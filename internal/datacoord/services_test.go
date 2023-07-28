@@ -156,6 +156,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		err := svr.meta.UpdateChannelCheckpoint("vchan1", &msgpb.MsgPosition{
 			ChannelName: "vchan1",
 			Timestamp:   10,
+			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
 		})
 		assert.NoError(t, err)
 
@@ -260,6 +261,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		err := svr.meta.UpdateChannelCheckpoint("vchan1", &msgpb.MsgPosition{
 			ChannelName: "vchan1",
 			Timestamp:   0,
+			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
 		})
 		assert.NoError(t, err)
 
@@ -433,6 +435,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		err := svr.meta.UpdateChannelCheckpoint("vchan1", &msgpb.MsgPosition{
 			ChannelName: "vchan1",
 			Timestamp:   0,
+			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
 		})
 		assert.NoError(t, err)
 
@@ -473,6 +476,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		err := svr.meta.UpdateChannelCheckpoint("vchan1", &msgpb.MsgPosition{
 			ChannelName: "vchan1",
 			Timestamp:   0,
+			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
 		})
 		require.NoError(t, err)
 
@@ -512,6 +516,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		err := svr.meta.UpdateChannelCheckpoint("vchan1", &msgpb.MsgPosition{
 			ChannelName: "vchan1",
 			Timestamp:   0,
+			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
 		})
 		assert.NoError(t, err)
 

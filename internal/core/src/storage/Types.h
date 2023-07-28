@@ -89,6 +89,7 @@ struct StorageConfig {
     std::string root_path = "files";
     std::string storage_type = "minio";
     std::string iam_endpoint = "";
+    std::string log_level = "error";
     bool useSSL = false;
     bool useIAM = false;
 };

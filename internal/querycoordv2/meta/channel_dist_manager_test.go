@@ -148,6 +148,47 @@ func (suite *ChannelDistManagerSuite) TestGetShardLeader() {
 	suite.Equal(leaders["dmc1"], suite.nodes[1])
 }
 
+func (suite *ChannelDistManagerSuite) TestGetChannelDistByReplica() {
+	replica := NewReplica(
+		&querypb.Replica{
+			CollectionID: suite.collection,
+		},
+		typeutil.NewUniqueSet(11, 22, 33),
+	)
+
+	ch1 := &DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: suite.collection,
+			ChannelName:  "test-channel1",
+		},
+		Node:    11,
+		Version: 1,
+	}
+	ch2 := &DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: suite.collection,
+			ChannelName:  "test-channel1",
+		},
+		Node:    22,
+		Version: 1,
+	}
+	ch3 := &DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: suite.collection,
+			ChannelName:  "test-channel2",
+		},
+		Node:    33,
+		Version: 1,
+	}
+	suite.dist.Update(11, ch1)
+	suite.dist.Update(22, ch2)
+	suite.dist.Update(33, ch3)
+
+	dist := suite.dist.GetChannelDistByReplica(replica)
+	suite.Len(dist["test-channel1"], 2)
+	suite.Len(dist["test-channel2"], 1)
+}
+
 func (suite *ChannelDistManagerSuite) AssertNames(channels []*DmChannel, names ...string) bool {
 	for _, channel := range channels {
 		hasChannel := false

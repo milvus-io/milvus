@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // flushManager defines a flush manager signature
@@ -97,7 +98,7 @@ type orderFlushQueue struct {
 	injectCh  chan *taskInjection
 
 	// MsgID => flushTask
-	working    sync.Map
+	working    *typeutil.ConcurrentMap[string, *flushTaskRunner]
 	notifyFunc notifyMetaFunc
 
 	tailMut sync.Mutex
@@ -114,6 +115,7 @@ func newOrderFlushQueue(segID UniqueID, f notifyMetaFunc) *orderFlushQueue {
 		segmentID:  segID,
 		notifyFunc: f,
 		injectCh:   make(chan *taskInjection, 100),
+		working:    typeutil.NewConcurrentMap[string, *flushTaskRunner](),
 	}
 	return q
 }
@@ -128,8 +130,7 @@ func (q *orderFlushQueue) init() {
 }
 
 func (q *orderFlushQueue) getFlushTaskRunner(pos *msgpb.MsgPosition) *flushTaskRunner {
-	actual, loaded := q.working.LoadOrStore(getSyncTaskID(pos), newFlushTaskRunner(q.segmentID, q.injectCh))
-	t := actual.(*flushTaskRunner)
+	t, loaded := q.working.GetOrInsert(getSyncTaskID(pos), newFlushTaskRunner(q.segmentID, q.injectCh))
 	// not loaded means the task runner is new, do initializtion
 	if !loaded {
 		// take over injection if task queue is handling it
@@ -142,7 +143,7 @@ func (q *orderFlushQueue) getFlushTaskRunner(pos *msgpb.MsgPosition) *flushTaskR
 		q.tailCh = t.finishSignal
 		q.tailMut.Unlock()
 		log.Info("new flush task runner created and initialized",
-			zap.Int64("segment ID", q.segmentID),
+			zap.Int64("segmentID", q.segmentID),
 			zap.String("pos message ID", string(pos.GetMsgID())),
 		)
 	}
@@ -152,7 +153,7 @@ func (q *orderFlushQueue) getFlushTaskRunner(pos *msgpb.MsgPosition) *flushTaskR
 // postTask handles clean up work after a task is done
 func (q *orderFlushQueue) postTask(pack *segmentFlushPack, postInjection postInjectionFunc) {
 	// delete task from working map
-	q.working.Delete(getSyncTaskID(pack.pos))
+	q.working.GetAndRemove(getSyncTaskID(pack.pos))
 	// after descreasing working count, check whether flush queue is empty
 	q.injectMut.Lock()
 	q.runningTasks--
@@ -271,7 +272,7 @@ type rendezvousFlushManager struct {
 	Channel
 
 	// segment id => flush queue
-	dispatcher sync.Map
+	dispatcher *typeutil.ConcurrentMap[int64, *orderFlushQueue]
 	notifyFunc notifyMetaFunc
 
 	dropping    atomic.Bool
@@ -281,16 +282,14 @@ type rendezvousFlushManager struct {
 // getFlushQueue gets or creates an orderFlushQueue for segment id if not found
 func (m *rendezvousFlushManager) getFlushQueue(segmentID UniqueID) *orderFlushQueue {
 	newQueue := newOrderFlushQueue(segmentID, m.notifyFunc)
-	actual, _ := m.dispatcher.LoadOrStore(segmentID, newQueue)
-	// all operation on dispatcher is private, assertion ok guaranteed
-	queue := actual.(*orderFlushQueue)
+	queue, _ := m.dispatcher.GetOrInsert(segmentID, newQueue)
 	queue.init()
 	return queue
 }
 
 func (m *rendezvousFlushManager) handleInsertTask(segmentID UniqueID, task flushInsertTask, binlogs, statslogs map[UniqueID]*datapb.Binlog, flushed bool, dropped bool, pos *msgpb.MsgPosition) {
 	log.Info("handling insert task",
-		zap.Int64("segment ID", segmentID),
+		zap.Int64("segmentID", segmentID),
 		zap.Bool("flushed", flushed),
 		zap.Bool("dropped", dropped),
 		zap.Any("position", pos),
@@ -316,12 +315,12 @@ func (m *rendezvousFlushManager) handleInsertTask(segmentID UniqueID, task flush
 }
 
 func (m *rendezvousFlushManager) handleDeleteTask(segmentID UniqueID, task flushDeleteTask, deltaLogs *DelDataBuf, pos *msgpb.MsgPosition) {
-	log.Info("handling delete task", zap.Int64("segment ID", segmentID))
+	log.Info("handling delete task", zap.Int64("segmentID", segmentID))
 	// in dropping mode
 	if m.dropping.Load() {
 		// preventing separate delete, check position exists in queue first
 		q := m.getFlushQueue(segmentID)
-		_, ok := q.working.Load(getSyncTaskID(pos))
+		_, ok := q.working.Get(getSyncTaskID(pos))
 		// if ok, means position insert data already in queue, just handle task in normal mode
 		// if not ok, means the insert buf should be handle in drop mode
 		if !ok {
@@ -422,12 +421,8 @@ func (m *rendezvousFlushManager) serializePkStatsLog(segmentID int64, flushed bo
 // isFull return true if the task pool is full
 func (m *rendezvousFlushManager) isFull() bool {
 	var num int
-	m.dispatcher.Range(func(_, q any) bool {
-		queue := q.(*orderFlushQueue)
-		queue.working.Range(func(_, _ any) bool {
-			num++
-			return true
-		})
+	m.dispatcher.Range(func(_ int64, queue *orderFlushQueue) bool {
+		num += queue.working.Len()
 		return true
 	})
 	return num >= Params.DataNodeCfg.MaxParallelSyncTaskNum.GetAsInt()
@@ -605,8 +600,7 @@ func (m *rendezvousFlushManager) getSegmentMeta(segmentID UniqueID, pos *msgpb.M
 // waitForAllTaskQueue waits for all flush queues in dispatcher become empty
 func (m *rendezvousFlushManager) waitForAllFlushQueue() {
 	var wg sync.WaitGroup
-	m.dispatcher.Range(func(k, v interface{}) bool {
-		queue := v.(*orderFlushQueue)
+	m.dispatcher.Range(func(segmentID int64, queue *orderFlushQueue) bool {
 		wg.Add(1)
 		go func() {
 			<-queue.tailCh
@@ -652,9 +646,8 @@ func getSyncTaskID(pos *msgpb.MsgPosition) string {
 
 // close cleans up all the left members
 func (m *rendezvousFlushManager) close() {
-	m.dispatcher.Range(func(k, v interface{}) bool {
+	m.dispatcher.Range(func(segmentID int64, queue *orderFlushQueue) bool {
 		//assertion ok
-		queue := v.(*orderFlushQueue)
 		queue.injectMut.Lock()
 		for i := 0; i < len(queue.injectCh); i++ {
 			go queue.handleInject(<-queue.injectCh)
@@ -721,6 +714,7 @@ func NewRendezvousFlushManager(allocator allocator.Allocator, cm storage.ChunkMa
 		dropHandler: dropHandler{
 			flushAndDrop: drop,
 		},
+		dispatcher: typeutil.NewConcurrentMap[int64, *orderFlushQueue](),
 	}
 	// start with normal mode
 	fm.dropping.Store(false)
@@ -922,9 +916,9 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 			// Stop retry and still proceed to the end, ignoring this error.
 			if !pack.flushed && rsp.GetErrorCode() == commonpb.ErrorCode_SegmentNotFound {
 				log.Warn("stale segment not found, could be compacted",
-					zap.Int64("segment ID", pack.segmentID))
+					zap.Int64("segmentID", pack.segmentID))
 				log.Warn("failed to SaveBinlogPaths",
-					zap.Int64("segment ID", pack.segmentID),
+					zap.Int64("segmentID", pack.segmentID),
 					zap.Error(errors.New(rsp.GetReason())))
 				return nil
 			}
@@ -945,7 +939,7 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 		}, opts...)
 		if err != nil {
 			log.Warn("failed to SaveBinlogPaths",
-				zap.Int64("segment ID", pack.segmentID),
+				zap.Int64("segmentID", pack.segmentID),
 				zap.Error(err))
 			// TODO change to graceful stop
 			panic(err)

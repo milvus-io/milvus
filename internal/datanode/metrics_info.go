@@ -51,8 +51,7 @@ func (node *DataNode) getQuotaMetrics() (*metricsinfo.DataNodeQuotaMetrics, erro
 
 	getAllCollections := func() []int64 {
 		collectionSet := typeutil.UniqueSet{}
-		node.flowgraphManager.flowgraphs.Range(func(key, value any) bool {
-			fg := value.(*dataSyncService)
+		node.flowgraphManager.flowgraphs.Range(func(key string, fg *dataSyncService) bool {
 			collectionSet.Insert(fg.channel.getCollectionID())
 			return true
 		})

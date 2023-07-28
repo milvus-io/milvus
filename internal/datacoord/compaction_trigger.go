@@ -365,6 +365,9 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 		if !signal.isForce && t.compactionHandler.isFull() {
 			break
 		}
+		if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
+			group.segments = FilterInIndexedSegments(t.handler, t.meta, group.segments...)
+		}
 
 		isDiskIndex, err := t.updateSegmentMaxSize(group.segments)
 		if err != nil {
@@ -406,14 +409,14 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 			if !signal.isForce && t.compactionHandler.isFull() {
 				log.Warn("compaction plan skipped due to handler full",
 					zap.Int64("collectionID", signal.collectionID),
-					zap.Int64s("segment IDs", segIDs))
+					zap.Int64s("segmentIDs", segIDs))
 				break
 			}
 			start := time.Now()
 			if err := t.fillOriginPlan(plan); err != nil {
 				log.Warn("failed to fill plan",
 					zap.Int64("collectionID", signal.collectionID),
-					zap.Int64s("segment IDs", segIDs),
+					zap.Int64s("segmentIDs", segIDs),
 					zap.Error(err))
 				continue
 			}
@@ -422,7 +425,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 				log.Warn("failed to execute compaction plan",
 					zap.Int64("collectionID", signal.collectionID),
 					zap.Int64("planID", plan.PlanID),
-					zap.Int64s("segment IDs", segIDs),
+					zap.Int64s("segmentIDs", segIDs),
 					zap.Error(err))
 				continue
 			}
@@ -435,11 +438,11 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 			log.Info("time cost of generating global compaction",
 				zap.Any("segID2DeltaLogs", segIDMap),
 				zap.Int64("planID", plan.PlanID),
-				zap.Any("time cost", time.Since(start).Milliseconds()),
+				zap.Int64("time cost", time.Since(start).Milliseconds()),
 				zap.Int64("collectionID", signal.collectionID),
 				zap.String("channel", group.channelName),
 				zap.Int64("partitionID", group.partitionID),
-				zap.Int64s("segment IDs", segIDs))
+				zap.Int64s("segmentIDs", segIDs))
 		}
 	}
 }
@@ -529,9 +532,9 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 		log.Info("time cost of generating compaction",
 			zap.Int64("plan ID", plan.PlanID),
 			zap.Any("time cost", time.Since(start).Milliseconds()),
-			zap.Int64("collection ID", signal.collectionID),
+			zap.Int64("collectionID", signal.collectionID),
 			zap.String("channel", channel),
-			zap.Int64("partition ID", partitionID),
+			zap.Int64("partitionID", partitionID),
 			zap.Int64s("segment IDs", fetchSegIDs(plan.GetSegmentBinlogs())))
 	}
 }
@@ -651,11 +654,10 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, i
 		}
 		// only merge if candidate number is large than MinSegmentToMerge or if target row is large enough
 		if len(bucket) >= Params.DataCoordCfg.MinSegmentToMerge.GetAsInt() ||
-			len(bucket) > 1 &&
-				targetRow > int64(float64(segment.GetMaxRowNum())*Params.DataCoordCfg.SegmentCompactableProportion.GetAsFloat()) {
+			len(bucket) > 1 && t.isCompactableSegment(targetRow, segment) {
 			plan := segmentsToPlan(bucket, compactTime)
 			log.Info("generate a plan for small candidates",
-				zap.Int64s("plan segment IDs", lo.Map(bucket, getSegmentIDs)),
+				zap.Int64s("plan segmentIDs", lo.Map(bucket, getSegmentIDs)),
 				zap.Int64("target segment row", targetRow),
 				zap.Int64("target segment size", size))
 			plans = append(plans, plan)
@@ -681,9 +683,9 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, i
 				plan.TotalRows += s.GetNumOfRows()
 				plan.SegmentBinlogs = append(plan.SegmentBinlogs, segmentBinLogs)
 				log.Info("small segment appended on existing plan",
-					zap.Int64("segment ID", s.GetID()),
+					zap.Int64("segmentID", s.GetID()),
 					zap.Int64("target rows", plan.GetTotalRows()),
-					zap.Int64s("plan segment ID", getSegIDsFromPlan(plan)),
+					zap.Int64s("plan segmentID", getSegIDsFromPlan(plan)),
 				)
 
 				remainingSmallSegs = append(remainingSmallSegs[:i], remainingSmallSegs[i+1:]...)
@@ -708,7 +710,7 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, i
 			plan := segmentsToPlan(bucket, compactTime)
 			plans = append(plans, plan)
 			log.Info("generate a plan for to squeeze small candidates into non-planned segment",
-				zap.Int64s("plan segment IDs", lo.Map(bucket, getSegmentIDs)),
+				zap.Int64s("plan segmentIDs", lo.Map(bucket, getSegmentIDs)),
 				zap.Int64("target segment row", targetRow),
 			)
 		}
@@ -771,6 +773,10 @@ func reverseGreedySelect(candidates []*SegmentInfo, free int64, maxSegment int) 
 
 func (t *compactionTrigger) getCandidateSegments(channel string, partitionID UniqueID) []*SegmentInfo {
 	segments := t.meta.GetSegmentsByChannel(channel)
+	if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
+		segments = FilterInIndexedSegments(t.handler, t.meta, segments...)
+	}
+
 	var res []*SegmentInfo
 	for _, s := range segments {
 		if !isSegmentHealthy(s) ||
@@ -789,6 +795,18 @@ func (t *compactionTrigger) getCandidateSegments(channel string, partitionID Uni
 
 func (t *compactionTrigger) isSmallSegment(segment *SegmentInfo) bool {
 	return segment.GetNumOfRows() < int64(float64(segment.GetMaxRowNum())*Params.DataCoordCfg.SegmentSmallProportion.GetAsFloat())
+}
+
+func (t *compactionTrigger) isCompactableSegment(targetRow int64, segment *SegmentInfo) bool {
+	smallProportion := Params.DataCoordCfg.SegmentSmallProportion.GetAsFloat()
+	compactableProportion := Params.DataCoordCfg.SegmentCompactableProportion.GetAsFloat()
+
+	// avoid invalid single segment compaction
+	if compactableProportion < smallProportion {
+		compactableProportion = smallProportion
+	}
+
+	return targetRow > int64(float64(segment.GetMaxRowNum())*compactableProportion)
 }
 
 func isExpandableSmallSegment(segment *SegmentInfo) bool {
@@ -835,7 +853,7 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, isDis
 		// TODO maybe we want to compact to single statslog to reduce watch dml channel cost
 		// TODO avoid rebuild index twice.
 		if statsLog > maxSize*2.0 {
-			log.Info("stats number is too much, trigger compaction", zap.Int64("segment", segment.ID), zap.Int("Bin logs", binLog), zap.Int("Stat logs", statsLog))
+			log.Info("stats number is too much, trigger compaction", zap.Int64("segmentID", segment.ID), zap.Int("Bin logs", binLog), zap.Int("Stat logs", statsLog))
 			return true
 		}
 	}
@@ -846,7 +864,7 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, isDis
 	}
 
 	if deltaLog > Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsInt() {
-		log.Info("total delta number is too much, trigger compaction", zap.Int64("segment", segment.ID), zap.Int("Bin logs", binLog), zap.Int("Delta logs", deltaLog))
+		log.Info("total delta number is too much, trigger compaction", zap.Int64("segmentID", segment.ID), zap.Int("Bin logs", binLog), zap.Int("Delta logs", deltaLog))
 		return true
 	}
 
@@ -864,7 +882,7 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, isDis
 	}
 
 	if float64(totalExpiredRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() || totalExpiredSize > Params.DataCoordCfg.SingleCompactionExpiredLogMaxSize.GetAsInt64() {
-		log.Info("total expired entities is too much, trigger compaction", zap.Int64("segment", segment.ID),
+		log.Info("total expired entities is too much, trigger compaction", zap.Int64("segmentID", segment.ID),
 			zap.Int("expired rows", totalExpiredRows), zap.Int64("expired log size", totalExpiredSize))
 		return true
 	}
@@ -890,7 +908,7 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, isDis
 
 	// currently delta log size and delete ratio policy is applied
 	if float64(totalDeletedRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() || totalDeleteLogSize > Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetAsInt64() {
-		log.Info("total delete entities is too much, trigger compaction", zap.Int64("segment", segment.ID),
+		log.Info("total delete entities is too much, trigger compaction", zap.Int64("segmentID", segment.ID),
 			zap.Int("deleted rows", totalDeletedRows), zap.Int64("delete log size", totalDeleteLogSize))
 		return true
 	}

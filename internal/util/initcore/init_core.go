@@ -17,11 +17,12 @@
 package initcore
 
 /*
-#cgo pkg-config: milvus_common milvus_storage
+#cgo pkg-config: milvus_common milvus_storage milvus_segcore
 
 #include <stdlib.h>
 #include <stdint.h>
 #include "common/init_c.h"
+#include "segcore/segcore_init_c.h"
 #include "storage/storage_c.h"
 */
 import "C"
@@ -62,6 +63,7 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	cRootPath := C.CString(params.MinioCfg.RootPath.GetValue())
 	cStorageType := C.CString(params.CommonCfg.StorageType.GetValue())
 	cIamEndPoint := C.CString(params.MinioCfg.IAMEndpoint.GetValue())
+	cLogLevel := C.CString(params.MinioCfg.LogLevel.GetValue())
 	defer C.free(unsafe.Pointer(cAddress))
 	defer C.free(unsafe.Pointer(cBucketName))
 	defer C.free(unsafe.Pointer(cAccessKey))
@@ -69,6 +71,7 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	defer C.free(unsafe.Pointer(cRootPath))
 	defer C.free(unsafe.Pointer(cStorageType))
 	defer C.free(unsafe.Pointer(cIamEndPoint))
+	defer C.free(unsafe.Pointer(cLogLevel))
 	storageConfig := C.CStorageConfig{
 		address:          cAddress,
 		bucket_name:      cBucketName,
@@ -79,6 +82,7 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 		iam_endpoint:     cIamEndPoint,
 		useSSL:           C.bool(params.MinioCfg.UseSSL.GetAsBool()),
 		useIAM:           C.bool(params.MinioCfg.UseIAM.GetAsBool()),
+		log_level:        cLogLevel,
 	}
 
 	status := C.InitRemoteChunkManagerSingleton(storageConfig)
@@ -87,6 +91,10 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 
 func CleanRemoteChunkManager() {
 	C.CleanRemoteChunkManagerSingleton()
+}
+
+func CleanGlogManager() {
+	C.SegcoreCloseGlog()
 }
 
 // HandleCStatus deals with the error returned from CGO

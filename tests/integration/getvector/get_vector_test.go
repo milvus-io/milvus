@@ -29,8 +29,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/distance"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/milvus-io/milvus/tests/integration"
 )
@@ -258,7 +258,7 @@ func (s *TestGetVectorSuite) TestGetVector_FLAT() {
 	s.nq = 10
 	s.topK = 10
 	s.indexType = integration.IndexFaissIDMap
-	s.metricType = distance.L2
+	s.metricType = metric.L2
 	s.pkType = schemapb.DataType_Int64
 	s.vecType = schemapb.DataType_FloatVector
 	s.searchFailed = false
@@ -269,7 +269,7 @@ func (s *TestGetVectorSuite) TestGetVector_IVF_FLAT() {
 	s.nq = 10
 	s.topK = 10
 	s.indexType = integration.IndexFaissIvfFlat
-	s.metricType = distance.L2
+	s.metricType = metric.L2
 	s.pkType = schemapb.DataType_Int64
 	s.vecType = schemapb.DataType_FloatVector
 	s.searchFailed = false
@@ -280,7 +280,7 @@ func (s *TestGetVectorSuite) TestGetVector_IVF_PQ() {
 	s.nq = 10
 	s.topK = 10
 	s.indexType = integration.IndexFaissIvfPQ
-	s.metricType = distance.L2
+	s.metricType = metric.L2
 	s.pkType = schemapb.DataType_Int64
 	s.vecType = schemapb.DataType_FloatVector
 	s.searchFailed = true
@@ -291,7 +291,7 @@ func (s *TestGetVectorSuite) TestGetVector_IVF_SQ8() {
 	s.nq = 10
 	s.topK = 10
 	s.indexType = integration.IndexFaissIvfSQ8
-	s.metricType = distance.L2
+	s.metricType = metric.L2
 	s.pkType = schemapb.DataType_Int64
 	s.vecType = schemapb.DataType_FloatVector
 	s.searchFailed = true
@@ -302,7 +302,7 @@ func (s *TestGetVectorSuite) TestGetVector_HNSW() {
 	s.nq = 10
 	s.topK = 10
 	s.indexType = integration.IndexHNSW
-	s.metricType = distance.L2
+	s.metricType = metric.L2
 	s.pkType = schemapb.DataType_Int64
 	s.vecType = schemapb.DataType_FloatVector
 	s.searchFailed = false
@@ -313,7 +313,7 @@ func (s *TestGetVectorSuite) TestGetVector_IP() {
 	s.nq = 10
 	s.topK = 10
 	s.indexType = integration.IndexHNSW
-	s.metricType = distance.IP
+	s.metricType = metric.IP
 	s.pkType = schemapb.DataType_Int64
 	s.vecType = schemapb.DataType_FloatVector
 	s.searchFailed = false
@@ -324,7 +324,7 @@ func (s *TestGetVectorSuite) TestGetVector_StringPK() {
 	s.nq = 10
 	s.topK = 10
 	s.indexType = integration.IndexHNSW
-	s.metricType = distance.L2
+	s.metricType = metric.L2
 	s.pkType = schemapb.DataType_VarChar
 	s.vecType = schemapb.DataType_FloatVector
 	s.searchFailed = false
@@ -335,7 +335,7 @@ func (s *TestGetVectorSuite) TestGetVector_BinaryVector() {
 	s.nq = 10
 	s.topK = 10
 	s.indexType = integration.IndexFaissBinIvfFlat
-	s.metricType = distance.JACCARD
+	s.metricType = metric.JACCARD
 	s.pkType = schemapb.DataType_Int64
 	s.vecType = schemapb.DataType_BinaryVector
 	s.searchFailed = false
@@ -347,7 +347,7 @@ func (s *TestGetVectorSuite) TestGetVector_Big_NQ_TOPK() {
 	s.nq = 10000
 	s.topK = 200
 	s.indexType = integration.IndexHNSW
-	s.metricType = distance.L2
+	s.metricType = metric.L2
 	s.pkType = schemapb.DataType_Int64
 	s.vecType = schemapb.DataType_FloatVector
 	s.searchFailed = false

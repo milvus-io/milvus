@@ -44,7 +44,8 @@ class DataCodec {
 
     void
     SetTimestamps(Timestamp start_timestamp, Timestamp end_timestamp) {
-        assert(start_timestamp <= end_timestamp);
+        // if milvus version <= 2.2.5
+        // assert(start_timestamp <= end_timestamp) condition may not be satisfied
         time_range_ = std::make_pair(start_timestamp, end_timestamp);
     }
 

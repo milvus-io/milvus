@@ -23,6 +23,7 @@
 #include <aws/core/http/URI.h>
 #include <aws/core/http/curl/CurlHttpClient.h>
 #include <aws/core/http/standard/StandardHttpRequest.h>
+#include <aws/core/utils/logging/FormattedLogSystem.h>
 #include <aws/s3/S3Client.h>
 #include <google/cloud/credentials.h>
 #include <google/cloud/internal/oauth2_credentials.h>
@@ -43,6 +44,25 @@
 namespace milvus::storage {
 
 enum class RemoteStorageType { S3 = 0, GOOGLE_CLOUD = 1, ALIYUN_CLOUD = 2 };
+
+/**
+ * @brief user defined aws logger, redirect aws log to segcore log
+ */
+class AwsLogger : public Aws::Utils::Logging::FormattedLogSystem {
+ public:
+    AwsLogger(Aws::Utils::Logging::LogLevel log_level)
+        : Aws::Utils::Logging::FormattedLogSystem(log_level) {
+    }
+    virtual ~AwsLogger() {
+    }
+    virtual void
+    Flush() override {
+    }
+
+ protected:
+    virtual void
+    ProcessFormattedStatement(Aws::String&& statement) override;
+};
 
 /**
  * @brief This MinioChunkManager is responsible for read and write file in S3.
@@ -149,7 +169,9 @@ class MinioChunkManager : public ChunkManager {
     std::vector<std::string>
     ListObjects(const char* bucket_name, const char* prefix = nullptr);
     void
-    InitSDKAPI(RemoteStorageType type);
+    InitSDKAPI(RemoteStorageType type,
+               bool useIAM,
+               const std::string& log_level);
     void
     ShutdownSDKAPI();
     void
@@ -163,6 +185,10 @@ class MinioChunkManager : public ChunkManager {
                            const Aws::Client::ClientConfiguration& config);
 
  private:
+    void
+    BuildAccessKeyClient(const StorageConfig& storage_config,
+                         const Aws::Client::ClientConfiguration& config);
+
     Aws::SDKOptions sdk_options_;
     static std::atomic<size_t> init_count_;
     static std::mutex client_mutex_;

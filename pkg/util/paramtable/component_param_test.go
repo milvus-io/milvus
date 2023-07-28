@@ -183,6 +183,8 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, Params.ReplicaSelectionPolicy.GetValue(), "round_robin")
 		params.Save(Params.ReplicaSelectionPolicy.Key, "look_aside")
 		assert.Equal(t, Params.ReplicaSelectionPolicy.GetValue(), "look_aside")
+		assert.Equal(t, Params.CheckQueryNodeHealthInterval.GetAsInt(), 1000)
+		assert.Equal(t, Params.CostMetricsExpireTime.GetAsInt(), 1000)
 	})
 
 	// t.Run("test proxyConfig panic", func(t *testing.T) {
@@ -292,6 +294,11 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 1.3, Params.ReverseUnbalanceTolerationFactor.GetAsFloat())
 		params.Save("queryCoord.reverseUnBalanceTolerationFactor", "1.5")
 		assert.Equal(t, 1.5, Params.ReverseUnbalanceTolerationFactor.GetAsFloat())
+
+		assert.Equal(t, 1000, Params.SegmentCheckInterval.GetAsInt())
+		assert.Equal(t, 1000, Params.ChannelCheckInterval.GetAsInt())
+		assert.Equal(t, 10000, Params.BalanceCheckInterval.GetAsInt())
+		assert.Equal(t, 10000, Params.IndexCheckInterval.GetAsInt())
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
@@ -384,6 +391,10 @@ func TestComponentParam(t *testing.T) {
 		period := Params.SyncPeriod
 		t.Logf("SyncPeriod: %v", period)
 		assert.Equal(t, 10*time.Minute, Params.SyncPeriod.GetAsDuration(time.Second))
+
+		bulkinsertTimeout := Params.BulkInsertTimeoutSeconds
+		t.Logf("BulkInsertTimeoutSeconds: %v", bulkinsertTimeout)
+		assert.Equal(t, "18000", Params.BulkInsertTimeoutSeconds.GetValue())
 	})
 
 	t.Run("test indexNodeConfig", func(t *testing.T) {

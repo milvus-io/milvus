@@ -271,6 +271,8 @@ enum PlaceholderType : int {
   None = 0,
   BinaryVector = 100,
   FloatVector = 101,
+  Int64 = 5,
+  VarChar = 21,
   PlaceholderType_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::min(),
   PlaceholderType_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::max()
 };
@@ -369,6 +371,7 @@ enum MsgType : int {
   DataNodeTt = 1208,
   Connect = 1209,
   ListClientInfos = 1210,
+  AllocTimestamp = 1211,
   CreateCredential = 1500,
   GetCredential = 1501,
   DeleteCredential = 1502,

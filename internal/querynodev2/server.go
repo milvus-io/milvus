@@ -183,9 +183,9 @@ func (node *QueryNode) Register() error {
 
 // InitSegcore set init params of segCore, such as chunckRows, SIMD type...
 func (node *QueryNode) InitSegcore() error {
-	cEasyloggingYaml := C.CString(path.Join(paramtable.Get().BaseTable.GetConfigDir(), paramtable.DefaultEasyloggingYaml))
-	C.SegcoreInit(cEasyloggingYaml)
-	C.free(unsafe.Pointer(cEasyloggingYaml))
+	cGlogConf := C.CString(path.Join(paramtable.Get().BaseTable.GetConfigDir(), paramtable.DefaultGlogConf))
+	C.SegcoreInit(cGlogConf)
+	C.free(unsafe.Pointer(cGlogConf))
 
 	// override segcore chunk size
 	cChunkRows := C.int64_t(paramtable.Get().QueryNodeCfg.ChunkRows.GetAsInt64())
@@ -228,6 +228,12 @@ func (node *QueryNode) InitSegcore() error {
 
 	initcore.InitTraceConfig(paramtable.Get())
 	return initcore.InitRemoteChunkManager(paramtable.Get())
+}
+
+func (node *QueryNode) CloseSegcore() {
+	// safe stop
+	initcore.CleanRemoteChunkManager()
+	initcore.CleanGlogManager()
 }
 
 // Init function init historical and streaming module to manage segments
@@ -356,10 +362,19 @@ func (node *QueryNode) Start() error {
 
 		paramtable.SetCreateTime(time.Now())
 		paramtable.SetUpdateTime(time.Now())
+		mmapDirPath := paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue()
+		mmapEnabled := len(mmapDirPath) > 0
+		if mmapEnabled {
+			err := os.MkdirAll(mmapDirPath, 0666)
+			if err != nil {
+				panic(err)
+			}
+		}
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 		log.Info("query node start successfully",
 			zap.Int64("queryNodeID", paramtable.GetNodeID()),
 			zap.String("Address", node.address),
+			zap.Bool("mmapEnabled", mmapEnabled),
 		)
 	})
 
@@ -427,8 +442,7 @@ func (node *QueryNode) Stop() error {
 			node.manager.Segment.Clear()
 		}
 
-		// safe stop
-		initcore.CleanRemoteChunkManager()
+		node.CloseSegcore()
 	})
 	return nil
 }

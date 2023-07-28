@@ -59,22 +59,25 @@ var (
 	ErrCollectionNotFound         = newMilvusError("collection not found", 100, false)
 	ErrCollectionNotLoaded        = newMilvusError("collection not loaded", 101, false)
 	ErrCollectionNumLimitExceeded = newMilvusError("exceeded the limit number of collections", 102, false)
+	ErrCollectionNotFullyLoaded   = newMilvusError("collection not fully loaded", 103, true)
 
 	// Partition related
-	ErrPartitionNotFound  = newMilvusError("partition not found", 202, false)
-	ErrPartitionNotLoaded = newMilvusError("partition not loaded", 203, false)
+	ErrPartitionNotFound       = newMilvusError("partition not found", 202, false)
+	ErrPartitionNotLoaded      = newMilvusError("partition not loaded", 203, false)
+	ErrPartitionNotFullyLoaded = newMilvusError("collection not fully loaded", 103, true)
 
 	// ResourceGroup related
 	ErrResourceGroupNotFound = newMilvusError("resource group not found", 300, false)
 
 	// Replica related
-	ErrReplicaNotFound          = newMilvusError("replica not found", 400, false)
-	ErrNoAvailableNodeInReplica = newMilvusError("no available node in replica", 401, false)
+	ErrReplicaNotFound     = newMilvusError("replica not found", 400, false)
+	ErrReplicaNotAvailable = newMilvusError("replica not available", 401, false)
 
 	// Channel related
-	ErrChannelNotFound    = newMilvusError("channel not found", 500, false)
-	ErrChannelLack        = newMilvusError("channel lacks", 501, false)
-	ErrChannelReduplicate = newMilvusError("channel reduplicates", 502, false)
+	ErrChannelNotFound     = newMilvusError("channel not found", 500, false)
+	ErrChannelLack         = newMilvusError("channel lacks", 501, false)
+	ErrChannelReduplicate  = newMilvusError("channel reduplicates", 502, false)
+	ErrChannelNotAvailable = newMilvusError("channel not available", 503, false)
 
 	// Segment related
 	ErrSegmentNotFound    = newMilvusError("segment not found", 600, false)
@@ -91,11 +94,11 @@ var (
 	ErrInvalidedDatabaseName    = newMilvusError("invalided database name", 802, false)
 
 	// Node related
-	ErrNodeNotFound    = newMilvusError("node not found", 901, false)
-	ErrNodeOffline     = newMilvusError("node offline", 902, false)
-	ErrNodeLack        = newMilvusError("node lacks", 903, false)
-	ErrNodeNotMatch    = newMilvusError("node not match", 904, false)
-	ErrNoAvailableNode = newMilvusError("no available node", 905, false)
+	ErrNodeNotFound     = newMilvusError("node not found", 901, false)
+	ErrNodeOffline      = newMilvusError("node offline", 902, false)
+	ErrNodeLack         = newMilvusError("node lacks", 903, false)
+	ErrNodeNotMatch     = newMilvusError("node not match", 904, false)
+	ErrNodeNotAvailable = newMilvusError("node not available", 905, false)
 
 	// IO related
 	ErrIoKeyNotFound = newMilvusError("key not found", 1000, false)
@@ -111,18 +114,12 @@ var (
 	ErrTopicNotFound = newMilvusError("topic not found", 1300, false)
 	ErrTopicNotEmpty = newMilvusError("topic not empty", 1301, false)
 
-	// Average related
-	ErrAverageLabelNotRegister = newMilvusError("average label not register", 1400, false)
-
 	// shard delegator related
 	ErrShardDelegatorNotFound        = newMilvusError("shard delegator not found", 1500, false)
 	ErrShardDelegatorAccessFailed    = newMilvusError("fail to access shard delegator", 1501, true)
 	ErrShardDelegatorSearchFailed    = newMilvusError("fail to search on all shard leaders", 1502, true)
 	ErrShardDelegatorQueryFailed     = newMilvusError("fail to query on all shard leaders", 1503, true)
 	ErrShardDelegatorStatisticFailed = newMilvusError("get statistics on all shard leaders", 1504, true)
-
-	// task related
-	ErrTaskQueueFull = newMilvusError("task queue full", 1600, false)
 
 	// field related
 	ErrFieldNotFound = newMilvusError("field not found", 1700, false)

@@ -53,14 +53,14 @@ func UnmarshalCollectionModel(coll *Collection) (*model.Collection, error) {
 	if coll.StartPosition != "" {
 		err := json.Unmarshal([]byte(coll.StartPosition), &startPositions)
 		if err != nil {
-			log.Error("unmarshal collection start positions error", zap.Int64("collID", coll.CollectionID), zap.Uint64("ts", coll.Ts), zap.Error(err))
+			log.Error("unmarshal collection start positions error", zap.Int64("collectionID", coll.CollectionID), zap.Uint64("ts", coll.Ts), zap.Error(err))
 			return nil, err
 		}
 	}
 
 	properties, err := UnmarshalProperties(coll.Properties)
 	if err != nil {
-		log.Error("unmarshal collection properties error", zap.Int64("collID", coll.CollectionID),
+		log.Error("unmarshal collection properties error", zap.Int64("collectionID", coll.CollectionID),
 			zap.String("properties", coll.Properties), zap.Error(err))
 		return nil, err
 	}

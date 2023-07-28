@@ -45,10 +45,6 @@ const (
 	indexTaskDone
 	// index task need to retry.
 	indexTaskRetry
-	// task has been deleted.
-	indexTaskDeleted
-	// task needs to prepare segment info on IndexNode
-	indexTaskPrepare
 
 	reqTimeoutInterval = time.Second * 10
 )
@@ -58,8 +54,6 @@ var TaskStateNames = map[indexTaskState]string{
 	1: "InProgress",
 	2: "Done",
 	3: "Retry",
-	4: "Deleted",
-	5: "Prepare",
 }
 
 func (x indexTaskState) String() string {
@@ -121,6 +115,9 @@ func (ib *indexBuilder) reloadFromKV() {
 	segments := ib.meta.GetAllSegmentsUnsafe()
 	for _, segment := range segments {
 		for _, segIndex := range segment.segmentIndexes {
+			if segIndex.IsDeleted {
+				continue
+			}
 			if segIndex.IndexState == commonpb.IndexState_Unissued {
 				ib.tasks[segIndex.BuildID] = indexTaskInit
 			} else if segIndex.IndexState == commonpb.IndexState_InProgress {
@@ -223,13 +220,17 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 		segment := ib.meta.GetSegment(meta.SegmentID)
 		if !isSegmentHealthy(segment) || !ib.meta.IsIndexExist(meta.CollectionID, meta.IndexID) {
 			log.Ctx(ib.ctx).Info("task is no need to build index, remove it", zap.Int64("buildID", buildID))
+			if err := ib.meta.DeleteTask(buildID); err != nil {
+				log.Ctx(ib.ctx).Warn("IndexCoord delete index failed", zap.Int64("buildID", buildID), zap.Error(err))
+				return false
+			}
 			deleteFunc(buildID)
 			return true
 		}
 		indexParams := ib.meta.GetIndexParams(meta.CollectionID, meta.IndexID)
 		if isFlatIndex(getIndexType(indexParams)) || meta.NumRows < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64() {
 			log.Ctx(ib.ctx).Debug("segment does not need index really", zap.Int64("buildID", buildID),
-				zap.Int64("segID", meta.SegmentID), zap.Int64("num rows", meta.NumRows))
+				zap.Int64("segmentID", meta.SegmentID), zap.Int64("num rows", meta.NumRows))
 			if err := ib.meta.FinishTask(&indexpb.IndexTaskInfo{
 				BuildID:        buildID,
 				State:          commonpb.IndexState_Finished,
@@ -307,7 +308,7 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 			return false
 		}
 		log.Ctx(ib.ctx).Info("index task assigned successfully", zap.Int64("buildID", buildID),
-			zap.Int64("segID", meta.SegmentID), zap.Int64("nodeID", nodeID))
+			zap.Int64("segmentID", meta.SegmentID), zap.Int64("nodeID", nodeID))
 		// update index meta state to InProgress
 		if err := ib.meta.BuildIndex(buildID); err != nil {
 			// need to release lock then reassign, so set task state to retry
@@ -328,9 +329,6 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 			return true
 		}
 		updateStateFunc(buildID, indexTaskInit)
-
-	case indexTaskDeleted:
-		deleteFunc(buildID)
 
 	default:
 		// state: in_progress

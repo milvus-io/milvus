@@ -221,7 +221,7 @@ func (it *upsertTask) deletePreExecute(ctx context.Context) error {
 		zap.String("collectionName", collName))
 
 	if err := validateCollectionName(collName); err != nil {
-		log.Info("Invalid collection name", zap.Error(err))
+		log.Info("Invalid collectionName", zap.Error(err))
 		return err
 	}
 	collID, err := globalMetaCache.GetCollectionID(ctx, it.req.GetDbName(), collName)

@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"path"
 	"strconv"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -273,12 +274,12 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 
 	ds, ok := node.flowgraphManager.getFlowgraphService(req.GetChannel())
 	if !ok {
-		log.Warn("illegel compaction plan, channel not in this DataNode", zap.String("channel name", req.GetChannel()))
+		log.Warn("illegel compaction plan, channel not in this DataNode", zap.String("channelName", req.GetChannel()))
 		return merr.Status(merr.WrapErrChannelNotFound(req.GetChannel(), "illegel compaction plan")), nil
 	}
 
 	if !node.compactionExecutor.channelValidateForCompaction(req.GetChannel()) {
-		log.Warn("channel of compaction is marked invalid in compaction executor", zap.String("channel name", req.GetChannel()))
+		log.Warn("channel of compaction is marked invalid in compaction executor", zap.String("channelName", req.GetChannel()))
 		return merr.Status(merr.WrapErrChannelNotFound(req.GetChannel(), "channel is dropping")), nil
 	}
 
@@ -309,18 +310,18 @@ func (node *DataNode) GetCompactionState(ctx context.Context, req *datapb.Compac
 		}, nil
 	}
 	results := make([]*datapb.CompactionStateResult, 0)
-	node.compactionExecutor.executing.Range(func(k, v any) bool {
+	node.compactionExecutor.executing.Range(func(planID int64, task compactor) bool {
 		results = append(results, &datapb.CompactionStateResult{
 			State:  commonpb.CompactionState_Executing,
-			PlanID: k.(UniqueID),
+			PlanID: planID,
 		})
 		return true
 	})
-	node.compactionExecutor.completed.Range(func(k, v any) bool {
+	node.compactionExecutor.completed.Range(func(planID int64, result *datapb.CompactionResult) bool {
 		results = append(results, &datapb.CompactionStateResult{
 			State:  commonpb.CompactionState_Completed,
-			PlanID: k.(UniqueID),
-			Result: v.(*datapb.CompactionResult),
+			PlanID: planID,
+			Result: result,
 		})
 		return true
 	})
@@ -357,19 +358,12 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		oneSegment int64
 		channel    Channel
 		err        error
-		ds         *dataSyncService
-		ok         bool
 	)
 
 	for _, fromSegment := range req.GetCompactedFrom() {
 		channel, err = node.flowgraphManager.getChannel(fromSegment)
 		if err != nil {
 			log.Ctx(ctx).Warn("fail to get the channel", zap.Int64("segment", fromSegment), zap.Error(err))
-			continue
-		}
-		ds, ok = node.flowgraphManager.getFlowgraphService(channel.getChannelName(fromSegment))
-		if !ok {
-			log.Ctx(ctx).Warn("fail to find flow graph service", zap.Int64("segment", fromSegment))
 			continue
 		}
 		oneSegment = fromSegment
@@ -395,11 +389,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		return merr.Status(err), nil
 	}
 
-	// block all flow graph so it's safe to remove segment
-	ds.fg.Blockall()
-	defer ds.fg.Unblock()
 	if err := channel.mergeFlushedSegments(ctx, targetSeg, req.GetPlanID(), req.GetCompactedFrom()); err != nil {
-		node.compactionExecutor.injectDone(req.GetPlanID(), false)
 		return merr.Status(err), nil
 	}
 	node.compactionExecutor.injectDone(req.GetPlanID(), true)
@@ -410,8 +400,8 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*commonpb.Status, error) {
 	logFields := []zap.Field{
 		zap.Int64("task ID", req.GetImportTask().GetTaskId()),
-		zap.Int64("collection ID", req.GetImportTask().GetCollectionId()),
-		zap.Int64("partition ID", req.GetImportTask().GetPartitionId()),
+		zap.Int64("collectionID", req.GetImportTask().GetCollectionId()),
+		zap.Int64("partitionID", req.GetImportTask().GetPartitionId()),
 		zap.String("database name", req.GetImportTask().GetDatabaseName()),
 		zap.Strings("channel names", req.GetImportTask().GetChannelNames()),
 		zap.Int64s("working dataNodes", req.WorkingNodes),
@@ -436,7 +426,7 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 	importResult.Infos = append(importResult.Infos, &commonpb.KeyValuePair{Key: importutil.ProgressPercent, Value: "0"})
 
 	// Spawn a new context to ignore cancellation from parental context.
-	newCtx, cancel := context.WithTimeout(context.TODO(), ImportCallTimeout)
+	newCtx, cancel := context.WithTimeout(context.TODO(), paramtable.Get().DataNodeCfg.BulkInsertTimeoutSeconds.GetAsDuration(time.Second))
 	defer cancel()
 
 	// function to report import state to RootCoord.
@@ -542,7 +532,7 @@ func (node *DataNode) getPartitions(ctx context.Context, dbName string, collecti
 
 	logFields := []zap.Field{
 		zap.String("dbName", dbName),
-		zap.String("collection name", collectionName),
+		zap.String("collectionName", collectionName),
 	}
 	resp, err := node.rootCoord.ShowPartitions(ctx, req)
 	if err != nil {
@@ -575,10 +565,10 @@ func (node *DataNode) getPartitions(ctx context.Context, dbName string, collecti
 // AddImportSegment adds the import segment to the current DataNode.
 func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImportSegmentRequest) (*datapb.AddImportSegmentResponse, error) {
 	logFields := []zap.Field{
-		zap.Int64("segment ID", req.GetSegmentId()),
-		zap.Int64("collection ID", req.GetCollectionId()),
-		zap.Int64("partition ID", req.GetPartitionId()),
-		zap.String("channel name", req.GetChannelName()),
+		zap.Int64("segmentID", req.GetSegmentId()),
+		zap.Int64("collectionID", req.GetCollectionId()),
+		zap.Int64("partitionID", req.GetPartitionId()),
+		zap.String("channelName", req.GetChannelName()),
 		zap.Int64("# of rows", req.GetRowNum()),
 	}
 	log.Info("adding segment to DataNode flow graph", logFields...)
@@ -674,7 +664,7 @@ func assignSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest) importutil
 		logFields := []zap.Field{
 			zap.Int64("task ID", importTaskID),
 			zap.Int("shard ID", shardID),
-			zap.Int64("partition ID", partID),
+			zap.Int64("partitionID", partID),
 			zap.Int("# of channels", len(chNames)),
 			zap.Strings("channel names", chNames),
 		}
@@ -689,6 +679,7 @@ func assignSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest) importutil
 		colID := req.GetImportTask().GetCollectionId()
 		segmentIDReq := composeAssignSegmentIDRequest(1, shardID, chNames, colID, partID)
 		targetChName := segmentIDReq.GetSegmentIDRequests()[0].GetChannelName()
+		logFields = append(logFields, zap.Int64("collection ID", colID))
 		logFields = append(logFields, zap.String("target channel name", targetChName))
 		log.Info("assign segment for the import task", logFields...)
 		resp, err := node.dataCoord.AssignSegmentID(context.Background(), segmentIDReq)
@@ -703,7 +694,7 @@ func assignSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest) importutil
 		}
 
 		segmentID := resp.SegIDAssignments[0].SegID
-		logFields = append(logFields, zap.Int64("segment ID", segmentID))
+		logFields = append(logFields, zap.Int64("segmentID", segmentID))
 		log.Info("new segment assigned", logFields...)
 
 		// call report to notify the rootcoord update the segment id list for this task
@@ -739,8 +730,8 @@ func createBinLogsFunc(node *DataNode, req *datapb.ImportTaskRequest, schema *sc
 		importTaskID := req.GetImportTask().GetTaskId()
 		logFields := []zap.Field{
 			zap.Int64("task ID", importTaskID),
-			zap.Int64("partition ID", partID),
-			zap.Int64("segment ID", segmentID),
+			zap.Int64("partitionID", partID),
+			zap.Int64("segmentID", segmentID),
 			zap.Int("# of channels", len(chNames)),
 			zap.Strings("channel names", chNames),
 		}
@@ -749,6 +740,7 @@ func createBinLogsFunc(node *DataNode, req *datapb.ImportTaskRequest, schema *sc
 			log.Info("fields data is empty, no need to generate binlog", logFields...)
 			return nil, nil, nil
 		}
+		logFields = append(logFields, zap.Int("row count", rowNum))
 
 		colID := req.GetImportTask().GetCollectionId()
 		fieldInsert, fieldStats, err := createBinLogs(rowNum, schema, ts, fields, node, segmentID, colID, partID)
@@ -771,8 +763,8 @@ func saveSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest, res *rootcoo
 		targetChName string, rowCount int64, partID int64) error {
 		logFields := []zap.Field{
 			zap.Int64("task ID", importTaskID),
-			zap.Int64("partition ID", partID),
-			zap.Int64("segment ID", segmentID),
+			zap.Int64("partitionID", partID),
+			zap.Int64("segmentID", segmentID),
 			zap.String("target channel name", targetChName),
 			zap.Int64("row count", rowCount),
 			zap.Uint64("ts", ts),
@@ -842,12 +834,6 @@ func composeAssignSegmentIDRequest(rowNum int, shardID int, chNames []string,
 	// use the first field's row count as segment row count
 	// all the fields row count are same, checked by ImportWrapper
 	// ask DataCoord to alloc a new segment
-	log.Info("import task flush segment",
-		zap.Int("rowCount", rowNum),
-		zap.Any("channel names", chNames),
-		zap.Int64("collectionID", collID),
-		zap.Int64("partitionID", partID),
-		zap.Int("shardID", shardID))
 	segReqs := []*datapb.SegmentIDRequest{
 		{
 			ChannelName:  chNames[shardID],
@@ -999,6 +985,6 @@ func reportImportFunc(node *DataNode) importutil.ReportFunc {
 
 func logDupFlush(cID, segID int64) {
 	log.Info("segment is already being flushed, ignoring flush request",
-		zap.Int64("collection ID", cID),
-		zap.Int64("segment ID", segID))
+		zap.Int64("collectionID", cID),
+		zap.Int64("segmentID", segID))
 }

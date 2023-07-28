@@ -25,7 +25,6 @@ package segments
 import "C"
 
 import (
-	"path/filepath"
 	"unsafe"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -57,7 +56,7 @@ func deleteLoadIndexInfo(info *LoadIndexInfo) {
 	C.DeleteLoadIndexInfo(info.cLoadIndexInfo)
 }
 
-func (li *LoadIndexInfo) appendLoadIndexInfo(bytesIndex [][]byte, indexInfo *querypb.FieldIndexInfo, collectionID int64, partitionID int64, segmentID int64, fieldType schemapb.DataType) error {
+func (li *LoadIndexInfo) appendLoadIndexInfo(indexInfo *querypb.FieldIndexInfo, collectionID int64, partitionID int64, segmentID int64, fieldType schemapb.DataType) error {
 	fieldID := indexInfo.FieldID
 	indexPaths := indexInfo.IndexFilePaths
 
@@ -87,7 +86,7 @@ func (li *LoadIndexInfo) appendLoadIndexInfo(bytesIndex [][]byte, indexInfo *que
 		}
 	}
 
-	err = li.appendIndexData(bytesIndex, indexPaths)
+	err = li.appendIndexData(indexPaths)
 	return err
 }
 
@@ -135,36 +134,12 @@ func (li *LoadIndexInfo) appendFieldInfo(collectionID int64, partitionID int64, 
 }
 
 // appendIndexData appends index path to cLoadIndexInfo and create index
-func (li *LoadIndexInfo) appendIndexData(bytesIndex [][]byte, indexKeys []string) error {
+func (li *LoadIndexInfo) appendIndexData(indexKeys []string) error {
 	for _, indexPath := range indexKeys {
 		err := li.appendIndexFile(indexPath)
 		if err != nil {
 			return err
 		}
-	}
-
-	if bytesIndex != nil {
-		var cBinarySet C.CBinarySet
-		status := C.NewBinarySet(&cBinarySet)
-		defer C.DeleteBinarySet(cBinarySet)
-		if err := HandleCStatus(&status, "NewBinarySet failed"); err != nil {
-			return err
-		}
-
-		for i, byteIndex := range bytesIndex {
-			indexPtr := unsafe.Pointer(&byteIndex[0])
-			indexLen := C.int64_t(len(byteIndex))
-			binarySetKey := filepath.Base(indexKeys[i])
-			indexKey := C.CString(binarySetKey)
-			status = C.AppendIndexBinary(cBinarySet, indexPtr, indexLen, indexKey)
-			C.free(unsafe.Pointer(indexKey))
-			if err := HandleCStatus(&status, "LoadIndexInfo AppendIndexBinary failed"); err != nil {
-				return err
-			}
-		}
-
-		status = C.AppendIndex(li.cLoadIndexInfo, cBinarySet)
-		return HandleCStatus(&status, "AppendIndex failed")
 	}
 
 	status := C.AppendIndexV2(li.cLoadIndexInfo)

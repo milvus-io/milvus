@@ -2269,6 +2269,15 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 			Status: unhealthyStatus(),
 		}, nil
 	}
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.String("partition", request.PartitionName),
+		zap.Int("len(FieldsData)", len(request.FieldsData)),
+		zap.Int("len(HashKeys)", len(request.HashKeys)),
+		zap.Uint32("NumRows", request.NumRows),
+	)
 	method := "Insert"
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.ProxyReceiveBytes.WithLabelValues(
@@ -2319,14 +2328,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		}
 	}
 
-	log.Debug("Enqueue insert request in Proxy",
-		zap.String("role", typeutil.ProxyRole),
-		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName),
-		zap.String("partition", request.PartitionName),
-		zap.Int("len(FieldsData)", len(request.FieldsData)),
-		zap.Int("len(HashKeys)", len(request.HashKeys)),
-		zap.Uint32("NumRows", request.NumRows))
+	log.Debug("Enqueue insert request in Proxy")
 
 	if err := node.sched.dmQueue.Enqueue(it); err != nil {
 		log.Warn("Failed to enqueue insert task: " + err.Error())
@@ -2335,14 +2337,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		return constructFailedResponse(err), nil
 	}
 
-	log.Debug("Detail of insert request in Proxy",
-		zap.String("role", typeutil.ProxyRole),
-		zap.Uint64("BeginTS", it.BeginTs()),
-		zap.Uint64("EndTS", it.EndTs()),
-		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName),
-		zap.String("partition", request.PartitionName),
-		zap.Uint32("NumRows", request.NumRows))
+	log.Debug("Detail of insert request in Proxy")
 
 	if err := it.WaitToFinish(); err != nil {
 		log.Warn("Failed to execute insert task in task scheduler: " + err.Error())
@@ -2362,6 +2357,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		}
 
 		setErrorIndex()
+		log.Warn("fail to insert data", zap.Uint32s("err_index", it.result.ErrIndex))
 	}
 
 	// InsertCnt always equals to the number of entities in the request
@@ -2383,7 +2379,13 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) (*milvuspb.MutationResult, error) {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Delete")
 	defer sp.End()
-	log := log.Ctx(ctx)
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.String("partition", request.PartitionName),
+		zap.String("expr", request.Expr),
+	)
 	log.Debug("Start processing delete request in Proxy")
 	defer log.Debug("Finish processing delete request in Proxy")
 
@@ -2426,12 +2428,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		chTicker:    node.chTicker,
 	}
 
-	log.Debug("Enqueue delete request in Proxy",
-		zap.String("role", typeutil.ProxyRole),
-		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName),
-		zap.String("partition", request.PartitionName),
-		zap.String("expr", request.Expr))
+	log.Debug("Enqueue delete request in Proxy")
 
 	// MsgID will be set by Enqueue()
 	if err := node.sched.dmQueue.Enqueue(dt); err != nil {
@@ -2447,13 +2444,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		}, nil
 	}
 
-	log.Debug("Detail of delete request in Proxy",
-		zap.String("role", typeutil.ProxyRole),
-		zap.Uint64("timestamp", dt.deleteMsg.Base.Timestamp),
-		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName),
-		zap.String("partition", request.PartitionName),
-		zap.String("expr", request.Expr))
+	log.Debug("Detail of delete request in Proxy")
 
 	if err := dt.WaitToFinish(); err != nil {
 		log.Error("Failed to execute delete task in task scheduler: " + err.Error())
@@ -3159,88 +3150,12 @@ func (node *Proxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasR
 
 // CalcDistance calculates the distances between vectors.
 func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDistanceRequest) (*milvuspb.CalcDistanceResults, error) {
-	if !node.checkHealthy() {
-		return &milvuspb.CalcDistanceResults{
-			Status: unhealthyStatus(),
-		}, nil
-	}
-
-	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-CalcDistance")
-	defer sp.End()
-
-	query := func(ids *milvuspb.VectorIDs) (*milvuspb.QueryResults, error) {
-		outputFields := []string{ids.FieldName}
-
-		queryRequest := &milvuspb.QueryRequest{
-			DbName:         "",
-			CollectionName: ids.CollectionName,
-			PartitionNames: ids.PartitionNames,
-			OutputFields:   outputFields,
-		}
-
-		qt := &queryTask{
-			ctx:       ctx,
-			Condition: NewTaskCondition(ctx),
-			RetrieveRequest: &internalpb.RetrieveRequest{
-				Base: commonpbutil.NewMsgBase(
-					commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
-					commonpbutil.WithSourceID(paramtable.GetNodeID()),
-				),
-				ReqID: paramtable.GetNodeID(),
-			},
-			request: queryRequest,
-			qc:      node.queryCoord,
-			ids:     ids.IdArray,
-		}
-
-		log := log.Ctx(ctx).With(
-			zap.String("collection", queryRequest.CollectionName),
-			zap.Any("partitions", queryRequest.PartitionNames),
-			zap.Any("OutputFields", queryRequest.OutputFields))
-
-		err := node.sched.dqQueue.Enqueue(qt)
-		if err != nil {
-			log.Error("CalcDistance queryTask failed to enqueue",
-				zap.Error(err))
-
-			return &milvuspb.QueryResults{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    err.Error(),
-				},
-			}, err
-		}
-
-		log.Debug("CalcDistance queryTask enqueued")
-
-		err = qt.WaitToFinish()
-		if err != nil {
-			log.Error("CalcDistance queryTask failed to WaitToFinish",
-				zap.Error(err))
-
-			return &milvuspb.QueryResults{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    err.Error(),
-				},
-			}, err
-		}
-
-		log.Debug("CalcDistance queryTask Done")
-
-		return &milvuspb.QueryResults{
-			Status:     qt.result.Status,
-			FieldsData: qt.result.FieldsData,
-		}, nil
-	}
-
-	// calcDistanceTask is not a standard task, no need to enqueue
-	task := &calcDistanceTask{
-		traceID:   sp.SpanContext().TraceID().String(),
-		queryFunc: query,
-	}
-
-	return task.Execute(ctx, request)
+	return &milvuspb.CalcDistanceResults{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "interface obsolete",
+		},
+	}, nil
 }
 
 // FlushAll notifies Proxy to flush all collection's DML messages.
@@ -3750,7 +3665,7 @@ func (node *Proxy) LoadBalance(ctx context.Context, req *milvuspb.LoadBalanceReq
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		log.Warn("failed to get collection id",
-			zap.String("collection name", req.GetCollectionName()),
+			zap.String("collectionName", req.GetCollectionName()),
 			zap.Error(err))
 		status.Reason = err.Error()
 		return status, nil
@@ -3973,7 +3888,7 @@ func (node *Proxy) Import(ctx context.Context, req *milvuspb.ImportRequest) (*mi
 	log := log.Ctx(ctx)
 
 	log.Info("received import request",
-		zap.String("collection name", req.GetCollectionName()),
+		zap.String("collectionName", req.GetCollectionName()),
 		zap.String("partition name", req.GetPartitionName()),
 		zap.Strings("files", req.GetFiles()))
 	resp := &milvuspb.ImportResponse{
@@ -5284,5 +5199,30 @@ func (node *Proxy) ListClientInfos(ctx context.Context, req *proxypb.ListClientI
 	return &proxypb.ListClientInfosResponse{
 		Status:      &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 		ClientInfos: clients,
+	}, nil
+}
+
+func (node *Proxy) AllocTimestamp(ctx context.Context, req *milvuspb.AllocTimestampRequest) (*milvuspb.AllocTimestampResponse, error) {
+	if !node.checkHealthy() {
+		return &milvuspb.AllocTimestampResponse{Status: unhealthyStatus()}, nil
+	}
+
+	log.Info("AllocTimestamp request receive")
+	ts, err := node.tsoAllocator.AllocOne(ctx)
+	if err != nil {
+		log.Info("AllocTimestamp failed", zap.Error(err))
+		return &milvuspb.AllocTimestampResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+
+	log.Info("AllocTimestamp request success", zap.Uint64("timestamp", ts))
+
+	return &milvuspb.AllocTimestampResponse{
+		Status:    &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		Timestamp: ts,
 	}, nil
 }

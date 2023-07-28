@@ -176,6 +176,7 @@ message DropIndexRequest {
 message DescribeIndexRequest {
   int64 collectionID = 1;
   string index_name = 2;
+  uint64 timestamp = 3;
 }
 
 message DescribeIndexResponse {

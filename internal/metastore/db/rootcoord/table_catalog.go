@@ -59,7 +59,7 @@ func (tc *Catalog) CreateCollection(ctx context.Context, collection *model.Colle
 		if collection.StartPositions != nil {
 			startPositionsBytes, err := json.Marshal(collection.StartPositions)
 			if err != nil {
-				log.Error("marshal collection start positions error", zap.Int64("collID", collection.CollectionID), zap.Uint64("ts", ts), zap.Error(err))
+				log.Error("marshal collection start positions error", zap.Int64("collectionID", collection.CollectionID), zap.Uint64("ts", ts), zap.Error(err))
 				return err
 			}
 			startPositionsStr = string(startPositionsBytes)
@@ -176,7 +176,7 @@ func (tc *Catalog) GetCollectionByID(ctx context.Context, dbID int64, ts typeuti
 		return nil, err
 	}
 	if cidTsPair.IsDeleted {
-		log.Error("not found collection", zap.Int64("collID", collectionID), zap.Uint64("ts", ts))
+		log.Error("not found collection", zap.Int64("collectionID", collectionID), zap.Uint64("ts", ts))
 		return nil, fmt.Errorf("not found collection, collID=%d, ts=%d", collectionID, ts)
 	}
 
@@ -326,7 +326,7 @@ func (tc *Catalog) DropCollection(ctx context.Context, collection *model.Collect
 		}
 		err := tc.metaDomain.CollectionDb(txCtx).Insert(coll)
 		if err != nil {
-			log.Error("insert tombstone record for collections failed", zap.String("tenant", tenantID), zap.Int64("collID", collection.CollectionID), zap.Uint64("ts", ts), zap.Error(err))
+			log.Error("insert tombstone record for collections failed", zap.String("tenant", tenantID), zap.Int64("collectionID", collection.CollectionID), zap.Uint64("ts", ts), zap.Error(err))
 			return err
 		}
 
@@ -346,7 +346,7 @@ func (tc *Catalog) DropCollection(ctx context.Context, collection *model.Collect
 
 			err = tc.metaDomain.CollAliasDb(txCtx).Insert(collAliases)
 			if err != nil {
-				log.Error("insert tombstone record for collection_aliases failed", zap.String("tenant", tenantID), zap.Int64("collID", collection.CollectionID), zap.Uint64("ts", ts), zap.Error(err))
+				log.Error("insert tombstone record for collection_aliases failed", zap.String("tenant", tenantID), zap.Int64("collectionID", collection.CollectionID), zap.Uint64("ts", ts), zap.Error(err))
 				return err
 			}
 		}
@@ -360,7 +360,7 @@ func (tc *Catalog) DropCollection(ctx context.Context, collection *model.Collect
 		}
 		err = tc.metaDomain.CollChannelDb(txCtx).Insert([]*dbmodel.CollectionChannel{collChannel})
 		if err != nil {
-			log.Error("insert tombstone record for collection_channels failed", zap.String("tenant", tenantID), zap.Int64("collID", collection.CollectionID), zap.Uint64("ts", ts), zap.Error(err))
+			log.Error("insert tombstone record for collection_channels failed", zap.String("tenant", tenantID), zap.Int64("collectionID", collection.CollectionID), zap.Uint64("ts", ts), zap.Error(err))
 			return err
 		}
 
@@ -373,7 +373,7 @@ func (tc *Catalog) DropCollection(ctx context.Context, collection *model.Collect
 		}
 		err = tc.metaDomain.FieldDb(txCtx).Insert([]*dbmodel.Field{field})
 		if err != nil {
-			log.Error("insert tombstone record for field_schemas failed", zap.String("tenant", tenantID), zap.Int64("collID", collection.CollectionID), zap.Uint64("ts", ts), zap.Error(err))
+			log.Error("insert tombstone record for field_schemas failed", zap.String("tenant", tenantID), zap.Int64("collectionID", collection.CollectionID), zap.Uint64("ts", ts), zap.Error(err))
 			return err
 		}
 
@@ -386,7 +386,7 @@ func (tc *Catalog) DropCollection(ctx context.Context, collection *model.Collect
 		}
 		err = tc.metaDomain.PartitionDb(txCtx).Insert([]*dbmodel.Partition{partition})
 		if err != nil {
-			log.Error("insert tombstone record for partitions failed", zap.String("tenant", tenantID), zap.Int64("collID", collection.CollectionID), zap.Uint64("ts", ts), zap.Error(err))
+			log.Error("insert tombstone record for partitions failed", zap.String("tenant", tenantID), zap.Int64("collectionID", collection.CollectionID), zap.Uint64("ts", ts), zap.Error(err))
 			return err
 		}
 
@@ -455,7 +455,7 @@ func (tc *Catalog) CreatePartition(ctx context.Context, dbID int64, partition *m
 	}
 	err := tc.metaDomain.PartitionDb(ctx).Insert([]*dbmodel.Partition{p})
 	if err != nil {
-		log.Error("insert partitions failed", zap.String("tenant", tenantID), zap.Int64("collID", partition.CollectionID), zap.Int64("partitionID", partition.PartitionID), zap.Uint64("ts", ts), zap.Error(err))
+		log.Error("insert partitions failed", zap.String("tenant", tenantID), zap.Int64("collectionID", partition.CollectionID), zap.Int64("partitionID", partition.PartitionID), zap.Uint64("ts", ts), zap.Error(err))
 		return err
 	}
 
@@ -474,7 +474,7 @@ func (tc *Catalog) DropPartition(ctx context.Context, dbID int64, collectionID t
 	}
 	err := tc.metaDomain.PartitionDb(ctx).Insert([]*dbmodel.Partition{p})
 	if err != nil {
-		log.Error("insert tombstone record for partition failed", zap.String("tenant", tenantID), zap.Int64("collID", collectionID), zap.Int64("partitionID", partitionID), zap.Uint64("ts", ts), zap.Error(err))
+		log.Error("insert tombstone record for partition failed", zap.String("tenant", tenantID), zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID), zap.Uint64("ts", ts), zap.Error(err))
 		return err
 	}
 
@@ -516,7 +516,7 @@ func (tc *Catalog) CreateAlias(ctx context.Context, alias *model.Alias, ts typeu
 	}
 	err := tc.metaDomain.CollAliasDb(ctx).Insert([]*dbmodel.CollectionAlias{collAlias})
 	if err != nil {
-		log.Error("insert collection_aliases failed", zap.Int64("collID", alias.CollectionID), zap.String("alias", alias.Name), zap.Uint64("ts", ts), zap.Error(err))
+		log.Error("insert collection_aliases failed", zap.Int64("collectionID", alias.CollectionID), zap.String("alias", alias.Name), zap.Uint64("ts", ts), zap.Error(err))
 		return err
 	}
 
@@ -540,7 +540,7 @@ func (tc *Catalog) DropAlias(ctx context.Context, dbID int64, alias string, ts t
 	}
 	err = tc.metaDomain.CollAliasDb(ctx).Insert([]*dbmodel.CollectionAlias{collAlias})
 	if err != nil {
-		log.Error("insert tombstone record for collection_aliases failed", zap.Int64("collID", collectionID), zap.String("collAlias", alias), zap.Uint64("ts", ts), zap.Error(err))
+		log.Error("insert tombstone record for collection_aliases failed", zap.Int64("collectionID", collectionID), zap.String("collAlias", alias), zap.Uint64("ts", ts), zap.Error(err))
 		return err
 	}
 

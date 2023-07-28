@@ -127,6 +127,9 @@ func (b *BalanceChecker) balanceReplicas(replicaIDs []int64) ([]balance.SegmentA
 	segmentPlans, channelPlans := make([]balance.SegmentAssignPlan, 0), make([]balance.ChannelAssignPlan, 0)
 	for _, rid := range replicaIDs {
 		replica := b.meta.ReplicaManager.Get(rid)
+		if replica == nil {
+			continue
+		}
 		sPlans, cPlans := b.Balance.BalanceReplica(replica)
 		segmentPlans = append(segmentPlans, sPlans...)
 		channelPlans = append(channelPlans, cPlans...)
@@ -145,9 +148,11 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 
 	tasks := balance.CreateSegmentTasksFromPlans(ctx, b.ID(), Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), segmentPlans)
 	task.SetPriority(task.TaskPriorityLow, tasks...)
+	task.SetReason("segment unbalanced", tasks...)
 	ret = append(ret, tasks...)
 
 	tasks = balance.CreateChannelTasksFromPlans(ctx, b.ID(), Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond), channelPlans)
+	task.SetReason("channel unbalanced", tasks...)
 	ret = append(ret, tasks...)
 	return ret
 }

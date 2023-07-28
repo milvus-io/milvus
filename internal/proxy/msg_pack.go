@@ -18,7 +18,8 @@ package proxy
 
 import (
 	"context"
-	"sync"
+	"strconv"
+	"time"
 
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -29,8 +30,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -120,11 +123,13 @@ func repackInsertDataByPartition(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
+	beforeAssign := time.Now()
 	assignedSegmentInfos, err := segIDAssigner.GetSegmentID(insertMsg.CollectionID, partitionID, channelName, uint32(len(rowOffsets)), maxTs)
+	metrics.ProxyAssignSegmentIDLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(time.Since(beforeAssign).Milliseconds()))
 	if err != nil {
 		log.Error("allocate segmentID for insert data failed",
-			zap.String("collection name", insertMsg.CollectionName),
-			zap.String("channel name", channelName),
+			zap.String("collectionName", insertMsg.CollectionName),
+			zap.String("channelName", channelName),
 			zap.Int("allocate count", len(rowOffsets)),
 			zap.Error(err))
 		return nil, err
@@ -136,7 +141,7 @@ func repackInsertDataByPartition(ctx context.Context,
 		msgs, err := genInsertMsgsByPartition(ctx, segmentID, partitionID, partitionName, subRowOffsets, channelName, insertMsg)
 		if err != nil {
 			log.Warn("repack insert data to insert msgs failed",
-				zap.String("collection name", insertMsg.CollectionName),
+				zap.String("collectionName", insertMsg.CollectionName),
 				zap.Int64("partitionID", partitionID),
 				zap.Error(err))
 			return nil, err
@@ -187,7 +192,7 @@ func repackInsertData(ctx context.Context,
 		msgs, err := repackInsertDataByPartition(ctx, partitionName, rowOffsets, channel, insertMsg, segIDAssigner)
 		if err != nil {
 			log.Warn("repack insert data to msg pack failed",
-				zap.String("collection name", insertMsg.CollectionName),
+				zap.String("collectionName", insertMsg.CollectionName),
 				zap.String("partition name", partitionName),
 				zap.Error(err))
 			return nil, err
@@ -199,7 +204,7 @@ func repackInsertData(ctx context.Context,
 	err := setMsgID(ctx, msgPack.Msgs, idAllocator)
 	if err != nil {
 		log.Error("failed to set msgID when repack insert data",
-			zap.String("collection name", insertMsg.CollectionName),
+			zap.String("collectionName", insertMsg.CollectionName),
 			zap.String("partition name", insertMsg.PartitionName),
 			zap.Error(err))
 		return nil, err
@@ -224,14 +229,14 @@ func repackInsertDataWithPartitionKey(ctx context.Context,
 	partitionNames, err := getDefaultPartitionNames(ctx, insertMsg.GetDbName(), insertMsg.CollectionName)
 	if err != nil {
 		log.Warn("get default partition names failed in partition key mode",
-			zap.String("collection name", insertMsg.CollectionName),
+			zap.String("collectionName", insertMsg.CollectionName),
 			zap.Error(err))
 		return nil, err
 	}
 	hashValues, err := typeutil.HashKey2Partitions(partitionKeys, partitionNames)
 	if err != nil {
 		log.Warn("has partition keys to partitions failed",
-			zap.String("collection name", insertMsg.CollectionName),
+			zap.String("collectionName", insertMsg.CollectionName),
 			zap.Error(err))
 		return nil, err
 	}
@@ -247,7 +252,7 @@ func repackInsertDataWithPartitionKey(ctx context.Context,
 		}
 
 		errGroup, _ := errgroup.WithContext(ctx)
-		partition2Msgs := sync.Map{}
+		partition2Msgs := typeutil.NewConcurrentMap[string, []msgstream.TsMsg]()
 		for partitionName, offsets := range partition2RowOffsets {
 			partitionName := partitionName
 			offsets := offsets
@@ -257,7 +262,7 @@ func repackInsertDataWithPartitionKey(ctx context.Context,
 					return err
 				}
 
-				partition2Msgs.Store(partitionName, msgs)
+				partition2Msgs.Insert(partitionName, msgs)
 				return nil
 			})
 		}
@@ -265,14 +270,13 @@ func repackInsertDataWithPartitionKey(ctx context.Context,
 		err = errGroup.Wait()
 		if err != nil {
 			log.Warn("repack insert data into insert msg pack failed",
-				zap.String("collection name", insertMsg.CollectionName),
-				zap.String("channel name", channel),
+				zap.String("collectionName", insertMsg.CollectionName),
+				zap.String("channelName", channel),
 				zap.Error(err))
 			return nil, err
 		}
 
-		partition2Msgs.Range(func(k, v interface{}) bool {
-			msgs := v.([]msgstream.TsMsg)
+		partition2Msgs.Range(func(name string, msgs []msgstream.TsMsg) bool {
 			msgPack.Msgs = append(msgPack.Msgs, msgs...)
 			return true
 		})
@@ -281,7 +285,7 @@ func repackInsertDataWithPartitionKey(ctx context.Context,
 	err = setMsgID(ctx, msgPack.Msgs, idAllocator)
 	if err != nil {
 		log.Error("failed to set msgID when repack insert data",
-			zap.String("collection name", insertMsg.CollectionName),
+			zap.String("collectionName", insertMsg.CollectionName),
 			zap.Error(err))
 		return nil, err
 	}

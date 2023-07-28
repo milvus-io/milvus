@@ -5,6 +5,7 @@ import pytest
 import random
 import numpy as np
 import pandas as pd
+pd.set_option("expand_frame_repr", False)
 from pymilvus import DefaultConfig
 import threading
 from pymilvus.orm.types import CONSISTENCY_STRONG, CONSISTENCY_BOUNDED, CONSISTENCY_EVENTUALLY
@@ -44,6 +45,10 @@ class TestQueryParams(TestcaseBase):
 
     @pytest.fixture(scope="function", params=[True, False])
     def enable_dynamic_field(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=[True, False])
+    def random_primary_key(self, request):
         yield request.param
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -557,6 +562,131 @@ class TestQueryParams(TestcaseBase):
             collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_query_expr_json_contains(self, enable_dynamic_field):
+        """
+        target: test query with expression using json_contains
+        method: query with expression using json_contains
+        expected: succeed
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, enable_dynamic_field=enable_dynamic_field)[0]
+
+        # 2. insert data
+        limit = 99
+        array = []
+        for i in range(ct.default_nb):
+            data = {
+                ct.default_int64_field_name: i,
+                ct.default_float_field_name: i * 1.0,
+                ct.default_string_field_name: str(i),
+                ct.default_json_field_name: {"number": i, "list": [m for m in range(i, i + limit)]},
+                ct.default_float_vec_field_name: cf.gen_vectors(1, ct.default_dim)[0]
+            }
+            array.append(data)
+        collection_w.insert(array)
+
+        # 3. query
+        collection_w.load()
+        expressions = ["json_contains(json_field['list'], 1000)", "JSON_CONTAINS(json_field['list'], 1000)"]
+        for expression in expressions:
+            res = collection_w.query(expression)[0]
+            assert len(res) == limit
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_query_expr_list_json_contains(self):
+        """
+        target: test query with expression using json_contains
+        method: query with expression using json_contains
+        expected: succeed
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, enable_dynamic_field=True)[0]
+
+        # 2. insert data
+        limit = ct.default_nb // 4
+        array = []
+        for i in range(ct.default_nb):
+            data = {
+                ct.default_int64_field_name: i,
+                ct.default_json_field_name: [str(m) for m in range(i, i + limit)],
+                ct.default_float_vec_field_name: cf.gen_vectors(1, ct.default_dim)[0]
+            }
+            array.append(data)
+        collection_w.insert(array)
+
+        # 3. query
+        collection_w.load()
+        expressions = ["json_contains(json_field, '1000')", "JSON_CONTAINS(json_field, '1000')"]
+        for expression in expressions:
+            res = collection_w.query(expression, output_fields=["count(*)"])[0]
+            assert res[0]["count(*)"] == limit
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_query_expr_json_contains_combined_with_normal(self, enable_dynamic_field):
+        """
+        target: test query with expression using json_contains
+        method: query with expression using json_contains
+        expected: succeed
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, enable_dynamic_field=enable_dynamic_field)[0]
+
+        # 2. insert data
+        limit = ct.default_nb // 3
+        array = []
+        for i in range(ct.default_nb):
+            data = {
+                ct.default_int64_field_name: i,
+                ct.default_float_field_name: i * 1.0,
+                ct.default_string_field_name: str(i),
+                ct.default_json_field_name: {"number": i, "list": [m for m in range(i, i + limit)]},
+                ct.default_float_vec_field_name: cf.gen_vectors(1, ct.default_dim)[0]
+            }
+            array.append(data)
+        collection_w.insert(array)
+
+        # 3. query
+        collection_w.load()
+        tar = 1000
+        expressions = [f"json_contains(json_field['list'], {tar}) && float > {tar - limit // 2}",
+                       f"JSON_CONTAINS(json_field['list'], {tar}) && float > {tar - limit // 2}"]
+        for expression in expressions:
+            res = collection_w.query(expression)[0]
+            assert len(res) == limit // 2
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_query_expr_json_contains_pagination(self, enable_dynamic_field):
+        """
+        target: test query with expression using json_contains
+        method: query with expression using json_contains
+        expected: succeed
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, enable_dynamic_field=enable_dynamic_field)[0]
+
+        # 2. insert data
+        limit = ct.default_nb // 3
+        array = []
+        for i in range(ct.default_nb):
+            data = {
+                ct.default_int64_field_name: i,
+                ct.default_float_field_name: i * 1.0,
+                ct.default_string_field_name: str(i),
+                ct.default_json_field_name: {"number": i, "list": [m for m in range(i, i + limit)]},
+                ct.default_float_vec_field_name: cf.gen_vectors(1, ct.default_dim)[0]
+            }
+            array.append(data)
+        collection_w.insert(array)
+
+        # 3. query
+        collection_w.load()
+        expressions = ["json_contains(json_field['list'], 1000)", "JSON_CONTAINS(json_field['list'], 1000)"]
+        offset = random.randint(1, limit)
+        for expression in expressions:
+            res = collection_w.query(expression, limit=limit, offset=offset)[0]
+            assert len(res) == limit - offset
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_query_output_field_none_or_empty(self, enable_dynamic_field):
         """
         target: test query with none and empty output field
@@ -583,18 +713,17 @@ class TestQueryParams(TestcaseBase):
         assert set(res[0].keys()) == {ct.default_int64_field_name, ct.default_float_field_name}
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue 24637")
-    def test_query_output_all_fields(self, enable_dynamic_field):
+    def test_query_output_all_fields(self, enable_dynamic_field, random_primary_key):
         """
         target: test query with none output field
         method: query with output field=None
         expected: return all fields
         """
         # 1. initialize with data
-        collection_w, df, _, insert_ids = self.init_collection_general(prefix, True, nb=10,
-                                                                       is_all_data_type=True,
-                                                                       enable_dynamic_field=
-                                                                       enable_dynamic_field)[0:4]
+        collection_w, df, _, insert_ids = \
+            self.init_collection_general(prefix, True, nb=10, is_all_data_type=True,
+                                         enable_dynamic_field=enable_dynamic_field,
+                                         random_primary_key=random_primary_key)[0:4]
         all_fields = [ct.default_int64_field_name, ct.default_int32_field_name, ct.default_int16_field_name,
                       ct.default_int8_field_name, ct.default_bool_field_name, ct.default_float_field_name,
                       ct.default_double_field_name, ct.default_string_field_name, ct.default_json_field_name,
@@ -602,7 +731,10 @@ class TestQueryParams(TestcaseBase):
         if enable_dynamic_field:
             res = df[0][:2]
         else:
-            res = df[0].iloc[:2].to_dict('records')
+            res = []
+            for id in range(2):
+                num = df[0][df[0][ct.default_int64_field_name] == id].index.to_list()[0]
+                res.append(df[0].iloc[num].to_dict())
         log.info(res)
         collection_w.load()
         actual_res, _ = collection_w.query(default_term_expr, output_fields=all_fields,
@@ -2408,8 +2540,7 @@ class TestQueryCount(TestcaseBase):
         # count with expr
         collection_w.query(expr=default_expr, output_fields=[ct.default_count_output],
                            check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: [{count: ct.default_nb}]}
-                           )
+                           check_items={exp_res: [{count: ct.default_nb}]})
 
         collection_w.query(expr=default_term_expr, output_fields=[ct.default_count_output],
                            check_task=CheckTasks.check_query_results,
@@ -2622,3 +2753,133 @@ class TestQueryCount(TestcaseBase):
         collection_w.query(expr=default_expr, output_fields=[ct.default_count_output], ignore_growing=True,
                            check_task=CheckTasks.check_query_results,
                            check_items={exp_res: [{count: 0}]})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("expression", cf.gen_normal_expressions())
+    def test_count_expressions(self, expression):
+        """
+        target: test count with expr
+        method: count with expr
+        expected: verify count
+        """
+        # create -> insert -> index -> load
+        collection_w,  _vectors, _, insert_ids = self.init_collection_general(insert_data=True)[0:4]
+
+        # filter result with expression in collection
+        _vectors = _vectors[0]
+        expression = expression.replace("&&", "and").replace("||", "or")
+        filter_ids = []
+        for i, _id in enumerate(insert_ids):
+            int64 = _vectors.int64[i]
+            float = _vectors.float[i]
+            if not expression or eval(expression):
+                filter_ids.append(_id)
+        res = len(filter_ids)
+
+        # count with expr
+        collection_w.query(expr=expression, output_fields=[count],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: [{count: res}]})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("bool_type", [True, False, "true", "false"])
+    def test_count_bool_expressions(self, bool_type):
+        """
+        target: test count with binary expr
+        method: count with binary expr
+        expected: verify count
+        """
+        # create -> insert -> index -> load
+        collection_w, _vectors, _, insert_ids = \
+            self.init_collection_general(insert_data=True, is_all_data_type=True)[0:4]
+
+        # filter result with expression in collection
+        filter_ids = []
+        bool_type_cmp = bool_type
+        if bool_type == "true":
+            bool_type_cmp = True
+        if bool_type == "false":
+            bool_type_cmp = False
+        for i, _id in enumerate(insert_ids):
+            if _vectors[0][f"{ct.default_bool_field_name}"][i] == bool_type_cmp:
+                filter_ids.append(_id)
+        res = len(filter_ids)
+
+        # count with expr
+        expression = f"{ct.default_bool_field_name} == {bool_type}"
+        collection_w.query(expr=expression, output_fields=[count],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: [{count: res}]})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("expression", cf.gen_normal_expressions_field(default_float_field_name))
+    def test_count_expression_auto_field(self, expression):
+        """
+        target: test count with expr
+        method: count with expr
+        expected: verify count
+        """
+        # create -> insert -> index -> load
+        collection_w, _vectors, _, insert_ids = self.init_collection_general(insert_data=True)[0:4]
+
+        # filter result with expression in collection
+        _vectors = _vectors[0]
+        expression = expression.replace("&&", "and").replace("||", "or")
+        filter_ids = []
+        for i, _id in enumerate(insert_ids):
+            float = _vectors.float[i]
+            if not expression or eval(expression):
+                filter_ids.append(_id)
+        res = len(filter_ids)
+
+        # count with expr
+        collection_w.query(expr=expression, output_fields=[count],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: [{count: res}]})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="issue #25841")
+    def test_count_expression_all_datatype(self):
+        """
+        target: test count with expr
+        method: count with expr
+        expected: verify count
+        """
+        # create -> insert -> index -> load
+        collection_w = self.init_collection_general(insert_data=True, is_all_data_type=True)[0]
+
+        # count with expr
+        expression = "int64 >= 0 && int32 >= 1999 && int16 >= 0 && int8 >= 0 && float <= 1999.0 && double >= 0"
+        # expression = "int64 == 1999"
+        collection_w.query(expr=expression, output_fields=[count],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: [{count: 1}]})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_count_expression_comparative(self):
+        """
+        target: test count with expr
+        method: count with expr
+        expected: verify count
+        """
+        # create -> insert -> index -> load
+        fields = [cf.gen_int64_field("int64_1"), cf.gen_int64_field("int64_2"),
+                  cf.gen_float_vec_field()]
+        schema = cf.gen_collection_schema(fields=fields, primary_field="int64_1")
+        collection_w = self.init_collection_wrap(schema=schema)
+
+        nb, res = 10, 0
+        int_values = [random.randint(0, nb) for _ in range(nb)]
+        data = [[i for i in range(nb)], int_values, cf.gen_vectors(nb, ct.default_dim)]
+        collection_w.insert(data)
+        collection_w.create_index(ct.default_float_vec_field_name)
+        collection_w.load()
+
+        for i in range(nb):
+            res = res + 1 if i >= int_values[i] else res
+
+        # count with expr
+        expression = "int64_1 >= int64_2"
+        collection_w.query(expr=expression, output_fields=[count],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: [{count: res}]})

@@ -32,6 +32,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -51,8 +52,9 @@ func HandleCStatus(status *C.CStatus, extraInfo string) error {
 	errorMsg := C.GoString(status.error_msg)
 	defer C.free(unsafe.Pointer(status.error_msg))
 
-	finalMsg := fmt.Sprintf("[%s] %s", errorName, errorMsg)
-	logMsg := fmt.Sprintf("%s, C Runtime Exception: %s\n", extraInfo, finalMsg)
+	finalMsg := fmt.Sprintf("%s: %s", errorName, errorMsg)
+	logMsg := fmt.Sprintf("%s, segcore error: %s\n", extraInfo, finalMsg)
+	log := log.With().WithOptions(zap.AddCallerSkip(1))
 	log.Warn(logMsg)
 	return errors.New(finalMsg)
 }

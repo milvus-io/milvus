@@ -144,7 +144,7 @@ func (it *indexBuildTask) OnEnqueue(ctx context.Context) error {
 	it.tr.RecordSpan()
 	it.statistic.StartTime = time.Now().UnixMicro()
 	it.statistic.PodID = it.node.GetNodeID()
-	log.Ctx(ctx).Info("IndexNode IndexBuilderTask Enqueue", zap.Int64("buildID", it.BuildID), zap.Int64("segID", it.segmentID))
+	log.Ctx(ctx).Info("IndexNode IndexBuilderTask Enqueue", zap.Int64("buildID", it.BuildID), zap.Int64("segmentID", it.segmentID))
 	return nil
 }
 

@@ -14,17 +14,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package job
+package eventlog
 
-import "github.com/cockroachdb/errors"
+// rawEvt implement `Evt` interface with plain event msg.
+type rawEvt struct {
+	level Level
+	tp    int32
+	data  []byte
+}
 
-var (
-	// Common errors
-	ErrInvalidRequest = errors.New("InvalidRequest")
+func (l *rawEvt) Level() Level {
+	return l.level
+}
 
-	// Load errors
-	ErrCollectionLoaded        = errors.New("CollectionLoaded")
-	ErrLoadParameterMismatched = errors.New("LoadParameterMismatched")
-	ErrNoEnoughNode            = errors.New("NoEnoughNode")
-	ErrPartitionNotInTarget    = errors.New("PartitionNotInLoadingTarget")
-)
+func (l *rawEvt) Type() int32 {
+	return l.tp
+}
+
+func (l *rawEvt) Raw() []byte {
+	return l.data
+}
+
+func NewRawEvt(level Level, data string) Evt {
+	return &rawEvt{
+		level: level,
+		data:  []byte(data),
+	}
+}

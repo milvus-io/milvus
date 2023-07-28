@@ -62,7 +62,7 @@ func ConvertFieldDBToModel(field *Field) (*model.Field, error) {
 	if field.TypeParams != "" {
 		err := json.Unmarshal([]byte(field.TypeParams), &typeParams)
 		if err != nil {
-			log.Error("unmarshal TypeParams of field failed", zap.Int64("collID", field.CollectionID),
+			log.Error("unmarshal TypeParams of field failed", zap.Int64("collectionID", field.CollectionID),
 				zap.Int64("fieldID", field.FieldID), zap.String("fieldName", field.FieldName), zap.Error(err))
 			return nil, err
 		}
@@ -72,7 +72,7 @@ func ConvertFieldDBToModel(field *Field) (*model.Field, error) {
 	if field.IndexParams != "" {
 		err := json.Unmarshal([]byte(field.IndexParams), &indexParams)
 		if err != nil {
-			log.Error("unmarshal IndexParams of field failed", zap.Int64("collID", field.CollectionID),
+			log.Error("unmarshal IndexParams of field failed", zap.Int64("collectionID", field.CollectionID),
 				zap.Int64("fieldID", field.FieldID), zap.String("fieldName", field.FieldName), zap.Error(err))
 			return nil, err
 		}

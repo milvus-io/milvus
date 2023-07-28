@@ -847,15 +847,15 @@ func (q *QuotaCenter) setRates() error {
 // recordMetrics records metrics of quota states.
 func (q *QuotaCenter) recordMetrics() {
 	record := func(errorCode commonpb.ErrorCode) {
+		var hasException float64 = 0
 		for _, states := range q.quotaStates {
 			for _, state := range states {
 				if state == errorCode {
-					metrics.RootCoordQuotaStates.WithLabelValues(errorCode.String()).Set(1)
+					hasException = 1
 				}
 			}
-			return
 		}
-		metrics.RootCoordQuotaStates.WithLabelValues(errorCode.String()).Set(0)
+		metrics.RootCoordQuotaStates.WithLabelValues(errorCode.String()).Set(hasException)
 	}
 	record(commonpb.ErrorCode_MemoryQuotaExhausted)
 	record(commonpb.ErrorCode_DiskQuotaExhausted)

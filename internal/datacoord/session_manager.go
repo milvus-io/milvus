@@ -27,9 +27,11 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"go.uber.org/zap"
 )
 
@@ -84,6 +86,7 @@ func (c *SessionManager) AddSession(node *NodeInfo) {
 
 	session := NewSession(node, c.sessionCreator)
 	c.sessions.data[node.NodeID] = session
+	metrics.DataCoordNumDataNodes.WithLabelValues().Set(float64(len(c.sessions.data)))
 }
 
 // DeleteSession removes the node session
@@ -95,6 +98,7 @@ func (c *SessionManager) DeleteSession(node *NodeInfo) {
 		session.Dispose()
 		delete(c.sessions.data, node.NodeID)
 	}
+	metrics.DataCoordNumDataNodes.WithLabelValues().Set(float64(len(c.sessions.data)))
 }
 
 // getLiveNodeIDs returns IDs of all live DataNodes.
@@ -145,7 +149,7 @@ func (c *SessionManager) execFlush(ctx context.Context, nodeID int64, req *datap
 
 // Compaction is a grpc interface. It will send request to DataNode with provided `nodeID` synchronously.
 func (c *SessionManager) Compaction(nodeID int64, plan *datapb.CompactionPlan) error {
-	ctx, cancel := context.WithTimeout(context.Background(), rpcCompactionTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
 	defer cancel()
 	cli, err := c.getClient(ctx, nodeID)
 	if err != nil {
@@ -169,7 +173,7 @@ func (c *SessionManager) SyncSegments(nodeID int64, req *datapb.SyncSegmentsRequ
 		zap.Int64("nodeID", nodeID),
 		zap.Int64("planID", req.GetPlanID()),
 	)
-	ctx, cancel := context.WithTimeout(context.Background(), rpcCompactionTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
 	defer cancel()
 	cli, err := c.getClient(ctx, nodeID)
 	if err != nil {
@@ -178,6 +182,9 @@ func (c *SessionManager) SyncSegments(nodeID int64, req *datapb.SyncSegmentsRequ
 	}
 
 	err = retry.Do(context.Background(), func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
+		defer cancel()
+
 		resp, err := cli.SyncSegments(ctx, req)
 		if err := VerifyResponse(resp, err); err != nil {
 			log.Warn("failed to sync segments", zap.Error(err))
@@ -248,7 +255,7 @@ func (c *SessionManager) GetCompactionState() map[int64]*datapb.CompactionStateR
 	wg := sync.WaitGroup{}
 	ctx := context.Background()
 
-	plans := sync.Map{}
+	plans := typeutil.NewConcurrentMap[int64, *datapb.CompactionStateResult]()
 	c.sessions.RLock()
 	for nodeID, s := range c.sessions.data {
 		wg.Add(1)
@@ -259,7 +266,7 @@ func (c *SessionManager) GetCompactionState() map[int64]*datapb.CompactionStateR
 				log.Info("Cannot Create Client", zap.Int64("NodeID", nodeID))
 				return
 			}
-			ctx, cancel := context.WithTimeout(ctx, rpcCompactionTimeout)
+			ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
 			defer cancel()
 			resp, err := cli.GetCompactionState(ctx, &datapb.CompactionStateRequest{
 				Base: commonpbutil.NewMsgBase(
@@ -277,7 +284,7 @@ func (c *SessionManager) GetCompactionState() map[int64]*datapb.CompactionStateR
 				return
 			}
 			for _, rst := range resp.GetResults() {
-				plans.Store(rst.PlanID, rst)
+				plans.Insert(rst.PlanID, rst)
 			}
 		}(nodeID, s)
 	}
@@ -285,8 +292,8 @@ func (c *SessionManager) GetCompactionState() map[int64]*datapb.CompactionStateR
 	wg.Wait()
 
 	rst := make(map[int64]*datapb.CompactionStateResult)
-	plans.Range(func(key, value any) bool {
-		rst[key.(int64)] = value.(*datapb.CompactionStateResult)
+	plans.Range(func(planID int64, result *datapb.CompactionStateResult) bool {
+		rst[planID] = result
 		return true
 	})
 

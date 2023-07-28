@@ -23,11 +23,11 @@ func (s *collectionDb) GetCollectionIDTs(tenantID string, collectionID typeutil.
 	err := s.db.Model(&dbmodel.Collection{}).Select("collection_id, ts").Where("tenant_id = ? AND collection_id = ? AND ts <= ?", tenantID, collectionID, ts).Order("ts desc").Take(&col).Error
 
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		log.Warn("record not found", zap.Int64("collID", collectionID), zap.Uint64("ts", ts), zap.Error(err))
+		log.Warn("record not found", zap.Int64("collectionID", collectionID), zap.Uint64("ts", ts), zap.Error(err))
 		return nil, fmt.Errorf("record not found, collID=%d, ts=%d", collectionID, ts)
 	}
 	if err != nil {
-		log.Error("get collection ts failed", zap.String("tenant", tenantID), zap.Int64("collID", collectionID), zap.Uint64("ts", ts), zap.Error(err))
+		log.Error("get collection ts failed", zap.String("tenant", tenantID), zap.Int64("collectionID", collectionID), zap.Uint64("ts", ts), zap.Error(err))
 		return nil, err
 	}
 
@@ -55,7 +55,7 @@ func (s *collectionDb) Get(tenantID string, collectionID typeutil.UniqueID, ts t
 		return nil, fmt.Errorf("collection not found, collID=%d, ts=%d", collectionID, ts)
 	}
 	if err != nil {
-		log.Error("get collection by collection_id and ts failed", zap.String("tenant", tenantID), zap.Int64("collID", collectionID), zap.Uint64("ts", ts), zap.Error(err))
+		log.Error("get collection by collection_id and ts failed", zap.String("tenant", tenantID), zap.Int64("collectionID", collectionID), zap.Uint64("ts", ts), zap.Error(err))
 		return nil, err
 	}
 
@@ -86,7 +86,7 @@ func (s *collectionDb) Insert(in *dbmodel.Collection) error {
 	}).Create(&in).Error
 
 	if err != nil {
-		log.Error("insert collection failed", zap.String("tenant", in.TenantID), zap.Int64("collID", in.CollectionID), zap.Uint64("ts", in.Ts), zap.Error(err))
+		log.Error("insert collection failed", zap.String("tenant", in.TenantID), zap.Int64("collectionID", in.CollectionID), zap.Uint64("ts", in.Ts), zap.Error(err))
 		return err
 	}
 

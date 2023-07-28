@@ -26,7 +26,9 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/http/healthz"
+	"github.com/milvus-io/milvus/pkg/eventlog"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 const (
@@ -50,6 +52,11 @@ func registerDefaults() {
 	Register(&Handler{
 		Path:    HealthzRouterPath,
 		Handler: healthz.Handler(),
+	})
+
+	Register(&Handler{
+		Path:    EventLogRouterPath,
+		Handler: eventlog.Handler(),
 	})
 }
 
@@ -81,6 +88,7 @@ func getHTTPAddr() string {
 	if err != nil {
 		return fmt.Sprintf(":%s", DefaultListenPort)
 	}
+	paramtable.Get().Save(paramtable.Get().CommonCfg.MetricsPort.Key, port)
 
 	return fmt.Sprintf(":%s", port)
 }

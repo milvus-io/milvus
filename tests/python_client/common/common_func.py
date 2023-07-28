@@ -165,6 +165,29 @@ def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.
     return schema
 
 
+def gen_bulk_insert_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name, with_varchar_field=True,
+                                      auto_id=False, dim=ct.default_dim, enable_dynamic_field=False, with_json=False):
+    if enable_dynamic_field:
+        if primary_field is ct.default_int64_field_name:
+            fields = [gen_int64_field(), gen_float_vec_field(dim=dim)]
+        elif primary_field is ct.default_string_field_name:
+            fields = [gen_string_field(), gen_float_vec_field(dim=dim)]
+        else:
+            log.error("Primary key only support int or varchar")
+            assert False
+    else:
+        fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_json_field(),
+                  gen_float_vec_field(dim=dim)]
+        if with_json is False:
+            fields.remove(gen_json_field())
+        if with_varchar_field is False:
+            fields.remove(gen_string_field())
+    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
+                                                                    primary_field=primary_field, auto_id=auto_id,
+                                                                    enable_dynamic_field=enable_dynamic_field)
+    return schema
+
+
 def gen_general_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
                                   auto_id=False, is_binary=False, dim=ct.default_dim, **kwargs):
     if is_binary:
@@ -276,8 +299,12 @@ def gen_binary_vectors(num, dim):
     return raw_vectors, binary_vectors
 
 
-def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True):
-    int_values = pd.Series(data=[i for i in range(start, start + nb)])
+def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True,
+                               random_primary_key=False):
+    if not random_primary_key:
+        int_values = pd.Series(data=[i for i in range(start, start + nb)])
+    else:
+        int_values = pd.Series(data=random.sample(range(start, start + nb), nb))
     float_values = pd.Series(data=[np.float32(i) for i in range(start, start + nb)], dtype="float32")
     string_values = pd.Series(data=[str(i) for i in range(start, start + nb)], dtype="string")
     json_values = [{"number": i, "float": i*1.0} for i in range(start, start + nb)]
@@ -376,8 +403,11 @@ def gen_dataframe_multi_string_fields(string_fields, nb=ct.default_nb):
     return df
 
 
-def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True):
-    int64_values = pd.Series(data=[i for i in range(start, start + nb)])
+def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True, random_primary_key=False):
+    if not random_primary_key:
+        int64_values = pd.Series(data=[i for i in range(start, start + nb)])
+    else:
+        int64_values = pd.Series(data=random.sample(range(start, start + nb), nb)) 
     int32_values = pd.Series(data=[np.int32(i) for i in range(start, start + nb)], dtype="int32")
     int16_values = pd.Series(data=[np.int16(i) for i in range(start, start + nb)], dtype="int16")
     int8_values = pd.Series(data=[np.int8(i) for i in range(start, start + nb)], dtype="int8")
@@ -457,13 +487,58 @@ def gen_default_list_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_js
     return data
 
 
-def gen_default_list_data_for_bulk_insert(nb=ct.default_nb, dim=ct.default_dim):
+def gen_default_list_data_for_bulk_insert(nb=ct.default_nb, varchar_len=2000, with_varchar_field=True):
+    str_value = gen_str_by_length(length=varchar_len)
     int_values = [i for i in range(nb)]
     float_values = [np.float32(i) for i in range(nb)]
-    string_values = [str(i) for i in range(nb)]
+    string_values = [f"{str(i)}_{str_value}" for i in range(nb)]
     float_vec_values = []  # placeholder for float_vec
     data = [int_values, float_values, string_values, float_vec_values]
+    if with_varchar_field is False:
+        data = [int_values, float_values, float_vec_values]
     return data
+ 
+
+def get_list_data_by_schema(nb=ct.default_nb, schema=None):
+    if schema is None:
+        schema = gen_default_collection_schema()
+    fields = schema.fields
+    fields_not_auto_id = []
+    for field in fields:
+        if not field.auto_id:
+            fields_not_auto_id.append(field)
+    data = []
+    for i in range(nb):
+        tmp = {}
+        for field in fields_not_auto_id:
+            tmp[field.name] = gen_data_by_type(field)
+        data.append(tmp)
+    return data
+
+def gen_data_by_type(field):
+    data_type = field.dtype
+    if data_type == DataType.BOOL:
+        return random.choice([True, False])
+    if data_type == DataType.INT8:
+        return random.randint(-128, 127)
+    if data_type == DataType.INT16:
+        return random.randint(-32768, 32767)
+    if data_type == DataType.INT32:
+        return random.randint(-2147483648, 2147483647)
+    if data_type == DataType.INT64:
+        return random.randint(-9223372036854775808, 9223372036854775807)
+    if data_type == DataType.FLOAT:
+        return np.float64(random.random())  # Object of type float32 is not JSON serializable, so set it as float64
+    if data_type == DataType.DOUBLE:
+        return np.float64(random.random())
+    if data_type == DataType.VARCHAR:
+        max_length = field.params['max_length']
+        length = random.randint(0, max_length)
+        return "".join([chr(random.randint(97, 122)) for _ in range(length)])
+    if data_type == DataType.FLOAT_VECTOR:
+        dim = field.params['dim']
+        return preprocessing.normalize([np.array([random.random() for i in range(dim)])])[0].tolist()
+    return None
 
 
 def gen_json_files_for_bulk_insert(data, schema, data_dir, **kwargs):
@@ -933,7 +1008,8 @@ def gen_partitions(collection_w, partition_num=1):
 
 
 def insert_data(collection_w, nb=ct.default_nb, is_binary=False, is_all_data_type=False,
-                auto_id=False, dim=ct.default_dim, insert_offset=0, enable_dynamic_field=False, with_json=True):
+                auto_id=False, dim=ct.default_dim, insert_offset=0, enable_dynamic_field=False, with_json=True,
+                random_primary_key=False):
     """
     target: insert non-binary/binary data
     method: insert non-binary/binary data into partitions if any
@@ -948,14 +1024,16 @@ def insert_data(collection_w, nb=ct.default_nb, is_binary=False, is_all_data_typ
     log.info(f"inserted {nb} data into collection {collection_w.name}")
     for i in range(num):
         log.debug("Dynamic field is enabled: %s" % enable_dynamic_field)
-        default_data = gen_default_dataframe_data(nb // num, dim=dim, start=start, with_json=with_json)
+        default_data = gen_default_dataframe_data(nb // num, dim=dim, start=start, with_json=with_json,
+                                                  random_primary_key=random_primary_key)
         if enable_dynamic_field:
             default_data = gen_default_rows_data(nb // num, dim=dim, start=start, with_json=with_json)
         if is_binary:
             default_data, binary_raw_data = gen_default_binary_dataframe_data(nb // num, dim=dim, start=start)
             binary_raw_vectors.extend(binary_raw_data)
         if is_all_data_type:
-            default_data = gen_dataframe_all_data_type(nb // num, dim=dim, start=start, with_json=with_json)
+            default_data = gen_dataframe_all_data_type(nb // num, dim=dim, start=start, with_json=with_json,
+                                                       random_primary_key=random_primary_key)
             if enable_dynamic_field:
                 default_data = gen_default_rows_data_all_data_type(nb // num, dim=dim, start=start, with_json=with_json)
         if auto_id:
@@ -1100,7 +1178,8 @@ def install_milvus_operator_specific_config(namespace, milvus_mode, release_name
 
 
 def get_wildcard_output_field_names(collection_w, output_fields):
-    all_fields = collection_w.schema.fields
+    all_fields = [field.name for field in collection_w.schema.fields]
+    output_fields = output_fields.copy()
     if "*" in output_fields:
         output_fields.remove("*")
         output_fields.extend(all_fields)

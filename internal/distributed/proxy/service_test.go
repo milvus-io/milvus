@@ -889,6 +889,10 @@ func (m *MockProxy) Connect(ctx context.Context, req *milvuspb.ConnectRequest) (
 	return nil, nil
 }
 
+func (m *MockProxy) AllocTimestamp(ctx context.Context, req *milvuspb.AllocTimestampRequest) (*milvuspb.AllocTimestampResponse, error) {
+	return nil, nil
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 type WaitOption struct {
@@ -1378,6 +1382,11 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("ListDatabase", func(t *testing.T) {
 		_, err := server.ListDatabases(ctx, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("AllocTimestamp", func(t *testing.T) {
+		_, err := server.AllocTimestamp(ctx, nil)
 		assert.Nil(t, err)
 	})
 	err = server.Stop()

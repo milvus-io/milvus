@@ -28,13 +28,13 @@ FieldDataImpl<Type, is_scalar>::FillFieldData(const void* source,
     }
 
     std::lock_guard lck(tell_mutex_);
-    if (tell_ + element_count > get_num_rows()) {
-        resize_field_data(tell_ + element_count);
+    if (length_ + element_count > get_num_rows()) {
+        resize_field_data(length_ + element_count);
     }
     std::copy_n(static_cast<const Type*>(source),
                 element_count * dim_,
-                field_data_.data() + tell_ * dim_);
-    tell_ += element_count;
+                field_data_.data() + length_ * dim_);
+    length_ += element_count;
 }
 
 template <typename ArrayType, arrow::Type::type ArrayDataType>

@@ -13,7 +13,7 @@ func ReCalcRowCount(seg, segCloned *datapb.SegmentInfo) {
 	// `segment` is not mutated but only cloned above and is safe to be referred here.
 	if newCount := CalcRowCountFromBinLog(seg); newCount != seg.GetNumOfRows() {
 		log.Warn("segment row number meta inconsistent with bin log row count and will be corrected",
-			zap.Int64("segment ID", seg.GetID()),
+			zap.Int64("segmentID", seg.GetID()),
 			zap.Int64("segment meta row count (wrong)", seg.GetNumOfRows()),
 			zap.Int64("segment bin log row count (correct)", newCount))
 		// Update the corrected row count.

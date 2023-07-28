@@ -190,7 +190,7 @@ func (s *LBPolicySuite) TestSelectNode() {
 
 	// test select node always fails, expected failure
 	s.lbBalancer.ExpectedCalls = nil
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(-1, merr.ErrNoAvailableNode)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(-1, merr.ErrNodeNotAvailable)
 	targetNode, err = s.lbPolicy.selectNode(ctx, ChannelWorkload{
 		db:           dbName,
 		collection:   s.collection,
@@ -198,12 +198,12 @@ func (s *LBPolicySuite) TestSelectNode() {
 		shardLeaders: []int64{},
 		nq:           1,
 	}, typeutil.NewUniqueSet())
-	s.ErrorIs(err, merr.ErrNoAvailableNode)
+	s.ErrorIs(err, merr.ErrNodeNotAvailable)
 	s.Equal(int64(-1), targetNode)
 
 	// test all nodes has been excluded, expected failure
 	s.lbBalancer.ExpectedCalls = nil
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(-1, merr.ErrNoAvailableNode)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(-1, merr.ErrNodeNotAvailable)
 	targetNode, err = s.lbPolicy.selectNode(ctx, ChannelWorkload{
 		db:           dbName,
 		collection:   s.collection,
@@ -211,14 +211,14 @@ func (s *LBPolicySuite) TestSelectNode() {
 		shardLeaders: s.nodes,
 		nq:           1,
 	}, typeutil.NewUniqueSet(s.nodes...))
-	s.ErrorIs(err, merr.ErrNoAvailableNode)
+	s.ErrorIs(err, merr.ErrServiceUnavailable)
 	s.Equal(int64(-1), targetNode)
 
 	// test get shard leaders failed, retry to select node failed
 	s.lbBalancer.ExpectedCalls = nil
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(-1, merr.ErrNoAvailableNode)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(-1, merr.ErrNodeNotAvailable)
 	s.qc.ExpectedCalls = nil
-	s.qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(nil, merr.ErrNoAvailableNodeInReplica)
+	s.qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(nil, merr.ErrServiceUnavailable)
 	targetNode, err = s.lbPolicy.selectNode(ctx, ChannelWorkload{
 		db:           dbName,
 		collection:   s.collection,
@@ -226,7 +226,7 @@ func (s *LBPolicySuite) TestSelectNode() {
 		shardLeaders: s.nodes,
 		nq:           1,
 	}, typeutil.NewUniqueSet())
-	s.ErrorIs(err, merr.ErrNoAvailableNodeInReplica)
+	s.ErrorIs(err, merr.ErrServiceUnavailable)
 	s.Equal(int64(-1), targetNode)
 }
 
@@ -253,7 +253,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 
 	// test select node failed, expected error
 	s.lbBalancer.ExpectedCalls = nil
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(-1, merr.ErrNoAvailableNode)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(-1, merr.ErrNodeNotAvailable)
 	err = s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
 		db:           dbName,
 		collection:   s.collection,
@@ -265,7 +265,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 		},
 		retryTimes: 1,
 	})
-	s.ErrorIs(err, merr.ErrNoAvailableNode)
+	s.ErrorIs(err, merr.ErrNodeNotAvailable)
 
 	// test get client failed, and retry failed, expected success
 	s.mgr.ExpectedCalls = nil
@@ -330,6 +330,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 
 func (s *LBPolicySuite) TestExecute() {
 	ctx := context.Background()
+	mockErr := errors.New("mock error")
 	// test  all channel success
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(1, nil)
@@ -355,7 +356,7 @@ func (s *LBPolicySuite) TestExecute() {
 				return nil
 			}
 
-			return errors.New("fake error")
+			return mockErr
 		},
 	})
 	s.Error(err)
@@ -363,7 +364,7 @@ func (s *LBPolicySuite) TestExecute() {
 	// test get shard leader failed
 	s.qc.ExpectedCalls = nil
 	globalMetaCache.DeprecateShardCache(dbName, s.collection)
-	s.qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(nil, errors.New("fake error"))
+	s.qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(nil, mockErr)
 	err = s.lbPolicy.Execute(ctx, CollectionWorkLoad{
 		db:         dbName,
 		collection: s.collection,
@@ -372,7 +373,7 @@ func (s *LBPolicySuite) TestExecute() {
 			return nil
 		},
 	})
-	s.Error(err)
+	s.ErrorIs(err, mockErr)
 }
 
 func (s *LBPolicySuite) TestUpdateCostMetrics() {

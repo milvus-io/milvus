@@ -627,10 +627,10 @@ func TestIndexBuilder(t *testing.T) {
 
 	ib := newIndexBuilder(ctx, mt, nodeManager, chunkManager)
 
-	assert.Equal(t, 7, len(ib.tasks))
+	assert.Equal(t, 6, len(ib.tasks))
 	assert.Equal(t, indexTaskInit, ib.tasks[buildID])
 	assert.Equal(t, indexTaskInProgress, ib.tasks[buildID+1])
-	assert.Equal(t, indexTaskInProgress, ib.tasks[buildID+2])
+	// buildID+2 will be filter by isDeleted
 	assert.Equal(t, indexTaskInit, ib.tasks[buildID+3])
 	assert.Equal(t, indexTaskInProgress, ib.tasks[buildID+8])
 	assert.Equal(t, indexTaskInit, ib.tasks[buildID+9])
@@ -708,16 +708,6 @@ func TestIndexBuilder_Error(t *testing.T) {
 		assert.False(t, ok)
 	})
 
-	t.Run("init no need to build index", func(t *testing.T) {
-		ib.tasks[buildID] = indexTaskInit
-		ib.meta.indexes[collID][indexID].IsDeleted = true
-		ib.process(buildID)
-
-		_, ok := ib.tasks[buildID]
-		assert.False(t, ok)
-		ib.meta.indexes[collID][indexID].IsDeleted = false
-	})
-
 	t.Run("finish few rows task fail", func(t *testing.T) {
 		ib.tasks[buildID+9] = indexTaskInit
 		ib.process(buildID + 9)
@@ -747,6 +737,28 @@ func TestIndexBuilder_Error(t *testing.T) {
 		state, ok := ib.tasks[buildID]
 		assert.True(t, ok)
 		assert.Equal(t, indexTaskInit, state)
+	})
+
+	t.Run("no need to build index but update catalog failed", func(t *testing.T) {
+		ib.meta.catalog = ec
+		ib.meta.indexes[collID][indexID].IsDeleted = true
+		ib.tasks[buildID] = indexTaskInit
+		ok := ib.process(buildID)
+		assert.False(t, ok)
+
+		_, ok = ib.tasks[buildID]
+		assert.True(t, ok)
+	})
+
+	t.Run("init no need to build index", func(t *testing.T) {
+		ib.meta.catalog = sc
+		ib.meta.indexes[collID][indexID].IsDeleted = true
+		ib.tasks[buildID] = indexTaskInit
+		ib.process(buildID)
+
+		_, ok := ib.tasks[buildID]
+		assert.False(t, ok)
+		ib.meta.indexes[collID][indexID].IsDeleted = false
 	})
 
 	t.Run("assign task error", func(t *testing.T) {

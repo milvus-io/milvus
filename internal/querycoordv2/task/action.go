@@ -26,12 +26,23 @@ import (
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-type ActionType = int32
+type ActionType int32
 
 const (
 	ActionTypeGrow ActionType = iota + 1
 	ActionTypeReduce
+	ActionTypeUpdate
 )
+
+var ActionTypeName = map[ActionType]string{
+	ActionTypeGrow:   "Grow",
+	ActionTypeReduce: "Reduce",
+	ActionTypeUpdate: "Update",
+}
+
+func (t ActionType) String() string {
+	return ActionTypeName[t]
+}
 
 type Action interface {
 	Node() int64
@@ -71,7 +82,7 @@ type SegmentAction struct {
 	segmentID UniqueID
 	scope     querypb.DataScope
 
-	isReleaseCommitted atomic.Bool
+	rpcReturned atomic.Bool
 }
 
 func NewSegmentAction(nodeID UniqueID, typ ActionType, shard string, segmentID UniqueID) *SegmentAction {
@@ -81,10 +92,10 @@ func NewSegmentAction(nodeID UniqueID, typ ActionType, shard string, segmentID U
 func NewSegmentActionWithScope(nodeID UniqueID, typ ActionType, shard string, segmentID UniqueID, scope querypb.DataScope) *SegmentAction {
 	base := NewBaseAction(nodeID, typ, shard)
 	return &SegmentAction{
-		BaseAction:         base,
-		segmentID:          segmentID,
-		scope:              scope,
-		isReleaseCommitted: *atomic.NewBool(false),
+		BaseAction:  base,
+		segmentID:   segmentID,
+		scope:       scope,
+		rpcReturned: *atomic.NewBool(false),
 	}
 }
 
@@ -98,8 +109,10 @@ func (action *SegmentAction) Scope() querypb.DataScope {
 
 func (action *SegmentAction) IsFinished(distMgr *meta.DistributionManager) bool {
 	if action.Type() == ActionTypeGrow {
-		nodes := distMgr.LeaderViewManager.GetSealedSegmentDist(action.SegmentID())
-		return lo.Contains(nodes, action.Node())
+		leaderSegmentDist := distMgr.LeaderViewManager.GetSealedSegmentDist(action.SegmentID())
+		nodeSegmentDist := distMgr.SegmentDistManager.GetSegmentDist(action.SegmentID())
+		return lo.Contains(leaderSegmentDist, action.Node()) &&
+			lo.Contains(nodeSegmentDist, action.Node())
 	} else if action.Type() == ActionTypeReduce {
 		// FIXME: Now shard leader's segment view is a map of segment ID to node ID,
 		// loading segment replaces the node ID with the new one,
@@ -117,7 +130,9 @@ func (action *SegmentAction) IsFinished(distMgr *meta.DistributionManager) bool 
 		if !funcutil.SliceContain(segments, action.SegmentID()) {
 			return true
 		}
-		return action.isReleaseCommitted.Load()
+		return action.rpcReturned.Load()
+	} else if action.Type() == ActionTypeUpdate {
+		return action.rpcReturned.Load()
 	}
 
 	return true

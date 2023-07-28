@@ -19,14 +19,14 @@ package nmq
 import (
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/nats-io/nats.go"
-	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
@@ -42,7 +42,6 @@ type nmqClient struct {
 // It retrieves the NMQ client URL from the server configuration.
 func NewClientWithDefaultOptions() (mqwrapper.Client, error) {
 	url := Nmq.ClientURL()
-	log.Info("123123 ", zap.String("url", url))
 	return NewClient(url)
 }
 
@@ -68,9 +67,13 @@ func (nc *nmqClient) CreateProducer(options mqwrapper.ProducerOptions) (mqwrappe
 	}
 	// TODO: (1) investigate on performance of multiple streams vs multiple topics.
 	//       (2) investigate if we should have topics under the same stream.
+
 	_, err = js.AddStream(&nats.StreamConfig{
 		Name:     options.Topic,
 		Subjects: []string{options.Topic},
+		MaxAge:   paramtable.Get().NatsmqCfg.ServerRetentionMaxAge.GetAsDuration(time.Minute),
+		MaxBytes: paramtable.Get().NatsmqCfg.ServerRetentionMaxBytes.GetAsInt64(),
+		MaxMsgs:  paramtable.Get().NatsmqCfg.ServerRetentionMaxMsgs.GetAsInt64(),
 	})
 	if err != nil {
 		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.FailLabel).Inc()
@@ -110,6 +113,9 @@ func (nc *nmqClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Con
 	_, err = js.AddStream(&nats.StreamConfig{
 		Name:     options.Topic,
 		Subjects: []string{options.Topic},
+		MaxAge:   paramtable.Get().NatsmqCfg.ServerRetentionMaxAge.GetAsDuration(time.Minute),
+		MaxBytes: paramtable.Get().NatsmqCfg.ServerRetentionMaxBytes.GetAsInt64(),
+		MaxMsgs:  paramtable.Get().NatsmqCfg.ServerRetentionMaxMsgs.GetAsInt64(),
 	})
 	if err != nil {
 		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.FailLabel).Inc()

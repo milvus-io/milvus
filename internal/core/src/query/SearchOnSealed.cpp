@@ -52,7 +52,6 @@ SearchOnSealedIndex(const Schema& schema,
         return vec_index->Query(ds, search_info, bitset);
     }();
 
-    auto ids = final->seg_offsets_.data();
     float* distances = final->distances_.data();
 
     auto total_num = num_queries * topk;
@@ -62,13 +61,10 @@ SearchOnSealedIndex(const Schema& schema,
             distances[i] = std::round(distances[i] * multiplier) / multiplier;
         }
     }
-    result.seg_offsets_.resize(total_num);
-    result.distances_.resize(total_num);
+    result.seg_offsets_ = std::move(final->seg_offsets_);
+    result.distances_ = std::move(final->distances_);
     result.total_nq_ = num_queries;
     result.unity_topK_ = topk;
-
-    std::copy_n(ids, total_num, result.seg_offsets_.data());
-    std::copy_n(distances, total_num, result.distances_.data());
 }
 
 void

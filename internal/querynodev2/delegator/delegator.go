@@ -89,7 +89,7 @@ type ShardDelegator interface {
 	LoadGrowing(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error
 	LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) error
 	ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest, force bool) error
-	SyncTargetVersion(newVersion int64, growingInTarget []int64, sealedInTarget []int64)
+	SyncTargetVersion(newVersion int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64)
 	GetTargetVersion() int64
 
 	// control
@@ -239,6 +239,12 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 	if req.Req.IgnoreGrowing {
 		growing = []SegmentEntry{}
 	}
+
+	sealedNum := lo.SumBy(sealed, func(item SnapshotItem) int { return len(item.Segments) })
+	log.Info("search segments...",
+		zap.Int("sealedNum", sealedNum),
+		zap.Int("growingNum", len(growing)),
+	)
 	tasks, err := organizeSubTask(req, sealed, growing, sd.workerManager, sd.modifySearchRequest)
 	if err != nil {
 		log.Warn("Search organizeSubTask failed", zap.Error(err))
@@ -298,8 +304,9 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		growing = []SegmentEntry{}
 	}
 
+	sealedNum := lo.SumBy(sealed, func(item SnapshotItem) int { return len(item.Segments) })
 	log.Info("query segments...",
-		zap.Int("sealedNum", len(sealed)),
+		zap.Int("sealedNum", sealedNum),
 		zap.Int("growingNum", len(growing)),
 	)
 	tasks, err := organizeSubTask(req, sealed, growing, sd.workerManager, sd.modifyQueryRequest)

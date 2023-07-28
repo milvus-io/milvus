@@ -36,6 +36,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
@@ -43,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -97,6 +100,8 @@ func (sd *shardDelegator) newGrowing(segmentID int64, insertData *InsertData) se
 
 // ProcessInsert handles insert data in delegator.
 func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
+	method := "ProcessInsert"
+	tr := timerecord.NewTimeRecorder(method)
 	log := sd.getLogger(context.Background())
 	for segmentID, insertData := range insertRecords {
 		growing := sd.segmentManager.GetGrowing(segmentID)
@@ -126,12 +131,16 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			zap.Uint64("maxTimestamp", insertData.Timestamps[len(insertData.Timestamps)-1]),
 		)
 	}
+	metrics.QueryNodeProcessCost.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).
+		Observe(float64(tr.ElapseSpan().Milliseconds()))
 }
 
 // ProcessDelete handles delete data in delegator.
 // delegator puts deleteData into buffer first,
 // then dispatch data to segments acoording to the result of pkOracle.
 func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
+	method := "ProcessDelete"
+	tr := timerecord.NewTimeRecorder(method)
 	// block load segment handle delete buffer
 	sd.deleteMut.Lock()
 	defer sd.deleteMut.Unlock()
@@ -223,6 +232,9 @@ func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 		log.Warn("failed to apply delete, mark segment offline", zap.Int64s("offlineSegments", offlineSegIDs))
 		sd.markSegmentOffline(offlineSegIDs...)
 	}
+
+	metrics.QueryNodeProcessCost.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).
+		Observe(float64(tr.ElapseSpan().Milliseconds()))
 }
 
 // applyDelete handles delete record and apply them to corresponding workers.
@@ -347,6 +359,11 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	}
 	log.Info("work loads segments done")
 
+	// load index need no stream delete and distribution change
+	if req.GetLoadScope() == querypb.LoadScope_Index {
+		return nil
+	}
+
 	log.Info("load delete...")
 	err = sd.loadStreamDelete(ctx, candidates, infos, req.GetDeltaPositions(), targetNodeID, worker)
 	if err != nil {
@@ -361,7 +378,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 			PartitionID:   info.GetPartitionID(),
 			NodeID:        req.GetDstNodeID(),
 			Version:       req.GetVersion(),
-			TargetVersion: sd.distribution.getTargetVersion(),
+			TargetVersion: info.GetReadableVersion(),
 		}
 	})
 	sd.distribution.AddDistributions(entries...)
@@ -375,13 +392,13 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	deltaPositions []*msgpb.MsgPosition,
 	targetNodeID int64, worker cluster.Worker) error {
 	log := sd.getLogger(ctx)
-	sd.deleteMut.Lock()
-	defer sd.deleteMut.Unlock()
 
 	idCandidates := lo.SliceToMap(candidates, func(candidate *pkoracle.BloomFilterSet) (int64, *pkoracle.BloomFilterSet) {
 		return candidate.ID(), candidate
 	})
 
+	sd.deleteMut.Lock()
+	defer sd.deleteMut.Unlock()
 	// apply buffered delete for new segments
 	// no goroutines here since qnv2 has no load merging logic
 	for i, info := range infos {
@@ -469,7 +486,7 @@ func (sd *shardDelegator) readDeleteFromMsgstream(ctx context.Context, position 
 
 	// Random the subname in case we trying to load same delta at the same time
 	subName := fmt.Sprintf("querynode-delta-loader-%d-%d-%d", paramtable.GetNodeID(), sd.collectionID, rand.Int())
-	log.Info("from dml check point load delete", zap.Any("position", position), zap.String("subName", subName), zap.Time("positionTs", ts))
+	log.Info("from dml check point load delete", zap.Any("position", position), zap.String("vChannel", vchannelName), zap.String("subName", subName), zap.Time("positionTs", ts))
 	stream.AsConsumer([]string{pChannelName}, subName, mqwrapper.SubscriptionPositionUnknown)
 
 	err = stream.Seek([]*msgpb.MsgPosition{position})
@@ -600,8 +617,34 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 	return nil
 }
 
-func (sd *shardDelegator) SyncTargetVersion(newVersion int64, growingInTarget []int64, sealedInTarget []int64) {
-	sd.distribution.SyncTargetVersion(newVersion, growingInTarget, sealedInTarget)
+func (sd *shardDelegator) SyncTargetVersion(newVersion int64, growingInTarget []int64,
+	sealedInTarget []int64, droppedInTarget []int64) {
+	growings := sd.segmentManager.GetBy(segments.WithType(segments.SegmentTypeGrowing))
+
+	sealedSet := typeutil.NewUniqueSet(sealedInTarget...)
+	growingSet := typeutil.NewUniqueSet(growingInTarget...)
+	droppedSet := typeutil.NewUniqueSet(droppedInTarget...)
+	redundantGrowing := make([]int64, 0)
+	for _, s := range growings {
+		if growingSet.Contain(s.ID()) {
+			continue
+		}
+
+		// sealed segment already exists, make growing segment redundant
+		if sealedSet.Contain(s.ID()) {
+			redundantGrowing = append(redundantGrowing, s.ID())
+		}
+
+		// sealed segment already dropped, make growing segment redundant
+		if droppedSet.Contain(s.ID()) {
+			redundantGrowing = append(redundantGrowing, s.ID())
+		}
+	}
+	if len(redundantGrowing) > 0 {
+		log.Warn("found redundant growing segments",
+			zap.Int64s("growingSegments", redundantGrowing))
+	}
+	sd.distribution.SyncTargetVersion(newVersion, growingInTarget, sealedInTarget, redundantGrowing)
 }
 
 func (sd *shardDelegator) GetTargetVersion() int64 {

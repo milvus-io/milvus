@@ -26,6 +26,7 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
+	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -36,15 +37,28 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/samber/lo"
 )
 
 const (
 	TaskTypeGrow Type = iota + 1
 	TaskTypeReduce
 	TaskTypeMove
+	TaskTypeUpdate
 )
 
-type Type = int32
+var TaskTypeName = map[Type]string{
+	TaskTypeGrow:   "Grow",
+	TaskTypeReduce: "Reduce",
+	TaskTypeMove:   "Move",
+	TaskTypeUpdate: "Update",
+}
+
+type Type int32
+
+func (t Type) String() string {
+	return TaskTypeName[t]
+}
 
 type replicaSegmentIndex struct {
 	ReplicaID int64
@@ -293,9 +307,9 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 			if task.Priority() > old.Priority() {
 				log.Info("replace old task, the new one with higher priority",
 					zap.Int64("oldID", old.ID()),
-					zap.Int32("oldPriority", old.Priority()),
+					zap.String("oldPriority", old.Priority().String()),
 					zap.Int64("newID", task.ID()),
-					zap.Int32("newPriority", task.Priority()),
+					zap.String("newPriority", task.Priority().String()),
 				)
 				old.Cancel(merr.WrapErrServiceInternal("replaced with the other one with higher priority"))
 				scheduler.remove(old)
@@ -306,9 +320,10 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 		}
 
 		if GetTaskType(task) == TaskTypeGrow {
-			nodesWithSegment := scheduler.distMgr.LeaderViewManager.GetSealedSegmentDist(task.SegmentID())
-			replicaNodeMap := utils.GroupNodesByReplica(scheduler.meta.ReplicaManager, task.CollectionID(), nodesWithSegment)
-			if _, ok := replicaNodeMap[task.ReplicaID()]; ok {
+			leaderSegmentDist := scheduler.distMgr.LeaderViewManager.GetSealedSegmentDist(task.SegmentID())
+			nodeSegmentDist := scheduler.distMgr.SegmentDistManager.GetSegmentDist(task.SegmentID())
+			if lo.Contains(leaderSegmentDist, task.Actions()[0].Node()) &&
+				lo.Contains(nodeSegmentDist, task.Actions()[0].Node()) {
 				return merr.WrapErrServiceInternal("segment loaded, it can be only balanced")
 			}
 		}
@@ -319,9 +334,9 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 			if task.Priority() > old.Priority() {
 				log.Info("replace old task, the new one with higher priority",
 					zap.Int64("oldID", old.ID()),
-					zap.Int32("oldPriority", old.Priority()),
+					zap.String("oldPriority", old.Priority().String()),
 					zap.Int64("newID", task.ID()),
-					zap.Int32("newPriority", task.Priority()),
+					zap.String("newPriority", task.Priority().String()),
 				)
 				old.Cancel(merr.WrapErrServiceInternal("replaced with the other one with higher priority"))
 				scheduler.remove(old)
@@ -546,7 +561,7 @@ func (scheduler *taskScheduler) isRelated(task Task, node int64) bool {
 		if task, ok := task.(*SegmentTask); ok {
 			taskType := GetTaskType(task)
 			var segment *datapb.SegmentInfo
-			if taskType == TaskTypeMove {
+			if taskType == TaskTypeMove || taskType == TaskTypeUpdate {
 				segment = scheduler.targetMgr.GetHistoricalSegment(task.CollectionID(), task.SegmentID(), meta.CurrentTarget)
 			} else {
 				segment = scheduler.targetMgr.GetHistoricalSegment(task.CollectionID(), task.SegmentID(), meta.NextTarget)
@@ -603,7 +618,7 @@ func (scheduler *taskScheduler) process(task Task) bool {
 		zap.Int64("taskID", task.ID()),
 		zap.Int64("collectionID", task.CollectionID()),
 		zap.Int64("replicaID", task.ReplicaID()),
-		zap.Int32("type", GetTaskType(task)),
+		zap.String("type", GetTaskType(task).String()),
 		zap.Int64("source", task.SourceID()),
 	)
 
@@ -680,7 +695,7 @@ func (scheduler *taskScheduler) remove(task Task) {
 		index := NewReplicaSegmentIndex(task)
 		delete(scheduler.segmentTasks, index)
 		log = log.With(zap.Int64("segmentID", task.SegmentID()))
-		if task.Err() != nil {
+		if task.Err() != nil && !errors.Is(task.Err(), merr.ErrChannelNotFound) {
 			log.Warn("task scheduler recordSegmentTaskError", zap.Error(task.err))
 			scheduler.recordSegmentTaskError(task)
 		}
@@ -745,7 +760,7 @@ func (scheduler *taskScheduler) checkSegmentTaskStale(task *SegmentTask) error {
 		case ActionTypeGrow:
 			taskType := GetTaskType(task)
 			var segment *datapb.SegmentInfo
-			if taskType == TaskTypeMove {
+			if taskType == TaskTypeMove || taskType == TaskTypeUpdate {
 				segment = scheduler.targetMgr.GetHistoricalSegment(task.CollectionID(), task.SegmentID(), meta.CurrentTarget)
 			} else {
 				segment = scheduler.targetMgr.GetHistoricalSegment(task.CollectionID(), task.SegmentID(), meta.NextTarget)
@@ -753,7 +768,7 @@ func (scheduler *taskScheduler) checkSegmentTaskStale(task *SegmentTask) error {
 			if segment == nil {
 				log.Warn("task stale due to the segment to load not exists in targets",
 					zap.Int64("segment", task.segmentID),
-					zap.Int32("taskType", taskType),
+					zap.String("taskType", taskType.String()),
 				)
 				return merr.WrapErrSegmentReduplicate(task.SegmentID(), "target doesn't contain this segment")
 			}

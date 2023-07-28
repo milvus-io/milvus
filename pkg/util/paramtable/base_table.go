@@ -32,7 +32,7 @@ import (
 type UniqueID = typeutil.UniqueID
 
 const (
-	DefaultEasyloggingYaml      = "easylogging.yaml"
+	DefaultGlogConf             = "glog.conf"
 	DefaultMinioHost            = "localhost"
 	DefaultMinioPort            = "9000"
 	DefaultMinioAccessKey       = "minioadmin"
@@ -44,14 +44,16 @@ const (
 	DefaultMinioIAMEndpoint     = ""
 	DefaultEtcdEndpoints        = "localhost:2379"
 
-	DefaultLogFormat       = "text"
-	DefaultLogLevelForBase = "debug"
-	DefaultRootPath        = ""
+	DefaultLogFormat                         = "text"
+	DefaultLogLevelForBase                   = "debug"
+	DefaultRootPath                          = ""
+	DefaultMinioLogLevel                     = "error"
+	DefaultKnowhereThreadPoolNumRatioInBuild = 1
 )
 
 // Const of Global Config List
 func globalConfigPrefixs() []string {
-	return []string{"metastore.", "localStorage.", "etcd.", "mysql.", "minio.", "pulsar.", "kafka.", "rocksmq.", "log.", "grpc.", "common.", "quotaAndLimits."}
+	return []string{"metastore", "localStorage", "etcd", "mysql", "minio", "pulsar", "kafka", "rocksmq", "log", "grpc", "common", "quotaAndLimits"}
 }
 
 var defaultYaml = []string{"milvus.yaml", "default.yaml", "user.yaml"}

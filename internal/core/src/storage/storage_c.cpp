@@ -64,6 +64,7 @@ InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config) {
             std::string(c_storage_config.storage_type);
         storage_config.iam_endpoint =
             std::string(c_storage_config.iam_endpoint);
+        storage_config.log_level = std::string(c_storage_config.log_level);
         storage_config.useSSL = c_storage_config.useSSL;
         storage_config.useIAM = c_storage_config.useIAM;
         milvus::storage::RemoteChunkManagerSingleton::GetInstance().Init(

@@ -329,10 +329,7 @@ func Test_AlterSegments(t *testing.T) {
 		catalog := NewCatalog(metakv, rootPath, "")
 		assert.Panics(t, func() {
 			catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{invalidSegment}, metastore.BinlogsIncrement{
-				Segment:    invalidSegment,
-				Insertlogs: invalidSegment.Binlogs,
-				Statslogs:  invalidSegment.Statslogs,
-				Deltalogs:  invalidSegment.Deltalogs,
+				Segment: invalidSegment,
 			})
 		})
 	})
@@ -360,10 +357,7 @@ func Test_AlterSegments(t *testing.T) {
 		assert.NoError(t, err)
 
 		err = catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{segment1}, metastore.BinlogsIncrement{
-			Segment:    segment1,
-			Insertlogs: segment1.Binlogs,
-			Statslogs:  segment1.Statslogs,
-			Deltalogs:  segment1.Deltalogs,
+			Segment: segment1,
 		})
 		assert.NoError(t, err)
 
@@ -423,10 +417,7 @@ func Test_AlterSegments(t *testing.T) {
 
 		err = catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{segmentXL},
 			metastore.BinlogsIncrement{
-				Segment:    segmentXL,
-				Insertlogs: segmentXL.Binlogs,
-				Statslogs:  segmentXL.Statslogs,
-				Deltalogs:  segmentXL.Deltalogs,
+				Segment: segmentXL,
 			})
 		assert.NoError(t, err)
 		assert.Equal(t, 255+3, len(savedKvs))
@@ -436,62 +427,6 @@ func Test_AlterSegments(t *testing.T) {
 		assert.NoError(t, err)
 		// Check that num of rows is corrected from 100 to 1275.
 		assert.Equal(t, int64(100), segmentXL.GetNumOfRows())
-		assert.Equal(t, int64(5), adjustedSeg.GetNumOfRows())
-	})
-}
-
-func Test_AlterSegmentsAndAddNewSegment(t *testing.T) {
-	t.Run("save error", func(t *testing.T) {
-		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().MultiSave(mock.Anything).Return(errors.New("error"))
-
-		catalog := NewCatalog(metakv, rootPath, "")
-		err := catalog.AlterSegmentsAndAddNewSegment(context.TODO(), []*datapb.SegmentInfo{}, segment1)
-		assert.Error(t, err)
-	})
-
-	t.Run("get prefix fail", func(t *testing.T) {
-		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().HasPrefix(mock.Anything).Return(false, errors.New("error"))
-
-		catalog := NewCatalog(metakv, rootPath, "")
-		err := catalog.AlterSegmentsAndAddNewSegment(context.TODO(), []*datapb.SegmentInfo{droppedSegment}, nil)
-		assert.Error(t, err)
-	})
-
-	t.Run("save successfully", func(t *testing.T) {
-		savedKvs := make(map[string]string, 0)
-		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().MultiSave(mock.Anything).RunAndReturn(func(m map[string]string) error {
-			maps.Copy(savedKvs, m)
-			return nil
-		})
-		metakv.EXPECT().Load(mock.Anything).RunAndReturn(func(s string) (string, error) {
-			if v, ok := savedKvs[s]; ok {
-				return v, nil
-			}
-			return "", errors.New("key not found")
-		})
-		metakv.EXPECT().HasPrefix(mock.Anything).Return(false, nil)
-
-		catalog := NewCatalog(metakv, rootPath, "")
-		err := catalog.AlterSegmentsAndAddNewSegment(context.TODO(), []*datapb.SegmentInfo{droppedSegment}, segment1)
-		assert.NoError(t, err)
-
-		assert.Equal(t, 8, len(savedKvs))
-		verifySavedKvsForDroppedSegment(t, savedKvs)
-		verifySavedKvsForSegment(t, savedKvs)
-
-		adjustedSeg, err := catalog.LoadFromSegmentPath(droppedSegment.CollectionID, droppedSegment.PartitionID, droppedSegment.ID)
-		assert.NoError(t, err)
-		// Check that num of rows is corrected from 100 to 5.
-		assert.Equal(t, int64(100), droppedSegment.GetNumOfRows())
-		assert.Equal(t, int64(5), adjustedSeg.GetNumOfRows())
-
-		adjustedSeg, err = catalog.LoadFromSegmentPath(segment1.CollectionID, segment1.PartitionID, segment1.ID)
-		assert.NoError(t, err)
-		// Check that num of rows is corrected from 100 to 5.
-		assert.Equal(t, int64(100), droppedSegment.GetNumOfRows())
 		assert.Equal(t, int64(5), adjustedSeg.GetNumOfRows())
 	})
 }
@@ -602,25 +537,6 @@ func Test_SaveDroppedSegmentsInBatch_MultiSave(t *testing.T) {
 		assert.Equal(t, 2, count)
 		assert.Equal(t, 129, kvSize)
 	}
-}
-
-func TestCatalog_RevertAlterSegmentsAndAddNewSegment(t *testing.T) {
-	t.Run("save error", func(t *testing.T) {
-		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything).Return(errors.New("mock error"))
-
-		catalog := NewCatalog(txn, rootPath, "")
-		err := catalog.RevertAlterSegmentsAndAddNewSegment(context.TODO(), []*datapb.SegmentInfo{segment1}, droppedSegment)
-		assert.Error(t, err)
-	})
-
-	t.Run("revert successfully", func(t *testing.T) {
-		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything).Return(nil)
-		catalog := NewCatalog(txn, rootPath, "")
-		err := catalog.RevertAlterSegmentsAndAddNewSegment(context.TODO(), []*datapb.SegmentInfo{segment1}, droppedSegment)
-		assert.NoError(t, err)
-	})
 }
 
 func TestChannelCP(t *testing.T) {
@@ -916,30 +832,6 @@ func TestCatalog_ListIndexes(t *testing.T) {
 	})
 }
 
-func TestCatalog_AlterIndex(t *testing.T) {
-	i := &model.Index{
-		CollectionID: 0,
-		FieldID:      0,
-		IndexID:      0,
-		IndexName:    "",
-		IsDeleted:    false,
-		CreateTime:   0,
-		TypeParams:   nil,
-		IndexParams:  nil,
-	}
-	t.Run("add", func(t *testing.T) {
-		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(nil)
-
-		catalog := &Catalog{
-			MetaKv: txn,
-		}
-
-		err := catalog.AlterIndex(context.Background(), i)
-		assert.NoError(t, err)
-	})
-}
-
 func TestCatalog_AlterIndexes(t *testing.T) {
 	i := &model.Index{
 		CollectionID: 0,
@@ -1079,36 +971,6 @@ func TestCatalog_ListSegmentIndexes(t *testing.T) {
 
 		_, err := catalog.ListSegmentIndexes(context.Background())
 		assert.Error(t, err)
-	})
-}
-
-func TestCatalog_AlterSegmentIndex(t *testing.T) {
-	segIdx := &model.SegmentIndex{
-		SegmentID:     0,
-		CollectionID:  0,
-		PartitionID:   0,
-		NumRows:       0,
-		IndexID:       0,
-		BuildID:       0,
-		NodeID:        0,
-		IndexState:    0,
-		FailReason:    "",
-		IndexVersion:  0,
-		IsDeleted:     false,
-		CreateTime:    0,
-		IndexFileKeys: nil,
-		IndexSize:     0,
-	}
-
-	t.Run("add", func(t *testing.T) {
-		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().Save(mock.Anything, mock.Anything).Return(nil)
-		catalog := &Catalog{
-			MetaKv: metakv,
-		}
-
-		err := catalog.AlterSegmentIndex(context.Background(), segIdx)
-		assert.NoError(t, err)
 	})
 }
 

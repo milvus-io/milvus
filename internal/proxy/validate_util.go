@@ -261,7 +261,11 @@ func (v *validateUtil) checkVarCharFieldData(field *schemapb.FieldData, fieldSch
 		return merr.WrapErrParameterInvalid("need string array", "got nil", msg)
 	}
 
-	if v.checkMaxLen {
+	// fieldSchema autoID is true means that field is pk and primaryData is auto generated
+	// no need to do max length check
+	// ignore the parameter of MaxLength
+	// related https://github.com/milvus-io/milvus/issues/25580
+	if v.checkMaxLen && !fieldSchema.AutoID {
 		maxLength, err := parameterutil.GetMaxLength(fieldSchema)
 		if err != nil {
 			return err

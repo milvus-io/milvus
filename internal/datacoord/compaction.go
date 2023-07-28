@@ -35,9 +35,7 @@ import (
 // TODO this num should be determined by resources of datanode, for now, we set to a fixed value for simple
 // TODO we should split compaction into different priorities, small compaction helps to merge segment, large compaction helps to handle delta and expiration of large segments
 const (
-	maxParallelCompactionTaskNum = 100
-	rpcCompactionTimeout         = 10 * time.Second
-	tsTimeout                    = uint64(1)
+	tsTimeout = uint64(1)
 )
 
 type compactionPlanContext interface {
@@ -325,7 +323,7 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 			if state == commonpb.CompactionState_Executing && !c.isTimeout(ts, task.plan.GetStartTime(), task.plan.GetTimeoutInSeconds()) {
 				continue
 			}
-			log.Info("compaction timeout",
+			log.Warn("compaction timeout",
 				zap.Int64("planID", task.plan.PlanID),
 				zap.Int64("nodeID", task.dataNodeID),
 				zap.Uint64("startTime", task.plan.GetStartTime()),
@@ -379,7 +377,7 @@ func (c *compactionPlanHandler) isFull() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	return c.executingTaskNum >= maxParallelCompactionTaskNum
+	return c.executingTaskNum >= Params.DataCoordCfg.CompactionMaxParallelTasks.GetAsInt()
 }
 
 func (c *compactionPlanHandler) getExecutingCompactions() []*compactionTask {
@@ -433,7 +431,8 @@ func setResult(result *datapb.CompactionResult) compactionTaskOpt {
 
 // 0.5*min(8, NumCPU/2)
 func calculateParallel() int {
-	return 2
+	// TODO after node memory management enabled, use this config as hard limit
+	return Params.DataCoordCfg.CompactionWorkerParalleTasks.GetAsInt()
 	//cores := runtime.NumCPU()
 	//if cores < 16 {
 	//return 4

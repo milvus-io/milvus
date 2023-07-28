@@ -455,33 +455,39 @@ func (p *ImportWrapper) flushFunc(fields BlockData, shardID int, partitionID int
 	}
 
 	// if fields data is empty, do nothing
-	var rowNum int
+	rowNum := 0
 	memSize := 0
 	for _, field := range fields {
 		rowNum = field.RowNum()
 		memSize += field.GetMemorySize()
-		break
 	}
 	if rowNum <= 0 {
 		log.Warn("import wrapper: fields data is empty", logFields...)
 		return nil
 	}
 
+	logFields = append(logFields, zap.Int("rowNum", rowNum), zap.Int("memSize", memSize))
+	log.Info("import wrapper: flush block data to binlog", logFields...)
+
 	// if there is no segment for this shard, create a new one
 	// if the segment exists and its size almost exceed segmentSize, close it and create a new one
 	var segment *WorkingSegment
 	if shard, ok := p.workingSegments[shardID]; ok {
-		if segment, exists := shard[partitionID]; exists {
-			// the segment already exists, check its size, if the size exceeds(or almost) segmentSize, close the segment
-			if int64(segment.memSize)+int64(memSize) >= p.segmentSize {
-				err := p.closeWorkingSegment(segment)
+		if segmentTemp, exists := shard[partitionID]; exists {
+			log.Info("import wrapper: compare working segment memSize with segmentSize",
+				zap.Int("memSize", segmentTemp.memSize), zap.Int64("segmentSize", p.segmentSize))
+			if int64(segmentTemp.memSize)+int64(memSize) >= p.segmentSize {
+				// the segment already exists, check its size, if the size exceeds(or almost) segmentSize, close the segment
+				err := p.closeWorkingSegment(segmentTemp)
 				if err != nil {
 					logFields = append(logFields, zap.Error(err))
 					log.Warn("import wrapper: failed to close working segment", logFields...)
 					return err
 				}
-				segment = nil
 				p.workingSegments[shardID][partitionID] = nil
+			} else {
+				// the exist segment size is small, no need to close
+				segment = segmentTemp
 			}
 		}
 	} else {

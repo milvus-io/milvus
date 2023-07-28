@@ -18,6 +18,7 @@
 #include <aws/core/auth/AWSCredentials.h>
 #include <aws/core/auth/AWSCredentialsProviderChain.h>
 #include <aws/core/auth/STSCredentialsProvider.h>
+#include <aws/core/utils/logging/ConsoleLogSystem.h>
 #include <aws/s3/model/CreateBucketRequest.h>
 #include <aws/s3/model/DeleteBucketRequest.h>
 #include <aws/s3/model/DeleteObjectRequest.h>
@@ -89,7 +90,14 @@ ConvertFromAwsString(const Aws::String& aws_str) {
 }
 
 void
-MinioChunkManager::InitSDKAPI(RemoteStorageType type) {
+AwsLogger::ProcessFormattedStatement(Aws::String&& statement) {
+    LOG_SEGCORE_INFO_ << "[AWS LOG] " << statement;
+}
+
+void
+MinioChunkManager::InitSDKAPI(RemoteStorageType type,
+                              bool useIAM,
+                              const std::string& log_level_str) {
     std::scoped_lock lock{client_mutex_};
     const size_t initCount = init_count_++;
     if (initCount == 0) {
@@ -103,9 +111,8 @@ MinioChunkManager::InitSDKAPI(RemoteStorageType type) {
         sigemptyset(&psa.sa_mask);
         sigaddset(&psa.sa_mask, SIGPIPE);
         sigaction(SIGPIPE, &psa, 0);
-        if (type == RemoteStorageType::GOOGLE_CLOUD) {
+        if (type == RemoteStorageType::GOOGLE_CLOUD && useIAM) {
             sdk_options_.httpOptions.httpClientFactory_create_fn = []() {
-                // auto credentials = google::cloud::oauth2_internal::GOOGLE_CLOUD_CPP_NS::GoogleDefaultCredentials();
                 auto credentials = std::make_shared<
                     google::cloud::oauth2_internal::GOOGLE_CLOUD_CPP_NS::
                         ComputeEngineCredentials>();
@@ -113,8 +120,30 @@ MinioChunkManager::InitSDKAPI(RemoteStorageType type) {
                     GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG, credentials);
             };
         }
-        sdk_options_.loggingOptions.logLevel =
-            Aws::Utils::Logging::LogLevel::Info;
+        LOG_SEGCORE_INFO_ << "init aws with log level:" << log_level_str;
+        auto get_aws_log_level = [](const std::string& level_str) {
+            Aws::Utils::Logging::LogLevel level =
+                Aws::Utils::Logging::LogLevel::Off;
+            if (level_str == "fatal") {
+                level = Aws::Utils::Logging::LogLevel::Fatal;
+            } else if (level_str == "error") {
+                level = Aws::Utils::Logging::LogLevel::Error;
+            } else if (level_str == "warn") {
+                level = Aws::Utils::Logging::LogLevel::Warn;
+            } else if (level_str == "info") {
+                level = Aws::Utils::Logging::LogLevel::Info;
+            } else if (level_str == "debug") {
+                level = Aws::Utils::Logging::LogLevel::Debug;
+            } else if (level_str == "trace") {
+                level = Aws::Utils::Logging::LogLevel::Trace;
+            }
+            return level;
+        };
+        auto log_level = get_aws_log_level(log_level_str);
+        sdk_options_.loggingOptions.logLevel = log_level;
+        sdk_options_.loggingOptions.logger_create_fn = [log_level]() {
+            return std::make_shared<AwsLogger>(log_level);
+        };
         Aws::InitAPI(sdk_options_);
     }
 }
@@ -149,19 +178,26 @@ MinioChunkManager::BuildS3Client(
             Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
             false);
     } else {
-        AssertInfo(!storage_config.access_key_id.empty(),
-                   "if not use iam, access key should not be empty");
-        AssertInfo(!storage_config.access_key_value.empty(),
-                   "if not use iam, access value should not be empty");
-
-        client_ = std::make_shared<Aws::S3::S3Client>(
-            Aws::Auth::AWSCredentials(
-                ConvertToAwsString(storage_config.access_key_id),
-                ConvertToAwsString(storage_config.access_key_value)),
-            config,
-            Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
-            false);
+        BuildAccessKeyClient(storage_config, config);
     }
+}
+
+void
+MinioChunkManager::BuildAccessKeyClient(
+    const StorageConfig& storage_config,
+    const Aws::Client::ClientConfiguration& config) {
+    AssertInfo(!storage_config.access_key_id.empty(),
+               "if not use iam, access key should not be empty");
+    AssertInfo(!storage_config.access_key_value.empty(),
+               "if not use iam, access value should not be empty");
+
+    client_ = std::make_shared<Aws::S3::S3Client>(
+        Aws::Auth::AWSCredentials(
+            ConvertToAwsString(storage_config.access_key_id),
+            ConvertToAwsString(storage_config.access_key_value)),
+        config,
+        Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
+        false);
 }
 
 void
@@ -185,7 +221,7 @@ MinioChunkManager::BuildAliyunCloudClient(
             Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
             true);
     } else {
-        throw std::runtime_error("aliyun cloud only support iam mode now");
+        BuildAccessKeyClient(storage_config, config);
     }
 }
 
@@ -200,7 +236,7 @@ MinioChunkManager::BuildGoogleCloudClient(
             Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
             false);
     } else {
-        throw std::runtime_error("google cloud only support iam mode now");
+        BuildAccessKeyClient(storage_config, config);
     }
 }
 
@@ -216,7 +252,7 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
         storageType = RemoteStorageType::S3;
     }
 
-    InitSDKAPI(storageType);
+    InitSDKAPI(storageType, storage_config.useIAM, storage_config.log_level);
 
     // The ClientConfiguration default constructor will take a long time.
     // For more details, please refer to https://github.com/aws/aws-sdk-cpp/issues/1440

@@ -216,7 +216,7 @@ func (c *ChannelManager) checkOldNodes(nodes []UniqueID) error {
 
 			log.Info("processing watch info",
 				zap.String("watch state", info.GetState().String()),
-				zap.String("channel name", channelName))
+				zap.String("channelName", channelName))
 
 			switch info.GetState() {
 			case datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_Uncomplete:
@@ -378,8 +378,8 @@ func (c *ChannelManager) DeleteNode(nodeID int64) error {
 	c.unsubAttempt(nodeChannelInfo)
 
 	updates := c.deregisterPolicy(c.store, nodeID)
-	log.Warn("deregister node",
-		zap.Int64("unregistered node", nodeID),
+	log.Info("deregister node",
+		zap.Int64("nodeID", nodeID),
 		zap.Array("updates", updates))
 	if len(updates) <= 0 {
 		return nil
@@ -397,7 +397,7 @@ func (c *ChannelManager) DeleteNode(nodeID int64) error {
 		chNames = append(chNames, ch.Name)
 	}
 	log.Info("remove timers for channel of the deregistered node",
-		zap.Any("channels", chNames), zap.Int64("nodeID", nodeID))
+		zap.Strings("channels", chNames), zap.Int64("nodeID", nodeID))
 	c.stateTimer.removeTimers(chNames)
 
 	if err := c.updateWithTimer(updates, datapb.ChannelWatchState_ToWatch); err != nil {
@@ -445,7 +445,7 @@ func (c *ChannelManager) Watch(ch *channel) error {
 	err := c.updateWithTimer(updates, datapb.ChannelWatchState_ToWatch)
 	if err != nil {
 		log.Warn("fail to update channel watch info with ToWatch state",
-			zap.Any("channel", ch), zap.Array("updates", updates), zap.Error(err))
+			zap.String("channel", ch.String()), zap.Array("updates", updates), zap.Error(err))
 	}
 	return err
 }
@@ -627,17 +627,17 @@ func (c *ChannelManager) processAck(e *ackEvent) {
 
 	switch e.ackType {
 	case invalidAck:
-		log.Warn("detected invalid Ack", zap.String("channel name", e.channelName))
+		log.Warn("detected invalid Ack", zap.String("channelName", e.channelName))
 
 	case watchSuccessAck:
-		log.Info("datanode successfully watched channel", zap.Int64("nodeID", e.nodeID), zap.String("channel name", e.channelName))
+		log.Info("datanode successfully watched channel", zap.Int64("nodeID", e.nodeID), zap.String("channelName", e.channelName))
 	case watchFailAck, watchTimeoutAck: // failure acks from toWatch
 		log.Warn("datanode watch channel failed or timeout, will release", zap.Int64("nodeID", e.nodeID),
 			zap.String("channel", e.channelName))
 		err := c.Release(e.nodeID, e.channelName)
 		if err != nil {
 			log.Warn("fail to set channels to release for watch failure ACKs",
-				zap.Int64("nodeID", e.nodeID), zap.String("channel name", e.channelName), zap.Error(err))
+				zap.Int64("nodeID", e.nodeID), zap.String("channelName", e.channelName), zap.Error(err))
 		}
 	case releaseFailAck, releaseTimeoutAck: // failure acks from toRelease
 		// Cleanup, Delete and Reassign
@@ -646,7 +646,7 @@ func (c *ChannelManager) processAck(e *ackEvent) {
 		err := c.CleanupAndReassign(e.nodeID, e.channelName)
 		if err != nil {
 			log.Warn("fail to clean and reassign channels for release failure ACKs",
-				zap.Int64("nodeID", e.nodeID), zap.String("channel name", e.channelName), zap.Error(err))
+				zap.Int64("nodeID", e.nodeID), zap.String("channelName", e.channelName), zap.Error(err))
 		}
 
 	case releaseSuccessAck:
@@ -656,7 +656,7 @@ func (c *ChannelManager) processAck(e *ackEvent) {
 		err := c.Reassign(e.nodeID, e.channelName)
 		if err != nil {
 			log.Warn("fail to response to release success ACK",
-				zap.Int64("nodeID", e.nodeID), zap.String("channel name", e.channelName), zap.Error(err))
+				zap.Int64("nodeID", e.nodeID), zap.String("channelName", e.channelName), zap.Error(err))
 		}
 	}
 }
@@ -685,7 +685,7 @@ func (c *ChannelManager) watchChannelStatesLoop(ctx context.Context, revision in
 		case ackEvent := <-timeoutWatcher:
 			log.Info("receive timeout acks from state watcher",
 				zap.Any("state", ackEvent.ackType),
-				zap.Int64("nodeID", ackEvent.nodeID), zap.String("channel name", ackEvent.channelName))
+				zap.Int64("nodeID", ackEvent.nodeID), zap.String("channelName", ackEvent.channelName))
 			c.processAck(ackEvent)
 		case event, ok := <-etcdWatcher:
 			if !ok {
@@ -781,7 +781,7 @@ func (c *ChannelManager) Reassign(originNodeID UniqueID, channelName string) err
 		if err := c.h.FinishDropChannel(channelName); err != nil {
 			return fmt.Errorf("FinishDropChannel failed, err=%w", err)
 		}
-		log.Info("removed channel assignment", zap.String("channel name", channelName))
+		log.Info("removed channel assignment", zap.String("channelName", channelName))
 		return nil
 	}
 
@@ -791,7 +791,7 @@ func (c *ChannelManager) Reassign(originNodeID UniqueID, channelName string) err
 		// Skip the remove if reassign to the original node.
 		log.Warn("failed to reassign channel to other nodes, assigning to the original DataNode",
 			zap.Int64("nodeID", originNodeID),
-			zap.String("channel name", channelName))
+			zap.String("channelName", channelName))
 		updates.Add(originNodeID, []*channel{ch})
 	}
 
@@ -826,7 +826,7 @@ func (c *ChannelManager) CleanupAndReassign(nodeID UniqueID, channelName string)
 			return fmt.Errorf("failed to remove watch info: %v,%s", chToCleanUp, err.Error())
 		}
 
-		log.Info("try to cleanup removal flag ", zap.String("channel name", channelName))
+		log.Info("try to cleanup removal flag ", zap.String("channelName", channelName))
 		if err := c.h.FinishDropChannel(channelName); err != nil {
 			return fmt.Errorf("FinishDropChannel failed, err=%w", err)
 		}
@@ -841,7 +841,7 @@ func (c *ChannelManager) CleanupAndReassign(nodeID UniqueID, channelName string)
 		// Skip the remove if reassign to the original node.
 		log.Warn("failed to reassign channel to other nodes, add channel to the original node",
 			zap.Int64("node ID", nodeID),
-			zap.String("channel name", channelName))
+			zap.String("channelName", channelName))
 		updates.Add(nodeID, []*channel{chToCleanUp})
 	}
 

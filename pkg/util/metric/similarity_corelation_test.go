@@ -14,12 +14,40 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package distance
+package metric
 
-import "strings"
+import "testing"
 
-// PositivelyRelated return if metricType are "ip" or "IP"
-func PositivelyRelated(metricType string) bool {
-	mUpper := strings.ToUpper(metricType)
-	return mUpper == strings.ToUpper(IP) || mUpper == strings.ToUpper(COSINE)
+func TestPositivelyRelated(t *testing.T) {
+	cases := []struct {
+		metricType string
+		wanted     bool
+	}{
+		{
+			IP,
+			true,
+		},
+		{
+			COSINE,
+			true,
+		},
+		{
+			L2,
+			false,
+		},
+		{
+			HAMMING,
+			false,
+		},
+		{
+			JACCARD,
+			false,
+		},
+	}
+
+	for idx := range cases {
+		if got := PositivelyRelated(cases[idx].metricType); got != cases[idx].wanted {
+			t.Errorf("PositivelyRelated(%v) = %v", cases[idx].metricType, cases[idx].wanted)
+		}
+	}
 }

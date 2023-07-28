@@ -132,18 +132,18 @@ func TestChannelStateTimer(t *testing.T) {
 		timer := newChannelStateTimer(kv)
 
 		timer.startOne(datapb.ChannelWatchState_ToRelease, "channel-1", 1, 20*time.Second)
-		stop, ok := timer.runningTimerStops.Load("channel-1")
+		stop, ok := timer.runningTimerStops.Get("channel-1")
 		require.True(t, ok)
 
 		timer.startOne(datapb.ChannelWatchState_ToWatch, "channel-1", 1, 20*time.Second)
-		_, ok = <-stop.(chan struct{})
+		_, ok = <-stop
 		assert.False(t, ok)
 
-		stop2, ok := timer.runningTimerStops.Load("channel-1")
+		stop2, ok := timer.runningTimerStops.Get("channel-1")
 		assert.True(t, ok)
 
 		timer.removeTimers([]string{"channel-1"})
-		_, ok = <-stop2.(chan struct{})
+		_, ok = <-stop2
 		assert.False(t, ok)
 	})
 }

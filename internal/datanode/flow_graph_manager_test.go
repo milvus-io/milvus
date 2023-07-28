@@ -218,19 +218,19 @@ func TestFlowGraphManager(t *testing.T) {
 				}
 				err = fm.addAndStart(node, vchan, nil, genTestTickler())
 				assert.NoError(t, err)
-				fg, ok := fm.flowgraphs.Load(vchannel)
+				fg, ok := fm.flowgraphs.Get(vchannel)
 				assert.True(t, ok)
-				err = fg.(*dataSyncService).channel.addSegment(addSegmentReq{segID: 0})
+				err = fg.channel.addSegment(addSegmentReq{segID: 0})
 				assert.NoError(t, err)
-				fg.(*dataSyncService).channel.updateSegmentMemorySize(0, memorySize)
-				fg.(*dataSyncService).channel.(*ChannelMeta).needToSync.Store(false)
+				fg.channel.updateSegmentMemorySize(0, memorySize)
+				fg.channel.(*ChannelMeta).needToSync.Store(false)
 			}
 			fm.execute(test.totalMemory)
 			for i, needToSync := range test.expectNeedToSync {
 				vchannel := fmt.Sprintf("%s%d", channelPrefix, i)
-				fg, ok := fm.flowgraphs.Load(vchannel)
+				fg, ok := fm.flowgraphs.Get(vchannel)
 				assert.True(t, ok)
-				assert.Equal(t, needToSync, fg.(*dataSyncService).channel.(*ChannelMeta).needToSync.Load())
+				assert.Equal(t, needToSync, fg.channel.(*ChannelMeta).needToSync.Load())
 			}
 		}
 	})

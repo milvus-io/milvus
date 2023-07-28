@@ -151,8 +151,4 @@ ReverseDataFromIndex(const index::IndexBase* index,
 void
 LoadFieldDatasFromRemote(std::vector<std::string>& remote_files,
                          storage::FieldDataChannelPtr channel);
-
-std::vector<storage::FieldDataPtr>
-CollectFieldDataChannel(storage::FieldDataChannelPtr& channel);
-
 }  // namespace milvus::segcore

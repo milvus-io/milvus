@@ -82,6 +82,7 @@ list_content = "list_content"
 dict_content = "dict_content"
 value_content = "value_content"
 
+code = "code"
 err_code = "err_code"
 err_msg = "err_msg"
 in_cluster_env = "IN_CLUSTER"
@@ -236,7 +237,7 @@ delete_support = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ"]
 ivf = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ"]
 skip_pq = ["IVF_PQ"]
 float_metrics = ["L2", "IP", "COSINE"]
-binary_metrics = ["JACCARD", "HAMMING", "TANIMOTO", "SUBSTRUCTURE", "SUPERSTRUCTURE"]
+binary_metrics = ["JACCARD", "HAMMING"]
 structure_metrics = ["SUBSTRUCTURE", "SUPERSTRUCTURE"]
 all_scalar_data_types = ['int8', 'int16', 'int32', 'int64', 'float', 'double', 'bool', 'varchar']
 

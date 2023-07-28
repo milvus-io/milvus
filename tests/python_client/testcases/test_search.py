@@ -5,6 +5,7 @@ import numpy
 import threading
 import pytest
 import pandas as pd
+pd.set_option("expand_frame_repr", False)
 import decimal
 from decimal import Decimal, getcontext
 from time import sleep
@@ -42,6 +43,7 @@ default_int64_field_name = ct.default_int64_field_name
 default_float_field_name = ct.default_float_field_name
 default_bool_field_name = ct.default_bool_field_name
 default_string_field_name = ct.default_string_field_name
+default_json_field_name = ct.default_json_field_name
 default_index_params = {"index_type": "IVF_SQ8", "metric_type": "COSINE", "params": {"nlist": 64}}
 vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
 range_search_supported_index = ct.all_index_types[:6]
@@ -775,6 +777,26 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                          "err_msg": "PartitonName: %s not found" % partition_name})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("nq", [16385])
+    def test_search_with_invalid_nq(self, nq):
+        """
+        target: test search with invalid nq
+        method: search with invalid nq
+        expected: raise exception and report the error
+        """
+        # initialize with data
+        collection_w = self.init_collection_general(prefix, True)[0]
+        # search
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(nq)]
+        collection_w.search(vectors[:nq], default_search_field,
+                            default_search_params, default_limit,
+                            default_search_exp,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1,
+                                         "err_msg": "nq (number of search vector per search "
+                                                    "request) should be in range [1, 16384]"})
+
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.xfail(reason="issue 15407")
     def test_search_param_invalid_binary(self):
         """
@@ -1143,17 +1165,11 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                            dim=dim, is_index=False)[0:5]
         # 2. create index
         default_index = {"index_type": "BIN_FLAT", "params": {"nlist": 128}, "metric_type": metric}
-        collection_w.create_index("binary_vector", default_index)
-        collection_w.load()
-        # 3. generate search vectors
-        binary_vectors = cf.gen_binary_vectors(nq, dim)[1]
-        # 4. search and compare the distance
-        search_params = {"metric_type": metric, "params": {"nprobe": 10, "radius": 10, "range_filter": 1}}
-        collection_w.search(binary_vectors[:nq], "binary_vector",
-                            search_params, default_limit,
-                            check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": f"invalid metric type"})[0]
+        collection_w.create_index("binary_vector", default_index,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={"err_code": 1,
+                                               "err_msg": "metric type not found or not supported, "
+                                                          "supported: [HAMMING JACCARD]"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_dynamic_compare_two_fields(self):
@@ -1213,6 +1229,8 @@ class TestCollectionSearch(TestcaseBase):
 
     @pytest.fixture(scope="function", params=["JACCARD", "HAMMING", "TANIMOTO"])
     def metrics(self, request):
+        if request.param == "TANIMOTO":
+            pytest.skip("TANIMOTO not supported now")
         yield request.param
 
     @pytest.fixture(scope="function", params=[False, True])
@@ -1225,6 +1243,10 @@ class TestCollectionSearch(TestcaseBase):
 
     @pytest.fixture(scope="function", params=["IP", "COSINE", "L2"])
     def metric_type(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=[True, False])
+    def random_primary_key(self, request):
         yield request.param
 
     """
@@ -1371,6 +1393,35 @@ class TestCollectionSearch(TestcaseBase):
             assert 1.0 - hits.distances[0] <= epsilon
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_search_random_primary_key(self, random_primary_key):
+        """
+        target: test search for collection with random primary keys
+        method: create connection, collection, insert and search
+        expected: Search without errors and data consistency
+        """
+        # 1. initialize collection with random primary key
+
+        collection_w, _vectors, _, insert_ids, time_stamp = \
+            self.init_collection_general(prefix, True, 10, random_primary_key=random_primary_key)[0:5]
+        # 2. search
+        log.info("test_search_random_primary_key: searching collection %s" % collection_w.name)
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit,
+                            default_search_exp,
+                            output_fields=[default_int64_field_name,
+                                           default_float_field_name,
+                                           default_json_field_name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": 10,
+                                         "original_entities": _vectors,
+                                         "output_fields": [default_int64_field_name,
+                                                           default_float_field_name,
+                                                           default_json_field_name]})
+
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("dup_times", [1, 2, 3])
     def test_search_with_dup_primary_key(self, dim, auto_id, _async, dup_times):
         """
@@ -1406,6 +1457,26 @@ class TestCollectionSearch(TestcaseBase):
         for hits in search_res:
             ids = hits.ids
             assert sorted(list(set(ids))) == sorted(ids)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("search_params", [{}, {"metric_type": "COSINE"}])
+    def test_search_with_default_search_params(self, _async, search_params):
+        """
+        target: test search with default search params
+        method: search with default search params
+        expected: search successfully
+        """
+        # initialize with data
+        collection_w, insert_data, _, insert_ids = self.init_collection_general(prefix, True)[0:4]
+        # search
+        collection_w.search(vectors[:nq], default_search_field,
+                            search_params, default_limit,
+                            default_search_exp, _async=_async,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit,
+                                         "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_accurate_search_with_multi_segments(self, dim):
@@ -2629,6 +2700,7 @@ class TestCollectionSearch(TestcaseBase):
         assert abs(res[0].distances[0] - min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("tanimoto obsolete")
     @pytest.mark.parametrize("index", ["BIN_FLAT", "BIN_IVF_FLAT"])
     def test_search_binary_tanimoto_flat_index(self, nq, dim, auto_id, _async, index, is_flush):
         """
@@ -2668,6 +2740,7 @@ class TestCollectionSearch(TestcaseBase):
         assert abs(res[0].distances[0] - min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("substructure obsolete")
     @pytest.mark.parametrize("index", ["BIN_FLAT"])
     def test_search_binary_substructure_flat_index(self, auto_id, _async, index, is_flush):
         """
@@ -2704,6 +2777,7 @@ class TestCollectionSearch(TestcaseBase):
         assert len(res) <= default_limit
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("superstructure obsolete")
     @pytest.mark.parametrize("index", ["BIN_FLAT"])
     def test_search_binary_superstructure_flat_index(self, auto_id, _async, index, is_flush):
         """
@@ -2987,6 +3061,112 @@ class TestCollectionSearch(TestcaseBase):
             ids = hits.ids
             assert set(ids).issubset(filter_ids_set)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_with_expression_json_contains(self, enable_dynamic_field):
+        """
+        target: test search with expression using json_contains
+        method: search with expression (json_contains)
+        expected: search successfully
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, enable_dynamic_field=enable_dynamic_field)[0]
+
+        # 2. insert data
+        array = []
+        for i in range(default_nb):
+            data = {
+                default_int64_field_name: i,
+                default_float_field_name: i*1.0,
+                default_string_field_name: str(i),
+                default_json_field_name: {"number": i, "list": [i, i+1, i+2]},
+                default_float_vec_field_name: gen_vectors(1, default_dim)[0]
+            }
+            array.append(data)
+        collection_w.insert(array)
+
+        # 2. search
+        collection_w.load()
+        log.info("test_search_with_output_field_json_contains: Searching collection %s" % collection_w.name)
+        expressions = ["json_contains(json_field['list'], 100)", "JSON_CONTAINS(json_field['list'], 100)"]
+        for expression in expressions:
+            collection_w.search(vectors[:default_nq], default_search_field,
+                                default_search_params, default_limit, expression,
+                                check_task=CheckTasks.check_search_results,
+                                check_items={"nq": default_nq,
+                                             "limit": 3})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_with_expression_json_contains_list(self, auto_id):
+        """
+        target: test search with expression using json_contains
+        method: search with expression (json_contains)
+        expected: search successfully
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, auto_id=auto_id, enable_dynamic_field=True)[0]
+
+        # 2. insert data
+        limit = 100
+        array = []
+        for i in range(default_nb):
+            data = {
+                default_int64_field_name: i,
+                default_json_field_name: [j for j in range(i, i + limit)],
+                default_float_vec_field_name: gen_vectors(1, default_dim)[0]
+            }
+            if auto_id:
+                data.pop(default_int64_field_name, None)
+            array.append(data)
+        collection_w.insert(array)
+
+        # 2. search
+        collection_w.load()
+        log.info("test_search_with_output_field_json_contains: Searching collection %s" % collection_w.name)
+        expressions = ["json_contains(json_field, 100)", "JSON_CONTAINS(json_field, 100)"]
+        for expression in expressions:
+            collection_w.search(vectors[:default_nq], default_search_field,
+                                default_search_params, limit, expression,
+                                check_task=CheckTasks.check_search_results,
+                                check_items={"nq": default_nq,
+                                             "limit": limit})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_expression_json_contains_combined_with_normal(self, enable_dynamic_field):
+        """
+        target: test search with expression using json_contains
+        method: search with expression (json_contains)
+        expected: search successfully
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, enable_dynamic_field=enable_dynamic_field)[0]
+
+        # 2. insert data
+        limit = 100
+        array = []
+        for i in range(default_nb):
+            data = {
+                default_int64_field_name: i,
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+                default_json_field_name: {"number": i, "list": [str(j) for j in range(i, i + limit)]},
+                default_float_vec_field_name: gen_vectors(1, default_dim)[0]
+            }
+            array.append(data)
+        collection_w.insert(array)
+
+        # 2. search
+        collection_w.load()
+        log.info("test_search_with_output_field_json_contains: Searching collection %s" % collection_w.name)
+        tar = 1000
+        expressions = [f"json_contains(json_field['list'], '{tar}') && int64 > {tar - limit // 2}",
+                       f"JSON_CONTAINS(json_field['list'], '{tar}') && int64 > {tar - limit // 2}"]
+        for expression in expressions:
+            collection_w.search(vectors[:default_nq], default_search_field,
+                                default_search_params, limit, expression,
+                                check_task=CheckTasks.check_search_results,
+                                check_items={"nq": default_nq,
+                                             "limit": limit // 2})
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_expression_all_data_type(self, nb, nq, dim, auto_id, _async, enable_dynamic_field):
         """
@@ -3222,6 +3402,12 @@ class TestCollectionSearch(TestcaseBase):
                 4. check the result vectors should be equal to the inserted
         expected: search success
         """
+        if index in ["IVF_SQ8", "IVF_PQ"]:
+            pytest.skip("IVF_SQ8 and IVF_PQ do not support output vector now")
+        if index == "DISKANN" and metrics == "IP":
+            pytest.skip("DISKANN(IP) does not support output vector now")
+        if metrics == "COSINE":
+            pytest.skip("COSINE does not support output vector now")
         # 1. create a collection and insert data
         collection_w, _vectors = self.init_collection_general(prefix, True, is_index=False)[:2]
 
@@ -3242,8 +3428,7 @@ class TestCollectionSearch(TestcaseBase):
                                          "output_fields": [field_name]})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue #23661")
-    @pytest.mark.parametrize("index", ct.all_index_types[6:8])
+    @pytest.mark.parametrize("index", ["HNSW", "BIN_FLAT", "BIN_IVF_FLAT"])
     def test_search_output_field_vector_after_binary_index(self, index):
         """
         target: test search with output vector field after binary index
@@ -3259,23 +3444,20 @@ class TestCollectionSearch(TestcaseBase):
         collection_w.insert(data)
 
         # 2. create index and load
-        default_index = {"index_type": index, "params": {"nlist": 128}, "metric_type": "JACCARD"}
+        default_index = {"index_type": index, "metric_type": "JACCARD",
+                         "params": {"nlist": 128, "efConstruction": 64, "M": 10}}
         collection_w.create_index(binary_field_name, default_index)
         collection_w.load()
 
         # 3. search with output field vector
-        search_params = {"metric_type": "JACCARD", "params": {"nprobe": 10}}
+        search_params = {"metric_type": "JACCARD"}
         binary_vectors = cf.gen_binary_vectors(1, default_dim)[1]
         res = collection_w.search(binary_vectors, binary_field_name,
-                                  ct.default_search_binary_params, 2, default_search_exp,
+                                  search_params, 2, default_search_exp,
                                   output_fields=[binary_field_name])[0]
 
         # 4. check the result vectors should be equal to the inserted
-        log.info(res[0][0].id)
-        log.info(res[0][0].entity.float_vector)
-        log.info(data['binary_vector'][0])
-        assert res[0][0].entity.binary_vector == data[binary_field_name][res[0][0].id]
-        # log.info(data['float_vector'][1])
+        assert res[0][0].entity.binary_vector == [data[binary_field_name][res[0][0].id]]
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("dim", [32, 128, 768])
@@ -3389,10 +3571,9 @@ class TestCollectionSearch(TestcaseBase):
                                         "output_fields": [field_name]})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("wildcard_output_fields", [["*"], ["*", default_float_field_name],
-                                                        ["*", default_search_field],
-                                                        ["%"], ["%", default_float_field_name], ["*", "%"]])
-    def test_search_with_output_field_wildcard(self, wildcard_output_fields, auto_id, _async, enable_dynamic_field):
+    @pytest.mark.parametrize("wildcard_output_fields", [["*"], ["*", default_int64_field_name],
+                                                        ["*", default_search_field]])
+    def test_search_with_output_field_wildcard(self, wildcard_output_fields, auto_id, _async):
         """
         target: test search with output fields using wildcard
         method: search with one output_field (wildcard)
@@ -3400,9 +3581,7 @@ class TestCollectionSearch(TestcaseBase):
         """
         # 1. initialize with data
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
-                                                                      auto_id=auto_id,
-                                                                      enable_dynamic_field=
-                                                                      enable_dynamic_field)[0:4]
+                                                                      auto_id=auto_id)[0:4]
         # 2. search
         log.info("test_search_with_output_field_wildcard: Searching collection %s" % collection_w.name)
         output_fields = cf.get_wildcard_output_field_names(collection_w, wildcard_output_fields)
@@ -3885,8 +4064,7 @@ class TestCollectionSearch(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("name", ["_co11ection", "co11_ection"])
     @pytest.mark.parametrize("index_name", ["_1ndeX", "In_0"])
-    @pytest.mark.skip(reason="create vector index type on scalar field, issue#25170 @Nico")
-    def test_search_collection_naming_rules(self, nq, dim, name, index_name, _async):
+    def test_search_collection_naming_rules(self, name, index_name, _async):
         """
         target: test search collection naming rules
         method: 1. Connect milvus
@@ -3897,30 +4075,28 @@ class TestCollectionSearch(TestcaseBase):
                 6. Search collection
         expected: searched successfully
         """
-        nb = 5000
         field_name1 = "_1nt"
         field_name2 = "f10at_"
         collection_name = cf.gen_unique_str(name)
         self._connect()
         fields = [cf.gen_int64_field(), cf.gen_int64_field(field_name1),
-                  cf.gen_float_vec_field(field_name2, dim=dim)]
-        schema = cf.gen_collection_schema(fields=fields, primary_field=ct.default_int64_field_name)
+                  cf.gen_float_vec_field(field_name2, dim=default_dim)]
+        schema = cf.gen_collection_schema(fields=fields, primary_field=default_int64_field_name)
         collection_w = self.init_collection_wrap(name=collection_name, schema=schema,
                                                  check_task=CheckTasks.check_collection_property,
                                                  check_items={"name": collection_name, "schema": schema})
-        collection_w.create_index(field_name1, default_index_params, index_name=index_name)
-        int_values = pd.Series(data=[i for i in range(0, nb)])
-        float_vec_values = cf.gen_vectors(nb, dim)
-        dataframe = pd.DataFrame({ct.default_int64_field_name: int_values,
+        collection_w.create_index(field_name1, index_name=index_name)
+        int_values = pd.Series(data=[i for i in range(0, default_nb)])
+        float_vec_values = cf.gen_vectors(default_nb, default_dim)
+        dataframe = pd.DataFrame({default_int64_field_name: int_values,
                                   field_name1: int_values, field_name2: float_vec_values})
         collection_w.insert(dataframe)
         collection_w.create_index(field_name2, index_params=ct.default_flat_index)
         collection_w.load()
-        vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
-        collection_w.search(vectors[:nq], field_name2, default_search_params,
+        collection_w.search(vectors[:default_nq], field_name2, default_search_params,
                             default_limit, _async=_async,
                             check_task=CheckTasks.check_search_results,
-                            check_items={"nq": nq,
+                            check_items={"nq": default_nq,
                                          "limit": default_limit,
                                          "_async": _async})
 
@@ -5000,8 +5176,8 @@ class TestSearchPagination(TestcaseBase):
                                          default_search_exp, _async=_async,
                                          check_task=CheckTasks.check_search_results,
                                          check_items={"nq": default_nq,
-                                         "limit": limit,
-                                         "_async": _async})[0]
+                                                      "limit": limit,
+                                                      "_async": _async})[0]
         # 3. search with offset+limit
         res = collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
                                   limit+offset, default_search_exp, _async=_async)[0]
@@ -5863,6 +6039,8 @@ class TestCollectionRangeSearch(TestcaseBase):
 
     @pytest.fixture(scope="function", params=["JACCARD", "HAMMING", "TANIMOTO"])
     def metrics(self, request):
+        if request.param == "TANIMOTO":
+            pytest.skip("TANIMOTO not supported now")
         yield request.param
 
     @pytest.fixture(scope="function", params=[False, True])
@@ -6626,6 +6804,7 @@ class TestCollectionRangeSearch(TestcaseBase):
                                          "limit": 0})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("tanimoto obsolete")
     @pytest.mark.parametrize("index", ["BIN_FLAT", "BIN_IVF_FLAT"])
     def test_range_search_binary_tanimoto_flat_index(self, dim, auto_id, _async, index, is_flush):
         """
@@ -6681,6 +6860,7 @@ class TestCollectionRangeSearch(TestcaseBase):
         assert abs(res[0].distances[0] - min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("tanimoto obsolete")
     @pytest.mark.parametrize("index", ["BIN_FLAT", "BIN_IVF_FLAT"])
     def test_range_search_binary_tanimoto_invalid_params(self, index):
         """
@@ -8218,8 +8398,9 @@ class TestCollectionLoadOperation(TestcaseBase):
         partition_w2.release()
         # search on collection
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 0})
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1,
+                                         ct.err_msg: "fail to get shard leaders from QueryCoord: collection not loaded"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.xfail(reason="issue #24446")

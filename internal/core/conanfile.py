@@ -48,7 +48,7 @@ class MilvusConan(ConanFile):
         "xz_utils/5.4.0",
         "prometheus-cpp/1.1.0",
         "re2/20230301",
-        "folly/2023.05.22.02@milvus/dev",
+        "folly/2023.07.12@milvus/dev",
         "google-cloud-cpp/2.5.0@milvus/dev",
         "opentelemetry-cpp/1.8.1.1@milvus/dev",
         "librdkafka/1.9.1",
@@ -56,6 +56,7 @@ class MilvusConan(ConanFile):
     generators = ("cmake", "cmake_find_package")
     default_options = {
         "librdkafka:shared": True,
+        "librdkafka:zstd": True,
         "rocksdb:shared": True,
         "rocksdb:with_zstd": True,
         "arrow:parquet": True,
@@ -67,7 +68,8 @@ class MilvusConan(ConanFile):
         "aws-sdk-cpp:transfer": False,
         "gtest:build_gmock": False,
         "boost:without_locale": False,
-        "glog:with_gflags": False,
+        "glog:with_gflags": True,
+        "glog:shared": True,
         "prometheus-cpp:with_pull": False,
         "fmt:header_only": True,
     }

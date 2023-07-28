@@ -87,6 +87,9 @@ minio:
   # Custom endpoint for fetch IAM role credentials. when useIAM is true & cloudProvider is "aws".
   # Leave it empty if you want to use AWS default endpoint
   iamEndpoint:
+  # Log level for aws sdk log. 
+  # Supported level:  off, fatal, error, warn, info, debug, trace
+  logLevel: error
 
 # Milvus supports four MQ: rocksmq(based on RockDB), natsmq(embedded nats-server), Pulsar and Kafka.
 # You can change your mq by setting mq.type field.
@@ -124,6 +127,10 @@ rocksmq:
   retentionTimeInMinutes: 4320 # 3 days, 3 * 24 * 60 minutes, The retention time of the message in rocksmq.
   retentionSizeInMB: 8192 # 8 GB, 8 * 1024 MB, The retention size of the message in rocksmq.
   compactionInterval: 86400 # 1 day, trigger rocksdb compaction every day to remove deleted data
+  # compaction compression type, only support use 0,7.
+  # 0 means not compress, 7 will use zstd
+  # len of types means num of rocksdb level.
+  compressionTypes: [0, 0, 7, 7, 7]
 
 # natsmq configuration.
 natsmq:
@@ -139,6 +146,10 @@ natsmq:
       logTime: true # true by default, If set to false, log without timestamps.
       logFile: # no log file by default, Log file path relative to.. .
       logSizeLimit: 0 # (B) 0, unlimited by default, Size in bytes after the log file rolls over to a new one.
+    retention:
+      maxAge: 4320 # (min) 3 days by default, Maximum age of any message in the P-channel.
+      maxBytes: # (B) None by default, How many bytes the single P-channel may contain. Removing oldest messages if the P-channel exceeds this size.
+      maxMsgs: # None by default, How many message the single P-channel may contain. Removing oldest messages if the P-channel exceeds this limit.
 
 # Related configuration of rootCoord, used to handle data definition language (DDL) and data control language (DCL) requests
 rootCoord:
@@ -215,6 +226,7 @@ queryCoord:
   taskMergeCap: 1
   taskExecutionCap: 256
   enableActiveStandby: false # Enable active-standby
+  brokerTimeout: 5000 # broker rpc timeout in milliseconds
 
 # Related configuration of queryNode, used to run hybrid search between vector and scalar data.
 queryNode:
@@ -235,7 +247,7 @@ queryNode:
       enableIndex: true
       nlist: 128 # growing segment index nlist
       nprobe: 16 # nprobe to search growing segment, based on your accuracy requirement, must smaller than nlist
-  loadMemoryUsageFactor: 2 # The multiply factor of calculating the memory usage while loading segments
+  loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
   enableDisk: true # enable querynode load disk index, and search on disk index
   maxDiskUsagePercentage: 95
   cache:
@@ -311,7 +323,12 @@ dataCoord:
     maxSize: 512 # Maximum size of a segment in MB
     diskSegmentMaxSize: 2048 # Maximun size of a segment in MB for collection which has Disk index
     sealProportion: 0.23
-    assignmentExpiration: 2000 # The time of the assignment expiration in ms
+    # The time of the assignment expiration in ms
+    # Warning! this parameter is an expert variable and closely related to data integrity. Without specific
+    # target and solid understanding of the scenarios, it should not be changed. If it's necessary to alter
+    # this parameter, make sure that the newly changed value is larger than the previous value used before restart
+    # otherwise there could be a large possibility of data loss
+    assignmentExpiration: 2000
     maxLife: 86400 # The max lifetime of segment in seconds, 24*60*60
     # If a segment didn't accept dml records in maxIdleTime and the size of segment is greater than
     # minSizeFromIdleToSealed, Milvus will automatically seal it.
@@ -324,7 +341,7 @@ dataCoord:
     smallProportion: 0.5 # The segment is considered as "small segment" when its # of rows is smaller than
     # (smallProportion * segment max # of rows).
     # A compaction will happen on small segments if the segment after compaction will have
-    compactableProportion: 0.5
+    compactableProportion: 0.85
     # over (compactableProportion * segment max # of rows) rows.
     # MUST BE GREATER THAN OR EQUAL TO <smallProportion>!!!
     # During compaction, the size of segment # of rows is able to exceed segment max # of rows by (expansionRate-1) * 100%.
@@ -332,11 +349,15 @@ dataCoord:
   enableCompaction: true # Enable data segment compaction
   compaction:
     enableAutoCompaction: true
+    rpcTimeout: 10 # compaction rpc request timeout in seconds
+    maxParallelTaskNum: 100 # max parallel compaction task number
+    indexBasedCompaction: true
+
   enableGarbageCollection: true
   gc:
     interval: 3600 # gc interval in seconds
-    missingTolerance: 10800 # file meta missing tolerance duration in seconds, 10800
-    dropTolerance: 3600 # file belongs to dropped entity tolerance duration in seconds. 3600
+    missingTolerance: 3600 # file meta missing tolerance duration in seconds, 3600
+    dropTolerance: 10800 # file belongs to dropped entity tolerance duration in seconds. 10800
   enableActiveStandby: false
   port: 13333
   grpc:

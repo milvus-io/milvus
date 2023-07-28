@@ -20,9 +20,11 @@ import (
 	"encoding/json"
 	"math/rand"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/gogo/protobuf/proto"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -44,8 +46,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type ServiceSuite struct {
@@ -476,7 +480,7 @@ func (suite *ServiceSuite) genSegmentLoadInfos(schema *schemapb.CollectionSchema
 			vecFieldIDs[0],
 			1000,
 			segments.IndexFaissIVFFlat,
-			segments.L2,
+			metric.L2,
 			suite.node.vectorStorage,
 		)
 		suite.Require().NoError(err)
@@ -600,6 +604,142 @@ func (suite *ServiceSuite) TestLoadDeltaVarchar() {
 	status, err := suite.node.LoadSegments(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
+}
+
+func (suite *ServiceSuite) TestLoadIndex_Success() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
+
+	infos := suite.genSegmentLoadInfos(schema)
+	infos = lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *querypb.SegmentLoadInfo {
+		info.SegmentID = info.SegmentID + 1000
+		return info
+	})
+	rawInfo := lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *querypb.SegmentLoadInfo {
+		info = typeutil.Clone(info)
+		info.IndexInfos = nil
+		return info
+	})
+	req := &querypb.LoadSegmentsRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:    rand.Int63(),
+			TargetID: suite.node.session.ServerID,
+		},
+		CollectionID: suite.collectionID,
+		DstNodeID:    suite.node.session.ServerID,
+		Infos:        rawInfo,
+		Schema:       schema,
+		NeedTransfer: false,
+		LoadScope:    querypb.LoadScope_Full,
+	}
+
+	// Load segment
+	status, err := suite.node.LoadSegments(ctx, req)
+	suite.Require().NoError(err)
+	suite.Require().Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
+
+	for _, segmentID := range lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) int64 {
+		return info.GetSegmentID()
+	}) {
+		suite.Equal(0, len(suite.node.manager.Segment.Get(segmentID).Indexes()))
+	}
+
+	req = &querypb.LoadSegmentsRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:    rand.Int63(),
+			TargetID: suite.node.session.ServerID,
+		},
+		CollectionID: suite.collectionID,
+		DstNodeID:    suite.node.session.ServerID,
+		Infos:        infos,
+		Schema:       schema,
+		NeedTransfer: false,
+		LoadScope:    querypb.LoadScope_Index,
+	}
+
+	// Load segment
+	status, err = suite.node.LoadSegments(ctx, req)
+	suite.Require().NoError(err)
+	suite.Require().Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
+
+	for _, segmentID := range lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) int64 {
+		return info.GetSegmentID()
+	}) {
+		suite.T().Log(segmentID)
+		suite.T().Log(len(suite.node.manager.Segment.Get(segmentID).Indexes()))
+		suite.Greater(len(suite.node.manager.Segment.Get(segmentID).Indexes()), 0)
+	}
+}
+
+func (suite *ServiceSuite) TestLoadIndex_Failed() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
+
+	suite.Run("load_non_exist_segment", func() {
+		infos := suite.genSegmentLoadInfos(schema)
+		infos = lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *querypb.SegmentLoadInfo {
+			info.SegmentID = info.SegmentID + 1000
+			return info
+		})
+		rawInfo := lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *querypb.SegmentLoadInfo {
+			info = typeutil.Clone(info)
+			info.IndexInfos = nil
+			return info
+		})
+		req := &querypb.LoadSegmentsRequest{
+			Base: &commonpb.MsgBase{
+				MsgID:    rand.Int63(),
+				TargetID: suite.node.session.ServerID,
+			},
+			CollectionID: suite.collectionID,
+			DstNodeID:    suite.node.session.ServerID,
+			Infos:        rawInfo,
+			Schema:       schema,
+			NeedTransfer: false,
+			LoadScope:    querypb.LoadScope_Index,
+		}
+
+		// Load segment
+		status, err := suite.node.LoadSegments(ctx, req)
+		suite.Require().NoError(err)
+		// Ignore segment missing
+		suite.Require().Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
+	})
+
+	suite.Run("loader_returns_error", func() {
+		suite.TestLoadSegments_Int64()
+		loader := suite.node.loader
+		mockLoader := segments.NewMockLoader(suite.T())
+		suite.node.loader = mockLoader
+		defer func() {
+			suite.node.loader = loader
+		}()
+
+		mockLoader.EXPECT().LoadIndex(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mocked error"))
+
+		infos := suite.genSegmentLoadInfos(schema)
+		req := &querypb.LoadSegmentsRequest{
+			Base: &commonpb.MsgBase{
+				MsgID:    rand.Int63(),
+				TargetID: suite.node.session.ServerID,
+			},
+			CollectionID: suite.collectionID,
+			DstNodeID:    suite.node.session.ServerID,
+			Infos:        infos,
+			Schema:       schema,
+			NeedTransfer: false,
+			LoadScope:    querypb.LoadScope_Index,
+		}
+
+		// Load segment
+		status, err := suite.node.LoadSegments(ctx, req)
+		suite.Require().NoError(err)
+		suite.Require().NotEqual(commonpb.ErrorCode_Success, status.GetErrorCode())
+	})
 }
 
 func (suite *ServiceSuite) TestLoadSegments_Failed() {
@@ -1020,7 +1160,7 @@ func (suite *ServiceSuite) TestSearch_Failed() {
 	req.GetReq().MetricType = "IP"
 	resp, err = suite.node.Search(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+	suite.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
 	suite.Contains(resp.GetStatus().GetReason(), merr.ErrParameterInvalid.Error())
 	req.GetReq().MetricType = "L2"
 
@@ -1334,6 +1474,18 @@ func (suite *ServiceSuite) TestSyncDistribution_Normal() {
 	status, err := suite.node.SyncDistribution(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+
+	syncVersionAction := &querypb.SyncAction{
+		Type:            querypb.SyncType_UpdateVersion,
+		SealedInTarget:  []int64{3},
+		GrowingInTarget: []int64{4},
+		DroppedInTarget: []int64{1, 2},
+		TargetVersion:   time.Now().UnixMilli(),
+	}
+
+	req.Actions = []*querypb.SyncAction{syncVersionAction}
+	status, err = suite.node.SyncDistribution(ctx, req)
+	suite.NoError(err)
 }
 
 func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {

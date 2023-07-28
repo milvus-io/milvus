@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"path"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -236,7 +237,18 @@ func (gc *garbageCollector) clearEtcd() {
 		channelCPs[channel] = pos.GetTimestamp()
 	}
 
-	for _, segment := range drops {
+	dropIDs := lo.Keys(drops)
+	sort.Slice(dropIDs, func(i, j int) bool {
+		return dropIDs[i] < dropIDs[j]
+	})
+
+	for _, segmentID := range dropIDs {
+		segment, ok := drops[segmentID]
+		if !ok {
+			log.Warn("segmentID is not in drops", zap.Int64("segmentID", segmentID))
+			// can't to here
+			continue
+		}
 		log := log.With(zap.Int64("segmentID", segment.ID))
 		to, isCompacted := compactTo[segment.GetID()]
 		// for compacted segment, try to clean up the files as long as target segment is there
@@ -267,8 +279,9 @@ func (gc *garbageCollector) clearEtcd() {
 		logs := getLogs(segment)
 		log.Info("GC segment", zap.Int64("segmentID", segment.GetID()))
 		if gc.removeLogs(logs) {
-			err := gc.meta.DropSegment(segment.GetID())
-			log.Warn("failed to drop segment", zap.Int64("segment id", segment.GetID()), zap.Error(err))
+			if err := gc.meta.DropSegment(segment.GetID()); err != nil {
+				log.Warn("failed to drop segment", zap.Int64("segmentID", segment.GetID()), zap.Error(err))
+			}
 		}
 		if segList := gc.meta.GetSegmentsByChannel(segInsertChannel); len(segList) == 0 &&
 			!gc.meta.catalog.ChannelExists(context.Background(), segInsertChannel) {
@@ -329,7 +342,7 @@ func (gc *garbageCollector) recycleUnusedIndexes() {
 	deletedIndexes := gc.meta.GetDeletedIndexes()
 	for _, index := range deletedIndexes {
 		if err := gc.meta.RemoveIndex(index.CollectionID, index.IndexID); err != nil {
-			log.Warn("remove index on collection fail", zap.Int64("collID", index.CollectionID),
+			log.Warn("remove index on collection fail", zap.Int64("collectionID", index.CollectionID),
 				zap.Int64("indexID", index.IndexID), zap.Error(err))
 			continue
 		}
@@ -342,11 +355,11 @@ func (gc *garbageCollector) recycleUnusedSegIndexes() {
 		if gc.meta.GetSegment(segIdx.SegmentID) == nil || !gc.meta.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
 			if err := gc.meta.RemoveSegmentIndex(segIdx.CollectionID, segIdx.PartitionID, segIdx.SegmentID, segIdx.IndexID, segIdx.BuildID); err != nil {
 				log.Warn("delete index meta from etcd failed, wait to retry", zap.Int64("buildID", segIdx.BuildID),
-					zap.Int64("segID", segIdx.SegmentID), zap.Int64("nodeID", segIdx.NodeID), zap.Error(err))
+					zap.Int64("segmentID", segIdx.SegmentID), zap.Int64("nodeID", segIdx.NodeID), zap.Error(err))
 				continue
 			}
 			log.Info("index meta recycle success", zap.Int64("buildID", segIdx.BuildID),
-				zap.Int64("segID", segIdx.SegmentID))
+				zap.Int64("segmentID", segIdx.SegmentID))
 		}
 	}
 }

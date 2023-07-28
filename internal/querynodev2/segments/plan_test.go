@@ -70,6 +70,12 @@ func (suite *PlanSuite) TestPlanFail() {
 	suite.Error(err)
 }
 
+func (suite *PlanSuite) TestQueryPlanCollectionReleased() {
+	collection := &Collection{id: suite.collectionID}
+	_, err := NewRetrievePlan(collection, nil, 0, 0)
+	suite.Error(err)
+}
+
 func TestPlan(t *testing.T) {
 	suite.Run(t, new(PlanSuite))
 }

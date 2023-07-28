@@ -100,6 +100,8 @@ func (fNode *filterNode) Operate(in Msg) Msg {
 			out.append(msg)
 		}
 	}
+
+	metrics.QueryNodeWaitProcessingMsgCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).Inc()
 	return out
 }
 

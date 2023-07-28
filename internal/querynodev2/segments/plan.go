@@ -32,6 +32,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -177,6 +178,10 @@ type RetrievePlan struct {
 func NewRetrievePlan(col *Collection, expr []byte, timestamp Timestamp, msgID UniqueID) (*RetrievePlan, error) {
 	col.mu.RLock()
 	defer col.mu.RUnlock()
+
+	if col.collectionPtr == nil {
+		return nil, merr.WrapErrCollectionNotFound(col.id, "collection released")
+	}
 
 	var cPlan C.CRetrievePlan
 	status := C.CreateRetrievePlanByExpr(col.collectionPtr, unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan)

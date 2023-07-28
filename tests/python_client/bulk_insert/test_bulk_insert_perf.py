@@ -61,8 +61,7 @@ class TestChaosBase:
 
 class TestChaos(TestChaosBase):
 
-
-    def teardown(self):
+    def teardown_method(self):
         sleep(10)
         log.info(f'Alive threads: {threading.enumerate()}')
 
@@ -82,16 +81,15 @@ class TestChaos(TestChaosBase):
         self.release_name = get_milvus_instance_name(self.milvus_ns, milvus_sys=self.milvus_sys)
         self.deploy_by = get_milvus_deploy_tool(self.milvus_ns, self.milvus_sys)
 
-    def init_health_checkers(self, collection_name=None, create_index=True, dim=2048):
+    def init_health_checkers(self, collection_name=None, dim=2048):
         log.info("init health checkers")
         c_name = collection_name if collection_name else cf.gen_unique_str("Checker_")
         checkers = {
-            Op.bulk_insert: BulkInsertChecker(collection_name=c_name, use_one_collection=False,
-                                              dim=dim, create_index=create_index),
+            Op.bulk_insert: BulkInsertChecker(collection_name=c_name, use_one_collection=False, dim=dim,),
         }
         self.health_checkers = checkers
 
-    def prepare_bulk_insert(self, nb=3000, file_type="json",dim=2048):
+    def prepare_bulk_insert(self, nb=3000, file_type="json", dim=768, varchar_len=2000, with_varchar_field=True):
         if Op.bulk_insert not in self.health_checkers:
             log.info("bulk_insert checker is not in  health checkers, skip prepare bulk load")
             return
@@ -107,8 +105,8 @@ class TestChaos(TestChaosBase):
         minio_port = "9000"
         minio_endpoint = f"{minio_ip}:{minio_port}"
         bucket_name = ms.index_nodes[0]["infos"]["system_configurations"]["minio_bucket_name"]
-        schema = cf.gen_default_collection_schema(dim=dim)
-        data = cf.gen_default_list_data_for_bulk_insert(nb=nb, dim=dim)
+        schema = cf.gen_bulk_insert_collection_schema(dim=dim, with_varchar_field=with_varchar_field)
+        data = cf.gen_default_list_data_for_bulk_insert(nb=nb, varchar_len=varchar_len, with_varchar_field=with_varchar_field)
         data_dir = "/tmp/bulk_insert_data"
         Path(data_dir).mkdir(parents=True, exist_ok=True)
         files = []
@@ -127,25 +125,20 @@ class TestChaos(TestChaosBase):
         log.info("prepare data for bulk load done")
 
     @pytest.mark.tags(CaseLabel.L3)
-    def test_bulk_insert_perf(self, file_type, create_index, nb, dim):
+    def test_bulk_insert_perf(self, file_type, nb, dim, varchar_len, with_varchar_field):
         # start the monitor threads to check the milvus ops
         log.info("*********************Test Start**********************")
         log.info(connections.get_connection_addr('default'))
-        log.info(f"file_type: {file_type}, create_index: {create_index}")
-        if create_index == "create_index":
-            create_index = True
+        log.info(f"file_type: {file_type}, nb: {nb}, dim: {dim}, varchar_len: {varchar_len}, with_varchar_field: {with_varchar_field}")
+        self.init_health_checkers(dim=int(dim))
+        nb = int(nb)
+        if str(with_varchar_field) in ["true", "True"]:
+            with_varchar_field = True
         else:
-            create_index = False
-        self.init_health_checkers(create_index=create_index, dim=int(dim))
-        if nb=="None":
-            nb = 3000
-            if file_type == "json":
-                nb = 13800
-            if file_type == "npy":
-                nb = 65000
-        else:
-            nb = int(nb)
-        self.prepare_bulk_insert(file_type=file_type, nb=nb, dim=int(dim))
+            with_varchar_field = False
+        varchar_len = int(varchar_len)
+
+        self.prepare_bulk_insert(file_type=file_type, nb=nb, dim=int(dim), varchar_len=varchar_len, with_varchar_field=with_varchar_field)
         cc.start_monitor_threads(self.health_checkers)
         # wait 600s
         while self.health_checkers[Op.bulk_insert].total() <= 10:

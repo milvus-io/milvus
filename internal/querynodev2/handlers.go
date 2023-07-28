@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
-	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -52,7 +51,7 @@ func loadGrowingSegments(ctx context.Context, delegator delegator.ShardDelegator
 			// unFlushed segment may not have binLogs, skip loading
 			segmentInfo := req.GetSegmentInfos()[segmentID]
 			if segmentInfo == nil {
-				log.Warn("an unflushed segment is not found in segment infos", zap.Int64("segment ID", segmentID))
+				log.Warn("an unflushed segment is not found in segment infos", zap.Int64("segmentID", segmentID))
 				continue
 			}
 			if len(segmentInfo.GetBinlogs()) > 0 {
@@ -103,6 +102,39 @@ func (node *QueryNode) loadDeltaLogs(ctx context.Context, req *querypb.LoadSegme
 	}
 
 	return util.SuccessStatus()
+}
+
+func (node *QueryNode) loadIndex(ctx context.Context, req *querypb.LoadSegmentsRequest) *commonpb.Status {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.Int64s("segmentIDs", lo.Map(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })),
+	)
+
+	status := util.SuccessStatus()
+	log.Info("start to load index")
+
+	for _, info := range req.GetInfos() {
+		log := log.With(zap.Int64("segmentID", info.GetSegmentID()))
+		segment := node.manager.Segment.GetSealed(info.GetSegmentID())
+		if segment == nil {
+			log.Warn("segment not found for load index operation")
+			continue
+		}
+		localSegment, ok := segment.(*segments.LocalSegment)
+		if !ok {
+			log.Warn("segment not local for load index opeartion")
+			continue
+		}
+
+		err := node.loader.LoadIndex(ctx, localSegment, info)
+		if err != nil {
+			log.Warn("failed to load index", zap.Error(err))
+			status = merr.Status(err)
+			break
+		}
+	}
+
+	return status
 }
 
 func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryRequest, channel string) (*internalpb.RetrieveResults, error) {
@@ -192,27 +224,6 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.Leader).Observe(float64(latency.Milliseconds()))
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.SuccessLabel, metrics.Leader).Inc()
 	return ret, nil
-}
-
-func (node *QueryNode) querySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
-	collection := node.manager.Collection.Get(req.Req.GetCollectionID())
-	if collection == nil {
-		return nil, merr.WrapErrCollectionNotFound(req.Req.GetCollectionID())
-	}
-
-	// Send task to scheduler and wait until it finished.
-	task := tasks.NewQueryTask(ctx, collection, node.manager, req)
-	if err := node.scheduler.Add(task); err != nil {
-		log.Warn("failed to add query task into scheduler", zap.Error(err))
-		return nil, err
-	}
-	err := task.Wait()
-	if err != nil {
-		log.Warn("failed to execute task by node scheduler", zap.Error(err))
-		return nil, err
-	}
-
-	return task.Result(), nil
 }
 
 func (node *QueryNode) optimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, deleg delegator.ShardDelegator) (*querypb.SearchRequest, error) {

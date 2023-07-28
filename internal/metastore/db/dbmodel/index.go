@@ -69,7 +69,7 @@ func UnmarshalIndexModel(inputs []*IndexResult) ([]*model.Index, error) {
 		if ir.IndexParams != "" {
 			err := json.Unmarshal([]byte(ir.IndexParams), &indexParams)
 			if err != nil {
-				log.Error("unmarshal IndexParams of index failed", zap.Int64("collID", ir.CollectionID),
+				log.Error("unmarshal IndexParams of index failed", zap.Int64("collectionID", ir.CollectionID),
 					zap.Int64("indexID", ir.IndexID), zap.String("indexName", ir.IndexName), zap.Error(err))
 				return nil, err
 			}
@@ -78,7 +78,7 @@ func UnmarshalIndexModel(inputs []*IndexResult) ([]*model.Index, error) {
 		if ir.UserIndexParams != "" {
 			err := json.Unmarshal([]byte(ir.UserIndexParams), &userIndexParams)
 			if err != nil {
-				log.Error("unmarshal UserIndexParams of index failed", zap.Int64("collID", ir.CollectionID),
+				log.Error("unmarshal UserIndexParams of index failed", zap.Int64("collectionID", ir.CollectionID),
 					zap.Int64("indexID", ir.IndexID), zap.String("indexName", ir.IndexName), zap.Error(err))
 				return nil, err
 			}
@@ -88,7 +88,7 @@ func UnmarshalIndexModel(inputs []*IndexResult) ([]*model.Index, error) {
 		if ir.TypeParams != "" {
 			err := json.Unmarshal([]byte(ir.TypeParams), &typeParams)
 			if err != nil {
-				log.Error("unmarshal TypeParams of index failed", zap.Int64("collID", ir.CollectionID),
+				log.Error("unmarshal TypeParams of index failed", zap.Int64("collectionID", ir.CollectionID),
 					zap.Int64("indexID", ir.IndexID), zap.String("indexName", ir.IndexName), zap.Error(err))
 				return nil, err
 			}

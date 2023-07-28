@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <unordered_map>
 #include <vector>
 #include <stdio.h>
 #include <stdlib.h>
@@ -111,5 +112,10 @@ ParseConfigFromIndexParams(
 
 void
 AssembleIndexDatas(std::map<std::string, storage::FieldDataPtr>& index_datas);
+
+void
+AssembleIndexDatas(
+    std::map<std::string, storage::FieldDataChannelPtr>& index_datas,
+    std::unordered_map<std::string, storage::FieldDataPtr>& result);
 
 }  // namespace milvus::index

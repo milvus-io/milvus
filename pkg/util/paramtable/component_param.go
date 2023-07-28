@@ -222,6 +222,8 @@ type commonConfig struct {
 	JSONMaxLength ParamItem `refreshable:"false"`
 
 	ImportMaxFileSize ParamItem `refreshable:"true"`
+
+	MetricsPort ParamItem `refreshable:"false"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -645,6 +647,13 @@ like the old password verification when updating the credential`,
 		DefaultValue: fmt.Sprint(16 << 30),
 	}
 	p.ImportMaxFileSize.Init(base.mgr)
+
+	p.MetricsPort = ParamItem{
+		Key:          "common.MetricsPort",
+		Version:      "2.3.0",
+		DefaultValue: "9091",
+	}
+	p.MetricsPort.Init(base.mgr)
 }
 
 type traceConfig struct {
@@ -883,23 +892,25 @@ type proxyConfig struct {
 	// Alias  string
 	SoPath ParamItem `refreshable:"false"`
 
-	TimeTickInterval         ParamItem `refreshable:"false"`
-	HealthCheckTimetout      ParamItem `refreshable:"true"`
-	MsgStreamTimeTickBufSize ParamItem `refreshable:"true"`
-	MaxNameLength            ParamItem `refreshable:"true"`
-	MaxUsernameLength        ParamItem `refreshable:"true"`
-	MinPasswordLength        ParamItem `refreshable:"true"`
-	MaxPasswordLength        ParamItem `refreshable:"true"`
-	MaxFieldNum              ParamItem `refreshable:"true"`
-	MaxShardNum              ParamItem `refreshable:"true"`
-	MaxDimension             ParamItem `refreshable:"true"`
-	GinLogging               ParamItem `refreshable:"false"`
-	MaxUserNum               ParamItem `refreshable:"true"`
-	MaxRoleNum               ParamItem `refreshable:"true"`
-	MaxTaskNum               ParamItem `refreshable:"false"`
-	AccessLog                AccessLogConfig
-	ShardLeaderCacheInterval ParamItem `refreshable:"false"`
-	ReplicaSelectionPolicy   ParamItem `refreshable:"false"`
+	TimeTickInterval             ParamItem `refreshable:"false"`
+	HealthCheckTimetout          ParamItem `refreshable:"true"`
+	MsgStreamTimeTickBufSize     ParamItem `refreshable:"true"`
+	MaxNameLength                ParamItem `refreshable:"true"`
+	MaxUsernameLength            ParamItem `refreshable:"true"`
+	MinPasswordLength            ParamItem `refreshable:"true"`
+	MaxPasswordLength            ParamItem `refreshable:"true"`
+	MaxFieldNum                  ParamItem `refreshable:"true"`
+	MaxShardNum                  ParamItem `refreshable:"true"`
+	MaxDimension                 ParamItem `refreshable:"true"`
+	GinLogging                   ParamItem `refreshable:"false"`
+	MaxUserNum                   ParamItem `refreshable:"true"`
+	MaxRoleNum                   ParamItem `refreshable:"true"`
+	MaxTaskNum                   ParamItem `refreshable:"false"`
+	AccessLog                    AccessLogConfig
+	ShardLeaderCacheInterval     ParamItem `refreshable:"false"`
+	ReplicaSelectionPolicy       ParamItem `refreshable:"false"`
+	CheckQueryNodeHealthInterval ParamItem `refreshable:"false"`
+	CostMetricsExpireTime        ParamItem `refreshable:"true"`
 }
 
 func (p *proxyConfig) init(base *BaseTable) {
@@ -1115,7 +1126,7 @@ please adjust in embedded Milvus: false`,
 	p.ShardLeaderCacheInterval = ParamItem{
 		Key:          "proxy.shardLeaderCacheInterval",
 		Version:      "2.2.4",
-		DefaultValue: "30",
+		DefaultValue: "10",
 		Doc:          "time interval to update shard leader cache, in seconds",
 	}
 	p.ShardLeaderCacheInterval.Init(base.mgr)
@@ -1127,6 +1138,23 @@ please adjust in embedded Milvus: false`,
 		Doc:          "replica selection policy in multiple replicas load balancing, support round_robin and look_aside",
 	}
 	p.ReplicaSelectionPolicy.Init(base.mgr)
+
+	p.CheckQueryNodeHealthInterval = ParamItem{
+		Key:          "proxy.checkQueryNodeHealthInterval",
+		Version:      "2.3.0",
+		DefaultValue: "1000",
+		Doc:          "time interval to check health for query node, in ms",
+	}
+	p.CheckQueryNodeHealthInterval.Init(base.mgr)
+
+	p.CostMetricsExpireTime = ParamItem{
+		Key:          "proxy.costMetricsExpireTime",
+		Version:      "2.3.0",
+		DefaultValue: "1000",
+		Doc:          "expire time for query node cost metrics, in ms",
+	}
+	p.CostMetricsExpireTime.Init(base.mgr)
+
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -1152,15 +1180,23 @@ type queryCoordConfig struct {
 	OverloadedMemoryThresholdPercentage ParamItem `refreshable:"true"`
 	BalanceIntervalSeconds              ParamItem `refreshable:"true"`
 	MemoryUsageMaxDifferencePercentage  ParamItem `refreshable:"true"`
-	CheckInterval                       ParamItem `refreshable:"true"`
-	ChannelTaskTimeout                  ParamItem `refreshable:"true"`
-	SegmentTaskTimeout                  ParamItem `refreshable:"true"`
-	DistPullInterval                    ParamItem `refreshable:"false"`
-	HeartbeatAvailableInterval          ParamItem `refreshable:"true"`
-	LoadTimeoutSeconds                  ParamItem `refreshable:"true"`
+
+	SegmentCheckInterval       ParamItem `refreshable:"true"`
+	ChannelCheckInterval       ParamItem `refreshable:"true"`
+	BalanceCheckInterval       ParamItem `refreshable:"true"`
+	IndexCheckInterval         ParamItem `refreshable:"true"`
+	ChannelTaskTimeout         ParamItem `refreshable:"true"`
+	SegmentTaskTimeout         ParamItem `refreshable:"true"`
+	DistPullInterval           ParamItem `refreshable:"false"`
+	HeartbeatAvailableInterval ParamItem `refreshable:"true"`
+	LoadTimeoutSeconds         ParamItem `refreshable:"true"`
+
 	// Deprecated: Since 2.2.2, QueryCoord do not use HandOff logic anymore
 	CheckHandoffInterval ParamItem `refreshable:"true"`
 	EnableActiveStandby  ParamItem `refreshable:"false"`
+
+	// Deprecated: Since 2.2.2, use different interval for different checker
+	CheckInterval ParamItem `refreshable:"true"`
 
 	NextTargetSurviveTime      ParamItem `refreshable:"true"`
 	UpdateNextTargetInterval   ParamItem `refreshable:"false"`
@@ -1169,6 +1205,7 @@ type queryCoordConfig struct {
 	EnableRGAutoRecover        ParamItem `refreshable:"true"`
 	CheckHealthInterval        ParamItem `refreshable:"false"`
 	CheckHealthRPCTimeout      ParamItem `refreshable:"true"`
+	BrokerTimeout              ParamItem `refreshable:"false"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -1300,6 +1337,42 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	}
 	p.CheckInterval.Init(base.mgr)
 
+	p.SegmentCheckInterval = ParamItem{
+		Key:          "queryCoord.checkSegmentInterval",
+		Version:      "2.3.0",
+		DefaultValue: "1000",
+		PanicIfEmpty: true,
+		Export:       true,
+	}
+	p.SegmentCheckInterval.Init(base.mgr)
+
+	p.ChannelCheckInterval = ParamItem{
+		Key:          "queryCoord.checkChannelInterval",
+		Version:      "2.3.0",
+		DefaultValue: "1000",
+		PanicIfEmpty: true,
+		Export:       true,
+	}
+	p.ChannelCheckInterval.Init(base.mgr)
+
+	p.BalanceCheckInterval = ParamItem{
+		Key:          "queryCoord.checkChannelInterval",
+		Version:      "2.3.0",
+		DefaultValue: "10000",
+		PanicIfEmpty: true,
+		Export:       true,
+	}
+	p.BalanceCheckInterval.Init(base.mgr)
+
+	p.IndexCheckInterval = ParamItem{
+		Key:          "queryCoord.checkIndexInterval",
+		Version:      "2.3.0",
+		DefaultValue: "10000",
+		PanicIfEmpty: true,
+		Export:       true,
+	}
+	p.IndexCheckInterval.Init(base.mgr)
+
 	p.ChannelTaskTimeout = ParamItem{
 		Key:          "queryCoord.channelTaskTimeout",
 		Version:      "2.0.0",
@@ -1424,6 +1497,16 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.CheckHealthRPCTimeout.Init(base.mgr)
+
+	p.BrokerTimeout = ParamItem{
+		Key:          "queryCoord.brokerTimeout",
+		Version:      "2.3.0",
+		DefaultValue: "5000",
+		PanicIfEmpty: true,
+		Doc:          "5000ms, querycoord broker rpc timeout",
+		Export:       true,
+	}
+	p.BrokerTimeout.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -1864,7 +1947,8 @@ type dataCoordConfig struct {
 	SegmentMaxSize                 ParamItem `refreshable:"false"`
 	DiskSegmentMaxSize             ParamItem `refreshable:"true"`
 	SegmentSealProportion          ParamItem `refreshable:"false"`
-	SegAssignmentExpiration        ParamItem `refreshable:"true"`
+	SegAssignmentExpiration        ParamItem `refreshable:"false"`
+	AllocLatestExpireAttempt       ParamItem `refreshable:"true"`
 	SegmentMaxLifetime             ParamItem `refreshable:"false"`
 	SegmentMaxIdleTime             ParamItem `refreshable:"false"`
 	SegmentMinSizeFromIdleToSealed ParamItem `refreshable:"false"`
@@ -1873,7 +1957,11 @@ type dataCoordConfig struct {
 	// compaction
 	EnableCompaction     ParamItem `refreshable:"false"`
 	EnableAutoCompaction ParamItem `refreshable:"true"`
+	IndexBasedCompaction ParamItem `refreshable:"true"`
 
+	CompactionRPCTimeout              ParamItem `refreshable:"true"`
+	CompactionMaxParallelTasks        ParamItem `refreshable:"true"`
+	CompactionWorkerParalleTasks      ParamItem `refreshable:"true"`
 	MinSegmentToMerge                 ParamItem `refreshable:"true"`
 	MaxSegmentToMerge                 ParamItem `refreshable:"true"`
 	SegmentSmallProportion            ParamItem `refreshable:"true"`
@@ -1966,6 +2054,15 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	}
 	p.SegAssignmentExpiration.Init(base.mgr)
 
+	p.AllocLatestExpireAttempt = ParamItem{
+		Key:          "dataCoord.segment.allocLatestExpireAttempt",
+		Version:      "2.2.0",
+		DefaultValue: "200",
+		Doc:          "The time attempting to alloc latest lastExpire from rootCoord after restart",
+		Export:       true,
+	}
+	p.AllocLatestExpireAttempt.Init(base.mgr)
+
 	p.SegmentMaxLifetime = ParamItem{
 		Key:          "dataCoord.segment.maxLife",
 		Version:      "2.0.0",
@@ -2022,6 +2119,38 @@ the number of binlog file reaches to max value.`,
 	}
 	p.EnableAutoCompaction.Init(base.mgr)
 
+	p.IndexBasedCompaction = ParamItem{
+		Key:          "dataCoord.compaction.indexBasedCompaction",
+		Version:      "2.0.0",
+		DefaultValue: "true",
+		Export:       true,
+	}
+	p.IndexBasedCompaction.Init(base.mgr)
+
+	p.CompactionRPCTimeout = ParamItem{
+		Key:          "dataCoord.compaction.rpcTimeout",
+		Version:      "2.2.12",
+		DefaultValue: "10",
+		Export:       true,
+	}
+	p.CompactionRPCTimeout.Init(base.mgr)
+
+	p.CompactionMaxParallelTasks = ParamItem{
+		Key:          "dataCoord.compaction.maxParallelTaskNum",
+		Version:      "2.2.12",
+		DefaultValue: "100",
+		Export:       true,
+	}
+	p.CompactionMaxParallelTasks.Init(base.mgr)
+
+	p.CompactionWorkerParalleTasks = ParamItem{
+		Key:          "dataCoord.compaction.workerMaxParallelTaskNum",
+		Version:      "2.3.0",
+		DefaultValue: "2",
+		Export:       true,
+	}
+	p.CompactionWorkerParalleTasks.Init(base.mgr)
+
 	p.MinSegmentToMerge = ParamItem{
 		Key:          "dataCoord.compaction.min.segment",
 		Version:      "2.0.0",
@@ -2048,7 +2177,7 @@ the number of binlog file reaches to max value.`,
 	p.SegmentCompactableProportion = ParamItem{
 		Key:          "dataCoord.segment.compactableProportion",
 		Version:      "2.2.1",
-		DefaultValue: "0.5",
+		DefaultValue: "0.85",
 		Doc: `(smallProportion * segment max # of rows).
 A compaction will happen on small segments if the segment after compaction will have`,
 		Export: true,
@@ -2137,7 +2266,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.GCMissingTolerance = ParamItem{
 		Key:          "dataCoord.gc.missingTolerance",
 		Version:      "2.0.0",
-		DefaultValue: "10800",
+		DefaultValue: "3600",
 		Doc:          "file meta missing tolerance duration in seconds, 60*60*3",
 		Export:       true,
 	}
@@ -2146,7 +2275,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.GCDropTolerance = ParamItem{
 		Key:          "dataCoord.gc.dropTolerance",
 		Version:      "2.0.0",
-		DefaultValue: "3600",
+		DefaultValue: "10800",
 		Doc:          "file belongs to dropped entity tolerance duration in seconds. 3600",
 		Export:       true,
 	}
@@ -2237,6 +2366,9 @@ type dataNodeConfig struct {
 	DataNodeTimeTickByRPC ParamItem `refreshable:"false"`
 	// DataNode send timetick interval per collection
 	DataNodeTimeTickInterval ParamItem `refreshable:"false"`
+
+	// timeout for bulkinsert
+	BulkInsertTimeoutSeconds ParamItem `refreshable:"true"`
 
 	// Skip BF
 	SkipBFStatsLoad ParamItem `refreshable:"true"`
@@ -2397,6 +2529,14 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		DefaultValue: "false",
 	}
 	p.SkipBFStatsLoad.Init(base.mgr)
+
+	p.BulkInsertTimeoutSeconds = ParamItem{
+		Key:          "datanode.bulkinsert.timeout.seconds",
+		Version:      "2.3.0",
+		PanicIfEmpty: false,
+		DefaultValue: "18000",
+	}
+	p.BulkInsertTimeoutSeconds.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

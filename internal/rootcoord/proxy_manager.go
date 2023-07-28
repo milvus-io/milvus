@@ -31,7 +31,6 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -153,7 +152,6 @@ func (p *proxyManager) handlePutEvent(e *clientv3.Event) error {
 	for _, f := range p.addSessionsFunc {
 		f(session)
 	}
-	metrics.RootCoordProxyCounter.WithLabelValues().Inc()
 	return nil
 }
 
@@ -166,7 +164,6 @@ func (p *proxyManager) handleDeleteEvent(e *clientv3.Event) error {
 	for _, f := range p.delSessionsFunc {
 		f(session)
 	}
-	metrics.RootCoordProxyCounter.WithLabelValues().Dec()
 	return nil
 }
 

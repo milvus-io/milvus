@@ -50,13 +50,13 @@ func MustInitNatsMQ(cfg *NatsMQConfig) {
 			log.Fatal("fail to initailize nmq", zap.Error(err))
 		}
 
-		log.Info("initialize nmq finished", zap.Error(err))
 		// Start Nmq in background and wait until it's ready for connection.
 		go Nmq.Start()
 		// Wait for server to be ready for connections
 		if !Nmq.ReadyForConnections(cfg.InitializeTimeout) {
-			log.Fatal("nmq is not ready")
+			log.Fatal("nmq is not ready within timeout")
 		}
+		log.Info("initialize nmq finished", zap.String("client-url", Nmq.ClientURL()), zap.Error(err))
 	})
 }
 

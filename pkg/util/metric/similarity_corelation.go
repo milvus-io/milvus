@@ -14,34 +14,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package querycoordv2
+package metric
 
-import (
-	"fmt"
-	"time"
+import "strings"
 
-	"github.com/cockroachdb/errors"
-)
-
-var (
-	// Node Availability
-	ErrLackSegment           = errors.New("LackSegment")
-	ErrNodeOffline           = errors.New("NodeOffline")
-	ErrNodeHeartbeatOutdated = errors.New("NodeHeartbeatOutdated")
-)
-
-func WrapErrLackSegment(segmentID int64) error {
-	return fmt.Errorf("%w(segmentID=%v)", ErrLackSegment, segmentID)
-}
-
-func WrapErrNodeOffline(nodeID int64) error {
-	return fmt.Errorf("%w(nodeID=%v)", ErrNodeOffline, nodeID)
-}
-
-func WrapErrNodeHeartbeatOutdated(nodeID int64, lastHeartbeat time.Time) error {
-	return fmt.Errorf("%w(nodeID=%v, lastHeartbeat=%v)",
-		ErrNodeHeartbeatOutdated,
-		nodeID,
-		lastHeartbeat,
-	)
+// PositivelyRelated return if metricType are "ip" or "IP"
+func PositivelyRelated(metricType string) bool {
+	mUpper := strings.ToUpper(metricType)
+	return mUpper == strings.ToUpper(IP) || mUpper == strings.ToUpper(COSINE)
 }

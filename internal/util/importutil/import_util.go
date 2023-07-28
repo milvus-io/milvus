@@ -445,11 +445,12 @@ func fillDynamicData(blockData BlockData, collectionSchema *schemapb.CollectionS
 		}
 	}
 
-	if dynamicData.RowNum() == 0 {
-		// fill the dynamic data by row count
+	if dynamicData.RowNum() < rowCount {
+		// fill the dynamic data by an empty JSON object, make sure the row count is eaual to other fields
 		data := dynamicData.(*storage.JSONFieldData)
 		bs := []byte("{}")
-		for i := 0; i < rowCount; i++ {
+		dynamicRowCount := dynamicData.RowNum()
+		for i := 0; i < rowCount-dynamicRowCount; i++ {
 			data.Data = append(data.Data, bs)
 		}
 	}

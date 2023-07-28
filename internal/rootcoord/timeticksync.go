@@ -47,28 +47,31 @@ var (
 )
 
 type ttHistogram struct {
-	sync.Map
+	*typeutil.ConcurrentMap[string, Timestamp]
 }
 
 func newTtHistogram() *ttHistogram {
-	return &ttHistogram{}
+	return &ttHistogram{
+		ConcurrentMap: typeutil.NewConcurrentMap[string, Timestamp](),
+	}
 }
 
 func (h *ttHistogram) update(channel string, ts Timestamp) {
-	h.Store(channel, ts)
+	h.Insert(channel, ts)
+
 }
 
 func (h *ttHistogram) get(channel string) Timestamp {
-	ts, ok := h.Load(channel)
+	ts, ok := h.Get(channel)
 	if !ok {
 		return typeutil.ZeroTimestamp
 	}
-	return ts.(Timestamp)
+	return ts
 }
 
 func (h *ttHistogram) remove(channels ...string) {
 	for _, channel := range channels {
-		h.Delete(channel)
+		h.GetAndRemove(channel)
 	}
 }
 
@@ -121,7 +124,7 @@ func newTimeTickSync(ctx context.Context, sourceID int64, factory msgstream.Fact
 	// recover physical channels for all collections
 	for collID, chanNames := range chanMap {
 		dmlChannels.addChannels(chanNames...)
-		log.Info("recover physical channels", zap.Int64("collID", collID), zap.Strings("physical channels", chanNames))
+		log.Info("recover physical channels", zap.Int64("collectionID", collID), zap.Strings("physical channels", chanNames))
 	}
 
 	return &timetickSync{

@@ -588,6 +588,11 @@ type RocksmqConfig struct {
 	CompactionInterval ParamItem `refreshable:"false"`
 	// TickerTimeInSeconds is the time of expired check, default 10 minutes
 	TickerTimeInSeconds ParamItem `refreshable:"false"`
+	// CompressionTypes is compression type of each level
+	// len of CompressionTypes means num of rocksdb level.
+	// only support {0,7}, 0 means no compress, 7 means zstd
+	// default [0,7].
+	CompressionTypes ParamItem `refreshable:"false"`
 }
 
 func (r *RocksmqConfig) Init(base *BaseTable) {
@@ -651,6 +656,13 @@ please adjust in embedded Milvus: /tmp/milvus/rdb_data`,
 		Version:      "2.2.2",
 	}
 	r.TickerTimeInSeconds.Init(base.mgr)
+
+	r.CompressionTypes = ParamItem{
+		Key:          "rocksmq.compressionTypes",
+		DefaultValue: "0,0,7,7,7",
+		Version:      "2.2.12",
+	}
+	r.CompressionTypes.Init(base.mgr)
 }
 
 // NatsmqConfig describes the configuration options for the Nats message queue
@@ -665,6 +677,9 @@ type NatsmqConfig struct {
 	ServerMonitorLogTime      ParamItem `refreshable:"false"`
 	ServerMonitorLogFile      ParamItem `refreshable:"false"`
 	ServerMonitorLogSizeLimit ParamItem `refreshable:"false"`
+	ServerRetentionMaxAge     ParamItem `refreshable:"true"`
+	ServerRetentionMaxBytes   ParamItem `refreshable:"true"`
+	ServerRetentionMaxMsgs    ParamItem `refreshable:"true"`
 }
 
 // Init sets up a new NatsmqConfig instance using the provided BaseTable
@@ -749,6 +764,31 @@ func (r *NatsmqConfig) Init(base *BaseTable) {
 		Export:       true,
 	}
 	r.ServerMonitorLogSizeLimit.Init(base.mgr)
+
+	r.ServerRetentionMaxAge = ParamItem{
+		Key:          "natsmq.server.retention.maxAge",
+		Version:      "2.3.0",
+		DefaultValue: "4320",
+		Doc:          `Maximum age of any message in the P-channel`,
+		Export:       true,
+	}
+	r.ServerRetentionMaxAge.Init(base.mgr)
+	r.ServerRetentionMaxBytes = ParamItem{
+		Key:          "natsmq.server.retention.maxBytes",
+		Version:      "2.3.0",
+		DefaultValue: "",
+		Doc:          `How many bytes the single P-channel may contain. Removing oldest messages if the P-channel exceeds this size`,
+		Export:       true,
+	}
+	r.ServerRetentionMaxBytes.Init(base.mgr)
+	r.ServerRetentionMaxMsgs = ParamItem{
+		Key:          "natsmq.server.retention.maxMsgs",
+		Version:      "2.3.0",
+		DefaultValue: "",
+		Doc:          `How many message the single P-channel may contain. Removing oldest messages if the P-channel exceeds this limit`,
+		Export:       true,
+	}
+	r.ServerRetentionMaxMsgs.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -764,6 +804,7 @@ type MinioConfig struct {
 	UseIAM          ParamItem `refreshable:"false"`
 	CloudProvider   ParamItem `refreshable:"false"`
 	IAMEndpoint     ParamItem `refreshable:"false"`
+	LogLevel        ParamItem `refreshable:"false"`
 }
 
 func (p *MinioConfig) Init(base *BaseTable) {
@@ -880,4 +921,12 @@ Leave it empty if you want to use AWS default endpoint`,
 		Export: true,
 	}
 	p.IAMEndpoint.Init(base.mgr)
+	p.LogLevel = ParamItem{
+		Key:          "minio.logLevel",
+		DefaultValue: DefaultMinioLogLevel,
+		Version:      "2.3.0",
+		Doc:          `Log level for aws sdk log. Supported level:  off, fatal, error, warn, info, debug, trace`,
+		Export:       true,
+	}
+	p.LogLevel.Init(base.mgr)
 }

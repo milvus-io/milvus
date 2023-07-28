@@ -958,3 +958,7 @@ func (s *Server) DropDatabase(ctx context.Context, request *milvuspb.DropDatabas
 func (s *Server) ListDatabases(ctx context.Context, request *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error) {
 	return s.proxy.ListDatabases(ctx, request)
 }
+
+func (s *Server) AllocTimestamp(ctx context.Context, req *milvuspb.AllocTimestampRequest) (*milvuspb.AllocTimestampResponse, error) {
+	return s.proxy.AllocTimestamp(ctx, req)
+}

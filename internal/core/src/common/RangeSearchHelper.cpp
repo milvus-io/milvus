@@ -125,7 +125,7 @@ CheckRangeSearchParam(float radius,
     } else {
         AssertInfo(range_filter < radius,
                    "range_filter must be less than radius for "
-                   "L2/HAMMING/JACCARD/TANIMOTO");
+                   "L2/HAMMING/JACCARD");
     }
 }
 

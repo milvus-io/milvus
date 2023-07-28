@@ -31,7 +31,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
@@ -180,6 +182,35 @@ func (node *QueryNode) GetStatistics(ctx context.Context, req *querypb.GetStatis
 	return ret, nil
 }
 
+func (node *QueryNode) composeIndexMeta(indexInfos []*indexpb.IndexInfo, schema *schemapb.CollectionSchema) *segcorepb.CollectionIndexMeta {
+	fieldIndexMetas := make([]*segcorepb.FieldIndexMeta, 0)
+	for _, info := range indexInfos {
+		fieldIndexMetas = append(fieldIndexMetas, &segcorepb.FieldIndexMeta{
+			CollectionID:    info.GetCollectionID(),
+			FieldID:         info.GetFieldID(),
+			IndexName:       info.GetIndexName(),
+			TypeParams:      info.GetTypeParams(),
+			IndexParams:     info.GetIndexParams(),
+			IsAutoIndex:     info.GetIsAutoIndex(),
+			UserIndexParams: info.GetUserIndexParams(),
+		})
+	}
+	sizePerRecord, err := typeutil.EstimateSizePerRecord(schema)
+	maxIndexRecordPerSegment := int64(0)
+	if err != nil || sizePerRecord == 0 {
+		log.Warn("failed to transfer segment size to collection, because failed to estimate size per record", zap.Error(err))
+	} else {
+		threshold := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024
+		proportion := paramtable.Get().DataCoordCfg.SegmentSealProportion.GetAsFloat()
+		maxIndexRecordPerSegment = int64(threshold * proportion / float64(sizePerRecord))
+	}
+
+	return &segcorepb.CollectionIndexMeta{
+		IndexMetas:       fieldIndexMetas,
+		MaxIndexRowCount: maxIndexRecordPerSegment,
+	}
+}
+
 // WatchDmChannels create consumers on dmChannels to receive Incremental data，which is the important part of real-time query
 func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {
 	channel := req.GetInfos()[0]
@@ -229,31 +260,8 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		return util.SuccessStatus(), nil
 	}
 
-	fieldIndexMetas := make([]*segcorepb.FieldIndexMeta, 0)
-	for _, info := range req.GetIndexInfoList() {
-		fieldIndexMetas = append(fieldIndexMetas, &segcorepb.FieldIndexMeta{
-			CollectionID:    info.GetCollectionID(),
-			FieldID:         info.GetFieldID(),
-			IndexName:       info.GetIndexName(),
-			TypeParams:      info.GetTypeParams(),
-			IndexParams:     info.GetIndexParams(),
-			IsAutoIndex:     info.GetIsAutoIndex(),
-			UserIndexParams: info.GetUserIndexParams(),
-		})
-	}
-	sizePerRecord, err := typeutil.EstimateSizePerRecord(req.Schema)
-	maxIndexRecordPerSegment := int64(0)
-	if err != nil || sizePerRecord == 0 {
-		log.Warn("failed to transfer segment size to collection, because failed to estimate size per record", zap.Error(err))
-	} else {
-		threshold := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024
-		proportion := paramtable.Get().DataCoordCfg.SegmentSealProportion.GetAsFloat()
-		maxIndexRecordPerSegment = int64(threshold * proportion / float64(sizePerRecord))
-	}
-	node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(), &segcorepb.CollectionIndexMeta{
-		IndexMetas:       fieldIndexMetas,
-		MaxIndexRowCount: maxIndexRecordPerSegment,
-	}, req.GetLoadMeta())
+	node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
+		node.composeIndexMeta(req.GetIndexInfoList(), req.Schema), req.GetLoadMeta())
 	collection := node.manager.Collection.Get(req.GetCollectionID())
 	collection.SetMetricType(req.GetLoadMeta().GetMetricType())
 	delegator, err := delegator.NewShardDelegator(req.GetCollectionID(), req.GetReplicaID(), channel.GetChannelName(), req.GetVersion(),
@@ -460,8 +468,12 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 	if req.GetLoadScope() == querypb.LoadScope_Delta {
 		return node.loadDeltaLogs(ctx, req), nil
 	}
+	if req.GetLoadScope() == querypb.LoadScope_Index {
+		return node.loadIndex(ctx, req), nil
+	}
 
-	node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(), nil, req.GetLoadMeta())
+	node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
+		node.composeIndexMeta(req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())
 	defer node.manager.Collection.Unref(req.GetCollectionID(), 1)
 
 	// Actual load segment
@@ -730,10 +742,8 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.SuccessLabel, metrics.FromLeader).Inc()
 
 	result := task.Result()
-	if result.CostAggregation != nil {
-		// update channel's response time
-		result.CostAggregation.ResponseTime = latency.Milliseconds()
-	}
+	result.GetCostAggregation().ResponseTime = tr.ElapseSpan().Milliseconds()
+	result.GetCostAggregation().TotalNQ = node.scheduler.GetWaitingTaskTotalNQ()
 	return result, nil
 }
 
@@ -754,6 +764,8 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
 		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
 		zap.Uint64("timeTravel", req.GetReq().GetTravelTimestamp()))
+
+	tr := timerecord.NewTimeRecorderWithTrace(ctx, "SearchRequest")
 
 	if !node.lifetime.Add(commonpbutil.IsHealthy) {
 		msg := fmt.Sprintf("query node %d is not ready", paramtable.GetNodeID())
@@ -832,7 +844,7 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		return failRet, nil
 	}
 
-	tr := timerecord.NewTimeRecorderWithTrace(ctx, "searchRequestReduce")
+	tr.RecordSpan()
 	result, err := segments.ReduceSearchResults(ctx, toReduceResults, req.Req.GetNq(), req.Req.GetTopk(), req.Req.GetMetricType())
 	if err != nil {
 		log.Warn("failed to reduce search results", zap.Error(err))
@@ -840,18 +852,17 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		failRet.Status.Reason = err.Error()
 		return failRet, nil
 	}
+	reduceLatency := tr.RecordSpan()
 	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.ReduceShards).
-		Observe(float64(tr.ElapseSpan().Milliseconds()))
+		Observe(float64(reduceLatency.Milliseconds()))
 
 	collector.Rate.Add(metricsinfo.NQPerSecond, float64(req.GetReq().GetNq()))
 	collector.Rate.Add(metricsinfo.SearchThroughput, float64(proto.Size(req)))
 	metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.SearchLabel).
 		Add(float64(proto.Size(req)))
 
-	if result.CostAggregation != nil {
-		// update channel's response time
-		currentTotalNQ := node.scheduler.GetWaitingTaskTotalNQ()
-		result.CostAggregation.TotalNQ = currentTotalNQ
+	if result.GetCostAggregation() != nil {
+		result.GetCostAggregation().ResponseTime = tr.ElapseSpan().Milliseconds()
 	}
 	return result, nil
 }
@@ -892,7 +903,18 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 	defer cancel()
 
 	tr := timerecord.NewTimeRecorder("querySegments")
-	results, err := node.querySegments(queryCtx, req)
+	collection := node.manager.Collection.Get(req.Req.GetCollectionID())
+	if collection == nil {
+		return nil, merr.WrapErrCollectionNotFound(req.Req.GetCollectionID())
+	}
+
+	// Send task to scheduler and wait until it finished.
+	task := tasks.NewQueryTask(queryCtx, collection, node.manager, req)
+	if err := node.scheduler.Add(task); err != nil {
+		log.Warn("failed to add query task into scheduler", zap.Error(err))
+		return nil, err
+	}
+	err := task.Wait()
 	if err != nil {
 		log.Warn("failed to query channel", zap.Error(err))
 		failRet.Status.Reason = err.Error()
@@ -911,19 +933,17 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 	latency := tr.ElapseSpan()
 	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.SuccessLabel, metrics.FromLeader).Inc()
-	results.CostAggregation = &internalpb.CostAggregation{
-		ServiceTime:  latency.Milliseconds(),
-		ResponseTime: latency.Milliseconds(),
-		TotalNQ:      0,
-	}
-	return results, nil
+	result := task.Result()
+	result.GetCostAggregation().ResponseTime = latency.Milliseconds()
+	result.GetCostAggregation().TotalNQ = node.scheduler.GetWaitingTaskTotalNQ()
+	return result, nil
 }
 
 // Query performs replica query tasks.
 func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
 	if req.FromShardLeader {
 		// for compatible with rolling upgrade from version before v2.2.9
-		return node.querySegments(ctx, req)
+		return node.QuerySegments(ctx, req)
 	}
 
 	log := log.Ctx(ctx).With(
@@ -938,6 +958,7 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		zap.Uint64("travelTimestamp", req.GetReq().GetTravelTimestamp()),
 		zap.Bool("isCount", req.GetReq().GetIsCount()),
 	)
+	tr := timerecord.NewTimeRecorderWithTrace(ctx, "QueryRequest")
 
 	if !node.lifetime.Add(commonpbutil.IsHealthy) {
 		msg := fmt.Sprintf("query node %d is not ready", paramtable.GetNodeID())
@@ -988,24 +1009,23 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		return WrapRetrieveResult(commonpb.ErrorCode_UnexpectedError, "failed to query channel", err), nil
 	}
 
-	tr := timerecord.NewTimeRecorderWithTrace(ctx, "queryRequestReduce")
+	tr.RecordSpan()
 	reducer := segments.CreateInternalReducer(req, node.manager.Collection.Get(req.GetReq().GetCollectionID()).Schema())
 	ret, err := reducer.Reduce(ctx, toMergeResults)
 	if err != nil {
 		return WrapRetrieveResult(commonpb.ErrorCode_UnexpectedError, "failed to query channel", err), nil
 	}
+	reduceLatency := tr.RecordSpan()
 	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.ReduceShards).
-		Observe(float64(tr.ElapseSpan().Milliseconds()))
+		Observe(float64(reduceLatency.Milliseconds()))
 
 	if !req.FromShardLeader {
 		collector.Rate.Add(metricsinfo.NQPerSecond, 1)
 		metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel).Add(float64(proto.Size(req)))
 	}
 
-	if ret.CostAggregation != nil {
-		// update channel's response time
-		currentTotalNQ := node.scheduler.GetWaitingTaskTotalNQ()
-		ret.CostAggregation.TotalNQ = currentTotalNQ
+	if ret.GetCostAggregation() != nil {
+		ret.GetCostAggregation().ResponseTime = tr.ElapseSpan().Milliseconds()
 	}
 	return ret, nil
 }
@@ -1259,7 +1279,20 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 		case querypb.SyncType_Set:
 			addSegments[action.GetNodeID()] = append(addSegments[action.GetNodeID()], action.GetInfo())
 		case querypb.SyncType_UpdateVersion:
-			shardDelegator.SyncTargetVersion(action.GetTargetVersion(), action.GetGrowingInTarget(), action.GetSealedInTarget())
+			pipeline := node.pipelineManager.Get(req.GetChannel())
+			if pipeline != nil {
+				droppedInfos := lo.Map(action.GetDroppedInTarget(), func(id int64, _ int) *datapb.SegmentInfo {
+					return &datapb.SegmentInfo{
+						ID: id,
+						DmlPosition: &msgpb.MsgPosition{
+							Timestamp: typeutil.MaxTimestamp,
+						},
+					}
+				})
+				pipeline.ExcludedSegments(droppedInfos...)
+			}
+			shardDelegator.SyncTargetVersion(action.GetTargetVersion(), action.GetGrowingInTarget(),
+				action.GetSealedInTarget(), action.GetDroppedInTarget())
 		default:
 			return &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,

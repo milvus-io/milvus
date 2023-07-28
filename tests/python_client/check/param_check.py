@@ -242,5 +242,7 @@ def output_field_value_check(search_res, original):
                 for order in range(0, len(entity[field]), 4):
                     assert abs(original[field][_id][order] - entity[field][order]) < ct.epsilon
             else:
-                assert original[field][_id] == entity[field]
+                num = original[original[ct.default_int64_field_name] == _id].index.to_list()[0]
+                assert original[field][num] == entity[field]
+
     return True

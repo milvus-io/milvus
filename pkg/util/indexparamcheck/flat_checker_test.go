@@ -4,6 +4,8 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/milvus-io/milvus/pkg/util/metric"
+
 	"github.com/stretchr/testify/assert"
 )
 
@@ -11,37 +13,25 @@ func Test_flatChecker_CheckTrain(t *testing.T) {
 
 	p1 := map[string]string{
 		DIM:    strconv.Itoa(128),
-		Metric: L2,
+		Metric: metric.L2,
 	}
 	p2 := map[string]string{
 		DIM:    strconv.Itoa(128),
-		Metric: IP,
+		Metric: metric.IP,
 	}
 	p3 := map[string]string{
 		DIM:    strconv.Itoa(128),
-		Metric: COSINE,
+		Metric: metric.COSINE,
 	}
-
 	p4 := map[string]string{
 		DIM:    strconv.Itoa(128),
-		Metric: HAMMING,
+		Metric: metric.HAMMING,
 	}
 	p5 := map[string]string{
 		DIM:    strconv.Itoa(128),
-		Metric: JACCARD,
+		Metric: metric.JACCARD,
 	}
-	p6 := map[string]string{
-		DIM:    strconv.Itoa(128),
-		Metric: TANIMOTO,
-	}
-	p7 := map[string]string{
-		DIM:    strconv.Itoa(128),
-		Metric: SUBSTRUCTURE,
-	}
-	p8 := map[string]string{
-		DIM:    strconv.Itoa(128),
-		Metric: SUPERSTRUCTURE,
-	}
+
 	cases := []struct {
 		params   map[string]string
 		errIsNil bool
@@ -51,9 +41,6 @@ func Test_flatChecker_CheckTrain(t *testing.T) {
 		{p3, true},
 		{p4, false},
 		{p5, false},
-		{p6, false},
-		{p7, false},
-		{p8, false},
 	}
 
 	c := newFlatChecker()

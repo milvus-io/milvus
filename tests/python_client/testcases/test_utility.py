@@ -269,7 +269,7 @@ class TestUtilityParams(TestcaseBase):
         collection_w = self.init_collection_general(prefix)[0]
         log.debug(collection_w.num_entities)
         collection_w.load()
-        err_msg = {ct.err_code: 1, ct.err_msg: f"partitionID of partitionName:{ct.default_tag} can not be find"}
+        err_msg = {ct.err_code: 15, ct.err_msg: f"partition not found"}
         self.utility_wrap.loading_progress(collection_w.name, partition_names,
                                            check_task=CheckTasks.err_res, check_items=err_msg)
 
@@ -299,7 +299,7 @@ class TestUtilityParams(TestcaseBase):
         self.utility_wrap.wait_for_loading_complete(
             collection_w.name, partition_names=[ct.default_tag],
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1, ct.err_msg: f'partitionID of partitionName:{ct.default_tag} can not be find'})
+            check_items={ct.err_code: 15, ct.err_msg: f'partitionID of partitionName:{ct.default_tag} can not be find'})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_drop_collection_not_existed(self):
@@ -676,7 +676,7 @@ class TestUtilityBase(TestcaseBase):
     def metric(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=["HAMMING", "TANIMOTO"])
+    @pytest.fixture(scope="function", params=["HAMMING", "JACCARD"])
     def metric_binary(self, request):
         yield request.param
 

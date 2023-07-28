@@ -63,7 +63,7 @@ func (b *CoordinatorBroker) DescribeCollectionInternal(ctx context.Context, coll
 		CollectionID: collectionID,
 	})
 	if err = VerifyResponse(resp, err); err != nil {
-		log.Error("DescribeCollectionInternal failed",
+		log.Warn("DescribeCollectionInternal failed",
 			zap.Int64("collectionID", collectionID),
 			zap.Error(err))
 		return nil, err
@@ -85,7 +85,7 @@ func (b *CoordinatorBroker) ShowPartitionsInternal(ctx context.Context, collecti
 		CollectionID: collectionID,
 	})
 	if err = VerifyResponse(resp, err); err != nil {
-		log.Error("ShowPartitionsInternal failed",
+		log.Warn("ShowPartitionsInternal failed",
 			zap.Int64("collectionID", collectionID),
 			zap.Error(err))
 		return nil, err

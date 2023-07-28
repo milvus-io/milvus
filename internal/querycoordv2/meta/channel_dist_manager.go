@@ -119,6 +119,27 @@ func (m *ChannelDistManager) GetShardLeadersByReplica(replica *Replica) map[stri
 	return ret
 }
 
+func (m *ChannelDistManager) GetChannelDistByReplica(replica *Replica) map[string][]int64 {
+	m.rwmutex.RLock()
+	defer m.rwmutex.RUnlock()
+
+	ret := make(map[string][]int64)
+	for _, node := range replica.GetNodes() {
+		channels := m.channels[node]
+		for _, dmc := range channels {
+			if dmc.GetCollectionID() == replica.GetCollectionID() {
+				channelName := dmc.GetChannelName()
+				_, ok := ret[channelName]
+				if !ok {
+					ret[channelName] = make([]int64, 0)
+				}
+				ret[channelName] = append(ret[channelName], node)
+			}
+		}
+	}
+	return ret
+}
+
 func (m *ChannelDistManager) GetByCollection(collectionID UniqueID) []*DmChannel {
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()

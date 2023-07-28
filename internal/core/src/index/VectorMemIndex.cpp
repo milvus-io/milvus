@@ -17,6 +17,10 @@
 #include "index/VectorMemIndex.h"
 
 #include <cmath>
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include "fmt/format.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
 #include "exceptions/EasyAssert.h"
@@ -29,6 +33,10 @@
 #include "common/Consts.h"
 #include "common/RangeSearchHelper.h"
 #include "common/Utils.h"
+#include "log/Log.h"
+#include "storage/FieldData.h"
+#include "storage/MemFileManagerImpl.h"
+#include "storage/ThreadPool.h"
 
 namespace milvus::index {
 
@@ -95,17 +103,44 @@ VectorMemIndex::Load(const Config& config) {
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load index");
-    auto index_datas = file_manager_->LoadIndexToMemory(index_files.value());
-    AssembleIndexDatas(index_datas);
+
+    auto parallel_degree =
+        static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+
+    std::map<std::string, storage::FieldDataChannelPtr> channels;
+    for (const auto& file : index_files.value()) {
+        auto key = file.substr(file.find_last_of('/') + 1);
+        LOG_SEGCORE_INFO_ << "loading index file " << key;
+        if (channels.find(key) == channels.end()) {
+            channels.emplace(std::move(key),
+                             std::make_shared<storage::FieldDataChannel>(
+                                 parallel_degree * 2));
+        }
+    }
+
+    auto& pool = ThreadPool::GetInstance();
+    auto future = pool.Submit(
+        [&] { file_manager_->LoadFileStream(index_files.value(), channels); });
+
+    LOG_SEGCORE_INFO_ << "assemble index data...";
+    std::unordered_map<std::string, storage::FieldDataPtr> result;
+    AssembleIndexDatas(channels, result);
+    LOG_SEGCORE_INFO_ << "assemble index data done";
+
+    LOG_SEGCORE_INFO_ << "construct binary set...";
     BinarySet binary_set;
-    for (auto& [key, data] : index_datas) {
+    for (auto& [key, data] : result) {
+        LOG_SEGCORE_INFO_ << "add index data to binary set: " << key;
         auto size = data->Size();
         auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
         auto buf = std::shared_ptr<uint8_t[]>(
             (uint8_t*)const_cast<void*>(data->Data()), deleter);
         binary_set.Append(key, buf, size);
     }
+
+    LOG_SEGCORE_INFO_ << "load index into Knowhere...";
     LoadWithoutAssemble(binary_set, config);
+    LOG_SEGCORE_INFO_ << "load vector index done";
 }
 
 void

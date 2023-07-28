@@ -19,6 +19,7 @@ package storage
 import (
 	"context"
 	"io"
+	"path"
 	"sync"
 	"time"
 
@@ -91,9 +92,10 @@ func (vcm *VectorChunkManager) initCache(ctx context.Context) error {
 		if err != nil {
 			log.Error("close mmap file failed", zap.Any("file", filePath))
 		}
-		err = vcm.cacheStorage.Remove(ctx, filePath)
+		localPath := path.Join(vcm.cacheStorage.RootPath(), filePath)
+		err = vcm.cacheStorage.Remove(ctx, localPath)
 		if err != nil {
-			log.Error("cache storage remove file failed", zap.Any("file", filePath))
+			log.Error("cache storage remove file failed", zap.Any("file", localPath))
 		}
 
 		vcm.cacheSizeMutex.Lock()
@@ -173,12 +175,13 @@ func (vcm *VectorChunkManager) readFile(ctx context.Context, filePath string) (*
 	if err != nil {
 		return nil, err
 	}
-	err = vcm.cacheStorage.Write(ctx, filePath, results)
+	localPath := path.Join(vcm.cacheStorage.RootPath(), filePath)
+	err = vcm.cacheStorage.Write(ctx, localPath, results)
 	if err != nil {
 		return nil, err
 	}
 
-	r, err := vcm.cacheStorage.Mmap(ctx, filePath)
+	r, err := vcm.cacheStorage.Mmap(ctx, localPath)
 	if err != nil {
 		return nil, err
 	}

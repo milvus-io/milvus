@@ -61,10 +61,6 @@ func TestClient_Concurrency(t *testing.T) {
 	wg.Wait()
 	expected := int(total - deregisterCount.Load())
 
-	var n int
-	client1.(*client).managers.Range(func(_, _ any) bool {
-		n++
-		return true
-	})
+	n := client1.(*client).managers.Len()
 	assert.Equal(t, expected, n)
 }

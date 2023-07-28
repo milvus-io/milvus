@@ -21,7 +21,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
@@ -48,7 +50,7 @@ type Executor struct {
 	// Merge load segment requests
 	merger *Merger[segmentIndex, *querypb.LoadSegmentsRequest]
 
-	executingTasks   sync.Map
+	executingTasks   *typeutil.ConcurrentSet[string] // task index
 	executingTaskNum atomic.Int32
 }
 
@@ -68,7 +70,7 @@ func NewExecutor(meta *meta.Meta,
 		nodeMgr:   nodeMgr,
 		merger:    NewMerger[segmentIndex, *querypb.LoadSegmentsRequest](),
 
-		executingTasks: sync.Map{},
+		executingTasks: typeutil.NewConcurrentSet[string](),
 	}
 }
 
@@ -86,12 +88,12 @@ func (ex *Executor) Stop() {
 // does nothing and returns false if the action is already committed,
 // returns true otherwise.
 func (ex *Executor) Execute(task Task, step int) bool {
-	_, exist := ex.executingTasks.LoadOrStore(task.ID(), struct{}{})
+	exist := !ex.executingTasks.Insert(task.Index())
 	if exist {
 		return false
 	}
 	if ex.executingTaskNum.Inc() > Params.QueryCoordCfg.TaskExecutionCap.GetAsInt32() {
-		ex.executingTasks.Delete(task.ID())
+		ex.executingTasks.Remove(task.Index())
 		ex.executingTaskNum.Dec()
 		return false
 	}
@@ -116,11 +118,6 @@ func (ex *Executor) Execute(task Task, step int) bool {
 	}()
 
 	return true
-}
-
-func (ex *Executor) Exist(taskID int64) bool {
-	_, ok := ex.executingTasks.Load(taskID)
-	return ok
 }
 
 func (ex *Executor) scheduleRequests() {
@@ -207,13 +204,13 @@ func (ex *Executor) removeTask(task Task, step int) {
 			zap.Error(task.Err()))
 	}
 
-	ex.executingTasks.Delete(task.ID())
+	ex.executingTasks.Remove(task.Index())
 	ex.executingTaskNum.Dec()
 }
 
 func (ex *Executor) executeSegmentAction(task *SegmentTask, step int) {
 	switch task.Actions()[step].Type() {
-	case ActionTypeGrow:
+	case ActionTypeGrow, ActionTypeUpdate:
 		ex.loadSegment(task, step)
 
 	case ActionTypeReduce:
@@ -225,6 +222,7 @@ func (ex *Executor) executeSegmentAction(task *SegmentTask, step int) {
 // not really executes the request
 func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	action := task.Actions()[step].(*SegmentAction)
+	defer action.rpcReturned.Store(true)
 	log := log.With(
 		zap.Int64("taskID", task.ID()),
 		zap.Int64("collectionID", task.CollectionID()),
@@ -268,10 +266,21 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	segment := resp.GetInfos()[0]
 	indexes, err := ex.broker.GetIndexInfo(ctx, task.CollectionID(), segment.GetID())
 	if err != nil {
-		log.Warn("failed to get index of segment", zap.Error(err))
-		return err
+		if !errors.Is(err, merr.ErrIndexNotFound) {
+			log.Warn("failed to get index of segment", zap.Error(err))
+			return err
+		}
+		indexes = nil
 	}
-	loadInfo := utils.PackSegmentLoadInfo(resp, indexes)
+
+	readableVersion := int64(0)
+	switch GetTaskType(task) {
+	case TaskTypeGrow:
+		readableVersion = ex.targetMgr.GetCollectionTargetVersion(task.CollectionID(), meta.NextTarget)
+	case TaskTypeMove, TaskTypeUpdate:
+		readableVersion = ex.targetMgr.GetCollectionTargetVersion(task.CollectionID(), meta.CurrentTarget)
+	}
+	loadInfo := utils.PackSegmentLoadInfo(resp, indexes, readableVersion)
 
 	// Get shard leader for the given replica and segment
 	leader, ok := getShardLeader(ex.meta.ReplicaManager, ex.dist, task.CollectionID(), action.Node(), segment.GetInsertChannel())
@@ -283,7 +292,14 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	}
 	log = log.With(zap.Int64("shardLeader", leader))
 
-	req := packLoadSegmentRequest(task, action, schema, loadMeta, loadInfo)
+	//Get collection index info
+	indexInfo, err := ex.broker.DescribeIndex(ctx, task.CollectionID())
+	if err != nil {
+		log.Warn("fail to get index meta of collection")
+		return err
+	}
+
+	req := packLoadSegmentRequest(task, action, schema, loadMeta, loadInfo, indexInfo)
 	loadTask := NewLoadSegmentsTask(task, step, req)
 	ex.merger.Add(loadTask)
 	log.Info("load segment task committed")
@@ -294,7 +310,7 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 	defer ex.removeTask(task, step)
 	startTs := time.Now()
 	action := task.Actions()[step].(*SegmentAction)
-	defer action.isReleaseCommitted.Store(true)
+	defer action.rpcReturned.Store(true)
 
 	log := log.With(
 		zap.Int64("taskID", task.ID()),

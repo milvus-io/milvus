@@ -465,7 +465,7 @@ func TestGetInsertBinlogPaths(t *testing.T) {
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
-	t.Run("with invalid segment id", func(t *testing.T) {
+	t.Run("with invalid segmentID", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
@@ -600,7 +600,7 @@ func TestGetSegmentInfo(t *testing.T) {
 		assert.NoError(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
-	t.Run("with wrong segment id", func(t *testing.T) {
+	t.Run("with wrong segmentID", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
@@ -662,7 +662,7 @@ func TestGetSegmentInfo(t *testing.T) {
 
 		pos := &msgpb.MsgPosition{
 			ChannelName: mockPChannel,
-			MsgID:       []byte{},
+			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
 			Timestamp:   1000,
 		}
 
@@ -1780,6 +1780,7 @@ func TestGetChannelSeekPosition(t *testing.T) {
 			Data: []byte{4, 5, 6},
 		},
 	}
+	msgID := []byte{0, 0, 0, 0, 0, 0, 0, 0}
 
 	tests := []struct {
 		testName     string
@@ -1790,16 +1791,16 @@ func TestGetChannelSeekPosition(t *testing.T) {
 		expectedPos  *msgpb.MsgPosition
 	}{
 		{"test-with-channelCP",
-			&msgpb.MsgPosition{ChannelName: "ch1", Timestamp: 100},
-			[]*msgpb.MsgPosition{{ChannelName: "ch1", Timestamp: 50}, {ChannelName: "ch1", Timestamp: 200}},
+			&msgpb.MsgPosition{ChannelName: "ch1", Timestamp: 100, MsgID: msgID},
+			[]*msgpb.MsgPosition{{ChannelName: "ch1", Timestamp: 50, MsgID: msgID}, {ChannelName: "ch1", Timestamp: 200, MsgID: msgID}},
 			startPos1,
-			"ch1", &msgpb.MsgPosition{ChannelName: "ch1", Timestamp: 100}},
+			"ch1", &msgpb.MsgPosition{ChannelName: "ch1", Timestamp: 100, MsgID: msgID}},
 
 		{"test-with-segmentDMLPos",
 			nil,
-			[]*msgpb.MsgPosition{{ChannelName: "ch1", Timestamp: 50}, {ChannelName: "ch1", Timestamp: 200}},
+			[]*msgpb.MsgPosition{{ChannelName: "ch1", Timestamp: 50, MsgID: msgID}, {ChannelName: "ch1", Timestamp: 200, MsgID: msgID}},
 			startPos1,
-			"ch1", &msgpb.MsgPosition{ChannelName: "ch1", Timestamp: 50}},
+			"ch1", &msgpb.MsgPosition{ChannelName: "ch1", Timestamp: 50, MsgID: msgID}},
 
 		{"test-with-collStartPos",
 			nil,
@@ -2559,6 +2560,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		err := svr.meta.UpdateChannelCheckpoint("vchan1", &msgpb.MsgPosition{
 			ChannelName: "vchan1",
 			Timestamp:   10,
+			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
 		})
 		assert.NoError(t, err)
 
@@ -2664,6 +2666,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		err := svr.meta.UpdateChannelCheckpoint("vchan1", &msgpb.MsgPosition{
 			ChannelName: "vchan1",
 			Timestamp:   0,
+			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
 		})
 		assert.NoError(t, err)
 
@@ -2839,6 +2842,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		err := svr.meta.UpdateChannelCheckpoint("vchan1", &msgpb.MsgPosition{
 			ChannelName: "vchan1",
 			Timestamp:   0,
+			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
 		})
 		assert.NoError(t, err)
 
@@ -2880,6 +2884,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		err := svr.meta.UpdateChannelCheckpoint("vchan1", &msgpb.MsgPosition{
 			ChannelName: "vchan1",
 			Timestamp:   0,
+			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
 		})
 		require.NoError(t, err)
 
@@ -2920,6 +2925,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		err := svr.meta.UpdateChannelCheckpoint("vchan1", &msgpb.MsgPosition{
 			ChannelName: "vchan1",
 			Timestamp:   0,
+			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
 		})
 		assert.NoError(t, err)
 
@@ -3837,7 +3843,7 @@ func TestDataCoord_SaveImportSegment(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
 	})
 
-	t.Run("test add segment w/ bad channel name", func(t *testing.T) {
+	t.Run("test add segment w/ bad channelName", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
@@ -3905,6 +3911,7 @@ func TestDataCoordServer_UpdateChannelCheckpoint(t *testing.T) {
 			Position: &msgpb.MsgPosition{
 				ChannelName: mockPChannel,
 				Timestamp:   1000,
+				MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
 			},
 		}
 

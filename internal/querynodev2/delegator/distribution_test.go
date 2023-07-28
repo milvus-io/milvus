@@ -622,7 +622,7 @@ func (s *DistributionSuite) Test_SyncTargetVersion() {
 
 	s.dist.AddGrowing(growing...)
 	s.dist.AddDistributions(sealed...)
-	s.dist.SyncTargetVersion(2, []int64{2, 3}, []int64{6})
+	s.dist.SyncTargetVersion(2, []int64{2, 3}, []int64{6}, []int64{})
 
 	s1, s2, _ := s.dist.GetSegments(true)
 	s.Len(s1[0].Segments, 1)
@@ -633,11 +633,15 @@ func (s *DistributionSuite) Test_SyncTargetVersion() {
 	s.Len(s2, 3)
 
 	s.dist.serviceable.Store(true)
-	s.dist.SyncTargetVersion(2, []int64{222}, []int64{})
+	s.dist.SyncTargetVersion(2, []int64{222}, []int64{}, []int64{})
 	s.True(s.dist.Serviceable())
 
-	s.dist.SyncTargetVersion(2, []int64{}, []int64{333})
+	s.dist.SyncTargetVersion(2, []int64{}, []int64{333}, []int64{})
 	s.False(s.dist.Serviceable())
+
+	s.dist.SyncTargetVersion(2, []int64{}, []int64{333}, []int64{1, 2, 3})
+	_, segments, _ := s.dist.GetSegments(true)
+	s.Len(segments, 0)
 }
 
 func TestDistributionSuite(t *testing.T) {

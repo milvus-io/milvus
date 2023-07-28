@@ -1000,7 +1000,7 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 	tr := timerecord.NewTimeRecorder("HasCollection")
 
 	ts := getTravelTs(in)
-	log := log.Ctx(ctx).With(zap.String("collection name", in.GetCollectionName()),
+	log := log.Ctx(ctx).With(zap.String("collectionName", in.GetCollectionName()),
 		zap.Uint64("ts", ts))
 
 	log.Info("received request to has collection")
@@ -1085,7 +1085,7 @@ func (c *Core) describeCollectionImpl(ctx context.Context, in *milvuspb.Describe
 	tr := timerecord.NewTimeRecorder("DescribeCollection")
 
 	ts := getTravelTs(in)
-	log := log.Ctx(ctx).With(zap.String("collection name", in.GetCollectionName()),
+	log := log.Ctx(ctx).With(zap.String("collectionName", in.GetCollectionName()),
 		zap.String("dbName", in.GetDbName()),
 		zap.Int64("id", in.GetCollectionID()),
 		zap.Uint64("ts", ts),
@@ -1804,7 +1804,7 @@ func (c *Core) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvus
 	var err error
 	if colInfo, err = c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp); err != nil {
 		log.Error("failed to find collection ID from its name",
-			zap.String("collection name", req.GetCollectionName()),
+			zap.String("collectionName", req.GetCollectionName()),
 			zap.Error(err))
 		return nil, err
 	}
@@ -1813,7 +1813,7 @@ func (c *Core) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvus
 	if isBackUp {
 		if len(req.GetPartitionName()) == 0 {
 			log.Info("partition name not specified when backup recovery",
-				zap.String("collection name", req.GetCollectionName()))
+				zap.String("collectionName", req.GetCollectionName()))
 			ret := &milvuspb.ImportResponse{
 				Status: failStatus(commonpb.ErrorCode_UnexpectedError,
 					"partition name not specified when backup"),
@@ -1846,11 +1846,11 @@ func (c *Core) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvus
 	}
 
 	log.Info("RootCoord receive import request",
-		zap.String("collection name", req.GetCollectionName()),
-		zap.Int64("collection ID", cID),
+		zap.String("collectionName", req.GetCollectionName()),
+		zap.Int64("collectionID", cID),
 		zap.String("partition name", req.GetPartitionName()),
 		zap.Strings("virtual channel names", req.GetChannelNames()),
-		zap.Int64("partition ID", pID),
+		zap.Int64("partitionID", pID),
 		zap.Int("# of files = ", len(req.GetFiles())),
 	)
 	importJobResp := c.importManager.importJob(ctx, req, cID, pID)

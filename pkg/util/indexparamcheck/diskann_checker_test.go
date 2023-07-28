@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/util/metric"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -12,13 +13,13 @@ import (
 func Test_diskannChecker_CheckTrain(t *testing.T) {
 	validParams := map[string]string{
 		DIM:    strconv.Itoa(128),
-		Metric: L2,
+		Metric: metric.L2,
 	}
 	validParamsBigDim := copyParams(validParams)
 	validParamsBigDim[DIM] = strconv.Itoa(2048)
 
 	invalidParamsWithoutDim := map[string]string{
-		Metric: L2,
+		Metric: metric.L2,
 	}
 
 	invalidParamsSmallDim := copyParams(validParams)
@@ -26,36 +27,23 @@ func Test_diskannChecker_CheckTrain(t *testing.T) {
 
 	p1 := map[string]string{
 		DIM:    strconv.Itoa(128),
-		Metric: L2,
+		Metric: metric.L2,
 	}
 	p2 := map[string]string{
 		DIM:    strconv.Itoa(128),
-		Metric: IP,
+		Metric: metric.IP,
 	}
 	p3 := map[string]string{
 		DIM:    strconv.Itoa(128),
-		Metric: COSINE,
+		Metric: metric.COSINE,
 	}
-
 	p4 := map[string]string{
 		DIM:    strconv.Itoa(128),
-		Metric: HAMMING,
+		Metric: metric.HAMMING,
 	}
 	p5 := map[string]string{
 		DIM:    strconv.Itoa(128),
-		Metric: JACCARD,
-	}
-	p6 := map[string]string{
-		DIM:    strconv.Itoa(128),
-		Metric: TANIMOTO,
-	}
-	p7 := map[string]string{
-		DIM:    strconv.Itoa(128),
-		Metric: SUBSTRUCTURE,
-	}
-	p8 := map[string]string{
-		DIM:    strconv.Itoa(128),
-		Metric: SUPERSTRUCTURE,
+		Metric: metric.JACCARD,
 	}
 
 	cases := []struct {
@@ -71,9 +59,6 @@ func Test_diskannChecker_CheckTrain(t *testing.T) {
 		{p3, true},
 		{p4, false},
 		{p5, false},
-		{p6, false},
-		{p7, false},
-		{p8, false},
 	}
 
 	c := newDiskannChecker()

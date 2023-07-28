@@ -253,6 +253,7 @@ message SegmentLoadInfo {
   string insert_channel = 13;
   msg.MsgPosition start_position = 14;
   msg.MsgPosition delta_position = 15;
+  int64 readableVersion = 16;
 }
 
 message FieldIndexInfo {
@@ -272,6 +273,7 @@ message FieldIndexInfo {
 enum LoadScope {
   Full = 0;
   Delta = 1;
+  Index = 2;
 }
 
 message LoadSegmentsRequest {
@@ -287,6 +289,7 @@ message LoadSegmentsRequest {
   int64 version = 10;
   bool need_transfer = 11;
   LoadScope load_scope = 12;
+  repeated index.IndexInfo index_info_list = 13;
 }
 
 message ReleaseSegmentsRequest {
@@ -562,6 +565,7 @@ message SyncAction {
   repeated int64 growingInTarget = 7;
   repeated int64 sealedInTarget = 8;
   int64 TargetVersion = 9;
+  repeated int64 droppedInTarget  = 10; 
 }
 
 message SyncDistributionRequest {

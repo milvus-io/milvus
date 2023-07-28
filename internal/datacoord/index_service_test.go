@@ -691,6 +691,7 @@ func TestServer_DescribeIndex(t *testing.T) {
 		req      = &indexpb.DescribeIndexRequest{
 			CollectionID: collID,
 			IndexName:    "",
+			Timestamp:    createTS,
 		}
 	)
 

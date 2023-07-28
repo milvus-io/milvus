@@ -75,11 +75,8 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 		return nil, err
 	}
 
-	requestCosts := lo.FilterMap(results, func(result *internalpb.SearchResults, _ int) (*internalpb.CostAggregation, bool) {
-		if result.CostAggregation == nil {
-			return nil, false
-		}
-		return result.CostAggregation, true
+	requestCosts := lo.Map(results, func(result *internalpb.SearchResults, _ int) *internalpb.CostAggregation {
+		return result.GetCostAggregation()
 	})
 	searchResults.CostAggregation = mergeRequestCost(requestCosts)
 

@@ -232,7 +232,7 @@ func (c *ChannelMeta) addSegment(req addSegmentReq) error {
 	err := c.InitPKstats(context.TODO(), seg, req.statsBinLogs, req.recoverTs)
 	if err != nil {
 		log.Error("failed to init bloom filter",
-			zap.Int64("segment ID", req.segID),
+			zap.Int64("segmentID", req.segID),
 			zap.Error(err))
 		return err
 	}
@@ -483,7 +483,7 @@ func (c *ChannelMeta) RollPKstats(segID UniqueID, stat *storage.PrimaryKeyStats)
 	c.segMu.Lock()
 	defer c.segMu.Unlock()
 	seg, ok := c.segments[segID]
-	log.Info("roll pk stats", zap.Int64("segment id", segID))
+	log.Info("roll pk stats", zap.Int64("segmentID", segID))
 	if ok && seg.notFlushed() {
 		pkStat := &storage.PkStatistics{
 			PkFilter: stat.BF,
@@ -591,14 +591,14 @@ func (c *ChannelMeta) updateSegmentRowNumber(segID UniqueID, numRows int64) {
 	c.segMu.Lock()
 	defer c.segMu.Unlock()
 
-	log.Info("updating segment num row", zap.Int64("Segment ID", segID), zap.Int64("numRows", numRows))
+	log.Info("updating segment num row", zap.Int64("segmentID", segID), zap.Int64("numRows", numRows))
 	seg, ok := c.segments[segID]
 	if ok && seg.notFlushed() {
 		seg.numRows += numRows
 		return
 	}
 
-	log.Warn("update segment num row not exist", zap.Int64("segID", segID))
+	log.Warn("update segment num row not exist", zap.Int64("segmentID", segID))
 }
 
 // updateStatistics updates the number of rows of a segment in channel.
@@ -606,14 +606,14 @@ func (c *ChannelMeta) updateSegmentMemorySize(segID UniqueID, memorySize int64) 
 	c.segMu.Lock()
 	defer c.segMu.Unlock()
 
-	log.Info("updating segment memorySize", zap.Int64("Segment ID", segID), zap.Int64("memorySize", memorySize))
+	log.Info("updating segment memorySize", zap.Int64("segmentID", segID), zap.Int64("memorySize", memorySize))
 	seg, ok := c.segments[segID]
 	if ok && seg.notFlushed() {
 		seg.memorySize = memorySize
 		return
 	}
 
-	log.Warn("update segment memorySize not exist", zap.Int64("segID", segID))
+	log.Warn("update segment memorySize not exist", zap.Int64("segmentID", segID))
 }
 
 // getSegmentStatisticsUpdates gives current segment's statistics updates.
@@ -665,12 +665,12 @@ func (c *ChannelMeta) getCollectionSchema(collID UniqueID, ts Timestamp) (*schem
 
 func (c *ChannelMeta) mergeFlushedSegments(ctx context.Context, seg *Segment, planID UniqueID, compactedFrom []UniqueID) error {
 	log := log.Ctx(ctx).With(
-		zap.Int64("segment ID", seg.segmentID),
-		zap.Int64("collection ID", seg.collectionID),
-		zap.Int64("partition ID", seg.partitionID),
+		zap.Int64("segmentID", seg.segmentID),
+		zap.Int64("collectionID", seg.collectionID),
+		zap.Int64("partitionID", seg.partitionID),
 		zap.Int64s("compacted from", compactedFrom),
 		zap.Int64("planID", planID),
-		zap.String("channel name", c.channelName))
+		zap.String("channelName", c.channelName))
 
 	if seg.collectionID != c.collectionID {
 		log.Warn("failed to mergeFlushedSegments, collection mismatch",
@@ -730,10 +730,10 @@ func (c *ChannelMeta) addFlushedSegmentWithPKs(segID, collID, partID UniqueID, n
 	}
 
 	log.Info("Add Flushed segment",
-		zap.Int64("segment ID", segID),
-		zap.Int64("collection ID", collID),
-		zap.Int64("partition ID", partID),
-		zap.String("channel name", c.channelName),
+		zap.Int64("segmentID", segID),
+		zap.Int64("collectionID", collID),
+		zap.Int64("partitionID", partID),
+		zap.String("channelName", c.channelName),
 	)
 
 	seg := &Segment{

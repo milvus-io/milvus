@@ -366,6 +366,7 @@ func (suite *TargetManagerSuite) TestGetSegmentByChannel() {
 			CollectionID:        collectionID,
 			ChannelName:         "channel-1",
 			UnflushedSegmentIds: []int64{1, 2, 3, 4},
+			DroppedSegmentIds:   []int64{11, 22, 33},
 		},
 		{
 			CollectionID:        collectionID,
@@ -394,6 +395,7 @@ func (suite *TargetManagerSuite) TestGetSegmentByChannel() {
 	suite.Len(suite.mgr.GetHistoricalSegmentsByChannel(collectionID, "channel-2", NextTarget), 1)
 	suite.Len(suite.mgr.GetStreamingSegmentsByChannel(collectionID, "channel-1", NextTarget), 4)
 	suite.Len(suite.mgr.GetStreamingSegmentsByChannel(collectionID, "channel-2", NextTarget), 1)
+	suite.Len(suite.mgr.GetDroppedSegmentsByChannel(collectionID, "channel-1", NextTarget), 3)
 }
 
 func TestTargetManager(t *testing.T) {

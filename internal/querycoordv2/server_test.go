@@ -39,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
@@ -412,8 +411,8 @@ func (suite *ServerSuite) expectGetRecoverInfo(collection int64) {
 }
 
 func (suite *ServerSuite) expectLoadAndReleasePartitions(querynode *mocks.MockQueryNode) {
-	querynode.EXPECT().LoadPartitions(mock.Anything, mock.Anything).Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil).Maybe()
-	querynode.EXPECT().ReleasePartitions(mock.Anything, mock.Anything).Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil).Maybe()
+	querynode.EXPECT().LoadPartitions(mock.Anything, mock.Anything).Return(merr.Status(nil), nil).Maybe()
+	querynode.EXPECT().ReleasePartitions(mock.Anything, mock.Anything).Return(merr.Status(nil), nil).Maybe()
 }
 
 func (suite *ServerSuite) expectGetRecoverInfoByMockDataCoord(collection int64, dataCoord *coordMocks.MockDataCoord) {
@@ -506,6 +505,7 @@ func (suite *ServerSuite) hackServer() {
 		suite.server.balancer,
 		suite.server.nodeMgr,
 		suite.server.taskScheduler,
+		suite.server.broker,
 	)
 	suite.server.targetObserver = observers.NewTargetObserver(
 		suite.server.meta,

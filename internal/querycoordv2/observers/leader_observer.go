@@ -150,11 +150,21 @@ func (o *LeaderObserver) checkNeedUpdateTargetVersion(leaderView *meta.LeaderVie
 
 	sealedSegments := o.target.GetHistoricalSegmentsByChannel(leaderView.CollectionID, leaderView.Channel, meta.CurrentTarget)
 	growingSegments := o.target.GetStreamingSegmentsByChannel(leaderView.CollectionID, leaderView.Channel, meta.CurrentTarget)
+	droppedSegments := o.target.GetDroppedSegmentsByChannel(leaderView.CollectionID, leaderView.Channel, meta.CurrentTarget)
+
+	log.Info("Update readable segment version",
+		zap.Int64("collectionID", leaderView.CollectionID),
+		zap.String("channelName", leaderView.Channel),
+		zap.Int64("nodeID", leaderView.ID),
+		zap.Int64("oldVersion", leaderView.TargetVersion),
+		zap.Int64("newVersion", targetVersion),
+	)
 
 	return &querypb.SyncAction{
 		Type:            querypb.SyncType_UpdateVersion,
 		GrowingInTarget: growingSegments.Collect(),
 		SealedInTarget:  lo.Keys(sealedSegments),
+		DroppedInTarget: droppedSegments,
 		TargetVersion:   targetVersion,
 	}
 }
@@ -172,6 +182,13 @@ func (o *LeaderObserver) findNeedLoadedSegments(leaderView *meta.LeaderView, dis
 			continue
 		}
 
+		readableVersion := int64(0)
+		if existInCurrentTarget {
+			readableVersion = o.target.GetCollectionTargetVersion(s.CollectionID, meta.CurrentTarget)
+		} else {
+			readableVersion = o.target.GetCollectionTargetVersion(s.CollectionID, meta.NextTarget)
+		}
+
 		if !ok || version.GetVersion() < s.Version { // Leader misses this segment
 			ctx := context.Background()
 			resp, err := o.broker.GetSegmentInfo(ctx, s.GetID())
@@ -179,7 +196,7 @@ func (o *LeaderObserver) findNeedLoadedSegments(leaderView *meta.LeaderView, dis
 				log.Warn("failed to get segment info from DataCoord", zap.Error(err))
 				continue
 			}
-			loadInfo := utils.PackSegmentLoadInfo(resp, nil)
+			loadInfo := utils.PackSegmentLoadInfo(resp, nil, readableVersion)
 
 			ret = append(ret, &querypb.SyncAction{
 				Type:        querypb.SyncType_Set,

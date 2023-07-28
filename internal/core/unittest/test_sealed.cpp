@@ -1127,7 +1127,7 @@ TEST(Sealed, BF) {
     auto result = segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
     auto ves = SearchResultToVector(*result);
     // first: offset, second: distance
-    EXPECT_GT(ves[0].first, 0);
+    EXPECT_GE(ves[0].first, 0);
     EXPECT_LE(ves[0].first, N);
     EXPECT_LE(ves[0].second, dim);
 

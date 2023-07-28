@@ -122,12 +122,13 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, workload ChannelWorkload
 			log.Warn("no available shard delegator found",
 				zap.Int64s("nodes", nodes),
 				zap.Int64s("excluded", excludeNodes.Collect()))
-			return -1, merr.WrapErrNoAvailableNode("all available nodes has been excluded")
+			return -1, merr.WrapErrServiceUnavailable("no available shard delegator found")
 		}
 
 		targetNode, err = lb.balancer.SelectNode(ctx, availableNodes, workload.nq)
 		if err != nil {
 			log.Warn("failed to select shard",
+				zap.Int64s("availableNodes", availableNodes),
 				zap.Error(err))
 			return -1, err
 		}
@@ -186,6 +187,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad) error {
 	dml2leaders, err := globalMetaCache.GetShards(ctx, true, workload.db, workload.collection)
 	if err != nil {
+		log.Ctx(ctx).Warn("failed to get shards", zap.Error(err))
 		return err
 	}
 

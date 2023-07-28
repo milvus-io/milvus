@@ -30,7 +30,7 @@ import (
 )
 
 type Status = int32
-type Priority = int32
+type Priority int32
 
 const (
 	TaskStatusCreated Status = iota + 1
@@ -40,10 +40,20 @@ const (
 )
 
 const (
-	TaskPriorityLow    int32 = iota // for balance checker
-	TaskPriorityNormal              // for segment checker
-	TaskPriorityHigh                // for channel checker
+	TaskPriorityLow    Priority = iota // for balance checker
+	TaskPriorityNormal                 // for segment checker
+	TaskPriorityHigh                   // for channel checker
 )
+
+var TaskPriorityName = map[Priority]string{
+	TaskPriorityLow:    "Low",
+	TaskPriorityNormal: "Normal",
+	TaskPriorityHigh:   "Hight",
+}
+
+func (p Priority) String() string {
+	return TaskPriorityName[p]
+}
 
 var (
 	// All task priorities from low to high
@@ -62,6 +72,7 @@ type Task interface {
 	Err() error
 	Priority() Priority
 	SetPriority(priority Priority)
+	Index() string // dedup indexing string
 
 	Cancel(err error)
 	Wait() error
@@ -156,6 +167,10 @@ func (task *baseTask) SetPriority(priority Priority) {
 	task.priority = priority
 }
 
+func (task *baseTask) Index() string {
+	return fmt.Sprintf("[replica=%d]", task.replicaID)
+}
+
 func (task *baseTask) Err() error {
 	select {
 	case <-task.doneCh:
@@ -218,13 +233,13 @@ func (task *baseTask) String() string {
 		}
 	}
 	return fmt.Sprintf(
-		"[id=%d] [type=%v] [reason=%s] [collectionID=%d] [replicaID=%d] [priority=%d] [actionsCount=%d] [actions=%s]",
+		"[id=%d] [type=%s] [reason=%s] [collectionID=%d] [replicaID=%d] [priority=%s] [actionsCount=%d] [actions=%s]",
 		task.id,
-		GetTaskType(task),
+		GetTaskType(task).String(),
 		task.reason,
 		task.collectionID,
 		task.replicaID,
-		task.priority,
+		task.priority.String(),
 		len(task.actions),
 		actionsStr,
 	)
@@ -280,6 +295,10 @@ func (task *SegmentTask) SegmentID() UniqueID {
 	return task.segmentID
 }
 
+func (task *SegmentTask) Index() string {
+	return fmt.Sprintf("%s[segment=%d][growing=%t]", task.baseTask.Index(), task.segmentID, task.Actions()[0].(*SegmentAction).Scope() == querypb.DataScope_Streaming)
+}
+
 func (task *SegmentTask) String() string {
 	return fmt.Sprintf("%s [segmentID=%d]", task.baseTask.String(), task.segmentID)
 }
@@ -323,6 +342,10 @@ func NewChannelTask(ctx context.Context,
 
 func (task *ChannelTask) Channel() string {
 	return task.shard
+}
+
+func (task *ChannelTask) Index() string {
+	return fmt.Sprintf("%s[channel=%s]", task.baseTask.Index(), task.shard)
 }
 
 func (task *ChannelTask) String() string {
