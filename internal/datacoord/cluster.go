@@ -22,7 +22,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/samber/lo"
@@ -60,21 +59,13 @@ func (c *Cluster) Startup(ctx context.Context, nodes []*NodeInfo) error {
 // Register registers a new node in cluster
 func (c *Cluster) Register(node *NodeInfo) error {
 	c.sessionManager.AddSession(node)
-	err := c.channelManager.AddNode(node.NodeID)
-	if err == nil {
-		metrics.DataCoordNumDataNodes.WithLabelValues().Inc()
-	}
-	return err
+	return c.channelManager.AddNode(node.NodeID)
 }
 
 // UnRegister removes a node from cluster
 func (c *Cluster) UnRegister(node *NodeInfo) error {
 	c.sessionManager.DeleteSession(node)
-	err := c.channelManager.DeleteNode(node.NodeID)
-	if err == nil {
-		metrics.DataCoordNumDataNodes.WithLabelValues().Dec()
-	}
-	return err
+	return c.channelManager.DeleteNode(node.NodeID)
 }
 
 // Watch tries to add a channel in datanode cluster

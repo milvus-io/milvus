@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	grpcdatanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
@@ -83,6 +84,7 @@ func (c *SessionManager) AddSession(node *NodeInfo) {
 
 	session := NewSession(node, c.sessionCreator)
 	c.sessions.data[node.NodeID] = session
+	metrics.DataCoordNumDataNodes.WithLabelValues().Set(float64(len(c.sessions.data)))
 }
 
 // DeleteSession removes the node session
@@ -94,6 +96,7 @@ func (c *SessionManager) DeleteSession(node *NodeInfo) {
 		session.Dispose()
 		delete(c.sessions.data, node.NodeID)
 	}
+	metrics.DataCoordNumDataNodes.WithLabelValues().Set(float64(len(c.sessions.data)))
 }
 
 // getLiveNodeIDs returns IDs of all live DataNodes.

@@ -65,6 +65,7 @@ func (nm *NodeManager) setClient(nodeID UniqueID, client types.IndexNode) {
 	}
 	nm.lock.Lock()
 	nm.nodeClients[nodeID] = client
+	metrics.IndexCoordIndexNodeNum.WithLabelValues().Set(float64(len(nm.nodeClients)))
 	log.Info("IndexNode NodeManager setClient success", zap.Int64("nodeID", nodeID), zap.Int("IndexNode num", len(nm.nodeClients)))
 	nm.lock.Unlock()
 	nm.pq.Push(item)
@@ -75,10 +76,10 @@ func (nm *NodeManager) RemoveNode(nodeID UniqueID) {
 	log.Info("IndexCoord", zap.Any("Remove node with ID", nodeID))
 	nm.lock.Lock()
 	delete(nm.nodeClients, nodeID)
+	metrics.IndexCoordIndexNodeNum.WithLabelValues().Set(float64(len(nm.nodeClients)))
 	delete(nm.stoppingNodes, nodeID)
 	nm.lock.Unlock()
 	nm.pq.Remove(nodeID)
-	metrics.IndexCoordIndexNodeNum.WithLabelValues().Dec()
 }
 
 func (nm *NodeManager) StoppingNode(nodeID UniqueID) {
@@ -112,7 +113,6 @@ func (nm *NodeManager) AddNode(nodeID UniqueID, address string) error {
 		log.Error("IndexCoord NodeManager", zap.Any("Add node err", err))
 		return err
 	}
-	metrics.IndexCoordIndexNodeNum.WithLabelValues().Inc()
 	nm.setClient(nodeID, nodeClient)
 	return nil
 }
