@@ -70,7 +70,7 @@ var rateCol *ratelimitutil.RateCollector
 // Proxy of milvus
 type Proxy struct {
 	ctx    context.Context
-	cancel func()
+	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
 	initParams *internalpb.InitParams

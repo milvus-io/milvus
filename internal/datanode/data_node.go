@@ -113,6 +113,7 @@ type DataNode struct {
 	//call once
 	initOnce     sync.Once
 	startOnce    sync.Once
+	stopOnce     sync.Once
 	wg           sync.WaitGroup
 	sessionMu    sync.Mutex // to fix data race
 	session      *sessionutil.Session
@@ -583,34 +584,32 @@ func (node *DataNode) ReadyToFlush() error {
 
 // Stop will release DataNode resources and shutdown datanode
 func (node *DataNode) Stop() error {
-	// https://github.com/milvus-io/milvus/issues/12282
-	node.UpdateStateCode(commonpb.StateCode_Abnormal)
-	node.flowgraphManager.dropAll()
-	node.flowgraphManager.stop()
+	node.stopOnce.Do(func() {
+		node.cancel()
+		// https://github.com/milvus-io/milvus/issues/12282
+		node.UpdateStateCode(commonpb.StateCode_Abnormal)
+		node.flowgraphManager.close()
 
-	node.cancel()
-	node.wg.Wait()
-	node.eventManagerMap.Range(func(_ string, m *channelEventManager) bool {
-		m.Close()
-		return true
-	})
+		node.eventManagerMap.Range(func(_ string, m *channelEventManager) bool {
+			m.Close()
+			return true
+		})
 
-	if node.allocator != nil {
-		log.Info("close id allocator", zap.String("role", typeutil.DataNodeRole))
-		node.allocator.Close()
-	}
-
-	if node.closer != nil {
-		err := node.closer.Close()
-		if err != nil {
-			return err
+		if node.allocator != nil {
+			log.Info("close id allocator", zap.String("role", typeutil.DataNodeRole))
+			node.allocator.Close()
 		}
-	}
 
-	if node.session != nil {
-		node.session.Stop()
-	}
+		if node.closer != nil {
+			node.closer.Close()
+		}
 
+		if node.session != nil {
+			node.session.Stop()
+		}
+
+		node.wg.Wait()
+	})
 	return nil
 }
 
