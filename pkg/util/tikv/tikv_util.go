@@ -14,25 +14,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package tsoutil
+package tikv
 
 import (
-	"path"
-
 	"github.com/tikv/client-go/v2/txnkv"
-	clientv3 "go.etcd.io/etcd/client/v3"
-
-	"github.com/milvus-io/milvus/internal/kv"
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/kv/tikv"
 )
 
-// NewTSOKVBase returns a kv.TxnKV object
-func NewTSOKVBase(client *clientv3.Client, tsoRoot, subPath string) kv.TxnKV {
-	return etcdkv.NewEtcdKV(client, path.Join(tsoRoot, subPath))
+func setupRemoteTiKV() (*txnkv.Client, error) {
+	return txnkv.NewClient([]string{"127.0.0.1:2379"})
 }
 
-// NewTSOTiKVBase returns a kv.TxnKV object
-func NewTSOTiKVBase(client *txnkv.Client, tsoRoot, subPath string) kv.TxnKV {
-	return tikv.NewTiKV(client, path.Join(tsoRoot, subPath))
+// GetTiKVClient returns TiKV client
+func GetTiKVClient() (*txnkv.Client, error) {
+	return setupRemoteTiKV()
 }

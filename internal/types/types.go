@@ -20,6 +20,7 @@ import (
 	"context"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"github.com/tikv/client-go/v2/txnkv"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -1477,6 +1478,9 @@ type QueryNodeComponent interface {
 
 	// SetEtcdClient set etcd client for QueryNode
 	SetEtcdClient(etcdClient *clientv3.Client)
+
+	// SetTiKVClient set TiKV client for QueryNode
+	SetTiKVClient(client *txnkv.Client)
 }
 
 // QueryCoord is the interface `querycoord` package implements
@@ -1521,6 +1525,9 @@ type QueryCoordComponent interface {
 
 	// SetEtcdClient set etcd client for QueryCoord
 	SetEtcdClient(etcdClient *clientv3.Client)
+
+	// SetTiKVClient set TiKV client for QueryCoord
+	SetTiKVClient(client *txnkv.Client)
 
 	// UpdateStateCode updates state code for QueryCoord
 	//  `stateCode` is current statement of this QueryCoord, indicating whether it's healthy.

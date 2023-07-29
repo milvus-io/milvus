@@ -67,6 +67,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/samber/lo"
+	"github.com/tikv/client-go/v2/txnkv"
 )
 
 // make sure QueryNode implements types.QueryNode
@@ -110,6 +111,8 @@ type QueryNode struct {
 
 	// etcd client
 	etcdCli *clientv3.Client
+	// tikv client
+	tikvCli *txnkv.Client
 	address string
 
 	dispClient msgdispatcher.Client
@@ -452,6 +455,10 @@ func (node *QueryNode) UpdateStateCode(code commonpb.StateCode) {
 // SetEtcdClient assigns parameter client to its member etcdCli
 func (node *QueryNode) SetEtcdClient(client *clientv3.Client) {
 	node.etcdCli = client
+}
+
+func (node *QueryNode) SetTiKVClient(client *txnkv.Client) {
+	node.tikvCli = client
 }
 
 func (node *QueryNode) GetAddress() string {

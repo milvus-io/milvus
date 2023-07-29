@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tikv"
 )
 
 type ServerSuite struct {
@@ -574,6 +575,10 @@ func (suite *ServerSuite) newQueryCoord() (*Server, error) {
 		return nil, err
 	}
 	server.SetEtcdClient(etcdCli)
+
+	tikvCli, _ := tikv.GetTiKVClient()
+	server.SetTiKVClient(tikvCli)
+
 	server.SetQueryNodeCreator(session.DefaultQueryNodeCreator)
 	suite.hackBroker(server)
 	err = server.Init()
