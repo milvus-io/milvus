@@ -258,7 +258,7 @@ func (s *Server) SetEtcdClient(etcdCli *clientv3.Client) {
 }
 
 func (s *Server) SetTiKVClient(client *txnkv.Client) {
-       s.querynode.SetTiKVClient(client)
+	s.querynode.SetTiKVClient(client)
 }
 
 // GetTimeTickChannel gets the time tick channel of QueryNode.

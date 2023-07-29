@@ -206,15 +206,15 @@ func (s *Server) initQueryCoord() error {
 	log.Info("QueryCoord", zap.Any("State", commonpb.StateCode_Initializing))
 	// Init KV
 	/*
-	etcdKV := etcdkv.NewEtcdKV(s.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
-	s.kv = etcdKV
+		etcdKV := etcdkv.NewEtcdKV(s.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
+		s.kv = etcdKV
 	*/
 	s.kv = tikv.NewTiKV(s.tikvCli, Params.EtcdCfg.MetaRootPath.GetValue())
 	log.Info("query coordinator try to connect etcd success")
 
 	// Init ID allocator
 	/*
-	idAllocatorKV := tsoutil.NewTSOKVBase(s.etcdCli, Params.EtcdCfg.KvRootPath.GetValue(), "querycoord-id-allocator")
+		idAllocatorKV := tsoutil.NewTSOKVBase(s.etcdCli, Params.EtcdCfg.KvRootPath.GetValue(), "querycoord-id-allocator")
 	*/
 	idAllocatorKV := tsoutil.NewTSOTiKVBase(s.tikvCli, Params.EtcdCfg.KvRootPath.GetValue(), "querycoord-id-allocator")
 	idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", idAllocatorKV)
@@ -556,7 +556,7 @@ func (s *Server) SetEtcdClient(etcdClient *clientv3.Client) {
 }
 
 func (s *Server) SetTiKVClient(client *txnkv.Client) {
-       s.tikvCli = client
+	s.tikvCli = client
 }
 
 // SetRootCoord sets root coordinator's client
