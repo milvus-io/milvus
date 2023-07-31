@@ -28,8 +28,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -40,8 +38,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -1162,8 +1162,10 @@ func waitForGrpcReady(opt *WaitOption) {
 }
 
 // TODO: should tls-related configurations be hard code here?
-var waitDuration = time.Second * 1
+var waitDuration = time.Second * 5
+
 var clientPemPath = "../../../configs/cert/client.pem"
+
 var clientKeyPath = "../../../configs/cert/client.key"
 
 // waitForServerReady wait for internal grpc service and external service to be ready, according to the params.
@@ -1814,11 +1816,11 @@ func Test_NewHTTPServer_TLS_TwoWay(t *testing.T) {
 	Params.CaPemPath = "../../../configs/cert/ca.pem"
 	HTTPParams.InitOnce()
 	HTTPParams.Enabled = true
+	HTTPParams.Port = 8080
 
 	err := runAndWaitForServerReady(server)
 	assert.Nil(t, err)
 	assert.NotNil(t, server.grpcExternalServer)
-	time.Sleep(100 * time.Second)
 	err = server.Stop()
 	assert.Nil(t, err)
 }
@@ -1832,6 +1834,7 @@ func Test_NewHTTPServer_TLS_OneWay(t *testing.T) {
 	Params.ServerKeyPath = "../../../configs/cert/server.key"
 	HTTPParams.InitOnce()
 	HTTPParams.Enabled = true
+	HTTPParams.Port = 8080
 
 	err := runAndWaitForServerReady(server)
 	assert.Nil(t, err)
@@ -1849,6 +1852,7 @@ func Test_NewHTTPServer_TLS_FileNotExisted(t *testing.T) {
 	Params.ServerKeyPath = "../../../configs/cert/server.key"
 	HTTPParams.InitOnce()
 	HTTPParams.Enabled = true
+	HTTPParams.Port = 8080
 	err := runAndWaitForServerReady(server)
 	assert.NotNil(t, err)
 	server.Stop()

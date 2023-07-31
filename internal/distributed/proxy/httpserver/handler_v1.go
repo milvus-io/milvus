@@ -6,20 +6,37 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/milvus-io/milvus/pkg/util/merr"
-
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
 	"github.com/golang/protobuf/proto"
+	"github.com/tidwall/gjson"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proxy"
-	"github.com/tidwall/gjson"
-	"go.uber.org/zap"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
+
+func checkAuthorization(c *gin.Context, req interface{}) error {
+	if proxy.Params.CommonCfg.AuthorizationEnabled {
+		username, ok := c.Get(ContextUsername)
+		if !ok {
+			c.AbortWithStatusJSON(http.StatusProxyAuthRequired, gin.H{HTTPReturnCode: Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
+			return merr.ErrNeedAuthenticate
+		}
+		_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), req)
+		if authErr != nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
+			return authErr
+		}
+	}
+	return nil
+}
 
 func (h *Handlers) checkDatabase(c *gin.Context, dbName string) bool {
 	if dbName == DefaultDbName {
@@ -48,14 +65,7 @@ func (h *Handlers) describeCollection(c *gin.Context, dbName string, collectionN
 		CollectionName: collectionName,
 	}
 	if needAuth {
-		username, ok := c.Get(ContextUsername)
-		if !ok {
-			c.JSON(http.StatusProxyAuthRequired, gin.H{HTTPReturnCode: Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
-			return nil, merr.ErrNeedAuthenticate
-		}
-		_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
-		if authErr != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
+		if authErr := checkAuthorization(c, &req); authErr != nil {
 			return nil, authErr
 		}
 	}
@@ -109,10 +119,7 @@ func (h *Handlers) listCollections(c *gin.Context) {
 	req := milvuspb.ShowCollectionsRequest{
 		DbName: dbName,
 	}
-	username, _ := c.Get(ContextUsername)
-	_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
-	if authErr != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
+	if authErr := checkAuthorization(c, &req); authErr != nil {
 		return
 	}
 	if !h.checkDatabase(c, dbName) {
@@ -190,10 +197,7 @@ func (h *Handlers) createCollection(c *gin.Context) {
 		ShardsNum:        ShardNumDefault,
 		ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
 	}
-	username, _ := c.Get(ContextUsername)
-	_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
-	if authErr != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
+	if authErr := checkAuthorization(c, &req); authErr != nil {
 		return
 	}
 	if !h.checkDatabase(c, req.DbName) {
@@ -313,10 +317,7 @@ func (h *Handlers) dropCollection(c *gin.Context) {
 		DbName:         httpReq.DbName,
 		CollectionName: httpReq.CollectionName,
 	}
-	username, _ := c.Get(ContextUsername)
-	_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
-	if authErr != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
+	if authErr := checkAuthorization(c, &req); authErr != nil {
 		return
 	}
 	if !h.checkDatabase(c, req.DbName) {
@@ -369,10 +370,7 @@ func (h *Handlers) query(c *gin.Context) {
 	if httpReq.Limit > 0 {
 		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: ParamLimit, Value: strconv.FormatInt(int64(httpReq.Limit), 10)})
 	}
-	username, _ := c.Get(ContextUsername)
-	_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
-	if authErr != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
+	if authErr := checkAuthorization(c, &req); authErr != nil {
 		return
 	}
 	if !h.checkDatabase(c, req.DbName) {
@@ -426,10 +424,7 @@ func (h *Handlers) get(c *gin.Context) {
 		OutputFields:       httpReq.OutputFields,
 		GuaranteeTimestamp: BoundedTimestamp,
 	}
-	username, _ := c.Get(ContextUsername)
-	_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
-	if authErr != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
+	if authErr := checkAuthorization(c, &req); authErr != nil {
 		return
 	}
 	if !h.checkDatabase(c, req.DbName) {
@@ -489,10 +484,7 @@ func (h *Handlers) delete(c *gin.Context) {
 		DbName:         httpReq.DbName,
 		CollectionName: httpReq.CollectionName,
 	}
-	username, _ := c.Get(ContextUsername)
-	_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
-	if authErr != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
+	if authErr := checkAuthorization(c, &req); authErr != nil {
 		return
 	}
 	if !h.checkDatabase(c, req.DbName) {
@@ -539,10 +531,7 @@ func (h *Handlers) insert(c *gin.Context) {
 		PartitionName:  "_default",
 		NumRows:        uint32(len(httpReq.Data)),
 	}
-	username, _ := c.Get(ContextUsername)
-	_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
-	if authErr != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
+	if authErr := checkAuthorization(c, &req); authErr != nil {
 		return
 	}
 	if !h.checkDatabase(c, req.DbName) {
@@ -619,10 +608,7 @@ func (h *Handlers) search(c *gin.Context) {
 		GuaranteeTimestamp: BoundedTimestamp,
 		Nq:                 int64(1),
 	}
-	username, _ := c.Get(ContextUsername)
-	_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
-	if authErr != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
+	if authErr := checkAuthorization(c, &req); authErr != nil {
 		return
 	}
 	if !h.checkDatabase(c, req.DbName) {
@@ -651,6 +637,7 @@ func (h *Handlers) search(c *gin.Context) {
 func code(code int32) int32 {
 	return merr.RootReasonCodeMask & code
 }
+
 func Code(err error) int32 {
 	return code(merr.Code(err))
 }
