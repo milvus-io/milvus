@@ -21,6 +21,7 @@ const (
 	IndexFaissIDMap      IndexType = "FLAT" // no index is built.
 	IndexFaissIvfFlat    IndexType = "IVF_FLAT"
 	IndexFaissIvfPQ      IndexType = "IVF_PQ"
+	IndexScaNN           IndexType = "SCANN"
 	IndexFaissIvfSQ8     IndexType = "IVF_SQ8"
 	IndexFaissBinIDMap   IndexType = "BIN_FLAT"
 	IndexFaissBinIvfFlat IndexType = "BIN_IVF_FLAT"

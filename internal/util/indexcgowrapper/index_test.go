@@ -18,6 +18,7 @@ const (
 	IndexFaissIVFFlat    = "IVF_FLAT"
 	IndexFaissIVFPQ      = "IVF_PQ"
 	IndexFaissIVFSQ8     = "IVF_SQ8"
+	IndexScaNN           = "SCANN"
 	IndexFaissBinIDMap   = "BIN_FLAT"
 	IndexFaissBinIVFFlat = "BIN_IVF_FLAT"
 
@@ -52,6 +53,8 @@ func generateFloatVectorTestCases() []vecTestCase {
 		{IndexFaissIVFPQ, metric.IP, false, schemapb.DataType_FloatVector},
 		{IndexFaissIVFSQ8, metric.L2, false, schemapb.DataType_FloatVector},
 		{IndexFaissIVFSQ8, metric.IP, false, schemapb.DataType_FloatVector},
+		{IndexScaNN, metric.L2, false, schemapb.DataType_FloatVector},
+		{IndexScaNN, metric.IP, false, schemapb.DataType_FloatVector},
 		{IndexHNSW, metric.L2, false, schemapb.DataType_FloatVector},
 		{IndexHNSW, metric.IP, false, schemapb.DataType_FloatVector},
 	}
@@ -89,6 +92,9 @@ func generateParams(indexType, metricType string) (map[string]string, map[string
 		indexParams[common.DimKey] = strconv.Itoa(dim)
 		indexParams["nlist"] = strconv.Itoa(nlist)
 		indexParams["nbits"] = strconv.Itoa(nbits)
+	} else if indexType == IndexScaNN {
+		indexParams[common.DimKey] = strconv.Itoa(dim)
+		indexParams["nlist"] = strconv.Itoa(nlist)
 	} else if indexType == IndexHNSW {
 		indexParams[common.DimKey] = strconv.Itoa(dim)
 		indexParams["M"] = strconv.Itoa(16)

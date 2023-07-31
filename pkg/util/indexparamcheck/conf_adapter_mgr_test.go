@@ -41,6 +41,12 @@ func Test_GetConfAdapterMgrInstance(t *testing.T) {
 	_, ok = adapter.(*ivfBaseChecker)
 	assert.Equal(t, true, ok)
 
+	adapter, err = adapterMgr.GetChecker(IndexScaNN)
+	assert.Equal(t, nil, err)
+	assert.NotEqual(t, nil, adapter)
+	_, ok = adapter.(*ivfBaseChecker)
+	assert.Equal(t, true, ok)
+
 	adapter, err = adapterMgr.GetChecker(IndexFaissIvfPQ)
 	assert.Equal(t, nil, err)
 	assert.NotEqual(t, nil, adapter)
@@ -90,6 +96,12 @@ func TestConfAdapterMgrImpl_GetAdapter(t *testing.T) {
 	assert.Equal(t, true, ok)
 
 	adapter, err = adapterMgr.GetChecker(IndexFaissIvfFlat)
+	assert.Equal(t, nil, err)
+	assert.NotEqual(t, nil, adapter)
+	_, ok = adapter.(*ivfBaseChecker)
+	assert.Equal(t, true, ok)
+
+	adapter, err = adapterMgr.GetChecker(IndexScaNN)
 	assert.Equal(t, nil, err)
 	assert.NotEqual(t, nil, adapter)
 	_, ok = adapter.(*ivfBaseChecker)

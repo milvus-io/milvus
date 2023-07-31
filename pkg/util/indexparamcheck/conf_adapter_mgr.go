@@ -48,6 +48,7 @@ func (mgr *indexCheckerMgrImpl) registerIndexChecker() {
 	mgr.checkers[IndexFaissIDMap] = newFlatChecker()
 	mgr.checkers[IndexFaissIvfFlat] = newIVFBaseChecker()
 	mgr.checkers[IndexFaissIvfPQ] = newIVFPQChecker()
+	mgr.checkers[IndexScaNN] = newIVFBaseChecker()
 	mgr.checkers[IndexFaissIvfSQ8] = newIVFSQChecker()
 	mgr.checkers[IndexFaissBinIDMap] = newBinFlatChecker()
 	mgr.checkers[IndexFaissBinIvfFlat] = newBinIVFFlatChecker()

@@ -35,6 +35,7 @@ const (
 	IndexFaissIDMap      = indexparamcheck.IndexFaissIDMap
 	IndexFaissIvfFlat    = indexparamcheck.IndexFaissIvfFlat
 	IndexFaissIvfPQ      = indexparamcheck.IndexFaissIvfPQ
+	IndexScaNN           = indexparamcheck.IndexScaNN
 	IndexFaissIvfSQ8     = indexparamcheck.IndexFaissIvfSQ8
 	IndexFaissBinIDMap   = indexparamcheck.IndexFaissBinIDMap
 	IndexFaissBinIvfFlat = indexparamcheck.IndexFaissBinIvfFlat
@@ -124,7 +125,7 @@ func ConstructIndexParam(dim int, indexType string, metricType string) []*common
 	switch indexType {
 	case IndexFaissIDMap, IndexFaissBinIDMap:
 	// no index param is required
-	case IndexFaissIvfFlat, IndexFaissBinIvfFlat, IndexFaissIvfSQ8:
+	case IndexFaissIvfFlat, IndexFaissBinIvfFlat, IndexFaissIvfSQ8, IndexScaNN:
 		params = append(params, &commonpb.KeyValuePair{
 			Key:   "nlist",
 			Value: "100",
@@ -163,7 +164,7 @@ func GetSearchParams(indexType string, metricType string) map[string]any {
 	switch indexType {
 	case IndexFaissIDMap, IndexFaissBinIDMap:
 		params[common.MetricTypeKey] = metricType
-	case IndexFaissIvfFlat, IndexFaissBinIvfFlat, IndexFaissIvfSQ8, IndexFaissIvfPQ:
+	case IndexFaissIvfFlat, IndexFaissBinIvfFlat, IndexFaissIvfSQ8, IndexFaissIvfPQ, IndexScaNN:
 		params["nprobe"] = 8
 	case IndexHNSW:
 		params["ef"] = 200
