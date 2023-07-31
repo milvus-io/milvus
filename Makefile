@@ -294,21 +294,23 @@ rpm: install
 	@QA_RPATHS="$$[ 0x001|0x0002|0x0020 ]" rpmbuild -ba ./build/rpm/milvus.spec
 
 mock-proxy:
-	mockery --name=ProxyComponent --dir=$(PWD)/internal/types --output=$(PWD)/internal/mocks --filename=mock_proxy.go --structname=Proxy --with-expecter
+	$(PWD)/bin/mockery --name=ProxyComponent --dir=$(PWD)/internal/types --output=$(PWD)/internal/mocks --filename=mock_proxy.go --structname=Proxy --with-expecter
 
 mock-datanode:
-	mockery --name=DataNode --dir=$(PWD)/internal/types --output=$(PWD)/internal/mocks --filename=mock_datanode.go --with-expecter
+	$(PWD)/bin/mockery --name=DataNode --dir=$(PWD)/internal/types --output=$(PWD)/internal/mocks --filename=mock_datanode.go --with-expecter
 
 mock-rootcoord:
-	mockery --name=RootCoord --dir=$(PWD)/internal/types --output=$(PWD)/internal/mocks --filename=mock_rootcoord.go --with-expecter
+	$(PWD)/bin/mockery --name=RootCoord --dir=$(PWD)/internal/types --output=$(PWD)/internal/mocks --filename=mock_rootcoord.go --with-expecter
+	$(PWD)/bin/mockery --name=GarbageCollector --dir=$(PWD)/internal/rootcoord --output=$(PWD)/internal/rootcoord/mocks --filename=GarbageCollector.go --with-expecter --outpkg=mockrootcoord
+	$(PWD)/bin/mockery --name=IMetaTable --dir=$(PWD)/internal/rootcoord --output=$(PWD)/internal/rootcoord/mocks --filename=IMetaTable.go --with-expecter --outpkg=mockrootcoord
 
 mock-datacoord:
-	mockery --name=DataCoord --dir=$(PWD)/internal/types --output=$(PWD)/internal/mocks --filename=mock_datacoord.go --with-expecter
+	$(PWD)/bin/mockery --name=DataCoord --dir=$(PWD)/internal/types --output=$(PWD)/internal/mocks --filename=mock_datacoord.go --with-expecter
 
 mock-indexcoord:
-	mockery --name=IndexCoord --dir=$(PWD)/internal/types --output=$(PWD)/internal/mocks --filename=mock_indexcoord.go --with-expecter
+	$(PWD)/bin/mockery --name=IndexCoord --dir=$(PWD)/internal/types --output=$(PWD)/internal/mocks --filename=mock_indexcoord.go --with-expecter
 
 mock-tnx-kv:
-	mockery --name=TxnKV --dir=$(PWD)/internal/kv --output=$(PWD)/internal/kv/mocks --filename=TxnKV.go --with-expecter
+	$(PWD)/bin/mockery --name=TxnKV --dir=$(PWD)/internal/kv --output=$(PWD)/internal/kv/mocks --filename=TxnKV.go --with-expecter
 
 ci-ut: build-cpp-with-coverage generated-proto-go-without-cpp codecov-cpp clean-compile codecov-go

@@ -20,6 +20,14 @@ type IMetaTable struct {
 	mock.Mock
 }
 
+type IMetaTable_Expecter struct {
+	mock *mock.Mock
+}
+
+func (_m *IMetaTable) EXPECT() *IMetaTable_Expecter {
+	return &IMetaTable_Expecter{mock: &_m.Mock}
+}
+
 // AddCollection provides a mock function with given fields: ctx, coll
 func (_m *IMetaTable) AddCollection(ctx context.Context, coll *model.Collection) error {
 	ret := _m.Called(ctx, coll)
@@ -32,6 +40,30 @@ func (_m *IMetaTable) AddCollection(ctx context.Context, coll *model.Collection)
 	}
 
 	return r0
+}
+
+// IMetaTable_AddCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddCollection'
+type IMetaTable_AddCollection_Call struct {
+	*mock.Call
+}
+
+// AddCollection is a helper method to define mock.On call
+//  - ctx context.Context
+//  - coll *model.Collection
+func (_e *IMetaTable_Expecter) AddCollection(ctx interface{}, coll interface{}) *IMetaTable_AddCollection_Call {
+	return &IMetaTable_AddCollection_Call{Call: _e.mock.On("AddCollection", ctx, coll)}
+}
+
+func (_c *IMetaTable_AddCollection_Call) Run(run func(ctx context.Context, coll *model.Collection)) *IMetaTable_AddCollection_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*model.Collection))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_AddCollection_Call) Return(_a0 error) *IMetaTable_AddCollection_Call {
+	_c.Call.Return(_a0)
+	return _c
 }
 
 // AddCredential provides a mock function with given fields: credInfo
@@ -48,6 +80,29 @@ func (_m *IMetaTable) AddCredential(credInfo *internalpb.CredentialInfo) error {
 	return r0
 }
 
+// IMetaTable_AddCredential_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddCredential'
+type IMetaTable_AddCredential_Call struct {
+	*mock.Call
+}
+
+// AddCredential is a helper method to define mock.On call
+//  - credInfo *internalpb.CredentialInfo
+func (_e *IMetaTable_Expecter) AddCredential(credInfo interface{}) *IMetaTable_AddCredential_Call {
+	return &IMetaTable_AddCredential_Call{Call: _e.mock.On("AddCredential", credInfo)}
+}
+
+func (_c *IMetaTable_AddCredential_Call) Run(run func(credInfo *internalpb.CredentialInfo)) *IMetaTable_AddCredential_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*internalpb.CredentialInfo))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_AddCredential_Call) Return(_a0 error) *IMetaTable_AddCredential_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
 // AddPartition provides a mock function with given fields: ctx, partition
 func (_m *IMetaTable) AddPartition(ctx context.Context, partition *model.Partition) error {
 	ret := _m.Called(ctx, partition)
@@ -60,6 +115,30 @@ func (_m *IMetaTable) AddPartition(ctx context.Context, partition *model.Partiti
 	}
 
 	return r0
+}
+
+// IMetaTable_AddPartition_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddPartition'
+type IMetaTable_AddPartition_Call struct {
+	*mock.Call
+}
+
+// AddPartition is a helper method to define mock.On call
+//  - ctx context.Context
+//  - partition *model.Partition
+func (_e *IMetaTable_Expecter) AddPartition(ctx interface{}, partition interface{}) *IMetaTable_AddPartition_Call {
+	return &IMetaTable_AddPartition_Call{Call: _e.mock.On("AddPartition", ctx, partition)}
+}
+
+func (_c *IMetaTable_AddPartition_Call) Run(run func(ctx context.Context, partition *model.Partition)) *IMetaTable_AddPartition_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*model.Partition))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_AddPartition_Call) Return(_a0 error) *IMetaTable_AddPartition_Call {
+	_c.Call.Return(_a0)
+	return _c
 }
 
 // AlterAlias provides a mock function with given fields: ctx, dbName, alias, collectionName, ts
@@ -76,6 +155,33 @@ func (_m *IMetaTable) AlterAlias(ctx context.Context, dbName string, alias strin
 	return r0
 }
 
+// IMetaTable_AlterAlias_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AlterAlias'
+type IMetaTable_AlterAlias_Call struct {
+	*mock.Call
+}
+
+// AlterAlias is a helper method to define mock.On call
+//  - ctx context.Context
+//  - dbName string
+//  - alias string
+//  - collectionName string
+//  - ts uint64
+func (_e *IMetaTable_Expecter) AlterAlias(ctx interface{}, dbName interface{}, alias interface{}, collectionName interface{}, ts interface{}) *IMetaTable_AlterAlias_Call {
+	return &IMetaTable_AlterAlias_Call{Call: _e.mock.On("AlterAlias", ctx, dbName, alias, collectionName, ts)}
+}
+
+func (_c *IMetaTable_AlterAlias_Call) Run(run func(ctx context.Context, dbName string, alias string, collectionName string, ts uint64)) *IMetaTable_AlterAlias_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(string), args[4].(uint64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_AlterAlias_Call) Return(_a0 error) *IMetaTable_AlterAlias_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
 // AlterCollection provides a mock function with given fields: ctx, oldColl, newColl, ts
 func (_m *IMetaTable) AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts uint64) error {
 	ret := _m.Called(ctx, oldColl, newColl, ts)
@@ -88,6 +194,32 @@ func (_m *IMetaTable) AlterCollection(ctx context.Context, oldColl *model.Collec
 	}
 
 	return r0
+}
+
+// IMetaTable_AlterCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AlterCollection'
+type IMetaTable_AlterCollection_Call struct {
+	*mock.Call
+}
+
+// AlterCollection is a helper method to define mock.On call
+//  - ctx context.Context
+//  - oldColl *model.Collection
+//  - newColl *model.Collection
+//  - ts uint64
+func (_e *IMetaTable_Expecter) AlterCollection(ctx interface{}, oldColl interface{}, newColl interface{}, ts interface{}) *IMetaTable_AlterCollection_Call {
+	return &IMetaTable_AlterCollection_Call{Call: _e.mock.On("AlterCollection", ctx, oldColl, newColl, ts)}
+}
+
+func (_c *IMetaTable_AlterCollection_Call) Run(run func(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts uint64)) *IMetaTable_AlterCollection_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*model.Collection), args[2].(*model.Collection), args[3].(uint64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_AlterCollection_Call) Return(_a0 error) *IMetaTable_AlterCollection_Call {
+	_c.Call.Return(_a0)
+	return _c
 }
 
 // AlterCredential provides a mock function with given fields: credInfo
@@ -104,6 +236,29 @@ func (_m *IMetaTable) AlterCredential(credInfo *internalpb.CredentialInfo) error
 	return r0
 }
 
+// IMetaTable_AlterCredential_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AlterCredential'
+type IMetaTable_AlterCredential_Call struct {
+	*mock.Call
+}
+
+// AlterCredential is a helper method to define mock.On call
+//  - credInfo *internalpb.CredentialInfo
+func (_e *IMetaTable_Expecter) AlterCredential(credInfo interface{}) *IMetaTable_AlterCredential_Call {
+	return &IMetaTable_AlterCredential_Call{Call: _e.mock.On("AlterCredential", credInfo)}
+}
+
+func (_c *IMetaTable_AlterCredential_Call) Run(run func(credInfo *internalpb.CredentialInfo)) *IMetaTable_AlterCredential_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*internalpb.CredentialInfo))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_AlterCredential_Call) Return(_a0 error) *IMetaTable_AlterCredential_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
 // ChangeCollectionState provides a mock function with given fields: ctx, collectionID, state, ts
 func (_m *IMetaTable) ChangeCollectionState(ctx context.Context, collectionID int64, state etcdpb.CollectionState, ts uint64) error {
 	ret := _m.Called(ctx, collectionID, state, ts)
@@ -116,6 +271,32 @@ func (_m *IMetaTable) ChangeCollectionState(ctx context.Context, collectionID in
 	}
 
 	return r0
+}
+
+// IMetaTable_ChangeCollectionState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ChangeCollectionState'
+type IMetaTable_ChangeCollectionState_Call struct {
+	*mock.Call
+}
+
+// ChangeCollectionState is a helper method to define mock.On call
+//  - ctx context.Context
+//  - collectionID int64
+//  - state etcdpb.CollectionState
+//  - ts uint64
+func (_e *IMetaTable_Expecter) ChangeCollectionState(ctx interface{}, collectionID interface{}, state interface{}, ts interface{}) *IMetaTable_ChangeCollectionState_Call {
+	return &IMetaTable_ChangeCollectionState_Call{Call: _e.mock.On("ChangeCollectionState", ctx, collectionID, state, ts)}
+}
+
+func (_c *IMetaTable_ChangeCollectionState_Call) Run(run func(ctx context.Context, collectionID int64, state etcdpb.CollectionState, ts uint64)) *IMetaTable_ChangeCollectionState_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(etcdpb.CollectionState), args[3].(uint64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_ChangeCollectionState_Call) Return(_a0 error) *IMetaTable_ChangeCollectionState_Call {
+	_c.Call.Return(_a0)
+	return _c
 }
 
 // ChangePartitionState provides a mock function with given fields: ctx, collectionID, partitionID, state, ts
@@ -132,6 +313,33 @@ func (_m *IMetaTable) ChangePartitionState(ctx context.Context, collectionID int
 	return r0
 }
 
+// IMetaTable_ChangePartitionState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ChangePartitionState'
+type IMetaTable_ChangePartitionState_Call struct {
+	*mock.Call
+}
+
+// ChangePartitionState is a helper method to define mock.On call
+//  - ctx context.Context
+//  - collectionID int64
+//  - partitionID int64
+//  - state etcdpb.PartitionState
+//  - ts uint64
+func (_e *IMetaTable_Expecter) ChangePartitionState(ctx interface{}, collectionID interface{}, partitionID interface{}, state interface{}, ts interface{}) *IMetaTable_ChangePartitionState_Call {
+	return &IMetaTable_ChangePartitionState_Call{Call: _e.mock.On("ChangePartitionState", ctx, collectionID, partitionID, state, ts)}
+}
+
+func (_c *IMetaTable_ChangePartitionState_Call) Run(run func(ctx context.Context, collectionID int64, partitionID int64, state etcdpb.PartitionState, ts uint64)) *IMetaTable_ChangePartitionState_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(int64), args[3].(etcdpb.PartitionState), args[4].(uint64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_ChangePartitionState_Call) Return(_a0 error) *IMetaTable_ChangePartitionState_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
 // CreateAlias provides a mock function with given fields: ctx, dbName, alias, collectionName, ts
 func (_m *IMetaTable) CreateAlias(ctx context.Context, dbName string, alias string, collectionName string, ts uint64) error {
 	ret := _m.Called(ctx, dbName, alias, collectionName, ts)
@@ -144,6 +352,33 @@ func (_m *IMetaTable) CreateAlias(ctx context.Context, dbName string, alias stri
 	}
 
 	return r0
+}
+
+// IMetaTable_CreateAlias_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateAlias'
+type IMetaTable_CreateAlias_Call struct {
+	*mock.Call
+}
+
+// CreateAlias is a helper method to define mock.On call
+//  - ctx context.Context
+//  - dbName string
+//  - alias string
+//  - collectionName string
+//  - ts uint64
+func (_e *IMetaTable_Expecter) CreateAlias(ctx interface{}, dbName interface{}, alias interface{}, collectionName interface{}, ts interface{}) *IMetaTable_CreateAlias_Call {
+	return &IMetaTable_CreateAlias_Call{Call: _e.mock.On("CreateAlias", ctx, dbName, alias, collectionName, ts)}
+}
+
+func (_c *IMetaTable_CreateAlias_Call) Run(run func(ctx context.Context, dbName string, alias string, collectionName string, ts uint64)) *IMetaTable_CreateAlias_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(string), args[4].(uint64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_CreateAlias_Call) Return(_a0 error) *IMetaTable_CreateAlias_Call {
+	_c.Call.Return(_a0)
+	return _c
 }
 
 // CreateDatabase provides a mock function with given fields: ctx, db, ts
@@ -160,6 +395,31 @@ func (_m *IMetaTable) CreateDatabase(ctx context.Context, db *model.Database, ts
 	return r0
 }
 
+// IMetaTable_CreateDatabase_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateDatabase'
+type IMetaTable_CreateDatabase_Call struct {
+	*mock.Call
+}
+
+// CreateDatabase is a helper method to define mock.On call
+//  - ctx context.Context
+//  - db *model.Database
+//  - ts uint64
+func (_e *IMetaTable_Expecter) CreateDatabase(ctx interface{}, db interface{}, ts interface{}) *IMetaTable_CreateDatabase_Call {
+	return &IMetaTable_CreateDatabase_Call{Call: _e.mock.On("CreateDatabase", ctx, db, ts)}
+}
+
+func (_c *IMetaTable_CreateDatabase_Call) Run(run func(ctx context.Context, db *model.Database, ts uint64)) *IMetaTable_CreateDatabase_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*model.Database), args[2].(uint64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_CreateDatabase_Call) Return(_a0 error) *IMetaTable_CreateDatabase_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
 // CreateRole provides a mock function with given fields: tenant, entity
 func (_m *IMetaTable) CreateRole(tenant string, entity *milvuspb.RoleEntity) error {
 	ret := _m.Called(tenant, entity)
@@ -172,6 +432,30 @@ func (_m *IMetaTable) CreateRole(tenant string, entity *milvuspb.RoleEntity) err
 	}
 
 	return r0
+}
+
+// IMetaTable_CreateRole_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateRole'
+type IMetaTable_CreateRole_Call struct {
+	*mock.Call
+}
+
+// CreateRole is a helper method to define mock.On call
+//  - tenant string
+//  - entity *milvuspb.RoleEntity
+func (_e *IMetaTable_Expecter) CreateRole(tenant interface{}, entity interface{}) *IMetaTable_CreateRole_Call {
+	return &IMetaTable_CreateRole_Call{Call: _e.mock.On("CreateRole", tenant, entity)}
+}
+
+func (_c *IMetaTable_CreateRole_Call) Run(run func(tenant string, entity *milvuspb.RoleEntity)) *IMetaTable_CreateRole_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(*milvuspb.RoleEntity))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_CreateRole_Call) Return(_a0 error) *IMetaTable_CreateRole_Call {
+	_c.Call.Return(_a0)
+	return _c
 }
 
 // DeleteCredential provides a mock function with given fields: username
@@ -188,6 +472,29 @@ func (_m *IMetaTable) DeleteCredential(username string) error {
 	return r0
 }
 
+// IMetaTable_DeleteCredential_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteCredential'
+type IMetaTable_DeleteCredential_Call struct {
+	*mock.Call
+}
+
+// DeleteCredential is a helper method to define mock.On call
+//  - username string
+func (_e *IMetaTable_Expecter) DeleteCredential(username interface{}) *IMetaTable_DeleteCredential_Call {
+	return &IMetaTable_DeleteCredential_Call{Call: _e.mock.On("DeleteCredential", username)}
+}
+
+func (_c *IMetaTable_DeleteCredential_Call) Run(run func(username string)) *IMetaTable_DeleteCredential_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_DeleteCredential_Call) Return(_a0 error) *IMetaTable_DeleteCredential_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
 // DropAlias provides a mock function with given fields: ctx, dbName, alias, ts
 func (_m *IMetaTable) DropAlias(ctx context.Context, dbName string, alias string, ts uint64) error {
 	ret := _m.Called(ctx, dbName, alias, ts)
@@ -200,6 +507,32 @@ func (_m *IMetaTable) DropAlias(ctx context.Context, dbName string, alias string
 	}
 
 	return r0
+}
+
+// IMetaTable_DropAlias_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropAlias'
+type IMetaTable_DropAlias_Call struct {
+	*mock.Call
+}
+
+// DropAlias is a helper method to define mock.On call
+//  - ctx context.Context
+//  - dbName string
+//  - alias string
+//  - ts uint64
+func (_e *IMetaTable_Expecter) DropAlias(ctx interface{}, dbName interface{}, alias interface{}, ts interface{}) *IMetaTable_DropAlias_Call {
+	return &IMetaTable_DropAlias_Call{Call: _e.mock.On("DropAlias", ctx, dbName, alias, ts)}
+}
+
+func (_c *IMetaTable_DropAlias_Call) Run(run func(ctx context.Context, dbName string, alias string, ts uint64)) *IMetaTable_DropAlias_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(uint64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_DropAlias_Call) Return(_a0 error) *IMetaTable_DropAlias_Call {
+	_c.Call.Return(_a0)
+	return _c
 }
 
 // DropDatabase provides a mock function with given fields: ctx, dbName, ts
@@ -216,6 +549,31 @@ func (_m *IMetaTable) DropDatabase(ctx context.Context, dbName string, ts uint64
 	return r0
 }
 
+// IMetaTable_DropDatabase_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropDatabase'
+type IMetaTable_DropDatabase_Call struct {
+	*mock.Call
+}
+
+// DropDatabase is a helper method to define mock.On call
+//  - ctx context.Context
+//  - dbName string
+//  - ts uint64
+func (_e *IMetaTable_Expecter) DropDatabase(ctx interface{}, dbName interface{}, ts interface{}) *IMetaTable_DropDatabase_Call {
+	return &IMetaTable_DropDatabase_Call{Call: _e.mock.On("DropDatabase", ctx, dbName, ts)}
+}
+
+func (_c *IMetaTable_DropDatabase_Call) Run(run func(ctx context.Context, dbName string, ts uint64)) *IMetaTable_DropDatabase_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(uint64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_DropDatabase_Call) Return(_a0 error) *IMetaTable_DropDatabase_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
 // DropGrant provides a mock function with given fields: tenant, role
 func (_m *IMetaTable) DropGrant(tenant string, role *milvuspb.RoleEntity) error {
 	ret := _m.Called(tenant, role)
@@ -230,6 +588,30 @@ func (_m *IMetaTable) DropGrant(tenant string, role *milvuspb.RoleEntity) error 
 	return r0
 }
 
+// IMetaTable_DropGrant_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropGrant'
+type IMetaTable_DropGrant_Call struct {
+	*mock.Call
+}
+
+// DropGrant is a helper method to define mock.On call
+//  - tenant string
+//  - role *milvuspb.RoleEntity
+func (_e *IMetaTable_Expecter) DropGrant(tenant interface{}, role interface{}) *IMetaTable_DropGrant_Call {
+	return &IMetaTable_DropGrant_Call{Call: _e.mock.On("DropGrant", tenant, role)}
+}
+
+func (_c *IMetaTable_DropGrant_Call) Run(run func(tenant string, role *milvuspb.RoleEntity)) *IMetaTable_DropGrant_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(*milvuspb.RoleEntity))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_DropGrant_Call) Return(_a0 error) *IMetaTable_DropGrant_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
 // DropRole provides a mock function with given fields: tenant, roleName
 func (_m *IMetaTable) DropRole(tenant string, roleName string) error {
 	ret := _m.Called(tenant, roleName)
@@ -242,6 +624,30 @@ func (_m *IMetaTable) DropRole(tenant string, roleName string) error {
 	}
 
 	return r0
+}
+
+// IMetaTable_DropRole_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropRole'
+type IMetaTable_DropRole_Call struct {
+	*mock.Call
+}
+
+// DropRole is a helper method to define mock.On call
+//  - tenant string
+//  - roleName string
+func (_e *IMetaTable_Expecter) DropRole(tenant interface{}, roleName interface{}) *IMetaTable_DropRole_Call {
+	return &IMetaTable_DropRole_Call{Call: _e.mock.On("DropRole", tenant, roleName)}
+}
+
+func (_c *IMetaTable_DropRole_Call) Run(run func(tenant string, roleName string)) *IMetaTable_DropRole_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_DropRole_Call) Return(_a0 error) *IMetaTable_DropRole_Call {
+	_c.Call.Return(_a0)
+	return _c
 }
 
 // GetCollectionByID provides a mock function with given fields: ctx, dbName, collectionID, ts, allowUnavailable
@@ -267,6 +673,33 @@ func (_m *IMetaTable) GetCollectionByID(ctx context.Context, dbName string, coll
 	return r0, r1
 }
 
+// IMetaTable_GetCollectionByID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCollectionByID'
+type IMetaTable_GetCollectionByID_Call struct {
+	*mock.Call
+}
+
+// GetCollectionByID is a helper method to define mock.On call
+//  - ctx context.Context
+//  - dbName string
+//  - collectionID int64
+//  - ts uint64
+//  - allowUnavailable bool
+func (_e *IMetaTable_Expecter) GetCollectionByID(ctx interface{}, dbName interface{}, collectionID interface{}, ts interface{}, allowUnavailable interface{}) *IMetaTable_GetCollectionByID_Call {
+	return &IMetaTable_GetCollectionByID_Call{Call: _e.mock.On("GetCollectionByID", ctx, dbName, collectionID, ts, allowUnavailable)}
+}
+
+func (_c *IMetaTable_GetCollectionByID_Call) Run(run func(ctx context.Context, dbName string, collectionID int64, ts uint64, allowUnavailable bool)) *IMetaTable_GetCollectionByID_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(int64), args[3].(uint64), args[4].(bool))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_GetCollectionByID_Call) Return(_a0 *model.Collection, _a1 error) *IMetaTable_GetCollectionByID_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
 // GetCollectionByName provides a mock function with given fields: ctx, dbName, collectionName, ts
 func (_m *IMetaTable) GetCollectionByName(ctx context.Context, dbName string, collectionName string, ts uint64) (*model.Collection, error) {
 	ret := _m.Called(ctx, dbName, collectionName, ts)
@@ -290,6 +723,32 @@ func (_m *IMetaTable) GetCollectionByName(ctx context.Context, dbName string, co
 	return r0, r1
 }
 
+// IMetaTable_GetCollectionByName_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCollectionByName'
+type IMetaTable_GetCollectionByName_Call struct {
+	*mock.Call
+}
+
+// GetCollectionByName is a helper method to define mock.On call
+//  - ctx context.Context
+//  - dbName string
+//  - collectionName string
+//  - ts uint64
+func (_e *IMetaTable_Expecter) GetCollectionByName(ctx interface{}, dbName interface{}, collectionName interface{}, ts interface{}) *IMetaTable_GetCollectionByName_Call {
+	return &IMetaTable_GetCollectionByName_Call{Call: _e.mock.On("GetCollectionByName", ctx, dbName, collectionName, ts)}
+}
+
+func (_c *IMetaTable_GetCollectionByName_Call) Run(run func(ctx context.Context, dbName string, collectionName string, ts uint64)) *IMetaTable_GetCollectionByName_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(uint64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_GetCollectionByName_Call) Return(_a0 *model.Collection, _a1 error) *IMetaTable_GetCollectionByName_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
 // GetCollectionVirtualChannels provides a mock function with given fields: colID
 func (_m *IMetaTable) GetCollectionVirtualChannels(colID int64) []string {
 	ret := _m.Called(colID)
@@ -304,6 +763,29 @@ func (_m *IMetaTable) GetCollectionVirtualChannels(colID int64) []string {
 	}
 
 	return r0
+}
+
+// IMetaTable_GetCollectionVirtualChannels_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCollectionVirtualChannels'
+type IMetaTable_GetCollectionVirtualChannels_Call struct {
+	*mock.Call
+}
+
+// GetCollectionVirtualChannels is a helper method to define mock.On call
+//  - colID int64
+func (_e *IMetaTable_Expecter) GetCollectionVirtualChannels(colID interface{}) *IMetaTable_GetCollectionVirtualChannels_Call {
+	return &IMetaTable_GetCollectionVirtualChannels_Call{Call: _e.mock.On("GetCollectionVirtualChannels", colID)}
+}
+
+func (_c *IMetaTable_GetCollectionVirtualChannels_Call) Run(run func(colID int64)) *IMetaTable_GetCollectionVirtualChannels_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_GetCollectionVirtualChannels_Call) Return(_a0 []string) *IMetaTable_GetCollectionVirtualChannels_Call {
+	_c.Call.Return(_a0)
+	return _c
 }
 
 // GetCredential provides a mock function with given fields: username
@@ -329,6 +811,29 @@ func (_m *IMetaTable) GetCredential(username string) (*internalpb.CredentialInfo
 	return r0, r1
 }
 
+// IMetaTable_GetCredential_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCredential'
+type IMetaTable_GetCredential_Call struct {
+	*mock.Call
+}
+
+// GetCredential is a helper method to define mock.On call
+//  - username string
+func (_e *IMetaTable_Expecter) GetCredential(username interface{}) *IMetaTable_GetCredential_Call {
+	return &IMetaTable_GetCredential_Call{Call: _e.mock.On("GetCredential", username)}
+}
+
+func (_c *IMetaTable_GetCredential_Call) Run(run func(username string)) *IMetaTable_GetCredential_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_GetCredential_Call) Return(_a0 *internalpb.CredentialInfo, _a1 error) *IMetaTable_GetCredential_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
 // GetDatabaseByID provides a mock function with given fields: ctx, dbID, ts
 func (_m *IMetaTable) GetDatabaseByID(ctx context.Context, dbID int64, ts uint64) (*model.Database, error) {
 	ret := _m.Called(ctx, dbID, ts)
@@ -350,6 +855,31 @@ func (_m *IMetaTable) GetDatabaseByID(ctx context.Context, dbID int64, ts uint64
 	}
 
 	return r0, r1
+}
+
+// IMetaTable_GetDatabaseByID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetDatabaseByID'
+type IMetaTable_GetDatabaseByID_Call struct {
+	*mock.Call
+}
+
+// GetDatabaseByID is a helper method to define mock.On call
+//  - ctx context.Context
+//  - dbID int64
+//  - ts uint64
+func (_e *IMetaTable_Expecter) GetDatabaseByID(ctx interface{}, dbID interface{}, ts interface{}) *IMetaTable_GetDatabaseByID_Call {
+	return &IMetaTable_GetDatabaseByID_Call{Call: _e.mock.On("GetDatabaseByID", ctx, dbID, ts)}
+}
+
+func (_c *IMetaTable_GetDatabaseByID_Call) Run(run func(ctx context.Context, dbID int64, ts uint64)) *IMetaTable_GetDatabaseByID_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(uint64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_GetDatabaseByID_Call) Return(_a0 *model.Database, _a1 error) *IMetaTable_GetDatabaseByID_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
 }
 
 // GetDatabaseByName provides a mock function with given fields: ctx, dbName, ts
@@ -375,6 +905,31 @@ func (_m *IMetaTable) GetDatabaseByName(ctx context.Context, dbName string, ts u
 	return r0, r1
 }
 
+// IMetaTable_GetDatabaseByName_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetDatabaseByName'
+type IMetaTable_GetDatabaseByName_Call struct {
+	*mock.Call
+}
+
+// GetDatabaseByName is a helper method to define mock.On call
+//  - ctx context.Context
+//  - dbName string
+//  - ts uint64
+func (_e *IMetaTable_Expecter) GetDatabaseByName(ctx interface{}, dbName interface{}, ts interface{}) *IMetaTable_GetDatabaseByName_Call {
+	return &IMetaTable_GetDatabaseByName_Call{Call: _e.mock.On("GetDatabaseByName", ctx, dbName, ts)}
+}
+
+func (_c *IMetaTable_GetDatabaseByName_Call) Run(run func(ctx context.Context, dbName string, ts uint64)) *IMetaTable_GetDatabaseByName_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(uint64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_GetDatabaseByName_Call) Return(_a0 *model.Database, _a1 error) *IMetaTable_GetDatabaseByName_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
 // GetPartitionByName provides a mock function with given fields: collID, partitionName, ts
 func (_m *IMetaTable) GetPartitionByName(collID int64, partitionName string, ts uint64) (int64, error) {
 	ret := _m.Called(collID, partitionName, ts)
@@ -394,6 +949,31 @@ func (_m *IMetaTable) GetPartitionByName(collID int64, partitionName string, ts 
 	}
 
 	return r0, r1
+}
+
+// IMetaTable_GetPartitionByName_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPartitionByName'
+type IMetaTable_GetPartitionByName_Call struct {
+	*mock.Call
+}
+
+// GetPartitionByName is a helper method to define mock.On call
+//  - collID int64
+//  - partitionName string
+//  - ts uint64
+func (_e *IMetaTable_Expecter) GetPartitionByName(collID interface{}, partitionName interface{}, ts interface{}) *IMetaTable_GetPartitionByName_Call {
+	return &IMetaTable_GetPartitionByName_Call{Call: _e.mock.On("GetPartitionByName", collID, partitionName, ts)}
+}
+
+func (_c *IMetaTable_GetPartitionByName_Call) Run(run func(collID int64, partitionName string, ts uint64)) *IMetaTable_GetPartitionByName_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(string), args[2].(uint64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_GetPartitionByName_Call) Return(_a0 int64, _a1 error) *IMetaTable_GetPartitionByName_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
 }
 
 // GetPartitionNameByID provides a mock function with given fields: collID, partitionID, ts
@@ -417,6 +997,31 @@ func (_m *IMetaTable) GetPartitionNameByID(collID int64, partitionID int64, ts u
 	return r0, r1
 }
 
+// IMetaTable_GetPartitionNameByID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPartitionNameByID'
+type IMetaTable_GetPartitionNameByID_Call struct {
+	*mock.Call
+}
+
+// GetPartitionNameByID is a helper method to define mock.On call
+//  - collID int64
+//  - partitionID int64
+//  - ts uint64
+func (_e *IMetaTable_Expecter) GetPartitionNameByID(collID interface{}, partitionID interface{}, ts interface{}) *IMetaTable_GetPartitionNameByID_Call {
+	return &IMetaTable_GetPartitionNameByID_Call{Call: _e.mock.On("GetPartitionNameByID", collID, partitionID, ts)}
+}
+
+func (_c *IMetaTable_GetPartitionNameByID_Call) Run(run func(collID int64, partitionID int64, ts uint64)) *IMetaTable_GetPartitionNameByID_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(int64), args[2].(uint64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_GetPartitionNameByID_Call) Return(_a0 string, _a1 error) *IMetaTable_GetPartitionNameByID_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
 // IsAlias provides a mock function with given fields: db, name
 func (_m *IMetaTable) IsAlias(db string, name string) bool {
 	ret := _m.Called(db, name)
@@ -429,6 +1034,30 @@ func (_m *IMetaTable) IsAlias(db string, name string) bool {
 	}
 
 	return r0
+}
+
+// IMetaTable_IsAlias_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsAlias'
+type IMetaTable_IsAlias_Call struct {
+	*mock.Call
+}
+
+// IsAlias is a helper method to define mock.On call
+//  - db string
+//  - name string
+func (_e *IMetaTable_Expecter) IsAlias(db interface{}, name interface{}) *IMetaTable_IsAlias_Call {
+	return &IMetaTable_IsAlias_Call{Call: _e.mock.On("IsAlias", db, name)}
+}
+
+func (_c *IMetaTable_IsAlias_Call) Run(run func(db string, name string)) *IMetaTable_IsAlias_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_IsAlias_Call) Return(_a0 bool) *IMetaTable_IsAlias_Call {
+	_c.Call.Return(_a0)
+	return _c
 }
 
 // ListAliasesByID provides a mock function with given fields: collID
@@ -447,6 +1076,29 @@ func (_m *IMetaTable) ListAliasesByID(collID int64) []string {
 	return r0
 }
 
+// IMetaTable_ListAliasesByID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListAliasesByID'
+type IMetaTable_ListAliasesByID_Call struct {
+	*mock.Call
+}
+
+// ListAliasesByID is a helper method to define mock.On call
+//  - collID int64
+func (_e *IMetaTable_Expecter) ListAliasesByID(collID interface{}) *IMetaTable_ListAliasesByID_Call {
+	return &IMetaTable_ListAliasesByID_Call{Call: _e.mock.On("ListAliasesByID", collID)}
+}
+
+func (_c *IMetaTable_ListAliasesByID_Call) Run(run func(collID int64)) *IMetaTable_ListAliasesByID_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_ListAliasesByID_Call) Return(_a0 []string) *IMetaTable_ListAliasesByID_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
 // ListAllAvailCollections provides a mock function with given fields: ctx
 func (_m *IMetaTable) ListAllAvailCollections(ctx context.Context) map[int64][]int64 {
 	ret := _m.Called(ctx)
@@ -463,6 +1115,29 @@ func (_m *IMetaTable) ListAllAvailCollections(ctx context.Context) map[int64][]i
 	return r0
 }
 
+// IMetaTable_ListAllAvailCollections_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListAllAvailCollections'
+type IMetaTable_ListAllAvailCollections_Call struct {
+	*mock.Call
+}
+
+// ListAllAvailCollections is a helper method to define mock.On call
+//  - ctx context.Context
+func (_e *IMetaTable_Expecter) ListAllAvailCollections(ctx interface{}) *IMetaTable_ListAllAvailCollections_Call {
+	return &IMetaTable_ListAllAvailCollections_Call{Call: _e.mock.On("ListAllAvailCollections", ctx)}
+}
+
+func (_c *IMetaTable_ListAllAvailCollections_Call) Run(run func(ctx context.Context)) *IMetaTable_ListAllAvailCollections_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_ListAllAvailCollections_Call) Return(_a0 map[int64][]int64) *IMetaTable_ListAllAvailCollections_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
 // ListCollectionPhysicalChannels provides a mock function with given fields:
 func (_m *IMetaTable) ListCollectionPhysicalChannels() map[int64][]string {
 	ret := _m.Called()
@@ -477,6 +1152,28 @@ func (_m *IMetaTable) ListCollectionPhysicalChannels() map[int64][]string {
 	}
 
 	return r0
+}
+
+// IMetaTable_ListCollectionPhysicalChannels_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListCollectionPhysicalChannels'
+type IMetaTable_ListCollectionPhysicalChannels_Call struct {
+	*mock.Call
+}
+
+// ListCollectionPhysicalChannels is a helper method to define mock.On call
+func (_e *IMetaTable_Expecter) ListCollectionPhysicalChannels() *IMetaTable_ListCollectionPhysicalChannels_Call {
+	return &IMetaTable_ListCollectionPhysicalChannels_Call{Call: _e.mock.On("ListCollectionPhysicalChannels")}
+}
+
+func (_c *IMetaTable_ListCollectionPhysicalChannels_Call) Run(run func()) *IMetaTable_ListCollectionPhysicalChannels_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *IMetaTable_ListCollectionPhysicalChannels_Call) Return(_a0 map[int64][]string) *IMetaTable_ListCollectionPhysicalChannels_Call {
+	_c.Call.Return(_a0)
+	return _c
 }
 
 // ListCollections provides a mock function with given fields: ctx, dbName, ts, onlyAvail
@@ -502,6 +1199,32 @@ func (_m *IMetaTable) ListCollections(ctx context.Context, dbName string, ts uin
 	return r0, r1
 }
 
+// IMetaTable_ListCollections_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListCollections'
+type IMetaTable_ListCollections_Call struct {
+	*mock.Call
+}
+
+// ListCollections is a helper method to define mock.On call
+//  - ctx context.Context
+//  - dbName string
+//  - ts uint64
+//  - onlyAvail bool
+func (_e *IMetaTable_Expecter) ListCollections(ctx interface{}, dbName interface{}, ts interface{}, onlyAvail interface{}) *IMetaTable_ListCollections_Call {
+	return &IMetaTable_ListCollections_Call{Call: _e.mock.On("ListCollections", ctx, dbName, ts, onlyAvail)}
+}
+
+func (_c *IMetaTable_ListCollections_Call) Run(run func(ctx context.Context, dbName string, ts uint64, onlyAvail bool)) *IMetaTable_ListCollections_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(uint64), args[3].(bool))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_ListCollections_Call) Return(_a0 []*model.Collection, _a1 error) *IMetaTable_ListCollections_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
 // ListCredentialUsernames provides a mock function with given fields:
 func (_m *IMetaTable) ListCredentialUsernames() (*milvuspb.ListCredUsersResponse, error) {
 	ret := _m.Called()
@@ -523,6 +1246,28 @@ func (_m *IMetaTable) ListCredentialUsernames() (*milvuspb.ListCredUsersResponse
 	}
 
 	return r0, r1
+}
+
+// IMetaTable_ListCredentialUsernames_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListCredentialUsernames'
+type IMetaTable_ListCredentialUsernames_Call struct {
+	*mock.Call
+}
+
+// ListCredentialUsernames is a helper method to define mock.On call
+func (_e *IMetaTable_Expecter) ListCredentialUsernames() *IMetaTable_ListCredentialUsernames_Call {
+	return &IMetaTable_ListCredentialUsernames_Call{Call: _e.mock.On("ListCredentialUsernames")}
+}
+
+func (_c *IMetaTable_ListCredentialUsernames_Call) Run(run func()) *IMetaTable_ListCredentialUsernames_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *IMetaTable_ListCredentialUsernames_Call) Return(_a0 *milvuspb.ListCredUsersResponse, _a1 error) *IMetaTable_ListCredentialUsernames_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
 }
 
 // ListDatabases provides a mock function with given fields: ctx, ts
@@ -548,6 +1293,30 @@ func (_m *IMetaTable) ListDatabases(ctx context.Context, ts uint64) ([]*model.Da
 	return r0, r1
 }
 
+// IMetaTable_ListDatabases_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListDatabases'
+type IMetaTable_ListDatabases_Call struct {
+	*mock.Call
+}
+
+// ListDatabases is a helper method to define mock.On call
+//  - ctx context.Context
+//  - ts uint64
+func (_e *IMetaTable_Expecter) ListDatabases(ctx interface{}, ts interface{}) *IMetaTable_ListDatabases_Call {
+	return &IMetaTable_ListDatabases_Call{Call: _e.mock.On("ListDatabases", ctx, ts)}
+}
+
+func (_c *IMetaTable_ListDatabases_Call) Run(run func(ctx context.Context, ts uint64)) *IMetaTable_ListDatabases_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(uint64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_ListDatabases_Call) Return(_a0 []*model.Database, _a1 error) *IMetaTable_ListDatabases_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
 // ListPolicy provides a mock function with given fields: tenant
 func (_m *IMetaTable) ListPolicy(tenant string) ([]string, error) {
 	ret := _m.Called(tenant)
@@ -569,6 +1338,29 @@ func (_m *IMetaTable) ListPolicy(tenant string) ([]string, error) {
 	}
 
 	return r0, r1
+}
+
+// IMetaTable_ListPolicy_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListPolicy'
+type IMetaTable_ListPolicy_Call struct {
+	*mock.Call
+}
+
+// ListPolicy is a helper method to define mock.On call
+//  - tenant string
+func (_e *IMetaTable_Expecter) ListPolicy(tenant interface{}) *IMetaTable_ListPolicy_Call {
+	return &IMetaTable_ListPolicy_Call{Call: _e.mock.On("ListPolicy", tenant)}
+}
+
+func (_c *IMetaTable_ListPolicy_Call) Run(run func(tenant string)) *IMetaTable_ListPolicy_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_ListPolicy_Call) Return(_a0 []string, _a1 error) *IMetaTable_ListPolicy_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
 }
 
 // ListUserRole provides a mock function with given fields: tenant
@@ -594,6 +1386,29 @@ func (_m *IMetaTable) ListUserRole(tenant string) ([]string, error) {
 	return r0, r1
 }
 
+// IMetaTable_ListUserRole_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListUserRole'
+type IMetaTable_ListUserRole_Call struct {
+	*mock.Call
+}
+
+// ListUserRole is a helper method to define mock.On call
+//  - tenant string
+func (_e *IMetaTable_Expecter) ListUserRole(tenant interface{}) *IMetaTable_ListUserRole_Call {
+	return &IMetaTable_ListUserRole_Call{Call: _e.mock.On("ListUserRole", tenant)}
+}
+
+func (_c *IMetaTable_ListUserRole_Call) Run(run func(tenant string)) *IMetaTable_ListUserRole_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_ListUserRole_Call) Return(_a0 []string, _a1 error) *IMetaTable_ListUserRole_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
 // OperatePrivilege provides a mock function with given fields: tenant, entity, operateType
 func (_m *IMetaTable) OperatePrivilege(tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
 	ret := _m.Called(tenant, entity, operateType)
@@ -606,6 +1421,31 @@ func (_m *IMetaTable) OperatePrivilege(tenant string, entity *milvuspb.GrantEnti
 	}
 
 	return r0
+}
+
+// IMetaTable_OperatePrivilege_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'OperatePrivilege'
+type IMetaTable_OperatePrivilege_Call struct {
+	*mock.Call
+}
+
+// OperatePrivilege is a helper method to define mock.On call
+//  - tenant string
+//  - entity *milvuspb.GrantEntity
+//  - operateType milvuspb.OperatePrivilegeType
+func (_e *IMetaTable_Expecter) OperatePrivilege(tenant interface{}, entity interface{}, operateType interface{}) *IMetaTable_OperatePrivilege_Call {
+	return &IMetaTable_OperatePrivilege_Call{Call: _e.mock.On("OperatePrivilege", tenant, entity, operateType)}
+}
+
+func (_c *IMetaTable_OperatePrivilege_Call) Run(run func(tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType)) *IMetaTable_OperatePrivilege_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(*milvuspb.GrantEntity), args[2].(milvuspb.OperatePrivilegeType))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_OperatePrivilege_Call) Return(_a0 error) *IMetaTable_OperatePrivilege_Call {
+	_c.Call.Return(_a0)
+	return _c
 }
 
 // OperateUserRole provides a mock function with given fields: tenant, userEntity, roleEntity, operateType
@@ -622,6 +1462,32 @@ func (_m *IMetaTable) OperateUserRole(tenant string, userEntity *milvuspb.UserEn
 	return r0
 }
 
+// IMetaTable_OperateUserRole_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'OperateUserRole'
+type IMetaTable_OperateUserRole_Call struct {
+	*mock.Call
+}
+
+// OperateUserRole is a helper method to define mock.On call
+//  - tenant string
+//  - userEntity *milvuspb.UserEntity
+//  - roleEntity *milvuspb.RoleEntity
+//  - operateType milvuspb.OperateUserRoleType
+func (_e *IMetaTable_Expecter) OperateUserRole(tenant interface{}, userEntity interface{}, roleEntity interface{}, operateType interface{}) *IMetaTable_OperateUserRole_Call {
+	return &IMetaTable_OperateUserRole_Call{Call: _e.mock.On("OperateUserRole", tenant, userEntity, roleEntity, operateType)}
+}
+
+func (_c *IMetaTable_OperateUserRole_Call) Run(run func(tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType)) *IMetaTable_OperateUserRole_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(*milvuspb.UserEntity), args[2].(*milvuspb.RoleEntity), args[3].(milvuspb.OperateUserRoleType))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_OperateUserRole_Call) Return(_a0 error) *IMetaTable_OperateUserRole_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
 // RemoveCollection provides a mock function with given fields: ctx, collectionID, ts
 func (_m *IMetaTable) RemoveCollection(ctx context.Context, collectionID int64, ts uint64) error {
 	ret := _m.Called(ctx, collectionID, ts)
@@ -634,6 +1500,31 @@ func (_m *IMetaTable) RemoveCollection(ctx context.Context, collectionID int64, 
 	}
 
 	return r0
+}
+
+// IMetaTable_RemoveCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveCollection'
+type IMetaTable_RemoveCollection_Call struct {
+	*mock.Call
+}
+
+// RemoveCollection is a helper method to define mock.On call
+//  - ctx context.Context
+//  - collectionID int64
+//  - ts uint64
+func (_e *IMetaTable_Expecter) RemoveCollection(ctx interface{}, collectionID interface{}, ts interface{}) *IMetaTable_RemoveCollection_Call {
+	return &IMetaTable_RemoveCollection_Call{Call: _e.mock.On("RemoveCollection", ctx, collectionID, ts)}
+}
+
+func (_c *IMetaTable_RemoveCollection_Call) Run(run func(ctx context.Context, collectionID int64, ts uint64)) *IMetaTable_RemoveCollection_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(uint64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_RemoveCollection_Call) Return(_a0 error) *IMetaTable_RemoveCollection_Call {
+	_c.Call.Return(_a0)
+	return _c
 }
 
 // RemovePartition provides a mock function with given fields: ctx, dbID, collectionID, partitionID, ts
@@ -650,6 +1541,33 @@ func (_m *IMetaTable) RemovePartition(ctx context.Context, dbID int64, collectio
 	return r0
 }
 
+// IMetaTable_RemovePartition_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemovePartition'
+type IMetaTable_RemovePartition_Call struct {
+	*mock.Call
+}
+
+// RemovePartition is a helper method to define mock.On call
+//  - ctx context.Context
+//  - dbID int64
+//  - collectionID int64
+//  - partitionID int64
+//  - ts uint64
+func (_e *IMetaTable_Expecter) RemovePartition(ctx interface{}, dbID interface{}, collectionID interface{}, partitionID interface{}, ts interface{}) *IMetaTable_RemovePartition_Call {
+	return &IMetaTable_RemovePartition_Call{Call: _e.mock.On("RemovePartition", ctx, dbID, collectionID, partitionID, ts)}
+}
+
+func (_c *IMetaTable_RemovePartition_Call) Run(run func(ctx context.Context, dbID int64, collectionID int64, partitionID int64, ts uint64)) *IMetaTable_RemovePartition_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(int64), args[3].(int64), args[4].(uint64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_RemovePartition_Call) Return(_a0 error) *IMetaTable_RemovePartition_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
 // RenameCollection provides a mock function with given fields: ctx, dbName, oldName, newDBName, newName, ts
 func (_m *IMetaTable) RenameCollection(ctx context.Context, dbName string, oldName string, newDBName string, newName string, ts uint64) error {
 	ret := _m.Called(ctx, dbName, oldName, newDBName, newName, ts)
@@ -662,6 +1580,34 @@ func (_m *IMetaTable) RenameCollection(ctx context.Context, dbName string, oldNa
 	}
 
 	return r0
+}
+
+// IMetaTable_RenameCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RenameCollection'
+type IMetaTable_RenameCollection_Call struct {
+	*mock.Call
+}
+
+// RenameCollection is a helper method to define mock.On call
+//  - ctx context.Context
+//  - dbName string
+//  - oldName string
+//  - newDBName string
+//  - newName string
+//  - ts uint64
+func (_e *IMetaTable_Expecter) RenameCollection(ctx interface{}, dbName interface{}, oldName interface{}, newDBName interface{}, newName interface{}, ts interface{}) *IMetaTable_RenameCollection_Call {
+	return &IMetaTable_RenameCollection_Call{Call: _e.mock.On("RenameCollection", ctx, dbName, oldName, newDBName, newName, ts)}
+}
+
+func (_c *IMetaTable_RenameCollection_Call) Run(run func(ctx context.Context, dbName string, oldName string, newDBName string, newName string, ts uint64)) *IMetaTable_RenameCollection_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(string), args[4].(string), args[5].(uint64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_RenameCollection_Call) Return(_a0 error) *IMetaTable_RenameCollection_Call {
+	_c.Call.Return(_a0)
+	return _c
 }
 
 // SelectGrant provides a mock function with given fields: tenant, entity
@@ -687,6 +1633,30 @@ func (_m *IMetaTable) SelectGrant(tenant string, entity *milvuspb.GrantEntity) (
 	return r0, r1
 }
 
+// IMetaTable_SelectGrant_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SelectGrant'
+type IMetaTable_SelectGrant_Call struct {
+	*mock.Call
+}
+
+// SelectGrant is a helper method to define mock.On call
+//  - tenant string
+//  - entity *milvuspb.GrantEntity
+func (_e *IMetaTable_Expecter) SelectGrant(tenant interface{}, entity interface{}) *IMetaTable_SelectGrant_Call {
+	return &IMetaTable_SelectGrant_Call{Call: _e.mock.On("SelectGrant", tenant, entity)}
+}
+
+func (_c *IMetaTable_SelectGrant_Call) Run(run func(tenant string, entity *milvuspb.GrantEntity)) *IMetaTable_SelectGrant_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(*milvuspb.GrantEntity))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_SelectGrant_Call) Return(_a0 []*milvuspb.GrantEntity, _a1 error) *IMetaTable_SelectGrant_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
 // SelectRole provides a mock function with given fields: tenant, entity, includeUserInfo
 func (_m *IMetaTable) SelectRole(tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
 	ret := _m.Called(tenant, entity, includeUserInfo)
@@ -710,6 +1680,31 @@ func (_m *IMetaTable) SelectRole(tenant string, entity *milvuspb.RoleEntity, inc
 	return r0, r1
 }
 
+// IMetaTable_SelectRole_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SelectRole'
+type IMetaTable_SelectRole_Call struct {
+	*mock.Call
+}
+
+// SelectRole is a helper method to define mock.On call
+//  - tenant string
+//  - entity *milvuspb.RoleEntity
+//  - includeUserInfo bool
+func (_e *IMetaTable_Expecter) SelectRole(tenant interface{}, entity interface{}, includeUserInfo interface{}) *IMetaTable_SelectRole_Call {
+	return &IMetaTable_SelectRole_Call{Call: _e.mock.On("SelectRole", tenant, entity, includeUserInfo)}
+}
+
+func (_c *IMetaTable_SelectRole_Call) Run(run func(tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool)) *IMetaTable_SelectRole_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(*milvuspb.RoleEntity), args[2].(bool))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_SelectRole_Call) Return(_a0 []*milvuspb.RoleResult, _a1 error) *IMetaTable_SelectRole_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
 // SelectUser provides a mock function with given fields: tenant, entity, includeRoleInfo
 func (_m *IMetaTable) SelectUser(tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error) {
 	ret := _m.Called(tenant, entity, includeRoleInfo)
@@ -731,6 +1726,31 @@ func (_m *IMetaTable) SelectUser(tenant string, entity *milvuspb.UserEntity, inc
 	}
 
 	return r0, r1
+}
+
+// IMetaTable_SelectUser_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SelectUser'
+type IMetaTable_SelectUser_Call struct {
+	*mock.Call
+}
+
+// SelectUser is a helper method to define mock.On call
+//  - tenant string
+//  - entity *milvuspb.UserEntity
+//  - includeRoleInfo bool
+func (_e *IMetaTable_Expecter) SelectUser(tenant interface{}, entity interface{}, includeRoleInfo interface{}) *IMetaTable_SelectUser_Call {
+	return &IMetaTable_SelectUser_Call{Call: _e.mock.On("SelectUser", tenant, entity, includeRoleInfo)}
+}
+
+func (_c *IMetaTable_SelectUser_Call) Run(run func(tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool)) *IMetaTable_SelectUser_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(*milvuspb.UserEntity), args[2].(bool))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_SelectUser_Call) Return(_a0 []*milvuspb.UserResult, _a1 error) *IMetaTable_SelectUser_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
 }
 
 type mockConstructorTestingTNewIMetaTable interface {
