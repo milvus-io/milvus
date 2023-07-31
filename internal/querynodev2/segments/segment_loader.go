@@ -911,6 +911,7 @@ func (loader *segmentLoader) checkSegmentSize(segmentLoadInfos []*querypb.Segmen
 	}
 
 	log.Info("predict memory and disk usage while loading (in MiB)",
+		zap.Uint64("maxSegmentSize", toMB(maxSegmentSize)),
 		zap.Int("concurrency", concurrency),
 		zap.Uint64("memUsage", toMB(memUsage)),
 		zap.Uint64("diskUsage", toMB(diskUsage)),
