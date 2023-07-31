@@ -1814,10 +1814,12 @@ func Test_NewHTTPServer_TLS_TwoWay(t *testing.T) {
 	Params.CaPemPath = "../../../configs/cert/ca.pem"
 	HTTPParams.InitOnce()
 	HTTPParams.Enabled = true
+	HTTPParams.Port = 8080
 
 	err := runAndWaitForServerReady(server)
 	assert.Nil(t, err)
 	assert.NotNil(t, server.grpcExternalServer)
+	assert.NotNil(t, server.httpServer)
 	time.Sleep(100 * time.Second)
 	err = server.Stop()
 	assert.Nil(t, err)
@@ -1832,10 +1834,12 @@ func Test_NewHTTPServer_TLS_OneWay(t *testing.T) {
 	Params.ServerKeyPath = "../../../configs/cert/server.key"
 	HTTPParams.InitOnce()
 	HTTPParams.Enabled = true
+	HTTPParams.Port = 8080
 
 	err := runAndWaitForServerReady(server)
 	assert.Nil(t, err)
 	assert.NotNil(t, server.grpcExternalServer)
+	assert.NotNil(t, server.httpServer)
 	err = server.Stop()
 	assert.Nil(t, err)
 }
@@ -1849,6 +1853,7 @@ func Test_NewHTTPServer_TLS_FileNotExisted(t *testing.T) {
 	Params.ServerKeyPath = "../../../configs/cert/server.key"
 	HTTPParams.InitOnce()
 	HTTPParams.Enabled = true
+	HTTPParams.Port = 8080
 	err := runAndWaitForServerReady(server)
 	assert.NotNil(t, err)
 	server.Stop()

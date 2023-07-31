@@ -47,7 +47,7 @@ func (h *Handlers) describeCollection(c *gin.Context, dbName string, collectionN
 		DbName:         dbName,
 		CollectionName: collectionName,
 	}
-	if needAuth {
+	if needAuth && proxy.Params.CommonCfg.AuthorizationEnabled {
 		username, ok := c.Get(ContextUsername)
 		if !ok {
 			c.JSON(http.StatusProxyAuthRequired, gin.H{HTTPReturnCode: Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
@@ -109,11 +109,13 @@ func (h *Handlers) listCollections(c *gin.Context) {
 	req := milvuspb.ShowCollectionsRequest{
 		DbName: dbName,
 	}
-	username, _ := c.Get(ContextUsername)
-	_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
-	if authErr != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
-		return
+	if proxy.Params.CommonCfg.AuthorizationEnabled {
+		username, _ := c.Get(ContextUsername)
+		_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
+		if authErr != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
+			return
+		}
 	}
 	if !h.checkDatabase(c, dbName) {
 		return
@@ -190,11 +192,13 @@ func (h *Handlers) createCollection(c *gin.Context) {
 		ShardsNum:        ShardNumDefault,
 		ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
 	}
-	username, _ := c.Get(ContextUsername)
-	_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
-	if authErr != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
-		return
+	if proxy.Params.CommonCfg.AuthorizationEnabled {
+		username, _ := c.Get(ContextUsername)
+		_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
+		if authErr != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
+			return
+		}
 	}
 	if !h.checkDatabase(c, req.DbName) {
 		return
@@ -313,11 +317,13 @@ func (h *Handlers) dropCollection(c *gin.Context) {
 		DbName:         httpReq.DbName,
 		CollectionName: httpReq.CollectionName,
 	}
-	username, _ := c.Get(ContextUsername)
-	_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
-	if authErr != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
-		return
+	if proxy.Params.CommonCfg.AuthorizationEnabled {
+		username, _ := c.Get(ContextUsername)
+		_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
+		if authErr != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
+			return
+		}
 	}
 	if !h.checkDatabase(c, req.DbName) {
 		return
@@ -369,11 +375,13 @@ func (h *Handlers) query(c *gin.Context) {
 	if httpReq.Limit > 0 {
 		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: ParamLimit, Value: strconv.FormatInt(int64(httpReq.Limit), 10)})
 	}
-	username, _ := c.Get(ContextUsername)
-	_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
-	if authErr != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
-		return
+	if proxy.Params.CommonCfg.AuthorizationEnabled {
+		username, _ := c.Get(ContextUsername)
+		_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
+		if authErr != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
+			return
+		}
 	}
 	if !h.checkDatabase(c, req.DbName) {
 		return
@@ -426,11 +434,13 @@ func (h *Handlers) get(c *gin.Context) {
 		OutputFields:       httpReq.OutputFields,
 		GuaranteeTimestamp: BoundedTimestamp,
 	}
-	username, _ := c.Get(ContextUsername)
-	_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
-	if authErr != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
-		return
+	if proxy.Params.CommonCfg.AuthorizationEnabled {
+		username, _ := c.Get(ContextUsername)
+		_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
+		if authErr != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
+			return
+		}
 	}
 	if !h.checkDatabase(c, req.DbName) {
 		return
@@ -489,11 +499,13 @@ func (h *Handlers) delete(c *gin.Context) {
 		DbName:         httpReq.DbName,
 		CollectionName: httpReq.CollectionName,
 	}
-	username, _ := c.Get(ContextUsername)
-	_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
-	if authErr != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
-		return
+	if proxy.Params.CommonCfg.AuthorizationEnabled {
+		username, _ := c.Get(ContextUsername)
+		_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
+		if authErr != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
+			return
+		}
 	}
 	if !h.checkDatabase(c, req.DbName) {
 		return
@@ -539,11 +551,13 @@ func (h *Handlers) insert(c *gin.Context) {
 		PartitionName:  "_default",
 		NumRows:        uint32(len(httpReq.Data)),
 	}
-	username, _ := c.Get(ContextUsername)
-	_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
-	if authErr != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
-		return
+	if proxy.Params.CommonCfg.AuthorizationEnabled {
+		username, _ := c.Get(ContextUsername)
+		_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
+		if authErr != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
+			return
+		}
 	}
 	if !h.checkDatabase(c, req.DbName) {
 		return
@@ -619,11 +633,13 @@ func (h *Handlers) search(c *gin.Context) {
 		GuaranteeTimestamp: BoundedTimestamp,
 		Nq:                 int64(1),
 	}
-	username, _ := c.Get(ContextUsername)
-	_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
-	if authErr != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
-		return
+	if proxy.Params.CommonCfg.AuthorizationEnabled {
+		username, _ := c.Get(ContextUsername)
+		_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
+		if authErr != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
+			return
+		}
 	}
 	if !h.checkDatabase(c, req.DbName) {
 		return
