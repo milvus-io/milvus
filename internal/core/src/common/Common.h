@@ -22,14 +22,22 @@
 namespace milvus {
 
 extern int64_t FILE_SLICE_SIZE;
-extern int64_t THREAD_CORE_COEFFICIENT;
+extern int64_t HIGH_PRIORITY_THREAD_CORE_COEFFICIENT;
+extern int64_t MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT;
+extern int64_t LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
 extern int CPU_NUM;
 
 void
 SetIndexSliceSize(const int64_t size);
 
 void
-SetThreadCoreCoefficient(const int64_t coefficient);
+SetHighPriorityThreadCoreCoefficient(const int64_t coefficient);
+
+void
+SetMiddlePriorityThreadCoreCoefficient(const int64_t coefficient);
+
+void
+SetLowPriorityThreadCoreCoefficient(const int64_t coefficient);
 
 void
 SetCpuNum(const int core);

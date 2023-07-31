@@ -448,7 +448,10 @@ common:
   retentionDuration: 0 # time travel reserved time, insert/delete will not be cleaned in this period. disable it by default
   entityExpiration: -1 # Entity expiration in seconds, CAUTION make sure entityExpiration >= retentionDuration and -1 means never expire
   indexSliceSize: 16 # MB
-  threadCoreCoefficient: 10 # This parameter specify how many times the number of threads is the number of cores
+  threadCoreCoefficient:
+    highPriority: 100 # This parameter specify how many times the number of threads is the number of cores in high priority thread pool
+    middlePriority: 50 # This parameter specify how many times the number of threads is the number of cores in middle priority thread pool
+    lowPriority: 10 # This parameter specify how many times the number of threads is the number of cores in low priority thread pool
   DiskIndex:
     MaxDegree: 56
     SearchListSize: 100
