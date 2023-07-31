@@ -3301,8 +3301,7 @@ class TestUtilityRBAC(TestcaseBase):
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
         self.connection_wrap.connect(host=host, port=port, user=user,
                                      password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
-        self.index_wrap.init_index(collection_w.collection, ct.default_int64_field_name,
-                                   default_index_params)
+        collection_w.create_index(ct.default_float_vec_field_name)
 
     @pytest.mark.tags(CaseLabel.RBAC)
     @pytest.mark.parametrize("with_db", [False, True])
@@ -3328,14 +3327,13 @@ class TestUtilityRBAC(TestcaseBase):
         db_name = db_kwargs.get("db_name", ct.default_db)
         self.database_wrap.using_database(db_name)
         collection_w = self.init_collection_wrap(name=c_name)
-        self.index_wrap.init_index(collection_w.collection, ct.default_int64_field_name,
-                                   default_index_params)
+        collection_w.create_index(ct.default_float_vec_field_name)
 
         self.utility_wrap.role_grant("Collection", c_name, "DropIndex", **db_kwargs)
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
         self.connection_wrap.connect(host=host, port=port, user=user,
                                      password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
-        self.index_wrap.drop()
+        collection_w.drop_index()
 
     @pytest.mark.tags(CaseLabel.RBAC)
     @pytest.mark.parametrize("with_db", [False, True])
@@ -3372,7 +3370,7 @@ class TestUtilityRBAC(TestcaseBase):
                                      password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
         vectors = [[random.random() for _ in range(ct.default_dim)] for _ in range(ct.default_nq)]
         collection_w.search(vectors[:ct.default_nq], ct.default_float_vec_field_name,
-                            ct.default_search_params, ct.default_limit,
+                            {}, ct.default_limit,
                             "int64 >= 0", check_task=CheckTasks.check_search_results,
                             check_items={"nq": ct.default_nq,
                                          "limit": ct.default_limit})
@@ -3866,7 +3864,7 @@ class TestUtilityRBAC(TestcaseBase):
         vectors = [[random.random() for _ in range(ct.default_dim)] for _ in range(ct.default_nq)]
         collection_w.load()
         collection_w.search(vectors[:ct.default_nq], ct.default_float_vec_field_name,
-                            ct.default_search_params, ct.default_limit,
+                            {}, ct.default_limit,
                             "int64 >= 0")
         collection_w.flush()
         default_term_expr = f'{ct.default_int64_field_name} in [0, 1]'

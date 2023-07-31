@@ -846,7 +846,7 @@ class TestConnect(TestcaseBase):
         address = "{}:{}".format(host, port)
         self.connection_wrap.connect(alias=connect_name, address=address, check_task=ct.CheckTasks.ccr)
 
-    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.tags(ct.CaseLabel.RBAC)
     @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING])
     def test_connect_with_default_user_password(self, host, port, connect_name):
         """
@@ -999,7 +999,6 @@ class TestConnectUserPasswordInvalid(TestcaseBase):
     """
 
     @pytest.mark.tags(ct.CaseLabel.RBAC)
-    @pytest.mark.parametrize("port", ["19530"])
     def test_connect_without_user_password_after_authorization_enabled(self, host, port):
         """
         target: test connect without user password after authorization enabled

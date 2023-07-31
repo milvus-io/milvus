@@ -1872,28 +1872,22 @@ class TestCollectionSearch(TestcaseBase):
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_search_max_nq(self, auto_id, dim, _async):
+    @pytest.mark.parametrize("nq", [1, 20, 100, 8000, 16384])
+    def test_search_different_nq(self, nq):
         """
-        target: test search with max nq
-        method: connect milvus, create collection, insert, load and search with max nq
-        expected: search successfully with max nq
+        target: test search with different nq
+        method: create collection, insert, load and search with different nq ∈ [1, 16384]
+        expected: search successfully with different nq
         """
-        self._connect()
-        nq = 16384
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
-                                                                      auto_id=auto_id,
-                                                                      dim=dim)[0:4]
-        collection_w.load()
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb=20000)[0:4]
         log.info("test_search_max_nq: searching collection %s" % collection_w.name)
-        vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(nq)]
         collection_w.search(vectors[:nq], default_search_field,
                             default_search_params, default_limit,
-                            default_search_exp, _async=_async,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
                                          "ids": insert_ids,
-                                         "limit": default_limit,
-                                         "_async": _async})
+                                         "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("shards_num", [-256, 0, ct.max_shards_num // 2, ct.max_shards_num])
@@ -3503,7 +3497,8 @@ class TestCollectionSearch(TestcaseBase):
         if enable_dynamic_field:
             entities = []
             for vector in _vectors[0]:
-                entities.append({default_float_field_name: vector[default_float_field_name],
+                entities.append({default_int64_field_name: vector[default_int64_field_name],
+                                 default_float_field_name: vector[default_float_field_name],
                                  default_string_field_name: vector[default_string_field_name],
                                  default_search_field: vector[default_search_field]})
             original_entities.append(pd.DataFrame(entities))

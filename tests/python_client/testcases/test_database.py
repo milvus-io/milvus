@@ -20,8 +20,6 @@ class TestDatabaseParams(TestcaseBase):
         """
         log.info("[database_teardown_method] Start teardown database test cases ...")
 
-        self._connect()
-
         # clear db
         for db in self.database_wrap.list_database()[0]:
             # using db
@@ -208,9 +206,9 @@ class TestDatabaseParams(TestcaseBase):
         assert collection_w.name in collections
 
     @pytest.mark.parametrize("invalid_db_name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
-    def test_using_invalid_db_2(self, invalid_db_name):
+    def test_using_invalid_db_2(self, host, port, invalid_db_name):
         # connect with default alias using
-        self._connect()
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user, password=ct.default_password)
 
         # create collection in default db
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
@@ -228,8 +226,6 @@ class TestDatabaseOperation(TestcaseBase):
         teardown method: drop collection and db
         """
         log.info("[database_teardown_method] Start teardown database test cases ...")
-
-        self._connect()
 
         # clear db
         for db in self.database_wrap.list_database()[0]:
@@ -511,14 +507,14 @@ class TestDatabaseOperation(TestcaseBase):
         using_collections, _ = self.utility_wrap.list_collections()
         assert collection_w_default.name in using_collections
 
-    def test_using_db_not_existed(self):
+    def test_using_db_not_existed(self, host, port):
         """
         target: test using a not existed db
         method: using a not existed db
         expected: exception
         """
         # create db
-        self._connect()
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user, password=ct.default_password)
         collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix))
 
         # list collection with not exist using db -> exception
