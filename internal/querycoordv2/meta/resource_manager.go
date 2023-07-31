@@ -23,6 +23,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -111,18 +112,18 @@ func (rg *ResourceGroup) GetCapacity() int {
 
 type ResourceManager struct {
 	groups  map[string]*ResourceGroup
-	store   Store
+	catalog metastore.QueryCoordCatalog
 	nodeMgr *session.NodeManager
 
 	rwmutex sync.RWMutex
 }
 
-func NewResourceManager(store Store, nodeMgr *session.NodeManager) *ResourceManager {
+func NewResourceManager(catalog metastore.QueryCoordCatalog, nodeMgr *session.NodeManager) *ResourceManager {
 	groupMap := make(map[string]*ResourceGroup)
 	groupMap[DefaultResourceGroupName] = NewResourceGroup(DefaultResourceGroupCapacity)
 	return &ResourceManager{
 		groups:  groupMap,
-		store:   store,
+		catalog: catalog,
 		nodeMgr: nodeMgr,
 	}
 }
@@ -142,7 +143,7 @@ func (rm *ResourceManager) AddResourceGroup(rgName string) error {
 		return ErrRGLimit
 	}
 
-	err := rm.store.SaveResourceGroup(&querypb.ResourceGroup{
+	err := rm.catalog.SaveResourceGroup(&querypb.ResourceGroup{
 		Name:     rgName,
 		Capacity: 0,
 	})
@@ -177,7 +178,7 @@ func (rm *ResourceManager) RemoveResourceGroup(rgName string) error {
 		return ErrDeleteNonEmptyRG
 	}
 
-	err := rm.store.RemoveResourceGroup(rgName)
+	err := rm.catalog.RemoveResourceGroup(rgName)
 	if err != nil {
 		log.Info("failed to remove resource group",
 			zap.String("rgName", rgName),
@@ -224,7 +225,7 @@ func (rm *ResourceManager) assignNode(rgName string, node int64) error {
 		// default rg capacity won't be changed
 		deltaCapacity = 0
 	}
-	err := rm.store.SaveResourceGroup(&querypb.ResourceGroup{
+	err := rm.catalog.SaveResourceGroup(&querypb.ResourceGroup{
 		Name:     rgName,
 		Capacity: int32(rm.groups[rgName].GetCapacity() + deltaCapacity),
 		Nodes:    newNodes,
@@ -291,7 +292,7 @@ func (rm *ResourceManager) unassignNode(rgName string, node int64) error {
 		deltaCapacity = 0
 	}
 
-	err := rm.store.SaveResourceGroup(&querypb.ResourceGroup{
+	err := rm.catalog.SaveResourceGroup(&querypb.ResourceGroup{
 		Name:     rgName,
 		Capacity: int32(rm.groups[rgName].GetCapacity() + deltaCapacity),
 		Nodes:    newNodes,
@@ -452,7 +453,7 @@ func (rm *ResourceManager) HandleNodeUp(node int64) (string, error) {
 	// assign new node to default rg
 	newNodes := rm.groups[DefaultResourceGroupName].GetNodes()
 	newNodes = append(newNodes, node)
-	err = rm.store.SaveResourceGroup(&querypb.ResourceGroup{
+	err = rm.catalog.SaveResourceGroup(&querypb.ResourceGroup{
 		Name:     DefaultResourceGroupName,
 		Capacity: int32(rm.groups[DefaultResourceGroupName].GetCapacity()),
 		Nodes:    newNodes,
@@ -489,7 +490,7 @@ func (rm *ResourceManager) HandleNodeDown(node int64) (string, error) {
 			newNodes = append(newNodes, nid)
 		}
 	}
-	err = rm.store.SaveResourceGroup(&querypb.ResourceGroup{
+	err = rm.catalog.SaveResourceGroup(&querypb.ResourceGroup{
 		Name:     rgName,
 		Capacity: int32(rm.groups[rgName].GetCapacity()),
 		Nodes:    newNodes,
@@ -607,7 +608,7 @@ func (rm *ResourceManager) transferNodeInStore(from string, to string, numNode i
 		Nodes:    toNodeList,
 	}
 
-	return movedNodes, rm.store.SaveResourceGroup(fromRG, toRG)
+	return movedNodes, rm.catalog.SaveResourceGroup(fromRG, toRG)
 }
 
 // auto recover rg, return recover used node num
@@ -655,7 +656,7 @@ func (rm *ResourceManager) AutoRecoverResourceGroup(rgName string) ([]int64, err
 func (rm *ResourceManager) Recover() error {
 	rm.rwmutex.Lock()
 	defer rm.rwmutex.Unlock()
-	rgs, err := rm.store.GetResourceGroups()
+	rgs, err := rm.catalog.GetResourceGroups()
 	if err != nil {
 		return ErrRecoverResourceGroupToStore
 	}

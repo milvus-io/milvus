@@ -25,6 +25,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 )
@@ -37,7 +39,7 @@ type ReplicaManagerSuite struct {
 	replicaNumbers []int32
 	idAllocator    func() (int64, error)
 	kv             kv.MetaKv
-	store          Store
+	catalog        metastore.QueryCoordCatalog
 	mgr            *ReplicaManager
 }
 
@@ -62,10 +64,10 @@ func (suite *ReplicaManagerSuite) SetupTest() {
 		config.EtcdTLSMinVersion.GetValue())
 	suite.Require().NoError(err)
 	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
-	suite.store = NewMetaStore(suite.kv)
+	suite.catalog = querycoord.NewCatalog(suite.kv)
 
 	suite.idAllocator = RandomIncrementIDAllocator()
-	suite.mgr = NewReplicaManager(suite.idAllocator, suite.store)
+	suite.mgr = NewReplicaManager(suite.idAllocator, suite.catalog)
 	suite.spawnAndPutAll()
 }
 
@@ -130,7 +132,7 @@ func (suite *ReplicaManagerSuite) TestRecover() {
 	}
 	value, err := proto.Marshal(&replicaInfo)
 	suite.NoError(err)
-	suite.kv.Save(ReplicaMetaPrefixV1+"/2100", string(value))
+	suite.kv.Save(querycoord.ReplicaMetaPrefixV1+"/2100", string(value))
 
 	suite.clearMemory()
 	mgr.Recover(append(suite.collections, 1000))
@@ -214,7 +216,7 @@ func (suite *ReplicaManagerSuite) spawnAndPutAll() {
 }
 
 func (suite *ReplicaManagerSuite) TestResourceGroup() {
-	mgr := NewReplicaManager(suite.idAllocator, suite.store)
+	mgr := NewReplicaManager(suite.idAllocator, suite.catalog)
 	replica1, err := mgr.spawn(int64(1000), DefaultResourceGroupName)
 	replica1.AddNode(1)
 	suite.NoError(err)

@@ -16,7 +16,10 @@
 
 package meta
 
-import "github.com/milvus-io/milvus/internal/querycoordv2/session"
+import (
+	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+)
 
 type Meta struct {
 	*CollectionManager
@@ -26,12 +29,12 @@ type Meta struct {
 
 func NewMeta(
 	idAllocator func() (int64, error),
-	store Store,
+	catalog metastore.QueryCoordCatalog,
 	nodeMgr *session.NodeManager,
 ) *Meta {
 	return &Meta{
-		NewCollectionManager(store),
-		NewReplicaManager(idAllocator, store),
-		NewResourceManager(store, nodeMgr),
+		NewCollectionManager(catalog),
+		NewReplicaManager(idAllocator, catalog),
+		NewResourceManager(catalog, nodeMgr),
 	}
 }

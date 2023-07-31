@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -60,7 +61,7 @@ func (suite *ScoreBasedBalancerTestSuite) SetupTest() {
 	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
 	suite.broker = meta.NewMockBroker(suite.T())
 
-	store := meta.NewMetaStore(suite.kv)
+	store := querycoord.NewCatalog(suite.kv)
 	idAllocator := RandomIncrementIDAllocator()
 	nodeManager := session.NewNodeManager()
 	testMeta := meta.NewMeta(idAllocator, store, nodeManager)
