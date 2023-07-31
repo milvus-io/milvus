@@ -24,6 +24,8 @@ import (
 
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
+	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -56,7 +58,7 @@ func (suite *ResourceManagerSuite) SetupTest() {
 	suite.Require().NoError(err)
 	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
 
-	store := NewMetaStore(suite.kv)
+	store := querycoord.NewCatalog(suite.kv)
 	suite.manager = NewResourceManager(store, session.NewNodeManager())
 }
 
@@ -380,7 +382,7 @@ func (suite *ResourceManagerSuite) TestDefaultResourceGroup() {
 }
 
 func (suite *ResourceManagerSuite) TestStoreFailed() {
-	store := NewMockStore(suite.T())
+	store := mocks.NewQueryCoordCatalog(suite.T())
 	nodeMgr := session.NewNodeManager()
 	manager := NewResourceManager(store, nodeMgr)
 

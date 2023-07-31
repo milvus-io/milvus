@@ -27,6 +27,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/eventlog"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -99,25 +100,25 @@ type CollectionManager struct {
 
 	collections map[UniqueID]*Collection
 	partitions  map[UniqueID]*Partition
-	store       Store
+	catalog     metastore.QueryCoordCatalog
 }
 
-func NewCollectionManager(store Store) *CollectionManager {
+func NewCollectionManager(catalog metastore.QueryCoordCatalog) *CollectionManager {
 	return &CollectionManager{
 		collections: make(map[int64]*Collection),
 		partitions:  make(map[int64]*Partition),
-		store:       store,
+		catalog:     catalog,
 	}
 }
 
 // Recover recovers collections from kv store,
 // panics if failed
 func (m *CollectionManager) Recover(broker Broker) error {
-	collections, err := m.store.GetCollections()
+	collections, err := m.catalog.GetCollections()
 	if err != nil {
 		return err
 	}
-	partitions, err := m.store.GetPartitions()
+	partitions, err := m.catalog.GetPartitions()
 	if err != nil {
 		return err
 	}
@@ -127,7 +128,7 @@ func (m *CollectionManager) Recover(broker Broker) error {
 		_, err = broker.GetCollectionSchema(context.Background(), collection.GetCollectionID())
 		if errors.Is(err, merr.ErrCollectionNotFound) {
 			log.Info("skip dropped collection during recovery", zap.Int64("collection", collection.GetCollectionID()))
-			m.store.ReleaseCollection(collection.GetCollectionID())
+			m.catalog.ReleaseCollection(collection.GetCollectionID())
 			continue
 		}
 		if err != nil {
@@ -140,7 +141,7 @@ func (m *CollectionManager) Recover(broker Broker) error {
 				zap.String("status", collection.GetStatus().String()),
 				zap.Int32("replicaNumber", collection.GetReplicaNumber()),
 			)
-			m.store.ReleaseCollection(collection.GetCollectionID())
+			m.catalog.ReleaseCollection(collection.GetCollectionID())
 			continue
 		}
 		m.collections[collection.CollectionID] = &Collection{
@@ -152,7 +153,7 @@ func (m *CollectionManager) Recover(broker Broker) error {
 		existPartitions, err := broker.GetPartitions(context.Background(), collection)
 		if errors.Is(err, merr.ErrCollectionNotFound) {
 			log.Info("skip dropped collection during recovery", zap.Int64("collection", collection))
-			m.store.ReleaseCollection(collection)
+			m.catalog.ReleaseCollection(collection)
 			continue
 		}
 		if err != nil {
@@ -169,7 +170,7 @@ func (m *CollectionManager) Recover(broker Broker) error {
 		if len(omitPartitions) > 0 {
 			log.Info("skip dropped partitions during recovery",
 				zap.Int64("collection", collection), zap.Int64s("partitions", omitPartitions))
-			m.store.ReleasePartition(collection, omitPartitions...)
+			m.catalog.ReleasePartition(collection, omitPartitions...)
 		}
 
 		sawLoaded := false
@@ -181,7 +182,7 @@ func (m *CollectionManager) Recover(broker Broker) error {
 					zap.Int64("partitionID", partition.GetPartitionID()),
 					zap.String("status", partition.GetStatus().String()),
 				)
-				m.store.ReleasePartition(collection, partition.GetPartitionID())
+				m.catalog.ReleasePartition(collection, partition.GetPartitionID())
 				continue
 			}
 
@@ -192,7 +193,7 @@ func (m *CollectionManager) Recover(broker Broker) error {
 		}
 
 		if !sawLoaded {
-			m.store.ReleaseCollection(collection)
+			m.catalog.ReleaseCollection(collection)
 		}
 	}
 
@@ -426,7 +427,7 @@ func (m *CollectionManager) putCollection(withSave bool, collection *Collection,
 		partitionInfos := lo.Map(partitions, func(partition *Partition, _ int) *querypb.PartitionLoadInfo {
 			return partition.PartitionLoadInfo
 		})
-		err := m.store.SaveCollection(collection.CollectionLoadInfo, partitionInfos...)
+		err := m.catalog.SaveCollection(collection.CollectionLoadInfo, partitionInfos...)
 		if err != nil {
 			return err
 		}
@@ -460,7 +461,7 @@ func (m *CollectionManager) putPartition(partitions []*Partition, withSave bool)
 		loadInfos := lo.Map(partitions, func(partition *Partition, _ int) *querypb.PartitionLoadInfo {
 			return partition.PartitionLoadInfo
 		})
-		err := m.store.SavePartition(loadInfos...)
+		err := m.catalog.SavePartition(loadInfos...)
 		if err != nil {
 			return err
 		}
@@ -535,7 +536,7 @@ func (m *CollectionManager) RemoveCollection(collectionID UniqueID) error {
 
 	_, ok := m.collections[collectionID]
 	if ok {
-		err := m.store.ReleaseCollection(collectionID)
+		err := m.catalog.ReleaseCollection(collectionID)
 		if err != nil {
 			return err
 		}
@@ -562,7 +563,7 @@ func (m *CollectionManager) RemovePartition(ids ...UniqueID) error {
 
 func (m *CollectionManager) removePartition(ids ...UniqueID) error {
 	partition := m.partitions[ids[0]]
-	err := m.store.ReleasePartition(partition.CollectionID, ids...)
+	err := m.catalog.ReleasePartition(partition.CollectionID, ids...)
 	if err != nil {
 		return err
 	}

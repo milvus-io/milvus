@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdKV "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -41,7 +42,7 @@ type ResourceObserverSuite struct {
 
 	kv kv.MetaKv
 	//dependency
-	store    *meta.MockStore
+	store    *mocks.QueryCoordCatalog
 	meta     *meta.Meta
 	observer *ResourceObserver
 	nodeMgr  *session.NodeManager
@@ -70,7 +71,7 @@ func (suite *ResourceObserverSuite) SetupTest() {
 	suite.kv = etcdKV.NewEtcdKV(cli, config.MetaRootPath.GetValue())
 
 	// meta
-	suite.store = meta.NewMockStore(suite.T())
+	suite.store = mocks.NewQueryCoordCatalog(suite.T())
 	idAllocator := RandomIncrementIDAllocator()
 	suite.nodeMgr = session.NewNodeManager()
 	suite.meta = meta.NewMeta(idAllocator, suite.store, suite.nodeMgr)

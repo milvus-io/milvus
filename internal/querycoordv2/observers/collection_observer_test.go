@@ -29,6 +29,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
@@ -56,7 +58,7 @@ type CollectionObserverSuite struct {
 	idAllocator func() (int64, error)
 	etcd        *clientv3.Client
 	kv          kv.MetaKv
-	store       meta.Store
+	store       metastore.QueryCoordCatalog
 	broker      *meta.MockBroker
 
 	// Dependencies
@@ -180,7 +182,7 @@ func (suite *CollectionObserverSuite) SetupTest() {
 	suite.kv = etcdkv.NewEtcdKV(client, Params.EtcdCfg.MetaRootPath.GetValue()+"-"+RandomMetaRootPath())
 	suite.Require().NoError(err)
 	log.Debug("create meta store...")
-	suite.store = meta.NewMetaStore(suite.kv)
+	suite.store = querycoord.NewCatalog(suite.kv)
 
 	// Dependencies
 	suite.dist = meta.NewDistributionManager()

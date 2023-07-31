@@ -23,6 +23,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -100,20 +101,20 @@ type ReplicaManager struct {
 
 	idAllocator func() (int64, error)
 	replicas    map[UniqueID]*Replica
-	store       Store
+	catalog     metastore.QueryCoordCatalog
 }
 
-func NewReplicaManager(idAllocator func() (int64, error), store Store) *ReplicaManager {
+func NewReplicaManager(idAllocator func() (int64, error), catalog metastore.QueryCoordCatalog) *ReplicaManager {
 	return &ReplicaManager{
 		idAllocator: idAllocator,
 		replicas:    make(map[int64]*Replica),
-		store:       store,
+		catalog:     catalog,
 	}
 }
 
 // Recover recovers the replicas for given collections from meta store
 func (m *ReplicaManager) Recover(collections []int64) error {
-	replicas, err := m.store.GetReplicas()
+	replicas, err := m.catalog.GetReplicas()
 	if err != nil {
 		return fmt.Errorf("failed to recover replicas, err=%w", err)
 	}
@@ -135,7 +136,7 @@ func (m *ReplicaManager) Recover(collections []int64) error {
 				zap.Int64s("nodes", replica.GetNodes()),
 			)
 		} else {
-			err := m.store.ReleaseReplica(replica.GetCollectionID(), replica.GetID())
+			err := m.catalog.ReleaseReplica(replica.GetCollectionID(), replica.GetID())
 			if err != nil {
 				return err
 			}
@@ -196,7 +197,7 @@ func (m *ReplicaManager) spawn(collectionID UniqueID, rgName string) (*Replica, 
 
 func (m *ReplicaManager) put(replicas ...*Replica) error {
 	for _, replica := range replicas {
-		err := m.store.SaveReplica(replica.Replica)
+		err := m.catalog.SaveReplica(replica.Replica)
 		if err != nil {
 			return err
 		}
@@ -211,7 +212,7 @@ func (m *ReplicaManager) RemoveCollection(collectionID UniqueID) error {
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
 
-	err := m.store.ReleaseReplicas(collectionID)
+	err := m.catalog.ReleaseReplicas(collectionID)
 	if err != nil {
 		return err
 	}

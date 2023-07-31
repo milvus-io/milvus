@@ -28,6 +28,8 @@ import (
 
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
@@ -46,9 +48,9 @@ type CollectionManagerSuite struct {
 	parLoadPercent map[int64][]int32
 
 	// Mocks
-	kv     kv.MetaKv
-	store  Store
-	broker *MockBroker
+	kv      kv.MetaKv
+	catalog metastore.QueryCoordCatalog
+	broker  *MockBroker
 
 	// Test object
 	mgr *CollectionManager
@@ -93,10 +95,10 @@ func (suite *CollectionManagerSuite) SetupTest() {
 		config.EtcdTLSMinVersion.GetValue())
 	suite.Require().NoError(err)
 	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
-	suite.store = NewMetaStore(suite.kv)
+	suite.catalog = querycoord.NewCatalog(suite.kv)
 	suite.broker = NewMockBroker(suite.T())
 
-	suite.mgr = NewCollectionManager(suite.store)
+	suite.mgr = NewCollectionManager(suite.catalog)
 	suite.loadAll()
 }
 
