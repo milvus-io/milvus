@@ -146,7 +146,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	log.Info("start loading...", zap.Int("segmentNum", len(segments)), zap.Int("afterFilter", len(infos)))
 
 	// Check memory & storage limit
-	memUsage, diskUsage, concurrencyLevel, err := loader.requestResource(infos...)
+	memUsage, diskUsage, concurrencyLevel, err := loader.requestResource(ctx, infos...)
 	if err != nil {
 		return nil, err
 	}
@@ -287,7 +287,7 @@ func (loader *segmentLoader) notifyLoadFinish(segments ...*querypb.SegmentLoadIn
 
 // requestResource requests memory & storage to load segments,
 // returns the memory usage, disk usage and concurrency with the gained memory.
-func (loader *segmentLoader) requestResource(infos ...*querypb.SegmentLoadInfo) (uint64, uint64, int, error) {
+func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*querypb.SegmentLoadInfo) (uint64, uint64, int, error) {
 	loader.mut.Lock()
 	defer loader.mut.Unlock()
 
@@ -305,13 +305,13 @@ func (loader *segmentLoader) requestResource(infos ...*querypb.SegmentLoadInfo) 
 		}
 
 		for ; concurrencyLevel > 1; concurrencyLevel /= 2 {
-			_, _, err := loader.checkSegmentSize(infos, concurrencyLevel)
+			_, _, err := loader.checkSegmentSize(ctx, infos, concurrencyLevel)
 			if err == nil {
 				break
 			}
 		}
 
-		mu, du, err := loader.checkSegmentSize(infos, concurrencyLevel)
+		mu, du, err := loader.checkSegmentSize(ctx, infos, concurrencyLevel)
 		if err != nil {
 			log.Warn("no sufficient resource to load segments", zap.Error(err))
 			return 0, 0, 0, err
@@ -835,12 +835,12 @@ func GetIndexResourceUsage(indexInfo *querypb.FieldIndexInfo) (uint64, uint64, e
 // checkSegmentSize checks whether the memory & disk is sufficient to load the segments with given concurrency,
 // returns the memory & disk usage while loading if possible to load,
 // otherwise, returns error
-func (loader *segmentLoader) checkSegmentSize(segmentLoadInfos []*querypb.SegmentLoadInfo, concurrency int) (uint64, uint64, error) {
+func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadInfos []*querypb.SegmentLoadInfo, concurrency int) (uint64, uint64, error) {
 	if len(segmentLoadInfos) == 0 || concurrency == 0 {
 		return 0, 0, nil
 	}
 
-	log := log.With(
+	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", segmentLoadInfos[0].GetCollectionID()),
 	)
 
@@ -913,7 +913,9 @@ func (loader *segmentLoader) checkSegmentSize(segmentLoadInfos []*querypb.Segmen
 	log.Info("predict memory and disk usage while loading (in MiB)",
 		zap.Uint64("maxSegmentSize", toMB(maxSegmentSize)),
 		zap.Int("concurrency", concurrency),
+		zap.Uint64("committedMemSize", toMB(loader.committedMemSize)),
 		zap.Uint64("memUsage", toMB(memUsage)),
+		zap.Uint64("committedDiskSize", toMB(loader.committedDiskSize)),
 		zap.Uint64("diskUsage", toMB(diskUsage)),
 		zap.Uint64("predictMemUsage", toMB(predictMemUsage)),
 		zap.Uint64("predictDiskUsage", toMB(predictDiskUsage)),
@@ -983,7 +985,7 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context, segment *LocalSegmen
 		info.Statslogs = nil
 		return info
 	})
-	memUsage, diskUsage, _, err := loader.requestResource(indexInfo...)
+	memUsage, diskUsage, _, err := loader.requestResource(ctx, indexInfo...)
 	if err != nil {
 		return err
 	}
