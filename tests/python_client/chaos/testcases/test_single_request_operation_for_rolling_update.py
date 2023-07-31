@@ -75,13 +75,22 @@ class TestOperations(TestBase):
         self.init_health_checkers(collection_name=c_name)
         # prepare data by bulk insert
         log.info("*********************Prepare Data by bulk insert**********************")
-
-        cc.start_monitor_threads(self.health_checkers)
         for k, v in self.health_checkers.items():
-            log.info(f"prepare bulk insert data for {k}")
-            v.prepare_bulk_insert_data(minio_endpoint=self.minio_endpoint)
-            v.do_bulk_insert()
+            if k in [Op.search, Op.query]:
+                log.info(f"prepare bulk insert data for {k}")
+                v.prepare_bulk_insert_data(minio_endpoint=self.minio_endpoint)
+                completed = False
+                retry_times = 0
+                while not completed and retry_times < 3:
+                    completed, result = v.do_bulk_insert()
+                    if not completed:
+                        log.info(f"do bulk insert failed: {result}")
+                        retry_times += 1
+                        sleep(5)
+        # how to make sure the bulk insert done before rolling update?
+
         log.info("*********************Load Start**********************")
+        cc.start_monitor_threads(self.health_checkers)
         # wait request_duration
         request_duration = request_duration.replace("h", "*3600+").replace("m", "*60+").replace("s", "")
         if request_duration[-1] == "+":
@@ -95,8 +104,11 @@ class TestOperations(TestBase):
             v.pause()
         for k, v in self.health_checkers.items():
             v.check_result()
-        for k, v in self.health_checkers.items():    
+        for k, v in self.health_checkers.items():  
+            log.info(f"{k} failed request: {v.fail_records}")
+        for k, v in self.health_checkers.items():  
             log.info(f"{k} rto: {v.get_rto()}")
+
         if is_check:
             assert_statistic(self.health_checkers, succ_rate_threshold=0.98)
             assert_expectations()
