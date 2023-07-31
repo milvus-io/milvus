@@ -57,4 +57,4 @@ log_err = log_config.log_err
 log_worker = log_config.log_worker
 self_defined_log = TestLog('ci_test', log_debug, log_info, log_err, log_worker).log
 loguru_log = loguru_logger
-test_log = loguru_logger
+test_log = self_defined_log

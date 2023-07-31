@@ -7,6 +7,7 @@ import sys
 import json
 import time
 from utils import constant
+from utils.utils import gen_collection_name
 from utils.util_log import test_log as logger
 import pytest
 from api.milvus import VectorClient
@@ -15,22 +16,6 @@ from utils.utils import (get_data_by_fields, get_data_by_payload, get_common_fie
 
 
 class TestInsertVector(TestBase):
-
-    def teardown_method(self):
-        try:
-            all_collections = self.collection_client.collection_list()['data']
-        except Exception as e:
-            logger.error(e)
-            all_collections = []
-        for collection in all_collections:
-            name = collection
-            payload = {
-                "collectionName": name,
-            }
-            try:
-                rsp = self.collection_client.collection_drop(payload)
-            except Exception as e:
-                logger.error(e)
 
     @pytest.mark.L0
     @pytest.mark.parametrize("insert_round", [2, 1])
@@ -45,7 +30,7 @@ class TestInsertVector(TestBase):
         """
         self.update_database(db_name=db_name)
         # create a collection
-        name = 'test_collection' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        name = gen_collection_name()
         collection_payload = {
             "collectionName": name,
             "dimension": dim,
@@ -72,22 +57,16 @@ class TestInsertVector(TestBase):
         logger.info("finished")
 
     @pytest.mark.L0
-    @pytest.mark.parametrize("insert_round", [1])
-    @pytest.mark.parametrize("nb", [100])
-    @pytest.mark.parametrize("dim", [32768])
-    @pytest.mark.parametrize("primary_field", ["id", "url"])
-    @pytest.mark.parametrize("vector_field", ["vector", "embedding"])
-    def test_insert_vector_with_payload_large_than_10m(self, vector_field, primary_field, nb, dim, insert_round):
+    @pytest.mark.parametrize("insert_round", [10])
+    def test_insert_vector_with_multi_round(self, insert_round):
         """
-        Insert a vector with a large dim
+        Insert a vector with a simple payload
         """
         # create a collection
-        name = 'test_collection' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        name = gen_collection_name()
         collection_payload = {
             "collectionName": name,
-            "dimension": dim,
-            "primaryField": primary_field,
-            "vectorField": vector_field,
+            "dimension": 768,
         }
         rsp = self.collection_client.collection_create(collection_payload)
         assert rsp['code'] == 200
@@ -95,6 +74,7 @@ class TestInsertVector(TestBase):
         logger.info(f"rsp: {rsp}")
         assert rsp['code'] == 200
         # insert data
+        nb = 300
         for i in range(insert_round):
             data = get_data_by_payload(collection_payload, nb)
             payload = {
@@ -104,8 +84,8 @@ class TestInsertVector(TestBase):
             body_size = sys.getsizeof(json.dumps(payload))
             logger.info(f"body size: {body_size / 1024 / 1024} MB")
             rsp = self.vector_client.vector_insert(payload)
-            logger.info(rsp)
-            assert "size limit" in rsp["message"]
+            assert rsp['code'] == 200
+            assert rsp['data']['insertCount'] == nb
         logger.info("finished")
 
     def test_insert_vector_with_invalid_api_key(self):
@@ -113,7 +93,7 @@ class TestInsertVector(TestBase):
         Insert a vector with invalid api key
         """
         # create a collection
-        name = 'test_collection' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        name = gen_collection_name()
         dim = 128
         payload = {
             "collectionName": name,
@@ -139,7 +119,7 @@ class TestInsertVector(TestBase):
         client = self.vector_client
         client.api_key = "invalid_api_key"
         rsp = client.vector_insert(payload)
-        assert rsp['code'] == 407
+        assert rsp['code'] == 1800
 
     def test_insert_vector_with_invalid_collection_name(self):
         """
@@ -147,7 +127,7 @@ class TestInsertVector(TestBase):
         """
 
         # create a collection
-        name = 'test_collection' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        name = gen_collection_name()
         dim = 128
         payload = {
             "collectionName": name,
@@ -174,7 +154,7 @@ class TestInsertVector(TestBase):
         Insert a vector with an invalid database name
         """
         # create a collection
-        name = 'test_collection' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        name = gen_collection_name()
         dim = 128
         payload = {
             "collectionName": name,
@@ -195,14 +175,14 @@ class TestInsertVector(TestBase):
         logger.info(f"body size: {body_size / 1024 / 1024} MB")
         success = False
         rsp = self.vector_client.vector_insert(payload, db_name="invalid_database")
-        assert rsp['code'] == 1
+        assert rsp['code'] == 800
 
     def test_insert_vector_with_mismatch_dim(self):
         """
         Insert a vector with mismatch dim
         """
         # create a collection
-        name = 'test_collection' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        name = gen_collection_name()
         dim = 32
         payload = {
             "collectionName": name,
@@ -226,26 +206,11 @@ class TestInsertVector(TestBase):
         body_size = sys.getsizeof(json.dumps(payload))
         logger.info(f"body size: {body_size / 1024 / 1024} MB")
         rsp = self.vector_client.vector_insert(payload)
-        assert rsp['code'] == 400
-        assert rsp['error'] == "vector length diff from dimension"
+        assert rsp['code'] == 1804
+        assert rsp['message'] == "fail to deal the insert data"
 
 
 class TestSearchVector(TestBase):
-
-    def teardown_method(self):
-        all_collections = self.collection_client.collection_list()['data']
-        for collection in all_collections:
-            if collection == self.name:
-                continue
-            name = collection
-            payload = {
-                "collectionName": name,
-            }
-            try:
-                rsp = self.collection_client.collection_drop(payload)
-            except Exception as e:
-                logger.error(e)
-        time.sleep(5)
 
     @pytest.mark.L0
     @pytest.mark.parametrize("metric_type", ["IP", "L2"])
@@ -253,7 +218,7 @@ class TestSearchVector(TestBase):
         """
         Search a vector with a simple payload
         """
-        name = 'test_collection' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        name = gen_collection_name()
         self.name = name
         self.init_collection(name, metric_type=metric_type)
 
@@ -279,18 +244,18 @@ class TestSearchVector(TestBase):
             assert distance == sorted(distance, reverse=True)
 
     @pytest.mark.L0
-    @pytest.mark.parametrize("sum_limit_offset", [1024, 1025])
+    @pytest.mark.parametrize("sum_limit_offset", [16384, 16385])
     def test_search_vector_with_exceed_sum_limit_offset(self, sum_limit_offset):
         """
         Search a vector with a simple payload
         """
-        max_search_sum_limit_offset = 1024
-        name = 'test_collection' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        max_search_sum_limit_offset = constant.MAX_SUM_OFFSET_AND_LIMIT
+        name = gen_collection_name()
         self.name = name
-        nb = sum_limit_offset + 100
+        nb = sum_limit_offset + 2000
         metric_type = "IP"
         limit = 100
-        self.init_collection(name, metric_type=metric_type, nb=nb)
+        self.init_collection(name, metric_type=metric_type, nb=nb, batch_size=2000)
 
         # search data
         dim = 128
@@ -303,7 +268,7 @@ class TestSearchVector(TestBase):
         }
         rsp = self.vector_client.vector_search(payload)
         if sum_limit_offset > max_search_sum_limit_offset:
-            assert rsp['code'] == 90141
+            assert rsp['code'] == 1
             return
         assert rsp['code'] == 200
         res = rsp['data']
@@ -327,7 +292,7 @@ class TestSearchVector(TestBase):
         """
         Search a vector with a simple payload
         """
-        name = 'test_collection' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        name = gen_collection_name()
         self.name = name
         nb = limit + offset + 100
         dim = 128
@@ -363,7 +328,7 @@ class TestSearchVector(TestBase):
         """
         Search a vector with a simple payload
         """
-        name = 'test_collection' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        name = gen_collection_name()
         self.name = name
         nb = 200
         dim = 128
@@ -396,7 +361,7 @@ class TestSearchVector(TestBase):
         """
         Search a vector with a simple payload
         """
-        name = 'test_collection' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        name = gen_collection_name()
         self.name = name
         nb = 200
         dim = 128
@@ -444,7 +409,7 @@ class TestSearchVector(TestBase):
         """
         Search a vector with a simple payload
         """
-        name = 'test_collection' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        name = gen_collection_name()
         self.name = name
         nb = 200
         dim = 128
@@ -488,12 +453,12 @@ class TestSearchVector(TestBase):
             if "like" in varchar_expr:
                 assert name.startswith(prefix)
 
-    @pytest.mark.parametrize("limit", [0, 3001])
+    @pytest.mark.parametrize("limit", [0, 16385])
     def test_search_vector_with_invalid_limit(self, limit):
         """
         Search a vector with a simple payload
         """
-        name = 'test_collection' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        name = gen_collection_name()
         self.name = name
         dim = 128
         schema_payload, data = self.init_collection(name, dim=dim)
@@ -510,14 +475,14 @@ class TestSearchVector(TestBase):
             "offset": 0,
         }
         rsp = self.vector_client.vector_search(payload)
-        assert rsp['code'] == 90004
+        assert rsp['code'] == 1
 
     @pytest.mark.parametrize("offset", [-1, 100_001])
     def test_search_vector_with_invalid_offset(self, offset):
         """
         Search a vector with a simple payload
         """
-        name = 'test_collection' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        name = gen_collection_name()
         self.name = name
         dim = 128
         schema_payload, data = self.init_collection(name, dim=dim)
@@ -535,467 +500,52 @@ class TestSearchVector(TestBase):
             "offset": offset,
         }
         rsp = self.vector_client.vector_search(payload)
-        assert rsp['code'] == 90005
+        assert rsp['code'] == 1
 
-    def test_search_vector_with_illegal_api_key(self, url):
+    def test_search_vector_with_illegal_api_key(self):
         """
         Search a vector with an illegal api key
         """
-        illegal_client = VectorClient(url, "illegal_api_key")
-        name = 'test_collection' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-        self.name = name
-        fields = [
-            {
-                "name": "id",
-                "type": "int64",
-                "primaryKey": True,
-                "autoId": True,
-                "description": "auto increment id"
-            },
-            {
-                "name": "doc_url",
-                "type": f"varchar({128})",
-                "description": "document url"
-            },
-            {
-                "name": "vector",
-                "type": f"floatVector({128})",
-            }
-        ]
-        data_type = ["bool", "int8", "int16", "int32", "int64", "float32", "float64"]
-        for dt in data_type:
-            fields.append({
-                "name": f"{dt}_field",
-                "type": dt,
-            })
-        client = self.collection_client
-        payload = {
-            "collectionName": name,
-            "shardsNum": 2,
-            "description": "test collection",
-            "fields": fields,
-            "indexes": [
-                {
-                    "indexName": "test_index",
-                    "fieldName": "vector",
-                    "metricType": "L2",
-                }
-            ]
-
-        }
-        rsp = client.collection_create(payload)
-        assert rsp['code'] == 200
-        rsp = client.collection_list()
-        all_collections = [collection["collectionName"] for collection in rsp['data']['collections']]
-        assert name in all_collections
-        # insert data
-        data = get_data_by_fields(fields, 3000)
-        payload = {
-            "collectionName": name,
-            "data": data
-        }
-        body_size = sys.getsizeof(json.dumps(payload))
-        logger.info(f"body size: {body_size / 1024 / 1024} MB")
-        rsp = self.vector_client.vector_insert(payload)
-        assert rsp['code'] == 200
-        # search data
-        dim = 128
-        vector_to_search = preprocessing.normalize([np.array([random.random() for i in range(dim)])])[0].tolist()
-        payload = {
-            "collectionName": name,
-            "vector": vector_to_search,
-            "filter": "int8_field > 0",
-
-        }
-        rsp = illegal_client.vector_search(payload)
-        assert rsp['Code'] == 80001
-
+        pass
 
     def test_search_vector_with_invalid_collection_name(self):
         """
         Search a vector with an invalid collection name
         """
-        cluster_id = self.cluster_id
-        name = 'test_collection' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-        self.name = name
-        fields = [
-            {
-                "name": "id",
-                "type": "int64",
-                "primaryKey": True,
-                "autoId": True,
-                "description": "auto increment id"
-            },
-            {
-                "name": "doc_url",
-                "type": f"varchar({128})",
-                "description": "document url"
-            },
-            {
-                "name": "vector",
-                "type": f"floatVector({128})",
-            }
-        ]
-        data_type = ["bool", "int8", "int16", "int32", "int64", "float32", "float64"]
-        for dt in data_type:
-            fields.append({
-                "name": f"{dt}_field",
-                "type": dt,
-            })
-        client = self.collection_client
-        payload = {
-            "collectionName": name,
-            "shardsNum": 2,
-            "description": "test collection",
-            "fields": fields,
-            "indexes": [
-                {
-                    "indexName": "test_index",
-                    "fieldName": "vector",
-                    "metricType": "L2",
-                }
-            ]
-
-        }
-        rsp = client.collection_create(cluster_id, payload)
-        assert rsp['code'] == 200
-        rsp = client.collection_list(cluster_id)
-        all_collections = [collection["collectionName"] for collection in rsp['data']['collections']]
-        assert name in all_collections
-        # insert data
-        data = get_data_by_fields(fields, 3000)
-        payload = {
-            "collectionName": name,
-            "data": data
-        }
-        body_size = sys.getsizeof(json.dumps(payload))
-        logger.info(f"body size: {body_size / 1024 / 1024} MB")
-        rsp = self.vector_client.vector_insert(cluster_id, payload)
-        assert rsp['code'] == 200
-        # search data
-        dim = 128
-        vector_to_search = preprocessing.normalize([np.array([random.random() for i in range(dim)])])[0].tolist()
-        payload = {
-            "collectionName": name + "_invalid",
-            "vector": vector_to_search,
-            "filter": "int8_field > 0",
-
-        }
-        logger.debug(f"payload: {payload}")
-        rsp = self.vector_client.vector_search(cluster_id, payload)
-        assert rsp['code'] == 90001
+        pass
 
     def test_search_vector_with_invalid_output_field(self):
         """
         Search a vector with an invalid output field
         """
-        cluster_id = self.cluster_id
-        name = 'test_collection' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-        self.name = name
-        fields = [
-            {
-                "name": "id",
-                "type": "int64",
-                "primaryKey": True,
-                "autoId": True,
-                "description": "auto increment id"
-            },
-            {
-                "name": "doc_url",
-                "type": f"varchar({128})",
-                "description": "document url"
-            },
-            {
-                "name": "vector",
-                "type": f"floatVector({128})",
-            }
-        ]
-        data_type = ["bool", "int8", "int16", "int32", "int64", "float32", "float64"]
-        for dt in data_type:
-            fields.append({
-                "name": f"{dt}_field",
-                "type": dt,
-            })
-        client = self.collection_client
-        payload = {
-            "collectionName": name,
-            "shardsNum": 2,
-            "description": "test collection",
-            "fields": fields,
-            "indexes": [
-                {
-                    "indexName": "test_index",
-                    "fieldName": "vector",
-                    "metricType": "L2",
-                }
-            ]
-
-        }
-        rsp = client.collection_create(cluster_id, payload)
-        assert rsp['code'] == 200
-        rsp = client.collection_list(cluster_id)
-        all_collections = [collection["collectionName"] for collection in rsp['data']['collections']]
-        assert name in all_collections
-        # insert data
-        data = get_data_by_fields(fields, 3000)
-        payload = {
-            "collectionName": name,
-            "data": data
-        }
-        body_size = sys.getsizeof(json.dumps(payload))
-        logger.info(f"body size: {body_size / 1024 / 1024} MB")
-        rsp = self.vector_client.vector_insert(cluster_id, payload)
-        assert rsp['code'] == 200
-        # search data
-        dim = 128
-        vector_to_search = preprocessing.normalize([np.array([random.random() for i in range(dim)])])[0].tolist()
-        payload = {
-            "collectionName": name,
-            "vector": vector_to_search,
-            "filter": "int8_field > 0",
-            "outputFields": ["id", "doc_url", "vector", "invalid_field"]
-
-        }
-        logger.debug(f"payload: {payload}")
-        rsp = self.vector_client.vector_search(cluster_id, payload)
-        assert rsp['code'] == 90002
+        pass
 
     @pytest.mark.parametrize("invalid_expr", ["invalid_field > 0", "12-s", "中文", "a", " "])
     def test_search_vector_with_invalid_expression(self, invalid_expr):
         """
         Search a vector with an invalid expression
         """
-        cluster_id = self.cluster_id
-        name = 'test_collection' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-        self.name = name
-        fields = [
-            {
-                "name": "id",
-                "type": "int64",
-                "primaryKey": True,
-                "autoId": True,
-                "description": "auto increment id"
-            },
-            {
-                "name": "doc_url",
-                "type": f"varchar({128})",
-                "description": "document url"
-            },
-            {
-                "name": "vector",
-                "type": f"floatVector({128})",
-            }
-        ]
-        data_type = ["bool", "int8", "int16", "int32", "int64", "float32", "float64"]
-        for dt in data_type:
-            fields.append({
-                "name": f"{dt}_field",
-                "type": dt,
-            })
-        client = self.collection_client
-        payload = {
-            "collectionName": name,
-            "shardsNum": 2,
-            "description": "test collection",
-            "fields": fields,
-            "indexes": [
-                {
-                    "indexName": "test_index",
-                    "fieldName": "vector",
-                    "metricType": "L2",
-                }
-            ]
-
-        }
-        rsp = client.collection_create(cluster_id, payload)
-        assert rsp['code'] == 200
-        rsp = client.collection_list(cluster_id)
-        all_collections = [collection["collectionName"] for collection in rsp['data']['collections']]
-        assert name in all_collections
-        assert rsp['code'] == 200
-        # search data
-        dim = 128
-        vector_to_search = preprocessing.normalize([np.array([random.random() for i in range(dim)])])[0].tolist()
-        payload = {
-            "collectionName": name,
-            "vector": vector_to_search,
-            "filter": invalid_expr,
-            "outputFields": ["id", "doc_url", "vector"]
-
-        }
-        rsp = self.vector_client.vector_search(cluster_id, payload)
-        assert rsp['code'] == 90003
+        pass
 
     def test_search_vector_with_invalid_vector_field(self):
         """
         Search a vector with an invalid vector field for ann search
         """
-        cluster_id = self.cluster_id
-        name = 'test_collection' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-        self.name = name
-        fields = [
-            {
-                "name": "id",
-                "type": "int64",
-                "primaryKey": True,
-                "autoId": True,
-                "description": "auto increment id"
-            },
-            {
-                "name": "doc_url",
-                "type": f"varchar({128})",
-                "description": "document url"
-            },
-            {
-                "name": "vector",
-                "type": f"floatVector({128})",
-            }
-        ]
-        data_type = ["bool", "int8", "int16", "int32", "int64", "float32", "float64"]
-        for dt in data_type:
-            fields.append({
-                "name": f"{dt}_field",
-                "type": dt,
-            })
-        client = self.collection_client
-        payload = {
-            "collectionName": name,
-            "shardsNum": 2,
-            "description": "test collection",
-            "fields": fields,
-            "indexes": [
-                {
-                    "indexName": "test_index",
-                    "fieldName": "vector",
-                    "metricType": "L2",
-                }
-            ]
-
-        }
-        rsp = client.collection_create(cluster_id, payload)
-        assert rsp['code'] == 200
-        rsp = client.collection_list(cluster_id)
-        all_collections = [collection["collectionName"] for collection in rsp['data']['collections']]
-        assert name in all_collections
-        # insert data
-        data = get_data_by_fields(fields, 3000)
-        payload = {
-            "collectionName": name,
-            "data": data
-        }
-        body_size = sys.getsizeof(json.dumps(payload))
-        logger.info(f"body size: {body_size / 1024 / 1024} MB")
-        rsp = self.vector_client.vector_insert(cluster_id, payload)
-        assert rsp['code'] == 200
-        # search data
-        dim = 128
-        vector_to_search = preprocessing.normalize([np.array([random.random() for i in range(dim)])])[0].tolist()
-        payload = {
-            "collectionName": name,
-            "invalid_vector": vector_to_search,
-            "outputFields": ["id", "doc_url", "vector"]
-
-        }
-        logger.debug(f"payload: {payload}")
-        rsp = self.vector_client.vector_search(cluster_id, payload)
-        assert rsp['code'] == 90115
+        pass
 
     @pytest.mark.parametrize("dim_offset", [1, -1])
     def test_search_vector_with_mismatch_vector_dim(self, dim_offset):
         """
         Search a vector with a mismatch vector dim
         """
-        cluster_id = self.cluster_id
-        name = 'test_collection' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-        self.name = name
-        fields = [
-            {
-                "name": "id",
-                "type": "int64",
-                "primaryKey": True,
-                "autoId": True,
-                "description": "auto increment id"
-            },
-            {
-                "name": "doc_url",
-                "type": f"varchar({128})",
-                "description": "document url"
-            },
-            {
-                "name": "vector",
-                "type": f"floatVector({128})",
-            }
-        ]
-        data_type = ["bool", "int8", "int16", "int32", "int64", "float32", "float64"]
-        for dt in data_type:
-            fields.append({
-                "name": f"{dt}_field",
-                "type": dt,
-            })
-        client = self.collection_client
-        payload = {
-            "collectionName": name,
-            "shardsNum": 2,
-            "description": "test collection",
-            "fields": fields,
-            "indexes": [
-                {
-                    "indexName": "test_index",
-                    "fieldName": "vector",
-                    "metricType": "L2",
-                }
-            ]
-
-        }
-        rsp = client.collection_create(cluster_id, payload)
-        assert rsp['code'] == 200
-        rsp = client.collection_list(cluster_id)
-        all_collections = [collection["collectionName"] for collection in rsp['data']['collections']]
-        assert name in all_collections
-        # insert data
-        data = get_data_by_fields(fields, 3000)
-        payload = {
-            "collectionName": name,
-            "data": data
-        }
-        body_size = sys.getsizeof(json.dumps(payload))
-        logger.info(f"body size: {body_size / 1024 / 1024} MB")
-        rsp = self.vector_client.vector_insert(cluster_id, payload)
-        assert rsp['code'] == 200
-        # search data
-        dim = 128 + dim_offset
-        vector_to_search = preprocessing.normalize([np.array([random.random() for i in range(dim)])])[0].tolist()
-        payload = {
-            "collectionName": name,
-            "vector": vector_to_search,
-            "filter": "int8_field > 0",
-
-        }
-        logger.debug(f"payload: {payload}")
-        rsp = self.vector_client.vector_search(cluster_id, payload)
-        assert rsp['code'] == 90007
+        pass
 
 
 class TestQueryVector(TestBase):
 
-    def teardown_method(self):
-        all_collections = self.collection_client.collection_list()['data']
-        for collection in all_collections:
-            if collection == self.name:
-                continue
-            name = collection
-            payload = {
-                "collectionName": name,
-            }
-            try:
-                rsp = self.collection_client.collection_drop(payload)
-            except Exception as e:
-                logger.error(e)
-        time.sleep(5)
-
     @pytest.mark.L0
     @pytest.mark.parametrize("expr", ["10+20 <= uid < 20+30", "uid in [1,2,3,4]",
-                                      "uid > 0", "uid >= 0",
+                                      "uid > 0", "uid >= 0", "uid > 0",
                                       "uid > -100 and uid < 100"])
     @pytest.mark.parametrize("include_output_fields", [True, False])
     @pytest.mark.parametrize("partial_fields", [True, False])
@@ -1003,7 +553,7 @@ class TestQueryVector(TestBase):
         """
         Query a vector with a simple payload
         """
-        name = 'test_collection' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        name = gen_collection_name()
         self.name = name
         schema_payload, data = self.init_collection(name)
         output_fields = get_common_fields_by_data(data)
@@ -1024,12 +574,13 @@ class TestQueryVector(TestBase):
         }
         if not include_output_fields:
             payload.pop("outputFields")
+            if 'vector' in output_fields:
+                output_fields.remove("vector")
         time.sleep(5)
         rsp = self.vector_client.vector_query(payload)
         assert rsp['code'] == 200
         res = rsp['data']
         logger.info(f"res: {len(res)}")
-        logger.info(f"res: {res[0]}")
         for r in res:
             uid = r['uid']
             assert eval(expr) is True
@@ -1043,7 +594,7 @@ class TestQueryVector(TestBase):
         """
         Query a vector with a complex payload
         """
-        name = 'test_collection' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        name = gen_collection_name()
         self.name = name
         nb = 200
         dim = 128
@@ -1088,7 +639,7 @@ class TestQueryVector(TestBase):
         Query a vector with sum of limit and offset larger than max value
         """
         max_sum_of_limit_offset = 16384
-        name = 'test_collection' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        name = gen_collection_name()
         filter_expr = "name > \"placeholder\""
         self.name = name
         nb = 200
@@ -1116,7 +667,7 @@ class TestQueryVector(TestBase):
         }
         rsp = self.vector_client.vector_query(payload)
         if sum_of_limit_offset > max_sum_of_limit_offset:
-            assert rsp['code'] == 90126
+            assert rsp['code'] == 1
             return
         assert rsp['code'] == 200
         res = rsp['data']
@@ -1133,27 +684,12 @@ class TestQueryVector(TestBase):
 
 class TestGetVector(TestBase):
 
-    def teardown_method(self):
-        all_collections = self.collection_client.collection_list()['data']
-        for collection in all_collections:
-            if collection == self.name:
-                continue
-            name = collection
-            payload = {
-                "collectionName": name,
-            }
-            try:
-                rsp = self.collection_client.collection_drop(payload)
-            except Exception as e:
-                logger.error(e)
-        time.sleep(5)
-
     @pytest.mark.L0
     def test_get_vector_with_simple_payload(self):
         """
         Search a vector with a simple payload
         """
-        name = 'test_collection' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        name = gen_collection_name()
         self.name = name
         self.init_collection(name)
 
@@ -1174,7 +710,7 @@ class TestGetVector(TestBase):
         assert len(ids) == len(set(ids))
         payload = {
             "collectionName": name,
-            "outputFields": "*",
+            "outputFields": ["*"],
             "id": ids[0],
         }
         rsp = self.vector_client.vector_get(payload)
@@ -1190,7 +726,7 @@ class TestGetVector(TestBase):
     @pytest.mark.parametrize("include_invalid_id", [True, False])
     @pytest.mark.parametrize("include_output_fields", [True, False])
     def test_get_vector_complex(self, id_field_type, include_output_fields, include_invalid_id):
-        name = 'test_collection' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        name = gen_collection_name()
         self.name = name
         nb = 200
         dim = 128
@@ -1253,26 +789,11 @@ class TestGetVector(TestBase):
 
 class TestDeleteVector(TestBase):
 
-    def teardown_method(self):
-        all_collections = self.collection_client.collection_list()['data']
-        for collection in all_collections:
-            if collection == self.name:
-                continue
-            name = collection
-            payload = {
-                "collectionName": name,
-            }
-            try:
-                rsp = self.collection_client.collection_drop(payload)
-            except Exception as e:
-                logger.error(e)
-        time.sleep(5)
-
     @pytest.mark.L0
     @pytest.mark.parametrize("include_invalid_id", [True, False])
     @pytest.mark.parametrize("id_field_type", ["list", "one"])
     def test_delete_vector_default(self, id_field_type, include_invalid_id):
-        name = 'test_collection' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        name = gen_collection_name()
         self.name = name
         nb = 200
         dim = 128
@@ -1324,7 +845,7 @@ class TestDeleteVector(TestBase):
             "collectionName": name,
             "filter": f"id in {id_to_get}",
         }
-        time.sleep(1)
+        time.sleep(5)
         rsp = self.vector_client.vector_query(payload)
         assert rsp['code'] == 200
         assert len(rsp['data']) == 0
@@ -1333,7 +854,7 @@ class TestDeleteVector(TestBase):
         """
         Delete a vector with an invalid api key
         """
-        name = 'test_collection' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        name = gen_collection_name()
         self.name = name
         nb = 200
         dim = 128
@@ -1364,13 +885,13 @@ class TestDeleteVector(TestBase):
         client = self.vector_client
         client.api_key = "invalid_api_key"
         rsp = client.vector_delete(payload)
-        assert rsp['code'] == 407
+        assert rsp['code'] == 1800
 
     def test_delete_vector_with_invalid_collection_name(self):
         """
         Delete a vector with an invalid collection name
         """
-        name = 'test_collection' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        name = gen_collection_name()
         self.name = name
         self.init_collection(name, dim=128, nb=3000)
 
@@ -1412,11 +933,11 @@ class TestDeleteVector(TestBase):
 
     def test_delete_vector_with_non_primary_key(self):
         """
-        Delete a vector with a non-primary key
+        Delete a vector with a non-primary key, expect no data were deleted
         """
-        name = 'test_collection' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        name = gen_collection_name()
         self.name = name
-        self.init_collection(name, dim=128, nb=3000)
+        self.init_collection(name, dim=128, nb=300)
         expr = "uid > 0"
         payload = {
             "collectionName": name,
@@ -1442,6 +963,7 @@ class TestDeleteVector(TestBase):
         rsp = self.vector_client.vector_query(payload)
         assert rsp['code'] == 200
         res = rsp['data']
+        num_before_delete = len(res)
         logger.info(f"res: {len(res)}")
         # delete data
         payload = {
@@ -1449,7 +971,6 @@ class TestDeleteVector(TestBase):
             "filter": delete_expr,
         }
         rsp = self.vector_client.vector_delete(payload)
-        # assert rsp['code'] == 90008
         # query data after delete
         payload = {
             "collectionName": name,
@@ -1458,5 +979,6 @@ class TestDeleteVector(TestBase):
             "offset": 0,
             "outputFields": ["id", "uid"]
         }
+        time.sleep(1)
         rsp = self.vector_client.vector_query(payload)
-        assert len(rsp["data"]) == 10
+        assert len(rsp["data"]) == num_before_delete

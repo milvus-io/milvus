@@ -108,25 +108,58 @@ class VectorClient(Requests):
         }
         return headers
 
-    def vector_search(self, payload, db_name="default"):
+    def vector_search(self, payload, db_name="default", timeout=10):
+        time.sleep(1)
         url = f'{self.protocol}://{self.url}/vector/search'
         if self.db_name is not None:
             payload["dbName"] = self.db_name
         if db_name != "default":
             payload["dbName"] = db_name
         response = self.post(url, headers=self.update_headers(), data=payload)
+        rsp = response.json()
+        if "data" in rsp and len(rsp["data"]) == 0:
+            t0 = time.time()
+            while time.time() - t0 < timeout:
+                response = self.post(url, headers=self.update_headers(), data=payload)
+                rsp = response.json()
+                if len(rsp["data"]) > 0:
+                    break
+                time.sleep(1)
+            else:
+                response = self.post(url, headers=self.update_headers(), data=payload)
+                rsp = response.json()
+                if "data" in rsp and len(rsp["data"]) == 0:
+                    logger.info(f"after {timeout}s, still no data")
+
         return response.json()
     
-    def vector_query(self, payload, db_name="default"):
+    def vector_query(self, payload, db_name="default", timeout=10):
+        time.sleep(1)
         url = f'{self.protocol}://{self.url}/vector/query'
         if self.db_name is not None:
             payload["dbName"] = self.db_name
         if db_name != "default":
             payload["dbName"] = db_name
         response = self.post(url, headers=self.update_headers(), data=payload)
+        rsp = response.json()
+        if "data" in rsp and len(rsp["data"]) == 0:
+            t0 = time.time()
+            while time.time() - t0 < timeout:
+                response = self.post(url, headers=self.update_headers(), data=payload)
+                rsp = response.json()
+                if len(rsp["data"]) > 0:
+                    break
+                time.sleep(1)
+            else:
+                response = self.post(url, headers=self.update_headers(), data=payload)
+                rsp = response.json()
+                if "data" in rsp and len(rsp["data"]) == 0:
+                    logger.info(f"after {timeout}s, still no data")
+
         return response.json()
 
     def vector_get(self, payload, db_name="default"):
+        time.sleep(1)
         url = f'{self.protocol}://{self.url}/vector/get'
         if self.db_name is not None:
             payload["dbName"] = self.db_name
@@ -185,8 +218,6 @@ class CollectionClient(Requests):
             }
         response = self.get(url, headers=self.update_headers(), params=params)
         res = response.json()
-        if res["data"] is None:
-            res["data"] = []
         return res
     
     def collection_create(self, payload, db_name="default"):

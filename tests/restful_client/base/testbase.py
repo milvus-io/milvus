@@ -14,6 +14,7 @@ def get_config():
 
 
 class Base:
+    name = None
     host = None
     port = None
     url = None
@@ -27,6 +28,19 @@ class Base:
 
 class TestBase(Base):
 
+    def teardown_method(self):
+        self.collection_client.api_key = self.api_key
+        all_collections = self.collection_client.collection_list()['data']
+        if self.name in all_collections:
+            logger.info(f"collection {self.name} exist, drop it")
+            payload = {
+                "collectionName": self.name,
+            }
+            try:
+                rsp = self.collection_client.collection_drop(payload)
+            except Exception as e:
+                logger.error(e)
+
     @pytest.fixture(scope="function", autouse=True)
     def init_client(self, host, port, username, password):
         self.host = host
@@ -39,23 +53,7 @@ class TestBase(Base):
         self.vector_client = VectorClient(self.url, self.api_key)
         self.collection_client = CollectionClient(self.url, self.api_key)
 
-    def init_collection(self, collection_name, pk_field="id", metric_type="L2", dim=128, nb=100):
-        # drop all collections
-        try:
-            all_collections = self.collection_client.collection_list()['data']
-        except Exception as e:
-            logger.error(e)
-            all_collections = []
-        for collection in all_collections:
-            name = collection
-            payload = {
-                "collectionName": name,
-            }
-            try:
-                rsp = self.collection_client.collection_drop(payload)
-            except Exception as e:
-                logger.error(e)
-        time.sleep(1)
+    def init_collection(self, collection_name, pk_field="id", metric_type="L2", dim=128, nb=100, batch_size=1000):
         # create collection
         schema_payload = {
             "collectionName": collection_name,
@@ -68,7 +66,7 @@ class TestBase(Base):
         rsp = self.collection_client.collection_create(schema_payload)
         assert rsp['code'] == 200
         self.wait_collection_load_completed(collection_name)
-        batch_size = 1000
+        batch_size = batch_size
         batch = nb // batch_size
         # in case of nb < batch_size
         if batch == 0:
@@ -104,7 +102,10 @@ class TestBase(Base):
         logger.info(f"all database: {all_db}")
         if db_name not in all_db:
             logger.info(f"create database: {db_name}")
-            db.create_database(db_name=db_name)
+            try:
+                db.create_database(db_name=db_name)
+            except Exception as e:
+                logger.error(e)
 
     def update_database(self, db_name="default"):
         self.create_database(db_name=db_name)

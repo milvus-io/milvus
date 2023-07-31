@@ -2,6 +2,7 @@ import datetime
 import random
 import time
 from utils.util_log import test_log as logger
+from utils.utils import gen_collection_name
 import pytest
 from api.milvus import CollectionClient
 from base.testbase import TestBase
@@ -10,24 +11,6 @@ import threading
 
 @pytest.mark.L0
 class TestCreateCollection(TestBase):
-
-    def teardown_method(self):
-        try:
-            all_collections = self.collection_client.collection_list()['data']
-        except Exception as e:
-            logger.error(e)
-            all_collections = []
-        if all_collections is None:
-            all_collections = []
-        for collection in all_collections:
-            name = collection
-            payload = {
-                "collectionName": name,
-            }
-            try:
-                rsp = self.collection_client.collection_drop(payload)
-            except Exception as e:
-                logger.error(e)
 
     @pytest.mark.parametrize("vector_field", [None, "vector", "emb"])
     @pytest.mark.parametrize("primary_field", [None, "id", "doc_id"])
@@ -41,7 +24,7 @@ class TestCreateCollection(TestBase):
         expected: create collection success
         """
         self.create_database(db_name)
-        name = 'test_collection_' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        name = gen_collection_name()
         dim = 128
         client = self.collection_client
         client.db_name = db_name
@@ -66,7 +49,6 @@ class TestCreateCollection(TestBase):
         rsp = client.collection_describe(name)
         assert rsp['code'] == 200
         assert rsp['data']['collectionName'] == name
-        # assert f"FloatVector({dim})" in str(rsp['data']['fields'])
 
     def test_create_collections_concurrent_with_same_param(self):
         """
@@ -85,7 +67,7 @@ class TestCreateCollection(TestBase):
             rsp = client.collection_create(collection_payload)
             concurrent_rsp.append(rsp)
             logger.info(rsp)
-        name = 'test_collection_' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        name = gen_collection_name()
         dim = 128
         metric_type = "L2"
         client = self.collection_client
@@ -111,7 +93,7 @@ class TestCreateCollection(TestBase):
         rsp = client.collection_describe(name)
         assert rsp['code'] == 200
         assert rsp['data']['collectionName'] == name
-        # assert f"floatVector({dim})" in str(rsp['data']['fields'])
+        assert f"FloatVector({dim})" in str(rsp['data']['fields'])
 
     def test_create_collections_concurrent_with_different_param(self):
         """
@@ -130,7 +112,7 @@ class TestCreateCollection(TestBase):
             rsp = client.collection_create(collection_payload)
             concurrent_rsp.append(rsp)
             logger.info(rsp)
-        name = 'test_collection_' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        name = gen_collection_name()
         dim = 128
         client = self.collection_client
         threads = []
@@ -165,7 +147,7 @@ class TestCreateCollection(TestBase):
         method: create collections with invalid api key
         expected: create collection failed
         """
-        name = 'test_collection_' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        name = gen_collection_name()
         dim = 128
         client = self.collection_client
         client.api_key = "illegal_api_key"
@@ -174,7 +156,7 @@ class TestCreateCollection(TestBase):
             "dimension": dim,
         }
         rsp = client.collection_create(payload)
-        assert rsp['code'] == 407
+        assert rsp['code'] == 1800
 
     @pytest.mark.parametrize("name", [" ", "test_collection_" * 100, "test collection", "test/collection", "test\collection"])
     def test_create_collections_with_invalid_collection_name(self, name):
@@ -196,22 +178,6 @@ class TestCreateCollection(TestBase):
 @pytest.mark.L0
 class TestListCollections(TestBase):
 
-    def teardown_method(self):
-        try:
-            all_collections = self.collection_client.collection_list()['data']
-        except Exception as e:
-            logger.error(e)
-            all_collections = []
-        for collection in all_collections:
-            name = collection
-            payload = {
-                "collectionName": name,
-            }
-            try:
-                rsp = self.collection_client.collection_drop(payload)
-            except Exception as e:
-                logger.error(e)
-
     def test_list_collections_default(self):
         """
         target: test list collection with a simple schema
@@ -221,7 +187,7 @@ class TestListCollections(TestBase):
         client = self.collection_client
         name_list = []
         for i in range(2):
-            name = 'test_collection_' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+            name = gen_collection_name()
             dim = 128
             payload = {
                 "collectionName": name,
@@ -236,7 +202,7 @@ class TestListCollections(TestBase):
         for name in name_list:
             assert name in all_collections
 
-    def test_list_collections_with_invalid_api_key(self, url):
+    def test_list_collections_with_invalid_api_key(self):
         """
         target: test list collection with an invalid api key
         method: list collection with invalid api key
@@ -245,7 +211,7 @@ class TestListCollections(TestBase):
         client = self.collection_client
         name_list = []
         for i in range(2):
-            name = 'test_collection_' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+            name = gen_collection_name()
             dim = 128
             payload = {
                 "collectionName": name,
@@ -258,27 +224,12 @@ class TestListCollections(TestBase):
         client = self.collection_client
         client.api_key = "illegal_api_key"
         rsp = client.collection_list()
-        assert rsp['code'] == 407
+        assert rsp['code'] == 1800
 
 
 @pytest.mark.L0
 class TestDescribeCollection(TestBase):
 
-    def teardown_method(self):
-        try:
-            all_collections = self.collection_client.collection_list()['data']
-        except Exception as e:
-            logger.error(e)
-            all_collections = []
-        for collection in all_collections:
-            name = collection
-            payload = {
-                "collectionName": name,
-            }
-            try:
-                rsp = self.collection_client.collection_drop(payload)
-            except Exception as e:
-                logger.error(e)
 
     def test_describe_collections_default(self):
         """
@@ -286,7 +237,7 @@ class TestDescribeCollection(TestBase):
         method: describe collection
         expected: info of description is same with param passed to create collection
         """
-        name = 'test_collection_' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        name = gen_collection_name()
         dim = 128
         client = self.collection_client
         payload = {
@@ -302,7 +253,7 @@ class TestDescribeCollection(TestBase):
         rsp = client.collection_describe(name)
         assert rsp['code'] == 200
         assert rsp['data']['collectionName'] == name
-        # assert f"floatVector({dim})" in str(rsp['data']['fields'])
+        assert f"FloatVector({dim})" in str(rsp['data']['fields'])
 
     def test_describe_collections_with_invalid_api_key(self):
         """
@@ -310,7 +261,7 @@ class TestDescribeCollection(TestBase):
         method: describe collection with invalid api key
         expected: raise error with right error code and message
         """
-        name = 'test_collection_' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        name = gen_collection_name()
         dim = 128
         client = self.collection_client
         payload = {
@@ -325,7 +276,7 @@ class TestDescribeCollection(TestBase):
         # describe collection
         illegal_client = CollectionClient(self.url, "illegal_api_key")
         rsp = illegal_client.collection_describe(name)
-        assert rsp['code'] == 407
+        assert rsp['code'] == 1800
 
     def test_describe_collections_with_invalid_collection_name(self):
         """
@@ -333,7 +284,7 @@ class TestDescribeCollection(TestBase):
         method: describe collection with invalid collection name
         expected: raise error with right error code and message
         """
-        name = 'test_collection_' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        name = gen_collection_name()
         dim = 128
         client = self.collection_client
         payload = {
@@ -354,22 +305,6 @@ class TestDescribeCollection(TestBase):
 @pytest.mark.L0
 class TestDropCollection(TestBase):
 
-    def teardown_method(self):
-        try:
-            all_collections = self.collection_client.collection_list()['data']
-        except Exception as e:
-            logger.error(e)
-            all_collections = []
-        for collection in all_collections:
-            name = collection
-            payload = {
-                "collectionName": name,
-            }
-            try:
-                rsp = self.collection_client.collection_drop(payload)
-            except Exception as e:
-                logger.error(e)
-
     def test_drop_collections_default(self):
         """
         Drop a collection with a simple schema
@@ -377,19 +312,10 @@ class TestDropCollection(TestBase):
         method: drop collection
         expected: dropped collection was not in collection list
         """
-        rsp = self.collection_client.collection_list()
-        all_collections = rsp['data']
-        for name in all_collections:
-            time.sleep(1)
-            payload = {
-                "collectionName": name,
-            }
-            rsp = self.collection_client.collection_drop(payload)
-            assert rsp['code'] == 200
         clo_list = []
-        for i in range(2):
+        for i in range(5):
             time.sleep(1)
-            name = 'test_collection_' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")
+            name = 'test_collection_' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f_%f")
             payload = {
                 "collectionName": name,
                 "dimension": 128,
@@ -399,7 +325,9 @@ class TestDropCollection(TestBase):
             clo_list.append(name)
         rsp = self.collection_client.collection_list()
         all_collections = rsp['data']
-        for name in all_collections:
+        for name in clo_list:
+            assert name in all_collections
+        for name in clo_list:
             time.sleep(0.2)
             payload = {
                 "collectionName": name,
@@ -417,7 +345,7 @@ class TestDropCollection(TestBase):
         method: drop collection with invalid api key
         expected: raise error with right error code and message; collection still in collection list
         """
-        name = 'test_collection_' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        name = gen_collection_name()
         dim = 128
         client = self.collection_client
         payload = {
@@ -435,7 +363,7 @@ class TestDropCollection(TestBase):
         }
         illegal_client = CollectionClient(self.url, "invalid_api_key")
         rsp = illegal_client.collection_drop(payload)
-        assert rsp['code'] == 407
+        assert rsp['code'] == 1800
         rsp = client.collection_list()
         all_collections = rsp['data']
         assert name in all_collections
@@ -446,7 +374,7 @@ class TestDropCollection(TestBase):
         method: drop collection with invalid collection name
         expected: raise error with right error code and message
         """
-        name = 'test_collection_' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        name = gen_collection_name()
         dim = 128
         client = self.collection_client
         payload = {
@@ -464,4 +392,4 @@ class TestDropCollection(TestBase):
             "collectionName": invalid_name,
         }
         rsp = client.collection_drop(payload)
-        assert rsp['code'] == 1
+        assert rsp['code'] == 100
