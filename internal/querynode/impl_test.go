@@ -41,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/panjf2000/ants/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -130,7 +129,7 @@ func TestImpl_WatchDmChannels(t *testing.T) {
 		defer func() {
 			node.taskPool = originPool
 		}()
-		node.taskPool, _ = concurrency.NewPool(runtime.GOMAXPROCS(0), ants.WithPreAlloc(true))
+		node.taskPool, _ = concurrency.NewPool(runtime.GOMAXPROCS(0), concurrency.WithPreAlloc(true))
 		node.taskPool.Release()
 		status, err = node.WatchDmChannels(ctx, req)
 		assert.NoError(t, err)

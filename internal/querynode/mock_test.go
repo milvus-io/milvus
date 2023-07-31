@@ -51,7 +51,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/panjf2000/ants/v2"
 )
 
 // ---------- unittest util functions ----------
@@ -1787,7 +1786,7 @@ func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac dependency.Factory
 	if err != nil {
 		return nil, err
 	}
-	node.taskPool, err = concurrency.NewPool(2, ants.WithPreAlloc(true))
+	node.taskPool, err = concurrency.NewPool(2, concurrency.WithPreAlloc(true))
 	if err != nil {
 		log.Error("QueryNode init channel pool failed", zap.Error(err))
 		return nil, err

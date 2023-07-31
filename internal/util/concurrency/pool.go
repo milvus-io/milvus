@@ -16,23 +16,34 @@
 
 package concurrency
 
-import "github.com/panjf2000/ants/v2"
+import (
+	"sync"
+
+	"github.com/panjf2000/ants/v2"
+)
 
 // A goroutine pool
 type Pool struct {
 	inner *ants.Pool
+	opt   *poolOption
 }
 
 // Return error if provides invalid parameters
 // cap: the number of workers
-func NewPool(cap int, opts ...ants.Option) (*Pool, error) {
-	pool, err := ants.NewPool(cap, opts...)
+func NewPool(cap int, opts ...PoolOption) (*Pool, error) {
+	opt := defaultPoolOption()
+	for _, o := range opts {
+		o(opt)
+	}
+
+	pool, err := ants.NewPool(cap, opt.antsOptions()...)
 	if err != nil {
 		return nil, err
 	}
 
 	return &Pool{
 		inner: pool,
+		opt:   opt,
 	}, nil
 }
 
@@ -43,6 +54,11 @@ func (pool *Pool) Submit(method func() (interface{}, error)) *Future {
 	future := newFuture()
 	err := pool.inner.Submit(func() {
 		defer close(future.ch)
+
+		if pool.opt != nil && pool.opt.preHandler != nil {
+			pool.opt.preHandler()
+		}
+
 		res, err := method()
 		if err != nil {
 			future.err = err
@@ -70,4 +86,22 @@ func (pool *Pool) Running() int {
 
 func (pool *Pool) Release() {
 	pool.inner.Release()
+}
+
+// WarmupPool do warm up logic for each goroutine in pool
+func WarmupPool(pool *Pool, warmup func()) {
+	cap := pool.Cap()
+	ch := make(chan struct{})
+	wg := sync.WaitGroup{}
+	wg.Add(cap)
+	for i := 0; i < cap; i++ {
+		pool.Submit(func() (any, error) {
+			warmup()
+			wg.Done()
+			<-ch
+			return struct{}{}, nil
+		})
+	}
+	wg.Wait()
+	close(ch)
 }

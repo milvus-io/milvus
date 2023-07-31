@@ -58,7 +58,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/panjf2000/ants/v2"
 	"github.com/samber/lo"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -326,7 +325,7 @@ func (node *QueryNode) Init() error {
 
 		cpuNum := runtime.GOMAXPROCS(0)
 
-		node.taskPool, err = concurrency.NewPool(cpuNum, ants.WithPreAlloc(true), ants.WithPanicHandler(func(v any) { panic(v) }))
+		node.taskPool, err = concurrency.NewPool(cpuNum, concurrency.WithPreAlloc(true), concurrency.WithConcealPanic(false))
 		if err != nil {
 			log.Error("QueryNode init channel pool failed", zap.Error(err))
 			initError = err

@@ -5,7 +5,6 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/util/concurrency"
-	"github.com/panjf2000/ants/v2"
 )
 
 var ioPool *concurrency.Pool
@@ -29,7 +28,8 @@ func getOrCreateIOPool() *concurrency.Pool {
 }
 
 func initStatsPool() {
-	pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0), ants.WithPreAlloc(false), ants.WithNonblocking(false))
+	pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0), concurrency.WithPreAlloc(false), concurrency.WithNonBlocking(false))
+
 	if err != nil {
 		// shall no happen here
 		panic(err)

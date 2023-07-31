@@ -1141,6 +1141,7 @@ type queryNodeConfig struct {
 	CPURatio                   float64
 	MinCPUParallelTaskNumRatio int32
 	MaxTimestampLag            time.Duration
+	CGOPoolSizeRatio           float64
 
 	// schedule
 	ScheduleReadPolicy queryNodeConfigScheduleReadPolicy
@@ -1190,6 +1191,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.initEnableDisk()
 	p.initDiskCapacity()
 	p.initMaxDiskUsagePercentage()
+	p.initCGOPoolSizeRatio()
 
 	// Initialize scheduler.
 	p.initScheduleReadPolicy()
@@ -1332,6 +1334,14 @@ func (p *queryNodeConfig) initMaxReadConcurrency() {
 	} else if p.MaxReadConcurrency > cpuNum*100 {
 		p.MaxReadConcurrency = cpuNum * 100 // MaxReadConcurrency must <= 100*cpuNum
 	}
+}
+
+func (p *queryNodeConfig) initCGOPoolSizeRatio() {
+	cgoPoolSizeRatio := p.Base.ParseFloatWithDefault("queryNode.segcore.cgoPoolSizeRatio", 2.0)
+	if cgoPoolSizeRatio <= 0 {
+		cgoPoolSizeRatio = 1.0
+	}
+	p.CGOPoolSizeRatio = cgoPoolSizeRatio
 }
 
 func (p *queryNodeConfig) initMaxGroupNQ() {
