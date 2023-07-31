@@ -35,7 +35,7 @@ enable_traceback = False
 DEFAULT_FMT = '[start time:{start_time}][time cost:{elapsed:0.8f}s][operation_name:{operation_name}][collection name:{collection_name}] -> {result!r}'
 
 
-def trace(fmt=DEFAULT_FMT, prefix='chaos-test', flag=True):
+def trace(fmt=DEFAULT_FMT, prefix='test', flag=True):
     def decorate(func):
         @functools.wraps(func)
         def inner_wrapper(self, *args, **kwargs):
@@ -102,20 +102,30 @@ class Checker:
         self._keep_running = True
         self.rsp_times = []
         self.average_time = 0
+        self.files = []
         self.c_wrap = ApiCollectionWrapper()
+        self.utility_wrap = ApiUtilityWrapper()
         c_name = collection_name if collection_name is not None else cf.gen_unique_str(
             'Checker_')
+        self.c_name = c_name
         schema = cf.gen_default_collection_schema(dim=dim) if schema is None else schema
+        self.schema = schema
+        self.dim = cf.get_dim_by_schema(schema=schema)
+        self.int64_field_name = cf.get_int64_field_name(schema=schema)
+        self.float_vector_field_name = cf.get_float_vec_field_name(schema=schema)
         self.c_wrap.init_collection(name=c_name,
                                     schema=schema,
                                     shards_num=shards_num,
                                     timeout=timeout,
-                                    # active_trace=True,
                                     enable_traceback=enable_traceback)
         if insert_data:
-            self.c_wrap.insert(data=cf.gen_default_list_data(nb=constants.ENTITIES_FOR_SEARCH, dim=dim),
-                            timeout=timeout,
-                            enable_traceback=enable_traceback)
+            log.info(f"collection {c_name} created, start to insert data")
+            t0 = time.perf_counter()
+            self.c_wrap.insert(data=cf.get_column_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=schema, start=0),
+                               timeout=timeout,
+                               enable_traceback=enable_traceback)
+            log.info(f"insert data for collection {c_name} cost {time.perf_counter() - t0}s")
+
         self.initial_entities = self.c_wrap.num_entities  # do as a flush
 
     def total(self):
@@ -166,15 +176,38 @@ class Checker:
                  f"end at {self.fail_records[-1][2]}")
         return recovery_time
 
+    def prepare_bulk_insert_data(self,
+                                 nb=constants.ENTITIES_FOR_BULKINSERT,
+                                 file_type="npy",
+                                 minio_endpoint="127.0.0.1:9000",
+                                 bucket_name="milvus-bucket"):
+        schema = self.schema
+        log.info(f"prepare data for bulk insert")
+        files = cf.prepare_bulk_insert_data(schema=schema,
+                                            nb=nb,
+                                            file_type=file_type,
+                                            minio_endpoint=minio_endpoint,
+                                            bucket_name=bucket_name)
+        self.files = files
+        return files
+
+    def do_bulk_insert(self):
+        log.info(f"bulk insert collection name: {self.c_name}")
+        task_ids, result = self.utility_wrap.do_bulk_insert(collection_name=self.c_name,
+                                                            files=self.files)
+        log.info(f"task ids {task_ids}")
+        completed, result = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_ids], timeout=720)
+        return task_ids, completed
+
 
 class SearchChecker(Checker):
     """check search operations in a dependent thread"""
 
-    def __init__(self, collection_name=None, shards_num=2, replica_number=1):
+    def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None,):
         if collection_name is None:
             collection_name = cf.gen_unique_str("SearchChecker_")
-        super().__init__(collection_name=collection_name, shards_num=shards_num)
-        self.c_wrap.create_index(ct.default_float_vec_field_name,
+        super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
+        self.c_wrap.create_index(self.float_vector_field_name,
                                  constants.DEFAULT_INDEX_PARAM,
                                  index_name=cf.gen_unique_str('index_'),
                                  timeout=timeout,
@@ -186,8 +219,8 @@ class SearchChecker(Checker):
     @trace()
     def search(self):
         res, result = self.c_wrap.search(
-            data=cf.gen_vectors(5, ct.default_dim),
-            anns_field=ct.default_float_vec_field_name,
+            data=cf.gen_vectors(5, self.dim),
+            anns_field=self.float_vector_field_name,
             param=constants.DEFAULT_SEARCH_PARAM,
             limit=1,
             timeout=timeout,
@@ -209,8 +242,8 @@ class SearchChecker(Checker):
 class InsertFlushChecker(Checker):
     """check Insert and flush operations in a dependent thread"""
 
-    def __init__(self, collection_name=None, flush=False, shards_num=2):
-        super().__init__(collection_name=collection_name, shards_num=shards_num)
+    def __init__(self, collection_name=None, flush=False, shards_num=2, schema=None):
+        super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
         self._flush = flush
         self.initial_entities = self.c_wrap.num_entities
 
@@ -218,7 +251,7 @@ class InsertFlushChecker(Checker):
         while True:
             t0 = time.time()
             _, insert_result = \
-                self.c_wrap.insert(data=cf.gen_default_list_data(nb=constants.DELTA_PER_INS),
+                self.c_wrap.insert(data=cf.get_column_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=self.schema),
                                    timeout=timeout,
                                    enable_traceback=enable_traceback,
                                    check_task=CheckTasks.check_nothing)
@@ -250,10 +283,10 @@ class InsertFlushChecker(Checker):
 class FlushChecker(Checker):
     """check flush operations in a dependent thread"""
 
-    def __init__(self, collection_name=None, shards_num=2):
+    def __init__(self, collection_name=None, shards_num=2, schema=None):
         if collection_name is None:
             collection_name = cf.gen_unique_str("FlushChecker_")
-        super().__init__(collection_name=collection_name, shards_num=shards_num)
+        super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
         self.initial_entities = self.c_wrap.num_entities
 
     @trace()
@@ -268,7 +301,7 @@ class FlushChecker(Checker):
 
     @exception_handler()
     def run_task(self):
-        _, result = self.c_wrap.insert(data=cf.gen_default_list_data(nb=constants.DELTA_PER_INS),
+        _, result = self.c_wrap.insert(data=cf.get_column_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=self.schema),
                                        timeout=timeout,
                                        enable_traceback=enable_traceback,
                                        check_task=CheckTasks.check_nothing)
@@ -284,20 +317,20 @@ class FlushChecker(Checker):
 class InsertChecker(Checker):
     """check flush operations in a dependent thread"""
 
-    def __init__(self, collection_name=None, flush=False, shards_num=2):
+    def __init__(self, collection_name=None, flush=False, shards_num=2, schema=None):
         if collection_name is None:
             collection_name = cf.gen_unique_str("InsertChecker_")
-        super().__init__(collection_name=collection_name, shards_num=shards_num)
+        super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
         self._flush = flush
         self.initial_entities = self.c_wrap.num_entities
         self.inserted_data = []
         self.scale = 1*10**6
         self.start_time_stamp = int(time.time()*self.scale)  # us
-        self.term_expr = f'{ct.default_int64_field_name} >= {self.start_time_stamp}'
+        self.term_expr = f'{self.int64_field_name} >= {self.start_time_stamp}'
 
     @trace()
     def insert(self):
-        data = cf.gen_default_list_data(nb=constants.DELTA_PER_INS)
+        data = cf.get_column_data_by_schema(nb=constants.DELTA_PER_INS, schema=self.schema)
         ts_data = []
         for i in range(constants.DELTA_PER_INS):
             time.sleep(0.001)
@@ -326,7 +359,7 @@ class InsertChecker(Checker):
 
     def verify_data_completeness(self):
         try:
-            self.c_wrap.create_index(ct.default_float_vec_field_name,
+            self.c_wrap.create_index(self.float_vector_field_name,
                                      constants.DEFAULT_INDEX_PARAM,
                                      index_name=cf.gen_unique_str('index_'),
                                      timeout=timeout,
@@ -336,14 +369,14 @@ class InsertChecker(Checker):
             log.error(f"create index error: {e}")
         self.c_wrap.load()
         end_time_stamp = int(time.time()*self.scale)
-        self.term_expr = f'{ct.default_int64_field_name} >= {self.start_time_stamp} and ' \
-                         f'{ct.default_int64_field_name} <= {end_time_stamp}'
+        self.term_expr = f'{self.int64_field_name} >= {self.start_time_stamp} and ' \
+                         f'{self.int64_field_name} <= {end_time_stamp}'
         data_in_client = []
         for d in self.inserted_data:
             if self.start_time_stamp <= d <= end_time_stamp:
                 data_in_client.append(d)
         res, result = self.c_wrap.query(self.term_expr, timeout=timeout,
-                                        output_fields=[f'{ct.default_int64_field_name}'],
+                                        output_fields=[f'{self.int64_field_name}'],
                                         limit=len(data_in_client) * 2,
                                         check_task=CheckTasks.check_nothing)
 
@@ -357,10 +390,10 @@ class InsertChecker(Checker):
 class CreateChecker(Checker):
     """check create operations in a dependent thread"""
 
-    def __init__(self, collection_name=None):
+    def __init__(self, collection_name=None, schema=None):
         if collection_name is None:
             collection_name = cf.gen_unique_str("CreateChecker_")
-        super().__init__(collection_name=collection_name)
+        super().__init__(collection_name=collection_name, schema=schema)
 
     @trace()
     def init_collection(self):
@@ -388,20 +421,20 @@ class CreateChecker(Checker):
 class IndexChecker(Checker):
     """check Insert operations in a dependent thread"""
 
-    def __init__(self, collection_name=None):
+    def __init__(self, collection_name=None, schema=None):
         if collection_name is None:
             collection_name = cf.gen_unique_str("IndexChecker_")
-        super().__init__(collection_name=collection_name)
+        super().__init__(collection_name=collection_name, schema=schema)
         self.index_name = cf.gen_unique_str('index_')
         for i in range(5):
-            self.c_wrap.insert(data=cf.gen_default_list_data(nb=constants.ENTITIES_FOR_SEARCH),
+            self.c_wrap.insert(data=cf.get_column_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=self.schema),
                                timeout=timeout, enable_traceback=enable_traceback)
         # do as a flush before indexing
         log.debug(f"Index ready entities: {self.c_wrap.num_entities}")
 
     @trace()
     def create_index(self):
-        res, result = self.c_wrap.create_index(ct.default_float_vec_field_name,
+        res, result = self.c_wrap.create_index(self.float_vector_field_name,
                                                constants.DEFAULT_INDEX_PARAM,
                                                index_name=self.index_name,
                                                timeout=timeout,
@@ -425,11 +458,11 @@ class IndexChecker(Checker):
 class QueryChecker(Checker):
     """check query operations in a dependent thread"""
 
-    def __init__(self, collection_name=None, shards_num=2, replica_number=1):
+    def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None):
         if collection_name is None:
             collection_name = cf.gen_unique_str("QueryChecker_")
-        super().__init__(collection_name=collection_name, shards_num=shards_num)
-        res, result = self.c_wrap.create_index(ct.default_float_vec_field_name,
+        super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
+        res, result = self.c_wrap.create_index(self.float_vector_field_name,
                                                constants.DEFAULT_INDEX_PARAM,
                                                index_name=cf.gen_unique_str(
                                                    'index_'),
@@ -450,8 +483,8 @@ class QueryChecker(Checker):
         int_values = []
         for _ in range(5):
             int_values.append(randint(0, constants.ENTITIES_FOR_SEARCH))
-        self.term_expr = f'{ct.default_int64_field_name} in {int_values}'
-        res, result= self.query()
+        self.term_expr = f'{self.int64_field_name} in {int_values}'
+        res, result = self.query()
         return res, result
 
     def keep_running(self):
@@ -463,12 +496,12 @@ class QueryChecker(Checker):
 class LoadChecker(Checker):
     """check load operations in a dependent thread"""
 
-    def __init__(self, collection_name=None, replica_number=1):
+    def __init__(self, collection_name=None, replica_number=1, schema=None):
         if collection_name is None:
-            collection_name = cf.gen_unique_str("DeleteChecker_")
-        super().__init__(collection_name=collection_name)
+            collection_name = cf.gen_unique_str("LoadChecker_")
+        super().__init__(collection_name=collection_name, schema=schema)
         self.replica_number = replica_number
-        res, result = self.c_wrap.create_index(ct.default_float_vec_field_name,
+        res, result = self.c_wrap.create_index(self.float_vector_field_name,
                                                constants.DEFAULT_INDEX_PARAM,
                                                index_name=cf.gen_unique_str(
                                                    'index_'),
@@ -497,11 +530,11 @@ class LoadChecker(Checker):
 class DeleteChecker(Checker):
     """check delete operations in a dependent thread"""
 
-    def __init__(self, collection_name=None):
+    def __init__(self, collection_name=None, schema=None):
         if collection_name is None:
             collection_name = cf.gen_unique_str("DeleteChecker_")
-        super().__init__(collection_name=collection_name)
-        res, result = self.c_wrap.create_index(ct.default_float_vec_field_name,
+        super().__init__(collection_name=collection_name, schema=schema)
+        res, result = self.c_wrap.create_index(self.float_vector_field_name,
                                                constants.DEFAULT_INDEX_PARAM,
                                                index_name=cf.gen_unique_str(
                                                    'index_'),
@@ -509,10 +542,10 @@ class DeleteChecker(Checker):
                                                enable_traceback=enable_traceback,
                                                check_task=CheckTasks.check_nothing)
         self.c_wrap.load()  # load before query
-        term_expr = f'{ct.default_int64_field_name} > 0'
+        term_expr = f'{self.int64_field_name} > 0'
         res, _ = self.c_wrap.query(term_expr, output_fields=[
-                                   ct.default_int64_field_name])
-        self.ids = [r[ct.default_int64_field_name] for r in res]
+                                   self.int64_field_name])
+        self.ids = [r[self.int64_field_name] for r in res]
         self.expr = None
 
     @trace()
@@ -523,7 +556,7 @@ class DeleteChecker(Checker):
     @exception_handler()
     def run_task(self):
         delete_ids = self.ids.pop()
-        self.expr = f'{ct.default_int64_field_name} in {[delete_ids]}'
+        self.expr = f'{self.int64_field_name} in {[delete_ids]}'
         res, result = self.delete()
         return res, result
 
@@ -536,12 +569,12 @@ class DeleteChecker(Checker):
 class CompactChecker(Checker):
     """check compact operations in a dependent thread"""
 
-    def __init__(self, collection_name=None):
+    def __init__(self, collection_name=None, schema=None):
         if collection_name is None:
             collection_name = cf.gen_unique_str("CompactChecker_")
-        super().__init__(collection_name=collection_name)
+        super().__init__(collection_name=collection_name, schema=schema)
         self.ut = ApiUtilityWrapper()
-        res, result = self.c_wrap.create_index(ct.default_float_vec_field_name,
+        res, result = self.c_wrap.create_index(self.float_vector_field_name,
                                                constants.DEFAULT_INDEX_PARAM,
                                                index_name=cf.gen_unique_str(
                                                    'index_'),
@@ -571,10 +604,10 @@ class CompactChecker(Checker):
 class DropChecker(Checker):
     """check drop operations in a dependent thread"""
 
-    def __init__(self, collection_name=None):
+    def __init__(self, collection_name=None, schema=None):
         if collection_name is None:
             collection_name = cf.gen_unique_str("DropChecker_")
-        super().__init__(collection_name=collection_name)
+        super().__init__(collection_name=collection_name, schema=schema)
 
     @trace()
     def drop(self):
@@ -600,12 +633,12 @@ class DropChecker(Checker):
 class LoadBalanceChecker(Checker):
     """check loadbalance operations in a dependent thread"""
 
-    def __init__(self, collection_name=None):
+    def __init__(self, collection_name=None, schema=None):
         if collection_name is None:
             collection_name = cf.gen_unique_str("LoadBalanceChecker_")
-        super().__init__(collection_name=collection_name)
+        super().__init__(collection_name=collection_name, schema=schema)
         self.utility_wrap = ApiUtilityWrapper()
-        res, result = self.c_wrap.create_index(ct.default_float_vec_field_name,
+        res, result = self.c_wrap.create_index(self.float_vector_field_name,
                                                constants.DEFAULT_INDEX_PARAM,
                                                index_name=cf.gen_unique_str(
                                                    'index_'),

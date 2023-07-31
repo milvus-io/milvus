@@ -13,6 +13,7 @@ from chaos.checker import (CreateChecker,
 from utils.util_log import test_log as log
 from chaos import chaos_commons as cc
 from common.common_type import CaseLabel
+from common import common_func as cf
 from chaos.chaos_commons import assert_statistic
 from chaos import constants
 from delayed_assert import assert_expectations
@@ -34,7 +35,7 @@ class TestBase:
 class TestOperations(TestBase):
 
     @pytest.fixture(scope="function", autouse=True)
-    def connection(self, host, port, user, password):
+    def connection(self, host, port, user, password, minio_host):
         if user and password:
             # log.info(f"connect to {host}:{port} with user {user} and password {password}")
             connections.connect('default', host=host, port=port, user=user, password=password, secure=True)
@@ -47,18 +48,21 @@ class TestOperations(TestBase):
         self.port = port
         self.user = user
         self.password = password
+        self.minio_endpoint = f"{minio_host}:9000"
 
     def init_health_checkers(self, collection_name=None):
         c_name = collection_name
+        schema = cf.gen_default_collection_schema(auto_id=False)
+
         checkers = {
-            Op.create: CreateChecker(collection_name=c_name),
-            Op.insert: InsertChecker(collection_name=c_name),
-            Op.flush: FlushChecker(collection_name=c_name),
-            Op.index: IndexChecker(collection_name=c_name),
-            Op.search: SearchChecker(collection_name=c_name),
-            Op.query: QueryChecker(collection_name=c_name),
-            Op.delete: DeleteChecker(collection_name=c_name),
-            Op.drop: DropChecker(collection_name=c_name)
+            Op.create: CreateChecker(collection_name=None, schema=schema),
+            Op.insert: InsertChecker(collection_name=c_name, schema=schema),
+            Op.flush: FlushChecker(collection_name=c_name, schema=schema),
+            Op.index: IndexChecker(collection_name=None, schema=schema),
+            Op.search: SearchChecker(collection_name=c_name, schema=schema),
+            Op.query: QueryChecker(collection_name=c_name, schema=schema),
+            Op.delete: DeleteChecker(collection_name=c_name, schema=schema),
+            Op.drop: DropChecker(collection_name=None, schema=schema)
         }
         self.health_checkers = checkers
 
@@ -69,7 +73,14 @@ class TestOperations(TestBase):
         log.info(connections.get_connection_addr('default'))
         c_name = None
         self.init_health_checkers(collection_name=c_name)
+        # prepare data by bulk insert
+        log.info("*********************Prepare Data by bulk insert**********************")
+
         cc.start_monitor_threads(self.health_checkers)
+        for k, v in self.health_checkers.items():
+            log.info(f"prepare bulk insert data for {k}")
+            v.prepare_bulk_insert_data(minio_endpoint=self.minio_endpoint)
+            v.do_bulk_insert()
         log.info("*********************Load Start**********************")
         # wait request_duration
         request_duration = request_duration.replace("h", "*3600+").replace("m", "*60+").replace("s", "")
@@ -93,7 +104,7 @@ class TestOperations(TestBase):
             for k, v in self.health_checkers.items():
                 log.info(f"{k} rto: {v.get_rto()}")
                 rto = v.get_rto()
-                pytest.assume(rto < 30,  f"{k} rto expect 30s but get {rto}s") # rto should be less than 30s
+                pytest.assume(rto < 30,  f"{k} rto expect 30s but get {rto}s")  # rto should be less than 30s
 
             if Op.insert in self.health_checkers:
                 # verify the no insert data loss
