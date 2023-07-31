@@ -237,7 +237,7 @@ func (s *LocalSegment) InsertCount() int64 {
 		return 0
 	}
 	var rowCount C.int64_t
-	GetPool().Submit(func() (any, error) {
+	GetDynamicPool().Submit(func() (any, error) {
 		rowCount = C.GetRowCount(s.ptr)
 		return nil, nil
 	}).Await()
@@ -253,7 +253,7 @@ func (s *LocalSegment) RowNum() int64 {
 		return 0
 	}
 	var rowCount C.int64_t
-	GetPool().Submit(func() (any, error) {
+	GetDynamicPool().Submit(func() (any, error) {
 		rowCount = C.GetRealCount(s.ptr)
 		return nil, nil
 	}).Await()
@@ -269,7 +269,7 @@ func (s *LocalSegment) MemSize() int64 {
 		return 0
 	}
 	var memoryUsageInBytes C.int64_t
-	GetPool().Submit(func() (any, error) {
+	GetDynamicPool().Submit(func() (any, error) {
 		memoryUsageInBytes = C.GetMemoryUsageInBytes(s.ptr)
 		return nil, nil
 	}).Await()
@@ -384,7 +384,7 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*S
 
 	var searchResult SearchResult
 	var status C.CStatus
-	GetPool().Submit(func() (any, error) {
+	GetSQPool().Submit(func() (any, error) {
 		tr := timerecord.NewTimeRecorder("cgoSearch")
 		status = C.Search(s.ptr,
 			searchReq.plan.cSearchPlan,
@@ -431,7 +431,7 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 
 	var retrieveResult RetrieveResult
 	var status C.CStatus
-	GetPool().Submit(func() (any, error) {
+	GetSQPool().Submit(func() (any, error) {
 		ts := C.uint64_t(plan.Timestamp)
 		tr := timerecord.NewTimeRecorder("cgoRetrieve")
 		status = C.Retrieve(s.ptr,
@@ -515,7 +515,7 @@ func (s *LocalSegment) preInsert(numOfRecords int) (int64, error) {
 	cOffset := (*C.int64_t)(&offset)
 
 	var status C.CStatus
-	GetPool().Submit(func() (any, error) {
+	GetDynamicPool().Submit(func() (any, error) {
 		status = C.PreInsert(s.ptr, C.int64_t(int64(numOfRecords)), cOffset)
 		return nil, nil
 	}).Await()
@@ -555,7 +555,7 @@ func (s *LocalSegment) Insert(rowIDs []int64, timestamps []typeutil.Timestamp, r
 
 	var status C.CStatus
 
-	GetPool().Submit(func() (any, error) {
+	GetDynamicPool().Submit(func() (any, error) {
 		status = C.Insert(s.ptr,
 			cOffset,
 			cNumOfRows,
@@ -632,7 +632,7 @@ func (s *LocalSegment) Delete(primaryKeys []storage.PrimaryKey, timestamps []typ
 		return fmt.Errorf("failed to marshal ids: %s", err)
 	}
 	var status C.CStatus
-	GetPool().Submit(func() (any, error) {
+	GetDynamicPool().Submit(func() (any, error) {
 		status = C.Delete(s.ptr,
 			cOffset,
 			cSize,
@@ -691,7 +691,7 @@ func (s *LocalSegment) LoadMultiFieldData(rowCount int64, fields []*datapb.Field
 	}
 
 	var status C.CStatus
-	GetPool().Submit(func() (any, error) {
+	GetDynamicPool().Submit(func() (any, error) {
 		status = C.LoadFieldData(s.ptr, loadFieldDataInfo.cLoadFieldDataInfo)
 		return nil, nil
 	}).Await()
@@ -740,7 +740,7 @@ func (s *LocalSegment) LoadFieldData(fieldID int64, rowCount int64, field *datap
 	loadFieldDataInfo.appendMMapDirPath(paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue())
 
 	var status C.CStatus
-	GetPool().Submit(func() (any, error) {
+	GetDynamicPool().Submit(func() (any, error) {
 		status = C.LoadFieldData(s.ptr, loadFieldDataInfo.cLoadFieldDataInfo)
 		return nil, nil
 	}).Await()
@@ -816,7 +816,7 @@ func (s *LocalSegment) LoadDeltaData(deltaData *storage.DeleteData) error {
 		LoadDeletedRecord(CSegmentInterface c_segment, CLoadDeletedRecordInfo deleted_record_info)
 	*/
 	var status C.CStatus
-	GetPool().Submit(func() (any, error) {
+	GetDynamicPool().Submit(func() (any, error) {
 		status = C.LoadDeletedRecord(s.ptr, loadInfo)
 		return nil, nil
 	}).Await()
@@ -870,7 +870,7 @@ func (s *LocalSegment) LoadIndexInfo(indexInfo *querypb.FieldIndexInfo, info *Lo
 	}
 
 	var status C.CStatus
-	GetPool().Submit(func() (any, error) {
+	GetDynamicPool().Submit(func() (any, error) {
 		status = C.UpdateSealedSegmentIndex(s.ptr, info.cLoadIndexInfo)
 		return nil, nil
 	}).Await()

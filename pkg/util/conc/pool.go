@@ -47,6 +47,7 @@ func NewPool[T any](cap int, opts ...PoolOption) *Pool[T] {
 
 	return &Pool[T]{
 		inner: pool,
+		opt:   opt,
 	}
 }
 
@@ -70,6 +71,10 @@ func (pool *Pool[T]) Submit(method func() (T, error)) *Future[T] {
 				panic(x) // throw panic out
 			}
 		}()
+		// execute pre handler
+		if pool.opt.preHandler != nil {
+			pool.opt.preHandler()
+		}
 		res, err := method()
 		if err != nil {
 			future.err = err

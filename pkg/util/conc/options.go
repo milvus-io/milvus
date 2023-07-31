@@ -37,6 +37,9 @@ type poolOption struct {
 	concealPanic bool
 	// panicHandler when task panics
 	panicHandler func(any)
+
+	// preHandler function executed before actual method executed
+	preHandler func()
 }
 
 func (opt *poolOption) antsOptions() []ants.Option {
@@ -102,5 +105,11 @@ func WithExpiryDuration(d time.Duration) PoolOption {
 func WithConcealPanic(v bool) PoolOption {
 	return func(opt *poolOption) {
 		opt.concealPanic = v
+	}
+}
+
+func WithPreHandler(fn func()) PoolOption {
+	return func(opt *poolOption) {
+		opt.preHandler = fn
 	}
 }
