@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -35,71 +36,77 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 )
 
-func TestMetaReloadFromKV(t *testing.T) {
-	t.Run("ListSegments fail", func(t *testing.T) {
-		catalog := mocks.NewDataCoordCatalog(t)
-		catalog.On("ListSegments",
-			mock.Anything,
-		).Return(nil, errors.New("error"))
+// MetaReloadSuite tests meta reload & meta creation related logic
+type MetaReloadSuite struct {
+	testutils.PromMetricsSuite
 
-		_, err := newMeta(context.TODO(), catalog, nil)
-		assert.Error(t, err)
+	catalog *mocks.DataCoordCatalog
+	meta    *meta
+}
+
+func (suite *MetaReloadSuite) SetupTest() {
+	catalog := mocks.NewDataCoordCatalog(suite.T())
+	suite.catalog = catalog
+}
+
+func (suite *MetaReloadSuite) resetMock() {
+	suite.catalog.ExpectedCalls = nil
+}
+
+func (suite *MetaReloadSuite) TestReloadFromKV() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	suite.Run("ListSegments_fail", func() {
+		defer suite.resetMock()
+		suite.catalog.EXPECT().ListSegments(mock.Anything).Return(nil, errors.New("mock"))
+
+		_, err := newMeta(ctx, suite.catalog, nil)
+		suite.Error(err)
 	})
 
-	t.Run("ListChannelCheckpoint fail", func(t *testing.T) {
-		catalog := mocks.NewDataCoordCatalog(t)
-		catalog.On("ListSegments",
-			mock.Anything,
-		).Return([]*datapb.SegmentInfo{}, nil)
-		catalog.On("ListChannelCheckpoint",
-			mock.Anything,
-		).Return(nil, errors.New("error"))
-		_, err := newMeta(context.TODO(), catalog, nil)
-		assert.Error(t, err)
+	suite.Run("ListChannelCheckpoint_fail", func() {
+		defer suite.resetMock()
+
+		suite.catalog.EXPECT().ListSegments(mock.Anything).Return([]*datapb.SegmentInfo{}, nil)
+		suite.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, errors.New("mock"))
+
+		_, err := newMeta(ctx, suite.catalog, nil)
+		suite.Error(err)
 	})
 
-	t.Run("ListIndexes fail", func(t *testing.T) {
-		catalog := mocks.NewDataCoordCatalog(t)
-		catalog.On("ListSegments",
-			mock.Anything,
-		).Return([]*datapb.SegmentInfo{}, nil)
-		catalog.On("ListChannelCheckpoint",
-			mock.Anything,
-		).Return(map[string]*msgpb.MsgPosition{}, nil)
-		catalog.On("ListIndexes",
-			mock.Anything,
-		).Return(nil, errors.New("error"))
-		_, err := newMeta(context.TODO(), catalog, nil)
-		assert.Error(t, err)
+	suite.Run("ListIndexes_fail", func() {
+		defer suite.resetMock()
+
+		suite.catalog.EXPECT().ListSegments(mock.Anything).Return([]*datapb.SegmentInfo{}, nil)
+		suite.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(map[string]*msgpb.MsgPosition{}, nil)
+		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, errors.New("mock"))
+
+		_, err := newMeta(ctx, suite.catalog, nil)
+		suite.Error(err)
 	})
 
-	t.Run("ListSegmentIndexes fails", func(t *testing.T) {
-		catalog := mocks.NewDataCoordCatalog(t)
-		catalog.On("ListSegments",
-			mock.Anything,
-		).Return([]*datapb.SegmentInfo{}, nil)
-		catalog.On("ListChannelCheckpoint",
-			mock.Anything,
-		).Return(map[string]*msgpb.MsgPosition{}, nil)
-		catalog.On("ListIndexes",
-			mock.Anything,
-		).Return([]*model.Index{}, nil)
-		catalog.On("ListSegmentIndexes",
-			mock.Anything,
-		).Return(nil, errors.New("error"))
-		_, err := newMeta(context.TODO(), catalog, nil)
-		assert.Error(t, err)
+	suite.Run("ListSegmentIndexes_fails", func() {
+		defer suite.resetMock()
+
+		suite.catalog.EXPECT().ListSegments(mock.Anything).Return([]*datapb.SegmentInfo{}, nil)
+		suite.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(map[string]*msgpb.MsgPosition{}, nil)
+		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
+		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, errors.New("mock"))
+
+		_, err := newMeta(ctx, suite.catalog, nil)
+		suite.Error(err)
 	})
 
-	t.Run("ok", func(t *testing.T) {
-		catalog := mocks.NewDataCoordCatalog(t)
-		catalog.On("ListSegments",
-			mock.Anything,
-		).Return([]*datapb.SegmentInfo{
+	suite.Run("ok", func() {
+		defer suite.resetMock()
+
+		suite.catalog.EXPECT().ListSegments(mock.Anything).Return([]*datapb.SegmentInfo{
 			{
 				ID:           1,
 				CollectionID: 1,
@@ -107,20 +114,14 @@ func TestMetaReloadFromKV(t *testing.T) {
 				State:        commonpb.SegmentState_Flushed,
 			},
 		}, nil)
-
-		catalog.On("ListChannelCheckpoint",
-			mock.Anything,
-		).Return(map[string]*msgpb.MsgPosition{
+		suite.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(map[string]*msgpb.MsgPosition{
 			"ch": {
 				ChannelName: "cn",
 				MsgID:       []byte{},
 				Timestamp:   1000,
 			},
 		}, nil)
-
-		catalog.On("ListIndexes",
-			mock.Anything,
-		).Return([]*model.Index{
+		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{
 			{
 				CollectionID: 1,
 				IndexID:      1,
@@ -129,18 +130,77 @@ func TestMetaReloadFromKV(t *testing.T) {
 			},
 		}, nil)
 
-		catalog.On("ListSegmentIndexes",
-			mock.Anything,
-		).Return([]*model.SegmentIndex{
+		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return([]*model.SegmentIndex{
 			{
 				SegmentID: 1,
 				IndexID:   1,
 			},
 		}, nil)
 
-		_, err := newMeta(context.TODO(), catalog, nil)
-		assert.NoError(t, err)
+		meta, err := newMeta(ctx, suite.catalog, nil)
+		suite.NoError(err)
+		suite.NotNil(meta)
+
+		suite.MetricsEqual(metrics.DataCoordNumSegments.WithLabelValues(metrics.FlushedSegmentLabel), 1)
 	})
+}
+
+type MetaBasicSuite struct {
+	testutils.PromMetricsSuite
+
+	collID      int64
+	partIDs     []int64
+	channelName string
+
+	meta *meta
+}
+
+func (suite *MetaBasicSuite) SetupSuite() {
+	Params.Init()
+}
+
+func (suite *MetaBasicSuite) SetupTest() {
+	suite.collID = 1
+	suite.partIDs = []int64{100, 101}
+	suite.channelName = "c1"
+
+	meta, err := newMemoryMeta()
+
+	suite.Require().NoError(err)
+	suite.meta = meta
+}
+
+func (suite *MetaBasicSuite) getCollectionInfo(partIDs ...int64) *collectionInfo {
+	testSchema := newTestSchema()
+	return &collectionInfo{
+		ID:             suite.collID,
+		Schema:         testSchema,
+		Partitions:     partIDs,
+		StartPositions: []*commonpb.KeyDataPair{},
+	}
+}
+
+func (suite *MetaBasicSuite) TestCollection() {
+	meta := suite.meta
+
+	info := suite.getCollectionInfo(suite.partIDs...)
+	meta.AddCollection(info)
+
+	collInfo := meta.GetCollection(suite.collID)
+	suite.Require().NotNil(collInfo)
+
+	// check partition info
+	suite.EqualValues(suite.collID, collInfo.ID)
+	suite.EqualValues(info.Schema, collInfo.Schema)
+	suite.EqualValues(len(suite.partIDs), len(collInfo.Partitions))
+	suite.ElementsMatch(info.Partitions, collInfo.Partitions)
+
+	suite.MetricsEqual(metrics.DataCoordNumCollections.WithLabelValues(), 1)
+}
+
+func TestMeta(t *testing.T) {
+	suite.Run(t, new(MetaBasicSuite))
+	suite.Run(t, new(MetaReloadSuite))
 }
 
 func TestMeta_Basic(t *testing.T) {
@@ -169,20 +229,6 @@ func TestMeta_Basic(t *testing.T) {
 		Schema:     testSchema,
 		Partitions: []UniqueID{},
 	}
-
-	t.Run("Test Collection", func(t *testing.T) {
-		meta.AddCollection(collInfo)
-		// check has collection
-		collInfo := meta.GetCollection(collID)
-		assert.NotNil(t, collInfo)
-
-		// check partition info
-		assert.EqualValues(t, collID, collInfo.ID)
-		assert.EqualValues(t, testSchema, collInfo.Schema)
-		assert.EqualValues(t, 2, len(collInfo.Partitions))
-		assert.EqualValues(t, partID0, collInfo.Partitions[0])
-		assert.EqualValues(t, partID1, collInfo.Partitions[1])
-	})
 
 	t.Run("Test Segment", func(t *testing.T) {
 		meta.AddCollection(collInfoWoPartition)

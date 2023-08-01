@@ -23,7 +23,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
-	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -36,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
 
 func getMetaKv(t *testing.T) kv.MetaKv {
@@ -55,7 +55,7 @@ func getWatchKV(t *testing.T) kv.WatchKV {
 }
 
 type ClusterSuite struct {
-	suite.Suite
+	testutils.PromMetricsSuite
 
 	kv kv.WatchKV
 }
@@ -104,7 +104,7 @@ func (suite *ClusterSuite) TestCreate() {
 		suite.EqualValues(1, len(dataNodes))
 		suite.EqualValues("localhost:8080", dataNodes[0].info.Address)
 
-		suite.Equal(float64(1), testutil.ToFloat64(metrics.DataCoordNumDataNodes))
+		suite.MetricsEqual(metrics.DataCoordNumDataNodes, 1)
 	})
 
 	suite.Run("startup_with_existed_channel_data", func() {
@@ -223,7 +223,7 @@ func (suite *ClusterSuite) TestRegister() {
 		suite.EqualValues(1, len(sessions))
 		suite.EqualValues("localhost:8080", sessions[0].info.Address)
 
-		suite.Equal(float64(1), testutil.ToFloat64(metrics.DataCoordNumDataNodes))
+		suite.MetricsEqual(metrics.DataCoordNumDataNodes, 1)
 	})
 
 	suite.Run("register_to_empty_cluster_with_buffer_channels", func() {
@@ -258,7 +258,7 @@ func (suite *ClusterSuite) TestRegister() {
 		suite.EqualValues(1, nodeChannels[0].NodeID)
 		suite.EqualValues("ch1", nodeChannels[0].Channels[0].Name)
 
-		suite.Equal(float64(1), testutil.ToFloat64(metrics.DataCoordNumDataNodes))
+		suite.MetricsEqual(metrics.DataCoordNumDataNodes, 1)
 	})
 
 	suite.Run("register_and_restart_with_no_channel", func() {
@@ -290,7 +290,7 @@ func (suite *ClusterSuite) TestRegister() {
 		channels := channelManager2.GetChannels()
 		suite.Empty(channels)
 
-		suite.Equal(float64(1), testutil.ToFloat64(metrics.DataCoordNumDataNodes))
+		suite.MetricsEqual(metrics.DataCoordNumDataNodes, 1)
 	})
 }
 
@@ -321,7 +321,7 @@ func (suite *ClusterSuite) TestUnregister() {
 		sessions := sessionManager.GetSessions()
 		suite.Empty(sessions)
 
-		suite.Equal(float64(0), testutil.ToFloat64(metrics.DataCoordNumDataNodes))
+		suite.MetricsEqual(metrics.DataCoordNumDataNodes, 0)
 	})
 
 	suite.Run("move_channel_to_online_nodes_after_unregister", func() {
@@ -358,10 +358,10 @@ func (suite *ClusterSuite) TestUnregister() {
 		suite.EqualValues(1, len(channels[0].Channels))
 		suite.EqualValues("ch1", channels[0].Channels[0].Name)
 
-		suite.Equal(float64(1), testutil.ToFloat64(metrics.DataCoordNumDataNodes))
+		suite.MetricsEqual(metrics.DataCoordNumDataNodes, 1)
 	})
 
-	suite.Run("remove all channels after unregsiter", func() {
+	suite.Run("remove_all_channels_after_unregsiter", func() {
 		defer kv.RemoveWithPrefix("")
 
 		ctx, cancel := context.WithCancel(context.TODO())
@@ -393,113 +393,12 @@ func (suite *ClusterSuite) TestUnregister() {
 		suite.EqualValues(1, len(channel.Channels))
 		suite.EqualValues("ch_1", channel.Channels[0].Name)
 
-		suite.Equal(float64(0), testutil.ToFloat64(metrics.DataCoordNumDataNodes))
+		suite.MetricsEqual(metrics.DataCoordNumDataNodes, 0)
 	})
 }
 
 func TestCluster(t *testing.T) {
 	suite.Run(t, new(ClusterSuite))
-}
-
-func TestUnregister(t *testing.T) {
-	kv := getWatchKV(t)
-	defer func() {
-		kv.RemoveWithPrefix("")
-		kv.Close()
-	}()
-
-	t.Run("remove node after unregister", func(t *testing.T) {
-		defer kv.RemoveWithPrefix("")
-
-		ctx, cancel := context.WithCancel(context.TODO())
-		defer cancel()
-
-		sessionManager := NewSessionManager()
-		channelManager, err := NewChannelManager(kv, newMockHandler())
-		assert.NoError(t, err)
-		cluster := NewCluster(sessionManager, channelManager)
-		defer cluster.Close()
-		addr := "localhost:8080"
-		info := &NodeInfo{
-			Address: addr,
-			NodeID:  1,
-		}
-		nodes := []*NodeInfo{info}
-		err = cluster.Startup(ctx, nodes)
-		assert.NoError(t, err)
-		err = cluster.UnRegister(nodes[0])
-		assert.NoError(t, err)
-		sessions := sessionManager.GetSessions()
-		assert.Empty(t, sessions)
-	})
-
-	t.Run("move channels to online nodes after unregister", func(t *testing.T) {
-		defer kv.RemoveWithPrefix("")
-
-		ctx, cancel := context.WithCancel(context.TODO())
-		defer cancel()
-
-		sessionManager := NewSessionManager()
-		channelManager, err := NewChannelManager(kv, newMockHandler())
-		assert.NoError(t, err)
-		cluster := NewCluster(sessionManager, channelManager)
-		defer cluster.Close()
-
-		nodeInfo1 := &NodeInfo{
-			Address: "localhost:8080",
-			NodeID:  1,
-		}
-		nodeInfo2 := &NodeInfo{
-			Address: "localhost:8081",
-			NodeID:  2,
-		}
-		nodes := []*NodeInfo{nodeInfo1, nodeInfo2}
-		err = cluster.Startup(ctx, nodes)
-		assert.NoError(t, err)
-		err = cluster.Watch("ch1", 1)
-		assert.NoError(t, err)
-		err = cluster.UnRegister(nodeInfo1)
-		assert.NoError(t, err)
-
-		channels := channelManager.GetChannels()
-		assert.EqualValues(t, 1, len(channels))
-		assert.EqualValues(t, 2, channels[0].NodeID)
-		assert.EqualValues(t, 1, len(channels[0].Channels))
-		assert.EqualValues(t, "ch1", channels[0].Channels[0].Name)
-	})
-
-	t.Run("remove all channels after unregsiter", func(t *testing.T) {
-		defer kv.RemoveWithPrefix("")
-
-		ctx, cancel := context.WithCancel(context.TODO())
-		defer cancel()
-
-		var mockSessionCreator = func(ctx context.Context, addr string) (types.DataNode, error) {
-			return newMockDataNodeClient(1, nil)
-		}
-		sessionManager := NewSessionManager(withSessionCreator(mockSessionCreator))
-		channelManager, err := NewChannelManager(kv, newMockHandler())
-		assert.NoError(t, err)
-		cluster := NewCluster(sessionManager, channelManager)
-		defer cluster.Close()
-
-		nodeInfo := &NodeInfo{
-			Address: "localhost:8080",
-			NodeID:  1,
-		}
-		err = cluster.Startup(ctx, []*NodeInfo{nodeInfo})
-		assert.NoError(t, err)
-		err = cluster.Watch("ch_1", 1)
-		assert.NoError(t, err)
-		err = cluster.UnRegister(nodeInfo)
-		assert.NoError(t, err)
-		channels := channelManager.GetChannels()
-		assert.Empty(t, channels)
-		channel := channelManager.GetBufferChannels()
-		assert.NotNil(t, channel)
-		assert.EqualValues(t, 1, len(channel.Channels))
-		assert.EqualValues(t, "ch_1", channel.Channels[0].Name)
-	})
 }
 
 func TestWatchIfNeeded(t *testing.T) {
