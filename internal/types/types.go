@@ -19,8 +19,8 @@ package types
 import (
 	"context"
 
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"github.com/tikv/client-go/v2/txnkv"
+	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"

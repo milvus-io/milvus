@@ -354,6 +354,7 @@ func getQueryCoord() *mocks.MockQueryCoord {
 	mqc := &mocks.MockQueryCoord{}
 	mqc.EXPECT().Init().Return(nil)
 	mqc.EXPECT().SetEtcdClient(mock.Anything)
+	mqc.EXPECT().SetTiKVClient(mock.Anything)
 	mqc.EXPECT().SetAddress(mock.Anything)
 	mqc.EXPECT().SetRootCoord(mock.Anything).Return(nil)
 	mqc.EXPECT().SetDataCoord(mock.Anything).Return(nil)

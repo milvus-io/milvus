@@ -14,12 +14,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package tikv_test
+package tikv
 
 import (
-	//"context"
+	"context"
 	"fmt"
-	"os"
 	"sort"
 	"testing"
 	"time"
@@ -27,67 +26,24 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/client-go/v2/testutils"
-	tilib "github.com/tikv/client-go/v2/tikv"
 	"github.com/tikv/client-go/v2/txnkv"
+	"github.com/tikv/client-go/v2/txnkv/transaction"
 	"golang.org/x/exp/maps"
-
-	tikv "github.com/milvus-io/milvus/internal/kv/tikv"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
-var Params paramtable.ComponentParam
-var tkv *txnkv.Client
-
-// creates a locak TiKV Store for testing purpose.
-func setupLocalTiKV() {
-	client, cluster, pdClient, err := testutils.NewMockTiKV("", nil)
-	if err != nil {
-		panic(err)
-	}
-	testutils.BootstrapWithSingleStore(cluster)
-	store, err := tilib.NewTestTiKVStore(client, pdClient, nil, nil, 0)
-	if err != nil {
-		panic(err)
-	}
-	tkv = &txnkv.Client{store}
-}
-
-// Connects to a remote TiKV service for testing purpose. By default, it assumes the TiKV is from localhost.
-func setupRemoteTiKV() {
-	pdsn := "127.0.0.1:2379"
-	var err error
-	tkv, err = txnkv.NewClient([]string{pdsn})
-	if err != nil {
-		panic(err)
-	}
-}
-
-func setupTiKV(use_remote bool) {
-	if use_remote {
-		setupRemoteTiKV()
-	} else {
-		setupLocalTiKV()
-	}
-}
-
-func TestMain(m *testing.M) {
-	Params.Init()
-	setupTiKV(false)
-	code := m.Run()
-	os.Exit(code)
-}
-
-func TestTiKV_Load(te *testing.T) {
+func TestTiKVLoad(te *testing.T) {
 	te.Run("kv SaveAndLoad", func(t *testing.T) {
 		rootPath := "/tikv/test/root/saveandload"
-		kv := tikv.NewTiKV(tkv, rootPath)
+		kv := NewTiKV(txnClient, rootPath)
 		err := kv.RemoveWithPrefix("")
 		require.NoError(t, err)
 
 		defer kv.Close()
 		defer kv.RemoveWithPrefix("")
+
+		// Disallow empty value
+		err = kv.Save("keyh2", "")
+		assert.Error(t, err)
 
 		saveAndLoadTests := []struct {
 			key   string
@@ -185,7 +141,7 @@ func TestTiKV_Load(te *testing.T) {
 
 	te.Run("kv MultiSaveAndMultiLoad", func(t *testing.T) {
 		rootPath := "/tikv/test/root/multi_save_and_multi_load"
-		kv := tikv.NewTiKV(tkv, rootPath)
+		kv := NewTiKV(txnClient, rootPath)
 
 		defer kv.Close()
 		defer kv.RemoveWithPrefix("")
@@ -293,7 +249,7 @@ func TestTiKV_Load(te *testing.T) {
 
 	te.Run("kv MultiRemoveWithPrefix", func(t *testing.T) {
 		rootPath := "/tikv/test/root/multi_remove_with_prefix"
-		kv := tikv.NewTiKV(tkv, rootPath)
+		kv := NewTiKV(txnClient, rootPath)
 		defer kv.Close()
 		defer kv.RemoveWithPrefix("")
 
@@ -376,11 +332,84 @@ func TestTiKV_Load(te *testing.T) {
 			assert.Equal(t, test.lengthAfterRemove, len(k))
 		}
 	})
+
+	te.Run("kv failed to start txn", func(t *testing.T) {
+		rootPath := "/tikv/test/root/start_exn"
+		kv := NewTiKV(txnClient, rootPath)
+		defer kv.Close()
+
+		beginTxn = func(txn *txnkv.Client) (*transaction.KVTxn, error) {
+			return nil, fmt.Errorf("bad txn!")
+		}
+		defer func() {
+			beginTxn = tiTxnBegin
+		}()
+		err := kv.Save("key1", "v1")
+		assert.Error(t, err)
+		_, err = kv.Has("key")
+		assert.Error(t, err)
+		_, err = kv.Load("key")
+		assert.Error(t, err)
+		_, err = kv.HasPrefix("key")
+		assert.Error(t, err)
+		_, err = kv.MultiLoad([]string{"key_1", "key_2"})
+		assert.Error(t, err)
+		_, _, err = kv.LoadWithPrefix("/")
+		assert.Error(t, err)
+		err = kv.MultiSave(map[string]string{"A/100": "v1"})
+		assert.Error(t, err)
+		err = kv.Remove("key1")
+		assert.Error(t, err)
+		err = kv.MultiRemove([]string{"key_1", "key_2"})
+		assert.Error(t, err)
+		err = kv.MultiSaveAndRemove(map[string]string{"key_1": "value_1"}, []string{})
+		assert.Error(t, err)
+		err = kv.MultiSaveAndRemoveWithPrefix(map[string]string{"y/c": "vvv"}, []string{"/"})
+		assert.Error(t, err)
+		err = kv.MultiRemoveWithPrefix([]string{"x/def", "x/den"})
+		assert.Error(t, err)
+	})
+
+	te.Run("kv failed to commit txn", func(t *testing.T) {
+		rootPath := "/tikv/test/root/commit_txn"
+		kv := NewTiKV(txnClient, rootPath)
+		defer kv.Close()
+
+		commitTxn = func(txn *transaction.KVTxn, ctx context.Context) error {
+			return fmt.Errorf("bad txn commit!")
+		}
+		defer func() {
+			commitTxn = tiTxnCommit
+		}()
+		var err error
+		err = kv.Save("key1", "v1")
+		assert.Error(t, err)
+		_, err = kv.Load("key")
+		assert.Error(t, err)
+		_, err = kv.HasPrefix("key")
+		assert.Error(t, err)
+		_, err = kv.MultiLoad([]string{"key_1", "key_2"})
+		assert.Error(t, err)
+		_, _, err = kv.LoadWithPrefix("/")
+		assert.Error(t, err)
+		err = kv.MultiSave(map[string]string{"A/100": "v1"})
+		assert.Error(t, err)
+		err = kv.Remove("key1")
+		assert.Error(t, err)
+		err = kv.MultiRemove([]string{"key_1", "key_2"})
+		assert.Error(t, err)
+		err = kv.MultiSaveAndRemove(map[string]string{"key_1": "value_1"}, []string{})
+		assert.Error(t, err)
+		err = kv.MultiSaveAndRemoveWithPrefix(map[string]string{"y/c": "vvv"}, []string{"/"})
+		assert.Error(t, err)
+		err = kv.MultiRemoveWithPrefix([]string{"x/def", "x/den"})
+		assert.Error(t, err)
+	})
 }
 
-func Test_WalkWithPagination(t *testing.T) {
+func TestWalkWithPagination(t *testing.T) {
 	rootPath := "/tikv/test/root/pagination"
-	kv := tikv.NewTiKV(tkv, rootPath)
+	kv := NewTiKV(txnClient, rootPath)
 
 	defer kv.Close()
 	defer kv.RemoveWithPrefix("")
@@ -454,48 +483,17 @@ func Test_WalkWithPagination(t *testing.T) {
 
 func TestElapse(t *testing.T) {
 	start := time.Now()
-	isElapse := tikv.CheckElapseAndWarn(start, "err message")
+	isElapse := CheckElapseAndWarn(start, "err message")
 	assert.Equal(t, isElapse, false)
 
 	time.Sleep(2001 * time.Millisecond)
-	isElapse = tikv.CheckElapseAndWarn(start, "err message")
+	isElapse = CheckElapseAndWarn(start, "err message")
 	assert.Equal(t, isElapse, true)
-}
-
-func TestCheckValueSizeAndWarn(t *testing.T) {
-	ret := tikv.CheckValueSizeAndWarn("k", "v")
-	assert.False(t, ret)
-
-	v := make([]byte, 1024000)
-	ret = tikv.CheckValueSizeAndWarn("k", v)
-	assert.True(t, ret)
-}
-
-func TestCheckTnxBytesValueSizeAndWarn(t *testing.T) {
-	kvs := make(map[string][]byte, 0)
-	kvs["k"] = []byte("v")
-	ret := tikv.CheckTnxBytesValueSizeAndWarn(kvs)
-	assert.False(t, ret)
-
-	kvs["k"] = make([]byte, 1024000)
-	ret = tikv.CheckTnxBytesValueSizeAndWarn(kvs)
-	assert.True(t, ret)
-}
-
-func TestCheckTnxStringValueSizeAndWarn(t *testing.T) {
-	kvs := make(map[string]string, 0)
-	kvs["k"] = "v"
-	ret := tikv.CheckTnxStringValueSizeAndWarn(kvs)
-	assert.False(t, ret)
-
-	kvs["k1"] = funcutil.RandomString(1024000)
-	ret = tikv.CheckTnxStringValueSizeAndWarn(kvs)
-	assert.True(t, ret)
 }
 
 func TestHas(t *testing.T) {
 	rootPath := "/tikv/test/root/pagination"
-	kv := tikv.NewTiKV(tkv, rootPath)
+	kv := NewTiKV(txnClient, rootPath)
 	err := kv.RemoveWithPrefix("")
 	require.NoError(t, err)
 
@@ -523,7 +521,7 @@ func TestHas(t *testing.T) {
 
 func TestHasPrefix(t *testing.T) {
 	rootPath := "/etcd/test/root/hasprefix"
-	kv := tikv.NewTiKV(tkv, rootPath)
+	kv := NewTiKV(txnClient, rootPath)
 	err := kv.RemoveWithPrefix("")
 	require.NoError(t, err)
 
@@ -547,4 +545,16 @@ func TestHasPrefix(t *testing.T) {
 	has, err = kv.HasPrefix("key")
 	assert.NoError(t, err)
 	assert.False(t, has)
+}
+
+func TestTiKVUnimplemented(t *testing.T) {
+	kv := NewTiKV(txnClient, "/")
+	err := kv.RemoveWithPrefix("")
+	require.NoError(t, err)
+
+	defer kv.Close()
+	defer kv.RemoveWithPrefix("")
+
+	_, err = kv.CompareVersionAndSwap("k", 1, "target")
+	assert.Error(t, err)
 }
