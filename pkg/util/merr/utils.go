@@ -176,6 +176,14 @@ func WrapErrCrossClusterRouting(expectedCluster, actualCluster string, msg ...st
 	return err
 }
 
+func WrapErrServiceDiskLimitExceeded(predict, limit float32, msg ...string) error {
+	err := errors.Wrapf(ErrServiceDiskLimitExceeded, "predict=%v, limit=%v", predict, limit)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
 func WrapErrDatabaseNotFound(database any, msg ...string) error {
 	err := wrapWithField(ErrDatabaseNotfound, "database", database)
 	if len(msg) > 0 {

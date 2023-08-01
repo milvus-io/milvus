@@ -66,6 +66,7 @@ func (s *ErrSuite) TestWrap() {
 	s.ErrorIs(WrapErrServiceRequestLimitExceeded(100, "too many requests"), ErrServiceRequestLimitExceeded)
 	s.ErrorIs(WrapErrServiceInternal("never throw out"), ErrServiceInternal)
 	s.ErrorIs(WrapErrCrossClusterRouting("ins-0", "ins-1"), ErrCrossClusterRouting)
+	s.ErrorIs(WrapErrServiceDiskLimitExceeded(110, 100, "DLE"), ErrServiceDiskLimitExceeded)
 
 	// Collection related
 	s.ErrorIs(WrapErrCollectionNotFound("test_collection", "failed to get collection"), ErrCollectionNotFound)
