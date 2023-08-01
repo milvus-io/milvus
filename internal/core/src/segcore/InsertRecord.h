@@ -18,6 +18,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <queue>
 
 #include "TimestampIndex.h"
 #include "common/Schema.h"
@@ -28,6 +29,12 @@
 #include "segcore/Record.h"
 
 namespace milvus::segcore {
+
+constexpr int64_t Unlimited = -1;
+constexpr int64_t NoLimit = 0;
+// If `bitset_count * 100` > `total_count * BruteForceSelectivity`, we use pk index.
+// Otherwise, we use bruteforce to retrieve all the pks and then sort them.
+constexpr int64_t BruteForceSelectivity = 10;
 
 class OffsetMap {
  public:
@@ -44,10 +51,15 @@ class OffsetMap {
 
     virtual bool
     empty() const = 0;
+
+    using OffsetType = int64_t;
+    // TODO: in fact, we can retrieve the pk here. Not sure which way is more efficient.
+    virtual std::vector<OffsetType>
+    find_first(int64_t limit, const BitsetType& bitset) const = 0;
 };
 
 template <typename T>
-class OffsetHashMap : public OffsetMap {
+class OffsetOrderedMap : public OffsetMap {
  public:
     std::vector<int64_t>
     find(const PkType& pk) const override {
@@ -64,7 +76,7 @@ class OffsetHashMap : public OffsetMap {
     void
     seal() override {
         PanicInfo(
-            "OffsetHashMap used for growing segment could not be sealed.");
+            "OffsetOrderedMap used for growing segment could not be sealed.");
     }
 
     bool
@@ -72,8 +84,41 @@ class OffsetHashMap : public OffsetMap {
         return map_.empty();
     }
 
+    std::vector<OffsetType>
+    find_first(int64_t limit, const BitsetType& bitset) const override {
+        if (limit == Unlimited || limit == NoLimit) {
+            limit = map_.size();
+        }
+
+        // TODO: we can't retrieve pk by offset very conveniently.
+        //      Selectivity should be done outside.
+        return find_first_by_index(limit, bitset);
+    }
+
  private:
-    std::unordered_map<T, std::vector<int64_t>> map_;
+    std::vector<OffsetType>
+    find_first_by_index(int64_t limit, const BitsetType& bitset) const {
+        std::vector<int64_t> seg_offsets;
+        seg_offsets.reserve(limit);
+        int64_t hit_num = 0;  // avoid counting the number everytime.
+        auto cnt = bitset.count();
+        for (auto it = map_.begin(); it != map_.end(); it++) {
+            if (hit_num >= limit || hit_num >= cnt) {
+                break;
+            }
+            for (auto seg_offset : it->second) {
+                if (bitset[seg_offset]) {
+                    seg_offsets.push_back(seg_offset);
+                    hit_num++;
+                }
+            }
+        }
+        return seg_offsets;
+    }
+
+ private:
+    using OrderedMap = std::map<T, std::vector<int64_t>, std::less<>>;
+    OrderedMap map_;
 };
 
 template <typename T>
@@ -81,8 +126,7 @@ class OffsetOrderedArray : public OffsetMap {
  public:
     std::vector<int64_t>
     find(const PkType& pk) const override {
-        if (!is_sealed)
-            PanicInfo("OffsetOrderedArray could not search before seal");
+        check_search();
 
         const T& target = std::get<T>(pk);
         auto it =
@@ -116,6 +160,44 @@ class OffsetOrderedArray : public OffsetMap {
     bool
     empty() const override {
         return array_.empty();
+    }
+
+    std::vector<OffsetType>
+    find_first(int64_t limit, const BitsetType& bitset) const override {
+        check_search();
+
+        if (limit == Unlimited || limit == NoLimit) {
+            limit = array_.size();
+        }
+
+        // TODO: we can't retrieve pk by offset very conveniently.
+        //      Selectivity should be done outside.
+        return find_first_by_index(limit, bitset);
+    }
+
+ private:
+    std::vector<OffsetType>
+    find_first_by_index(int64_t limit, const BitsetType& bitset) const {
+        std::vector<int64_t> seg_offsets;
+        seg_offsets.reserve(limit);
+        int64_t hit_num = 0;  // avoid counting the number everytime.
+        auto cnt = bitset.count();
+        for (auto it = array_.begin(); it != array_.end(); it++) {
+            if (hit_num >= limit || hit_num >= cnt) {
+                break;
+            }
+            if (bitset[it->second]) {
+                seg_offsets.push_back(it->second);
+                hit_num++;
+            }
+        }
+        return seg_offsets;
+    }
+
+    void
+    check_search() const {
+        AssertInfo(is_sealed,
+                   "OffsetOrderedArray could not search before seal");
     }
 
  private:
@@ -154,7 +236,7 @@ struct InsertRecord {
                                 std::make_unique<OffsetOrderedArray<int64_t>>();
                         else
                             pk2offset_ =
-                                std::make_unique<OffsetHashMap<int64_t>>();
+                                std::make_unique<OffsetOrderedMap<int64_t>>();
                         break;
                     }
                     case DataType::VARCHAR: {
@@ -162,8 +244,8 @@ struct InsertRecord {
                             pk2offset_ = std::make_unique<
                                 OffsetOrderedArray<std::string>>();
                         else
-                            pk2offset_ =
-                                std::make_unique<OffsetHashMap<std::string>>();
+                            pk2offset_ = std::make_unique<
+                                OffsetOrderedMap<std::string>>();
                         break;
                     }
                     default: {

@@ -205,7 +205,7 @@ ProtoParser::RetrievePlanNodeFromProto(
     auto plan_node = [&]() -> std::unique_ptr<RetrievePlanNode> {
         auto node = std::make_unique<RetrievePlanNode>();
         if (plan_node_proto.has_predicates()) {  // version before 2023.03.30.
-            node->is_count = false;
+            node->is_count_ = false;
             auto& predicate_proto = plan_node_proto.predicates();
             auto expr_opt = [&]() -> ExprPtr {
                 return ParseExpr(predicate_proto);
@@ -220,7 +220,8 @@ ProtoParser::RetrievePlanNodeFromProto(
                 }();
                 node->predicate_ = std::move(expr_opt);
             }
-            node->is_count = query.is_count();
+            node->is_count_ = query.is_count();
+            node->limit_ = query.limit();
         }
         return node;
     }();

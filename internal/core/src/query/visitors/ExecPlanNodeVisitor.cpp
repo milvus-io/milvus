@@ -148,12 +148,12 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
 
     auto active_count = segment->get_active_count(timestamp_);
 
-    if (active_count == 0 && !node.is_count) {
+    if (active_count == 0 && !node.is_count_) {
         retrieve_result_opt_ = std::move(retrieve_result);
         return;
     }
 
-    if (active_count == 0 && node.is_count) {
+    if (active_count == 0 && node.is_count_) {
         retrieve_result = *(wrap_num_entities(0));
         retrieve_result_opt_ = std::move(retrieve_result);
         return;
@@ -161,7 +161,7 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
 
     BitsetType bitset_holder;
     // For case that retrieve by expression, bitset will be allocated when expression is being executed.
-    if (node.is_count) {
+    if (node.is_count_) {
         bitset_holder.resize(active_count);
     }
 
@@ -176,27 +176,27 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
 
     segment->mask_with_delete(bitset_holder, active_count, timestamp_);
     // if bitset_holder is all 1's, we got empty result
-    if (bitset_holder.all() && !node.is_count) {
+    if (bitset_holder.all() && !node.is_count_) {
         retrieve_result_opt_ = std::move(retrieve_result);
         return;
     }
 
-    if (node.is_count) {
+    if (node.is_count_) {
         auto cnt = bitset_holder.size() - bitset_holder.count();
         retrieve_result = *(wrap_num_entities(cnt));
         retrieve_result_opt_ = std::move(retrieve_result);
         return;
     }
 
-    BitsetView final_view = bitset_holder;
-    auto seg_offsets =
-        GetExprUsePkIndex() && IsTermExpr(node.predicate_.value().get())
-            ? segment->search_ids(
-                  final_view, expr_cached_pk_id_offsets_, timestamp_)
-            : segment->search_ids(bitset_holder.flip(), timestamp_);
-    retrieve_result.result_offsets_.assign(
-        (int64_t*)seg_offsets.data(),
-        (int64_t*)seg_offsets.data() + seg_offsets.size());
+    bitset_holder.flip();
+    if (GetExprUsePkIndex() && IsTermExpr(node.predicate_.value().get())) {
+        segment->search_ids_filter(
+            bitset_holder, expr_cached_pk_id_offsets_, timestamp_);
+    } else {
+        segment->search_ids_filter(bitset_holder, timestamp_);
+    }
+    retrieve_result.result_offsets_ =
+        segment->find_first(node.limit_, bitset_holder);
     retrieve_result_opt_ = std::move(retrieve_result);
 }
 

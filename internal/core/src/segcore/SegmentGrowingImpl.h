@@ -213,17 +213,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
     std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
     search_ids(const IdArray& id_array, Timestamp timestamp) const override;
 
-    std::vector<SegOffset>
-    search_ids(const BitsetType& view, Timestamp timestamp) const override;
-
-    std::vector<SegOffset>
-    search_ids(const BitsetView& view, Timestamp timestamp) const override;
-
-    std::vector<SegOffset>
-    search_ids(const BitsetView& view,
-               const std::vector<int64_t>& offsets,
-               Timestamp timestamp) const override;
-
     bool
     HasIndex(FieldId field_id) const override {
         return true;
@@ -245,6 +234,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return true;
     }
 
+    std::vector<OffsetMap::OffsetType>
+    find_first(int64_t limit, const BitsetType& bitset) const override {
+        return insert_record_.pk2offset_->find_first(limit, bitset);
+    }
+
  protected:
     int64_t
     num_chunk() const override;
@@ -255,6 +249,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     check_search(const query::Plan* plan) const override {
         Assert(plan);
+    }
+
+    const ConcurrentVector<Timestamp>&
+    get_timestamps() const override {
+        return insert_record_.timestamps_;
     }
 
  private:

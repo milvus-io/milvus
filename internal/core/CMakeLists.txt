@@ -123,8 +123,12 @@ if (LINUX OR MSYS)
                   "-DELPP_THREAD_SAFE"
                   "-fopenmp"
                   "-Werror"
-                  "-O3"
                   )
+    if (CMAKE_BUILD_TYPE STREQUAL "Release")
+        append_flags( CMAKE_CXX_FLAGS
+                "-O3"
+                )
+    endif()
 endif ()
 
 if ( APPLE )

@@ -3884,6 +3884,7 @@ class QueryPlanNode final :
 
   enum : int {
     kPredicatesFieldNumber = 1,
+    kLimitFieldNumber = 3,
     kIsCountFieldNumber = 2,
   };
   // .milvus.proto.plan.Expr predicates = 1;
@@ -3904,6 +3905,15 @@ class QueryPlanNode final :
       ::milvus::proto::plan::Expr* predicates);
   ::milvus::proto::plan::Expr* unsafe_arena_release_predicates();
 
+  // int64 limit = 3;
+  void clear_limit();
+  int64_t limit() const;
+  void set_limit(int64_t value);
+  private:
+  int64_t _internal_limit() const;
+  void _internal_set_limit(int64_t value);
+  public:
+
   // bool is_count = 2;
   void clear_is_count();
   bool is_count() const;
@@ -3922,6 +3932,7 @@ class QueryPlanNode final :
   typedef void DestructorSkippable_;
   struct Impl_ {
     ::milvus::proto::plan::Expr* predicates_;
+    int64_t limit_;
     bool is_count_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   };
@@ -8116,6 +8127,26 @@ inline void QueryPlanNode::_internal_set_is_count(bool value) {
 inline void QueryPlanNode::set_is_count(bool value) {
   _internal_set_is_count(value);
   // @@protoc_insertion_point(field_set:milvus.proto.plan.QueryPlanNode.is_count)
+}
+
+// int64 limit = 3;
+inline void QueryPlanNode::clear_limit() {
+  _impl_.limit_ = int64_t{0};
+}
+inline int64_t QueryPlanNode::_internal_limit() const {
+  return _impl_.limit_;
+}
+inline int64_t QueryPlanNode::limit() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.plan.QueryPlanNode.limit)
+  return _internal_limit();
+}
+inline void QueryPlanNode::_internal_set_limit(int64_t value) {
+  
+  _impl_.limit_ = value;
+}
+inline void QueryPlanNode::set_limit(int64_t value) {
+  _internal_set_limit(value);
+  // @@protoc_insertion_point(field_set:milvus.proto.plan.QueryPlanNode.limit)
 }
 
 // -------------------------------------------------------------------
