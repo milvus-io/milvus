@@ -24,7 +24,6 @@ import (
 	"sync"
 
 	"github.com/opentracing/opentracing-go"
-	"github.com/panjf2000/ants/v2"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -46,7 +45,7 @@ var deletePool *concurrency.Pool
 var deletePoolInitOnce sync.Once
 
 func initDeletePool() {
-	pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0), ants.WithPreAlloc(false))
+	pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0), concurrency.WithPreAlloc(false))
 	if err != nil {
 		// shall no happen here
 		panic(err)

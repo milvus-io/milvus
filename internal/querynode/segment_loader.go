@@ -52,7 +52,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/panjf2000/ants/v2"
 	"github.com/samber/lo"
 )
 
@@ -929,18 +928,18 @@ func newSegmentLoader(
 	if ioPoolSize > 256 {
 		ioPoolSize = 256
 	}
-	ioPool, err := concurrency.NewPool(ioPoolSize, ants.WithPreAlloc(true))
+	ioPool, err := concurrency.NewPool(ioPoolSize, concurrency.WithPreAlloc(true))
 	if err != nil {
 		log.Error("failed to create goroutine pool for segment loader",
 			zap.Error(err))
 		panic(err)
 	}
-	cpuPool, err := concurrency.NewPool(cpuNum, ants.WithPreAlloc(true))
+	cpuPool, err := concurrency.NewPool(cpuNum, concurrency.WithPreAlloc(true))
 	if err != nil {
 		log.Error("failed to create cpu goroutine pool for segment loader", zap.Error(err))
 		panic(err)
 	}
-	lazyPool, err := concurrency.NewPool(ioPoolSize, ants.WithPreAlloc(false))
+	lazyPool, err := concurrency.NewPool(ioPoolSize, concurrency.WithPreAlloc(false))
 	if err != nil {
 		log.Error("failed to create lazy load pool for segment loader", zap.Error(err))
 		panic(err)
