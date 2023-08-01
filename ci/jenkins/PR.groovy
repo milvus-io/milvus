@@ -73,7 +73,6 @@ pipeline {
             }
         }
 
-
         stage('Install & E2E Test') {
             matrix {
                 axes {
@@ -144,6 +143,7 @@ pipeline {
                                                 --install-extra-arg "
                                                 --set etcd.metrics.enabled=true \
                                                 --set etcd.metrics.podMonitor.enabled=true \
+                                                --set etcd.persistence.storageClass=unity-iscsi-ssd \
                                                 --set indexCoordinator.gc.interval=1 \
                                                 --set indexNode.disk.enabled=true \
                                                 --set queryNode.disk.enabled=true \
