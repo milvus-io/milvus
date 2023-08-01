@@ -50,6 +50,9 @@ type LookAsideBalancer struct {
 
 	unreachableQueryNodes *typeutil.ConcurrentSet[int64]
 
+	// query node id -> number of consecutive heartbeat failures
+	failedHeartBeatCounter *typeutil.ConcurrentMap[int64, *atomic.Int64]
+
 	closeCh   chan struct{}
 	closeOnce sync.Once
 	wg        sync.WaitGroup
@@ -57,12 +60,13 @@ type LookAsideBalancer struct {
 
 func NewLookAsideBalancer(clientMgr shardClientMgr) *LookAsideBalancer {
 	balancer := &LookAsideBalancer{
-		clientMgr:             clientMgr,
-		metricsMap:            typeutil.NewConcurrentMap[int64, *internalpb.CostAggregation](),
-		metricsUpdateTs:       typeutil.NewConcurrentMap[int64, int64](),
-		executingTaskTotalNQ:  typeutil.NewConcurrentMap[int64, *atomic.Int64](),
-		unreachableQueryNodes: typeutil.NewConcurrentSet[int64](),
-		closeCh:               make(chan struct{}),
+		clientMgr:              clientMgr,
+		metricsMap:             typeutil.NewConcurrentMap[int64, *internalpb.CostAggregation](),
+		metricsUpdateTs:        typeutil.NewConcurrentMap[int64, int64](),
+		executingTaskTotalNQ:   typeutil.NewConcurrentMap[int64, *atomic.Int64](),
+		unreachableQueryNodes:  typeutil.NewConcurrentSet[int64](),
+		failedHeartBeatCounter: typeutil.NewConcurrentMap[int64, *atomic.Int64](),
+		closeCh:                make(chan struct{}),
 	}
 
 	return balancer
@@ -198,13 +202,28 @@ func (b *LookAsideBalancer) checkQueryNodeHealthLoop(ctx context.Context) {
 						ctx, cancel := context.WithTimeout(context.Background(), checkInterval)
 						defer cancel()
 
-						setUnreachable := func() bool {
+						setUnreachable := func(err error) bool {
+							failures, ok := b.failedHeartBeatCounter.Get(node)
+							if !ok {
+								failures = atomic.NewInt64(0)
+							}
+							failures.Inc()
+							b.failedHeartBeatCounter.Insert(node, failures)
+
+							if failures.Load() < Params.ProxyCfg.RetryTimesOnHealthCheck.GetAsInt64() {
+								log.Warn("get component status failed",
+									zap.Int64("node", node),
+									zap.Int64("times", failures.Load()),
+									zap.Error(err))
+								return false
+							}
+
 							return b.unreachableQueryNodes.Insert(node)
 						}
 
 						qn, err := b.clientMgr.GetClient(ctx, node)
 						if err != nil {
-							if setUnreachable() {
+							if setUnreachable(err) {
 								log.Warn("get client failed, set node unreachable", zap.Int64("node", node), zap.Error(err))
 							}
 							return struct{}{}, nil
@@ -212,14 +231,14 @@ func (b *LookAsideBalancer) checkQueryNodeHealthLoop(ctx context.Context) {
 
 						resp, err := qn.GetComponentStates(ctx)
 						if err != nil {
-							if setUnreachable() {
+							if setUnreachable(err) {
 								log.Warn("get component status failed,set node unreachable", zap.Int64("node", node), zap.Error(err))
 							}
 							return struct{}{}, nil
 						}
 
 						if resp.GetState().GetStateCode() != commonpb.StateCode_Healthy {
-							if setUnreachable() {
+							if setUnreachable(merr.ErrServiceUnavailable) {
 								log.Warn("component status unhealthy,set node unreachable", zap.Int64("node", node), zap.Error(err))
 							}
 							return struct{}{}, nil
@@ -228,6 +247,11 @@ func (b *LookAsideBalancer) checkQueryNodeHealthLoop(ctx context.Context) {
 						// check health successfully, update check health ts
 						b.metricsUpdateTs.Insert(node, time.Now().Local().UnixMilli())
 						if b.unreachableQueryNodes.TryRemove(node) {
+							// once heartbeat succeed, clear filed counter
+							failures, ok := b.failedHeartBeatCounter.Get(node)
+							if ok {
+								failures.Store(0)
+							}
 							log.Info("component recuperated, set node reachable", zap.Int64("node", node), zap.Error(err))
 						}
 
