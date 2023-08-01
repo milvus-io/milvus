@@ -621,7 +621,7 @@ func (suite *TaskSuite) TestLoadSegmentTaskFailed() {
 	suite.AssertTaskNum(0, 0, 0, 0)
 
 	for _, task := range tasks {
-		suite.Equal(TaskStatusCanceled, task.Status())
+		suite.Equal(TaskStatusFailed, task.Status())
 	}
 }
 

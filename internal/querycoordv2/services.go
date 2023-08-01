@@ -99,7 +99,6 @@ func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectio
 				msg := "show collection failed"
 				log.Warn(msg, zap.Error(err))
 				status := merr.Status(errors.Wrap(err, msg))
-				status.ErrorCode = commonpb.ErrorCode_InsufficientMemoryToLoad
 				return &querypb.ShowCollectionsResponse{
 					Status: status,
 				}, nil
@@ -156,7 +155,6 @@ func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitions
 			err := meta.GlobalFailedLoadCache.Get(req.GetCollectionID())
 			if err != nil {
 				status := merr.Status(err)
-				status.ErrorCode = commonpb.ErrorCode_InsufficientMemoryToLoad
 				log.Warn("show partition failed", zap.Error(err))
 				return &querypb.ShowPartitionsResponse{
 					Status: status,

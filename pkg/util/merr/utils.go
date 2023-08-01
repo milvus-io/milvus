@@ -90,6 +90,8 @@ func oldCode(code int32) commonpb.ErrorCode {
 		return commonpb.ErrorCode_MetaFailed
 	case ErrReplicaNotAvailable.code(), ErrChannelNotAvailable.code(), ErrNodeNotAvailable.code():
 		return commonpb.ErrorCode_NoReplicaAvailable
+	case ErrServiceMemoryLimitExceeded.code():
+		return commonpb.ErrorCode_InsufficientMemoryToLoad
 	default:
 		return commonpb.ErrorCode_UnexpectedError
 	}

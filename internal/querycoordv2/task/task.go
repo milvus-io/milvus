@@ -37,6 +37,7 @@ const (
 	TaskStatusStarted
 	TaskStatusSucceeded
 	TaskStatusCanceled
+	TaskStatusFailed
 )
 
 const (
@@ -74,7 +75,11 @@ type Task interface {
 	SetPriority(priority Priority)
 	Index() string // dedup indexing string
 
+	// cancel the task as we don't need to continue it
 	Cancel(err error)
+	// fail the task as we encounter some error so be unable to continue,
+	// this error will be recorded for response to user requests
+	Fail(err error)
 	Wait() error
 	Actions() []Action
 	Step() int
@@ -185,6 +190,17 @@ func (task *baseTask) Cancel(err error) {
 		task.cancel()
 		if task.Status() != TaskStatusSucceeded {
 			task.SetStatus(TaskStatusCanceled)
+		}
+		task.err = err
+		close(task.doneCh)
+	}
+}
+
+func (task *baseTask) Fail(err error) {
+	if task.canceled.CompareAndSwap(false, true) {
+		task.cancel()
+		if task.Status() != TaskStatusSucceeded {
+			task.SetStatus(TaskStatusFailed)
 		}
 		task.err = err
 		close(task.doneCh)
