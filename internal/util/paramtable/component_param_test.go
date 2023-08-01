@@ -394,6 +394,9 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, Params.EnableActiveStandby, false)
 		assert.True(t, Params.SegmentCompactableProportion >= Params.SegmentSmallProportion)
 		t.Logf("dataCoord EnableActiveStandby = %t", Params.EnableActiveStandby)
+
+		assert.Equal(t, 60*time.Second, Params.GlobalCompactionInterval)
+		t.Logf("dataCoord GlobaleCompactionInterval = %v", Params.GlobalCompactionInterval)
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {

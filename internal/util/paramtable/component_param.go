@@ -1674,9 +1674,9 @@ func (p *dataCoordConfig) initSingleCompactionDeltalogMaxNum() {
 	p.SingleCompactionDeltalogMaxNum = p.Base.ParseInt64WithDefault("dataCoord.compaction.single.deltalog.maxnum", 200)
 }
 
-// interval we check and trigger global compaction
+// interval we check and trigger global compaction unit in seconds
 func (p *dataCoordConfig) initGlobalCompactionInterval() {
-	p.GlobalCompactionInterval = time.Duration(p.Base.ParseInt64WithDefault("dataCoord.compaction.global.interval", int64(60*time.Second)))
+	p.GlobalCompactionInterval = time.Second * time.Duration(p.Base.ParseInt64WithDefault("dataCoord.compaction.global.interval", 60))
 }
 
 // -- GC --
