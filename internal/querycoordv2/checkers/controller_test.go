@@ -87,6 +87,7 @@ func (suite *CheckerControllerSuite) TestBasic() {
 
 	// set meta
 	suite.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
+	suite.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 	suite.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
 	suite.nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
 	suite.nodeMgr.Add(session.NewNodeInfo(2, "localhost"))
@@ -103,7 +104,7 @@ func (suite *CheckerControllerSuite) TestBasic() {
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		nil, segments, nil)
-	suite.targetManager.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
+	suite.targetManager.UpdateCollectionNextTarget(int64(1))
 
 	// set dist
 	suite.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))

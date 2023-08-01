@@ -412,7 +412,7 @@ func (suite *JobSuite) TestLoadCollectionWithDiffIndex() {
 		err := job.Wait()
 		suite.NoError(err)
 		suite.EqualValues(1, suite.meta.GetReplicaNumber(collection))
-		suite.targetMgr.UpdateCollectionCurrentTarget(collection, suite.partitions[collection]...)
+		suite.targetMgr.UpdateCollectionCurrentTarget(collection)
 		suite.assertCollectionLoaded(collection)
 	}
 
@@ -473,7 +473,7 @@ func (suite *JobSuite) TestLoadPartition() {
 		err := job.Wait()
 		suite.NoError(err)
 		suite.EqualValues(1, suite.meta.GetReplicaNumber(collection))
-		suite.targetMgr.UpdateCollectionCurrentTarget(collection, suite.partitions[collection]...)
+		suite.targetMgr.UpdateCollectionCurrentTarget(collection)
 		suite.assertCollectionLoaded(collection)
 	}
 
@@ -809,7 +809,7 @@ func (suite *JobSuite) TestLoadPartitionWithDiffIndex() {
 		err := job.Wait()
 		suite.NoError(err)
 		suite.EqualValues(1, suite.meta.GetReplicaNumber(collection))
-		suite.targetMgr.UpdateCollectionCurrentTarget(collection, suite.partitions[collection]...)
+		suite.targetMgr.UpdateCollectionCurrentTarget(collection)
 		suite.assertCollectionLoaded(collection)
 	}
 

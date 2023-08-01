@@ -75,6 +75,10 @@ func newTarget() *target {
 }
 
 func (t *target) updateCollectionTarget(collectionID int64, target *CollectionTarget) {
+	if t.collectionTargetMap[collectionID] != nil && target.GetTargetVersion() <= t.collectionTargetMap[collectionID].GetTargetVersion() {
+		return
+	}
+
 	t.collectionTargetMap[collectionID] = target
 }
 

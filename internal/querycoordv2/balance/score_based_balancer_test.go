@@ -296,12 +296,13 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceOneRound() {
 			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, c.collectionID).Return(
 				nil, c.collectionsSegments, nil)
 			suite.broker.EXPECT().GetPartitions(mock.Anything, c.collectionID).Return([]int64{c.collectionID}, nil).Maybe()
-			balancer.targetMgr.UpdateCollectionNextTargetWithPartitions(c.collectionID, c.collectionID)
-			balancer.targetMgr.UpdateCollectionCurrentTarget(c.collectionID, c.collectionID)
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded
 			balancer.meta.CollectionManager.PutCollection(collection)
+			balancer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(c.collectionID, c.collectionID))
 			balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(c.replicaID, c.collectionID, c.nodes))
+			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
+			balancer.targetMgr.UpdateCollectionCurrentTarget(c.collectionID)
 
 			//2. set up target for distribution for multi collections
 			for node, s := range c.distributions {
@@ -401,14 +402,16 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceMultiRound() {
 		collections = append(collections, collection)
 		suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, balanceCase.collectionIDs[i]).Return(
 			nil, balanceCase.collectionsSegments[i], nil)
-		balancer.targetMgr.UpdateCollectionNextTargetWithPartitions(balanceCase.collectionIDs[i], balanceCase.collectionIDs[i])
-		balancer.targetMgr.UpdateCollectionCurrentTarget(balanceCase.collectionIDs[i], balanceCase.collectionIDs[i])
+
 		collection.LoadPercentage = 100
 		collection.Status = querypb.LoadStatus_Loaded
 		collection.LoadType = querypb.LoadType_LoadCollection
 		balancer.meta.CollectionManager.PutCollection(collection)
+		balancer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(balanceCase.collectionIDs[i], balanceCase.collectionIDs[i]))
 		balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(balanceCase.replicaIDs[i], balanceCase.collectionIDs[i],
 			append(balanceCase.nodes, balanceCase.notExistedNodes...)))
+		balancer.targetMgr.UpdateCollectionNextTarget(balanceCase.collectionIDs[i])
+		balancer.targetMgr.UpdateCollectionCurrentTarget(balanceCase.collectionIDs[i])
 	}
 
 	//2. set up target for distribution for multi collections
@@ -539,12 +542,13 @@ func (suite *ScoreBasedBalancerTestSuite) TestStoppedBalance() {
 			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, c.collectionID).Return(
 				nil, c.collectionsSegments, nil)
 			suite.broker.EXPECT().GetPartitions(mock.Anything, c.collectionID).Return([]int64{c.collectionID}, nil).Maybe()
-			balancer.targetMgr.UpdateCollectionNextTargetWithPartitions(c.collectionID, c.collectionID)
-			balancer.targetMgr.UpdateCollectionCurrentTarget(c.collectionID, c.collectionID)
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded
 			balancer.meta.CollectionManager.PutCollection(collection)
+			balancer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(c.collectionID, c.collectionID))
 			balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(c.replicaID, c.collectionID, c.nodes))
+			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
+			balancer.targetMgr.UpdateCollectionCurrentTarget(c.collectionID)
 
 			//2. set up target for distribution for multi collections
 			for node, s := range c.distributions {

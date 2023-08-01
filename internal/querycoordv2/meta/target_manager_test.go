@@ -134,7 +134,21 @@ func (suite *TargetManagerSuite) SetupTest() {
 		}
 		suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collection).Return(dmChannels, allSegments, nil)
 
-		suite.mgr.UpdateCollectionNextTargetWithPartitions(collection, suite.partitions[collection]...)
+		suite.meta.PutCollection(&Collection{
+			CollectionLoadInfo: &querypb.CollectionLoadInfo{
+				CollectionID:  collection,
+				ReplicaNumber: 1},
+		})
+		for _, partition := range suite.partitions[collection] {
+			suite.meta.PutPartition(&Partition{
+				PartitionLoadInfo: &querypb.PartitionLoadInfo{
+					CollectionID: collection,
+					PartitionID:  partition,
+				},
+			})
+		}
+
+		suite.mgr.UpdateCollectionNextTarget(collection)
 	}
 }
 
@@ -213,7 +227,7 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget() {
 	}
 
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nextTargetChannels, nextTargetSegments, nil)
-	suite.mgr.UpdateCollectionNextTargetWithPartitions(collectionID, int64(1))
+	suite.mgr.UpdateCollectionNextTarget(collectionID)
 	suite.assertSegments([]int64{11, 12}, suite.mgr.GetHistoricalSegmentsByCollection(collectionID, NextTarget))
 	suite.assertChannels([]string{"channel-1", "channel-2"}, suite.mgr.GetDmChannelsByCollection(collectionID, NextTarget))
 	suite.assertSegments([]int64{}, suite.mgr.GetHistoricalSegmentsByCollection(collectionID, CurrentTarget))
@@ -224,18 +238,15 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget() {
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nil, nil, status.Errorf(codes.Unimplemented, "fake not found"))
 	suite.broker.EXPECT().GetPartitions(mock.Anything, mock.Anything).Return([]int64{1}, nil)
 	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, collectionID, int64(1)).Return(nextTargetChannels, nextTargetBinlogs, nil)
-	err := suite.mgr.UpdateCollectionNextTargetWithPartitions(collectionID, int64(1))
+	err := suite.mgr.UpdateCollectionNextTarget(collectionID)
 	suite.NoError(err)
 
 	suite.broker.ExpectedCalls = nil
 	// test getRecoveryInfoV2 failed , then retry getRecoveryInfoV2 succeed
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nil, nil, errors.New("fake error")).Times(1)
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nextTargetChannels, nextTargetSegments, nil)
-	err = suite.mgr.UpdateCollectionNextTargetWithPartitions(collectionID, int64(1))
+	err = suite.mgr.UpdateCollectionNextTarget(collectionID)
 	suite.NoError(err)
-
-	err = suite.mgr.UpdateCollectionNextTargetWithPartitions(collectionID)
-	suite.Error(err)
 
 	err = suite.mgr.UpdateCollectionNextTarget(collectionID)
 	suite.NoError(err)
@@ -333,9 +344,9 @@ func (suite *TargetManagerSuite) TestGetCollectionTargetVersion() {
 	suite.True(t1 <= version)
 	suite.True(t2 >= version)
 
-	collectionID := int64(1)
+	collectionID := suite.collections[0]
 	t3 := time.Now().UnixNano()
-	suite.mgr.updateCollectionNextTarget(collectionID)
+	suite.mgr.UpdateCollectionNextTarget(collectionID)
 	t4 := time.Now().UnixNano()
 
 	collectionVersion := suite.mgr.GetCollectionTargetVersion(collectionID, NextTarget)
@@ -390,7 +401,7 @@ func (suite *TargetManagerSuite) TestGetSegmentByChannel() {
 	}
 
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nextTargetChannels, nextTargetSegments, nil)
-	suite.mgr.UpdateCollectionNextTargetWithPartitions(collectionID, int64(1))
+	suite.mgr.UpdateCollectionNextTarget(collectionID)
 	suite.Len(suite.mgr.GetHistoricalSegmentsByCollection(collectionID, NextTarget), 2)
 	suite.Len(suite.mgr.GetHistoricalSegmentsByChannel(collectionID, "channel-1", NextTarget), 1)
 	suite.Len(suite.mgr.GetHistoricalSegmentsByChannel(collectionID, "channel-2", NextTarget), 1)
