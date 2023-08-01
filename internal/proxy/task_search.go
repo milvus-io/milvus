@@ -361,10 +361,10 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	collectionInfo, err2 := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName)
+	collectionInfo, err2 := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
 	if err2 != nil {
 		log.Warn("Proxy::searchTask::PreExecute failed to GetCollectionInfo from cache",
-			zap.Any("collectionName", collectionName), zap.Error(err2))
+			zap.String("collectionName", collectionName), zap.Int64("collectionID", t.CollectionID), zap.Error(err2))
 		return err2
 	}
 	guaranteeTs := t.request.GetGuaranteeTimestamp()
@@ -417,10 +417,11 @@ func (t *searchTask) Execute(ctx context.Context) error {
 	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.SearchResults]()
 
 	err := t.lb.Execute(ctx, CollectionWorkLoad{
-		db:         t.request.GetDbName(),
-		collection: t.collectionName,
-		nq:         t.Nq,
-		exec:       t.searchShard,
+		db:             t.request.GetDbName(),
+		collectionID:   t.SearchRequest.CollectionID,
+		collectionName: t.collectionName,
+		nq:             t.Nq,
+		exec:           t.searchShard,
 	})
 	if err != nil {
 		log.Warn("search execute failed", zap.Error(err))

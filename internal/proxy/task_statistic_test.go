@@ -44,7 +44,8 @@ type StatisticTaskSuite struct {
 
 	lb LBPolicy
 
-	collection string
+	collectionName string
+	collectionID   int64
 }
 
 func (s *StatisticTaskSuite) SetupSuite() {
@@ -87,7 +88,7 @@ func (s *StatisticTaskSuite) SetupTest() {
 	err := InitMetaCache(context.Background(), s.rc, s.qc, mgr)
 	s.NoError(err)
 
-	s.collection = "test_statistics_task"
+	s.collectionName = "test_statistics_task"
 	s.loadCollection()
 }
 
@@ -104,7 +105,7 @@ func (s *StatisticTaskSuite) loadCollection() {
 		fieldName2Types[testBinaryVecField] = schemapb.DataType_BinaryVector
 	}
 
-	schema := constructCollectionSchemaByDataType(s.collection, fieldName2Types, testInt64Field, false)
+	schema := constructCollectionSchemaByDataType(s.collectionName, fieldName2Types, testInt64Field, false)
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
@@ -112,7 +113,7 @@ func (s *StatisticTaskSuite) loadCollection() {
 	createColT := &createCollectionTask{
 		Condition: NewTaskCondition(ctx),
 		CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
-			CollectionName: s.collection,
+			CollectionName: s.collectionName,
 			Schema:         marshaledSchema,
 			ShardsNum:      common.DefaultShardsNum,
 		},
@@ -125,7 +126,7 @@ func (s *StatisticTaskSuite) loadCollection() {
 	s.NoError(createColT.Execute(ctx))
 	s.NoError(createColT.PostExecute(ctx))
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), s.collection)
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), s.collectionName)
 	s.NoError(err)
 
 	status, err := s.qc.LoadCollection(ctx, &querypb.LoadCollectionRequest{
@@ -137,6 +138,7 @@ func (s *StatisticTaskSuite) loadCollection() {
 	})
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
+	s.collectionID = collectionID
 }
 
 func (s *StatisticTaskSuite) TearDownSuite() {
@@ -164,7 +166,7 @@ func (s *StatisticTaskSuite) getStatisticsTask(ctx context.Context) *getStatisti
 	return &getStatisticsTask{
 		Condition:      NewTaskCondition(ctx),
 		ctx:            ctx,
-		collectionName: s.collection,
+		collectionName: s.collectionName,
 		result: &milvuspb.GetStatisticsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
@@ -175,7 +177,7 @@ func (s *StatisticTaskSuite) getStatisticsTask(ctx context.Context) *getStatisti
 				MsgType:  commonpb.MsgType_Retrieve,
 				SourceID: paramtable.GetNodeID(),
 			},
-			CollectionName: s.collection,
+			CollectionName: s.collectionName,
 		},
 		qc: s.qc,
 		lb: s.lb,
@@ -195,6 +197,7 @@ func (s *StatisticTaskSuite) TestStatisticTask_NotShardLeader() {
 			Reason:    "error",
 		},
 	}, nil)
+	s.NoError(task.PreExecute(ctx))
 	s.Error(task.Execute(ctx))
 	s.NoError(task.PostExecute(ctx))
 }
@@ -211,6 +214,7 @@ func (s *StatisticTaskSuite) TestStatisticTask_UnexpectedError() {
 			Reason:    "error",
 		},
 	}, nil)
+	s.NoError(task.PreExecute(ctx))
 	s.Error(task.Execute(ctx))
 	s.NoError(task.PostExecute(ctx))
 }
@@ -220,8 +224,10 @@ func (s *StatisticTaskSuite) TestStatisticTask_Success() {
 	task := s.getStatisticsTask(ctx)
 
 	s.NoError(task.OnEnqueue())
-	task.fromQueryNode = true
 	s.qn.EXPECT().GetStatistics(mock.Anything, mock.Anything).Return(nil, nil)
+	s.NoError(task.PreExecute(ctx))
+	task.fromQueryNode = true
+	task.fromDataCoord = false
 	s.NoError(task.Execute(ctx))
 	s.NoError(task.PostExecute(ctx))
 }
