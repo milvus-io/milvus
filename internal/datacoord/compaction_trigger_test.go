@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -2275,6 +2276,304 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 			isForce:      true,
 		})
 	})
+}
+
+func Test_forceCompaction_skip_clustering(t *testing.T) {
+	type fields struct {
+		meta              *meta
+		allocator         allocator
+		signals           chan *compactionSignal
+		compactionHandler compactionPlanContext
+		globalTrigger     *time.Ticker
+	}
+	type args struct {
+		collectionID int64
+		compactTime  *compactTime
+	}
+	Params.Init()
+	vecFieldID := int64(201)
+	segmentInfos := &SegmentsInfo{
+		segments: make(map[UniqueID]*SegmentInfo),
+	}
+	for i := UniqueID(0); i < 20; i++ {
+		info := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:             i,
+				CollectionID:   2,
+				PartitionID:    1,
+				LastExpireTime: 100,
+				NumOfRows:      100,
+				MaxRowNum:      300000,
+				InsertChannel:  "ch1",
+				State:          commonpb.SegmentState_Flushed,
+				Binlogs: []*datapb.FieldBinlog{
+					{
+						Binlogs: []*datapb.Binlog{
+							{EntriesNum: 5, LogPath: "log1"},
+						},
+					},
+				},
+			},
+			segmentIndexes: map[UniqueID]*model.SegmentIndex{
+				indexID: {
+					SegmentID:    i,
+					CollectionID: 2,
+					PartitionID:  1,
+					NumRows:      100,
+					IndexID:      indexID,
+					BuildID:      i,
+					NodeID:       0,
+					IndexVersion: 1,
+					IndexState:   commonpb.IndexState_Finished,
+				},
+			},
+		}
+
+		// half segments are clustering segments
+		if i%2 == 0 {
+			info.ClusteringInfo = &internalpb.ClusteringInfo{
+				Center: []float32{0.0, 0.0},
+			}
+		}
+		segmentInfos.segments[i] = info
+	}
+
+	tests := []struct {
+		name    string
+		fields  fields
+		args    args
+		wantErr bool
+	}{
+		{
+			"test skip clustering",
+			fields{
+				&meta{
+					segments: segmentInfos,
+					collections: map[int64]*collectionInfo{
+						2: {
+							ID: 2,
+							Schema: &schemapb.CollectionSchema{
+								Fields: []*schemapb.FieldSchema{
+									{
+										FieldID:  vecFieldID,
+										DataType: schemapb.DataType_FloatVector,
+										TypeParams: []*commonpb.KeyValuePair{
+											{
+												Key:   common.DimKey,
+												Value: "128",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					indexes: map[UniqueID]map[UniqueID]*model.Index{
+						2: {
+							indexID: {
+								TenantID:     "",
+								CollectionID: 2,
+								FieldID:      vecFieldID,
+								IndexID:      indexID,
+								IndexName:    "_default_idx",
+								IsDeleted:    false,
+								CreateTime:   0,
+								TypeParams:   nil,
+								IndexParams: []*commonpb.KeyValuePair{
+									{
+										Key:   common.IndexTypeKey,
+										Value: "HNSW",
+									},
+								},
+								IsAutoIndex:     false,
+								UserIndexParams: nil,
+							},
+						},
+					},
+				},
+				newMockAllocator(),
+				nil,
+				&spyCompactionHandler{spyChan: make(chan *datapb.CompactionPlan, 2)},
+				nil,
+			},
+			args{
+				2,
+				&compactTime{travelTime: 200, expireTime: 0},
+			},
+			false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr := &compactionTrigger{
+				meta:                         tt.fields.meta,
+				handler:                      newMockHandlerWithMeta(tt.fields.meta),
+				allocator:                    tt.fields.allocator,
+				signals:                      tt.fields.signals,
+				compactionHandler:            tt.fields.compactionHandler,
+				globalTrigger:                tt.fields.globalTrigger,
+				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
+				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
+				testingOnly:                  true,
+			}
+			_, err := tr.forceTriggerCompaction(tt.args.collectionID)
+			assert.Equal(t, tt.wantErr, err != nil)
+			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
+
+			plan := <-spy.spyChan
+			assert.Equal(t, 10, len(plan.SegmentBinlogs))
+		})
+	}
+}
+
+func Test_autoCompaction_skip_clustering(t *testing.T) {
+	type fields struct {
+		meta              *meta
+		allocator         allocator
+		signals           chan *compactionSignal
+		compactionHandler compactionPlanContext
+		globalTrigger     *time.Ticker
+	}
+	type args struct {
+		collectionID int64
+		compactTime  *compactTime
+	}
+	Params.Init()
+	vecFieldID := int64(201)
+	segmentInfos := &SegmentsInfo{
+		segments: make(map[UniqueID]*SegmentInfo),
+	}
+	for i := UniqueID(0); i < 20; i++ {
+		info := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:             i,
+				CollectionID:   2,
+				PartitionID:    1,
+				LastExpireTime: 100,
+				NumOfRows:      100,
+				MaxRowNum:      300000,
+				InsertChannel:  "ch1",
+				State:          commonpb.SegmentState_Flushed,
+				Binlogs: []*datapb.FieldBinlog{
+					{
+						Binlogs: []*datapb.Binlog{
+							{EntriesNum: 5, LogPath: "log1"},
+						},
+					},
+				},
+			},
+			segmentIndexes: map[UniqueID]*model.SegmentIndex{
+				indexID: {
+					SegmentID:    i,
+					CollectionID: 2,
+					PartitionID:  1,
+					NumRows:      100,
+					IndexID:      indexID,
+					BuildID:      i,
+					NodeID:       0,
+					IndexVersion: 1,
+					IndexState:   commonpb.IndexState_Finished,
+				},
+			},
+		}
+
+		// half segments are clustering segments
+		if i%2 == 0 {
+			info.ClusteringInfo = &internalpb.ClusteringInfo{
+				Center: []float32{0.0, 0.0},
+			}
+		}
+		segmentInfos.segments[i] = info
+	}
+
+	tests := []struct {
+		name    string
+		fields  fields
+		args    args
+		wantErr bool
+	}{
+		{
+			"test skip clustering",
+			fields{
+				&meta{
+					segments: segmentInfos,
+					collections: map[int64]*collectionInfo{
+						2: {
+							ID: 2,
+							Schema: &schemapb.CollectionSchema{
+								Fields: []*schemapb.FieldSchema{
+									{
+										FieldID:  vecFieldID,
+										DataType: schemapb.DataType_FloatVector,
+										TypeParams: []*commonpb.KeyValuePair{
+											{
+												Key:   common.DimKey,
+												Value: "128",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					indexes: map[UniqueID]map[UniqueID]*model.Index{
+						2: {
+							indexID: {
+								TenantID:     "",
+								CollectionID: 2,
+								FieldID:      vecFieldID,
+								IndexID:      indexID,
+								IndexName:    "_default_idx",
+								IsDeleted:    false,
+								CreateTime:   0,
+								TypeParams:   nil,
+								IndexParams: []*commonpb.KeyValuePair{
+									{
+										Key:   common.IndexTypeKey,
+										Value: "HNSW",
+									},
+								},
+								IsAutoIndex:     false,
+								UserIndexParams: nil,
+							},
+						},
+					},
+				},
+				newMockAllocator(),
+				make(chan *compactionSignal, 1),
+				&spyCompactionHandler{spyChan: make(chan *datapb.CompactionPlan, 2)},
+				nil,
+			},
+			args{
+				2,
+				&compactTime{travelTime: 200, expireTime: 0},
+			},
+			false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr := &compactionTrigger{
+				meta:                         tt.fields.meta,
+				handler:                      newMockHandlerWithMeta(tt.fields.meta),
+				allocator:                    tt.fields.allocator,
+				signals:                      tt.fields.signals,
+				compactionHandler:            tt.fields.compactionHandler,
+				globalTrigger:                tt.fields.globalTrigger,
+				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
+				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
+				testingOnly:                  true,
+			}
+			tr.start()
+			defer tr.stop()
+			err := tr.triggerCompaction()
+			assert.Equal(t, tt.wantErr, err != nil)
+			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
+
+			plan := <-spy.spyChan
+			assert.Equal(t, 10, len(plan.SegmentBinlogs))
+		})
+	}
 }
 
 func TestCompactionTriggerSuite(t *testing.T) {

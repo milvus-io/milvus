@@ -344,6 +344,8 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 		return (signal.collectionID == 0 || segment.CollectionID == signal.collectionID) &&
 			isSegmentHealthy(segment) &&
 			isFlush(segment) &&
+			// Todo Major compaction should be able to compact clustering segments
+			!isClusteringSegment(segment) && // not clustering segment
 			!segment.isCompacting && // not compacting now
 			!segment.GetIsImporting() // not importing now
 	}) // m is list of chanPartSegments, which is channel-partition organized segments
@@ -781,6 +783,7 @@ func (t *compactionTrigger) getCandidateSegments(channel string, partitionID Uni
 	for _, s := range segments {
 		if !isSegmentHealthy(s) ||
 			!isFlush(s) ||
+			isClusteringSegment(s) || // skip clustering segment
 			s.GetInsertChannel() != channel ||
 			s.GetPartitionID() != partitionID ||
 			s.isCompacting ||
@@ -925,6 +928,10 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, isDis
 
 func isFlush(segment *SegmentInfo) bool {
 	return segment.GetState() == commonpb.SegmentState_Flushed || segment.GetState() == commonpb.SegmentState_Flushing
+}
+
+func isClusteringSegment(segment *SegmentInfo) bool {
+	return segment.GetClusteringInfo() != nil && segment.GetClusteringInfo().Center != nil
 }
 
 func fetchSegIDs(segBinLogs []*datapb.CompactionSegmentBinlogs) []int64 {
