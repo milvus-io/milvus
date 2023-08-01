@@ -7,6 +7,9 @@ const (
 	CacheRemoveUserFromRole
 	CacheGrantPrivilege
 	CacheRevokePrivilege
+	CacheDeleteUser
+	CacheDropRole
+	CacheRefresh
 )
 
 type CacheOp struct {

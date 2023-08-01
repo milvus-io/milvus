@@ -4942,9 +4942,10 @@ func (node *Proxy) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePr
 	}
 	curUser, err := GetCurUserFromContext(ctx)
 	if err != nil {
+		log.Warn("fail to get current user", zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
+			Reason:    "fail to get current user, please make sure the authorizationEnabled setting in the milvus.yaml is true",
 		}, nil
 	}
 	req.Entity.Grantor.User = &milvuspb.UserEntity{Name: curUser}
