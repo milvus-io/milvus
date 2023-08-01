@@ -793,32 +793,31 @@ func GetStorageSizeByIndexInfo(indexInfo *querypb.FieldIndexInfo) (uint64, uint6
 }
 
 func (loader *segmentLoader) checkSegmentSize(collectionID UniqueID, segmentLoadInfos []*querypb.SegmentLoadInfo, concurrency int) error {
-	usedMem := hardware.GetUsedMemoryCount()
-	currentAvailableMemCount := hardware.GetAvailableMemoryCount()
-	totalMem := currentAvailableMemCount + usedMem
-	//calculating totalMem with available and used memory rather than using hardware min(container_limit, stats.total)
-	//because container limit memory can be quite larger than truly available memory for a container,
-	//which may result in wrong memory prediction and lead to oom in the process of loading segment file.
-	//Instead, using available memory is relatively conservative and can lower the possibility of oom crash
+	memUsage := hardware.GetUsedMemoryCount()
+	totalMem := hardware.GetMemoryCount()
+	// calculating totalMem with available and used memory rather than using hardware min(container_limit, stats.total)
+	// because container limit memory can be quite larger than truly available memory for a container,
+	// which may result in wrong memory prediction and lead to oom in the process of loading segment file.
+	// Instead, using available memory is relatively conservative and can lower the possibility of oom crash
 	if len(segmentLoadInfos) < concurrency {
 		concurrency = len(segmentLoadInfos)
 	}
 
-	if usedMem == 0 || currentAvailableMemCount == 0 {
+	if memUsage == 0 || totalMem == 0 {
 		return fmt.Errorf("get memory failed when checkSegmentSize, collectionID = %d", collectionID)
 	}
 
-	usedMemAfterLoad := usedMem
-	maxSegmentMemUsgae := uint64(0)
+	predictMemUsage := memUsage
+	maxSegmentSize := uint64(0)
 
-	localUsedSize, err := GetLocalUsedSize()
+	localDiskUsage, err := GetLocalUsedSize()
 	if err != nil {
 		return fmt.Errorf("get local used size failed, collectionID = %d", collectionID)
 	}
-	usedLocalSizeAfterLoad := uint64(localUsedSize)
+	predictDiskUsage := uint64(localDiskUsage)
 
 	for _, loadInfo := range segmentLoadInfos {
-		oldUsedMem := usedMemAfterLoad
+		oldUsedMem := predictMemUsage
 		diskIndexMemSize := uint64(0)
 		vecFieldID2IndexInfo := make(map[int64]*querypb.FieldIndexInfo)
 		for _, fieldIndexInfo := range loadInfo.IndexInfos {
@@ -838,35 +837,35 @@ func (loader *segmentLoader) checkSegmentSize(collectionID UniqueID, segmentLoad
 						zap.Int64("indexBuildID", fieldIndexInfo.BuildID))
 					return err
 				}
-				usedLocalSizeAfterLoad += neededDiskSize
+				predictDiskUsage += neededDiskSize
 				// diskann not need to copy data
 				indexType, _ := funcutil.GetAttrByKeyFromRepeatedKV("index_type", fieldIndexInfo.IndexParams)
 				if indexType == indexparamcheck.IndexDISKANN {
 					diskIndexMemSize += neededMemSize
 				}
-				usedMemAfterLoad += neededMemSize
+				predictMemUsage += neededMemSize
 			} else {
-				usedMemAfterLoad += uint64(funcutil.GetFieldSizeFromFieldBinlog(fieldBinlog))
+				predictMemUsage += uint64(funcutil.GetFieldSizeFromFieldBinlog(fieldBinlog))
 			}
 		}
 
 		// get size of state data
 		for _, fieldBinlog := range loadInfo.Statslogs {
-			usedMemAfterLoad += uint64(funcutil.GetFieldSizeFromFieldBinlog(fieldBinlog))
+			predictMemUsage += uint64(funcutil.GetFieldSizeFromFieldBinlog(fieldBinlog))
 		}
 
 		// get size of delete data
 		for _, fieldBinlog := range loadInfo.Deltalogs {
-			usedMemAfterLoad += uint64(funcutil.GetFieldSizeFromFieldBinlog(fieldBinlog))
+			predictMemUsage += uint64(funcutil.GetFieldSizeFromFieldBinlog(fieldBinlog))
 		}
 
-		currentSegmentSize := usedMemAfterLoad - oldUsedMem
+		currentSegmentSize := predictMemUsage - oldUsedMem
 		currentSegmentMemUsage := uint64(float64(currentSegmentSize) * Params.QueryNodeCfg.LoadMemoryUsageFactor)
 		if Params.QueryNodeCfg.LoadMemoryUsageFactor > 1 {
 			currentSegmentMemUsage -= uint64(float64(diskIndexMemSize) * (Params.QueryNodeCfg.LoadMemoryUsageFactor - 1))
 		}
-		if currentSegmentMemUsage > maxSegmentMemUsgae {
-			maxSegmentMemUsgae = currentSegmentMemUsage
+		if currentSegmentMemUsage > maxSegmentSize {
+			maxSegmentSize = currentSegmentMemUsage
 		}
 	}
 
@@ -875,36 +874,37 @@ func (loader *segmentLoader) checkSegmentSize(collectionID UniqueID, segmentLoad
 	}
 
 	// when load segment, data will be copied from go memory to c++ memory
-	memLoadingUsage := usedMemAfterLoad + uint64(float64(maxSegmentMemUsgae)*float64(concurrency))
+	predictPeakMemUsage := predictMemUsage + uint64(float64(maxSegmentSize)*float64(concurrency))
 
 	log.Info("predict memory and disk usage while loading (in MiB)",
 		zap.Int64("collectionID", collectionID),
 		zap.Int("concurrency", concurrency),
-		zap.Uint64("memLoadingUsage", toMB(memLoadingUsage)),
-		zap.Uint64("memUsageAfterLoad", toMB(usedMemAfterLoad)),
-		zap.Uint64("diskUsageAfterLoad", toMB(usedLocalSizeAfterLoad)),
-		zap.Uint64("currentUsedMem", toMB(usedMem)),
-		zap.Uint64("currentAvailableFreeMemory", toMB(currentAvailableMemCount)),
-		zap.Uint64("currentTotalMemory", toMB(totalMem)),
-		zap.Uint64("currentUsedDisk", toMB(uint64(localUsedSize))),
-		zap.Uint64("currentTotalDisk", toMB(uint64(Params.QueryNodeCfg.DiskCapacityLimit))))
+		zap.Uint64("maxSegmentSize", toMB(maxSegmentSize)),
+		zap.Uint64("memUsage", toMB(memUsage)),
+		zap.Uint64("freeMemory", toMB(totalMem-memUsage)),
+		zap.Uint64("totalMemory", toMB(totalMem)),
+		zap.Uint64("predictMemUsage", toMB(predictMemUsage)),
+		zap.Uint64("predictPeakMemUsage", toMB(predictPeakMemUsage)),
+		zap.Uint64("diskUsage", toMB(uint64(localDiskUsage))),
+		zap.Uint64("predictDiskUsage", toMB(predictDiskUsage)),
+		zap.Uint64("totalDisk", toMB(uint64(Params.QueryNodeCfg.DiskCapacityLimit))))
 
-	if memLoadingUsage > uint64(float64(totalMem)*Params.QueryNodeCfg.OverloadedMemoryThresholdPercentage) {
+	if predictPeakMemUsage > uint64(float64(totalMem)*Params.QueryNodeCfg.OverloadedMemoryThresholdPercentage) {
 		return fmt.Errorf("%w, load segment failed, OOM if load, collectionID = %d, MaxSegmentMemUsage = %v MB, concurrency = %d, usedMemAfterLoad = %v MB, currentAvailableMemCount = %v MB, currentTotalMem = %v MB, thresholdFactor = %f",
 			ErrInsufficientMemory,
 			collectionID,
-			toMB(maxSegmentMemUsgae),
+			toMB(maxSegmentSize),
 			concurrency,
-			toMB(usedMemAfterLoad),
-			toMB(currentAvailableMemCount),
+			toMB(predictMemUsage),
+			toMB(totalMem-memUsage),
 			toMB(totalMem),
 			Params.QueryNodeCfg.OverloadedMemoryThresholdPercentage)
 	}
 
-	if usedLocalSizeAfterLoad > uint64(float64(Params.QueryNodeCfg.DiskCapacityLimit)*Params.QueryNodeCfg.MaxDiskUsagePercentage) {
+	if predictDiskUsage > uint64(float64(Params.QueryNodeCfg.DiskCapacityLimit)*Params.QueryNodeCfg.MaxDiskUsagePercentage) {
 		return fmt.Errorf("load segment failed, disk space is not enough, collectionID = %d, usedDiskAfterLoad = %v MB, totalDisk = %v MB, thresholdFactor = %f",
 			collectionID,
-			toMB(usedLocalSizeAfterLoad),
+			toMB(predictDiskUsage),
 			toMB(uint64(Params.QueryNodeCfg.DiskCapacityLimit)),
 			Params.QueryNodeCfg.MaxDiskUsagePercentage)
 	}
