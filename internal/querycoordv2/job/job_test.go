@@ -28,6 +28,9 @@ import (
 
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
+	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
@@ -56,7 +59,7 @@ type JobSuite struct {
 
 	// Dependencies
 	kv                kv.MetaKv
-	store             meta.Store
+	store             metastore.QueryCoordCatalog
 	dist              *meta.DistributionManager
 	meta              *meta.Meta
 	cluster           *session.MockCluster
@@ -149,7 +152,7 @@ func (suite *JobSuite) SetupTest() {
 	suite.Require().NoError(err)
 	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
 
-	suite.store = meta.NewMetaStore(suite.kv)
+	suite.store = querycoord.NewCatalog(suite.kv)
 	suite.dist = meta.NewDistributionManager()
 	suite.nodeMgr = session.NewNodeManager()
 	suite.meta = meta.NewMeta(RandomIncrementIDAllocator(), suite.store, suite.nodeMgr)
@@ -1071,7 +1074,7 @@ func (suite *JobSuite) TestDynamicRelease() {
 
 func (suite *JobSuite) TestLoadCollectionStoreFailed() {
 	// Store collection failed
-	store := meta.NewMockStore(suite.T())
+	store := mocks.NewQueryCoordCatalog(suite.T())
 	suite.meta = meta.NewMeta(RandomIncrementIDAllocator(), store, suite.nodeMgr)
 
 	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil)
@@ -1114,7 +1117,7 @@ func (suite *JobSuite) TestLoadCollectionStoreFailed() {
 
 func (suite *JobSuite) TestLoadPartitionStoreFailed() {
 	// Store partition failed
-	store := meta.NewMockStore(suite.T())
+	store := mocks.NewQueryCoordCatalog(suite.T())
 	suite.meta = meta.NewMeta(RandomIncrementIDAllocator(), store, suite.nodeMgr)
 
 	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil)

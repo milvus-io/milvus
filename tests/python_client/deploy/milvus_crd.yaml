@@ -2,7 +2,7 @@
 apiVersion: milvus.io/v1beta1
 kind: Milvus
 metadata:
-  name: kafka-demo
+  name: operator-demo
   namespace: chaos-testing
   labels:
     app: milvus
@@ -12,6 +12,16 @@ spec:
     dataNode:
       memory:
         forceSyncEnable: false    
+    rootCoord:
+      enableActiveStandby: true
+    dataCoord:
+      enableActiveStandby: true
+    queryCoord:
+      enableActiveStandby: true
+    indexCoord:
+      enableActiveStandby: true
+#    mixCoord:
+#      enableActiveStandby: true
     quotaAndLimits:
       enable: false
     log:
@@ -28,7 +38,7 @@ spec:
     queryNode:
       replicas: 2
     mixCoord:
-      replicas: 1   
+      replicas: 1
   dependencies:
     msgStreamType: kafka
     etcd:

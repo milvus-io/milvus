@@ -38,6 +38,7 @@ type SegmentLoaderSuite struct {
 
 	// Dependencies
 	manager      *Manager
+	rootPath     string
 	chunkManager storage.ChunkManager
 
 	// Data
@@ -50,6 +51,7 @@ type SegmentLoaderSuite struct {
 
 func (suite *SegmentLoaderSuite) SetupSuite() {
 	paramtable.Init()
+	suite.rootPath = suite.T().Name()
 	suite.collectionID = rand.Int63()
 	suite.partitionID = rand.Int63()
 	suite.segmentID = rand.Int63()
@@ -64,7 +66,7 @@ func (suite *SegmentLoaderSuite) SetupTest() {
 	// TODO:: cpp chunk manager not support local chunk manager
 	//suite.chunkManager = storage.NewLocalChunkManager(storage.RootPath(
 	//	fmt.Sprintf("/tmp/milvus-ut/%d", rand.Int63())))
-	chunkManagerFactory := storage.NewChunkManagerFactoryWithParam(paramtable.Get())
+	chunkManagerFactory := NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
 	suite.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
 	suite.loader = NewLoader(suite.manager, suite.chunkManager)
 	initcore.InitRemoteChunkManager(paramtable.Get())
@@ -85,7 +87,7 @@ func (suite *SegmentLoaderSuite) TearDownTest() {
 	for i := 0; i < suite.segmentNum; i++ {
 		suite.manager.Segment.Remove(suite.segmentID+int64(i), querypb.DataScope_All)
 	}
-	suite.chunkManager.RemoveWithPrefix(ctx, paramtable.Get().MinioCfg.RootPath.GetValue())
+	suite.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
 }
 
 func (suite *SegmentLoaderSuite) TestLoad() {

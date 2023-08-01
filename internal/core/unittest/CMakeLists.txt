@@ -51,6 +51,8 @@ set(MILVUS_TEST_FILES
         test_local_chunk_manager.cpp
         test_disk_file_manager_test.cpp
         test_integer_overflow.cpp
+        test_offset_ordered_map.cpp
+        test_offset_ordered_array.cpp
         )
 
 if ( BUILD_DISK_ANN STREQUAL "ON" )

@@ -3,17 +3,22 @@ import random
 import math
 import string
 import json
+import time
+import uuid
 from functools import singledispatch
 import numpy as np
 import pandas as pd
 from sklearn import preprocessing
 from npy_append_array import NpyAppendArray
+from faker import Faker
+from pathlib import Path
+from minio import Minio
 from pymilvus import DataType
 from base.schema_wrapper import ApiCollectionSchemaWrapper, ApiFieldSchemaWrapper
 from common import common_type as ct
 from utils.util_log import test_log as log
 from customize.milvus_operator import MilvusOperator
-
+fake = Faker()
 """" Methods of processing data """
 
 
@@ -492,14 +497,65 @@ def gen_default_list_data_for_bulk_insert(nb=ct.default_nb, varchar_len=2000, wi
     int_values = [i for i in range(nb)]
     float_values = [np.float32(i) for i in range(nb)]
     string_values = [f"{str(i)}_{str_value}" for i in range(nb)]
+    # in case of large nb, float_vec_values will be too large in memory
+    # then generate float_vec_values in each loop instead of generating all at once during generate npy or json file
     float_vec_values = []  # placeholder for float_vec
     data = [int_values, float_values, string_values, float_vec_values]
     if with_varchar_field is False:
         data = [int_values, float_values, float_vec_values]
     return data
- 
 
-def get_list_data_by_schema(nb=ct.default_nb, schema=None):
+
+def prepare_bulk_insert_data(schema=None,
+                             nb=ct.default_nb,
+                             file_type="npy",
+                             minio_endpoint="127.0.0.1:9000",
+                             bucket_name="milvus-bucket"):
+    schema = gen_default_collection_schema() if schema is None else schema
+    dim = get_dim_by_schema(schema=schema)
+    log.info(f"start to generate raw data for bulk insert")
+    t0 = time.time()
+    data = get_column_data_by_schema(schema=schema, nb=nb, skip_vectors=True)
+    log.info(f"generate raw data for bulk insert cost {time.time() - t0} s")
+    data_dir = "/tmp/bulk_insert_data"
+    Path(data_dir).mkdir(parents=True, exist_ok=True)
+    log.info(f"schema:{schema}, nb:{nb}, file_type:{file_type}, minio_endpoint:{minio_endpoint}, bucket_name:{bucket_name}")
+    files = []
+    log.info(f"generate {file_type} files for bulk insert")
+    if file_type == "json":
+        files = gen_json_files_for_bulk_insert(data, schema, data_dir)
+    if file_type == "npy":
+        files = gen_npy_files_for_bulk_insert(data, schema, data_dir)
+    log.info(f"generated {len(files)} {file_type} files for bulk insert, cost {time.time() - t0} s")
+    log.info("upload file to minio")
+    client = Minio(minio_endpoint, access_key="minioadmin", secret_key="minioadmin", secure=False)
+    for file_name in files:
+        file_size = os.path.getsize(os.path.join(data_dir, file_name)) / 1024 / 1024
+        t0 = time.time()
+        client.fput_object(bucket_name, file_name, os.path.join(data_dir, file_name))
+        log.info(f"upload file {file_name} to minio, size: {file_size:.2f} MB, cost {time.time() - t0:.2f} s")
+    return files
+
+
+def get_column_data_by_schema(nb=ct.default_nb, schema=None, skip_vectors=False, start=None):
+    if schema is None:
+        schema = gen_default_collection_schema()
+    fields = schema.fields
+    fields_not_auto_id = []
+    for field in fields:
+        if not field.auto_id:
+            fields_not_auto_id.append(field)
+    data = []
+    for field in fields_not_auto_id:
+        if field.dtype == DataType.FLOAT_VECTOR and skip_vectors is True:
+            tmp = []
+        else:
+            tmp = gen_data_by_type(field, nb=nb, start=start)
+        data.append(tmp)
+    return data
+
+
+def get_row_data_by_schema(nb=ct.default_nb, schema=None):
     if schema is None:
         schema = gen_default_collection_schema()
     fields = schema.fields
@@ -515,48 +571,149 @@ def get_list_data_by_schema(nb=ct.default_nb, schema=None):
         data.append(tmp)
     return data
 
-def gen_data_by_type(field):
-    data_type = field.dtype
-    if data_type == DataType.BOOL:
-        return random.choice([True, False])
-    if data_type == DataType.INT8:
-        return random.randint(-128, 127)
-    if data_type == DataType.INT16:
-        return random.randint(-32768, 32767)
-    if data_type == DataType.INT32:
-        return random.randint(-2147483648, 2147483647)
-    if data_type == DataType.INT64:
-        return random.randint(-9223372036854775808, 9223372036854775807)
-    if data_type == DataType.FLOAT:
-        return np.float64(random.random())  # Object of type float32 is not JSON serializable, so set it as float64
-    if data_type == DataType.DOUBLE:
-        return np.float64(random.random())
-    if data_type == DataType.VARCHAR:
-        max_length = field.params['max_length']
-        length = random.randint(0, max_length)
-        return "".join([chr(random.randint(97, 122)) for _ in range(length)])
-    if data_type == DataType.FLOAT_VECTOR:
-        dim = field.params['dim']
-        return preprocessing.normalize([np.array([random.random() for i in range(dim)])])[0].tolist()
+
+def get_fields_map(schema=None):
+    if schema is None:
+        schema = gen_default_collection_schema()
+    fields = schema.fields
+    fields_map = {}
+    for field in fields:
+        fields_map[field.name] = field.dtype
+    return fields_map
+
+
+def get_int64_field_name(schema=None):
+    if schema is None:
+        schema = gen_default_collection_schema()
+    fields = schema.fields
+    for field in fields:
+        if field.dtype == DataType.INT64:
+            return field.name
     return None
 
 
-def gen_json_files_for_bulk_insert(data, schema, data_dir, **kwargs):
-    nb = kwargs.get("nb", ct.default_nb)
-    dim = kwargs.get("dim", ct.default_dim)
+def get_float_field_name(schema=None):
+    if schema is None:
+        schema = gen_default_collection_schema()
+    fields = schema.fields
+    for field in fields:
+        if field.dtype == DataType.FLOAT or field.dtype == DataType.DOUBLE:
+            return field.name
+    return None
+
+
+def get_float_vec_field_name(schema=None):
+    if schema is None:
+        schema = gen_default_collection_schema()
+    fields = schema.fields
+    for field in fields:
+        if field.dtype == DataType.FLOAT_VECTOR:
+            return field.name
+    return None
+
+
+def get_binary_vec_field_name(schema=None):
+    if schema is None:
+        schema = gen_default_collection_schema()
+    fields = schema.fields
+    for field in fields:
+        if field.dtype == DataType.BINARY_VECTOR:
+            return field.name
+    return None
+
+
+def get_dim_by_schema(schema=None):
+    if schema is None:
+        schema = gen_default_collection_schema()
+    fields = schema.fields
+    for field in fields:
+        if field.dtype == DataType.FLOAT_VECTOR or field.dtype == DataType.BINARY_VECTOR:
+            dim = field.params['dim']
+            return dim
+    return None
+
+
+def gen_data_by_type(field, nb=None, start=None):
+    # if nb is None, return one data, else return a list of data
+    data_type = field.dtype
+    if data_type == DataType.BOOL:
+        if nb is None:
+            return random.choice([True, False])
+        return [random.choice([True, False]) for _ in range(nb)]
+    if data_type == DataType.INT8:
+        if nb is None:
+            return random.randint(-128, 127)
+        return [random.randint(-128, 127) for _ in range(nb)]
+    if data_type == DataType.INT16:
+        if nb is None:
+            return random.randint(-32768, 32767)
+        return [random.randint(-32768, 32767) for _ in range(nb)]
+    if data_type == DataType.INT32:
+        if nb is None:
+            return random.randint(-2147483648, 2147483647)
+        return [random.randint(-2147483648, 2147483647) for _ in range(nb)]
+    if data_type == DataType.INT64:
+        if nb is None:
+            return random.randint(-9223372036854775808, 9223372036854775807)
+        if start is not None:
+            return [i for i in range(start, start+nb)]
+        return [random.randint(-9223372036854775808, 9223372036854775807) for _ in range(nb)]
+    if data_type == DataType.FLOAT:
+        if nb is None:
+            return np.float32(random.random())
+        return [np.float32(random.random()) for _ in range(nb)]
+    if data_type == DataType.DOUBLE:
+        if nb is None:
+            return np.float64(random.random())
+        return [np.float64(random.random()) for _ in range(nb)]
+    if data_type == DataType.VARCHAR:
+        max_length = field.params['max_length']
+        max_length = min(20, max_length-1)
+        length = random.randint(0, max_length)
+        if nb is None:
+            return "".join([chr(random.randint(97, 122)) for _ in range(length)])
+        return ["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(nb)]
+    if data_type == DataType.JSON:
+        if nb is None:
+            return {"name": fake.name(), "address": fake.address()}
+        data = [{"name": str(i), "address": i} for i in range(nb)]
+        return data
+    if data_type == DataType.FLOAT_VECTOR:
+        dim = field.params['dim']
+        if nb is None:
+            return [random.random() for i in range(dim)]
+        return [[random.random() for i in range(dim)] for _ in range(nb)]
+    return None
+
+
+def gen_json_files_for_bulk_insert(data, schema, data_dir):
+    for d in data:
+        if len(d) > 0:
+            nb = len(d)
+    dim = get_dim_by_schema(schema)
+    vec_field_name = get_float_vec_field_name(schema)
     fields_name = [field.name for field in schema.fields]
-    file_name = f"bulk_insert_data_source_dim_{dim}_nb_{nb}.json"
+    # get vec field index
+    vec_field_index = fields_name.index(vec_field_name)
+    uuid_str = str(uuid.uuid4())
+    log.info(f"file dir name: {uuid_str}")
+    file_name = f"{uuid_str}/bulk_insert_data_source_dim_{dim}_nb_{nb}.json"
     files = [file_name]
     data_source = os.path.join(data_dir, file_name)
+    Path(data_source).parent.mkdir(parents=True, exist_ok=True)
+    log.info(f"file name: {data_source}")
     with open(data_source, "w") as f:
         f.write("{")
         f.write("\n")
         f.write('"rows":[')
         f.write("\n")
         for i in range(nb):
-            entity_value = [field_values[i] for field_values in data[:-1]]
-            vector = [random.random() for _ in range(dim)]
-            entity_value.append(vector)
+            entity_value = [None for _ in range(len(fields_name))]
+            for j in range(len(data)):
+                if j == vec_field_index:
+                    entity_value[j] = [random.random() for _ in range(dim)]
+                else:
+                    entity_value[j] = data[j][i]
             entity = dict(zip(fields_name, entity_value))
             f.write(json.dumps(entity, indent=4, default=to_serializable))
             if i != nb - 1:
@@ -568,22 +725,35 @@ def gen_json_files_for_bulk_insert(data, schema, data_dir, **kwargs):
     return files
 
 
-def gen_npy_files_for_bulk_insert(data, schema, data_dir, **kwargs):
-    nb = kwargs.get("nb", ct.default_nb)
-    dim = kwargs.get("dim", ct.default_dim)
+def gen_npy_files_for_bulk_insert(data, schema, data_dir):
+    for d in data:
+        if len(d) > 0:
+            nb = len(d)
+    dim = get_dim_by_schema(schema)
+    vec_filed_name = get_float_vec_field_name(schema)
     fields_name = [field.name for field in schema.fields]
     files = []
+    uuid_str = uuid.uuid4()
     for field in fields_name:
-        files.append(f"{field}.npy")
+        files.append(f"{uuid_str}/{field}.npy")
     for i, file in enumerate(files):
         data_source = os.path.join(data_dir, file)
-        if "vector" in file:
+        #  mkdir for npy file
+        Path(data_source).parent.mkdir(parents=True, exist_ok=True)
+        log.info(f"save file {data_source}")
+        if vec_filed_name in file:
             log.info(f"generate {nb} vectors with dim {dim} for {data_source}")
             with NpyAppendArray(data_source, "wb") as npaa:
                 for j in range(nb):
                     vector = np.array([[random.random() for _ in range(dim)]])
                     npaa.append(vector)
 
+        elif isinstance(data[i][0], dict):
+            tmp = []
+            for d in data[i]:
+                tmp.append(json.dumps(d))
+            data[i] = tmp
+            np.save(data_source, np.array(data[i]))
         else:
             np.save(data_source, np.array(data[i]))
     return files

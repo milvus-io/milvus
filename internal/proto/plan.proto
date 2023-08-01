@@ -159,6 +159,7 @@ message VectorANNS {
 message QueryPlanNode {
   Expr predicates = 1;
   bool is_count = 2;
+  int64 limit = 3;
 };
 
 message PlanNode {

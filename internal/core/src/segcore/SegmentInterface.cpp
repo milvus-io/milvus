@@ -84,7 +84,7 @@ SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan,
     auto retrieve_results = visitor.get_retrieve_result(*plan->plan_node_);
     retrieve_results.segment_ = (void*)this;
 
-    if (plan->plan_node_->is_count) {
+    if (plan->plan_node_->is_count_) {
         AssertInfo(retrieve_results.field_data_.size() == 1,
                    "count result should only have one column");
         *results->add_fields_data() = retrieve_results.field_data_[0];
@@ -165,7 +165,7 @@ SegmentInternalInterface::get_real_count() const {
 #endif
     auto plan = std::make_unique<query::RetrievePlan>(get_schema());
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->is_count = true;
+    plan->plan_node_->is_count_ = true;
     auto res = Retrieve(plan.get(), MAX_TIMESTAMP);
     AssertInfo(res->fields_data().size() == 1,
                "count result should only have one column");
@@ -176,6 +176,37 @@ SegmentInternalInterface::get_real_count() const {
     AssertInfo(res->fields_data()[0].scalars().long_data().data_size() == 1,
                "count result should only have one row");
     return res->fields_data()[0].scalars().long_data().data(0);
+}
+
+void
+SegmentInternalInterface::search_ids_filter(BitsetType& bitset,
+                                            Timestamp timestamp) const {
+    auto& timestamps = get_timestamps();
+    for (int offset = bitset.find_first(); offset < bitset.size();
+         offset = bitset.find_next(offset)) {
+        if (offset == BitsetType::npos) {
+            return;
+        }
+        // You can't see an entity which is inserted after the point when you search.
+        if (timestamps[offset] > timestamp) {
+            bitset[offset] = false;
+        }
+    }
+}
+
+void
+SegmentInternalInterface::search_ids_filter(BitsetType& bitset,
+                                            const std::vector<int64_t>& offsets,
+                                            Timestamp timestamp) const {
+    BitsetType bitset_copy = bitset;
+    bitset.reset();
+    auto& timestamps = get_timestamps();
+    for (auto& offset : offsets) {
+        // You can't see an entity which is inserted after the point when you search.
+        if (bitset_copy[offset] && timestamps[offset] <= timestamp) {
+            bitset.set(offset, true);
+        }
+    }
 }
 
 }  // namespace milvus::segcore

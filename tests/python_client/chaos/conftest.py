@@ -55,4 +55,4 @@ def request_duration(request):
 
 @pytest.fixture
 def is_check(request):
-    return request.config.getoption("--is_check")    
+    return request.config.getoption("--is_check")

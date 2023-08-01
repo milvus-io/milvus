@@ -53,7 +53,8 @@ type LBPolicySuite struct {
 	channels []string
 	qnList   []*mocks.MockQueryNode
 
-	collection string
+	collectionName string
+	collectionID   int64
 }
 
 func (s *LBPolicySuite) SetupSuite() {
@@ -108,7 +109,7 @@ func (s *LBPolicySuite) SetupTest() {
 	err := InitMetaCache(context.Background(), s.rc, s.qc, s.mgr)
 	s.NoError(err)
 
-	s.collection = "test_lb_policy"
+	s.collectionName = "test_lb_policy"
 	s.loadCollection()
 }
 
@@ -125,7 +126,7 @@ func (s *LBPolicySuite) loadCollection() {
 		fieldName2Types[testBinaryVecField] = schemapb.DataType_BinaryVector
 	}
 
-	schema := constructCollectionSchemaByDataType(s.collection, fieldName2Types, testInt64Field, false)
+	schema := constructCollectionSchemaByDataType(s.collectionName, fieldName2Types, testInt64Field, false)
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
@@ -133,7 +134,7 @@ func (s *LBPolicySuite) loadCollection() {
 	createColT := &createCollectionTask{
 		Condition: NewTaskCondition(ctx),
 		CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
-			CollectionName: s.collection,
+			CollectionName: s.collectionName,
 			DbName:         dbName,
 			Schema:         marshaledSchema,
 			ShardsNum:      common.DefaultShardsNum,
@@ -147,7 +148,7 @@ func (s *LBPolicySuite) loadCollection() {
 	s.NoError(createColT.Execute(ctx))
 	s.NoError(createColT.PostExecute(ctx))
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, dbName, s.collection)
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, dbName, s.collectionName)
 	s.NoError(err)
 
 	status, err := s.qc.LoadCollection(ctx, &querypb.LoadCollectionRequest{
@@ -159,17 +160,19 @@ func (s *LBPolicySuite) loadCollection() {
 	})
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
+	s.collectionID = collectionID
 }
 
 func (s *LBPolicySuite) TestSelectNode() {
 	ctx := context.Background()
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(5, nil)
 	targetNode, err := s.lbPolicy.selectNode(ctx, ChannelWorkload{
-		db:           dbName,
-		collection:   s.collection,
-		channel:      s.channels[0],
-		shardLeaders: s.nodes,
-		nq:           1,
+		db:             dbName,
+		collectionName: s.collectionName,
+		collectionID:   s.collectionID,
+		channel:        s.channels[0],
+		shardLeaders:   s.nodes,
+		nq:             1,
 	}, typeutil.NewUniqueSet())
 	s.NoError(err)
 	s.Equal(int64(5), targetNode)
@@ -179,11 +182,12 @@ func (s *LBPolicySuite) TestSelectNode() {
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(-1, errors.New("fake err")).Times(1)
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(3, nil)
 	targetNode, err = s.lbPolicy.selectNode(ctx, ChannelWorkload{
-		db:           dbName,
-		collection:   s.collection,
-		channel:      s.channels[0],
-		shardLeaders: []int64{},
-		nq:           1,
+		db:             dbName,
+		collectionName: s.collectionName,
+		collectionID:   s.collectionID,
+		channel:        s.channels[0],
+		shardLeaders:   []int64{},
+		nq:             1,
 	}, typeutil.NewUniqueSet())
 	s.NoError(err)
 	s.Equal(int64(3), targetNode)
@@ -192,11 +196,12 @@ func (s *LBPolicySuite) TestSelectNode() {
 	s.lbBalancer.ExpectedCalls = nil
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(-1, merr.ErrNodeNotAvailable)
 	targetNode, err = s.lbPolicy.selectNode(ctx, ChannelWorkload{
-		db:           dbName,
-		collection:   s.collection,
-		channel:      s.channels[0],
-		shardLeaders: []int64{},
-		nq:           1,
+		db:             dbName,
+		collectionName: s.collectionName,
+		collectionID:   s.collectionID,
+		channel:        s.channels[0],
+		shardLeaders:   []int64{},
+		nq:             1,
 	}, typeutil.NewUniqueSet())
 	s.ErrorIs(err, merr.ErrNodeNotAvailable)
 	s.Equal(int64(-1), targetNode)
@@ -205,11 +210,12 @@ func (s *LBPolicySuite) TestSelectNode() {
 	s.lbBalancer.ExpectedCalls = nil
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(-1, merr.ErrNodeNotAvailable)
 	targetNode, err = s.lbPolicy.selectNode(ctx, ChannelWorkload{
-		db:           dbName,
-		collection:   s.collection,
-		channel:      s.channels[0],
-		shardLeaders: s.nodes,
-		nq:           1,
+		db:             dbName,
+		collectionName: s.collectionName,
+		collectionID:   s.collectionID,
+		channel:        s.channels[0],
+		shardLeaders:   s.nodes,
+		nq:             1,
 	}, typeutil.NewUniqueSet(s.nodes...))
 	s.ErrorIs(err, merr.ErrServiceUnavailable)
 	s.Equal(int64(-1), targetNode)
@@ -220,11 +226,12 @@ func (s *LBPolicySuite) TestSelectNode() {
 	s.qc.ExpectedCalls = nil
 	s.qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(nil, merr.ErrServiceUnavailable)
 	targetNode, err = s.lbPolicy.selectNode(ctx, ChannelWorkload{
-		db:           dbName,
-		collection:   s.collection,
-		channel:      s.channels[0],
-		shardLeaders: s.nodes,
-		nq:           1,
+		db:             dbName,
+		collectionName: s.collectionName,
+		collectionID:   s.collectionID,
+		channel:        s.channels[0],
+		shardLeaders:   s.nodes,
+		nq:             1,
 	}, typeutil.NewUniqueSet())
 	s.ErrorIs(err, merr.ErrServiceUnavailable)
 	s.Equal(int64(-1), targetNode)
@@ -239,11 +246,12 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(1, nil)
 	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
-		db:           dbName,
-		collection:   s.collection,
-		channel:      s.channels[0],
-		shardLeaders: s.nodes,
-		nq:           1,
+		db:             dbName,
+		collectionName: s.collectionName,
+		collectionID:   s.collectionID,
+		channel:        s.channels[0],
+		shardLeaders:   s.nodes,
+		nq:             1,
 		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNode, s ...string) error {
 			return nil
 		},
@@ -255,11 +263,12 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	s.lbBalancer.ExpectedCalls = nil
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(-1, merr.ErrNodeNotAvailable)
 	err = s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
-		db:           dbName,
-		collection:   s.collection,
-		channel:      s.channels[0],
-		shardLeaders: s.nodes,
-		nq:           1,
+		db:             dbName,
+		collectionName: s.collectionName,
+		collectionID:   s.collectionID,
+		channel:        s.channels[0],
+		shardLeaders:   s.nodes,
+		nq:             1,
 		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNode, s ...string) error {
 			return nil
 		},
@@ -274,11 +283,12 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(1, nil)
 	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 	err = s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
-		db:           dbName,
-		collection:   s.collection,
-		channel:      s.channels[0],
-		shardLeaders: s.nodes,
-		nq:           1,
+		db:             dbName,
+		collectionName: s.collectionName,
+		collectionID:   s.collectionID,
+		channel:        s.channels[0],
+		shardLeaders:   s.nodes,
+		nq:             1,
 		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNode, s ...string) error {
 			return nil
 		},
@@ -291,11 +301,12 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 	err = s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
-		db:           dbName,
-		collection:   s.collection,
-		channel:      s.channels[0],
-		shardLeaders: s.nodes,
-		nq:           1,
+		db:             dbName,
+		collectionName: s.collectionName,
+		collectionID:   s.collectionID,
+		channel:        s.channels[0],
+		shardLeaders:   s.nodes,
+		nq:             1,
 		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNode, s ...string) error {
 			return nil
 		},
@@ -311,11 +322,12 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 	counter := 0
 	err = s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
-		db:           dbName,
-		collection:   s.collection,
-		channel:      s.channels[0],
-		shardLeaders: s.nodes,
-		nq:           1,
+		db:             dbName,
+		collectionName: s.collectionName,
+		collectionID:   s.collectionID,
+		channel:        s.channels[0],
+		shardLeaders:   s.nodes,
+		nq:             1,
 		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNode, s ...string) error {
 			counter++
 			if counter == 1 {
@@ -336,9 +348,10 @@ func (s *LBPolicySuite) TestExecute() {
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(1, nil)
 	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 	err := s.lbPolicy.Execute(ctx, CollectionWorkLoad{
-		db:         dbName,
-		collection: s.collection,
-		nq:         1,
+		db:             dbName,
+		collectionName: s.collectionName,
+		collectionID:   s.collectionID,
+		nq:             1,
 		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNode, s ...string) error {
 			return nil
 		},
@@ -348,9 +361,10 @@ func (s *LBPolicySuite) TestExecute() {
 	// test some channel failed
 	counter := atomic.NewInt64(0)
 	err = s.lbPolicy.Execute(ctx, CollectionWorkLoad{
-		db:         dbName,
-		collection: s.collection,
-		nq:         1,
+		db:             dbName,
+		collectionName: s.collectionName,
+		collectionID:   s.collectionID,
+		nq:             1,
 		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNode, s ...string) error {
 			if counter.Add(1) == 1 {
 				return nil
@@ -363,12 +377,13 @@ func (s *LBPolicySuite) TestExecute() {
 
 	// test get shard leader failed
 	s.qc.ExpectedCalls = nil
-	globalMetaCache.DeprecateShardCache(dbName, s.collection)
+	globalMetaCache.DeprecateShardCache(dbName, s.collectionName)
 	s.qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(nil, mockErr)
 	err = s.lbPolicy.Execute(ctx, CollectionWorkLoad{
-		db:         dbName,
-		collection: s.collection,
-		nq:         1,
+		db:             dbName,
+		collectionName: s.collectionName,
+		collectionID:   s.collectionID,
+		nq:             1,
 		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNode, s ...string) error {
 			return nil
 		},

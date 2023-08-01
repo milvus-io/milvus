@@ -282,6 +282,7 @@ PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORIT
 PROTOBUF_CONSTEXPR QueryPlanNode::QueryPlanNode(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.predicates_)*/nullptr
+  , /*decltype(_impl_.limit_)*/int64_t{0}
   , /*decltype(_impl_.is_count_)*/false
   , /*decltype(_impl_._cached_size_)*/{}} {}
 struct QueryPlanNodeDefaultTypeInternal {
@@ -492,6 +493,7 @@ const uint32_t TableStruct_plan_2eproto::offsets[] PROTOBUF_SECTION_VARIABLE(pro
   ~0u,  // no _inlined_string_donated_
   PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::QueryPlanNode, _impl_.predicates_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::QueryPlanNode, _impl_.is_count_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::QueryPlanNode, _impl_.limit_),
   ~0u,  // no _has_bits_
   PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::PlanNode, _internal_metadata_),
   ~0u,  // no _extensions_
@@ -523,7 +525,7 @@ static const ::_pbi::MigrationSchema schemas[] PROTOBUF_SECTION_VARIABLE(protode
   { 138, -1, -1, sizeof(::milvus::proto::plan::Expr)},
   { 156, -1, -1, sizeof(::milvus::proto::plan::VectorANNS)},
   { 167, -1, -1, sizeof(::milvus::proto::plan::QueryPlanNode)},
-  { 175, -1, -1, sizeof(::milvus::proto::plan::PlanNode)},
+  { 176, -1, -1, sizeof(::milvus::proto::plan::PlanNode)},
 };
 
 static const ::_pb::Message* const file_default_instances[] = {
@@ -625,29 +627,30 @@ const char descriptor_table_protodef_plan_2eproto[] PROTOBUF_SECTION_VARIABLE(pr
   "inary\030\001 \001(\010\022\020\n\010field_id\030\002 \001(\003\022+\n\npredica"
   "tes\030\003 \001(\0132\027.milvus.proto.plan.Expr\0220\n\nqu"
   "ery_info\030\004 \001(\0132\034.milvus.proto.plan.Query"
-  "Info\022\027\n\017placeholder_tag\030\005 \001(\t\"N\n\rQueryPl"
+  "Info\022\027\n\017placeholder_tag\030\005 \001(\t\"]\n\rQueryPl"
   "anNode\022+\n\npredicates\030\001 \001(\0132\027.milvus.prot"
-  "o.plan.Expr\022\020\n\010is_count\030\002 \001(\010\"\304\001\n\010PlanNo"
-  "de\0224\n\013vector_anns\030\001 \001(\0132\035.milvus.proto.p"
-  "lan.VectorANNSH\000\022-\n\npredicates\030\002 \001(\0132\027.m"
-  "ilvus.proto.plan.ExprH\000\0221\n\005query\030\004 \001(\0132 "
-  ".milvus.proto.plan.QueryPlanNodeH\000\022\030\n\020ou"
-  "tput_field_ids\030\003 \003(\003B\006\n\004node*\272\001\n\006OpType\022"
-  "\013\n\007Invalid\020\000\022\017\n\013GreaterThan\020\001\022\020\n\014Greater"
-  "Equal\020\002\022\014\n\010LessThan\020\003\022\r\n\tLessEqual\020\004\022\t\n\005"
-  "Equal\020\005\022\014\n\010NotEqual\020\006\022\017\n\013PrefixMatch\020\007\022\020"
-  "\n\014PostfixMatch\020\010\022\t\n\005Match\020\t\022\t\n\005Range\020\n\022\006"
-  "\n\002In\020\013\022\t\n\005NotIn\020\014*G\n\013ArithOpType\022\013\n\007Unkn"
-  "own\020\000\022\007\n\003Add\020\001\022\007\n\003Sub\020\002\022\007\n\003Mul\020\003\022\007\n\003Div\020"
-  "\004\022\007\n\003Mod\020\005B3Z1github.com/milvus-io/milvu"
-  "s/internal/proto/planpbb\006proto3"
+  "o.plan.Expr\022\020\n\010is_count\030\002 \001(\010\022\r\n\005limit\030\003"
+  " \001(\003\"\304\001\n\010PlanNode\0224\n\013vector_anns\030\001 \001(\0132\035"
+  ".milvus.proto.plan.VectorANNSH\000\022-\n\npredi"
+  "cates\030\002 \001(\0132\027.milvus.proto.plan.ExprH\000\0221"
+  "\n\005query\030\004 \001(\0132 .milvus.proto.plan.QueryP"
+  "lanNodeH\000\022\030\n\020output_field_ids\030\003 \003(\003B\006\n\004n"
+  "ode*\272\001\n\006OpType\022\013\n\007Invalid\020\000\022\017\n\013GreaterTh"
+  "an\020\001\022\020\n\014GreaterEqual\020\002\022\014\n\010LessThan\020\003\022\r\n\t"
+  "LessEqual\020\004\022\t\n\005Equal\020\005\022\014\n\010NotEqual\020\006\022\017\n\013"
+  "PrefixMatch\020\007\022\020\n\014PostfixMatch\020\010\022\t\n\005Match"
+  "\020\t\022\t\n\005Range\020\n\022\006\n\002In\020\013\022\t\n\005NotIn\020\014*G\n\013Arit"
+  "hOpType\022\013\n\007Unknown\020\000\022\007\n\003Add\020\001\022\007\n\003Sub\020\002\022\007"
+  "\n\003Mul\020\003\022\007\n\003Div\020\004\022\007\n\003Mod\020\005B3Z1github.com/"
+  "milvus-io/milvus/internal/proto/planpbb\006"
+  "proto3"
   ;
 static const ::_pbi::DescriptorTable* const descriptor_table_plan_2eproto_deps[1] = {
   &::descriptor_table_schema_2eproto,
 };
 static ::_pbi::once_flag descriptor_table_plan_2eproto_once;
 const ::_pbi::DescriptorTable descriptor_table_plan_2eproto = {
-    false, false, 3671, descriptor_table_protodef_plan_2eproto,
+    false, false, 3686, descriptor_table_protodef_plan_2eproto,
     "plan.proto",
     &descriptor_table_plan_2eproto_once, descriptor_table_plan_2eproto_deps, 1, 19,
     schemas, file_default_instances, TableStruct_plan_2eproto::offsets,
@@ -5982,6 +5985,7 @@ QueryPlanNode::QueryPlanNode(const QueryPlanNode& from)
   QueryPlanNode* const _this = this; (void)_this;
   new (&_impl_) Impl_{
       decltype(_impl_.predicates_){nullptr}
+    , decltype(_impl_.limit_){}
     , decltype(_impl_.is_count_){}
     , /*decltype(_impl_._cached_size_)*/{}};
 
@@ -5989,7 +5993,9 @@ QueryPlanNode::QueryPlanNode(const QueryPlanNode& from)
   if (from._internal_has_predicates()) {
     _this->_impl_.predicates_ = new ::milvus::proto::plan::Expr(*from._impl_.predicates_);
   }
-  _this->_impl_.is_count_ = from._impl_.is_count_;
+  ::memcpy(&_impl_.limit_, &from._impl_.limit_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.is_count_) -
+    reinterpret_cast<char*>(&_impl_.limit_)) + sizeof(_impl_.is_count_));
   // @@protoc_insertion_point(copy_constructor:milvus.proto.plan.QueryPlanNode)
 }
 
@@ -5999,6 +6005,7 @@ inline void QueryPlanNode::SharedCtor(
   (void)is_message_owned;
   new (&_impl_) Impl_{
       decltype(_impl_.predicates_){nullptr}
+    , decltype(_impl_.limit_){int64_t{0}}
     , decltype(_impl_.is_count_){false}
     , /*decltype(_impl_._cached_size_)*/{}
   };
@@ -6032,7 +6039,9 @@ void QueryPlanNode::Clear() {
     delete _impl_.predicates_;
   }
   _impl_.predicates_ = nullptr;
-  _impl_.is_count_ = false;
+  ::memset(&_impl_.limit_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.is_count_) -
+      reinterpret_cast<char*>(&_impl_.limit_)) + sizeof(_impl_.is_count_));
   _internal_metadata_.Clear<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
 }
 
@@ -6054,6 +6063,14 @@ const char* QueryPlanNode::_InternalParse(const char* ptr, ::_pbi::ParseContext*
       case 2:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
           _impl_.is_count_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // int64 limit = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
+          _impl_.limit_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -6100,6 +6117,12 @@ uint8_t* QueryPlanNode::_InternalSerialize(
     target = ::_pbi::WireFormatLite::WriteBoolToArray(2, this->_internal_is_count(), target);
   }
 
+  // int64 limit = 3;
+  if (this->_internal_limit() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteInt64ToArray(3, this->_internal_limit(), target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = ::_pbi::WireFormat::InternalSerializeUnknownFieldsToArray(
         _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance), target, stream);
@@ -6121,6 +6144,11 @@ size_t QueryPlanNode::ByteSizeLong() const {
     total_size += 1 +
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
         *_impl_.predicates_);
+  }
+
+  // int64 limit = 3;
+  if (this->_internal_limit() != 0) {
+    total_size += ::_pbi::WireFormatLite::Int64SizePlusOne(this->_internal_limit());
   }
 
   // bool is_count = 2;
@@ -6149,6 +6177,9 @@ void QueryPlanNode::MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::
   if (from._internal_has_predicates()) {
     _this->_internal_mutable_predicates()->::milvus::proto::plan::Expr::MergeFrom(
         from._internal_predicates());
+  }
+  if (from._internal_limit() != 0) {
+    _this->_internal_set_limit(from._internal_limit());
   }
   if (from._internal_is_count() != 0) {
     _this->_internal_set_is_count(from._internal_is_count());

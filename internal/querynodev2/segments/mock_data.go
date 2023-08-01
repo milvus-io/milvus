@@ -594,6 +594,20 @@ func GenTestVectorFiledData(dType schemapb.DataType, fieldName string, fieldID i
 	return ret
 }
 
+func NewTestChunkManagerFactory(params *paramtable.ComponentParam, rootPath string) *storage.ChunkManagerFactory {
+	return storage.NewChunkManagerFactory("minio",
+		storage.RootPath(rootPath),
+		storage.Address(params.MinioCfg.Address.GetValue()),
+		storage.AccessKeyID(params.MinioCfg.AccessKeyID.GetValue()),
+		storage.SecretAccessKeyID(params.MinioCfg.SecretAccessKey.GetValue()),
+		storage.UseSSL(params.MinioCfg.UseSSL.GetAsBool()),
+		storage.BucketName(params.MinioCfg.BucketName.GetValue()),
+		storage.UseIAM(params.MinioCfg.UseIAM.GetAsBool()),
+		storage.CloudProvider(params.MinioCfg.CloudProvider.GetValue()),
+		storage.IAMEndpoint(params.MinioCfg.IAMEndpoint.GetValue()),
+		storage.CreateBucket(true))
+}
+
 func SaveBinLog(ctx context.Context,
 	collectionID int64,
 	partitionID int64,
@@ -625,7 +639,7 @@ func SaveBinLog(ctx context.Context,
 
 		k := JoinIDPath(collectionID, partitionID, segmentID, fieldID)
 		//key := path.Join(defaultLocalStorage, "insert-log", k)
-		key := path.Join(paramtable.Get().MinioCfg.RootPath.GetValue(), "insert-log", k)
+		key := path.Join(chunkManager.RootPath(), "insert-log", k)
 		kvs[key] = blob.Value
 		fieldBinlog = append(fieldBinlog, &datapb.FieldBinlog{
 			FieldID: fieldID,
@@ -648,7 +662,7 @@ func SaveBinLog(ctx context.Context,
 
 		k := JoinIDPath(collectionID, partitionID, segmentID, fieldID)
 		//key := path.Join(defaultLocalStorage, "stats-log", k)
-		key := path.Join(paramtable.Get().MinioCfg.RootPath.GetValue(), "stats-log", k)
+		key := path.Join(chunkManager.RootPath(), "stats-log", k)
 		kvs[key] = blob.Value[:]
 		statsBinlog = append(statsBinlog, &datapb.FieldBinlog{
 			FieldID: fieldID,
@@ -826,7 +840,7 @@ func SaveDeltaLog(collectionID int64,
 	log.Debug("[query node unittest] save delta log", zap.Int64("fieldID", pkFieldID))
 	key := JoinIDPath(collectionID, partitionID, segmentID, pkFieldID)
 	//keyPath := path.Join(defaultLocalStorage, "delta-log", key)
-	keyPath := path.Join(paramtable.Get().MinioCfg.RootPath.GetValue(), "delta-log", key)
+	keyPath := path.Join(cm.RootPath(), "delta-log", key)
 	kvs[keyPath] = blob.Value[:]
 	fieldBinlog = append(fieldBinlog, &datapb.FieldBinlog{
 		FieldID: pkFieldID,
@@ -878,7 +892,7 @@ func GenAndSaveIndex(collectionID, partitionID, segmentID, fieldID int64, msgLen
 	indexPaths := make([]string, 0)
 	for _, index := range serializedIndexBlobs {
 		//indexPath := filepath.Join(defaultLocalStorage, strconv.Itoa(int(segmentID)), index.Key)
-		indexPath := filepath.Join(paramtable.Get().MinioCfg.RootPath.GetValue(), "index_files",
+		indexPath := filepath.Join(cm.RootPath(), "index_files",
 			strconv.Itoa(int(segmentID)), index.Key)
 		indexPaths = append(indexPaths, indexPath)
 		err := cm.Write(context.Background(), indexPath, index.Value)

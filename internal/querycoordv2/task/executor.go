@@ -147,7 +147,7 @@ func (ex *Executor) processMergeTask(mergeTask *LoadSegmentsTask) {
 	defer func() {
 		if err != nil {
 			for i := range mergeTask.tasks {
-				mergeTask.tasks[i].Cancel(err)
+				mergeTask.tasks[i].Fail(err)
 			}
 		}
 		for i := range mergeTask.tasks {
@@ -235,7 +235,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	var err error
 	defer func() {
 		if err != nil {
-			task.Cancel(err)
+			task.Fail(err)
 			ex.removeTask(task, step)
 		}
 	}()
@@ -396,7 +396,7 @@ func (ex *Executor) subDmChannel(task *ChannelTask, step int) error {
 	var err error
 	defer func() {
 		if err != nil {
-			task.Cancel(err)
+			task.Fail(err)
 		}
 	}()
 
@@ -479,7 +479,7 @@ func (ex *Executor) unsubDmChannel(task *ChannelTask, step int) error {
 	var err error
 	defer func() {
 		if err != nil {
-			task.Cancel(err)
+			task.Fail(err)
 		}
 	}()
 

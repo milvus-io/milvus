@@ -110,15 +110,19 @@ func (pi *ParamItem) GetAsInt32() int32 {
 }
 
 func (pi *ParamItem) GetAsUint() uint {
-	return uint(getAsInt64(pi.GetValue()))
+	return uint(getAsUint64(pi.GetValue()))
 }
 
 func (pi *ParamItem) GetAsUint32() uint32 {
-	return uint32(getAsInt64(pi.GetValue()))
+	return uint32(getAsUint64(pi.GetValue()))
+}
+
+func (pi *ParamItem) GetAsUint64() uint64 {
+	return getAsUint64(pi.GetValue())
 }
 
 func (pi *ParamItem) GetAsUint16() uint16 {
-	return uint16(getAsInt64(pi.GetValue()))
+	return uint16(getAsUint64(pi.GetValue()))
 }
 
 func (pi *ParamItem) GetAsInt64() int64 {
@@ -190,6 +194,12 @@ func getAsInt(v string) int {
 func getAsInt64(v string) int64 {
 	return getAndConvert(v, func(value string) (int64, error) {
 		return strconv.ParseInt(value, 10, 64)
+	}, 0)
+}
+
+func getAsUint64(v string) uint64 {
+	return getAndConvert(v, func(value string) (uint64, error) {
+		return strconv.ParseUint(value, 10, 64)
 	}, 0)
 }
 

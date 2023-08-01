@@ -27,13 +27,19 @@ import (
 )
 
 var (
-	p        atomic.Pointer[conc.Pool[any]]
-	initOnce sync.Once
+	// Use separate pool for search/query
+	// and other operations (insert/delete/statistics/etc.)
+	// since in concurrent situation, there operation may block each other in high payload
+
+	sqp     atomic.Pointer[conc.Pool[any]]
+	sqOnce  sync.Once
+	dp      atomic.Pointer[conc.Pool[any]]
+	dynOnce sync.Once
 )
 
-// InitPool initialize
-func InitPool() {
-	initOnce.Do(func() {
+// initSQPool initialize
+func initSQPool() {
+	sqOnce.Do(func() {
 		pt := paramtable.Get()
 		pool := conc.NewPool[any](
 			int(math.Ceil(pt.QueryNodeCfg.MaxReadConcurrency.GetAsFloat()*pt.QueryNodeCfg.CGOPoolSizeRatio.GetAsFloat())),
@@ -42,12 +48,31 @@ func InitPool() {
 		)
 		conc.WarmupPool(pool, runtime.LockOSThread)
 
-		p.Store(pool)
+		sqp.Store(pool)
 	})
 }
 
-// GetPool returns the singleton pool instance.
-func GetPool() *conc.Pool[any] {
-	InitPool()
-	return p.Load()
+func initDynamicPool() {
+	dynOnce.Do(func() {
+		pool := conc.NewPool[any](
+			runtime.GOMAXPROCS(0),
+			conc.WithPreAlloc(false),
+			conc.WithDisablePurge(false),
+			conc.WithPreHandler(runtime.LockOSThread), // lock os thread for cgo thread disposal
+		)
+
+		dp.Store(pool)
+	})
+}
+
+// GetSQPool returns the singleton pool instance for search/query operations.
+func GetSQPool() *conc.Pool[any] {
+	initSQPool()
+	return sqp.Load()
+}
+
+// GetDynamicPool returns the singleton pool for dynamic cgo operations.
+func GetDynamicPool() *conc.Pool[any] {
+	initDynamicPool()
+	return dp.Load()
 }

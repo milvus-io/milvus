@@ -90,6 +90,8 @@ func oldCode(code int32) commonpb.ErrorCode {
 		return commonpb.ErrorCode_MetaFailed
 	case ErrReplicaNotAvailable.code(), ErrChannelNotAvailable.code(), ErrNodeNotAvailable.code():
 		return commonpb.ErrorCode_NoReplicaAvailable
+	case ErrServiceMemoryLimitExceeded.code():
+		return commonpb.ErrorCode_InsufficientMemoryToLoad
 	default:
 		return commonpb.ErrorCode_UnexpectedError
 	}
@@ -168,6 +170,14 @@ func WrapErrServiceInternal(msg string, others ...string) error {
 
 func WrapErrCrossClusterRouting(expectedCluster, actualCluster string, msg ...string) error {
 	err := errors.Wrapf(ErrCrossClusterRouting, "expectedCluster=%s, actualCluster=%s", expectedCluster, actualCluster)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+func WrapErrServiceDiskLimitExceeded(predict, limit float32, msg ...string) error {
+	err := errors.Wrapf(ErrServiceDiskLimitExceeded, "predict=%v, limit=%v", predict, limit)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "; "))
 	}

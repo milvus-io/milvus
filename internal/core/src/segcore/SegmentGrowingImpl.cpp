@@ -474,55 +474,6 @@ SegmentGrowingImpl::bulk_subscript(SystemFieldType system_type,
     }
 }
 
-std::vector<SegOffset>
-SegmentGrowingImpl::search_ids(const BitsetType& bitset,
-                               Timestamp timestamp) const {
-    std::vector<SegOffset> res_offsets;
-    for (int i = bitset.find_first(); i < bitset.size();
-         i = bitset.find_next(i)) {
-        if (i == BitsetType::npos) {
-            return res_offsets;
-        }
-        auto offset = SegOffset(i);
-        if (insert_record_.timestamps_[offset.get()] <= timestamp) {
-            res_offsets.push_back(offset);
-        }
-    }
-    return res_offsets;
-}
-
-std::vector<SegOffset>
-SegmentGrowingImpl::search_ids(const BitsetView& bitset,
-                               Timestamp timestamp) const {
-    std::vector<SegOffset> res_offsets;
-
-    for (int i = 0; i < bitset.size(); ++i) {
-        if (!bitset.test(i)) {
-            auto offset = SegOffset(i);
-            if (insert_record_.timestamps_[offset.get()] <= timestamp) {
-                res_offsets.push_back(offset);
-            }
-        }
-    }
-    return res_offsets;
-}
-
-std::vector<SegOffset>
-SegmentGrowingImpl::search_ids(const BitsetView& bitset,
-                               const std::vector<int64_t>& offsets,
-                               Timestamp timestamp) const {
-    std::vector<SegOffset> res_offsets;
-
-    for (auto& offset : offsets) {
-        if (!bitset.test(offset)) {
-            if (insert_record_.timestamps_[offset] <= timestamp) {
-                res_offsets.push_back(SegOffset(offset));
-            }
-        }
-    }
-    return res_offsets;
-}
-
 std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
 SegmentGrowingImpl::search_ids(const IdArray& id_array,
                                Timestamp timestamp) const {

@@ -1005,51 +1005,6 @@ SegmentSealedImpl::Delete(int64_t reserved_offset,  // deprecated
     return Status::OK();
 }
 
-std::vector<SegOffset>
-SegmentSealedImpl::search_ids(const BitsetType& bitset,
-                              Timestamp timestamp) const {
-    std::vector<SegOffset> dst_offset;
-    for (int offset = bitset.find_first(); offset < bitset.size();
-         offset = bitset.find_next(offset)) {
-        if (offset == BitsetType::npos) {
-            return dst_offset;
-        }
-        if (insert_record_.timestamps_[offset] <= timestamp) {
-            dst_offset.emplace_back(offset);
-        }
-    }
-    return dst_offset;
-}
-
-std::vector<SegOffset>
-SegmentSealedImpl::search_ids(const BitsetView& bitset,
-                              Timestamp timestamp) const {
-    std::vector<SegOffset> dst_offset;
-    for (int offset = 0; offset < bitset.size(); offset++) {
-        if (!bitset.test(offset)) {
-            if (insert_record_.timestamps_[offset] <= timestamp) {
-                dst_offset.emplace_back(offset);
-            }
-        }
-    }
-    return dst_offset;
-}
-
-std::vector<SegOffset>
-SegmentSealedImpl::search_ids(const BitsetView& bitset,
-                              const std::vector<int64_t>& offsets,
-                              Timestamp timestamp) const {
-    std::vector<SegOffset> dst_offset;
-    for (auto& offset : offsets) {
-        if (!bitset.test(offset)) {
-            if (insert_record_.timestamps_[offset] <= timestamp) {
-                dst_offset.emplace_back(offset);
-            }
-        }
-    }
-    return dst_offset;
-}
-
 std::string
 SegmentSealedImpl::debug() const {
     std::string log_str;

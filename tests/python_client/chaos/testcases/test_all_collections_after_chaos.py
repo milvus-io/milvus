@@ -34,6 +34,12 @@ class TestAllCollection(TestcaseBase):
         collection_w = self.init_collection_wrap(name=name, schema=schema)
         tt = time.time() - t0
         assert collection_w.name == name
+        # get collection info
+        schema = collection_w.schema
+        dim = cf.get_dim_by_schema(schema=schema)
+        int64_field_name = cf.get_int64_field_name(schema=schema)
+        float_vector_field_name = cf.get_float_vec_field_name(schema=schema)
+
         # compact collection before getting num_entities
         collection_w.flush(timeout=180)
         collection_w.compact()
@@ -48,7 +54,7 @@ class TestAllCollection(TestcaseBase):
         for field in collection_w.schema.fields:
             if field.dtype.name == "JSON":
                 with_json = True
-        data = cf.gen_default_list_data(start=offset, with_json=with_json)
+        data = cf.get_column_data_by_schema(nb=ct.default_nb, schema=schema, start=offset)
         t0 = time.time()
         _, res = collection_w.insert(data)
         tt = time.time() - t0
@@ -68,9 +74,9 @@ class TestAllCollection(TestcaseBase):
         index_infos = [index.to_dict() for index in collection_w.indexes]
         index_params = {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 48, "efConstruction": 500}}
         if len(index_infos) == 0:
-            log.info("collection {name} does not have index, create index for it")
+            log.info(f"collection {name} does not have index, create index for it")
             t0 = time.time()
-            index, _ = collection_w.create_index(field_name=ct.default_float_vec_field_name,
+            index, _ = collection_w.create_index(field_name=float_vector_field_name,
                                                  index_params=index_params,
                                                  index_name=cf.gen_unique_str())
             tt = time.time() - t0
@@ -84,17 +90,17 @@ class TestAllCollection(TestcaseBase):
         collection_w.load()
 
         # search
-        search_vectors = cf.gen_vectors(1, ct.default_dim)
+        search_vectors = cf.gen_vectors(1, dim)
         search_params = {"metric_type": "L2", "params": {"ef": 64}}
         t0 = time.time()
         res_1, _ = collection_w.search(data=search_vectors,
-                                       anns_field=ct.default_float_vec_field_name,
+                                       anns_field=float_vector_field_name,
                                        param=search_params, limit=1)
         tt = time.time() - t0
         log.info(f"assert search: {tt}")
         assert len(res_1) == 1
         # query
-        term_expr = f'{ct.default_int64_field_name} in {[i for i in range(offset, 0)]}'
+        term_expr = f'{int64_field_name} in {[i for i in range(offset, 0)]}'
         t0 = time.time()
         res, _ = collection_w.query(term_expr)
         tt = time.time() - t0
@@ -103,7 +109,7 @@ class TestAllCollection(TestcaseBase):
         collection_w.release()
 
         # insert data
-        d = cf.gen_default_list_data(with_json=with_json)
+        d = cf.get_column_data_by_schema(nb=ct.default_nb, schema=schema)
         collection_w.insert(d)
 
         # load
@@ -115,10 +121,10 @@ class TestAllCollection(TestcaseBase):
         # search
         nq = 5
         topk = 5
-        search_vectors = cf.gen_vectors(nq, ct.default_dim)
+        search_vectors = cf.gen_vectors(nq, dim)
         t0 = time.time()
         res, _ = collection_w.search(data=search_vectors,
-                                     anns_field=ct.default_float_vec_field_name,
+                                     anns_field=float_vector_field_name,
                                      param=search_params, limit=topk)
         tt = time.time() - t0
         log.info(f"assert search: {tt}")
@@ -126,7 +132,7 @@ class TestAllCollection(TestcaseBase):
         assert len(res[0]) <= topk
 
         # query
-        term_expr = f'{ct.default_int64_field_name} in [1, 2, 3, 4]'
+        term_expr = f'{int64_field_name} in [1, 2, 3, 4]'
         t0 = time.time()
         res, _ = collection_w.query(term_expr)
         tt = time.time() - t0

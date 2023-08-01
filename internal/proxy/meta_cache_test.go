@@ -474,6 +474,7 @@ func TestMetaCache_GetShards(t *testing.T) {
 	var (
 		ctx            = context.Background()
 		collectionName = "collection1"
+		collectionID   = int64(1)
 	)
 
 	rootCoord := &MockRootCoordClientInterface{}
@@ -488,7 +489,7 @@ func TestMetaCache_GetShards(t *testing.T) {
 	defer qc.Stop()
 
 	t.Run("No collection in meta cache", func(t *testing.T) {
-		shards, err := globalMetaCache.GetShards(ctx, true, dbName, "non-exists")
+		shards, err := globalMetaCache.GetShards(ctx, true, dbName, "non-exists", 0)
 		assert.Error(t, err)
 		assert.Empty(t, shards)
 	})
@@ -503,7 +504,7 @@ func TestMetaCache_GetShards(t *testing.T) {
 		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 		}, nil)
-		shards, err := globalMetaCache.GetShards(ctx, false, dbName, collectionName)
+		shards, err := globalMetaCache.GetShards(ctx, false, dbName, collectionName, collectionID)
 		assert.Error(t, err)
 		assert.Empty(t, shards)
 	})
@@ -524,7 +525,7 @@ func TestMetaCache_GetShards(t *testing.T) {
 		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 		}, nil)
-		shards, err := globalMetaCache.GetShards(ctx, true, dbName, collectionName)
+		shards, err := globalMetaCache.GetShards(ctx, true, dbName, collectionName, collectionID)
 		assert.NoError(t, err)
 		assert.NotEmpty(t, shards)
 		assert.Equal(t, 1, len(shards))
@@ -537,7 +538,7 @@ func TestMetaCache_GetShards(t *testing.T) {
 				Reason:    "not implemented",
 			},
 		}, nil)
-		shards, err = globalMetaCache.GetShards(ctx, true, dbName, collectionName)
+		shards, err = globalMetaCache.GetShards(ctx, true, dbName, collectionName, collectionID)
 
 		assert.NoError(t, err)
 		assert.NotEmpty(t, shards)
@@ -550,6 +551,7 @@ func TestMetaCache_ClearShards(t *testing.T) {
 	var (
 		ctx            = context.TODO()
 		collectionName = "collection1"
+		collectionID   = int64(1)
 	)
 
 	rootCoord := &MockRootCoordClientInterface{}
@@ -588,7 +590,7 @@ func TestMetaCache_ClearShards(t *testing.T) {
 		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 		}, nil)
-		shards, err := globalMetaCache.GetShards(ctx, true, dbName, collectionName)
+		shards, err := globalMetaCache.GetShards(ctx, true, dbName, collectionName, collectionID)
 		require.NoError(t, err)
 		require.NotEmpty(t, shards)
 		require.Equal(t, 1, len(shards))
@@ -602,7 +604,7 @@ func TestMetaCache_ClearShards(t *testing.T) {
 				Reason:    "not implemented",
 			},
 		}, nil)
-		shards, err = globalMetaCache.GetShards(ctx, true, dbName, collectionName)
+		shards, err = globalMetaCache.GetShards(ctx, true, dbName, collectionName, collectionID)
 		assert.Error(t, err)
 		assert.Empty(t, shards)
 	})
@@ -706,26 +708,26 @@ func TestMetaCache_RemoveCollection(t *testing.T) {
 		InMemoryPercentages: []int64{100, 50},
 	}, nil)
 
-	_, err = globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1")
+	_, err = globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1", 1)
 	assert.NoError(t, err)
 	// no collectionInfo of collection1, should access RootCoord
 	assert.Equal(t, rootCoord.GetAccessCount(), 1)
 
-	_, err = globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1")
+	_, err = globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1", 1)
 	assert.NoError(t, err)
 	// shouldn't access RootCoord again
 	assert.Equal(t, rootCoord.GetAccessCount(), 1)
 
 	globalMetaCache.RemoveCollection(ctx, dbName, "collection1")
 	// no collectionInfo of collection2, should access RootCoord
-	_, err = globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1")
+	_, err = globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1", 1)
 	assert.NoError(t, err)
 	// shouldn't access RootCoord again
 	assert.Equal(t, rootCoord.GetAccessCount(), 2)
 
 	globalMetaCache.RemoveCollectionsByID(ctx, UniqueID(1))
 	// no collectionInfo of collection2, should access RootCoord
-	_, err = globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1")
+	_, err = globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1", 1)
 	assert.NoError(t, err)
 	// shouldn't access RootCoord again
 	assert.Equal(t, rootCoord.GetAccessCount(), 3)
@@ -761,7 +763,7 @@ func TestMetaCache_ExpireShardLeaderCache(t *testing.T) {
 			},
 		},
 	}, nil)
-	nodeInfos, err := globalMetaCache.GetShards(ctx, true, dbName, "collection1")
+	nodeInfos, err := globalMetaCache.GetShards(ctx, true, dbName, "collection1", 1)
 	assert.NoError(t, err)
 	assert.Len(t, nodeInfos["channel-1"], 3)
 
@@ -780,7 +782,7 @@ func TestMetaCache_ExpireShardLeaderCache(t *testing.T) {
 	}, nil)
 
 	assert.Eventually(t, func() bool {
-		nodeInfos, err := globalMetaCache.GetShards(ctx, true, dbName, "collection1")
+		nodeInfos, err := globalMetaCache.GetShards(ctx, true, dbName, "collection1", 1)
 		assert.NoError(t, err)
 		return len(nodeInfos["channel-1"]) == 2
 	}, 3*time.Second, 1*time.Second)
@@ -800,7 +802,7 @@ func TestMetaCache_ExpireShardLeaderCache(t *testing.T) {
 	}, nil)
 
 	assert.Eventually(t, func() bool {
-		nodeInfos, err := globalMetaCache.GetShards(ctx, true, dbName, "collection1")
+		nodeInfos, err := globalMetaCache.GetShards(ctx, true, dbName, "collection1", 1)
 		assert.NoError(t, err)
 		return len(nodeInfos["channel-1"]) == 3
 	}, 3*time.Second, 1*time.Second)
@@ -825,7 +827,7 @@ func TestMetaCache_ExpireShardLeaderCache(t *testing.T) {
 	}, nil)
 
 	assert.Eventually(t, func() bool {
-		nodeInfos, err := globalMetaCache.GetShards(ctx, true, dbName, "collection1")
+		nodeInfos, err := globalMetaCache.GetShards(ctx, true, dbName, "collection1", 1)
 		assert.NoError(t, err)
 		return len(nodeInfos["channel-1"]) == 3 && len(nodeInfos["channel-2"]) == 3
 	}, 3*time.Second, 1*time.Second)

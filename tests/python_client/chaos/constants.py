@@ -8,14 +8,14 @@ DEFAULT_DEPLOY_MODE = "single"
 
 CHAOS_NAMESPACE = "chaos-testing"  # namespace of chaos
 CHAOS_API_VERSION = 'chaos-mesh.org/v1alpha1'  # chaos mesh api version
-CHAOS_GROUP = 'chaos-mesh.org'  # chao mesh group
-CHAOS_VERSION = 'v1alpha1'  # chao mesh version
+CHAOS_GROUP = 'chaos-mesh.org'  # chaos mesh group
+CHAOS_VERSION = 'v1alpha1'  # chaos mesh version
 SUCC = 'succ'
 FAIL = 'fail'
 DELTA_PER_INS = 10  # entities per insert
 ENTITIES_FOR_SEARCH = 3000  # entities for search_collection
-
-CHAOS_CONFIG_ENV = 'CHAOS_CONFIG_PATH'  # env variables for chao path
+ENTITIES_FOR_BULKINSERT = 1000000  # entities for bulk insert
+CHAOS_CONFIG_ENV = 'CHAOS_CONFIG_PATH'  # env variables for chaos path
 TESTS_CONFIG_LOCATION = 'chaos_objects/pod_kill/'
 ALL_CHAOS_YAMLS = 'chaos_allstandalone_pod_kill.yaml'
 RELEASE_NAME = 'test-allstandalone-pod-kill-19-25-26'

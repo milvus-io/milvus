@@ -675,6 +675,14 @@ func (scheduler *taskScheduler) RemoveByNode(node int64) {
 }
 
 func (scheduler *taskScheduler) recordSegmentTaskError(task *SegmentTask) {
+	log.Warn("task scheduler recordSegmentTaskError",
+		zap.Int64("taskID", task.ID()),
+		zap.Int64("collectionID", task.CollectionID()),
+		zap.Int64("replicaID", task.ReplicaID()),
+		zap.Int64("segmentID", task.SegmentID()),
+		zap.Int32("taskStatus", task.Status()),
+		zap.Error(task.err),
+	)
 	meta.GlobalFailedLoadCache.Put(task.collectionID, task.Err())
 }
 
@@ -695,8 +703,7 @@ func (scheduler *taskScheduler) remove(task Task) {
 		index := NewReplicaSegmentIndex(task)
 		delete(scheduler.segmentTasks, index)
 		log = log.With(zap.Int64("segmentID", task.SegmentID()))
-		if task.Err() != nil && !errors.Is(task.Err(), merr.ErrChannelNotFound) {
-			log.Warn("task scheduler recordSegmentTaskError", zap.Error(task.err))
+		if task.Status() == TaskStatusFailed && task.Err() != nil && !errors.Is(task.Err(), merr.ErrChannelNotFound) {
 			scheduler.recordSegmentTaskError(task)
 		}
 

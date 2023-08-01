@@ -24,6 +24,8 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	etcdKV "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
+	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -45,7 +47,7 @@ func TestSpawnReplicasWithRG(t *testing.T) {
 		config.EtcdTLSMinVersion.GetValue())
 	kv := etcdKV.NewEtcdKV(cli, config.MetaRootPath.GetValue())
 
-	store := meta.NewMetaStore(kv)
+	store := querycoord.NewCatalog(kv)
 	nodeMgr := session.NewNodeManager()
 	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr)
 	m.ResourceManager.AddResourceGroup("rg1")
@@ -118,7 +120,7 @@ func TestSpawnReplicasWithRG(t *testing.T) {
 func TestAddNodesToCollectionsInRGFailed(t *testing.T) {
 	Params.Init()
 
-	store := meta.NewMockStore(t)
+	store := mocks.NewQueryCoordCatalog(t)
 	store.EXPECT().SaveCollection(mock.Anything).Return(nil)
 	store.EXPECT().SaveReplica(mock.Anything).Return(nil).Times(4)
 	store.EXPECT().SaveResourceGroup(mock.Anything).Return(nil)
@@ -180,7 +182,7 @@ func TestAddNodesToCollectionsInRGFailed(t *testing.T) {
 func TestAddNodesToCollectionsInRG(t *testing.T) {
 	Params.Init()
 
-	store := meta.NewMockStore(t)
+	store := mocks.NewQueryCoordCatalog(t)
 	store.EXPECT().SaveCollection(mock.Anything).Return(nil)
 	store.EXPECT().SaveReplica(mock.Anything).Return(nil)
 	store.EXPECT().SaveResourceGroup(mock.Anything).Return(nil)

@@ -31,6 +31,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -67,7 +69,7 @@ type ServiceSuite struct {
 
 	// Dependencies
 	kv             kv.MetaKv
-	store          meta.Store
+	store          metastore.QueryCoordCatalog
 	dist           *meta.DistributionManager
 	meta           *meta.Meta
 	targetMgr      *meta.TargetManager
@@ -133,7 +135,7 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.Require().NoError(err)
 	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
 
-	suite.store = meta.NewMetaStore(suite.kv)
+	suite.store = querycoord.NewCatalog(suite.kv)
 	suite.dist = meta.NewDistributionManager()
 	suite.nodeMgr = session.NewNodeManager()
 	suite.meta = meta.NewMeta(params.RandomIncrementIDAllocator(), suite.store, suite.nodeMgr)
