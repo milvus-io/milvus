@@ -96,8 +96,12 @@ pipeline {
                                     script {
                                         sh 'printenv'
                                         def clusterEnabled = "false"
+                                        def valuesFile = "pr.yaml"
                                         if ("${MILVUS_SERVER_TYPE}".contains('distributed')) {
                                             clusterEnabled = "true"
+                                        }
+                                        if ("${MILVUS_SERVER_TYPE}".contains("kafka")) {
+                                            valuesFile = "pr_kafka.yaml"
                                         }
 
                                         if ("${MILVUS_CLIENT}" == "pymilvus") {
@@ -121,36 +125,36 @@ pipeline {
                                                     chmod +x /usr/bin/yq
                                                 '''
                                                 sh """
-
-                                                    yq -i '.pulsar.enabled=false' values/ci/pr.yaml
-                                                    yq -i '.kafka.enabled=true' values/ci/pr.yaml
-                                                    yq -i '.kafka.metrics.kafka.enabled=true' values/ci/pr.yaml
-                                                    yq -i '.kafka.metrics.jmx.enabled=true' values/ci/pr.yaml
-                                                    yq -i '.kafka.metrics.serviceMonitor.enabled=true' values/ci/pr.yaml
+                                                    cp values/ci/pr.yaml values/ci/pr_kafka.yaml
+                                                    yq -i '.pulsar.enabled=false' values/ci/pr_kafka.yaml
+                                                    yq -i '.kafka.enabled=true' values/ci/pr_kafka.yaml
+                                                    yq -i '.kafka.metrics.kafka.enabled=true' values/ci/pr_kafka.yaml
+                                                    yq -i '.kafka.metrics.jmx.enabled=true' values/ci/pr_kafka.yaml
+                                                    yq -i '.kafka.metrics.serviceMonitor.enabled=true' values/ci/pr_kafka.yaml
                                                 """
                                             }
                                             withCredentials([usernamePassword(credentialsId: "${env.CI_DOCKER_CREDENTIAL_ID}", usernameVariable: 'CI_REGISTRY_USERNAME', passwordVariable: 'CI_REGISTRY_PASSWORD')]){
                                                 sh """
-                                                MILVUS_CLUSTER_ENABLED=${clusterEnabled} \
-                                                MILVUS_HELM_REPO="http://nexus-nexus-repository-manager.nexus:8081/repository/milvus-proxy" \
-                                                TAG=${imageTag}\
-                                                ./e2e-k8s.sh \
-                                                --skip-export-logs \
-                                                --skip-cleanup \
-                                                --skip-setup \
-                                                --skip-test \
-                                                --skip-build \
-                                                --skip-build-image \
-                                                --install-extra-arg "
-                                                --set etcd.metrics.enabled=true \
-                                                --set etcd.metrics.podMonitor.enabled=true \
-                                                --set indexCoordinator.gc.interval=1 \
-                                                --set indexNode.disk.enabled=true \
-                                                --set queryNode.disk.enabled=true \
-                                                --set standalone.disk.enabled=true \
-                                                --version ${chart_version} \
-                                                -f values/ci/pr.yaml" 
-                                                """
+                                                    MILVUS_CLUSTER_ENABLED=${clusterEnabled} \
+                                                    MILVUS_HELM_REPO="http://nexus-nexus-repository-manager.nexus:8081/repository/milvus-proxy" \
+                                                    TAG=${imageTag}\
+                                                    ./e2e-k8s.sh \
+                                                    --skip-export-logs \
+                                                    --skip-cleanup \
+                                                    --skip-setup \
+                                                    --skip-test \
+                                                    --skip-build \
+                                                    --skip-build-image \
+                                                    --install-extra-arg "
+                                                    --set etcd.metrics.enabled=true \
+                                                    --set etcd.metrics.podMonitor.enabled=true \
+                                                    --set indexCoordinator.gc.interval=1 \
+                                                    --set indexNode.disk.enabled=true \
+                                                    --set queryNode.disk.enabled=true \
+                                                    --set standalone.disk.enabled=true \
+                                                    --version ${chart_version} \
+                                                    -f values/ci/${valuesFile}"
+                                                    """
                                             }
                                         } else {
                                             error "Error: Unsupported Milvus client: ${MILVUS_CLIENT}"
