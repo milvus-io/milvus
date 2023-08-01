@@ -2312,7 +2312,6 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		chMgr:         node.chMgr,
 		chTicker:      node.chTicker,
 	}
-
 	constructFailedResponse := func(err error) *milvuspb.MutationResult {
 		numRows := request.NumRows
 		errIndex := make([]uint32, numRows)

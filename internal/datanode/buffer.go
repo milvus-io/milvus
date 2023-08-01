@@ -432,7 +432,10 @@ func newBufferData(collSchema *schemapb.CollectionSchema) (*BufferData, error) {
 
 	//TODO::xige-16 eval vec and string field
 	return &BufferData{
-		buffer: &InsertData{Data: make(map[UniqueID]storage.FieldData)},
+		buffer: &InsertData{
+			Data:    make(map[UniqueID]storage.FieldData),
+			NullMap: make(map[UniqueID][]bool),
+		},
 		size:   0,
 		limit:  limit,
 		tsFrom: math.MaxUint64,

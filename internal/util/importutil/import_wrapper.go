@@ -243,7 +243,6 @@ func (p *ImportWrapper) Import(filePaths []string, options ImportOptions) error 
 	if options.IsBackup && p.isBinlogImport(filePaths) {
 		return p.doBinlogImport(filePaths, options.TsStartPoint, options.TsEndPoint)
 	}
-
 	// normal logic for import general data files
 	rowBased, err := p.fileValidation(filePaths)
 	if err != nil {

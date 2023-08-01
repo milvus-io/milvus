@@ -22,18 +22,18 @@ import (
 
 // PayloadWriterInterface abstracts PayloadWriter
 type PayloadWriterInterface interface {
-	AddDataToPayload(msgs any, dim ...int) error
-	AddBoolToPayload(msgs []bool) error
-	AddByteToPayload(msgs []byte) error
-	AddInt8ToPayload(msgs []int8) error
-	AddInt16ToPayload(msgs []int16) error
-	AddInt32ToPayload(msgs []int32) error
-	AddInt64ToPayload(msgs []int64) error
-	AddFloatToPayload(msgs []float32) error
-	AddDoubleToPayload(msgs []float64) error
-	AddOneStringToPayload(msgs string) error
-	AddOneArrayToPayload(msg *schemapb.ScalarField) error
-	AddOneJSONToPayload(msg []byte) error
+	AddDataToPayload(msgs any, valid ...bool) error
+	AddBoolToPayload(msgs []bool, valid []bool) error
+	AddByteToPayload(msgs []byte, valid []bool) error
+	AddInt8ToPayload(msgs []int8, valid []bool) error
+	AddInt16ToPayload(msgs []int16, valid []bool) error
+	AddInt32ToPayload(msgs []int32, valid []bool) error
+	AddInt64ToPayload(msgs []int64, valid []bool) error
+	AddFloatToPayload(msgs []float32, valid []bool) error
+	AddDoubleToPayload(msgs []float64, valid []bool) error
+	AddOneStringToPayload(msgs string, valid bool) error
+	AddOneArrayToPayload(msg *schemapb.ScalarField, valid bool) error
+	AddOneJSONToPayload(msg []byte, valid bool) error
 	AddBinaryVectorToPayload(binVec []byte, dim int) error
 	AddFloatVectorToPayload(binVec []float32, dim int) error
 	FinishPayloadWriter() error

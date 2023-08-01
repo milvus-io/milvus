@@ -127,6 +127,7 @@ template <typename Type>
 using FixedVector = folly::fbvector<
     Type>;  // boost::container::vector has memory leak when version > 1.79, so use folly::fbvector instead
 
+using Bitset = boost::container::vector<bool>;
 using Config = nlohmann::json;
 using TargetBitmap = FixedVector<bool>;
 using TargetBitmapPtr = std::unique_ptr<TargetBitmap>;

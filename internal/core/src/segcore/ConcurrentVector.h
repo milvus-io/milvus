@@ -124,6 +124,9 @@ class VectorBase {
 
     virtual const void*
     get_chunk_data(ssize_t chunk_index) const = 0;
+    
+    virtual const void*
+    get_null_bitset() const = 0;
 
     virtual ssize_t
     num_chunk() const = 0;
@@ -219,6 +222,7 @@ class ConcurrentVectorImpl : public VectorBase {
                  const std::vector<storage::FieldDataPtr>& datas) override {
         for (auto& field_data : datas) {
             auto num_rows = field_data->get_num_rows();
+            nulls = field_data->get_null_bitset();
             set_data_raw(element_offset, field_data->Data(), num_rows);
             element_offset += num_rows;
         }
@@ -287,6 +291,11 @@ class ConcurrentVectorImpl : public VectorBase {
         return chunks_[chunk_index].data();
     }
 
+    const void*
+    get_null_bitset() const override {
+        return nulls;
+    }
+
     // just for fun, don't use it directly
     const Type*
     get_element(ssize_t element_index) const {
@@ -353,6 +362,7 @@ class ConcurrentVectorImpl : public VectorBase {
 
  private:
     ThreadSafeVector<Chunk> chunks_;
+    const void* nulls;
 };
 
 template <typename Type>

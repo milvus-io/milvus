@@ -97,6 +97,7 @@ func (r *PayloadReader) GetBoolFromPayload() ([]bool, error) {
 	if err != nil {
 		return nil, err
 	}
+	// need to check null number + value read == numRows here?
 
 	if valuesRead != r.numRows {
 		return nil, fmt.Errorf("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)

@@ -61,7 +61,7 @@ func (codec *IndexFileBinlogCodec) serializeImpl(
 	}
 	defer eventWriter.Close()
 
-	err = eventWriter.AddOneStringToPayload(typeutil.UnsafeBytes2str(value))
+	err = eventWriter.AddOneStringToPayload(typeutil.UnsafeBytes2str(value), true)
 	if err != nil {
 		return nil, err
 	}

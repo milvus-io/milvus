@@ -95,7 +95,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
 
     // step 3: fill into Segment.ConcurrentVector
     insert_record_.timestamps_.set_data_raw(
-        reserved_offset, timestamps_raw, size);
+        reserved_offset, timestamps_raw,size);
     insert_record_.row_ids_.set_data_raw(reserved_offset, row_ids, size);
     for (auto [field_id, field_meta] : schema_->get_fields()) {
         AssertInfo(field_id_to_offset.count(field_id), "Cannot find field_id");
@@ -340,55 +340,55 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
             FixedVector<bool> output(count);
             bulk_subscript_impl<bool>(
                 *vec_ptr, seg_offsets, count, output.data());
-            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
+            return CreateScalarDataArrayFrom(output.data(), vec_ptr->get_null_bitset(), count, field_meta);
         }
         case DataType::INT8: {
             FixedVector<bool> output(count);
             bulk_subscript_impl<int8_t>(
                 *vec_ptr, seg_offsets, count, output.data());
-            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
+            return CreateScalarDataArrayFrom(output.data(), vec_ptr->get_null_bitset(),count, field_meta);
         }
         case DataType::INT16: {
             FixedVector<int16_t> output(count);
             bulk_subscript_impl<int16_t>(
                 *vec_ptr, seg_offsets, count, output.data());
-            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
+            return CreateScalarDataArrayFrom(output.data(), vec_ptr->get_null_bitset(),count, field_meta);
         }
         case DataType::INT32: {
             FixedVector<int32_t> output(count);
             bulk_subscript_impl<int32_t>(
                 *vec_ptr, seg_offsets, count, output.data());
-            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
+            return CreateScalarDataArrayFrom(output.data(), vec_ptr->get_null_bitset(),count, field_meta);
         }
         case DataType::INT64: {
             FixedVector<int64_t> output(count);
             bulk_subscript_impl<int64_t>(
                 *vec_ptr, seg_offsets, count, output.data());
-            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
+            return CreateScalarDataArrayFrom(output.data(), vec_ptr->get_null_bitset(),count, field_meta);
         }
         case DataType::FLOAT: {
             FixedVector<float> output(count);
             bulk_subscript_impl<float>(
                 *vec_ptr, seg_offsets, count, output.data());
-            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
+            return CreateScalarDataArrayFrom(output.data(), vec_ptr->get_null_bitset(),count, field_meta);
         }
         case DataType::DOUBLE: {
             FixedVector<double> output(count);
             bulk_subscript_impl<double>(
                 *vec_ptr, seg_offsets, count, output.data());
-            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
+            return CreateScalarDataArrayFrom(output.data(), vec_ptr->get_null_bitset(),count, field_meta);
         }
         case DataType::VARCHAR: {
             FixedVector<std::string> output(count);
             bulk_subscript_impl<std::string>(
                 *vec_ptr, seg_offsets, count, output.data());
-            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
+            return CreateScalarDataArrayFrom(output.data(), vec_ptr->get_null_bitset(),count, field_meta);
         }
         case DataType::JSON: {
             FixedVector<std::string> output(count);
             bulk_subscript_impl<Json, std::string>(
                 *vec_ptr, seg_offsets, count, output.data());
-            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
+            return CreateScalarDataArrayFrom(output.data(), vec_ptr->get_null_bitset(),count, field_meta);
         }
         default: {
             PanicInfo("unsupported type");

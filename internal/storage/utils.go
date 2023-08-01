@@ -300,10 +300,20 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 		blobReaders = append(blobReaders, bytes.NewReader(blob.GetValue()))
 	}
 
+	fieldNulls := make(map[FieldID][]bool)
+	for _, field := range msg.FieldsData {
+		fieldNulls[field.FieldId] = field.GetNulls()
+	}
+
 	idata = &InsertData{
-		Data: make(map[FieldID]FieldData),
+		Data:    make(map[FieldID]FieldData),
+		NullMap: make(map[FieldID][]bool),
 		// TODO: handle Infos.
 		Infos: nil,
+	}
+
+	for _, field := range msg.FieldsData {
+		idata.NullMap[field.FieldId] = field.GetNulls()
 	}
 
 	for _, field := range collSchema.Fields {
@@ -364,10 +374,13 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 			switch field.FieldID {
 			case 0: // rowIDs
 				fieldData.Data = append(fieldData.Data, msg.RowIDs...)
+				idata.NullMap[field.FieldID] = GetSystemNulls(len(fieldData.Data))
+
 			case 1: // Timestamps
 				for _, ts := range msg.Timestamps {
 					fieldData.Data = append(fieldData.Data, int64(ts))
 				}
+				idata.NullMap[field.FieldID] = GetSystemNulls(len(fieldData.Data))
 			default:
 				fieldData.Data = readInt64Array(blobReaders)
 			}
@@ -394,7 +407,8 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 	}
 
 	idata = &InsertData{
-		Data: make(map[FieldID]FieldData),
+		Data:    make(map[FieldID]FieldData),
+		NullMap: make(map[int64][]bool),
 		// TODO: handle Infos.
 		Infos: nil,
 	}
@@ -443,7 +457,12 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			}
 			fieldData.Data = append(fieldData.Data, srcData...)
 
+			srcNulls := srcFields[field.FieldID].GetNulls()
+			nulls := make([]bool, 0, len(srcNulls))
+			nulls = append(nulls, srcNulls...)
+
 			idata.Data[field.FieldID] = fieldData
+			idata.NullMap[field.FieldID] = nulls
 
 		case schemapb.DataType_Int8:
 			srcData := srcFields[field.FieldID].GetScalars().GetIntData().GetData()
@@ -457,7 +476,12 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			}
 			fieldData.Data = append(fieldData.Data, int8SrcData...)
 
+			srcNulls := srcFields[field.FieldID].GetNulls()
+			nulls := make([]bool, 0, len(srcNulls))
+			nulls = append(nulls, srcNulls...)
+
 			idata.Data[field.FieldID] = fieldData
+			idata.NullMap[field.FieldID] = nulls
 
 		case schemapb.DataType_Int16:
 			srcData := srcFields[field.FieldID].GetScalars().GetIntData().GetData()
@@ -471,7 +495,12 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			}
 			fieldData.Data = append(fieldData.Data, int16SrcData...)
 
+			srcNulls := srcFields[field.FieldID].GetNulls()
+			nulls := make([]bool, 0, len(srcNulls))
+			nulls = append(nulls, srcNulls...)
+
 			idata.Data[field.FieldID] = fieldData
+			idata.NullMap[field.FieldID] = nulls
 
 		case schemapb.DataType_Int32:
 			srcData := srcFields[field.FieldID].GetScalars().GetIntData().GetData()
@@ -481,7 +510,12 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			}
 			fieldData.Data = append(fieldData.Data, srcData...)
 
+			srcNulls := srcFields[field.FieldID].GetNulls()
+			nulls := make([]bool, 0, len(srcNulls))
+			nulls = append(nulls, srcNulls...)
+
 			idata.Data[field.FieldID] = fieldData
+			idata.NullMap[field.FieldID] = nulls
 
 		case schemapb.DataType_Int64:
 			fieldData := &Int64FieldData{
@@ -492,15 +526,25 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			case 0: // rowIDs
 				fieldData.Data = make([]int64, 0, len(msg.RowIDs))
 				fieldData.Data = append(fieldData.Data, msg.RowIDs...)
+				idata.NullMap[field.FieldID] = GetSystemNulls(len(fieldData.Data))
+
 			case 1: // Timestamps
 				fieldData.Data = make([]int64, 0, len(msg.Timestamps))
 				for _, ts := range msg.Timestamps {
 					fieldData.Data = append(fieldData.Data, int64(ts))
 				}
+				idata.NullMap[field.FieldID] = GetSystemNulls(len(fieldData.Data))
 			default:
 				srcData := srcFields[field.FieldID].GetScalars().GetLongData().GetData()
 				fieldData.Data = make([]int64, 0, len(srcData))
 				fieldData.Data = append(fieldData.Data, srcData...)
+
+				srcNulls := srcFields[field.FieldID].GetNulls()
+				nulls := make([]bool, 0, len(srcNulls))
+				nulls = append(nulls, srcNulls...)
+
+				idata.Data[field.FieldID] = fieldData
+				idata.NullMap[field.FieldID] = nulls
 			}
 
 			idata.Data[field.FieldID] = fieldData
@@ -513,7 +557,12 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			}
 			fieldData.Data = append(fieldData.Data, srcData...)
 
+			srcNulls := srcFields[field.FieldID].GetNulls()
+			nulls := make([]bool, 0, len(srcNulls))
+			nulls = append(nulls, srcNulls...)
+
 			idata.Data[field.FieldID] = fieldData
+			idata.NullMap[field.FieldID] = nulls
 
 		case schemapb.DataType_Double:
 			srcData := srcFields[field.FieldID].GetScalars().GetDoubleData().GetData()
@@ -523,7 +572,12 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			}
 			fieldData.Data = append(fieldData.Data, srcData...)
 
+			srcNulls := srcFields[field.FieldID].GetNulls()
+			nulls := make([]bool, 0, len(srcNulls))
+			nulls = append(nulls, srcNulls...)
+
 			idata.Data[field.FieldID] = fieldData
+			idata.NullMap[field.FieldID] = nulls
 		case schemapb.DataType_String, schemapb.DataType_VarChar:
 			srcData := srcFields[field.FieldID].GetScalars().GetStringData().GetData()
 
@@ -532,7 +586,13 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			}
 
 			fieldData.Data = append(fieldData.Data, srcData...)
+
+			srcNulls := srcFields[field.FieldID].GetNulls()
+			nulls := make([]bool, 0, len(srcNulls))
+			nulls = append(nulls, srcNulls...)
+
 			idata.Data[field.FieldID] = fieldData
+			idata.NullMap[field.FieldID] = nulls
 		case schemapb.DataType_Array:
 			srcData := srcFields[field.FieldID].GetScalars().GetArrayData().GetData()
 
@@ -541,7 +601,13 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			}
 
 			fieldData.Data = append(fieldData.Data, srcData...)
+
+			srcNulls := srcFields[field.FieldID].GetNulls()
+			nulls := make([]bool, 0, len(srcNulls))
+			nulls = append(nulls, srcNulls...)
+
 			idata.Data[field.FieldID] = fieldData
+			idata.NullMap[field.FieldID] = nulls
 		case schemapb.DataType_JSON:
 			srcData := srcFields[field.FieldID].GetScalars().GetJsonData().GetData()
 
@@ -550,7 +616,13 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			}
 
 			fieldData.Data = append(fieldData.Data, srcData...)
+
+			srcNulls := srcFields[field.FieldID].GetNulls()
+			nulls := make([]bool, 0, len(srcNulls))
+			nulls = append(nulls, srcNulls...)
+
 			idata.Data[field.FieldID] = fieldData
+			idata.NullMap[field.FieldID] = nulls
 		}
 	}
 
@@ -734,17 +806,20 @@ func MergeFieldData(data *InsertData, fid FieldID, field FieldData) {
 // MergeInsertData merge insert datas. Maybe there are large write zoom if frequent inserts are met.
 func MergeInsertData(datas ...*InsertData) *InsertData {
 	ret := &InsertData{
-		Data:  make(map[FieldID]FieldData),
-		Infos: nil,
+		Data:    make(map[FieldID]FieldData),
+		NullMap: make(map[FieldID][]bool),
+		Infos:   nil,
 	}
 	for _, data := range datas {
 		if data != nil {
 			for fid, field := range data.Data {
 				MergeFieldData(ret, fid, field)
+				// has check that fieldID in nullMap and Data are matched
+				ret.NullMap[fid] = append(ret.NullMap[fid], data.NullMap[fid]...)
 			}
-
 			// TODO: handle storage.InsertData.Infos
 			ret.Infos = append(ret.Infos, data.Infos...)
+
 		}
 	}
 	return ret
@@ -1081,4 +1156,12 @@ func TransferInsertMsgToInsertRecord(schema *schemapb.CollectionSchema, msg *msg
 	insertRecord.FieldsData = append(insertRecord.FieldsData, msg.FieldsData...)
 
 	return insertRecord, nil
+}
+
+func GetSystemNulls(length int) []bool {
+	nulls := make([]bool, length)
+	for i := 0; i < length; i++ {
+		nulls[i] = true
+	}
+	return nulls
 }

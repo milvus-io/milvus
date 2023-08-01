@@ -3149,6 +3149,7 @@ class FieldData final :
   // accessors -------------------------------------------------------
 
   enum : int {
+    kNullsFieldNumber = 7,
     kFieldNameFieldNumber = 2,
     kTypeFieldNumber = 1,
     kIsDynamicFieldNumber = 6,
@@ -3156,6 +3157,28 @@ class FieldData final :
     kScalarsFieldNumber = 3,
     kVectorsFieldNumber = 4,
   };
+  // repeated bool nulls = 7;
+  int nulls_size() const;
+  private:
+  int _internal_nulls_size() const;
+  public:
+  void clear_nulls();
+  private:
+  bool _internal_nulls(int index) const;
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< bool >&
+      _internal_nulls() const;
+  void _internal_add_nulls(bool value);
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< bool >*
+      _internal_mutable_nulls();
+  public:
+  bool nulls(int index) const;
+  void set_nulls(int index, bool value);
+  void add_nulls(bool value);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< bool >&
+      nulls() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< bool >*
+      mutable_nulls();
+
   // string field_name = 2;
   void clear_field_name();
   const std::string& field_name() const;
@@ -3248,6 +3271,7 @@ class FieldData final :
   typedef void InternalArenaConstructable_;
   typedef void DestructorSkippable_;
   struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::RepeatedField< bool > nulls_;
     ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr field_name_;
     int type_;
     bool is_dynamic_;
@@ -6390,6 +6414,53 @@ inline void FieldData::_internal_set_is_dynamic(bool value) {
 inline void FieldData::set_is_dynamic(bool value) {
   _internal_set_is_dynamic(value);
   // @@protoc_insertion_point(field_set:milvus.proto.schema.FieldData.is_dynamic)
+}
+
+// repeated bool nulls = 7;
+inline int FieldData::_internal_nulls_size() const {
+  return _impl_.nulls_.size();
+}
+inline int FieldData::nulls_size() const {
+  return _internal_nulls_size();
+}
+inline void FieldData::clear_nulls() {
+  _impl_.nulls_.Clear();
+}
+inline bool FieldData::_internal_nulls(int index) const {
+  return _impl_.nulls_.Get(index);
+}
+inline bool FieldData::nulls(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.FieldData.nulls)
+  return _internal_nulls(index);
+}
+inline void FieldData::set_nulls(int index, bool value) {
+  _impl_.nulls_.Set(index, value);
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.FieldData.nulls)
+}
+inline void FieldData::_internal_add_nulls(bool value) {
+  _impl_.nulls_.Add(value);
+}
+inline void FieldData::add_nulls(bool value) {
+  _internal_add_nulls(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.schema.FieldData.nulls)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< bool >&
+FieldData::_internal_nulls() const {
+  return _impl_.nulls_;
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< bool >&
+FieldData::nulls() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.schema.FieldData.nulls)
+  return _internal_nulls();
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< bool >*
+FieldData::_internal_mutable_nulls() {
+  return &_impl_.nulls_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< bool >*
+FieldData::mutable_nulls() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.schema.FieldData.nulls)
+  return _internal_mutable_nulls();
 }
 
 inline bool FieldData::has_field() const {

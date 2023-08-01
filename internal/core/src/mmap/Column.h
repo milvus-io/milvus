@@ -20,9 +20,12 @@
 #include <cstddef>
 #include <cstring>
 #include <filesystem>
+#include <type_traits>
 
 #include "common/FieldMeta.h"
 #include "common/Span.h"
+#include "common/Types.h"
+#include "common/VectorTrait.h"
 #include "exceptions/EasyAssert.h"
 #include "fmt/format.h"
 #include "mmap/Utils.h"
@@ -48,6 +51,14 @@ class ColumnBase {
             return;
         }
 
+        if (field_meta.is_vector()) {
+            is_scalar = false;
+        }
+
+        if (is_scalar) {
+            nulls_.resize(num_rows);
+        }
+
         size_ = field_meta.get_sizeof() * num_rows + padding_;
         auto data_type = field_meta.get_data_type();
 
@@ -71,6 +82,14 @@ class ColumnBase {
 
         len_ = size;
         size_ = size + padding_;
+
+        if (field_meta.is_vector()) {
+            is_scalar = false;
+        }
+
+        if (is_scalar) {
+            nulls_.resize(len_);
+        }
         data_ = static_cast<char*>(
             mmap(nullptr, size_, PROT_READ, mmap_flags, fd, 0));
 #ifndef MAP_POPULATE
@@ -98,11 +117,25 @@ class ColumnBase {
         : data_(column.data_), size_(column.size_) {
         column.data_ = nullptr;
         column.size_ = 0;
+        column.nulls_.clear();
     }
 
     const char*
     Data() const {
         return data_;
+    }
+
+    const void*
+    Nulls() const {
+        if (is_scalar) {
+            return &nulls_;
+        }
+        return nullptr;
+    }
+
+    size_t
+    Size() const {
+        return size_;
     }
 
     virtual SpanBase
@@ -118,6 +151,13 @@ class ColumnBase {
 
         std::copy_n(data, size, data_ + len_);
         len_ += size;
+    }
+
+    void
+    AppendNulls(const void* nulls, size_t size) {
+        AssertInfo(is_scalar == false, "vector field not support null");
+        auto* value = reinterpret_cast<Bitset*>(const_cast<void*>(nulls));
+        std::copy_n(value, size, &nulls_);
     }
 
  protected:
@@ -149,6 +189,8 @@ class ColumnBase {
     }
 
     char* data_{nullptr};
+    Bitset nulls_{};
+    bool is_scalar{true};
     size_t size_{0};
     size_t padding_{0};
 

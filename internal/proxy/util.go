@@ -1090,6 +1090,10 @@ func fillFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstr
 	return nil
 }
 
+func checkNulls(schema *schemapb.CollectionSchema, fieldData []*schemapb.FieldData) error {
+	return nil
+}
+
 func checkPrimaryFieldData(schema *schemapb.CollectionSchema, result *milvuspb.MutationResult, insertMsg *msgstream.InsertMsg, inInsert bool) (*schemapb.IDs, error) {
 	rowNums := uint32(insertMsg.NRows())
 	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
@@ -1145,6 +1149,15 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, result *milvuspb.M
 			log.Error("get primary field data failed when upsert", zap.String("collectionName", insertMsg.CollectionName), zap.Error(err))
 			return nil, err
 		}
+	}
+
+	// pk not support null
+	// to invoke func here
+	pkNulls := primaryFieldData.GetNulls()
+	// for compatible
+	if pkNulls != nil && HasNullData(pkNulls) {
+		// pk can not be null
+		return nil, merr.WrapErrParameterInvalid("pk can not set null data", "")
 	}
 
 	// parse primaryFieldData to result.IDs, and as returned primary keys
@@ -1395,4 +1408,13 @@ func memsetLoop[T any](v T, numRows int) []T {
 	}
 
 	return ret
+}
+
+func HasNullData(nullBitset []bool) bool {
+	for _, v := range nullBitset {
+		if v {
+			return true
+		}
+	}
+	return false
 }

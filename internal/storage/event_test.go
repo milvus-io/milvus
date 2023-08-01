@@ -293,13 +293,13 @@ func TestInsertEvent(t *testing.T) {
 		assert.NoError(t, err)
 		insertT(t, schemapb.DataType_BinaryVector, w,
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]byte{1, 2, 3, 4}, 16)
+				return w.AddDataToPayload([]byte{1, 2, 3, 4})
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]byte{5, 6, 7, 8}, 16)
+				return w.AddDataToPayload([]byte{5, 6, 7, 8})
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int{1, 2, 3, 4, 5, 6}, 16)
+				return w.AddDataToPayload([]int{1, 2, 3, 4, 5, 6})
 			},
 			[]byte{1, 2, 3, 4, 5, 6, 7, 8})
 	})
@@ -309,26 +309,27 @@ func TestInsertEvent(t *testing.T) {
 		assert.NoError(t, err)
 		insertT(t, schemapb.DataType_FloatVector, w,
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]float32{1, 2, 3, 4}, 2)
+				return w.AddDataToPayload([]float32{1, 2, 3, 4})
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]float32{5, 6, 7, 8}, 2)
+				return w.AddDataToPayload([]float32{5, 6, 7, 8})
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int{1, 2, 3, 4, 5, 6}, 2)
+				return w.AddDataToPayload([]int{1, 2, 3, 4, 5, 6})
 			},
 			[]float32{1, 2, 3, 4, 5, 6, 7, 8})
 	})
 
 	t.Run("insert_string", func(t *testing.T) {
+
 		w, err := newInsertEventWriter(schemapb.DataType_String)
 		assert.NoError(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
-		err = w.AddDataToPayload("1234")
+		err = w.AddDataToPayload("1234", true)
 		assert.NoError(t, err)
-		err = w.AddOneStringToPayload("567890")
+		err = w.AddOneStringToPayload("567890", true)
 		assert.NoError(t, err)
-		err = w.AddOneStringToPayload("abcdefg")
+		err = w.AddOneStringToPayload("abcdefg", true)
 		assert.NoError(t, err)
 		err = w.AddDataToPayload([]int{1, 2, 3})
 		assert.Error(t, err)

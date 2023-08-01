@@ -28,7 +28,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"go.uber.org/zap"
 )
 
 const (
@@ -283,8 +286,9 @@ type BlobInfo struct {
 // Data {<0, row_id>, <1, timestamp>, <100, float_field>, <101, int_field>, <102, float_vector_field>, <103, string_field>}
 type InsertData struct {
 	// Todo, data should be zero copy by passing data directly to event reader or change Data to map[FieldID]FieldDataArray
-	Data  map[FieldID]FieldData // field id to field data
-	Infos []BlobInfo
+	Data    map[FieldID]FieldData // field id to field data
+	NullMap map[FieldID][]bool    // only scalar field has null bitset
+	Infos   []BlobInfo
 }
 
 func (iData *InsertData) IsEmpty() bool {
@@ -432,6 +436,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		writer = NewInsertBinlogWriter(field.DataType, insertCodec.Schema.ID, partitionID, segmentID, field.FieldID)
 		var eventWriter *insertEventWriter
 		var err error
+		var nulls []bool
 		if typeutil.IsVectorType(field.DataType) {
 			switch field.DataType {
 			case schemapb.DataType_FloatVector:
@@ -443,6 +448,13 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			}
 		} else {
 			eventWriter, err = writer.NextInsertEventWriter()
+			if !common.IsSystemField(field.FieldID) {
+				nulls, ok = data.NullMap[field.FieldID]
+				if !ok {
+					log.Info("scalar field not contains nulls", zap.Int64("fieldID", field.FieldID))
+					return nil, merr.WrapErrParameterInvalid("scalar field should contains nulls", "not")
+				}
+			}
 		}
 		if err != nil {
 			writer.Close()
@@ -452,7 +464,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		eventWriter.SetEventTimestamp(startTs, endTs)
 		switch field.DataType {
 		case schemapb.DataType_Bool:
-			err = eventWriter.AddBoolToPayload(singleData.(*BoolFieldData).Data)
+			err = eventWriter.AddBoolToPayload(singleData.(*BoolFieldData).Data, nulls)
 			if err != nil {
 				eventWriter.Close()
 				writer.Close()
@@ -460,7 +472,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*BoolFieldData).GetMemorySize()))
 		case schemapb.DataType_Int8:
-			err = eventWriter.AddInt8ToPayload(singleData.(*Int8FieldData).Data)
+			err = eventWriter.AddInt8ToPayload(singleData.(*Int8FieldData).Data, nulls)
 			if err != nil {
 				eventWriter.Close()
 				writer.Close()
@@ -468,7 +480,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*Int8FieldData).GetMemorySize()))
 		case schemapb.DataType_Int16:
-			err = eventWriter.AddInt16ToPayload(singleData.(*Int16FieldData).Data)
+			err = eventWriter.AddInt16ToPayload(singleData.(*Int16FieldData).Data, nulls)
 			if err != nil {
 				eventWriter.Close()
 				writer.Close()
@@ -476,7 +488,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*Int16FieldData).GetMemorySize()))
 		case schemapb.DataType_Int32:
-			err = eventWriter.AddInt32ToPayload(singleData.(*Int32FieldData).Data)
+			err = eventWriter.AddInt32ToPayload(singleData.(*Int32FieldData).Data, nulls)
 			if err != nil {
 				eventWriter.Close()
 				writer.Close()
@@ -484,7 +496,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*Int32FieldData).GetMemorySize()))
 		case schemapb.DataType_Int64:
-			err = eventWriter.AddInt64ToPayload(singleData.(*Int64FieldData).Data)
+			err = eventWriter.AddInt64ToPayload(singleData.(*Int64FieldData).Data, nulls)
 			if err != nil {
 				eventWriter.Close()
 				writer.Close()
@@ -492,7 +504,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*Int64FieldData).GetMemorySize()))
 		case schemapb.DataType_Float:
-			err = eventWriter.AddFloatToPayload(singleData.(*FloatFieldData).Data)
+			err = eventWriter.AddFloatToPayload(singleData.(*FloatFieldData).Data, nulls)
 			if err != nil {
 				eventWriter.Close()
 				writer.Close()
@@ -500,7 +512,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*FloatFieldData).GetMemorySize()))
 		case schemapb.DataType_Double:
-			err = eventWriter.AddDoubleToPayload(singleData.(*DoubleFieldData).Data)
+			err = eventWriter.AddDoubleToPayload(singleData.(*DoubleFieldData).Data, nulls)
 			if err != nil {
 				eventWriter.Close()
 				writer.Close()
@@ -509,7 +521,11 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*DoubleFieldData).GetMemorySize()))
 		case schemapb.DataType_String, schemapb.DataType_VarChar:
 			for _, singleString := range singleData.(*StringFieldData).Data {
-				err = eventWriter.AddOneStringToPayload(singleString)
+				if len(nulls) != 1 {
+					log.Info("length of null bitset wrong", zap.Int64("fieldID", field.FieldID))
+					return nil, merr.WrapErrParameterInvalid(1, len(nulls), "length of null bitset wrong")
+				}
+				err = eventWriter.AddOneStringToPayload(singleString, nulls[0])
 				if err != nil {
 					eventWriter.Close()
 					writer.Close()
@@ -519,7 +535,11 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*StringFieldData).GetMemorySize()))
 		case schemapb.DataType_Array:
 			for _, singleArray := range singleData.(*ArrayFieldData).Data {
-				err = eventWriter.AddOneArrayToPayload(singleArray)
+				if len(nulls) != 1 {
+					log.Info("length of null bitset wrong", zap.Int64("fieldID", field.FieldID))
+					return nil, merr.WrapErrParameterInvalid(1, len(nulls), "length of null bitset wrong")
+				}
+				err = eventWriter.AddOneArrayToPayload(singleArray, nulls[0])
 				if err != nil {
 					eventWriter.Close()
 					writer.Close()
@@ -529,7 +549,11 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*ArrayFieldData).GetMemorySize()))
 		case schemapb.DataType_JSON:
 			for _, singleJSON := range singleData.(*JSONFieldData).Data {
-				err = eventWriter.AddOneJSONToPayload(singleJSON)
+				if len(nulls) != 1 {
+					log.Info("length of null bitset wrong", zap.Int64("fieldID", field.FieldID))
+					return nil, merr.WrapErrParameterInvalid(1, len(nulls), "length of null bitset wrong")
+				}
+				err = eventWriter.AddOneJSONToPayload(singleJSON, nulls[0])
 				if err != nil {
 					eventWriter.Close()
 					writer.Close()
@@ -1050,7 +1074,7 @@ func (deleteCodec *DeleteCodec) Serialize(collectionID UniqueID, partitionID Uni
 		if err != nil {
 			return nil, err
 		}
-		err = eventWriter.AddOneStringToPayload(string(serializedPayload))
+		err = eventWriter.AddOneStringToPayload(string(serializedPayload), true)
 		if err != nil {
 			return nil, err
 		}
@@ -1185,7 +1209,8 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 	for _, singleTs := range ts {
 		int64Ts = append(int64Ts, int64(singleTs))
 	}
-	err = eventWriter.AddInt64ToPayload(int64Ts)
+	nulls := make([]bool, len(int64Ts))
+	err = eventWriter.AddInt64ToPayload(int64Ts, nulls)
 	if err != nil {
 		return nil, err
 	}
@@ -1222,7 +1247,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 			if err != nil {
 				return nil, err
 			}
-			err = eventWriter.AddOneStringToPayload(req)
+			err = eventWriter.AddOneStringToPayload(req, true)
 			if err != nil {
 				return nil, err
 			}
@@ -1232,7 +1257,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 			if err != nil {
 				return nil, err
 			}
-			err = eventWriter.AddOneStringToPayload(req)
+			err = eventWriter.AddOneStringToPayload(req, true)
 			if err != nil {
 				return nil, err
 			}
@@ -1242,7 +1267,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 			if err != nil {
 				return nil, err
 			}
-			err = eventWriter.AddOneStringToPayload(req)
+			err = eventWriter.AddOneStringToPayload(req, true)
 			if err != nil {
 				return nil, err
 			}
@@ -1252,7 +1277,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 			if err != nil {
 				return nil, err
 			}
-			err = eventWriter.AddOneStringToPayload(req)
+			err = eventWriter.AddOneStringToPayload(req, true)
 			if err != nil {
 				return nil, err
 			}

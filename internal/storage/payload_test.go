@@ -342,7 +342,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 					Data: []int32{1, 2},
 				},
 			},
-		})
+		}, true)
 		assert.NoError(t, err)
 		err = w.AddOneArrayToPayload(&schemapb.ScalarField{
 			Data: &schemapb.ScalarField_IntData{

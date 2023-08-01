@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "storage/FieldData.h"
+#include "arrow/type_fwd.h"
 #include "common/Json.h"
 
 namespace milvus::storage {
@@ -37,14 +38,22 @@ FieldDataImpl<Type, is_scalar>::FillFieldData(const void* source,
     length_ += element_count;
 }
 
-template <typename ArrayType, arrow::Type::type ArrayDataType>
-std::pair<const void*, int64_t>
-GetDataInfoFromArray(const std::shared_ptr<arrow::Array> array) {
+template <typename Type, typename ArrayType, arrow::Type::type ArrayDataType>
+std::pair<const void*, Bitset>
+GetDataInfoFromArray(const std::shared_ptr<arrow::Array> array,
+                     bool is_scalar) {
     AssertInfo(array->type()->id() == ArrayDataType, "inconsistent data type");
     auto typed_array = std::dynamic_pointer_cast<ArrayType>(array);
     auto element_count = array->length();
-
-    return std::make_pair(typed_array->raw_values(), element_count);
+    FixedVector<Type> values(element_count);
+    Bitset null_bitset_;
+    for (size_t index = 0; index < element_count; ++index) {
+        values[index] = typed_array->Value(index);
+        if (is_scalar) {
+            null_bitset_.push_back(array->IsNull(index));
+        }
+    }
+    return std::make_pair(values.data(), null_bitset_);
 }
 
 template <typename Type, bool is_scalar>
@@ -58,83 +67,90 @@ FieldDataImpl<Type, is_scalar>::FillFieldData(
     }
     switch (data_type_) {
         case DataType::BOOL: {
-            AssertInfo(array->type()->id() == arrow::Type::type::BOOL,
-                       "inconsistent data type");
-            auto bool_array =
-                std::dynamic_pointer_cast<arrow::BooleanArray>(array);
-            FixedVector<bool> values(element_count);
-            for (size_t index = 0; index < element_count; ++index) {
-                values[index] = bool_array->Value(index);
-            }
-            return FillFieldData(values.data(), element_count);
+            auto array_info =
+                GetDataInfoFromArray<bool,
+                                     arrow::BooleanArray,
+                                     arrow::Type::type::BOOL>(array, is_scalar);
+            null_bitset_ = array_info.second;
+            return FillFieldData(array_info.first, element_count);
         }
         case DataType::INT8: {
             auto array_info =
-                GetDataInfoFromArray<arrow::Int8Array, arrow::Type::type::INT8>(
-                    array);
-            return FillFieldData(array_info.first, array_info.second);
+                GetDataInfoFromArray<int8_t,
+                                     arrow::Int8Array,
+                                     arrow::Type::type::INT8>(array, is_scalar);
+            null_bitset_ = array_info.second;
+            return FillFieldData(array_info.first, element_count);
         }
         case DataType::INT16: {
-            auto array_info =
-                GetDataInfoFromArray<arrow::Int16Array,
-                                     arrow::Type::type::INT16>(array);
-            return FillFieldData(array_info.first, array_info.second);
+            auto array_info = GetDataInfoFromArray<int16_t,
+                                                   arrow::Int16Array,
+                                                   arrow::Type::type::INT16>(
+                array, is_scalar);
+            null_bitset_ = array_info.second;
+            return FillFieldData(array_info.first, element_count);
         }
         case DataType::INT32: {
-            auto array_info =
-                GetDataInfoFromArray<arrow::Int32Array,
-                                     arrow::Type::type::INT32>(array);
-            return FillFieldData(array_info.first, array_info.second);
+            auto array_info = GetDataInfoFromArray<int32_t,
+                                                   arrow::Int32Array,
+                                                   arrow::Type::type::INT32>(
+                array, is_scalar);
+            null_bitset_ = array_info.second;
+            return FillFieldData(array_info.first, element_count);
         }
         case DataType::INT64: {
-            auto array_info =
-                GetDataInfoFromArray<arrow::Int64Array,
-                                     arrow::Type::type::INT64>(array);
-            return FillFieldData(array_info.first, array_info.second);
+            auto array_info = GetDataInfoFromArray<int64_t,
+                                                   arrow::Int64Array,
+                                                   arrow::Type::type::INT64>(
+                array, is_scalar);
+            null_bitset_ = array_info.second;
+            return FillFieldData(array_info.first, element_count);
         }
         case DataType::FLOAT: {
-            auto array_info =
-                GetDataInfoFromArray<arrow::FloatArray,
-                                     arrow::Type::type::FLOAT>(array);
-            return FillFieldData(array_info.first, array_info.second);
+            auto array_info = GetDataInfoFromArray<float,
+                                                   arrow::FloatArray,
+                                                   arrow::Type::type::FLOAT>(
+                array, is_scalar);
+            null_bitset_ = array_info.second;
+            return FillFieldData(array_info.first, element_count);
         }
         case DataType::DOUBLE: {
-            auto array_info =
-                GetDataInfoFromArray<arrow::DoubleArray,
-                                     arrow::Type::type::DOUBLE>(array);
-            return FillFieldData(array_info.first, array_info.second);
+            auto array_info = GetDataInfoFromArray<double,
+                                                   arrow::DoubleArray,
+                                                   arrow::Type::type::DOUBLE>(
+                array, is_scalar);
+            null_bitset_ = array_info.second;
+            return FillFieldData(array_info.first, element_count);
         }
         case DataType::STRING:
         case DataType::VARCHAR: {
-            AssertInfo(array->type()->id() == arrow::Type::type::STRING,
-                       "inconsistent data type");
-            auto string_array =
-                std::dynamic_pointer_cast<arrow::StringArray>(array);
-            std::vector<std::string> values(element_count);
-            for (size_t index = 0; index < element_count; ++index) {
-                values[index] = string_array->GetString(index);
-            }
-            return FillFieldData(values.data(), element_count);
+            auto array_info = GetDataInfoFromArray<std::string,
+                                                   arrow::StringArray,
+                                                   arrow::Type::type::STRING>(
+                array, is_scalar);
+            null_bitset_ = array_info.second;
+            return FillFieldData(array_info.first, element_count);
         }
         case DataType::JSON: {
-            AssertInfo(array->type()->id() == arrow::Type::type::BINARY,
-                       "inconsistent data type");
             auto json_array =
                 std::dynamic_pointer_cast<arrow::BinaryArray>(array);
             std::vector<Json> values(element_count);
             for (size_t index = 0; index < element_count; ++index) {
                 values[index] =
                     Json(simdjson::padded_string(json_array->GetString(index)));
+                null_bitset_.push_back(array->IsNull(index));
             }
             return FillFieldData(values.data(), element_count);
         }
         case DataType::VECTOR_FLOAT:
         case DataType::VECTOR_BINARY: {
             auto array_info =
-                GetDataInfoFromArray<arrow::FixedSizeBinaryArray,
+                GetDataInfoFromArray<const uint8_t*,
+                                     arrow::FixedSizeBinaryArray,
                                      arrow::Type::type::FIXED_SIZE_BINARY>(
-                    array);
-            return FillFieldData(array_info.first, array_info.second);
+                    array, is_scalar);
+            null_bitset_ = array_info.second;
+            return FillFieldData(array_info.first, element_count);
         }
         default: {
             throw NotSupportedDataTypeException(GetName() + "::FillFieldData" +

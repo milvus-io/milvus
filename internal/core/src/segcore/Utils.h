@@ -55,6 +55,7 @@ CreateVectorDataArray(int64_t count, const FieldMeta& field_meta);
 
 std::unique_ptr<DataArray>
 CreateScalarDataArrayFrom(const void* data_raw,
+                          const void* nulls,
                           int64_t count,
                           const FieldMeta& field_meta);
 

@@ -155,6 +155,15 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
+	// check fieldSchema.nullable related
+	// if not nullable, the nulls can not has true
+	// can't mark nulls as true when nullable is false
+	// check every user field has nullBitset and has the correct num rows
+	err = checkNulls(it.schema, it.insertMsg.InsertRequest.FieldsData)
+	if err != nil {
+		return err
+	}
+
 	// check primaryFieldData whether autoID is true or not
 	// set rowIDs as primary data if autoID == true
 	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields

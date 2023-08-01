@@ -112,7 +112,6 @@ TEST(storage, boolean) {
     st = NewPayloadReader(
         int(milvus::DataType::BOOL), (uint8_t*)cb.data, cb.length, &reader);
     ASSERT_EQ(st.error_code, ErrorCode::Success);
-    bool* values;
     int length = GetPayloadLengthFromReader(reader);
     ASSERT_EQ(length, 4);
     for (int i = 0; i < length; i++) {

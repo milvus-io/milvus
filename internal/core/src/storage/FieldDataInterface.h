@@ -72,6 +72,9 @@ class FieldDataBase {
     virtual int64_t
     get_num_rows() const = 0;
 
+    virtual const void*
+    get_null_bitset() const = 0;
+
     virtual int64_t
     get_dim() const = 0;
 
@@ -132,6 +135,21 @@ class FieldDataImpl : public FieldDataBase {
         return &field_data_[offset];
     }
 
+    std::optional<const void*>
+    Value(ssize_t offset) {
+        if (!is_scalar) {
+            return RawValue(offset);
+        }
+        AssertInfo(offset < get_num_rows(),
+                   "field data subscript out of range");
+        AssertInfo(offset < length(),
+                   "subscript position don't has valid value");
+        if (null_bitset_[offset]) {
+            return std::nullopt;
+        }
+        return &field_data_[offset];
+    }
+
     int64_t
     Size() const override {
         return sizeof(Type) * length() * dim_;
@@ -174,6 +192,14 @@ class FieldDataImpl : public FieldDataBase {
         return num_rows_;
     }
 
+    const void*
+    get_null_bitset() const override {
+        if (is_scalar) {
+            return &null_bitset_;
+        }
+        return nullptr;
+    }
+
     void
     resize_field_data(int64_t num_rows) {
         std::lock_guard lck(num_rows_mutex_);
@@ -196,6 +222,7 @@ class FieldDataImpl : public FieldDataBase {
 
  protected:
     Chunk field_data_;
+    Bitset null_bitset_;
     int64_t num_rows_;
     mutable std::shared_mutex num_rows_mutex_;
     size_t length_{};

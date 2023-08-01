@@ -271,6 +271,8 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                                 field_data->RawValue(i));
                             var_column->Append(str->data(), str->size());
                         }
+                        var_column->AppendNulls(field_data->get_null_bitset(),
+                                                field_data->get_num_rows());
                     }
                     var_column->Seal();
                     column = std::move(var_column);
@@ -290,6 +292,8 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                             var_column->Append(padded_string.data(),
                                                padded_string.size());
                         }
+                        var_column->AppendNulls(field_data->get_null_bitset(),
+                                                field_data->get_num_rows());
                     }
                     var_column->Seal();
                     column = std::move(var_column);
@@ -304,6 +308,9 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
             while (data.channel->pop(field_data)) {
                 column->Append(static_cast<const char*>(field_data->Data()),
                                field_data->Size());
+            }
+            if (field_meta.is_vector()) {
+                    column->AppendNulls(field_data->get_null_bitset(), field_data->Size());
             }
         }
 
@@ -817,6 +824,7 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id,
             case DataType::VARCHAR:
             case DataType::STRING: {
                 FixedVector<std::string> output(count);
+                // Bitset nulls(count);
                 bulk_subscript_impl<std::string>(fields_.at(field_id).get(),
                                                  seg_offsets,
                                                  count,

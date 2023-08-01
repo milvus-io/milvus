@@ -217,11 +217,15 @@ CreateVectorDataArray(int64_t count, const FieldMeta& field_meta) {
 
 std::unique_ptr<DataArray>
 CreateScalarDataArrayFrom(const void* data_raw,
+                          const void* null_bitset,
                           int64_t count,
                           const FieldMeta& field_meta) {
     auto data_type = field_meta.get_data_type();
     auto data_array = std::make_unique<DataArray>();
     data_array->set_field_id(field_meta.get_id().get());
+    auto nulls = reinterpret_cast<const bool*>(null_bitset);
+    auto obj = data_array->mutable_nulls();
+    obj->Add(nulls, nulls + count);
     data_array->set_type(static_cast<milvus::proto::schema::DataType>(
         field_meta.get_data_type()));
 
@@ -332,12 +336,13 @@ CreateVectorDataArrayFrom(const void* data_raw,
 
 std::unique_ptr<DataArray>
 CreateDataArrayFrom(const void* data_raw,
+                    const void* nulls,
                     int64_t count,
                     const FieldMeta& field_meta) {
     auto data_type = field_meta.get_data_type();
 
     if (!datatype_is_vector(data_type)) {
-        return CreateScalarDataArrayFrom(data_raw, count, field_meta);
+        return CreateScalarDataArrayFrom(data_raw, nulls, count, field_meta);
     }
 
     return CreateVectorDataArrayFrom(data_raw, count, field_meta);
