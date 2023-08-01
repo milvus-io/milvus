@@ -1,2 +1,10 @@
-decorest~=0.1.0
-pydantic~=1.10.2
+requests~=2.26.0
+urllib3==1.26.16
+loguru~=0.5.3
+pytest~=7.2.0
+pyyaml~=6.0
+numpy~=1.24.3
+allure-pytest>=2.8.18
+Faker==19.2.0
+pymilvus~=2.2.9
+scikit-learn~=1.1.3
