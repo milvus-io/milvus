@@ -34,6 +34,7 @@ type RetrieveSuite struct {
 	suite.Suite
 
 	// Dependencies
+	rootPath     string
 	chunkManager storage.ChunkManager
 
 	// Data
@@ -55,7 +56,8 @@ func (suite *RetrieveSuite) SetupTest() {
 	ctx := context.Background()
 	msgLength := 100
 
-	chunkManagerFactory := storage.NewChunkManagerFactoryWithParam(paramtable.Get())
+	suite.rootPath = suite.T().Name()
+	chunkManagerFactory := NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
 	suite.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
 	initcore.InitRemoteChunkManager(paramtable.Get())
 
@@ -131,7 +133,7 @@ func (suite *RetrieveSuite) TearDownTest() {
 	DeleteSegment(suite.growing)
 	DeleteCollection(suite.collection)
 	ctx := context.Background()
-	suite.chunkManager.RemoveWithPrefix(ctx, paramtable.Get().MinioCfg.RootPath.GetValue())
+	suite.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
 }
 
 func (suite *RetrieveSuite) TestRetrieveSealed() {
