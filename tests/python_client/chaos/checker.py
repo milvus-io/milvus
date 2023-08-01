@@ -8,6 +8,7 @@ from base.collection_wrapper import ApiCollectionWrapper
 from base.utility_wrapper import ApiUtilityWrapper
 from common import common_func as cf
 from common import common_type as ct
+from common.milvus_sys import MilvusSys
 from chaos import constants
 
 from common.common_type import CheckTasks
@@ -30,7 +31,7 @@ class Op(Enum):
     unknown = 'unknown'
 
 
-timeout = 120
+timeout = 10
 enable_traceback = False
 DEFAULT_FMT = '[start time:{start_time}][time cost:{elapsed:0.8f}s][operation_name:{operation_name}][collection name:{collection_name}] -> {result!r}'
 
@@ -103,6 +104,8 @@ class Checker:
         self.rsp_times = []
         self.average_time = 0
         self.files = []
+        self.ms = MilvusSys()
+        self.bucket_name = self.ms.index_nodes[0]["infos"]["system_configurations"]["minio_bucket_name"]
         self.c_wrap = ApiCollectionWrapper()
         self.utility_wrap = ApiUtilityWrapper()
         c_name = collection_name if collection_name is not None else cf.gen_unique_str(
@@ -180,16 +183,21 @@ class Checker:
                                  nb=constants.ENTITIES_FOR_BULKINSERT,
                                  file_type="npy",
                                  minio_endpoint="127.0.0.1:9000",
-                                 bucket_name="milvus-bucket"):
+                                 bucket_name=None):
         schema = self.schema
+        bucket_name = self.bucket_name if bucket_name is None else bucket_name
         log.info(f"prepare data for bulk insert")
-        files = cf.prepare_bulk_insert_data(schema=schema,
-                                            nb=nb,
-                                            file_type=file_type,
-                                            minio_endpoint=minio_endpoint,
-                                            bucket_name=bucket_name)
-        self.files = files
-        return files
+        try:
+            files = cf.prepare_bulk_insert_data(schema=schema,
+                                                nb=nb,
+                                                file_type=file_type,
+                                                minio_endpoint=minio_endpoint,
+                                                bucket_name=bucket_name)
+            self.files = files
+            return files, True
+        except Exception as e:
+            log.error(f"prepare data for bulk insert failed with error {e}")
+            return [], False
 
     def do_bulk_insert(self):
         log.info(f"bulk insert collection name: {self.c_name}")
