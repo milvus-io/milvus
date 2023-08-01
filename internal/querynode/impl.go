@@ -826,7 +826,7 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 	}
 
 	if ret.SlicedBlob == nil {
-		log.Ctx(ctx).Info("search result is empty",
+		log.Ctx(ctx).Debug("search result is empty",
 			zap.Strings("vChannels", req.GetDmlChannels()),
 			zap.Int64s("segmentIDs", req.GetSegmentIDs()),
 			zap.Int64("collection", req.Req.CollectionID),
