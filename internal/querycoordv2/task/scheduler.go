@@ -631,22 +631,7 @@ func (scheduler *taskScheduler) process(task Task) bool {
 		return false
 	}
 
-	log = log.With(zap.Int("step", step))
-	switch task.Status() {
-	case TaskStatusStarted:
-		return executor.Execute(task, step)
-
-	case TaskStatusSucceeded:
-		log.Info("task succeeded")
-
-	case TaskStatusCanceled:
-		log.Warn("failed to execute task", zap.Error(task.Err()))
-
-	default:
-		panic(fmt.Sprintf("invalid task status: %v", task.Status()))
-	}
-
-	return false
+	return executor.Execute(task, step)
 }
 
 func (scheduler *taskScheduler) check(task Task) error {
