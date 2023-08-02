@@ -474,7 +474,7 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 					defer s.keepAliveLock.Unlock()
 					// have to KeepAliveOnce before KeepAlive because KeepAlive won't throw error even when lease OT
 					var keepAliveOnceResp *clientv3.LeaseKeepAliveResponse
-					s.keepAliveCtx.Done()
+					s.keepAliveCancel()
 					s.keepAliveCtx, s.keepAliveCancel = context.WithCancel(context.Background())
 					err := retry.Do(s.ctx, func() error {
 						ctx, cancel := context.WithTimeout(s.keepAliveCtx, time.Second*10)
@@ -503,14 +503,13 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 						s.safeCloseLiveCh()
 						return
 					}
-					s.processKeepAliveResponse(chNew)
+					go s.processKeepAliveResponse(chNew)
 					return
 				}
 				if resp == nil {
 					log.Warn("session keepalive response failed")
 					s.safeCloseLiveCh()
 				}
-				//failCh <- true
 			}
 		}
 	}()
