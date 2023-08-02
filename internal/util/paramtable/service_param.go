@@ -486,6 +486,8 @@ type MinioConfig struct {
 	CloudProvider   string
 	IAMEndpoint     string
 	LogLevel        string
+	Region          string
+	UseVirtualHost  bool
 }
 
 func (p *MinioConfig) init(base *BaseTable) {
@@ -501,6 +503,8 @@ func (p *MinioConfig) init(base *BaseTable) {
 	p.initCloudProvider()
 	p.initIAMEndpoint()
 	p.initLogLevel()
+	p.initUseVirtualHost()
+	p.initRegion()
 }
 
 func (p *MinioConfig) initAddress() {
@@ -566,6 +570,15 @@ func (p *MinioConfig) initUseIAM() {
 	}
 }
 
+func (p *MinioConfig) initUseVirtualHost() {
+	useVirHost := p.Base.LoadWithDefault("minio.useVirtualHost", DefaultMinioUseVirtualHost)
+	var err error
+	p.UseVirtualHost, err = strconv.ParseBool(useVirHost)
+	if err != nil {
+		panic("parse bool useVirtualHost:" + err.Error())
+	}
+}
+
 // CloudProvider supported
 const (
 	CloudProviderAWS    = "aws"
@@ -592,4 +605,8 @@ func (p *MinioConfig) initIAMEndpoint() {
 
 func (p *MinioConfig) initLogLevel() {
 	p.LogLevel = p.Base.LoadWithDefault("minio.logLevel", DefaultMinioLogLevel)
+}
+
+func (p *MinioConfig) initRegion() {
+	p.Region = p.Base.LoadWithDefault("minio.region", DefaultMinioRegion)
 }

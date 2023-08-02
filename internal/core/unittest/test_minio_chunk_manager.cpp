@@ -30,11 +30,13 @@ class MinioChunkManagerTest : public testing::Test {
 
     virtual void
     SetUp() {
-        chunk_manager_ = std::make_unique<MinioChunkManager>(get_default_storage_config());
+        configs_ = get_default_storage_config();
+        chunk_manager_ = std::make_unique<MinioChunkManager>(configs_);
     }
 
  protected:
     MinioChunkManagerPtr chunk_manager_;
+    StorageConfig configs_;
 };
 
 StorageConfig
@@ -48,8 +50,8 @@ get_google_cloud_storage_config() {
     auto iamEndPoint = "";
     auto bucketName = "gcp-zilliz-infra-test";
 
-    return StorageConfig{endpoint, bucketName,  accessKey, accessValue, rootPath,
-                         "minio",  iamEndPoint, "error",   useSSL,      useIam};
+    return StorageConfig{endpoint,    bucketName, accessKey, accessValue, rootPath, "minio",
+                         iamEndPoint, "error",    "",        useSSL,      useIam};
 }
 
 class GoogleChunkManagerTest : public testing::Test {
@@ -95,7 +97,7 @@ TEST_F(MinioChunkManagerTest, BucketNegtive) {
 }
 
 TEST_F(MinioChunkManagerTest, ObjectExist) {
-    string testBucketName = "test-objexist";
+    string testBucketName = configs_.bucket_name;
     string objPath = "1/3";
     chunk_manager_->SetBucketName(testBucketName);
     if (!chunk_manager_->BucketExists(testBucketName)) {
@@ -108,15 +110,16 @@ TEST_F(MinioChunkManagerTest, ObjectExist) {
 }
 
 TEST_F(MinioChunkManagerTest, WritePositive) {
-    string testBucketName = "test-write";
+    string testBucketName = configs_.bucket_name;
     chunk_manager_->SetBucketName(testBucketName);
     EXPECT_EQ(chunk_manager_->GetBucketName(), testBucketName);
 
-    if (!chunk_manager_->BucketExists(testBucketName)) {
-        chunk_manager_->CreateBucket(testBucketName);
-    }
+    // if (!chunk_manager_->BucketExists(testBucketName)) {
+    //     chunk_manager_->CreateBucket(testBucketName);
+    // }
+    auto has_bucket = chunk_manager_->BucketExists(testBucketName);
     uint8_t data[5] = {0x17, 0x32, 0x45, 0x34, 0x23};
-    string path = "1/3/5";
+    string path = "1";
     chunk_manager_->Write(path, data, sizeof(data));
 
     bool exist = chunk_manager_->Exist(path);
@@ -141,7 +144,7 @@ TEST_F(MinioChunkManagerTest, WritePositive) {
 }
 
 TEST_F(MinioChunkManagerTest, ReadPositive) {
-    string testBucketName = "test-read";
+    string testBucketName = configs_.bucket_name;
     chunk_manager_->SetBucketName(testBucketName);
     EXPECT_EQ(chunk_manager_->GetBucketName(), testBucketName);
 

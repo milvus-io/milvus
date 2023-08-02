@@ -290,6 +290,8 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 				UseIAM:          Params.MinioCfg.UseIAM,
 				IAMEndpoint:     Params.MinioCfg.IAMEndpoint,
 				StorageType:     Params.CommonCfg.StorageType,
+				Region:          Params.MinioCfg.Region,
+				UseVirtualHost:  Params.MinioCfg.UseVirtualHost,
 			}
 		}
 		req := &indexpb.CreateJobRequest{

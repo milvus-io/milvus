@@ -95,9 +95,11 @@ get_default_storage_config() {
     auto iamEndPoint = minioConfig["iamEndpoint"].as<std::string>();
     auto logLevel = minioConfig["logLevel"].as<std::string>();
     auto bucketName = minioConfig["bucketName"].as<std::string>();
+    auto useVirHost = minioConfig["useVirtualHost"].as<bool>();
+    auto region = minioConfig["region"].as<std::string>();
 
-    return StorageConfig{endpoint, bucketName,  accessKey, accessValue, rootPath,
-                         "minio",  iamEndPoint, logLevel,  useSSL,      useIam};
+    return StorageConfig{endpoint,    bucketName, accessKey, accessValue, rootPath, "minio",
+                         iamEndPoint, logLevel,   region,    useSSL,      useIam,   useVirHost};
 }
 
 void
@@ -109,6 +111,7 @@ delete_cstorage_config(CStorageConfig config) {
     delete[] config.remote_root_path;
     delete[] config.storage_type;
     delete[] config.iam_endpoint;
+    delete[] config.region;
 }
 
 class TestConfigWrapper {
