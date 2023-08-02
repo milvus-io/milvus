@@ -625,7 +625,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	s1.LivenessCheck(ctx1, func() {
 		flag = true
 		signal <- struct{}{}
-		s1.keepAliveCancel()
+		s1.cancelKeepAlive()
 	})
 	assert.False(t, s1.isStandby.Load().(bool))
 
@@ -875,7 +875,7 @@ func (s *SessionSuite) TestKeepAliveRetryActiveCancel() {
 	session.processKeepAliveResponse(ch)
 	session.LivenessCheck(ctx, nil)
 	// active cancel, should not retry connect
-	session.keepAliveCancel()
+	session.cancelKeepAlive()
 
 	// sleep a while wait goroutine process
 	time.Sleep(time.Millisecond * 100)
