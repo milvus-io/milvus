@@ -12111,14 +12111,14 @@
         "datasource": {
           "uid": "$datasource"
         },
-        "definition": "label_values(kube_pod_info, namespace)",
+        "definition": "label_values(namespace)",
         "hide": 0,
         "includeAll": false,
         "multi": false,
         "name": "namespace",
         "options": [],
         "query": {
-          "query": "label_values(kube_pod_info, namespace)",
+          "query": "label_values(namespace)",
           "refId": "prometheus-namespace-Variable-Query"
         },
         "refresh": 1,
