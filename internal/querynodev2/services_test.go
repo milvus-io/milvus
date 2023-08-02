@@ -1170,7 +1170,7 @@ func (suite *ServiceSuite) TestSearch_Failed() {
 	resp, err = suite.node.Search(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-	suite.Contains(resp.GetStatus().GetReason(), "failed to get query shard delegator")
+	suite.Contains(resp.GetStatus().GetReason(), merr.ErrServiceUnavailable.Error())
 
 	suite.TestWatchDmChannelsInt64()
 	suite.TestLoadSegments_Int64()
@@ -1269,7 +1269,7 @@ func (suite *ServiceSuite) TestQuery_Failed() {
 	resp, err := suite.node.Query(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-	suite.Contains(resp.GetStatus().GetReason(), "failed to get query shard delegator")
+	suite.Contains(resp.GetStatus().GetReason(), merr.ErrServiceUnavailable.Error())
 
 	suite.TestWatchDmChannelsInt64()
 	suite.TestLoadSegments_Int64()

@@ -28,6 +28,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -327,7 +328,10 @@ func (node *DataNode) GetCompactionState(ctx context.Context, req *datapb.Compac
 	})
 
 	if len(results) > 0 {
-		log.Info("Compaction results", zap.Any("results", results))
+		planIDs := lo.Map(results, func(result *datapb.CompactionStateResult, i int) UniqueID {
+			return result.GetPlanID()
+		})
+		log.Info("Compaction results", zap.Int64s("planIDs", planIDs))
 	}
 	return &datapb.CompactionStateResponse{
 		Status:  merr.Status(nil),

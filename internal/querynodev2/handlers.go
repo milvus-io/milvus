@@ -175,8 +175,8 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 	// get delegator
 	sd, ok := node.delegators.Get(channel)
 	if !ok {
-		err := merr.WrapErrServiceUnavailable("failed to get query shard delegator")
-		log.Warn("Query failed, failed to get query shard delegator", zap.Error(err))
+		err := merr.WrapErrServiceUnavailable("failed to get shard delegator for query")
+		log.Warn("Query failed, failed to get shard delegator for query", zap.Error(err))
 		failRet.Status = merr.Status(err)
 		return failRet, nil
 	}
@@ -326,8 +326,8 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 	// get delegator
 	sd, ok := node.delegators.Get(channel)
 	if !ok {
-		err := merr.WrapErrServiceUnavailable("failed to get query shard delegator")
-		log.Warn("Query failed, failed to get query shard delegator", zap.Error(err))
+		err := merr.WrapErrServiceUnavailable("failed to get shard delegator for search")
+		log.Warn("Query failed, failed to get shard delegator for search", zap.Error(err))
 		failRet.Status.Reason = err.Error()
 		return failRet, err
 	}

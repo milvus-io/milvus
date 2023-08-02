@@ -33,7 +33,9 @@ KnowhereInitImpl(const char* conf_file) {
         knowhere::KnowhereConfig::SetBlasThreshold(16384);
         knowhere::KnowhereConfig::SetEarlyStopThreshold(0);
         knowhere::KnowhereConfig::ShowVersion();
-        google::InitGoogleLogging("milvus");
+        if (!google::IsGoogleLoggingInitialized()) {
+            google::InitGoogleLogging("milvus");
+        }
 
 #ifdef EMBEDDED_MILVUS
         // always disable all logs for embedded milvus
