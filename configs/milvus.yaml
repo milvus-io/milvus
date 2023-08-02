@@ -489,6 +489,13 @@ common:
   ImportMaxFileSize: 17179869184 # 16 * 1024 * 1024 * 1024
   # max file size to import for bulkInsert
 
+  locks:
+    metrics:
+      enable: false
+    threshold:
+      info: 500 # minimum milliseconds for printing durations in info level
+      warn: 1000 # minimum milliseconds for printing durations in warn level
+
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:
 #   1. TT protection;
