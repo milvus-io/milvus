@@ -492,8 +492,6 @@ func TestExprBinaryArithOp_Str(t *testing.T) {
 		"(30 % age1) == 0",
 		// Modulo is not supported in the parser but the engine can handle it since fmod is used
 		"(FloatN % 2.1) == 0",
-		// Different data types are not supported
-		"(age1 + 20.16) == 35.16",
 		// Left operand of the function must be an identifier
 		"(10.5 / floatN) == 5.75",
 	}

@@ -5,10 +5,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func IsBool(n *planpb.GenericValue) bool {
@@ -42,6 +41,14 @@ func IsNumber(n *planpb.GenericValue) bool {
 func IsString(n *planpb.GenericValue) bool {
 	switch n.GetVal().(type) {
 	case *planpb.GenericValue_StringVal:
+		return true
+	}
+	return false
+}
+
+func IsArray(n *planpb.GenericValue) bool {
+	switch n.GetVal().(type) {
+	case *planpb.GenericValue_ArrayVal:
 		return true
 	}
 	return false
@@ -119,33 +126,47 @@ func toValueExpr(n *planpb.GenericValue) *ExprWithType {
 	}
 }
 
-func getSameType(a, b schemapb.DataType) (schemapb.DataType, error) {
-	if hasJSONField(a, b) {
-		return schemapb.DataType_JSON, nil
+func getSameType(left, right *ExprWithType) (schemapb.DataType, error) {
+	lDataType, rDataType := left.dataType, right.dataType
+	if typeutil.IsArrayType(lDataType) {
+		lDataType = toColumnInfo(left).GetElementType()
 	}
-	if typeutil.IsFloatingType(a) && typeutil.IsArithmetic(b) {
-		return schemapb.DataType_Double, nil
+	if typeutil.IsArrayType(rDataType) {
+		rDataType = toColumnInfo(right).GetElementType()
+	}
+	if typeutil.IsJSONType(lDataType) {
+		if typeutil.IsJSONType(rDataType) {
+			return schemapb.DataType_JSON, nil
+		}
+		if typeutil.IsFloatingType(rDataType) {
+			return schemapb.DataType_Double, nil
+		}
+		if typeutil.IsIntegerType(rDataType) {
+			return schemapb.DataType_Int64, nil
+		}
+	}
+	if typeutil.IsFloatingType(lDataType) {
+		if typeutil.IsJSONType(rDataType) || typeutil.IsArithmetic(rDataType) {
+			return schemapb.DataType_Double, nil
+		}
+	}
+	if typeutil.IsIntegerType(lDataType) {
+		if typeutil.IsFloatingType(rDataType) {
+			return schemapb.DataType_Double, nil
+		}
+		if typeutil.IsIntegerType(rDataType) || typeutil.IsJSONType(rDataType) {
+			return schemapb.DataType_Int64, nil
+		}
 	}
 
-	if typeutil.IsIntegerType(a) && typeutil.IsIntegerType(b) {
-		return schemapb.DataType_Int64, nil
-	}
-
-	return schemapb.DataType_None, fmt.Errorf("incompatible data type, %s, %s", a.String(), b.String())
-}
-
-func hasJSONField(a, b schemapb.DataType) bool {
-	if typeutil.IsJSONType(a) || typeutil.IsJSONType(b) {
-		return true
-	}
-	return false
+	return schemapb.DataType_None, fmt.Errorf("incompatible data type, %s, %s", lDataType.String(), rDataType.String())
 }
 
 func calcDataType(left, right *ExprWithType, reverse bool) (schemapb.DataType, error) {
 	if reverse {
-		return getSameType(right.dataType, left.dataType)
+		return getSameType(right, left)
 	}
-	return getSameType(left.dataType, right.dataType)
+	return getSameType(left, right)
 }
 
 func reverseOrder(op planpb.OpType) (planpb.OpType, error) {
@@ -175,6 +196,9 @@ func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.
 	if typeutil.IsJSONType(dataType) {
 		return value, nil
 	}
+	if typeutil.IsArrayType(dataType) && IsArray(value) {
+		return value, nil
+	}
 	if typeutil.IsStringType(dataType) && IsString(value) {
 		return value, nil
 	}
@@ -192,17 +216,19 @@ func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.
 		}
 	}
 
-	if typeutil.IsIntegerType(dataType) {
-		if IsInteger(value) {
-			return value, nil
-		}
+	if typeutil.IsIntegerType(dataType) && IsInteger(value) {
+		return value, nil
 	}
 
 	return nil, fmt.Errorf("cannot cast value to %s, value: %s", dataType.String(), value)
 }
 
 func combineBinaryArithExpr(op planpb.OpType, arithOp planpb.ArithOpType, columnInfo *planpb.ColumnInfo, operand *planpb.GenericValue, value *planpb.GenericValue) *planpb.Expr {
-	castedValue, err := castValue(columnInfo.GetDataType(), operand)
+	dataType := columnInfo.GetDataType()
+	if typeutil.IsArrayType(dataType) && len(columnInfo.GetNestedPath()) != 0 {
+		dataType = columnInfo.GetElementType()
+	}
+	castedValue, err := castValue(dataType, operand)
 	if err != nil {
 		return nil
 	}
@@ -219,6 +245,19 @@ func combineBinaryArithExpr(op planpb.OpType, arithOp planpb.ArithOpType, column
 	}
 }
 
+func combineArrayLengthExpr(op planpb.OpType, arithOp planpb.ArithOpType, columnInfo *planpb.ColumnInfo, value *planpb.GenericValue) (*planpb.Expr, error) {
+	return &planpb.Expr{
+		Expr: &planpb.Expr_BinaryArithOpEvalRangeExpr{
+			BinaryArithOpEvalRangeExpr: &planpb.BinaryArithOpEvalRangeExpr{
+				ColumnInfo: columnInfo,
+				ArithOp:    arithOp,
+				Op:         op,
+				Value:      value,
+			},
+		},
+	}, nil
+}
+
 func handleBinaryArithExpr(op planpb.OpType, arithExpr *planpb.BinaryArithExpr, valueExpr *planpb.ValueExpr) (*planpb.Expr, error) {
 	switch op {
 	case planpb.OpType_Equal, planpb.OpType_NotEqual:
@@ -230,6 +269,10 @@ func handleBinaryArithExpr(op planpb.OpType, arithExpr *planpb.BinaryArithExpr, 
 
 	leftExpr, leftValue := arithExpr.Left.GetColumnExpr(), arithExpr.Left.GetValueExpr()
 	rightExpr, rightValue := arithExpr.Right.GetColumnExpr(), arithExpr.Right.GetValueExpr()
+	arithOp := arithExpr.GetOp()
+	if arithOp == planpb.ArithOpType_ArrayLength {
+		return combineArrayLengthExpr(op, arithOp, leftExpr.GetInfo(), valueExpr.GetValue())
+	}
 
 	if leftExpr != nil && rightExpr != nil {
 		// a + b == 3
@@ -247,7 +290,7 @@ func handleBinaryArithExpr(op planpb.OpType, arithExpr *planpb.BinaryArithExpr, 
 		// a * 2 == 3
 		// a / 2 == 3
 		// a % 2 == 3
-		return combineBinaryArithExpr(op, arithExpr.GetOp(), leftExpr.GetInfo(), rightValue.GetValue(), valueExpr.GetValue()), nil
+		return combineBinaryArithExpr(op, arithOp, leftExpr.GetInfo(), rightValue.GetValue(), valueExpr.GetValue()), nil
 	} else if rightExpr != nil && leftValue != nil {
 		// 2 + a == 3
 		// 2 - a == 3
@@ -257,9 +300,9 @@ func handleBinaryArithExpr(op planpb.OpType, arithExpr *planpb.BinaryArithExpr, 
 
 		switch arithExpr.GetOp() {
 		case planpb.ArithOpType_Add, planpb.ArithOpType_Mul:
-			return combineBinaryArithExpr(op, arithExpr.GetOp(), rightExpr.GetInfo(), leftValue.GetValue(), valueExpr.GetValue()), nil
+			return combineBinaryArithExpr(op, arithOp, rightExpr.GetInfo(), leftValue.GetValue(), valueExpr.GetValue()), nil
 		default:
-			return nil, fmt.Errorf("todo")
+			return nil, fmt.Errorf("module field is not yet supported")
 		}
 	} else {
 		// (a + b) / 2 == 3
@@ -268,7 +311,11 @@ func handleBinaryArithExpr(op planpb.OpType, arithExpr *planpb.BinaryArithExpr, 
 }
 
 func handleCompareRightValue(op planpb.OpType, left *ExprWithType, right *planpb.ValueExpr) (*planpb.Expr, error) {
-	castedValue, err := castValue(left.dataType, right.GetValue())
+	dataType := left.dataType
+	if typeutil.IsArrayType(dataType) && len(toColumnInfo(left).GetNestedPath()) != 0 {
+		dataType = toColumnInfo(left).GetElementType()
+	}
+	castedValue, err := castValue(dataType, right.GetValue())
 	if err != nil {
 		return nil, err
 	}
@@ -281,7 +328,6 @@ func handleCompareRightValue(op planpb.OpType, left *ExprWithType, right *planpb
 	if columnInfo == nil {
 		return nil, fmt.Errorf("not supported to combine multiple fields")
 	}
-
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_UnaryRangeExpr{
 			UnaryRangeExpr: &planpb.UnaryRangeExpr{
@@ -332,9 +378,49 @@ func relationalCompatible(t1, t2 schemapb.DataType) bool {
 	return both || neither
 }
 
+func canBeComparedDataType(left, right schemapb.DataType) bool {
+	switch left {
+	case schemapb.DataType_Bool:
+		return typeutil.IsBoolType(right) || typeutil.IsJSONType(right)
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32, schemapb.DataType_Int64,
+		schemapb.DataType_Float, schemapb.DataType_Double:
+		return typeutil.IsArithmetic(right) || typeutil.IsJSONType(right)
+	case schemapb.DataType_String, schemapb.DataType_VarChar:
+		return typeutil.IsStringType(right) || typeutil.IsJSONType(right)
+	case schemapb.DataType_JSON:
+		return true
+	default:
+		return false
+	}
+}
+
+func getArrayElementType(expr *ExprWithType) schemapb.DataType {
+	if columnInfo := toColumnInfo(expr); columnInfo != nil {
+		return columnInfo.GetElementType()
+	}
+	if valueExpr := expr.expr.GetValueExpr(); valueExpr != nil {
+		return valueExpr.GetValue().GetArrayVal().GetElementType()
+	}
+	return schemapb.DataType_None
+}
+
+func canBeCompared(left, right *ExprWithType) bool {
+	if !typeutil.IsArrayType(left.dataType) && !typeutil.IsArrayType(right.dataType) {
+		return canBeComparedDataType(left.dataType, right.dataType)
+	}
+	if typeutil.IsArrayType(left.dataType) && typeutil.IsArrayType(right.dataType) {
+		return canBeComparedDataType(getArrayElementType(left), getArrayElementType(right))
+	}
+	if typeutil.IsArrayType(left.dataType) {
+		return canBeComparedDataType(getArrayElementType(left), right.dataType)
+	}
+	return canBeComparedDataType(left.dataType, getArrayElementType(right))
+}
+
 func HandleCompare(op int, left, right *ExprWithType) (*planpb.Expr, error) {
-	if !relationalCompatible(left.dataType, right.dataType) {
-		return nil, fmt.Errorf("comparisons between string and non-string are not supported")
+	if !canBeCompared(left, right) {
+		return nil, fmt.Errorf("comparisons between %s, element_type: %s and %s elementType: %s are not supported",
+			left.dataType, getArrayElementType(left), right.dataType, getArrayElementType(right))
 	}
 
 	cmpOp := cmpOpMap[op]
@@ -423,4 +509,35 @@ func convertEscapeSingle(literal string) (string, error) {
 	b.WriteString(literal[end+1 : len(literal)-1])
 	b.WriteString(`"`)
 	return strconv.Unquote(b.String())
+}
+
+func canArithmeticDataType(left, right schemapb.DataType) bool {
+	switch left {
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32, schemapb.DataType_Int64,
+		schemapb.DataType_Float, schemapb.DataType_Double:
+		return typeutil.IsArithmetic(right) || typeutil.IsJSONType(right)
+	case schemapb.DataType_JSON:
+		return typeutil.IsArithmetic(right)
+	default:
+		return false
+	}
+}
+
+func canArithmetic(left *ExprWithType, right *ExprWithType) bool {
+	if !typeutil.IsArrayType(left.dataType) && !typeutil.IsArrayType(right.dataType) {
+		return canArithmeticDataType(left.dataType, right.dataType)
+	}
+	if typeutil.IsArrayType(left.dataType) && typeutil.IsArrayType(right.dataType) {
+		return canArithmeticDataType(getArrayElementType(left), getArrayElementType(right))
+	}
+	if typeutil.IsArrayType(left.dataType) {
+		return canArithmeticDataType(getArrayElementType(left), right.dataType)
+	}
+	return canArithmeticDataType(left.dataType, getArrayElementType(right))
+}
+
+func isIntegerColumn(col *planpb.ColumnInfo) bool {
+	return typeutil.IsIntegerType(col.GetDataType()) ||
+		(typeutil.IsArrayType(col.GetDataType()) && typeutil.IsIntegerType(col.GetElementType())) ||
+		typeutil.IsJSONType(col.GetDataType())
 }

@@ -87,6 +87,16 @@ VectorBase::set_data_raw(ssize_t element_offset,
 
             return set_data_raw(element_offset, data_raw.data(), element_count);
         }
+        case DataType::ARRAY: {
+            auto& array_data = FIELD_DATA(data, array);
+            std::vector<Array> data_raw{};
+            data_raw.reserve(array_data.size());
+            for (auto& array_bytes : array_data) {
+                data_raw.emplace_back(Array(array_bytes));
+            }
+
+            return set_data_raw(element_offset, data_raw.data(), element_count);
+        }
         default: {
             PanicCodeInfo(DataTypeInvalid,
                           fmt::format("unsupported datatype {}",

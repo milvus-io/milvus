@@ -122,6 +122,13 @@ class SegmentSealedImpl : public SegmentSealed {
             limit, bitset, false_filtered_out);
     }
 
+    // Calculate: output[i] = Vec[seg_offset[i]]
+    // where Vec is determined from field_offset
+    std::unique_ptr<DataArray>
+    bulk_subscript(FieldId field_id,
+                   const int64_t* seg_offsets,
+                   int64_t count) const override;
+
  protected:
     // blob and row_count
     SpanBase
@@ -137,13 +144,6 @@ class SegmentSealedImpl : public SegmentSealed {
                    const int64_t* seg_offsets,
                    int64_t count,
                    void* output) const override;
-
-    // Calculate: output[i] = Vec[seg_offset[i]]
-    // where Vec is determined from field_offset
-    std::unique_ptr<DataArray>
-    bulk_subscript(FieldId field_id,
-                   const int64_t* seg_offsets,
-                   int64_t count) const override;
 
     void
     check_search(const query::Plan* plan) const override;
@@ -167,6 +167,12 @@ class SegmentSealedImpl : public SegmentSealed {
     template <typename S, typename T = S>
     static void
     bulk_subscript_impl(const ColumnBase* field,
+                        const int64_t* seg_offsets,
+                        int64_t count,
+                        void* dst_raw);
+
+    static void
+    bulk_subscript_impl(const ColumnBase* column,
                         const int64_t* seg_offsets,
                         int64_t count,
                         void* dst_raw);

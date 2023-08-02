@@ -135,6 +135,64 @@ GetRawDataSizeOfDataArray(const DataArray* data,
                 }
                 break;
             }
+            case DataType::ARRAY: {
+                auto& array_data = FIELD_DATA(data, array);
+                switch (field_meta.get_element_type()) {
+                    case DataType::BOOL: {
+                        for (auto& array_bytes : array_data) {
+                            result += array_bytes.bool_data().data_size() *
+                                      sizeof(bool);
+                        }
+                        break;
+                    }
+                    case DataType::INT8:
+                    case DataType::INT16:
+                    case DataType::INT32: {
+                        for (auto& array_bytes : array_data) {
+                            result += array_bytes.int_data().data_size() *
+                                      sizeof(int);
+                        }
+                        break;
+                    }
+                    case DataType::INT64: {
+                        for (auto& array_bytes : array_data) {
+                            result += array_bytes.long_data().data_size() *
+                                      sizeof(int64_t);
+                        }
+                        break;
+                    }
+                    case DataType::FLOAT: {
+                        for (auto& array_bytes : array_data) {
+                            result += array_bytes.float_data().data_size() *
+                                      sizeof(float);
+                        }
+                        break;
+                    }
+                    case DataType::DOUBLE: {
+                        for (auto& array_bytes : array_data) {
+                            result += array_bytes.double_data().data_size() *
+                                      sizeof(double);
+                        }
+                        break;
+                    }
+                    case DataType::VARCHAR:
+                    case DataType::STRING: {
+                        for (auto& array_bytes : array_data) {
+                            auto element_num =
+                                array_bytes.string_data().data_size();
+                            for (int i = 0; i < element_num; ++i) {
+                                result +=
+                                    array_bytes.string_data().data(i).size();
+                            }
+                        }
+                        break;
+                    }
+                    default:
+                        PanicInfo("unsupported element type for array");
+                }
+
+                break;
+            }
             default: {
                 PanicInfo(
                     fmt::format("unsupported variable datatype {}", data_type));
@@ -206,6 +264,14 @@ CreateScalarDataArray(int64_t count, const FieldMeta& field_meta) {
             obj->mutable_data()->Reserve(count);
             for (int i = 0; i < count; i++) {
                 *(obj->mutable_data()->Add()) = std::string();
+            }
+            break;
+        }
+        case DataType::ARRAY: {
+            auto obj = scalar_array->mutable_array_data();
+            obj->mutable_data()->Reserve(count);
+            for (int i = 0; i < count; i++) {
+                *(obj->mutable_data()->Add()) = proto::schema::ScalarField();
             }
             break;
         }
@@ -321,6 +387,14 @@ CreateScalarDataArrayFrom(const void* data_raw,
         case DataType::JSON: {
             auto data = reinterpret_cast<const std::string*>(data_raw);
             auto obj = scalar_array->mutable_json_data();
+            for (auto i = 0; i < count; i++) {
+                *(obj->mutable_data()->Add()) = data[i];
+            }
+            break;
+        }
+        case DataType::ARRAY: {
+            auto data = reinterpret_cast<const ScalarArray*>(data_raw);
+            auto obj = scalar_array->mutable_array_data();
             for (auto i = 0; i < count; i++) {
                 *(obj->mutable_data()->Add()) = data[i];
             }
@@ -474,6 +548,14 @@ MergeDataArray(
             case DataType::JSON: {
                 auto& data = FIELD_DATA(src_field_data, json);
                 auto obj = scalar_array->mutable_json_data();
+                *(obj->mutable_data()->Add()) = data[src_offset];
+                break;
+            }
+            case DataType::ARRAY: {
+                auto& data = FIELD_DATA(src_field_data, array);
+                auto obj = scalar_array->mutable_array_data();
+                obj->set_element_type(
+                    proto::schema::DataType(field_meta.get_element_type()));
                 *(obj->mutable_data()->Add()) = data[src_offset];
                 break;
             }

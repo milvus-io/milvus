@@ -341,11 +341,10 @@ struct InsertRecord {
                     this->append_field_data<Json>(field_id, size_per_chunk);
                     break;
                 }
-                // case DataType::ARRAY: {
-                //     this->append_field_data<std::string>(field_id,
-                //                                          size_per_chunk);
-                //     break;
-                // }
+                case DataType::ARRAY: {
+                    this->append_field_data<Array>(field_id, size_per_chunk);
+                    break;
+                }
                 default: {
                     PanicCodeInfo(DataTypeInvalid,
                                   fmt::format("unsupported scalar type",

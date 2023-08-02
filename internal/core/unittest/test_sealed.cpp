@@ -382,6 +382,7 @@ TEST(Sealed, LoadFieldData) {
     schema->AddDebugField("int16", DataType::INT16);
     schema->AddDebugField("float", DataType::FLOAT);
     schema->AddDebugField("json", DataType::JSON);
+    schema->AddDebugField("array", DataType::ARRAY, DataType::INT64);
     schema->set_primary_field_id(counter_id);
 
     auto dataset = DataGen(schema, N);
@@ -506,6 +507,7 @@ TEST(Sealed, LoadFieldDataMmap) {
     schema->AddDebugField("int16", DataType::INT16);
     schema->AddDebugField("float", DataType::FLOAT);
     schema->AddDebugField("json", DataType::JSON);
+    schema->AddDebugField("array", DataType::ARRAY, DataType::INT64);
     schema->set_primary_field_id(counter_id);
 
     auto dataset = DataGen(schema, N);
@@ -1258,4 +1260,112 @@ TEST(Sealed, GetVectorFromChunkCache) {
     Assert(!exist);
     exist = std::filesystem::exists(mmap_dir);
     Assert(!exist);
+}
+
+TEST(Sealed, LoadArrayFieldData) {
+    auto dim = 16;
+    auto topK = 5;
+    auto N = 10;
+    auto metric_type = knowhere::metric::L2;
+    auto schema = std::make_shared<Schema>();
+    auto fakevec_id = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto counter_id = schema->AddDebugField("counter", DataType::INT64);
+    auto array_id =
+        schema->AddDebugField("array", DataType::ARRAY, DataType::INT64);
+    schema->set_primary_field_id(counter_id);
+
+    auto dataset = DataGen(schema, N);
+    auto fakevec = dataset.get_col<float>(fakevec_id);
+    auto segment = CreateSealedSegment(schema);
+
+    const char* raw_plan = R"(vector_anns:<
+            field_id:100
+            predicates:<
+                json_contains_expr:<
+                    column_info:<
+                        field_id:102
+                        data_type:Array
+                        element_type:Int64
+                    >
+                    elements:<int64_val:1 >
+                    op:Contains
+                    elements_same_type:true
+                >
+            >
+            query_info:<
+                topk: 5
+                round_decimal: 3
+                metric_type: "L2"
+                search_params: "{\"nprobe\": 10}"
+            > placeholder_tag:"$0"
+        >)";
+
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    auto plan =
+        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+    auto num_queries = 5;
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    SealedLoadFieldData(dataset, *segment);
+    segment->Search(plan.get(), ph_group.get());
+
+    auto ids_ds = GenRandomIds(N);
+    auto s = dynamic_cast<SegmentSealedImpl*>(segment.get());
+    auto int64_result = s->bulk_subscript(array_id, ids_ds->GetIds(), N);
+    auto result_count = int64_result->scalars().array_data().data().size();
+    ASSERT_EQ(result_count, N);
+}
+
+TEST(Sealed, LoadArrayFieldDataWithMMap) {
+    auto dim = 16;
+    auto topK = 5;
+    auto N = ROW_COUNT;
+    auto metric_type = knowhere::metric::L2;
+    auto schema = std::make_shared<Schema>();
+    auto fakevec_id = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto counter_id = schema->AddDebugField("counter", DataType::INT64);
+    auto array_id =
+        schema->AddDebugField("array", DataType::ARRAY, DataType::INT64);
+    schema->set_primary_field_id(counter_id);
+
+    auto dataset = DataGen(schema, N);
+    auto fakevec = dataset.get_col<float>(fakevec_id);
+    auto segment = CreateSealedSegment(schema);
+
+    const char* raw_plan = R"(vector_anns:<
+            field_id:100
+            predicates:<
+                json_contains_expr:<
+                    column_info:<
+                        field_id:102
+                        data_type:Array
+                        element_type:Int64
+                    >
+                    elements:<int64_val:1 >
+                    op:Contains
+                    elements_same_type:true
+                >
+            >
+            query_info:<
+                topk: 5
+                round_decimal: 3
+                metric_type: "L2"
+                search_params: "{\"nprobe\": 10}"
+            > placeholder_tag:"$0"
+        >)";
+
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    auto plan =
+        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+    auto num_queries = 5;
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    SealedLoadFieldData(dataset, *segment, {}, true);
+    segment->Search(plan.get(), ph_group.get());
 }

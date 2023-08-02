@@ -349,6 +349,7 @@ func TestValidatePrimaryKey(t *testing.T) {
 func TestValidateFieldType(t *testing.T) {
 	type testCase struct {
 		dt       schemapb.DataType
+		et       schemapb.DataType
 		validate bool
 	}
 	cases := []testCase{
@@ -396,6 +397,80 @@ func TestValidateFieldType(t *testing.T) {
 			dt:       schemapb.DataType_VarChar,
 			validate: true,
 		},
+		{
+			dt:       schemapb.DataType_String,
+			validate: false,
+		},
+		{
+			dt:       schemapb.DataType_Array,
+			et:       schemapb.DataType_Bool,
+			validate: true,
+		},
+		{
+			dt:       schemapb.DataType_Array,
+			et:       schemapb.DataType_Int8,
+			validate: true,
+		},
+		{
+			dt:       schemapb.DataType_Array,
+			et:       schemapb.DataType_Int16,
+			validate: true,
+		},
+		{
+			dt:       schemapb.DataType_Array,
+			et:       schemapb.DataType_Int32,
+			validate: true,
+		},
+		{
+			dt:       schemapb.DataType_Array,
+			et:       schemapb.DataType_Int64,
+			validate: true,
+		},
+		{
+			dt:       schemapb.DataType_Array,
+			et:       schemapb.DataType_Float,
+			validate: true,
+		},
+		{
+			dt:       schemapb.DataType_Array,
+			et:       schemapb.DataType_Double,
+			validate: true,
+		},
+		{
+			dt:       schemapb.DataType_Array,
+			et:       schemapb.DataType_VarChar,
+			validate: true,
+		},
+		{
+			dt:       schemapb.DataType_Array,
+			et:       schemapb.DataType_String,
+			validate: false,
+		},
+		{
+			dt:       schemapb.DataType_Array,
+			et:       schemapb.DataType_None,
+			validate: false,
+		},
+		{
+			dt:       schemapb.DataType_Array,
+			et:       schemapb.DataType_JSON,
+			validate: false,
+		},
+		{
+			dt:       schemapb.DataType_Array,
+			et:       schemapb.DataType_Array,
+			validate: false,
+		},
+		{
+			dt:       schemapb.DataType_Array,
+			et:       schemapb.DataType_FloatVector,
+			validate: false,
+		},
+		{
+			dt:       schemapb.DataType_Array,
+			et:       schemapb.DataType_BinaryVector,
+			validate: false,
+		},
 	}
 
 	for _, tc := range cases {
@@ -403,7 +478,8 @@ func TestValidateFieldType(t *testing.T) {
 			sch := &schemapb.CollectionSchema{
 				Fields: []*schemapb.FieldSchema{
 					{
-						DataType: tc.dt,
+						DataType:    tc.dt,
+						ElementType: tc.et,
 					},
 				},
 			}
@@ -1936,5 +2012,69 @@ func Test_CheckDynamicFieldData(t *testing.T) {
 		}
 		err := checkDynamicFieldData(schema, insertMsg)
 		assert.NoError(t, err)
+	})
+}
+
+func Test_validateMaxCapacityPerRow(t *testing.T) {
+	t.Run("normal case", func(t *testing.T) {
+		arrayField := &schemapb.FieldSchema{
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_VarChar,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.MaxLengthKey,
+					Value: "100",
+				},
+				{
+					Key:   common.MaxCapacityKey,
+					Value: "10",
+				},
+			},
+		}
+
+		err := validateMaxCapacityPerRow("collection", arrayField)
+		assert.NoError(t, err)
+	})
+
+	t.Run("no max capacity", func(t *testing.T) {
+		arrayField := &schemapb.FieldSchema{
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Int64,
+		}
+
+		err := validateMaxCapacityPerRow("collection", arrayField)
+		assert.Error(t, err)
+	})
+
+	t.Run("max capacity not int", func(t *testing.T) {
+		arrayField := &schemapb.FieldSchema{
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Int64,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.MaxCapacityKey,
+					Value: "six",
+				},
+			},
+		}
+
+		err := validateMaxCapacityPerRow("collection", arrayField)
+		assert.Error(t, err)
+	})
+
+	t.Run("max capacity exceed max", func(t *testing.T) {
+		arrayField := &schemapb.FieldSchema{
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Int64,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.MaxCapacityKey,
+					Value: "4097",
+				},
+			},
+		}
+
+		err := validateMaxCapacityPerRow("collection", arrayField)
+		assert.Error(t, err)
 	})
 }

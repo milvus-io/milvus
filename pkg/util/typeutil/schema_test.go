@@ -603,7 +603,6 @@ func genFieldData(fieldName string, fieldID int64, fieldType schemapb.DataType, 
 			FieldId: fieldID,
 		}
 	case schemapb.DataType_Array:
-		data := fieldValue.([][]int32)
 		fieldData = &schemapb.FieldData{
 			Type:      schemapb.DataType_Array,
 			FieldName: fieldName,
@@ -611,23 +610,12 @@ func genFieldData(fieldName string, fieldID int64, fieldType schemapb.DataType, 
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_ArrayData{
 						ArrayData: &schemapb.ArrayArray{
-							Data:        []*schemapb.ScalarField{},
+							Data:        fieldValue.([]*schemapb.ScalarField),
 							ElementType: schemapb.DataType_Int32,
 						},
 					},
 				},
 			},
-		}
-
-		for _, list := range data {
-			arrayList := fieldData.GetScalars().GetArrayData()
-			arrayList.Data = append(arrayList.Data, &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_IntData{
-					IntData: &schemapb.IntArray{
-						Data: list,
-					},
-				},
-			})
 		}
 
 	case schemapb.DataType_JSON:
@@ -663,6 +651,7 @@ func TestAppendFieldData(t *testing.T) {
 		BinaryVectorFieldName  = "BinaryVectorField"
 		FloatVectorFieldName   = "FloatVectorField"
 		Float16VectorFieldName = "Float16VectorField"
+		ArrayFieldName         = "ArrayField"
 		BoolFieldID            = common.StartOfUserFieldID + 1
 		Int32FieldID           = common.StartOfUserFieldID + 2
 		Int64FieldID           = common.StartOfUserFieldID + 3
@@ -671,6 +660,7 @@ func TestAppendFieldData(t *testing.T) {
 		BinaryVectorFieldID    = common.StartOfUserFieldID + 6
 		FloatVectorFieldID     = common.StartOfUserFieldID + 7
 		Float16VectorFieldID   = common.StartOfUserFieldID + 8
+		ArrayFieldID           = common.StartOfUserFieldID + 9
 	)
 	BoolArray := []bool{true, false}
 	Int32Array := []int32{1, 2}
@@ -681,8 +671,24 @@ func TestAppendFieldData(t *testing.T) {
 	FloatVector := []float32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 88.0}
 	Float16Vector := []byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff,
 		0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}
+	ArrayArray := []*schemapb.ScalarField{
+		{
+			Data: &schemapb.ScalarField_IntData{
+				IntData: &schemapb.IntArray{
+					Data: []int32{1, 2, 3},
+				},
+			},
+		},
+		{
+			Data: &schemapb.ScalarField_IntData{
+				IntData: &schemapb.IntArray{
+					Data: []int32{4, 5, 6},
+				},
+			},
+		},
+	}
 
-	result := make([]*schemapb.FieldData, 8)
+	result := make([]*schemapb.FieldData, 9)
 	var fieldDataArray1 []*schemapb.FieldData
 	fieldDataArray1 = append(fieldDataArray1, genFieldData(BoolFieldName, BoolFieldID, schemapb.DataType_Bool, BoolArray[0:1], 1))
 	fieldDataArray1 = append(fieldDataArray1, genFieldData(Int32FieldName, Int32FieldID, schemapb.DataType_Int32, Int32Array[0:1], 1))
@@ -692,6 +698,7 @@ func TestAppendFieldData(t *testing.T) {
 	fieldDataArray1 = append(fieldDataArray1, genFieldData(BinaryVectorFieldName, BinaryVectorFieldID, schemapb.DataType_BinaryVector, BinaryVector[0:Dim/8], Dim))
 	fieldDataArray1 = append(fieldDataArray1, genFieldData(FloatVectorFieldName, FloatVectorFieldID, schemapb.DataType_FloatVector, FloatVector[0:Dim], Dim))
 	fieldDataArray1 = append(fieldDataArray1, genFieldData(Float16VectorFieldName, Float16VectorFieldID, schemapb.DataType_Float16Vector, Float16Vector[0:Dim*2], Dim))
+	fieldDataArray1 = append(fieldDataArray1, genFieldData(ArrayFieldName, ArrayFieldID, schemapb.DataType_Array, ArrayArray[0:1], 1))
 
 	var fieldDataArray2 []*schemapb.FieldData
 	fieldDataArray2 = append(fieldDataArray2, genFieldData(BoolFieldName, BoolFieldID, schemapb.DataType_Bool, BoolArray[1:2], 1))
@@ -702,6 +709,7 @@ func TestAppendFieldData(t *testing.T) {
 	fieldDataArray2 = append(fieldDataArray2, genFieldData(BinaryVectorFieldName, BinaryVectorFieldID, schemapb.DataType_BinaryVector, BinaryVector[Dim/8:2*Dim/8], Dim))
 	fieldDataArray2 = append(fieldDataArray2, genFieldData(FloatVectorFieldName, FloatVectorFieldID, schemapb.DataType_FloatVector, FloatVector[Dim:2*Dim], Dim))
 	fieldDataArray2 = append(fieldDataArray2, genFieldData(Float16VectorFieldName, Float16VectorFieldID, schemapb.DataType_Float16Vector, Float16Vector[2*Dim:4*Dim], Dim))
+	fieldDataArray2 = append(fieldDataArray2, genFieldData(ArrayFieldName, ArrayFieldID, schemapb.DataType_Array, ArrayArray[1:2], 1))
 
 	AppendFieldData(result, fieldDataArray1, 0)
 	AppendFieldData(result, fieldDataArray2, 0)
@@ -714,6 +722,7 @@ func TestAppendFieldData(t *testing.T) {
 	assert.Equal(t, BinaryVector, result[5].GetVectors().Data.(*schemapb.VectorField_BinaryVector).BinaryVector)
 	assert.Equal(t, FloatVector, result[6].GetVectors().GetFloatVector().Data)
 	assert.Equal(t, Float16Vector, result[7].GetVectors().Data.(*schemapb.VectorField_Float16Vector).Float16Vector)
+	assert.Equal(t, ArrayArray, result[8].GetScalars().GetArrayData().Data)
 }
 
 func TestDeleteFieldData(t *testing.T) {
@@ -997,7 +1006,22 @@ func TestCalcColumnSize(t *testing.T) {
 		105: []float64{0, 1},
 		106: []string{"0", "1"},
 		107: []float32{0, 1, 2, 3},
-		109: [][]int32{{1, 2, 3}, {4, 5, 6}},
+		109: []*schemapb.ScalarField{
+			{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: []int32{1, 2, 3},
+					},
+				},
+			},
+			{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: []int32{4, 5, 6},
+					},
+				},
+			},
+		},
 		110: [][]byte{[]byte(`{"key":"value"}`), []byte(`{"hello":"world"}`)},
 	}
 	schema := &schemapb.CollectionSchema{
@@ -1085,9 +1109,9 @@ func TestCalcColumnSize(t *testing.T) {
 				expected += len(v)
 			}
 		case schemapb.DataType_Array:
-			data := values.([][]int32)
+			data := values.([]*schemapb.ScalarField)
 			for _, v := range data {
-				expected += binary.Size(v)
+				expected += binary.Size(v.GetIntData().GetData())
 			}
 		case schemapb.DataType_JSON:
 			data := values.([][]byte)

@@ -141,6 +141,10 @@ SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan,
         auto col = bulk_subscript(field_id,
                                   retrieve_results.result_offsets_.data(),
                                   retrieve_results.result_offsets_.size());
+        if (field_meta.get_data_type() == DataType::ARRAY) {
+            col->mutable_scalars()->mutable_array_data()->set_element_type(
+                proto::schema::DataType(field_meta.get_element_type()));
+        }
         auto col_data = col.release();
         fields_data->AddAllocated(col_data);
         if (pk_field_id.has_value() && pk_field_id.value() == field_id) {

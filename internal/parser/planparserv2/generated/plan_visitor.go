@@ -58,6 +58,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#Relational.
 	VisitRelational(ctx *RelationalContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#ArrayLength.
+	VisitArrayLength(ctx *ArrayLengthContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#Term.
 	VisitTerm(ctx *TermContext) interface{}
 

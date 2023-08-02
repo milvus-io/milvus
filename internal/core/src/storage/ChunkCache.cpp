@@ -76,7 +76,9 @@ ChunkCache::Mmap(const std::filesystem::path& path,
 
     // write the field data to disk
     auto data_size = field_data->Size();
-    auto written = WriteFieldData(file, data_type, field_data);
+    // unused
+    std::vector<std::vector<uint64_t>> element_indices{};
+    auto written = WriteFieldData(file, data_type, field_data, element_indices);
     AssertInfo(written == data_size,
                fmt::format("failed to write data file {}, written "
                            "{} but total {}, err: {}",

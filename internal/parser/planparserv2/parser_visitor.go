@@ -49,6 +49,7 @@ func (v *ParserVisitor) translateIdentifier(identifier string) (*ExprWithType, e
 						IsAutoID:       field.AutoID,
 						NestedPath:     nestedPath,
 						IsPartitionKey: field.IsPartitionKey,
+						ElementType:    field.GetElementType(),
 					},
 				},
 			},
@@ -147,6 +148,13 @@ func (v *ParserVisitor) VisitString(ctx *parser.StringContext) interface{} {
 	}
 }
 
+func checkDirectComparisonBinaryField(columnInfo *planpb.ColumnInfo) error {
+	if typeutil.IsArrayType(columnInfo.GetDataType()) && len(columnInfo.GetNestedPath()) == 0 {
+		return fmt.Errorf("can not comparisons array fields directly")
+	}
+	return nil
+}
+
 // VisitAddSub translates expr to arithmetic plan.
 func (v *ParserVisitor) VisitAddSub(ctx *parser.AddSubContext) interface{} {
 	left := ctx.Expr(0).Accept(v)
@@ -191,12 +199,13 @@ func (v *ParserVisitor) VisitAddSub(ctx *parser.AddSubContext) interface{} {
 		return fmt.Errorf("invalid arithmetic expression, left: %s, op: %s, right: %s", ctx.Expr(0).GetText(), ctx.GetOp(), ctx.Expr(1).GetText())
 	}
 
-	if typeutil.IsArrayType(leftExpr.dataType) || typeutil.IsArrayType(rightExpr.dataType) {
-		return fmt.Errorf("invalid expression, array is not supported for AddSub")
+	if err := checkDirectComparisonBinaryField(toColumnInfo(leftExpr)); err != nil {
+		return err
 	}
-
-	if (!typeutil.IsArithmetic(leftExpr.dataType) && !typeutil.IsJSONType(leftExpr.dataType)) ||
-		(!typeutil.IsArithmetic(rightExpr.dataType) && !typeutil.IsJSONType(rightExpr.dataType)) {
+	if err := checkDirectComparisonBinaryField(toColumnInfo(rightExpr)); err != nil {
+		return err
+	}
+	if !canArithmetic(leftExpr, rightExpr) {
 		return fmt.Errorf("'%s' can only be used between integer or floating or json field expressions", arithNameMap[ctx.GetOp().GetTokenType()])
 	}
 
@@ -274,19 +283,19 @@ func (v *ParserVisitor) VisitMulDivMod(ctx *parser.MulDivModContext) interface{}
 		return fmt.Errorf("invalid arithmetic expression, left: %s, op: %s, right: %s", ctx.Expr(0).GetText(), ctx.GetOp(), ctx.Expr(1).GetText())
 	}
 
-	if typeutil.IsArrayType(leftExpr.dataType) || typeutil.IsArrayType(rightExpr.dataType) {
-		return fmt.Errorf("invalid expression, array is not supported for MulDivMod")
+	if err := checkDirectComparisonBinaryField(toColumnInfo(leftExpr)); err != nil {
+		return err
 	}
-
-	if (!typeutil.IsArithmetic(leftExpr.dataType) && !typeutil.IsJSONType(leftExpr.dataType)) ||
-		(!typeutil.IsArithmetic(rightExpr.dataType) && !typeutil.IsJSONType(rightExpr.dataType)) {
-		return fmt.Errorf("'%s' can only be used between integer or floating expressions", arithNameMap[ctx.GetOp().GetTokenType()])
+	if err := checkDirectComparisonBinaryField(toColumnInfo(rightExpr)); err != nil {
+		return err
+	}
+	if !canArithmetic(leftExpr, rightExpr) {
+		return fmt.Errorf("'%s' can only be used between integer or floating or json field expressions", arithNameMap[ctx.GetOp().GetTokenType()])
 	}
 
 	switch ctx.GetOp().GetTokenType() {
 	case parser.PlanParserMOD:
-		if (!typeutil.IsIntegerType(leftExpr.dataType) && !typeutil.IsJSONType(leftExpr.dataType)) ||
-			(!typeutil.IsIntegerType(rightExpr.dataType) && !typeutil.IsJSONType(rightExpr.dataType)) {
+		if !isIntegerColumn(toColumnInfo(leftExpr)) && !isIntegerColumn(toColumnInfo(rightExpr)) {
 			return fmt.Errorf("modulo can only apply on integer types")
 		}
 	default:
@@ -349,10 +358,6 @@ func (v *ParserVisitor) VisitEquality(ctx *parser.EqualityContext) interface{} {
 		rightExpr = getExpr(right)
 	}
 
-	if typeutil.IsArrayType(leftExpr.dataType) || typeutil.IsArrayType(rightExpr.dataType) {
-		return fmt.Errorf("invalid expression, array is not supported for Equality")
-	}
-
 	expr, err := HandleCompare(ctx.GetOp().GetTokenType(), leftExpr, rightExpr)
 	if err != nil {
 		return err
@@ -405,9 +410,11 @@ func (v *ParserVisitor) VisitRelational(ctx *parser.RelationalContext) interface
 	} else {
 		rightExpr = getExpr(right)
 	}
-
-	if typeutil.IsArrayType(leftExpr.dataType) || typeutil.IsArrayType(rightExpr.dataType) {
-		return fmt.Errorf("invalid expression, array is not supported for Relational")
+	if err := checkDirectComparisonBinaryField(toColumnInfo(leftExpr)); err != nil {
+		return err
+	}
+	if err := checkDirectComparisonBinaryField(toColumnInfo(rightExpr)); err != nil {
+		return err
 	}
 
 	expr, err := HandleCompare(ctx.GetOp().GetTokenType(), leftExpr, rightExpr)
@@ -433,14 +440,19 @@ func (v *ParserVisitor) VisitLike(ctx *parser.LikeContext) interface{} {
 		return fmt.Errorf("the left operand of like is invalid")
 	}
 
-	if !typeutil.IsStringType(leftExpr.dataType) && !typeutil.IsJSONType(leftExpr.dataType) {
-		return fmt.Errorf("like operation on non-string or no-json field is unsupported")
-	}
-
 	column := toColumnInfo(leftExpr)
 	if column == nil {
 		return fmt.Errorf("like operation on complicated expr is unsupported")
 	}
+	if err := checkDirectComparisonBinaryField(column); err != nil {
+		return err
+	}
+
+	if !typeutil.IsStringType(leftExpr.dataType) && !typeutil.IsJSONType(leftExpr.dataType) &&
+		!(typeutil.IsArrayType(leftExpr.dataType) && typeutil.IsStringType(column.GetElementType())) {
+		return fmt.Errorf("like operation on non-string or no-json field is unsupported")
+	}
+
 	pattern, err := convertEscapeSingle(ctx.StringLiteral().GetText())
 	if err != nil {
 		return err
@@ -482,6 +494,10 @@ func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 		return fmt.Errorf("'term' can only be used on single field, but got: %s", ctx.Expr(0).GetText())
 	}
 
+	dataType := columnInfo.GetDataType()
+	if typeutil.IsArrayType(dataType) && len(columnInfo.GetNestedPath()) != 0 {
+		dataType = columnInfo.GetElementType()
+	}
 	allExpr := ctx.AllExpr()
 	lenOfAllExpr := len(allExpr)
 	values := make([]*planpb.GenericValue, 0, lenOfAllExpr)
@@ -494,9 +510,9 @@ func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 		if n == nil {
 			return fmt.Errorf("value '%s' in list cannot be a non-const expression", ctx.Expr(i).GetText())
 		}
-		castedValue, err := castValue(childExpr.dataType, n)
+		castedValue, err := castValue(dataType, n)
 		if err != nil {
-			return fmt.Errorf("value '%s' in list cannot be casted to %s", ctx.Expr(i).GetText(), childExpr.dataType.String())
+			return fmt.Errorf("value '%s' in list cannot be casted to %s", ctx.Expr(i).GetText(), dataType.String())
 		}
 		values = append(values, castedValue)
 	}
@@ -542,6 +558,9 @@ func (v *ParserVisitor) VisitEmptyTerm(ctx *parser.EmptyTermContext) interface{}
 	columnInfo := toColumnInfo(childExpr)
 	if columnInfo == nil {
 		return fmt.Errorf("'term' can only be used on single field, but got: %s", ctx.Expr().GetText())
+	}
+	if err := checkDirectComparisonBinaryField(columnInfo); err != nil {
+		return err
 	}
 
 	expr := &planpb.Expr{
@@ -589,6 +608,9 @@ func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 	if columnInfo == nil {
 		return fmt.Errorf("range operations are only supported on single fields now, got: %s", ctx.Expr(1).GetText())
 	}
+	if err := checkDirectComparisonBinaryField(columnInfo); err != nil {
+		return err
+	}
 
 	lower := ctx.Expr(0).Accept(v)
 	upper := ctx.Expr(1).Accept(v)
@@ -608,7 +630,12 @@ func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 		return fmt.Errorf("upperbound cannot be a non-const expression: %s", ctx.Expr(1).GetText())
 	}
 
-	switch columnInfo.GetDataType() {
+	fieldDataType := columnInfo.GetDataType()
+	if typeutil.IsArrayType(columnInfo.GetDataType()) {
+		fieldDataType = columnInfo.GetElementType()
+	}
+
+	switch fieldDataType {
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		if !IsString(lowerValue) || !IsString(upperValue) {
 			return fmt.Errorf("invalid range operations")
@@ -669,6 +696,10 @@ func (v *ParserVisitor) VisitReverseRange(ctx *parser.ReverseRangeContext) inter
 	}
 	if columnInfo == nil {
 		return fmt.Errorf("range operations are only supported on single fields now, got: %s", ctx.Expr(1).GetText())
+	}
+
+	if err := checkDirectComparisonBinaryField(columnInfo); err != nil {
+		return err
 	}
 
 	lower := ctx.Expr(1).Accept(v)
@@ -766,6 +797,9 @@ func (v *ParserVisitor) VisitUnary(ctx *parser.UnaryContext) interface{} {
 	childExpr := getExpr(child)
 	if childExpr == nil {
 		return fmt.Errorf("failed to parse unary expressions")
+	}
+	if err := checkDirectComparisonBinaryField(toColumnInfo(childExpr)); err != nil {
+		return err
 	}
 	switch ctx.GetOp().GetTokenType() {
 	case parser.PlanParserADD:
@@ -983,25 +1017,25 @@ func (v *ParserVisitor) getColumnInfoFromJSONIdentifier(identifier string) (*pla
 			if path == "" {
 				return nil, fmt.Errorf("invalid identifier: %s", identifier)
 			}
+			if typeutil.IsArrayType(field.DataType) {
+				return nil, fmt.Errorf("can only access array field with integer index")
+			}
 		} else if _, err := strconv.ParseInt(path, 10, 64); err != nil {
 			return nil, fmt.Errorf("json key must be enclosed in double quotes or single quotes: \"%s\"", path)
 		}
 		nestedPath = append(nestedPath, path)
 	}
 
-	if typeutil.IsJSONType(field.DataType) && len(nestedPath) == 0 {
-		return nil, fmt.Errorf("can not comparisons jsonField directly")
-	}
-
 	return &planpb.ColumnInfo{
-		FieldId:    field.FieldID,
-		DataType:   field.DataType,
-		NestedPath: nestedPath,
+		FieldId:     field.FieldID,
+		DataType:    field.DataType,
+		NestedPath:  nestedPath,
+		ElementType: field.GetElementType(),
 	}, nil
 }
 
 func (v *ParserVisitor) VisitJSONIdentifier(ctx *parser.JSONIdentifierContext) interface{} {
-	jsonField, err := v.getColumnInfoFromJSONIdentifier(ctx.JSONIdentifier().GetText())
+	field, err := v.getColumnInfoFromJSONIdentifier(ctx.JSONIdentifier().GetText())
 	if err != nil {
 		return err
 	}
@@ -1010,14 +1044,15 @@ func (v *ParserVisitor) VisitJSONIdentifier(ctx *parser.JSONIdentifierContext) i
 			Expr: &planpb.Expr_ColumnExpr{
 				ColumnExpr: &planpb.ColumnExpr{
 					Info: &planpb.ColumnInfo{
-						FieldId:    jsonField.GetFieldId(),
-						DataType:   jsonField.GetDataType(),
-						NestedPath: jsonField.GetNestedPath(),
+						FieldId:     field.GetFieldId(),
+						DataType:    field.GetDataType(),
+						NestedPath:  field.GetNestedPath(),
+						ElementType: field.GetElementType(),
 					},
 				},
 			},
 		},
-		dataType:      jsonField.GetDataType(),
+		dataType:      field.GetDataType(),
 		nodeDependent: true,
 	}
 }
@@ -1037,6 +1072,7 @@ func (v *ParserVisitor) VisitExists(ctx *parser.ExistsContext) interface{} {
 		return fmt.Errorf(
 			"exists oerations are only supportted on json field, got:%s", columnInfo.GetDataType())
 	}
+
 	return &ExprWithType{
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_ExistsExpr{
@@ -1053,6 +1089,53 @@ func (v *ParserVisitor) VisitExists(ctx *parser.ExistsContext) interface{} {
 	}
 }
 
+func (v *ParserVisitor) VisitArray(ctx *parser.ArrayContext) interface{} {
+	allExpr := ctx.AllExpr()
+	array := make([]*planpb.GenericValue, 0, len(allExpr))
+	dType := schemapb.DataType_None
+	sameType := true
+	for i := 0; i < len(allExpr); i++ {
+		element := allExpr[i].Accept(v)
+		if err := getError(element); err != nil {
+			return err
+		}
+		elementValue := getGenericValue(element)
+		if elementValue == nil {
+			return fmt.Errorf("array element type must be generic value, but got: %s", allExpr[i].GetText())
+		}
+		array = append(array, elementValue)
+
+		if dType == schemapb.DataType_None {
+			dType = element.(*ExprWithType).dataType
+		} else if dType != element.(*ExprWithType).dataType {
+			sameType = false
+		}
+	}
+	if !sameType {
+		dType = schemapb.DataType_None
+	}
+
+	return &ExprWithType{
+		dataType: schemapb.DataType_Array,
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ValueExpr{
+				ValueExpr: &planpb.ValueExpr{
+					Value: &planpb.GenericValue{
+						Val: &planpb.GenericValue_ArrayVal{
+							ArrayVal: &planpb.Array{
+								Array:       array,
+								SameType:    sameType,
+								ElementType: dType,
+							},
+						},
+					},
+				},
+			},
+		},
+		nodeDependent: true,
+	}
+}
+
 func (v *ParserVisitor) VisitJSONContains(ctx *parser.JSONContainsContext) interface{} {
 	field := ctx.Expr(0).Accept(v)
 	if err := getError(field); err != nil {
@@ -1060,9 +1143,10 @@ func (v *ParserVisitor) VisitJSONContains(ctx *parser.JSONContainsContext) inter
 	}
 
 	columnInfo := toColumnInfo(field.(*ExprWithType))
-	if columnInfo == nil || !typeutil.IsJSONType(columnInfo.GetDataType()) {
+	if columnInfo == nil ||
+		(!typeutil.IsJSONType(columnInfo.GetDataType()) && !typeutil.IsArrayType(columnInfo.GetDataType())) {
 		return fmt.Errorf(
-			"json_contains operation are only supported on json fields now, got: %s", ctx.Expr(0).GetText())
+			"contains operation are only supported on json or array fields now, got: %s", ctx.Expr(0).GetText())
 	}
 
 	element := ctx.Expr(1).Accept(v)
@@ -1072,7 +1156,15 @@ func (v *ParserVisitor) VisitJSONContains(ctx *parser.JSONContainsContext) inter
 	elementValue := getGenericValue(element)
 	if elementValue == nil {
 		return fmt.Errorf(
-			"json_contains operation are only supported explicitly specified element, got: %s", ctx.Expr(1).GetText())
+			"contains operation are only supported explicitly specified element, got: %s", ctx.Expr(1).GetText())
+	}
+	if typeutil.IsArrayType(columnInfo.GetDataType()) {
+		valExpr := toValueExpr(elementValue)
+		if !canBeCompared(field.(*ExprWithType), valExpr) {
+			return fmt.Errorf("contains operation can't compare between array element type: %s and %s",
+				columnInfo.GetElementType(),
+				valExpr.dataType)
+		}
 	}
 
 	elements := make([]*planpb.GenericValue, 1)
@@ -1094,49 +1186,6 @@ func (v *ParserVisitor) VisitJSONContains(ctx *parser.JSONContainsContext) inter
 	}
 }
 
-func (v *ParserVisitor) VisitArray(ctx *parser.ArrayContext) interface{} {
-	allExpr := ctx.AllExpr()
-	array := make([]*planpb.GenericValue, 0, len(allExpr))
-	dType := schemapb.DataType_None
-	sameType := true
-	for i := 0; i < len(allExpr); i++ {
-		element := allExpr[i].Accept(v)
-		if err := getError(element); err != nil {
-			return err
-		}
-		elementValue := getGenericValue(element)
-		if elementValue == nil {
-			return fmt.Errorf("array element type must be generic value, but got: %s", allExpr[i].GetText())
-		}
-		array = append(array, getGenericValue(element))
-
-		if dType == schemapb.DataType_None {
-			dType = element.(*ExprWithType).dataType
-		} else if dType != element.(*ExprWithType).dataType {
-			sameType = false
-		}
-	}
-
-	return &ExprWithType{
-		dataType: schemapb.DataType_Array,
-		expr: &planpb.Expr{
-			Expr: &planpb.Expr_ValueExpr{
-				ValueExpr: &planpb.ValueExpr{
-					Value: &planpb.GenericValue{
-						Val: &planpb.GenericValue_ArrayVal{
-							ArrayVal: &planpb.Array{
-								Array:    array,
-								SameType: sameType,
-							},
-						},
-					},
-				},
-			},
-		},
-		nodeDependent: true,
-	}
-}
-
 func (v *ParserVisitor) VisitJSONContainsAll(ctx *parser.JSONContainsAllContext) interface{} {
 	field := ctx.Expr(0).Accept(v)
 	if err := getError(field); err != nil {
@@ -1144,9 +1193,10 @@ func (v *ParserVisitor) VisitJSONContainsAll(ctx *parser.JSONContainsAllContext)
 	}
 
 	columnInfo := toColumnInfo(field.(*ExprWithType))
-	if columnInfo == nil || !typeutil.IsJSONType(columnInfo.GetDataType()) {
+	if columnInfo == nil ||
+		(!typeutil.IsJSONType(columnInfo.GetDataType()) && !typeutil.IsArrayType(columnInfo.GetDataType())) {
 		return fmt.Errorf(
-			"json_contains_all operation are only supported on json fields now, got: %s", ctx.Expr(0).GetText())
+			"contains_all operation are only supported on json or array fields now, got: %s", ctx.Expr(0).GetText())
 	}
 
 	element := ctx.Expr(1).Accept(v)
@@ -1156,11 +1206,22 @@ func (v *ParserVisitor) VisitJSONContainsAll(ctx *parser.JSONContainsAllContext)
 	elementValue := getGenericValue(element)
 	if elementValue == nil {
 		return fmt.Errorf(
-			"json_contains_all operation are only supported explicitly specified element, got: %s", ctx.Expr(1).GetText())
+			"contains_all operation are only supported explicitly specified element, got: %s", ctx.Expr(1).GetText())
 	}
 
 	if elementValue.GetArrayVal() == nil {
-		return fmt.Errorf("json_contains_all operation element must be an array")
+		return fmt.Errorf("contains_all operation element must be an array")
+	}
+
+	if typeutil.IsArrayType(columnInfo.GetDataType()) {
+		for _, value := range elementValue.GetArrayVal().GetArray() {
+			valExpr := toValueExpr(value)
+			if !canBeCompared(field.(*ExprWithType), valExpr) {
+				return fmt.Errorf("contains_all operation can't compare between array element type: %s and %s",
+					columnInfo.GetElementType(),
+					valExpr.dataType)
+			}
+		}
 	}
 
 	expr := &planpb.Expr{
@@ -1186,9 +1247,10 @@ func (v *ParserVisitor) VisitJSONContainsAny(ctx *parser.JSONContainsAnyContext)
 	}
 
 	columnInfo := toColumnInfo(field.(*ExprWithType))
-	if columnInfo == nil || !typeutil.IsJSONType(columnInfo.GetDataType()) {
+	if columnInfo == nil ||
+		(!typeutil.IsJSONType(columnInfo.GetDataType()) && !typeutil.IsArrayType(columnInfo.GetDataType())) {
 		return fmt.Errorf(
-			"json_contains_any operation are only supported on json fields now, got: %s", ctx.Expr(0).GetText())
+			"contains_any operation are only supported on json or array fields now, got: %s", ctx.Expr(0).GetText())
 	}
 
 	element := ctx.Expr(1).Accept(v)
@@ -1198,11 +1260,22 @@ func (v *ParserVisitor) VisitJSONContainsAny(ctx *parser.JSONContainsAnyContext)
 	elementValue := getGenericValue(element)
 	if elementValue == nil {
 		return fmt.Errorf(
-			"json_contains_any operation are only supported explicitly specified element, got: %s", ctx.Expr(1).GetText())
+			"contains_any operation are only supported explicitly specified element, got: %s", ctx.Expr(1).GetText())
 	}
 
 	if elementValue.GetArrayVal() == nil {
-		return fmt.Errorf("json_contains_any operation element must be an array")
+		return fmt.Errorf("contains_any operation element must be an array")
+	}
+
+	if typeutil.IsArrayType(columnInfo.GetDataType()) {
+		for _, value := range elementValue.GetArrayVal().GetArray() {
+			valExpr := toValueExpr(value)
+			if !canBeCompared(field.(*ExprWithType), valExpr) {
+				return fmt.Errorf("contains_any operation can't compare between array element type: %s and %s",
+					columnInfo.GetElementType(),
+					valExpr.dataType)
+			}
+		}
 	}
 
 	expr := &planpb.Expr{
@@ -1218,5 +1291,38 @@ func (v *ParserVisitor) VisitJSONContainsAny(ctx *parser.JSONContainsAnyContext)
 	return &ExprWithType{
 		expr:     expr,
 		dataType: schemapb.DataType_Bool,
+	}
+}
+
+func (v *ParserVisitor) VisitArrayLength(ctx *parser.ArrayLengthContext) interface{} {
+	columnInfo, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier())
+	if err != nil {
+		return err
+	}
+	if columnInfo == nil ||
+		(!typeutil.IsJSONType(columnInfo.GetDataType()) && !typeutil.IsArrayType(columnInfo.GetDataType())) {
+		return fmt.Errorf(
+			"array_length operation are only supported on json or array fields now, got: %s", ctx.GetText())
+	}
+
+	expr := &planpb.Expr{
+		Expr: &planpb.Expr_BinaryArithExpr{
+			BinaryArithExpr: &planpb.BinaryArithExpr{
+				Left: &planpb.Expr{
+					Expr: &planpb.Expr_ColumnExpr{
+						ColumnExpr: &planpb.ColumnExpr{
+							Info: columnInfo,
+						},
+					},
+				},
+				Right: nil,
+				Op:    planpb.ArithOpType_ArrayLength,
+			},
+		},
+	}
+	return &ExprWithType{
+		expr:          expr,
+		dataType:      schemapb.DataType_Int64,
+		nodeDependent: true,
 	}
 }

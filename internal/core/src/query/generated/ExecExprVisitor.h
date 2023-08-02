@@ -116,7 +116,17 @@ class ExecExprVisitor : public ExprVisitor {
 
     template <typename ExprValueType>
     auto
+    ExecUnaryRangeVisitorDispatcherArray(UnaryRangeExpr& expr_raw)
+        -> BitsetType;
+
+    template <typename ExprValueType>
+    auto
     ExecBinaryArithOpEvalRangeVisitorDispatcherJson(
+        BinaryArithOpEvalRangeExpr& expr_raw) -> BitsetType;
+
+    template <typename ExprValueType>
+    auto
+    ExecBinaryArithOpEvalRangeVisitorDispatcherArray(
         BinaryArithOpEvalRangeExpr& expr_raw) -> BitsetType;
 
     template <typename T>
@@ -127,6 +137,11 @@ class ExecExprVisitor : public ExprVisitor {
     template <typename ExprValueType>
     auto
     ExecBinaryRangeVisitorDispatcherJson(BinaryRangeExpr& expr_raw)
+        -> BitsetType;
+
+    template <typename ExprValueType>
+    auto
+    ExecBinaryRangeVisitorDispatcherArray(BinaryRangeExpr& expr_raw)
         -> BitsetType;
 
     template <typename T>
@@ -147,11 +162,23 @@ class ExecExprVisitor : public ExprVisitor {
 
     template <typename ExprValueType>
     auto
+    ExecTermArrayVariableInField(TermExpr& expr_raw) -> BitsetType;
+
+    template <typename ExprValueType>
+    auto
     ExecTermJsonFieldInVariable(TermExpr& expr_raw) -> BitsetType;
 
     template <typename ExprValueType>
     auto
+    ExecTermArrayFieldInVariable(TermExpr& expr_raw) -> BitsetType;
+
+    template <typename ExprValueType>
+    auto
     ExecTermVisitorImplTemplateJson(TermExpr& expr_raw) -> BitsetType;
+
+    template <typename ExprValueType>
+    auto
+    ExecTermVisitorImplTemplateArray(TermExpr& expr_raw) -> BitsetType;
 
     template <typename CmpFunc>
     auto
@@ -162,6 +189,10 @@ class ExecExprVisitor : public ExprVisitor {
     auto
     ExecJsonContains(JsonContainsExpr& expr_raw) -> BitsetType;
 
+    template <typename ExprValueType>
+    auto
+    ExecArrayContains(JsonContainsExpr& expr_raw) -> BitsetType;
+
     auto
     ExecJsonContainsArray(JsonContainsExpr& expr_raw) -> BitsetType;
 
@@ -171,6 +202,10 @@ class ExecExprVisitor : public ExprVisitor {
     template <typename ExprValueType>
     auto
     ExecJsonContainsAll(JsonContainsExpr& expr_raw) -> BitsetType;
+
+    template <typename ExprValueType>
+    auto
+    ExecArrayContainsAll(JsonContainsExpr& expr_raw) -> BitsetType;
 
     auto
     ExecJsonContainsAllArray(JsonContainsExpr& expr_raw) -> BitsetType;
