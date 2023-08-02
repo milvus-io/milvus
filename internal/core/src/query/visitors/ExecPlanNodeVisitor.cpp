@@ -188,15 +188,17 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
         return;
     }
 
-    bitset_holder.flip();
+    bool false_filtered_out = false;
     if (GetExprUsePkIndex() && IsTermExpr(node.predicate_.value().get())) {
-        segment->search_ids_filter(
+        segment->timestamp_filter(
             bitset_holder, expr_cached_pk_id_offsets_, timestamp_);
     } else {
-        segment->search_ids_filter(bitset_holder, timestamp_);
+        bitset_holder.flip();
+        false_filtered_out = true;
+        segment->timestamp_filter(bitset_holder, timestamp_);
     }
     retrieve_result.result_offsets_ =
-        segment->find_first(node.limit_, bitset_holder);
+        segment->find_first(node.limit_, bitset_holder, false_filtered_out);
     retrieve_result_opt_ = std::move(retrieve_result);
 }
 
