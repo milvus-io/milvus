@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path"
 	"path/filepath"
@@ -97,7 +96,7 @@ func (lcm *LocalChunkManager) Write(ctx context.Context, filePath string, conten
 			return err
 		}
 	}
-	return ioutil.WriteFile(filePath, content, os.ModePerm)
+	return os.WriteFile(filePath, content, os.ModePerm)
 }
 
 // MultiWrite writes the data to local storage.
@@ -134,7 +133,7 @@ func (lcm *LocalChunkManager) Read(ctx context.Context, filePath string) ([]byte
 		return nil, fmt.Errorf("file not exist: %s", filePath)
 	}
 
-	return ioutil.ReadFile(filePath)
+	return os.ReadFile(filePath)
 }
 
 // MultiRead reads the local storage data if exists.

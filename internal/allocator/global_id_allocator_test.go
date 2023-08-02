@@ -17,7 +17,6 @@
 package allocator
 
 import (
-	"io/ioutil"
 	"net/url"
 	"os"
 	"testing"
@@ -37,7 +36,7 @@ var Params paramtable.ComponentParam
 var embedEtcdServer *embed.Etcd
 
 func startEmbedEtcdServer() (*embed.Etcd, error) {
-	dir, err := ioutil.TempDir(os.TempDir(), "milvus_ut")
+	dir, err := os.MkdirTemp(os.TempDir(), "milvus_ut")
 	if err != nil {
 		return nil, err
 	}

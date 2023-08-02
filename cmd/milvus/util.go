@@ -3,7 +3,6 @@ package milvus
 import (
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path"
 	"runtime"
@@ -22,7 +21,7 @@ func makeRuntimeDir(dir string) error {
 		return fmt.Errorf("create runtime dir %s failed, err: %s", dir, err.Error())
 	}
 
-	tmpFile, err := ioutil.TempFile(dir, "tmp")
+	tmpFile, err := os.CreateTemp(dir, "tmp")
 	if err != nil {
 		return err
 	}
