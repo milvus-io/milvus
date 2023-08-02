@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/samber/lo"
 	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -887,7 +888,10 @@ func (node *DataNode) GetCompactionState(ctx context.Context, req *datapb.Compac
 	})
 
 	if len(results) > 0 {
-		log.Info("Compaction results", zap.Any("results", results))
+		planIDs := lo.Map(results, func(result *datapb.CompactionStateResult, i int) UniqueID {
+			return result.GetPlanID()
+		})
+		log.Info("Compaction results", zap.Int64s("results", planIDs))
 	}
 	return &datapb.CompactionStateResponse{
 		Status:  &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
