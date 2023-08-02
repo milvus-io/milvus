@@ -25,6 +25,7 @@ class TestCreateCollection(TestBase):
         """
         self.create_database(db_name)
         name = gen_collection_name()
+        self.name_list.append(name)
         dim = 128
         client = self.collection_client
         client.db_name = db_name
@@ -59,6 +60,7 @@ class TestCreateCollection(TestBase):
         concurrent_rsp = []
 
         def create_collection(c_name, vector_dim, c_metric_type):
+            self.name_list.append(c_name)
             collection_payload = {
                 "collectionName": c_name,
                 "dimension": vector_dim,
@@ -68,6 +70,7 @@ class TestCreateCollection(TestBase):
             concurrent_rsp.append(rsp)
             logger.info(rsp)
         name = gen_collection_name()
+        self.name_list.append(name)
         dim = 128
         metric_type = "L2"
         client = self.collection_client
@@ -104,6 +107,7 @@ class TestCreateCollection(TestBase):
         concurrent_rsp = []
 
         def create_collection(c_name, vector_dim, c_metric_type):
+            self.name_list.append(c_name)
             collection_payload = {
                 "collectionName": c_name,
                 "dimension": vector_dim,
@@ -113,6 +117,7 @@ class TestCreateCollection(TestBase):
             concurrent_rsp.append(rsp)
             logger.info(rsp)
         name = gen_collection_name()
+        self.name_list.append(name)
         dim = 128
         client = self.collection_client
         threads = []
@@ -188,6 +193,7 @@ class TestListCollections(TestBase):
         name_list = []
         for i in range(2):
             name = gen_collection_name()
+            self.name_list.append(name)
             dim = 128
             payload = {
                 "collectionName": name,
@@ -212,6 +218,7 @@ class TestListCollections(TestBase):
         name_list = []
         for i in range(2):
             name = gen_collection_name()
+            self.name_list.append(name)
             dim = 128
             payload = {
                 "collectionName": name,
@@ -230,7 +237,6 @@ class TestListCollections(TestBase):
 @pytest.mark.L0
 class TestDescribeCollection(TestBase):
 
-
     def test_describe_collections_default(self):
         """
         target: test describe collection with a simple schema
@@ -238,6 +244,7 @@ class TestDescribeCollection(TestBase):
         expected: info of description is same with param passed to create collection
         """
         name = gen_collection_name()
+        self.name_list.append(name)
         dim = 128
         client = self.collection_client
         payload = {
@@ -262,6 +269,7 @@ class TestDescribeCollection(TestBase):
         expected: raise error with right error code and message
         """
         name = gen_collection_name()
+        self.name_list.append(name)
         dim = 128
         client = self.collection_client
         payload = {
@@ -316,6 +324,7 @@ class TestDropCollection(TestBase):
         for i in range(5):
             time.sleep(1)
             name = 'test_collection_' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f_%f")
+            self.name_list.append(name)
             payload = {
                 "collectionName": name,
                 "dimension": 128,
@@ -352,6 +361,7 @@ class TestDropCollection(TestBase):
             "collectionName": name,
             "dimension": dim,
         }
+        self.name_list.append(name)
         rsp = client.collection_create(payload)
         assert rsp['code'] == 200
         rsp = client.collection_list()
@@ -375,6 +385,7 @@ class TestDropCollection(TestBase):
         expected: raise error with right error code and message
         """
         name = gen_collection_name()
+        self.name_list.append(name)
         dim = 128
         client = self.collection_client
         payload = {

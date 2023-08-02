@@ -19,8 +19,10 @@ class Base:
     host = None
     port = None
     url = None
+    uri = None
     api_key = None
     username = None
+    name_list = None
     password = None
     invalid_api_key = None
     vector_client = None
@@ -31,16 +33,26 @@ class TestBase(Base):
 
     def teardown_method(self):
         self.collection_client.api_key = self.api_key
-        all_collections = self.collection_client.collection_list()['data']
-        if self.name in all_collections:
-            logger.info(f"collection {self.name} exist, drop it")
-            payload = {
-                "collectionName": self.name,
-            }
-            try:
-                rsp = self.collection_client.collection_drop(payload)
-            except Exception as e:
-                logger.error(e)
+        all_db = self.list_database()
+        for db_name in all_db:
+            all_collections = self.collection_client.collection_list(db_name=db_name)['data']
+            logger.info(f"all collections: {all_collections}")
+            if not isinstance(self.name_list, list):
+                c_name_list = [self.name_list]
+            else:
+                c_name_list = self.name_list
+            for c_name in c_name_list:
+                if c_name in all_collections:
+                    logger.info(f"collection {c_name} exist, drop it")
+                    payload = {
+                        "collectionName": c_name,
+                        "dbName": db_name
+                    }
+                    try:
+                        rsp = self.collection_client.collection_drop(payload)
+                        logger.info(f"drop collection {c_name} response: {rsp}")
+                    except Exception as e:
+                        logger.error(e)
 
     @pytest.fixture(scope="function", autouse=True)
     def init_client(self, protocol, host, port, username, password):
@@ -48,13 +60,14 @@ class TestBase(Base):
         self.host = host
         self.port = port
         self.url = f"{host}:{port}/v1"
+        self.uri = f"{protocol}://{host}:{port}"
         self.username = username
         self.password = password
+        self.name_list = []
         self.api_key = f"{self.username}:{self.password}"
         self.invalid_api_key = "invalid_token"
-        self.vector_client = VectorClient(self.url, self.api_key)
-        self.collection_client = CollectionClient(self.url, self.api_key)
-        connections.connect(host=self.host, port=self.port)
+        self.vector_client = VectorClient(self.url, self.api_key, protocol=self.protocol)
+        self.collection_client = CollectionClient(self.url, self.api_key, protocol=self.protocol)
 
     def init_collection(self, collection_name, pk_field="id", metric_type="L2", dim=128, nb=100, batch_size=1000):
         # create collection
@@ -100,7 +113,13 @@ class TestBase(Base):
                 time.sleep(5)
 
     def create_database(self, db_name="default"):
-        connections.connect(host=self.host, port=self.port)
+        try:
+            # first try to connect to milvus without auth
+            connections.connect(host=self.host, port=self.port)
+        except Exception as e:
+            # logger.debug(e)
+            # if failed, connect to milvus with auth
+            connections.connect(uri=self.uri, token=self.api_key)
         all_db = db.list_database()
         logger.info(f"all database: {all_db}")
         if db_name not in all_db:
@@ -109,6 +128,18 @@ class TestBase(Base):
                 db.create_database(db_name=db_name)
             except Exception as e:
                 logger.error(e)
+
+    def list_database(self, db_name="default"):
+        try:
+            # first try to connect to milvus without auth
+            connections.connect(host=self.host, port=self.port)
+        except Exception as e:
+            logger.debug(e)
+            # if failed, connect to milvus with auth
+            connections.connect(uri=self.uri, token=self.api_key)
+        all_db = db.list_database()
+        logger.info(f"all database: {all_db}")
+        return all_db
 
     def update_database(self, db_name="default"):
         self.create_database(db_name=db_name)

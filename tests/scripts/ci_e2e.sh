@@ -84,3 +84,19 @@ else
   pytest testcases/test_bulk_insert.py --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} \
                                      --html=${CI_LOG_PATH}/report_bulk_insert.html --self-contained-html
 fi
+
+
+# Run restful test
+
+cd ${ROOT}/tests/restful_client
+
+pip install -r requirements.txt || echo "install lib failed"
+
+if [[ -n "${TEST_TIMEOUT:-}" ]]; then
+  
+  timeout  "${TEST_TIMEOUT}" pytest -n 6 --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} \
+                                     --html=${CI_LOG_PATH}/report_restful.html  --self-contained-html
+else
+  pytest -n 6 --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT}  \
+                                     --html=${CI_LOG_PATH}/report_restful.html --self-contained-html
+fi
