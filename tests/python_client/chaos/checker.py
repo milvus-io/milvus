@@ -31,7 +31,10 @@ class Op(Enum):
     unknown = 'unknown'
 
 
-timeout = 10
+timeout = 120
+search_timeout = 10
+query_timeout = 10
+
 enable_traceback = False
 DEFAULT_FMT = '[start time:{start_time}][time cost:{elapsed:0.8f}s][operation_name:{operation_name}][collection name:{collection_name}] -> {result!r}'
 
@@ -231,7 +234,7 @@ class SearchChecker(Checker):
             anns_field=self.float_vector_field_name,
             param=constants.DEFAULT_SEARCH_PARAM,
             limit=1,
-            timeout=timeout,
+            timeout=search_timeout,
             check_task=CheckTasks.check_nothing
         )
         return res, result
@@ -482,7 +485,7 @@ class QueryChecker(Checker):
 
     @trace()
     def query(self):
-        res, result = self.c_wrap.query(self.term_expr, timeout=timeout,
+        res, result = self.c_wrap.query(self.term_expr, timeout=query_timeout,
                                         check_task=CheckTasks.check_nothing)
         return res, result
 
