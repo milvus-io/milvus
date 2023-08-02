@@ -50,6 +50,8 @@ func newMinIOChunkManager(ctx context.Context, bucketName string, rootPath strin
 		CloudProvider("aws"),
 		IAMEndpoint(""),
 		CreateBucket(true),
+		UseVirtualHost(false),
+		Region(""),
 	)
 	return client, err
 }

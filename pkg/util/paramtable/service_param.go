@@ -855,6 +855,8 @@ type MinioConfig struct {
 	CloudProvider   ParamItem `refreshable:"false"`
 	IAMEndpoint     ParamItem `refreshable:"false"`
 	LogLevel        ParamItem `refreshable:"false"`
+	Region          ParamItem `refreshable:"false"`
+	UseVirtualHost  ParamItem `refreshable:"false"`
 }
 
 func (p *MinioConfig) Init(base *BaseTable) {
@@ -979,4 +981,23 @@ Leave it empty if you want to use AWS default endpoint`,
 		Export:       true,
 	}
 	p.LogLevel.Init(base.mgr)
+	p.Region = ParamItem{
+		Key:          "minio.region",
+		DefaultValue: DefaultMinioRegion,
+		Version:      "2.3.0",
+		Doc:          `Specify minio storage system location region`,
+		Export:       true,
+	}
+	p.Region.Init(base.mgr)
+
+	p.UseVirtualHost = ParamItem{
+		Key:          "minio.useVirtualHost",
+		Version:      "2.3.0",
+		DefaultValue: DefaultMinioUseVirtualHost,
+		PanicIfEmpty: true,
+		Doc:          "Whether use virtual host mode for bucket",
+		Export:       true,
+	}
+	p.UseVirtualHost.Init(base.mgr)
+
 }

@@ -27,6 +27,8 @@ func NewChunkManagerFactoryWithParam(params *paramtable.ComponentParam) *ChunkMa
 		UseIAM(params.MinioCfg.UseIAM.GetAsBool()),
 		CloudProvider(params.MinioCfg.CloudProvider.GetValue()),
 		IAMEndpoint(params.MinioCfg.IAMEndpoint.GetValue()),
+		UseVirtualHost(params.MinioCfg.UseVirtualHost.GetAsBool()),
+		Region(params.MinioCfg.Region.GetValue()),
 		CreateBucket(true))
 }
 

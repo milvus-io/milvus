@@ -57,20 +57,61 @@ find_file(const path& dir, const std::string& file_name, path& path_found) {
                 return true;
             }
             iter++;
-        } catch (filesystem_error& e) {
         } catch (std::exception& e) {
-            // ignore error
+            LOG_SEGCORE_ERROR_ << e.what();
+            throw e;
         }
     }
     return false;
 }
 
 StorageConfig
-get_default_storage_config() {
+get_default_local_storage_config() {
     StorageConfig storage_config;
     storage_config.storage_type = "local";
     storage_config.root_path = TestRemotePath;
     return storage_config;
+}
+
+StorageConfig
+get_default_remote_storage_config() {
+    char testPath[100];
+    auto pwd = std::string(getcwd(testPath, sizeof(testPath)));
+    path filepath;
+    auto currentPath = path(pwd);
+    while (!find_file(currentPath, "milvus.yaml", filepath)) {
+        currentPath = currentPath.append("../");
+    }
+    auto configPath = filepath.string();
+    YAML::Node config;
+    config = YAML::LoadFile(configPath);
+    auto minioConfig = config["minio"];
+    auto address = minioConfig["address"].as<std::string>();
+    auto port = minioConfig["port"].as<std::string>();
+    auto endpoint = address + ":" + port;
+    auto accessKey = minioConfig["accessKeyID"].as<std::string>();
+    auto accessValue = minioConfig["secretAccessKey"].as<std::string>();
+    auto rootPath = minioConfig["rootPath"].as<std::string>();
+    auto useSSL = minioConfig["useSSL"].as<bool>();
+    auto useIam = minioConfig["useIAM"].as<bool>();
+    auto iamEndPoint = minioConfig["iamEndpoint"].as<std::string>();
+    auto logLevel = minioConfig["logLevel"].as<std::string>();
+    auto bucketName = minioConfig["bucketName"].as<std::string>();
+    auto useVirHost = minioConfig["useVirtualHost"].as<bool>();
+    auto region = minioConfig["region"].as<std::string>();
+
+    return StorageConfig{endpoint,
+                         bucketName,
+                         accessKey,
+                         accessValue,
+                         rootPath,
+                         "minio",
+                         iamEndPoint,
+                         logLevel,
+                         region,
+                         useSSL,
+                         useIam,
+                         useVirHost};
 }
 
 void
@@ -82,6 +123,7 @@ delete_cstorage_config(CStorageConfig config) {
     delete[] config.root_path;
     delete[] config.storage_type;
     delete[] config.iam_endpoint;
+    delete[] config.region;
 }
 
 class TestConfigWrapper {

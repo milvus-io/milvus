@@ -83,6 +83,10 @@ func newMinioChunkManagerWithConfig(ctx context.Context, c *config) (*MinioChunk
 	var newMinioFn = minio.New
 	var bucketLookupType = minio.BucketLookupAuto
 
+	if c.useVirtualHost {
+		bucketLookupType = minio.BucketLookupDNS
+	}
+
 	switch c.cloudProvider {
 	case CloudProviderAliyun:
 		// auto doesn't work for aliyun, so we set to dns deliberately
@@ -108,6 +112,7 @@ func newMinioChunkManagerWithConfig(ctx context.Context, c *config) (*MinioChunk
 		BucketLookup: bucketLookupType,
 		Creds:        creds,
 		Secure:       c.useSSL,
+		Region:       c.region,
 	}
 	minIOClient, err := newMinioFn(c.address, minioOpts)
 	// options nil or invalid formatted endpoint, don't need to retry

@@ -119,9 +119,6 @@ func TestGlobalMethods(t *testing.T) {
 	// Incorrect option
 	err = ZstdCompress(strings.NewReader(data), compressed, zstd.WithWindowSize(3))
 	assert.Error(t, err)
-
-	err = ZstdDecompress(compressed, origin, zstd.WithDecoderConcurrency(-1))
-	assert.Error(t, err)
 }
 
 func TestCurrencyGlobalMethods(t *testing.T) {

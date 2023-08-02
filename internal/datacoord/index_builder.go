@@ -287,6 +287,8 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 				UseIAM:          Params.MinioCfg.UseIAM.GetAsBool(),
 				IAMEndpoint:     Params.MinioCfg.IAMEndpoint.GetValue(),
 				StorageType:     Params.CommonCfg.StorageType.GetValue(),
+				Region:          Params.MinioCfg.Region.GetValue(),
+				UseVirtualHost:  Params.MinioCfg.UseVirtualHost.GetAsBool(),
 			}
 		}
 		req := &indexpb.CreateJobRequest{
