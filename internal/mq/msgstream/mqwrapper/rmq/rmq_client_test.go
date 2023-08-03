@@ -37,6 +37,8 @@ import (
 
 func TestMain(m *testing.M) {
 	paramtable.Init()
+	pt := paramtable.Get()
+	pt.Save(pt.ServiceParam.MQCfg.EnablePursuitMode.Key, "false")
 
 	rand.Seed(time.Now().UnixNano())
 	path := "/tmp/milvus/rdb_data"
