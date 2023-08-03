@@ -23,6 +23,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -585,7 +586,80 @@ func TestProxy_Connect(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
+	t.Run("failed to list database", func(t *testing.T) {
+		r := mocks.NewRootCoord(t)
+		r.On("ListDatabases",
+			mock.Anything,
+			mock.Anything,
+		).Return(nil, errors.New("error mock ListDatabases"))
+
+		node := &Proxy{rootCoord: r}
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		resp, err := node.Connect(context.TODO(), nil)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("list database error", func(t *testing.T) {
+		r := mocks.NewRootCoord(t)
+		r.On("ListDatabases",
+			mock.Anything,
+			mock.Anything,
+		).Return(&milvuspb.ListDatabasesResponse{
+			Status: unhealthyStatus(),
+		}, nil)
+
+		node := &Proxy{rootCoord: r}
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		resp, err := node.Connect(context.TODO(), nil)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("database not found", func(t *testing.T) {
+		md := metadata.New(map[string]string{
+			"dbName": "20230525",
+		})
+		ctx := metadata.NewIncomingContext(context.TODO(), md)
+
+		r := mocks.NewRootCoord(t)
+		r.On("ListDatabases",
+			mock.Anything,
+			mock.Anything,
+		).Return(&milvuspb.ListDatabasesResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			DbNames: []string{},
+		}, nil)
+
+		node := &Proxy{rootCoord: r}
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		resp, err := node.Connect(ctx, nil)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
 	t.Run("failed to allocate ts", func(t *testing.T) {
+		md := metadata.New(map[string]string{
+			"dbName": "20230525",
+		})
+		ctx := metadata.NewIncomingContext(context.TODO(), md)
+
+		r := mocks.NewRootCoord(t)
+		r.On("ListDatabases",
+			mock.Anything,
+			mock.Anything,
+		).Return(&milvuspb.ListDatabasesResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			DbNames: []string{"20230525"},
+		}, nil)
+
 		m := newMockTimestampAllocator(t)
 		m.On("AllocTimestamp",
 			mock.Anything,
@@ -594,14 +668,31 @@ func TestProxy_Connect(t *testing.T) {
 		alloc, _ := newTimestampAllocator(m, 199)
 		node := Proxy{
 			tsoAllocator: alloc,
+			rootCoord:    r,
 		}
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
-		resp, err := node.Connect(context.TODO(), nil)
+		resp, err := node.Connect(ctx, nil)
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("normal case", func(t *testing.T) {
+		md := metadata.New(map[string]string{
+			"dbName": "20230525",
+		})
+		ctx := metadata.NewIncomingContext(context.TODO(), md)
+
+		r := mocks.NewRootCoord(t)
+		r.On("ListDatabases",
+			mock.Anything,
+			mock.Anything,
+		).Return(&milvuspb.ListDatabasesResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			DbNames: []string{"20230525"},
+		}, nil)
+
 		m := newMockTimestampAllocator(t)
 		m.On("AllocTimestamp",
 			mock.Anything,
@@ -616,9 +707,10 @@ func TestProxy_Connect(t *testing.T) {
 		alloc, _ := newTimestampAllocator(m, 199)
 		node := Proxy{
 			tsoAllocator: alloc,
+			rootCoord:    r,
 		}
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
-		resp, err := node.Connect(context.TODO(), &milvuspb.ConnectRequest{
+		resp, err := node.Connect(ctx, &milvuspb.ConnectRequest{
 			ClientInfo: &commonpb.ClientInfo{},
 		})
 		assert.NoError(t, err)
