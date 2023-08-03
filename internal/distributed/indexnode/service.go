@@ -25,8 +25,7 @@ import (
 	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
-	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/pkg/tracer"
+	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/zap"
@@ -39,12 +38,15 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tikv"
 )
 
 // Server is the grpc wrapper of IndexNode.
@@ -59,6 +61,7 @@ type Server struct {
 	loopWg     sync.WaitGroup
 
 	etcdCli *clientv3.Client
+	tikvCli *txnkv.Client
 }
 
 // Run initializes and starts IndexNode's grpc service.
@@ -165,6 +168,15 @@ func (s *Server) init() error {
 	}
 	s.etcdCli = etcdCli
 	s.indexnode.SetEtcdClient(etcdCli)
+
+	s.tikvCli, err = tikv.GetTiKVClient()
+	if err != nil {
+		log.Debug("IndexNode connect to tikv failed", zap.Error(err))
+		return err
+	}
+	s.indexnode.SetTiKVClient(s.tikvCli)
+	log.Debug("IndexNode connect to tikv successfully")
+
 	s.indexnode.SetAddress(Params.GetAddress())
 	err = s.indexnode.Init()
 	if err != nil {

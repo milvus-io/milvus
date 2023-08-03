@@ -19,6 +19,7 @@ package indexnode
 import (
 	"context"
 
+	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -45,6 +46,7 @@ type Mock struct {
 
 	CallSetAddress      func(address string)
 	CallSetEtcdClient   func(etcdClient *clientv3.Client)
+	CallSetTiKVClient   func(client *txnkv.Client)
 	CallUpdateStateCode func(stateCode commonpb.StateCode)
 
 	CallCreateJob   func(ctx context.Context, req *indexpb.CreateJobRequest) (*commonpb.Status, error)
@@ -73,6 +75,8 @@ func NewIndexNodeMock() *Mock {
 		CallSetAddress: func(address string) {
 		},
 		CallSetEtcdClient: func(etcdClient *clientv3.Client) {
+		},
+		CallSetTiKVClient: func(client *txnkv.Client) {
 		},
 		CallUpdateStateCode: func(stateCode commonpb.StateCode) {
 		},
@@ -189,6 +193,9 @@ func (m *Mock) GetAddress() string {
 }
 
 func (m *Mock) SetEtcdClient(etcdClient *clientv3.Client) {
+}
+
+func (m *Mock) SetTiKVClient(etcd *txnkv.Client) {
 }
 
 func (m *Mock) UpdateStateCode(stateCode commonpb.StateCode) {

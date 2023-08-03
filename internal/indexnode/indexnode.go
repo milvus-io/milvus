@@ -40,7 +40,7 @@ import (
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -95,6 +96,7 @@ type IndexNode struct {
 	session        *sessionutil.Session
 
 	etcdCli *clientv3.Client
+	tikvCli *txnkv.Client
 	address string
 
 	initOnce  sync.Once
@@ -272,6 +274,11 @@ func (i *IndexNode) UpdateStateCode(code commonpb.StateCode) {
 // SetEtcdClient assigns parameter client to its member etcdCli
 func (i *IndexNode) SetEtcdClient(client *clientv3.Client) {
 	i.etcdCli = client
+}
+
+// SetTiKVClient assigns parameter client to its member tikvCli
+func (i *IndexNode) SetTiKVClient(client *txnkv.Client) {
+	i.tikvCli = client
 }
 
 // GetComponentStates gets the component states of IndexNode.

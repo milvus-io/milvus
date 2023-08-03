@@ -441,6 +441,9 @@ type IndexNodeComponent interface {
 	// SetEtcdClient set etcd client for IndexNodeComponent
 	SetEtcdClient(etcdClient *clientv3.Client)
 
+	// SetTiKVClient set TiKV client for IndexNodeComponent
+	SetTiKVClient(client *txnkv.Client)
+
 	// UpdateStateCode updates state code for IndexNodeComponent
 	//  `stateCode` is current statement of this QueryCoord, indicating whether it's healthy.
 	UpdateStateCode(stateCode commonpb.StateCode)

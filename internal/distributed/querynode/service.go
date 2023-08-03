@@ -116,6 +116,7 @@ func (s *Server) init() error {
 
 	s.tikvCli, _ = tikv.GetTiKVClient()
 	s.SetTiKVClient(s.tikvCli)
+	log.Debug("QueryNode connect to tikv successfully")
 
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.Port.GetAsInt())
