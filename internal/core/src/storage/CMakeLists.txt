@@ -42,7 +42,7 @@ set(STORAGE_FILES
     DiskFileManagerImpl.cpp
     AliyunSTSClient.cpp
     AliyunCredentialsProvider.cpp
-    MemFileManagerImpl.cpp)
+    MemFileManagerImpl.cpp ThreadPools.cpp)
 
 add_library(milvus_storage SHARED ${STORAGE_FILES})
 

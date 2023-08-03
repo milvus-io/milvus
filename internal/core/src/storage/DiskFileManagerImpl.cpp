@@ -27,7 +27,7 @@
 #include "storage/Exception.h"
 #include "storage/IndexData.h"
 #include "storage/Util.h"
-#include "storage/ThreadPool.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::storage {
 
@@ -113,7 +113,7 @@ DiskFileManagerImpl::AddBatchIndexFiles(const std::string& local_file_name,
                                         const std::vector<std::string>& remote_files,
                                         const std::vector<int64_t>& remote_file_sizes) {
     auto& local_chunk_manager = LocalChunkManager::GetInstance();
-    auto& pool = ThreadPool::GetInstance();
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
 
     auto LoadIndexFromDisk = [&](const std::string& file, const int64_t offset,
                                  const int64_t data_size) -> std::shared_ptr<uint8_t[]> {

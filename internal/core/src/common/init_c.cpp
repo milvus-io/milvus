@@ -20,10 +20,9 @@
 
 #include <string>
 #include "config/ConfigChunkManager.h"
-#include "common/Slice.h"
 #include "common/Common.h"
 
-std::once_flag flag1, flag2, flag3, flag4;
+std::once_flag flag1, flag2, flag3, flag4, flag5, flag6;
 
 void
 InitLocalRootPath(const char* root_path) {
@@ -35,17 +34,43 @@ InitLocalRootPath(const char* root_path) {
 void
 InitIndexSliceSize(const int64_t size) {
     std::call_once(
-        flag2, [](int64_t size) { milvus::SetIndexSliceSize(size); }, size);
-}
-
-void
-InitThreadCoreCoefficient(const int64_t value) {
-    std::call_once(
-        flag3, [](int64_t value) { milvus::SetThreadCoreCoefficient(value); }, value);
+            flag2, [](int64_t size) { milvus::SetIndexSliceSize(size); }, size);
 }
 
 void
 InitCpuNum(const int value) {
     std::call_once(
-        flag4, [](int value) { milvus::SetCpuNum(value); }, value);
+            flag3, [](int value) { milvus::SetCpuNum(value); }, value);
 }
+
+void
+InitHighPriorityThreadCoreCoefficient(const int64_t value) {
+    std::call_once(
+        flag4,
+        [](int64_t value) {
+            milvus::SetHighPriorityThreadCoreCoefficient(value);
+        },
+        value);
+}
+
+void
+InitMiddlePriorityThreadCoreCoefficient(const int64_t value) {
+    std::call_once(
+        flag5,
+        [](int64_t value) {
+            milvus::SetMiddlePriorityThreadCoreCoefficient(value);
+        },
+        value);
+}
+
+void
+InitLowPriorityThreadCoreCoefficient(const int64_t value) {
+    std::call_once(
+        flag6,
+        [](int64_t value) {
+            milvus::SetLowPriorityThreadCoreCoefficient(value);
+        },
+        value);
+}
+
+

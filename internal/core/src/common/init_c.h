@@ -27,7 +27,13 @@ void
 InitIndexSliceSize(const int64_t);
 
 void
-InitThreadCoreCoefficient(const int64_t);
+InitHighPriorityThreadCoreCoefficient(const int64_t);
+
+void
+InitMiddlePriorityThreadCoreCoefficient(const int64_t);
+
+void
+InitLowPriorityThreadCoreCoefficient(const int64_t);
 
 void
 InitCpuNum(const int);

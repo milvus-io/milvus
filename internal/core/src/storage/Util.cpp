@@ -23,6 +23,7 @@
 #include "storage/FieldData.h"
 #include "storage/parquet_c.h"
 #include "storage/ThreadPool.h"
+#include "storage/ThreadPools.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/FieldDataFactory.h"
 
@@ -421,7 +422,7 @@ EncodeAndUploadIndexSlice(RemoteChunkManager* remote_chunk_manager,
 
 std::vector<FieldDataPtr>
 GetObjectData(RemoteChunkManager* remote_chunk_manager, const std::vector<std::string>& remote_files) {
-    auto& pool = ThreadPool::GetInstance();
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
     std::vector<std::future<std::unique_ptr<DataCodec>>> futures;
     for (auto& file : remote_files) {
         futures.emplace_back(pool.Submit(DownloadAndDecodeRemoteFile, remote_chunk_manager, file));
@@ -443,7 +444,7 @@ PutIndexData(RemoteChunkManager* remote_chunk_manager,
              const std::vector<std::string>& slice_names,
              FieldDataMeta& field_meta,
              IndexMeta& index_meta) {
-    auto& pool = ThreadPool::GetInstance();
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
     std::vector<std::future<std::pair<std::string, size_t>>> futures;
     AssertInfo(data_slices.size() == slice_sizes.size(), "inconsistent size of data slices with slice sizes!");
     AssertInfo(data_slices.size() == slice_names.size(), "inconsistent size of data slices with slice names!");

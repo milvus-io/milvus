@@ -177,7 +177,7 @@ test_worker(string s) {
 }
 
 TEST_F(DiskAnnFileManagerTest, TestThreadPool) {
-    auto thread_pool = new milvus::ThreadPool(50);
+    auto thread_pool = new milvus::ThreadPool(50, "test");
     std::vector<std::future<int>> futures;
     auto start = chrono::system_clock::now();
     for (int i = 0; i < 100; i++) {
@@ -202,7 +202,7 @@ test_exception(string s) {
 
 TEST_F(DiskAnnFileManagerTest, TestThreadPoolException) {
     try {
-        auto thread_pool = new milvus::ThreadPool(50);
+        auto thread_pool = new milvus::ThreadPool(50, "test");
         std::vector<std::future<int>> futures;
         for (int i = 0; i < 100; i++) {
             futures.push_back(thread_pool->Submit(test_exception, "test_id" + std::to_string(i)));

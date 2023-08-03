@@ -449,6 +449,10 @@ common:
   retentionDuration: 0     # time travel reserved time, insert/delete will not be cleaned in this period. disable it by default
   entityExpiration: -1     # Entity expiration in seconds, CAUTION make sure entityExpiration >= retentionDuration and -1 means never expire
 
+  threadCoreCoefficient:
+    highPriority: 10 # This parameter specify how many times the number of threads is the number of cores in high priority thread pool
+    middlePriority: 5 # This parameter specify how many times the number of threads is the number of cores in middle priority thread pool
+    lowPriority: 1 # This parameter specify how many times the number of threads is the number of cores in low priority thread pool
   gracefulTime: 5000 # milliseconds. it represents the interval (in ms) by which the request arrival time needs to be subtracted in the case of Bounded Consistency.
   gracefulStopTimeout: 1800 # seconds. it will force quit the server if the graceful stop process is not completed during this time.
 
