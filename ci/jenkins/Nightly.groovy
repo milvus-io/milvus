@@ -163,6 +163,7 @@ pipeline {
                                                     --set indexNode.disk.enabled=true \
                                                     --set queryNode.disk.enabled=true \
                                                     --set standalone.disk.enabled=true \
+                                                    --set log.level=debug \
                                                     --set common.security.authorizationEnabled=${authenticationEnabled} \
                                                     --version ${chart_version} \
                                                     -f values/${mqMode}.yaml \
