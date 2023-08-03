@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/errorutil"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -5161,8 +5162,50 @@ func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest
 		return &milvuspb.ConnectResponse{Status: unhealthyStatus()}, nil
 	}
 
+	db := GetCurDBNameFromContextOrDefault(ctx)
+	logsToBePrinted := append(getLoggerOfClientInfo(request.GetClientInfo()), zap.String("db", db))
+	log := log.Ctx(ctx).With(logsToBePrinted...)
+
+	log.Info("connect received")
+
+	resp, err := node.rootCoord.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_ListDatabases),
+		),
+	})
+
+	if err != nil {
+		log.Info("connect failed, failed to list databases", zap.Error(err))
+		return &milvuspb.ConnectResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+
+	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		log.Info("connect failed, failed to list databases",
+			zap.String("code", resp.GetStatus().GetErrorCode().String()),
+			zap.String("reason", resp.GetStatus().GetReason()))
+		return &milvuspb.ConnectResponse{
+			Status: proto.Clone(resp.GetStatus()).(*commonpb.Status),
+		}, nil
+	}
+
+	if !funcutil.SliceContain(resp.GetDbNames(), db) {
+		log.Info("connect failed, target database not exist")
+		return &milvuspb.ConnectResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError, // DatabaseNotExist?
+				Reason:    fmt.Sprintf("database not found: %s", db),
+			},
+		}, nil
+	}
+
 	ts, err := node.tsoAllocator.AllocOne(ctx)
 	if err != nil {
+		log.Info("connect failed, failed to allocate timestamp", zap.Error(err))
 		return &milvuspb.ConnectResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
