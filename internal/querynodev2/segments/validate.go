@@ -43,7 +43,6 @@ func validate(ctx context.Context, manager *Manager, collectionID int64, partiti
 	if len(partitionIDs) == 0 {
 		searchPartIDs = collection.GetPartitions()
 	} else {
-		collection.ExistPartition()
 		if collection.ExistPartition(partitionIDs...) {
 			searchPartIDs = partitionIDs
 		}
