@@ -709,7 +709,6 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.CollectionID),
 	)
-	log.Info("receive GetIndexInfos request", zap.Int64s("segmentIDs", req.GetSegmentIDs()), zap.String("indexName", req.GetIndexName()))
 	errResp := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		Reason:    "",
