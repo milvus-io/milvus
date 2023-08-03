@@ -17,9 +17,9 @@ pipeline {
     }
     agent {
             kubernetes {
-                inheritFrom 'default'
+                inheritFrom 'milvus-e2e'
                 defaultContainer 'main'
-                yamlFile 'ci/jenkins/pod/rte.yaml'
+                yamlFile 'ci/jenkins/pod/rte-build.yaml'
                 customWorkspace '/home/jenkins/agent/workspace'
             }
     }
@@ -103,6 +103,7 @@ pipeline {
                                         // sh 'git config --global --add safe.directory /home/jenkins/agent/workspace'
                                         if ("${MILVUS_SERVER_TYPE}".contains("kafka")) {
                                             valuesFile = "pr_kafka.yaml"
+                                       
                                         }
 
                                         if ("${MILVUS_CLIENT}" == "pymilvus") {
