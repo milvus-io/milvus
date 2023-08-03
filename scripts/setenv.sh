@@ -47,13 +47,13 @@ case "${unameOut}" in
       export RPATH=$LD_LIBRARY_PATH;;
     Darwin*)
       # detect llvm version by valid list
-      for llvm_version in 15 14 NOT_FOUND ; do
+      for llvm_version in 16 15 14 NOT_FOUND ; do
         if brew ls --versions llvm@${llvm_version} > /dev/null; then
           break
         fi
       done
       if [ "${llvm_version}" = "NOT_FOUND" ] ; then
-        echo "valid llvm(14 or 15) not installed"
+        echo "valid llvm(>=14) not installed"
         exit 1
       fi
       llvm_prefix="$(brew --prefix llvm@${llvm_version})"
