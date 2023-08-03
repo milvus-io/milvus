@@ -68,7 +68,7 @@ TYPED_TEST_P(TypedOffsetOrderedArrayTest, find_first) {
     std::vector<int64_t> offsets;
 
     // not sealed.
-    ASSERT_ANY_THROW(this->map_.find_first(Unlimited, {}));
+    ASSERT_ANY_THROW(this->map_.find_first(Unlimited, {}, true));
 
     // insert 10 entities.
     int num = 10;
@@ -83,12 +83,12 @@ TYPED_TEST_P(TypedOffsetOrderedArrayTest, find_first) {
     // all is satisfied.
     BitsetType all(num);
     all.set();
-    offsets = this->map_.find_first(num / 2, all);
+    offsets = this->map_.find_first(num / 2, all, true);
     ASSERT_EQ(num / 2, offsets.size());
     for (int i = 1; i < offsets.size(); i++) {
         ASSERT_TRUE(data[offsets[i - 1]] <= data[offsets[i]]);
     }
-    offsets = this->map_.find_first(Unlimited, all);
+    offsets = this->map_.find_first(Unlimited, all, true);
     ASSERT_EQ(num, offsets.size());
     for (int i = 1; i < offsets.size(); i++) {
         ASSERT_TRUE(data[offsets[i - 1]] <= data[offsets[i]]);
@@ -97,9 +97,9 @@ TYPED_TEST_P(TypedOffsetOrderedArrayTest, find_first) {
     // none is satisfied.
     BitsetType none(num);
     none.reset();
-    offsets = this->map_.find_first(num / 2, none);
+    offsets = this->map_.find_first(num / 2, none, true);
     ASSERT_EQ(0, offsets.size());
-    offsets = this->map_.find_first(NoLimit, none);
+    offsets = this->map_.find_first(NoLimit, none, true);
     ASSERT_EQ(0, offsets.size());
 }
 

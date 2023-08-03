@@ -15,6 +15,7 @@
 #include "common/Utils.h"
 #include "query/Utils.h"
 #include "test_utils/DataGen.h"
+#include "common/Types.h"
 
 TEST(Util, StringMatch) {
     using namespace milvus;
@@ -116,4 +117,19 @@ TEST(Util, OutOfRange) {
         static_cast<int64_t>(std::numeric_limits<int32_t>::max()) + 1));
     ASSERT_TRUE(out_of_range<int32_t>(
         static_cast<int64_t>(std::numeric_limits<int32_t>::min()) - 1));
+}
+
+TEST(Util, upper_bound) {
+    using milvus::Timestamp;
+    using milvus::segcore::ConcurrentVector;
+    using milvus::segcore::upper_bound;
+
+    std::vector<Timestamp> data{0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+    ConcurrentVector<Timestamp> timestamps(1);
+    timestamps.grow_to_at_least(data.size());
+    timestamps.set_data(0, data.data(), data.size());
+
+    ASSERT_EQ(1, upper_bound(timestamps, 0, data.size(), 0));
+    ASSERT_EQ(5, upper_bound(timestamps, 0, data.size(), 4));
+    ASSERT_EQ(10, upper_bound(timestamps, 0, data.size(), 10));
 }

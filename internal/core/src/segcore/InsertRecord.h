@@ -55,7 +55,9 @@ class OffsetMap {
     using OffsetType = int64_t;
     // TODO: in fact, we can retrieve the pk here. Not sure which way is more efficient.
     virtual std::vector<OffsetType>
-    find_first(int64_t limit, const BitsetType& bitset) const = 0;
+    find_first(int64_t limit,
+               const BitsetType& bitset,
+               bool false_filtered_out) const = 0;
 };
 
 template <typename T>
@@ -85,29 +87,36 @@ class OffsetOrderedMap : public OffsetMap {
     }
 
     std::vector<OffsetType>
-    find_first(int64_t limit, const BitsetType& bitset) const override {
+    find_first(int64_t limit,
+               const BitsetType& bitset,
+               bool false_filtered_out) const override {
         if (limit == Unlimited || limit == NoLimit) {
             limit = map_.size();
         }
 
         // TODO: we can't retrieve pk by offset very conveniently.
         //      Selectivity should be done outside.
-        return find_first_by_index(limit, bitset);
+        return find_first_by_index(limit, bitset, false_filtered_out);
     }
 
  private:
     std::vector<OffsetType>
-    find_first_by_index(int64_t limit, const BitsetType& bitset) const {
+    find_first_by_index(int64_t limit,
+                        const BitsetType& bitset,
+                        bool false_filtered_out) const {
         std::vector<int64_t> seg_offsets;
         seg_offsets.reserve(limit);
         int64_t hit_num = 0;  // avoid counting the number everytime.
         auto cnt = bitset.count();
+        if (!false_filtered_out) {
+            cnt = bitset.size() - bitset.count();
+        }
         for (auto it = map_.begin(); it != map_.end(); it++) {
             if (hit_num >= limit || hit_num >= cnt) {
                 break;
             }
             for (auto seg_offset : it->second) {
-                if (bitset[seg_offset]) {
+                if (!(bitset[seg_offset] ^ false_filtered_out)) {
                     seg_offsets.push_back(seg_offset);
                     hit_num++;
                 }
@@ -163,7 +172,9 @@ class OffsetOrderedArray : public OffsetMap {
     }
 
     std::vector<OffsetType>
-    find_first(int64_t limit, const BitsetType& bitset) const override {
+    find_first(int64_t limit,
+               const BitsetType& bitset,
+               bool false_filtered_out) const override {
         check_search();
 
         if (limit == Unlimited || limit == NoLimit) {
@@ -172,21 +183,26 @@ class OffsetOrderedArray : public OffsetMap {
 
         // TODO: we can't retrieve pk by offset very conveniently.
         //      Selectivity should be done outside.
-        return find_first_by_index(limit, bitset);
+        return find_first_by_index(limit, bitset, false_filtered_out);
     }
 
  private:
     std::vector<OffsetType>
-    find_first_by_index(int64_t limit, const BitsetType& bitset) const {
+    find_first_by_index(int64_t limit,
+                        const BitsetType& bitset,
+                        bool false_filtered_out) const {
         std::vector<int64_t> seg_offsets;
         seg_offsets.reserve(limit);
         int64_t hit_num = 0;  // avoid counting the number everytime.
         auto cnt = bitset.count();
+        if (!false_filtered_out) {
+            cnt = bitset.size() - bitset.count();
+        }
         for (auto it = array_.begin(); it != array_.end(); it++) {
             if (hit_num >= limit || hit_num >= cnt) {
                 break;
             }
-            if (bitset[it->second]) {
+            if (!(bitset[it->second] ^ false_filtered_out)) {
                 seg_offsets.push_back(it->second);
                 hit_num++;
             }

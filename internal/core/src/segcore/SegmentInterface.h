@@ -186,16 +186,47 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
     search_ids(const IdArray& id_array, Timestamp timestamp) const = 0;
 
+    /**
+     * Apply timestamp filtering on bitset, the query can't see an entity whose
+     * timestamp is bigger than the timestamp of query.
+     *
+     * @param bitset The final bitset after scalar filtering and delta filtering,
+     *  `false` means that the entity will be filtered out.
+     * @param timestamp The timestamp of query.
+     */
     void
-    search_ids_filter(BitsetType& bitset, Timestamp timestamp) const;
+    timestamp_filter(BitsetType& bitset, Timestamp timestamp) const;
 
+    /**
+     * Apply timestamp filtering on bitset, the query can't see an entity whose
+     * timestamp is bigger than the timestamp of query. The passed offsets are
+     * all candidate entities.
+     *
+     * @param bitset The final bitset after scalar filtering and delta filtering,
+     *  `true` means that the entity will be filtered out.
+     * @param offsets The segment offsets of all candidates.
+     * @param timestamp The timestamp of query.
+     */
     void
-    search_ids_filter(BitsetType& bitset,
-                      const std::vector<int64_t>& offsets,
-                      Timestamp timestamp) const;
+    timestamp_filter(BitsetType& bitset,
+                     const std::vector<int64_t>& offsets,
+                     Timestamp timestamp) const;
 
+    /**
+     * Sort all candidates in ascending order, and then return the limit smallest.
+     * Bitset is used to check if the candidate will be filtered out. `false_filtered_out`
+     * determines how to filter out candidates. If `false_filtered_out` is true, we will
+     * filter all candidates whose related bit is false.
+     *
+     * @param limit
+     * @param bitset
+     * @param false_filtered_out
+     * @return All candidates offsets.
+     */
     virtual std::vector<OffsetMap::OffsetType>
-    find_first(int64_t limit, const BitsetType& bitset) const = 0;
+    find_first(int64_t limit,
+               const BitsetType& bitset,
+               bool false_filtered_out) const = 0;
 
  protected:
     // internal API: return chunk_data in span

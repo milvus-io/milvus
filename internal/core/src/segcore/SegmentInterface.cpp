@@ -179,31 +179,39 @@ SegmentInternalInterface::get_real_count() const {
 }
 
 void
-SegmentInternalInterface::search_ids_filter(BitsetType& bitset,
-                                            Timestamp timestamp) const {
+SegmentInternalInterface::timestamp_filter(BitsetType& bitset,
+                                           Timestamp timestamp) const {
     auto& timestamps = get_timestamps();
-    for (int offset = bitset.find_first(); offset < bitset.size();
-         offset = bitset.find_next(offset)) {
+    auto cnt = bitset.size();
+    if (timestamps[cnt - 1] <= timestamp) {
+        // no need to filter out anything.
+        return;
+    }
+
+    auto pilot = upper_bound(timestamps, 0, cnt, timestamp);
+    // offset bigger than pilot should be filtered out.
+    for (int offset = pilot; offset < cnt; offset = bitset.find_next(offset)) {
         if (offset == BitsetType::npos) {
             return;
         }
-        // You can't see an entity which is inserted after the point when you search.
-        if (timestamps[offset] > timestamp) {
-            bitset[offset] = false;
-        }
+        bitset[offset] = false;
     }
 }
 
 void
-SegmentInternalInterface::search_ids_filter(BitsetType& bitset,
-                                            const std::vector<int64_t>& offsets,
-                                            Timestamp timestamp) const {
-    BitsetType bitset_copy = bitset;
-    bitset.reset();
+SegmentInternalInterface::timestamp_filter(BitsetType& bitset,
+                                           const std::vector<int64_t>& offsets,
+                                           Timestamp timestamp) const {
     auto& timestamps = get_timestamps();
+    auto cnt = bitset.size();
+    if (timestamps[cnt - 1] <= timestamp) {
+        // no need to filter out anything.
+        return;
+    }
+
+    // point query, faster than binary search.
     for (auto& offset : offsets) {
-        // You can't see an entity which is inserted after the point when you search.
-        if (bitset_copy[offset] && timestamps[offset] <= timestamp) {
+        if (timestamps[offset] > timestamp) {
             bitset.set(offset, true);
         }
     }

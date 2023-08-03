@@ -588,4 +588,21 @@ LoadFieldDatasFromRemote(std::vector<std::string>& remote_files,
 
     channel->close();
 }
+
+int64_t
+upper_bound(const ConcurrentVector<Timestamp>& timestamps,
+            int64_t first,
+            int64_t last,
+            Timestamp value) {
+    int64_t mid;
+    while (first < last) {
+        mid = first + (last - first) / 2;
+        if (value >= timestamps[mid]) {
+            first = mid + 1;
+        } else {
+            last = mid;
+        }
+    }
+    return first;
+}
 }  // namespace milvus::segcore
