@@ -937,23 +937,6 @@ TEST(CApiTest, SearchTest) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    // const char* dsl_string = R"(
-    // {
-    //     "bool": {
-    //         "vector": {
-    //             "fakevec": {
-    //                 "metric_type": "L2",
-    //                 "params": {
-    //                     "nprobe": 10
-    //                 },
-    //                 "query": "$0",
-    //                 "topk": 10,
-    //                 "round_decimal": 3
-    //             }
-    //         }
-    //     }
-    // })";
-
     milvus::proto::plan::PlanNode plan_node;
     auto vector_anns = plan_node.mutable_vector_anns();
     vector_anns->set_is_binary(false);
@@ -983,13 +966,11 @@ TEST(CApiTest, SearchTest) {
     placeholderGroups.push_back(placeholderGroup);
 
     CSearchResult search_result;
-    auto res = Search(
-        segment, plan, placeholderGroup, {}, N + ts_offset, &search_result);
+    auto res = Search(segment, plan, placeholderGroup, {}, &search_result);
     ASSERT_EQ(res.error_code, Success);
 
     CSearchResult search_result2;
-    auto res2 =
-        Search(segment, plan, placeholderGroup, {}, ts_offset, &search_result2);
+    auto res2 = Search(segment, plan, placeholderGroup, {}, &search_result2);
     ASSERT_EQ(res2.error_code, Success);
 
     DeleteSearchPlan(plan);
@@ -1051,12 +1032,7 @@ TEST(CApiTest, SearchTestWithExpr) {
     dataset.timestamps_.push_back(1);
 
     CSearchResult search_result;
-    auto res = Search(segment,
-                      plan,
-                      placeholderGroup,
-                      {},
-                      dataset.timestamps_[0],
-                      &search_result);
+    auto res = Search(segment, plan, placeholderGroup, {}, &search_result);
     ASSERT_EQ(res.error_code, Success);
 
     DeleteSearchPlan(plan);
@@ -1246,19 +1222,6 @@ TEST(CApiTest, GetRealCount) {
     DeleteSegment(segment);
 }
 
-// TEST(CApiTest, SchemaTest) {
-//    std::string schema_string =
-//        "id: 6873737669791618215\nname: \"collection0\"\nschema: \u003c\n  "
-//        "field_metas: \u003c\n    field_name: \"age\"\n    type: INT32\n    dim: 1\n  \u003e\n  "
-//        "field_metas: \u003c\n    field_name: \"field_1\"\n    type: VECTOR_FLOAT\n    dim: 16\n  \u003e\n"
-//        "\u003e\ncreate_time: 1600416765\nsegment_ids: 6873737669791618215\npartition_tags: \"default\"\n";
-//
-//    auto collection = NewCollection(schema_string.data());
-//    auto segment = NewSegment(collection, Growing, -1);
-//    DeleteCollection(collection);
-//    DeleteSegment(segment);
-//}
-
 void
 CheckSearchResultDuplicate(const std::vector<CSearchResult>& results) {
     auto nq = ((SearchResult*)results[0])->total_nq_;
@@ -1299,23 +1262,6 @@ TEST(CApiTest, ReudceNullResult) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    //  const char* dsl_string = R"(
-    //  {
-    //      "bool": {
-    //          "vector": {
-    //              "fakevec": {
-    //                  "metric_type": "L2",
-    //                  "params": {
-    //                      "nprobe": 10
-    //                  },
-    //                  "query": "$0",
-    //                  "topk": 10,
-    //                  "round_decimal": 3
-    //             }
-    //          }
-    //      }
-    // })";
-
     milvus::proto::plan::PlanNode plan_node;
     auto vector_anns = plan_node.mutable_vector_anns();
     vector_anns->set_is_binary(false);
@@ -1352,8 +1298,7 @@ TEST(CApiTest, ReudceNullResult) {
         auto slice_topKs = std::vector<int64_t>{1};
         std::vector<CSearchResult> results;
         CSearchResult res;
-        status = Search(
-            segment, plan, placeholderGroup, {}, dataset.timestamps_[0], &res);
+        status = Search(segment, plan, placeholderGroup, {}, &res);
         ASSERT_EQ(status.error_code, Success);
         results.push_back(res);
         CSearchResultDataBlobs cSearchResultData;
@@ -1401,22 +1346,6 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    //  const char* dsl_string = R"(
-    //  {
-    //      "bool": {
-    //          "vector": {
-    //              "fakevec": {
-    //                  "metric_type": "L2",
-    //                  "params": {
-    //                      "nprobe": 10
-    //                  },
-    //                  "query": "$0",
-    //                  "topk": 10,
-    //                  "round_decimal": 3
-    //             }
-    //          }
-    //      }
-    // })";
     milvus::proto::plan::PlanNode plan_node;
     auto vector_anns = plan_node.mutable_vector_anns();
     vector_anns->set_is_binary(false);
@@ -1454,11 +1383,9 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
         auto slice_topKs = std::vector<int64_t>{topK / 2, topK};
         std::vector<CSearchResult> results;
         CSearchResult res1, res2;
-        status = Search(
-            segment, plan, placeholderGroup, {}, dataset.timestamps_[0], &res1);
+        status = Search(segment, plan, placeholderGroup, {}, &res1);
         ASSERT_EQ(status.error_code, Success);
-        status = Search(
-            segment, plan, placeholderGroup, {}, dataset.timestamps_[0], &res2);
+        status = Search(segment, plan, placeholderGroup, {}, &res2);
         ASSERT_EQ(status.error_code, Success);
         results.push_back(res1);
         results.push_back(res2);
@@ -1487,14 +1414,11 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
         auto slice_topKs = std::vector<int64_t>{topK / 2, topK, topK};
         std::vector<CSearchResult> results;
         CSearchResult res1, res2, res3;
-        status = Search(
-            segment, plan, placeholderGroup, {}, dataset.timestamps_[0], &res1);
+        status = Search(segment, plan, placeholderGroup, {}, &res1);
         ASSERT_EQ(status.error_code, Success);
-        status = Search(
-            segment, plan, placeholderGroup, {}, dataset.timestamps_[0], &res2);
+        status = Search(segment, plan, placeholderGroup, {}, &res2);
         ASSERT_EQ(status.error_code, Success);
-        status = Search(
-            segment, plan, placeholderGroup, {}, dataset.timestamps_[0], &res3);
+        status = Search(segment, plan, placeholderGroup, {}, &res3);
         ASSERT_EQ(status.error_code, Success);
         results.push_back(res1);
         results.push_back(res2);
@@ -1581,11 +1505,9 @@ testReduceSearchWithExpr(int N, int topK, int num_queries) {
     std::vector<CSearchResult> results;
     CSearchResult res1;
     CSearchResult res2;
-    auto res = Search(
-        segment, plan, placeholderGroup, {}, dataset.timestamps_[N - 1], &res1);
+    auto res = Search(segment, plan, placeholderGroup, {}, &res1);
     ASSERT_EQ(res.error_code, Success);
-    res = Search(
-        segment, plan, placeholderGroup, {}, dataset.timestamps_[N - 1], &res2);
+    res = Search(segment, plan, placeholderGroup, {}, &res2);
     ASSERT_EQ(res.error_code, Success);
     results.push_back(res1);
     results.push_back(res2);
@@ -1738,12 +1660,6 @@ TEST(CApiTest, LoadIndexSearch) {
         knowhere::GenDataSet(num_query, DIM, raw_data.data() + BIAS * DIM);
 
     auto result = indexing.Search(*query_dataset, conf, nullptr);
-
-    auto ids = (result.value()->GetIds());
-    auto dis = (result.value()->GetDistance());
-    // for (int i = 0; i < std::min(num_query * K, 100); ++i) {
-    //    std::cout << ids[i] << "->" << dis[i] << std::endl;
-    //}
 }
 
 TEST(CApiTest, Indexing_Without_Predicate) {
@@ -1773,23 +1689,6 @@ TEST(CApiTest, Indexing_Without_Predicate) {
                           insert_data.data(),
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
-
-    // const char* dsl_string = R"(
-    //  {
-    //      "bool": {
-    //          "vector": {
-    //              "fakevec": {
-    //                  "metric_type": "L2",
-    //                  "params": {
-    //                      "nprobe": 10
-    //                  },
-    //                  "query": "$0",
-    //                  "topk": 5,
-    //                  "round_decimal": -1
-    //              }
-    //          }
-    //      }
-    //  })";
 
     milvus::proto::plan::PlanNode plan_node;
     auto vector_anns = plan_node.mutable_vector_anns();
@@ -1822,15 +1721,10 @@ TEST(CApiTest, Indexing_Without_Predicate) {
 
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
-    Timestamp time = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
-    auto res_before_load_index = Search(segment,
-                                        plan,
-                                        placeholderGroup,
-                                        {},
-                                        time,
-                                        &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(
+        segment, plan, placeholderGroup, {}, &c_search_result_on_smallIndex);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
@@ -1887,7 +1781,6 @@ TEST(CApiTest, Indexing_Without_Predicate) {
                                        plan,
                                        placeholderGroup,
                                        {},
-                                       time,
                                        &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
@@ -1895,8 +1788,6 @@ TEST(CApiTest, Indexing_Without_Predicate) {
         SearchResultToJson(*search_result_on_raw_index);
     auto search_result_on_bigIndex_json =
         SearchResultToJson((*(SearchResult*)c_search_result_on_bigIndex));
-    // std::cout << search_result_on_raw_index_json.dump(1) << std::endl;
-    // std::cout << search_result_on_bigIndex_json.dump(1) << std::endl;
 
     ASSERT_EQ(search_result_on_raw_index_json.dump(1),
               search_result_on_bigIndex_json.dump(1));
@@ -1969,15 +1860,10 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
 
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
-    Timestamp time = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
-    auto res_before_load_index = Search(segment,
-                                        plan,
-                                        placeholderGroup,
-                                        {},
-                                        time,
-                                        &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(
+        segment, plan, placeholderGroup, {}, &c_search_result_on_smallIndex);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
@@ -2034,7 +1920,6 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
                                        plan,
                                        placeholderGroup,
                                        {},
-                                       time,
                                        &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
@@ -2042,8 +1927,6 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
         SearchResultToJson(*search_result_on_raw_index);
     auto search_result_on_bigIndex_json =
         SearchResultToJson((*(SearchResult*)c_search_result_on_bigIndex));
-    // std::cout << search_result_on_raw_index_json.dump(1) << std::endl;
-    // std::cout << search_result_on_bigIndex_json.dump(1) << std::endl;
 
     ASSERT_EQ(search_result_on_raw_index_json.dump(1),
               search_result_on_bigIndex_json.dump(1));
@@ -2085,34 +1968,6 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    // const char* dsl_string = R"({
-    //      "bool": {
-    //          "must": [
-    //          {
-    //              "range": {
-    //                  "counter": {
-    //                      "GE": 4200,
-    //                      "LT": 4210
-    //                  }
-    //              }
-    //          },
-    //          {
-    //              "vector": {
-    //                  "fakevec": {
-    //                      "metric_type": "L2",
-    //                      "params": {
-    //                          "nprobe": 10
-    //                      },
-    //                      "query": "$0",
-    //                      "topk": 5,
-    //                      "round_decimal": -1
-    //
-    //                  }
-    //              }
-    //          }
-    //          ]
-    //      }
-    //  })";
     const char* raw_plan = R"(vector_anns: <
                                 field_id: 100
                                 predicates: <
@@ -2173,15 +2028,10 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
 
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
-    Timestamp time = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
-    auto res_before_load_index = Search(segment,
-                                        plan,
-                                        placeholderGroup,
-                                        {},
-                                        time,
-                                        &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(
+        segment, plan, placeholderGroup, {}, &c_search_result_on_smallIndex);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
@@ -2238,7 +2088,6 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
                                        plan,
                                        placeholderGroup,
                                        {},
-                                       time,
                                        &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
@@ -2349,15 +2198,10 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
 
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
-    Timestamp time = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
-    auto res_before_load_index = Search(segment,
-                                        plan,
-                                        placeholderGroup,
-                                        {},
-                                        time,
-                                        &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(
+        segment, plan, placeholderGroup, {}, &c_search_result_on_smallIndex);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
@@ -2414,7 +2258,6 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
                                        plan,
                                        placeholderGroup,
                                        {},
-                                       time,
                                        &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
@@ -2463,33 +2306,6 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    // const char* dsl_string = R"({
-    //      "bool": {
-    //          "must": [
-    //          {
-    //              "term": {
-    //                  "counter": {
-    //                      "values": [4200, 4201, 4202, 4203, 4204],
-    //                      "is_in_field": false
-    //                  }
-    //              }
-    //          },
-    //          {
-    //              "vector": {
-    //                  "fakevec": {
-    //                      "metric_type": "L2",
-    //                      "params": {
-    //                          "nprobe": 10
-    //                      },
-    //                      "query": "$0",
-    //                      "topk": 5,
-    //                      "round_decimal": -1
-    //                  }
-    //              }
-    //          }
-    //          ]
-    //      }
-    //  })";
     const char* raw_plan = R"(vector_anns: <
                                              field_id: 100
                                              predicates: <
@@ -2544,15 +2360,10 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
 
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
-    Timestamp time = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
-    auto res_before_load_index = Search(segment,
-                                        plan,
-                                        placeholderGroup,
-                                        {},
-                                        time,
-                                        &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(
+        segment, plan, placeholderGroup, {}, &c_search_result_on_smallIndex);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
@@ -2609,7 +2420,6 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
                                        plan,
                                        placeholderGroup,
                                        {},
-                                       time,
                                        &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
@@ -2713,15 +2523,10 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
 
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
-    Timestamp time = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
-    auto res_before_load_index = Search(segment,
-                                        plan,
-                                        placeholderGroup,
-                                        {},
-                                        time,
-                                        &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(
+        segment, plan, placeholderGroup, {}, &c_search_result_on_smallIndex);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
@@ -2778,7 +2583,6 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
                                        plan,
                                        placeholderGroup,
                                        {},
-                                       time,
                                        &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
@@ -2827,33 +2631,6 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    // const char* dsl_string = R"({
-    //      "bool": {
-    //          "must": [
-    //          {
-    //              "range": {
-    //                  "counter": {
-    //                      "GE": 4200,
-    //                      "LT": 4210
-    //                  }
-    //              }
-    //          },
-    //          {
-    //              "vector": {
-    //                  "fakevec": {
-    //                      "metric_type": "JACCARD",
-    //                      "params": {
-    //                          "nprobe": 10
-    //                      },
-    //                      "query": "$0",
-    //                      "topk": 5,
-    //                      "round_decimal": -1
-    //                  }
-    //              }
-    //          }
-    //          ]
-    //      }
-    //  })";
     const char* raw_plan = R"(vector_anns: <
                                              field_id: 100
                                              predicates: <
@@ -2914,15 +2691,10 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
 
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
-    Timestamp time = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
-    auto res_before_load_index = Search(segment,
-                                        plan,
-                                        placeholderGroup,
-                                        {},
-                                        time,
-                                        &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(
+        segment, plan, placeholderGroup, {}, &c_search_result_on_smallIndex);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
@@ -2980,7 +2752,6 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
                                        plan,
                                        placeholderGroup,
                                        {},
-                                       time,
                                        &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
@@ -3089,15 +2860,10 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
 
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
-    Timestamp time = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
-    auto res_before_load_index = Search(segment,
-                                        plan,
-                                        placeholderGroup,
-                                        {},
-                                        time,
-                                        &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(
+        segment, plan, placeholderGroup, {}, &c_search_result_on_smallIndex);
     ASSERT_TRUE(res_before_load_index.error_code == Success)
         << res_before_load_index.error_msg;
 
@@ -3155,7 +2921,6 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
                                        plan,
                                        placeholderGroup,
                                        {},
-                                       time,
                                        &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
@@ -3204,33 +2969,6 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    // const char* dsl_string = R"({
-    //     "bool": {
-    //         "must": [
-    //         {
-    //             "term": {
-    //                 "counter": {
-    //                     "values": [4200, 4201, 4202, 4203, 4204],
-    //                     "is_in_field": false
-    //                 }
-    //             }
-    //         },
-    //         {
-    //             "vector": {
-    //                 "fakevec": {
-    //                     "metric_type": "JACCARD",
-    //                     "params": {
-    //                         "nprobe": 10
-    //                     },
-    //                     "query": "$0",
-    //                     "topk": 5,
-    //                     "round_decimal": -1
-    //                 }
-    //             }
-    //         }
-    //         ]
-    //     }
-    // })";
     const char* raw_plan = R"(vector_anns: <
                                              field_id: 100
                                              predicates: <
@@ -3286,15 +3024,10 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
 
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
-    Timestamp time = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
-    auto res_before_load_index = Search(segment,
-                                        plan,
-                                        placeholderGroup,
-                                        {},
-                                        time,
-                                        &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(
+        segment, plan, placeholderGroup, {}, &c_search_result_on_smallIndex);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
@@ -3351,7 +3084,6 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
                                        plan,
                                        placeholderGroup,
                                        {},
-                                       time,
                                        &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
@@ -3480,12 +3212,8 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     Timestamp time = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
-    auto res_before_load_index = Search(segment,
-                                        plan,
-                                        placeholderGroup,
-                                        {},
-                                        time,
-                                        &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(
+        segment, plan, placeholderGroup, {}, &c_search_result_on_smallIndex);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
@@ -3542,7 +3270,6 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
                                        plan,
                                        placeholderGroup,
                                        {},
-                                       time,
                                        &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
@@ -3561,9 +3288,6 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
                                             slice_topKs.data(),
                                             slice_nqs.size());
     ASSERT_EQ(status.error_code, Success);
-
-    //    status = ReduceSearchResultsAndFillData(plan, results.data(), results.size());
-    //    ASSERT_EQ(status.error_code, Success);
 
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
     for (int i = 0; i < num_queries; ++i) {
@@ -3619,34 +3343,6 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     auto query_ptr = vec_col.data() + BIAS * DIM;
 
     auto counter_col = dataset.get_col<int64_t>(FieldId(101));
-
-    // const char* dsl_string = R"({
-    //     "bool": {
-    //         "must": [
-    //         {
-    //             "range": {
-    //                 "counter": {
-    //                     "GE": 4200,
-    //                     "LT": 4210
-    //                 }
-    //             }
-    //         },
-    //         {
-    //             "vector": {
-    //                 "fakevec": {
-    //                     "metric_type": "L2",
-    //                     "params": {
-    //                         "nprobe": 10
-    //                     },
-    //                     "query": "$0",
-    //                     "topk": 5,
-    //                     "round_decimal": -1
-    //                 }
-    //             }
-    //         }
-    //         ]
-    //     }
-    // })";
 
     const char* raw_plan = R"(vector_anns: <
                                 field_id: 100
@@ -3733,7 +3429,6 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
-    auto load_index_info = (LoadIndexInfo*)c_load_index_info;
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     SearchInfo search_info;
@@ -3764,7 +3459,6 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
                                        plan,
                                        placeholderGroup,
                                        {},
-                                       time,
                                        &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
@@ -3801,22 +3495,6 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
 
     auto counter_col = dataset.get_col<int64_t>(FieldId(101));
 
-    // const char* dsl_string = R"(
-    // {
-    //      "bool": {
-    //          "vector": {
-    //              "fakevec": {
-    //                  "metric_type": "L2",
-    //                  "params": {
-    //                      "nprobe": 10
-    //                  },
-    //                  "query": "$0",
-    //                  "topk": 5,
-    //                  "round_decimal": -1
-    //              }
-    //          }
-    //      }
-    // })";
     const char* raw_plan = R"(vector_anns: <
                                 field_id: 100
                                 query_info: <
@@ -3857,14 +3535,12 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
     CSearchResult search_result;
-    auto res = Search(
-        segment, plan, placeholderGroup, {}, N + ts_offset, &search_result);
+    auto res = Search(segment, plan, placeholderGroup, {}, &search_result);
     std::cout << res.error_msg << std::endl;
     ASSERT_EQ(res.error_code, Success);
 
     CSearchResult search_result2;
-    auto res2 =
-        Search(segment, plan, placeholderGroup, {}, ts_offset, &search_result2);
+    auto res2 = Search(segment, plan, placeholderGroup, {}, &search_result2);
     ASSERT_EQ(res2.error_code, Success);
 
     DeleteSearchPlan(plan);
@@ -3951,7 +3627,6 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
 
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
-    Timestamp time = 10000000;
 
     // load index to segment
     auto indexing = generate_index(vec_col.data(),
@@ -4007,12 +3682,8 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     }
 
     CSearchResult c_search_result_on_bigIndex;
-    auto res_after_load_index = Search(segment,
-                                       plan,
-                                       placeholderGroup,
-                                       {},
-                                       time,
-                                       &c_search_result_on_bigIndex);
+    auto res_after_load_index = Search(
+        segment, plan, placeholderGroup, {}, &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
@@ -4208,23 +3879,6 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_IP) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    // const char* dsl_string = R"(
-    // {
-    //     "bool": {
-    //         "vector": {
-    //             "fakevec": {
-    //                 "metric_type": "IP",
-    //                 "params": {
-    //                     "nprobe": 10,
-    //                     "radius": 10
-    //                 },
-    //                 "query": "$0",
-    //                 "topk": 10,
-    //                 "round_decimal": 3
-    //             }
-    //         }
-    //     }
-    // })";
     const char* raw_plan = R"(vector_anns: <
                                              field_id: 100
                                              query_info: <
@@ -4254,8 +3908,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_IP) {
     placeholderGroups.push_back(placeholderGroup);
 
     CSearchResult search_result;
-    auto res =
-        Search(segment, plan, placeholderGroup, {}, ts_offset, &search_result);
+    auto res = Search(segment, plan, placeholderGroup, {}, &search_result);
     ASSERT_EQ(res.error_code, Success);
 
     DeleteSearchPlan(plan);
@@ -4287,24 +3940,6 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    // const char* dsl_string = R"(
-    // {
-    //     "bool": {
-    //         "vector": {
-    //             "fakevec": {
-    //                 "metric_type": "IP",
-    //                 "params": {
-    //                     "nprobe": 10,
-    //                     "radius": 10,
-    //                     "range_filter": 20
-    //                 },
-    //                 "query": "$0",
-    //                 "topk": 10,
-    //                 "round_decimal": 3
-    //             }
-    //         }
-    //     }
-    // })";
     const char* raw_plan = R"(vector_anns: <
                                              field_id: 100
                                              query_info: <
@@ -4334,8 +3969,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP) {
     placeholderGroups.push_back(placeholderGroup);
 
     CSearchResult search_result;
-    auto res =
-        Search(segment, plan, placeholderGroup, {}, ts_offset, &search_result);
+    auto res = Search(segment, plan, placeholderGroup, {}, &search_result);
     ASSERT_EQ(res.error_code, Success);
 
     DeleteSearchPlan(plan);
@@ -4367,23 +4001,6 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_L2) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    // const char* dsl_string = R"(
-    // {
-    //     "bool": {
-    //         "vector": {
-    //             "fakevec": {
-    //                 "metric_type": "L2",
-    //                 "params": {
-    //                     "nprobe": 10,
-    //                     "radius": 10
-    //                 },
-    //                 "query": "$0",
-    //                 "topk": 10,
-    //                 "round_decimal": 3
-    //             }
-    //         }
-    //     }
-    // })";
     const char* raw_plan = R"(vector_anns: <
                                              field_id: 100
                                              query_info: <
@@ -4413,8 +4030,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_L2) {
     placeholderGroups.push_back(placeholderGroup);
 
     CSearchResult search_result;
-    auto res =
-        Search(segment, plan, placeholderGroup, {}, ts_offset, &search_result);
+    auto res = Search(segment, plan, placeholderGroup, {}, &search_result);
     ASSERT_EQ(res.error_code, Success);
 
     DeleteSearchPlan(plan);
@@ -4446,24 +4062,6 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_L2) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    // const char* dsl_string = R"(
-    // {
-    //     "bool": {
-    //         "vector": {
-    //             "fakevec": {
-    //                 "metric_type": "L2",
-    //                 "params": {
-    //                     "nprobe": 10,
-    //                     "radius": 20,
-    //                     "range_filter": 10
-    //                 },
-    //                 "query": "$0",
-    //                 "topk": 10,
-    //                 "round_decimal": 3
-    //             }
-    //         }
-    //     }
-    // })";
     const char* raw_plan = R"(vector_anns: <
                                              field_id: 100
                                              query_info: <
@@ -4493,8 +4091,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_L2) {
     placeholderGroups.push_back(placeholderGroup);
 
     CSearchResult search_result;
-    auto res =
-        Search(segment, plan, placeholderGroup, {}, ts_offset, &search_result);
+    auto res = Search(segment, plan, placeholderGroup, {}, &search_result);
     ASSERT_EQ(res.error_code, Success);
 
     DeleteSearchPlan(plan);

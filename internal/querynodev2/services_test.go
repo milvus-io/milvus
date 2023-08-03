@@ -1226,7 +1226,6 @@ func (suite *ServiceSuite) genCQueryRequest(nq int64, indexType string, schema *
 		PartitionIDs: suite.partitionIDs,
 		// 106 is fieldID of int64 pk
 		OutputFieldsId:     []int64{106, 100},
-		TravelTimestamp:    uint64(1000),
 		SerializedExprPlan: expr,
 	}, nil
 }

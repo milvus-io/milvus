@@ -353,14 +353,6 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	travelTimestamp := t.request.TravelTimestamp
-	if travelTimestamp == 0 {
-		travelTimestamp = typeutil.MaxTimestamp
-	}
-	err = validateTravelTimestamp(travelTimestamp, t.BeginTs())
-	if err != nil {
-		return err
-	}
 	collectionInfo, err2 := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
 	if err2 != nil {
 		log.Warn("Proxy::searchTask::PreExecute failed to GetCollectionInfo from cache",
@@ -368,7 +360,6 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		return err2
 	}
 	guaranteeTs := t.request.GetGuaranteeTimestamp()
-	t.SearchRequest.TravelTimestamp = travelTimestamp
 	var consistencyLevel commonpb.ConsistencyLevel
 	useDefaultConsistency := t.request.GetUseDefaultConsistency()
 	if useDefaultConsistency {
@@ -398,7 +389,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	}
 
 	log.Debug("search PreExecute done.",
-		zap.Uint64("travel_ts", travelTimestamp), zap.Uint64("guarantee_ts", guaranteeTs),
+		zap.Uint64("guarantee_ts", guaranteeTs),
 		zap.Bool("use_default_consistency", useDefaultConsistency),
 		zap.Any("consistency level", consistencyLevel),
 		zap.Uint64("timeout_ts", t.SearchRequest.GetTimeoutTimestamp()))
@@ -588,7 +579,6 @@ func (t *searchTask) Requery() error {
 		Expr:               expr,
 		OutputFields:       t.request.GetOutputFields(),
 		PartitionNames:     t.request.GetPartitionNames(),
-		TravelTimestamp:    t.request.GetTravelTimestamp(),
 		GuaranteeTimestamp: t.request.GetGuaranteeTimestamp(),
 		QueryParams:        t.request.GetSearchParams(),
 	}

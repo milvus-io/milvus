@@ -2642,7 +2642,6 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		lb:      node.lbPolicy,
 	}
 
-	travelTs := request.TravelTimestamp
 	guaranteeTs := request.GuaranteeTimestamp
 
 	log := log.Ctx(ctx).With(
@@ -2654,7 +2653,6 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		zap.Any("len(PlaceholderGroup)", len(request.PlaceholderGroup)),
 		zap.Any("OutputFields", request.OutputFields),
 		zap.Any("search_params", request.SearchParams),
-		zap.Uint64("travel_timestamp", travelTs),
 		zap.Uint64("guarantee_timestamp", guaranteeTs))
 
 	defer func() {
@@ -2664,8 +2662,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		}
 	}()
 
-	log.Debug(
-		rpcReceived(method))
+	log.Debug(rpcReceived(method))
 
 	if err := node.sched.dqQueue.Enqueue(qt); err != nil {
 		log.Warn(

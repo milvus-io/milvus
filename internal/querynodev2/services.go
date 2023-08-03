@@ -762,8 +762,7 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 
 	log.Debug("Received SearchRequest",
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
-		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
-		zap.Uint64("timeTravel", req.GetReq().GetTravelTimestamp()))
+		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()))
 
 	tr := timerecord.NewTimeRecorderWithTrace(ctx, "SearchRequest")
 
@@ -955,7 +954,7 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		zap.Int64s("outputFields", req.GetReq().GetOutputFieldsId()),
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
 		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
-		zap.Uint64("travelTimestamp", req.GetReq().GetTravelTimestamp()),
+		zap.Uint64("mvccTimestamp", req.GetReq().GetMvccTimestamp()),
 		zap.Bool("isCount", req.GetReq().GetIsCount()),
 	)
 	tr := timerecord.NewTimeRecorderWithTrace(ctx, "QueryRequest")

@@ -1137,10 +1137,10 @@ func checkSearchResult(nq int64, plan *SearchPlan, searchResult *SearchResult) e
 			return fmt.Errorf("unexpected nq when checkSearchResult")
 		}
 		// search empty segment, return empty result.IDs
-		if len(result.Ids.IdField.(*schemapb.IDs_IntId).IntId.Data) != 0 {
+		if len(result.Ids.IdField.(*schemapb.IDs_IntId).IntId.Data) <= 0 {
 			return fmt.Errorf("unexpected Ids when checkSearchResult")
 		}
-		if len(result.Scores) != 0 {
+		if len(result.Scores) <= 0 {
 			return fmt.Errorf("unexpected Scores when checkSearchResult")
 		}
 	}

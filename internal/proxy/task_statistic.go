@@ -122,15 +122,7 @@ func (g *getStatisticsTask) PreExecute(ctx context.Context) error {
 	g.GetStatisticsRequest.DbID = 0 // todo
 	g.GetStatisticsRequest.CollectionID = collID
 
-	if g.TravelTimestamp == 0 {
-		g.TravelTimestamp = g.BeginTs()
-	}
-
-	err = validateTravelTimestamp(g.TravelTimestamp, g.BeginTs())
-	if err != nil {
-		return err
-	}
-
+	g.TravelTimestamp = g.BeginTs()
 	g.GuaranteeTimestamp = parseGuaranteeTs(g.GuaranteeTimestamp, g.BeginTs())
 
 	deadline, ok := g.TraceCtx().Deadline()

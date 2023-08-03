@@ -709,17 +709,6 @@ func ValidatePassword(password string) error {
 	return nil
 }
 
-func validateTravelTimestamp(travelTs, tMax typeutil.Timestamp) error {
-	durationSeconds := tsoutil.CalculateDuration(tMax, travelTs) / 1000
-	if durationSeconds > Params.CommonCfg.RetentionDuration.GetAsInt64() {
-
-		durationIn := time.Second * time.Duration(durationSeconds)
-		durationSupport := time.Second * time.Duration(Params.CommonCfg.RetentionDuration.GetAsInt64())
-		return fmt.Errorf("only support to travel back to %v so far, but got %v", durationSupport, durationIn)
-	}
-	return nil
-}
-
 func ReplaceID2Name(oldStr string, id int64, name string) string {
 	return strings.ReplaceAll(oldStr, strconv.FormatInt(id, 10), name)
 }

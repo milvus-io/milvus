@@ -2161,35 +2161,6 @@ class TestQueryCount(TestcaseBase):
                            check_items={exp_res: [{count: ct.default_nb}]})
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_count_travel_timestamp(self):
-        """
-        target: test count with  travel_timestamp
-        method: count with travel_timestamp
-        expected: verify count
-        """
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
-        # load collection
-        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
-        collection_w.load()
-
-        # insert
-        df = cf.gen_default_dataframe_data()
-        insert_res, _ = collection_w.insert(df)
-
-        collection_w.delete(default_term_expr)
-
-        # query count with  travel_timestamp
-        collection_w.query(expr=default_term_expr, output_fields=[ct.default_count_output],
-                           travel_timestamp=insert_res.timestamp,
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: [{count: 2}]}
-                           )
-        collection_w.query(expr=default_term_expr, output_fields=[ct.default_count_output],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: [{count: 0}]}
-                           )
-
-    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("invalid_output_field", ["count", "count(int64)", "count(**)"])
     def test_count_invalid_output_field(self, invalid_output_field):
         """

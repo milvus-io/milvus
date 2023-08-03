@@ -94,7 +94,6 @@ message SearchRequest {
   common.DslType dsl_type = 8;
   bytes serialized_expr_plan = 9;
   repeated int64 output_fields_id = 10;
-  uint64 travel_timestamp = 11;
   uint64 guarantee_timestamp = 12;
   uint64 timeout_timestamp = 13;
   int64  nq = 14;
@@ -137,7 +136,7 @@ message RetrieveRequest {
   repeated int64 partitionIDs = 5;
   bytes serialized_expr_plan = 6;
   repeated int64 output_fields_id = 7;
-  uint64 travel_timestamp = 8;
+  uint64 mvcc_timestamp = 8;
   uint64 guarantee_timestamp = 9;
   uint64 timeout_timestamp = 10;
   int64 limit = 11; // Optional

@@ -116,7 +116,7 @@ GenCompareExpr(proto::plan::OpType op) {
 
 template <typename T>
 auto
-GenUnaryRangeExpr(proto::plan::OpType op, T value) {
+GenUnaryRangeExpr(proto::plan::OpType op, T& value) {
     auto unary_range_expr = new proto::plan::UnaryRangeExpr();
     unary_range_expr->set_op(op);
     auto generic = GenGenericValue(value);
@@ -184,7 +184,7 @@ GenTermPlan(const FieldMeta& fvec_meta,
 
     auto plan_node = GenPlanNode();
     plan_node->set_allocated_vector_anns(anns);
-    return std::move(plan_node);
+    return plan_node;
 }
 
 auto
@@ -222,7 +222,7 @@ GenAlwaysFalsePlan(const FieldMeta& fvec_meta, const FieldMeta& str_meta) {
 
     auto plan_node = GenPlanNode();
     plan_node->set_allocated_vector_anns(anns);
-    return std::move(plan_node);
+    return plan_node;
 }
 
 auto
@@ -235,7 +235,7 @@ GenAlwaysTruePlan(const FieldMeta& fvec_meta, const FieldMeta& str_meta) {
 
     auto plan_node = GenPlanNode();
     plan_node->set_allocated_vector_anns(anns);
-    return std::move(plan_node);
+    return plan_node;
 }
 
 SchemaPtr
@@ -361,26 +361,26 @@ TEST(StringExpr, Compare) {
 
         auto plan_node = std::make_unique<proto::plan::PlanNode>();
         plan_node->set_allocated_vector_anns(anns);
-        return std::move(plan_node);
+        return plan_node;
     };
 
     std::vector<std::tuple<proto::plan::OpType,
-                           std::function<bool(std::string, std::string)>>>
+                           std::function<bool(std::string&, std::string&)>>>
         testcases{
             {proto::plan::OpType::GreaterThan,
-             [](std::string v1, std::string v2) { return v1 > v2; }},
+             [](std::string& v1, std::string& v2) { return v1 > v2; }},
             {proto::plan::OpType::GreaterEqual,
-             [](std::string v1, std::string v2) { return v1 >= v2; }},
+             [](std::string& v1, std::string& v2) { return v1 >= v2; }},
             {proto::plan::OpType::LessThan,
-             [](std::string v1, std::string v2) { return v1 < v2; }},
+             [](std::string& v1, std::string& v2) { return v1 < v2; }},
             {proto::plan::OpType::LessEqual,
-             [](std::string v1, std::string v2) { return v1 <= v2; }},
+             [](std::string& v1, std::string& v2) { return v1 <= v2; }},
             {proto::plan::OpType::Equal,
-             [](std::string v1, std::string v2) { return v1 == v2; }},
+             [](std::string& v1, std::string& v2) { return v1 == v2; }},
             {proto::plan::OpType::NotEqual,
-             [](std::string v1, std::string v2) { return v1 != v2; }},
+             [](std::string& v1, std::string& v2) { return v1 != v2; }},
             {proto::plan::OpType::PrefixMatch,
-             [](std::string v1, std::string v2) {
+             [](std::string& v1, std::string& v2) {
                  return PrefixMatch(v1, v2);
              }},
         };
@@ -464,28 +464,28 @@ TEST(StringExpr, UnaryRange) {
 
         auto plan_node = std::make_unique<proto::plan::PlanNode>();
         plan_node->set_allocated_vector_anns(anns);
-        return std::move(plan_node);
+        return plan_node;
     };
 
     std::vector<std::tuple<proto::plan::OpType,
                            std::string,
-                           std::function<bool(std::string)>>>
+                           std::function<bool(std::string&)>>>
         testcases{
             {proto::plan::OpType::GreaterThan,
              "2000",
-             [](std::string val) { return val > "2000"; }},
+             [](std::string& val) { return val > "2000"; }},
             {proto::plan::OpType::GreaterEqual,
              "2000",
-             [](std::string val) { return val >= "2000"; }},
+             [](std::string& val) { return val >= "2000"; }},
             {proto::plan::OpType::LessThan,
              "3000",
-             [](std::string val) { return val < "3000"; }},
+             [](std::string& val) { return val < "3000"; }},
             {proto::plan::OpType::LessEqual,
              "3000",
-             [](std::string val) { return val <= "3000"; }},
+             [](std::string& val) { return val <= "3000"; }},
             {proto::plan::OpType::PrefixMatch,
              "a",
-             [](std::string val) { return PrefixMatch(val, "a"); }},
+             [](std::string& val) { return PrefixMatch(val, "a"); }},
         };
 
     auto seg = CreateGrowingSegment(schema, empty_index_meta);
@@ -559,7 +559,7 @@ TEST(StringExpr, BinaryRange) {
 
         auto plan_node = std::make_unique<proto::plan::PlanNode>();
         plan_node->set_allocated_vector_anns(anns);
-        return std::move(plan_node);
+        return plan_node;
     };
 
     // bool lb_inclusive, bool ub_inclusive, std::string lb, std::string ub
@@ -567,29 +567,33 @@ TEST(StringExpr, BinaryRange) {
                            bool,
                            std::string,
                            std::string,
-                           std::function<bool(std::string)>>>
+                           std::function<bool(std::string&)>>>
         testcases{
             {false,
              false,
              "2000",
              "3000",
-             [](std::string val) { return val > "2000" && val < "3000"; }},
+             [](std::string& val) { return val > "2000" && val < "3000"; }},
             {false,
              true,
              "2000",
              "3000",
-             [](std::string val) { return val > "2000" && val <= "3000"; }},
+             [](std::string& val) { return val > "2000" && val <= "3000"; }},
             {true,
              false,
              "2000",
              "3000",
-             [](std::string val) { return val >= "2000" && val < "3000"; }},
+             [](std::string& val) { return val >= "2000" && val < "3000"; }},
             {true,
              true,
              "2000",
              "3000",
-             [](std::string val) { return val >= "2000" && val <= "3000"; }},
-            {true, true, "2000", "1000", [](std::string val) { return false; }},
+             [](std::string& val) { return val >= "2000" && val <= "3000"; }},
+            {true,
+             true,
+             "2000",
+             "1000",
+             [](std::string& val) { return false; }},
         };
 
     auto seg = CreateGrowingSegment(schema, empty_index_meta);
@@ -667,7 +671,6 @@ TEST(AlwaysTrueStringPlan, SearchWithOutputFields) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    Timestamp time = MAX_TIMESTAMP;
     std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
 
     query::dataset::SearchDataset search_dataset{
@@ -681,7 +684,7 @@ TEST(AlwaysTrueStringPlan, SearchWithOutputFields) {
     auto sub_result = BruteForceSearch(
         search_dataset, vec_col.data(), N, knowhere::Json(), nullptr);
 
-    auto sr = segment->Search(plan.get(), ph_group.get(), time);
+    auto sr = segment->Search(plan.get(), ph_group.get());
     segment->FillPrimaryKeys(plan.get(), *sr);
     segment->FillTargetEntry(plan.get(), *sr);
     ASSERT_EQ(sr->pk_type_, DataType::VARCHAR);

@@ -250,7 +250,6 @@ func (t *SearchTask) Merge(other *SearchTask) bool {
 	// Check mergeable
 	if t.req.GetReq().GetDbID() != other.req.GetReq().GetDbID() ||
 		t.req.GetReq().GetCollectionID() != other.req.GetReq().GetCollectionID() ||
-		t.req.GetReq().GetTravelTimestamp() != other.req.GetReq().GetTravelTimestamp() ||
 		t.req.GetReq().GetDslType() != other.req.GetReq().GetDslType() ||
 		t.req.GetDmlChannels()[0] != other.req.GetDmlChannels()[0] ||
 		nq+otherNq > paramtable.Get().QueryNodeCfg.MaxGroupNQ.GetAsInt64() ||

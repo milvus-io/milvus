@@ -90,10 +90,8 @@ Search_GrowingIndex(benchmark::State& state) {
                     dataset_.timestamps_.data(),
                     dataset_.raw_);
 
-    Timestamp time = 10000000;
-
     for (auto _ : state) {
-        auto qr = segment->Search(plan.get(), ph_group.get(), time);
+        auto qr = segment->Search(plan.get(), ph_group.get());
     }
 }
 
@@ -125,9 +123,8 @@ Search_Sealed(benchmark::State& state) {
         segment->DropFieldData(milvus::FieldId(100));
         segment->LoadIndex(info);
     }
-    Timestamp time = 10000000;
     for (auto _ : state) {
-        auto qr = segment->Search(plan.get(), ph_group.get(), time);
+        auto qr = segment->Search(plan.get(), ph_group.get());
     }
 }
 
