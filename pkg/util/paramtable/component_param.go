@@ -33,10 +33,12 @@ const (
 	DefaultRetentionDuration = 0
 
 	// DefaultIndexSliceSize defines the default slice size of index file when serializing.
-	DefaultIndexSliceSize        = 16
-	DefaultGracefulTime          = 5000 // ms
-	DefaultGracefulStopTimeout   = 30   // s
-	DefaultThreadCoreCoefficient = 10
+	DefaultIndexSliceSize                      = 16
+	DefaultGracefulTime                        = 5000 // ms
+	DefaultGracefulStopTimeout                 = 30   // s
+	DefaultHighPriorityThreadCoreCoefficient   = 100
+	DefaultMiddlePriorityThreadCoreCoefficient = 50
+	DefaultLowPriorityThreadCoreCoefficient    = 10
 
 	DefaultSessionTTL        = 20 // s
 	DefaultSessionRetryTimes = 30
@@ -192,17 +194,19 @@ type commonConfig struct {
 	RetentionDuration    ParamItem `refreshable:"true"`
 	EntityExpirationTTL  ParamItem `refreshable:"true"`
 
-	IndexSliceSize           ParamItem `refreshable:"false"`
-	ThreadCoreCoefficient    ParamItem `refreshable:"false"`
-	MaxDegree                ParamItem `refreshable:"true"`
-	SearchListSize           ParamItem `refreshable:"true"`
-	PQCodeBudgetGBRatio      ParamItem `refreshable:"true"`
-	BuildNumThreadsRatio     ParamItem `refreshable:"true"`
-	SearchCacheBudgetGBRatio ParamItem `refreshable:"true"`
-	LoadNumThreadRatio       ParamItem `refreshable:"true"`
-	BeamWidthRatio           ParamItem `refreshable:"true"`
-	GracefulTime             ParamItem `refreshable:"true"`
-	GracefulStopTimeout      ParamItem `refreshable:"true"`
+	IndexSliceSize                      ParamItem `refreshable:"false"`
+	HighPriorityThreadCoreCoefficient   ParamItem `refreshable:"false"`
+	MiddlePriorityThreadCoreCoefficient ParamItem `refreshable:"false"`
+	LowPriorityThreadCoreCoefficient    ParamItem `refreshable:"false"`
+	MaxDegree                           ParamItem `refreshable:"true"`
+	SearchListSize                      ParamItem `refreshable:"true"`
+	PQCodeBudgetGBRatio                 ParamItem `refreshable:"true"`
+	BuildNumThreadsRatio                ParamItem `refreshable:"true"`
+	SearchCacheBudgetGBRatio            ParamItem `refreshable:"true"`
+	LoadNumThreadRatio                  ParamItem `refreshable:"true"`
+	BeamWidthRatio                      ParamItem `refreshable:"true"`
+	GracefulTime                        ParamItem `refreshable:"true"`
+	GracefulStopTimeout                 ParamItem `refreshable:"true"`
 
 	StorageType ParamItem `refreshable:"false"`
 	SimdType    ParamItem `refreshable:"false"`
@@ -563,14 +567,35 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	}
 	p.StorageType.Init(base.mgr)
 
-	p.ThreadCoreCoefficient = ParamItem{
-		Key:          "common.threadCoreCoefficient",
+	p.HighPriorityThreadCoreCoefficient = ParamItem{
+		Key:          "common.threadCoreCoefficient.highPriority",
 		Version:      "2.0.0",
-		DefaultValue: strconv.Itoa(DefaultThreadCoreCoefficient),
-		Doc:          "This parameter specify how many times the number of threads is the number of cores",
-		Export:       true,
+		DefaultValue: strconv.Itoa(DefaultHighPriorityThreadCoreCoefficient),
+		Doc: "This parameter specify how many times the number of threads " +
+			"is the number of cores in high priority pool",
+		Export: true,
 	}
-	p.ThreadCoreCoefficient.Init(base.mgr)
+	p.HighPriorityThreadCoreCoefficient.Init(base.mgr)
+
+	p.MiddlePriorityThreadCoreCoefficient = ParamItem{
+		Key:          "common.threadCoreCoefficient.middlePriority",
+		Version:      "2.0.0",
+		DefaultValue: strconv.Itoa(DefaultMiddlePriorityThreadCoreCoefficient),
+		Doc: "This parameter specify how many times the number of threads " +
+			"is the number of cores in middle priority pool",
+		Export: true,
+	}
+	p.MiddlePriorityThreadCoreCoefficient.Init(base.mgr)
+
+	p.LowPriorityThreadCoreCoefficient = ParamItem{
+		Key:          "common.threadCoreCoefficient.lowPriority",
+		Version:      "2.0.0",
+		DefaultValue: strconv.Itoa(DefaultLowPriorityThreadCoreCoefficient),
+		Doc: "This parameter specify how many times the number of threads " +
+			"is the number of cores in low priority pool",
+		Export: true,
+	}
+	p.LowPriorityThreadCoreCoefficient.Init(base.mgr)
 
 	p.AuthorizationEnabled = ParamItem{
 		Key:          "common.security.authorizationEnabled",

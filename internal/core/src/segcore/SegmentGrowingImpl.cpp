@@ -27,7 +27,7 @@
 #include "storage/FieldData.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Util.h"
-#include "storage/ThreadPool.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::segcore {
 
@@ -158,7 +158,8 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
         auto field_id = FieldId(id);
         auto insert_files = info.insert_files;
         auto channel = std::make_shared<storage::FieldDataChannel>();
-        auto& pool = ThreadPool::GetInstance();
+        auto& pool =
+            ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
         auto load_future =
             pool.Submit(LoadFieldDatasFromRemote, insert_files, channel);
         auto field_data = CollectFieldDataChannel(channel);
