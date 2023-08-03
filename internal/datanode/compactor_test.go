@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
@@ -670,11 +671,13 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		alloc.EXPECT().AllocOne().Call.Return(int64(11111), nil)
 		ctx, cancel := context.WithCancel(context.TODO())
 		emptyTask := &compactionTask{
-			ctx:     ctx,
-			cancel:  cancel,
-			done:    make(chan struct{}, 1),
-			Channel: &ChannelMeta{},
-			tr:      timerecord.NewTimeRecorder("test"),
+			ctx:    ctx,
+			cancel: cancel,
+			done:   make(chan struct{}, 1),
+			Channel: &ChannelMeta{
+				segMu: lock.NewMetricsLock("test"),
+			},
+			tr: timerecord.NewTimeRecorder("test"),
 		}
 
 		plan := &datapb.CompactionPlan{

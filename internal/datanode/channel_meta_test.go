@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 )
 
@@ -203,6 +204,7 @@ func TestChannelMeta_getCollectionAndPartitionID(t *testing.T) {
 			channel := &ChannelMeta{
 				segments: map[UniqueID]*Segment{
 					test.segID: &seg},
+				segMu: lock.NewMetricsLock("test"),
 			}
 
 			collID, parID, err := channel.getCollectionAndPartitionID(test.segID)
@@ -240,6 +242,7 @@ func TestChannelMeta_segmentFlushed(t *testing.T) {
 	t.Run("Test segmentFlushed", func(t *testing.T) {
 		channel := &ChannelMeta{
 			segments: make(map[UniqueID]*Segment),
+			segMu:    lock.NewMetricsLock("test"),
 		}
 
 		type Test struct {
@@ -483,6 +486,7 @@ func TestChannelMeta_InterfaceMethod(t *testing.T) {
 				2: &s2,
 				3: &s3,
 			},
+			segMu: lock.NewMetricsLock("test"),
 		}
 
 		ids := channel.listAllSegmentIDs()
@@ -490,7 +494,10 @@ func TestChannelMeta_InterfaceMethod(t *testing.T) {
 	})
 
 	t.Run("Test listPartitionSegments", func(t *testing.T) {
-		channel := &ChannelMeta{segments: make(map[UniqueID]*Segment)}
+		channel := &ChannelMeta{
+			segments: make(map[UniqueID]*Segment),
+			segMu:    lock.NewMetricsLock("test"),
+		}
 		segs := []struct {
 			segID   UniqueID
 			partID  UniqueID
@@ -1007,6 +1014,7 @@ func (s *ChannelMetaSuite) TestHasSegment() {
 
 	channel := &ChannelMeta{
 		segments: make(map[UniqueID]*Segment),
+		segMu:    lock.NewMetricsLock("test"),
 	}
 
 	for _, seg := range segs {
@@ -1259,8 +1267,8 @@ func (s *ChannelMetaMockSuite) TestAddSegment_SkipBFLoad2() {
 }
 
 func (s *ChannelMetaMockSuite) getSegmentByID(id UniqueID) (*Segment, bool) {
-	s.channel.segMu.RLock()
-	defer s.channel.segMu.RUnlock()
+	s.channel.segMu.RLock("getSegmentByID")
+	defer s.channel.segMu.RUnLock("getSegmentByID")
 
 	seg, ok := s.channel.segments[id]
 	if ok && seg.isValid() {

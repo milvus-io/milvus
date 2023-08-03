@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 )
@@ -116,6 +117,7 @@ func genMockChannel(segIDs []int64, pks []primaryKey, chanName string) *ChannelM
 	channel := &ChannelMeta{
 		channelName: chanName,
 		segments:    make(map[UniqueID]*Segment),
+		segMu:       lock.NewMetricsLock("test"),
 	}
 	for i := range segIDs {
 		seg := Segment{
@@ -353,6 +355,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 
 		channel := &ChannelMeta{
 			segments: make(map[UniqueID]*Segment),
+			segMu:    lock.NewMetricsLock("test"),
 		}
 
 		c := &nodeConfig{
@@ -511,6 +514,7 @@ func TestFlowGraphDeleteNode_showDelBuf(t *testing.T) {
 
 	channel := &ChannelMeta{
 		segments: make(map[UniqueID]*Segment),
+		segMu:    lock.NewMetricsLock("test"),
 	}
 	c := &nodeConfig{
 		channel:      channel,

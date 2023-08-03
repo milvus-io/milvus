@@ -92,6 +92,13 @@ func logLock(duration time.Duration, lockName string, source string, lockType st
 	metrics.LockCosts.WithLabelValues(lockName, source, lockType, opType).Set(float64(duration.Milliseconds()))
 }
 
+func NewMetricsLock(name string) *MetricsRWMutex {
+	return &MetricsRWMutex{
+		lockName:       name,
+		acquireTimeMap: make(map[string]time.Time, 0),
+	}
+}
+
 // currently, we keep metricsLockManager as a communal gate for metrics lock
 // we may use this manager as a centralized statistical site to provide overall cost for locks
 func (mlManager *MetricsLockManager) applyRWLock(name string) *MetricsRWMutex {

@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 )
 
@@ -147,6 +148,7 @@ func TestOrderFlushQueue_Order(t *testing.T) {
 func newTestChannel() *ChannelMeta {
 	return &ChannelMeta{
 		segments:     make(map[UniqueID]*Segment),
+		segMu:        lock.NewMetricsLock("test"),
 		collectionID: 1,
 		collSchema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{{

@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -113,7 +114,7 @@ type ChannelMeta struct {
 	collSchema   *schemapb.CollectionSchema
 	schemaMut    sync.RWMutex
 
-	segMu    sync.RWMutex
+	segMu    *lock.MetricsRWMutex
 	segments map[UniqueID]*Segment
 
 	needToSync   *atomic.Bool
@@ -149,6 +150,7 @@ func newChannel(channelName string, collID UniqueID, schema *schemapb.Collection
 
 		segments: make(map[UniqueID]*Segment),
 
+		segMu:      lock.NewMetricsLock("data_node_channel_meta_segMu"),
 		needToSync: atomic.NewBool(false),
 		syncPolicies: []segmentSyncPolicy{
 			syncPeriodically(),
@@ -167,8 +169,8 @@ func newChannel(channelName string, collID UniqueID, schema *schemapb.Collection
 
 // segmentFlushed transfers a segment from *New* or *Normal* into *Flushed*.
 func (c *ChannelMeta) segmentFlushed(segID UniqueID) {
-	c.segMu.Lock()
-	defer c.segMu.Unlock()
+	c.segMu.Lock("segmentFlushed")
+	defer c.segMu.UnLock("segmentFlushed")
 
 	if seg, ok := c.segments[segID]; ok {
 		seg.setType(datapb.SegmentType_Flushed)
@@ -184,8 +186,8 @@ func (c *ChannelMeta) new2NormalSegment(segID UniqueID) {
 }
 
 func (c *ChannelMeta) getCollectionAndPartitionID(segID UniqueID) (collID, partitionID UniqueID, err error) {
-	c.segMu.RLock()
-	defer c.segMu.RUnlock()
+	c.segMu.RLock("getCollectionAndPartitionID")
+	defer c.segMu.RUnLock("getCollectionAndPartitionID")
 
 	if seg, ok := c.segments[segID]; ok && seg.isValid() {
 		return seg.collectionID, seg.partitionID, nil
@@ -237,15 +239,15 @@ func (c *ChannelMeta) addSegment(req addSegmentReq) error {
 		return err
 	}
 
-	c.segMu.Lock()
+	c.segMu.Lock("addSegment")
 	c.segments[req.segID] = seg
-	c.segMu.Unlock()
+	c.segMu.UnLock("addSegment")
 	return nil
 }
 
 func (c *ChannelMeta) getSegment(segID UniqueID) *Segment {
-	c.segMu.RLock()
-	defer c.segMu.RUnlock()
+	c.segMu.RLock("getSegment")
+	defer c.segMu.RUnLock("getSegment")
 
 	seg, ok := c.segments[segID]
 	if !ok {
@@ -255,8 +257,8 @@ func (c *ChannelMeta) getSegment(segID UniqueID) *Segment {
 }
 
 func (c *ChannelMeta) listCompactedSegmentIDs() map[UniqueID][]UniqueID {
-	c.segMu.RLock()
-	defer c.segMu.RUnlock()
+	c.segMu.RLock("listCompactedSegmentIDs")
+	defer c.segMu.RUnLock("listCompactedSegmentIDs")
 
 	compactedTo2From := make(map[UniqueID][]UniqueID)
 
@@ -269,8 +271,8 @@ func (c *ChannelMeta) listCompactedSegmentIDs() map[UniqueID][]UniqueID {
 }
 
 func (c *ChannelMeta) listSegmentIDsToSync(ts Timestamp) []UniqueID {
-	c.segMu.RLock()
-	defer c.segMu.RUnlock()
+	c.segMu.RLock("listSegmentIDsToSync")
+	defer c.segMu.RUnLock("listSegmentIDsToSync")
 
 	validSegs := make([]*Segment, 0)
 	for _, seg := range c.segments {
@@ -291,8 +293,8 @@ func (c *ChannelMeta) listSegmentIDsToSync(ts Timestamp) []UniqueID {
 }
 
 func (c *ChannelMeta) setSegmentLastSyncTs(segID UniqueID, ts Timestamp) {
-	c.segMu.Lock()
-	defer c.segMu.Unlock()
+	c.segMu.Lock("setSegmentLastSyncTs")
+	defer c.segMu.UnLock("setSegmentLastSyncTs")
 	if _, ok := c.segments[segID]; ok {
 		c.segments[segID].lastSyncTs = ts
 	}
@@ -301,8 +303,8 @@ func (c *ChannelMeta) setSegmentLastSyncTs(segID UniqueID, ts Timestamp) {
 // filterSegments return segments with same partitionID for all segments
 // get all segments
 func (c *ChannelMeta) filterSegments(partitionID UniqueID) []*Segment {
-	c.segMu.RLock()
-	defer c.segMu.RUnlock()
+	c.segMu.RLock("filterSegments")
+	defer c.segMu.RUnLock("filterSegments")
 
 	var results []*Segment
 	for _, seg := range c.segments {
@@ -350,8 +352,8 @@ func (c *ChannelMeta) submitLoadStatsTask(s *Segment, statsBinlogs []*datapb.Fie
 			}
 			// get segment lock here
 			// it's ok that segment is dropped here
-			c.segMu.Lock()
-			defer c.segMu.Unlock()
+			c.segMu.Lock("set_lazy_loading")
+			defer c.segMu.UnLock("set_lazy_loading")
 			s.historyStats = append(s.historyStats, stats...)
 			s.setLoadingLazy(false)
 			log.Info("lazy loading segment statslog complete")
@@ -480,8 +482,8 @@ func (c *ChannelMeta) RollPKstats(segID UniqueID, stat *storage.PrimaryKeyStats)
 		return
 	}
 
-	c.segMu.Lock()
-	defer c.segMu.Unlock()
+	c.segMu.Lock("RollPKstats")
+	defer c.segMu.UnLock("RollPKstats")
 	seg, ok := c.segments[segID]
 	log.Info("roll pk stats", zap.Int64("segmentID", segID))
 	if ok && seg.notFlushed() {
@@ -507,8 +509,8 @@ func (c *ChannelMeta) RollPKstats(segID UniqueID, stat *storage.PrimaryKeyStats)
 //
 //	transfer segments states from *New* to *Normal*.
 func (c *ChannelMeta) listNewSegmentsStartPositions() []*datapb.SegmentStartPosition {
-	c.segMu.Lock()
-	defer c.segMu.Unlock()
+	c.segMu.Lock("listNewSegmentsStartPositions")
+	defer c.segMu.UnLock("listNewSegmentsStartPositions")
 
 	var result []*datapb.SegmentStartPosition
 	for id, seg := range c.segments {
@@ -524,8 +526,8 @@ func (c *ChannelMeta) listNewSegmentsStartPositions() []*datapb.SegmentStartPosi
 
 // transferNewSegments make new segment transfer to normal segments.
 func (c *ChannelMeta) transferNewSegments(segmentIDs []UniqueID) {
-	c.segMu.Lock()
-	defer c.segMu.Unlock()
+	c.segMu.Lock("transferNewSegments")
+	defer c.segMu.UnLock("transferNewSegments")
 
 	for _, segmentID := range segmentIDs {
 		c.new2NormalSegment(segmentID)
@@ -533,8 +535,8 @@ func (c *ChannelMeta) transferNewSegments(segmentIDs []UniqueID) {
 }
 
 func (c *ChannelMeta) updateSegmentPKRange(segID UniqueID, ids storage.FieldData) {
-	c.segMu.Lock()
-	defer c.segMu.Unlock()
+	c.segMu.Lock("updateSegmentPKRange")
+	defer c.segMu.UnLock("updateSegmentPKRange")
 
 	seg, ok := c.segments[segID]
 	if ok && seg.isValid() {
@@ -546,8 +548,8 @@ func (c *ChannelMeta) updateSegmentPKRange(segID UniqueID, ids storage.FieldData
 }
 
 func (c *ChannelMeta) removeSegments(segIDs ...UniqueID) {
-	c.segMu.Lock()
-	defer c.segMu.Unlock()
+	c.segMu.Lock("removeSegments")
+	defer c.segMu.UnLock("removeSegments")
 
 	log.Info("remove segments if exist", zap.Int64s("segmentIDs", segIDs))
 	cnt := 0
@@ -570,8 +572,8 @@ func (c *ChannelMeta) removeSegments(segIDs ...UniqueID) {
 
 // hasSegment checks whether this channel has a segment according to segment ID.
 func (c *ChannelMeta) hasSegment(segID UniqueID, countFlushed bool) bool {
-	c.segMu.RLock()
-	defer c.segMu.RUnlock()
+	c.segMu.RLock("hasSegment")
+	defer c.segMu.RUnLock("hasSegment")
 
 	seg, ok := c.segments[segID]
 	if !ok {
@@ -588,8 +590,8 @@ func (c *ChannelMeta) hasSegment(segID UniqueID, countFlushed bool) bool {
 
 // updateStatistics updates the number of rows of a segment in channel.
 func (c *ChannelMeta) updateSegmentRowNumber(segID UniqueID, numRows int64) {
-	c.segMu.Lock()
-	defer c.segMu.Unlock()
+	c.segMu.Lock("updateSegmentRowNumber")
+	defer c.segMu.UnLock("updateSegmentRowNumber")
 
 	log.Info("updating segment num row", zap.Int64("segmentID", segID), zap.Int64("numRows", numRows))
 	seg, ok := c.segments[segID]
@@ -603,8 +605,8 @@ func (c *ChannelMeta) updateSegmentRowNumber(segID UniqueID, numRows int64) {
 
 // updateStatistics updates the number of rows of a segment in channel.
 func (c *ChannelMeta) updateSegmentMemorySize(segID UniqueID, memorySize int64) {
-	c.segMu.Lock()
-	defer c.segMu.Unlock()
+	c.segMu.Lock("updateSegmentMemorySize")
+	defer c.segMu.UnLock("updateSegmentMemorySize")
 
 	log.Info("updating segment memorySize", zap.Int64("segmentID", segID), zap.Int64("memorySize", memorySize))
 	seg, ok := c.segments[segID]
@@ -618,8 +620,8 @@ func (c *ChannelMeta) updateSegmentMemorySize(segID UniqueID, memorySize int64) 
 
 // getSegmentStatisticsUpdates gives current segment's statistics updates.
 func (c *ChannelMeta) getSegmentStatisticsUpdates(segID UniqueID) (*commonpb.SegmentStats, error) {
-	c.segMu.RLock()
-	defer c.segMu.RUnlock()
+	c.segMu.RLock("getSegmentStatisticsUpdates")
+	defer c.segMu.RUnLock("getSegmentStatisticsUpdates")
 
 	if seg, ok := c.segments[segID]; ok && seg.isValid() {
 		return &commonpb.SegmentStats{SegmentID: segID, NumRows: seg.numRows}, nil
@@ -693,8 +695,8 @@ func (c *ChannelMeta) mergeFlushedSegments(ctx context.Context, seg *Segment, pl
 	}
 
 	log.Info("merge flushed segments")
-	c.segMu.Lock()
-	defer c.segMu.Unlock()
+	c.segMu.Lock("mergeFlushedSegments")
+	defer c.segMu.UnLock("mergeFlushedSegments")
 	select {
 	case <-ctx.Done():
 		log.Warn("the context has been closed", zap.Error(ctx.Err()))
@@ -746,16 +748,16 @@ func (c *ChannelMeta) addFlushedSegmentWithPKs(segID, collID, partID UniqueID, n
 	seg.updatePKRange(ids)
 	seg.setType(datapb.SegmentType_Flushed)
 
-	c.segMu.Lock()
+	c.segMu.Lock("addFlushedSegmentWithPKs")
 	c.segments[segID] = seg
-	c.segMu.Unlock()
+	c.segMu.UnLock("addFlushedSegmentWithPKs")
 
 	return nil
 }
 
 func (c *ChannelMeta) listAllSegmentIDs() []UniqueID {
-	c.segMu.RLock()
-	defer c.segMu.RUnlock()
+	c.segMu.RLock("listAllSegmentIDs")
+	defer c.segMu.RUnLock("listAllSegmentIDs")
 
 	var segIDs []UniqueID
 	for _, seg := range c.segments {
@@ -767,8 +769,8 @@ func (c *ChannelMeta) listAllSegmentIDs() []UniqueID {
 }
 
 func (c *ChannelMeta) listPartitionSegments(partID UniqueID) []UniqueID {
-	c.segMu.RLock()
-	defer c.segMu.RUnlock()
+	c.segMu.RLock("listPartitionSegments")
+	defer c.segMu.RUnLock("listPartitionSegments")
 
 	var segIDs []UniqueID
 	for _, seg := range c.segments {
@@ -780,8 +782,8 @@ func (c *ChannelMeta) listPartitionSegments(partID UniqueID) []UniqueID {
 }
 
 func (c *ChannelMeta) listNotFlushedSegmentIDs() []UniqueID {
-	c.segMu.RLock()
-	defer c.segMu.RUnlock()
+	c.segMu.RLock("listNotFlushedSegmentIDs")
+	defer c.segMu.RUnLock("listNotFlushedSegmentIDs")
 
 	var segIDs []UniqueID
 	for sID, seg := range c.segments {
@@ -794,8 +796,8 @@ func (c *ChannelMeta) listNotFlushedSegmentIDs() []UniqueID {
 }
 
 func (c *ChannelMeta) getChannelCheckpoint(ttPos *msgpb.MsgPosition) *msgpb.MsgPosition {
-	c.segMu.RLock()
-	defer c.segMu.RUnlock()
+	c.segMu.RLock("getChannelCheckpoint")
+	defer c.segMu.RUnLock("getChannelCheckpoint")
 	channelCP := &msgpb.MsgPosition{Timestamp: math.MaxUint64}
 	// 1. find the earliest startPos in current buffer and history buffer
 	for _, seg := range c.segments {
@@ -831,8 +833,8 @@ func (c *ChannelMeta) getChannelCheckpoint(ttPos *msgpb.MsgPosition) *msgpb.MsgP
 }
 
 func (c *ChannelMeta) getCurInsertBuffer(segmentID UniqueID) (*BufferData, bool) {
-	c.segMu.RLock()
-	defer c.segMu.RUnlock()
+	c.segMu.RLock("getCurInsertBuffer")
+	defer c.segMu.RUnLock("getCurInsertBuffer")
 	seg, ok := c.segments[segmentID]
 	if ok {
 		return seg.curInsertBuf, seg.curInsertBuf != nil
@@ -841,8 +843,8 @@ func (c *ChannelMeta) getCurInsertBuffer(segmentID UniqueID) (*BufferData, bool)
 }
 
 func (c *ChannelMeta) setCurInsertBuffer(segmentID UniqueID, buf *BufferData) {
-	c.segMu.Lock()
-	defer c.segMu.Unlock()
+	c.segMu.Lock("setCurInsertBuffer")
+	defer c.segMu.UnLock("setCurInsertBuffer")
 
 	seg, ok := c.segments[segmentID]
 	if ok {
@@ -853,8 +855,8 @@ func (c *ChannelMeta) setCurInsertBuffer(segmentID UniqueID, buf *BufferData) {
 }
 
 func (c *ChannelMeta) rollInsertBuffer(segmentID UniqueID) {
-	c.segMu.Lock()
-	defer c.segMu.Unlock()
+	c.segMu.Lock("rollInsertBuffer")
+	defer c.segMu.UnLock("rollInsertBuffer")
 
 	seg, ok := c.segments[segmentID]
 	if ok {
@@ -865,8 +867,8 @@ func (c *ChannelMeta) rollInsertBuffer(segmentID UniqueID) {
 }
 
 func (c *ChannelMeta) evictHistoryInsertBuffer(segmentID UniqueID, endPos *msgpb.MsgPosition) {
-	c.segMu.Lock()
-	defer c.segMu.Unlock()
+	c.segMu.Lock("evictHistoryInsertBuffer")
+	defer c.segMu.UnLock("evictHistoryInsertBuffer")
 
 	seg, ok := c.segments[segmentID]
 	if ok {
@@ -877,8 +879,8 @@ func (c *ChannelMeta) evictHistoryInsertBuffer(segmentID UniqueID, endPos *msgpb
 }
 
 func (c *ChannelMeta) getCurDeleteBuffer(segmentID UniqueID) (*DelDataBuf, bool) {
-	c.segMu.RLock()
-	defer c.segMu.RUnlock()
+	c.segMu.RLock("getCurDeleteBuffer")
+	defer c.segMu.RUnLock("getCurDeleteBuffer")
 
 	seg, ok := c.segments[segmentID]
 	if ok {
@@ -888,8 +890,8 @@ func (c *ChannelMeta) getCurDeleteBuffer(segmentID UniqueID) (*DelDataBuf, bool)
 }
 
 func (c *ChannelMeta) setCurDeleteBuffer(segmentID UniqueID, buf *DelDataBuf) {
-	c.segMu.Lock()
-	defer c.segMu.Unlock()
+	c.segMu.Lock("setCurDeleteBuffer")
+	defer c.segMu.UnLock("setCurDeleteBuffer")
 
 	seg, ok := c.segments[segmentID]
 	if ok {
@@ -900,8 +902,8 @@ func (c *ChannelMeta) setCurDeleteBuffer(segmentID UniqueID, buf *DelDataBuf) {
 }
 
 func (c *ChannelMeta) rollDeleteBuffer(segmentID UniqueID) {
-	c.segMu.Lock()
-	defer c.segMu.Unlock()
+	c.segMu.Lock("rollDeleteBuffer")
+	defer c.segMu.UnLock("rollDeleteBuffer")
 
 	seg, ok := c.segments[segmentID]
 	if ok {
@@ -912,8 +914,8 @@ func (c *ChannelMeta) rollDeleteBuffer(segmentID UniqueID) {
 }
 
 func (c *ChannelMeta) evictHistoryDeleteBuffer(segmentID UniqueID, endPos *msgpb.MsgPosition) {
-	c.segMu.Lock()
-	defer c.segMu.Unlock()
+	c.segMu.Lock("evictHistoryDeleteBuffer")
+	defer c.segMu.UnLock("evictHistoryDeleteBuffer")
 
 	seg, ok := c.segments[segmentID]
 	if ok {
@@ -928,8 +930,8 @@ func (c *ChannelMeta) forceToSync() {
 }
 
 func (c *ChannelMeta) getTotalMemorySize() int64 {
-	c.segMu.RLock()
-	defer c.segMu.RUnlock()
+	c.segMu.RLock("getTotalMemorySize")
+	defer c.segMu.RUnLock("getTotalMemorySize")
 	var res int64
 	for _, segment := range c.segments {
 		res += segment.memorySize

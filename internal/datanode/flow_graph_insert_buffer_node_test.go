@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -345,6 +346,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 		collectionID: collMeta.ID,
 		segments:     make(map[UniqueID]*Segment),
 		needToSync:   atomic.NewBool(false),
+		segMu:        lock.NewMetricsLock("test"),
 	}
 
 	channel.metaService = newMetaService(mockRootCoord, collMeta.ID)
@@ -432,9 +434,9 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 		assert.Equal(t, 0, len(flushPacks))
 
 		for i, test := range beforeAutoFlushTests {
-			channel.segMu.Lock()
+			channel.segMu.Lock("before_get_segment_auto_flush")
 			seg, ok := channel.segments[UniqueID(i+1)]
-			channel.segMu.Unlock()
+			channel.segMu.UnLock("before_get_segment_auto_flush")
 			assert.True(t, ok)
 			assert.Equal(t, datapb.SegmentType_New, seg.getType())
 			assert.Equal(t, test.expectedSegID, seg.segmentID)
@@ -532,9 +534,9 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 		assert.Equal(t, 0, len(flushPacks))
 
 		for _, test := range beforeAutoFlushTests {
-			channel.segMu.Lock()
+			channel.segMu.Lock("before_get_segment_auto_flush")
 			seg, ok := channel.segments[test.expectedSegID]
-			channel.segMu.Unlock()
+			channel.segMu.UnLock("before_get_segment_auto_flush")
 			assert.True(t, ok)
 			assert.Equal(t, datapb.SegmentType_New, seg.getType())
 			assert.Equal(t, test.expectedSegID, seg.segmentID)
@@ -592,6 +594,7 @@ func TestInsertBufferNodeRollBF(t *testing.T) {
 		collectionID: collMeta.ID,
 		segments:     make(map[UniqueID]*Segment),
 		needToSync:   atomic.NewBool(false),
+		segMu:        lock.NewMetricsLock("test"),
 	}
 
 	channel.metaService = newMetaService(mockRootCoord, collMeta.ID)
@@ -671,9 +674,9 @@ func TestInsertBufferNodeRollBF(t *testing.T) {
 		assert.Equal(t, 0, len(flushPacks))
 
 		// should not be flushed with only 1 one
-		channel.segMu.Lock()
+		channel.segMu.Lock("test")
 		seg, ok := channel.segments[UniqueID(1)]
-		channel.segMu.Unlock()
+		channel.segMu.UnLock("test")
 		assert.True(t, ok)
 		assert.Equal(t, datapb.SegmentType_New, seg.getType())
 		assert.Equal(t, int64(1), seg.numRows)

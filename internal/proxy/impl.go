@@ -3812,8 +3812,7 @@ func (node *Proxy) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStat
 
 	log := log.Ctx(ctx)
 
-	log.Debug("received get flush state request",
-		zap.Any("request", req))
+	log.Debug("received get flush state request", zap.Int64s("segmentIDs", req.GetSegmentIDs()))
 	var err error
 	resp := &milvuspb.GetFlushStateResponse{}
 	if !node.checkHealthy() {
