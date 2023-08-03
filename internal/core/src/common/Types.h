@@ -23,6 +23,7 @@
 #include <boost/align/aligned_allocator.hpp>
 #include <boost/container/vector.hpp>
 #include <boost/dynamic_bitset.hpp>
+#include <folly/FBVector.h>
 
 #include <limits>
 #include <memory>
@@ -123,7 +124,8 @@ using BitsetTypePtr = std::shared_ptr<boost::dynamic_bitset<>>;
 using BitsetTypeOpt = std::optional<BitsetType>;
 
 template <typename Type>
-using FixedVector = boost::container::vector<Type>;
+using FixedVector = folly::fbvector<
+    Type>;  // boost::container::vector has memory leak when version > 1.79, so use folly::fbvector instead
 
 using Config = nlohmann::json;
 using TargetBitmap = FixedVector<bool>;
