@@ -968,6 +968,8 @@ type proxyConfig struct {
 	ReplicaSelectionPolicy       ParamItem `refreshable:"false"`
 	CheckQueryNodeHealthInterval ParamItem `refreshable:"false"`
 	CostMetricsExpireTime        ParamItem `refreshable:"true"`
+	RetryTimesOnReplica          ParamItem `refreshable:"true"`
+	RetryTimesOnHealthCheck      ParamItem `refreshable:"true"`
 }
 
 func (p *proxyConfig) init(base *BaseTable) {
@@ -984,7 +986,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 	p.HealthCheckTimetout = ParamItem{
 		Key:          "proxy.healthCheckTimetout",
 		Version:      "2.3.0",
-		DefaultValue: "500",
+		DefaultValue: "1000",
 		PanicIfEmpty: true,
 		Doc:          "ms, the interval that to do component healthy check",
 		Export:       true,
@@ -1212,6 +1214,21 @@ please adjust in embedded Milvus: false`,
 	}
 	p.CostMetricsExpireTime.Init(base.mgr)
 
+	p.RetryTimesOnReplica = ParamItem{
+		Key:          "proxy.retryTimesOnReplica",
+		Version:      "2.3.0",
+		DefaultValue: "2",
+		Doc:          "retry times on each replica",
+	}
+	p.RetryTimesOnReplica.Init(base.mgr)
+
+	p.RetryTimesOnHealthCheck = ParamItem{
+		Key:          "proxy.retryTimesOnHealthCheck",
+		Version:      "2.3.0",
+		DefaultValue: "3",
+		Doc:          "set query node unavailable on proxy when heartbeat failures reach this limit",
+	}
+	p.RetryTimesOnHealthCheck.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

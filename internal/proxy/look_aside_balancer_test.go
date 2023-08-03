@@ -302,14 +302,14 @@ func (suite *LookAsideBalancerSuite) TestCheckHealthLoop() {
 	suite.balancer.unreachableQueryNodes.Insert(2)
 	suite.Eventually(func() bool {
 		return suite.balancer.unreachableQueryNodes.Contain(1)
-	}, 3*time.Second, 100*time.Millisecond)
+	}, 5*time.Second, 100*time.Millisecond)
 	targetNode, err := suite.balancer.SelectNode(context.Background(), []int64{1}, 1)
 	suite.ErrorIs(err, merr.ErrServiceUnavailable)
 	suite.Equal(int64(-1), targetNode)
 
 	suite.Eventually(func() bool {
 		return !suite.balancer.unreachableQueryNodes.Contain(2)
-	}, 3*time.Second, 100*time.Millisecond)
+	}, 5*time.Second, 100*time.Millisecond)
 }
 
 func (suite *LookAsideBalancerSuite) TestNodeRecover() {

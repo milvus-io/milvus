@@ -558,11 +558,11 @@ func (suite *LeaderObserverTestSuite) TestSyncTargetVersion() {
 
 	view := utils.CreateTestLeaderView(1, collectionID, "channel-1", nil, nil)
 	view.TargetVersion = TargetVersion
-	action := observer.checkNeedUpdateTargetVersion(view)
+	action := observer.checkNeedUpdateTargetVersion(context.Background(), view)
 	suite.Nil(action)
 
 	view.TargetVersion = TargetVersion - 1
-	action = observer.checkNeedUpdateTargetVersion(view)
+	action = observer.checkNeedUpdateTargetVersion(context.Background(), view)
 	suite.NotNil(action)
 	suite.Equal(querypb.SyncType_UpdateVersion, action.Type)
 	suite.Len(action.GrowingInTarget, 2)

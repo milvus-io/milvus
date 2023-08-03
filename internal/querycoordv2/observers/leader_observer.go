@@ -111,7 +111,7 @@ func (o *LeaderObserver) observeCollection(ctx context.Context, collection int64
 
 			actions := o.findNeedLoadedSegments(leaderView, dists)
 			actions = append(actions, o.findNeedRemovedSegments(leaderView, dists)...)
-			updateVersionAction := o.checkNeedUpdateTargetVersion(leaderView)
+			updateVersionAction := o.checkNeedUpdateTargetVersion(ctx, leaderView)
 			if updateVersionAction != nil {
 				actions = append(actions, updateVersionAction)
 			}
@@ -133,14 +133,15 @@ func (ob *LeaderObserver) CheckTargetVersion(collectionID int64) bool {
 	return <-notifier
 }
 
-func (o *LeaderObserver) checkNeedUpdateTargetVersion(leaderView *meta.LeaderView) *querypb.SyncAction {
+func (o *LeaderObserver) checkNeedUpdateTargetVersion(ctx context.Context, leaderView *meta.LeaderView) *querypb.SyncAction {
+	log.Ctx(ctx).WithRateGroup("qcv2.LeaderObserver", 1, 60)
 	targetVersion := o.target.GetCollectionTargetVersion(leaderView.CollectionID, meta.CurrentTarget)
 
 	if targetVersion <= leaderView.TargetVersion {
 		return nil
 	}
 
-	log.Info("Update readable segment version",
+	log.RatedInfo(10, "Update readable segment version",
 		zap.Int64("collectionID", leaderView.CollectionID),
 		zap.String("channelName", leaderView.Channel),
 		zap.Int64("nodeID", leaderView.ID),
@@ -151,14 +152,6 @@ func (o *LeaderObserver) checkNeedUpdateTargetVersion(leaderView *meta.LeaderVie
 	sealedSegments := o.target.GetHistoricalSegmentsByChannel(leaderView.CollectionID, leaderView.Channel, meta.CurrentTarget)
 	growingSegments := o.target.GetStreamingSegmentsByChannel(leaderView.CollectionID, leaderView.Channel, meta.CurrentTarget)
 	droppedSegments := o.target.GetDroppedSegmentsByChannel(leaderView.CollectionID, leaderView.Channel, meta.CurrentTarget)
-
-	log.Info("Update readable segment version",
-		zap.Int64("collectionID", leaderView.CollectionID),
-		zap.String("channelName", leaderView.Channel),
-		zap.Int64("nodeID", leaderView.ID),
-		zap.Int64("oldVersion", leaderView.TargetVersion),
-		zap.Int64("newVersion", targetVersion),
-	)
 
 	return &querypb.SyncAction{
 		Type:            querypb.SyncType_UpdateVersion,
