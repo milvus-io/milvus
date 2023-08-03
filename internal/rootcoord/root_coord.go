@@ -591,13 +591,12 @@ func (c *Core) restore(ctx context.Context) error {
 			return err
 		}
 		for _, coll := range colls {
-			for _, part := range coll.Partitions {
-				ts, err := c.tsoAllocator.GenerateTSO(1)
-				if err != nil {
-					return err
-				}
-
-				if coll.Available() {
+			ts, err := c.tsoAllocator.GenerateTSO(1)
+			if err != nil {
+				return err
+			}
+			if coll.Available() {
+				for _, part := range coll.Partitions {
 					switch part.State {
 					case pb.PartitionState_PartitionDropping:
 						go c.garbageCollector.ReDropPartition(coll.DBID, coll.PhysicalChannelNames, part.Clone(), ts)
@@ -605,14 +604,14 @@ func (c *Core) restore(ctx context.Context) error {
 						go c.garbageCollector.RemoveCreatingPartition(coll.DBID, part.Clone(), ts)
 					default:
 					}
-				} else {
-					switch coll.State {
-					case pb.CollectionState_CollectionDropping:
-						go c.garbageCollector.ReDropCollection(coll.Clone(), ts)
-					case pb.CollectionState_CollectionCreating:
-						go c.garbageCollector.RemoveCreatingCollection(coll.Clone())
-					default:
-					}
+				}
+			} else {
+				switch coll.State {
+				case pb.CollectionState_CollectionDropping:
+					go c.garbageCollector.ReDropCollection(coll.Clone(), ts)
+				case pb.CollectionState_CollectionCreating:
+					go c.garbageCollector.RemoveCreatingCollection(coll.Clone())
+				default:
 				}
 			}
 		}

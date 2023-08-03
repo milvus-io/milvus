@@ -29,6 +29,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -40,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -1755,4 +1757,104 @@ func TestCore_Stop(t *testing.T) {
 		assert.True(t, ok)
 		assert.Equal(t, commonpb.StateCode_Abnormal, code)
 	})
+}
+
+type RootCoordSuite struct {
+	suite.Suite
+}
+
+func (s *RootCoordSuite) TestRestore() {
+	meta := mockrootcoord.NewIMetaTable(s.T())
+	gc := mockrootcoord.NewGarbageCollector(s.T())
+
+	finishCh := make(chan struct{}, 4)
+	gc.EXPECT().ReDropPartition(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Once().
+		Run(func(args mock.Arguments) {
+			finishCh <- struct{}{}
+		})
+	gc.EXPECT().RemoveCreatingPartition(mock.Anything, mock.Anything, mock.Anything).Once().
+		Run(func(args mock.Arguments) {
+			finishCh <- struct{}{}
+		})
+	gc.EXPECT().ReDropCollection(mock.Anything, mock.Anything).Once().
+		Run(func(args mock.Arguments) {
+			finishCh <- struct{}{}
+		})
+	gc.EXPECT().RemoveCreatingCollection(mock.Anything).Once().
+		Run(func(args mock.Arguments) {
+			finishCh <- struct{}{}
+		})
+
+	meta.EXPECT().ListDatabases(mock.Anything, mock.Anything).
+		Return([]*model.Database{
+			{Name: "available_colls_db"},
+			{Name: "not_available_colls_db"}}, nil)
+
+	meta.EXPECT().ListCollections(mock.Anything, "available_colls_db", mock.Anything, false).
+		Return([]*model.Collection{
+			{
+				DBID:                 1,
+				State:                etcdpb.CollectionState_CollectionCreated, // available collection
+				PhysicalChannelNames: []string{"ch1"},
+				Partitions: []*model.Partition{
+					{State: etcdpb.PartitionState_PartitionDropping},
+					{State: etcdpb.PartitionState_PartitionCreating},
+					{State: etcdpb.PartitionState_PartitionDropped}, // ignored
+				},
+			},
+		}, nil)
+	meta.EXPECT().ListCollections(mock.Anything, "not_available_colls_db", mock.Anything, false).
+		Return([]*model.Collection{
+			{
+				DBID:                 1,
+				State:                etcdpb.CollectionState_CollectionDropping, // not available collection
+				PhysicalChannelNames: []string{"ch1"},
+				Partitions: []*model.Partition{
+					{State: etcdpb.PartitionState_PartitionDropping},
+					{State: etcdpb.PartitionState_PartitionCreating},
+					{State: etcdpb.PartitionState_PartitionDropped},
+				},
+			},
+			{
+				DBID:                 1,
+				State:                etcdpb.CollectionState_CollectionCreating, // not available collection
+				PhysicalChannelNames: []string{"ch1"},
+				Partitions: []*model.Partition{
+					{State: etcdpb.PartitionState_PartitionDropping},
+					{State: etcdpb.PartitionState_PartitionCreating},
+					{State: etcdpb.PartitionState_PartitionDropped},
+				},
+			},
+			{
+				DBID:                 1,
+				State:                etcdpb.CollectionState_CollectionDropped, // ignored
+				PhysicalChannelNames: []string{"ch1"},
+				Partitions: []*model.Partition{
+					{State: etcdpb.PartitionState_PartitionDropping},
+					{State: etcdpb.PartitionState_PartitionCreating},
+					{State: etcdpb.PartitionState_PartitionDropped},
+				},
+			},
+		}, nil)
+
+	// ticker := newTickerWithMockNormalStream()
+	tsoAllocator := newMockTsoAllocator()
+	tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
+		return 100, nil
+	}
+	core := newTestCore(
+		withGarbageCollector(gc),
+		// withTtSynchronizer(ticker),
+		withTsoAllocator(tsoAllocator),
+		// withValidProxyManager(),
+		withMeta(meta))
+	core.restore(context.Background())
+
+	for i := 0; i < 4; i++ {
+		<-finishCh
+	}
+}
+
+func TestRootCoordSuite(t *testing.T) {
+	suite.Run(t, new(RootCoordSuite))
 }
