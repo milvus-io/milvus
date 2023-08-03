@@ -321,6 +321,19 @@ func printPayloadValues(colType schemapb.DataType, reader PayloadReaderInterface
 			}
 			fmt.Println()
 		}
+	case schemapb.DataType_JSON:
+
+		rows, err := reader.GetPayloadLengthFromReader()
+		if err != nil {
+			return err
+		}
+		val, err := reader.GetJSONFromPayload()
+		if err != nil {
+			return err
+		}
+		for i := 0; i < rows; i++ {
+			fmt.Printf("\t\t%d : %s\n", i, val[i])
+		}
 	default:
 		return errors.New("undefined data type")
 	}

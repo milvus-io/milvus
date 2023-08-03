@@ -179,6 +179,13 @@ func TestPrintBinlogFiles(t *testing.T) {
 					Description:  "description_11",
 					DataType:     schemapb.DataType_FloatVector,
 				},
+				{
+					FieldID:      110,
+					Name:         "field_json",
+					IsPrimaryKey: false,
+					Description:  "description_12",
+					DataType:     schemapb.DataType_JSON,
+				},
 			},
 		},
 	}
@@ -223,6 +230,12 @@ func TestPrintBinlogFiles(t *testing.T) {
 				Data: []float32{0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
 				Dim:  8,
 			},
+			110: &JSONFieldData{
+				Data: [][]byte{
+					[]byte(`{}`),
+					[]byte(`{"key":"hello"}`),
+				},
+			},
 		},
 	}
 
@@ -265,6 +278,12 @@ func TestPrintBinlogFiles(t *testing.T) {
 			109: &FloatVectorFieldData{
 				Data: []float32{0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
 				Dim:  8,
+			},
+			110: &JSONFieldData{
+				Data: [][]byte{
+					[]byte(`{}`),
+					[]byte(`{"key":"world"}`),
+				},
 			},
 		},
 	}
