@@ -1,6 +1,4 @@
-import datetime
 import random
-import time
 from sklearn import preprocessing
 import numpy as np
 import sys
@@ -10,9 +8,8 @@ from utils import constant
 from utils.utils import gen_collection_name
 from utils.util_log import test_log as logger
 import pytest
-from api.milvus import VectorClient
 from base.testbase import TestBase
-from utils.utils import (get_data_by_fields, get_data_by_payload, get_common_fields_by_data)
+from utils.utils import (get_data_by_payload, get_common_fields_by_data)
 
 
 class TestInsertVector(TestBase):
@@ -31,6 +28,7 @@ class TestInsertVector(TestBase):
         self.update_database(db_name=db_name)
         # create a collection
         name = gen_collection_name()
+        self.name_list.append(name)
         collection_payload = {
             "collectionName": name,
             "dimension": dim,
@@ -64,6 +62,7 @@ class TestInsertVector(TestBase):
         """
         # create a collection
         name = gen_collection_name()
+        self.name_list.append(name)
         collection_payload = {
             "collectionName": name,
             "dimension": 768,
@@ -94,6 +93,7 @@ class TestInsertVector(TestBase):
         """
         # create a collection
         name = gen_collection_name()
+        self.name_list.append(name)
         dim = 128
         payload = {
             "collectionName": name,
@@ -128,6 +128,7 @@ class TestInsertVector(TestBase):
 
         # create a collection
         name = gen_collection_name()
+        self.name_list.append(name)
         dim = 128
         payload = {
             "collectionName": name,
@@ -155,6 +156,7 @@ class TestInsertVector(TestBase):
         """
         # create a collection
         name = gen_collection_name()
+        self.name_list.append(name)
         dim = 128
         payload = {
             "collectionName": name,
@@ -183,6 +185,7 @@ class TestInsertVector(TestBase):
         """
         # create a collection
         name = gen_collection_name()
+        self.name_list.append(name)
         dim = 32
         payload = {
             "collectionName": name,
@@ -219,7 +222,7 @@ class TestSearchVector(TestBase):
         Search a vector with a simple payload
         """
         name = gen_collection_name()
-        self.name = name
+        self.name_list.append(name)
         self.init_collection(name, metric_type=metric_type)
 
         # search data
@@ -251,7 +254,7 @@ class TestSearchVector(TestBase):
         """
         max_search_sum_limit_offset = constant.MAX_SUM_OFFSET_AND_LIMIT
         name = gen_collection_name()
-        self.name = name
+        self.name_list.append(name)
         nb = sum_limit_offset + 2000
         metric_type = "IP"
         limit = 100
@@ -293,7 +296,7 @@ class TestSearchVector(TestBase):
         Search a vector with a simple payload
         """
         name = gen_collection_name()
-        self.name = name
+        self.name_list.append(name)
         nb = limit + offset + 100
         dim = 128
         schema_payload, data = self.init_collection(name, dim=dim, nb=nb, metric_type=metric_type)
@@ -329,7 +332,7 @@ class TestSearchVector(TestBase):
         Search a vector with a simple payload
         """
         name = gen_collection_name()
-        self.name = name
+        self.name_list.append(name)
         nb = 200
         dim = 128
         limit = 100
@@ -362,7 +365,7 @@ class TestSearchVector(TestBase):
         Search a vector with a simple payload
         """
         name = gen_collection_name()
-        self.name = name
+        self.name_list.append(name)
         nb = 200
         dim = 128
         limit = 100
@@ -410,7 +413,7 @@ class TestSearchVector(TestBase):
         Search a vector with a simple payload
         """
         name = gen_collection_name()
-        self.name = name
+        self.name_list.append(name)
         nb = 200
         dim = 128
         limit = 100
@@ -459,7 +462,7 @@ class TestSearchVector(TestBase):
         Search a vector with a simple payload
         """
         name = gen_collection_name()
-        self.name = name
+        self.name_list.append(name)
         dim = 128
         schema_payload, data = self.init_collection(name, dim=dim)
         vector_field = schema_payload.get("vectorField")
@@ -483,7 +486,7 @@ class TestSearchVector(TestBase):
         Search a vector with a simple payload
         """
         name = gen_collection_name()
-        self.name = name
+        self.name_list.append(name)
         dim = 128
         schema_payload, data = self.init_collection(name, dim=dim)
         vector_field = schema_payload.get("vectorField")
@@ -554,7 +557,7 @@ class TestQueryVector(TestBase):
         Query a vector with a simple payload
         """
         name = gen_collection_name()
-        self.name = name
+        self.name_list.append(name)
         schema_payload, data = self.init_collection(name)
         output_fields = get_common_fields_by_data(data)
         if partial_fields:
@@ -595,7 +598,7 @@ class TestQueryVector(TestBase):
         Query a vector with a complex payload
         """
         name = gen_collection_name()
-        self.name = name
+        self.name_list.append(name)
         nb = 200
         dim = 128
         limit = 100
@@ -640,13 +643,14 @@ class TestQueryVector(TestBase):
         """
         max_sum_of_limit_offset = 16384
         name = gen_collection_name()
+        self.name_list.append(name)
         filter_expr = "name > \"placeholder\""
-        self.name = name
         nb = 200
         dim = 128
         limit = 100
         offset = sum_of_limit_offset - limit
         schema_payload, data = self.init_collection(name, dim=dim, nb=nb)
+        # values of name field in data
         names = []
         for item in data:
             names.append(item.get("name"))
@@ -690,7 +694,7 @@ class TestGetVector(TestBase):
         Search a vector with a simple payload
         """
         name = gen_collection_name()
-        self.name = name
+        self.name_list.append(name)
         self.init_collection(name)
 
         # search data
@@ -727,7 +731,7 @@ class TestGetVector(TestBase):
     @pytest.mark.parametrize("include_output_fields", [True, False])
     def test_get_vector_complex(self, id_field_type, include_output_fields, include_invalid_id):
         name = gen_collection_name()
-        self.name = name
+        self.name_list.append(name)
         nb = 200
         dim = 128
         schema_payload, data = self.init_collection(name, dim=dim, nb=nb)
@@ -794,7 +798,7 @@ class TestDeleteVector(TestBase):
     @pytest.mark.parametrize("id_field_type", ["list", "one"])
     def test_delete_vector_default(self, id_field_type, include_invalid_id):
         name = gen_collection_name()
-        self.name = name
+        self.name_list.append(name)
         nb = 200
         dim = 128
         schema_payload, data = self.init_collection(name, dim=dim, nb=nb)
@@ -855,7 +859,7 @@ class TestDeleteVector(TestBase):
         Delete a vector with an invalid api key
         """
         name = gen_collection_name()
-        self.name = name
+        self.name_list.append(name)
         nb = 200
         dim = 128
         schema_payload, data = self.init_collection(name, dim=dim, nb=nb)
@@ -892,7 +896,7 @@ class TestDeleteVector(TestBase):
         Delete a vector with an invalid collection name
         """
         name = gen_collection_name()
-        self.name = name
+        self.name_list.append(name)
         self.init_collection(name, dim=128, nb=3000)
 
         # query data
@@ -936,7 +940,7 @@ class TestDeleteVector(TestBase):
         Delete a vector with a non-primary key, expect no data were deleted
         """
         name = gen_collection_name()
-        self.name = name
+        self.name_list.append(name)
         self.init_collection(name, dim=128, nb=300)
         expr = "uid > 0"
         payload = {
