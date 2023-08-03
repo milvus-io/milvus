@@ -3,6 +3,7 @@ kind: Pod
 metadata:
   labels:
     app: milvus-e2e
+    task: milvus-e2e-pytest
   namespace: milvus-ci
 spec:
   enableServiceLinks: false
