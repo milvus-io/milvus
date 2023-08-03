@@ -228,6 +228,11 @@ type commonConfig struct {
 	ImportMaxFileSize ParamItem `refreshable:"true"`
 
 	MetricsPort ParamItem `refreshable:"false"`
+
+	//lock related params
+	EnableLockMetrics        ParamItem `refreshable:"false"`
+	LockSlowLogInfoThreshold ParamItem `refreshable:"true"`
+	LockSlowLogWarnThreshold ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -679,6 +684,33 @@ like the old password verification when updating the credential`,
 		DefaultValue: "9091",
 	}
 	p.MetricsPort.Init(base.mgr)
+
+	p.EnableLockMetrics = ParamItem{
+		Key:          "common.locks.metrics.enable",
+		Version:      "2.0.0",
+		DefaultValue: "false",
+		Doc:          "whether gather statistics for metrics locks",
+		Export:       true,
+	}
+	p.EnableLockMetrics.Init(base.mgr)
+
+	p.LockSlowLogInfoThreshold = ParamItem{
+		Key:          "common.locks.threshold.info",
+		Version:      "2.0.0",
+		DefaultValue: "500",
+		Doc:          "minimum milliseconds for printing durations in info level",
+		Export:       true,
+	}
+	p.LockSlowLogInfoThreshold.Init(base.mgr)
+
+	p.LockSlowLogWarnThreshold = ParamItem{
+		Key:          "common.locks.threshold.warn",
+		Version:      "2.0.0",
+		DefaultValue: "1000",
+		Doc:          "minimum milliseconds for printing durations in warn level",
+		Export:       true,
+	}
+	p.LockSlowLogWarnThreshold.Init(base.mgr)
 }
 
 type traceConfig struct {

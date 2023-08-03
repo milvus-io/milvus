@@ -84,6 +84,10 @@ const (
 	requestScope             = "scope"
 	fullMethodLabelName      = "full_method"
 	reduceLevelName          = "reduce_level"
+	lockName                 = "lock_name"
+	lockSource               = "lock_source"
+	lockType                 = "lock_type"
+	lockOp                   = "lock_op"
 )
 
 var (
@@ -97,9 +101,22 @@ var (
 			Name:      "num_node",
 			Help:      "number of nodes and coordinates",
 		}, []string{nodeIDLabelName, roleNameLabelName})
+
+	LockCosts = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Name:      "lock_time_cost",
+			Help:      "time cost for various kinds of locks",
+		}, []string{
+			lockName,
+			lockSource,
+			lockType,
+			lockOp,
+		})
 )
 
 // Register serves prometheus http service
 func Register(r *prometheus.Registry) {
 	r.MustRegister(NumNodes)
+	r.MustRegister(LockCosts)
 }
