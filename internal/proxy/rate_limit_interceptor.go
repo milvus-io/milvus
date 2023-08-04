@@ -155,7 +155,7 @@ func wrapQuotaError(rt internalpb.RateType, errCode commonpb.ErrorCode, fullMeth
 func getFailedResponse(req interface{}, rt internalpb.RateType, errCode commonpb.ErrorCode, fullMethod string) interface{} {
 	err := wrapQuotaError(rt, errCode, fullMethod)
 	switch req.(type) {
-	case *milvuspb.InsertRequest, *milvuspb.DeleteRequest:
+	case *milvuspb.InsertRequest, *milvuspb.DeleteRequest, *milvuspb.UpsertRequest:
 		return failedMutationResult(errCode, err.Error())
 	case *milvuspb.ImportRequest:
 		return &milvuspb.ImportResponse{
