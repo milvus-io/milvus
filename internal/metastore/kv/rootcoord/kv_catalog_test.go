@@ -10,10 +10,12 @@ import (
 	"testing"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
+	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -1236,6 +1238,12 @@ func TestCatalog_DropCollection(t *testing.T) {
 	})
 }
 
+func getUserInfoMetaString(username string) string {
+	validInfo := internalpb.CredentialInfo{Username: username, EncryptedPassword: "pwd" + username}
+	validBytes, _ := json.Marshal(validInfo)
+	return string(validBytes)
+}
+
 func TestRBAC_Credential(t *testing.T) {
 	ctx := context.TODO()
 
@@ -1345,12 +1353,34 @@ func TestRBAC_Credential(t *testing.T) {
 			kvmock = mocks.NewTxnKV(t)
 			c      = &Catalog{Txn: kvmock}
 
-			dropFailName = "drop-fail"
-			dropFailKey  = fmt.Sprintf("%s/%s", CredentialPrefix, dropFailName)
+			validName              = "user1"
+			validUserRoleKeyPrefix = funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, util.DefaultTenant, validName)
+
+			dropFailName          = "drop-fail"
+			dropUserRoleKeyPrefix = funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, util.DefaultTenant, dropFailName)
+			getFailName           = "get-fail"
 		)
 
-		kvmock.EXPECT().Remove(dropFailKey).Return(errors.New("Mock invalid remove"))
-		kvmock.EXPECT().Remove(mock.Anything).Return(nil)
+		kvmock.EXPECT().MultiRemove([]string{fmt.Sprintf("%s/%s", CredentialPrefix, dropFailName)}).Return(errors.New("Mock drop fail"))
+		kvmock.EXPECT().MultiRemove(
+			[]string{
+				fmt.Sprintf("%s/%s", CredentialPrefix, validName),
+				validUserRoleKeyPrefix + "/role1",
+				validUserRoleKeyPrefix + "/role2",
+			},
+		).Return(nil)
+		kvmock.EXPECT().MultiRemove(mock.Anything).Return(errors.New("Mock invalid multi remove"))
+
+		kvmock.EXPECT().Load(fmt.Sprintf("%s/%s", CredentialPrefix, getFailName)).Return("", errors.New("Mock invalid load"))
+		kvmock.EXPECT().Load(fmt.Sprintf("%s/%s", CredentialPrefix, validName)).Return(getUserInfoMetaString(validName), nil)
+		kvmock.EXPECT().Load(fmt.Sprintf("%s/%s", CredentialPrefix, dropFailName)).Return(getUserInfoMetaString(dropFailName), nil)
+
+		kvmock.EXPECT().LoadWithPrefix(validUserRoleKeyPrefix).Return(
+			[]string{validUserRoleKeyPrefix + "/role1", validUserRoleKeyPrefix + "/role2"},
+			[]string{"", ""},
+			nil,
+		)
+		kvmock.EXPECT().LoadWithPrefix(dropUserRoleKeyPrefix).Return([]string{}, []string{}, nil)
 
 		tests := []struct {
 			description string
@@ -1358,8 +1388,8 @@ func TestRBAC_Credential(t *testing.T) {
 
 			user string
 		}{
-			{"valid user1", true, "user1"},
-			{"valid user2", true, "user2"},
+			{"valid user1", true, validName},
+			{"invalid user get-fail", false, getFailName},
 			{"invalid user drop-fail", false, dropFailName},
 		}
 
@@ -1582,20 +1612,42 @@ func TestRBAC_Role(t *testing.T) {
 			kvmock = mocks.NewTxnKV(t)
 			c      = &Catalog{Txn: kvmock}
 
-			errorName = "error"
-			errorPath = funcutil.HandleTenantForEtcdKey(RolePrefix, tenant, errorName)
+			validName   = "role1"
+			errorName   = "error"
+			getFailName = "get-fail"
 		)
 
-		kvmock.EXPECT().Remove(errorPath).Return(errors.New("mock remove error")).Once()
-		kvmock.EXPECT().Remove(mock.Anything).Return(nil).Once()
+		kvmock.EXPECT().MultiRemove([]string{funcutil.HandleTenantForEtcdKey(RolePrefix, tenant, errorName)}).Return(errors.New("remove error"))
+		kvmock.EXPECT().MultiRemove([]string{
+			funcutil.HandleTenantForEtcdKey(RolePrefix, tenant, validName),
+			funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, fmt.Sprintf("%s/%s", "user1", validName)),
+			funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, fmt.Sprintf("%s/%s", "user2", validName)),
+		}).Return(nil)
+		kvmock.EXPECT().MultiRemove(mock.Anything).Run(func(keys []string) {
+			log.Info("keys", zap.Any("keys", keys))
+		}).Return(errors.New("mock multi remove error"))
+
+		getRoleMappingKey := func(username, rolename string) string {
+			return funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, fmt.Sprintf("%s/%s", username, rolename))
+		}
+
+		kvmock.EXPECT().LoadWithPrefix(funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, "")).Return(
+			[]string{getRoleMappingKey("user1", validName), getRoleMappingKey("user2", validName), getRoleMappingKey("user3", "role3")},
+			[]string{},
+			nil,
+		)
+
+		kvmock.EXPECT().Load(funcutil.HandleTenantForEtcdKey(RolePrefix, tenant, getFailName)).Return("", errors.New("mock load error"))
+		kvmock.EXPECT().Load(funcutil.HandleTenantForEtcdKey(RolePrefix, tenant, validName)).Return("", nil)
+		kvmock.EXPECT().Load(funcutil.HandleTenantForEtcdKey(RolePrefix, tenant, errorName)).Return("", nil)
 
 		tests := []struct {
 			description string
 			isValid     bool
-
-			role string
+			role        string
 		}{
-			{"valid role role1", true, "role1"},
+			{"valid role role1", true, validName},
+			{"fail to get role info", false, getFailName},
 			{"invalid role error", false, errorName},
 		}
 

@@ -669,6 +669,18 @@ func (c *Core) startInternal() error {
 
 	c.startServerLoop()
 	c.UpdateStateCode(commonpb.StateCode_Healthy)
+	// refresh rbac cache
+	if err := retry.Do(c.ctx, func() error {
+		if err := c.proxyClientManager.RefreshPolicyInfoCache(c.ctx, &proxypb.RefreshPolicyInfoCacheRequest{
+			OpType: int32(typeutil.CacheRefresh),
+		}); err != nil {
+			log.Warn("fail to refresh policy info cache", zap.Error(err))
+			return err
+		}
+		return nil
+	}, retry.Attempts(100), retry.Sleep(time.Second)); err != nil {
+		log.Panic("fail to refresh policy info cache", zap.Error(err))
+	}
 	logutil.Logger(c.ctx).Info("rootcoord startup successfully")
 
 	return nil
@@ -2113,7 +2125,7 @@ func (c *Core) GetCredential(ctx context.Context, in *rootcoordpb.GetCredentialR
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return &rootcoordpb.GetCredentialResponse{
 			Status: failStatus(commonpb.ErrorCode_GetCredentialFailure, "GetCredential failed: "+err.Error()),
-		}, err
+		}, nil
 	}
 	log.Info("GetCredential success", zap.String("role", typeutil.RootCoordRole),
 		zap.String("username", in.Username))
@@ -2171,35 +2183,61 @@ func (c *Core) DeleteCredential(ctx context.Context, in *milvuspb.DeleteCredenti
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
 
+	var status *commonpb.Status
+	defer func() {
+		if status.ErrorCode != commonpb.ErrorCode_Success {
+			metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
+		}
+	}()
+	ctxLog := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole), zap.String("username", in.Username))
+
 	if code, ok := c.checkHealthy(); !ok {
-		ret := &commonpb.Status{}
-		setNotServingStatus(ret, code)
-		return ret, nil
+		status = &commonpb.Status{}
+		setNotServingStatus(status, code)
+		return status, nil
 	}
 
-	// delete data on storage
-	err := c.meta.DeleteCredential(in.Username)
+	redoTask := newBaseRedoTask(c.stepExecutor)
+	redoTask.AddSyncStep(NewSimpleStep("delete credential meta data", func(ctx context.Context) ([]nestedStep, error) {
+		err := c.meta.DeleteCredential(in.Username)
+		if err != nil {
+			ctxLog.Warn("delete credential meta data failed", zap.Error(err))
+		}
+		return nil, err
+	}))
+	redoTask.AddAsyncStep(NewSimpleStep("delete credential cache", func(ctx context.Context) ([]nestedStep, error) {
+		err := c.ExpireCredCache(ctx, in.Username)
+		if err != nil {
+			ctxLog.Warn("delete credential cache failed", zap.Error(err))
+		}
+		return nil, err
+	}))
+	redoTask.AddAsyncStep(NewSimpleStep("delete user role cache for the user", func(ctx context.Context) ([]nestedStep, error) {
+		err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
+			OpType: int32(typeutil.CacheDeleteUser),
+			OpKey:  in.Username,
+		})
+		if err != nil {
+			ctxLog.Warn("delete user role cache failed for the user", zap.Error(err))
+		}
+		return nil, err
+	}))
+
+	err := redoTask.Execute(ctx)
 	if err != nil {
-		log.Error("DeleteCredential remove credential failed", zap.String("role", typeutil.RootCoordRole),
-			zap.String("username", in.Username), zap.Error(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-		return failStatus(commonpb.ErrorCode_DeleteCredentialFailure, "DeleteCredential failed: "+err.Error()), err
+		errMsg := "fail to execute task when deleting the user"
+		ctxLog.Warn(errMsg, zap.Error(err))
+		status = failStatus(commonpb.ErrorCode_DeleteCredentialFailure, errMsg)
+		return status, nil
 	}
-	// invalidate proxy's local cache
-	err = c.ExpireCredCache(ctx, in.Username)
-	if err != nil {
-		log.Error("DeleteCredential expire credential cache failed", zap.String("role", typeutil.RootCoordRole),
-			zap.String("username", in.Username), zap.Error(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-		return failStatus(commonpb.ErrorCode_DeleteCredentialFailure, "DeleteCredential failed: "+err.Error()), nil
-	}
-	log.Info("DeleteCredential success", zap.String("role", typeutil.RootCoordRole),
-		zap.String("username", in.Username))
+
+	ctxLog.Info("DeleteCredential success")
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordNumOfCredentials.Dec()
-	return succStatus(), nil
+	status = succStatus()
+	return status, nil
 }
 
 // ListCredUsers list all usernames
@@ -2217,11 +2255,11 @@ func (c *Core) ListCredUsers(ctx context.Context, in *milvuspb.ListCredUsersRequ
 	credInfo, err := c.meta.ListCredentialUsernames()
 	if err != nil {
 		log.Error("ListCredUsers query usernames failed", zap.String("role", typeutil.RootCoordRole),
-			zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
+			zap.Any("in", in), zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return &milvuspb.ListCredUsersResponse{
 			Status: failStatus(commonpb.ErrorCode_ListCredUsersFailure, "ListCredUsers failed: "+err.Error()),
-		}, err
+		}, nil
 	}
 	log.Info("ListCredUsers success", zap.String("role", typeutil.RootCoordRole))
 
@@ -2277,7 +2315,8 @@ func (c *Core) DropRole(ctx context.Context, in *milvuspb.DropRoleRequest) (*com
 	method := "DropRole"
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
-	logger.Debug(method, zap.Any("in", in))
+	ctxLog := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole), zap.String("role_name", in.RoleName))
+	ctxLog.Debug(method)
 
 	if code, ok := c.checkHealthy(); !ok {
 		ret := &commonpb.Status{}
@@ -2286,7 +2325,7 @@ func (c *Core) DropRole(ctx context.Context, in *milvuspb.DropRoleRequest) (*com
 	}
 	if _, err := c.meta.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName}, false); err != nil {
 		errMsg := "not found the role, maybe the role isn't existed or internal system error"
-		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
+		ctxLog.Warn(errMsg, zap.Error(err))
 		return failStatus(commonpb.ErrorCode_DropRoleFailure, errMsg), nil
 	}
 
@@ -2295,42 +2334,36 @@ func (c *Core) DropRole(ctx context.Context, in *milvuspb.DropRoleRequest) (*com
 	})
 	if len(grantEntities) != 0 {
 		errMsg := "fail to drop the role that it has privileges. Use REVOKE API to revoke privileges"
-		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
-		return failStatus(commonpb.ErrorCode_DropRoleFailure, errMsg), nil
-	}
-	roleResults, err := c.meta.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName}, true)
-	if err != nil {
-		errMsg := "fail to find the role by role name, maybe the role isn't existed or internal system error"
-		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
-		return failStatus(commonpb.ErrorCode_DropRoleFailure, errMsg), nil
-	}
-	logger.Debug("role to user info", zap.Int("counter", len(roleResults)))
-	for _, roleResult := range roleResults {
-		for index, userEntity := range roleResult.Users {
-			if err = c.meta.OperateUserRole(util.DefaultTenant,
-				&milvuspb.UserEntity{Name: userEntity.Name},
-				&milvuspb.RoleEntity{Name: roleResult.Role.Name}, milvuspb.OperateUserRoleType_RemoveUserFromRole); err != nil {
-				if common.IsIgnorableError(err) {
-					continue
-				}
-				errMsg := "fail to remove user from role"
-				log.Error(errMsg, zap.Any("in", in), zap.String("role_name", roleResult.Role.Name), zap.String("username", userEntity.Name), zap.Int("current_index", index), zap.Error(err))
-				return failStatus(commonpb.ErrorCode_OperateUserRoleFailure, errMsg), nil
-			}
-		}
-	}
-	if err = c.meta.DropGrant(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName}); err != nil {
-		errMsg := "fail to drop the grant"
-		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
-		return failStatus(commonpb.ErrorCode_DropRoleFailure, errMsg), nil
-	}
-	if err = c.meta.DropRole(util.DefaultTenant, in.RoleName); err != nil {
-		errMsg := "fail to drop the role"
-		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
+		ctxLog.Warn(errMsg, zap.Error(err))
 		return failStatus(commonpb.ErrorCode_DropRoleFailure, errMsg), nil
 	}
 
-	logger.Debug(method+" success", zap.String("role_name", in.RoleName))
+	redoTask := newBaseRedoTask(c.stepExecutor)
+	redoTask.AddSyncStep(NewSimpleStep("drop role meta data", func(ctx context.Context) ([]nestedStep, error) {
+		err := c.meta.DropRole(util.DefaultTenant, in.RoleName)
+		if err != nil {
+			ctxLog.Warn("drop role mata data failed", zap.Error(err))
+		}
+		return nil, err
+	}))
+	redoTask.AddAsyncStep(NewSimpleStep("drop role cache", func(ctx context.Context) ([]nestedStep, error) {
+		err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
+			OpType: int32(typeutil.CacheDropRole),
+			OpKey:  in.RoleName,
+		})
+		if err != nil {
+			ctxLog.Warn("delete user role cache failed for the role", zap.Error(err))
+		}
+		return nil, err
+	}))
+	err = redoTask.Execute(ctx)
+	if err != nil {
+		errMsg := "fail to execute task when dropping the role"
+		ctxLog.Warn(errMsg, zap.Error(err))
+		return failStatus(commonpb.ErrorCode_DropRoleFailure, errMsg), nil
+	}
+
+	ctxLog.Debug(method + " success")
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordNumOfRoles.Dec()
@@ -2368,17 +2401,16 @@ func (c *Core) OperateUserRole(ctx context.Context, in *milvuspb.OperateUserRole
 		}
 	}
 
-	updateCache := true
-	if err := c.meta.OperateUserRole(util.DefaultTenant, &milvuspb.UserEntity{Name: in.Username}, &milvuspb.RoleEntity{Name: in.RoleName}, in.Type); err != nil {
-		if !common.IsIgnorableError(err) {
-			errMsg := "fail to operate user to role"
-			log.Error(errMsg, zap.Any("in", in), zap.Error(err))
-			return failStatus(commonpb.ErrorCode_OperateUserRoleFailure, errMsg), nil
+	redoTask := newBaseRedoTask(c.stepExecutor)
+	redoTask.AddSyncStep(NewSimpleStep("operate user role meta data", func(ctx context.Context) ([]nestedStep, error) {
+		err := c.meta.OperateUserRole(util.DefaultTenant, &milvuspb.UserEntity{Name: in.Username}, &milvuspb.RoleEntity{Name: in.RoleName}, in.Type)
+		if err != nil && !common.IsIgnorableError(err) {
+			log.Warn("operate user role mata data failed", zap.Error(err))
+			return nil, err
 		}
-		updateCache = false
-	}
-
-	if updateCache {
+		return nil, nil
+	}))
+	redoTask.AddAsyncStep(NewSimpleStep("operate user role cache", func(ctx context.Context) ([]nestedStep, error) {
 		var opType int32
 		switch in.Type {
 		case milvuspb.OperateUserRoleType_AddUserToRole:
@@ -2387,17 +2419,23 @@ func (c *Core) OperateUserRole(ctx context.Context, in *milvuspb.OperateUserRole
 			opType = int32(typeutil.CacheRemoveUserFromRole)
 		default:
 			errMsg := "invalid operate type for the OperateUserRole api"
-			log.Error(errMsg, zap.Any("in", in))
-			return failStatus(commonpb.ErrorCode_OperateUserRoleFailure, errMsg), nil
+			log.Warn(errMsg, zap.Any("in", in))
+			return nil, nil
 		}
 		if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
 			OpType: opType,
 			OpKey:  funcutil.EncodeUserRoleCache(in.Username, in.RoleName),
 		}); err != nil {
-			errMsg := "fail to refresh policy info cache"
-			log.Error(errMsg, zap.Any("in", in), zap.Error(err))
-			return failStatus(commonpb.ErrorCode_OperateUserRoleFailure, errMsg), nil
+			log.Warn("fail to refresh policy info cache", zap.Any("in", in), zap.Error(err))
+			return nil, err
 		}
+		return nil, nil
+	}))
+	err := redoTask.Execute(ctx)
+	if err != nil {
+		errMsg := "fail to execute task when operate the user and role"
+		log.Warn(errMsg, zap.Error(err))
+		return failStatus(commonpb.ErrorCode_OperateUserRoleFailure, errMsg), nil
 	}
 
 	logger.Debug(method + " success")
@@ -2610,17 +2648,17 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 	if in.Entity.Object.Name == commonpb.ObjectType_Global.String() {
 		in.Entity.ObjectName = util.AnyWord
 	}
-	updateCache := true
-	if err := c.meta.OperatePrivilege(util.DefaultTenant, in.Entity, in.Type); err != nil {
-		if !common.IsIgnorableError(err) {
-			errMsg := "fail to operate the privilege"
-			log.Error(errMsg, zap.Any("in", in), zap.Error(err))
-			return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure, errMsg), nil
-		}
-		updateCache = false
-	}
 
-	if updateCache {
+	redoTask := newBaseRedoTask(c.stepExecutor)
+	redoTask.AddSyncStep(NewSimpleStep("operate privilege meta data", func(ctx context.Context) ([]nestedStep, error) {
+		err := c.meta.OperatePrivilege(util.DefaultTenant, in.Entity, in.Type)
+		if err != nil && !common.IsIgnorableError(err) {
+			log.Warn("fail to operate the privilege", zap.Any("in", in), zap.Error(err))
+			return nil, err
+		}
+		return nil, nil
+	}))
+	redoTask.AddAsyncStep(NewSimpleStep("operate privilege cache", func(ctx context.Context) ([]nestedStep, error) {
 		var opType int32
 		switch in.Type {
 		case milvuspb.OperatePrivilegeType_Grant:
@@ -2628,18 +2666,24 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 		case milvuspb.OperatePrivilegeType_Revoke:
 			opType = int32(typeutil.CacheRevokePrivilege)
 		default:
-			errMsg := "invalid operate type for the OperatePrivilege api"
-			log.Error(errMsg, zap.Any("in", in))
-			return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure, errMsg), nil
+			log.Warn("invalid operate type for the OperatePrivilege api", zap.Any("in", in))
+			return nil, nil
 		}
 		if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
 			OpType: opType,
 			OpKey:  funcutil.PolicyForPrivilege(in.Entity.Role.Name, in.Entity.Object.Name, in.Entity.ObjectName, in.Entity.Grantor.Privilege.Name, in.Entity.DbName),
 		}); err != nil {
-			errMsg := "fail to refresh policy info cache"
-			log.Error(errMsg, zap.Any("in", in), zap.Error(err))
-			return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure, errMsg), nil
+			log.Warn("fail to refresh policy info cache", zap.Any("in", in), zap.Error(err))
+			return nil, err
 		}
+		return nil, nil
+	}))
+
+	err := redoTask.Execute(ctx)
+	if err != nil {
+		errMsg := "fail to execute task when operating the privilege"
+		log.Warn(errMsg, zap.Error(err))
+		return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure, errMsg), nil
 	}
 
 	logger.Debug(method + " success")

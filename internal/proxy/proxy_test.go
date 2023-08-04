@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"net"
 	"os"
 	"strconv"
@@ -30,13 +31,6 @@ import (
 	"github.com/golang/protobuf/proto"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/keepalive"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -78,6 +72,12 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 )
 
 const (
@@ -2196,7 +2196,6 @@ func TestProxy(t *testing.T) {
 		updateCredentialReq.NewPassword = crypto.Base64Encode(newPassword)
 		updateResp, err = proxy.UpdateCredential(rootCtx, updateCredentialReq)
 		assert.NoError(t, err)
-		fmt.Println("simfg fubang:", updateResp)
 		assert.Equal(t, commonpb.ErrorCode_Success, updateResp.ErrorCode)
 	})
 
@@ -2220,7 +2219,8 @@ func TestProxy(t *testing.T) {
 
 		getCredentialReq.Username = "("
 		getResp, err = rootCoordClient.GetCredential(ctx, getCredentialReq)
-		assert.Error(t, err)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, getResp.Status.ErrorCode)
 	})
 
 	wg.Add(1)
@@ -3366,6 +3366,73 @@ func testProxyRole(ctx context.Context, t *testing.T, proxy *Proxy) {
 
 		opResp, _ = proxy.OperateUserRole(ctx, &milvuspb.OperateUserRoleRequest{Username: "root", RoleName: "admin", Type: milvuspb.OperateUserRoleType_RemoveUserFromRole})
 		assert.Equal(t, commonpb.ErrorCode_Success, opResp.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run("User Role mapping info", func(t *testing.T) {
+		defer wg.Done()
+
+		ctx := context.Background()
+		username := fmt.Sprintf("user%d", rand.Int31())
+		roleName := fmt.Sprintf("role%d", rand.Int31())
+		{
+			createCredentialResp, err := proxy.CreateCredential(ctx, &milvuspb.CreateCredentialRequest{Username: username, Password: crypto.Base64Encode("userpwd")})
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, createCredentialResp.ErrorCode)
+			createRoleResp, err := proxy.CreateRole(ctx, &milvuspb.CreateRoleRequest{Entity: &milvuspb.RoleEntity{Name: roleName}})
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, createRoleResp.ErrorCode)
+		}
+		{
+			resp, err := proxy.OperateUserRole(ctx, &milvuspb.OperateUserRoleRequest{Username: username, RoleName: roleName})
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		}
+		{
+			resp, err := proxy.OperateUserRole(ctx, &milvuspb.OperateUserRoleRequest{Username: username, RoleName: "admin"})
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		}
+		{
+			selectUserResp, err := proxy.SelectUser(ctx, &milvuspb.SelectUserRequest{User: &milvuspb.UserEntity{Name: username}, IncludeRoleInfo: true})
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, selectUserResp.Status.ErrorCode)
+			assert.Equal(t, 2, len(selectUserResp.Results[0].Roles))
+
+			selectRoleResp, err := proxy.SelectRole(ctx, &milvuspb.SelectRoleRequest{Role: &milvuspb.RoleEntity{Name: roleName}, IncludeUserInfo: true})
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, selectRoleResp.Status.ErrorCode)
+			assert.Equal(t, 1, len(selectRoleResp.Results[0].Users))
+		}
+		{
+			resp, err := proxy.DropRole(ctx, &milvuspb.DropRoleRequest{RoleName: roleName})
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		}
+		{
+			selectUserResp, err := proxy.SelectUser(ctx, &milvuspb.SelectUserRequest{User: &milvuspb.UserEntity{Name: username}, IncludeRoleInfo: true})
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, selectUserResp.Status.ErrorCode)
+			assert.Equal(t, 1, len(selectUserResp.Results[0].Roles))
+
+			selectRoleResp, err := proxy.SelectRole(ctx, &milvuspb.SelectRoleRequest{Role: &milvuspb.RoleEntity{Name: roleName}, IncludeUserInfo: true})
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, selectRoleResp.Status.ErrorCode)
+			assert.Equal(t, 0, len(selectRoleResp.Results))
+		}
+		{
+			resp, err := proxy.DeleteCredential(ctx, &milvuspb.DeleteCredentialRequest{Username: username})
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+			time.Sleep(time.Second)
+		}
+		{
+			selectUserResp, err := proxy.SelectUser(ctx, &milvuspb.SelectUserRequest{User: &milvuspb.UserEntity{Name: username}, IncludeRoleInfo: true})
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, selectUserResp.Status.ErrorCode)
+			assert.Equal(t, 0, len(selectUserResp.Results))
+		}
 	})
 
 	wg.Wait()
