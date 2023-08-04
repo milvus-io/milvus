@@ -319,8 +319,12 @@ func (t *compactionTask) merge(
 		return false
 	}
 
-	addInsertFieldPath := func(inPaths map[UniqueID]*datapb.FieldBinlog) {
+	addInsertFieldPath := func(inPaths map[UniqueID]*datapb.FieldBinlog, timestampFrom, timestampTo int64) {
 		for fID, path := range inPaths {
+			for _, binlog := range path.GetBinlogs() {
+				binlog.TimestampTo = uint64(timestampTo)
+				binlog.TimestampFrom = uint64(timestampFrom)
+			}
 			tmpBinlog, ok := insertField2Path[fID]
 			if !ok {
 				tmpBinlog = path
@@ -387,6 +391,11 @@ func (t *compactionTask) merge(
 	}
 
 	stats := storage.NewPrimaryKeyStats(pkID, int64(pkType), oldRowNums)
+	// initial timestampFrom, timestampTo = -1, -1 is an illegal value, only to mark initial state
+	var (
+		timestampTo   int64 = -1
+		timestampFrom int64 = -1
+	)
 
 	for _, path := range unMergedInsertlogs {
 		downloadStart := time.Now()
@@ -402,6 +411,7 @@ func (t *compactionTask) merge(
 			log.Warn("new insert binlogs Itr wrong", zap.Strings("path", path), zap.Error(err))
 			return nil, nil, 0, err
 		}
+
 		for iter.HasNext() {
 			vInter, _ := iter.Next()
 			v, ok := vInter.(*storage.Value)
@@ -419,6 +429,14 @@ func (t *compactionTask) merge(
 			if t.isExpiredEntity(ts, currentTs) {
 				expired++
 				continue
+			}
+
+			// Update timestampFrom, timestampTo
+			if v.Timestamp < timestampFrom || timestampFrom == -1 {
+				timestampFrom = v.Timestamp
+			}
+			if v.Timestamp > timestampTo || timestampFrom == -1 {
+				timestampTo = v.Timestamp
 			}
 
 			row, ok := v.Value.(map[UniqueID]interface{})
@@ -445,7 +463,9 @@ func (t *compactionTask) merge(
 					return nil, nil, 0, err
 				}
 				uploadInsertTimeCost += time.Since(uploadInsertStart)
-				addInsertFieldPath(inPaths)
+				addInsertFieldPath(inPaths, timestampFrom, timestampTo)
+				timestampFrom = -1
+				timestampTo = -1
 
 				fID2Content = make(map[int64][]interface{})
 				currentRows = 0
@@ -465,7 +485,7 @@ func (t *compactionTask) merge(
 		}
 
 		uploadInsertTimeCost += time.Since(uploadStart)
-		addInsertFieldPath(inPaths)
+		addInsertFieldPath(inPaths, timestampFrom, timestampTo)
 		addStatFieldPath(statsPaths)
 		numRows += int64(currentRows)
 		numBinlogs += len(inPaths)
