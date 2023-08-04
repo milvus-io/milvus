@@ -27,6 +27,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 
+	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/stretchr/testify/assert"
@@ -74,6 +75,9 @@ func (m *mockCore) SetAddress(address string) {
 }
 
 func (m *mockCore) SetEtcdClient(etcdClient *clientv3.Client) {
+}
+
+func (m *mockCore) SetTiKVClient(client *txnkv.Client) {
 }
 
 func (m *mockCore) SetDataCoord(types.DataCoord) error {

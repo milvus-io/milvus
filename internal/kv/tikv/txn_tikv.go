@@ -646,7 +646,7 @@ func (kv *txnTiKV) putTiKVMeta(ctx context.Context, key, val string) error {
 
 	err = txn.Set([]byte(key), []byte(val))
 	if err != nil {
-		return errors.Wrap(err, fmt.Sprintf("Failed to get value for key %s in putTiKVMeta", key))
+		return errors.Wrap(err, fmt.Sprintf("Failed to set kv pair (%s, %s) in putTiKVMeta", key, val))
 	}
 	err = commitTxn(txn, ctx1)
 
@@ -678,7 +678,7 @@ func (kv *txnTiKV) removeTiKVMeta(ctx context.Context, key string) error {
 
 	err = txn.Delete([]byte(key))
 	if err != nil {
-		return errors.Wrap(err, fmt.Sprintf("Failed to get value for key %s in putTiKVMeta", key))
+		return errors.Wrap(err, fmt.Sprintf("Failed to remove value for key %s in removeTiKVMeta", key))
 	}
 	err = commitTxn(txn, ctx1)
 

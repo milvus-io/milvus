@@ -28,6 +28,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -38,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	tikv "github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/db/dao"
 	"github.com/milvus-io/milvus/internal/metastore/db/dbcore"
@@ -86,9 +88,15 @@ type Opt func(*Core)
 
 type metaKVCreator func(root string) (kv.MetaKv, error)
 
-func defaultMetaKVCreator(etcdCli *clientv3.Client) metaKVCreator {
+func defaultEtcdMetaKVCreator(etcdCli *clientv3.Client) metaKVCreator {
 	return func(root string) (kv.MetaKv, error) {
 		return etcdkv.NewEtcdKV(etcdCli, root), nil
+	}
+}
+
+func defaultMetaKVCreator(tikvCli *txnkv.Client) metaKVCreator {
+	return func(root string) (kv.MetaKv, error) {
+		return tikv.NewTiKV(tikvCli, root), nil
 	}
 }
 
@@ -98,6 +106,7 @@ type Core struct {
 	cancel           context.CancelFunc
 	wg               sync.WaitGroup
 	etcdCli          *clientv3.Client
+	tikvCli          *txnkv.Client
 	address          string
 	meta             IMetaTable
 	scheduler        IScheduler
@@ -308,6 +317,11 @@ func (c *Core) SetEtcdClient(etcdClient *clientv3.Client) {
 	c.etcdCli = etcdClient
 }
 
+// SetTiKVClient sets the tikvCli of Core
+func (c *Core) SetTiKVClient(client *txnkv.Client) {
+	c.tikvCli = client
+}
+
 func (c *Core) initSession() error {
 	c.session = sessionutil.NewSession(c.ctx, Params.EtcdCfg.MetaRootPath.GetValue(), c.etcdCli)
 	if c.session == nil {
@@ -320,7 +334,7 @@ func (c *Core) initSession() error {
 
 func (c *Core) initKVCreator() {
 	if c.metaKVCreator == nil {
-		c.metaKVCreator = defaultMetaKVCreator(c.etcdCli)
+		c.metaKVCreator = defaultMetaKVCreator(c.tikvCli)
 	}
 }
 
@@ -367,7 +381,7 @@ func (c *Core) initMetaTable() error {
 }
 
 func (c *Core) initIDAllocator() error {
-	tsoKV := tsoutil2.NewTSOKVBase(c.etcdCli, Params.EtcdCfg.KvRootPath.GetValue(), globalIDAllocatorSubPath)
+	tsoKV := tsoutil2.NewTSOTiKVBase(c.tikvCli, Params.EtcdCfg.KvRootPath.GetValue(), globalIDAllocatorSubPath)
 	idAllocator := allocator.NewGlobalIDAllocator(globalIDAllocatorKey, tsoKV)
 	if err := idAllocator.Initialize(); err != nil {
 		return err
@@ -383,7 +397,7 @@ func (c *Core) initIDAllocator() error {
 }
 
 func (c *Core) initTSOAllocator() error {
-	tsoKV := tsoutil2.NewTSOKVBase(c.etcdCli, Params.EtcdCfg.KvRootPath.GetValue(), globalTSOAllocatorSubPath)
+	tsoKV := tsoutil2.NewTSOTiKVBase(c.tikvCli, Params.EtcdCfg.KvRootPath.GetValue(), globalTSOAllocatorSubPath)
 	tsoAllocator := tso2.NewGlobalTSOAllocator(globalTSOAllocatorKey, tsoKV)
 	if err := tsoAllocator.Initialize(); err != nil {
 		return err

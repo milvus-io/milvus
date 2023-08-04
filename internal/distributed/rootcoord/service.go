@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util/interceptor"
+	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/zap"
@@ -45,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tikv"
 
 	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	qcc "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
@@ -62,6 +64,7 @@ type Server struct {
 	cancel context.CancelFunc
 
 	etcdCli    *clientv3.Client
+	tikvCli    *txnkv.Client
 	dataCoord  types.DataCoord
 	queryCoord types.QueryCoord
 
@@ -170,6 +173,13 @@ func (s *Server) init() error {
 	s.rootCoord.SetEtcdClient(s.etcdCli)
 	s.rootCoord.SetAddress(Params.GetAddress())
 	log.Debug("etcd connect done ...")
+	s.tikvCli, err = tikv.GetTiKVClient()
+	if err != nil {
+		log.Debug("RootCoord connect to tikv failed", zap.Error(err))
+		return err
+	}
+	s.rootCoord.SetTiKVClient(s.tikvCli)
+	log.Debug("tikv connect done ...")
 
 	err = s.startGrpc(Params.Port.GetAsInt())
 	if err != nil {
@@ -289,6 +299,9 @@ func (s *Server) Stop() error {
 	log.Debug("Rootcoord stop", zap.String("Address", Params.GetAddress()))
 	if s.etcdCli != nil {
 		defer s.etcdCli.Close()
+	}
+	if s.tikvCli != nil {
+		defer s.tikvCli.Close()
 	}
 	if s.dataCoord != nil {
 		if err := s.dataCoord.Stop(); err != nil {

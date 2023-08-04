@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tikv"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -1589,6 +1590,10 @@ func TestRootcoord_EnableActiveStandby(t *testing.T) {
 	core, err := NewCore(ctx, coreFactory)
 	core.etcdCli = etcdCli
 	assert.NoError(t, err)
+
+	tikvCli, _ := tikv.GetTiKVClient()
+	core.SetTiKVClient(tikvCli)
+
 	err = core.Init()
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.StateCode_StandBy, core.stateCode.Load().(commonpb.StateCode))
@@ -1639,6 +1644,10 @@ func TestRootcoord_DisableActiveStandby(t *testing.T) {
 	core, err := NewCore(ctx, coreFactory)
 	core.etcdCli = etcdCli
 	assert.NoError(t, err)
+
+	tikvCli, _ := tikv.GetTiKVClient()
+	core.SetTiKVClient(tikvCli)
+
 	err = core.Init()
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.StateCode_Initializing, core.stateCode.Load().(commonpb.StateCode))

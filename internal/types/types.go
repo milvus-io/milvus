@@ -824,6 +824,9 @@ type RootCoordComponent interface {
 	// `etcdClient` is a client of etcd
 	SetEtcdClient(etcdClient *clientv3.Client)
 
+	// SetTiKVClient set TiKV client for RootCoord
+	SetTiKVClient(client *txnkv.Client)
+
 	// UpdateStateCode updates state code for RootCoord
 	// State includes: Initializing, Healthy and Abnormal
 	UpdateStateCode(commonpb.StateCode)

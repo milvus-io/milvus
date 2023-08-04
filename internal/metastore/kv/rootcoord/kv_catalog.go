@@ -704,7 +704,9 @@ func (kc *Catalog) save(k string) error {
 		log.Debug("the key has existed", zap.String("key", k))
 		return common.NewIgnorableError(fmt.Errorf("the key[%s] has existed", k))
 	}
-	return kc.Txn.Save(k, "")
+	// Note that some Meta Stores (e.g. TiKV) don't allow value to be empty.
+	// Thus we pass in a " " instead of an empty string.
+	return kc.Txn.Save(k, " ")
 }
 
 func (kc *Catalog) remove(k string) error {
