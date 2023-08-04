@@ -159,6 +159,9 @@ func (t *SearchTask) Execute() error {
 			}
 
 			task.result = &internalpb.SearchResults{
+				Base: &commonpb.MsgBase{
+					SourceID: paramtable.GetNodeID(),
+				},
 				Status:         &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 				MetricType:     req.GetReq().GetMetricType(),
 				NumQueries:     t.originNqs[i],
@@ -212,6 +215,9 @@ func (t *SearchTask) Execute() error {
 			Observe(float64(reduceLatency.Milliseconds()))
 
 		task.result = &internalpb.SearchResults{
+			Base: &commonpb.MsgBase{
+				SourceID: paramtable.GetNodeID(),
+			},
 			Status:         util.WrapStatus(commonpb.ErrorCode_Success, ""),
 			MetricType:     req.GetReq().GetMetricType(),
 			NumQueries:     t.originNqs[i],

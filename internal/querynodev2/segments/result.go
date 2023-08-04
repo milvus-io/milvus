@@ -32,6 +32,7 @@ import (
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -75,8 +76,16 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 		return nil, err
 	}
 
-	requestCosts := lo.Map(results, func(result *internalpb.SearchResults, _ int) *internalpb.CostAggregation {
-		return result.GetCostAggregation()
+	requestCosts := lo.FilterMap(results, func(result *internalpb.SearchResults, _ int) (*internalpb.CostAggregation, bool) {
+		if paramtable.Get().QueryNodeCfg.EnableWorkerSQCostMetrics.GetAsBool() {
+			return result.GetCostAggregation(), true
+		}
+
+		if result.GetBase().GetSourceID() == paramtable.GetNodeID() {
+			return result.GetCostAggregation(), true
+		}
+
+		return nil, false
 	})
 	searchResults.CostAggregation = mergeRequestCost(requestCosts)
 
@@ -289,10 +298,15 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 	}
 
 	requestCosts := lo.FilterMap(retrieveResults, func(result *internalpb.RetrieveResults, _ int) (*internalpb.CostAggregation, bool) {
-		if result.CostAggregation == nil {
-			return nil, false
+		if paramtable.Get().QueryNodeCfg.EnableWorkerSQCostMetrics.GetAsBool() {
+			return result.GetCostAggregation(), true
 		}
-		return result.CostAggregation, true
+
+		if result.GetBase().GetSourceID() == paramtable.GetNodeID() {
+			return result.GetCostAggregation(), true
+		}
+
+		return nil, false
 	})
 	ret.CostAggregation = mergeRequestCost(requestCosts)
 
