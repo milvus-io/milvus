@@ -274,7 +274,7 @@ class TestDescribeCollection(TestBase):
         all_collections = rsp['data']
         assert name in all_collections
         # describe collection
-        illegal_client = CollectionClient(self.url, "illegal_api_key")
+        illegal_client = CollectionClient(self.url, "illegal_api_key", self.protocol)
         rsp = illegal_client.collection_describe(name)
         assert rsp['code'] == 1800
 
@@ -361,7 +361,7 @@ class TestDropCollection(TestBase):
         payload = {
             "collectionName": name,
         }
-        illegal_client = CollectionClient(self.url, "invalid_api_key")
+        illegal_client = CollectionClient(self.url, "invalid_api_key", self.protocol)
         rsp = illegal_client.collection_drop(payload)
         assert rsp['code'] == 1800
         rsp = client.collection_list()
