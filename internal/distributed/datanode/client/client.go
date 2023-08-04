@@ -131,7 +131,8 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 // Deprecated
 // WatchDmChannels create consumers on dmChannels to reveive Incremental data
 func (c *Client) WatchDmChannels(ctx context.Context, req *datapb.WatchDmChannelsRequest) (*commonpb.Status, error) {
-	req = typeutil.Clone(req)
+	// to avoid shared msg datarace
+	req.Base = typeutil.Clone(req.GetBase())
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
@@ -153,7 +154,8 @@ func (c *Client) WatchDmChannels(ctx context.Context, req *datapb.WatchDmChannel
 //
 //	Log an info log if a segment is under flushing
 func (c *Client) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
-	req = typeutil.Clone(req)
+	// to avoid shared msg datarace
+	req.Base = typeutil.Clone(req.GetBase())
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
@@ -164,7 +166,8 @@ func (c *Client) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsReq
 
 // ShowConfigurations gets specified configurations para of DataNode
 func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
-	req = typeutil.Clone(req)
+	// to avoid shared msg datarace
+	req.Base = typeutil.Clone(req.GetBase())
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
@@ -175,7 +178,8 @@ func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 
 // GetMetrics returns metrics
 func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	req = typeutil.Clone(req)
+	// to avoid shared msg datarace
+	req.Base = typeutil.Clone(req.GetBase())
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
@@ -192,7 +196,8 @@ func (c *Client) Compaction(ctx context.Context, req *datapb.CompactionPlan) (*c
 }
 
 func (c *Client) GetCompactionState(ctx context.Context, req *datapb.CompactionStateRequest) (*datapb.CompactionStateResponse, error) {
-	req = typeutil.Clone(req)
+	// to avoid shared msg datarace
+	req.Base = typeutil.Clone(req.GetBase())
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
@@ -203,7 +208,8 @@ func (c *Client) GetCompactionState(ctx context.Context, req *datapb.CompactionS
 
 // Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
 func (c *Client) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*commonpb.Status, error) {
-	req = typeutil.Clone(req)
+	// to avoid shared msg datarace
+	req.Base = typeutil.Clone(req.GetBase())
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
@@ -213,7 +219,8 @@ func (c *Client) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*co
 }
 
 func (c *Client) ResendSegmentStats(ctx context.Context, req *datapb.ResendSegmentStatsRequest) (*datapb.ResendSegmentStatsResponse, error) {
-	req = typeutil.Clone(req)
+	// to avoid shared msg datarace
+	req.Base = typeutil.Clone(req.GetBase())
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
@@ -224,7 +231,8 @@ func (c *Client) ResendSegmentStats(ctx context.Context, req *datapb.ResendSegme
 
 // AddImportSegment is the DataNode client side code for AddImportSegment call.
 func (c *Client) AddImportSegment(ctx context.Context, req *datapb.AddImportSegmentRequest) (*datapb.AddImportSegmentResponse, error) {
-	req = typeutil.Clone(req)
+	// to avoid shared msg datarace
+	req.Base = typeutil.Clone(req.GetBase())
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))

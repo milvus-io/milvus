@@ -157,7 +157,8 @@ func (c *Client) GetJobStats(ctx context.Context, req *indexpb.GetJobStatsReques
 
 // ShowConfigurations gets specified configurations para of IndexNode
 func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
-	req = typeutil.Clone(req)
+	// to avoid shared msg datarace
+	req.Base = typeutil.Clone(req.GetBase())
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
@@ -168,7 +169,8 @@ func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 
 // GetMetrics gets the metrics info of IndexNode.
 func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	req = typeutil.Clone(req)
+	// to avoid shared msg datarace
+	req.Base = typeutil.Clone(req.GetBase())
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
