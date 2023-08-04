@@ -55,10 +55,10 @@ import (
 type Cache interface {
 	// GetCollectionID get collection's id by name.
 	GetCollectionID(ctx context.Context, database, collectionName string) (typeutil.UniqueID, error)
-	// GetDatabaseAndCollectionName get collection's name and database by id
-	GetDatabaseAndCollectionName(ctx context.Context, collectionID int64) (string, string, error)
+	// GetCollectionName get collection's name and database by id
+	GetCollectionName(ctx context.Context, collectionID int64) (string, error)
 	// GetCollectionInfo get collection's information by name or collection id, such as schema, and etc.
-	GetCollectionInfo(ctx context.Context, database, collectionName string, collectionID int64) (*collectionInfo, error)
+	GetCollectionInfo(ctx context.Context, database, collectionName string, collectionID int64) (*collectionBasicInfo, error)
 	// GetPartitionID get partition's identifier of specific collection.
 	GetPartitionID(ctx context.Context, database, collectionName string, partitionName string) (typeutil.UniqueID, error)
 	// GetPartitions get all partitions' id of specific collection.
@@ -87,6 +87,14 @@ type Cache interface {
 	RemoveDatabase(ctx context.Context, database string)
 }
 
+type collectionBasicInfo struct {
+	collID              typeutil.UniqueID
+	createdTimestamp    uint64
+	createdUtcTimestamp uint64
+	consistencyLevel    commonpb.ConsistencyLevel
+	partInfo            map[string]*partitionInfo
+}
+
 type collectionInfo struct {
 	collID              typeutil.UniqueID
 	schema              *schemapb.CollectionSchema
@@ -96,7 +104,23 @@ type collectionInfo struct {
 	createdTimestamp    uint64
 	createdUtcTimestamp uint64
 	consistencyLevel    commonpb.ConsistencyLevel
-	database            string
+}
+
+// getBasicInfo get a basic info by deep copy.
+func (info *collectionInfo) getBasicInfo() *collectionBasicInfo {
+	// Do a deep copy for all fields.
+	basicInfo := &collectionBasicInfo{
+		collID:              info.collID,
+		createdTimestamp:    info.createdTimestamp,
+		createdUtcTimestamp: info.createdUtcTimestamp,
+		consistencyLevel:    info.consistencyLevel,
+		partInfo:            make(map[string]*partitionInfo, len(info.partInfo)),
+	}
+	for s, info := range info.partInfo {
+		info2 := *info
+		basicInfo.partInfo[s] = &info2
+	}
+	return basicInfo
 }
 
 func (info *collectionInfo) isCollectionCached() bool {
@@ -252,8 +276,8 @@ func (m *MetaCache) GetCollectionID(ctx context.Context, database, collectionNam
 	return collInfo.collID, nil
 }
 
-// GetDatabaseAndCollectionName returns the corresponding collection name for provided collection id
-func (m *MetaCache) GetDatabaseAndCollectionName(ctx context.Context, collectionID int64) (string, string, error) {
+// GetCollectionName returns the corresponding collection name for provided collection id
+func (m *MetaCache) GetCollectionName(ctx context.Context, collectionID int64) (string, error) {
 	m.mu.RLock()
 	var collInfo *collectionInfo
 	for _, db := range m.collInfo {
@@ -272,24 +296,22 @@ func (m *MetaCache) GetDatabaseAndCollectionName(ctx context.Context, collection
 		m.mu.RUnlock()
 		coll, err := m.describeCollection(ctx, "", "", collectionID)
 		if err != nil {
-			return "", "", err
+			return "", err
 		}
 		m.mu.Lock()
 		defer m.mu.Unlock()
 
 		m.updateCollection(coll, coll.GetDbName(), coll.Schema.Name)
 		metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		return coll.GetDbName(), coll.Schema.Name, nil
+		return coll.Schema.Name, nil
 	}
 	defer m.mu.RUnlock()
 	metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheHitLabel).Inc()
 
-	return collInfo.database, collInfo.schema.Name, nil
+	return collInfo.schema.Name, nil
 }
 
-// GetCollectionInfo returns the collection information related to provided collection name
-// If the information is not found, proxy will try to fetch information for other source (RootCoord for now)
-func (m *MetaCache) GetCollectionInfo(ctx context.Context, database, collectionName string, collectionID int64) (*collectionInfo, error) {
+func (m *MetaCache) GetCollectionInfo(ctx context.Context, database string, collectionName string, collectionID int64) (*collectionBasicInfo, error) {
 	m.mu.RLock()
 	var collInfo *collectionInfo
 	var ok bool
@@ -298,12 +320,49 @@ func (m *MetaCache) GetCollectionInfo(ctx context.Context, database, collectionN
 	if dbOk {
 		collInfo, ok = db[collectionName]
 	}
-	m.mu.RUnlock()
 
 	method := "GetCollectionInfo"
 	// if collInfo.collID != collectionID, means that the cache is not trustable
 	// try to get collection according to collectionID
 	if !ok || !collInfo.isCollectionCached() || collInfo.collID != collectionID {
+		m.mu.RUnlock()
+		tr := timerecord.NewTimeRecorder("UpdateCache")
+		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheMissLabel).Inc()
+		coll, err := m.describeCollection(ctx, database, "", collectionID)
+		if err != nil {
+			return nil, err
+		}
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		m.updateCollection(coll, database, collectionName)
+		collInfo = m.collInfo[database][collectionName]
+		metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		return collInfo.getBasicInfo(), nil
+	}
+	defer m.mu.RUnlock()
+
+	metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheHitLabel).Inc()
+	return collInfo.getBasicInfo(), nil
+}
+
+// GetCollectionInfo returns the collection information related to provided collection name
+// If the information is not found, proxy will try to fetch information for other source (RootCoord for now)
+// TODO: may cause data race of this implementation, should be refactored in future.
+func (m *MetaCache) getFullCollectionInfo(ctx context.Context, database, collectionName string, collectionID int64) (*collectionInfo, error) {
+	m.mu.RLock()
+	var collInfo *collectionInfo
+	var ok bool
+
+	db, dbOk := m.collInfo[database]
+	if dbOk {
+		collInfo, ok = db[collectionName]
+	}
+
+	method := "GetCollectionInfo"
+	// if collInfo.collID != collectionID, means that the cache is not trustable
+	// try to get collection according to collectionID
+	if !ok || !collInfo.isCollectionCached() || collInfo.collID != collectionID {
+		m.mu.RUnlock()
 		tr := timerecord.NewTimeRecorder("UpdateCache")
 		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheMissLabel).Inc()
 		var coll *milvuspb.DescribeCollectionResponse
@@ -320,8 +379,10 @@ func (m *MetaCache) GetCollectionInfo(ctx context.Context, database, collectionN
 		collInfo = m.collInfo[database][collectionName]
 		m.mu.Unlock()
 		metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		return collInfo, nil
 	}
 
+	m.mu.RUnlock()
 	metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheHitLabel).Inc()
 	return collInfo, nil
 }
@@ -707,7 +768,7 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, col
 		zap.String("collectionName", collectionName),
 		zap.Int64("collectionID", collectionID))
 
-	info, err := m.GetCollectionInfo(ctx, database, collectionName, collectionID)
+	info, err := m.getFullCollectionInfo(ctx, database, collectionName, collectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -764,7 +825,7 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, col
 
 	shards := parseShardLeaderList2QueryNode(resp.GetShards())
 
-	info, err = m.GetCollectionInfo(ctx, database, collectionName, collectionID)
+	info, err = m.getFullCollectionInfo(ctx, database, collectionName, collectionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get shards, collectionName %s, colectionID %d not found", collectionName, collectionID)
 	}
@@ -825,7 +886,6 @@ func (m *MetaCache) DeprecateShardCache(database, collectionName string) {
 	if ok {
 		info.deprecateLeaderCache()
 	}
-
 }
 
 func (m *MetaCache) expireShardLeaderCache(ctx context.Context) {

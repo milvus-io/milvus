@@ -259,7 +259,40 @@ func TestMetaCache_GetCollection(t *testing.T) {
 		Fields: []*schemapb.FieldSchema{},
 		Name:   "collection1",
 	})
+}
 
+func TestMetaCache_GetBasicCollectionInfo(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := &MockRootCoordClientInterface{}
+	queryCoord := &mocks.MockQueryCoord{}
+	mgr := newShardClientMgr()
+	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
+	assert.NoError(t, err)
+
+	// should be no data race.
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		info, err := globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1", 1)
+		assert.NoError(t, err)
+		assert.Equal(t, info.collID, int64(1))
+		_ = info.consistencyLevel
+		_ = info.createdTimestamp
+		_ = info.createdUtcTimestamp
+		_ = info.partInfo
+	}()
+	go func() {
+		defer wg.Done()
+		info, err := globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1", 1)
+		assert.NoError(t, err)
+		assert.Equal(t, info.collID, int64(1))
+		_ = info.consistencyLevel
+		_ = info.createdTimestamp
+		_ = info.createdUtcTimestamp
+		_ = info.partInfo
+	}()
+	wg.Wait()
 }
 
 func TestMetaCache_GetCollectionName(t *testing.T) {
@@ -270,9 +303,8 @@ func TestMetaCache_GetCollectionName(t *testing.T) {
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.NoError(t, err)
 
-	db, collection, err := globalMetaCache.GetDatabaseAndCollectionName(ctx, 1)
+	collection, err := globalMetaCache.GetCollectionName(ctx, 1)
 	assert.NoError(t, err)
-	assert.Equal(t, db, dbName)
 	assert.Equal(t, collection, "collection1")
 	assert.Equal(t, rootCoord.GetAccessCount(), 1)
 
@@ -285,7 +317,7 @@ func TestMetaCache_GetCollectionName(t *testing.T) {
 		Fields: []*schemapb.FieldSchema{},
 		Name:   "collection1",
 	})
-	_, collection, err = globalMetaCache.GetDatabaseAndCollectionName(ctx, 1)
+	collection, err = globalMetaCache.GetCollectionName(ctx, 1)
 	assert.Equal(t, rootCoord.GetAccessCount(), 1)
 	assert.NoError(t, err)
 	assert.Equal(t, collection, "collection1")
@@ -299,7 +331,7 @@ func TestMetaCache_GetCollectionName(t *testing.T) {
 	})
 
 	// test to get from cache, this should trigger root request
-	_, collection, err = globalMetaCache.GetDatabaseAndCollectionName(ctx, 1)
+	collection, err = globalMetaCache.GetCollectionName(ctx, 1)
 	assert.Equal(t, rootCoord.GetAccessCount(), 2)
 	assert.NoError(t, err)
 	assert.Equal(t, collection, "collection1")
@@ -397,7 +429,7 @@ func TestMetaCache_ConcurrentTest1(t *testing.T) {
 	getCollectionCacheFunc := func(wg *sync.WaitGroup) {
 		defer wg.Done()
 		for i := 0; i < cnt; i++ {
-			//GetCollectionSchema will never fail
+			// GetCollectionSchema will never fail
 			schema, err := globalMetaCache.GetCollectionSchema(ctx, dbName, "collection1")
 			assert.NoError(t, err)
 			assert.Equal(t, schema, &schemapb.CollectionSchema{
@@ -412,7 +444,7 @@ func TestMetaCache_ConcurrentTest1(t *testing.T) {
 	getPartitionCacheFunc := func(wg *sync.WaitGroup) {
 		defer wg.Done()
 		for i := 0; i < cnt; i++ {
-			//GetPartitions may fail
+			// GetPartitions may fail
 			globalMetaCache.GetPartitions(ctx, dbName, "collection1")
 			time.Sleep(10 * time.Millisecond)
 		}
@@ -421,7 +453,7 @@ func TestMetaCache_ConcurrentTest1(t *testing.T) {
 	invalidCacheFunc := func(wg *sync.WaitGroup) {
 		defer wg.Done()
 		for i := 0; i < cnt; i++ {
-			//periodically invalid collection cache
+			// periodically invalid collection cache
 			globalMetaCache.RemoveCollection(ctx, dbName, "collection1")
 			time.Sleep(10 * time.Millisecond)
 		}
@@ -574,7 +606,6 @@ func TestMetaCache_ClearShards(t *testing.T) {
 	})
 
 	t.Run("Clear valid collection valid cache", func(t *testing.T) {
-
 		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
@@ -731,6 +762,13 @@ func TestMetaCache_RemoveCollection(t *testing.T) {
 	assert.NoError(t, err)
 	// shouldn't access RootCoord again
 	assert.Equal(t, rootCoord.GetAccessCount(), 3)
+
+	globalMetaCache.RemoveCollectionsByID(ctx, UniqueID(1))
+	// no collectionInfo of collection2, should access RootCoord
+	_, err = globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1", 1)
+	assert.NoError(t, err)
+	// no collectionInfo of collection1, should access RootCoord
+	assert.Equal(t, rootCoord.GetAccessCount(), 4)
 }
 
 func TestMetaCache_ExpireShardLeaderCache(t *testing.T) {
