@@ -521,7 +521,6 @@ func (dct *describeCollectionTask) Execute(ctx context.Context) error {
 	}
 
 	result, err := dct.rootCoord.DescribeCollection(ctx, dct.DescribeCollectionRequest)
-
 	if err != nil {
 		return err
 	}
@@ -634,7 +633,6 @@ func (sct *showCollectionsTask) PreExecute(ctx context.Context) error {
 
 func (sct *showCollectionsTask) Execute(ctx context.Context) error {
 	respFromRootCoord, err := sct.rootCoord.ShowCollections(ctx, sct.ShowCollectionsRequest)
-
 	if err != nil {
 		return err
 	}
@@ -670,10 +668,9 @@ func (sct *showCollectionsTask) Execute(ctx context.Context) error {
 				sct.Base,
 				commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections),
 			),
-			//DbID: sct.ShowCollectionsRequest.DbName,
+			// DbID: sct.ShowCollectionsRequest.DbName,
 			CollectionIDs: collectionIDs,
 		})
-
 		if err != nil {
 			return err
 		}
@@ -1179,7 +1176,6 @@ func (spt *showPartitionsTask) Execute(ctx context.Context) error {
 			CollectionID: collectionID,
 			PartitionIDs: partitionIDs,
 		})
-
 		if err != nil {
 			return err
 		}
@@ -2209,13 +2205,12 @@ func (t *DescribeResourceGroupTask) Execute(ctx context.Context) error {
 	resp, err := t.queryCoord.DescribeResourceGroup(ctx, &querypb.DescribeResourceGroupRequest{
 		ResourceGroup: t.ResourceGroup,
 	})
-
 	if err != nil {
 		return err
 	}
 
 	getCollectionNameFunc := func(value int32, key int64) string {
-		_, name, err := globalMetaCache.GetDatabaseAndCollectionName(ctx, key)
+		name, err := globalMetaCache.GetCollectionName(ctx, key)
 		if err != nil {
 			// unreachable logic path
 			return "unavailable_collection"

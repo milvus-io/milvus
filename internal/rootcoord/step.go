@@ -476,3 +476,29 @@ func (b *confirmGCStep) Desc() string {
 func (b *confirmGCStep) Weight() stepPriority {
 	return stepPriorityLow
 }
+
+type simpleStep struct {
+	desc        string
+	weight      stepPriority
+	executeFunc func(ctx context.Context) ([]nestedStep, error)
+}
+
+func NewSimpleStep(desc string, executeFunc func(ctx context.Context) ([]nestedStep, error)) nestedStep {
+	return &simpleStep{
+		desc:        desc,
+		weight:      stepPriorityNormal,
+		executeFunc: executeFunc,
+	}
+}
+
+func (s *simpleStep) Execute(ctx context.Context) ([]nestedStep, error) {
+	return s.executeFunc(ctx)
+}
+
+func (s *simpleStep) Desc() string {
+	return s.desc
+}
+
+func (s *simpleStep) Weight() stepPriority {
+	return s.weight
+}

@@ -328,7 +328,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int32(10240), Params.MaxReceiveChanSize.GetAsInt32())
 		assert.Equal(t, int32(10240), Params.MaxUnsolvedQueueSize.GetAsInt32())
 		assert.Equal(t, 10.0, Params.CPURatio.GetAsFloat())
-		assert.Equal(t, uint32(runtime.GOMAXPROCS(0)*4), Params.KnowhereThreadPoolSize.GetAsUint32())
+		assert.Equal(t, uint32(runtime.GOMAXPROCS(0)), Params.KnowhereThreadPoolSize.GetAsUint32())
 
 		// test small indexNlist/NProbe default
 		params.Remove("queryNode.segcore.smallIndex.nlist")

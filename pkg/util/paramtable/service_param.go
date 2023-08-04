@@ -380,7 +380,7 @@ func (p *MQConfig) Init(base *BaseTable) {
 	p.Type = ParamItem{
 		Key:          "mq.type",
 		Version:      "2.3.0",
-		DefaultValue: "",
+		DefaultValue: "default",
 		Doc: `Default value: "default"
 Valid values: [default, pulsar, kafka, rocksmq, natsmq]`,
 		Export: true,

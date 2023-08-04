@@ -76,6 +76,18 @@ func Status(err error) *commonpb.Status {
 	}
 }
 
+func StatusWithErrorCode(err error, code commonpb.ErrorCode) *commonpb.Status {
+	if err == nil {
+		return &commonpb.Status{}
+	}
+
+	return &commonpb.Status{
+		Code:      Code(err),
+		Reason:    err.Error(),
+		ErrorCode: code,
+	}
+}
+
 func oldCode(code int32) commonpb.ErrorCode {
 	switch code {
 	case ErrServiceNotReady.code():

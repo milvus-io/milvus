@@ -102,6 +102,19 @@ func TestRbacCreateRole(t *testing.T) {
 			assert.Error(t, err)
 		})
 	}
+
+	{
+		mockCata := mocks.NewRootCoordCatalog(t)
+		mockCata.On("ListRole",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil, errors.New("error mock list role"))
+		mockMt := &MetaTable{catalog: mockCata}
+		err := mockMt.CreateRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: "role1"})
+		assert.Error(t, err)
+	}
 }
 
 func TestRbacDropRole(t *testing.T) {
