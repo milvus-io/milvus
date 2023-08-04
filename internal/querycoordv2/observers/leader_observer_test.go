@@ -127,7 +127,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegments() {
 	view := utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{})
 	view.TargetVersion = observer.target.GetCollectionTargetVersion(1, meta.CurrentTarget)
 	observer.dist.LeaderViewManager.Update(2, view)
-	loadInfo := utils.PackSegmentLoadInfo(resp, nil, view.TargetVersion)
+	loadInfo := utils.PackSegmentLoadInfo(resp, nil)
 
 	expectReqeustFunc := func(version int64) *querypb.SyncDistributionRequest {
 		return &querypb.SyncDistributionRequest{
@@ -218,7 +218,7 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncLoadedSegments() {
 	view := utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{})
 	view.TargetVersion = observer.target.GetCollectionTargetVersion(1, meta.CurrentTarget)
 	observer.dist.LeaderViewManager.Update(2, view)
-	loadInfo := utils.PackSegmentLoadInfo(resp, nil, view.TargetVersion)
+	loadInfo := utils.PackSegmentLoadInfo(resp, nil)
 
 	expectReqeustFunc := func(version int64) *querypb.SyncDistributionRequest {
 		return &querypb.SyncDistributionRequest{
@@ -352,7 +352,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 	view2 := utils.CreateTestLeaderView(4, 1, "test-insert-channel", map[int64]int64{1: 4}, map[int64]*meta.Segment{})
 	view.TargetVersion = observer.target.GetCollectionTargetVersion(1, meta.CurrentTarget)
 	observer.dist.LeaderViewManager.Update(4, view2)
-	loadInfo := utils.PackSegmentLoadInfo(resp, nil, view.TargetVersion)
+	loadInfo := utils.PackSegmentLoadInfo(resp, nil)
 
 	expectReqeustFunc := func(version int64) *querypb.SyncDistributionRequest {
 		return &querypb.SyncDistributionRequest{

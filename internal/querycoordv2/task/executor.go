@@ -273,14 +273,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		indexes = nil
 	}
 
-	readableVersion := int64(0)
-	switch GetTaskType(task) {
-	case TaskTypeGrow:
-		readableVersion = ex.targetMgr.GetCollectionTargetVersion(task.CollectionID(), meta.NextTarget)
-	case TaskTypeMove, TaskTypeUpdate:
-		readableVersion = ex.targetMgr.GetCollectionTargetVersion(task.CollectionID(), meta.CurrentTarget)
-	}
-	loadInfo := utils.PackSegmentLoadInfo(resp, indexes, readableVersion)
+	loadInfo := utils.PackSegmentLoadInfo(resp, indexes)
 
 	// Get shard leader for the given replica and segment
 	leader, ok := getShardLeader(ex.meta.ReplicaManager, ex.dist, task.CollectionID(), action.Node(), segment.GetInsertChannel())
