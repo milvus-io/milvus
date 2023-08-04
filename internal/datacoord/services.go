@@ -682,7 +682,10 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 		}
 		channelInfos = append(channelInfos, channelInfo)
 		log.Info("datacoord append channelInfo in GetRecoveryInfo",
-			zap.Any("channelInfo", channelInfo),
+			zap.String("channel", channelInfo.GetChannelName()),
+			zap.Int("# of unflushed segments", len(channelInfo.GetUnflushedSegmentIds())),
+			zap.Int("# of flushed segments", len(channelInfo.GetFlushedSegmentIds())),
+			zap.Int("# of dropped segments", len(channelInfo.GetDroppedSegmentIds())),
 		)
 		flushedIDs.Insert(channelInfo.GetFlushedSegmentIds()...)
 	}
@@ -823,7 +826,10 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 		}
 		channelInfos = append(channelInfos, channelInfo)
 		log.Info("datacoord append channelInfo in GetRecoveryInfo",
-			zap.Any("channelInfo", channelInfo),
+			zap.String("channel", channelInfo.GetChannelName()),
+			zap.Int("# of unflushed segments", len(channelInfo.GetUnflushedSegmentIds())),
+			zap.Int("# of flushed segments", len(channelInfo.GetFlushedSegmentIds())),
+			zap.Int("# of dropped segments", len(channelInfo.GetDroppedSegmentIds())),
 		)
 		flushedIDs.Insert(channelInfo.GetFlushedSegmentIds()...)
 	}
