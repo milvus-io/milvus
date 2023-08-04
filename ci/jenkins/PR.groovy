@@ -17,9 +17,9 @@ pipeline {
     }
     agent {
             kubernetes {
-                inheritFrom 'default'
+                inheritFrom 'milvus-e2e'
                 defaultContainer 'main'
-                yamlFile 'ci/jenkins/pod/rte.yaml'
+                yamlFile 'ci/jenkins/pod/rte-build.yaml'
                 customWorkspace '/home/jenkins/agent/workspace'
             }
     }

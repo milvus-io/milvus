@@ -6,66 +6,79 @@ log:
 proxy:
   resources:
     requests:
-      cpu: "0.1"
+      cpu: "0.3"
       memory: "256Mi"
-
+    limits:
+      cpu: "1"
 rootCoordinator:
   resources:
     requests:
-      cpu: "0.1"
+      cpu: "0.2"
       memory: "256Mi"
-
+    limits:
+      cpu: "1"
 queryCoordinator:
   resources:
     requests:
-      cpu: "0.4"
+      cpu: "0.2"
       memory: "100Mi"
-
+    limits:
+      cpu: "1"
 queryNode:
   resources:
     requests:
       cpu: "0.5"
       memory: "500Mi"
+    limits:
+      cpu: "2"
 indexCoordinator:
   resources:
     requests:
       cpu: "0.1"
       memory: "50Mi"
+    limits:
+      cpu: "1"
 indexNode:
   resources:
     requests:
       cpu: "0.5"
       memory: "500Mi"
-
+    limits:
+      cpu: "2"
 dataCoordinator:
   resources:
     requests:
       cpu: "0.1"
       memory: "50Mi"
-
+    limits:
+      cpu: "1"
 dataNode:
   resources:
     requests:
       cpu: "0.5"
       memory: "500Mi"
+    limits:
+      cpu: "2"
 
 pulsar:
+  components:
+    autorecovery: false
   proxy:
     configData:
       PULSAR_MEM: >
-        -Xms2048m -Xmx2048m
+        -Xms1024m -Xmx1024m
       PULSAR_GC: >
         -XX:MaxDirectMemorySize=2048m
       httpNumThreads: "50"
     resources:
       requests:
         cpu: "0.5"
-        memory: "2Gi"
+        memory: "1Gi"
   # Resources for the websocket proxy
     wsResources:
       requests:
-        memory: "512Mi"
-        cpu: "0.3"
+        memory: "100Mi"
+        cpu: "0.1"
   broker:
     resources:
       requests:
@@ -121,18 +134,6 @@ pulsar:
         cpu: "0.5"
         memory: "4Gi"
 
-  bastion:
-    resources:
-      requests:
-        cpu: "0.3"
-        memory: "50Mi"
-
-  autorecovery:
-    resources:
-      requests:
-        cpu: "0.5"
-        memory: "512Mi"
-
   zookeeper:
     replicaCount: 1
     configData:
@@ -151,12 +152,23 @@ pulsar:
     resources:
       requests:
         cpu: "0.3"
-        memory: "1Gi"
+        memory: "512Mi"
+kafka:
+  resources:
+    requests:
+      cpu: "0.5"
+      memory: "1Gi"
+  zookeeper:
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: "0.3"
+        memory: "512Mi"
 etcd:
   replicaCount: 1
   resources:
     requests:
-      cpu: "0.1"
+      cpu: "0.3"
       memory: "100Mi"
 minio:
   resources:
@@ -166,5 +178,7 @@ minio:
 standalone:
   resources:
     requests:
-      cpu: "0.5"
+      cpu: "1"
       memory: "3.5Gi"
+    limits:
+      cpu: "4"
