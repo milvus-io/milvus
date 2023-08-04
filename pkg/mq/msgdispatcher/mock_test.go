@@ -37,10 +37,11 @@ const (
 	dim = 128
 )
 
-var Params paramtable.ComponentParam
+var Params = paramtable.Get()
 
 func TestMain(m *testing.M) {
 	Params.Init()
+	Params.Save(Params.ServiceParam.MQCfg.EnablePursuitMode.Key, "false")
 	exitCode := m.Run()
 	os.Exit(exitCode)
 }

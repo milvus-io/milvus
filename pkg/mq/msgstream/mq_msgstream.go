@@ -32,7 +32,9 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -548,6 +550,30 @@ func isDMLMsg(msg TsMsg) bool {
 	return msg.Type() == commonpb.MsgType_Insert || msg.Type() == commonpb.MsgType_Delete
 }
 
+func (ms *MqTtMsgStream) continueBuffering(endTs uint64, size uint64) bool {
+	if ms.ctx.Err() != nil {
+		return false
+	}
+
+	// first run
+	if endTs == 0 {
+		return true
+	}
+
+	// pursuit mode not enabled
+	if !paramtable.Get().ServiceParam.MQCfg.EnablePursuitMode.GetAsBool() {
+		return false
+	}
+
+	// buffer full
+	if size > paramtable.Get().ServiceParam.MQCfg.PursuitBufferSize.GetAsUint64() {
+		return false
+	}
+
+	endTime, _ := tsoutil.ParseTS(endTs)
+	return time.Since(endTime) > paramtable.Get().ServiceParam.MQCfg.PursuitLag.GetAsDuration(time.Second)
+}
+
 func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 	ms.closeRWMutex.RLock()
 	defer ms.closeRWMutex.RUnlock()
@@ -567,74 +593,78 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 		case <-ms.ctx.Done():
 			return
 		default:
-			ms.consumerLock.Lock()
-
-			// wait all channels get ttMsg
-			for _, consumer := range ms.consumers {
-				if !chanTtMsgSync[consumer] {
-					ms.chanWaitGroup.Add(1)
-					go ms.consumeToTtMsg(consumer)
-				}
-			}
-			ms.chanWaitGroup.Wait()
-
-			// block here until all channels reach same timetick
-			currTs, ok := ms.allChanReachSameTtMsg(chanTtMsgSync)
-			if !ok || currTs <= ms.lastTimeStamp {
-				//log.Printf("All timeTick's timestamps are inconsistent")
-				ms.consumerLock.Unlock()
-				continue
-			}
-
 			timeTickBuf := make([]TsMsg, 0)
 			startMsgPosition := make([]*msgpb.MsgPosition, 0)
 			endMsgPositions := make([]*msgpb.MsgPosition, 0)
-			ms.chanMsgBufMutex.Lock()
-			for consumer, msgs := range ms.chanMsgBuf {
-				if len(msgs) == 0 {
+			var endTs uint64
+			var size uint64
+
+			for ms.continueBuffering(endTs, size) {
+				ms.consumerLock.Lock()
+				// wait all channels get ttMsg
+				for _, consumer := range ms.consumers {
+					if !chanTtMsgSync[consumer] {
+						ms.chanWaitGroup.Add(1)
+						go ms.consumeToTtMsg(consumer)
+					}
+				}
+				ms.chanWaitGroup.Wait()
+
+				// block here until all channels reach same timetick
+				currTs, ok := ms.allChanReachSameTtMsg(chanTtMsgSync)
+				if !ok || currTs <= ms.lastTimeStamp {
+					ms.consumerLock.Unlock()
 					continue
 				}
-				tempBuffer := make([]TsMsg, 0)
-				var timeTickMsg TsMsg
-				for _, v := range msgs {
-					if v.Type() == commonpb.MsgType_TimeTick {
-						timeTickMsg = v
+				endTs = currTs
+
+				ms.chanMsgBufMutex.Lock()
+				for consumer, msgs := range ms.chanMsgBuf {
+					if len(msgs) == 0 {
 						continue
 					}
-					if v.EndTs() <= currTs {
-						timeTickBuf = append(timeTickBuf, v)
-						//log.Debug("pack msg", zap.Uint64("curr", v.EndTs()), zap.Uint64("currTs", currTs))
-					} else {
-						tempBuffer = append(tempBuffer, v)
+					tempBuffer := make([]TsMsg, 0)
+					var timeTickMsg TsMsg
+					for _, v := range msgs {
+						if v.Type() == commonpb.MsgType_TimeTick {
+							timeTickMsg = v
+							continue
+						}
+						if v.EndTs() <= currTs {
+							size += uint64(v.Size())
+							timeTickBuf = append(timeTickBuf, v)
+						} else {
+							tempBuffer = append(tempBuffer, v)
+						}
 					}
-				}
-				ms.chanMsgBuf[consumer] = tempBuffer
+					ms.chanMsgBuf[consumer] = tempBuffer
 
-				startMsgPosition = append(startMsgPosition, proto.Clone(ms.chanMsgPos[consumer]).(*msgpb.MsgPosition))
-				var newPos *msgpb.MsgPosition
-				if len(tempBuffer) > 0 {
-					// if tempBuffer is not empty, use tempBuffer[0] to seek
-					newPos = &msgpb.MsgPosition{
-						ChannelName: tempBuffer[0].Position().ChannelName,
-						MsgID:       tempBuffer[0].Position().MsgID,
-						Timestamp:   currTs,
-						MsgGroup:    consumer.Subscription(),
+					startMsgPosition = append(startMsgPosition, proto.Clone(ms.chanMsgPos[consumer]).(*msgpb.MsgPosition))
+					var newPos *msgpb.MsgPosition
+					if len(tempBuffer) > 0 {
+						// if tempBuffer is not empty, use tempBuffer[0] to seek
+						newPos = &msgpb.MsgPosition{
+							ChannelName: tempBuffer[0].Position().ChannelName,
+							MsgID:       tempBuffer[0].Position().MsgID,
+							Timestamp:   currTs,
+							MsgGroup:    consumer.Subscription(),
+						}
+						endMsgPositions = append(endMsgPositions, newPos)
+					} else if timeTickMsg != nil {
+						// if tempBuffer is empty, use timeTickMsg to seek
+						newPos = &msgpb.MsgPosition{
+							ChannelName: timeTickMsg.Position().ChannelName,
+							MsgID:       timeTickMsg.Position().MsgID,
+							Timestamp:   currTs,
+							MsgGroup:    consumer.Subscription(),
+						}
+						endMsgPositions = append(endMsgPositions, newPos)
 					}
-					endMsgPositions = append(endMsgPositions, newPos)
-				} else if timeTickMsg != nil {
-					// if tempBuffer is empty, use timeTickMsg to seek
-					newPos = &msgpb.MsgPosition{
-						ChannelName: timeTickMsg.Position().ChannelName,
-						MsgID:       timeTickMsg.Position().MsgID,
-						Timestamp:   currTs,
-						MsgGroup:    consumer.Subscription(),
-					}
-					endMsgPositions = append(endMsgPositions, newPos)
+					ms.chanMsgPos[consumer] = newPos
 				}
-				ms.chanMsgPos[consumer] = newPos
+				ms.chanMsgBufMutex.Unlock()
+				ms.consumerLock.Unlock()
 			}
-			ms.chanMsgBufMutex.Unlock()
-			ms.consumerLock.Unlock()
 
 			idset := make(typeutil.UniqueSet)
 			uniqueMsgs := make([]TsMsg, 0, len(timeTickBuf))
@@ -647,21 +677,23 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 				uniqueMsgs = append(uniqueMsgs, msg)
 			}
 
-			msgPack := MsgPack{
-				BeginTs:        ms.lastTimeStamp,
-				EndTs:          currTs,
-				Msgs:           uniqueMsgs,
-				StartPositions: startMsgPosition,
-				EndPositions:   endMsgPositions,
-			}
+			// skip endTs = 0 (no run for ctx error)
+			if endTs > 0 {
+				msgPack := MsgPack{
+					BeginTs:        ms.lastTimeStamp,
+					EndTs:          endTs,
+					Msgs:           uniqueMsgs,
+					StartPositions: startMsgPosition,
+					EndPositions:   endMsgPositions,
+				}
 
-			//log.Debug("send msg pack", zap.Int("len", len(msgPack.Msgs)), zap.Uint64("currTs", currTs))
-			select {
-			case ms.receiveBuf <- &msgPack:
-			case <-ms.ctx.Done():
-				return
+				select {
+				case ms.receiveBuf <- &msgPack:
+				case <-ms.ctx.Done():
+					return
+				}
+				ms.lastTimeStamp = endTs
 			}
-			ms.lastTimeStamp = currTs
 		}
 	}
 }

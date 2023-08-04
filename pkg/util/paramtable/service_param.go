@@ -369,7 +369,10 @@ func (p *MetaDBConfig) Init(base *BaseTable) {
 
 // MQConfig represents the configuration settings for the message queue.
 type MQConfig struct {
-	Type ParamItem `refreshable:"false"`
+	Type              ParamItem `refreshable:"false"`
+	EnablePursuitMode ParamItem `refreshable:"true"`
+	PursuitLag        ParamItem `refreshable:"true"`
+	PursuitBufferSize ParamItem `refreshable:"true"`
 }
 
 // Init initializes the MQConfig object with a BaseTable.
@@ -383,6 +386,33 @@ Valid values: [default, pulsar, kafka, rocksmq, natsmq]`,
 		Export: true,
 	}
 	p.Type.Init(base.mgr)
+
+	p.EnablePursuitMode = ParamItem{
+		Key:          "mq.enablePursuitMode",
+		Version:      "2.3.0",
+		DefaultValue: "true",
+		Doc:          `Default value: "true"`,
+		Export:       true,
+	}
+	p.EnablePursuitMode.Init(base.mgr)
+
+	p.PursuitLag = ParamItem{
+		Key:          "mq.pursuitLag",
+		Version:      "2.3.0",
+		DefaultValue: "10",
+		Doc:          `time tick lag threshold to enter pursuit mode, in seconds`,
+		Export:       true,
+	}
+	p.PursuitLag.Init(base.mgr)
+
+	p.PursuitBufferSize = ParamItem{
+		Key:          "mq.pursuitBufferSize",
+		Version:      "2.3.0",
+		DefaultValue: "8388608", // 8 MB
+		Doc:          `pursuit mode buffer size in bytes`,
+		Export:       true,
+	}
+	p.PursuitBufferSize.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
