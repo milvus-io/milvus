@@ -917,7 +917,10 @@ func (m *MetaCache) expireShardLeaderCache(ctx context.Context) {
 func (m *MetaCache) InitPolicyInfo(info []string, userRoles []string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.unsafeInitPolicyInfo(info, userRoles)
+}
 
+func (m *MetaCache) unsafeInitPolicyInfo(info []string, userRoles []string) {
 	m.privilegeInfos = util.StringSet(info)
 	for _, userRole := range userRoles {
 		user, role, err := funcutil.DecodeUserRoleCache(userRole)
@@ -975,6 +978,21 @@ func (m *MetaCache) RefreshPolicyInfo(op typeutil.CacheOp) error {
 		if m.userToRoles[user] != nil {
 			delete(m.userToRoles[user], role)
 		}
+	case typeutil.CacheDeleteUser:
+		delete(m.userToRoles, op.OpKey)
+	case typeutil.CacheDropRole:
+		for user := range m.userToRoles {
+			delete(m.userToRoles[user], op.OpKey)
+		}
+	case typeutil.CacheRefresh:
+		resp, err := m.rootCoord.ListPolicy(context.Background(), &internalpb.ListPolicyRequest{})
+		if err != nil {
+			log.Error("fail to init meta cache", zap.Error(err))
+			return err
+		}
+		m.userToRoles = make(map[string]map[string]struct{})
+		m.privilegeInfos = make(map[string]struct{})
+		m.unsafeInitPolicyInfo(resp.PolicyInfos, resp.UserRoles)
 	default:
 		return fmt.Errorf("invalid opType, op_type: %d, op_key: %s", int(op.OpType), op.OpKey)
 	}

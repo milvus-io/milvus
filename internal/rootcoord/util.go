@@ -31,8 +31,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-var logger = log.L().WithOptions(zap.Fields(zap.String("role", typeutil.RootCoordRole)))
-
 // EqualKeyPairArray check whether 2 KeyValuePairs are equal
 func EqualKeyPairArray(p1 []*commonpb.KeyValuePair, p2 []*commonpb.KeyValuePair) bool {
 	if len(p1) != len(p2) {
@@ -107,6 +105,7 @@ func CheckMsgType(got, expect commonpb.MsgType) error {
 	return nil
 }
 
+// Deprecated: use merr.StatusWithErrorCode or merr.Status instead
 func failStatus(code commonpb.ErrorCode, reason string) *commonpb.Status {
 	return &commonpb.Status{
 		ErrorCode: code,

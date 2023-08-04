@@ -72,6 +72,8 @@ class MilvusConan(ConanFile):
         "glog:shared": True,
         "prometheus-cpp:with_pull": False,
         "fmt:header_only": True,
+        "onnetbb:tbbmalloc": False,
+        "onetbb:tbbproxy": False,
     }
 
     def configure(self):

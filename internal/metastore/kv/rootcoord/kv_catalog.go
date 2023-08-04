@@ -534,9 +534,24 @@ func (kc *Catalog) DropPartition(ctx context.Context, dbID int64, collectionID t
 
 func (kc *Catalog) DropCredential(ctx context.Context, username string) error {
 	k := fmt.Sprintf("%s/%s", CredentialPrefix, username)
-	err := kc.Txn.Remove(k)
+	userResults, err := kc.ListUser(ctx, util.DefaultTenant, &milvuspb.UserEntity{Name: username}, true)
+	if err != nil && !common.IsKeyNotExistError(err) {
+		log.Warn("fail to list user", zap.String("key", k), zap.Error(err))
+		return err
+	}
+	deleteKeys := make([]string, 0, len(userResults)+1)
+	deleteKeys = append(deleteKeys, k)
+	for _, userResult := range userResults {
+		if userResult.User.Name == username {
+			for _, role := range userResult.Roles {
+				userRoleKey := funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, util.DefaultTenant, fmt.Sprintf("%s/%s", username, role.Name))
+				deleteKeys = append(deleteKeys, userRoleKey)
+			}
+		}
+	}
+	err = kc.Txn.MultiRemove(deleteKeys)
 	if err != nil {
-		log.Error("drop credential update meta fail", zap.String("key", k), zap.Error(err))
+		log.Warn("fail to drop credential", zap.String("key", k), zap.Error(err))
 		return err
 	}
 
@@ -729,9 +744,26 @@ func (kc *Catalog) CreateRole(ctx context.Context, tenant string, entity *milvus
 
 func (kc *Catalog) DropRole(ctx context.Context, tenant string, roleName string) error {
 	k := funcutil.HandleTenantForEtcdKey(RolePrefix, tenant, roleName)
-	err := kc.Txn.Remove(k)
+	roleResults, err := kc.ListRole(ctx, tenant, &milvuspb.RoleEntity{Name: roleName}, true)
+	if err != nil && !common.IsKeyNotExistError(err) {
+		log.Warn("fail to list role", zap.String("key", k), zap.Error(err))
+		return err
+	}
+
+	deleteKeys := make([]string, 0, len(roleResults)+1)
+	deleteKeys = append(deleteKeys, k)
+	for _, roleResult := range roleResults {
+		if roleResult.Role.Name == roleName {
+			for _, userInfo := range roleResult.Users {
+				userRoleKey := funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, fmt.Sprintf("%s/%s", userInfo.Name, roleName))
+				deleteKeys = append(deleteKeys, userRoleKey)
+			}
+		}
+	}
+
+	err = kc.Txn.MultiRemove(deleteKeys)
 	if err != nil {
-		log.Error("fail to drop role", zap.String("key", k), zap.Error(err))
+		log.Warn("fail to drop role", zap.String("key", k), zap.Error(err))
 		return err
 	}
 	return nil
