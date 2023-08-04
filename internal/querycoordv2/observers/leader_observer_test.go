@@ -90,6 +90,7 @@ func (suite *LeaderObserverTestSuite) TearDownTest() {
 func (suite *LeaderObserverTestSuite) TestSyncLoadedSegments() {
 	observer := suite.observer
 	observer.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
+	observer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 	observer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
 	segments := []*datapb.SegmentInfo{
 		{
@@ -119,7 +120,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegments() {
 		&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{info}}, nil)
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
-	observer.target.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
+	observer.target.UpdateCollectionNextTarget(int64(1))
 	observer.target.UpdateCollectionCurrentTarget(1)
 	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 2, 1, "test-insert-channel"))
 	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
@@ -149,7 +150,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegments() {
 			Schema: schema,
 			LoadMeta: &querypb.LoadMetaInfo{
 				CollectionID: 1,
-				PartitionIDs: []int64{},
+				PartitionIDs: []int64{1},
 			},
 			Version: version,
 		}
@@ -179,6 +180,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegments() {
 func (suite *LeaderObserverTestSuite) TestIgnoreSyncLoadedSegments() {
 	observer := suite.observer
 	observer.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
+	observer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 	observer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
 	segments := []*datapb.SegmentInfo{
 		{
@@ -208,7 +210,7 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncLoadedSegments() {
 		&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{info}}, nil)
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
-	observer.target.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
+	observer.target.UpdateCollectionNextTarget(int64(1))
 	observer.target.UpdateCollectionCurrentTarget(1)
 	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 2, 1, "test-insert-channel"),
 		utils.CreateTestSegment(1, 1, 2, 2, 1, "test-insert-channel"))
@@ -239,7 +241,7 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncLoadedSegments() {
 			Schema: schema,
 			LoadMeta: &querypb.LoadMetaInfo{
 				CollectionID: 1,
-				PartitionIDs: []int64{},
+				PartitionIDs: []int64{1},
 			},
 			Version: version,
 		}
@@ -267,6 +269,7 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncLoadedSegments() {
 func (suite *LeaderObserverTestSuite) TestIgnoreBalancedSegment() {
 	observer := suite.observer
 	observer.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
+	observer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 	observer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
 	segments := []*datapb.SegmentInfo{
 		{
@@ -284,7 +287,7 @@ func (suite *LeaderObserverTestSuite) TestIgnoreBalancedSegment() {
 
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
-	observer.target.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
+	observer.target.UpdateCollectionNextTarget(int64(1))
 	observer.target.UpdateCollectionCurrentTarget(1)
 	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 1, 1, "test-insert-channel"))
 	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
@@ -307,6 +310,7 @@ func (suite *LeaderObserverTestSuite) TestIgnoreBalancedSegment() {
 func (suite *LeaderObserverTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 	observer := suite.observer
 	observer.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 2))
+	observer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 	observer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
 	observer.meta.ReplicaManager.Put(utils.CreateTestReplica(2, 1, []int64{3, 4}))
 	segments := []*datapb.SegmentInfo{
@@ -337,7 +341,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
 	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, int64(1)).Return(schema, nil)
-	observer.target.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
+	observer.target.UpdateCollectionNextTarget(int64(1))
 	observer.target.UpdateCollectionCurrentTarget(1)
 	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 1, 1, "test-insert-channel"))
 	observer.dist.SegmentDistManager.Update(4, utils.CreateTestSegment(1, 1, 1, 4, 2, "test-insert-channel"))
@@ -371,7 +375,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 			Schema: schema,
 			LoadMeta: &querypb.LoadMetaInfo{
 				CollectionID: 1,
-				PartitionIDs: []int64{},
+				PartitionIDs: []int64{1},
 			},
 			Version: version,
 		}
@@ -400,6 +404,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 func (suite *LeaderObserverTestSuite) TestSyncRemovedSegments() {
 	observer := suite.observer
 	observer.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
+	observer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 	observer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
 
 	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
@@ -426,7 +431,7 @@ func (suite *LeaderObserverTestSuite) TestSyncRemovedSegments() {
 			Schema: schema,
 			LoadMeta: &querypb.LoadMetaInfo{
 				CollectionID: 1,
-				PartitionIDs: []int64{},
+				PartitionIDs: []int64{1},
 			},
 			Version: version,
 		}
@@ -453,6 +458,7 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncRemovedSegments() {
 
 	observer := suite.observer
 	observer.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
+	observer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 	observer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
 
 	segments := []*datapb.SegmentInfo{
@@ -472,7 +478,7 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncRemovedSegments() {
 	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, int64(1)).Return(schema, nil)
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
-	observer.target.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
+	observer.target.UpdateCollectionNextTarget(int64(1))
 
 	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
 	observer.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{3: 2, 2: 2}, map[int64]*meta.Segment{}))
@@ -495,7 +501,7 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncRemovedSegments() {
 			Schema: schema,
 			LoadMeta: &querypb.LoadMetaInfo{
 				CollectionID: 1,
-				PartitionIDs: []int64{},
+				PartitionIDs: []int64{1},
 			},
 			Version: version,
 		}
@@ -523,6 +529,7 @@ func (suite *LeaderObserverTestSuite) TestSyncTargetVersion() {
 
 	observer := suite.observer
 	observer.meta.CollectionManager.PutCollection(utils.CreateTestCollection(collectionID, 1))
+	observer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(collectionID, 1))
 	observer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, collectionID, []int64{1, 2}))
 
 	nextTargetChannels := []*datapb.VchannelInfo{
@@ -552,7 +559,7 @@ func (suite *LeaderObserverTestSuite) TestSyncTargetVersion() {
 	}
 
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nextTargetChannels, nextTargetSegments, nil)
-	suite.observer.target.UpdateCollectionNextTargetWithPartitions(collectionID, 1)
+	suite.observer.target.UpdateCollectionNextTarget(collectionID)
 	suite.observer.target.UpdateCollectionCurrentTarget(collectionID)
 	TargetVersion := suite.observer.target.GetCollectionTargetVersion(collectionID, meta.CurrentTarget)
 

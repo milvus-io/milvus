@@ -37,7 +37,6 @@ type checkRequest struct {
 
 type targetUpdateRequest struct {
 	CollectionID  int64
-	PartitionIDs  []int64
 	Notifier      chan error
 	ReadyNotifier chan struct{}
 }
@@ -109,7 +108,7 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 			req.Notifier <- ob.targetMgr.IsCurrentTargetExist(req.CollectionID)
 
 		case req := <-ob.updateChan:
-			err := ob.updateNextTarget(req.CollectionID, req.PartitionIDs...)
+			err := ob.updateNextTarget(req.CollectionID)
 			if err != nil {
 				close(req.ReadyNotifier)
 			} else {
@@ -154,14 +153,13 @@ func (ob *TargetObserver) check(collectionID int64) {
 // UpdateNextTarget updates the next target,
 // returns a channel which will be closed when the next target is ready,
 // or returns error if failed to pull target
-func (ob *TargetObserver) UpdateNextTarget(collectionID int64, partitionIDs ...int64) (chan struct{}, error) {
+func (ob *TargetObserver) UpdateNextTarget(collectionID int64) (chan struct{}, error) {
 	notifier := make(chan error)
 	readyCh := make(chan struct{})
 	defer close(notifier)
 
 	ob.updateChan <- targetUpdateRequest{
 		CollectionID:  collectionID,
-		PartitionIDs:  partitionIDs,
 		Notifier:      notifier,
 		ReadyNotifier: readyCh,
 	}
@@ -215,16 +213,11 @@ func (ob *TargetObserver) isNextTargetExpired(collectionID int64) bool {
 	return time.Since(ob.nextTargetLastUpdate[collectionID]) > params.Params.QueryCoordCfg.NextTargetSurviveTime.GetAsDuration(time.Second)
 }
 
-func (ob *TargetObserver) updateNextTarget(collectionID int64, partitionIDs ...int64) error {
-	log := log.With(zap.Int64("collectionID", collectionID), zap.Int64s("partIDs", partitionIDs))
+func (ob *TargetObserver) updateNextTarget(collectionID int64) error {
+	log := log.With(zap.Int64("collectionID", collectionID))
 
 	log.Info("observer trigger update next target")
-	var err error
-	if len(partitionIDs) == 0 {
-		err = ob.targetMgr.UpdateCollectionNextTarget(collectionID)
-	} else {
-		err = ob.targetMgr.UpdateCollectionNextTargetWithPartitions(collectionID, partitionIDs...)
-	}
+	err := ob.targetMgr.UpdateCollectionNextTarget(collectionID)
 	if err != nil {
 		log.Error("failed to update next target for collection",
 			zap.Error(err))

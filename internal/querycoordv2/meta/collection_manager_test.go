@@ -433,15 +433,6 @@ func (suite *CollectionManagerSuite) TestUpdateLoadPercentage() {
 	collection := mgr.GetCollection(1)
 	suite.Equal(int32(15), collection.LoadPercentage)
 	suite.Equal(querypb.LoadStatus_Loading, collection.Status)
-	// expect nothing changed
-	mgr.UpdateLoadPercent(1, 15)
-	partition = mgr.GetPartition(1)
-	suite.Equal(int32(30), partition.LoadPercentage)
-	suite.Equal(querypb.LoadStatus_Loading, partition.Status)
-	collection = mgr.GetCollection(1)
-	suite.Equal(int32(15), collection.LoadPercentage)
-	suite.Equal(querypb.LoadStatus_Loading, collection.Status)
-	suite.Equal(querypb.LoadStatus_Loading, mgr.CalculateLoadStatus(collection.CollectionID))
 	// test update partition load percentage to 100
 	mgr.UpdateLoadPercent(1, 100)
 	partition = mgr.GetPartition(1)

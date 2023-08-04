@@ -159,6 +159,7 @@ func (suite *TaskSuite) BeforeTest(suiteName, testName string) {
 
 	switch testName {
 	case "TestSubscribeChannelTask",
+		"TestUnsubscribeChannelTask",
 		"TestLoadSegmentTask",
 		"TestLoadSegmentTaskNotIndex",
 		"TestLoadSegmentTaskFailed",
@@ -173,6 +174,12 @@ func (suite *TaskSuite) BeforeTest(suiteName, testName string) {
 				CollectionID:  suite.collection,
 				ReplicaNumber: 1,
 				Status:        querypb.LoadStatus_Loading,
+			},
+		})
+		suite.meta.PutPartition(&meta.Partition{
+			PartitionLoadInfo: &querypb.PartitionLoadInfo{
+				CollectionID: suite.collection,
+				PartitionID:  1,
 			},
 		})
 		suite.meta.ReplicaManager.Put(
@@ -242,7 +249,7 @@ func (suite *TaskSuite) TestSubscribeChannelTask() {
 		suite.NoError(err)
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return(dmChannels, nil, nil)
-	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, int64(1))
+	suite.target.UpdateCollectionNextTarget(suite.collection)
 	suite.AssertTaskNum(0, len(suite.subChannels), len(suite.subChannels), 0)
 
 	// Process tasks
@@ -337,7 +344,7 @@ func (suite *TaskSuite) TestUnsubscribeChannelTask() {
 		suite.NoError(err)
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return(dmChannels, nil, nil)
-	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, int64(1))
+	suite.target.UpdateCollectionNextTarget(suite.collection)
 
 	// Only first channel exists
 	suite.dist.LeaderViewManager.Update(targetNode, &meta.LeaderView{
@@ -424,7 +431,7 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 		suite.NoError(err)
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return(nil, segments, nil)
-	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, int64(1))
+	suite.target.UpdateCollectionNextTarget(suite.collection)
 	segmentsNum := len(suite.loadSegments)
 	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
 
@@ -518,7 +525,7 @@ func (suite *TaskSuite) TestLoadSegmentTaskNotIndex() {
 		suite.NoError(err)
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return(nil, segments, nil)
-	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, int64(1))
+	suite.target.UpdateCollectionNextTarget(suite.collection)
 	segmentsNum := len(suite.loadSegments)
 	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
 
@@ -606,7 +613,7 @@ func (suite *TaskSuite) TestLoadSegmentTaskFailed() {
 		suite.NoError(err)
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return(nil, segments, nil)
-	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, int64(1))
+	suite.target.UpdateCollectionNextTarget(suite.collection)
 	segmentsNum := len(suite.loadSegments)
 	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
 
@@ -820,8 +827,8 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 		suite.NoError(err)
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return([]*datapb.VchannelInfo{vchannel}, segmentInfos, nil)
-	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, int64(1))
-	suite.target.UpdateCollectionCurrentTarget(suite.collection, int64(1))
+	suite.target.UpdateCollectionNextTarget(suite.collection)
+	suite.target.UpdateCollectionCurrentTarget(suite.collection)
 	suite.dist.SegmentDistManager.Update(sourceNode, segments...)
 	suite.dist.LeaderViewManager.Update(leader, view)
 	segmentsNum := len(suite.moveSegments)
@@ -918,7 +925,8 @@ func (suite *TaskSuite) TestTaskCanceled() {
 	segmentsNum := len(suite.loadSegments)
 	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return(nil, segmentInfos, nil)
-	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, partition)
+	suite.meta.CollectionManager.PutPartition(utils.CreateTestPartition(suite.collection, partition))
+	suite.target.UpdateCollectionNextTarget(suite.collection)
 
 	// Process tasks
 	suite.dispatchAndWait(targetNode)
@@ -1001,7 +1009,8 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 		suite.NoError(err)
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return(nil, segments, nil)
-	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, int64(1))
+	suite.meta.CollectionManager.PutPartition(utils.CreateTestPartition(suite.collection, partition))
+	suite.target.UpdateCollectionNextTarget(suite.collection)
 	segmentsNum := len(suite.loadSegments)
 	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
 
@@ -1036,7 +1045,9 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 	suite.broker.AssertExpectations(suite.T())
 	suite.broker.ExpectedCalls = suite.broker.ExpectedCalls[:0]
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return(nil, segments, nil)
-	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, int64(2))
+
+	suite.meta.CollectionManager.PutPartition(utils.CreateTestPartition(suite.collection, 2))
+	suite.target.UpdateCollectionNextTarget(suite.collection)
 	suite.dispatchAndWait(targetNode)
 	suite.AssertTaskNum(0, 0, 0, 0)
 
@@ -1240,7 +1251,7 @@ func (suite *TaskSuite) TestNoExecutor() {
 		suite.NoError(err)
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return(nil, segments, nil)
-	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, int64(1))
+	suite.target.UpdateCollectionNextTarget(suite.collection)
 	segmentsNum := len(suite.loadSegments)
 	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
 

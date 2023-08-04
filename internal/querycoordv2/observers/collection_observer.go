@@ -174,40 +174,41 @@ func (ob *CollectionObserver) observePartitionLoadStatus(partition *meta.Partiti
 
 	segmentTargets := ob.targetMgr.GetHistoricalSegmentsByPartition(partition.GetCollectionID(), partition.GetPartitionID(), meta.NextTarget)
 	channelTargets := ob.targetMgr.GetDmChannelsByCollection(partition.GetCollectionID(), meta.NextTarget)
+
 	targetNum := len(segmentTargets) + len(channelTargets)
+	if targetNum == 0 {
+		log.Info("segments and channels in target are both empty, waiting for new target content")
+		return
+	}
+
 	log.Info("partition targets",
 		zap.Int("segmentTargetNum", len(segmentTargets)),
 		zap.Int("channelTargetNum", len(channelTargets)),
 		zap.Int("totalTargetNum", targetNum),
 		zap.Int32("replicaNum", replicaNum),
 	)
-
 	loadedCount := 0
 	loadPercentage := int32(0)
-	if targetNum == 0 {
-		log.Info("No segment/channel in target need to be loaded!")
-		loadPercentage = 100
-	} else {
-		for _, channel := range channelTargets {
-			group := utils.GroupNodesByReplica(ob.meta.ReplicaManager,
-				partition.GetCollectionID(),
-				ob.dist.LeaderViewManager.GetChannelDist(channel.GetChannelName()))
-			loadedCount += len(group)
-		}
-		subChannelCount := loadedCount
-		for _, segment := range segmentTargets {
-			group := utils.GroupNodesByReplica(ob.meta.ReplicaManager,
-				partition.GetCollectionID(),
-				ob.dist.LeaderViewManager.GetSealedSegmentDist(segment.GetID()))
-			loadedCount += len(group)
-		}
-		if loadedCount > 0 {
-			log.Info("partition load progress",
-				zap.Int("subChannelCount", subChannelCount),
-				zap.Int("loadSegmentCount", loadedCount-subChannelCount))
-		}
-		loadPercentage = int32(loadedCount * 100 / (targetNum * int(replicaNum)))
+
+	for _, channel := range channelTargets {
+		group := utils.GroupNodesByReplica(ob.meta.ReplicaManager,
+			partition.GetCollectionID(),
+			ob.dist.LeaderViewManager.GetChannelDist(channel.GetChannelName()))
+		loadedCount += len(group)
 	}
+	subChannelCount := loadedCount
+	for _, segment := range segmentTargets {
+		group := utils.GroupNodesByReplica(ob.meta.ReplicaManager,
+			partition.GetCollectionID(),
+			ob.dist.LeaderViewManager.GetSealedSegmentDist(segment.GetID()))
+		loadedCount += len(group)
+	}
+	if loadedCount > 0 {
+		log.Info("partition load progress",
+			zap.Int("subChannelCount", subChannelCount),
+			zap.Int("loadSegmentCount", loadedCount-subChannelCount))
+	}
+	loadPercentage = int32(loadedCount * 100 / (targetNum * int(replicaNum)))
 
 	if loadedCount <= ob.partitionLoadedCount[partition.GetPartitionID()] && loadPercentage != 100 {
 		ob.partitionLoadedCount[partition.GetPartitionID()] = loadedCount
