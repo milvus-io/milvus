@@ -470,8 +470,6 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 		metrics.SearchLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
 
 	if len(validSearchResults) <= 0 {
-		log.Warn("search result is empty")
-
 		t.fillInEmptyResult(Nq)
 		return nil
 	}

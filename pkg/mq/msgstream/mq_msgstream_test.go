@@ -39,6 +39,7 @@ import (
 	pulsarwrapper "github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper/pulsar"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
 const (
@@ -46,9 +47,10 @@ const (
 	DefaultPulsarNamespace = "default"
 )
 
-var Params paramtable.ComponentParam
+var Params *paramtable.ComponentParam
 
 func TestMain(m *testing.M) {
+	Params = paramtable.Get()
 	Params.Init()
 	mockKafkaCluster, err := kafka.NewMockCluster(1)
 	defer mockKafkaCluster.Close()
@@ -59,6 +61,8 @@ func TestMain(m *testing.M) {
 	}
 	broker := mockKafkaCluster.BootstrapServers()
 	Params.Save("kafka.brokerList", broker)
+	// Disable pursuit mode for unit test by default
+	Params.Save(Params.ServiceParam.MQCfg.EnablePursuitMode.Key, "false")
 
 	exitCode := m.Run()
 	os.Exit(exitCode)
@@ -1394,4 +1398,100 @@ type messageID struct {
 // interface struct mapping
 type iface struct {
 	Type, Data unsafe.Pointer
+}
+
+func TestMqttStream_continueBuffering(t *testing.T) {
+	defer Params.Save(Params.ServiceParam.MQCfg.EnablePursuitMode.Key, "false")
+
+	ms := &MqTtMsgStream{
+		mqMsgStream: &mqMsgStream{
+			ctx: context.Background(),
+		},
+	}
+
+	t.Run("disable_pursuit_mode", func(t *testing.T) {
+		Params.Save(Params.ServiceParam.MQCfg.EnablePursuitMode.Key, "false")
+		Params.Save(Params.ServiceParam.MQCfg.PursuitLag.Key, "10")
+		Params.Save(Params.ServiceParam.MQCfg.PursuitBufferSize.Key, "1024")
+
+		type testCase struct {
+			tag    string
+			endTs  uint64
+			size   uint64
+			expect bool
+		}
+
+		currTs := tsoutil.ComposeTSByTime(time.Now(), 0)
+		cases := []testCase{
+			{
+				tag:    "first_run",
+				endTs:  0,
+				size:   0,
+				expect: true,
+			},
+			{
+				tag:    "lag_large",
+				endTs:  1,
+				size:   10,
+				expect: false,
+			},
+			{
+				tag:    "currTs",
+				endTs:  currTs,
+				size:   10,
+				expect: false,
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.tag, func(t *testing.T) {
+				assert.Equal(t, tc.expect, ms.continueBuffering(tc.endTs, tc.size))
+			})
+		}
+	})
+
+	t.Run("disable_pursuit_mode", func(t *testing.T) {
+		Params.Save(Params.ServiceParam.MQCfg.EnablePursuitMode.Key, "true")
+		Params.Save(Params.ServiceParam.MQCfg.PursuitLag.Key, "10")
+		Params.Save(Params.ServiceParam.MQCfg.PursuitBufferSize.Key, "1024")
+
+		type testCase struct {
+			tag    string
+			endTs  uint64
+			size   uint64
+			expect bool
+		}
+
+		currTs := tsoutil.ComposeTSByTime(time.Now(), 0)
+		cases := []testCase{
+			{
+				tag:    "first_run",
+				endTs:  0,
+				size:   0,
+				expect: true,
+			},
+			{
+				tag:    "lag_large",
+				endTs:  1,
+				size:   10,
+				expect: true,
+			},
+			{
+				tag:    "currTs",
+				endTs:  currTs,
+				size:   10,
+				expect: false,
+			},
+			{
+				tag:    "large_lag_buffer_full",
+				endTs:  1,
+				size:   2048,
+				expect: false,
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.tag, func(t *testing.T) {
+				assert.Equal(t, tc.expect, ms.continueBuffering(tc.endTs, tc.size))
+			})
+		}
+	})
 }

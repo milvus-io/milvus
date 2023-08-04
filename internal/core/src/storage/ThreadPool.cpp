@@ -27,6 +27,7 @@ ThreadPool::Init() {
 
 void
 ThreadPool::ShutDown() {
+    LOG_SEGCORE_INFO_ << "Start shutting down " << name_;
     shutdown_ = true;
     condition_lock_.notify_all();
     for (int i = 0; i < threads_.size(); i++) {
@@ -34,5 +35,6 @@ ThreadPool::ShutDown() {
             threads_[i].join();
         }
     }
+    LOG_SEGCORE_INFO_ << "Finish shutting down " << name_;
 }
 };  // namespace milvus

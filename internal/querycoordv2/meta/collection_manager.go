@@ -482,10 +482,6 @@ func (m *CollectionManager) UpdateLoadPercent(partitionID int64, loadPercent int
 		return 0, merr.WrapErrPartitionNotFound(partitionID)
 	}
 
-	if loadPercent <= oldPartition.LoadPercentage {
-		return m.calculateLoadPercentage(oldPartition.GetCollectionID()), nil
-	}
-
 	// update partition load percentage
 	newPartition := oldPartition.Clone()
 	newPartition.LoadPercentage = loadPercent
@@ -508,9 +504,6 @@ func (m *CollectionManager) UpdateLoadPercent(partitionID int64, loadPercent int
 		return 0, merr.WrapErrCollectionNotFound(newPartition.CollectionID)
 	}
 	collectionPercent := m.calculateLoadPercentage(oldCollection.CollectionID)
-	if collectionPercent <= oldCollection.LoadPercentage {
-		return m.calculateLoadPercentage(oldPartition.GetCollectionID()), nil
-	}
 	newCollection := oldCollection.Clone()
 	newCollection.LoadPercentage = collectionPercent
 	saveCollection := false

@@ -185,6 +185,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, Params.ReplicaSelectionPolicy.GetValue(), "look_aside")
 		assert.Equal(t, Params.CheckQueryNodeHealthInterval.GetAsInt(), 1000)
 		assert.Equal(t, Params.CostMetricsExpireTime.GetAsInt(), 1000)
+		assert.Equal(t, Params.RetryTimesOnReplica.GetAsInt(), 2)
 	})
 
 	// t.Run("test proxyConfig panic", func(t *testing.T) {

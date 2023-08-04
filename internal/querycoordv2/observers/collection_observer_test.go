@@ -250,34 +250,34 @@ func (suite *CollectionObserverSuite) TestObserve() {
 		Channel:      "100-dmc1",
 		Segments:     map[int64]*querypb.SegmentDist{2: {NodeID: 2, Version: 0}},
 	})
-	suite.dist.LeaderViewManager.Update(3, &meta.LeaderView{
+	view1 := &meta.LeaderView{
 		ID:           3,
 		CollectionID: 102,
 		Channel:      "102-dmc0",
 		Segments:     map[int64]*querypb.SegmentDist{2: {NodeID: 5, Version: 0}},
-	})
+	}
 
 	segmentsInfo, ok := suite.segments[103]
 	suite.True(ok)
-	lview := &meta.LeaderView{
+	view2 := &meta.LeaderView{
 		ID:           3,
 		CollectionID: 13,
 		Channel:      "103-dmc0",
 		Segments:     make(map[int64]*querypb.SegmentDist),
 	}
 	for _, segment := range segmentsInfo {
-		lview.Segments[segment.GetID()] = &querypb.SegmentDist{
+		view2.Segments[segment.GetID()] = &querypb.SegmentDist{
 			NodeID: 3, Version: 0,
 		}
 	}
-	suite.dist.LeaderViewManager.Update(3, lview)
-
-	suite.Eventually(func() bool {
-		return suite.isCollectionLoaded(suite.collections[0])
-	}, timeout*2, timeout/10)
+	suite.dist.LeaderViewManager.Update(3, view1, view2)
 
 	suite.Eventually(func() bool {
 		return suite.isCollectionLoadedContinue(suite.collections[2], time)
+	}, timeout-1, timeout/10)
+
+	suite.Eventually(func() bool {
+		return suite.isCollectionLoaded(suite.collections[0])
 	}, timeout*2, timeout/10)
 
 	suite.Eventually(func() bool {
@@ -296,24 +296,24 @@ func (suite *CollectionObserverSuite) TestObservePartition() {
 	paramtable.Get().Save(Params.QueryCoordCfg.LoadTimeoutSeconds.Key, "3")
 
 	// Partition 10 loaded
+	// Partition 11 timeout
 	suite.dist.LeaderViewManager.Update(1, &meta.LeaderView{
 		ID:           1,
 		CollectionID: 100,
 		Channel:      "100-dmc0",
 		Segments:     map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}},
+	}, &meta.LeaderView{
+		ID:           1,
+		CollectionID: 101,
+		Channel:      "",
+
+		Segments: map[int64]*querypb.SegmentDist{},
 	})
 	suite.dist.LeaderViewManager.Update(2, &meta.LeaderView{
 		ID:           2,
 		CollectionID: 100,
 		Channel:      "100-dmc1",
 		Segments:     map[int64]*querypb.SegmentDist{2: {NodeID: 2, Version: 0}},
-	})
-	// Partition 11 timeout
-	suite.dist.LeaderViewManager.Update(1, &meta.LeaderView{
-		ID:           1,
-		CollectionID: 101,
-		Channel:      "",
-		Segments:     map[int64]*querypb.SegmentDist{},
 	})
 
 	suite.Eventually(func() bool {
@@ -386,7 +386,9 @@ func (suite *CollectionObserverSuite) loadAll() {
 		suite.load(collection)
 	}
 	suite.targetMgr.UpdateCollectionCurrentTarget(suite.collections[0])
+	suite.targetMgr.UpdateCollectionNextTarget(suite.collections[0])
 	suite.targetMgr.UpdateCollectionCurrentTarget(suite.collections[2])
+	suite.targetMgr.UpdateCollectionNextTarget(suite.collections[2])
 }
 
 func (suite *CollectionObserverSuite) load(collection int64) {
@@ -440,9 +442,8 @@ func (suite *CollectionObserverSuite) load(collection int64) {
 		})
 	}
 
-	partitions := suite.partitions[collection]
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collection).Return(dmChannels, allSegments, nil)
-	suite.targetMgr.UpdateCollectionNextTargetWithPartitions(collection, partitions...)
+	suite.targetMgr.UpdateCollectionNextTarget(collection)
 }
 
 func TestCollectionObserver(t *testing.T) {

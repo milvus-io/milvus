@@ -33,10 +33,12 @@ const (
 	DefaultRetentionDuration = 0
 
 	// DefaultIndexSliceSize defines the default slice size of index file when serializing.
-	DefaultIndexSliceSize        = 16
-	DefaultGracefulTime          = 5000 // ms
-	DefaultGracefulStopTimeout   = 30   // s
-	DefaultThreadCoreCoefficient = 10
+	DefaultIndexSliceSize                      = 16
+	DefaultGracefulTime                        = 5000 // ms
+	DefaultGracefulStopTimeout                 = 30   // s
+	DefaultHighPriorityThreadCoreCoefficient   = 100
+	DefaultMiddlePriorityThreadCoreCoefficient = 50
+	DefaultLowPriorityThreadCoreCoefficient    = 10
 
 	DefaultSessionTTL        = 20 // s
 	DefaultSessionRetryTimes = 30
@@ -192,17 +194,19 @@ type commonConfig struct {
 	RetentionDuration    ParamItem `refreshable:"true"`
 	EntityExpirationTTL  ParamItem `refreshable:"true"`
 
-	IndexSliceSize           ParamItem `refreshable:"false"`
-	ThreadCoreCoefficient    ParamItem `refreshable:"false"`
-	MaxDegree                ParamItem `refreshable:"true"`
-	SearchListSize           ParamItem `refreshable:"true"`
-	PQCodeBudgetGBRatio      ParamItem `refreshable:"true"`
-	BuildNumThreadsRatio     ParamItem `refreshable:"true"`
-	SearchCacheBudgetGBRatio ParamItem `refreshable:"true"`
-	LoadNumThreadRatio       ParamItem `refreshable:"true"`
-	BeamWidthRatio           ParamItem `refreshable:"true"`
-	GracefulTime             ParamItem `refreshable:"true"`
-	GracefulStopTimeout      ParamItem `refreshable:"true"`
+	IndexSliceSize                      ParamItem `refreshable:"false"`
+	HighPriorityThreadCoreCoefficient   ParamItem `refreshable:"false"`
+	MiddlePriorityThreadCoreCoefficient ParamItem `refreshable:"false"`
+	LowPriorityThreadCoreCoefficient    ParamItem `refreshable:"false"`
+	MaxDegree                           ParamItem `refreshable:"true"`
+	SearchListSize                      ParamItem `refreshable:"true"`
+	PQCodeBudgetGBRatio                 ParamItem `refreshable:"true"`
+	BuildNumThreadsRatio                ParamItem `refreshable:"true"`
+	SearchCacheBudgetGBRatio            ParamItem `refreshable:"true"`
+	LoadNumThreadRatio                  ParamItem `refreshable:"true"`
+	BeamWidthRatio                      ParamItem `refreshable:"true"`
+	GracefulTime                        ParamItem `refreshable:"true"`
+	GracefulStopTimeout                 ParamItem `refreshable:"true"`
 
 	StorageType ParamItem `refreshable:"false"`
 	SimdType    ParamItem `refreshable:"false"`
@@ -224,6 +228,11 @@ type commonConfig struct {
 	ImportMaxFileSize ParamItem `refreshable:"true"`
 
 	MetricsPort ParamItem `refreshable:"false"`
+
+	//lock related params
+	EnableLockMetrics        ParamItem `refreshable:"false"`
+	LockSlowLogInfoThreshold ParamItem `refreshable:"true"`
+	LockSlowLogWarnThreshold ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -563,14 +572,35 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	}
 	p.StorageType.Init(base.mgr)
 
-	p.ThreadCoreCoefficient = ParamItem{
-		Key:          "common.threadCoreCoefficient",
+	p.HighPriorityThreadCoreCoefficient = ParamItem{
+		Key:          "common.threadCoreCoefficient.highPriority",
 		Version:      "2.0.0",
-		DefaultValue: strconv.Itoa(DefaultThreadCoreCoefficient),
-		Doc:          "This parameter specify how many times the number of threads is the number of cores",
-		Export:       true,
+		DefaultValue: strconv.Itoa(DefaultHighPriorityThreadCoreCoefficient),
+		Doc: "This parameter specify how many times the number of threads " +
+			"is the number of cores in high priority pool",
+		Export: true,
 	}
-	p.ThreadCoreCoefficient.Init(base.mgr)
+	p.HighPriorityThreadCoreCoefficient.Init(base.mgr)
+
+	p.MiddlePriorityThreadCoreCoefficient = ParamItem{
+		Key:          "common.threadCoreCoefficient.middlePriority",
+		Version:      "2.0.0",
+		DefaultValue: strconv.Itoa(DefaultMiddlePriorityThreadCoreCoefficient),
+		Doc: "This parameter specify how many times the number of threads " +
+			"is the number of cores in middle priority pool",
+		Export: true,
+	}
+	p.MiddlePriorityThreadCoreCoefficient.Init(base.mgr)
+
+	p.LowPriorityThreadCoreCoefficient = ParamItem{
+		Key:          "common.threadCoreCoefficient.lowPriority",
+		Version:      "2.0.0",
+		DefaultValue: strconv.Itoa(DefaultLowPriorityThreadCoreCoefficient),
+		Doc: "This parameter specify how many times the number of threads " +
+			"is the number of cores in low priority pool",
+		Export: true,
+	}
+	p.LowPriorityThreadCoreCoefficient.Init(base.mgr)
 
 	p.AuthorizationEnabled = ParamItem{
 		Key:          "common.security.authorizationEnabled",
@@ -654,6 +684,33 @@ like the old password verification when updating the credential`,
 		DefaultValue: "9091",
 	}
 	p.MetricsPort.Init(base.mgr)
+
+	p.EnableLockMetrics = ParamItem{
+		Key:          "common.locks.metrics.enable",
+		Version:      "2.0.0",
+		DefaultValue: "false",
+		Doc:          "whether gather statistics for metrics locks",
+		Export:       true,
+	}
+	p.EnableLockMetrics.Init(base.mgr)
+
+	p.LockSlowLogInfoThreshold = ParamItem{
+		Key:          "common.locks.threshold.info",
+		Version:      "2.0.0",
+		DefaultValue: "500",
+		Doc:          "minimum milliseconds for printing durations in info level",
+		Export:       true,
+	}
+	p.LockSlowLogInfoThreshold.Init(base.mgr)
+
+	p.LockSlowLogWarnThreshold = ParamItem{
+		Key:          "common.locks.threshold.warn",
+		Version:      "2.0.0",
+		DefaultValue: "1000",
+		Doc:          "minimum milliseconds for printing durations in warn level",
+		Export:       true,
+	}
+	p.LockSlowLogWarnThreshold.Init(base.mgr)
 }
 
 type traceConfig struct {
@@ -911,6 +968,8 @@ type proxyConfig struct {
 	ReplicaSelectionPolicy       ParamItem `refreshable:"false"`
 	CheckQueryNodeHealthInterval ParamItem `refreshable:"false"`
 	CostMetricsExpireTime        ParamItem `refreshable:"true"`
+	RetryTimesOnReplica          ParamItem `refreshable:"true"`
+	RetryTimesOnHealthCheck      ParamItem `refreshable:"true"`
 }
 
 func (p *proxyConfig) init(base *BaseTable) {
@@ -927,7 +986,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 	p.HealthCheckTimetout = ParamItem{
 		Key:          "proxy.healthCheckTimetout",
 		Version:      "2.3.0",
-		DefaultValue: "500",
+		DefaultValue: "1000",
 		PanicIfEmpty: true,
 		Doc:          "ms, the interval that to do component healthy check",
 		Export:       true,
@@ -1155,6 +1214,21 @@ please adjust in embedded Milvus: false`,
 	}
 	p.CostMetricsExpireTime.Init(base.mgr)
 
+	p.RetryTimesOnReplica = ParamItem{
+		Key:          "proxy.retryTimesOnReplica",
+		Version:      "2.3.0",
+		DefaultValue: "2",
+		Doc:          "retry times on each replica",
+	}
+	p.RetryTimesOnReplica.Init(base.mgr)
+
+	p.RetryTimesOnHealthCheck = ParamItem{
+		Key:          "proxy.retryTimesOnHealthCheck",
+		Version:      "2.3.0",
+		DefaultValue: "3",
+		Doc:          "set query node unavailable on proxy when heartbeat failures reach this limit",
+	}
+	p.RetryTimesOnHealthCheck.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

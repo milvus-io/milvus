@@ -106,6 +106,7 @@ func (suite *SegmentCheckerTestSuite) TestLoadSegments() {
 	checker := suite.checker
 	// set meta
 	checker.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
+	checker.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
 	suite.nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
 	suite.nodeMgr.Add(session.NewNodeInfo(2, "localhost"))
@@ -122,7 +123,7 @@ func (suite *SegmentCheckerTestSuite) TestLoadSegments() {
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		nil, segments, nil)
-	checker.targetMgr.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
+	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 
 	// set dist
 	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
@@ -143,6 +144,7 @@ func (suite *SegmentCheckerTestSuite) TestSkipCheckReplica() {
 	checker := suite.checker
 	// set meta
 	checker.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
+	checker.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
 	suite.nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
 	suite.nodeMgr.Add(session.NewNodeInfo(2, "localhost"))
@@ -159,7 +161,7 @@ func (suite *SegmentCheckerTestSuite) TestSkipCheckReplica() {
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		nil, segments, nil)
-	checker.targetMgr.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
+	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 
 	// set dist
 	checker.dist.ChannelDistManager.Update(1, utils.CreateTestChannel(1, 1, 1, "test-insert-channel"))
@@ -197,6 +199,7 @@ func (suite *SegmentCheckerTestSuite) TestReleaseRepeatedSegments() {
 	checker := suite.checker
 	// set meta
 	checker.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
+	checker.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
 
 	// set target
@@ -209,7 +212,7 @@ func (suite *SegmentCheckerTestSuite) TestReleaseRepeatedSegments() {
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		nil, segments, nil)
-	checker.targetMgr.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
+	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 
 	// set dist
 	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
@@ -241,6 +244,7 @@ func (suite *SegmentCheckerTestSuite) TestSkipReleaseSealedSegments() {
 	partitionID := int64(1)
 	// set meta
 	checker.meta.CollectionManager.PutCollection(utils.CreateTestCollection(collectionID, 1))
+	checker.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 	checker.meta.CollectionManager.PutPartition(utils.CreateTestPartition(collectionID, partitionID))
 	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, collectionID, []int64{1, 2}))
 
@@ -248,7 +252,7 @@ func (suite *SegmentCheckerTestSuite) TestSkipReleaseSealedSegments() {
 	segments := []*datapb.SegmentInfo{}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		nil, segments, nil)
-	checker.targetMgr.UpdateCollectionNextTargetWithPartitions(collectionID, partitionID)
+	checker.targetMgr.UpdateCollectionNextTarget(collectionID)
 	checker.targetMgr.UpdateCollectionCurrentTarget(collectionID)
 	readableVersion := checker.targetMgr.GetCollectionTargetVersion(collectionID, meta.CurrentTarget)
 
@@ -285,6 +289,7 @@ func (suite *SegmentCheckerTestSuite) TestReleaseGrowingSegments() {
 	// segment3 is compacted from segment2, and node2 has growing segments 2 and 3. checker should generate
 	// 2 tasks to reduce segment 2 and 3.
 	checker.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
+	checker.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
 
 	segments := []*datapb.SegmentInfo{
@@ -303,8 +308,8 @@ func (suite *SegmentCheckerTestSuite) TestReleaseGrowingSegments() {
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
-	checker.targetMgr.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
-	checker.targetMgr.UpdateCollectionCurrentTarget(int64(1), int64(1))
+	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
+	checker.targetMgr.UpdateCollectionCurrentTarget(int64(1))
 
 	growingSegments := make(map[int64]*meta.Segment)
 	growingSegments[2] = utils.CreateTestSegment(1, 1, 2, 2, 0, "test-insert-channel")
@@ -349,6 +354,7 @@ func (suite *SegmentCheckerTestSuite) TestReleaseGrowingSegments() {
 func (suite *SegmentCheckerTestSuite) TestSkipReleaseGrowingSegments() {
 	checker := suite.checker
 	checker.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
+	checker.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
 
 	segments := []*datapb.SegmentInfo{}
@@ -361,8 +367,8 @@ func (suite *SegmentCheckerTestSuite) TestSkipReleaseGrowingSegments() {
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
-	checker.targetMgr.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
-	checker.targetMgr.UpdateCollectionCurrentTarget(int64(1), int64(1))
+	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
+	checker.targetMgr.UpdateCollectionCurrentTarget(int64(1))
 
 	growingSegments := make(map[int64]*meta.Segment)
 	growingSegments[2] = utils.CreateTestSegment(1, 1, 2, 2, 0, "test-insert-channel")

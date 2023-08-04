@@ -20,7 +20,12 @@
 namespace milvus {
 
 int64_t FILE_SLICE_SIZE = DEFAULT_INDEX_FILE_SLICE_SIZE;
-int64_t THREAD_CORE_COEFFICIENT = DEFAULT_THREAD_CORE_COEFFICIENT;
+int64_t HIGH_PRIORITY_THREAD_CORE_COEFFICIENT =
+    DEFAULT_HIGH_PRIORITY_THREAD_CORE_COEFFICIENT;
+int64_t MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT =
+    DEFAULT_MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT;
+int64_t LOW_PRIORITY_THREAD_CORE_COEFFICIENT =
+    DEFAULT_LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
 int CPU_NUM = DEFAULT_CPU_NUM;
 
 void
@@ -31,10 +36,24 @@ SetIndexSliceSize(const int64_t size) {
 }
 
 void
-SetThreadCoreCoefficient(const int64_t coefficient) {
-    THREAD_CORE_COEFFICIENT = coefficient;
-    LOG_SEGCORE_DEBUG_ << "set thread pool core coefficient: "
-                       << THREAD_CORE_COEFFICIENT;
+SetHighPriorityThreadCoreCoefficient(const int64_t coefficient) {
+    HIGH_PRIORITY_THREAD_CORE_COEFFICIENT = coefficient;
+    LOG_SEGCORE_INFO_ << "set high priority thread pool core coefficient: "
+                      << HIGH_PRIORITY_THREAD_CORE_COEFFICIENT;
+}
+
+void
+SetMiddlePriorityThreadCoreCoefficient(const int64_t coefficient) {
+    MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT = coefficient;
+    LOG_SEGCORE_INFO_ << "set middle priority thread pool core coefficient: "
+                      << MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT;
+}
+
+void
+SetLowPriorityThreadCoreCoefficient(const int64_t coefficient) {
+    LOW_PRIORITY_THREAD_CORE_COEFFICIENT = coefficient;
+    LOG_SEGCORE_INFO_ << "set low priority thread pool core coefficient: "
+                      << LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
 }
 
 void

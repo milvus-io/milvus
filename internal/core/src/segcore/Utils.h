@@ -9,6 +9,8 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#pragma once
+
 #include <unordered_map>
 #include <exception>
 #include <memory>
@@ -151,4 +153,20 @@ ReverseDataFromIndex(const index::IndexBase* index,
 void
 LoadFieldDatasFromRemote(std::vector<std::string>& remote_files,
                          storage::FieldDataChannelPtr channel);
+
+/**
+ * Returns an index pointing to the first element in the range [first, last) such that `value < element` is true
+ * (i.e. that is strictly greater than value), or last if no such element is found.
+ *
+ * @param timestamps
+ * @param first
+ * @param last
+ * @param value
+ * @return The index of answer, last will be returned if no timestamp is bigger than the value.
+ */
+int64_t
+upper_bound(const ConcurrentVector<Timestamp>& timestamps,
+            int64_t first,
+            int64_t last,
+            Timestamp value);
 }  // namespace milvus::segcore

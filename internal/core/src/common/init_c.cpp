@@ -25,7 +25,7 @@
 #include "common/Tracer.h"
 #include "log/Log.h"
 
-std::once_flag flag1, flag2, flag3;
+std::once_flag flag1, flag2, flag3, flag4, flag5;
 std::once_flag traceFlag;
 
 void
@@ -35,10 +35,32 @@ InitIndexSliceSize(const int64_t size) {
 }
 
 void
-InitThreadCoreCoefficient(const int64_t value) {
+InitHighPriorityThreadCoreCoefficient(const int64_t value) {
     std::call_once(
         flag2,
-        [](int64_t value) { milvus::SetThreadCoreCoefficient(value); },
+        [](int64_t value) {
+            milvus::SetHighPriorityThreadCoreCoefficient(value);
+        },
+        value);
+}
+
+void
+InitMiddlePriorityThreadCoreCoefficient(const int64_t value) {
+    std::call_once(
+        flag4,
+        [](int64_t value) {
+            milvus::SetMiddlePriorityThreadCoreCoefficient(value);
+        },
+        value);
+}
+
+void
+InitLowPriorityThreadCoreCoefficient(const int64_t value) {
+    std::call_once(
+        flag5,
+        [](int64_t value) {
+            milvus::SetLowPriorityThreadCoreCoefficient(value);
+        },
         value);
 }
 

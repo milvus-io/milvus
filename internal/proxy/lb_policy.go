@@ -199,6 +199,7 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 	for channel, nodes := range dml2leaders {
 		channel := channel
 		nodes := lo.Map(nodes, func(node nodeInfo, _ int) int64 { return node.nodeID })
+		retryOnReplica := Params.ProxyCfg.RetryTimesOnReplica.GetAsInt()
 		wg.Go(func() error {
 			err := lb.ExecuteWithRetry(ctx, ChannelWorkload{
 				db:             workload.db,
@@ -208,7 +209,7 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 				shardLeaders:   nodes,
 				nq:             workload.nq,
 				exec:           workload.exec,
-				retryTimes:     uint(len(nodes)),
+				retryTimes:     uint(len(nodes) * retryOnReplica),
 			})
 			return err
 		})

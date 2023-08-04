@@ -366,6 +366,7 @@ func (s *LBPolicySuite) TestExecute() {
 		collectionID:   s.collectionID,
 		nq:             1,
 		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNode, s ...string) error {
+			// succeed in first execute
 			if counter.Add(1) == 1 {
 				return nil
 			}
@@ -374,6 +375,7 @@ func (s *LBPolicySuite) TestExecute() {
 		},
 	})
 	s.Error(err)
+	s.Equal(int64(11), counter.Load())
 
 	// test get shard leader failed
 	s.qc.ExpectedCalls = nil

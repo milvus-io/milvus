@@ -36,7 +36,7 @@
 #include "log/Log.h"
 #include "storage/FieldData.h"
 #include "storage/MemFileManagerImpl.h"
-#include "storage/ThreadPool.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::index {
 
@@ -118,7 +118,7 @@ VectorMemIndex::Load(const Config& config) {
         }
     }
 
-    auto& pool = ThreadPool::GetInstance();
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
     auto future = pool.Submit(
         [&] { file_manager_->LoadFileStream(index_files.value(), channels); });
 

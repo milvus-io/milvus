@@ -111,8 +111,11 @@ class SegmentSealedImpl : public SegmentSealed {
            const Timestamp* timestamps) override;
 
     std::vector<OffsetMap::OffsetType>
-    find_first(int64_t limit, const BitsetType& bitset) const override {
-        return insert_record_.pk2offset_->find_first(limit, bitset);
+    find_first(int64_t limit,
+               const BitsetType& bitset,
+               bool false_filtered_out) const override {
+        return insert_record_.pk2offset_->find_first(
+            limit, bitset, false_filtered_out);
     }
 
  protected:

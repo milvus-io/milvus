@@ -105,6 +105,7 @@ func (suite *ChannelCheckerTestSuite) createMockBalancer() balance.Balance {
 func (suite *ChannelCheckerTestSuite) TestLoadChannel() {
 	checker := suite.checker
 	checker.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
+	suite.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1}))
 	suite.nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
 	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 1)
@@ -118,7 +119,7 @@ func (suite *ChannelCheckerTestSuite) TestLoadChannel() {
 
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, nil, nil)
-	checker.targetMgr.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
+	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 
 	tasks := checker.Check(context.TODO())
 	suite.Len(tasks, 1)
@@ -151,6 +152,7 @@ func (suite *ChannelCheckerTestSuite) TestReduceChannel() {
 func (suite *ChannelCheckerTestSuite) TestRepeatedChannels() {
 	checker := suite.checker
 	err := checker.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
+	suite.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 	suite.NoError(err)
 	err = checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
 	suite.NoError(err)
@@ -170,7 +172,7 @@ func (suite *ChannelCheckerTestSuite) TestRepeatedChannels() {
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
-	checker.targetMgr.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
+	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 	checker.dist.ChannelDistManager.Update(1, utils.CreateTestChannel(1, 1, 1, "test-insert-channel"))
 	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 2, "test-insert-channel"))
 

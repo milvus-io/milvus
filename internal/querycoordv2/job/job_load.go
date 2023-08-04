@@ -166,16 +166,7 @@ func (job *LoadCollectionJob) Execute() error {
 		return err
 	}
 
-	// 4. update next target
-	_, err = job.targetObserver.UpdateNextTarget(req.GetCollectionID(), partitionIDs...)
-	if err != nil {
-		msg := "failed to update next target"
-		log.Error(msg, zap.Error(err))
-		return errors.Wrap(err, msg)
-	}
-	job.undo.TargetUpdated = true
-
-	// 5. put collection/partitions meta
+	// 4. put collection/partitions meta
 	partitions := lo.Map(lackPartitionIDs, func(partID int64, _ int) *meta.Partition {
 		return &meta.Partition{
 			PartitionLoadInfo: &querypb.PartitionLoadInfo{
@@ -204,10 +195,17 @@ func (job *LoadCollectionJob) Execute() error {
 		log.Error(msg, zap.Error(err))
 		return errors.Wrap(err, msg)
 	}
-
 	eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("Start load collection %d", collection.CollectionID)))
-
 	metrics.QueryCoordNumPartitions.WithLabelValues().Add(float64(len(partitions)))
+
+	// 5. update next target, no need to rollback if pull target failed, target observer will pull target in periodically
+	_, err = job.targetObserver.UpdateNextTarget(req.GetCollectionID())
+	if err != nil {
+		msg := "failed to update next target"
+		log.Warn(msg, zap.Error(err))
+	}
+	job.undo.TargetUpdated = true
+
 	return nil
 }
 
@@ -341,16 +339,7 @@ func (job *LoadPartitionJob) Execute() error {
 		return err
 	}
 
-	// 4. update next target
-	_, err = job.targetObserver.UpdateNextTarget(req.GetCollectionID(), append(loadedPartitionIDs, lackPartitionIDs...)...)
-	if err != nil {
-		msg := "failed to update next target"
-		log.Error(msg, zap.Error(err))
-		return errors.Wrap(err, msg)
-	}
-	job.undo.TargetUpdated = true
-
-	// 5. put collection/partitions meta
+	// 4. put collection/partitions meta
 	partitions := lo.Map(lackPartitionIDs, func(partID int64, _ int) *meta.Partition {
 		return &meta.Partition{
 			PartitionLoadInfo: &querypb.PartitionLoadInfo{
@@ -388,8 +377,16 @@ func (job *LoadPartitionJob) Execute() error {
 			return errors.Wrap(err, msg)
 		}
 	}
-
 	metrics.QueryCoordNumPartitions.WithLabelValues().Add(float64(len(partitions)))
+
+	// 5. update next target, no need to rollback if pull target failed, target observer will pull target in periodically
+	_, err = job.targetObserver.UpdateNextTarget(req.GetCollectionID())
+	if err != nil {
+		msg := "failed to update next target"
+		log.Warn(msg, zap.Error(err))
+	}
+	job.undo.TargetUpdated = true
+
 	return nil
 }
 
