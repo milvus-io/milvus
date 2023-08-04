@@ -81,16 +81,17 @@ ${LCOV_CMD} -a ${FILE_INFO_BASE} -a ${FILE_INFO_UT} -o ${FILE_INFO_COMBINE}
 # remove unnecessary info
 ${LCOV_CMD} -r "${FILE_INFO_COMBINE}" -o "${FILE_INFO_OUTPUT}" \
     "/usr/*" \
+    "*/llvm/*" \
     "*/src/pb/*" \
     "*/src/core/bench/*" \
-    "*/faiss_ep-prefix/*" \
-    "*/boost/*" \
     "*/unittest/*" \
-    "*/thirdparty/*"
+    "*/thirdparty/*" \
+    "*/3rdparty_download/*" \
+    "*/.conan/data/*"
 
 # generate html report
-#${LCOV_GEN_CMD} ${FILE_INFO_OUTPUT} --output-directory ${DIR_LCOV_OUTPUT}/
-#echo "Generate cpp code coverage report to ${DIR_LCOV_OUTPUT}"
+${LCOV_GEN_CMD} ${FILE_INFO_OUTPUT} --output-directory ${DIR_LCOV_OUTPUT}/
+echo "Generate cpp code coverage report to ${DIR_LCOV_OUTPUT}"
 
 
 endTime=`date +%s`

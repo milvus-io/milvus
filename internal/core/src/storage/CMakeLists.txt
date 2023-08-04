@@ -47,8 +47,9 @@ set(STORAGE_FILES
     Event.cpp
     ThreadPool.cpp
     storage_c.cpp
+    ChunkManager.cpp
     MinioChunkManager.cpp
-    ChunkManagers.cpp
+    OpenDALChunkManager.cpp
     AliyunSTSClient.cpp
     AliyunCredentialsProvider.cpp
     MemFileManagerImpl.cpp

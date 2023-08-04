@@ -310,6 +310,8 @@ NewBuildIndexInfo(CBuildIndexInfo* c_build_index_info,
             std::string(c_storage_config.cloud_provider);
         storage_config.iam_endpoint =
             std::string(c_storage_config.iam_endpoint);
+        storage_config.cloud_provider =
+            std::string(c_storage_config.cloud_provider);
         storage_config.useSSL = c_storage_config.useSSL;
         storage_config.useIAM = c_storage_config.useIAM;
         storage_config.region = c_storage_config.region;

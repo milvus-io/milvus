@@ -62,8 +62,8 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	cAccessValue := C.CString(params.MinioCfg.SecretAccessKey.GetValue())
 	cRootPath := C.CString(params.MinioCfg.RootPath.GetValue())
 	cStorageType := C.CString(params.CommonCfg.StorageType.GetValue())
-	cCloudProvider := C.CString(params.MinioCfg.CloudProvider.GetValue())
 	cIamEndPoint := C.CString(params.MinioCfg.IAMEndpoint.GetValue())
+	cCloudProvider := C.CString(params.MinioCfg.CloudProvider.GetValue())
 	cLogLevel := C.CString(params.MinioCfg.LogLevel.GetValue())
 	cRegion := C.CString(params.MinioCfg.Region.GetValue())
 	defer C.free(unsafe.Pointer(cAddress))
@@ -72,10 +72,10 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	defer C.free(unsafe.Pointer(cAccessValue))
 	defer C.free(unsafe.Pointer(cRootPath))
 	defer C.free(unsafe.Pointer(cStorageType))
-	defer C.free(unsafe.Pointer(cCloudProvider))
 	defer C.free(unsafe.Pointer(cIamEndPoint))
 	defer C.free(unsafe.Pointer(cLogLevel))
 	defer C.free(unsafe.Pointer(cRegion))
+	defer C.free(unsafe.Pointer(cCloudProvider))
 	storageConfig := C.CStorageConfig{
 		address:          cAddress,
 		bucket_name:      cBucketName,
@@ -83,8 +83,8 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 		access_key_value: cAccessValue,
 		root_path:        cRootPath,
 		storage_type:     cStorageType,
-		cloud_provider:   cCloudProvider,
 		iam_endpoint:     cIamEndPoint,
+		cloud_provider:   cCloudProvider,
 		useSSL:           C.bool(params.MinioCfg.UseSSL.GetAsBool()),
 		useIAM:           C.bool(params.MinioCfg.UseIAM.GetAsBool()),
 		log_level:        cLogLevel,

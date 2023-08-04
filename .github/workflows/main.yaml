@@ -47,6 +47,14 @@ jobs:
     env:
       UBUNTU: ${{ matrix.ubuntu }}
     steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 10240
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
       - name: Checkout
         uses: actions/checkout@v2
         with:
@@ -92,7 +100,7 @@ jobs:
         run: |
           ./build/builder.sh /bin/bash -c "make USE_ASAN=${{env.useasan}} build-cpp-with-coverage"
       - run: |
-          zip -r code.zip . -x "./.docker/*"
+          zip -r code.zip . -x "./.docker/*" -x "./cmake_build/thirdparty/*"
       - name: Archive code
         uses: actions/upload-artifact@v3
         with:
@@ -127,8 +135,6 @@ jobs:
         shell: bash
         run: |
           docker-compose up -d azurite
-#      - name: 'Setup upterm session'
-#        uses: lhotari/action-upterm@v1
       - name: UT
         run: |
           chmod +x build/builder.sh
@@ -173,8 +179,6 @@ jobs:
         shell: bash
         run: |
           docker-compose up -d pulsar etcd minio azurite
-#      - name: 'Setup upterm session'
-#        uses: lhotari/action-upterm@v1
       - name: UT
         run: |
           chmod +x build/builder.sh

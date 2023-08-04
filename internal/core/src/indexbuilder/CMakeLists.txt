@@ -20,17 +20,7 @@ set(INDEXBUILDER_FILES
 milvus_add_pkg_config("milvus_indexbuilder")
 add_library(milvus_indexbuilder SHARED ${INDEXBUILDER_FILES})
 
-find_library(TBB NAMES tbb)
-set(PLATFORM_LIBS dl)
-if (MSYS)
-set(PLATFORM_LIBS -Wl,--allow-multiple-definition)
-endif ()
-
 # link order matters
-target_link_libraries(milvus_indexbuilder
-        milvus_index
-        ${TBB}
-        ${PLATFORM_LIBS}
-        )
+target_link_libraries(milvus_indexbuilder milvus_index)
 
 install(TARGETS milvus_indexbuilder DESTINATION "${CMAKE_INSTALL_LIBDIR}")

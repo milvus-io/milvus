@@ -48,7 +48,7 @@ func (f *ChunkManagerFactory) newChunkManager(ctx context.Context, engine string
 	switch engine {
 	case "local":
 		return NewLocalChunkManager(RootPath(f.config.rootPath)), nil
-	case "minio":
+	case "minio", "opendal":
 		return newMinioChunkManagerWithConfig(ctx, f.config)
 	case "remote":
 		return NewRemoteChunkManager(ctx, f.config)
