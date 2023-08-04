@@ -37,6 +37,7 @@
 #include "storage/FieldData.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/ThreadPools.h"
+#include "storage/Util.h"
 
 namespace milvus::index {
 
@@ -104,32 +105,78 @@ VectorMemIndex::Load(const Config& config) {
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load index");
 
+    LOG_SEGCORE_INFO_ << "load index files: " << index_files.value().size();
+
     auto parallel_degree =
         static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+    std::map<std::string, storage::FieldDataPtr> index_datas{};
 
-    std::map<std::string, storage::FieldDataChannelPtr> channels;
-    for (const auto& file : index_files.value()) {
-        auto key = file.substr(file.find_last_of('/') + 1);
-        LOG_SEGCORE_INFO_ << "loading index file " << key;
-        if (channels.find(key) == channels.end()) {
-            channels.emplace(std::move(key),
-                             std::make_shared<storage::FieldDataChannel>(
-                                 parallel_degree * 2));
+    // try to read slice meta first
+    std::string slice_meta_filepath;
+    for (auto& file : index_files.value()) {
+        auto file_name = file.substr(file.find_last_of('/') + 1);
+        if (file_name == INDEX_FILE_SLICE_META) {
+            slice_meta_filepath = file;
+            break;
         }
     }
 
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
-    auto future = pool.Submit(
-        [&] { file_manager_->LoadFileStream(index_files.value(), channels); });
+    if (slice_meta_filepath
+            .empty()) {  // no slice meta, we could simply load all these files
+        index_datas = file_manager_->LoadIndexToMemory(index_files.value());
+        AssembleIndexDatas(index_datas);
+    } else {  // load with the slice meta info, then we can load batch by batch
+        std::string index_file_prefix = slice_meta_filepath.substr(
+            0, slice_meta_filepath.find_last_of('/') + 1);
+        std::vector<std::string> batch{};
+        batch.reserve(parallel_degree);
 
-    LOG_SEGCORE_INFO_ << "assemble index data...";
-    std::unordered_map<std::string, storage::FieldDataPtr> result;
-    AssembleIndexDatas(channels, result);
-    LOG_SEGCORE_INFO_ << "assemble index data done";
+        auto result = file_manager_->LoadIndexToMemory({slice_meta_filepath});
+        auto raw_slice_meta = result[INDEX_FILE_SLICE_META];
+        Config meta_data = Config::parse(
+            std::string(static_cast<const char*>(raw_slice_meta->Data()),
+                        raw_slice_meta->Size()));
+
+        for (auto& item : meta_data[META]) {
+            std::string prefix = item[NAME];
+            int slice_num = item[SLICE_NUM];
+            auto total_len = static_cast<size_t>(item[TOTAL_LEN]);
+
+            auto new_field_data =
+                milvus::storage::CreateFieldData(DataType::INT8, 1, total_len);
+            auto HandleBatch = [&](int index) {
+                auto batch_data = file_manager_->LoadIndexToMemory(batch);
+                for (int j = index - batch.size() + 1; j <= index; j++) {
+                    std::string file_name = GenSlicedFileName(prefix, j);
+                    AssertInfo(batch_data.find(file_name) != batch_data.end(),
+                               "lost index slice data");
+                    auto data = batch_data[file_name];
+                    new_field_data->FillFieldData(data->Data(), data->Size());
+                }
+                batch.clear();
+            };
+
+            for (auto i = 0; i < slice_num; ++i) {
+                std::string file_name = GenSlicedFileName(prefix, i);
+                batch.push_back(index_file_prefix + file_name);
+                if (batch.size() >= parallel_degree) {
+                    HandleBatch(i);
+                }
+            }
+            if (batch.size() > 0) {
+                HandleBatch(slice_num - 1);
+            }
+
+            AssertInfo(
+                new_field_data->IsFull(),
+                "index len is inconsistent after disassemble and assemble");
+            index_datas[prefix] = new_field_data;
+        }
+    }
 
     LOG_SEGCORE_INFO_ << "construct binary set...";
     BinarySet binary_set;
-    for (auto& [key, data] : result) {
+    for (auto& [key, data] : index_datas) {
         LOG_SEGCORE_INFO_ << "add index data to binary set: " << key;
         auto size = data->Size();
         auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
