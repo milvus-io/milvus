@@ -19,11 +19,13 @@ func (c binIVFFlatChecker) StaticCheck(params map[string]string) error {
 }
 
 func (c binIVFFlatChecker) CheckTrain(params map[string]string) error {
-	if err := c.binaryVectorBaseChecker.CheckTrain(params); err != nil {
+	// static check first
+	// or it will throw binaryVectorBaseChecker error msg when has the wrong metric type
+	if err := c.StaticCheck(params); err != nil {
 		return err
 	}
 
-	return c.StaticCheck(params)
+	return c.binaryVectorBaseChecker.CheckTrain(params)
 }
 
 func newBinIVFFlatChecker() IndexChecker {
