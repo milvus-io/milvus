@@ -105,9 +105,9 @@ func genAuthMiddleWare(needAuth bool) gin.HandlerFunc {
 		return func(c *gin.Context) {
 			username, password, ok := ParseUsernamePassword(c)
 			if !ok {
-				c.AbortWithStatusJSON(http.StatusProxyAuthRequired, gin.H{HTTPReturnCode: Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
 			} else if username == util.UserRoot && password != util.DefaultRootPassword {
-				c.AbortWithStatusJSON(http.StatusProxyAuthRequired, gin.H{HTTPReturnCode: Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
 			} else {
 				c.Set(ContextUsername, username)
 			}
@@ -139,7 +139,7 @@ func TestVectorAuthenticate(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/v1/vector/collections", nil)
 		w := httptest.NewRecorder()
 		testEngine.ServeHTTP(w, req)
-		assert.Equal(t, w.Code, http.StatusProxyAuthRequired)
+		assert.Equal(t, w.Code, http.StatusUnauthorized)
 		assert.Equal(t, w.Body.String(), PrintErr(merr.ErrNeedAuthenticate))
 	})
 
@@ -148,7 +148,7 @@ func TestVectorAuthenticate(t *testing.T) {
 		req.SetBasicAuth(util.UserRoot, util.UserRoot)
 		w := httptest.NewRecorder()
 		testEngine.ServeHTTP(w, req)
-		assert.Equal(t, w.Code, http.StatusProxyAuthRequired)
+		assert.Equal(t, w.Code, http.StatusUnauthorized)
 		assert.Equal(t, w.Body.String(), PrintErr(merr.ErrNeedAuthenticate))
 	})
 
@@ -239,7 +239,7 @@ func TestVectorCollectionsDescribe(t *testing.T) {
 		name:         "get load status fail",
 		mp:           mp2,
 		exceptCode:   http.StatusOK,
-		expectedBody: "{\"code\":200,\"data\":{\"collectionName\":\"" + DefaultCollectionName + "\",\"description\":\"\",\"enableDynamic\":true,\"fields\":[{\"autoId\":false,\"description\":\"\",\"name\":\"book_id\",\"primaryKey\":true,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"\",\"name\":\"word_count\",\"primaryKey\":false,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"\",\"name\":\"book_intro\",\"primaryKey\":false,\"type\":\"FloatVector(2)\"}],\"indexes\":[{\"fieldName\":\"book_intro\",\"indexName\":\"_default_idx_102\",\"metricType\":\"L2\"}],\"load\":\"\",\"shardsNum\":1}}",
+		expectedBody: "{\"code\":200,\"data\":{\"collectionName\":\"" + DefaultCollectionName + "\",\"description\":\"\",\"enableDynamicField\":true,\"fields\":[{\"autoId\":false,\"description\":\"\",\"name\":\"book_id\",\"primaryKey\":true,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"\",\"name\":\"word_count\",\"primaryKey\":false,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"\",\"name\":\"book_intro\",\"primaryKey\":false,\"type\":\"FloatVector(2)\"}],\"indexes\":[{\"fieldName\":\"book_intro\",\"indexName\":\"" + DefaultIndexName + "\",\"metricType\":\"L2\"}],\"load\":\"\",\"shardsNum\":1}}",
 	})
 
 	mp3 := mocks.NewProxy(t)
@@ -250,7 +250,7 @@ func TestVectorCollectionsDescribe(t *testing.T) {
 		name:         "get indexes fail",
 		mp:           mp3,
 		exceptCode:   http.StatusOK,
-		expectedBody: "{\"code\":200,\"data\":{\"collectionName\":\"" + DefaultCollectionName + "\",\"description\":\"\",\"enableDynamic\":true,\"fields\":[{\"autoId\":false,\"description\":\"\",\"name\":\"book_id\",\"primaryKey\":true,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"\",\"name\":\"word_count\",\"primaryKey\":false,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"\",\"name\":\"book_intro\",\"primaryKey\":false,\"type\":\"FloatVector(2)\"}],\"indexes\":[],\"load\":\"LoadStateLoaded\",\"shardsNum\":1}}",
+		expectedBody: "{\"code\":200,\"data\":{\"collectionName\":\"" + DefaultCollectionName + "\",\"description\":\"\",\"enableDynamicField\":true,\"fields\":[{\"autoId\":false,\"description\":\"\",\"name\":\"book_id\",\"primaryKey\":true,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"\",\"name\":\"word_count\",\"primaryKey\":false,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"\",\"name\":\"book_intro\",\"primaryKey\":false,\"type\":\"FloatVector(2)\"}],\"indexes\":[],\"load\":\"LoadStateLoaded\",\"shardsNum\":1}}",
 	})
 
 	mp4 := mocks.NewProxy(t)
@@ -261,7 +261,7 @@ func TestVectorCollectionsDescribe(t *testing.T) {
 		name:         "show collection details success",
 		mp:           mp4,
 		exceptCode:   http.StatusOK,
-		expectedBody: "{\"code\":200,\"data\":{\"collectionName\":\"" + DefaultCollectionName + "\",\"description\":\"\",\"enableDynamic\":true,\"fields\":[{\"autoId\":false,\"description\":\"\",\"name\":\"book_id\",\"primaryKey\":true,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"\",\"name\":\"word_count\",\"primaryKey\":false,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"\",\"name\":\"book_intro\",\"primaryKey\":false,\"type\":\"FloatVector(2)\"}],\"indexes\":[{\"fieldName\":\"book_intro\",\"indexName\":\"_default_idx_102\",\"metricType\":\"L2\"}],\"load\":\"LoadStateLoaded\",\"shardsNum\":1}}",
+		expectedBody: "{\"code\":200,\"data\":{\"collectionName\":\"" + DefaultCollectionName + "\",\"description\":\"\",\"enableDynamicField\":true,\"fields\":[{\"autoId\":false,\"description\":\"\",\"name\":\"book_id\",\"primaryKey\":true,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"\",\"name\":\"word_count\",\"primaryKey\":false,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"\",\"name\":\"book_intro\",\"primaryKey\":false,\"type\":\"FloatVector(2)\"}],\"indexes\":[{\"fieldName\":\"book_intro\",\"indexName\":\"" + DefaultIndexName + "\",\"metricType\":\"L2\"}],\"load\":\"LoadStateLoaded\",\"shardsNum\":1}}",
 	})
 
 	for _, tt := range testCases {
@@ -666,7 +666,7 @@ func TestInsert(t *testing.T) {
 			rows := generateSearchResult()
 			data, _ := json.Marshal(map[string]interface{}{
 				HTTPCollectionName: DefaultCollectionName,
-				HTTPReturnData:     rows,
+				HTTPReturnData:     rows[0],
 			})
 			bodyReader := bytes.NewReader(data)
 			req := httptest.NewRequest(http.MethodPost, "/v1/vector/insert", bodyReader)
@@ -1035,7 +1035,7 @@ func TestAuthorization(t *testing.T) {
 				req.Header.Set("authorization", "Bearer test:test")
 				w := httptest.NewRecorder()
 				testEngine.ServeHTTP(w, req)
-				assert.Equal(t, w.Code, http.StatusUnauthorized)
+				assert.Equal(t, w.Code, http.StatusForbidden)
 				assert.Equal(t, w.Body.String(), res)
 			})
 		}
@@ -1056,7 +1056,7 @@ func TestAuthorization(t *testing.T) {
 				req.Header.Set("authorization", "Bearer test:test")
 				w := httptest.NewRecorder()
 				testEngine.ServeHTTP(w, req)
-				assert.Equal(t, w.Code, http.StatusUnauthorized)
+				assert.Equal(t, w.Code, http.StatusForbidden)
 				assert.Equal(t, w.Body.String(), res)
 			})
 		}
@@ -1077,7 +1077,7 @@ func TestAuthorization(t *testing.T) {
 				req.Header.Set("authorization", "Bearer test:test")
 				w := httptest.NewRecorder()
 				testEngine.ServeHTTP(w, req)
-				assert.Equal(t, w.Code, http.StatusUnauthorized)
+				assert.Equal(t, w.Code, http.StatusForbidden)
 				assert.Equal(t, w.Body.String(), res)
 			})
 		}
@@ -1098,7 +1098,7 @@ func TestAuthorization(t *testing.T) {
 				req.Header.Set("authorization", "Bearer test:test")
 				w := httptest.NewRecorder()
 				testEngine.ServeHTTP(w, req)
-				assert.Equal(t, w.Code, http.StatusUnauthorized)
+				assert.Equal(t, w.Code, http.StatusForbidden)
 				assert.Equal(t, w.Body.String(), res)
 			})
 		}
@@ -1120,7 +1120,7 @@ func TestAuthorization(t *testing.T) {
 				req.Header.Set("authorization", "Bearer test:test")
 				w := httptest.NewRecorder()
 				testEngine.ServeHTTP(w, req)
-				assert.Equal(t, w.Code, http.StatusUnauthorized)
+				assert.Equal(t, w.Code, http.StatusForbidden)
 				assert.Equal(t, w.Body.String(), res)
 			})
 		}
@@ -1368,7 +1368,7 @@ func Test_Handles_VectorCollectionsDescribe(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/vector/collections/describe?collectionName=book", nil)
 		w := httptest.NewRecorder()
 		testEngine.ServeHTTP(w, req)
-		assert.Equal(t, w.Code, http.StatusProxyAuthRequired)
+		assert.Equal(t, w.Code, http.StatusUnauthorized)
 	})
 
 	t.Run("auth fail", func(t *testing.T) {
@@ -1377,7 +1377,7 @@ func Test_Handles_VectorCollectionsDescribe(t *testing.T) {
 		req.SetBasicAuth("test", util.DefaultRootPassword)
 		w := httptest.NewRecorder()
 		testEngine.ServeHTTP(w, req)
-		assert.Equal(t, w.Code, http.StatusUnauthorized)
+		assert.Equal(t, w.Code, http.StatusForbidden)
 		assert.Equal(t, w.Body.String(), Print(int32(65535), "rpc error: code = Unavailable desc = internal: Milvus Proxy is not ready yet. please wait"))
 	})
 
@@ -1430,7 +1430,7 @@ func Test_Handles_VectorCollectionsDescribe(t *testing.T) {
 		w := httptest.NewRecorder()
 		testEngine.ServeHTTP(w, req)
 		assert.Equal(t, w.Code, http.StatusOK)
-		assert.Equal(t, w.Body.String(), "{\"code\":200,\"data\":{\"collectionName\":\"\",\"description\":\"\",\"enableDynamic\":false,\"fields\":[{\"autoId\":false,\"description\":\"RowID field\",\"name\":\"RowID\",\"primaryKey\":false,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"Timestamp field\",\"name\":\"Timestamp\",\"primaryKey\":false,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"field 100\",\"name\":\"float_vector_field\",\"primaryKey\":false,\"type\":\"FloatVector(2)\"},{\"autoId\":false,\"description\":\"field 106\",\"name\":\"int64_field\",\"primaryKey\":true,\"type\":\"Int64\"}],\"indexes\":[],\"load\":\"\",\"shardsNum\":0}}")
+		assert.Equal(t, w.Body.String(), "{\"code\":200,\"data\":{\"collectionName\":\"\",\"description\":\"\",\"enableDynamicField\":false,\"fields\":[{\"autoId\":false,\"description\":\"RowID field\",\"name\":\"RowID\",\"primaryKey\":false,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"Timestamp field\",\"name\":\"Timestamp\",\"primaryKey\":false,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"field 100\",\"name\":\"float_vector_field\",\"primaryKey\":false,\"type\":\"FloatVector(2)\"},{\"autoId\":false,\"description\":\"field 106\",\"name\":\"int64_field\",\"primaryKey\":true,\"type\":\"Int64\"}],\"indexes\":[],\"load\":\"\",\"shardsNum\":0}}")
 	})
 
 	t.Run("get load state and describe index fail with status code", func(t *testing.T) {
@@ -1455,7 +1455,7 @@ func Test_Handles_VectorCollectionsDescribe(t *testing.T) {
 		w := httptest.NewRecorder()
 		testEngine.ServeHTTP(w, req)
 		assert.Equal(t, w.Code, http.StatusOK)
-		assert.Equal(t, w.Body.String(), "{\"code\":200,\"data\":{\"collectionName\":\"\",\"description\":\"\",\"enableDynamic\":false,\"fields\":[{\"autoId\":false,\"description\":\"RowID field\",\"name\":\"RowID\",\"primaryKey\":false,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"Timestamp field\",\"name\":\"Timestamp\",\"primaryKey\":false,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"field 100\",\"name\":\"float_vector_field\",\"primaryKey\":false,\"type\":\"FloatVector(2)\"},{\"autoId\":false,\"description\":\"field 106\",\"name\":\"int64_field\",\"primaryKey\":true,\"type\":\"Int64\"}],\"indexes\":[],\"load\":\"\",\"shardsNum\":0}}")
+		assert.Equal(t, w.Body.String(), "{\"code\":200,\"data\":{\"collectionName\":\"\",\"description\":\"\",\"enableDynamicField\":false,\"fields\":[{\"autoId\":false,\"description\":\"RowID field\",\"name\":\"RowID\",\"primaryKey\":false,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"Timestamp field\",\"name\":\"Timestamp\",\"primaryKey\":false,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"field 100\",\"name\":\"float_vector_field\",\"primaryKey\":false,\"type\":\"FloatVector(2)\"},{\"autoId\":false,\"description\":\"field 106\",\"name\":\"int64_field\",\"primaryKey\":true,\"type\":\"Int64\"}],\"indexes\":[],\"load\":\"\",\"shardsNum\":0}}")
 	})
 
 	t.Run("ok", func(t *testing.T) {
@@ -1494,6 +1494,6 @@ func Test_Handles_VectorCollectionsDescribe(t *testing.T) {
 		w := httptest.NewRecorder()
 		testEngine.ServeHTTP(w, req)
 		assert.Equal(t, w.Code, http.StatusOK)
-		assert.Equal(t, w.Body.String(), "{\"code\":200,\"data\":{\"collectionName\":\"\",\"description\":\"\",\"enableDynamic\":false,\"fields\":[{\"autoId\":false,\"description\":\"RowID field\",\"name\":\"RowID\",\"primaryKey\":false,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"Timestamp field\",\"name\":\"Timestamp\",\"primaryKey\":false,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"field 100\",\"name\":\"float_vector_field\",\"primaryKey\":false,\"type\":\"FloatVector(2)\"},{\"autoId\":false,\"description\":\"field 106\",\"name\":\"int64_field\",\"primaryKey\":true,\"type\":\"Int64\"}],\"indexes\":[],\"load\":\"LoadStateLoaded\",\"shardsNum\":0}}")
+		assert.Equal(t, w.Body.String(), "{\"code\":200,\"data\":{\"collectionName\":\"\",\"description\":\"\",\"enableDynamicField\":false,\"fields\":[{\"autoId\":false,\"description\":\"RowID field\",\"name\":\"RowID\",\"primaryKey\":false,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"Timestamp field\",\"name\":\"Timestamp\",\"primaryKey\":false,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"field 100\",\"name\":\"float_vector_field\",\"primaryKey\":false,\"type\":\"FloatVector(2)\"},{\"autoId\":false,\"description\":\"field 106\",\"name\":\"int64_field\",\"primaryKey\":true,\"type\":\"Int64\"}],\"indexes\":[],\"load\":\"LoadStateLoaded\",\"shardsNum\":0}}")
 	})
 }

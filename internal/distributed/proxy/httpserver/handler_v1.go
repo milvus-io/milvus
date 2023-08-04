@@ -26,12 +26,12 @@ func checkAuthorization(c *gin.Context, req interface{}) error {
 	if proxy.Params.CommonCfg.AuthorizationEnabled {
 		username, ok := c.Get(ContextUsername)
 		if !ok {
-			c.AbortWithStatusJSON(http.StatusProxyAuthRequired, gin.H{HTTPReturnCode: Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
 			return merr.ErrNeedAuthenticate
 		}
 		_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), req)
 		if authErr != nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
 			return authErr
 		}
 	}
@@ -216,6 +216,7 @@ func (h *Handlers) createCollection(c *gin.Context) {
 		DbName:         httpReq.DbName,
 		CollectionName: httpReq.CollectionName,
 		FieldName:      httpReq.VectorField,
+		IndexName:      DefaultIndexName,
 		ExtraParams:    []*commonpb.KeyValuePair{{Key: common.MetricTypeKey, Value: httpReq.MetricType}},
 	})
 	if err != nil {
@@ -295,7 +296,7 @@ func (h *Handlers) getCollectionDetails(c *gin.Context) {
 		"indexes":             indexDesc,
 		"load":                collLoadState,
 		"shardsNum":           coll.ShardsNum,
-		"enableDynamic":       coll.Schema.EnableDynamicField,
+		"enableDynamicField":  coll.Schema.EnableDynamicField,
 	}})
 }
 
@@ -516,9 +517,17 @@ func (h *Handlers) insert(c *gin.Context) {
 		DbName: DefaultDbName,
 	}
 	if err := c.ShouldBindBodyWith(&httpReq, binding.JSON); err != nil {
-		log.Warn("high level restful api, the parameter of insert is incorrect", zap.Any("request", httpReq), zap.Error(err))
-		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(merr.ErrIncorrectParameterFormat), HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error()})
-		return
+		singleInsertReq := SingleInsertReq{
+			DbName: DefaultDbName,
+		}
+		if err = c.ShouldBindBodyWith(&singleInsertReq, binding.JSON); err != nil {
+			log.Warn("high level restful api, the parameter of insert is incorrect", zap.Any("request", httpReq), zap.Error(err))
+			c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(merr.ErrIncorrectParameterFormat), HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error()})
+			return
+		}
+		httpReq.DbName = singleInsertReq.DbName
+		httpReq.CollectionName = singleInsertReq.CollectionName
+		httpReq.Data = []map[string]interface{}{singleInsertReq.Data}
 	}
 	if httpReq.CollectionName == "" {
 		log.Warn("high level restful api, insert require parameter: [collectionName], but miss")
