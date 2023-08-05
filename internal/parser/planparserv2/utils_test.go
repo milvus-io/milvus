@@ -3,6 +3,9 @@ package planparserv2
 import (
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/proto/planpb"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
@@ -54,6 +57,77 @@ func Test_relationalCompatible(t *testing.T) {
 			if got := relationalCompatible(tt.args.t1, tt.args.t2); got != tt.want {
 				t.Errorf("relationalCompatible() = %v, want %v", got, tt.want)
 			}
+		})
+	}
+}
+
+func TestIsAlwaysTruePlan(t *testing.T) {
+	type args struct {
+		plan *planpb.PlanNode
+	}
+	tests := []struct {
+		name string
+		args args
+		want bool
+	}{
+		{
+			args: args{
+				plan: nil,
+			},
+			want: false,
+		},
+		{
+			args: args{
+				plan: &planpb.PlanNode{
+					Node: &planpb.PlanNode_VectorAnns{
+						VectorAnns: &planpb.VectorANNS{
+							Predicates: alwaysTrueExpr(),
+						},
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			args: args{
+				plan: &planpb.PlanNode{
+					Node: &planpb.PlanNode_Predicates{
+						Predicates: alwaysTrueExpr(),
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			args: args{
+				plan: &planpb.PlanNode{
+					Node: &planpb.PlanNode_Query{
+						Query: &planpb.QueryPlanNode{
+							Predicates: alwaysTrueExpr(),
+							IsCount:    false,
+						},
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			args: args{
+				plan: &planpb.PlanNode{
+					Node: &planpb.PlanNode_Query{
+						Query: &planpb.QueryPlanNode{
+							Predicates: alwaysTrueExpr(),
+							IsCount:    true,
+						},
+					},
+				},
+			},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equalf(t, tt.want, IsAlwaysTruePlan(tt.args.plan), "IsAlwaysTruePlan(%v)", tt.args.plan)
 		})
 	}
 }

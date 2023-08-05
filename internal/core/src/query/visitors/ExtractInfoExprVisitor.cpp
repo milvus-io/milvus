@@ -70,4 +70,9 @@ ExtractInfoExprVisitor::visit(ExistsExpr& expr) {
     plan_info_.add_involved_field(expr.column_.field_id);
 }
 
+void
+ExtractInfoExprVisitor::visit(AlwaysTrueExpr& expr) {
+    // all is involved.
+}
+
 }  // namespace milvus::query

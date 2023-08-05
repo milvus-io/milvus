@@ -13,8 +13,11 @@ import (
 )
 
 func handleExpr(schema *typeutil.SchemaHelper, exprStr string) interface{} {
-	if exprStr == "" {
-		return nil
+	if isEmptyExpression(exprStr) {
+		return &ExprWithType{
+			dataType: schemapb.DataType_Bool,
+			expr:     alwaysTrueExpr(),
+		}
 	}
 
 	inputStream := antlr.NewInputStream(exprStr)
@@ -49,10 +52,6 @@ func handleExpr(schema *typeutil.SchemaHelper, exprStr string) interface{} {
 }
 
 func ParseExpr(schema *typeutil.SchemaHelper, exprStr string) (*planpb.Expr, error) {
-	if len(exprStr) <= 0 {
-		return nil, nil
-	}
-
 	ret := handleExpr(schema, exprStr)
 
 	if err := getError(ret); err != nil {
@@ -115,7 +114,14 @@ func CreateSearchPlan(schemaPb *schemapb.CollectionSchema, exprStr string, vecto
 		return nil, err
 	}
 
-	expr, err := ParseExpr(schema, exprStr)
+	parse := func() (*planpb.Expr, error) {
+		if len(exprStr) <= 0 {
+			return nil, nil
+		}
+		return ParseExpr(schema, exprStr)
+	}
+
+	expr, err := parse()
 	if err != nil {
 		log.Info("CreateSearchPlan failed", zap.Error(err))
 		return nil, err

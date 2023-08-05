@@ -608,6 +608,9 @@ ProtoParser::ParseExpr(const proto::plan::Expr& expr_pb) {
         case ppe::kExistsExpr: {
             return ParseExistExpr(expr_pb.exists_expr());
         }
+        case ppe::kAlwaysTrueExpr: {
+            return CreateAlwaysTrueExpr();
+        }
         default:
             PanicInfo("unsupported expr proto node");
     }

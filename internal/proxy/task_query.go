@@ -199,10 +199,6 @@ func (t *queryTask) createPlan(ctx context.Context) error {
 		return err
 	}
 
-	if t.request.Expr == "" {
-		return fmt.Errorf("query expression is empty")
-	}
-
 	plan, err := planparserv2.CreateRetrievePlan(schema, t.request.Expr)
 	if err != nil {
 		return err
@@ -323,6 +319,10 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	t.plan.Node.(*planpb.PlanNode_Query).Query.Limit = t.RetrieveRequest.Limit
 
+	if planparserv2.IsAlwaysTruePlan(t.plan) && t.RetrieveRequest.Limit == typeutil.Unlimited {
+		return fmt.Errorf("empty expression should be used with limit")
+	}
+
 	partitionNames := t.request.GetPartitionNames()
 	if t.partitionKeyMode {
 		expr, err := ParseExprFromPlan(t.plan)
@@ -347,10 +347,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		return fmt.Errorf("count entities with pagination is not allowed")
 	}
 
-	if t.plan.GetQuery().GetIsCount() {
-		t.RetrieveRequest.IsCount = true
-	}
-
+	t.RetrieveRequest.IsCount = t.plan.GetQuery().GetIsCount()
 	t.RetrieveRequest.SerializedExprPlan, err = proto.Marshal(t.plan)
 	if err != nil {
 		return err

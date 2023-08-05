@@ -132,6 +132,8 @@ message BinaryArithOpEvalRangeExpr {
   GenericValue value = 5;
 }
 
+message AlwaysTrueExpr {}
+
 message Expr {
   oneof expr {
     TermExpr term_expr = 1;
@@ -145,6 +147,7 @@ message Expr {
     ValueExpr value_expr = 9;
     ColumnExpr column_expr = 10;
     ExistsExpr exists_expr = 11;
+    AlwaysTrueExpr always_true_expr = 12;
   };
 }
 

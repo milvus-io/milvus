@@ -42,5 +42,8 @@ class ExprVisitor {
 
     virtual void
     visit(ExistsExpr&) = 0;
+
+    virtual void
+    visit(AlwaysTrueExpr&) = 0;
 };
 }  // namespace milvus::query

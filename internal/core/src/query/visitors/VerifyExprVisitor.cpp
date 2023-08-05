@@ -52,4 +52,9 @@ VerifyExprVisitor::visit(ExistsExpr& expr) {
     // TODO
 }
 
+void
+VerifyExprVisitor::visit(AlwaysTrueExpr& expr) {
+    // TODO
+}
+
 }  // namespace milvus::query

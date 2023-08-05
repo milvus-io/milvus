@@ -335,4 +335,12 @@ ShowExprVisitor::visit(ExistsExpr& expr) {
     json_opt_ = res;
 }
 
+void
+ShowExprVisitor::visit(AlwaysTrueExpr& expr) {
+    AssertInfo(!json_opt_.has_value(),
+               "[ShowExprVisitor]Ret json already has value before visit");
+    Json res{{"expr_type", "AlwaysTrue"}};
+    json_opt_ = res;
+}
+
 }  // namespace milvus::query
