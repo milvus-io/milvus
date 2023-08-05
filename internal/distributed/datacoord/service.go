@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/interceptor"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
+	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/zap"
@@ -47,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tikv"
 )
 
 // Server is the grpc server of datacoord
@@ -58,6 +60,7 @@ type Server struct {
 	dataCoord types.DataCoordComponent
 
 	etcdCli *clientv3.Client
+	tikvCli *txnkv.Client
 
 	grpcErrChan chan error
 	grpcServer  *grpc.Server
@@ -95,6 +98,9 @@ func (s *Server) init() error {
 	s.etcdCli = etcdCli
 	s.dataCoord.SetEtcdClient(etcdCli)
 	s.dataCoord.SetAddress(Params.GetAddress())
+
+	tikvCli, _ := tikv.GetTiKVClient()
+	s.dataCoord.SetTiKVClient(tikvCli)
 
 	err = s.startGrpc()
 	if err != nil {
@@ -193,6 +199,9 @@ func (s *Server) Stop() error {
 
 	if s.etcdCli != nil {
 		defer s.etcdCli.Close()
+	}
+	if s.tikvCli != nil {
+		defer s.tikvCli.Close()
 	}
 	if s.grpcServer != nil {
 		log.Debug("Graceful stop grpc server...")

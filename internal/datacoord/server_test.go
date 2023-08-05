@@ -60,6 +60,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tikv"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -3945,6 +3946,10 @@ func newTestServer(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 
 	svr := CreateServer(context.TODO(), factory)
 	svr.SetEtcdClient(etcdCli)
+
+	tikvCli, _ := tikv.GetTiKVClient()
+	svr.SetTiKVClient(tikvCli)
+
 	svr.dataNodeCreator = func(ctx context.Context, addr string) (types.DataNode, error) {
 		return newMockDataNodeClient(0, receiveCh)
 	}
@@ -3997,6 +4002,10 @@ func newTestServerWithMeta(t *testing.T, receiveCh chan any, meta *meta, opts ..
 
 	svr := CreateServer(context.TODO(), factory, opts...)
 	svr.SetEtcdClient(etcdCli)
+
+	tikvCli, _ := tikv.GetTiKVClient()
+	svr.SetTiKVClient(tikvCli)
+
 	svr.dataNodeCreator = func(ctx context.Context, addr string) (types.DataNode, error) {
 		return newMockDataNodeClient(0, receiveCh)
 	}
@@ -4052,6 +4061,10 @@ func newTestServer2(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 
 	svr := CreateServer(context.TODO(), factory, opts...)
 	svr.SetEtcdClient(etcdCli)
+
+	tikvCli, _ := tikv.GetTiKVClient()
+	svr.SetTiKVClient(tikvCli)
+
 	svr.dataNodeCreator = func(ctx context.Context, addr string) (types.DataNode, error) {
 		return newMockDataNodeClient(0, receiveCh)
 	}
@@ -4244,6 +4257,10 @@ func testDataCoordBase(t *testing.T, opts ...Option) *Server {
 
 	svr := CreateServer(ctx, factory, opts...)
 	svr.SetEtcdClient(etcdCli)
+
+	tikvCli, _ := tikv.GetTiKVClient()
+	svr.SetTiKVClient(tikvCli)
+
 	svr.SetDataNodeCreator(func(ctx context.Context, addr string) (types.DataNode, error) {
 		return newMockDataNodeClient(0, nil)
 	})

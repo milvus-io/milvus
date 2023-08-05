@@ -394,6 +394,9 @@ type DataCoordComponent interface {
 	// `etcdClient` is a client of etcd
 	SetEtcdClient(etcdClient *clientv3.Client)
 
+	// SetTiKVClient set TiKV client for QueryNode
+	SetTiKVClient(client *txnkv.Client)
+
 	SetRootCoord(rootCoord RootCoord)
 
 	// SetDataNodeCreator set DataNode client creator func for DataCoord

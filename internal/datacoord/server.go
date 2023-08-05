@@ -28,6 +28,7 @@ import (
 
 	"github.com/blang/semver/v4"
 	"github.com/cockroachdb/errors"
+	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
@@ -37,6 +38,7 @@ import (
 	rootcoordclient "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -102,8 +104,10 @@ type Server struct {
 	helper           ServerHelper
 
 	etcdCli          *clientv3.Client
+	tikvCli          *txnkv.Client
 	address          string
-	kvClient         kv.WatchKV
+	watchClient      kv.WatchKV
+	kv               kv.MetaKv
 	meta             *meta
 	segmentManager   Manager
 	allocator        allocator
@@ -404,7 +408,7 @@ func (s *Server) initCluster() error {
 	}
 
 	var err error
-	s.channelManager, err = NewChannelManager(s.kvClient, s.handler, withMsgstreamFactory(s.factory),
+	s.channelManager, err = NewChannelManager(s.watchClient, s.handler, withMsgstreamFactory(s.factory),
 		withStateChecker(), withBgChecker())
 	if err != nil {
 		return err
@@ -421,6 +425,10 @@ func (s *Server) SetAddress(address string) {
 // SetEtcdClient sets etcd client for datacoord.
 func (s *Server) SetEtcdClient(client *clientv3.Client) {
 	s.etcdCli = client
+}
+
+func (s *Server) SetTiKVClient(client *txnkv.Client) {
+	s.tikvCli = client
 }
 
 func (s *Server) SetRootCoord(rootCoord types.RootCoord) {
@@ -534,12 +542,12 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	if s.meta != nil {
 		return nil
 	}
-	etcdKV := etcdkv.NewEtcdKV(s.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
+	s.watchClient = etcdkv.NewEtcdKV(s.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
+	s.kv = tikv.NewTiKV(s.tikvCli, Params.EtcdCfg.MetaRootPath.GetValue())
 
-	s.kvClient = etcdKV
 	reloadEtcdFn := func() error {
 		var err error
-		catalog := datacoord.NewCatalog(etcdKV, chunkManager.RootPath(), Params.EtcdCfg.MetaRootPath.GetValue())
+		catalog := datacoord.NewCatalog(s.kv, chunkManager.RootPath(), Params.EtcdCfg.MetaRootPath.GetValue())
 		s.meta, err = newMeta(s.ctx, catalog, chunkManager)
 		if err != nil {
 			return err
@@ -989,8 +997,17 @@ func (s *Server) Stop() error {
 
 // CleanMeta only for test
 func (s *Server) CleanMeta() error {
-	log.Debug("clean meta", zap.Any("kv", s.kvClient))
-	return s.kvClient.RemoveWithPrefix("")
+	log.Debug("clean meta", zap.Any("kv", s.kv))
+	err := s.kv.RemoveWithPrefix("")
+	err2 := s.watchClient.RemoveWithPrefix("")
+	if err2 != nil {
+		if err != nil {
+			err = fmt.Errorf("Failed to CleanMeta[metadata cleanup error: %w][watchdata cleanup error: %w]", err, err2)
+		} else {
+			err = err2
+		}
+	}
+	return err
 }
 
 func (s *Server) stopServerLoop() {

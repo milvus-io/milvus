@@ -900,7 +900,14 @@ func buildBinlogKvs(collectionID, partitionID, segmentID typeutil.UniqueID, binl
 			return nil, fmt.Errorf("marshal deltalogs failed, collectionID:%d, segmentID:%d, fieldID:%d, error:%w", collectionID, segmentID, deltalog.FieldID, err)
 		}
 		key := buildFieldDeltalogPath(collectionID, partitionID, segmentID, deltalog.FieldID)
-		kv[key] = string(binlogBytes)
+		if len(string(binlogBytes)) == 0 {
+			// Note that some Meta Stores (e.g. TiKV) don't allow value to be empty.
+			// Thus we pass in a " " instead of an empty string.
+			kv[key] = " "
+			log.Error("Debug by yiwang.")
+		} else {
+			kv[key] = string(binlogBytes)
+		}
 	}
 
 	// statslog

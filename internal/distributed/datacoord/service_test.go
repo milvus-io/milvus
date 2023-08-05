@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/stretchr/testify/assert"
+	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
@@ -102,6 +103,9 @@ func (*MockDataCoord) SetAddress(address string) {
 }
 
 func (m *MockDataCoord) SetEtcdClient(etcdClient *clientv3.Client) {
+}
+
+func (m *MockDataCoord) SetTiKVClient(client *txnkv.Client) {
 }
 
 func (m *MockDataCoord) SetRootCoord(rootCoord types.RootCoord) {
