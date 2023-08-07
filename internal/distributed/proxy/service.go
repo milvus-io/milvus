@@ -124,6 +124,9 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 }
 
 func authenticate(c *gin.Context) {
+	if !proxy.Params.CommonCfg.AuthorizationEnabled {
+		return
+	}
 	username, password, ok := httpserver.ParseUsernamePassword(c)
 	if ok {
 		if proxy.PasswordVerify(c, username, password) {
@@ -132,7 +135,7 @@ func authenticate(c *gin.Context) {
 			return
 		}
 	}
-	c.AbortWithStatusJSON(http.StatusProxyAuthRequired, gin.H{httpserver.HTTPReturnCode: httpserver.Code(merr.ErrNeedAuthenticate), httpserver.HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
+	c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{httpserver.HTTPReturnCode: httpserver.Code(merr.ErrNeedAuthenticate), httpserver.HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
 }
 
 // registerHTTPServer register the http server, panic when failed
@@ -157,14 +160,26 @@ func (s *Server) registerHTTPServer() {
 	})
 }
 
-func (s *Server) startHTTPServer() {
+func (s *Server) startHTTPServer(errChan chan error) {
 	defer s.wg.Done()
 	ginHandler := gin.Default()
+	ginHandler.Use(func(c *gin.Context) {
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, DELETE, OPTIONS, PATCH")
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+	})
 	app := ginHandler.Group("/v1", authenticate)
 	httpserver.NewHandlers(s.proxy).RegisterRoutesToV1(app)
 	s.httpServer = &http.Server{Handler: ginHandler}
+	errChan <- nil
 	if err := s.httpServer.Serve(s.httpListener); err != nil && err != cmux.ErrServerClosed {
-		log.Warn("start Proxy http server to listen failed", zap.Error(err))
+		log.Error("start Proxy http server to listen failed", zap.Error(err))
+		errChan <- err
 		return
 	}
 	log.Info("Proxy http server exited")
@@ -407,13 +422,66 @@ func (s *Server) init() error {
 			log.Error("Proxy server(grpc/http) failed to listen on", zap.Error(err), zap.Int("port", Params.Port))
 			return err
 		}
-		if HTTPParams.Enabled && Params.TLSMode == 0 {
+		if HTTPParams.Enabled && Params.TLSMode == 0 && (HTTPParams.Port == -1 || HTTPParams.Port == Params.Port) {
 			s.tcpServer = cmux.New(lis)
 			s.grpcListener = s.tcpServer.MatchWithWriters(cmux.HTTP2MatchHeaderFieldSendSettings("content-type", "application/grpc"))
 			s.httpListener = s.tcpServer.Match(cmux.Any())
 		} else {
 			s.grpcListener = lis
 		}
+
+		if HTTPParams.Enabled && HTTPParams.Port != -1 && HTTPParams.Port != Params.Port {
+			if Params.TLSMode == 0 {
+				s.httpListener, listenErr = net.Listen("tcp", ":"+strconv.Itoa(HTTPParams.Port))
+				if listenErr != nil {
+					log.Error("Proxy server(http) failed to listen on", zap.Error(err), zap.Int("port", HTTPParams.Port))
+					return err
+				}
+			} else if Params.TLSMode == 1 {
+				creds, err := tls.LoadX509KeyPair(Params.ServerPemPath, Params.ServerKeyPath)
+				if err != nil {
+					log.Error("proxy can't create creds", zap.Error(err))
+					return err
+				}
+				s.httpListener, listenErr = tls.Listen("tcp", ":"+strconv.Itoa(HTTPParams.Port), &tls.Config{
+					Certificates: []tls.Certificate{creds},
+				})
+				if listenErr != nil {
+					log.Error("Proxy server(http) failed to listen on", zap.Error(err), zap.Int("port", HTTPParams.Port))
+					return listenErr
+				}
+			} else if Params.TLSMode == 2 {
+				cert, err := tls.LoadX509KeyPair(Params.ServerPemPath, Params.ServerKeyPath)
+				if err != nil {
+					log.Error("proxy cant load x509 key pair", zap.Error(err))
+					return err
+				}
+
+				certPool := x509.NewCertPool()
+				rootBuf, err := ioutil.ReadFile(Params.CaPemPath)
+				if err != nil {
+					log.Error("failed read ca pem", zap.Error(err))
+					return err
+				}
+				if !certPool.AppendCertsFromPEM(rootBuf) {
+					log.Warn("fail to append ca to cert")
+					return fmt.Errorf("fail to append ca to cert")
+				}
+
+				tlsConf := &tls.Config{
+					ClientAuth:   tls.RequireAndVerifyClientCert,
+					Certificates: []tls.Certificate{cert},
+					ClientCAs:    certPool,
+					MinVersion:   tls.VersionTLS13,
+				}
+				s.httpListener, listenErr = tls.Listen("tcp", ":"+strconv.Itoa(HTTPParams.Port), tlsConf)
+				if listenErr != nil {
+					log.Error("Proxy server(http) failed to listen on", zap.Error(err), zap.Int("port", HTTPParams.Port))
+					return listenErr
+				}
+			}
+		}
+
 	}
 	{
 		s.startExternalRPCServer(Params.Port, errChan)
@@ -564,10 +632,15 @@ func (s *Server) start() error {
 		return err
 	}
 
-	if s.tcpServer != nil {
+	if s.httpListener != nil {
 		log.Info("start Proxy http server")
+		errChan := make(chan error, 1)
 		s.wg.Add(1)
-		go s.startHTTPServer()
+		go s.startHTTPServer(errChan)
+		if err := <-errChan; err != nil {
+			log.Error("failed to create http server", zap.Error(err))
+			return err
+		}
 	}
 
 	return nil
@@ -602,6 +675,10 @@ func (s *Server) Stop() error {
 		} else if s.grpcExternalServer != nil {
 			log.Info("Graceful stop grpc external server...")
 			s.grpcExternalServer.GracefulStop()
+			if s.httpServer != nil {
+				log.Info("Graceful stop grpc http server...")
+				s.httpServer.Close()
+			}
 		}
 	}()
 	gracefulWg.Wait()

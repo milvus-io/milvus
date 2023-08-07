@@ -21,6 +21,7 @@ const (
 	HTTPCollectionName  = "collectionName"
 	HTTPDbName          = "dbName"
 	DefaultDbName       = "default"
+	DefaultIndexName    = "vector_idx"
 	DefaultOutputFields = "*"
 
 	HTTPReturnCode    = "code"

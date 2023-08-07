@@ -11,4 +11,5 @@ func TestHTTPConfig_Init(t *testing.T) {
 	cf.InitOnce()
 	assert.Equal(t, cf.Enabled, true)
 	assert.Equal(t, cf.DebugMode, false)
+	assert.Equal(t, cf.Port, -1)
 }

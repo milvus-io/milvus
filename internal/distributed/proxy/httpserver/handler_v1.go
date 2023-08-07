@@ -42,21 +42,30 @@ func (h *Handlers) checkDatabase(c *gin.Context, dbName string) bool {
 	return false
 }
 
+func checkAuthorization(c *gin.Context, req interface{}) error {
+	if proxy.Params.CommonCfg.AuthorizationEnabled {
+		username, ok := c.Get(ContextUsername)
+		if !ok {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
+			return merr.ErrNeedAuthenticate
+		}
+		_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), req)
+		if authErr != nil {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
+			return authErr
+		}
+	}
+	return nil
+}
+
 func (h *Handlers) describeCollection(c *gin.Context, dbName string, collectionName string, needAuth bool) (*milvuspb.DescribeCollectionResponse, error) {
 	req := milvuspb.DescribeCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	}
 	if needAuth {
-		username, ok := c.Get(ContextUsername)
-		if !ok {
-			c.JSON(http.StatusProxyAuthRequired, gin.H{HTTPReturnCode: Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
-			return nil, merr.ErrNeedAuthenticate
-		}
-		_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
-		if authErr != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
-			return nil, authErr
+		if err := checkAuthorization(c, &req); err != nil {
+			return nil, err
 		}
 	}
 	response, err := h.proxy.DescribeCollection(c, &req)
@@ -109,10 +118,7 @@ func (h *Handlers) listCollections(c *gin.Context) {
 	req := milvuspb.ShowCollectionsRequest{
 		DbName: dbName,
 	}
-	username, _ := c.Get(ContextUsername)
-	_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
-	if authErr != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
+	if err := checkAuthorization(c, &req); err != nil {
 		return
 	}
 	if !h.checkDatabase(c, dbName) {
@@ -190,10 +196,7 @@ func (h *Handlers) createCollection(c *gin.Context) {
 		ShardsNum:        ShardNumDefault,
 		ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
 	}
-	username, _ := c.Get(ContextUsername)
-	_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
-	if authErr != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
+	if err := checkAuthorization(c, &req); err != nil {
 		return
 	}
 	if !h.checkDatabase(c, req.DbName) {
@@ -212,6 +215,7 @@ func (h *Handlers) createCollection(c *gin.Context) {
 		DbName:         httpReq.DbName,
 		CollectionName: httpReq.CollectionName,
 		FieldName:      httpReq.VectorField,
+		IndexName:      DefaultIndexName,
 		ExtraParams:    []*commonpb.KeyValuePair{{Key: common.MetricTypeKey, Value: httpReq.MetricType}},
 	})
 	if err != nil {
@@ -291,7 +295,7 @@ func (h *Handlers) getCollectionDetails(c *gin.Context) {
 		"indexes":             indexDesc,
 		"load":                collLoadState,
 		"shardsNum":           coll.ShardsNum,
-		"enableDynamic":       coll.Schema.EnableDynamicField,
+		"enableDynamicField":  coll.Schema.EnableDynamicField,
 	}})
 }
 
@@ -313,10 +317,7 @@ func (h *Handlers) dropCollection(c *gin.Context) {
 		DbName:         httpReq.DbName,
 		CollectionName: httpReq.CollectionName,
 	}
-	username, _ := c.Get(ContextUsername)
-	_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
-	if authErr != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
+	if err := checkAuthorization(c, &req); err != nil {
 		return
 	}
 	if !h.checkDatabase(c, req.DbName) {
@@ -350,8 +351,8 @@ func (h *Handlers) query(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(merr.ErrIncorrectParameterFormat), HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error()})
 		return
 	}
-	if httpReq.CollectionName == "" {
-		log.Warn("high level restful api, query require parameter: [collectionName], but miss")
+	if httpReq.CollectionName == "" || httpReq.Filter == "" {
+		log.Warn("high level restful api, query require parameter: [collectionName, filter], but miss")
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(merr.ErrMissingRequiredParameters), HTTPReturnMessage: merr.ErrMissingRequiredParameters.Error()})
 		return
 	}
@@ -369,10 +370,7 @@ func (h *Handlers) query(c *gin.Context) {
 	if httpReq.Limit > 0 {
 		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: ParamLimit, Value: strconv.FormatInt(int64(httpReq.Limit), 10)})
 	}
-	username, _ := c.Get(ContextUsername)
-	_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
-	if authErr != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
+	if err := checkAuthorization(c, &req); err != nil {
 		return
 	}
 	if !h.checkDatabase(c, req.DbName) {
@@ -415,9 +413,9 @@ func (h *Handlers) get(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(merr.ErrIncorrectParameterFormat), HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error()})
 		return
 	}
-	if httpReq.CollectionName == "" {
-		log.Warn("high level restful api, get require parameter: [collectionName], but miss")
-		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(merr.ErrMissingRequiredParameters), HTTPReturnMessage: merr.ErrMissingRequiredParameters})
+	if httpReq.CollectionName == "" || httpReq.ID == nil {
+		log.Warn("high level restful api, get require parameter: [collectionName, id], but miss")
+		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(merr.ErrMissingRequiredParameters), HTTPReturnMessage: merr.ErrMissingRequiredParameters.Error()})
 		return
 	}
 	req := milvuspb.QueryRequest{
@@ -426,10 +424,7 @@ func (h *Handlers) get(c *gin.Context) {
 		OutputFields:       httpReq.OutputFields,
 		GuaranteeTimestamp: BoundedTimestamp,
 	}
-	username, _ := c.Get(ContextUsername)
-	_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
-	if authErr != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
+	if err := checkAuthorization(c, &req); err != nil {
 		return
 	}
 	if !h.checkDatabase(c, req.DbName) {
@@ -480,8 +475,8 @@ func (h *Handlers) delete(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(merr.ErrIncorrectParameterFormat), HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error()})
 		return
 	}
-	if httpReq.CollectionName == "" {
-		log.Warn("high level restful api, delete require parameter: [collectionName], but miss")
+	if httpReq.CollectionName == "" || httpReq.ID == nil {
+		log.Warn("high level restful api, delete require parameter: [collectionName, id], but miss")
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(merr.ErrMissingRequiredParameters), HTTPReturnMessage: merr.ErrMissingRequiredParameters.Error()})
 		return
 	}
@@ -489,10 +484,7 @@ func (h *Handlers) delete(c *gin.Context) {
 		DbName:         httpReq.DbName,
 		CollectionName: httpReq.CollectionName,
 	}
-	username, _ := c.Get(ContextUsername)
-	_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
-	if authErr != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
+	if err := checkAuthorization(c, &req); err != nil {
 		return
 	}
 	if !h.checkDatabase(c, req.DbName) {
@@ -524,12 +516,20 @@ func (h *Handlers) insert(c *gin.Context) {
 		DbName: DefaultDbName,
 	}
 	if err := c.ShouldBindBodyWith(&httpReq, binding.JSON); err != nil {
-		log.Warn("high level restful api, the parameter of insert is incorrect", zap.Any("request", httpReq), zap.Error(err))
-		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(merr.ErrIncorrectParameterFormat), HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error()})
-		return
+		singleInsertReq := SingleInsertReq{
+			DbName: DefaultDbName,
+		}
+		if err = c.ShouldBindBodyWith(&singleInsertReq, binding.JSON); err != nil {
+			log.Warn("high level restful api, the parameter of insert is incorrect", zap.Any("request", httpReq), zap.Error(err))
+			c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(merr.ErrIncorrectParameterFormat), HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error()})
+			return
+		}
+		httpReq.DbName = singleInsertReq.DbName
+		httpReq.CollectionName = singleInsertReq.CollectionName
+		httpReq.Data = []map[string]interface{}{singleInsertReq.Data}
 	}
-	if httpReq.CollectionName == "" {
-		log.Warn("high level restful api, insert require parameter: [collectionName], but miss")
+	if httpReq.CollectionName == "" || httpReq.Data == nil {
+		log.Warn("high level restful api, insert require parameter: [collectionName, data], but miss")
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(merr.ErrMissingRequiredParameters), HTTPReturnMessage: merr.ErrMissingRequiredParameters.Error()})
 		return
 	}
@@ -539,10 +539,7 @@ func (h *Handlers) insert(c *gin.Context) {
 		PartitionName:  "_default",
 		NumRows:        uint32(len(httpReq.Data)),
 	}
-	username, _ := c.Get(ContextUsername)
-	_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
-	if authErr != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
+	if err := checkAuthorization(c, &req); err != nil {
 		return
 	}
 	if !h.checkDatabase(c, req.DbName) {
@@ -592,9 +589,9 @@ func (h *Handlers) search(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(merr.ErrIncorrectParameterFormat), HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error()})
 		return
 	}
-	if httpReq.CollectionName == "" {
-		log.Warn("high level restful api, search require parameter: [collectionName], but miss")
-		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(merr.ErrMissingRequiredParameters), HTTPReturnMessage: merr.ErrMissingRequiredParameters})
+	if httpReq.CollectionName == "" || httpReq.Vector == nil {
+		log.Warn("high level restful api, search require parameter: [collectionName, vector], but miss")
+		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(merr.ErrMissingRequiredParameters), HTTPReturnMessage: merr.ErrMissingRequiredParameters.Error()})
 		return
 	}
 
@@ -619,10 +616,7 @@ func (h *Handlers) search(c *gin.Context) {
 		GuaranteeTimestamp: BoundedTimestamp,
 		Nq:                 int64(1),
 	}
-	username, _ := c.Get(ContextUsername)
-	_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
-	if authErr != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: Code(authErr), HTTPReturnMessage: authErr.Error()})
+	if err := checkAuthorization(c, &req); err != nil {
 		return
 	}
 	if !h.checkDatabase(c, req.DbName) {
