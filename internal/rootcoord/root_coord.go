@@ -636,21 +636,23 @@ func (c *Core) startInternal() error {
 
 	c.scheduler.Start()
 	c.stepExecutor.Start()
+	go func() {
+		// refresh rbac cache
+		if err := retry.Do(c.ctx, func() error {
+			if err := c.proxyClientManager.RefreshPolicyInfoCache(c.ctx, &proxypb.RefreshPolicyInfoCacheRequest{
+				OpType: int32(typeutil.CacheRefresh),
+			}); err != nil {
+				log.Warn("fail to refresh policy info cache", zap.Error(err))
+				return err
+			}
+			return nil
+		}, retry.Attempts(100), retry.Sleep(time.Second)); err != nil {
+			log.Panic("fail to refresh policy info cache", zap.Error(err))
+		}
+	}()
 
 	c.startServerLoop()
 	c.UpdateStateCode(commonpb.StateCode_Healthy)
-	// refresh rbac cache
-	if err := retry.Do(c.ctx, func() error {
-		if err := c.proxyClientManager.RefreshPolicyInfoCache(c.ctx, &proxypb.RefreshPolicyInfoCacheRequest{
-			OpType: int32(typeutil.CacheRefresh),
-		}); err != nil {
-			log.Warn("fail to refresh policy info cache", zap.Error(err))
-			return err
-		}
-		return nil
-	}, retry.Attempts(100), retry.Sleep(time.Second)); err != nil {
-		log.Panic("fail to refresh policy info cache", zap.Error(err))
-	}
 	logutil.Logger(c.ctx).Info("rootcoord startup successfully")
 
 	return nil
