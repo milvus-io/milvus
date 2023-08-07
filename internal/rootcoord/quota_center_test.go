@@ -410,6 +410,7 @@ func TestQuotaCenter(t *testing.T) {
 	t.Run("test GrowingSegmentsSize factors", func(t *testing.T) {
 		qc := types.NewMockQueryCoord(t)
 		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
+		defaultRatio := Params.QuotaConfig.GrowingSegmentsSizeMinRateRatio
 		tests := []struct {
 			low            float64
 			high           float64
@@ -421,15 +422,15 @@ func TestQuotaCenter(t *testing.T) {
 			{0.8, 0.9, 80, 100, 1},
 			{0.8, 0.9, 82, 100, 0.8},
 			{0.8, 0.9, 85, 100, 0.5},
-			{0.8, 0.9, 88, 100, 0.2},
-			{0.8, 0.9, 90, 100, 0},
+			{0.8, 0.9, 88, 100, defaultRatio},
+			{0.8, 0.9, 90, 100, defaultRatio},
 
 			{0.85, 0.95, 25, 100, 1},
 			{0.85, 0.95, 85, 100, 1},
 			{0.85, 0.95, 87, 100, 0.8},
 			{0.85, 0.95, 90, 100, 0.5},
-			{0.85, 0.95, 93, 100, 0.2},
-			{0.85, 0.95, 95, 100, 0},
+			{0.85, 0.95, 93, 100, defaultRatio},
+			{0.85, 0.95, 95, 100, defaultRatio},
 		}
 
 		quotaCenter.writableCollections = append(quotaCenter.writableCollections, 1, 2, 3)
