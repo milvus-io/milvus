@@ -761,11 +761,11 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	catalog.On("ChannelExists",
 		mock.Anything,
 		mock.Anything,
-	).Return(false)
+	).Return(true)
 	catalog.On("DropChannelCheckpoint",
 		mock.Anything,
 		mock.Anything,
-	).Return(nil)
+	).Return(nil).Maybe()
 	catalog.On("CreateSegmentIndex",
 		mock.Anything,
 		mock.Anything,
@@ -793,11 +793,14 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 						ID:            segID,
 						CollectionID:  collID,
 						PartitionID:   partID,
-						InsertChannel: "",
+						InsertChannel: "dmlChannel",
 						NumOfRows:     5000,
 						State:         commonpb.SegmentState_Dropped,
 						MaxRowNum:     65536,
 						DroppedAt:     0,
+						DmlPosition: &msgpb.MsgPosition{
+							Timestamp: 900,
+						},
 					},
 					segmentIndexes: map[UniqueID]*model.SegmentIndex{
 						indexID: {
@@ -824,11 +827,14 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 						ID:            segID + 1,
 						CollectionID:  collID,
 						PartitionID:   partID,
-						InsertChannel: "",
+						InsertChannel: "dmlChannel",
 						NumOfRows:     5000,
 						State:         commonpb.SegmentState_Dropped,
 						MaxRowNum:     65536,
 						DroppedAt:     0,
+						DmlPosition: &msgpb.MsgPosition{
+							Timestamp: 900,
+						},
 					},
 					segmentIndexes: map[UniqueID]*model.SegmentIndex{
 						indexID: {
@@ -852,47 +858,55 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 				},
 				segID + 2: {
 					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID + 2,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						InsertChannel:  "",
-						NumOfRows:      10000,
-						State:          commonpb.SegmentState_Dropped,
-						MaxRowNum:      65536,
-						DroppedAt:      10,
+						ID:            segID + 2,
+						CollectionID:  collID,
+						PartitionID:   partID,
+						InsertChannel: "dmlChannel",
+						NumOfRows:     10000,
+						State:         commonpb.SegmentState_Dropped,
+						MaxRowNum:     65536,
+						DroppedAt:     10,
+						DmlPosition: &msgpb.MsgPosition{
+							Timestamp: 900,
+						},
 						CompactionFrom: []int64{segID, segID + 1},
 					},
 					segmentIndexes: map[UniqueID]*model.SegmentIndex{},
 				},
 				segID + 3: {
 					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID + 3,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						InsertChannel:  "",
-						NumOfRows:      2000,
-						State:          commonpb.SegmentState_Dropped,
-						MaxRowNum:      65536,
-						DroppedAt:      10,
+						ID:            segID + 3,
+						CollectionID:  collID,
+						PartitionID:   partID,
+						InsertChannel: "dmlChannel",
+						NumOfRows:     2000,
+						State:         commonpb.SegmentState_Dropped,
+						MaxRowNum:     65536,
+						DroppedAt:     10,
+						DmlPosition: &msgpb.MsgPosition{
+							Timestamp: 900,
+						},
 						CompactionFrom: nil,
 					},
 					segmentIndexes: map[UniqueID]*model.SegmentIndex{},
 				},
 				segID + 4: {
 					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID + 4,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						InsertChannel:  "",
-						NumOfRows:      12000,
-						State:          commonpb.SegmentState_Flushed,
-						MaxRowNum:      65536,
-						DroppedAt:      10,
+						ID:            segID + 4,
+						CollectionID:  collID,
+						PartitionID:   partID,
+						InsertChannel: "dmlChannel",
+						NumOfRows:     12000,
+						State:         commonpb.SegmentState_Flushed,
+						MaxRowNum:     65536,
+						DroppedAt:     10,
+						DmlPosition: &msgpb.MsgPosition{
+							Timestamp: 900,
+						},
 						CompactionFrom: []int64{segID + 2, segID + 3},
 					},
 					segmentIndexes: map[UniqueID]*model.SegmentIndex{},
 				},
-				// before channel cp,
 				segID + 5: {
 					SegmentInfo: &datapb.SegmentInfo{
 						ID:             segID + 5,
@@ -907,6 +921,41 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 						DmlPosition: &msgpb.MsgPosition{
 							Timestamp: 1200,
 						},
+					},
+				},
+				segID + 6: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:             segID + 6,
+						CollectionID:   collID,
+						PartitionID:    partID,
+						InsertChannel:  "dmlChannel",
+						NumOfRows:      2000,
+						State:          commonpb.SegmentState_Dropped,
+						MaxRowNum:      65535,
+						DroppedAt:      uint64(time.Now().Add(time.Hour).UnixNano()),
+						CompactionFrom: nil,
+						DmlPosition: &msgpb.MsgPosition{
+							Timestamp: 900,
+						},
+						Compacted: true,
+					},
+				},
+				// compacted and child is GCed, dml pos is big than channel cp
+				segID + 7: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:             segID + 7,
+						CollectionID:   collID,
+						PartitionID:    partID,
+						InsertChannel:  "dmlChannel",
+						NumOfRows:      2000,
+						State:          commonpb.SegmentState_Dropped,
+						MaxRowNum:      65535,
+						DroppedAt:      0,
+						CompactionFrom: nil,
+						DmlPosition: &msgpb.MsgPosition{
+							Timestamp: 1200,
+						},
+						Compacted: true,
 					},
 				},
 			},
@@ -1003,6 +1052,25 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	}
 	gc.clearEtcd()
 
+	/*
+		A    B
+		 \   /
+		   C	D
+		    \  /
+		      E
+
+		E: flushed, not indexed, should not be GCed
+		D: dropped, not indexed, should not be GCed, since E is not GCed
+		C: dropped, not indexed, should not be GCed, since E is not GCed
+		A: dropped, indexed, should not be GCed, since C is not indexed
+		B: dropped, indexed, should not be GCed, since C is not indexed
+
+		F: dropped, compcated is false, should not be GCed, since dml position is larger than channel cp
+		G: dropped, compacted is true, missing child info, should be GCed since dml pos is less than channel cp, FAST GC do not wait drop tolerance
+		H: dropped, compacted is true, missing child info, should not be GCed since dml pos is larger than channel cp
+
+		conclusion: only G is GCed.
+	*/
 	segA := gc.meta.GetSegment(segID)
 	assert.NotNil(t, segA)
 	segB := gc.meta.GetSegment(segID + 1)
@@ -1014,8 +1082,11 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	segE := gc.meta.GetSegment(segID + 4)
 	assert.NotNil(t, segE)
 	segF := gc.meta.GetSegment(segID + 5)
-	assert.Nil(t, segF)
-
+	assert.NotNil(t, segF)
+	segG := gc.meta.GetSegment(segID + 6)
+	assert.Nil(t, segG)
+	segH := gc.meta.GetSegment(segID + 7)
+	assert.NotNil(t, segH)
 	err := gc.meta.AddSegmentIndex(&model.SegmentIndex{
 		SegmentID:    segID + 4,
 		CollectionID: collID,
@@ -1036,25 +1107,28 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	assert.NoError(t, err)
 
 	gc.clearEtcd()
-	//segA := gc.meta.GetSegmentUnsafe(segID)
-	//assert.NotNil(t, segA)
-	//segB := gc.meta.GetSegmentUnsafe(segID + 1)
-	//assert.NotNil(t, segB)
+	/*
+
+		A: processed prior to C, C is not GCed yet and C is not indexed, A is not GCed in this turn
+		B: processed prior to C, C is not GCed yet and C is not indexed, B is not GCed in this turn
+
+		E: flushed, indexed, should not be GCed
+		C: dropped, not indexed, should be GCed since E is indexed
+		D: dropped, not indexed, should be GCed since E is indexed
+	*/
+
 	segC = gc.meta.GetSegment(segID + 2)
 	assert.Nil(t, segC)
 	segD = gc.meta.GetSegment(segID + 3)
 	assert.Nil(t, segD)
-	segE = gc.meta.GetSegment(segID + 4)
-	assert.NotNil(t, segE)
-	segF = gc.meta.GetSegment(segID + 5)
-	assert.Nil(t, segF)
 
 	gc.clearEtcd()
+	/*
+		A: compacted became false due to C is GCed already, A should be GCed since dropTolernace is meet
+		B: compacted became false due to C is GCed already, B should be GCed since dropTolerance is meet
+	*/
 	segA = gc.meta.GetSegment(segID)
 	assert.Nil(t, segA)
 	segB = gc.meta.GetSegment(segID + 1)
 	assert.Nil(t, segB)
-	segF = gc.meta.GetSegment(segID + 5)
-	assert.Nil(t, segF)
-
 }

@@ -279,6 +279,11 @@ message SegmentInfo {
   // (2) the bulk insert task that creates this segment has not yet reached `ImportCompleted` state.
   bool is_importing = 17;
   bool is_fake = 18;
+
+  // denote if this segment is compacted to other segment.
+  // For compatibility reasons, this flag of an old compacted segment may still be False.
+  // As for new fields added in the message, they will be populated with their respective field types' default values.
+  bool compacted = 19;
 }
 
 message SegmentStartPosition {
