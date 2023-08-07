@@ -119,41 +119,6 @@ MemFileManagerImpl::LoadIndexToMemory(
     return file_to_index_data;
 }
 
-void
-MemFileManagerImpl::LoadFileStream(
-    const std::vector<std::string>& remote_files,
-    std::map<std::string, storage::FieldDataChannelPtr>& channels) {
-    auto parallel_degree =
-        static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
-
-    std::vector<std::string> batch_files;
-    auto LoadBatchIndexFiles = [&]() {
-        auto index_datas = GetObjectData(rcm_.get(), batch_files);
-        for (auto i = 0; i < index_datas.size(); i++) {
-            auto file_name =
-                batch_files[i].substr(batch_files[i].find_last_of('/') + 1);
-            auto& channel = channels[file_name];
-            channel->push(index_datas[i]);
-        }
-    };
-
-    for (auto& file : remote_files) {
-        if (batch_files.size() >= parallel_degree) {
-            LoadBatchIndexFiles();
-            batch_files.clear();
-        }
-        batch_files.emplace_back(file);
-    }
-
-    if (batch_files.size() > 0) {
-        LoadBatchIndexFiles();
-    }
-
-    for (auto& [_, channel] : channels) {
-        channel->close();
-    }
-}
-
 std::vector<FieldDataPtr>
 MemFileManagerImpl::CacheRawDataToMemory(
     std::vector<std::string> remote_files) {
