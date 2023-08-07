@@ -343,7 +343,7 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
             return CreateScalarDataArrayFrom(output.data(), count, field_meta);
         }
         case DataType::INT8: {
-            FixedVector<bool> output(count);
+            FixedVector<int8_t> output(count);
             bulk_subscript_impl<int8_t>(
                 *vec_ptr, seg_offsets, count, output.data());
             return CreateScalarDataArrayFrom(output.data(), count, field_meta);
