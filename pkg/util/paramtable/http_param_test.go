@@ -12,4 +12,5 @@ func TestHTTPConfig_Init(t *testing.T) {
 	cf := params.HTTPCfg
 	assert.Equal(t, cf.Enabled.GetAsBool(), true)
 	assert.Equal(t, cf.DebugMode.GetAsBool(), false)
+	assert.Equal(t, cf.Port.GetValue(), "")
 }

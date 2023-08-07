@@ -966,12 +966,14 @@ func waitForGrpcReady(opt *WaitOption) {
 				ch <- err
 				return
 			}
-			_, err = grpc.Dial(address, grpc.WithBlock(), grpc.WithTransportCredentials(creds))
+			conn, err := grpc.Dial(address, grpc.WithBlock(), grpc.WithTransportCredentials(creds))
 			ch <- err
+			conn.Close()
 			return
 		}
-		if _, err := grpc.Dial(address, grpc.WithBlock(), grpc.WithInsecure()); true {
+		if conn, err := grpc.Dial(address, grpc.WithBlock(), grpc.WithInsecure()); true {
 			ch <- err
+			conn.Close()
 		}
 	}()
 
@@ -1522,7 +1524,7 @@ func Test_NewServer_HTTPServer_Enabled(t *testing.T) {
 			t.Fatalf("test should have panicked but did not")
 		}
 	}()
-	// if disable workds path not registered, so it shall not panic
+	// if disable works path not registered, so it shall not panic
 	server.registerHTTPServer()
 }
 
@@ -1613,6 +1615,86 @@ func Test_NewServer_TLS_FileNotExisted(t *testing.T) {
 	paramtable.Get().Save(Params.CaPemPath.Key, "service.go")
 	err = runAndWaitForServerReady(server)
 	assert.Error(t, err)
+	server.Stop()
+}
+
+func Test_NewHTTPServer_TLS_TwoWay(t *testing.T) {
+	server := getServer(t)
+
+	Params := &paramtable.Get().ProxyGrpcServerCfg
+
+	paramtable.Get().Save(Params.TLSMode.Key, "2")
+	paramtable.Get().Save(Params.ServerPemPath.Key, "../../../configs/cert/server.pem")
+	paramtable.Get().Save(Params.ServerKeyPath.Key, "../../../configs/cert/server.key")
+	paramtable.Get().Save(Params.CaPemPath.Key, "../../../configs/cert/ca.pem")
+	paramtable.Get().Save(proxy.Params.HTTPCfg.Enabled.Key, "true")
+	paramtable.Get().Save(proxy.Params.HTTPCfg.Port.Key, "8080")
+
+	err := runAndWaitForServerReady(server)
+	assert.Nil(t, err)
+	assert.NotNil(t, server.grpcExternalServer)
+	err = server.Stop()
+	assert.Nil(t, err)
+
+	paramtable.Get().Save(proxy.Params.HTTPCfg.Port.Key, "19529")
+	err = runAndWaitForServerReady(server)
+	assert.NotNil(t, err)
+	server.Stop()
+}
+
+func Test_NewHTTPServer_TLS_OneWay(t *testing.T) {
+	server := getServer(t)
+
+	Params := &paramtable.Get().ProxyGrpcServerCfg
+
+	paramtable.Get().Save(Params.TLSMode.Key, "1")
+	paramtable.Get().Save(Params.ServerPemPath.Key, "../../../configs/cert/server.pem")
+	paramtable.Get().Save(Params.ServerKeyPath.Key, "../../../configs/cert/server.key")
+	paramtable.Get().Save(proxy.Params.HTTPCfg.Enabled.Key, "true")
+	paramtable.Get().Save(proxy.Params.HTTPCfg.Port.Key, "8080")
+
+	err := runAndWaitForServerReady(server)
+	assert.Nil(t, err)
+	assert.NotNil(t, server.grpcExternalServer)
+	err = server.Stop()
+	assert.Nil(t, err)
+
+	paramtable.Get().Save(proxy.Params.HTTPCfg.Port.Key, "19529")
+	err = runAndWaitForServerReady(server)
+	assert.NotNil(t, err)
+	server.Stop()
+}
+
+func Test_NewHTTPServer_TLS_FileNotExisted(t *testing.T) {
+	server := getServer(t)
+
+	Params := &paramtable.Get().ProxyGrpcServerCfg
+
+	paramtable.Get().Save(Params.TLSMode.Key, "1")
+	paramtable.Get().Save(Params.ServerPemPath.Key, "../not/existed/server.pem")
+	paramtable.Get().Save(Params.ServerKeyPath.Key, "../../../configs/cert/server.key")
+	paramtable.Get().Save(proxy.Params.HTTPCfg.Enabled.Key, "true")
+	paramtable.Get().Save(proxy.Params.HTTPCfg.Port.Key, "8080")
+	err := runAndWaitForServerReady(server)
+	assert.NotNil(t, err)
+	server.Stop()
+
+	paramtable.Get().Save(Params.TLSMode.Key, "2")
+	paramtable.Get().Save(Params.ServerPemPath.Key, "../not/existed/server.pem")
+	paramtable.Get().Save(Params.CaPemPath.Key, "../../../configs/cert/ca.pem")
+	err = runAndWaitForServerReady(server)
+	assert.NotNil(t, err)
+	server.Stop()
+
+	paramtable.Get().Save(Params.ServerPemPath.Key, "../../../configs/cert/server.pem")
+	paramtable.Get().Save(Params.CaPemPath.Key, "../not/existed/ca.pem")
+	err = runAndWaitForServerReady(server)
+	assert.NotNil(t, err)
+	server.Stop()
+
+	paramtable.Get().Save(Params.CaPemPath.Key, "service.go")
+	err = runAndWaitForServerReady(server)
+	assert.NotNil(t, err)
 	server.Stop()
 }
 
