@@ -8,17 +8,18 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"go.uber.org/zap"
 )
 
-type MetricsLockManager struct {
-	rwLocks map[string]*MetricsRWMutex
-}
+var enableLockMetrics bool
+var logWarnThresHold time.Duration
+var logInfoThresHold time.Duration
 
 type MetricsRWMutex struct {
 	mutex          sync.RWMutex
 	lockName       string
-	acquireTimeMap map[string]time.Time
+	acquireTimeMap *typeutil.ConcurrentMap[string, time.Time]
 }
 
 const (
@@ -29,10 +30,10 @@ const (
 )
 
 func (mRWLock *MetricsRWMutex) RLock(source string) {
-	if paramtable.Get().CommonCfg.EnableLockMetrics.GetAsBool() {
+	if enableLockMetrics {
 		before := time.Now()
 		mRWLock.mutex.RLock()
-		mRWLock.acquireTimeMap[source] = time.Now()
+		mRWLock.acquireTimeMap.Insert(source, time.Now())
 		logLock(time.Since(before), mRWLock.lockName, source, readLock, acquire)
 	} else {
 		mRWLock.mutex.RLock()
@@ -40,10 +41,10 @@ func (mRWLock *MetricsRWMutex) RLock(source string) {
 }
 
 func (mRWLock *MetricsRWMutex) Lock(source string) {
-	if paramtable.Get().CommonCfg.EnableLockMetrics.GetAsBool() {
+	if enableLockMetrics {
 		before := time.Now()
 		mRWLock.mutex.Lock()
-		mRWLock.acquireTimeMap[source] = time.Now()
+		mRWLock.acquireTimeMap.Insert(source, time.Now())
 		logLock(time.Since(before), mRWLock.lockName, source, writeLock, acquire)
 	} else {
 		mRWLock.mutex.Lock()
@@ -65,11 +66,11 @@ func (mRWLock *MetricsRWMutex) RUnLock(source string) {
 }
 
 func (mRWLock *MetricsRWMutex) maybeLogUnlockDuration(source string, lockType string) error {
-	if paramtable.Get().CommonCfg.EnableLockMetrics.GetAsBool() {
-		acquireTime, ok := mRWLock.acquireTimeMap[source]
+	if enableLockMetrics {
+		acquireTime, ok := mRWLock.acquireTimeMap.Get(source)
 		if ok {
 			logLock(time.Since(acquireTime), mRWLock.lockName, source, lockType, hold)
-			delete(mRWLock.acquireTimeMap, source)
+			mRWLock.acquireTimeMap.GetAndRemove(source)
 		} else {
 			log.Error("there's no lock history for the source, there may be some defects in codes",
 				zap.String("source", source))
@@ -80,11 +81,11 @@ func (mRWLock *MetricsRWMutex) maybeLogUnlockDuration(source string, lockType st
 }
 
 func logLock(duration time.Duration, lockName string, source string, lockType string, opType string) {
-	if duration >= paramtable.Get().CommonCfg.LockSlowLogWarnThreshold.GetAsDuration(time.Millisecond) {
+	if duration >= logWarnThresHold {
 		log.Warn("lock takes too long", zap.String("lockName", lockName), zap.String("lockType", lockType),
 			zap.String("source", source), zap.String("opType", opType),
 			zap.Duration("time_cost", duration))
-	} else if duration >= paramtable.Get().CommonCfg.LockSlowLogInfoThreshold.GetAsDuration(time.Millisecond) {
+	} else if duration >= logInfoThresHold {
 		log.Info("lock takes too long", zap.String("lockName", lockName), zap.String("lockType", lockType),
 			zap.String("source", source), zap.String("opType", opType),
 			zap.Duration("time_cost", duration))
@@ -92,11 +93,12 @@ func logLock(duration time.Duration, lockName string, source string, lockType st
 	metrics.LockCosts.WithLabelValues(lockName, source, lockType, opType).Set(float64(duration.Milliseconds()))
 }
 
-// currently, we keep metricsLockManager as a communal gate for metrics lock
-// we may use this manager as a centralized statistical site to provide overall cost for locks
-func (mlManager *MetricsLockManager) applyRWLock(name string) *MetricsRWMutex {
+func NewMetricsLock(name string) *MetricsRWMutex {
+	enableLockMetrics = paramtable.Get().CommonCfg.EnableLockMetrics.GetAsBool()
+	logWarnThresHold = paramtable.Get().CommonCfg.LockSlowLogWarnThreshold.GetAsDuration(time.Millisecond)
+	logInfoThresHold = paramtable.Get().CommonCfg.LockSlowLogInfoThreshold.GetAsDuration(time.Millisecond)
 	return &MetricsRWMutex{
 		lockName:       name,
-		acquireTimeMap: make(map[string]time.Time, 0),
+		acquireTimeMap: typeutil.NewConcurrentMap[string, time.Time](),
 	}
 }
