@@ -1602,9 +1602,7 @@ func TestRootcoord_EnableActiveStandby(t *testing.T) {
 	paramtable.Get().Save(Params.RootCoordCfg.EnableActiveStandby.Key, "true")
 	paramtable.Get().Save(Params.CommonCfg.RootCoordTimeTick.Key, fmt.Sprintf("rootcoord-time-tick-%d", randVal))
 	paramtable.Get().Save(Params.CommonCfg.RootCoordStatistics.Key, fmt.Sprintf("rootcoord-statistics-%d", randVal))
-	paramtable.Get().Save(Params.CommonCfg.RootCoordSubName.Key, fmt.Sprintf("subname-%d", randVal))
 	paramtable.Get().Save(Params.CommonCfg.RootCoordDml.Key, fmt.Sprintf("rootcoord-dml-test-%d", randVal))
-	paramtable.Get().Save(Params.CommonCfg.RootCoordDelta.Key, fmt.Sprintf("rootcoord-delta-test-%d", randVal))
 
 	ctx := context.Background()
 	coreFactory := dependency.NewDefaultFactory(true)
@@ -1652,9 +1650,7 @@ func TestRootcoord_DisableActiveStandby(t *testing.T) {
 	paramtable.Get().Save(Params.RootCoordCfg.EnableActiveStandby.Key, "false")
 	paramtable.Get().Save(Params.CommonCfg.RootCoordTimeTick.Key, fmt.Sprintf("rootcoord-time-tick-%d", randVal))
 	paramtable.Get().Save(Params.CommonCfg.RootCoordStatistics.Key, fmt.Sprintf("rootcoord-statistics-%d", randVal))
-	paramtable.Get().Save(Params.CommonCfg.RootCoordSubName.Key, fmt.Sprintf("subname-%d", randVal))
 	paramtable.Get().Save(Params.CommonCfg.RootCoordDml.Key, fmt.Sprintf("rootcoord-dml-test-%d", randVal))
-	paramtable.Get().Save(Params.CommonCfg.RootCoordDelta.Key, fmt.Sprintf("rootcoord-delta-test-%d", randVal))
 
 	ctx := context.Background()
 	coreFactory := dependency.NewDefaultFactory(true)

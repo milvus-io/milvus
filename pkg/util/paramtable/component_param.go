@@ -162,25 +162,12 @@ func (p *ComponentParam) WatchKeyPrefix(keyPrefix string, watcher config.EventHa
 type commonConfig struct {
 	ClusterPrefix ParamItem `refreshable:"false"`
 
-	// Deprecated: do not use it anymore
-	ProxySubName ParamItem `refreshable:"true"`
-
 	RootCoordTimeTick   ParamItem `refreshable:"true"`
 	RootCoordStatistics ParamItem `refreshable:"true"`
 	RootCoordDml        ParamItem `refreshable:"false"`
-	RootCoordDelta      ParamItem `refreshable:"false"`
-	// Deprecated: do not use it anymore
-	RootCoordSubName ParamItem `refreshable:"true"`
 
-	// Deprecated: only used in metrics as ID
-	QueryCoordSearch ParamItem `refreshable:"true"`
-	// Deprecated: only used in metrics as ID
-	QueryCoordSearchResult ParamItem `refreshable:"true"`
-	QueryCoordTimeTick     ParamItem `refreshable:"true"`
-	QueryNodeSubName       ParamItem `refreshable:"false"`
+	QueryCoordTimeTick ParamItem `refreshable:"true"`
 
-	// Deprecated: do not use it anymore
-	DataCoordStatistic ParamItem `refreshable:"true"`
 	// Deprecated
 	DataCoordTimeTick     ParamItem `refreshable:"false"`
 	DataCoordSegmentInfo  ParamItem `refreshable:"true"`
@@ -251,15 +238,6 @@ func (p *commonConfig) init(base *BaseTable) {
 	chanNamePrefix := func(prefix string) string {
 		return strings.Join([]string{p.ClusterPrefix.GetValue(), prefix}, "-")
 	}
-	p.ProxySubName = ParamItem{
-		Key:          "msgChannel.subNamePrefix.proxySubNamePrefix",
-		Version:      "2.1.0",
-		FallbackKeys: []string{"common.subNamePrefix.proxySubNamePrefix"},
-		PanicIfEmpty: true,
-		Formatter:    chanNamePrefix,
-		Export:       true,
-	}
-	p.ProxySubName.Init(base.mgr)
 
 	// --- rootcoord ---
 	p.RootCoordTimeTick = ParamItem{
@@ -292,46 +270,6 @@ func (p *commonConfig) init(base *BaseTable) {
 	}
 	p.RootCoordDml.Init(base.mgr)
 
-	p.RootCoordDelta = ParamItem{
-		Key:          "msgChannel.chanNamePrefix.rootCoordDelta",
-		Version:      "2.1.0",
-		FallbackKeys: []string{"common.chanNamePrefix.rootCoordDelta"},
-		PanicIfEmpty: true,
-		Formatter:    chanNamePrefix,
-		Export:       true,
-	}
-	p.RootCoordDelta.Init(base.mgr)
-
-	p.RootCoordSubName = ParamItem{
-		Key:          "msgChannel.subNamePrefix.rootCoordSubNamePrefix",
-		Version:      "2.1.0",
-		FallbackKeys: []string{"common.subNamePrefix.rootCoordSubNamePrefix"},
-		PanicIfEmpty: true,
-		Formatter:    chanNamePrefix,
-		Export:       true,
-	}
-	p.RootCoordSubName.Init(base.mgr)
-
-	p.QueryCoordSearch = ParamItem{
-		Key:          "msgChannel.chanNamePrefix.search",
-		Version:      "2.1.0",
-		FallbackKeys: []string{"common.chanNamePrefix.search"},
-		PanicIfEmpty: true,
-		Formatter:    chanNamePrefix,
-		Export:       true,
-	}
-	p.QueryCoordSearch.Init(base.mgr)
-
-	p.QueryCoordSearchResult = ParamItem{
-		Key:          "msgChannel.chanNamePrefix.searchResult",
-		Version:      "2.1.0",
-		FallbackKeys: []string{"common.chanNamePrefix.searchResult"},
-		PanicIfEmpty: true,
-		Formatter:    chanNamePrefix,
-		Export:       true,
-	}
-	p.QueryCoordSearchResult.Init(base.mgr)
-
 	p.QueryCoordTimeTick = ParamItem{
 		Key:          "msgChannel.chanNamePrefix.queryTimeTick",
 		Version:      "2.1.0",
@@ -341,26 +279,6 @@ func (p *commonConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.QueryCoordTimeTick.Init(base.mgr)
-
-	p.QueryNodeSubName = ParamItem{
-		Key:          "msgChannel.subNamePrefix.queryNodeSubNamePrefix",
-		Version:      "2.1.0",
-		FallbackKeys: []string{"common.subNamePrefix.queryNodeSubNamePrefix"},
-		PanicIfEmpty: true,
-		Formatter:    chanNamePrefix,
-		Export:       true,
-	}
-	p.QueryNodeSubName.Init(base.mgr)
-
-	p.DataCoordStatistic = ParamItem{
-		Key:          "msgChannel.chanNamePrefix.dataCoordStatistic",
-		Version:      "2.1.0",
-		FallbackKeys: []string{"common.chanNamePrefix.dataCoordStatistic"},
-		PanicIfEmpty: true,
-		Formatter:    chanNamePrefix,
-		Export:       true,
-	}
-	p.DataCoordStatistic.Init(base.mgr)
 
 	p.DataCoordTimeTick = ParamItem{
 		Key:          "msgChannel.chanNamePrefix.dataCoordTimeTick",

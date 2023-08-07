@@ -42,7 +42,6 @@ func TestTimetickSync(t *testing.T) {
 
 	paramtable.Get().Save(Params.RootCoordCfg.DmlChannelNum.Key, "2")
 	paramtable.Get().Save(Params.CommonCfg.RootCoordDml.Key, "rootcoord-dml")
-	paramtable.Get().Save(Params.CommonCfg.RootCoordDelta.Key, "rootcoord-delta")
 	ttSync := newTimeTickSync(ctx, sourceID, factory, nil)
 
 	var wg sync.WaitGroup
@@ -121,7 +120,6 @@ func TestMultiTimetickSync(t *testing.T) {
 
 	paramtable.Get().Save(Params.RootCoordCfg.DmlChannelNum.Key, "1")
 	paramtable.Get().Save(Params.CommonCfg.RootCoordDml.Key, "rootcoord-dml")
-	paramtable.Get().Save(Params.CommonCfg.RootCoordDelta.Key, "rootcoord-delta")
 	ttSync := newTimeTickSync(ctx, UniqueID(0), factory, nil)
 
 	var wg sync.WaitGroup
@@ -188,8 +186,6 @@ func TestTimetickSyncWithExistChannels(t *testing.T) {
 	//}
 
 	paramtable.Get().Save(Params.CommonCfg.RootCoordDml.Key, "rootcoord-dml")
-	paramtable.Get().Save(Params.CommonCfg.RootCoordDelta.Key, "rootcoord-delta")
-	paramtable.Get().Save(Params.RootCoordCfg.DmlChannelNum.Key, "5")
 	chans := map[UniqueID][]string{}
 
 	chans[UniqueID(100)] = []string{"by-dev-rootcoord-dml_4", "by-dev-rootcoord-dml_8"}
@@ -239,7 +235,6 @@ func TestTimetickSyncInvalidName(t *testing.T) {
 	//}
 
 	paramtable.Get().Save(Params.CommonCfg.RootCoordDml.Key, "rootcoord-dml")
-	paramtable.Get().Save(Params.CommonCfg.RootCoordDelta.Key, "rootcoord-delta")
 	chans := map[UniqueID][]string{}
 	chans[UniqueID(100)] = []string{"rootcoord-dml4"}
 	assert.Panics(t, func() {
