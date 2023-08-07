@@ -957,6 +957,7 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 		dsService.channel.evictHistoryInsertBuffer(req.GetSegmentID(), pack.pos)
 		dsService.channel.evictHistoryDeleteBuffer(req.GetSegmentID(), pack.pos)
 		segment := dsService.channel.getSegment(req.GetSegmentID())
+		dsService.channel.updateSingleSegmentMemorySize(req.GetSegmentID())
 		segment.setSyncing(false)
 		// dsService.channel.saveBinlogPath(fieldStats)
 	}

@@ -222,7 +222,7 @@ func TestFlowGraphManager(t *testing.T) {
 				assert.True(t, ok)
 				err = fg.channel.addSegment(addSegmentReq{segID: 0})
 				assert.NoError(t, err)
-				fg.channel.updateSegmentMemorySize(0, memorySize)
+				fg.channel.getSegment(0).memorySize = memorySize
 				fg.channel.(*ChannelMeta).needToSync.Store(false)
 			}
 			fm.execute(test.totalMemory)

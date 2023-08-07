@@ -298,14 +298,7 @@ func (ibNode *insertBufferNode) DisplayStatistics(seg2Upload []UniqueID) {
 // updateSegmentsMemorySize updates segments' memory size in channel meta
 func (ibNode *insertBufferNode) updateSegmentsMemorySize(seg2Upload []UniqueID) {
 	for _, segID := range seg2Upload {
-		var memorySize int64
-		if buffer, ok := ibNode.channel.getCurInsertBuffer(segID); ok {
-			memorySize += buffer.memorySize()
-		}
-		if buffer, ok := ibNode.channel.getCurDeleteBuffer(segID); ok {
-			memorySize += buffer.GetLogSize()
-		}
-		ibNode.channel.updateSegmentMemorySize(segID, memorySize)
+		ibNode.channel.updateSingleSegmentMemorySize(segID)
 	}
 }
 
@@ -482,7 +475,7 @@ func (ibNode *insertBufferNode) Sync(fgMsg *flowGraphMsg, seg2Upload []UniqueID,
 			continue
 		}
 		segment.setSyncing(true)
-		log.Info("insertBufferNode syncing BufferData")
+		log.Info("insertBufferNode start syncing bufferData")
 		// use the flushed pk stats to take current stat
 		var pkStats *storage.PrimaryKeyStats
 		// TODO, this has to be async flush, no need to block here.
@@ -519,6 +512,7 @@ func (ibNode *insertBufferNode) Sync(fgMsg *flowGraphMsg, seg2Upload []UniqueID,
 			metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.TotalLabel).Inc()
 			metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SuccessLabel).Inc()
 		}
+		log.Info("insertBufferNode finish submitting syncing bufferData")
 	}
 	return segmentsToSync
 }
