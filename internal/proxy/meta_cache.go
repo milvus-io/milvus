@@ -915,12 +915,14 @@ func (m *MetaCache) GetUserRole(user string) []string {
 }
 
 func (m *MetaCache) RefreshPolicyInfo(op typeutil.CacheOp) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if op.OpKey == "" {
-		return errors.New("empty op key")
+	if op.OpType != typeutil.CacheRefresh {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		if op.OpKey == "" {
+			return errors.New("empty op key")
+		}
 	}
+
 	switch op.OpType {
 	case typeutil.CacheGrantPrivilege:
 		m.privilegeInfos[op.OpKey] = struct{}{}
@@ -955,6 +957,9 @@ func (m *MetaCache) RefreshPolicyInfo(op typeutil.CacheOp) error {
 			log.Error("fail to init meta cache", zap.Error(err))
 			return err
 		}
+
+		m.mu.Lock()
+		defer m.mu.Unlock()
 		m.userToRoles = make(map[string]map[string]struct{})
 		m.privilegeInfos = make(map[string]struct{})
 		m.unsafeInitPolicyInfo(resp.PolicyInfos, resp.UserRoles)
