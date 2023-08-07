@@ -107,6 +107,7 @@ type quotaConfig struct {
 	QueryNodeMemoryLowWaterLevel         ParamItem `refreshable:"true"`
 	QueryNodeMemoryHighWaterLevel        ParamItem `refreshable:"true"`
 	GrowingSegmentsSizeProtectionEnabled ParamItem `refreshable:"true"`
+	GrowingSegmentsSizeMinRateRatio      ParamItem `refreshable:"true"`
 	GrowingSegmentsSizeLowWaterLevel     ParamItem `refreshable:"true"`
 	GrowingSegmentsSizeHighWaterLevel    ParamItem `refreshable:"true"`
 	DiskProtectionEnabled                ParamItem `refreshable:"true"`
@@ -1014,12 +1015,28 @@ When memory usage < memoryLowWaterLevel, no action.`,
 		Key:          "quotaAndLimits.limitWriting.growingSegmentsSizeProtection.enabled",
 		Version:      "2.2.9",
 		DefaultValue: "false",
-		Doc: `1. No action will be taken if the ratio of growing segments size is less than the low water level.
-2. The DML rate will be reduced if the ratio of growing segments size is greater than the low water level and less than the high water level.
-3. All DML requests will be rejected if the ratio of growing segments size is greater than the high water level.`,
+		Doc: `No action will be taken if the growing segments size is less than the low watermark.
+When the growing segments size exceeds the low watermark, the dml rate will be reduced,
+but the rate will not be lower than minRateRatio * dmlRate.`,
 		Export: true,
 	}
 	p.GrowingSegmentsSizeProtectionEnabled.Init(base.mgr)
+
+	defaultGrowingSegSizeMinRateRatio := "0.5"
+	p.GrowingSegmentsSizeMinRateRatio = ParamItem{
+		Key:          "quotaAndLimits.limitWriting.growingSegmentsSizeProtection.minRateRatio",
+		Version:      "2.3.0",
+		DefaultValue: defaultGrowingSegSizeMinRateRatio,
+		Formatter: func(v string) string {
+			level := getAsFloat(v)
+			if level <= 0 || level > 1 {
+				return defaultGrowingSegSizeMinRateRatio
+			}
+			return v
+		},
+		Export: true,
+	}
+	p.GrowingSegmentsSizeMinRateRatio.Init(base.mgr)
 
 	defaultGrowingSegSizeLowWaterLevel := "0.2"
 	p.GrowingSegmentsSizeLowWaterLevel = ParamItem{

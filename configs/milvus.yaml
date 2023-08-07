@@ -582,10 +582,11 @@ quotaAndLimits:
       queryNodeMemoryLowWaterLevel: 0.85 # (0, 1], memoryLowWaterLevel in QueryNodes
       queryNodeMemoryHighWaterLevel: 0.95 # (0, 1], memoryHighWaterLevel in QueryNodes
     growingSegmentsSizeProtection:
-      # 1. No action will be taken if the ratio of growing segments size is less than the low water level.
-      # 2. The DML rate will be reduced if the ratio of growing segments size is greater than the low water level and less than the high water level.
-      # 3. All DML requests will be rejected if the ratio of growing segments size is greater than the high water level.
+      # No action will be taken if the growing segments size is less than the low watermark.
+      # When the growing segments size exceeds the low watermark, the dml rate will be reduced,
+      # but the rate will not be lower than `minRateRatio * dmlRate`.
       enabled: false
+      minRateRatio: 0.5
       lowWaterLevel: 0.2
       highWaterLevel: 0.4
     diskProtection:

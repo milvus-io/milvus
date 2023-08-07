@@ -658,24 +658,19 @@ func (q *QuotaCenter) getGrowingSegmentsSizeFactor() map[int64]float64 {
 		if cur <= low {
 			continue
 		}
-		if cur >= high {
-			log.RatedWarn(10, "QuotaCenter: QueryNode growing segments size to high water level",
-				zap.String("Node", fmt.Sprintf("%s-%d", typeutil.QueryNodeRole, nodeID)),
-				zap.Int64s("collections", metric.Effect.CollectionIDs),
-				zap.Int64("segmentsSize", metric.GrowingSegmentsSize),
-				zap.Uint64("TotalMem", metric.Hms.Memory),
-				zap.Float64("highWaterLevel", high))
-			updateCollectionFactor(0, metric.Effect.CollectionIDs)
-			continue
-		}
 		factor := (high - cur) / (high - low)
+		if factor < Params.QuotaConfig.GrowingSegmentsSizeMinRateRatio.GetAsFloat() {
+			factor = Params.QuotaConfig.GrowingSegmentsSizeMinRateRatio.GetAsFloat()
+		}
 		updateCollectionFactor(factor, metric.Effect.CollectionIDs)
-		log.RatedWarn(10, "QuotaCenter: QueryNode growing segments size to low water level, limit writing rate",
+		log.RatedWarn(10, "QuotaCenter: QueryNode growing segments size exceeds watermark, limit writing rate",
 			zap.String("Node", fmt.Sprintf("%s-%d", typeutil.QueryNodeRole, nodeID)),
 			zap.Int64s("collections", metric.Effect.CollectionIDs),
 			zap.Int64("segmentsSize", metric.GrowingSegmentsSize),
 			zap.Uint64("TotalMem", metric.Hms.Memory),
-			zap.Float64("lowWaterLevel", low))
+			zap.Float64("highWatermark", high),
+			zap.Float64("lowWatermark", low),
+			zap.Float64("factor", factor))
 	}
 	return collectionFactor
 }
