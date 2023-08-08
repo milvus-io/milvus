@@ -42,17 +42,18 @@ type PmsFactory struct {
 	PulsarAddress    string
 	PulsarWebAddress string
 	ReceiveBufSize   int64
-	PulsarBufSize    int64
+	MQBufSize        int64
 	PulsarAuthPlugin string
 	PulsarAuthParams string
 	PulsarTenant     string
 	PulsarNameSpace  string
 }
 
-func NewPmsFactory(config *paramtable.PulsarConfig) *PmsFactory {
+func NewPmsFactory(serviceParam *paramtable.ServiceParam) *PmsFactory {
+	config := &serviceParam.PulsarCfg
 	return &PmsFactory{
-		PulsarBufSize:    1024,
-		ReceiveBufSize:   1024,
+		MQBufSize:        serviceParam.MQCfg.MQBufSize.GetAsInt64(),
+		ReceiveBufSize:   serviceParam.MQCfg.ReceiveBufSize.GetAsInt64(),
 		PulsarAddress:    config.Address.GetValue(),
 		PulsarWebAddress: config.WebAddress.GetValue(),
 		PulsarAuthPlugin: config.AuthPlugin.GetValue(),
@@ -77,7 +78,7 @@ func (f *PmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewMqMsgStream(ctx, f.ReceiveBufSize, f.PulsarBufSize, pulsarClient, f.dispatcherFactory.NewUnmarshalDispatcher())
+	return NewMqMsgStream(ctx, f.ReceiveBufSize, f.MQBufSize, pulsarClient, f.dispatcherFactory.NewUnmarshalDispatcher())
 }
 
 // NewTtMsgStream is used to generate a new TtMsgstream object
@@ -95,7 +96,7 @@ func (f *PmsFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewMqTtMsgStream(ctx, f.ReceiveBufSize, f.PulsarBufSize, pulsarClient, f.dispatcherFactory.NewUnmarshalDispatcher())
+	return NewMqTtMsgStream(ctx, f.ReceiveBufSize, f.MQBufSize, pulsarClient, f.dispatcherFactory.NewUnmarshalDispatcher())
 }
 
 func (f *PmsFactory) getAuthentication() (pulsar.Authentication, error) {
@@ -152,16 +153,17 @@ type KmsFactory struct {
 	dispatcherFactory ProtoUDFactory
 	config            *paramtable.KafkaConfig
 	ReceiveBufSize    int64
+	MQBufSize         int64
 }
 
 func (f *KmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
 	kafkaClient := kafkawrapper.NewKafkaClientInstanceWithConfig(f.config)
-	return NewMqMsgStream(ctx, f.ReceiveBufSize, -1, kafkaClient, f.dispatcherFactory.NewUnmarshalDispatcher())
+	return NewMqMsgStream(ctx, f.ReceiveBufSize, f.MQBufSize, kafkaClient, f.dispatcherFactory.NewUnmarshalDispatcher())
 }
 
 func (f *KmsFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
 	kafkaClient := kafkawrapper.NewKafkaClientInstanceWithConfig(f.config)
-	return NewMqTtMsgStream(ctx, f.ReceiveBufSize, -1, kafkaClient, f.dispatcherFactory.NewUnmarshalDispatcher())
+	return NewMqTtMsgStream(ctx, f.ReceiveBufSize, f.MQBufSize, kafkaClient, f.dispatcherFactory.NewUnmarshalDispatcher())
 }
 
 func (f *KmsFactory) NewQueryMsgStream(ctx context.Context) (MsgStream, error) {
@@ -180,11 +182,12 @@ func (f *KmsFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, st
 	}
 }
 
-func NewKmsFactory(config *paramtable.KafkaConfig) Factory {
+func NewKmsFactory(config *paramtable.ServiceParam) Factory {
 	f := &KmsFactory{
 		dispatcherFactory: ProtoUDFactory{},
-		ReceiveBufSize:    1024,
-		config:            config,
+		ReceiveBufSize:    config.MQCfg.ReceiveBufSize.GetAsInt64(),
+		MQBufSize:         config.MQCfg.MQBufSize.GetAsInt64(),
+		config:            &config.KafkaCfg,
 	}
 	return f
 }
@@ -192,11 +195,12 @@ func NewKmsFactory(config *paramtable.KafkaConfig) Factory {
 // NewNatsmqFactory create a new nats-mq factory.
 func NewNatsmqFactory() Factory {
 	paramtable.Init()
-	nmq.MustInitNatsMQ(nmq.ParseServerOption(paramtable.Get()))
+	paramtable := paramtable.Get()
+	nmq.MustInitNatsMQ(nmq.ParseServerOption(paramtable))
 	return &CommonFactory{
 		Newer:             nmq.NewClientWithDefaultOptions,
 		DispatcherFactory: ProtoUDFactory{},
-		ReceiveBufSize:    1024,
-		MQBufSize:         1024,
+		ReceiveBufSize:    paramtable.MQCfg.ReceiveBufSize.GetAsInt64(),
+		MQBufSize:         paramtable.MQCfg.MQBufSize.GetAsInt64(),
 	}
 }

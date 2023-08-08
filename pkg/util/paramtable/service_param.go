@@ -373,6 +373,9 @@ type MQConfig struct {
 	EnablePursuitMode ParamItem `refreshable:"true"`
 	PursuitLag        ParamItem `refreshable:"true"`
 	PursuitBufferSize ParamItem `refreshable:"true"`
+
+	MQBufSize      ParamItem `refreshable:"false"`
+	ReceiveBufSize ParamItem `refreshable:"false"`
 }
 
 // Init initializes the MQConfig object with a BaseTable.
@@ -413,6 +416,23 @@ Valid values: [default, pulsar, kafka, rocksmq, natsmq]`,
 		Export:       true,
 	}
 	p.PursuitBufferSize.Init(base.mgr)
+
+	p.MQBufSize = ParamItem{
+		Key:          "mq.mqBufSize",
+		Version:      "2.3.0",
+		DefaultValue: "16",
+		Doc:          `MQ client consumer buffer length`,
+		Export:       true,
+	}
+	p.MQBufSize.Init(base.mgr)
+
+	p.ReceiveBufSize = ParamItem{
+		Key:          "mq.receiveBufSize",
+		Version:      "2.3.0",
+		DefaultValue: "16",
+		Doc:          "MQ consumer chan buffer length",
+	}
+	p.ReceiveBufSize.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

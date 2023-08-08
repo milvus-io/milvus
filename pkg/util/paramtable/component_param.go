@@ -1658,7 +1658,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.FlowGraphMaxQueueLength = ParamItem{
 		Key:          "queryNode.dataSync.flowGraph.maxQueueLength",
 		Version:      "2.0.0",
-		DefaultValue: "1024",
+		DefaultValue: "16",
 		Doc:          "Maximum length of task queue in flowgraph",
 		Export:       true,
 	}
@@ -2452,7 +2452,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.FlowGraphMaxQueueLength = ParamItem{
 		Key:          "dataNode.dataSync.flowGraph.maxQueueLength",
 		Version:      "2.0.0",
-		DefaultValue: "1024",
+		DefaultValue: "16",
 		Doc:          "Maximum length of task queue in flowgraph",
 		Export:       true,
 	}

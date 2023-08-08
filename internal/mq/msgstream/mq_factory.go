@@ -5,11 +5,12 @@ import (
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper/rmq"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"go.uber.org/zap"
 )
 
 // NewRocksmqFactory creates a new message stream factory based on rocksmq.
-func NewRocksmqFactory(path string) msgstream.Factory {
+func NewRocksmqFactory(path string, cfg *paramtable.ServiceParam) msgstream.Factory {
 	if err := server.InitRocksMQ(path); err != nil {
 		log.Fatal("fail to init rocksmq", zap.Error(err))
 	}
@@ -18,7 +19,7 @@ func NewRocksmqFactory(path string) msgstream.Factory {
 	return &msgstream.CommonFactory{
 		Newer:             rmq.NewClientWithDefaultOptions,
 		DispatcherFactory: msgstream.ProtoUDFactory{},
-		ReceiveBufSize:    1024,
-		MQBufSize:         1024,
+		ReceiveBufSize:    cfg.MQCfg.ReceiveBufSize.GetAsInt64(),
+		MQBufSize:         cfg.MQCfg.MQBufSize.GetAsInt64(),
 	}
 }

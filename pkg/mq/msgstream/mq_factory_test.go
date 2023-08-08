@@ -25,7 +25,7 @@ import (
 
 func TestPmsFactory(t *testing.T) {
 	Params.Init()
-	pmsFactory := NewPmsFactory(&Params.PulsarCfg)
+	pmsFactory := NewPmsFactory(&Params.ServiceParam)
 
 	ctx := context.Background()
 	_, err := pmsFactory.NewMsgStream(ctx)
@@ -42,7 +42,7 @@ func TestPmsFactory(t *testing.T) {
 }
 
 func TestPmsFactoryWithAuth(t *testing.T) {
-	config := &Params.PulsarCfg
+	config := &Params.ServiceParam
 	Params.Save(Params.PulsarCfg.AuthPlugin.Key, "token")
 	Params.Save(Params.PulsarCfg.AuthParams.Key, "token:fake_token")
 	defer func() {
@@ -77,7 +77,7 @@ func TestPmsFactoryWithAuth(t *testing.T) {
 }
 
 func TestKafkaFactory(t *testing.T) {
-	kmsFactory := NewKmsFactory(&Params.KafkaCfg)
+	kmsFactory := NewKmsFactory(&Params.ServiceParam)
 
 	ctx := context.Background()
 	_, err := kmsFactory.NewMsgStream(ctx)
