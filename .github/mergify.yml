@@ -156,7 +156,7 @@ pull_request_rules:
           - ci-passed
 
 
-  - name: Blocking PR if missing a related issue or PR doesn't have kind/improvement label
+  - name: Blocking PR if missing a related issue or doesn't have kind/improvement label
     conditions:
       - or:
         - base=master
@@ -202,7 +202,9 @@ pull_request_rules:
     conditions:
       - base=2.2.0
       # - base~=^2(\.\d+){2}$
-      - -body~=https://github.com/milvus-io/milvus/pull/[0-9]{1,6}(\s+|$)
+      - and:
+        - -body~=pr\:\ \#[0-9]{1,6}(\s+|$)
+        - -body~=https://github.com/milvus-io/milvus/pull/[0-9]{1,6}(\s+|$)
       - -label=kind/branch-feature
       - -title~=\[automated\]
     actions:
@@ -219,7 +221,8 @@ pull_request_rules:
       - base=2.2.0
       # - base~=^2(\.\d+){2}$
       - or:
-        - body~=https://github.com/milvus-io/milvus/issues/[0-9]{1,6}(\s+|$)
+        - body~=pr\:\ \#[0-9]{1,6}(\s+|$)
+        - body~=https://github.com/milvus-io/milvus/pull/[0-9]{1,6}(\s+|$)
         - label=kind/branch-feature
     actions:
       label:
