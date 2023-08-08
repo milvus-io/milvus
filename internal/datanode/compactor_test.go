@@ -327,9 +327,9 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 		t.Run("Merge without expiration2", func(t *testing.T) {
 			mockbIO := &binlogIO{cm, alloc}
 			paramtable.Get().Save(Params.CommonCfg.EntityExpirationTTL.Key, "0")
-			BinLogMaxSize := Params.DataNodeCfg.BinLogMaxSize
+			BinLogMaxSize := Params.DataNodeCfg.BinLogMaxSize.GetValue()
 			defer func() {
-				Params.DataNodeCfg.BinLogMaxSize = BinLogMaxSize
+				Params.Save(Params.DataNodeCfg.BinLogMaxSize.Key, BinLogMaxSize)
 			}()
 			paramtable.Get().Save(Params.DataNodeCfg.BinLogMaxSize.Key, "128")
 			iData := genInsertDataWithExpiredTS()

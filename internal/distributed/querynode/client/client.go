@@ -45,7 +45,7 @@ func NewClient(ctx context.Context, addr string) (*Client, error) {
 	if addr == "" {
 		return nil, fmt.Errorf("addr is empty")
 	}
-	clientParams := paramtable.Get().QueryNodeGrpcClientCfg
+	clientParams := &paramtable.Get().QueryNodeGrpcClientCfg
 	client := &Client{
 		addr: addr,
 		grpcClient: &grpcclient.ClientBase[querypb.QueryNodeClient]{
