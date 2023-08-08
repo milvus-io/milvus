@@ -330,6 +330,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(UserRPCCounter)
 
 	registry.MustRegister(ProxyWorkLoadScore)
+	registry.MustRegister(ProxyExecutingTotalNq)
 }
 
 func CleanupCollectionMetrics(nodeID int64, collection string) {

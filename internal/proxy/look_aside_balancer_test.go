@@ -128,6 +128,22 @@ func (suite *LookAsideBalancerSuite) TestCalculateScore() {
 	suite.balancer.metricsUpdateTs.Insert(1, time.Now().UnixMilli()-5000)
 	score11 := suite.balancer.calculateScore(1, costMetrics4, 0)
 	suite.Equal(float64(0), score11)
+
+	// test unexpected negative nq value
+	costMetrics6 := &internalpb.CostAggregation{
+		ResponseTime: 5,
+		ServiceTime:  1,
+		TotalNQ:      -1,
+	}
+	score12 := suite.balancer.calculateScore(-1, costMetrics6, math.MaxInt64)
+	suite.Equal(float64(4), score12)
+	costMetrics7 := &internalpb.CostAggregation{
+		ResponseTime: 5,
+		ServiceTime:  1,
+		TotalNQ:      1,
+	}
+	score13 := suite.balancer.calculateScore(-1, costMetrics7, -1)
+	suite.Equal(float64(4), score13)
 }
 
 func (suite *LookAsideBalancerSuite) TestSelectNode() {
