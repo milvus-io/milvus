@@ -1722,6 +1722,37 @@ func Test_NewServer_HTTPServer_Enabled(t *testing.T) {
 	server.registerHTTPServer()
 }
 
+func Test_NewServer_HTTPServer_Enabled_WithPort(t *testing.T) {
+	ctx := context.Background()
+	server, err := NewServer(ctx, nil)
+	assert.NotNil(t, server)
+	assert.Nil(t, err)
+
+	server.proxy = &MockProxy{}
+	server.rootCoordClient = &MockRootCoord{}
+	server.indexCoordClient = &MockIndexCoord{}
+	server.queryCoordClient = &MockQueryCoord{}
+	server.dataCoordClient = &MockDataCoord{}
+
+	HTTPParams.InitOnce()
+	HTTPParams.Enabled = true
+	HTTPParams.Port = 8080
+
+	err = runAndWaitForServerReady(server)
+	assert.Nil(t, err)
+	err = server.Stop()
+	assert.Nil(t, err)
+
+	defer func() {
+		e := recover()
+		if e == nil {
+			t.Fatalf("test should have panicked but did not")
+		}
+	}()
+	// if disable works path not registered, so it shall not panic
+	server.registerHTTPServer()
+}
+
 func getServer(t *testing.T) *Server {
 	ctx := context.Background()
 	server, err := NewServer(ctx, nil)
@@ -1814,13 +1845,19 @@ func Test_NewHTTPServer_TLS_TwoWay(t *testing.T) {
 	Params.CaPemPath = "../../../configs/cert/ca.pem"
 	HTTPParams.InitOnce()
 	HTTPParams.Enabled = true
+	HTTPParams.Port = 8080
 
 	err := runAndWaitForServerReady(server)
 	assert.Nil(t, err)
 	assert.NotNil(t, server.grpcExternalServer)
-	time.Sleep(100 * time.Second)
+	assert.NotNil(t, server.httpServer)
 	err = server.Stop()
 	assert.Nil(t, err)
+
+	HTTPParams.Port = 19529
+	err = runAndWaitForServerReady(server)
+	assert.NotNil(t, err)
+	server.Stop()
 }
 
 func Test_NewHTTPServer_TLS_OneWay(t *testing.T) {
@@ -1832,12 +1869,19 @@ func Test_NewHTTPServer_TLS_OneWay(t *testing.T) {
 	Params.ServerKeyPath = "../../../configs/cert/server.key"
 	HTTPParams.InitOnce()
 	HTTPParams.Enabled = true
+	HTTPParams.Port = 8080
 
 	err := runAndWaitForServerReady(server)
 	assert.Nil(t, err)
 	assert.NotNil(t, server.grpcExternalServer)
+	assert.NotNil(t, server.httpServer)
 	err = server.Stop()
 	assert.Nil(t, err)
+
+	HTTPParams.Port = 19529
+	err = runAndWaitForServerReady(server)
+	assert.NotNil(t, err)
+	server.Stop()
 }
 
 func Test_NewHTTPServer_TLS_FileNotExisted(t *testing.T) {
@@ -1849,6 +1893,7 @@ func Test_NewHTTPServer_TLS_FileNotExisted(t *testing.T) {
 	Params.ServerKeyPath = "../../../configs/cert/server.key"
 	HTTPParams.InitOnce()
 	HTTPParams.Enabled = true
+	HTTPParams.Port = 8080
 	err := runAndWaitForServerReady(server)
 	assert.NotNil(t, err)
 	server.Stop()

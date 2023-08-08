@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/milvus-io/milvus/pkg/util/parameterutil.go"
+
 	"github.com/gin-gonic/gin"
 	"github.com/golang/protobuf/proto"
 	"github.com/spf13/cast"
@@ -133,6 +135,9 @@ func printFields(fields []*schemapb.FieldSchema) []gin.H {
 		if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector {
 			dim, _ := getDim(field)
 			fieldDetail[HTTPReturnFieldType] = field.DataType.String() + "(" + strconv.FormatInt(dim, 10) + ")"
+		} else if field.DataType == schemapb.DataType_VarChar {
+			maxLength, _ := parameterutil.GetMaxLength(field)
+			fieldDetail[HTTPReturnFieldType] = field.DataType.String() + "(" + strconv.FormatInt(maxLength, 10) + ")"
 		} else {
 			fieldDetail[HTTPReturnFieldType] = field.DataType.String()
 		}

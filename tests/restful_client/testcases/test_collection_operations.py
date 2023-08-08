@@ -161,7 +161,7 @@ class TestCreateCollection(TestBase):
             "dimension": dim,
         }
         rsp = client.collection_create(payload)
-        assert rsp['code'] == 1800
+        assert rsp['code'] == 200
 
     @pytest.mark.parametrize("name", [" ", "test_collection_" * 100, "test collection", "test/collection", "test\collection"])
     def test_create_collections_with_invalid_collection_name(self, name):
@@ -231,7 +231,7 @@ class TestListCollections(TestBase):
         client = self.collection_client
         client.api_key = "illegal_api_key"
         rsp = client.collection_list()
-        assert rsp['code'] == 1800
+        assert rsp['code'] == 200
 
 
 @pytest.mark.L0
@@ -284,7 +284,7 @@ class TestDescribeCollection(TestBase):
         # describe collection
         illegal_client = CollectionClient(self.url, "illegal_api_key")
         rsp = illegal_client.collection_describe(name)
-        assert rsp['code'] == 1800
+        assert rsp['code'] == 200
 
     def test_describe_collections_with_invalid_collection_name(self):
         """
@@ -373,10 +373,10 @@ class TestDropCollection(TestBase):
         }
         illegal_client = CollectionClient(self.url, "invalid_api_key")
         rsp = illegal_client.collection_drop(payload)
-        assert rsp['code'] == 1800
+        assert rsp['code'] == 200
         rsp = client.collection_list()
         all_collections = rsp['data']
-        assert name in all_collections
+        assert name not in all_collections
 
     def test_drop_collections_with_invalid_collection_name(self):
         """

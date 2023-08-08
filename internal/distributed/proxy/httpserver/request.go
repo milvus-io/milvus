@@ -43,6 +43,12 @@ type InsertReq struct {
 	Data           []map[string]interface{} `json:"data" validate:"required"`
 }
 
+type SingleInsertReq struct {
+	DbName         string                 `json:"dbName"`
+	CollectionName string                 `json:"collectionName" validate:"required"`
+	Data           map[string]interface{} `json:"data" validate:"required"`
+}
+
 type SearchReq struct {
 	DbName         string    `json:"dbName"`
 	CollectionName string    `json:"collectionName" validate:"required"`

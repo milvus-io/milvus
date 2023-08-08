@@ -105,7 +105,7 @@ func generateCollectionSchema(useBinary bool) *schemapb.CollectionSchema {
 func generateIndexes() []*milvuspb.IndexDescription {
 	return []*milvuspb.IndexDescription{
 		{
-			IndexName: "_default_idx_102",
+			IndexName: DefaultIndexName,
 			IndexID:   442051985533243300,
 			Params: []*commonpb.KeyValuePair{
 				{
@@ -268,12 +268,26 @@ func TestPrintCollectionDetails(t *testing.T) {
 	})
 	assert.Equal(t, printIndexes(indexes), []gin.H{
 		{
-			HTTPReturnIndexName:        "_default_idx_102",
+			HTTPReturnIndexName:        DefaultIndexName,
 			HTTPReturnIndexField:       FieldBookIntro,
 			HTTPReturnIndexMetricsType: DefaultMetricType},
 	})
 	assert.Equal(t, getMetricType(indexes[0].Params), DefaultMetricType)
 	assert.Equal(t, getMetricType(nil), DefaultMetricType)
+	fields := []*schemapb.FieldSchema{}
+	for _, field := range newCollectionSchema(coll).Fields {
+		if field.DataType == schemapb.DataType_VarChar {
+			fields = append(fields, field)
+		}
+	}
+	assert.Equal(t, printFields(fields), []gin.H{
+		{
+			HTTPReturnFieldName:       "field-varchar",
+			HTTPReturnFieldType:       "VarChar(10)",
+			HTTPReturnFieldPrimaryKey: false,
+			HTTPReturnFieldAutoID:     false,
+			HTTPReturnDescription:     ""},
+	})
 }
 
 func TestPrimaryField(t *testing.T) {
@@ -470,6 +484,9 @@ func newCollectionSchema(coll *schemapb.CollectionSchema) *schemapb.CollectionSc
 	fieldSchema8 := schemapb.FieldSchema{
 		Name:     "field-varchar",
 		DataType: schemapb.DataType_VarChar,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: "max_length", Value: "10"},
+		},
 	}
 	coll.Fields = append(coll.Fields, &fieldSchema8)
 

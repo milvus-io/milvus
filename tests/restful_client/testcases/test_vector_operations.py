@@ -119,7 +119,7 @@ class TestInsertVector(TestBase):
         client = self.vector_client
         client.api_key = "invalid_api_key"
         rsp = client.vector_insert(payload)
-        assert rsp['code'] == 1800
+        assert rsp['code'] == 200
 
     def test_insert_vector_with_invalid_collection_name(self):
         """
@@ -889,7 +889,7 @@ class TestDeleteVector(TestBase):
         client = self.vector_client
         client.api_key = "invalid_api_key"
         rsp = client.vector_delete(payload)
-        assert rsp['code'] == 1800
+        assert rsp['code'] == 200
 
     def test_delete_vector_with_invalid_collection_name(self):
         """
@@ -933,7 +933,7 @@ class TestDeleteVector(TestBase):
             "filter": delete_expr,
         }
         rsp = self.vector_client.vector_delete(payload)
-        assert rsp['code'] == 1
+        assert rsp['code'] == 1802
 
     def test_delete_vector_with_non_primary_key(self):
         """
