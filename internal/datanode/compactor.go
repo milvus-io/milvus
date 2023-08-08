@@ -265,8 +265,12 @@ func (t *compactionTask) merge(
 		return false
 	}
 
-	addInsertFieldPath := func(inPaths map[UniqueID]*datapb.FieldBinlog) {
+	addInsertFieldPath := func(inPaths map[UniqueID]*datapb.FieldBinlog, timestampFrom, timestampTo int64) {
 		for fID, path := range inPaths {
+			for _, binlog := range path.GetBinlogs() {
+				binlog.TimestampTo = uint64(timestampTo)
+				binlog.TimestampFrom = uint64(timestampFrom)
+			}
 			tmpBinlog, ok := insertField2Path[fID]
 			if !ok {
 				tmpBinlog = path
@@ -316,6 +320,12 @@ func (t *compactionTask) merge(
 	downloadTimeCost := time.Duration(0)
 	uploadInsertTimeCost := time.Duration(0)
 
+	// initial timestampFrom, timestampTo = -1, -1 is an illegal value, only to mark initial state
+	var (
+		timestampTo   int64 = -1
+		timestampFrom int64 = -1
+	)
+
 	for _, path := range unMergedInsertlogs {
 		downloadStart := time.Now()
 		data, err := t.download(ctxTimeout, path)
@@ -330,6 +340,7 @@ func (t *compactionTask) merge(
 			log.Warn("new insert binlogs Itr wrong", zap.Strings("path", path), zap.Error(err))
 			return nil, nil, 0, err
 		}
+
 		for iter.HasNext() {
 			vInter, _ := iter.Next()
 			v, ok := vInter.(*storage.Value)
@@ -347,6 +358,14 @@ func (t *compactionTask) merge(
 			if t.isExpiredEntity(ts, currentTs) {
 				expired++
 				continue
+			}
+
+			// Update timestampFrom, timestampTo
+			if v.Timestamp < timestampFrom || timestampFrom == -1 {
+				timestampFrom = v.Timestamp
+			}
+			if v.Timestamp > timestampTo || timestampFrom == -1 {
+				timestampTo = v.Timestamp
 			}
 
 			row, ok := v.Value.(map[UniqueID]interface{})
@@ -371,7 +390,9 @@ func (t *compactionTask) merge(
 					return nil, nil, 0, err
 				}
 				uploadInsertTimeCost += time.Since(uploadInsertStart)
-				addInsertFieldPath(inPaths)
+				addInsertFieldPath(inPaths, timestampFrom, timestampTo)
+				timestampFrom = -1
+				timestampTo = -1
 				addStatFieldPath(statsPaths)
 
 				fID2Content = make(map[int64][]interface{})
@@ -389,8 +410,7 @@ func (t *compactionTask) merge(
 			return nil, nil, 0, err
 		}
 		uploadInsertTimeCost += time.Since(uploadInsertStart)
-
-		addInsertFieldPath(inPaths)
+		addInsertFieldPath(inPaths, timestampFrom, timestampTo)
 		addStatFieldPath(statsPaths)
 
 		numRows += int64(currentRows)

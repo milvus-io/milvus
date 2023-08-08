@@ -310,6 +310,8 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			assert.Equal(t, int64(2), numOfRow)
 			assert.Equal(t, 1, len(inPaths[0].GetBinlogs()))
 			assert.Equal(t, 1, len(statsPaths))
+			assert.NotEqual(t, -1, inPaths[0].GetBinlogs()[0].GetTimestampFrom())
+			assert.NotEqual(t, -1, inPaths[0].GetBinlogs()[0].GetTimestampTo())
 		})
 		t.Run("Merge without expiration2", func(t *testing.T) {
 			alloc := NewAllocatorFactory(1)
@@ -347,6 +349,53 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			assert.Equal(t, 2, len(inPaths[0].GetBinlogs()))
 			assert.Equal(t, 1, len(statsPaths))
 			assert.Equal(t, 2, len(statsPaths[0].GetBinlogs()))
+			assert.NotEqual(t, -1, inPaths[0].GetBinlogs()[0].GetTimestampFrom())
+			assert.NotEqual(t, -1, inPaths[0].GetBinlogs()[0].GetTimestampTo())
+		})
+		// set Params.DataNodeCfg.BinLogMaxSize.Key = 1 to generate multi binlogs, each has only one row
+		t.Run("Merge without expiration3", func(t *testing.T) {
+			alloc := NewAllocatorFactory(1)
+			mockbIO := &binlogIO{cm, alloc}
+			Params.CommonCfg.EntityExpirationTTL = 0
+			flushInsertBufferSize := Params.DataNodeCfg.BinLogMaxSize
+			defer func() {
+				Params.DataNodeCfg.BinLogMaxSize = flushInsertBufferSize
+			}()
+			Params.DataNodeCfg.BinLogMaxSize = 1
+
+			iData := genInsertDataWithExpiredTS()
+
+			var allPaths [][]string
+			inpath, _, err := mockbIO.uploadInsertLog(context.Background(), 1, 0, iData, meta)
+			assert.NoError(t, err)
+			assert.Equal(t, 12, len(inpath))
+			binlogNum := len(inpath[0].GetBinlogs())
+			assert.Equal(t, 1, binlogNum)
+
+			for idx := 0; idx < binlogNum; idx++ {
+				var ps []string
+				for _, path := range inpath {
+					ps = append(ps, path.GetBinlogs()[idx].GetLogPath())
+				}
+				allPaths = append(allPaths, ps)
+			}
+
+			dm := map[interface{}]Timestamp{
+				1: 10000,
+			}
+
+			ct := &compactionTask{Channel: channel, downloader: mockbIO, uploader: mockbIO, done: make(chan struct{}, 1)}
+			inPaths, statsPaths, numOfRow, err := ct.merge(context.Background(), allPaths, 2, 0, meta, dm)
+			assert.NoError(t, err)
+			assert.Equal(t, int64(2), numOfRow)
+			assert.Equal(t, 2, len(inPaths[0].GetBinlogs()))
+			assert.Equal(t, 1, len(statsPaths))
+			for _, inpath := range inPaths {
+				assert.NotEqual(t, -1, inpath.GetBinlogs()[0].GetTimestampFrom())
+				assert.NotEqual(t, -1, inpath.GetBinlogs()[0].GetTimestampTo())
+				// as only one row for each binlog, timestampTo == timestampFrom
+				assert.Equal(t, inpath.GetBinlogs()[0].GetTimestampTo(), inpath.GetBinlogs()[0].GetTimestampFrom())
+			}
 		})
 
 		t.Run("Merge with expiration", func(t *testing.T) {

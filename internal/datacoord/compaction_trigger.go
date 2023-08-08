@@ -807,6 +807,11 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, isDis
 		for _, l := range binlogs.GetBinlogs() {
 			// TODO, we should probably estimate expired log entries by total rows in binlog and the ralationship of timeTo, timeFrom and expire time
 			if l.TimestampTo < compactTime.expireTime {
+				log.RatedDebug(10, "mark binlog as expired",
+					zap.Int64("segmentID", segment.ID),
+					zap.Int64("binlogID", l.GetLogID()),
+					zap.Uint64("binlogTimestampTo", l.TimestampTo),
+					zap.Uint64("compactExpireTime", compactTime.expireTime))
 				totalExpiredRows += int(l.GetEntriesNum())
 				totalExpiredSize += l.GetLogSize()
 			}
@@ -814,8 +819,9 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, isDis
 	}
 
 	if float32(totalExpiredRows)/float32(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold || totalExpiredSize > Params.DataCoordCfg.SingleCompactionExpiredLogMaxSize {
-		log.Info("total expired entities is too much, trigger compaction", zap.Int64("segment", segment.ID),
-			zap.Int("expired rows", totalExpiredRows), zap.Int64("expired log size", totalExpiredSize))
+		log.Info("total expired entities is too much, trigger compaction", zap.Int64("segmentID", segment.ID),
+			zap.Int("expiredRows", totalExpiredRows), zap.Int64("expiredLogSize", totalExpiredSize),
+			zap.Bool("createdByCompaction", segment.CreatedByCompaction), zap.Int64s("compactionFrom", segment.CompactionFrom))
 		return true
 	}
 
