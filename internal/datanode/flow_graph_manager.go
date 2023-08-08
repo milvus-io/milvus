@@ -91,7 +91,12 @@ func (fm *flowgraphManager) execute(totalMemory uint64) {
 		return
 	}
 
-	if float64(total) < float64(totalMemory)*Params.DataNodeCfg.MemoryWatermark.GetAsFloat() {
+	memoryWatermark := float64(totalMemory) * Params.DataNodeCfg.MemoryWatermark.GetAsFloat()
+	if float64(total) < memoryWatermark {
+		log.RatedDebug(5, "skip force sync because memory level is not high enough",
+			zap.Float64("current_total_memory_usage", float64(total)),
+			zap.Float64("current_memory_watermark", memoryWatermark),
+			zap.Any("channel_memory_usages", channels))
 		return
 	}
 
