@@ -37,7 +37,7 @@ import (
 func TestMultiRateLimiter(t *testing.T) {
 	collectionID := int64(1)
 	t.Run("test multiRateLimiter", func(t *testing.T) {
-		bak := Params.QuotaConfig.QuotaAndLimitsEnabled
+		bak := Params.QuotaConfig.QuotaAndLimitsEnabled.GetValue()
 		paramtable.Get().Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
 		multiLimiter := NewMultiRateLimiter()
 		multiLimiter.collectionLimiters[collectionID] = newRateLimiter(false)
@@ -66,11 +66,11 @@ func TestMultiRateLimiter(t *testing.T) {
 			}
 
 		}
-		Params.QuotaConfig.QuotaAndLimitsEnabled = bak
+		Params.Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, bak)
 	})
 
 	t.Run("test global static limit", func(t *testing.T) {
-		bak := Params.QuotaConfig.QuotaAndLimitsEnabled
+		bak := Params.QuotaConfig.QuotaAndLimitsEnabled.GetValue()
 		paramtable.Get().Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
 		multiLimiter := NewMultiRateLimiter()
 		multiLimiter.collectionLimiters[1] = newRateLimiter(false)
@@ -103,32 +103,32 @@ func TestMultiRateLimiter(t *testing.T) {
 				assert.Equal(t, commonpb.ErrorCode_RateLimit, errCode)
 			}
 		}
-		Params.QuotaConfig.QuotaAndLimitsEnabled = bak
+		Params.Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, bak)
 	})
 
 	t.Run("not enable quotaAndLimit", func(t *testing.T) {
 		multiLimiter := NewMultiRateLimiter()
 		multiLimiter.collectionLimiters[collectionID] = newRateLimiter(false)
-		bak := Params.QuotaConfig.QuotaAndLimitsEnabled
+		bak := Params.QuotaConfig.QuotaAndLimitsEnabled.GetValue()
 		paramtable.Get().Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
 		for _, rt := range internalpb.RateType_value {
 			errCode := multiLimiter.Check(collectionID, internalpb.RateType(rt), 1)
 			assert.Equal(t, commonpb.ErrorCode_Success, errCode)
 		}
-		Params.QuotaConfig.QuotaAndLimitsEnabled = bak
+		Params.Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, bak)
 	})
 
 	t.Run("test limit", func(t *testing.T) {
 		run := func(insertRate float64) {
-			bakInsertRate := Params.QuotaConfig.DMLMaxInsertRate
+			bakInsertRate := Params.QuotaConfig.DMLMaxInsertRate.GetValue()
 			paramtable.Get().Save(Params.QuotaConfig.DMLMaxInsertRate.Key, fmt.Sprintf("%f", insertRate))
 			multiLimiter := NewMultiRateLimiter()
-			bak := Params.QuotaConfig.QuotaAndLimitsEnabled
+			bak := Params.QuotaConfig.QuotaAndLimitsEnabled.GetValue()
 			paramtable.Get().Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
 			errCode := multiLimiter.Check(collectionID, internalpb.RateType_DMLInsert, 1*1024*1024)
 			assert.Equal(t, commonpb.ErrorCode_Success, errCode)
-			Params.QuotaConfig.QuotaAndLimitsEnabled = bak
-			Params.QuotaConfig.DMLMaxInsertRate = bakInsertRate
+			Params.Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, bak)
+			Params.Save(Params.QuotaConfig.DMLMaxInsertRate.Key, bakInsertRate)
 		}
 		run(math.MaxFloat64)
 		run(math.MaxFloat64 / 1.2)

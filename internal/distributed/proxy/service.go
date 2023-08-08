@@ -367,7 +367,7 @@ func (s *Server) init() error {
 	etcdConfig := &paramtable.Get().EtcdCfg
 	Params := &paramtable.Get().ProxyGrpcServerCfg
 	log.Debug("Proxy init service's parameter table done")
-	HTTPParams := paramtable.Get().HTTPCfg
+	HTTPParams := &paramtable.Get().HTTPCfg
 	log.Debug("Proxy init http server's parameter table done")
 
 	if !funcutil.CheckPortAvailable(Params.Port.GetAsInt()) {

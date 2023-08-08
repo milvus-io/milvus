@@ -401,10 +401,10 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 
 	t.Run("Pure auto flush", func(t *testing.T) {
 		// iBNode.insertBuffer.maxSize = 2
-		tmp := Params.DataNodeCfg.FlushInsertBufferSize
+		tmp := Params.DataNodeCfg.FlushInsertBufferSize.GetValue()
 		paramtable.Get().Save(Params.DataNodeCfg.FlushInsertBufferSize.Key, "200")
 		defer func() {
-			Params.DataNodeCfg.FlushInsertBufferSize = tmp
+			Params.Save(Params.DataNodeCfg.FlushInsertBufferSize.Key, tmp)
 		}()
 
 		for i := range inMsg.insertMessages {
@@ -493,10 +493,10 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	})
 
 	t.Run("Auto with manual flush", func(t *testing.T) {
-		tmp := Params.DataNodeCfg.FlushInsertBufferSize
+		tmp := Params.DataNodeCfg.FlushInsertBufferSize.GetValue()
 		paramtable.Get().Save(Params.DataNodeCfg.FlushInsertBufferSize.Key, "200")
 		defer func() {
-			Params.DataNodeCfg.FlushInsertBufferSize = tmp
+			Params.Save(Params.DataNodeCfg.FlushInsertBufferSize.Key, tmp)
 		}()
 
 		fpMut.Lock()
@@ -648,10 +648,10 @@ func TestInsertBufferNodeRollBF(t *testing.T) {
 	var iMsg flowgraph.Msg = &inMsg
 
 	t.Run("Pure roll BF", func(t *testing.T) {
-		tmp := Params.DataNodeCfg.FlushInsertBufferSize
+		tmp := Params.DataNodeCfg.FlushInsertBufferSize.GetValue()
 		paramtable.Get().Save(Params.DataNodeCfg.FlushInsertBufferSize.Key, "200")
 		defer func() {
-			Params.DataNodeCfg.FlushInsertBufferSize = tmp
+			Params.Save(Params.DataNodeCfg.FlushInsertBufferSize.Key, tmp)
 		}()
 
 		inMsg.startPositions = []*msgpb.MsgPosition{{Timestamp: 100}}

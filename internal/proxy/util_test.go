@@ -865,9 +865,9 @@ func TestPasswordVerify(t *testing.T) {
 }
 
 func TestValidateTravelTimestamp(t *testing.T) {
-	originalRetentionDuration := Params.CommonCfg.RetentionDuration
+	originalRetentionDuration := Params.CommonCfg.RetentionDuration.GetValue()
 	defer func() {
-		Params.CommonCfg.RetentionDuration = originalRetentionDuration
+		Params.Save(Params.CommonCfg.RetentionDuration.Key, originalRetentionDuration)
 	}()
 
 	travelTs := tsoutil.GetCurrentTime()

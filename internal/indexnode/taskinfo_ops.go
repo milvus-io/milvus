@@ -110,7 +110,7 @@ func (i *IndexNode) waitTaskFinish() {
 		return
 	}
 
-	gracefulTimeout := Params.IndexNodeCfg.GracefulStopTimeout
+	gracefulTimeout := &Params.IndexNodeCfg.GracefulStopTimeout
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 

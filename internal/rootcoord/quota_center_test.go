@@ -182,7 +182,7 @@ func TestQuotaCenter(t *testing.T) {
 			{10 * time.Second, t0.Add(100 * time.Second), t0, 0},
 		}
 
-		backup := Params.QuotaConfig.MaxTimeTickDelay
+		backup := Params.QuotaConfig.MaxTimeTickDelay.GetValue()
 
 		for _, c := range ttCases {
 			paramtable.Get().Save(Params.QuotaConfig.MaxTimeTickDelay.Key, fmt.Sprintf("%f", c.maxTtDelay.Seconds()))
@@ -203,7 +203,7 @@ func TestQuotaCenter(t *testing.T) {
 			}
 		}
 
-		Params.QuotaConfig.MaxTimeTickDelay = backup
+		Params.Save(Params.QuotaConfig.MaxTimeTickDelay.Key, backup)
 	})
 
 	t.Run("test TimeTickDelayFactor factors", func(t *testing.T) {
@@ -226,7 +226,7 @@ func TestQuotaCenter(t *testing.T) {
 			{100 * time.Second, 0},
 		}
 
-		backup := Params.QuotaConfig.MaxTimeTickDelay
+		backup := Params.QuotaConfig.MaxTimeTickDelay.GetValue()
 		paramtable.Get().Save(Params.QuotaConfig.DMLLimitEnabled.Key, "true")
 		paramtable.Get().Save(Params.QuotaConfig.TtProtectionEnabled.Key, "true")
 		paramtable.Get().Save(Params.QuotaConfig.MaxTimeTickDelay.Key, "10.0")
@@ -276,7 +276,7 @@ func TestQuotaCenter(t *testing.T) {
 			deleteFactor := float64(quotaCenter.currentRates[1][internalpb.RateType_DMLDelete]) / Params.QuotaConfig.DMLMaxInsertRatePerCollection.GetAsFloat()
 			assert.Equal(t, c.expectedFactor, deleteFactor)
 		}
-		Params.QuotaConfig.MaxTimeTickDelay = backup
+		Params.Save(Params.QuotaConfig.MaxTimeTickDelay.Key, backup)
 	})
 
 	t.Run("test calculateReadRates", func(t *testing.T) {
@@ -496,7 +496,7 @@ func TestQuotaCenter(t *testing.T) {
 		quotaCenter.checkDiskQuota()
 
 		// total DiskQuota exceeded
-		quotaBackup := Params.QuotaConfig.DiskQuota
+		quotaBackup := Params.QuotaConfig.DiskQuota.GetValue()
 		paramtable.Get().Save(Params.QuotaConfig.DiskQuota.Key, "99")
 		quotaCenter.dataCoordMetrics = &metricsinfo.DataCoordQuotaMetrics{
 			TotalBinlogSize:      200 * 1024 * 1024,
@@ -509,10 +509,10 @@ func TestQuotaCenter(t *testing.T) {
 			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DMLUpsert])
 			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DMLDelete])
 		}
-		paramtable.Get().Save(Params.QuotaConfig.DiskQuota.Key, quotaBackup.GetValue())
+		paramtable.Get().Save(Params.QuotaConfig.DiskQuota.Key, quotaBackup)
 
 		// collection DiskQuota exceeded
-		colQuotaBackup := Params.QuotaConfig.DiskQuotaPerCollection
+		colQuotaBackup := Params.QuotaConfig.DiskQuotaPerCollection.GetValue()
 		paramtable.Get().Save(Params.QuotaConfig.DiskQuotaPerCollection.Key, "30")
 		quotaCenter.dataCoordMetrics = &metricsinfo.DataCoordQuotaMetrics{CollectionBinlogSize: map[int64]int64{
 			1: 20 * 1024 * 1024, 2: 30 * 1024 * 1024, 3: 60 * 1024 * 1024}}
@@ -528,7 +528,7 @@ func TestQuotaCenter(t *testing.T) {
 		assert.Equal(t, Limit(0), quotaCenter.currentRates[3][internalpb.RateType_DMLInsert])
 		assert.Equal(t, Limit(0), quotaCenter.currentRates[3][internalpb.RateType_DMLUpsert])
 		assert.Equal(t, Limit(0), quotaCenter.currentRates[3][internalpb.RateType_DMLDelete])
-		paramtable.Get().Save(Params.QuotaConfig.DiskQuotaPerCollection.Key, colQuotaBackup.GetValue())
+		paramtable.Get().Save(Params.QuotaConfig.DiskQuotaPerCollection.Key, colQuotaBackup)
 	})
 
 	t.Run("test setRates", func(t *testing.T) {
@@ -599,8 +599,8 @@ func TestQuotaCenter(t *testing.T) {
 				meta.EXPECT().GetCollectionByID(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
 				quotaCenter := NewQuotaCenter(pcm, nil, &dataCoordMockForQuota{}, core.tsoAllocator, meta)
 				quotaCenter.resetAllCurrentRates()
-				quotaBackup := Params.QuotaConfig.DiskQuota
-				colQuotaBackup := Params.QuotaConfig.DiskQuotaPerCollection
+				quotaBackup := Params.QuotaConfig.DiskQuota.GetValue()
+				colQuotaBackup := Params.QuotaConfig.DiskQuotaPerCollection.GetValue()
 				paramtable.Get().Save(Params.QuotaConfig.DiskQuota.Key, test.totalDiskQuota)
 				paramtable.Get().Save(Params.QuotaConfig.DiskQuotaPerCollection.Key, test.collDiskQuota)
 				quotaCenter.diskMu.Lock()
@@ -610,8 +610,8 @@ func TestQuotaCenter(t *testing.T) {
 				quotaCenter.diskMu.Unlock()
 				allowance := quotaCenter.diskAllowance(collection)
 				assert.Equal(t, test.expectAllowance, allowance)
-				paramtable.Get().Save(Params.QuotaConfig.DiskQuota.Key, quotaBackup.GetValue())
-				paramtable.Get().Save(Params.QuotaConfig.DiskQuotaPerCollection.Key, colQuotaBackup.GetValue())
+				paramtable.Get().Save(Params.QuotaConfig.DiskQuota.Key, quotaBackup)
+				paramtable.Get().Save(Params.QuotaConfig.DiskQuotaPerCollection.Key, colQuotaBackup)
 			})
 		}
 	})
