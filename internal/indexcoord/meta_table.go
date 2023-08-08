@@ -656,13 +656,13 @@ func (mt *metaTable) GetIndexStates(indexID int64, createTs uint64, filters ...f
 		})
 	}
 
-	log.Debug("IndexCoord get index states success", zap.Int64("indexID", indexID),
+	log.Info("IndexCoord get index states success", zap.Int64("indexID", indexID),
 		zap.Int("total", len(segIndexStates)), zap.Int("None", cntNone), zap.Int("Unissued", cntUnissued),
 		zap.Int("InProgress", cntInProgress), zap.Int("Finished", cntFinished), zap.Int("Failed", cntFailed))
 
 	return segIndexStates, IndexStateCnt{
 		None:       cntNone,
-		Unissued:   cntNone,
+		Unissued:   cntUnissued,
 		InProgress: cntInProgress,
 		Finished:   cntFinished,
 		Failed:     cntFailed,
