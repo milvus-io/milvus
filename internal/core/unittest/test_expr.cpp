@@ -1413,9 +1413,9 @@ TEST(Expr, TestExprs) {
                           int n) -> std::shared_ptr<query::Expr> {
         switch (test_type) {
             case UnaryRangeExpr:
-                return std::make_shared<query::UnaryRangeExprImpl<int8_t>>(
-                    ColumnInfo(int8_fid, DataType::INT8),
-                    proto::plan::OpType::GreaterThan,
+                return std::make_shared<query::UnaryRangeExprImpl<int64_t>>(
+                    ColumnInfo(int64_fid, DataType::INT64),
+                    proto::plan::OpType::Equal,
                     10,
                     proto::plan::GenericValue::ValCase::kInt64Val);
                 break;
@@ -1513,7 +1513,7 @@ TEST(Expr, TestExprs) {
         }
     };
     auto test_case = [&](int n) {
-        auto expr = build_expr(TermExprImpl, n);
+        auto expr = build_expr(UnaryRangeExpr, n);
         std::cout << "start test" << std::endl;
         auto start = std::chrono::steady_clock::now();
         auto final = visitor.call_child(*expr);

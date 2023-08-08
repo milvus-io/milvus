@@ -61,9 +61,8 @@ FindTermSSE2(const bool* src, size_t vec_size, bool val) {
     __m128i xmm_target = _mm_set1_epi8(val);
     __m128i xmm_data;
     size_t num_chunks = vec_size / 16;
-    for (size_t i = 0; i < num_chunks; i++) {
-        xmm_data =
-            _mm_loadu_si128(reinterpret_cast<const __m128i*>(src + 16 * i));
+    for (size_t i = 0; i < num_chunks * 16; i += 16) {
+        xmm_data = _mm_loadu_si128(reinterpret_cast<const __m128i*>(src + i));
         __m128i xmm_match = _mm_cmpeq_epi8(xmm_data, xmm_target);
         int mask = _mm_movemask_epi8(xmm_match);
         if (mask != 0) {
@@ -71,7 +70,7 @@ FindTermSSE2(const bool* src, size_t vec_size, bool val) {
         }
     }
 
-    for (size_t i = 16 * num_chunks; i < vec_size; ++i) {
+    for (size_t i = num_chunks * 16; i < vec_size; ++i) {
         if (src[i] == val) {
             return true;
         }
@@ -86,9 +85,8 @@ FindTermSSE2(const int8_t* src, size_t vec_size, int8_t val) {
     __m128i xmm_target = _mm_set1_epi8(val);
     __m128i xmm_data;
     size_t num_chunks = vec_size / 16;
-    for (size_t i = 0; i < num_chunks; i++) {
-        xmm_data =
-            _mm_loadu_si128(reinterpret_cast<const __m128i*>(src + 16 * i));
+    for (size_t i = 0; i < num_chunks * 16; i += 16) {
+        xmm_data = _mm_loadu_si128(reinterpret_cast<const __m128i*>(src + i));
         __m128i xmm_match = _mm_cmpeq_epi8(xmm_data, xmm_target);
         int mask = _mm_movemask_epi8(xmm_match);
         if (mask != 0) {
@@ -96,7 +94,7 @@ FindTermSSE2(const int8_t* src, size_t vec_size, int8_t val) {
         }
     }
 
-    for (size_t i = 16 * num_chunks; i < vec_size; ++i) {
+    for (size_t i = num_chunks * 16; i < vec_size; ++i) {
         if (src[i] == val) {
             return true;
         }
@@ -111,9 +109,8 @@ FindTermSSE2(const int16_t* src, size_t vec_size, int16_t val) {
     __m128i xmm_target = _mm_set1_epi16(val);
     __m128i xmm_data;
     size_t num_chunks = vec_size / 8;
-    for (size_t i = 0; i < num_chunks; i++) {
-        xmm_data =
-            _mm_loadu_si128(reinterpret_cast<const __m128i*>(src + i * 8));
+    for (size_t i = 0; i < num_chunks * 8; i += 8) {
+        xmm_data = _mm_loadu_si128(reinterpret_cast<const __m128i*>(src + i));
         __m128i xmm_match = _mm_cmpeq_epi16(xmm_data, xmm_target);
         int mask = _mm_movemask_epi8(xmm_match);
         if (mask != 0) {
@@ -121,7 +118,7 @@ FindTermSSE2(const int16_t* src, size_t vec_size, int16_t val) {
         }
     }
 
-    for (size_t i = 8 * num_chunks; i < vec_size; ++i) {
+    for (size_t i = num_chunks * 8; i < vec_size; ++i) {
         if (src[i] == val) {
             return true;
         }
@@ -136,9 +133,9 @@ FindTermSSE2(const int32_t* src, size_t vec_size, int32_t val) {
     size_t remaining_size = vec_size % 4;
 
     __m128i xmm_target = _mm_set1_epi32(val);
-    for (size_t i = 0; i < num_chunk; ++i) {
+    for (size_t i = 0; i < num_chunk * 4; i += 4) {
         __m128i xmm_data =
-            _mm_loadu_si128(reinterpret_cast<const __m128i*>(src + i * 4));
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(src + i));
         __m128i xmm_match = _mm_cmpeq_epi32(xmm_data, xmm_target);
         int mask = _mm_movemask_epi8(xmm_match);
         if (mask != 0) {
@@ -180,9 +177,9 @@ FindTermSSE2(const int64_t* src, size_t vec_size, int64_t val) {
     size_t num_chunk = vec_size / 2;
     size_t remaining_size = vec_size % 2;
 
-    for (int64_t i = 0; i < num_chunk; i++) {
+    for (int64_t i = 0; i < num_chunk * 2; i += 2) {
         __m128i xmm_vec =
-            _mm_load_si128(reinterpret_cast<const __m128i*>(src + i * 2));
+            _mm_load_si128(reinterpret_cast<const __m128i*>(src + i));
 
         __m128i xmm_low = _mm_set1_epi32(low);
         __m128i xmm_high = _mm_set1_epi32(high);
@@ -203,13 +200,6 @@ FindTermSSE2(const int64_t* src, size_t vec_size, int64_t val) {
         }
     }
     return false;
-
-    // for (size_t i = 0; i < vec_size; ++i) {
-    //     if (src[i] == val) {
-    //         return true;
-    //     }
-    // }
-    // return false;
 }
 
 template <>
@@ -217,8 +207,8 @@ bool
 FindTermSSE2(const float* src, size_t vec_size, float val) {
     size_t num_chunks = vec_size / 4;
     __m128 xmm_target = _mm_set1_ps(val);
-    for (int i = 0; i < num_chunks; ++i) {
-        __m128 xmm_data = _mm_loadu_ps(src + 4 * i);
+    for (int i = 0; i < 4 * num_chunks; i += 4) {
+        __m128 xmm_data = _mm_loadu_ps(src + i);
         __m128 xmm_match = _mm_cmpeq_ps(xmm_data, xmm_target);
         int mask = _mm_movemask_ps(xmm_match);
         if (mask != 0) {
@@ -239,8 +229,8 @@ bool
 FindTermSSE2(const double* src, size_t vec_size, double val) {
     size_t num_chunks = vec_size / 2;
     __m128d xmm_target = _mm_set1_pd(val);
-    for (int i = 0; i < num_chunks; ++i) {
-        __m128d xmm_data = _mm_loadu_pd(src + 2 * i);
+    for (int i = 0; i < 2 * num_chunks; i += 2) {
+        __m128d xmm_data = _mm_loadu_pd(src + i);
         __m128d xmm_match = _mm_cmpeq_pd(xmm_data, xmm_target);
         int mask = _mm_movemask_pd(xmm_match);
         if (mask != 0) {

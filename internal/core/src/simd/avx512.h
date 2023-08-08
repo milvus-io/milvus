@@ -17,6 +17,10 @@
 
 #include "common.h"
 
+#if defined(__x86_64__)
+#include <immintrin.h>
+#endif
+
 namespace milvus {
 namespace simd {
 
@@ -54,6 +58,54 @@ FindTermAVX512(const float* src, size_t vec_size, float val);
 template <>
 bool
 FindTermAVX512(const double* src, size_t vec_size, double val);
+
+template <typename T>
+void
+EqualValAVX512(const T* src, size_t size, T val, bool* res);
+
+template <typename T>
+void
+LessValAVX512(const T* src, size_t size, T val, bool* res);
+
+template <typename T>
+void
+GreaterValAVX512(const T* src, size_t size, T val, bool* res);
+
+template <typename T>
+void
+NotEqualValAVX512(const T* src, size_t size, T val, bool* res);
+
+template <typename T>
+void
+LessEqualValAVX512(const T* src, size_t size, T val, bool* res);
+
+template <typename T>
+void
+GreaterEqualValAVX512(const T* src, size_t size, T val, bool* res);
+
+template <typename T>
+void
+EqualColumnAVX512(const T* left, const T* right, size_t size, bool* res);
+
+template <typename T>
+void
+LessColumnAVX512(const T* left, const T* right, size_t size, bool* res);
+
+template <typename T>
+void
+LessEqualColumnAVX512(const T* left, const T* right, size_t size, bool* res);
+
+template <typename T>
+void
+GreaterColumnAVX512(const T* left, const T* right, size_t size, bool* res);
+
+template <typename T>
+void
+GreaterEqualColumnAVX512(const T* left, const T* right, size_t size, bool* res);
+
+template <typename T>
+void
+NotEqualColumnAVX512(const T* left, const T* right, size_t size, bool* res);
 
 }  // namespace simd
 }  // namespace milvus
