@@ -30,9 +30,11 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/eventlog"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
+	"go.uber.org/zap"
 )
 
 type SegmentFilter func(segment Segment) bool
@@ -98,6 +100,8 @@ type SegmentManager interface {
 	Remove(segmentID UniqueID, scope querypb.DataScope) (int, int)
 	RemoveBy(filters ...SegmentFilter) (int, int)
 	Clear()
+
+	UpdateSegmentVersion(segmentType SegmentType, segmentID int64, newVersion int64)
 }
 
 var _ SegmentManager = (*segmentManager)(nil)
@@ -132,29 +136,74 @@ func (mgr *segmentManager) Put(segmentType SegmentType, segments ...Segment) {
 	}
 
 	for _, segment := range segments {
-		if _, ok := targetMap[segment.ID()]; ok {
+		oldSegment, ok := targetMap[segment.ID()]
+
+		if ok && oldSegment.Version() >= segment.Version() {
+			log.Warn("Invalid segment distribution changed, skip it",
+				zap.Int64("segmentID", segment.ID()),
+				zap.Int64("oldVersion", oldSegment.Version()),
+				zap.Int64("newVersion", segment.Version()),
+			)
 			continue
 		}
-		eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("Segment %d[%d] loaded", segment.ID(), segment.Collection())))
 		targetMap[segment.ID()] = segment
-		metrics.QueryNodeNumSegments.WithLabelValues(
-			fmt.Sprint(paramtable.GetNodeID()),
-			fmt.Sprint(segment.Collection()),
-			fmt.Sprint(segment.Partition()),
-			segment.Type().String(),
-			fmt.Sprint(len(segment.Indexes())),
-		).Inc()
-		if segment.RowNum() > 0 {
-			metrics.QueryNodeNumEntities.WithLabelValues(
+
+		if !ok {
+			eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("Segment %d[%d] loaded", segment.ID(), segment.Collection())))
+			metrics.QueryNodeNumSegments.WithLabelValues(
 				fmt.Sprint(paramtable.GetNodeID()),
 				fmt.Sprint(segment.Collection()),
 				fmt.Sprint(segment.Partition()),
 				segment.Type().String(),
 				fmt.Sprint(len(segment.Indexes())),
-			).Add(float64(segment.RowNum()))
+			).Inc()
+			if segment.RowNum() > 0 {
+				metrics.QueryNodeNumEntities.WithLabelValues(
+					fmt.Sprint(paramtable.GetNodeID()),
+					fmt.Sprint(segment.Collection()),
+					fmt.Sprint(segment.Partition()),
+					segment.Type().String(),
+					fmt.Sprint(len(segment.Indexes())),
+				).Add(float64(segment.RowNum()))
+			}
 		}
 	}
 	mgr.updateMetric()
+}
+
+func (mgr *segmentManager) UpdateSegmentVersion(segmentType SegmentType, segmentID int64, newVersion int64) {
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+
+	targetMap := mgr.growingSegments
+	switch segmentType {
+	case SegmentTypeGrowing:
+		targetMap = mgr.growingSegments
+	case SegmentTypeSealed:
+		targetMap = mgr.sealedSegments
+	default:
+		panic("unexpected segment type")
+	}
+
+	segment, ok := targetMap[segmentID]
+	if !ok {
+		log.Warn("segment not exist, skip segment version change",
+			zap.Int64("segmentID", segmentID),
+			zap.Int64("newVersion", newVersion),
+		)
+		return
+	}
+
+	if segment.Version() >= newVersion {
+		log.Warn("Invalid segment version changed, skip it",
+			zap.Int64("segmentID", segment.ID()),
+			zap.Int64("oldVersion", segment.Version()),
+			zap.Int64("newVersion", newVersion))
+		return
+	}
+
+	segment.UpdateVersion(newVersion)
+	targetMap[segmentID] = segment
 }
 
 func (mgr *segmentManager) Get(segmentID UniqueID) Segment {

@@ -126,7 +126,7 @@ func (node *QueryNode) loadIndex(ctx context.Context, req *querypb.LoadSegmentsR
 			continue
 		}
 
-		err := node.loader.LoadIndex(ctx, localSegment, info)
+		err := node.loader.LoadIndex(ctx, localSegment, info, req.Version)
 		if err != nil {
 			log.Warn("failed to load index", zap.Error(err))
 			status = merr.Status(err)

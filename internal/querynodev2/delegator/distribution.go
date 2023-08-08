@@ -171,9 +171,21 @@ func (d *distribution) AddDistributions(entries ...SegmentEntry) {
 	defer d.mut.Unlock()
 
 	for _, entry := range entries {
-		if s, ok := d.sealedSegments[entry.SegmentID]; ok {
+		oldEntry, ok := d.sealedSegments[entry.SegmentID]
+		if ok && oldEntry.Version >= entry.Version {
+			log.Warn("Invalid segment distribution changed, skip it",
+				zap.Int64("segmentID", entry.SegmentID),
+				zap.Int64("oldVersion", oldEntry.Version),
+				zap.Int64("oldNode", oldEntry.NodeID),
+				zap.Int64("newVersion", entry.Version),
+				zap.Int64("newNode", entry.NodeID),
+			)
+			continue
+		}
+
+		if ok {
 			// remain the target version for already loaded segment to void skipping this segment when executing search
-			entry.TargetVersion = s.TargetVersion
+			entry.TargetVersion = oldEntry.TargetVersion
 		}
 		d.sealedSegments[entry.SegmentID] = entry
 		d.offlines.Remove(entry.SegmentID)

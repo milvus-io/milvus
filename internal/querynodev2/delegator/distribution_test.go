@@ -77,6 +77,31 @@ func (s *DistributionSuite) TestAddDistribution() {
 			expectedSignalClosed: true,
 		},
 		{
+			tag: "duplicate segment",
+			input: []SegmentEntry{
+				{
+					NodeID:    1,
+					SegmentID: 1,
+				},
+				{
+					NodeID:    1,
+					SegmentID: 1,
+				},
+			},
+			expected: []SnapshotItem{
+				{
+					NodeID: 1,
+					Segments: []SegmentEntry{
+						{
+							NodeID:    1,
+							SegmentID: 1,
+						},
+					},
+				},
+			},
+			expectedSignalClosed: true,
+		},
+		{
 			tag: "multiple_nodes",
 			input: []SegmentEntry{
 				{
