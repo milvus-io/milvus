@@ -239,6 +239,34 @@ func Test_validateUtil_checkFloatVectorFieldData(t *testing.T) {
 		err := v.checkFloatVectorFieldData(f, nil)
 		assert.NoError(t, err)
 	})
+
+	t.Run("default", func(t *testing.T) {
+		data := []*schemapb.FieldData{
+			{
+				FieldId:   100,
+				FieldName: "vec",
+				Type:      schemapb.DataType_FloatVector,
+				Field:     &schemapb.FieldData_Vectors{},
+			},
+		}
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "vec",
+					DataType:     schemapb.DataType_FloatVector,
+					DefaultValue: &schemapb.ValueField{},
+				},
+			},
+		}
+		h, err := typeutil.CreateSchemaHelper(schema)
+		assert.NoError(t, err)
+
+		v := newValidateUtil()
+		err = v.fillWithDefaultValue(data, h, 1)
+		assert.Error(t, err)
+	})
 }
 
 func Test_validateUtil_checkAligned(t *testing.T) {
@@ -2080,4 +2108,26 @@ func Test_validateUtil_checkIntegerFieldData(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+}
+
+func Test_validateUtil_checkJSONData(t *testing.T) {
+	v := newValidateUtil(withOverflowCheck())
+
+	f := &schemapb.FieldSchema{
+		DataType: schemapb.DataType_JSON,
+	}
+	data := &schemapb.FieldData{
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: []int32{int32(math.MinInt8 - 1)},
+					},
+				},
+			},
+		},
+	}
+
+	err := v.checkJSONFieldData(data, f)
+	assert.Error(t, err)
 }
