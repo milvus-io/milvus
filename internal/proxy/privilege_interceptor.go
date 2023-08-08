@@ -77,6 +77,22 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 		log.Warn("GetCurUserFromContext fail", zap.Error(err))
 		return ctx, err
 	}
+	return privilegeInterceptor(ctx, privilegeExt, username, req)
+}
+
+func PrivilegeInterceptorWithUsername(ctx context.Context, username string, req interface{}) (context.Context, error) {
+	if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
+		return ctx, nil
+	}
+	log.Debug("PrivilegeInterceptor", zap.String("type", reflect.TypeOf(req).String()))
+	privilegeExt, err := funcutil.GetPrivilegeExtObj(req)
+	if err != nil {
+		log.Warn("GetPrivilegeExtObj err", zap.Error(err))
+		return ctx, nil
+	}
+	return privilegeInterceptor(ctx, privilegeExt, username, req)
+}
+func privilegeInterceptor(ctx context.Context, privilegeExt commonpb.PrivilegeExt, username string, req interface{}) (context.Context, error) {
 	if username == util.UserRoot {
 		return ctx, nil
 	}

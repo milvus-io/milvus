@@ -3,6 +3,7 @@ package paramtable
 type httpConfig struct {
 	Enabled   ParamItem `refreshable:"false"`
 	DebugMode ParamItem `refreshable:"false"`
+	Port      ParamItem `refreshable:"false"`
 }
 
 func (p *httpConfig) init(base *BaseTable) {
@@ -23,4 +24,13 @@ func (p *httpConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.DebugMode.Init(base.mgr)
+
+	p.Port = ParamItem{
+		Key:          "proxy.http.port",
+		Version:      "2.1.0",
+		Doc:          "high-level restful api",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.Port.Init(base.mgr)
 }

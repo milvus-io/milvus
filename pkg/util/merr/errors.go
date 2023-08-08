@@ -36,7 +36,7 @@ const (
 	embededBits
 
 	retriableFlag      = 1 << 20
-	rootReasonCodeMask = (1 << 16) - 1
+	RootReasonCodeMask = (1 << 16) - 1
 
 	CanceledCode int32 = 10000
 	TimeoutCode  int32 = 10001
@@ -124,6 +124,15 @@ var (
 
 	// field related
 	ErrFieldNotFound = newMilvusError("field not found", 1700, false)
+
+	// high-level restful api related
+	ErrNeedAuthenticate          = newMilvusError("user hasn't authenticate", 1800, false)
+	ErrIncorrectParameterFormat  = newMilvusError("can only accept json format request", 1801, false)
+	ErrMissingRequiredParameters = newMilvusError("missing required parameters", 1802, false)
+	ErrMarshalCollectionSchema   = newMilvusError("fail to marshal collection schema", 1803, false)
+	ErrInvalidInsertData         = newMilvusError("fail to deal the insert data", 1804, false)
+	ErrInvalidSearchResult       = newMilvusError("fail to parse search result", 1805, false)
+	ErrCheckPrimaryKey           = newMilvusError("please check the primary key and its' type can only in [int, string]", 1806, false)
 
 	// Do NOT export this,
 	// never allow programmer using this, keep only for converting unknown error to milvusError
