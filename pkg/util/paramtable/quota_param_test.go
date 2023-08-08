@@ -187,6 +187,7 @@ func TestQuotaParam(t *testing.T) {
 		assert.Equal(t, defaultLowWaterLevel, qc.QueryNodeMemoryLowWaterLevel.GetAsFloat())
 		assert.Equal(t, defaultHighWaterLevel, qc.QueryNodeMemoryHighWaterLevel.GetAsFloat())
 		assert.Equal(t, false, qc.GrowingSegmentsSizeProtectionEnabled.GetAsBool())
+		assert.Equal(t, 0.5, qc.GrowingSegmentsSizeMinRateRatio.GetAsFloat())
 		assert.Equal(t, 0.2, qc.GrowingSegmentsSizeLowWaterLevel.GetAsFloat())
 		assert.Equal(t, 0.4, qc.GrowingSegmentsSizeHighWaterLevel.GetAsFloat())
 		assert.Equal(t, true, qc.DiskProtectionEnabled.GetAsBool())
