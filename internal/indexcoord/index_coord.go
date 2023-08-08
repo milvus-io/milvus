@@ -605,7 +605,7 @@ func (i *IndexCoord) getIndexIDAndCreateTime(collectionID int64, indexName strin
 // completeIndexInfo get the index row count and index task state
 // if realTime, calculate current statistics
 // if not realTime, which means get info of the prior `CreateIndex` action, skip segments created after index's create time
-func (i *IndexCoord) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.Index, segIDs []UniqueID) error {
+func (i *IndexCoord) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.Index, segIDs []UniqueID, realTime bool) error {
 	collectionID := indexInfo.CollectionID
 	indexName := indexInfo.IndexName
 	log.Info("IndexCoord completeIndexInfo", zap.Int64("collID", collectionID),
@@ -615,18 +615,22 @@ func (i *IndexCoord) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *mode
 
 	//get index status of segSet
 	_, indexStateCnt := i.metaTable.GetIndexStates(index.IndexID, typeutil.MaxTimestamp, func(segIdx *model.SegmentIndex) bool {
-		return segSet.Contain(segIdx.SegmentID)
+		return segSet.Contain(segIdx.SegmentID) && (realTime || !realTime && segIdx.CreateTime <= index.CreateTime)
 	})
-	allCnt := len(segIDs)
 
+	// A,B => C, segIDs = [C], but A, B must have index.
 	switch {
 	case indexStateCnt.Failed > 0:
 		indexInfo.State = commonpb.IndexState_Failed
 		indexInfo.IndexStateFailReason = indexStateCnt.FailReason
-	case indexStateCnt.Finished == allCnt:
-		indexInfo.State = commonpb.IndexState_Finished
-	default:
+	case indexStateCnt.None > 0:
+		// can't to here
+		log.Warn("IndexCoord get invalid segment index state")
+		indexInfo.State = commonpb.IndexState_IndexStateNone
+	case indexStateCnt.InProgress > 0 || indexStateCnt.Unissued > 0:
 		indexInfo.State = commonpb.IndexState_InProgress
+	default:
+		indexInfo.State = commonpb.IndexState_Finished
 	}
 
 	log.Info("IndexCoord completeIndexInfo success", zap.Int64("collID", collectionID),
@@ -942,7 +946,7 @@ func (i *IndexCoord) DescribeIndex(ctx context.Context, req *indexpb.DescribeInd
 		indexInfo.TotalRows = totalRows
 		indexInfo.IndexedRows = indexedRows
 		indexInfo.PendingIndexRows = pendingIndexRows
-		if err := i.completeIndexInfo(indexInfo, index, segmentsToCheck); err != nil {
+		if err := i.completeIndexInfo(indexInfo, index, segmentsToCheck, false); err != nil {
 			log.Error("IndexCoord describe index fail", zap.Int64("collectionID", req.CollectionID),
 				zap.String("indexName", req.IndexName), zap.Error(err))
 			return &indexpb.DescribeIndexResponse{
@@ -1018,7 +1022,7 @@ func (i *IndexCoord) GetIndexStatistics(ctx context.Context, req *indexpb.GetInd
 		indexInfo.TotalRows = totalRows
 		indexInfo.IndexedRows = indexedRows
 		indexInfo.PendingIndexRows = pendingIndexRows
-		if err := i.completeIndexInfo(indexInfo, index, segmentsToCheck); err != nil {
+		if err := i.completeIndexInfo(indexInfo, index, segmentsToCheck, true); err != nil {
 			log.Error("IndexCoord GetIndexStatistics fail", zap.Int64("collectionID", req.CollectionID), zap.String("indexName", req.IndexName), zap.Error(err))
 			ret.Status.Reason = err.Error()
 			return ret, nil

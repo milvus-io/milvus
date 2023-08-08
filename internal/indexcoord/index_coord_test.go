@@ -599,11 +599,11 @@ func testIndexCoord(t *testing.T) {
 			}
 		})
 		// indexed segment: 55, 66, 77 and compaction to 555, 666, 777,
-		// so total rows = 2048*3, indexed rows = 2048*3, pending index rows = 2048*3, state = InProgress
+		// so total rows = 2048*3, indexed rows = 2048*3, pending index rows = 2048*3, state = Finished
 		resp, err = ic.DescribeIndex(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-		assert.Equal(t, commonpb.IndexState_InProgress, resp.IndexInfos[0].State)
+		assert.Equal(t, commonpb.IndexState_Finished, resp.IndexInfos[0].State)
 		assert.Equal(t, int64(2048*3), resp.IndexInfos[0].IndexedRows)
 		assert.Equal(t, int64(2048*3), resp.IndexInfos[0].TotalRows)
 		assert.Equal(t, int64(2048*3), resp.IndexInfos[0].PendingIndexRows)
