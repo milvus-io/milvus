@@ -198,6 +198,36 @@ pull_request_rules:
         remove:
           - do-not-merge/missing-related-issue
 
+  - name: Blocking PR if missing a related master PR or doesn't have kind/branch-feature label
+    conditions:
+      - base=2.2.0
+      # - base~=^2(\.\d+){2}$
+      - -body~=https://github.com/milvus-io/milvus/pull/[0-9]{1,6}(\s+|$)
+      - -label=kind/branch-feature
+      - -title~=\[automated\]
+    actions:
+      label:
+        add:
+          - do-not-merge/missing-related-pr
+      comment:
+        message: |
+          @{{author}} Please associate the related pr of master to the body of your Pull Request.  (eg. “pr: #<xyz>”)
+
+
+  - name: Dismiss block label if related pr be added into PR
+    conditions:
+      - base=2.2.0
+      # - base~=^2(\.\d+){2}$
+      - or:
+        - body~=https://github.com/milvus-io/milvus/issues/[0-9]{1,6}(\s+|$)
+        - label=kind/branch-feature
+    actions:
+      label:
+        remove:
+          - do-not-merge/missing-related-pr
+
+
+
   - name: Dismiss block label if automated create PR
     conditions:
       - or:
@@ -209,6 +239,7 @@ pull_request_rules:
       label:
         remove:
           - do-not-merge/missing-related-issue
+          - do-not-merge/missing-related-pr
 
   - name: Test passed for skip e2e-master
     conditions:
