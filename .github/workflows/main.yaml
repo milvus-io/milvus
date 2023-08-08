@@ -44,6 +44,14 @@ jobs:
     env:
       UBUNTU: ${{ matrix.ubuntu }}
     steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 10240
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
       - name: Checkout
         uses: actions/checkout@v2
         with:
@@ -60,10 +68,12 @@ jobs:
             **/*.h
             **/*.hpp
             **/*.CMakeLists.txt
-            **/conanfiles.*          
+            **/conanfiles.* 
+
       - name: 'Setup Use USE_ASAN'
         if: steps.changed-files-cpp.outputs.any_changed == 'true'
         run: |
+            df -h
             echo "useasan=true" >> $GITHUB_ENV
             echo "Setup USE_ASAN to true since cpp file(s) changed"
       - name: 'Generate CCache Hash'
@@ -93,9 +103,13 @@ jobs:
       - name: Start Service
         shell: bash
         run: |
+          df -h
           docker-compose up -d pulsar etcd minio
+      # - name: Setup upterm session
+      #   uses: lhotari/action-upterm@v1
       - name: Build and UnitTest
         run: |
+          df -h
           ./build/builder.sh /bin/bash -c "make USE_ASAN=${{env.useasan}} ci-ut"
       - name: Get the status & restart count for containers when ut failed
         if: ${{ failure() }}
