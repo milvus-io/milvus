@@ -1025,9 +1025,6 @@ func (deleteCodec *DeleteCodec) Serialize(collectionID UniqueID, partitionID Uni
 	}
 	defer binlogWriter.Close()
 	defer eventWriter.Close()
-	if err != nil {
-		return nil, err
-	}
 	length := len(data.Pks)
 	if length != len(data.Tss) {
 		return nil, fmt.Errorf("the length of pks, and TimeStamps is not equal")
@@ -1178,9 +1175,6 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 
 	var blobs []*Blob
 
-	if err != nil {
-		return nil, err
-	}
 	var int64Ts []int64
 	for _, singleTs := range ts {
 		int64Ts = append(int64Ts, int64(singleTs))
