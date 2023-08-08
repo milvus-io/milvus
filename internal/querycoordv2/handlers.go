@@ -195,10 +195,7 @@ func (s *Server) getSystemInfoMetrics(
 				Type:        typeutil.QueryCoordRole,
 				ID:          paramtable.GetNodeID(),
 			},
-			SystemConfigurations: metricsinfo.QueryCoordConfiguration{
-				SearchChannelPrefix:       Params.CommonCfg.QueryCoordSearch.GetValue(),
-				SearchResultChannelPrefix: Params.CommonCfg.QueryCoordSearchResult.GetValue(),
-			},
+			SystemConfigurations: metricsinfo.QueryCoordConfiguration{},
 		},
 		ConnectedNodes: make([]metricsinfo.QueryNodeInfos, 0),
 	}

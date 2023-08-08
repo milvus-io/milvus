@@ -66,10 +66,6 @@ func TestComponentParam(t *testing.T) {
 		params.Save(Params.GracefulStopTimeout.Key, "50")
 		assert.Equal(t, Params.GracefulStopTimeout.GetAsInt64(), int64(50))
 
-		// -- proxy --
-		assert.Equal(t, Params.ProxySubName.GetValue(), "by-dev-proxy")
-		t.Logf("ProxySubName: %s", Params.ProxySubName.GetValue())
-
 		// -- rootcoord --
 		assert.Equal(t, Params.RootCoordTimeTick.GetValue(), "by-dev-rootcoord-timetick")
 		t.Logf("rootcoord timetick channel = %s", Params.RootCoordTimeTick.GetValue())
@@ -80,25 +76,9 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, Params.RootCoordDml.GetValue(), "by-dev-rootcoord-dml")
 		t.Logf("rootcoord dml channel = %s", Params.RootCoordDml.GetValue())
 
-		assert.Equal(t, Params.RootCoordDelta.GetValue(), "by-dev-rootcoord-delta")
-		t.Logf("rootcoord delta channel = %s", Params.RootCoordDelta.GetValue())
-
-		assert.Equal(t, Params.RootCoordSubName.GetValue(), "by-dev-rootCoord")
-		t.Logf("rootcoord subname = %s", Params.RootCoordSubName.GetValue())
-
 		// -- querycoord --
-		assert.Equal(t, Params.QueryCoordSearch.GetValue(), "by-dev-search")
-		t.Logf("querycoord search channel = %s", Params.QueryCoordSearch.GetValue())
-
-		assert.Equal(t, Params.QueryCoordSearchResult.GetValue(), "by-dev-searchResult")
-		t.Logf("querycoord search result channel = %s", Params.QueryCoordSearchResult.GetValue())
-
 		assert.Equal(t, Params.QueryCoordTimeTick.GetValue(), "by-dev-queryTimeTick")
 		t.Logf("querycoord timetick channel = %s", Params.QueryCoordTimeTick.GetValue())
-
-		// -- querynode --
-		assert.Equal(t, Params.QueryNodeSubName.GetValue(), "by-dev-queryNode")
-		t.Logf("querynode subname = %s", Params.QueryNodeSubName.GetValue())
 
 		// -- datacoord --
 		assert.Equal(t, Params.DataCoordTimeTick.GetValue(), "by-dev-datacoord-timetick-channel")
