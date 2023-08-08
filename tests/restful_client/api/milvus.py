@@ -92,7 +92,7 @@ class Requests:
 
 
 class VectorClient(Requests):
-    def __init__(self, url, api_key, protocol="http"):
+    def __init__(self, url, api_key, protocol):
         super().__init__(url, api_key)
         self.protocol = protocol
         self.url = url
@@ -189,7 +189,7 @@ class VectorClient(Requests):
 
 class CollectionClient(Requests):
     
-    def __init__(self, url, api_key, protocol="http"):
+    def __init__(self, url, api_key, protocol):
         super().__init__(url, api_key)
         self.protocol = protocol
         self.url = url

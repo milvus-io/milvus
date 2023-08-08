@@ -15,6 +15,7 @@ def get_config():
 
 class Base:
     name = None
+    protocol = None
     host = None
     port = None
     url = None
@@ -42,7 +43,8 @@ class TestBase(Base):
                 logger.error(e)
 
     @pytest.fixture(scope="function", autouse=True)
-    def init_client(self, host, port, username, password):
+    def init_client(self, protocol, host, port, username, password):
+        self.protocol = protocol
         self.host = host
         self.port = port
         self.url = f"{host}:{port}/v1"
@@ -52,6 +54,7 @@ class TestBase(Base):
         self.invalid_api_key = "invalid_token"
         self.vector_client = VectorClient(self.url, self.api_key)
         self.collection_client = CollectionClient(self.url, self.api_key)
+        connections.connect(host=self.host, port=self.port)
 
     def init_collection(self, collection_name, pk_field="id", metric_type="L2", dim=128, nb=100, batch_size=1000):
         # create collection
