@@ -838,7 +838,7 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id,
 
             default:
                 PanicInfo(
-                    fmt::format("718 unsupported data type: {}",
+                    fmt::format("unsupported data type: {}",
                                 datatype_name(field_meta.get_data_type())));
         }
     }
