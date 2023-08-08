@@ -374,11 +374,10 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	// alter distribution
 	entries := lo.Map(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) SegmentEntry {
 		return SegmentEntry{
-			SegmentID:     info.GetSegmentID(),
-			PartitionID:   info.GetPartitionID(),
-			NodeID:        req.GetDstNodeID(),
-			Version:       req.GetVersion(),
-			TargetVersion: info.GetReadableVersion(),
+			SegmentID:   info.GetSegmentID(),
+			PartitionID: info.GetPartitionID(),
+			NodeID:      req.GetDstNodeID(),
+			Version:     req.GetVersion(),
 		}
 	})
 	sd.distribution.AddDistributions(entries...)
