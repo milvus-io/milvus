@@ -38,6 +38,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -971,7 +972,7 @@ func waitForGrpcReady(opt *WaitOption) {
 			conn.Close()
 			return
 		}
-		if conn, err := grpc.Dial(address, grpc.WithBlock(), grpc.WithInsecure()); true {
+		if conn, err := grpc.Dial(address, grpc.WithBlock(), grpc.WithTransportCredentials(insecure.NewCredentials())); true {
 			ch <- err
 			conn.Close()
 		}
