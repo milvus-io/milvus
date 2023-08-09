@@ -111,6 +111,7 @@ type quotaConfig struct {
 	QueryNodeMemoryLowWaterLevel         float64
 	QueryNodeMemoryHighWaterLevel        float64
 	GrowingSegmentsSizeProtectionEnabled bool
+	GrowingSegmentsSizeMinRateRatio      float64
 	GrowingSegmentsSizeLowWaterLevel     float64
 	GrowingSegmentsSizeHighWaterLevel    float64
 	DiskProtectionEnabled                bool
@@ -188,6 +189,7 @@ func (p *quotaConfig) init(base *BaseTable) {
 	p.initQueryNodeMemoryLowWaterLevel()
 	p.initQueryNodeMemoryHighWaterLevel()
 	p.initGrowingSegmentsSizeProtectionEnabled()
+	p.initGrowingSegmentsSizeMinRateRatio()
 	p.initGrowingSegmentsSizeLowWaterLevel()
 	p.initGrowingSegmentsSizeHighWaterLevel()
 	p.initDiskProtectionEnabled()
@@ -724,6 +726,15 @@ func (p *quotaConfig) initQueryNodeMemoryHighWaterLevel() {
 
 func (p *quotaConfig) initGrowingSegmentsSizeProtectionEnabled() {
 	p.GrowingSegmentsSizeProtectionEnabled = p.Base.ParseBool("quotaAndLimits.limitWriting.growingSegmentsSizeProtection.enabled", false)
+}
+
+func (p *quotaConfig) initGrowingSegmentsSizeMinRateRatio() {
+	defaultGrowingSegmentsSizeMinRateRatio := 0.5
+	p.GrowingSegmentsSizeMinRateRatio = p.Base.ParseFloatWithDefault("quotaAndLimits.limitWriting.growingSegmentsSizeProtection.minRateRatio", defaultGrowingSegmentsSizeMinRateRatio)
+	if p.GrowingSegmentsSizeMinRateRatio <= 0 || p.GrowingSegmentsSizeMinRateRatio > 1 {
+		log.Warn("GrowingSegmentsSizeMinRateRatio must in the range of `(0, 1]`, use default value", zap.Float64("default", defaultGrowingSegmentsSizeMinRateRatio))
+		p.GrowingSegmentsSizeMinRateRatio = defaultGrowingSegmentsSizeMinRateRatio
+	}
 }
 
 func (p *quotaConfig) initGrowingSegmentsSizeLowWaterLevel() {
