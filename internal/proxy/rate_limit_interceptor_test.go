@@ -171,6 +171,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		}
 
 		testGetFailedResponse(&milvuspb.DeleteRequest{}, internalpb.RateType_DMLDelete, commonpb.ErrorCode_ForceDeny, "delete")
+		testGetFailedResponse(&milvuspb.UpsertRequest{}, internalpb.RateType_DMLUpsert, commonpb.ErrorCode_ForceDeny, "upsert")
 		testGetFailedResponse(&milvuspb.ImportRequest{}, internalpb.RateType_DMLBulkLoad, commonpb.ErrorCode_MemoryQuotaExhausted, "import")
 		testGetFailedResponse(&milvuspb.SearchRequest{}, internalpb.RateType_DQLSearch, commonpb.ErrorCode_DiskQuotaExhausted, "search")
 		testGetFailedResponse(&milvuspb.QueryRequest{}, internalpb.RateType_DQLQuery, commonpb.ErrorCode_ForceDeny, "query")
