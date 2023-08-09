@@ -202,6 +202,45 @@ func (gc *garbageCollector) scan() {
 		zap.Strings("removedKeys", removedKeys))
 }
 
+func (gc *garbageCollector) checkDroppedSegmentGC(segment *SegmentInfo,
+	childSegment *SegmentInfo,
+	indexSet typeutil.UniqueSet,
+	cpTimestamp Timestamp) bool {
+	log := log.With(zap.Int64("segmentID", segment.ID))
+
+	isCompacted := childSegment != nil || segment.GetCompacted()
+	if isCompacted {
+		// For compact A, B -> C, don't GC A or B if C is not indexed,
+		// guarantee replacing A, B with C won't downgrade performance
+		// If the child is GC'ed first, then childSegment will be nil.
+		if childSegment != nil && !indexSet.Contain(childSegment.GetID()) {
+			log.WithRateGroup("GC_FAIL_COMPACT_TO_NOT_INDEXED", 1, 60).
+				RatedWarn(60, "skipping GC when compact target segment is not indexed",
+					zap.Int64("child segment ID", childSegment.GetID()))
+			return false
+		}
+	} else {
+		if !gc.isExpire(segment.GetDroppedAt()) {
+			return false
+		}
+	}
+
+	segInsertChannel := segment.GetInsertChannel()
+	// Ignore segments from potentially dropped collection. Check if collection is to be dropped by checking if channel is dropped.
+	// We do this because collection meta drop relies on all segment being GCed.
+	if gc.meta.catalog.ChannelExists(context.Background(), segInsertChannel) &&
+		segment.GetDmlPosition().GetTimestamp() > cpTimestamp {
+		// segment gc shall only happen when channel cp is after segment dml cp.
+		log.WithRateGroup("GC_FAIL_CP_BEFORE", 1, 60).
+			RatedInfo(60, "dropped segment dml position after channel cp, skip meta gc",
+				zap.Uint64("dmlPosTs", segment.GetDmlPosition().GetTimestamp()),
+				zap.Uint64("channelCpTs", cpTimestamp),
+			)
+		return false
+	}
+	return true
+}
+
 func (gc *garbageCollector) clearEtcd() {
 	all := gc.meta.SelectSegments(func(si *SegmentInfo) bool { return true })
 	drops := make(map[int64]*SegmentInfo, 0)
@@ -246,50 +285,29 @@ func (gc *garbageCollector) clearEtcd() {
 		segment, ok := drops[segmentID]
 		if !ok {
 			log.Warn("segmentID is not in drops", zap.Int64("segmentID", segmentID))
-			// can't to here
 			continue
 		}
-		log := log.With(zap.Int64("segmentID", segment.ID))
-		to, isCompacted := compactTo[segment.GetID()]
-		// for compacted segment, try to clean up the files as long as target segment is there
-		if !isCompacted && !gc.isExpire(segment.GetDroppedAt()) {
-			continue
-		}
+
 		segInsertChannel := segment.GetInsertChannel()
-		// Ignore segments from potentially dropped collection. Check if collection is to be dropped by checking if channel is dropped.
-		// We do this because collection meta drop relies on all segment being GCed.
-		if gc.meta.catalog.ChannelExists(context.Background(), segInsertChannel) &&
-			segment.GetDmlPosition().GetTimestamp() > channelCPs[segInsertChannel] {
-			// segment gc shall only happen when channel cp is after segment dml cp.
-			log.WithRateGroup("GC_FAIL_CP_BEFORE", 1, 60).
-				RatedInfo(60, "dropped segment dml position after channel cp, skip meta gc",
-					zap.Uint64("dmlPosTs", segment.GetDmlPosition().GetTimestamp()),
-					zap.Uint64("channelCpTs", channelCPs[segInsertChannel]),
-				)
+		if !gc.checkDroppedSegmentGC(segment, compactTo[segment.GetID()], indexedSet, channelCPs[segInsertChannel]) {
 			continue
 		}
-		// For compact A, B -> C, don't GC A or B if C is not indexed,
-		// guarantee replacing A, B with C won't downgrade performance
-		if isCompacted && !indexedSet.Contain(to.GetID()) {
-			log.WithRateGroup("GC_FAIL_COMPACT_TO_NOT_INDEXED", 1, 60).
-				RatedWarn(60, "skipping GC when compact target segment is not indexed",
-					zap.Int64("segmentID", to.GetID()))
-			continue
-		}
+
 		logs := getLogs(segment)
 		log.Info("GC segment", zap.Int64("segmentID", segment.GetID()))
 		if gc.removeLogs(logs) {
-			if err := gc.meta.DropSegment(segment.GetID()); err != nil {
-				log.Warn("failed to drop segment", zap.Int64("segmentID", segment.GetID()), zap.Error(err))
+			err := gc.meta.DropSegment(segment.GetID())
+			if err != nil {
+				log.Info("GC segment meta failed to drop segment", zap.Int64("segment id", segment.GetID()), zap.Error(err))
+			} else {
+				log.Info("GC segment meta drop semgent", zap.Int64("segment id", segment.GetID()))
 			}
 		}
 		if segList := gc.meta.GetSegmentsByChannel(segInsertChannel); len(segList) == 0 &&
 			!gc.meta.catalog.ChannelExists(context.Background(), segInsertChannel) {
 			log.Info("empty channel found during gc, manually cleanup channel checkpoints", zap.String("vChannel", segInsertChannel))
-
 			if err := gc.meta.DropChannelCheckpoint(segInsertChannel); err != nil {
-				// Fail-open as there's nothing to do.
-				log.Warn("failed to drop channel check point during segment garbage collection", zap.String("vchannel", segInsertChannel), zap.Error(err))
+				log.Info("failed to drop channel check point during segment garbage collection", zap.String("vchannel", segInsertChannel), zap.Error(err))
 			}
 		}
 	}

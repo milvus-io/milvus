@@ -991,6 +991,7 @@ func (m *meta) PrepareCompleteCompactionMutation(compactionLogs []*datapb.Compac
 			cloned := segment.Clone()
 			updateSegStateAndPrepareMetrics(cloned, commonpb.SegmentState_Dropped, metricMutation)
 			cloned.DroppedAt = uint64(time.Now().UnixNano())
+			cloned.Compacted = true
 			modSegments = append(modSegments, cloned)
 		}
 	}
