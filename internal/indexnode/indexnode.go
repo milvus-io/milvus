@@ -202,14 +202,6 @@ func (i *IndexNode) Init() error {
 		}
 		log.Info("IndexNode init session successful", zap.Int64("serverID", i.session.ServerID))
 
-		if err != nil {
-			log.Error("IndexNode NewMinIOKV failed", zap.Error(err))
-			initErr = err
-			return
-		}
-
-		log.Info("IndexNode NewMinIOKV succeeded")
-
 		i.initSegcore()
 	})
 

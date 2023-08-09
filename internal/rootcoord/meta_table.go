@@ -527,7 +527,7 @@ func (mt *MetaTable) getCollectionByIDInternal(ctx context.Context, dbName strin
 
 	if coll == nil {
 		// use coll.Name to match error message of regression. TODO: remove this after error code is ready.
-		return nil, common.NewCollectionNotExistError(fmt.Sprintf("can't find collection: %s", coll.Name))
+		return nil, common.NewCollectionNotExistError(fmt.Sprintf("can't find collection: %d", collectionID))
 	}
 
 	if allowUnavailable {

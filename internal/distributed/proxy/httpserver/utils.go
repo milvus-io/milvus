@@ -516,9 +516,6 @@ func anyToColumns(rows []map[string]interface{}, sch *schemapb.CollectionSchema)
 				return nil, fmt.Errorf("failed to marshal dynamic field %w", err)
 			}
 			dynamicCol = append(dynamicCol, bs)
-			if err != nil {
-				return nil, fmt.Errorf("failed to append value to dynamic field %w", err)
-			}
 		}
 	}
 	columns := make([]*schemapb.FieldData, 0, len(nameColumns))
