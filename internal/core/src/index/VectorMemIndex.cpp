@@ -20,6 +20,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include "fmt/format.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
@@ -105,6 +106,9 @@ VectorMemIndex::Load(const Config& config) {
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load index");
 
+    std::unordered_set<std::string> pending_index_files(index_files->begin(),
+                                                        index_files->end());
+
     LOG_SEGCORE_INFO_ << "load index files: " << index_files.value().size();
 
     auto parallel_degree =
@@ -113,19 +117,20 @@ VectorMemIndex::Load(const Config& config) {
 
     // try to read slice meta first
     std::string slice_meta_filepath;
-    for (auto& file : index_files.value()) {
+    for (auto& file : pending_index_files) {
         auto file_name = file.substr(file.find_last_of('/') + 1);
         if (file_name == INDEX_FILE_SLICE_META) {
             slice_meta_filepath = file;
+            pending_index_files.erase(file);
             break;
         }
     }
 
-    if (slice_meta_filepath
-            .empty()) {  // no slice meta, we could simply load all these files
-        index_datas = file_manager_->LoadIndexToMemory(index_files.value());
-        AssembleIndexDatas(index_datas);
-    } else {  // load with the slice meta info, then we can load batch by batch
+    LOG_SEGCORE_INFO_ << "load with slice meta: "
+                      << !slice_meta_filepath.empty();
+
+    if (!slice_meta_filepath
+             .empty()) {  // load with the slice meta info, then we can load batch by batch
         std::string index_file_prefix = slice_meta_filepath.substr(
             0, slice_meta_filepath.find_last_of('/') + 1);
         std::vector<std::string> batch{};
@@ -153,6 +158,9 @@ VectorMemIndex::Load(const Config& config) {
                     auto data = batch_data[file_name];
                     new_field_data->FillFieldData(data->Data(), data->Size());
                 }
+                for (auto& file : batch) {
+                    pending_index_files.erase(file);
+                }
                 batch.clear();
             };
 
@@ -171,6 +179,14 @@ VectorMemIndex::Load(const Config& config) {
                 new_field_data->IsFull(),
                 "index len is inconsistent after disassemble and assemble");
             index_datas[prefix] = new_field_data;
+        }
+    }
+
+    if (!pending_index_files.empty()) {
+        auto result = file_manager_->LoadIndexToMemory(std::vector<std::string>(
+            pending_index_files.begin(), pending_index_files.end()));
+        for (auto&& index_data : result) {
+            index_datas.insert(std::move(index_data));
         }
     }
 
