@@ -73,11 +73,11 @@ SegmentGrowingImpl::try_remove_chunks(FieldId fieldId) {
 
 void
 SegmentGrowingImpl::Insert(int64_t reserved_offset,
-                           int64_t size,
+                           int64_t num_rows,
                            const int64_t* row_ids,
                            const Timestamp* timestamps_raw,
                            const InsertData* insert_data) {
-    AssertInfo(insert_data->num_rows() == size,
+    AssertInfo(insert_data->num_rows() == num_rows,
                "Entities_raw count not equal to insert size");
     //    AssertInfo(insert_data->fields_data_size() == schema_->size(),
     //               "num fields of insert data not equal to num of schema fields");
@@ -95,15 +95,15 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
 
     // step 3: fill into Segment.ConcurrentVector
     insert_record_.timestamps_.set_data_raw(
-        reserved_offset, timestamps_raw, size);
-    insert_record_.row_ids_.set_data_raw(reserved_offset, row_ids, size);
+        reserved_offset, timestamps_raw, num_rows);
+    insert_record_.row_ids_.set_data_raw(reserved_offset, row_ids, num_rows);
     for (auto [field_id, field_meta] : schema_->get_fields()) {
         AssertInfo(field_id_to_offset.count(field_id), "Cannot find field_id");
         auto data_offset = field_id_to_offset[field_id];
         if (!indexing_record_.SyncDataWithIndex(field_id)) {
             insert_record_.get_field_data_base(field_id)->set_data_raw(
                 reserved_offset,
-                size,
+                num_rows,
                 &insert_data->fields_data(data_offset),
                 field_meta);
         }
@@ -111,27 +111,36 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         if (segcore_config_.get_enable_growing_segment_index()) {
             indexing_record_.AppendingIndex(
                 reserved_offset,
-                size,
+                num_rows,
                 field_id,
                 &insert_data->fields_data(data_offset),
                 insert_record_);
         }
+
+        // update average row data size
+        if (datatype_is_variable(field_meta.get_data_type())) {
+            auto field_data_size = GetRawDataSizeOfDataArray(
+                &insert_data->fields_data(data_offset), field_meta, num_rows);
+            SegmentInternalInterface::set_field_avg_size(
+                field_id, num_rows, field_data_size);
+        }
+
         try_remove_chunks(field_id);
     }
 
     // step 4: set pks to offset
     auto field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
     AssertInfo(field_id.get() != INVALID_FIELD_ID, "Primary key is -1");
-    std::vector<PkType> pks(size);
+    std::vector<PkType> pks(num_rows);
     ParsePksFromFieldData(
         pks, insert_data->fields_data(field_id_to_offset[field_id]));
-    for (int i = 0; i < size; ++i) {
+    for (int i = 0; i < num_rows; ++i) {
         insert_record_.insert_pk(pks[i], reserved_offset + i);
     }
 
     // step 5: update small indexes
     insert_record_.ack_responder_.AddSegment(reserved_offset,
-                                             reserved_offset + size);
+                                             reserved_offset + num_rows);
 }
 
 void
@@ -195,6 +204,15 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
 
         if (field_id == primary_field_id) {
             insert_record_.insert_pks(field_data);
+        }
+
+        // update average row data size
+        auto field_meta = (*schema_)[field_id];
+        if (datatype_is_variable(field_meta.get_data_type())) {
+            SegmentInternalInterface::set_field_avg_size(
+                field_id,
+                num_rows,
+                storage::GetByteSizeOfFieldDatas(field_data));
         }
     }
 

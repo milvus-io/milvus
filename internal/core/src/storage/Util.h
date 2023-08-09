@@ -132,6 +132,9 @@ CreateFieldData(const DataType& type,
                 int64_t dim = 1,
                 int64_t total_num_rows = 0);
 
+int64_t
+GetByteSizeOfFieldDatas(const std::vector<FieldDataPtr>& field_datas);
+
 std::vector<storage::FieldDataPtr>
 CollectFieldDataChannel(storage::FieldDataChannelPtr& channel);
 

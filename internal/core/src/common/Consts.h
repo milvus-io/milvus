@@ -50,3 +50,5 @@ const int DEFAULT_CPU_NUM = 1;
 
 constexpr const char* RADIUS = knowhere::meta::RADIUS;
 constexpr const char* RANGE_FILTER = knowhere::meta::RANGE_FILTER;
+
+const int64_t DEFAULT_MAX_OUTPUT_SIZE = 67108864;  // bytes, 64MB

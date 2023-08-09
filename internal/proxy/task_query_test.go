@@ -551,6 +551,33 @@ func TestTaskQuery_functions(t *testing.T) {
 
 			})
 
+			t.Run("test unLimited and maxOutputSize", func(t *testing.T) {
+				paramtable.Get().Save(paramtable.Get().QuotaConfig.MaxOutputSize.Key, "1")
+
+				ids := make([]int64, 100)
+				offsets := make([]int64, 100)
+				for i := range ids {
+					ids[i] = int64(i)
+					offsets[i] = int64(i)
+				}
+				fieldData := getFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, ids, 1)
+
+				result := &internalpb.RetrieveResults{
+					Ids: &schemapb.IDs{
+						IdField: &schemapb.IDs_IntId{
+							IntId: &schemapb.LongArray{
+								Data: ids,
+							},
+						},
+					},
+					FieldsData: []*schemapb.FieldData{fieldData},
+				}
+
+				_, err := reduceRetrieveResults(context.Background(), []*internalpb.RetrieveResults{result}, &queryParams{limit: typeutil.Unlimited})
+				assert.Error(t, err)
+				paramtable.Get().Save(paramtable.Get().QuotaConfig.MaxOutputSize.Key, "1104857600")
+			})
+
 			t.Run("test offset", func(t *testing.T) {
 				tests := []struct {
 					description string

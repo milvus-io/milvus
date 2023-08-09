@@ -496,7 +496,7 @@ func (loader *segmentLoader) loadSegment(ctx context.Context,
 		log.Info("load fields...",
 			zap.Int64s("indexedFields", lo.Keys(indexedFieldInfos)),
 		)
-		if err := loader.loadFieldsIndex(ctx, segment, indexedFieldInfos); err != nil {
+		if err := loader.loadFieldsIndex(ctx, collection.Schema(), segment, loadInfo.GetNumOfRows(), indexedFieldInfos); err != nil {
 			return err
 		}
 		if err := loader.loadSealedSegmentFields(ctx, segment, fieldBinlogs, loadInfo.GetNumOfRows()); err != nil {
@@ -570,7 +570,13 @@ func (loader *segmentLoader) loadSealedSegmentFields(ctx context.Context, segmen
 	return nil
 }
 
-func (loader *segmentLoader) loadFieldsIndex(ctx context.Context, segment *LocalSegment, vecFieldInfos map[int64]*IndexedFieldInfo) error {
+func (loader *segmentLoader) loadFieldsIndex(ctx context.Context,
+	schema *schemapb.CollectionSchema,
+	segment *LocalSegment,
+	numRows int64,
+	vecFieldInfos map[int64]*IndexedFieldInfo) error {
+	schemaHelper, _ := typeutil.CreateSchemaHelper(schema)
+
 	for fieldID, fieldInfo := range vecFieldInfos {
 		indexInfo := fieldInfo.IndexInfo
 		err := loader.loadFieldIndex(ctx, segment, indexInfo)
@@ -586,6 +592,18 @@ func (loader *segmentLoader) loadFieldsIndex(ctx context.Context, segment *Local
 		)
 
 		segment.AddIndex(fieldID, fieldInfo)
+
+		// set average row data size of variable field
+		field, err := schemaHelper.GetFieldFromID(fieldID)
+		if err != nil {
+			return err
+		}
+		if typeutil.IsVariableDataType(field.GetDataType()) {
+			err = segment.UpdateFieldRawDataSize(numRows, fieldInfo.FieldBinlog)
+			if err != nil {
+				return err
+			}
+		}
 	}
 
 	return nil

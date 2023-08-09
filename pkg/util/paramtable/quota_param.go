@@ -96,6 +96,7 @@ type quotaConfig struct {
 	TopKLimit             ParamItem `refreshable:"true"`
 	NQLimit               ParamItem `refreshable:"true"`
 	MaxQueryResultWindow  ParamItem `refreshable:"true"`
+	MaxOutputSize         ParamItem `refreshable:"true"`
 
 	// limit writing
 	ForceDenyWriting                     ParamItem `refreshable:"true"`
@@ -864,6 +865,13 @@ Check https://milvus.io/docs/limitations.md for more details.`,
 		Doc:          `Query limit, which applies on: maximum of offset + limit`,
 	}
 	p.MaxQueryResultWindow.Init(base.mgr)
+
+	p.MaxOutputSize = ParamItem{
+		Key:          "quotaAndLimits.limits.maxOutputSize",
+		Version:      "2.3.0",
+		DefaultValue: "104857600", // 100 MB, 100 * 1024 * 1024
+	}
+	p.MaxOutputSize.Init(base.mgr)
 
 	// limit writing
 	p.ForceDenyWriting = ParamItem{

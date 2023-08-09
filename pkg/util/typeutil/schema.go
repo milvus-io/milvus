@@ -331,6 +331,10 @@ func IsJSONType(dataType schemapb.DataType) bool {
 	return dataType == schemapb.DataType_JSON
 }
 
+func IsArrayType(dataType schemapb.DataType) bool {
+	return dataType == schemapb.DataType_Array
+}
+
 // IsFloatingType returns true if input is a floating type, otherwise false
 func IsFloatingType(dataType schemapb.DataType) bool {
 	switch dataType {
@@ -364,6 +368,10 @@ func IsStringType(dataType schemapb.DataType) bool {
 	default:
 		return false
 	}
+}
+
+func IsVariableDataType(dataType schemapb.DataType) bool {
+	return IsStringType(dataType) || IsArrayType(dataType) || IsJSONType(dataType)
 }
 
 // AppendFieldData appends fields data of specified index from src to dst

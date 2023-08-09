@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -165,6 +166,35 @@ func (suite *ResultSuite) TestResult_MergeSegcoreRetrieveResults() {
 					suite.NoError(err)
 				})
 			}
+		})
+
+		suite.Run("test unLimited and maxOutputSize", func() {
+			reqLimit := typeutil.Unlimited
+			paramtable.Get().Save(paramtable.Get().QuotaConfig.MaxOutputSize.Key, "1")
+
+			ids := make([]int64, 100)
+			offsets := make([]int64, 100)
+			for i := range ids {
+				ids[i] = int64(i)
+				offsets[i] = int64(i)
+			}
+			fieldData := genFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, ids, 1)
+
+			result := &segcorepb.RetrieveResults{
+				Ids: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{
+							Data: ids,
+						},
+					},
+				},
+				Offset:     offsets,
+				FieldsData: []*schemapb.FieldData{fieldData},
+			}
+
+			_, err := MergeSegcoreRetrieveResults(context.Background(), []*segcorepb.RetrieveResults{result}, reqLimit)
+			suite.Error(err)
+			paramtable.Get().Save(paramtable.Get().QuotaConfig.MaxOutputSize.Key, "1104857600")
 		})
 
 		suite.Run("test int ID", func() {
@@ -344,6 +374,33 @@ func (suite *ResultSuite) TestResult_MergeInternalRetrieveResults() {
 					suite.NoError(err)
 				})
 			}
+		})
+
+		suite.Run("test unLimited and maxOutputSize", func() {
+			paramtable.Get().Save(paramtable.Get().QuotaConfig.MaxOutputSize.Key, "1")
+
+			ids := make([]int64, 100)
+			offsets := make([]int64, 100)
+			for i := range ids {
+				ids[i] = int64(i)
+				offsets[i] = int64(i)
+			}
+			fieldData := genFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, ids, 1)
+
+			result := &internalpb.RetrieveResults{
+				Ids: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{
+							Data: ids,
+						},
+					},
+				},
+				FieldsData: []*schemapb.FieldData{fieldData},
+			}
+
+			_, err := MergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{result}, typeutil.Unlimited)
+			suite.Error(err)
+			paramtable.Get().Save(paramtable.Get().QuotaConfig.MaxOutputSize.Key, "1104857600")
 		})
 
 		suite.Run("test int ID", func() {
