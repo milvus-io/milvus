@@ -166,7 +166,7 @@ func (kc *kafkaClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.C
 	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.TotalLabel).Inc()
 
 	config := kc.newConsumerConfig(options.SubscriptionName, options.SubscriptionInitialPosition)
-	consumer, err := newKafkaConsumer(config, options.Topic, options.SubscriptionName, options.SubscriptionInitialPosition)
+	consumer, err := newKafkaConsumer(config, options.BufSize, options.Topic, options.SubscriptionName, options.SubscriptionInitialPosition)
 	if err != nil {
 		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.FailLabel).Inc()
 		return nil, err

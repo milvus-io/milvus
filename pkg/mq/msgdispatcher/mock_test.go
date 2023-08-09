@@ -47,7 +47,7 @@ func TestMain(m *testing.M) {
 }
 
 func newMockFactory() msgstream.Factory {
-	return msgstream.NewPmsFactory(&Params.PulsarCfg)
+	return msgstream.NewPmsFactory(&Params.ServiceParam)
 }
 
 func newMockProducer(factory msgstream.Factory, pchannel string) (msgstream.MsgStream, error) {

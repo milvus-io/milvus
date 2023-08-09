@@ -24,7 +24,7 @@ import (
 )
 
 func TestPulsarMsgUtil(t *testing.T) {
-	pmsFactory := NewPmsFactory(&Params.PulsarCfg)
+	pmsFactory := NewPmsFactory(&Params.ServiceParam)
 
 	ctx := context.Background()
 	msgStream, err := pmsFactory.NewMsgStream(ctx)

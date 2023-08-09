@@ -29,8 +29,8 @@ type Consumer struct {
 
 const timeout = 3000
 
-func newKafkaConsumer(config *kafka.ConfigMap, topic string, groupID string, position mqwrapper.SubscriptionInitialPosition) (*Consumer, error) {
-	msgChannel := make(chan mqwrapper.Message, 256)
+func newKafkaConsumer(config *kafka.ConfigMap, bufSize int64, topic string, groupID string, position mqwrapper.SubscriptionInitialPosition) (*Consumer, error) {
+	msgChannel := make(chan mqwrapper.Message, bufSize)
 	kc := &Consumer{
 		config:     config,
 		msgChannel: msgChannel,

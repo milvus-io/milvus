@@ -32,7 +32,7 @@ func TestRmsFactory(t *testing.T) {
 
 	dir := t.TempDir()
 
-	rmsFactory := NewRocksmqFactory(dir)
+	rmsFactory := NewRocksmqFactory(dir, &paramtable.Get().ServiceParam)
 
 	ctx := context.Background()
 	_, err := rmsFactory.NewMsgStream(ctx)

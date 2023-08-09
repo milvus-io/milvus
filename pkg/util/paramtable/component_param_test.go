@@ -289,7 +289,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 1000, interval)
 
 		length := Params.FlowGraphMaxQueueLength.GetAsInt32()
-		assert.Equal(t, int32(1024), length)
+		assert.Equal(t, int32(16), length)
 
 		maxParallelism := Params.FlowGraphMaxParallelism.GetAsInt32()
 		assert.Equal(t, int32(1024), maxParallelism)
