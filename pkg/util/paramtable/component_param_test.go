@@ -339,6 +339,8 @@ func TestComponentParam(t *testing.T) {
 		params.Save("queryNode.gracefulStopTimeout", "100")
 		gracefulStopTimeout := Params.GracefulStopTimeout
 		assert.Equal(t, int64(100), gracefulStopTimeout.GetAsInt64())
+
+		assert.Equal(t, false, Params.EnableWorkerSQCostMetrics.GetAsBool())
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {

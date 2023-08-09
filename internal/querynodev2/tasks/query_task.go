@@ -123,6 +123,9 @@ func (t *QueryTask) Execute() error {
 	}
 
 	t.result = &internalpb.RetrieveResults{
+		Base: &commonpb.MsgBase{
+			SourceID: paramtable.GetNodeID(),
+		},
 		Status:     &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 		Ids:        reducedResult.Ids,
 		FieldsData: reducedResult.FieldsData,

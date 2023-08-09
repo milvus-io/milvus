@@ -1563,6 +1563,8 @@ type queryNodeConfig struct {
 
 	// CGOPoolSize ratio to MaxReadConcurrency
 	CGOPoolSizeRatio ParamItem `refreshable:"false"`
+
+	EnableWorkerSQCostMetrics ParamItem `refreshable:"true"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -1925,6 +1927,14 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Doc:          "cgo pool size ratio to max read concurrency",
 	}
 	p.CGOPoolSizeRatio.Init(base.mgr)
+
+	p.EnableWorkerSQCostMetrics = ParamItem{
+		Key:          "queryNode.enableWorkerSQCostMetrics",
+		Version:      "2.3.0",
+		DefaultValue: "false",
+		Doc:          "whether use worker's cost to measure delegator's workload",
+	}
+	p.EnableWorkerSQCostMetrics.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
