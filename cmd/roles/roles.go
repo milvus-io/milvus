@@ -109,7 +109,9 @@ func runComponent[T component](ctx context.Context,
 			panic(err)
 		}
 		wg.Done()
-		_ = role.Run()
+		if err := role.Run(); err != nil {
+			panic(err)
+		}
 		runWg.Done()
 	}()
 	wg.Wait()
