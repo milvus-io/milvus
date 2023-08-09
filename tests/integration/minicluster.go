@@ -434,6 +434,12 @@ func (cluster *MiniCluster) Start() error {
 
 func (cluster *MiniCluster) Stop() error {
 	log.Info("mini cluster stop")
+
+	for _, dataNode := range cluster.DataNodes {
+		dataNode.Stop()
+	}
+	log.Info("mini cluster datanodes stopped")
+
 	cluster.RootCoord.Stop()
 	log.Info("mini cluster rootCoord stopped")
 	cluster.DataCoord.Stop()
@@ -443,11 +449,6 @@ func (cluster *MiniCluster) Stop() error {
 	log.Info("mini cluster queryCoord stopped")
 	cluster.Proxy.Stop()
 	log.Info("mini cluster proxy stopped")
-
-	for _, dataNode := range cluster.DataNodes {
-		dataNode.Stop()
-	}
-	log.Info("mini cluster datanodes stopped")
 
 	for _, queryNode := range cluster.QueryNodes {
 		queryNode.Stop()

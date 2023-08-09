@@ -80,6 +80,11 @@ type Timestamp = typeutil.Timestamp
 
 const InvalidCollectionID = UniqueID(0)
 
+const (
+	DescribeAlias = "DescribeAlias"
+	ListAliases   = "ListAliases"
+)
+
 var Params *paramtable.ComponentParam = paramtable.Get()
 
 type Opt func(*Core)
@@ -1802,6 +1807,86 @@ func (c *Core) AlterAlias(ctx context.Context, in *milvuspb.AlterAliasRequest) (
 		zap.String("collection", in.GetCollectionName()),
 		zap.Uint64("ts", t.GetTs()))
 	return merr.Status(nil), nil
+}
+
+// DescribeAlias describe collection alias
+func (c *Core) DescribeAlias(ctx context.Context, in *milvuspb.DescribeAliasRequest) (*milvuspb.DescribeAliasResponse, error) {
+	if code, ok := c.checkHealthy(); !ok {
+		return &milvuspb.DescribeAliasResponse{
+			Status: merr.Status(merr.WrapErrServiceNotReady(code.String())),
+		}, nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues(DescribeAlias, metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder(DescribeAlias)
+
+	log.Ctx(ctx).Info("received request to describe alias",
+		zap.String("role", typeutil.RootCoordRole),
+		zap.String("db", in.GetDbName()),
+		zap.String("alias", in.GetAlias()))
+
+	if in.GetAlias() == "" {
+		return &milvuspb.DescribeAliasResponse{
+			Status: merr.Status(merr.WrapErrParameterMissing("alias", "no input alias")),
+		}, nil
+	}
+
+	collectionName, err := c.meta.DescribeAlias(ctx, in.GetDbName(), in.GetAlias(), 0)
+
+	if err != nil {
+		return &milvuspb.DescribeAliasResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	metrics.RootCoordDDLReqCounter.WithLabelValues(DescribeAlias, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(DescribeAlias).Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	log.Info("done to describe alias",
+		zap.String("role", typeutil.RootCoordRole),
+		zap.String("alias", in.GetAlias()),
+		zap.String("collection", collectionName))
+	return &milvuspb.DescribeAliasResponse{
+		Status:     merr.Status(nil),
+		DbName:     in.GetDbName(),
+		Alias:      in.GetAlias(),
+		Collection: collectionName,
+	}, nil
+}
+
+// ListAliases list aliases
+func (c *Core) ListAliases(ctx context.Context, in *milvuspb.ListAliasesRequest) (*milvuspb.ListAliasesResponse, error) {
+	if code, ok := c.checkHealthy(); !ok {
+		return &milvuspb.ListAliasesResponse{
+			Status: merr.Status(merr.WrapErrServiceNotReady(code.String())),
+		}, nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues(ListAliases, metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder(ListAliases)
+
+	log.Ctx(ctx).Info("received request to list aliases",
+		zap.String("role", typeutil.RootCoordRole),
+		zap.String("dbName", in.GetDbName()),
+		zap.String("collectionName", in.GetCollectionName()))
+
+	aliases, err := c.meta.ListAliases(ctx, in.GetDbName(), in.GetCollectionName(), 0)
+
+	if err != nil {
+		return &milvuspb.ListAliasesResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues(ListAliases, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(ListAliases).Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	log.Info("done to list aliases",
+		zap.String("role", typeutil.RootCoordRole))
+	return &milvuspb.ListAliasesResponse{
+		Status:  merr.Status(nil),
+		DbName:  in.GetDbName(),
+		Aliases: aliases,
+	}, nil
 }
 
 // Import imports large files (json, numpy, etc.) on MinIO/S3 storage into Milvus storage.

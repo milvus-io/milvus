@@ -201,6 +201,14 @@ func (m *MockRootCoord) AlterAlias(ctx context.Context, req *milvuspb.AlterAlias
 	return nil, nil
 }
 
+func (m *MockRootCoord) DescribeAlias(ctx context.Context, req *milvuspb.DescribeAliasRequest) (*milvuspb.DescribeAliasResponse, error) {
+	return nil, nil
+}
+
+func (m *MockRootCoord) ListAliases(ctx context.Context, req *milvuspb.ListAliasesRequest) (*milvuspb.ListAliasesResponse, error) {
+	return nil, nil
+}
+
 func (m *MockRootCoord) AllocTimestamp(ctx context.Context, req *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
 	return nil, nil
 }
@@ -720,6 +728,14 @@ func (m *MockProxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAlias
 	return nil, nil
 }
 
+func (m *MockProxy) DescribeAlias(ctx context.Context, request *milvuspb.DescribeAliasRequest) (*milvuspb.DescribeAliasResponse, error) {
+	return nil, nil
+}
+
+func (m *MockProxy) ListAliases(ctx context.Context, request *milvuspb.ListAliasesRequest) (*milvuspb.ListAliasesResponse, error) {
+	return nil, nil
+}
+
 func (m *MockProxy) SetRates(ctx context.Context, request *proxypb.SetRatesRequest) (*commonpb.Status, error) {
 	return nil, nil
 }
@@ -1236,6 +1252,16 @@ func Test_NewServer(t *testing.T) {
 	t.Run("AlterAlias", func(t *testing.T) {
 		_, err := server.AlterAlias(ctx, nil)
 		assert.NoError(t, err)
+	})
+
+	t.Run("DescribeAlias", func(t *testing.T) {
+		_, err := server.DescribeAlias(ctx, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("ListAliases", func(t *testing.T) {
+		_, err := server.ListAliases(ctx, nil)
+		assert.Nil(t, err)
 	})
 
 	t.Run("GetCompactionState", func(t *testing.T) {

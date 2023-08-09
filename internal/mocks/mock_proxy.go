@@ -784,6 +784,53 @@ func (_c *MockProxy_DeleteCredential_Call) Return(_a0 *commonpb.Status, _a1 erro
 	return _c
 }
 
+// DescribeAlias provides a mock function with given fields: ctx, req
+func (_m *MockProxy) DescribeAlias(ctx context.Context, req *milvuspb.DescribeAliasRequest) (*milvuspb.DescribeAliasResponse, error) {
+	ret := _m.Called(ctx, req)
+
+	var r0 *milvuspb.DescribeAliasResponse
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DescribeAliasRequest) *milvuspb.DescribeAliasResponse); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.DescribeAliasResponse)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DescribeAliasRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_DescribeAlias_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DescribeAlias'
+type MockProxy_DescribeAlias_Call struct {
+	*mock.Call
+}
+
+// DescribeAlias is a helper method to define mock.On call
+//  - ctx context.Context
+//  - req *milvuspb.DescribeAliasRequest
+func (_e *MockProxy_Expecter) DescribeAlias(ctx interface{}, req interface{}) *MockProxy_DescribeAlias_Call {
+	return &MockProxy_DescribeAlias_Call{Call: _e.mock.On("DescribeAlias", ctx, req)}
+}
+
+func (_c *MockProxy_DescribeAlias_Call) Run(run func(ctx context.Context, req *milvuspb.DescribeAliasRequest)) *MockProxy_DescribeAlias_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.DescribeAliasRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_DescribeAlias_Call) Return(_a0 *milvuspb.DescribeAliasResponse, _a1 error) *MockProxy_DescribeAlias_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
 // DescribeCollection provides a mock function with given fields: ctx, request
 func (_m *MockProxy) DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	ret := _m.Called(ctx, request)
@@ -2728,6 +2775,53 @@ func (_c *MockProxy_InvalidateCredentialCache_Call) Run(run func(ctx context.Con
 }
 
 func (_c *MockProxy_InvalidateCredentialCache_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxy_InvalidateCredentialCache_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+// ListAliases provides a mock function with given fields: ctx, req
+func (_m *MockProxy) ListAliases(ctx context.Context, req *milvuspb.ListAliasesRequest) (*milvuspb.ListAliasesResponse, error) {
+	ret := _m.Called(ctx, req)
+
+	var r0 *milvuspb.ListAliasesResponse
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListAliasesRequest) *milvuspb.ListAliasesResponse); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ListAliasesResponse)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListAliasesRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_ListAliases_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListAliases'
+type MockProxy_ListAliases_Call struct {
+	*mock.Call
+}
+
+// ListAliases is a helper method to define mock.On call
+//  - ctx context.Context
+//  - req *milvuspb.ListAliasesRequest
+func (_e *MockProxy_Expecter) ListAliases(ctx interface{}, req interface{}) *MockProxy_ListAliases_Call {
+	return &MockProxy_ListAliases_Call{Call: _e.mock.On("ListAliases", ctx, req)}
+}
+
+func (_c *MockProxy_ListAliases_Call) Run(run func(ctx context.Context, req *milvuspb.ListAliasesRequest)) *MockProxy_ListAliases_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.ListAliasesRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_ListAliases_Call) Return(_a0 *milvuspb.ListAliasesResponse, _a1 error) *MockProxy_ListAliases_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }

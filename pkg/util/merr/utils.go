@@ -245,6 +245,22 @@ func WrapErrCollectionResourceLimitExceeded(msg ...string) error {
 	return err
 }
 
+func WrapErrAliasNotFound(alias string, msg ...string) error {
+	err := wrapWithField(ErrAliasNotFound, "alias", alias)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+func WrapErrCollectionIDOfAliasNotFound(collectionID int64, msg ...string) error {
+	err := wrapWithField(ErrCollectionIDOfAliasNotFound, "collectionID", collectionID)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
 func WrapErrCollectionNotFullyLoaded(collection any, msg ...string) error {
 	err := wrapWithField(ErrCollectionNotFullyLoaded, "collection", collection)
 	if len(msg) > 0 {
@@ -448,6 +464,14 @@ func WrapErrParameterInvalid[T any](expected, actual T, msg ...string) error {
 
 func WrapErrParameterInvalidRange[T any](lower, upper, actual T, msg ...string) error {
 	err := errors.Wrapf(ErrParameterInvalid, "expected in (%v, %v), actual=%v", lower, upper, actual)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+func WrapErrParameterMissing(name string, msg ...string) error {
+	err := errors.Wrapf(ErrParameterMissing, "missing parameter=%s", name)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "; "))
 	}

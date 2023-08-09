@@ -877,22 +877,14 @@ func (s *Server) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasReq
 	return s.proxy.AlterAlias(ctx, request)
 }
 
+// DescribeAlias show the alias-collection relation for the specified alias.
 func (s *Server) DescribeAlias(ctx context.Context, request *milvuspb.DescribeAliasRequest) (*milvuspb.DescribeAliasResponse, error) {
-	return &milvuspb.DescribeAliasResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    "TODO: implement me",
-		},
-	}, nil
+	return s.proxy.DescribeAlias(ctx, request)
 }
 
+// ListAliases list all the alias for the specified db, collection.
 func (s *Server) ListAliases(ctx context.Context, request *milvuspb.ListAliasesRequest) (*milvuspb.ListAliasesResponse, error) {
-	return &milvuspb.ListAliasesResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    "TODO: implement me",
-		},
-	}, nil
+	return s.proxy.ListAliases(ctx, request)
 }
 
 // GetCompactionState gets the state of a compaction

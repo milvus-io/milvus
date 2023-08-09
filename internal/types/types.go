@@ -665,6 +665,26 @@ type RootCoord interface {
 	// error is always nil
 	AlterAlias(ctx context.Context, req *milvuspb.AlterAliasRequest) (*commonpb.Status, error)
 
+	// DescribeAlias query RootCoord to show alias for the name
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including collection name and new alias
+	//
+	// The `ErrorCode` of `Status` is `Success` if alter alias successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
+	// error is always nil
+	DescribeAlias(ctx context.Context, req *milvuspb.DescribeAliasRequest) (*milvuspb.DescribeAliasResponse, error)
+
+	// ListAliases query RootCoord to show all alias for the db
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including collection name and new alias
+	//
+	// The `ErrorCode` of `Status` is `Success` if alter alias successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
+	// error is always nil
+	ListAliases(ctx context.Context, req *milvuspb.ListAliasesRequest) (*milvuspb.ListAliasesResponse, error)
+
 	// AllocTimestamp notifies RootCoord to alloc timestamps
 	//
 	// ctx is the context to control request deadline and cancellation
@@ -1348,6 +1368,27 @@ type ProxyComponent interface {
 	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
 	// error is always nil
 	AlterAlias(ctx context.Context, request *milvuspb.AlterAliasRequest) (*commonpb.Status, error)
+
+	// DescribeAlias query RootCoord to show alias for the name
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including collection name and new alias
+	//
+	// The `ErrorCode` of `Status` is `Success` if alter alias successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
+	// error is always nil
+	DescribeAlias(ctx context.Context, req *milvuspb.DescribeAliasRequest) (*milvuspb.DescribeAliasResponse, error)
+
+	// ListAliases query RootCoord to show all alias for the db
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including collection name and new alias
+	//
+	// The `ErrorCode` of `Status` is `Success` if alter alias successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
+	// error is always nil
+	ListAliases(ctx context.Context, req *milvuspb.ListAliasesRequest) (*milvuspb.ListAliasesResponse, error)
+
 	GetCompactionState(ctx context.Context, req *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error)
 	ManualCompaction(ctx context.Context, req *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error)
 	GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error)

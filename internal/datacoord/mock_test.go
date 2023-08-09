@@ -334,6 +334,16 @@ func (m *mockRootCoordService) AlterAlias(ctx context.Context, req *milvuspb.Alt
 	panic("implement me")
 }
 
+func (m *mockRootCoordService) DescribeAlias(ctx context.Context, req *milvuspb.DescribeAliasRequest) (*milvuspb.DescribeAliasResponse, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRootCoordService) ListAliases(ctx context.Context, req *milvuspb.ListAliasesRequest) (*milvuspb.ListAliasesResponse, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
 func newMockRootCoordService() *mockRootCoordService {
 	return &mockRootCoordService{state: commonpb.StateCode_Healthy}
 }

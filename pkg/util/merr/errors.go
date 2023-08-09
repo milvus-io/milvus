@@ -44,7 +44,7 @@ const (
 
 // Define leaf errors here,
 // WARN: take care to add new error,
-// check whehter you can use the erorrs below before adding a new one.
+// check whether you can use the errors below before adding a new one.
 // Name: Err + related prefix + error name
 var (
 	// Service related
@@ -107,6 +107,7 @@ var (
 
 	// Parameter related
 	ErrParameterInvalid = newMilvusError("invalid parameter", 1100, false)
+	ErrParameterMissing = newMilvusError("missing parameter", 1101, false)
 
 	// Metrics related
 	ErrMetricNotFound = newMilvusError("metric not found", 1200, false)
@@ -133,6 +134,10 @@ var (
 	ErrInvalidInsertData         = newMilvusError("fail to deal the insert data", 1804, false)
 	ErrInvalidSearchResult       = newMilvusError("fail to parse search result", 1805, false)
 	ErrCheckPrimaryKey           = newMilvusError("please check the primary key and its' type can only in [int, string]", 1806, false)
+
+	// Alias related
+	ErrAliasNotFound               = newMilvusError("alias not found", 1900, false)
+	ErrCollectionIDOfAliasNotFound = newMilvusError("collection id of alias not found", 1901, false)
 
 	// Do NOT export this,
 	// never allow programmer using this, keep only for converting unknown error to milvusError

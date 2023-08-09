@@ -173,6 +173,14 @@ func Test_NewClient(t *testing.T) {
 			retCheck(retNotNil, r, err)
 		}
 		{
+			r, err := client.DescribeAlias(ctx, nil)
+			retCheck(retNotNil, r, err)
+		}
+		{
+			r, err := client.ListAliases(ctx, nil)
+			retCheck(retNotNil, r, err)
+		}
+		{
 			r, err := client.Import(ctx, nil)
 			retCheck(retNotNil, r, err)
 		}
@@ -384,6 +392,14 @@ func Test_NewClient(t *testing.T) {
 	}
 	{
 		rTimeout, err := client.AlterAlias(shortCtx, nil)
+		retCheck(rTimeout, err)
+	}
+	{
+		rTimeout, err := client.DescribeAlias(shortCtx, nil)
+		retCheck(rTimeout, err)
+	}
+	{
+		rTimeout, err := client.ListAliases(shortCtx, nil)
 		retCheck(rTimeout, err)
 	}
 	{
