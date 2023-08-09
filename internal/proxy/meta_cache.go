@@ -56,7 +56,7 @@ type Cache interface {
 	// GetCollectionID get collection's id by name.
 	GetCollectionID(ctx context.Context, database, collectionName string) (typeutil.UniqueID, error)
 	// GetCollectionName get collection's name and database by id
-	GetCollectionName(ctx context.Context, collectionID int64) (string, error)
+	GetCollectionName(ctx context.Context, database string, collectionID int64) (string, error)
 	// GetCollectionInfo get collection's information by name or collection id, such as schema, and etc.
 	GetCollectionInfo(ctx context.Context, database, collectionName string, collectionID int64) (*collectionBasicInfo, error)
 	// GetPartitionID get partition's identifier of specific collection.
@@ -277,7 +277,7 @@ func (m *MetaCache) GetCollectionID(ctx context.Context, database, collectionNam
 }
 
 // GetCollectionName returns the corresponding collection name for provided collection id
-func (m *MetaCache) GetCollectionName(ctx context.Context, collectionID int64) (string, error) {
+func (m *MetaCache) GetCollectionName(ctx context.Context, database string, collectionID int64) (string, error) {
 	m.mu.RLock()
 	var collInfo *collectionInfo
 	for _, db := range m.collInfo {
@@ -294,7 +294,7 @@ func (m *MetaCache) GetCollectionName(ctx context.Context, collectionID int64) (
 		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheMissLabel).Inc()
 		tr := timerecord.NewTimeRecorder("UpdateCache")
 		m.mu.RUnlock()
-		coll, err := m.describeCollection(ctx, "", "", collectionID)
+		coll, err := m.describeCollection(ctx, database, "", collectionID)
 		if err != nil {
 			return "", err
 		}

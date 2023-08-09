@@ -3101,6 +3101,21 @@ func TestDescribeResourceGroupTaskFailed(t *testing.T) {
 	err := task.Execute(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, task.result.Status.ErrorCode)
+
+	qc.ExpectedCalls = nil
+	qc.EXPECT().Stop().Return(nil)
+	qc.EXPECT().DescribeResourceGroup(mock.Anything, mock.Anything).Return(&querypb.DescribeResourceGroupResponse{
+		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		ResourceGroup: &querypb.ResourceGroupInfo{
+			Name:             "rg",
+			Capacity:         2,
+			NumAvailableNode: 1,
+			NumOutgoingNode:  map[int64]int32{3: 1},
+			NumIncomingNode:  map[int64]int32{4: 2},
+		},
+	}, nil)
+	err = task.Execute(ctx)
+	assert.Error(t, err)
 }
 
 func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
