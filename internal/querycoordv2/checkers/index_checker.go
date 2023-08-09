@@ -102,7 +102,9 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 			continue
 		}
 		for _, info := range infos {
-			if missingFields.Contain(info.GetFieldID()) && info.GetEnableIndex() {
+			if missingFields.Contain(info.GetFieldID()) &&
+				info.GetEnableIndex() &&
+				len(info.GetIndexFilePaths()) > 0 {
 				segmentsToUpdate.Insert(segment)
 			}
 		}

@@ -470,7 +470,7 @@ func (loader *segmentLoader) loadSegment(ctx context.Context,
 	if segment.Type() == SegmentTypeSealed {
 		fieldID2IndexInfo := make(map[int64]*querypb.FieldIndexInfo)
 		for _, indexInfo := range loadInfo.IndexInfos {
-			if len(indexInfo.IndexFilePaths) > 0 {
+			if len(indexInfo.GetIndexFilePaths()) > 0 {
 				fieldID := indexInfo.FieldID
 				fieldID2IndexInfo[fieldID] = indexInfo
 			}
@@ -947,6 +947,11 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context, segment *LocalSegmen
 			func(info *datapb.FieldBinlog) (int64, *datapb.FieldBinlog) { return info.GetFieldID(), info })
 
 		for _, info := range loadInfo.GetIndexInfos() {
+			if len(info.GetIndexFilePaths()) == 0 {
+				log.Warn("failed to add index for segment, index file list is empty, the segment may be too small")
+				return merr.WrapErrIndexNotFound("index file list empty")
+			}
+
 			fieldInfo, ok := fieldInfos[info.GetFieldID()]
 			if !ok {
 				return merr.WrapErrParameterInvalid("index info with corresponding  field info", "missing field info", strconv.FormatInt(fieldInfo.GetFieldID(), 10))

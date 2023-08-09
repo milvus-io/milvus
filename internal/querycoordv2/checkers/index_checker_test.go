@@ -97,9 +97,10 @@ func (suite *IndexCheckerSuite) TestLoadIndex() {
 	suite.broker.EXPECT().GetIndexInfo(mock.Anything, int64(1), int64(2)).
 		Return([]*querypb.FieldIndexInfo{
 			{
-				FieldID:     101,
-				IndexID:     1000,
-				EnableIndex: true,
+				FieldID:        101,
+				IndexID:        1000,
+				EnableIndex:    true,
+				IndexFilePaths: []string{"index"},
 			},
 		}, nil)
 
