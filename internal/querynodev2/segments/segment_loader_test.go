@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -350,6 +351,25 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogs() {
 			suite.Require().True(exist)
 		}
 	}
+}
+
+func (suite *SegmentLoaderSuite) TestLoadIndex() {
+	ctx := context.Background()
+	segment := &LocalSegment{}
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:    1,
+		PartitionID:  suite.partitionID,
+		CollectionID: suite.collectionID,
+		IndexInfos: []*querypb.FieldIndexInfo{
+			{
+				IndexFilePaths: []string{},
+			},
+		},
+	}
+
+	err := suite.loader.LoadIndex(ctx, segment, loadInfo)
+	suite.ErrorIs(err, merr.ErrIndexNotFound)
+
 }
 
 func (suite *SegmentLoaderSuite) TestLoadWithMmap() {
