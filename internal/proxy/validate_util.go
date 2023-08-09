@@ -224,8 +224,8 @@ func (v *validateUtil) fillWithDefaultValue(data []*schemapb.FieldData, schema *
 			}
 
 		case *schemapb.FieldData_Vectors:
-			log.Error("vectors not support default value", zap.String("fieldSchemaName", field.GetFieldName()))
-			return merr.WrapErrParameterInvalid("not set default value", "", "json type not support default value")
+			log.Error("vector not support default value", zap.String("fieldSchemaName", field.GetFieldName()))
+			return merr.WrapErrParameterInvalid("not set default value", "", "vector type not support default value")
 
 		default:
 			panic("undefined data type " + field.Type.String())
@@ -279,7 +279,7 @@ func (v *validateUtil) checkVarCharFieldData(field *schemapb.FieldData, fieldSch
 func (v *validateUtil) checkJSONFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	jsonArray := field.GetScalars().GetJsonData().GetData()
 	if jsonArray == nil {
-		msg := fmt.Sprintf("varchar field '%v' is illegal, array type mismatch", field.GetFieldName())
+		msg := fmt.Sprintf("json field '%v' is illegal, array type mismatch", field.GetFieldName())
 		return merr.WrapErrParameterInvalid("need string array", "got nil", msg)
 	}
 
