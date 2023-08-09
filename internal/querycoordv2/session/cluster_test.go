@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 const bufSize = 1024 * 1024
@@ -78,7 +79,7 @@ func (suite *ClusterTestSuite) setupServers() {
 
 	// check server ready to serve
 	for _, lis := range suite.listeners {
-		conn, err := grpc.Dial(lis.Addr().String(), grpc.WithBlock(), grpc.WithInsecure())
+		conn, err := grpc.Dial(lis.Addr().String(), grpc.WithBlock(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 		suite.NoError(err)
 		suite.NoError(conn.Close())
 	}

@@ -39,6 +39,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"go.uber.org/zap"
 )
@@ -378,8 +379,11 @@ func (bct *buildClientTask) Run() {
 		connectGrpcFunc := func() error {
 			opts := tracer.GetInterceptorOpts()
 			log.Debug("Grpc connect", zap.String("Address", bct.sess.Address))
-			conn, err := grpc.DialContext(bct.ctx, bct.sess.Address,
-				grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(30*time.Second),
+			ctx, cancel := context.WithTimeout(bct.ctx, 30*time.Second)
+			defer cancel()
+			conn, err := grpc.DialContext(ctx, bct.sess.Address,
+				grpc.WithTransportCredentials(insecure.NewCredentials()),
+				grpc.WithBlock(),
 				grpc.WithDisableRetry(),
 				grpc.WithUnaryInterceptor(
 					grpc_middleware.ChainUnaryClient(
