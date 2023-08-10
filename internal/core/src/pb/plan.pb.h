@@ -23,6 +23,7 @@
 #include <google/protobuf/io/coded_stream.h>
 #include <google/protobuf/arena.h>
 #include <google/protobuf/arenastring.h>
+#include <google/protobuf/generated_message_bases.h>
 #include <google/protobuf/generated_message_util.h>
 #include <google/protobuf/metadata_lite.h>
 #include <google/protobuf/generated_message_reflection.h>
@@ -49,6 +50,9 @@ extern const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table
 namespace milvus {
 namespace proto {
 namespace plan {
+class AlwaysTrueExpr;
+struct AlwaysTrueExprDefaultTypeInternal;
+extern AlwaysTrueExprDefaultTypeInternal _AlwaysTrueExpr_default_instance_;
 class BinaryArithExpr;
 struct BinaryArithExprDefaultTypeInternal;
 extern BinaryArithExprDefaultTypeInternal _BinaryArithExpr_default_instance_;
@@ -110,6 +114,7 @@ extern VectorANNSDefaultTypeInternal _VectorANNS_default_instance_;
 }  // namespace proto
 }  // namespace milvus
 PROTOBUF_NAMESPACE_OPEN
+template<> ::milvus::proto::plan::AlwaysTrueExpr* Arena::CreateMaybeMessage<::milvus::proto::plan::AlwaysTrueExpr>(Arena*);
 template<> ::milvus::proto::plan::BinaryArithExpr* Arena::CreateMaybeMessage<::milvus::proto::plan::BinaryArithExpr>(Arena*);
 template<> ::milvus::proto::plan::BinaryArithOp* Arena::CreateMaybeMessage<::milvus::proto::plan::BinaryArithOp>(Arena*);
 template<> ::milvus::proto::plan::BinaryArithOpEvalRangeExpr* Arena::CreateMaybeMessage<::milvus::proto::plan::BinaryArithOpEvalRangeExpr>(Arena*);
@@ -3153,6 +3158,124 @@ class BinaryArithOpEvalRangeExpr final :
 };
 // -------------------------------------------------------------------
 
+class AlwaysTrueExpr final :
+    public ::PROTOBUF_NAMESPACE_ID::internal::ZeroFieldsBase /* @@protoc_insertion_point(class_definition:milvus.proto.plan.AlwaysTrueExpr) */ {
+ public:
+  inline AlwaysTrueExpr() : AlwaysTrueExpr(nullptr) {}
+  explicit PROTOBUF_CONSTEXPR AlwaysTrueExpr(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  AlwaysTrueExpr(const AlwaysTrueExpr& from);
+  AlwaysTrueExpr(AlwaysTrueExpr&& from) noexcept
+    : AlwaysTrueExpr() {
+    *this = ::std::move(from);
+  }
+
+  inline AlwaysTrueExpr& operator=(const AlwaysTrueExpr& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline AlwaysTrueExpr& operator=(AlwaysTrueExpr&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return default_instance().GetMetadata().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return default_instance().GetMetadata().reflection;
+  }
+  static const AlwaysTrueExpr& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const AlwaysTrueExpr* internal_default_instance() {
+    return reinterpret_cast<const AlwaysTrueExpr*>(
+               &_AlwaysTrueExpr_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    15;
+
+  friend void swap(AlwaysTrueExpr& a, AlwaysTrueExpr& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(AlwaysTrueExpr* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(AlwaysTrueExpr* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  AlwaysTrueExpr* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<AlwaysTrueExpr>(arena);
+  }
+  using ::PROTOBUF_NAMESPACE_ID::internal::ZeroFieldsBase::CopyFrom;
+  inline void CopyFrom(const AlwaysTrueExpr& from) {
+    ::PROTOBUF_NAMESPACE_ID::internal::ZeroFieldsBase::CopyImpl(*this, from);
+  }
+  using ::PROTOBUF_NAMESPACE_ID::internal::ZeroFieldsBase::MergeFrom;
+  void MergeFrom(const AlwaysTrueExpr& from) {
+    ::PROTOBUF_NAMESPACE_ID::internal::ZeroFieldsBase::MergeImpl(*this, from);
+  }
+  public:
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.proto.plan.AlwaysTrueExpr";
+  }
+  protected:
+  explicit AlwaysTrueExpr(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  static const ClassData _class_data_;
+  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  // @@protoc_insertion_point(class_scope:milvus.proto.plan.AlwaysTrueExpr)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+  };
+  friend struct ::TableStruct_plan_2eproto;
+};
+// -------------------------------------------------------------------
+
 class Expr final :
     public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.plan.Expr) */ {
  public:
@@ -3208,6 +3331,7 @@ class Expr final :
     kValueExpr = 9,
     kColumnExpr = 10,
     kExistsExpr = 11,
+    kAlwaysTrueExpr = 12,
     EXPR_NOT_SET = 0,
   };
 
@@ -3216,7 +3340,7 @@ class Expr final :
                &_Expr_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    15;
+    16;
 
   friend void swap(Expr& a, Expr& b) {
     a.Swap(&b);
@@ -3300,6 +3424,7 @@ class Expr final :
     kValueExprFieldNumber = 9,
     kColumnExprFieldNumber = 10,
     kExistsExprFieldNumber = 11,
+    kAlwaysTrueExprFieldNumber = 12,
   };
   // .milvus.proto.plan.TermExpr term_expr = 1;
   bool has_term_expr() const;
@@ -3499,6 +3624,24 @@ class Expr final :
       ::milvus::proto::plan::ExistsExpr* exists_expr);
   ::milvus::proto::plan::ExistsExpr* unsafe_arena_release_exists_expr();
 
+  // .milvus.proto.plan.AlwaysTrueExpr always_true_expr = 12;
+  bool has_always_true_expr() const;
+  private:
+  bool _internal_has_always_true_expr() const;
+  public:
+  void clear_always_true_expr();
+  const ::milvus::proto::plan::AlwaysTrueExpr& always_true_expr() const;
+  PROTOBUF_NODISCARD ::milvus::proto::plan::AlwaysTrueExpr* release_always_true_expr();
+  ::milvus::proto::plan::AlwaysTrueExpr* mutable_always_true_expr();
+  void set_allocated_always_true_expr(::milvus::proto::plan::AlwaysTrueExpr* always_true_expr);
+  private:
+  const ::milvus::proto::plan::AlwaysTrueExpr& _internal_always_true_expr() const;
+  ::milvus::proto::plan::AlwaysTrueExpr* _internal_mutable_always_true_expr();
+  public:
+  void unsafe_arena_set_allocated_always_true_expr(
+      ::milvus::proto::plan::AlwaysTrueExpr* always_true_expr);
+  ::milvus::proto::plan::AlwaysTrueExpr* unsafe_arena_release_always_true_expr();
+
   void clear_expr();
   ExprCase expr_case() const;
   // @@protoc_insertion_point(class_scope:milvus.proto.plan.Expr)
@@ -3515,6 +3658,7 @@ class Expr final :
   void set_has_value_expr();
   void set_has_column_expr();
   void set_has_exists_expr();
+  void set_has_always_true_expr();
 
   inline bool has_expr() const;
   inline void clear_has_expr();
@@ -3537,6 +3681,7 @@ class Expr final :
       ::milvus::proto::plan::ValueExpr* value_expr_;
       ::milvus::proto::plan::ColumnExpr* column_expr_;
       ::milvus::proto::plan::ExistsExpr* exists_expr_;
+      ::milvus::proto::plan::AlwaysTrueExpr* always_true_expr_;
     } expr_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
     uint32_t _oneof_case_[1];
@@ -3595,7 +3740,7 @@ class VectorANNS final :
                &_VectorANNS_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    16;
+    17;
 
   friend void swap(VectorANNS& a, VectorANNS& b) {
     a.Swap(&b);
@@ -3810,7 +3955,7 @@ class QueryPlanNode final :
                &_QueryPlanNode_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    17;
+    18;
 
   friend void swap(QueryPlanNode& a, QueryPlanNode& b) {
     a.Swap(&b);
@@ -3996,7 +4141,7 @@ class PlanNode final :
                &_PlanNode_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    18;
+    19;
 
   friend void swap(PlanNode& a, PlanNode& b) {
     a.Swap(&b);
@@ -6916,6 +7061,10 @@ inline void BinaryArithOpEvalRangeExpr::set_allocated_value(::milvus::proto::pla
 
 // -------------------------------------------------------------------
 
+// AlwaysTrueExpr
+
+// -------------------------------------------------------------------
+
 // Expr
 
 // .milvus.proto.plan.TermExpr term_expr = 1;
@@ -7732,6 +7881,80 @@ inline ::milvus::proto::plan::ExistsExpr* Expr::mutable_exists_expr() {
   return _msg;
 }
 
+// .milvus.proto.plan.AlwaysTrueExpr always_true_expr = 12;
+inline bool Expr::_internal_has_always_true_expr() const {
+  return expr_case() == kAlwaysTrueExpr;
+}
+inline bool Expr::has_always_true_expr() const {
+  return _internal_has_always_true_expr();
+}
+inline void Expr::set_has_always_true_expr() {
+  _impl_._oneof_case_[0] = kAlwaysTrueExpr;
+}
+inline void Expr::clear_always_true_expr() {
+  if (_internal_has_always_true_expr()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.expr_.always_true_expr_;
+    }
+    clear_has_expr();
+  }
+}
+inline ::milvus::proto::plan::AlwaysTrueExpr* Expr::release_always_true_expr() {
+  // @@protoc_insertion_point(field_release:milvus.proto.plan.Expr.always_true_expr)
+  if (_internal_has_always_true_expr()) {
+    clear_has_expr();
+    ::milvus::proto::plan::AlwaysTrueExpr* temp = _impl_.expr_.always_true_expr_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.expr_.always_true_expr_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::milvus::proto::plan::AlwaysTrueExpr& Expr::_internal_always_true_expr() const {
+  return _internal_has_always_true_expr()
+      ? *_impl_.expr_.always_true_expr_
+      : reinterpret_cast< ::milvus::proto::plan::AlwaysTrueExpr&>(::milvus::proto::plan::_AlwaysTrueExpr_default_instance_);
+}
+inline const ::milvus::proto::plan::AlwaysTrueExpr& Expr::always_true_expr() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.plan.Expr.always_true_expr)
+  return _internal_always_true_expr();
+}
+inline ::milvus::proto::plan::AlwaysTrueExpr* Expr::unsafe_arena_release_always_true_expr() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:milvus.proto.plan.Expr.always_true_expr)
+  if (_internal_has_always_true_expr()) {
+    clear_has_expr();
+    ::milvus::proto::plan::AlwaysTrueExpr* temp = _impl_.expr_.always_true_expr_;
+    _impl_.expr_.always_true_expr_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Expr::unsafe_arena_set_allocated_always_true_expr(::milvus::proto::plan::AlwaysTrueExpr* always_true_expr) {
+  clear_expr();
+  if (always_true_expr) {
+    set_has_always_true_expr();
+    _impl_.expr_.always_true_expr_ = always_true_expr;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:milvus.proto.plan.Expr.always_true_expr)
+}
+inline ::milvus::proto::plan::AlwaysTrueExpr* Expr::_internal_mutable_always_true_expr() {
+  if (!_internal_has_always_true_expr()) {
+    clear_expr();
+    set_has_always_true_expr();
+    _impl_.expr_.always_true_expr_ = CreateMaybeMessage< ::milvus::proto::plan::AlwaysTrueExpr >(GetArenaForAllocation());
+  }
+  return _impl_.expr_.always_true_expr_;
+}
+inline ::milvus::proto::plan::AlwaysTrueExpr* Expr::mutable_always_true_expr() {
+  ::milvus::proto::plan::AlwaysTrueExpr* _msg = _internal_mutable_always_true_expr();
+  // @@protoc_insertion_point(field_mutable:milvus.proto.plan.Expr.always_true_expr)
+  return _msg;
+}
+
 inline bool Expr::has_expr() const {
   return expr_case() != EXPR_NOT_SET;
 }
@@ -8434,6 +8657,8 @@ inline PlanNode::NodeCase PlanNode::node_case() const {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------

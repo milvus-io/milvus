@@ -2046,4 +2046,11 @@ ExecExprVisitor::visit(ExistsExpr& expr) {
     bitset_opt_ = std::move(res);
 }
 
+void
+ExecExprVisitor::visit(AlwaysTrueExpr& expr) {
+    BitsetType res(row_count_);
+    res.set();
+    bitset_opt_ = std::move(res);
+}
+
 }  // namespace milvus::query

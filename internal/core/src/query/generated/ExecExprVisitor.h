@@ -53,6 +53,9 @@ class ExecExprVisitor : public ExprVisitor {
     void
     visit(ExistsExpr& expr) override;
 
+    void
+    visit(AlwaysTrueExpr& expr) override;
+
  public:
     ExecExprVisitor(const segcore::SegmentInternalInterface& segment,
                     int64_t row_count,

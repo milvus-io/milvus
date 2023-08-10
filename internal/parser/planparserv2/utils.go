@@ -2,6 +2,7 @@ package planparserv2
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 
@@ -342,4 +343,32 @@ func HandleCompare(op int, left, right *ExprWithType) (*planpb.Expr, error) {
 	} else {
 		return handleCompare(cmpOp, left, right)
 	}
+}
+
+func isEmptyExpression(s string) bool {
+	return len(strings.TrimSpace(s)) == 0
+}
+
+func isAlwaysTrueExpr(e *planpb.Expr) bool {
+	return e.GetAlwaysTrueExpr() != nil
+}
+
+func alwaysTrueExpr() *planpb.Expr {
+	return &planpb.Expr{
+		Expr: &planpb.Expr_AlwaysTrueExpr{
+			AlwaysTrueExpr: &planpb.AlwaysTrueExpr{},
+		},
+	}
+}
+
+func IsAlwaysTruePlan(plan *planpb.PlanNode) bool {
+	switch realPlan := plan.GetNode().(type) {
+	case *planpb.PlanNode_VectorAnns:
+		return isAlwaysTrueExpr(realPlan.VectorAnns.GetPredicates())
+	case *planpb.PlanNode_Predicates:
+		return isAlwaysTrueExpr(realPlan.Predicates)
+	case *planpb.PlanNode_Query:
+		return !realPlan.Query.GetIsCount() && isAlwaysTrueExpr(realPlan.Query.GetPredicates())
+	}
+	return false
 }

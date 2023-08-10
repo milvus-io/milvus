@@ -54,4 +54,8 @@ ExistsExpr::accept(ExprVisitor& visitor) {
     visitor.visit(*this);
 }
 
+void
+AlwaysTrueExpr::accept(ExprVisitor& visitor) {
+    visitor.visit(*this);
+}
 }  // namespace milvus::query

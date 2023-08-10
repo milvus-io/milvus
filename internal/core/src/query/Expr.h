@@ -268,6 +268,17 @@ struct ExistsExpr : Expr {
     accept(ExprVisitor&) override;
 };
 
+struct AlwaysTrueExpr : Expr {
+ public:
+    void
+    accept(ExprVisitor&) override;
+};
+
+inline ExprPtr
+CreateAlwaysTrueExpr() {
+    return std::make_unique<AlwaysTrueExpr>();
+}
+
 inline bool
 IsTermExpr(Expr* expr) {
     TermExpr* term_expr = dynamic_cast<TermExpr*>(expr);

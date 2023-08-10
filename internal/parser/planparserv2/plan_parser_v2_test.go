@@ -534,6 +534,16 @@ func Test_handleExpr(t *testing.T) {
 	assert.Error(t, err1)
 }
 
+func Test_handleExpr_empty(t *testing.T) {
+	schema := newTestSchema()
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	ret1 := handleExpr(schemaHelper, "")
+	assert.True(t, isAlwaysTrueExpr(getExpr(ret1).expr))
+	assert.Equal(t, schemapb.DataType_Bool, getExpr(ret1).dataType)
+}
+
 // test if handleExpr is thread-safe.
 func Test_handleExpr_17126(t *testing.T) {
 	schema := newTestSchema()
@@ -1645,4 +1655,33 @@ c'`
 		RoundDecimal: 0,
 	})
 	assert.Error(t, err)
+}
+
+func Test_isEmptyExpression(t *testing.T) {
+	type args struct {
+		s string
+	}
+	tests := []struct {
+		name string
+		args args
+		want bool
+	}{
+		{
+			args: args{s: ""},
+			want: true,
+		},
+		{
+			args: args{s: "         "},
+			want: true,
+		},
+		{
+			args: args{s: "not empty"},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equalf(t, tt.want, isEmptyExpression(tt.args.s), "isEmptyExpression(%v)", tt.args.s)
+		})
+	}
 }

@@ -248,6 +248,17 @@ struct BinaryArithOpEvalRangeExprDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 BinaryArithOpEvalRangeExprDefaultTypeInternal _BinaryArithOpEvalRangeExpr_default_instance_;
+PROTOBUF_CONSTEXPR AlwaysTrueExpr::AlwaysTrueExpr(
+    ::_pbi::ConstantInitialized) {}
+struct AlwaysTrueExprDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR AlwaysTrueExprDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~AlwaysTrueExprDefaultTypeInternal() {}
+  union {
+    AlwaysTrueExpr _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 AlwaysTrueExprDefaultTypeInternal _AlwaysTrueExpr_default_instance_;
 PROTOBUF_CONSTEXPR Expr::Expr(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.expr_)*/{}
@@ -313,7 +324,7 @@ PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORIT
 }  // namespace plan
 }  // namespace proto
 }  // namespace milvus
-static ::_pb::Metadata file_level_metadata_plan_2eproto[19];
+static ::_pb::Metadata file_level_metadata_plan_2eproto[20];
 static const ::_pb::EnumDescriptor* file_level_enum_descriptors_plan_2eproto[4];
 static constexpr ::_pb::ServiceDescriptor const** file_level_service_descriptors_plan_2eproto = nullptr;
 
@@ -457,11 +468,18 @@ const uint32_t TableStruct_plan_2eproto::offsets[] PROTOBUF_SECTION_VARIABLE(pro
   PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::BinaryArithOpEvalRangeExpr, _impl_.op_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::BinaryArithOpEvalRangeExpr, _impl_.value_),
   ~0u,  // no _has_bits_
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::AlwaysTrueExpr, _internal_metadata_),
+  ~0u,  // no _extensions_
+  ~0u,  // no _oneof_case_
+  ~0u,  // no _weak_field_map_
+  ~0u,  // no _inlined_string_donated_
+  ~0u,  // no _has_bits_
   PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::Expr, _internal_metadata_),
   ~0u,  // no _extensions_
   PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::Expr, _impl_._oneof_case_[0]),
   ~0u,  // no _weak_field_map_
   ~0u,  // no _inlined_string_donated_
+  ::_pbi::kInvalidFieldOffsetTag,
   ::_pbi::kInvalidFieldOffsetTag,
   ::_pbi::kInvalidFieldOffsetTag,
   ::_pbi::kInvalidFieldOffsetTag,
@@ -522,10 +540,11 @@ static const ::_pbi::MigrationSchema schemas[] PROTOBUF_SECTION_VARIABLE(protode
   { 109, -1, -1, sizeof(::milvus::proto::plan::BinaryArithOp)},
   { 118, -1, -1, sizeof(::milvus::proto::plan::BinaryArithExpr)},
   { 127, -1, -1, sizeof(::milvus::proto::plan::BinaryArithOpEvalRangeExpr)},
-  { 138, -1, -1, sizeof(::milvus::proto::plan::Expr)},
-  { 156, -1, -1, sizeof(::milvus::proto::plan::VectorANNS)},
-  { 167, -1, -1, sizeof(::milvus::proto::plan::QueryPlanNode)},
-  { 176, -1, -1, sizeof(::milvus::proto::plan::PlanNode)},
+  { 138, -1, -1, sizeof(::milvus::proto::plan::AlwaysTrueExpr)},
+  { 144, -1, -1, sizeof(::milvus::proto::plan::Expr)},
+  { 163, -1, -1, sizeof(::milvus::proto::plan::VectorANNS)},
+  { 174, -1, -1, sizeof(::milvus::proto::plan::QueryPlanNode)},
+  { 183, -1, -1, sizeof(::milvus::proto::plan::PlanNode)},
 };
 
 static const ::_pb::Message* const file_default_instances[] = {
@@ -544,6 +563,7 @@ static const ::_pb::Message* const file_default_instances[] = {
   &::milvus::proto::plan::_BinaryArithOp_default_instance_._instance,
   &::milvus::proto::plan::_BinaryArithExpr_default_instance_._instance,
   &::milvus::proto::plan::_BinaryArithOpEvalRangeExpr_default_instance_._instance,
+  &::milvus::proto::plan::_AlwaysTrueExpr_default_instance_._instance,
   &::milvus::proto::plan::_Expr_default_instance_._instance,
   &::milvus::proto::plan::_VectorANNS_default_instance_._instance,
   &::milvus::proto::plan::_QueryPlanNode_default_instance_._instance,
@@ -606,53 +626,55 @@ const char descriptor_table_protodef_plan_2eproto[] PROTOBUF_SECTION_VARIABLE(pr
   "pe\0226\n\rright_operand\030\003 \001(\0132\037.milvus.proto"
   ".plan.GenericValue\022%\n\002op\030\004 \001(\0162\031.milvus."
   "proto.plan.OpType\022.\n\005value\030\005 \001(\0132\037.milvu"
-  "s.proto.plan.GenericValue\"\235\005\n\004Expr\0220\n\tte"
-  "rm_expr\030\001 \001(\0132\033.milvus.proto.plan.TermEx"
-  "prH\000\0222\n\nunary_expr\030\002 \001(\0132\034.milvus.proto."
-  "plan.UnaryExprH\000\0224\n\013binary_expr\030\003 \001(\0132\035."
-  "milvus.proto.plan.BinaryExprH\000\0226\n\014compar"
-  "e_expr\030\004 \001(\0132\036.milvus.proto.plan.Compare"
-  "ExprH\000\022=\n\020unary_range_expr\030\005 \001(\0132!.milvu"
-  "s.proto.plan.UnaryRangeExprH\000\022\?\n\021binary_"
-  "range_expr\030\006 \001(\0132\".milvus.proto.plan.Bin"
-  "aryRangeExprH\000\022X\n\037binary_arith_op_eval_r"
-  "ange_expr\030\007 \001(\0132-.milvus.proto.plan.Bina"
-  "ryArithOpEvalRangeExprH\000\022\?\n\021binary_arith"
-  "_expr\030\010 \001(\0132\".milvus.proto.plan.BinaryAr"
-  "ithExprH\000\0222\n\nvalue_expr\030\t \001(\0132\034.milvus.p"
-  "roto.plan.ValueExprH\000\0224\n\013column_expr\030\n \001"
-  "(\0132\035.milvus.proto.plan.ColumnExprH\000\0224\n\013e"
-  "xists_expr\030\013 \001(\0132\035.milvus.proto.plan.Exi"
-  "stsExprH\000B\006\n\004expr\"\251\001\n\nVectorANNS\022\021\n\tis_b"
-  "inary\030\001 \001(\010\022\020\n\010field_id\030\002 \001(\003\022+\n\npredica"
-  "tes\030\003 \001(\0132\027.milvus.proto.plan.Expr\0220\n\nqu"
-  "ery_info\030\004 \001(\0132\034.milvus.proto.plan.Query"
-  "Info\022\027\n\017placeholder_tag\030\005 \001(\t\"]\n\rQueryPl"
-  "anNode\022+\n\npredicates\030\001 \001(\0132\027.milvus.prot"
-  "o.plan.Expr\022\020\n\010is_count\030\002 \001(\010\022\r\n\005limit\030\003"
-  " \001(\003\"\304\001\n\010PlanNode\0224\n\013vector_anns\030\001 \001(\0132\035"
-  ".milvus.proto.plan.VectorANNSH\000\022-\n\npredi"
-  "cates\030\002 \001(\0132\027.milvus.proto.plan.ExprH\000\0221"
-  "\n\005query\030\004 \001(\0132 .milvus.proto.plan.QueryP"
-  "lanNodeH\000\022\030\n\020output_field_ids\030\003 \003(\003B\006\n\004n"
-  "ode*\272\001\n\006OpType\022\013\n\007Invalid\020\000\022\017\n\013GreaterTh"
-  "an\020\001\022\020\n\014GreaterEqual\020\002\022\014\n\010LessThan\020\003\022\r\n\t"
-  "LessEqual\020\004\022\t\n\005Equal\020\005\022\014\n\010NotEqual\020\006\022\017\n\013"
-  "PrefixMatch\020\007\022\020\n\014PostfixMatch\020\010\022\t\n\005Match"
-  "\020\t\022\t\n\005Range\020\n\022\006\n\002In\020\013\022\t\n\005NotIn\020\014*G\n\013Arit"
-  "hOpType\022\013\n\007Unknown\020\000\022\007\n\003Add\020\001\022\007\n\003Sub\020\002\022\007"
-  "\n\003Mul\020\003\022\007\n\003Div\020\004\022\007\n\003Mod\020\005B3Z1github.com/"
-  "milvus-io/milvus/internal/proto/planpbb\006"
-  "proto3"
+  "s.proto.plan.GenericValue\"\020\n\016AlwaysTrueE"
+  "xpr\"\334\005\n\004Expr\0220\n\tterm_expr\030\001 \001(\0132\033.milvus"
+  ".proto.plan.TermExprH\000\0222\n\nunary_expr\030\002 \001"
+  "(\0132\034.milvus.proto.plan.UnaryExprH\000\0224\n\013bi"
+  "nary_expr\030\003 \001(\0132\035.milvus.proto.plan.Bina"
+  "ryExprH\000\0226\n\014compare_expr\030\004 \001(\0132\036.milvus."
+  "proto.plan.CompareExprH\000\022=\n\020unary_range_"
+  "expr\030\005 \001(\0132!.milvus.proto.plan.UnaryRang"
+  "eExprH\000\022\?\n\021binary_range_expr\030\006 \001(\0132\".mil"
+  "vus.proto.plan.BinaryRangeExprH\000\022X\n\037bina"
+  "ry_arith_op_eval_range_expr\030\007 \001(\0132-.milv"
+  "us.proto.plan.BinaryArithOpEvalRangeExpr"
+  "H\000\022\?\n\021binary_arith_expr\030\010 \001(\0132\".milvus.p"
+  "roto.plan.BinaryArithExprH\000\0222\n\nvalue_exp"
+  "r\030\t \001(\0132\034.milvus.proto.plan.ValueExprH\000\022"
+  "4\n\013column_expr\030\n \001(\0132\035.milvus.proto.plan"
+  ".ColumnExprH\000\0224\n\013exists_expr\030\013 \001(\0132\035.mil"
+  "vus.proto.plan.ExistsExprH\000\022=\n\020always_tr"
+  "ue_expr\030\014 \001(\0132!.milvus.proto.plan.Always"
+  "TrueExprH\000B\006\n\004expr\"\251\001\n\nVectorANNS\022\021\n\tis_"
+  "binary\030\001 \001(\010\022\020\n\010field_id\030\002 \001(\003\022+\n\npredic"
+  "ates\030\003 \001(\0132\027.milvus.proto.plan.Expr\0220\n\nq"
+  "uery_info\030\004 \001(\0132\034.milvus.proto.plan.Quer"
+  "yInfo\022\027\n\017placeholder_tag\030\005 \001(\t\"]\n\rQueryP"
+  "lanNode\022+\n\npredicates\030\001 \001(\0132\027.milvus.pro"
+  "to.plan.Expr\022\020\n\010is_count\030\002 \001(\010\022\r\n\005limit\030"
+  "\003 \001(\003\"\304\001\n\010PlanNode\0224\n\013vector_anns\030\001 \001(\0132"
+  "\035.milvus.proto.plan.VectorANNSH\000\022-\n\npred"
+  "icates\030\002 \001(\0132\027.milvus.proto.plan.ExprH\000\022"
+  "1\n\005query\030\004 \001(\0132 .milvus.proto.plan.Query"
+  "PlanNodeH\000\022\030\n\020output_field_ids\030\003 \003(\003B\006\n\004"
+  "node*\272\001\n\006OpType\022\013\n\007Invalid\020\000\022\017\n\013GreaterT"
+  "han\020\001\022\020\n\014GreaterEqual\020\002\022\014\n\010LessThan\020\003\022\r\n"
+  "\tLessEqual\020\004\022\t\n\005Equal\020\005\022\014\n\010NotEqual\020\006\022\017\n"
+  "\013PrefixMatch\020\007\022\020\n\014PostfixMatch\020\010\022\t\n\005Matc"
+  "h\020\t\022\t\n\005Range\020\n\022\006\n\002In\020\013\022\t\n\005NotIn\020\014*G\n\013Ari"
+  "thOpType\022\013\n\007Unknown\020\000\022\007\n\003Add\020\001\022\007\n\003Sub\020\002\022"
+  "\007\n\003Mul\020\003\022\007\n\003Div\020\004\022\007\n\003Mod\020\005B3Z1github.com"
+  "/milvus-io/milvus/internal/proto/planpbb"
+  "\006proto3"
   ;
 static const ::_pbi::DescriptorTable* const descriptor_table_plan_2eproto_deps[1] = {
   &::descriptor_table_schema_2eproto,
 };
 static ::_pbi::once_flag descriptor_table_plan_2eproto_once;
 const ::_pbi::DescriptorTable descriptor_table_plan_2eproto = {
-    false, false, 3686, descriptor_table_protodef_plan_2eproto,
+    false, false, 3767, descriptor_table_protodef_plan_2eproto,
     "plan.proto",
-    &descriptor_table_plan_2eproto_once, descriptor_table_plan_2eproto_deps, 1, 19,
+    &descriptor_table_plan_2eproto_once, descriptor_table_plan_2eproto_deps, 1, 20,
     schemas, file_default_instances, TableStruct_plan_2eproto::offsets,
     file_level_metadata_plan_2eproto, file_level_enum_descriptors_plan_2eproto,
     file_level_service_descriptors_plan_2eproto,
@@ -4793,6 +4815,46 @@ void BinaryArithOpEvalRangeExpr::InternalSwap(BinaryArithOpEvalRangeExpr* other)
 
 // ===================================================================
 
+class AlwaysTrueExpr::_Internal {
+ public:
+};
+
+AlwaysTrueExpr::AlwaysTrueExpr(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::internal::ZeroFieldsBase(arena, is_message_owned) {
+  // @@protoc_insertion_point(arena_constructor:milvus.proto.plan.AlwaysTrueExpr)
+}
+AlwaysTrueExpr::AlwaysTrueExpr(const AlwaysTrueExpr& from)
+  : ::PROTOBUF_NAMESPACE_ID::internal::ZeroFieldsBase() {
+  AlwaysTrueExpr* const _this = this; (void)_this;
+  _internal_metadata_.MergeFrom<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(from._internal_metadata_);
+  // @@protoc_insertion_point(copy_constructor:milvus.proto.plan.AlwaysTrueExpr)
+}
+
+
+
+
+
+const ::PROTOBUF_NAMESPACE_ID::Message::ClassData AlwaysTrueExpr::_class_data_ = {
+    ::PROTOBUF_NAMESPACE_ID::internal::ZeroFieldsBase::CopyImpl,
+    ::PROTOBUF_NAMESPACE_ID::internal::ZeroFieldsBase::MergeImpl,
+};
+const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*AlwaysTrueExpr::GetClassData() const { return &_class_data_; }
+
+
+
+
+
+
+
+::PROTOBUF_NAMESPACE_ID::Metadata AlwaysTrueExpr::GetMetadata() const {
+  return ::_pbi::AssignDescriptors(
+      &descriptor_table_plan_2eproto_getter, &descriptor_table_plan_2eproto_once,
+      file_level_metadata_plan_2eproto[15]);
+}
+
+// ===================================================================
+
 class Expr::_Internal {
  public:
   static const ::milvus::proto::plan::TermExpr& term_expr(const Expr* msg);
@@ -4806,6 +4868,7 @@ class Expr::_Internal {
   static const ::milvus::proto::plan::ValueExpr& value_expr(const Expr* msg);
   static const ::milvus::proto::plan::ColumnExpr& column_expr(const Expr* msg);
   static const ::milvus::proto::plan::ExistsExpr& exists_expr(const Expr* msg);
+  static const ::milvus::proto::plan::AlwaysTrueExpr& always_true_expr(const Expr* msg);
 };
 
 const ::milvus::proto::plan::TermExpr&
@@ -4851,6 +4914,10 @@ Expr::_Internal::column_expr(const Expr* msg) {
 const ::milvus::proto::plan::ExistsExpr&
 Expr::_Internal::exists_expr(const Expr* msg) {
   return *msg->_impl_.expr_.exists_expr_;
+}
+const ::milvus::proto::plan::AlwaysTrueExpr&
+Expr::_Internal::always_true_expr(const Expr* msg) {
+  return *msg->_impl_.expr_.always_true_expr_;
 }
 void Expr::set_allocated_term_expr(::milvus::proto::plan::TermExpr* term_expr) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
@@ -5017,6 +5084,21 @@ void Expr::set_allocated_exists_expr(::milvus::proto::plan::ExistsExpr* exists_e
   }
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.plan.Expr.exists_expr)
 }
+void Expr::set_allocated_always_true_expr(::milvus::proto::plan::AlwaysTrueExpr* always_true_expr) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_expr();
+  if (always_true_expr) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(always_true_expr);
+    if (message_arena != submessage_arena) {
+      always_true_expr = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, always_true_expr, submessage_arena);
+    }
+    set_has_always_true_expr();
+    _impl_.expr_.always_true_expr_ = always_true_expr;
+  }
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.plan.Expr.always_true_expr)
+}
 Expr::Expr(::PROTOBUF_NAMESPACE_ID::Arena* arena,
                          bool is_message_owned)
   : ::PROTOBUF_NAMESPACE_ID::Message(arena, is_message_owned) {
@@ -5087,6 +5169,11 @@ Expr::Expr(const Expr& from)
     case kExistsExpr: {
       _this->_internal_mutable_exists_expr()->::milvus::proto::plan::ExistsExpr::MergeFrom(
           from._internal_exists_expr());
+      break;
+    }
+    case kAlwaysTrueExpr: {
+      _this->_internal_mutable_always_true_expr()->::milvus::proto::plan::AlwaysTrueExpr::MergeFrom(
+          from._internal_always_true_expr());
       break;
     }
     case EXPR_NOT_SET: {
@@ -5194,6 +5281,12 @@ void Expr::clear_expr() {
     case kExistsExpr: {
       if (GetArenaForAllocation() == nullptr) {
         delete _impl_.expr_.exists_expr_;
+      }
+      break;
+    }
+    case kAlwaysTrueExpr: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.expr_.always_true_expr_;
       }
       break;
     }
@@ -5309,6 +5402,14 @@ const char* Expr::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
         } else
           goto handle_unusual;
         continue;
+      // .milvus.proto.plan.AlwaysTrueExpr always_true_expr = 12;
+      case 12:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 98)) {
+          ptr = ctx->ParseMessage(_internal_mutable_always_true_expr(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       default:
         goto handle_unusual;
     }  // switch
@@ -5415,6 +5516,13 @@ uint8_t* Expr::_InternalSerialize(
         _Internal::exists_expr(this).GetCachedSize(), target, stream);
   }
 
+  // .milvus.proto.plan.AlwaysTrueExpr always_true_expr = 12;
+  if (_internal_has_always_true_expr()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(12, _Internal::always_true_expr(this),
+        _Internal::always_true_expr(this).GetCachedSize(), target, stream);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = ::_pbi::WireFormat::InternalSerializeUnknownFieldsToArray(
         _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance), target, stream);
@@ -5509,6 +5617,13 @@ size_t Expr::ByteSizeLong() const {
           *_impl_.expr_.exists_expr_);
       break;
     }
+    // .milvus.proto.plan.AlwaysTrueExpr always_true_expr = 12;
+    case kAlwaysTrueExpr: {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.expr_.always_true_expr_);
+      break;
+    }
     case EXPR_NOT_SET: {
       break;
     }
@@ -5587,6 +5702,11 @@ void Expr::MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_
           from._internal_exists_expr());
       break;
     }
+    case kAlwaysTrueExpr: {
+      _this->_internal_mutable_always_true_expr()->::milvus::proto::plan::AlwaysTrueExpr::MergeFrom(
+          from._internal_always_true_expr());
+      break;
+    }
     case EXPR_NOT_SET: {
       break;
     }
@@ -5615,7 +5735,7 @@ void Expr::InternalSwap(Expr* other) {
 ::PROTOBUF_NAMESPACE_ID::Metadata Expr::GetMetadata() const {
   return ::_pbi::AssignDescriptors(
       &descriptor_table_plan_2eproto_getter, &descriptor_table_plan_2eproto_once,
-      file_level_metadata_plan_2eproto[15]);
+      file_level_metadata_plan_2eproto[16]);
 }
 
 // ===================================================================
@@ -5960,7 +6080,7 @@ void VectorANNS::InternalSwap(VectorANNS* other) {
 ::PROTOBUF_NAMESPACE_ID::Metadata VectorANNS::GetMetadata() const {
   return ::_pbi::AssignDescriptors(
       &descriptor_table_plan_2eproto_getter, &descriptor_table_plan_2eproto_once,
-      file_level_metadata_plan_2eproto[16]);
+      file_level_metadata_plan_2eproto[17]);
 }
 
 // ===================================================================
@@ -6212,7 +6332,7 @@ void QueryPlanNode::InternalSwap(QueryPlanNode* other) {
 ::PROTOBUF_NAMESPACE_ID::Metadata QueryPlanNode::GetMetadata() const {
   return ::_pbi::AssignDescriptors(
       &descriptor_table_plan_2eproto_getter, &descriptor_table_plan_2eproto_once,
-      file_level_metadata_plan_2eproto[17]);
+      file_level_metadata_plan_2eproto[18]);
 }
 
 // ===================================================================
@@ -6617,7 +6737,7 @@ void PlanNode::InternalSwap(PlanNode* other) {
 ::PROTOBUF_NAMESPACE_ID::Metadata PlanNode::GetMetadata() const {
   return ::_pbi::AssignDescriptors(
       &descriptor_table_plan_2eproto_getter, &descriptor_table_plan_2eproto_once,
-      file_level_metadata_plan_2eproto[18]);
+      file_level_metadata_plan_2eproto[19]);
 }
 
 // @@protoc_insertion_point(namespace_scope)
@@ -6684,6 +6804,10 @@ Arena::CreateMaybeMessage< ::milvus::proto::plan::BinaryArithExpr >(Arena* arena
 template<> PROTOBUF_NOINLINE ::milvus::proto::plan::BinaryArithOpEvalRangeExpr*
 Arena::CreateMaybeMessage< ::milvus::proto::plan::BinaryArithOpEvalRangeExpr >(Arena* arena) {
   return Arena::CreateMessageInternal< ::milvus::proto::plan::BinaryArithOpEvalRangeExpr >(arena);
+}
+template<> PROTOBUF_NOINLINE ::milvus::proto::plan::AlwaysTrueExpr*
+Arena::CreateMaybeMessage< ::milvus::proto::plan::AlwaysTrueExpr >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::milvus::proto::plan::AlwaysTrueExpr >(arena);
 }
 template<> PROTOBUF_NOINLINE ::milvus::proto::plan::Expr*
 Arena::CreateMaybeMessage< ::milvus::proto::plan::Expr >(Arena* arena) {
