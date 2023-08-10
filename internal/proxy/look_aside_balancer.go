@@ -159,8 +159,20 @@ func (b *LookAsideBalancer) calculateScore(node int64, cost *internalpb.CostAggr
 	}
 
 	executeSpeed := float64(cost.ResponseTime) - float64(cost.ServiceTime)
-	workload := math.Pow(float64(1+cost.TotalNQ+executingNQ), 3.0) * float64(cost.ServiceTime)
-	if workload < 0.0 {
+	if executingNQ < 0 {
+		log.Warn("unexpected executing nq value",
+			zap.Int64("executingNQ", executingNQ))
+		return executeSpeed
+	}
+
+	if cost.GetTotalNQ() < 0 {
+		log.Warn("unexpected total nq value",
+			zap.Int64("totalNq", cost.GetTotalNQ()))
+		return executeSpeed
+	}
+
+	workload := math.Pow(float64(1+cost.GetTotalNQ()+executingNQ), 3.0) * float64(cost.ServiceTime)
+	if workload < 0 {
 		return math.MaxFloat64
 	}
 
