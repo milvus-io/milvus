@@ -128,7 +128,20 @@ ExecExprVisitor::visit(LogicalUnaryExpr& expr) {
 void
 ExecExprVisitor::visit(LogicalBinaryExpr& expr) {
     using OpType = LogicalBinaryExpr::OpType;
+    auto skip_right_expr = [](const BitsetType& left_res,
+                              const OpType& op_type) -> bool {
+        return (op_type == OpType::LogicalAnd && left_res.none()) ||
+               (op_type == OpType::LogicalOr && left_res.all());
+    };
+
     auto left = call_child(*expr.left_);
+    // skip execute right node for some situations
+    if (skip_right_expr(left, expr.op_type_)) {
+        AssertInfo(left.size() == row_count_,
+                   "[ExecExprVisitor]Size of results not equal row count");
+        bitset_opt_ = std::move(left);
+        return;
+    }
     auto right = call_child(*expr.right_);
     AssertInfo(left.size() == right.size(),
                "[ExecExprVisitor]Left size not equal to right size");
