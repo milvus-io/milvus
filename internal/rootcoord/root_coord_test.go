@@ -33,6 +33,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -1112,6 +1113,42 @@ func TestCore_Import(t *testing.T) {
 			CollectionName: "a-good-name",
 		})
 		assert.NotNil(t, resp)
+	})
+
+	t.Run("not allow partiton name with partition key", func(t *testing.T) {
+		ctx := context.Background()
+		c := newTestCore(withHealthyCode(),
+			withMeta(meta))
+		meta.GetCollectionIDByNameFunc = func(name string) (UniqueID, error) {
+			return 100, nil
+		}
+		meta.GetCollectionVirtualChannelsFunc = func(colID int64) []string {
+			return []string{"ch-1", "ch-2"}
+		}
+		meta.GetPartitionByNameFunc = func(collID UniqueID, partitionName string, ts Timestamp) (UniqueID, error) {
+			return 101, nil
+		}
+		coll := &model.Collection{
+			CollectionID: 100,
+			Name:         "a-good-name",
+			Fields: []*model.Field{
+				{
+					FieldID:        101,
+					Name:           "test_field_name_1",
+					IsPrimaryKey:   false,
+					IsPartitionKey: true,
+					DataType:       schemapb.DataType_Int64,
+				},
+			},
+		}
+		meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
+			return coll.Clone(), nil
+		}
+		_, err := c.Import(ctx, &milvuspb.ImportRequest{
+			CollectionName: "a-good-name",
+			PartitionName:  "p1",
+		})
+		assert.Error(t, err)
 	})
 }
 

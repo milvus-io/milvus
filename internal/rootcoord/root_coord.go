@@ -1822,6 +1822,7 @@ func (c *Core) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvus
 		return nil, err
 	}
 
+	// Backup tool call import must with a partition name, each time restore a partition
 	isBackUp := importutil.IsBackup(req.GetOptions())
 	if isBackUp {
 		if len(req.GetPartitionName()) == 0 {
@@ -1845,13 +1846,22 @@ func (c *Core) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvus
 			break
 		}
 	}
+
+	// If has partition key and not backup/restore mode, don't allow user to specify partition name
+	if hasPartitionKey && !isBackUp && req.GetPartitionName() != "" {
+		msg := "not allow to set partition name for collection with partition key"
+		log.Warn(msg, zap.String("collection name", req.GetCollectionName()))
+		return nil, errors.New(msg)
+	}
+
+	// Get partition ID by partition name
 	var pID UniqueID
 	if !hasPartitionKey {
 		if req.GetPartitionName() == "" {
 			req.PartitionName = Params.CommonCfg.DefaultPartitionName.GetValue()
 		}
 		if pID, err = c.meta.GetPartitionByName(cID, req.GetPartitionName(), typeutil.MaxTimestamp); err != nil {
-			log.Error("failed to get partition ID from its name",
+			log.Warn("failed to get partition ID from its name",
 				zap.String("partition name", req.GetPartitionName()),
 				zap.Error(err))
 			return nil, err
