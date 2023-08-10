@@ -10,8 +10,6 @@ image:
     tag: master-20230614-893c3c04
     pullPolicy: IfNotPresent
 standalone:
-  heaptrack:
-    enabled: true
   resources:
     limits:
       cpu: 8
