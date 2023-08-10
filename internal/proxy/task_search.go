@@ -889,6 +889,11 @@ func reduceSearchResultData(ctx context.Context, subSearchResultData []*schemapb
 		}
 		realTopK = j
 		ret.Results.Topks = append(ret.Results.Topks, realTopK)
+
+		// limit search result to avoid oom
+		if int64(proto.Size(ret)) > paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64() {
+			return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64())
+		}
 	}
 	log.Ctx(ctx).Debug("skip duplicated search result", zap.Int64("count", skipDupCnt))
 

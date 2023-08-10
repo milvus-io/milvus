@@ -581,6 +581,12 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 			// primary keys duplicate
 			skipDupCnt++
 		}
+
+		// limit retrieve result to avoid oom
+		if int64(proto.Size(ret)) > paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64() {
+			return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64())
+		}
+
 		cursors[sel]++
 	}
 

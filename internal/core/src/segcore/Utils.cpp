@@ -110,6 +110,41 @@ GetSizeOfIdArray(const IdArray& data) {
     PanicInfo("unsupported id type");
 }
 
+int64_t
+GetRawDataSizeOfDataArray(const DataArray* data,
+                          const FieldMeta& field_meta,
+                          int64_t num_rows) {
+    int64_t result = 0;
+    auto data_type = field_meta.get_data_type();
+    if (!datatype_is_variable(data_type)) {
+        result = field_meta.get_sizeof() * num_rows;
+    } else {
+        switch (data_type) {
+            case DataType::STRING:
+            case DataType::VARCHAR: {
+                auto& string_data = FIELD_DATA(data, string);
+                for (auto& str : string_data) {
+                    result += str.size();
+                }
+                break;
+            }
+            case DataType::JSON: {
+                auto& json_data = FIELD_DATA(data, json);
+                for (auto& json_bytes : json_data) {
+                    result += json_bytes.size();
+                }
+                break;
+            }
+            default: {
+                PanicInfo(
+                    fmt::format("unsupported variable datatype {}", data_type));
+            }
+        }
+    }
+
+    return result;
+}
+
 // Note: this is temporary solution.
 // modify bulk script implement to make process more clear
 

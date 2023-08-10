@@ -259,6 +259,7 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
 
         std::shared_ptr<ColumnBase> column{};
         if (datatype_is_variable(data_type)) {
+            int64_t field_data_size = 0;
             switch (data_type) {
                 case milvus::DataType::STRING:
                 case milvus::DataType::VARCHAR: {
@@ -270,7 +271,9 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                         for (auto i = 0; i < field_data->get_num_rows(); i++) {
                             auto str = static_cast<const std::string*>(
                                 field_data->RawValue(i));
-                            var_column->Append(str->data(), str->size());
+                            auto str_size = str->size();
+                            var_column->Append(str->data(), str_size);
+                            field_data_size += str_size;
                         }
                     }
                     var_column->Seal();
@@ -288,8 +291,10 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                                 static_cast<const milvus::Json*>(
                                     field_data->RawValue(i))
                                     ->data();
+                            auto padded_string_size = padded_string.size();
                             var_column->Append(padded_string.data(),
-                                               padded_string.size());
+                                               padded_string_size);
+                            field_data_size += padded_string_size;
                         }
                     }
                     var_column->Seal();
@@ -299,6 +304,10 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                 default: {
                 }
             }
+
+            // update average row data size
+            SegmentInternalInterface::set_field_avg_size(
+                field_id, num_rows, field_data_size);
         } else {
             column = std::make_shared<Column>(num_rows, field_meta);
             storage::FieldDataPtr field_data;
@@ -468,7 +477,6 @@ SegmentSealedImpl::chunk_data_impl(FieldId field_id, int64_t chunk_id) const {
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
     auto& field_meta = schema_->operator[](field_id);
-    auto element_sizeof = field_meta.get_sizeof();
     if (auto it = fields_.find(field_id); it != fields_.end()) {
         auto& field_data = it->second;
         return field_data->Span();

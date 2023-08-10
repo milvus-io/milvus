@@ -53,7 +53,9 @@ class SegmentInterface {
            Timestamp timestamp) const = 0;
 
     virtual std::unique_ptr<proto::segcore::RetrieveResults>
-    Retrieve(const query::RetrievePlan* Plan, Timestamp timestamp) const = 0;
+    Retrieve(const query::RetrievePlan* Plan,
+             Timestamp timestamp,
+             int64_t limit_size) const = 0;
 
     // TODO: memory use is not correct when load string or load string index
     virtual int64_t
@@ -70,6 +72,14 @@ class SegmentInterface {
 
     virtual int64_t
     get_real_count() const = 0;
+
+    virtual int64_t
+    get_field_avg_size(FieldId field_id) const = 0;
+
+    virtual void
+    set_field_avg_size(FieldId field_id,
+                       int64_t num_rows,
+                       int64_t field_size) = 0;
 
     //  virtual int64_t
     //  PreDelete(int64_t size) = 0;
@@ -131,8 +141,9 @@ class SegmentInternalInterface : public SegmentInterface {
                     SearchResult& results) const override;
 
     std::unique_ptr<proto::segcore::RetrieveResults>
-    Retrieve(const query::RetrievePlan* plan,
-             Timestamp timestamp) const override;
+    Retrieve(const query::RetrievePlan* Plan,
+             Timestamp timestamp,
+             int64_t limit_size) const override;
 
     virtual bool
     HasIndex(FieldId field_id) const = 0;
@@ -145,6 +156,14 @@ class SegmentInternalInterface : public SegmentInterface {
 
     int64_t
     get_real_count() const override;
+
+    int64_t
+    get_field_avg_size(FieldId field_id) const override;
+
+    void
+    set_field_avg_size(FieldId field_id,
+                       int64_t num_rows,
+                       int64_t field_size) override;
 
  public:
     virtual void
@@ -258,6 +277,9 @@ class SegmentInternalInterface : public SegmentInterface {
 
  protected:
     mutable std::shared_mutex mutex_;
+    // fieldID -> std::pair<num_rows, avg_size>
+    std::unordered_map<FieldId, std::pair<int64_t, int64_t>>
+        variable_fields_avg_size_;  // bytes
 };
 
 }  // namespace milvus::segcore

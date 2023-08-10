@@ -45,6 +45,11 @@ ParsePksFromIDs(std::vector<PkType>& pks,
 int64_t
 GetSizeOfIdArray(const IdArray& data);
 
+int64_t
+GetRawDataSizeOfDataArray(const DataArray* data,
+                          const FieldMeta& field_meta,
+                          int64_t num_rows);
+
 // Note: this is temporary solution.
 // modify bulk script implement to make process more clear
 std::unique_ptr<DataArray>

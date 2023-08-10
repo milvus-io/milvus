@@ -157,6 +157,11 @@ func ReduceSearchResultData(ctx context.Context, searchResultData []*schemapb.Se
 		// 	// return nil, errors.New("the length (topk) between all result of query is different")
 		// }
 		ret.Topks = append(ret.Topks, j)
+
+		// limit search result to avoid oom
+		if int64(proto.Size(ret)) > paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64() {
+			return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64())
+		}
 	}
 	log.Debug("skip duplicated search result", zap.Int64("count", skipDupCnt))
 	return ret, nil
@@ -290,6 +295,12 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 				typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel])
 			}
 		}
+
+		// limit retrieve result to avoid oom
+		if int64(proto.Size(ret)) > paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64() {
+			return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64())
+		}
+
 		cursors[sel]++
 	}
 
@@ -378,6 +389,12 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 			// primary keys duplicate
 			skipDupCnt++
 		}
+
+		// limit retrieve result to avoid oom
+		if int64(proto.Size(ret)) > paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64() {
+			return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64())
+		}
+
 		cursors[sel]++
 	}
 

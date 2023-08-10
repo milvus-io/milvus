@@ -428,6 +428,7 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 		flag:    C.uchar(span.SpanContext().TraceFlags()),
 	}
 
+	maxLimitSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	var retrieveResult RetrieveResult
 	var status C.CStatus
 	GetSQPool().Submit(func() (any, error) {
@@ -438,7 +439,8 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 			traceCtx,
 			ts,
 			&retrieveResult.cRetrieveResult,
-		)
+			C.int64_t(maxLimitSize))
+
 		metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
 			metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		log.Debug("cgo retrieve done", zap.Duration("timeTaken", tr.ElapseSpan()))
@@ -879,6 +881,27 @@ func (s *LocalSegment) LoadIndexInfo(indexInfo *querypb.FieldIndexInfo, info *Lo
 		return err
 	}
 	log.Info("updateSegmentIndex done")
+
+	return nil
+}
+
+func (s *LocalSegment) UpdateFieldRawDataSize(numRows int64, fieldBinlog *datapb.FieldBinlog) error {
+	var status C.CStatus
+	fieldID := fieldBinlog.FieldID
+	fieldDataSize := int64(0)
+	for _, binlog := range fieldBinlog.GetBinlogs() {
+		fieldDataSize += binlog.LogSize
+	}
+	GetDynamicPool().Submit(func() (any, error) {
+		status = C.UpdateFieldRawDataSize(s.ptr, C.int64_t(fieldID), C.int64_t(numRows), C.int64_t(fieldDataSize))
+		return nil, nil
+	}).Await()
+
+	if err := HandleCStatus(&status, "updateFieldRawDataSize failed"); err != nil {
+		return err
+	}
+
+	log.Info("updateFieldRawDataSize done", zap.Int64("segmentID", s.ID()))
 
 	return nil
 }
