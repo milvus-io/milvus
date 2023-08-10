@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"go.uber.org/zap"
 )
@@ -221,10 +222,11 @@ func (cm *ConnectionManager) Stop() {
 	}
 }
 
-//go:norace
 // fix datarace in unittest
 // startWatchService will only be invoked at start procedure
 // otherwise, remove the annotation and add atomic protection
+//
+//go:norace
 func (cm *ConnectionManager) processEvent(channel <-chan *sessionutil.SessionEvent) {
 	for {
 		select {
@@ -393,8 +395,11 @@ func (bct *buildClientTask) Run() {
 		connectGrpcFunc := func() error {
 			opts := trace.GetInterceptorOpts()
 			log.Info("Grpc connect ", zap.String("Address", bct.sess.Address))
-			conn, err := grpc.DialContext(bct.ctx, bct.sess.Address,
-				grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(30*time.Second),
+			ctx, cancel := context.WithTimeout(bct.ctx, time.Second*30)
+			defer cancel()
+			conn, err := grpc.DialContext(ctx, bct.sess.Address,
+				grpc.WithTransportCredentials(insecure.NewCredentials()),
+				grpc.WithBlock(),
 				grpc.WithDisableRetry(),
 				grpc.WithUnaryInterceptor(
 					grpc_middleware.ChainUnaryClient(
