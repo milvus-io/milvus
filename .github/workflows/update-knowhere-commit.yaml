@@ -12,7 +12,7 @@ on:
     #         │ │  │ │ │
     #         │ │  │ │ │
     #         │ │  │ │ │
-    - cron:  '0 5 * * *'
+    - cron:  '0 15 * * *'
 
 
 jobs:
@@ -29,8 +29,8 @@ jobs:
         id: get-knowhere-latest-commit
         run: | 
           cd ..
-          git clone https://github.com/milvus-io/knowhere.git
-          cd knowhere
+          git clone https://github.com/zilliztech/Knowhere.git
+          cd Knowhere
           export commit=$(git rev-parse --short HEAD)
           echo $commit
           echo "::set-output name=knowhere-commit::$commit"
