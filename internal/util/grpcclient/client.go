@@ -31,6 +31,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -183,7 +184,6 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 		conn, err = grpc.DialContext(
 			dialContext,
 			addr,
-			//grpc.WithInsecure(),
 			// #nosec G402
 			grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{})),
 			grpc.WithBlock(),
@@ -220,8 +220,7 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 		conn, err = grpc.DialContext(
 			dialContext,
 			addr,
-			grpc.WithInsecure(),
-			//grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{})),
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
 			grpc.WithBlock(),
 			grpc.WithDefaultCallOptions(
 				grpc.MaxCallRecvMsgSize(c.ClientMaxRecvSize),
