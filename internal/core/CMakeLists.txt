@@ -105,8 +105,6 @@ include( ExternalProject )
 include( GNUInstallDirs )
 include( FetchContent )
 
-# this MACRO is used to show knowhere prometheus metrics
-add_definitions(-DNOT_COMPILE_FOR_SWIG)
 include_directories( thirdparty )
 
 set( FETCHCONTENT_BASE_DIR ${MILVUS_BINARY_DIR}/3rdparty_download )
