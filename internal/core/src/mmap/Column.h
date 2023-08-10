@@ -26,13 +26,14 @@
 #include "exceptions/EasyAssert.h"
 #include "fmt/format.h"
 #include "mmap/Utils.h"
+#include "utils/File.h"
 
 namespace milvus {
 
 #ifdef MAP_POPULATE
-static int mmap_flags = MAP_PRIVATE | MAP_POPULATE;
+static int mmap_flags = MAP_SHARED | MAP_POPULATE;
 #else
-static int mmap_flags = MAP_PRIVATE;
+static int mmap_flags = MAP_SHARED;
 #endif
 
 class ColumnBase {
@@ -64,7 +65,7 @@ class ColumnBase {
     }
 
     // mmap mode ctor
-    ColumnBase(int fd, size_t size, const FieldMeta& field_meta) {
+    ColumnBase(const File& file, size_t size, const FieldMeta& field_meta) {
         padding_ = field_meta.get_data_type() == DataType::JSON
                        ? simdjson::SIMDJSON_PADDING
                        : 0;
@@ -72,7 +73,7 @@ class ColumnBase {
         len_ = size;
         size_ = size + padding_;
         data_ = static_cast<char*>(
-            mmap(nullptr, size_, PROT_READ, mmap_flags, fd, 0));
+            mmap(nullptr, size_, PROT_READ, mmap_flags, file.Descriptor(), 0));
 #ifndef MAP_POPULATE
         // Manually access the mapping to populate it
         const size_t page_size = getpagesize();
@@ -164,8 +165,8 @@ class Column : public ColumnBase {
     }
 
     // mmap mode ctor
-    Column(int fd, size_t size, const FieldMeta& field_meta)
-        : ColumnBase(fd, size, field_meta),
+    Column(const File& file, size_t size, const FieldMeta& field_meta)
+        : ColumnBase(file, size, field_meta),
           num_rows_(size / field_meta.get_sizeof()) {
     }
 
@@ -202,8 +203,8 @@ class VariableColumn : public ColumnBase {
     }
 
     // mmap mode ctor
-    VariableColumn(int fd, size_t size, const FieldMeta& field_meta)
-        : ColumnBase(fd, size, field_meta) {
+    VariableColumn(const File& file, size_t size, const FieldMeta& field_meta)
+        : ColumnBase(file, size, field_meta) {
     }
 
     VariableColumn(VariableColumn&& column) noexcept

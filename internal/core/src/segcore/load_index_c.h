@@ -40,7 +40,8 @@ AppendFieldInfo(CLoadIndexInfo c_load_index_info,
                 int64_t partition_id,
                 int64_t segment_id,
                 int64_t field_id,
-                enum CDataType field_type);
+                enum CDataType field_type,
+                const char* mmap_dir_path);
 
 CStatus
 AppendIndexInfo(CLoadIndexInfo c_load_index_info,

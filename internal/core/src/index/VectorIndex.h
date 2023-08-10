@@ -35,7 +35,7 @@ class VectorIndex : public IndexBase {
  public:
     explicit VectorIndex(const IndexType& index_type,
                          const MetricType& metric_type)
-        : index_type_(index_type), metric_type_(metric_type) {
+        : IndexBase(index_type), metric_type_(metric_type) {
     }
 
  public:
@@ -87,7 +87,6 @@ class VectorIndex : public IndexBase {
     }
 
  private:
-    IndexType index_type_;
     MetricType metric_type_;
     int64_t dim_;
 };

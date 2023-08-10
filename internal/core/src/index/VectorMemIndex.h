@@ -75,6 +75,10 @@ class VectorMemIndex : public VectorIndex {
     virtual void
     LoadWithoutAssemble(const BinarySet& binary_set, const Config& config);
 
+ private:
+    void
+    LoadFromFile(const Config& config);
+
  protected:
     Config config_;
     knowhere::Index<knowhere::IndexNode> index_;

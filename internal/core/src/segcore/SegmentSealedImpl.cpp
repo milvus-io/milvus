@@ -35,6 +35,7 @@
 #include "storage/FieldData.h"
 #include "storage/Util.h"
 #include "storage/ThreadPools.h"
+#include "utils/File.h"
 
 namespace milvus::segcore {
 
@@ -335,10 +336,7 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
     auto dir = filepath.parent_path();
     std::filesystem::create_directories(dir);
 
-    int fd =
-        open(filepath.c_str(), O_CREAT | O_TRUNC | O_RDWR, S_IRUSR | S_IWUSR);
-    AssertInfo(fd != -1,
-               fmt::format("failed to create mmap file {}", filepath.c_str()));
+    auto file = File::Open(filepath.string(), O_CREAT | O_TRUNC | O_RDWR);
 
     auto& field_meta = (*schema_)[field_id];
     auto data_type = field_meta.get_data_type();
@@ -350,7 +348,7 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
     storage::FieldDataPtr field_data;
     while (data.channel->pop(field_data)) {
         data_size += field_data->Size();
-        auto written = WriteFieldData(fd, data_type, field_data);
+        auto written = WriteFieldData(file, data_type, field_data);
         if (written != field_data->Size()) {
             break;
         }
@@ -369,11 +367,6 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
             total_written,
             data_size,
             strerror(errno)));
-    int ok = fsync(fd);
-    AssertInfo(ok == 0,
-               fmt::format("failed to fsync mmap data file {}, err: {}",
-                           filepath.c_str(),
-                           strerror(errno)));
 
     auto num_rows = data.row_count;
     std::shared_ptr<ColumnBase> column{};
@@ -382,7 +375,7 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
             case milvus::DataType::STRING:
             case milvus::DataType::VARCHAR: {
                 auto var_column = std::make_shared<VariableColumn<std::string>>(
-                    fd, total_written, field_meta);
+                    file, total_written, field_meta);
                 var_column->Seal(std::move(indices));
                 column = std::move(var_column);
                 break;
@@ -390,7 +383,7 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
             case milvus::DataType::JSON: {
                 auto var_column =
                     std::make_shared<VariableColumn<milvus::Json>>(
-                        fd, total_written, field_meta);
+                        file, total_written, field_meta);
                 var_column->Seal(std::move(indices));
                 column = std::move(var_column);
                 break;
@@ -399,7 +392,7 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
             }
         }
     } else {
-        column = std::make_shared<Column>(fd, total_written, field_meta);
+        column = std::make_shared<Column>(file, total_written, field_meta);
     }
 
     {
@@ -407,14 +400,9 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
         fields_.emplace(field_id, column);
     }
 
-    ok = unlink(filepath.c_str());
+    auto ok = unlink(filepath.c_str());
     AssertInfo(ok == 0,
                fmt::format("failed to unlink mmap data file {}, err: {}",
-                           filepath.c_str(),
-                           strerror(errno)));
-    ok = close(fd);
-    AssertInfo(ok == 0,
-               fmt::format("failed to close data file {}, err: {}",
                            filepath.c_str(),
                            strerror(errno)));
 

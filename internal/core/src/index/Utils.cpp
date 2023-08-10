@@ -15,6 +15,9 @@
 // limitations under the License.
 
 #include <algorithm>
+#include <cerrno>
+#include <cstring>
+#include <filesystem>
 #include <string>
 #include <tuple>
 #include <unordered_map>
@@ -25,11 +28,13 @@
 #include "index/Utils.h"
 #include "index/Meta.h"
 #include <google/protobuf/text_format.h>
+#include <unistd.h>
 #include "exceptions/EasyAssert.h"
 #include "knowhere/comp/index_param.h"
 #include "common/Slice.h"
 #include "storage/FieldData.h"
 #include "storage/Util.h"
+#include "utils/File.h"
 
 namespace milvus::index {
 
