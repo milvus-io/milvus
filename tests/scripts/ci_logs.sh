@@ -87,14 +87,19 @@ if [[ ! -d ${RELEASE_LOG_DIR} ]] ;then
 fi 
 # Try to found logs file from mount disk /volume1/ci-logs
 log_files=$(find ${LOG_DIR} -type f  -name "*${RELEASE_NAME}*" )
-for log_file in ${log_files}
-do 
- file_name=$(basename ${log_file})
-  mv  ${log_file} ${RELEASE_LOG_DIR}/`echo ${file_name} | sed 's/jenkins.var.log.containers.//g' `
-done 
 
-tar -zcvf ${ARTIFACTS_NAME:-artifacts}.tar.gz ${RELEASE_LOG_DIR}/*
-rm -rf ${RELEASE_LOG_DIR}
+if [ -z "${log_files:-}" ]; then
+  echo "No log files find"
+else
+  for log_file in ${log_files}
+  do 
+   file_name=$(basename ${log_file})
+    mv  ${log_file} ${RELEASE_LOG_DIR}/`echo ${file_name} | sed 's/jenkins.var.log.containers.//g' `
+  done 
+
+  tar -zcvf ${ARTIFACTS_NAME:-artifacts}.tar.gz ${RELEASE_LOG_DIR}/*
+  rm -rf ${RELEASE_LOG_DIR}
+fi
 
 remain_log_files=$(find ${LOG_DIR} -type f  -name "*${RELEASE_NAME}*")
 
