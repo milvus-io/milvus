@@ -148,7 +148,10 @@ func (s *ShardClusterService) SyncReplicaSegments(vchannelName string, distribut
 func (s *ShardClusterService) GetShardClusters() []*ShardCluster {
 	ret := make([]*ShardCluster, 0)
 	s.clusters.Range(func(key, value any) bool {
-		ret = append(ret, value.(*ShardCluster))
+		sc := value.(*ShardCluster)
+		if sc.state.Load() == int32(available) {
+			ret = append(ret, sc)
+		}
 		return true
 	})
 	return ret
