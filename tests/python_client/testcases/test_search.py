@@ -2603,6 +2603,120 @@ class TestCollectionSearch(TestcaseBase):
             ids = hits.ids
             assert set(ids).issubset(filter_ids_set)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_with_expression_json_contains(self, enable_dynamic_field):
+        """
+        target: test search with expression using json_contains
+        method: search with expression (json_contains)
+        expected: search successfully
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, enable_dynamic_field=enable_dynamic_field)[0]
+
+        # 2. insert data
+        array = []
+        for i in range(default_nb):
+            data = {
+                default_int64_field_name: i,
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+                default_json_field_name: {"number": i, "list": [i, i + 1, i + 2]},
+                default_float_vec_field_name: gen_vectors(1, default_dim)[0]
+            }
+            array.append(data)
+        collection_w.insert(array)
+
+        # 2. search
+        collection_w.load()
+        log.info("test_search_with_output_field_json_contains: Searching collection %s" % collection_w.name)
+        expressions = ["json_contains(json_field['list'], 100)", "JSON_CONTAINS(json_field['list'], 100)"]
+        for expression in expressions:
+            collection_w.search(vectors[:default_nq], default_search_field,
+                                default_search_params, default_limit, expression,
+                                check_task=CheckTasks.check_search_results,
+                                check_items={"nq": default_nq,
+                                             "limit": 3})
+        expressions = ["json_contains('list', 100)", "JSON_CONTAINS('list', 100)"]
+        for expression in expressions:
+            msg = f"cannot parse expression: {expression}, error: json_contains operation are only supported " \
+                  f"on json fields now, got: 'list'"
+            collection_w.search(vectors[:default_nq], default_search_field,
+                                default_search_params, default_limit, expression,
+                                check_task=CheckTasks.err_res,
+                                check_items={ct.err_code: 1, ct.err_msg: msg})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_with_expression_json_contains_list(self, auto_id):
+        """
+        target: test search with expression using json_contains
+        method: search with expression (json_contains)
+        expected: search successfully
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, auto_id=auto_id, enable_dynamic_field=True)[0]
+
+        # 2. insert data
+        limit = 100
+        array = []
+        for i in range(default_nb):
+            data = {
+                default_int64_field_name: i,
+                default_json_field_name: [j for j in range(i, i + limit)],
+                default_float_vec_field_name: gen_vectors(1, default_dim)[0]
+            }
+            if auto_id:
+                data.pop(default_int64_field_name, None)
+            array.append(data)
+        collection_w.insert(array)
+
+        # 2. search
+        collection_w.load()
+        log.info("test_search_with_output_field_json_contains: Searching collection %s" % collection_w.name)
+        expressions = ["json_contains(json_field, 100)", "JSON_CONTAINS(json_field, 100)"]
+        for expression in expressions:
+            collection_w.search(vectors[:default_nq], default_search_field,
+                                default_search_params, limit, expression,
+                                check_task=CheckTasks.check_search_results,
+                                check_items={"nq": default_nq,
+                                             "limit": limit})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_expression_json_contains_combined_with_normal(self, enable_dynamic_field):
+        """
+        target: test search with expression using json_contains
+        method: search with expression (json_contains)
+        expected: search successfully
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, enable_dynamic_field=enable_dynamic_field)[0]
+
+        # 2. insert data
+        limit = 100
+        array = []
+        for i in range(default_nb):
+            data = {
+                default_int64_field_name: i,
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+                default_json_field_name: {"number": i, "list": [str(j) for j in range(i, i + limit)]},
+                default_float_vec_field_name: gen_vectors(1, default_dim)[0]
+            }
+            array.append(data)
+        collection_w.insert(array)
+
+        # 2. search
+        collection_w.load()
+        log.info("test_search_with_output_field_json_contains: Searching collection %s" % collection_w.name)
+        tar = 1000
+        expressions = [f"json_contains(json_field['list'], '{tar}') && int64 > {tar - limit // 2}",
+                       f"JSON_CONTAINS(json_field['list'], '{tar}') && int64 > {tar - limit // 2}"]
+        for expression in expressions:
+            collection_w.search(vectors[:default_nq], default_search_field,
+                                default_search_params, limit, expression,
+                                check_task=CheckTasks.check_search_results,
+                                check_items={"nq": default_nq,
+                                             "limit": limit // 2})
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_expression_all_data_type(self, nb, nq, dim, auto_id, _async, enable_dynamic_field):
         """
@@ -4833,6 +4947,26 @@ class TestSearchPagination(TestcaseBase):
             res_distance = res[0].distances[offset:]
             # assert sorted(search_res[0].distances) == sorted(res_distance)
             assert set(search_res[0].ids) == set(res[0].ids[offset:])
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("offset", [100, default_nb // 2])
+    def test_search_offset_different_position(self, offset):
+        """
+        target: test search pagination with offset in different position
+        method: create connection, collection, insert entities and search with offset
+        expected: search successfully
+        """
+        # 1. initialize
+        collection_w = self.init_collection_general(prefix, True)[0]
+        # 2. search with offset in params
+        search_params = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
+        res1 = collection_w.search(vectors[:default_nq], default_search_field,
+                                   search_params, default_limit)[0]
+
+        # 3. search with offset outside params
+        res2 = collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
+                                   default_limit, offset=offset)[0]
+        assert res1[0].ids == res2[0].ids
 
 
 class TestSearchPaginationInvalid(TestcaseBase):
