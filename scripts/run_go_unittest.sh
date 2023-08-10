@@ -60,96 +60,96 @@ done
 
 function test_proxy()
 {
-go test -race -cover -tags dynamic "${MILVUS_DIR}/proxy/..." -failfast -count=1
-go test -race -cover -tags dynamic "${MILVUS_DIR}/distributed/proxy/..." -failfast -count=1
+go test -race -cover -tags dynamic "${MILVUS_DIR}/proxy/..." -failfast -count=1 -ldflags="-r ${RPATH}"
+go test -race -cover -tags dynamic "${MILVUS_DIR}/distributed/proxy/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 
 function test_querynode()
 {
-go test -race -cover -tags dynamic "${MILVUS_DIR}/querynodev2/..." -failfast -count=1
-go test -race -cover -tags dynamic "${MILVUS_DIR}/distributed/querynode/..." -failfast -count=1
+go test -race -cover -tags dynamic "${MILVUS_DIR}/querynodev2/..." -failfast -count=1 -ldflags="-r ${RPATH}"
+go test -race -cover -tags dynamic "${MILVUS_DIR}/distributed/querynode/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 
 
 function test_kv()
 {
-go test -race -cover -tags dynamic "${MILVUS_DIR}/kv/..." -failfast -count=1
+go test -race -cover -tags dynamic "${MILVUS_DIR}/kv/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 
 function test_mq()
 {
-go test -race -cover -tags dynamic $(go list "${MILVUS_DIR}/mq/..." | grep -v kafka)  -failfast -count=1
+go test -race -cover -tags dynamic $(go list "${MILVUS_DIR}/mq/..." | grep -v kafka)  -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 
 function test_storage()
 {
-go test -race -cover -tags dynamic "${MILVUS_DIR}/storage" -failfast -count=1
+go test -race -cover -tags dynamic "${MILVUS_DIR}/storage" -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 
 function test_allocator()
 {
-go test -race -cover -tags dynamic "${MILVUS_DIR}/allocator/..." -failfast -count=1
+go test -race -cover -tags dynamic "${MILVUS_DIR}/allocator/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 
 function test_tso()
 {
-go test -race -cover -tags dynamic "${MILVUS_DIR}/tso/..." -failfast -count=1
+go test -race -cover -tags dynamic "${MILVUS_DIR}/tso/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 
 function test_config()
 {
-go test -race -cover -tags dynamic "${MILVUS_DIR}/config/..." -failfast -count=1
+go test -race -cover -tags dynamic "${MILVUS_DIR}/config/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 
 function test_util()
 {
-go test -race -cover -tags dynamic "${MILVUS_DIR}/util/funcutil/..." -failfast -count=1
-go test -race -cover -tags dynamic "${MILVUS_DIR}/util/paramtable/..." -failfast -count=1
-go test -race -cover -tags dynamic "${PKG_DIR}/util/retry/..." -failfast -count=1
-go test -race -cover -tags dynamic "${MILVUS_DIR}/util/sessionutil/..." -failfast -count=1
-go test -race -cover -tags dynamic "${MILVUS_DIR}/util/typeutil/..." -failfast -count=1
-go test -race -cover -tags dynamic "${MILVUS_DIR}/util/importutil/..." -failfast -count=1
+go test -race -cover -tags dynamic "${MILVUS_DIR}/util/funcutil/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+go test -race -cover -tags dynamic "${MILVUS_DIR}/util/paramtable/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+go test -race -cover -tags dynamic "${PKG_DIR}/util/retry/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+go test -race -cover -tags dynamic "${MILVUS_DIR}/util/sessionutil/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+go test -race -cover -tags dynamic "${MILVUS_DIR}/util/typeutil/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+go test -race -cover -tags dynamic "${MILVUS_DIR}/util/importutil/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 }
 
 function test_pkg()
 {
-go test -race -cover -tags dynamic "${PKG_DIR}/common/..." -failfast -count=1
-go test -race -cover -tags dynamic "${PKG_DIR}/config/..." -failfast -count=1
-go test -race -cover -tags dynamic "${PKG_DIR}/log/..." -failfast -count=1
-go test -race -cover -tags dynamic "${PKG_DIR}/mq/..." -failfast -count=1
-go test -race -cover -tags dynamic "${PKG_DIR}/tracer/..." -failfast -count=1
-go test -race -cover -tags dynamic "${PKG_DIR}/util/..." -failfast -count=1
+go test -race -cover -tags dynamic "${PKG_DIR}/common/..." -failfast -count=1   -ldflags="-r ${RPATH}"
+go test -race -cover -tags dynamic "${PKG_DIR}/config/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+go test -race -cover -tags dynamic "${PKG_DIR}/log/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+go test -race -cover -tags dynamic "${PKG_DIR}/mq/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+go test -race -cover -tags dynamic "${PKG_DIR}/tracer/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+go test -race -cover -tags dynamic "${PKG_DIR}/util/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 }
 
 function test_datanode
 {
 
-go test -race -cover -tags dynamic "${MILVUS_DIR}/datanode/..." -failfast -count=1
-go test -race -cover -tags dynamic "${MILVUS_DIR}/distributed/datanode/..." -failfast -count=1
+go test -race -cover -tags dynamic "${MILVUS_DIR}/datanode/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+go test -race -cover -tags dynamic "${MILVUS_DIR}/distributed/datanode/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 
 }
 
 function test_indexnode()
 {
-go test -race -cover -tags dynamic "${MILVUS_DIR}/indexnode/..." -failfast -count=1
+go test -race -cover -tags dynamic "${MILVUS_DIR}/indexnode/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 
 function test_rootcoord()
 {
-go test -race -cover -tags dynamic "${MILVUS_DIR}/distributed/rootcoord/..." -failfast -count=1
-go test -race -cover -tags dynamic "${MILVUS_DIR}/rootcoord" -failfast
+go test -race -cover -tags dynamic "${MILVUS_DIR}/distributed/rootcoord/..." -failfast -count=1 -ldflags="-r ${RPATH}"
+go test -race -cover -tags dynamic "${MILVUS_DIR}/rootcoord" -failfast  -ldflags="-r ${RPATH}"
 }
 
 function test_datacoord()
 {
-go test -race -cover -tags dynamic "${MILVUS_DIR}/distributed/datacoord/..." -failfast -count=1
-go test -race -cover -tags dynamic "${MILVUS_DIR}/datacoord/..." -failfast -count=1
+go test -race -cover -tags dynamic "${MILVUS_DIR}/distributed/datacoord/..." -failfast -count=1 -ldflags="-r ${RPATH}"
+go test -race -cover -tags dynamic "${MILVUS_DIR}/datacoord/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 
 function test_querycoord()
 {
-go test -race -cover -tags dynamic "${MILVUS_DIR}/distributed/querycoord/..." -failfast -count=1
-go test -race -cover -tags dynamic "${MILVUS_DIR}/querycoordv2/..." -failfast -count=1
+go test -race -cover -tags dynamic "${MILVUS_DIR}/distributed/querycoord/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+go test -race -cover -tags dynamic "${MILVUS_DIR}/querycoordv2/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 }
 
 #function test_indexcoord()
@@ -159,7 +159,7 @@ go test -race -cover -tags dynamic "${MILVUS_DIR}/querycoordv2/..." -failfast -c
 
 function test_metastore()
 {
-go test -race -cover -tags dynamic "${MILVUS_DIR}/metastore/..." -failfast -count=1
+go test -race -cover -tags dynamic "${MILVUS_DIR}/metastore/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 
 function test_all()
