@@ -2398,7 +2398,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.MaxParallelSyncTaskNum = ParamItem{
 		Key:          "dataNode.dataSync.maxParallelSyncTaskNum",
 		Version:      "2.3.0",
-		DefaultValue: "2",
+		DefaultValue: "6",
 		Doc:          "Maximum number of sync tasks executed in parallel in each flush manager",
 		Export:       true,
 	}
