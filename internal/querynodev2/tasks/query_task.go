@@ -80,7 +80,7 @@ func (t *QueryTask) Execute() error {
 	retrievePlan, err := segments.NewRetrievePlan(
 		t.collection,
 		t.req.Req.GetSerializedExprPlan(),
-		t.req.Req.GetTravelTimestamp(),
+		t.req.Req.GetMvccTimestamp(),
 		t.req.Req.Base.GetMsgID(),
 	)
 	if err != nil {

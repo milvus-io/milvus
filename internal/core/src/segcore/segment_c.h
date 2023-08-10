@@ -43,7 +43,6 @@ Search(CSegmentInterface c_segment,
        CSearchPlan c_plan,
        CPlaceholderGroup c_placeholder_group,
        CTraceContext c_trace,
-       uint64_t timestamp,
        CSearchResult* result);
 
 void

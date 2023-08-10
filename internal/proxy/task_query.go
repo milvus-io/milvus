@@ -358,16 +358,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		t.RetrieveRequest.Username = username
 	}
 
-	if t.request.TravelTimestamp == 0 {
-		t.TravelTimestamp = t.BeginTs()
-	} else {
-		t.TravelTimestamp = t.request.TravelTimestamp
-	}
-
-	err = validateTravelTimestamp(t.TravelTimestamp, t.BeginTs())
-	if err != nil {
-		return err
-	}
+	t.MvccTimestamp = t.BeginTs()
 	collectionInfo, err2 := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
 	if err2 != nil {
 		log.Warn("Proxy::queryTask::PreExecute failed to GetCollectionInfo from cache",
@@ -402,7 +393,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	t.DbID = 0 // TODO
 	log.Debug("Query PreExecute done.",
 		zap.Uint64("guarantee_ts", guaranteeTs),
-		zap.Uint64("travel_ts", t.GetTravelTimestamp()),
+		zap.Uint64("mvcc_ts", t.GetMvccTimestamp()),
 		zap.Uint64("timeout_ts", t.GetTimeoutTimestamp()))
 	return nil
 }

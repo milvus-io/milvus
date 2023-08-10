@@ -186,7 +186,7 @@ class TestCompactionParams(TestcaseBase):
                 2.delete some entities and flush (ensure generate delta log)
                 3.create index
                 4.compact outside retentionDuration
-                5.load and search with travel time
+                5.load and search 
         expected: Empty search result
         """
         # create, insert without flush
@@ -213,7 +213,6 @@ class TestCompactionParams(TestcaseBase):
         res, _ = collection_w.search(df[ct.default_float_vec_field_name][:1].to_list(),
                                      ct.default_float_vec_field_name,
                                      ct.default_search_params, ct.default_limit)
-        # Travel time currently does not support travel back to retention ago, so just verify search is available.
         assert len(res[0]) == ct.default_limit
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -775,80 +774,6 @@ class TestCompactionOperation(TestcaseBase):
         collection_w.load()
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 
-    @pytest.mark.tags(CaseLabel.L3)
-    def test_compact_delete_inside_time_travel(self):
-        """
-        target: test compact inside time_travel range
-        method: 1.insert data and get ts
-                2.delete all ids
-                4.compact
-                5.search with ts
-        expected: Verify search result
-        """
-        from pymilvus import utility
-        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix), shards_num=1)
-
-        # insert and get tt
-        df = cf.gen_default_dataframe_data(tmp_nb)
-        insert_res, _ = collection_w.insert(df)
-        tt = utility.mkts_from_hybridts(insert_res.timestamp, milliseconds=0.)
-
-        # delete all
-        expr = f'{ct.default_int64_field_name} in {insert_res.primary_keys}'
-        delete_res, _ = collection_w.delete(expr)
-        log.debug(collection_w.num_entities)
-
-        collection_w.compact()
-        collection_w.wait_for_compaction_completed()
-        collection_w.get_compaction_plans()
-
-        collection_w.load()
-        search_one, _ = collection_w.search(df[ct.default_float_vec_field_name][:1].to_list(),
-                                            ct.default_float_vec_field_name,
-                                            ct.default_search_params, ct.default_limit,
-                                            travel_timestamp=tt)
-        assert 0 in search_one[0].ids
-
-    @pytest.mark.tags(CaseLabel.L3)
-    def test_compact_delete_outside_time_travel(self):
-        """
-        target: test compact outside time_travel range
-        method: 1.create and insert
-                2.get time stamp
-                3.delete
-                4.compact after compact_retention_duration
-                5.load and search with travel time tt
-        expected: Empty search result
-                  But no way to verify, because travel time does not support travel back to retentionDuration ago so far
-        """
-        from pymilvus import utility
-        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix), shards_num=1)
-
-        # insert
-        df = cf.gen_default_dataframe_data(tmp_nb)
-        insert_res, _ = collection_w.insert(df)
-        tt = utility.mkts_from_hybridts(insert_res.timestamp, milliseconds=0.)
-
-        expr = f'{ct.default_int64_field_name} in {insert_res.primary_keys}'
-        delete_res, _ = collection_w.delete(expr)
-        log.debug(collection_w.num_entities)
-
-        # ensure compact remove delta data that delete outside retention range
-        sleep(ct.compact_retention_duration + 1)
-
-        collection_w.compact()
-        collection_w.wait_for_compaction_completed()
-        collection_w.get_compaction_plans(check_task=CheckTasks.check_delete_compact)
-        collection_w.load()
-
-        # search with travel_time tt
-        collection_w.search(df[ct.default_float_vec_field_name][:1].to_list(),
-                            ct.default_float_vec_field_name,
-                            ct.default_search_params, ct.default_limit,
-                            travel_timestamp=tt,
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: "only support to travel back to"})
-
     @pytest.mark.tags(CaseLabel.L0)
     def test_compact_merge_two_segments(self):
         """
@@ -1005,42 +930,6 @@ class TestCompactionOperation(TestcaseBase):
         assert len(segments_info) == 1*replica_num
         assert segments_info[0].segmentID == target
 
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_compact_merge_inside_time_travel(self):
-        """
-        target: test compact and merge segments inside time_travel range
-        method: search with time travel after merge compact
-        expected: Verify segments inside time_travel merged
-        """
-        from pymilvus import utility
-        # create collection shard_num=1, insert 2 segments, each with tmp_nb entities
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), shards_num=1)
-
-        # insert twice
-        df1 = cf.gen_default_dataframe_data(tmp_nb)
-        collection_w.insert(df1)
-        assert collection_w.num_entities == tmp_nb
-
-        df2 = cf.gen_default_dataframe_data(tmp_nb, start=tmp_nb)
-        insert_two = collection_w.insert(df2)[0]
-        assert collection_w.num_entities == tmp_nb * 2
-
-        tt = utility.mkts_from_hybridts(insert_two.timestamp, milliseconds=0.1)
-
-        collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
-        log.debug(collection_w.index())
-
-        collection_w.compact()
-        collection_w.wait_for_compaction_completed()
-        collection_w.get_compaction_plans(check_task=CheckTasks.check_merge_compact)
-
-        collection_w.load()
-        search_res, _ = collection_w.search(df2[ct.default_float_vec_field_name][:1].to_list(),
-                                            ct.default_float_vec_field_name,
-                                            ct.default_search_params, ct.default_limit,
-                                            travel_timestamp=0)
-        assert tmp_nb in search_res[0].ids
-        assert len(search_res[0]) == ct.default_limit
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_threshold_auto_merge(self):

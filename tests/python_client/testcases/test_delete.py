@@ -1077,38 +1077,6 @@ class TestDeleteOperation(TestcaseBase):
         pass
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="Time travel disabled")
-    def test_delete_time_travel(self):
-        """
-        target: test search with time travel after delete
-        method: 1.insert and flush
-                2.delete
-                3.load and search with time travel
-        expected: search successfully
-        """
-
-        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix))
-        df = cf.gen_default_dataframe_data(tmp_nb)
-        insert_res, _ = collection_w.insert(df)
-        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
-        collection_w.load()
-
-        tt = self.utility_wrap.mkts_from_hybridts(insert_res.timestamp, milliseconds=0.)
-
-        res_before, _ = collection_w.search(df[ct.default_float_vec_field_name][:1].to_list(),
-                                            ct.default_float_vec_field_name,
-                                            ct.default_search_params, ct.default_limit)
-
-        expr = f'{ct.default_int64_field_name} in {insert_res.primary_keys[:tmp_nb // 2]}'
-        delete_res, _ = collection_w.delete(expr)
-
-        res_travel, _ = collection_w.search(df[ct.default_float_vec_field_name][:1].to_list(),
-                                            ct.default_float_vec_field_name,
-                                            ct.default_search_params, ct.default_limit,
-                                            travel_timestamp=tt)
-        assert res_before[0].ids == res_travel[0].ids
-
-    @pytest.mark.tags(CaseLabel.L1)
     def test_delete_insert_multi(self):
         """
         target: test delete after multi insert
@@ -1714,39 +1682,6 @@ class TestDeleteString(TestcaseBase):
                            check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="Time travel disabled")
-    def test_delete_time_travel_string(self):
-        """
-        target: test search with time travel after delete
-        method: 1.create a collection with string field is primary, insert and flush
-                2.delete
-                3.load and search with time travel
-        expected: search successfully
-        """
-        schema = cf.gen_string_pk_default_collection_schema()
-        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix), schema=schema)
-        df = cf.gen_default_dataframe_data(tmp_nb)
-        insert_res, _ = collection_w.insert(df)
-        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
-        collection_w.load()
-
-        tt = self.utility_wrap.mkts_from_hybridts(insert_res.timestamp, milliseconds=0.)
-
-        res_before, _ = collection_w.search(df[ct.default_float_vec_field_name][:1].to_list(),
-                                            ct.default_float_vec_field_name,
-                                            ct.default_search_params, ct.default_limit)
-
-        expr = f'{ct.default_string_field_name} in {insert_res.primary_keys[:tmp_nb // 2]}'
-        expr = expr.replace("'", "\"")
-        delete_res, _ = collection_w.delete(expr)
-
-        res_travel, _ = collection_w.search(df[ct.default_float_vec_field_name][:1].to_list(),
-                                            ct.default_float_vec_field_name,
-                                            ct.default_search_params, ct.default_limit,
-                                            travel_timestamp=tt)
-        assert res_before[0].ids == res_travel[0].ids
-
-    @pytest.mark.tags(CaseLabel.L1)
     def test_delete_insert_multi_with_string(self):
         """
         target: test delete after multi insert with string
@@ -1881,6 +1816,3 @@ class TestDeleteString(TestcaseBase):
         # load and query with id
         collection_w.load()
         collection_w.query(string_expr, check_task=CheckTasks.check_query_empty)
-
-
-       

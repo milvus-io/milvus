@@ -165,7 +165,6 @@ func (suite *ReduceSuite) TestReduceAllFunc() {
 	plan, err := createSearchPlanByExpr(suite.collection, serializedPlan, "")
 	suite.NoError(err)
 	searchReq, err := parseSearchRequest(plan, placeGroupByte)
-	searchReq.timestamp = 0
 	suite.NoError(err)
 	defer searchReq.Delete()
 

@@ -54,22 +54,6 @@ TEST(Query, ShowExecutor) {
 }
 
 TEST(Query, ParsePlaceholderGroup) {
-    //     std::string dsl_string = R"(
-    // {
-    //     "bool": {
-    //         "vector": {
-    //             "fakevec": {
-    //                 "metric_type": "L2",
-    //                 "params": {
-    //                     "nprobe": 10
-    //                 },
-    //                 "query": "$0",
-    //                 "topk": 10,
-    //                 "round_decimal":3
-    //             }
-    //         }
-    //     }
-    // })";
     const char* raw_plan = R"(vector_anns: <
                                 field_id: 100
                                 query_info: <
@@ -103,33 +87,6 @@ TEST(Query, ExecWithPredicateLoader) {
     schema->AddDebugField("age", DataType::FLOAT);
     auto counter_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(counter_fid);
-    // std::string dsl = R"({
-    //     "bool": {
-    //         "must": [
-    //         {
-    //             "range": {
-    //                 "age": {
-    //                     "GE": -1,
-    //                     "LT": 1
-    //                 }
-    //             }
-    //         },
-    //         {
-    //             "vector": {
-    //                 "fakevec": {
-    //                     "metric_type": "L2",
-    //                     "params": {
-    //                         "nprobe": 10
-    //                     },
-    //                     "query": "$0",
-    //                     "topk": 5,
-    //                     "round_decimal": 3
-    //                 }
-    //             }
-    //         }
-    //         ]
-    //     }
-    // })";
     const char* raw_plan = R"(vector_anns: <
                                     field_id: 100
                                     predicates: <
@@ -173,10 +130,8 @@ TEST(Query, ExecWithPredicateLoader) {
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    Timestamp time = 1000000;
 
-    auto sr = segment->Search(plan.get(), ph_group.get(), time);
-    int topk = 5;
+    auto sr = segment->Search(plan.get(), ph_group.get());
 
     query::Json json = SearchResultToJson(*sr);
 #ifdef __linux__
@@ -215,33 +170,6 @@ TEST(Query, ExecWithPredicateSmallN) {
     schema->AddDebugField("age", DataType::FLOAT);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
-    // std::string dsl = R"({
-    //     "bool": {
-    //         "must": [
-    //         {
-    //             "range": {
-    //                 "age": {
-    //                     "GE": -1,
-    //                     "LT": 1
-    //                 }
-    //             }
-    //         },
-    //         {
-    //             "vector": {
-    //                 "fakevec": {
-    //                     "metric_type": "L2",
-    //                     "params": {
-    //                         "nprobe": 10
-    //                     },
-    //                     "query": "$0",
-    //                     "topk": 5,
-    //                     "round_decimal": 3
-    //                 }
-    //             }
-    //         }
-    //         ]
-    //     }
-    // })";
     const char* raw_plan = R"(vector_anns: <
                                     field_id: 100
                                     predicates: <
@@ -285,10 +213,8 @@ TEST(Query, ExecWithPredicateSmallN) {
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 7, 1024);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    Timestamp time = 1000000;
 
-    auto sr = segment->Search(plan.get(), ph_group.get(), time);
-    int topk = 5;
+    auto sr = segment->Search(plan.get(), ph_group.get());
 
     query::Json json = SearchResultToJson(*sr);
     std::cout << json.dump(2);
@@ -303,33 +229,6 @@ TEST(Query, ExecWithPredicate) {
     schema->AddDebugField("age", DataType::FLOAT);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
-    // std::string dsl = R"({
-    //     "bool": {
-    //         "must": [
-    //         {
-    //             "range": {
-    //                 "age": {
-    //                     "GE": -1,
-    //                     "LT": 1
-    //                 }
-    //             }
-    //         },
-    //         {
-    //             "vector": {
-    //                 "fakevec": {
-    //                     "metric_type": "L2",
-    //                     "params": {
-    //                         "nprobe": 10
-    //                     },
-    //                     "query": "$0",
-    //                     "topk": 5,
-    //                     "round_decimal": 3
-    //                 }
-    //             }
-    //         }
-    //         ]
-    //     }
-    // })";
     const char* raw_plan = R"(vector_anns: <
                                     field_id: 100
                                     predicates: <
@@ -373,10 +272,8 @@ TEST(Query, ExecWithPredicate) {
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    Timestamp time = 1000000;
 
-    auto sr = segment->Search(plan.get(), ph_group.get(), time);
-    int topk = 5;
+    auto sr = segment->Search(plan.get(), ph_group.get());
 
     query::Json json = SearchResultToJson(*sr);
 #ifdef __linux__
@@ -415,33 +312,6 @@ TEST(Query, ExecTerm) {
     schema->AddDebugField("age", DataType::FLOAT);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
-    // std::string dsl = R"({
-    //     "bool": {
-    //         "must": [
-    //         {
-    //             "term": {
-    //                 "age": {
-    //                     "values": [],
-    //                     "is_in_field": false
-    //                 }
-    //             }
-    //         },
-    //         {
-    //             "vector": {
-    //                 "fakevec": {
-    //                     "metric_type": "L2",
-    //                     "params": {
-    //                         "nprobe": 10
-    //                     },
-    //                     "query": "$0",
-    //                     "topk": 5,
-    //                     "round_decimal": 3
-    //                 }
-    //             }
-    //         }
-    //         ]
-    //     }
-    // })";
     const char* raw_plan = R"(vector_anns: <
                                     field_id: 100
                                     predicates: <
@@ -477,15 +347,13 @@ TEST(Query, ExecTerm) {
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    Timestamp time = 1000000;
 
-    auto sr = segment->Search(plan.get(), ph_group.get(), time);
+    auto sr = segment->Search(plan.get(), ph_group.get());
     std::vector<std::vector<std::string>> results;
     int topk = 5;
     auto json = SearchResultToJson(*sr);
     ASSERT_EQ(sr->total_nq_, num_queries);
     ASSERT_EQ(sr->unity_topK_, topk);
-    // for(auto x: )
 }
 
 TEST(Query, ExecEmpty) {
@@ -495,25 +363,6 @@ TEST(Query, ExecEmpty) {
     schema->AddDebugField("age", DataType::FLOAT);
     schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
-    // std::string dsl = R"({
-    //     "bool": {
-    //         "must": [
-    //         {
-    //             "vector": {
-    //                 "fakevec": {
-    //                     "metric_type": "L2",
-    //                     "params": {
-    //                         "nprobe": 10
-    //                     },
-    //                     "query": "$0",
-    //                     "topk": 5,
-    //                     "round_decimal": 3
-    //                 }
-    //             }
-    //         }
-    //         ]
-    //     }
-    // })";
     const char* raw_plan = R"(vector_anns: <
                                 field_id: 101
                                 query_info: <
@@ -533,9 +382,8 @@ TEST(Query, ExecEmpty) {
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    Timestamp time = 1000000;
 
-    auto sr = segment->Search(plan.get(), ph_group.get(), time);
+    auto sr = segment->Search(plan.get(), ph_group.get());
     std::cout << SearchResultToJson(*sr);
 
     for (auto i : sr->seg_offsets_) {
@@ -555,25 +403,6 @@ TEST(Query, ExecWithoutPredicateFlat) {
     schema->AddDebugField("age", DataType::FLOAT);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
-    // std::string dsl = R"({
-    //     "bool": {
-    //         "must": [
-    //         {
-    //             "vector": {
-    //                 "fakevec": {
-    //                     "metric_type": "L2",
-    //                     "params": {
-    //                         "nprobe": 10
-    //                     },
-    //                     "query": "$0",
-    //                     "topk": 5,
-    //                     "round_decimal": 3
-    //                 }
-    //             }
-    //         }
-    //         ]
-    //     }
-    // })";
     const char* raw_plan = R"(vector_anns: <
                                     field_id: 100
                                     query_info: <
@@ -601,11 +430,9 @@ TEST(Query, ExecWithoutPredicateFlat) {
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    Timestamp time = 1000000;
 
-    auto sr = segment->Search(plan.get(), ph_group.get(), time);
+    auto sr = segment->Search(plan.get(), ph_group.get());
     std::vector<std::vector<std::string>> results;
-    int topk = 5;
     auto json = SearchResultToJson(*sr);
     std::cout << json.dump(2);
 }
@@ -619,25 +446,6 @@ TEST(Query, ExecWithoutPredicate) {
     schema->AddDebugField("age", DataType::FLOAT);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
-    // std::string dsl = R"({
-    //     "bool": {
-    //         "must": [
-    //         {
-    //             "vector": {
-    //                 "fakevec": {
-    //                     "metric_type": "l2",
-    //                     "params": {
-    //                         "nprobe": 10
-    //                     },
-    //                     "query": "$0",
-    //                     "topk": 5,
-    //                     "round_decimal":3
-    //                 }
-    //             }
-    //         }
-    //         ]
-    //     }
-    // })";
     const char* raw_plan = R"(vector_anns: <
                                     field_id: 100
                                     query_info: <
@@ -665,12 +473,10 @@ TEST(Query, ExecWithoutPredicate) {
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    Timestamp time = 1000000;
 
-    auto sr = segment->Search(plan.get(), ph_group.get(), time);
+    auto sr = segment->Search(plan.get(), ph_group.get());
     assert_order(*sr, "l2");
     std::vector<std::vector<std::string>> results;
-    int topk = 5;
     auto json = SearchResultToJson(*sr);
 #ifdef __linux__
     auto ref = json::parse(R"(
@@ -705,25 +511,6 @@ TEST(Query, InnerProduct) {
     constexpr auto topk = 10;
     auto num_queries = 5;
     auto schema = std::make_shared<Schema>();
-    // std::string dsl = R"({
-    //     "bool": {
-    //         "must": [
-    //         {
-    //             "vector": {
-    //                 "normalized": {
-    //                     "metric_type": "ip",
-    //                     "params": {
-    //                         "nprobe": 10
-    //                     },
-    //                     "query": "$0",
-    //                     "topk": 5,
-    //                     "round_decimal":3
-    //                 }
-    //             }
-    //         }
-    //         ]
-    //     }
-    // })";
     const char* raw_plan = R"(vector_anns: <
                                     field_id: 100
                                     query_info: <
@@ -755,10 +542,8 @@ TEST(Query, InnerProduct) {
         CreatePlaceholderGroupFromBlob(num_queries, 16, col.data());
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    Timestamp ts = N * 2;
-    auto sr = segment->Search(plan.get(), ph_group.get(), ts);
+    auto sr = segment->Search(plan.get(), ph_group.get());
     assert_order(*sr, "ip");
-    std::cout << SearchResultToJson(*sr).dump(2);
 }
 
 TEST(Query, FillSegment) {
@@ -827,40 +612,9 @@ TEST(Query, FillSegment) {
     segments.emplace_back([&] {
         auto segment = CreateSealedSegment(schema);
         SealedLoadFieldData(dataset, *segment);
-        // auto indexing = GenVecIndexing(N, dim, std_vfloat_vec.data());
-
-        // LoadIndexInfo info;
-        // auto field_offset = schema->get_offset(FieldName("fakevec"));
-        // auto& meta = schema->operator[](field_offset);
-
-        // info.field_id = meta.get_id().get();
-        // info.field_name = meta.get_name().get();
-        // info.index_params["metric_type"] = "L2";
-        // info.index = indexing;
-
-        // segment->LoadIndex(info);
         return segment;
     }());
 
-    // std::string dsl = R"({
-    //     "bool": {
-    //         "must": [
-    //         {
-    //             "vector": {
-    //                 "fakevec": {
-    //                     "metric_type": "L2",
-    //                     "params": {
-    //                         "nprobe": 10
-    //                     },
-    //                     "query": "$0",
-    //                     "topk": 5,
-    //                     "round_decimal": 3
-    //                 }
-    //             }
-    //         }
-    //         ]
-    //     }
-    // })";
     const char* raw_plan = R"(vector_anns: <
                                     field_id: 100
                                     query_info: <
@@ -876,7 +630,6 @@ TEST(Query, FillSegment) {
         CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
     auto ph_proto = CreatePlaceholderGroup(10, 16, 443);
     auto ph = ParsePlaceholderGroup(plan.get(), ph_proto.SerializeAsString());
-    Timestamp ts = N * 2UL;
     auto topk = 5;
     auto num_queries = 10;
 
@@ -886,8 +639,7 @@ TEST(Query, FillSegment) {
             schema->get_field_id(FieldName("fakevec")));
         plan->target_entries_.push_back(
             schema->get_field_id(FieldName("the_value")));
-        auto result = segment->Search(plan.get(), ph.get(), ts);
-        // std::cout << SearchResultToJson(result).dump(2);
+        auto result = segment->Search(plan.get(), ph.get());
         result->result_offsets_.resize(topk * num_queries);
         segment->FillTargetEntry(plan.get(), *result);
         segment->FillPrimaryKeys(plan.get(), *result);
@@ -946,33 +698,6 @@ TEST(Query, ExecWithPredicateBinary) {
     auto float_fid = schema->AddDebugField("age", DataType::FLOAT);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
-    // std::string dsl = R"({
-    //     "bool": {
-    //         "must": [
-    //         {
-    //             "range": {
-    //                 "age": {
-    //                     "GE": -1,
-    //                     "LT": 1
-    //                 }
-    //             }
-    //         },
-    //         {
-    //             "vector": {
-    //                 "fakevec": {
-    //                     "metric_type": "JACCARD",
-    //                     "params": {
-    //                         "nprobe": 10
-    //                     },
-    //                     "query": "$0",
-    //                     "topk": 5,
-    //                     "round_decimal": 3
-    //                 }
-    //             }
-    //         }
-    //         ]
-    //     }
-    // })";
     const char* raw_plan = R"(vector_anns: <
                                     field_id: 100
                                     predicates: <
@@ -1018,10 +743,7 @@ TEST(Query, ExecWithPredicateBinary) {
         num_queries, 512, vec_ptr.data() + 1024 * 512 / 8);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    Timestamp time = 1000000;
-
-    auto sr = segment->Search(plan.get(), ph_group.get(), time);
-    int topk = 5;
+    auto sr = segment->Search(plan.get(), ph_group.get());
 
     query::Json json = SearchResultToJson(*sr);
     std::cout << json.dump(2);

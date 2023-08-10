@@ -864,38 +864,6 @@ func TestPasswordVerify(t *testing.T) {
 	assert.Equal(t, 1, invokedCount)
 }
 
-func TestValidateTravelTimestamp(t *testing.T) {
-	originalRetentionDuration := Params.CommonCfg.RetentionDuration.GetValue()
-	defer func() {
-		Params.Save(Params.CommonCfg.RetentionDuration.Key, originalRetentionDuration)
-	}()
-
-	travelTs := tsoutil.GetCurrentTime()
-	tests := []struct {
-		description string
-		defaultRD   string
-		nowTs       typeutil.Timestamp
-		isValid     bool
-	}{
-		{"one second", "100", tsoutil.AddPhysicalDurationOnTs(travelTs, time.Second), true},
-		{"retention duration", "100", tsoutil.AddPhysicalDurationOnTs(travelTs, 100*time.Second), true},
-		{"retention duration+1", "100", tsoutil.AddPhysicalDurationOnTs(travelTs, 101*time.Second), false},
-	}
-
-	for _, test := range tests {
-		t.Run(test.description, func(t *testing.T) {
-			paramtable.Get().Save(Params.CommonCfg.RetentionDuration.Key, test.defaultRD)
-			defer paramtable.Get().Reset(Params.CommonCfg.RetentionDuration.Key)
-			err := validateTravelTimestamp(travelTs, test.nowTs)
-			if test.isValid {
-				assert.NoError(t, err)
-			} else {
-				assert.Error(t, err)
-			}
-		})
-	}
-}
-
 func Test_isCollectionIsLoaded(t *testing.T) {
 	ctx := context.Background()
 	t.Run("normal", func(t *testing.T) {

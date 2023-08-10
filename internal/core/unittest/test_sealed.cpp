@@ -74,10 +74,9 @@ TEST(Sealed, without_predicate) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    Timestamp time = 1000000;
     std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
 
-    auto sr = segment->Search(plan.get(), ph_group.get(), time);
+    auto sr = segment->Search(plan.get(), ph_group.get());
     auto pre_result = SearchResultToJson(*sr);
     milvus::index::CreateIndexInfo create_index_info;
     create_index_info.field_type = DataType::VECTOR_FLOAT;
@@ -119,7 +118,7 @@ TEST(Sealed, without_predicate) {
     sealed_segment->DropFieldData(fake_id);
     sealed_segment->LoadIndex(load_info);
 
-    sr = sealed_segment->Search(plan.get(), ph_group.get(), time);
+    sr = sealed_segment->Search(plan.get(), ph_group.get());
 
     auto post_result = SearchResultToJson(*sr);
     std::cout << "ref_result" << std::endl;
@@ -127,9 +126,6 @@ TEST(Sealed, without_predicate) {
     std::cout << "post_result" << std::endl;
     std::cout << post_result.dump(1);
     // ASSERT_EQ(ref_result.dump(1), post_result.dump(1));
-
-    sr = sealed_segment->Search(plan.get(), ph_group.get(), 0);
-    EXPECT_EQ(sr->get_total_result_count(), 0);
 }
 
 TEST(Sealed, with_predicate) {
@@ -143,33 +139,6 @@ TEST(Sealed, with_predicate) {
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
-    // std::string dsl = R"({
-    //     "bool": {
-    //         "must": [
-    //         {
-    //             "range": {
-    //                 "counter": {
-    //                     "GE": 4200,
-    //                     "LT": 4205
-    //                 }
-    //             }
-    //         },
-    //         {
-    //             "vector": {
-    //                 "fakevec": {
-    //                     "metric_type": "L2",
-    //                     "params": {
-    //                         "nprobe": 10
-    //                     },
-    //                     "query": "$0",
-    //                     "topk": 5,
-    //                     "round_decimal": 6
-    //                 }
-    //             }
-    //         }
-    //         ]
-    //     }
-    // })";
     const char* raw_plan = R"(vector_anns: <
                                 field_id: 100
                                 predicates: <
@@ -219,10 +188,9 @@ TEST(Sealed, with_predicate) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    Timestamp time = 10000000;
     std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
 
-    auto sr = segment->Search(plan.get(), ph_group.get(), time);
+    auto sr = segment->Search(plan.get(), ph_group.get());
     milvus::index::CreateIndexInfo create_index_info;
     create_index_info.field_type = DataType::VECTOR_FLOAT;
     create_index_info.metric_type = knowhere::metric::L2;
@@ -263,7 +231,7 @@ TEST(Sealed, with_predicate) {
     sealed_segment->DropFieldData(fake_id);
     sealed_segment->LoadIndex(load_info);
 
-    sr = sealed_segment->Search(plan.get(), ph_group.get(), time);
+    sr = sealed_segment->Search(plan.get(), ph_group.get());
 
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * topK;
@@ -284,33 +252,6 @@ TEST(Sealed, with_predicate_filter_all) {
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
-    // std::string dsl = R"({
-    //     "bool": {
-    //         "must": [
-    //         {
-    //             "range": {
-    //                 "counter": {
-    //                     "GE": 4200,
-    //                     "LT": 4199
-    //                 }
-    //             }
-    //         },
-    //         {
-    //             "vector": {
-    //                 "fakevec": {
-    //                     "metric_type": "L2",
-    //                     "params": {
-    //                         "nprobe": 10
-    //                     },
-    //                     "query": "$0",
-    //                     "topk": 5,
-    //                    "round_decimal": 6
-    //                 }
-    //             }
-    //         }
-    //         ]
-    //     }
-    // })";
     const char* raw_plan = R"(vector_anns: <
                                 field_id: 100
                                 predicates: <
@@ -352,7 +293,6 @@ TEST(Sealed, with_predicate_filter_all) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    Timestamp time = 10000000;
     std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
 
     milvus::index::CreateIndexInfo create_index_info;
@@ -384,7 +324,7 @@ TEST(Sealed, with_predicate_filter_all) {
     ivf_sealed_segment->DropFieldData(fake_id);
     ivf_sealed_segment->LoadIndex(load_info);
 
-    auto sr = ivf_sealed_segment->Search(plan.get(), ph_group.get(), time);
+    auto sr = ivf_sealed_segment->Search(plan.get(), ph_group.get());
     EXPECT_EQ(sr->get_total_result_count(), 0);
 
     auto hnsw_conf =
@@ -416,7 +356,7 @@ TEST(Sealed, with_predicate_filter_all) {
     hnsw_sealed_segment->DropFieldData(fake_id);
     hnsw_sealed_segment->LoadIndex(hnsw_load_info);
 
-    auto sr2 = hnsw_sealed_segment->Search(plan.get(), ph_group.get(), time);
+    auto sr2 = hnsw_sealed_segment->Search(plan.get(), ph_group.get());
     EXPECT_EQ(sr2->get_total_result_count(), 0);
 }
 
@@ -499,7 +439,6 @@ TEST(Sealed, LoadFieldData) {
                                     placeholder_tag: "$0"
      >)";
 
-    Timestamp time = 1000000;
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
         CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
@@ -508,13 +447,13 @@ TEST(Sealed, LoadFieldData) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), time));
+    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get()));
 
     SealedLoadFieldData(dataset, *segment);
-    segment->Search(plan.get(), ph_group.get(), time);
+    segment->Search(plan.get(), ph_group.get());
 
     segment->DropFieldData(fakevec_id);
-    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), time));
+    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get()));
 
     LoadIndexInfo vec_info;
     vec_info.field_id = fakevec_id.get();
@@ -537,12 +476,12 @@ TEST(Sealed, LoadFieldData) {
         ASSERT_EQ(chunk_span3[i], ref3[i]);
     }
 
-    auto sr = segment->Search(plan.get(), ph_group.get(), time);
+    auto sr = segment->Search(plan.get(), ph_group.get());
     auto json = SearchResultToJson(*sr);
     std::cout << json.dump(1);
 
     segment->DropIndex(fakevec_id);
-    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), time));
+    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get()));
 }
 
 TEST(Sealed, LoadFieldDataMmap) {
@@ -570,33 +509,6 @@ TEST(Sealed, LoadFieldDataMmap) {
     auto indexing = GenVecIndexing(N, dim, fakevec.data());
 
     auto segment = CreateSealedSegment(schema);
-    // std::string dsl = R"({
-    //     "bool": {
-    //         "must": [
-    //         {
-    //             "range": {
-    //                 "double": {
-    //                     "GE": -1,
-    //                     "LT": 1
-    //                 }
-    //             }
-    //         },
-    //         {
-    //             "vector": {
-    //                 "fakevec": {
-    //                     "metric_type": "L2",
-    //                     "params": {
-    //                         "nprobe": 10
-    //                     },
-    //                     "query": "$0",
-    //                     "topk": 5,
-    //                     "round_decimal": 3
-    //                 }
-    //             }
-    //         }
-    //         ]
-    //     }
-    // })";
     const char* raw_plan = R"(vector_anns: <
                                     field_id: 100
                                     predicates: <
@@ -624,7 +536,6 @@ TEST(Sealed, LoadFieldDataMmap) {
                                     placeholder_tag: "$0"
      >)";
 
-    Timestamp time = 1000000;
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
         CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
@@ -633,13 +544,13 @@ TEST(Sealed, LoadFieldDataMmap) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), time));
+    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get()));
 
     SealedLoadFieldData(dataset, *segment, {}, true);
-    segment->Search(plan.get(), ph_group.get(), time);
+    segment->Search(plan.get(), ph_group.get());
 
     segment->DropFieldData(fakevec_id);
-    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), time));
+    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get()));
 
     LoadIndexInfo vec_info;
     vec_info.field_id = fakevec_id.get();
@@ -662,12 +573,12 @@ TEST(Sealed, LoadFieldDataMmap) {
         ASSERT_EQ(chunk_span3[i], ref3[i]);
     }
 
-    auto sr = segment->Search(plan.get(), ph_group.get(), time);
+    auto sr = segment->Search(plan.get(), ph_group.get());
     auto json = SearchResultToJson(*sr);
     std::cout << json.dump(1);
 
     segment->DropIndex(fakevec_id);
-    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), time));
+    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get()));
 }
 
 TEST(Sealed, LoadScalarIndex) {
@@ -743,7 +654,6 @@ TEST(Sealed, LoadScalarIndex) {
                                     placeholder_tag: "$0"
      >)";
 
-    Timestamp time = 1000000;
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
         CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
@@ -786,8 +696,7 @@ TEST(Sealed, LoadScalarIndex) {
     counter_index.field_type = DataType::INT64;
     counter_index.index_params["index_type"] = "sort";
     auto counter_data = dataset.get_col<int64_t>(counter_id);
-    counter_index.index =
-        std::move(GenScalarIndexing<int64_t>(N, counter_data.data()));
+    counter_index.index = GenScalarIndexing<int64_t>(N, counter_data.data());
     segment->LoadIndex(counter_index);
 
     LoadIndexInfo double_index;
@@ -795,8 +704,7 @@ TEST(Sealed, LoadScalarIndex) {
     double_index.field_type = DataType::DOUBLE;
     double_index.index_params["index_type"] = "sort";
     auto double_data = dataset.get_col<double>(double_id);
-    double_index.index =
-        std::move(GenScalarIndexing<double>(N, double_data.data()));
+    double_index.index = GenScalarIndexing<double>(N, double_data.data());
     segment->LoadIndex(double_index);
 
     LoadIndexInfo nothing_index;
@@ -804,11 +712,10 @@ TEST(Sealed, LoadScalarIndex) {
     nothing_index.field_type = DataType::INT32;
     nothing_index.index_params["index_type"] = "sort";
     auto nothing_data = dataset.get_col<int32_t>(nothing_id);
-    nothing_index.index =
-        std::move(GenScalarIndexing<int32_t>(N, nothing_data.data()));
+    nothing_index.index = GenScalarIndexing<int32_t>(N, nothing_data.data());
     segment->LoadIndex(nothing_index);
 
-    auto sr = segment->Search(plan.get(), ph_group.get(), time);
+    auto sr = segment->Search(plan.get(), ph_group.get());
     auto json = SearchResultToJson(*sr);
     std::cout << json.dump(1);
 }
@@ -831,33 +738,6 @@ TEST(Sealed, Delete) {
     auto fakevec = dataset.get_col<float>(fakevec_id);
 
     auto segment = CreateSealedSegment(schema);
-    // std::string dsl = R"({
-    //     "bool": {
-    //         "must": [
-    //         {
-    //             "range": {
-    //                 "double": {
-    //                     "GE": -1,
-    //                     "LT": 1
-    //                 }
-    //             }
-    //         },
-    //         {
-    //             "vector": {
-    //                 "fakevec": {
-    //                     "metric_type": "L2",
-    //                     "params": {
-    //                         "nprobe": 10
-    //                     },
-    //                     "query": "$0",
-    //                     "topk": 5,
-    //                     "round_decimal": 3
-    //                 }
-    //             }
-    //         }
-    //         ]
-    //     }
-    // })";
     const char* raw_plan = R"(vector_anns: <
                                     field_id: 100
                                     predicates: <
@@ -885,7 +765,6 @@ TEST(Sealed, Delete) {
                                     placeholder_tag: "$0"
      >)";
 
-    Timestamp time = 1000000;
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
         CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
@@ -894,7 +773,7 @@ TEST(Sealed, Delete) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), time));
+    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get()));
 
     SealedLoadFieldData(dataset, *segment);
 
@@ -943,33 +822,6 @@ TEST(Sealed, OverlapDelete) {
     auto fakevec = dataset.get_col<float>(fakevec_id);
 
     auto segment = CreateSealedSegment(schema);
-    // std::string dsl = R"({
-    //     "bool": {
-    //         "must": [
-    //         {
-    //             "range": {
-    //                 "double": {
-    //                     "GE": -1,
-    //                     "LT": 1
-    //                 }
-    //             }
-    //         },
-    //         {
-    //             "vector": {
-    //                 "fakevec": {
-    //                     "metric_type": "L2",
-    //                     "params": {
-    //                         "nprobe": 10
-    //                     },
-    //                     "query": "$0",
-    //                     "topk": 5,
-    //                     "round_decimal": 3
-    //                 }
-    //             }
-    //         }
-    //         ]
-    //     }
-    // })";
     const char* raw_plan = R"(vector_anns: <
                                     field_id: 100
                                     predicates: <
@@ -997,7 +849,6 @@ TEST(Sealed, OverlapDelete) {
                                     placeholder_tag: "$0"
      >)";
 
-    Timestamp time = 1000000;
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
         CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
@@ -1006,7 +857,7 @@ TEST(Sealed, OverlapDelete) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), time));
+    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get()));
 
     SealedLoadFieldData(dataset, *segment);
 
@@ -1124,15 +975,12 @@ TEST(Sealed, BF) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    auto result = segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
+    auto result = segment->Search(plan.get(), ph_group.get());
     auto ves = SearchResultToVector(*result);
     // first: offset, second: distance
     EXPECT_GE(ves[0].first, 0);
     EXPECT_LE(ves[0].first, N);
     EXPECT_LE(ves[0].second, dim);
-
-    auto result2 = segment->Search(plan.get(), ph_group.get(), 0);
-    EXPECT_EQ(result2->get_total_result_count(), 0);
 }
 
 TEST(Sealed, BF_Overflow) {
@@ -1181,7 +1029,7 @@ TEST(Sealed, BF_Overflow) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    auto result = segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
+    auto result = segment->Search(plan.get(), ph_group.get());
     auto ves = SearchResultToVector(*result);
     for (int i = 0; i < num_queries; ++i) {
         EXPECT_EQ(ves[0].first, -1);
@@ -1256,16 +1104,12 @@ TEST(Sealed, RealCount) {
 
 TEST(Sealed, GetVector) {
     auto dim = 16;
-    auto topK = 5;
     auto N = ROW_COUNT;
     auto metric_type = knowhere::metric::L2;
     auto schema = std::make_shared<Schema>();
     auto fakevec_id = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto counter_id = schema->AddDebugField("counter", DataType::INT64);
-    auto double_id = schema->AddDebugField("double", DataType::DOUBLE);
-    auto nothing_id = schema->AddDebugField("nothing", DataType::INT32);
-    auto str_id = schema->AddDebugField("str", DataType::VARCHAR);
     schema->AddDebugField("int8", DataType::INT8);
     schema->AddDebugField("int16", DataType::INT16);
     schema->AddDebugField("float", DataType::FLOAT);

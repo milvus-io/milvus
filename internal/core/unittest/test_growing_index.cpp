@@ -44,25 +44,6 @@ TEST(GrowingIndex, Correctness) {
     auto segment = CreateGrowingSegment(schema, metaPtr);
     auto segmentImplPtr = dynamic_cast<SegmentGrowingImpl*>(segment.get());
 
-    // std::string dsl = R"({
-    //     "bool": {
-    //         "must": [
-    //         {
-    //             "vector": {
-    //                 "embeddings": {
-    //                     "metric_type": "l2",
-    //                     "params": {
-    //                         "nprobe": 16
-    //                     },
-    //                     "query": "$0",
-    //                     "topk": 5,
-    //                     "round_decimal":3
-    //                 }
-    //             }
-    //         }
-    //         ]
-    //     }
-    // })";
     milvus::proto::plan::PlanNode plan_node;
     auto vector_anns = plan_node.mutable_vector_anns();
     vector_anns->set_is_binary(false);
@@ -119,8 +100,7 @@ TEST(GrowingIndex, Correctness) {
             *schema, plan_str.data(), plan_str.size());
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-        Timestamp time = 1000000;
-        auto sr = segment->Search(plan.get(), ph_group.get(), time);
+        auto sr = segment->Search(plan.get(), ph_group.get());
         EXPECT_EQ(sr->total_nq_, num_queries);
         EXPECT_EQ(sr->unity_topK_, top_k);
         EXPECT_EQ(sr->distances_.size(), num_queries * top_k);
@@ -130,8 +110,7 @@ TEST(GrowingIndex, Correctness) {
             *schema, range_plan_str.data(), range_plan_str.size());
         auto range_ph_group = ParsePlaceholderGroup(
             range_plan.get(), ph_group_raw.SerializeAsString());
-        auto range_sr =
-            segment->Search(range_plan.get(), range_ph_group.get(), time);
+        auto range_sr = segment->Search(range_plan.get(), range_ph_group.get());
         ASSERT_EQ(range_sr->total_nq_, num_queries);
         EXPECT_EQ(sr->unity_topK_, top_k);
         EXPECT_EQ(sr->distances_.size(), num_queries * top_k);

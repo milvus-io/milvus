@@ -87,7 +87,6 @@ func (plan *SearchPlan) delete() {
 type SearchRequest struct {
 	plan              *SearchPlan
 	cPlaceholderGroup C.CPlaceholderGroup
-	timestamp         Timestamp
 	msgID             UniqueID
 	searchFieldID     UniqueID
 }
@@ -127,7 +126,6 @@ func NewSearchRequest(collection *Collection, req *querypb.SearchRequest, placeh
 	ret := &SearchRequest{
 		plan:              plan,
 		cPlaceholderGroup: cPlaceholderGroup,
-		timestamp:         req.Req.GetTravelTimestamp(),
 		msgID:             req.GetReq().GetBase().GetMsgID(),
 		searchFieldID:     int64(fieldID),
 	}
