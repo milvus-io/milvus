@@ -195,7 +195,7 @@ func TestSessionLivenessCheck(t *testing.T) {
 	require.NoError(t, err)
 	s := NewSession(context.Background(), metaRoot, etcdCli)
 	ctx := context.Background()
-	ch := make(chan bool)
+	ch := make(chan struct{})
 	s.liveCh = ch
 	signal := make(chan struct{}, 1)
 
@@ -207,7 +207,7 @@ func TestSessionLivenessCheck(t *testing.T) {
 	})
 
 	assert.False(t, flag)
-	ch <- true
+	ch <- struct{}{}
 
 	assert.False(t, flag)
 	close(ch)
@@ -217,7 +217,7 @@ func TestSessionLivenessCheck(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(ctx)
 	cancel()
-	ch = make(chan bool)
+	ch = make(chan struct{})
 	s.liveCh = ch
 	flag = false
 
@@ -605,7 +605,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	defer etcdKV.RemoveWithPrefix("")
 
 	var wg sync.WaitGroup
-	ch := make(chan bool)
+	ch := make(chan struct{})
 	signal := make(chan struct{}, 1)
 	flag := false
 
@@ -647,7 +647,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	// stop session 1, session 2 will take over primary service
 	log.Debug("Stop session 1, session 2 will take over primary service")
 	assert.False(t, flag)
-	ch <- true
+	ch <- struct{}{}
 	assert.False(t, flag)
 	s1.safeCloseLiveCh()
 	<-signal
@@ -871,7 +871,7 @@ func (s *SessionSuite) TestKeepAliveRetryActiveCancel() {
 	if err != nil {
 		panic(err)
 	}
-	session.liveCh = make(chan bool)
+	session.liveCh = make(chan struct{})
 	session.processKeepAliveResponse(ch)
 	session.LivenessCheck(ctx, nil)
 	// active cancel, should not retry connect
@@ -893,7 +893,7 @@ func (s *SessionSuite) TestKeepAliveRetryChannelClose() {
 	if err != nil {
 		panic(err)
 	}
-	session.liveCh = make(chan bool)
+	session.liveCh = make(chan struct{})
 	closeChan := make(chan *clientv3.LeaseKeepAliveResponse)
 	sendChan := (<-chan *clientv3.LeaseKeepAliveResponse)(closeChan)
 	session.processKeepAliveResponse(sendChan)
@@ -914,7 +914,7 @@ func (s *SessionSuite) TestSafeCloseLiveCh() {
 	ctx := context.Background()
 	session := NewSession(ctx, s.metaRoot, s.client)
 	session.Init("test", "normal", false, false)
-	session.liveCh = make(chan bool)
+	session.liveCh = make(chan struct{})
 	session.safeCloseLiveCh()
 	assert.NotPanics(s.T(), func() {
 		session.safeCloseLiveCh()

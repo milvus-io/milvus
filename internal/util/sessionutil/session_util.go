@@ -97,11 +97,13 @@ type Session struct {
 	TriggerKill bool
 	Version     semver.Version `json:"Version,omitempty"`
 
-	liveChOnce        sync.Once
-	liveCh            chan bool
+	liveChOnce sync.Once
+	liveCh     chan struct{}
+
 	etcdCli           *clientv3.Client
 	leaseID           *clientv3.LeaseID
 	watchSessionKeyCh clientv3.WatchChan
+	watchCancel       atomic.Pointer[context.CancelFunc]
 	wg                sync.WaitGroup
 
 	metaRoot string
@@ -267,7 +269,7 @@ func (s *Session) Register() {
 		log.Error("Register failed", zap.Error(err))
 		panic(err)
 	}
-	s.liveCh = make(chan bool)
+	s.liveCh = make(chan struct{})
 	s.processKeepAliveResponse(ch)
 	s.UpdateRegistered(true)
 }
@@ -357,21 +359,25 @@ func (s *Session) getSessionKey() string {
 	return path.Join(s.metaRoot, DefaultServiceRoot, key)
 }
 
-func (s *Session) initWatchSessionCh() {
+func (s *Session) initWatchSessionCh(ctx context.Context) error {
 	var (
 		err     error
 		getResp *clientv3.GetResponse
 	)
 
-	err = retry.Do(context.Background(), func() error {
-		getResp, err = s.etcdCli.Get(context.Background(), s.getSessionKey())
+	ctx, cancel := context.WithCancel(ctx)
+	s.watchCancel.Store(&cancel)
+
+	err = retry.Do(ctx, func() error {
+		getResp, err = s.etcdCli.Get(ctx, s.getSessionKey())
 		log.Warn("fail to get the session key from the etcd", zap.Error(err))
 		return err
-	}, retry.Attempts(100))
+	}, retry.Attempts(uint(s.sessionRetryTimes)))
 	if err != nil {
-		panic(err)
+		return err
 	}
-	s.watchSessionKeyCh = s.etcdCli.Watch(context.Background(), s.getSessionKey(), clientv3.WithRev(getResp.Header.Revision))
+	s.watchSessionKeyCh = s.etcdCli.Watch(ctx, s.getSessionKey(), clientv3.WithRev(getResp.Header.Revision))
+	return nil
 }
 
 // registerService registers the service to etcd so that other services
@@ -780,7 +786,11 @@ func (w *sessionWatcher) handleWatchErr(err error) error {
 // ch is the liveness signal channel, ch is closed only when the session is expired
 // callback is the function to call when ch is closed, note that callback will not be invoked when loop exits due to context
 func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
-	s.initWatchSessionCh()
+	err := s.initWatchSessionCh(ctx)
+	if err != nil {
+		log.Error("failed to get session for liveness check", zap.Error(err))
+		s.cancelKeepAlive()
+	}
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -818,12 +828,11 @@ func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
 						return
 					}
 					log.Warn("Watch service found compacted error", zap.Error(resp.Err()))
-					getResp, err := s.etcdCli.Get(s.ctx, s.getSessionKey())
-					if err != nil || len(getResp.Kvs) == 0 {
+					err := s.initWatchSessionCh(ctx)
+					if err != nil {
+						log.Warn("failed to get session during reconnecting", zap.Error(err))
 						s.cancelKeepAlive()
-						return
 					}
-					s.watchSessionKeyCh = s.etcdCli.Watch(s.ctx, s.getSessionKey(), clientv3.WithRev(getResp.Header.Revision))
 					continue
 				}
 				for _, event := range resp.Events {
@@ -909,6 +918,9 @@ func (s *Session) updateStandby(b bool) {
 func (s *Session) safeCloseLiveCh() {
 	s.liveChOnce.Do(func() {
 		close(s.liveCh)
+		if s.watchCancel.Load() != nil {
+			(*s.watchCancel.Load())()
+		}
 	})
 }
 
