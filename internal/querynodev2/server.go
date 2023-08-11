@@ -258,7 +258,15 @@ func (node *QueryNode) Init() error {
 
 		node.factory.Init(paramtable.Get())
 
-		localChunkManager := storage.NewLocalChunkManager(storage.RootPath(paramtable.Get().LocalStorageCfg.Path.GetValue()))
+		localRootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
+		localChunkManager := storage.NewLocalChunkManager(storage.RootPath(localRootPath))
+		localUsedSize, err := segments.GetLocalUsedSize(localRootPath)
+		if err != nil {
+			log.Warn("get local used size failed", zap.Error(err))
+			initError = err
+			return
+		}
+		metrics.QueryNodeDiskUsedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(localUsedSize / 1024 / 1024))
 		remoteChunkManager, err := node.factory.NewPersistentStorageChunkManager(node.ctx)
 		if err != nil {
 			log.Warn("failed to init remote chunk manager", zap.Error(err))

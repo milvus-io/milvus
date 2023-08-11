@@ -810,6 +810,10 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 		zap.Int64("collectionID", segmentLoadInfos[0].GetCollectionID()),
 	)
 
+	toMB := func(mem uint64) uint64 {
+		return mem / 1024 / 1024
+	}
+
 	memUsage := hardware.GetUsedMemoryCount() + loader.committedResource.MemorySize
 	totalMem := hardware.GetMemoryCount()
 	if memUsage == 0 || totalMem == 0 {
@@ -820,6 +824,8 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 	if err != nil {
 		return 0, 0, errors.Wrap(err, "get local used size failed")
 	}
+
+	metrics.QueryNodeDiskUsedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(toMB(uint64(localDiskUsage))))
 	diskUsage := uint64(localDiskUsage) + loader.committedResource.DiskSize
 
 	maxSegmentSize := uint64(0)
@@ -871,11 +877,6 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 	}
 
 	mmapEnabled := len(paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue()) > 0
-
-	toMB := func(mem uint64) uint64 {
-		return mem / 1024 / 1024
-	}
-
 	log.Info("predict memory and disk usage while loading (in MiB)",
 		zap.Uint64("maxSegmentSize", toMB(maxSegmentSize)),
 		zap.Int("concurrency", concurrency),
