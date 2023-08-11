@@ -17,18 +17,16 @@
 
 #include "common/Slice.h"
 #include "common/Common.h"
-#include "storage/Event.h"
 #include "storage/ThreadPool.h"
 #include "storage/Util.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/LocalChunkManagerSingleton.h"
 
-#include "test_utils/indexbuilder_test_utils.h"
+#include "test_utils/storage_test_utils.h"
 
 using namespace std;
 using namespace milvus;
 using namespace milvus::storage;
-using namespace boost::filesystem;
 using namespace knowhere;
 
 class DiskAnnFileManagerTest : public testing::Test {

@@ -23,11 +23,11 @@
 #include "common/QueryResult.h"
 #include "segcore/Types.h"
 #include "test_utils/indexbuilder_test_utils.h"
+#include "test_utils/storage_test_utils.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/Timer.h"
 #include "storage/Util.h"
 
-using namespace boost::filesystem;
 using namespace milvus;
 using namespace milvus::segcore;
 

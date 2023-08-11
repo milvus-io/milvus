@@ -10,15 +10,19 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
-#include "common/SystemProperty.h"
+
 #include "test_utils/Constants.h"
 #include "storage/LocalChunkManagerSingleton.h"
+#include "storage/RemoteChunkManagerSingleton.h"
+#include "test_utils/storage_test_utils.h"
 
 int
 main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     milvus::storage::LocalChunkManagerSingleton::GetInstance().Init(
         TestLocalPath);
+    milvus::storage::RemoteChunkManagerSingleton::GetInstance().Init(
+        get_default_local_storage_config());
 
     return RUN_ALL_TESTS();
 }

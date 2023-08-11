@@ -31,6 +31,7 @@
 #include "test_utils/DataGen.h"
 #include "test_utils/PbHelper.h"
 #include "test_utils/indexbuilder_test_utils.h"
+#include "test_utils/storage_test_utils.h"
 #include "query/generated/ExecExprVisitor.h"
 
 namespace chrono = std::chrono;
@@ -3735,7 +3736,8 @@ TEST(CApiTest, SealedSegment_Update_Field_Size) {
     int row_size = 10;
 
     // update row_size =10 with n rows
-    auto status = UpdateFieldRawDataSize(segment, str_fid.get(), N, N * row_size);
+    auto status =
+        UpdateFieldRawDataSize(segment, str_fid.get(), N, N * row_size);
     ASSERT_EQ(status.error_code, Success);
     ASSERT_EQ(segment->get_field_avg_size(str_fid), row_size);
 
@@ -3751,6 +3753,36 @@ TEST(CApiTest, SealedSegment_Update_Field_Size) {
     ASSERT_EQ(res.error_code, Success);
     ASSERT_EQ(segment->get_field_avg_size(str_fid),
               (row_size * N + total_size) / (2 * N));
+
+    DeleteSegment(segment);
+}
+
+TEST(CApiTest, GrowingSegment_Load_Field_Data) {
+    auto schema = std::make_shared<Schema>();
+    auto str_fid = schema->AddDebugField("string", DataType::VARCHAR);
+    auto vec_fid = schema->AddDebugField(
+        "vector_float", DataType::VECTOR_FLOAT, DIM, "L2");
+    schema->set_primary_field_id(str_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta).release();
+
+    int N = ROW_COUNT;
+    auto raw_data = DataGen(schema, N);
+
+    auto storage_config = get_default_local_storage_config();
+    auto cm = storage::CreateChunkManager(storage_config);
+    auto load_info =
+        PrepareInsertBinlog(1,
+                            2,
+                            3,
+                            storage_config.root_path + "/" + "test_load_sealed",
+                            raw_data,
+                            cm);
+
+    auto status = LoadFieldData(segment, &load_info);
+    ASSERT_EQ(status.error_code, Success);
+    ASSERT_EQ(segment->get_real_count(), ROW_COUNT);
+    ASSERT_NE(segment->get_field_avg_size(str_fid), 0);
 
     DeleteSegment(segment);
 }
