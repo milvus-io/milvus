@@ -287,7 +287,7 @@ class IndexTest : public ::testing::TestWithParam<Param> {
  protected:
     void
     SetUp() override {
-        storage_config_ = get_default_storage_config();
+        storage_config_ = get_default_local_storage_config();
 
         auto param = GetParam();
         index_type = param.first;
@@ -569,7 +569,7 @@ TEST(Indexing, SearchDiskAnnWithInvalidParam) {
     int64_t build_id = 1000;
     int64_t index_version = 1;
 
-    StorageConfig storage_config = get_default_storage_config();
+    StorageConfig storage_config = get_default_local_storage_config();
     milvus::storage::FieldDataMeta field_data_meta{
         collection_id, partition_id, segment_id, field_id};
     milvus::storage::IndexMeta index_meta{

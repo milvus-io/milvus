@@ -4187,7 +4187,7 @@ func Test_newChunkManagerFactory(t *testing.T) {
 		storageCli, err := server.newChunkManagerFactory()
 		assert.Nil(t, storageCli)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "too many colons in address")
+		assert.Contains(t, err.Error(), "invalid port")
 	})
 
 	t.Run("local storage init", func(t *testing.T) {
@@ -4219,7 +4219,7 @@ func Test_initGarbageCollection(t *testing.T) {
 		storageCli, err := server.newChunkManagerFactory()
 		assert.Nil(t, storageCli)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "too many colons in address")
+		assert.Contains(t, err.Error(), "invalid port")
 	})
 }
 

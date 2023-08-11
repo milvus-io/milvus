@@ -40,7 +40,7 @@ class DiskAnnFileManagerTest : public testing::Test {
 
     virtual void
     SetUp() {
-        cm_ = storage::CreateChunkManager(get_default_storage_config());
+        cm_ = storage::CreateChunkManager(get_default_local_storage_config());
     }
 
  protected:

@@ -29,7 +29,7 @@ class IndexWrapperTest : public ::testing::TestWithParam<Param> {
  protected:
     void
     SetUp() override {
-        storage_config_ = get_default_storage_config();
+        storage_config_ = get_default_local_storage_config();
 
         auto param = GetParam();
         index_type = param.first;

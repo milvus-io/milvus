@@ -12,6 +12,8 @@ type config struct {
 	useIAM            bool
 	cloudProvider     string
 	iamEndpoint       string
+	useVirtualHost    bool
+	region            string
 }
 
 func newDefaultConfig() *config {
@@ -77,5 +79,17 @@ func CloudProvider(cloudProvider string) Option {
 func IAMEndpoint(iamEndpoint string) Option {
 	return func(c *config) {
 		c.iamEndpoint = iamEndpoint
+	}
+}
+
+func UseVirtualHost(useVirtualHost bool) Option {
+	return func(c *config) {
+		c.useVirtualHost = useVirtualHost
+	}
+}
+
+func Region(region string) Option {
+	return func(c *config) {
+		c.region = region
 	}
 }

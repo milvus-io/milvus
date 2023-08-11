@@ -49,6 +49,8 @@ const (
 	DefaultRootPath                          = ""
 	DefaultMinioLogLevel                     = "error"
 	DefaultKnowhereThreadPoolNumRatioInBuild = 1
+	DefaultMinioRegion                       = ""
+	DefaultMinioUseVirtualHost               = "false"
 )
 
 // Const of Global Config List

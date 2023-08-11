@@ -176,7 +176,7 @@ MinioChunkManager::BuildS3Client(
             provider,
             config,
             Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
-            false);
+            storage_config.useVirtualHost);
     } else {
         BuildAccessKeyClient(storage_config, config);
     }
@@ -197,7 +197,7 @@ MinioChunkManager::BuildAccessKeyClient(
             ConvertToAwsString(storage_config.access_key_value)),
         config,
         Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
-        false);
+        storage_config.useVirtualHost);
 }
 
 void
@@ -219,7 +219,7 @@ MinioChunkManager::BuildAliyunCloudClient(
             aliyun_provider,
             config,
             Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
-            true);
+            storage_config.useVirtualHost);
     } else {
         BuildAccessKeyClient(storage_config, config);
     }
@@ -234,7 +234,7 @@ MinioChunkManager::BuildGoogleCloudClient(
         client_ = std::make_shared<Aws::S3::S3Client>(
             config,
             Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
-            false);
+            storage_config.useVirtualHost);
     } else {
         BuildAccessKeyClient(storage_config, config);
     }
@@ -266,6 +266,10 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
     } else {
         config.scheme = Aws::Http::Scheme::HTTP;
         config.verifySSL = false;
+    }
+
+    if (!storage_config.region.empty()) {
+        config.region = ConvertToAwsString(storage_config.region);
     }
 
     if (storageType == RemoteStorageType::S3) {
