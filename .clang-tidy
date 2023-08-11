@@ -18,7 +18,7 @@
 # The checks defined here will be run and will display by default as warnings.
 Checks: >
     -*, clang-diagnostic-*, -clang-diagnostic-error,
-    clang-analyzer-*, -clang-analyzer-alpha*,
+    clang-analyzer-*,
     google-*, -google-runtime-references, -google-readability-todo,
     modernize-*, -modernize-use-trailing-return-type, -modernize-use-nodiscard,
     performance-*,
