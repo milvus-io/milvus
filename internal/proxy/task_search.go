@@ -221,7 +221,11 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	t.SearchRequest.DbID = 0 // todo
 	t.SearchRequest.CollectionID = collID
-	t.schema, _ = globalMetaCache.GetCollectionSchema(ctx, t.request.GetDbName(), collectionName)
+	t.schema, err = globalMetaCache.GetCollectionSchema(ctx, t.request.GetDbName(), collectionName)
+	if err != nil {
+		log.Warn("get collection schema failed", zap.Error(err))
+		return err
+	}
 
 	partitionKeyMode, err := isPartitionKeyMode(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {

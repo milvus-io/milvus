@@ -289,7 +289,7 @@ func (m *MetaCache) GetCollectionName(ctx context.Context, database string, coll
 		}
 	}
 
-	method := "GeCollectionName"
+	method := "GetCollectionName"
 	if collInfo == nil || !collInfo.isCollectionCached() {
 		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheMissLabel).Inc()
 		tr := timerecord.NewTimeRecorder("UpdateCache")
