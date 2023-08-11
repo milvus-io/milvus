@@ -287,6 +287,17 @@ func (s *TestGetVectorSuite) TestGetVector_IVF_PQ() {
 	s.run()
 }
 
+func (s *TestGetVectorSuite) TestGetVector_SCANN() {
+	s.nq = 10
+	s.topK = 10
+	s.indexType = integration.IndexScaNN
+	s.metricType = metric.L2
+	s.pkType = schemapb.DataType_Int64
+	s.vecType = schemapb.DataType_FloatVector
+	s.searchFailed = false
+	s.run()
+}
+
 func (s *TestGetVectorSuite) TestGetVector_IVF_SQ8() {
 	s.nq = 10
 	s.topK = 10

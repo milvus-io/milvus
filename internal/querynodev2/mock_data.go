@@ -50,6 +50,7 @@ const (
 	IndexFaissIDMap      = "FLAT"
 	IndexFaissIVFFlat    = "IVF_FLAT"
 	IndexFaissIVFPQ      = "IVF_PQ"
+	IndexScaNN           = "SCANN"
 	IndexFaissIVFSQ8     = "IVF_SQ8"
 	IndexFaissBinIDMap   = "BIN_FLAT"
 	IndexFaissBinIVFFlat = "BIN_IVF_FLAT"
