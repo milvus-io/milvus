@@ -78,9 +78,12 @@ Search(CSegmentInterface c_segment,
             c_placeholder_group);
         auto ctx = milvus::tracer::TraceContext{
             c_trace.traceID, c_trace.spanID, c_trace.flag};
-
-        auto span = milvus::tracer::StartSpan("SegcoreSearch", &ctx);
-
+        auto span = milvus::tracer::StartSpan("SegCoreSearch", &ctx);
+        milvus::tracer::logTraceContext(
+            "SegCore_SegmentSearch_SegmentID:" +
+                std::to_string(segment->get_segment_id()),
+            span);
+        milvus::tracer::SetRootSpan(span);
         auto search_result = segment->Search(plan, phg_ptr);
         if (!milvus::PositivelyRelated(
                 plan->plan_node_->search_info_.metric_type_)) {
@@ -89,8 +92,8 @@ Search(CSegmentInterface c_segment,
             }
         }
         *result = search_result.release();
-
         span->End();
+        milvus::tracer::CloseRootSpan();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(UnexpectedError, e.what());

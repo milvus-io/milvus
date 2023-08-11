@@ -34,6 +34,9 @@ namespace jaeger = opentelemetry::exporter::jaeger;
 namespace ostream = opentelemetry::exporter::trace;
 namespace otlp = opentelemetry::exporter::otlp;
 
+static const int trace_id_size = 2 * opentelemetry::trace::TraceId::kSize;
+static bool enable_trace = true;
+
 void
 initTelementry(TraceConfig* config) {
     std::unique_ptr<opentelemetry::sdk::trace::SpanExporter> exporter;
@@ -50,6 +53,7 @@ initTelementry(TraceConfig* config) {
         exporter = otlp::OtlpGrpcExporterFactory::Create(opts);
     } else {
         LOG_SEGCORE_INFO_ << "Empty Trace";
+        enable_trace = false;
     }
     auto processor =
         trace_sdk::BatchSpanProcessorFactory::Create(std::move(exporter), {});
@@ -82,6 +86,41 @@ StartSpan(std::string name, TraceContext* parentCtx) {
             true);
     }
     return GetTracer()->StartSpan(name, opts);
+}
+
+thread_local std::shared_ptr<trace::Span> local_span;
+void
+SetRootSpan(std::shared_ptr<trace::Span> span) {
+    if (enable_trace) {
+        local_span = span;
+    }
+}
+
+void
+CloseRootSpan() {
+    if (enable_trace) {
+        local_span = nullptr;
+    }
+}
+
+std::shared_ptr<trace::Span>
+GetRootSpan() {
+    if (enable_trace && local_span != nullptr) {
+        return local_span;
+    }
+    return nullptr;
+}
+
+void
+logTraceContext(const std::string& extended_info,
+                const std::shared_ptr<trace::Span> span) {
+    if (enable_trace && span != nullptr) {
+        char traceID[trace_id_size];
+        span->GetContext().trace_id().ToLowerBase16(
+            nostd::span<char, 2 * opentelemetry::trace::TraceId::kSize>{
+                &traceID[0], trace_id_size});
+        LOG_SEGCORE_INFO_ << extended_info << ", traceID:" << traceID;
+    }
 }
 
 }  // namespace milvus::tracer
