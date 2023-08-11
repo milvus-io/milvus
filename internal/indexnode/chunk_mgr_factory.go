@@ -25,7 +25,7 @@ func NewChunkMgrFactory() *chunkMgrFactory {
 }
 
 func (m *chunkMgrFactory) NewChunkManager(ctx context.Context, config *indexpb.StorageConfig) (storage.ChunkManager, error) {
-	key := m.cacheKey(config.StorageType, config.BucketName, config.Address)
+	key := m.cacheKey(config.GetStorageType(), config.GetBucketName(), config.GetAddress())
 	if v, ok := m.cached.Get(key); ok {
 		return v, nil
 	}
