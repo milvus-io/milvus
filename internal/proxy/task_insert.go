@@ -95,7 +95,7 @@ func (it *insertTask) OnEnqueue() error {
 }
 
 func (it *insertTask) PreExecute(ctx context.Context) error {
-	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Insert-PreExecute")
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Insert-PreExecute")
 	defer sp.End()
 
 	it.result = &milvuspb.MutationResult{
@@ -212,7 +212,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 }
 
 func (it *insertTask) Execute(ctx context.Context) error {
-	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Insert-PreExecute")
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Insert-Execute")
 	defer sp.End()
 
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute insert %d", it.ID()))

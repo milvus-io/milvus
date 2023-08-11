@@ -34,6 +34,8 @@ namespace jaeger = opentelemetry::exporter::jaeger;
 namespace ostream = opentelemetry::exporter::trace;
 namespace otlp = opentelemetry::exporter::otlp;
 
+static const int trace_id_size = 2 * opentelemetry::trace::TraceId::kSize;
+
 void
 initTelementry(TraceConfig* config) {
     std::unique_ptr<opentelemetry::sdk::trace::SpanExporter> exporter;
@@ -82,6 +84,16 @@ StartSpan(std::string name, TraceContext* parentCtx) {
             true);
     }
     return GetTracer()->StartSpan(name, opts);
+}
+
+void
+logTraceContext(const std::string& extended_info,
+                const trace::SpanContext& ctx) {
+    char traceID[trace_id_size];
+    ctx.trace_id().ToLowerBase16(
+        nostd::span<char, 2 * opentelemetry::trace::TraceId::kSize>{
+            &traceID[0], trace_id_size});
+    LOG_SEGCORE_DEBUG_ << extended_info << ":" << traceID;
 }
 
 }  // namespace milvus::tracer
