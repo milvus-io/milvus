@@ -68,7 +68,7 @@ type Loader interface {
 	LoadBloomFilterSet(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error)
 
 	// LoadIndex append index for segment and remove vector binlogs.
-	LoadIndex(ctx context.Context, segment *LocalSegment, info *querypb.SegmentLoadInfo) error
+	LoadIndex(ctx context.Context, segment *LocalSegment, info *querypb.SegmentLoadInfo, version int64) error
 }
 
 type LoadResource struct {
@@ -148,7 +148,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		return nil, nil
 	}
 	// Filter out loaded & loading segments
-	infos := loader.prepare(segmentType, segments...)
+	infos := loader.prepare(segmentType, version, segments...)
 	defer loader.unregister(infos...)
 
 	// continue to wait other task done
@@ -246,7 +246,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	return loaded, nil
 }
 
-func (loader *segmentLoader) prepare(segmentType SegmentType, segments ...*querypb.SegmentLoadInfo) []*querypb.SegmentLoadInfo {
+func (loader *segmentLoader) prepare(segmentType SegmentType, version int64, segments ...*querypb.SegmentLoadInfo) []*querypb.SegmentLoadInfo {
 	loader.mut.Lock()
 	defer loader.mut.Unlock()
 
@@ -259,6 +259,8 @@ func (loader *segmentLoader) prepare(segmentType SegmentType, segments ...*query
 			infos = append(infos, segment)
 			loader.loadingSegments.Insert(segment.GetSegmentID(), make(chan struct{}))
 		} else {
+			// try to update segment version before skip load operation
+			loader.manager.Segment.UpdateSegmentVersion(segmentType, segment.SegmentID, version)
 			log.Info("skip loaded/loading segment", zap.Int64("segmentID", segment.GetSegmentID()),
 				zap.Bool("isLoaded", len(loader.manager.Segment.GetBy(WithType(segmentType), WithID(segment.GetSegmentID()))) > 0),
 				zap.Bool("isLoading", loader.loadingSegments.Contain(segment.GetSegmentID())),
@@ -934,7 +936,7 @@ func (loader *segmentLoader) getFieldType(collectionID, fieldID int64) (schemapb
 	return 0, merr.WrapErrFieldNotFound(fieldID)
 }
 
-func (loader *segmentLoader) LoadIndex(ctx context.Context, segment *LocalSegment, loadInfo *querypb.SegmentLoadInfo) error {
+func (loader *segmentLoader) LoadIndex(ctx context.Context, segment *LocalSegment, loadInfo *querypb.SegmentLoadInfo, version int64) error {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collection", segment.Collection()),
 		zap.Int64("segment", segment.ID()),
@@ -942,7 +944,7 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context, segment *LocalSegmen
 
 	// Filter out LOADING segments only
 	// use None to avoid loaded check
-	infos := loader.prepare(commonpb.SegmentState_SegmentStateNone, loadInfo)
+	infos := loader.prepare(commonpb.SegmentState_SegmentStateNone, version, loadInfo)
 	defer loader.unregister(infos...)
 
 	indexInfo := lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *querypb.SegmentLoadInfo {

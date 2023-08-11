@@ -367,7 +367,7 @@ func (suite *SegmentLoaderSuite) TestLoadIndex() {
 		},
 	}
 
-	err := suite.loader.LoadIndex(ctx, segment, loadInfo)
+	err := suite.loader.LoadIndex(ctx, segment, loadInfo, 0)
 	suite.ErrorIs(err, merr.ErrIndexNotFound)
 
 }

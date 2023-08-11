@@ -73,39 +73,6 @@ type IndexedFieldInfo struct {
 	IndexInfo   *querypb.FieldIndexInfo
 }
 
-type Segment interface {
-	// Properties
-	ID() int64
-	Collection() int64
-	Partition() int64
-	Shard() string
-	Version() int64
-	StartPosition() *msgpb.MsgPosition
-	Type() SegmentType
-
-	// Stats related
-	// InsertCount returns the number of inserted rows, not effected by deletion
-	InsertCount() int64
-	// RowNum returns the number of rows, it's slow, so DO NOT call it in a loop
-	RowNum() int64
-	MemSize() int64
-
-	// Index related
-	AddIndex(fieldID int64, index *IndexedFieldInfo)
-	GetIndex(fieldID int64) *IndexedFieldInfo
-	ExistIndex(fieldID int64) bool
-	Indexes() []*IndexedFieldInfo
-
-	// Modification related
-	Insert(rowIDs []int64, timestamps []typeutil.Timestamp, record *segcorepb.InsertRecord) error
-	Delete(primaryKeys []storage.PrimaryKey, timestamps []typeutil.Timestamp) error
-	LastDeltaTimestamp() uint64
-
-	// Bloom filter related
-	UpdateBloomFilter(pks []storage.PrimaryKey)
-	MayPkExist(pk storage.PrimaryKey) bool
-}
-
 type baseSegment struct {
 	segmentID      int64
 	partitionID    int64
@@ -157,6 +124,10 @@ func (s *baseSegment) StartPosition() *msgpb.MsgPosition {
 
 func (s *baseSegment) Version() int64 {
 	return s.version
+}
+
+func (s *baseSegment) UpdateVersion(version int64) {
+	s.version = version
 }
 
 func (s *baseSegment) UpdateBloomFilter(pks []storage.PrimaryKey) {
