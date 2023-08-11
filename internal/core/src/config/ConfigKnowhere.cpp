@@ -74,7 +74,10 @@ KnowhereSetSimdType(const char* value) {
 void
 KnowhereInitThreadPool(const uint32_t num_threads) {
     knowhere::ThreadPool::InitGlobalThreadPool(num_threads);
-    knowhere::KnowhereConfig::SetAioContextPool(num_threads, 32);
+    if (!knowhere::KnowhereConfig::SetAioContextPool(num_threads)) {
+        PanicInfo("Failed to set aio context pool with num_threads " +
+                  std::to_string(num_threads));
+    }
 }
 
 }  // namespace milvus::config

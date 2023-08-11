@@ -10,7 +10,10 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <exception>
 
+#include "config/ConfigKnowhere.h"
+#include "gtest/gtest-death-test.h"
 #include "segcore/segcore_init_c.h"
 #include "test_utils/DataGen.h"
 
@@ -21,4 +24,16 @@ TEST(Init, Naive) {
     SegcoreSetChunkRows(32768);
     auto simd_type = SegcoreSetSimdType("auto");
     free(simd_type);
+}
+
+TEST(Init, KnowhereThreadPoolInit) {
+#ifdef BUILD_DISK_ANN
+    try {
+        milvus::config::KnowhereInitThreadPool(0);
+    } catch (std::exception& e) {
+        ASSERT_TRUE(std::string(e.what()).find(
+                        "Failed to set aio context pool") != std::string::npos);
+    }
+#endif
+    milvus::config::KnowhereInitThreadPool(8);
 }
