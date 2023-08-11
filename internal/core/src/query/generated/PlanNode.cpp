@@ -13,11 +13,14 @@
 // DO NOT EDIT
 #include "query/PlanNode.h"
 #include "PlanNodeVisitor.h"
+#include "common/Tracer.h"
 
 namespace milvus::query {
 void
 FloatVectorANNS::accept(PlanNodeVisitor& visitor) {
     visitor.visit(*this);
+    auto root_span = milvus::tracer::GetRootSpan();
+    milvus::tracer::logTraceContext("FloatVectorANNS::accept_finish_accept", root_span);
 }
 
 void

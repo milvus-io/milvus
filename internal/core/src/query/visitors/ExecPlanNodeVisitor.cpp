@@ -76,6 +76,8 @@ empty_search_result(int64_t num_queries, SearchInfo& search_info) {
 template <typename VectorType>
 void
 ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
+    auto root_span = milvus::tracer::GetRootSpan();
+
     // TODO: optimize here, remove the dynamic cast
     assert(!search_result_opt_.has_value());
     auto segment =
@@ -85,11 +87,11 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
     auto& ph = placeholder_group_->at(0);
     auto src_data = ph.get_blob<EmbeddedType<VectorType>>();
     auto num_queries = ph.num_of_queries_;
-
+    milvus::tracer::logTraceContext("before_get_active_count", root_span);
     // TODO: add API to unify row_count
     // auto row_count = segment->get_row_count();
     auto active_count = segment->get_active_count(timestamp_);
-
+    milvus::tracer::logTraceContext("after_get_active_count", root_span);
     // skip all calculation
     if (active_count == 0) {
         search_result_opt_ =
@@ -103,13 +105,15 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
             ExecExprVisitor(*segment, this, active_count, timestamp_)
                 .call_child(*node.predicate_.value()));
         bitset_holder->flip();
+        milvus::tracer::logTraceContext("after_expr_bitset_holder", root_span);
     } else {
         bitset_holder = std::make_unique<BitsetType>(active_count, false);
     }
+    milvus::tracer::logTraceContext("after_set_bitset_holder", root_span);
     segment->mask_with_timestamps(*bitset_holder, timestamp_);
-
+    milvus::tracer::logTraceContext("after_mask_with_timestamps", root_span);
     segment->mask_with_delete(*bitset_holder, active_count, timestamp_);
-
+    milvus::tracer::logTraceContext("after_mask_with_delete", root_span);
     // if bitset_holder is all 1's, we got empty result
     if (bitset_holder->all()) {
         search_result_opt_ =
@@ -117,13 +121,14 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
         return;
     }
     BitsetView final_view = *bitset_holder;
+    milvus::tracer::logTraceContext("before_vector_search", root_span);
     segment->vector_search(node.search_info_,
                            src_data,
                            num_queries,
                            timestamp_,
                            final_view,
                            search_result);
-
+    milvus::tracer::logTraceContext("after_vector_search", root_span);
     search_result_opt_ = std::move(search_result);
 }
 

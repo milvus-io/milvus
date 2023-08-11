@@ -44,6 +44,7 @@
 #include "storage/ThreadPools.h"
 #include "storage/Util.h"
 #include "utils/File.h"
+#include "common/Tracer.h"
 
 namespace milvus::index {
 
@@ -289,7 +290,7 @@ VectorMemIndex::Query(const DatasetPtr dataset,
                       const BitsetView& bitset) {
     //    AssertInfo(GetMetricType() == search_info.metric_type_,
     //               "Metric type of field index isn't the same with search info");
-
+    auto root_span = milvus::tracer::GetRootSpan();
     auto num_queries = dataset->GetRows();
     knowhere::Json search_conf = search_info.search_params_;
     auto topk = search_info.topk_;
@@ -304,17 +305,22 @@ VectorMemIndex::Query(const DatasetPtr dataset,
                                       search_conf[RANGE_FILTER],
                                       GetMetricType());
             }
+            milvus::tracer::logTraceContext("before_range_search", root_span);
             auto res = index_.RangeSearch(*dataset, search_conf, bitset);
+            milvus::tracer::logTraceContext("after_range_search", root_span);
             if (!res.has_value()) {
                 PanicCodeInfo(ErrorCodeEnum::UnexpectedError,
                               fmt::format("failed to range search: {}: {}",
                                           KnowhereStatusString(res.error()),
                                           res.what()));
             }
+            milvus::tracer::logTraceContext("before_ReGenRangeSearchResult", root_span);
             return ReGenRangeSearchResult(
                 res.value(), topk, num_queries, GetMetricType());
         } else {
+            milvus::tracer::logTraceContext("before_index_.Search", root_span);
             auto res = index_.Search(*dataset, search_conf, bitset);
+            milvus::tracer::logTraceContext("after_index_.Search", root_span);
             if (!res.has_value()) {
                 PanicCodeInfo(ErrorCodeEnum::UnexpectedError,
                               fmt::format("failed to search: {}: {}",
@@ -345,7 +351,7 @@ VectorMemIndex::Query(const DatasetPtr dataset,
 
     std::copy_n(ids, total_num, result->seg_offsets_.data());
     std::copy_n(distances, total_num, result->distances_.data());
-
+    milvus::tracer::logTraceContext("after_VectorMemIndex::Query", root_span);
     return result;
 }
 

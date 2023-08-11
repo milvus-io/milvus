@@ -66,10 +66,13 @@ SegmentInternalInterface::Search(
     const query::Plan* plan,
     const query::PlaceholderGroup* placeholder_group) const {
     std::shared_lock lck(mutex_);
+    auto root_span = milvus::tracer::GetRootSpan();
+    milvus::tracer::logTraceContext("finish_get_segment_mutex:", root_span);
     check_search(plan);
     query::ExecPlanNodeVisitor visitor(*this, 1L << 63, placeholder_group);
     auto results = std::make_unique<SearchResult>();
     *results = visitor.get_moved_result(*plan->plan_node_);
+    milvus::tracer::logTraceContext("finish_get_moved_result:", root_span);
     results->segment_ = (void*)this;
     return results;
 }

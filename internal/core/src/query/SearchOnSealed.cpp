@@ -17,6 +17,7 @@
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"
 #include "query/helper.h"
+#include "common/Tracer.h"
 
 namespace milvus::query {
 
@@ -28,6 +29,7 @@ SearchOnSealedIndex(const Schema& schema,
                     int64_t num_queries,
                     const BitsetView& bitset,
                     SearchResult& result) {
+    auto root_span = milvus::tracer::GetRootSpan();
     auto topk = search_info.topk_;
     auto round_decimal = search_info.round_decimal_;
 
@@ -37,22 +39,25 @@ SearchOnSealedIndex(const Schema& schema,
     auto dim = field.get_dim();
 
     AssertInfo(record.is_ready(field_id), "[SearchOnSealed]Record isn't ready");
+    milvus::tracer::logTraceContext("before_get_field_indexing", root_span);
     auto field_indexing = record.get_field_indexing(field_id);
+    milvus::tracer::logTraceContext("after_get_field_indexing", root_span);
     AssertInfo(field_indexing->metric_type_ == search_info.metric_type_,
                "Metric type of field index isn't the same with search info");
 
     auto final = [&] {
         auto ds = knowhere::GenDataSet(num_queries, dim, query_data);
-
+        milvus::tracer::logTraceContext("after_knowhere::GenDataSet", root_span);
         auto conf = search_info.search_params_;
         conf[knowhere::meta::TOPK] = search_info.topk_;
         conf[knowhere::meta::METRIC_TYPE] = field_indexing->metric_type_;
         auto vec_index =
             dynamic_cast<index::VectorIndex*>(field_indexing->indexing_.get());
         auto index_type = vec_index->GetIndexType();
+        milvus::tracer::logTraceContext("before_vec_index->Query", root_span);
         return vec_index->Query(ds, search_info, bitset);
     }();
-
+    milvus::tracer::logTraceContext("after_final", root_span);
     float* distances = final->distances_.data();
 
     auto total_num = num_queries * topk;
@@ -66,6 +71,7 @@ SearchOnSealedIndex(const Schema& schema,
     result.distances_ = std::move(final->distances_);
     result.total_nq_ = num_queries;
     result.unity_topK_ = topk;
+    milvus::tracer::logTraceContext("finish_SearchOnSealedIndex", root_span);
 }
 
 void

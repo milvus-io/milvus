@@ -28,6 +28,7 @@
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Util.h"
 #include "storage/ThreadPools.h"
+#include "common/Tracer.h"
 
 namespace milvus::segcore {
 
@@ -303,7 +304,10 @@ SegmentGrowingImpl::vector_search(SearchInfo& search_info,
                                   const BitsetView& bitset,
                                   SearchResult& output) const {
     auto& sealed_indexing = this->get_sealed_indexing_record();
+    auto root_span = milvus::tracer::GetRootSpan();
+    milvus::tracer::logTraceContext("before_is_ready", root_span);
     if (sealed_indexing.is_ready(search_info.field_id_)) {
+        milvus::tracer::logTraceContext("before_SearchOnSealedIndex", root_span);
         query::SearchOnSealedIndex(this->get_schema(),
                                    sealed_indexing,
                                    search_info,
@@ -311,7 +315,9 @@ SegmentGrowingImpl::vector_search(SearchInfo& search_info,
                                    query_count,
                                    bitset,
                                    output);
+        milvus::tracer::logTraceContext("after_SearchOnSealedIndex", root_span);
     } else {
+        milvus::tracer::logTraceContext("before_SearchOnGrowing", root_span);
         query::SearchOnGrowing(*this,
                                search_info,
                                query_data,
@@ -319,6 +325,7 @@ SegmentGrowingImpl::vector_search(SearchInfo& search_info,
                                timestamp,
                                bitset,
                                output);
+        milvus::tracer::logTraceContext("after_SearchOnGrowing", root_span);
     }
 }
 

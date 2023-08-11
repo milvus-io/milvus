@@ -44,6 +44,15 @@ StartSpan(std::string name, TraceContext* ctx = nullptr);
 
 void
 logTraceContext(const std::string& extended_info,
-                const trace::SpanContext& ctx);
+                std::shared_ptr<trace::Span> span);
+
+void
+SetRootSpan(std::shared_ptr<trace::Span> span);
+
+void
+CloseRootSpan();
+
+std::shared_ptr<trace::Span>
+GetRootSpan();
 
 }  // namespace milvus::tracer

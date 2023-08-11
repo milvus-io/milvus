@@ -22,6 +22,7 @@
 
 #include "knowhere/factory.h"
 #include "knowhere/comp/time_recorder.h"
+#include "common/Tracer.h"
 #define RAW_DATA "RAW_DATA"
 
 namespace milvus::index {
@@ -83,12 +84,16 @@ std::unique_ptr<SearchResult>
 VectorMemNMIndex::Query(const DatasetPtr dataset,
                         const SearchInfo& search_info,
                         const BitsetView& bitset) {
+    auto root_span = milvus::tracer::GetRootSpan();
     auto load_raw_data_closure = [&]() { LoadRawData(); };  // hide this pointer
+    milvus::tracer::logTraceContext("after_load_raw_data", root_span);
     // load -> query, raw data has been loaded
     // build -> query, this case just for test, should load raw data before query
     std::call_once(raw_data_loaded_, load_raw_data_closure);
-
-    return VectorMemIndex::Query(dataset, search_info, bitset);
+    milvus::tracer::logTraceContext("after_load_raw_data_closure", root_span);
+    auto res = VectorMemIndex::Query(dataset, search_info, bitset);
+    milvus::tracer::logTraceContext("VectorMemIndex::Query", root_span);
+    return res;
 }
 
 void

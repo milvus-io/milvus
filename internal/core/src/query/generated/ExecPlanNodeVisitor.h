@@ -15,6 +15,7 @@
 #include "utils/Json.h"
 #include "query/PlanImpl.h"
 #include "segcore/SegmentGrowing.h"
+#include "common/Tracer.h"
 #include <utility>
 #include "PlanNodeVisitor.h"
 
@@ -48,7 +49,9 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     SearchResult
     get_moved_result(PlanNode& node) {
         assert(!search_result_opt_.has_value());
+        auto root_span = milvus::tracer::GetRootSpan();
         node.accept(*this);
+        milvus::tracer::logTraceContext("node.accept", root_span);
         assert(search_result_opt_.has_value());
         auto ret = std::move(search_result_opt_).value();
         search_result_opt_.reset();

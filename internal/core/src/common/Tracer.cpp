@@ -8,6 +8,7 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
+#include <shared_mutex>
 #include "log/Log.h"
 #include "Tracer.h"
 
@@ -35,6 +36,8 @@ namespace ostream = opentelemetry::exporter::trace;
 namespace otlp = opentelemetry::exporter::otlp;
 
 static const int trace_id_size = 2 * opentelemetry::trace::TraceId::kSize;
+static bool enable_trace = true;
+static std::unordered_map<std::thread::id, std::shared_ptr<trace::Span>> root_span_map;
 
 void
 initTelementry(TraceConfig* config) {
@@ -52,6 +55,7 @@ initTelementry(TraceConfig* config) {
         exporter = otlp::OtlpGrpcExporterFactory::Create(opts);
     } else {
         LOG_SEGCORE_INFO_ << "Empty Trace";
+        enable_trace = false;
     }
     auto processor =
         trace_sdk::BatchSpanProcessorFactory::Create(std::move(exporter), {});
@@ -87,13 +91,37 @@ StartSpan(std::string name, TraceContext* parentCtx) {
 }
 
 void
+SetRootSpan(std::shared_ptr<trace::Span> span) {
+    if(enable_trace) {
+        root_span_map[std::this_thread::get_id()] = span;
+    }
+}
+
+void
+CloseRootSpan() {
+    if(enable_trace) {
+        root_span_map.erase(std::this_thread::get_id());
+    }
+}
+
+std::shared_ptr<trace::Span>
+GetRootSpan() {
+    if(enable_trace) {
+        return root_span_map[std::this_thread::get_id()];
+    }
+    return nullptr;
+}
+
+void
 logTraceContext(const std::string& extended_info,
-                const trace::SpanContext& ctx) {
-    char traceID[trace_id_size];
-    ctx.trace_id().ToLowerBase16(
-        nostd::span<char, 2 * opentelemetry::trace::TraceId::kSize>{
-            &traceID[0], trace_id_size});
-    LOG_SEGCORE_DEBUG_ << extended_info << ":" << traceID;
+                const std::shared_ptr<trace::Span> span) {
+    if (enable_trace && span != nullptr) {
+        char traceID[trace_id_size];
+        span->GetContext().trace_id().ToLowerBase16(
+                nostd::span<char, 2 * opentelemetry::trace::TraceId::kSize>{
+                        &traceID[0], trace_id_size});
+        LOG_SEGCORE_INFO_ << extended_info << ":" << traceID;
+    }
 }
 
 }  // namespace milvus::tracer
