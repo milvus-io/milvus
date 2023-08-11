@@ -527,6 +527,7 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 		return resp, nil
 	}
 
+	var collectionID int64
 	segments := make([]*SegmentInfo, 0, len(req.GetSegments()))
 	for _, seg2Drop := range req.GetSegments() {
 		info := &datapb.SegmentInfo{
@@ -542,6 +543,7 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 		}
 		segment := NewSegmentInfo(info)
 		segments = append(segments, segment)
+		collectionID = seg2Drop.GetCollectionID()
 	}
 
 	err := s.meta.UpdateDropChannelSegmentInfo(channel, segments)
@@ -557,6 +559,8 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 		log.Warn("DropVChannel failed to ReleaseAndRemove", zap.String("channel", channel), zap.Error(err))
 	}
 	s.segmentManager.DropSegmentsOfChannel(ctx, channel)
+
+	metrics.CleanupDataCoordNumStoredRows(collectionID)
 
 	// no compaction triggered in Drop procedure
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
