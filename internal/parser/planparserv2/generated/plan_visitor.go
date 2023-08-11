@@ -19,6 +19,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#Floating.
 	VisitFloating(ctx *FloatingContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#JSONContainsAll.
+	VisitJSONContainsAll(ctx *JSONContainsAllContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#LogicalOr.
 	VisitLogicalOr(ctx *LogicalOrContext) interface{}
 
@@ -69,6 +72,12 @@ type PlanVisitor interface {
 
 	// Visit a parse tree produced by PlanParser#Integer.
 	VisitInteger(ctx *IntegerContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#Array.
+	VisitArray(ctx *ArrayContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#JSONContainsAny.
+	VisitJSONContainsAny(ctx *JSONContainsAnyContext) interface{}
 
 	// Visit a parse tree produced by PlanParser#BitXor.
 	VisitBitXor(ctx *BitXorContext) interface{}

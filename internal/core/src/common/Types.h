@@ -83,6 +83,7 @@ using VectorArray = proto::schema::VectorField;
 using IdArray = proto::schema::IDs;
 using InsertData = proto::segcore::InsertRecord;
 using PkType = std::variant<std::monostate, int64_t, std::string>;
+using ContainsType = proto::plan::JSONContainsExpr_JSONOp;
 
 inline bool
 IsPrimaryKeyDataType(DataType data_type) {

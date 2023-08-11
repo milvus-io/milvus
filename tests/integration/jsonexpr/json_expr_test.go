@@ -1023,7 +1023,7 @@ func (s *JSONExprSuite) TestJsonWithEscapeString() {
 	}
 	s.doSearch(collectionName, []string{common.MetaFieldName}, expr, dim, checkFunc)
 
-	// search fail reason: "string field contains invalid UTF-8"
+	//search fail reason: "string field contains invalid UTF-8"
 	//expr = `str4 like "abc\367-%"`
 	//checkFunc = func(result *milvuspb.SearchResults) {
 	//	s.Equal(1, len(result.Results.FieldsData))
@@ -1032,6 +1032,131 @@ func (s *JSONExprSuite) TestJsonWithEscapeString() {
 	//	s.Equal(10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	//}
 	//s.doSearch(collectionName, []string{common.MetaFieldName}, expr, dim, checkFunc)
+}
+
+func (s *JSONExprSuite) TestJsonContains() {
+	c := s.Cluster
+	ctx, cancel := context.WithCancel(c.GetContext())
+	defer cancel()
+	prefix := "TestHelloMilvus"
+	dbName := ""
+	collectionName := prefix + funcutil.GenRandomStr()
+	dim := 128
+	rowNum := 100
+
+	constructCollectionSchema := func() *schemapb.CollectionSchema {
+		pk := &schemapb.FieldSchema{
+			FieldID:      0,
+			Name:         integration.Int64Field,
+			IsPrimaryKey: true,
+			Description:  "",
+			DataType:     schemapb.DataType_Int64,
+			TypeParams:   nil,
+			IndexParams:  nil,
+			AutoID:       true,
+		}
+		fVec := &schemapb.FieldSchema{
+			FieldID:      0,
+			Name:         integration.FloatVecField,
+			IsPrimaryKey: false,
+			Description:  "",
+			DataType:     schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.DimKey,
+					Value: strconv.Itoa(dim),
+				},
+			},
+			IndexParams: nil,
+			AutoID:      false,
+		}
+		return &schemapb.CollectionSchema{
+			Name:               collectionName,
+			Description:        "",
+			AutoID:             false,
+			EnableDynamicField: true,
+			Fields: []*schemapb.FieldSchema{
+				pk,
+				fVec,
+			},
+		}
+	}
+	schema := constructCollectionSchema()
+	marshaledSchema, err := proto.Marshal(schema)
+	s.NoError(err)
+
+	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Schema:         marshaledSchema,
+		ShardsNum:      2,
+	})
+	s.NoError(err)
+	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
+		log.Warn("createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
+	}
+	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
+
+	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	s.NoError(err)
+	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+
+	describeCollectionResp, err := c.Proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
+	s.NoError(err)
+	s.True(describeCollectionResp.Schema.EnableDynamicField)
+	s.Equal(2, len(describeCollectionResp.GetSchema().GetFields()))
+
+	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
+	jsonData := newJSONData(common.MetaFieldName, rowNum)
+	jsonData.IsDynamic = true
+	s.insertFlushIndexLoad(ctx, dbName, collectionName, rowNum, dim, []*schemapb.FieldData{fVecColumn, jsonData})
+
+	expr := ""
+	// search
+	expr = `json_contains(C, 0)`
+	checkFunc := func(result *milvuspb.SearchResults) {
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(common.MetaFieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(1, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+	}
+	s.doSearch(collectionName, []string{"A"}, expr, dim, checkFunc)
+
+	expr = `json_contains_all(C, [0, 100])`
+	checkFunc = func(result *milvuspb.SearchResults) {
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(common.MetaFieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(1, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+	}
+	s.doSearch(collectionName, []string{"A"}, expr, dim, checkFunc)
+
+	expr = `json_contains_all(C, [0, 99])`
+	checkFunc = func(result *milvuspb.SearchResults) {
+		for _, f := range result.Results.GetFieldsData() {
+			s.Nil(f)
+		}
+	}
+	s.doSearch(collectionName, []string{"A"}, expr, dim, checkFunc)
+
+	expr = `json_contains_any(C, [1, 98])`
+	checkFunc = func(result *milvuspb.SearchResults) {
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(common.MetaFieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(4, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+	}
+	s.doSearch(collectionName, []string{"A"}, expr, dim, checkFunc)
+
+	expr = `json_contains_any(C, [101, 102])`
+	checkFunc = func(result *milvuspb.SearchResults) {
+		for _, f := range result.Results.GetFieldsData() {
+			s.Nil(f)
+		}
+	}
+	s.doSearch(collectionName, []string{"A"}, expr, dim, checkFunc)
 }
 
 func TestJsonExpr(t *testing.T) {

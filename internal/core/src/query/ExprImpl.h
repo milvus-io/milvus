@@ -97,4 +97,19 @@ struct ExistsExprImpl : ExistsExpr {
     }
 };
 
+template <typename T>
+struct JsonContainsExprImpl : JsonContainsExpr {
+    const std::vector<T> elements_;
+
+    JsonContainsExprImpl(ColumnInfo column,
+                         std::vector<T> elements,
+                         const bool same_type,
+                         ContainsType op,
+                         proto::plan::GenericValue::ValCase val_case)
+        : JsonContainsExpr(
+              std::forward<ColumnInfo>(column), same_type, op, val_case),
+          elements_(std::move(elements)) {
+    }
+};
+
 }  // namespace milvus::query

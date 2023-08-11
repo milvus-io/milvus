@@ -343,4 +343,21 @@ ShowExprVisitor::visit(AlwaysTrueExpr& expr) {
     json_opt_ = res;
 }
 
+void
+ShowExprVisitor::visit(JsonContainsExpr& expr) {
+    using proto::plan::OpType;
+    using proto::plan::OpType_Name;
+    AssertInfo(!json_opt_.has_value(),
+               "[ShowExprVisitor]Ret json already has value before visit");
+
+    Json res{{"expr_type", "JsonContains"},
+             {"field_id", expr.column_.field_id.get()},
+             {"data_type", expr.column_.data_type},
+             {"nested_path", expr.column_.nested_path},
+             {"same_type", expr.same_type_},
+             {"op", expr.op_},
+             {"val_case", expr.val_case_}};
+    json_opt_ = res;
+}
+
 }  // namespace milvus::query

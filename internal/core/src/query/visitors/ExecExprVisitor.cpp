@@ -1934,8 +1934,9 @@ ExecExprVisitor::ExecTermJsonVariableInField(TermExpr& expr_raw) -> BitsetType {
             if (val.error()) {
                 return false;
             }
-            if (val.value() == target_val)
+            if (val.value() == target_val) {
                 return true;
+            }
         }
         return false;
     };
@@ -2063,6 +2064,471 @@ void
 ExecExprVisitor::visit(AlwaysTrueExpr& expr) {
     BitsetType res(row_count_);
     res.set();
+    bitset_opt_ = std::move(res);
+}
+
+bool
+compareTwoJsonArray(
+    simdjson::simdjson_result<simdjson::fallback::ondemand::array> arr1,
+    const proto::plan::Array& arr2) {
+    if (arr2.array_size() != arr1.count_elements()) {
+        return false;
+    }
+    int i = 0;
+    for (auto&& it : arr1) {
+        switch (arr2.array(i).val_case()) {
+            case proto::plan::GenericValue::kBoolVal: {
+                auto val = it.template get<bool>();
+                if (val.error() || val.value() != arr2.array(i).bool_val()) {
+                    return false;
+                }
+                break;
+            }
+            case proto::plan::GenericValue::kInt64Val: {
+                auto val = it.template get<int64_t>();
+                if (val.error() || val.value() != arr2.array(i).int64_val()) {
+                    return false;
+                }
+                break;
+            }
+            case proto::plan::GenericValue::kFloatVal: {
+                auto val = it.template get<double>();
+                if (val.error() || val.value() != arr2.array(i).float_val()) {
+                    return false;
+                }
+                break;
+            }
+            case proto::plan::GenericValue::kStringVal: {
+                auto val = it.template get<std::string_view>();
+                if (val.error() || val.value() != arr2.array(i).string_val()) {
+                    return false;
+                }
+                break;
+            }
+            default:
+                PanicInfo(fmt::format("unsupported data type {}",
+                                      arr2.array(i).val_case()));
+        }
+        i++;
+    }
+    return true;
+}
+
+template <typename ExprValueType>
+auto
+ExecExprVisitor::ExecJsonContains(JsonContainsExpr& expr_raw) -> BitsetType {
+    using Index = index::ScalarIndex<milvus::Json>;
+    auto& expr = static_cast<JsonContainsExprImpl<ExprValueType>&>(expr_raw);
+    auto pointer = milvus::Json::pointer(expr.column_.nested_path);
+    auto index_func = [](Index* index) { return TargetBitmap{}; };
+    using GetType =
+        std::conditional_t<std::is_same_v<ExprValueType, std::string>,
+                           std::string_view,
+                           ExprValueType>;
+    std::unordered_set<GetType> elements;
+    for (auto const& element : expr.elements_) {
+        elements.insert(element);
+    }
+    auto elem_func = [&elements, &pointer](const milvus::Json& json) {
+        auto doc = json.doc();
+        auto array = doc.at_pointer(pointer).get_array();
+        if (array.error()) {
+            return false;
+        }
+        for (auto&& it : array) {
+            auto val = it.template get<GetType>();
+            if (val.error()) {
+                continue;
+            }
+            if (elements.count(val.value()) > 0) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    return ExecRangeVisitorImpl<milvus::Json>(
+        expr.column_.field_id, index_func, elem_func);
+}
+
+auto
+ExecExprVisitor::ExecJsonContainsArray(JsonContainsExpr& expr_raw)
+    -> BitsetType {
+    using Index = index::ScalarIndex<milvus::Json>;
+    auto& expr =
+        static_cast<JsonContainsExprImpl<proto::plan::Array>&>(expr_raw);
+    auto pointer = milvus::Json::pointer(expr.column_.nested_path);
+    auto index_func = [](Index* index) { return TargetBitmap{}; };
+    auto& elements = expr.elements_;
+    auto elem_func = [&elements, &pointer](const milvus::Json& json) {
+        auto doc = json.doc();
+        auto array = doc.at_pointer(pointer).get_array();
+        if (array.error()) {
+            return false;
+        }
+        for (auto const& element : elements) {
+            for (auto&& it : array) {
+                auto val = it.get_array();
+                if (val.error()) {
+                    continue;
+                }
+                if (compareTwoJsonArray(val, element)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+
+    return ExecRangeVisitorImpl<milvus::Json>(
+        expr.column_.field_id, index_func, elem_func);
+}
+
+auto
+ExecExprVisitor::ExecJsonContainsWithDiffType(JsonContainsExpr& expr_raw)
+    -> BitsetType {
+    using Index = index::ScalarIndex<milvus::Json>;
+    auto& expr =
+        static_cast<JsonContainsExprImpl<proto::plan::GenericValue>&>(expr_raw);
+    auto pointer = milvus::Json::pointer(expr.column_.nested_path);
+    auto index_func = [](Index* index) { return TargetBitmap{}; };
+    auto& elements = expr.elements_;
+    auto elem_func = [&elements, &pointer](const milvus::Json& json) {
+        auto doc = json.doc();
+        auto array = doc.at_pointer(pointer).get_array();
+        if (array.error()) {
+            return false;
+        }
+        // Note: array can only be iterated once
+        for (auto&& it : array) {
+            for (auto const& element : elements) {
+                switch (element.val_case()) {
+                    case proto::plan::GenericValue::kBoolVal: {
+                        auto val = it.template get<bool>();
+                        if (val.error()) {
+                            continue;
+                        }
+                        if (val.value() == element.bool_val()) {
+                            return true;
+                        }
+                        break;
+                    }
+                    case proto::plan::GenericValue::kInt64Val: {
+                        auto val = it.template get<int64_t>();
+                        if (val.error()) {
+                            continue;
+                        }
+                        if (val.value() == element.int64_val()) {
+                            return true;
+                        }
+                        break;
+                    }
+                    case proto::plan::GenericValue::kFloatVal: {
+                        auto val = it.template get<double>();
+                        if (val.error()) {
+                            continue;
+                        }
+                        if (val.value() == element.float_val()) {
+                            return true;
+                        }
+                        break;
+                    }
+                    case proto::plan::GenericValue::kStringVal: {
+                        auto val = it.template get<std::string_view>();
+                        if (val.error()) {
+                            continue;
+                        }
+                        if (val.value() == element.string_val()) {
+                            return true;
+                        }
+                        break;
+                    }
+                    case proto::plan::GenericValue::kArrayVal: {
+                        auto val = it.get_array();
+                        if (val.error()) {
+                            continue;
+                        }
+                        if (compareTwoJsonArray(val, element.array_val())) {
+                            return true;
+                        }
+                        break;
+                    }
+                    default:
+                        PanicInfo(fmt::format("unsupported data type {}",
+                                              element.val_case()));
+                }
+            }
+        }
+        return false;
+    };
+
+    return ExecRangeVisitorImpl<milvus::Json>(
+        expr.column_.field_id, index_func, elem_func);
+}
+
+template <typename ExprValueType>
+auto
+ExecExprVisitor::ExecJsonContainsAll(JsonContainsExpr& expr_raw) -> BitsetType {
+    using Index = index::ScalarIndex<milvus::Json>;
+    auto& expr = static_cast<JsonContainsExprImpl<ExprValueType>&>(expr_raw);
+    auto pointer = milvus::Json::pointer(expr.column_.nested_path);
+    auto index_func = [](Index* index) { return TargetBitmap{}; };
+    using GetType =
+        std::conditional_t<std::is_same_v<ExprValueType, std::string>,
+                           std::string_view,
+                           ExprValueType>;
+
+    std::unordered_set<GetType> elements;
+    for (auto const& element : expr.elements_) {
+        elements.insert(element);
+    }
+    //    auto elements = expr.elements_;
+    auto elem_func = [&elements, &pointer](const milvus::Json& json) {
+        auto doc = json.doc();
+        auto array = doc.at_pointer(pointer).get_array();
+        if (array.error()) {
+            return false;
+        }
+        std::unordered_set<GetType> tmp_elements(elements);
+        // Note: array can only be iterated once
+        for (auto&& it : array) {
+            auto val = it.template get<GetType>();
+            if (val.error()) {
+                continue;
+            }
+            tmp_elements.erase(val.value());
+            if (tmp_elements.size() == 0) {
+                return true;
+            }
+        }
+        return tmp_elements.size() == 0;
+    };
+
+    return ExecRangeVisitorImpl<milvus::Json>(
+        expr.column_.field_id, index_func, elem_func);
+}
+
+auto
+ExecExprVisitor::ExecJsonContainsAllArray(JsonContainsExpr& expr_raw)
+    -> BitsetType {
+    using Index = index::ScalarIndex<milvus::Json>;
+    auto& expr =
+        static_cast<JsonContainsExprImpl<proto::plan::Array>&>(expr_raw);
+    auto pointer = milvus::Json::pointer(expr.column_.nested_path);
+    auto index_func = [](Index* index) { return TargetBitmap{}; };
+    auto& elements = expr.elements_;
+    std::unordered_set<int> elements_index;
+    int i = 0;
+    for (auto& element : expr.elements_) {
+        elements_index.insert(i);
+        i++;
+    }
+    auto elem_func =
+        [&elements, &elements_index, &pointer](const milvus::Json& json) {
+            auto doc = json.doc();
+            auto array = doc.at_pointer(pointer).get_array();
+            if (array.error()) {
+                return false;
+            }
+            std::unordered_set<int> tmp_elements_index(elements_index);
+            for (auto&& it : array) {
+                auto val = it.get_array();
+                if (val.error()) {
+                    continue;
+                }
+                int i = -1;
+                for (auto const& element : elements) {
+                    i++;
+                    if (compareTwoJsonArray(val, element)) {
+                        tmp_elements_index.erase(i);
+                        break;
+                    }
+                }
+                if (tmp_elements_index.size() == 0) {
+                    return true;
+                }
+            }
+            return tmp_elements_index.size() == 0;
+        };
+
+    return ExecRangeVisitorImpl<milvus::Json>(
+        expr.column_.field_id, index_func, elem_func);
+}
+
+auto
+ExecExprVisitor::ExecJsonContainsAllWithDiffType(JsonContainsExpr& expr_raw)
+    -> BitsetType {
+    using Index = index::ScalarIndex<milvus::Json>;
+    auto& expr =
+        static_cast<JsonContainsExprImpl<proto::plan::GenericValue>&>(expr_raw);
+    auto pointer = milvus::Json::pointer(expr.column_.nested_path);
+    auto index_func = [](Index* index) { return TargetBitmap{}; };
+
+    auto elements = expr.elements_;
+    std::unordered_set<int> elements_index;
+    int i = 0;
+    for (auto& element : expr.elements_) {
+        elements_index.insert(i);
+        i++;
+    }
+    auto elem_func =
+        [&elements, &elements_index, &pointer](const milvus::Json& json) {
+            auto doc = json.doc();
+            auto array = doc.at_pointer(pointer).get_array();
+            if (array.error()) {
+                return false;
+            }
+            std::unordered_set<int> tmp_elements_index(elements_index);
+            for (auto&& it : array) {
+                int i = -1;
+                for (auto& element : elements) {
+                    i++;
+                    switch (element.val_case()) {
+                        case proto::plan::GenericValue::kBoolVal: {
+                            auto val = it.template get<bool>();
+                            if (val.error()) {
+                                continue;
+                            }
+                            if (val.value() == element.bool_val()) {
+                                tmp_elements_index.erase(i);
+                            }
+                            break;
+                        }
+                        case proto::plan::GenericValue::kInt64Val: {
+                            auto val = it.template get<int64_t>();
+                            if (val.error()) {
+                                continue;
+                            }
+                            if (val.value() == element.int64_val()) {
+                                tmp_elements_index.erase(i);
+                            }
+                            break;
+                        }
+                        case proto::plan::GenericValue::kFloatVal: {
+                            auto val = it.template get<double>();
+                            if (val.error()) {
+                                continue;
+                            }
+                            if (val.value() == element.float_val()) {
+                                tmp_elements_index.erase(i);
+                            }
+                            break;
+                        }
+                        case proto::plan::GenericValue::kStringVal: {
+                            auto val = it.template get<std::string_view>();
+                            if (val.error()) {
+                                continue;
+                            }
+                            if (val.value() == element.string_val()) {
+                                tmp_elements_index.erase(i);
+                            }
+                            break;
+                        }
+                        case proto::plan::GenericValue::kArrayVal: {
+                            auto val = it.get_array();
+                            if (val.error()) {
+                                continue;
+                            }
+                            if (compareTwoJsonArray(val, element.array_val())) {
+                                tmp_elements_index.erase(i);
+                            }
+                            break;
+                        }
+                        default:
+                            PanicInfo(fmt::format("unsupported data type {}",
+                                                  element.val_case()));
+                    }
+                    if (tmp_elements_index.size() == 0) {
+                        return true;
+                    }
+                }
+                if (tmp_elements_index.size() == 0) {
+                    return true;
+                }
+            }
+            return tmp_elements_index.size() == 0;
+        };
+
+    return ExecRangeVisitorImpl<milvus::Json>(
+        expr.column_.field_id, index_func, elem_func);
+}
+
+void
+ExecExprVisitor::visit(JsonContainsExpr& expr) {
+    auto& field_meta = segment_.get_schema()[expr.column_.field_id];
+    AssertInfo(
+        expr.column_.data_type == DataType::JSON,
+        "[ExecExprVisitor]DataType of JsonContainsExpr isn't json data type");
+    BitsetType res;
+    switch (expr.op_) {
+        case proto::plan::JSONContainsExpr_JSONOp_Contains:
+        case proto::plan::JSONContainsExpr_JSONOp_ContainsAny: {
+            if (expr.same_type_) {
+                switch (expr.val_case_) {
+                    case proto::plan::GenericValue::kBoolVal: {
+                        res = ExecJsonContains<bool>(expr);
+                        break;
+                    }
+                    case proto::plan::GenericValue::kInt64Val: {
+                        res = ExecJsonContains<int64_t>(expr);
+                        break;
+                    }
+                    case proto::plan::GenericValue::kFloatVal: {
+                        res = ExecJsonContains<double>(expr);
+                        break;
+                    }
+                    case proto::plan::GenericValue::kStringVal: {
+                        res = ExecJsonContains<std::string>(expr);
+                        break;
+                    }
+                    case proto::plan::GenericValue::kArrayVal: {
+                        res = ExecJsonContainsArray(expr);
+                        break;
+                    }
+                    default:
+                        PanicInfo(fmt::format("unsupported data type"));
+                }
+                break;
+            }
+            res = ExecJsonContainsWithDiffType(expr);
+            break;
+        }
+        case proto::plan::JSONContainsExpr_JSONOp_ContainsAll: {
+            if (expr.same_type_) {
+                switch (expr.val_case_) {
+                    case proto::plan::GenericValue::kBoolVal: {
+                        res = ExecJsonContainsAll<bool>(expr);
+                        break;
+                    }
+                    case proto::plan::GenericValue::kInt64Val: {
+                        res = ExecJsonContainsAll<int64_t>(expr);
+                        break;
+                    }
+                    case proto::plan::GenericValue::kFloatVal: {
+                        res = ExecJsonContainsAll<double>(expr);
+                        break;
+                    }
+                    case proto::plan::GenericValue::kStringVal: {
+                        res = ExecJsonContainsAll<std::string>(expr);
+                        break;
+                    }
+                    case proto::plan::GenericValue::kArrayVal: {
+                        res = ExecJsonContainsAllArray(expr);
+                        break;
+                    }
+                    default:
+                        PanicInfo(fmt::format("unsupported data type"));
+                }
+                break;
+            }
+            res = ExecJsonContainsAllWithDiffType(expr);
+            break;
+        }
+        default:
+            PanicInfo(fmt::format("unsupported json contains type"));
+    }
+    AssertInfo(res.size() == row_count_,
+               "[ExecExprVisitor]Size of results not equal row count");
     bitset_opt_ = std::move(res);
 }
 

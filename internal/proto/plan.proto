@@ -35,7 +35,13 @@ message GenericValue {
     int64 int64_val = 2;
     double float_val = 3;
     string string_val = 4;
+    Array array_val = 5;
   };
+}
+
+message Array {
+  repeated GenericValue array = 1;
+  bool same_type = 2;
 }
 
 message QueryInfo {
@@ -90,6 +96,23 @@ message TermExpr {
   ColumnInfo column_info = 1;
   repeated GenericValue values = 2;
   bool is_in_field = 3;
+}
+
+message JSONContainsExpr {
+  ColumnInfo column_info = 1;
+  repeated GenericValue elements = 2;
+  // 0: invalid
+  // 1: json_contains
+  // 2: json_contains_all
+  // 3: json_contains_any
+  enum JSONOp {
+    Invalid = 0;
+    Contains = 1;
+    ContainsAll = 2;
+    ContainsAny = 3;
+  }
+  JSONOp op = 3;
+  bool elements_same_type = 4;
 }
 
 message UnaryExpr {
@@ -148,6 +171,7 @@ message Expr {
     ColumnExpr column_expr = 10;
     ExistsExpr exists_expr = 11;
     AlwaysTrueExpr always_true_expr = 12;
+    JSONContainsExpr json_contains_expr = 13;
   };
 }
 
