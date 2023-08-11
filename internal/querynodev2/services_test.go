@@ -1091,6 +1091,7 @@ func (suite *ServiceSuite) TestSearch_Normal() {
 		Req:             creq,
 		FromShardLeader: false,
 		DmlChannels:     []string{suite.vchannel},
+		TotalChannelNum: 2,
 	}
 	suite.NoError(err)
 
@@ -1117,6 +1118,7 @@ func (suite *ServiceSuite) TestSearch_Concurrent() {
 				Req:             creq,
 				FromShardLeader: false,
 				DmlChannels:     []string{suite.vchannel},
+				TotalChannelNum: 2,
 			}
 			suite.NoError(err)
 			return suite.node.Search(ctx, req)
@@ -1142,6 +1144,7 @@ func (suite *ServiceSuite) TestSearch_Failed() {
 		Req:             creq,
 		FromShardLeader: false,
 		DmlChannels:     []string{suite.vchannel},
+		TotalChannelNum: 2,
 	}
 	suite.NoError(err)
 
@@ -1201,6 +1204,7 @@ func (suite *ServiceSuite) TestSearchSegments_Normal() {
 		Req:             creq,
 		FromShardLeader: true,
 		DmlChannels:     []string{suite.vchannel},
+		TotalChannelNum: 2,
 	}
 	suite.NoError(err)
 

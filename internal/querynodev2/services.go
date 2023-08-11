@@ -821,6 +821,7 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 			SegmentIDs:      req.SegmentIDs,
 			FromShardLeader: req.FromShardLeader,
 			Scope:           req.Scope,
+			TotalChannelNum: req.TotalChannelNum,
 		}
 
 		runningGp.Go(func() error {
