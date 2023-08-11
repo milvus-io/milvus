@@ -301,6 +301,9 @@ func (loader *segmentLoader) notifyLoadFinish(segments ...*querypb.SegmentLoadIn
 func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*querypb.SegmentLoadInfo) (LoadResource, int, error) {
 	resource := LoadResource{}
 
+	loader.mut.Lock()
+	defer loader.mut.Unlock()
+
 	memoryUsage := hardware.GetUsedMemoryCount()
 	totalMemory := hardware.GetMemoryCount()
 
@@ -309,9 +312,6 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 		return resource, 0, errors.Wrap(err, "get local used size failed")
 	}
 	diskCap := paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsUint64()
-
-	loader.mut.Lock()
-	defer loader.mut.Unlock()
 
 	poolCap := runtime.NumCPU() * paramtable.Get().CommonCfg.HighPriorityThreadCoreCoefficient.GetAsInt()
 	if loader.committedResource.WorkNum >= poolCap {
