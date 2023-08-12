@@ -30,11 +30,7 @@
 
 namespace milvus {
 
-#ifdef MAP_POPULATE
-static int mmap_flags = MAP_SHARED | MAP_POPULATE;
-#else
 static int mmap_flags = MAP_SHARED;
-#endif
 
 class ColumnBase {
  public:
