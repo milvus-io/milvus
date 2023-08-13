@@ -31,10 +31,10 @@ import (
 
 // retrieveOnSegments performs retrieve on listed segments
 // all segment ids are validated before calling this function
-func retrieveOnSegments(ctx context.Context, manager *Manager, segType SegmentType, plan *RetrievePlan, segIDs []UniqueID) ([]*segcorepb.RetrieveResults, error) {
+func retrieveOnSegments(ctx context.Context, segments []Segment, segType SegmentType, plan *RetrievePlan) ([]*segcorepb.RetrieveResults, error) {
 	var (
-		resultCh = make(chan *segcorepb.RetrieveResults, len(segIDs))
-		errs     = make([]error, len(segIDs))
+		resultCh = make(chan *segcorepb.RetrieveResults, len(segments))
+		errs     = make([]error, len(segments))
 		wg       sync.WaitGroup
 	)
 
@@ -43,22 +43,18 @@ func retrieveOnSegments(ctx context.Context, manager *Manager, segType SegmentTy
 		label = metrics.GrowingSegmentLabel
 	}
 
-	for i, segID := range segIDs {
+	for i, segment := range segments {
 		wg.Add(1)
-		go func(segID int64, i int) {
+		go func(segment Segment, i int) {
 			defer wg.Done()
-			segment, _ := manager.Segment.GetWithType(segID, segType).(*LocalSegment)
-			if segment == nil {
-				errs[i] = nil
-				return
-			}
+			seg := segment.(*LocalSegment)
 			tr := timerecord.NewTimeRecorder("retrieveOnSegments")
-			result, err := segment.Retrieve(ctx, plan)
+			result, err := seg.Retrieve(ctx, plan)
 			if err != nil {
 				errs[i] = err
 				return
 			}
-			if err = segment.ValidateIndexedFieldsData(ctx, result); err != nil {
+			if err = seg.ValidateIndexedFieldsData(ctx, result); err != nil {
 				errs[i] = err
 				return
 			}
@@ -66,7 +62,7 @@ func retrieveOnSegments(ctx context.Context, manager *Manager, segType SegmentTy
 			resultCh <- result
 			metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
 				metrics.QueryLabel, label).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		}(segID, i)
+		}(segment, i)
 	}
 	wg.Wait()
 	close(resultCh)
@@ -86,31 +82,22 @@ func retrieveOnSegments(ctx context.Context, manager *Manager, segType SegmentTy
 }
 
 // retrieveHistorical will retrieve all the target segments in historical
-func RetrieveHistorical(ctx context.Context, manager *Manager, plan *RetrievePlan, collID UniqueID, partIDs []UniqueID, segIDs []UniqueID) ([]*segcorepb.RetrieveResults, []UniqueID, []UniqueID, error) {
-	var err error
-	var retrieveResults []*segcorepb.RetrieveResults
-	var retrieveSegmentIDs []UniqueID
-	var retrievePartIDs []UniqueID
-	retrievePartIDs, retrieveSegmentIDs, err = validateOnHistorical(ctx, manager, collID, partIDs, segIDs)
+func RetrieveHistorical(ctx context.Context, manager *Manager, plan *RetrievePlan, collID UniqueID, partIDs []UniqueID, segIDs []UniqueID) ([]*segcorepb.RetrieveResults, []Segment, error) {
+	segments, err := validateOnHistorical(ctx, manager, collID, partIDs, segIDs)
 	if err != nil {
-		return retrieveResults, retrieveSegmentIDs, retrievePartIDs, err
+		return nil, nil, err
 	}
 
-	retrieveResults, err = retrieveOnSegments(ctx, manager, SegmentTypeSealed, plan, retrieveSegmentIDs)
-	return retrieveResults, retrievePartIDs, retrieveSegmentIDs, err
+	retrieveResults, err := retrieveOnSegments(ctx, segments, SegmentTypeSealed, plan)
+	return retrieveResults, segments, err
 }
 
 // retrieveStreaming will retrieve all the target segments in streaming
-func RetrieveStreaming(ctx context.Context, manager *Manager, plan *RetrievePlan, collID UniqueID, partIDs []UniqueID, segIDs []UniqueID) ([]*segcorepb.RetrieveResults, []UniqueID, []UniqueID, error) {
-	var err error
-	var retrieveResults []*segcorepb.RetrieveResults
-	var retrievePartIDs []UniqueID
-	var retrieveSegmentIDs []UniqueID
-
-	retrievePartIDs, retrieveSegmentIDs, err = validateOnStream(ctx, manager, collID, partIDs, segIDs)
+func RetrieveStreaming(ctx context.Context, manager *Manager, plan *RetrievePlan, collID UniqueID, partIDs []UniqueID, segIDs []UniqueID) ([]*segcorepb.RetrieveResults, []Segment, error) {
+	segments, err := validateOnStream(ctx, manager, collID, partIDs, segIDs)
 	if err != nil {
-		return retrieveResults, retrieveSegmentIDs, retrievePartIDs, err
+		return nil, nil, err
 	}
-	retrieveResults, err = retrieveOnSegments(ctx, manager, SegmentTypeGrowing, plan, retrieveSegmentIDs)
-	return retrieveResults, retrievePartIDs, retrieveSegmentIDs, err
+	retrieveResults, err := retrieveOnSegments(ctx, segments, SegmentTypeGrowing, plan)
+	return retrieveResults, segments, err
 }

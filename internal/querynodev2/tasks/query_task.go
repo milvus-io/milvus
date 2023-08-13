@@ -88,9 +88,12 @@ func (t *QueryTask) Execute() error {
 	}
 	defer retrievePlan.Delete()
 
-	var results []*segcorepb.RetrieveResults
+	var (
+		results          []*segcorepb.RetrieveResults
+		searchedSegments []segments.Segment
+	)
 	if t.req.GetScope() == querypb.DataScope_Historical {
-		results, _, _, err = segments.RetrieveHistorical(
+		results, searchedSegments, err = segments.RetrieveHistorical(
 			t.ctx,
 			t.segmentManager,
 			retrievePlan,
@@ -99,7 +102,7 @@ func (t *QueryTask) Execute() error {
 			t.req.GetSegmentIDs(),
 		)
 	} else {
-		results, _, _, err = segments.RetrieveStreaming(
+		results, searchedSegments, err = segments.RetrieveStreaming(
 			t.ctx,
 			t.segmentManager,
 			retrievePlan,
@@ -108,6 +111,7 @@ func (t *QueryTask) Execute() error {
 			t.req.GetSegmentIDs(),
 		)
 	}
+	defer t.segmentManager.Segment.Unpin(searchedSegments)
 	if err != nil {
 		return err
 	}
