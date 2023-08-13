@@ -85,6 +85,7 @@ func (kp *kafkaProducer) Close() {
 		}
 
 		close(kp.deliveryChan)
+		kp.p.Close()
 
 		cost := time.Since(start).Milliseconds()
 		if cost > 500 {
