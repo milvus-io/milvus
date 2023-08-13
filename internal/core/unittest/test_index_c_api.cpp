@@ -20,7 +20,6 @@
 #include "common/type_c.h"
 
 constexpr int NB = 10;
-const CStorageConfig c_storage_config = get_default_cstorage_config();
 
 TEST(FloatVecIndex, All) {
     auto index_type = knowhere::IndexEnum::INDEX_FAISS_IVFPQ;
@@ -200,7 +199,7 @@ TEST(CBoolIndexTest, All) {
         { DeleteBinarySet(binary_set); }
     }
 
-    delete[] (char*)(half_ds->GetTensor());
+    delete[](char*)(half_ds->GetTensor());
 }
 
 // TODO: more scalar type.
@@ -317,6 +316,6 @@ TEST(CStringIndexTest, All) {
         { DeleteBinarySet(binary_set); }
     }
 
-    delete[] (char*)(str_ds->GetTensor());
+    delete[](char*)(str_ds->GetTensor());
 }
 #endif

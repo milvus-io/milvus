@@ -18,6 +18,7 @@
 #include "indexbuilder/VecIndexCreator.h"
 #include "common/QueryResult.h"
 #include "test_utils/indexbuilder_test_utils.h"
+#include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
