@@ -6,16 +6,21 @@ import (
 	"sync"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
-var producer *kafka.Producer
+var (
+	producer atomic.Pointer[kafka.Producer]
+	sf       conc.Singleflight[*kafka.Producer]
+)
 
 var once sync.Once
 
@@ -85,15 +90,21 @@ func cloneKafkaConfig(config kafka.ConfigMap) *kafka.ConfigMap {
 }
 
 func (kc *kafkaClient) getKafkaProducer() (*kafka.Producer, error) {
-	config := kc.newProducerConfig()
-	producer, err := kafka.NewProducer(config)
-	if err != nil {
-		log.Error("create sync kafka producer failed", zap.Error(err))
-		return nil, err
+	if p := producer.Load(); p != nil {
+		return p, nil
 	}
-	once.Do(func() {
+	p, err, _ := sf.Do("kafka_producer", func() (*kafka.Producer, error) {
+		if p := producer.Load(); p != nil {
+			return p, nil
+		}
+		config := kc.newProducerConfig()
+		p, err := kafka.NewProducer(config)
+		if err != nil {
+			log.Error("create sync kafka producer failed", zap.Error(err))
+			return nil, err
+		}
 		go func() {
-			for e := range producer.Events() {
+			for e := range p.Events() {
 				switch ev := e.(type) {
 				case kafka.Error:
 					// Generic client instance-level errors, such as broker connection failures,
@@ -109,9 +120,13 @@ func (kc *kafkaClient) getKafkaProducer() (*kafka.Producer, error) {
 				}
 			}
 		}()
+		producer.Store(p)
+		return p, nil
 	})
-
-	return producer, nil
+	if err != nil {
+		return nil, err
+	}
+	return p, nil
 }
 
 func (kc *kafkaClient) newProducerConfig() *kafka.ConfigMap {
