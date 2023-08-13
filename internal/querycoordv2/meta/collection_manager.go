@@ -199,7 +199,7 @@ func (m *CollectionManager) Recover(broker Broker) error {
 
 	err = m.upgradeRecover(broker)
 	if err != nil {
-		log.Error("upgrade recover failed", zap.Error(err))
+		log.Warn("upgrade recover failed", zap.Error(err))
 		return err
 	}
 	return nil

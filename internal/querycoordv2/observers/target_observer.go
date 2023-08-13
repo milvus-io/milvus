@@ -219,7 +219,7 @@ func (ob *TargetObserver) updateNextTarget(collectionID int64) error {
 	log.Info("observer trigger update next target")
 	err := ob.targetMgr.UpdateCollectionNextTarget(collectionID)
 	if err != nil {
-		log.Error("failed to update next target for collection",
+		log.Warn("failed to update next target for collection",
 			zap.Error(err))
 		return err
 	}

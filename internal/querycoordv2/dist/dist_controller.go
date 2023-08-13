@@ -76,7 +76,7 @@ func (dc *ControllerImpl) SyncAll(ctx context.Context) {
 			defer wg.Done()
 			resp, err := handler.getDistribution(ctx)
 			if err != nil {
-				log.Error("SyncAll come across err when getting data distribution", zap.Error(err))
+				log.Warn("SyncAll come across err when getting data distribution", zap.Error(err))
 			} else {
 				handler.handleDistResp(resp)
 			}

@@ -122,12 +122,12 @@ func AssignNodesToReplicas(m *meta.Meta, rgName string, replicas ...*meta.Replic
 
 	nodeGroup, err := m.ResourceManager.GetNodes(rgName)
 	if err != nil {
-		log.Error("failed to get nodes", zap.Error(err))
+		log.Warn("failed to get nodes", zap.Error(err))
 		return err
 	}
 
 	if len(nodeGroup) < len(replicaIDs) {
-		log.Error(meta.ErrNodeNotEnough.Error())
+		log.Warn(meta.ErrNodeNotEnough.Error(), zap.Error(meta.ErrNodeNotEnough))
 		return meta.ErrNodeNotEnough
 	}
 

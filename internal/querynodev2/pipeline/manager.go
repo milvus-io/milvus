@@ -63,7 +63,7 @@ func (m *manager) Add(collectionID UniqueID, channel string) (Pipeline, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	log.Debug("start create pipeine",
+	log.Info("start create pipeine",
 		zap.Int64("collectionID", collectionID),
 		zap.String("channel", channel),
 	)

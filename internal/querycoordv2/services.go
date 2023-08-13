@@ -277,7 +277,7 @@ func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 	err := releaseJob.Wait()
 	if err != nil {
 		msg := "failed to release collection"
-		log.Error(msg, zap.Error(err))
+		log.Warn(msg, zap.Error(err))
 		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(errors.Wrap(err, msg)), nil
 	}
@@ -402,7 +402,7 @@ func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 	err := releaseJob.Wait()
 	if err != nil {
 		msg := "failed to release partitions"
-		log.Error(msg, zap.Error(err))
+		log.Warn(msg, zap.Error(err))
 		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(errors.Wrap(err, msg)), nil
 	}
