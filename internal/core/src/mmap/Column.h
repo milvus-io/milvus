@@ -35,7 +35,7 @@ static int mmap_flags = MAP_SHARED;
 class ColumnBase {
  public:
     // memory mode ctor
-    ColumnBase(size_t num_rows, const FieldMeta& field_meta) {
+    ColumnBase(size_t capacity, const FieldMeta& field_meta) {
         // simdjson requires a padding following the json data
         padding_ = field_meta.get_data_type() == DataType::JSON
                        ? simdjson::SIMDJSON_PADDING
@@ -45,12 +45,12 @@ class ColumnBase {
             return;
         }
 
-        size_ = field_meta.get_sizeof() * num_rows + padding_;
+        cap_ = field_meta.get_sizeof() * capacity;
         auto data_type = field_meta.get_data_type();
 
         // use anon mapping so we are able to free these memory with munmap only
         data_ = static_cast<char*>(mmap(nullptr,
-                                        size_,
+                                        cap_ + padding_,
                                         PROT_READ | PROT_WRITE,
                                         mmap_flags | MAP_ANON,
                                         -1,
@@ -67,23 +67,18 @@ class ColumnBase {
                        : 0;
 
         len_ = size;
-        size_ = size + padding_;
-        data_ = static_cast<char*>(
-            mmap(nullptr, size_, PROT_READ, mmap_flags, file.Descriptor(), 0));
-#ifndef MAP_POPULATE
-        // Manually access the mapping to populate it
-        const size_t page_size = getpagesize();
-        char* begin = (char*)data_;
-        char* end = begin + len_;
-        for (char* page = begin; page < end; page += page_size) {
-            char value = page[0];
-        }
-#endif
+        cap_ = size;
+        data_ = static_cast<char*>(mmap(nullptr,
+                                        cap_ + padding_,
+                                        PROT_READ,
+                                        mmap_flags,
+                                        file.Descriptor(),
+                                        0));
     }
 
     virtual ~ColumnBase() {
         if (data_ != nullptr) {
-            if (munmap(data_, size_)) {
+            if (munmap(data_, cap_)) {
                 AssertInfo(true,
                            fmt::format("failed to unmap variable field, err={}",
                                        strerror(errno)));
@@ -92,9 +87,9 @@ class ColumnBase {
     }
 
     ColumnBase(ColumnBase&& column) noexcept
-        : data_(column.data_), size_(column.size_) {
+        : data_(column.data_), cap_(column.cap_), padding_(column.padding_) {
         column.data_ = nullptr;
-        column.size_ = 0;
+        column.cap_ = 0;
     }
 
     const char*
@@ -102,19 +97,27 @@ class ColumnBase {
         return data_;
     }
 
+    virtual size_t
+    NumRows() const = 0;
+
+    size_t
+    Capacity() const {
+        return cap_;
+    }
+
     virtual SpanBase
     Span() const = 0;
 
     // build only
     void
-    Append(const char* data, size_t size) {
-        size_t required_size = len_ + size;
-        if (required_size + padding_ > size_) {
+    Append(const char* data, size_t num_rows) {
+        size_t required_size = len_ + num_rows;
+        if (required_size > cap_) {
             Expand(required_size * 2 + padding_);
         }
 
-        std::copy_n(data, size, data_ + len_);
-        len_ += size;
+        std::copy_n(data, num_rows, data_ + len_);
+        len_ += num_rows;
     }
 
  protected:
@@ -133,7 +136,7 @@ class ColumnBase {
 
         if (data_ != nullptr) {
             std::memcpy(data, data_, len_);
-            if (munmap(data_, size_)) {
+            if (munmap(data_, cap_)) {
                 AssertInfo(
                     false,
                     fmt::format("failed to unmap while expanding, err={}",
@@ -142,11 +145,11 @@ class ColumnBase {
         }
 
         data_ = data;
-        size_ = size;
+        cap_ = size;
     }
 
     char* data_{nullptr};
-    size_t size_{0};
+    size_t cap_{0};
     size_t padding_{0};
 
     // build only
@@ -174,13 +177,13 @@ class Column : public ColumnBase {
     ~Column() override = default;
 
     size_t
-    NumRows() const {
+    NumRows() const override {
         return num_rows_;
     }
 
     SpanBase
     Span() const override {
-        return SpanBase(data_, num_rows_, size_ / num_rows_);
+        return SpanBase(data_, num_rows_, cap_ / num_rows_);
     }
 
  private:
@@ -212,7 +215,7 @@ class VariableColumn : public ColumnBase {
     ~VariableColumn() override = default;
 
     size_t
-    NumRows() const {
+    NumRows() const override {
         return indices_.size();
     }
 
