@@ -131,6 +131,8 @@ func (s *ErrSuite) TestWrap() {
 
 	// shard delegator related
 	s.ErrorIs(WrapErrShardDelegatorNotFound("unknown", "fail to get shard delegator"), ErrShardDelegatorNotFound)
+	s.ErrorIs(WrapErrShardDelegatorSQFailed("fake"), ErrShardDelegatorSQFailed)
+	s.ErrorIs(WrapErrShardDelegatorSQTimeout("fake"), ErrShardDelegatorSQTimeout)
 
 	// field related
 	s.ErrorIs(WrapErrFieldNotFound("meta", "failed to get field"), ErrFieldNotFound)
