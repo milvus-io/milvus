@@ -492,7 +492,7 @@ func (i *IndexCoord) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRe
 
 // GetIndexState gets the index state of the index name in the request from Proxy.
 func (i *IndexCoord) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error) {
-	log.Info("IndexCoord get index state", zap.Int64("collectionID", req.CollectionID),
+	log.Info("IndexCoord receive GetIndexState", zap.Int64("collectionID", req.CollectionID),
 		zap.String("indexName", req.IndexName))
 
 	if !i.isHealthy() {
@@ -543,13 +543,13 @@ func (i *IndexCoord) GetIndexState(ctx context.Context, req *indexpb.GetIndexSta
 		}
 	}
 
-	log.Info("IndexCoord get index state success", zap.Int64("collectionID", req.CollectionID),
+	log.Info("IndexCoord GetIndexState success", zap.Int64("collectionID", req.CollectionID),
 		zap.String("indexName", req.IndexName), zap.String("state", ret.State.String()))
 	return ret, nil
 }
 
 func (i *IndexCoord) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
-	log.Info("IndexCoord get index state", zap.Int64("collectionID", req.CollectionID),
+	log.Info("IndexCoord receive GetSegmentIndexState", zap.Int64("collectionID", req.CollectionID),
 		zap.String("indexName", req.IndexName))
 
 	if !i.isHealthy() {
@@ -607,9 +607,6 @@ func (i *IndexCoord) getIndexIDAndCreateTime(collectionID int64, indexName strin
 // if not realTime, which means get info of the prior `CreateIndex` action, skip segments created after index's create time
 func (i *IndexCoord) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.Index, segIDs []UniqueID, realTime bool) error {
 	collectionID := indexInfo.CollectionID
-	indexName := indexInfo.IndexName
-	log.Info("IndexCoord completeIndexInfo", zap.Int64("collID", collectionID),
-		zap.String("indexName", indexName))
 
 	segSet := typeutil.NewSet(segIDs...)
 
@@ -765,12 +762,8 @@ func (i *IndexCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexReques
 	return ret, nil
 }
 
-// TODO @xiaocai2333: drop index on the segments when drop partition. (need?)
-
 // GetIndexInfos gets the index file paths from IndexCoord.
 func (i *IndexCoord) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoRequest) (*indexpb.GetIndexInfoResponse, error) {
-	log.Debug("IndexCoord GetIndexInfos", zap.Int64("collectionID", req.CollectionID),
-		zap.String("indexName", req.GetIndexName()), zap.Int64s("segIDs", req.GetSegmentIDs()))
 	if !i.isHealthy() {
 		log.Warn(msgIndexCoordIsUnhealthy(i.serverID))
 		ret := &indexpb.GetIndexInfoResponse{Status: &commonpb.Status{}}
@@ -891,7 +884,7 @@ func (i *IndexCoord) getIndexedStats(ctx context.Context, collID, indexID Unique
 
 // DescribeIndex describe the index info of the collection.
 func (i *IndexCoord) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
-	log.Info("IndexCoord DescribeIndex", zap.Int64("collectionID", req.CollectionID),
+	log.Info("IndexCoord receive DescribeIndex", zap.Int64("collectionID", req.CollectionID),
 		zap.String("indexName", req.GetIndexName()), zap.Uint64("timestamp", req.GetTimestamp()))
 	if !i.isHealthy() {
 		log.Warn(msgIndexCoordIsUnhealthy(i.serverID))
@@ -956,11 +949,11 @@ func (i *IndexCoord) DescribeIndex(ctx context.Context, req *indexpb.DescribeInd
 				},
 			}, nil
 		}
-		log.Info("IndexCoord describe index success", zap.Int64("collectionID", req.CollectionID),
+		log.Info("IndexCoord DescribeIndex success", zap.Int64("collectionID", req.CollectionID),
 			zap.Int64("indexID", indexInfo.IndexID), zap.Int64("total rows", indexInfo.TotalRows),
 			zap.Int64("indexed rows", indexInfo.IndexedRows), zap.Int64("pending index rows", pendingIndexRows),
 			zap.String("index state", indexInfo.State.String()),
-			zap.Int64s("segments", segmentsToCheck))
+			zap.Int("check segment num", len(segmentsToCheck)))
 		indexInfos = append(indexInfos, indexInfo)
 	}
 

@@ -179,7 +179,7 @@ func (i *IndexNode) DropJobs(ctx context.Context, req *indexpb.DropJobsRequest) 
 			info.cancel()
 		}
 	}
-	log.Ctx(ctx).Debug("drop index build jobs success", zap.String("ClusterID", req.ClusterID),
+	log.Ctx(ctx).Info("drop index build jobs success", zap.String("ClusterID", req.ClusterID),
 		zap.Int64s("IndexBuildIDs", req.BuildIDs))
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
