@@ -64,5 +64,5 @@ spec:
     name: cgroup
   - name: ci-logs
     nfs:
-      path: /ci-logs
-      server: 172.16.70.239
+      path: /volume1/ci-logs
+      server: 172.16.70.249
