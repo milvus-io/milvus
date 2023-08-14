@@ -35,6 +35,9 @@ const (
 
 	// for growing segment which not exist in target, and it's start position < max sealed dml position
 	redundantTargetVersion = int64(-1)
+
+	// for sealed segment which loaded by load segment request, should become readable after sync target version
+	unreadableTargetVersion = int64(-2)
 )
 
 var (
@@ -186,6 +189,9 @@ func (d *distribution) AddDistributions(entries ...SegmentEntry) {
 		if ok {
 			// remain the target version for already loaded segment to void skipping this segment when executing search
 			entry.TargetVersion = oldEntry.TargetVersion
+		} else {
+			// waiting for sync target version, to become readable
+			entry.TargetVersion = unreadableTargetVersion
 		}
 		d.sealedSegments[entry.SegmentID] = entry
 		d.offlines.Remove(entry.SegmentID)
