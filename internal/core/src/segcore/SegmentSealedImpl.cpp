@@ -24,6 +24,7 @@
 #include "Utils.h"
 #include "Types.h"
 #include "common/Json.h"
+#include "exceptions/EasyAssert.h"
 #include "mmap/Column.h"
 #include "common/Consts.h"
 #include "common/FieldMeta.h"
@@ -84,13 +85,13 @@ SegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
     AssertInfo(
         !get_bit(index_ready_bitset_, field_id),
         "vector index has been exist at " + std::to_string(field_id.get()));
-    if (row_count_opt_.has_value()) {
-        AssertInfo(row_count_opt_.value() == row_count,
+    if (num_rows_.has_value()) {
+        AssertInfo(num_rows_.value() == row_count,
                    "field (" + std::to_string(field_id.get()) +
                        ") data has different row count (" +
                        std::to_string(row_count) +
                        ") than other column's row count (" +
-                       std::to_string(row_count_opt_.value()) + ")");
+                       std::to_string(num_rows_.value()) + ")");
     }
     AssertInfo(!vector_indexings_.is_ready(field_id), "vec index is not ready");
     vector_indexings_.append_field_indexing(
@@ -118,13 +119,13 @@ SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
     AssertInfo(
         !get_bit(index_ready_bitset_, field_id),
         "scalar index has been exist at " + std::to_string(field_id.get()));
-    if (row_count_opt_.has_value()) {
-        AssertInfo(row_count_opt_.value() == row_count,
+    if (num_rows_.has_value()) {
+        AssertInfo(num_rows_.value() == row_count,
                    "field (" + std::to_string(field_id.get()) +
                        ") data has different row count (" +
                        std::to_string(row_count) +
                        ") than other column's row count (" +
-                       std::to_string(row_count_opt_.value()) + ")");
+                       std::to_string(num_rows_.value()) + ")");
     }
 
     scalar_indexings_[field_id] =
@@ -315,6 +316,13 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                 column->Append(static_cast<const char*>(field_data->Data()),
                                field_data->Size());
             }
+
+            AssertInfo(column->NumRows() == num_rows,
+                       fmt::format("data lost while loading column {}: loaded "
+                                   "num rows {} but expected {}",
+                                   data.field_id,
+                                   column->NumRows(),
+                                   num_rows));
         }
 
         {
@@ -500,14 +508,14 @@ int64_t
 SegmentSealedImpl::GetMemoryUsageInBytes() const {
     // TODO: add estimate for index
     std::shared_lock lck(mutex_);
-    auto row_count = row_count_opt_.value_or(0);
+    auto row_count = num_rows_.value_or(0);
     return schema_->get_total_sizeof() * row_count;
 }
 
 int64_t
 SegmentSealedImpl::get_row_count() const {
     std::shared_lock lck(mutex_);
-    return row_count_opt_.value_or(0);
+    return num_rows_.value_or(0);
 }
 
 int64_t
@@ -569,9 +577,9 @@ SegmentSealedImpl::vector_search(SearchInfo& search_info,
         AssertInfo(
             get_bit(field_data_ready_bitset_, field_id),
             "Field Data is not loaded: " + std::to_string(field_id.get()));
-        AssertInfo(row_count_opt_.has_value(), "Can't get row count value");
-        auto row_count = row_count_opt_.value();
-        auto& vec_data = fields_.at(field_id);
+        AssertInfo(num_rows_.has_value(), "Can't get row count value");
+        auto row_count = num_rows_.value();
+        auto vec_data = fields_.at(field_id);
         query::SearchOnSealed(*schema_,
                               vec_data->Data(),
                               search_info,
@@ -808,15 +816,18 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id,
 
     Assert(get_bit(field_data_ready_bitset_, field_id));
 
+    // DO NOT directly access the column byh map like: `fields_.at(field_id)->Data()`,
+    // we have to clone the shared pointer,
+    // to make sure it won't get released if segment released
+    auto column = fields_.at(field_id);
+
     if (datatype_is_variable(field_meta.get_data_type())) {
         switch (field_meta.get_data_type()) {
             case DataType::VARCHAR:
             case DataType::STRING: {
                 FixedVector<std::string> output(count);
-                bulk_subscript_impl<std::string>(fields_.at(field_id).get(),
-                                                 seg_offsets,
-                                                 count,
-                                                 output.data());
+                bulk_subscript_impl<std::string>(
+                    column.get(), seg_offsets, count, output.data());
                 return CreateScalarDataArrayFrom(
                     output.data(), count, field_meta);
             }
@@ -824,10 +835,7 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id,
             case DataType::JSON: {
                 FixedVector<std::string> output(count);
                 bulk_subscript_impl<Json, std::string>(
-                    fields_.at(field_id).get(),
-                    seg_offsets,
-                    count,
-                    output.data());
+                    column.get(), seg_offsets, count, output.data());
                 return CreateScalarDataArrayFrom(
                     output.data(), count, field_meta);
             }
@@ -839,7 +847,7 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id,
         }
     }
 
-    auto src_vec = fields_.at(field_id)->Data();
+    auto src_vec = column->Data();
     switch (field_meta.get_data_type()) {
         case DataType::BOOL: {
             FixedVector<bool> output(count);

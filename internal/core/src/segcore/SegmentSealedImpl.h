@@ -182,7 +182,7 @@ class SegmentSealedImpl : public SegmentSealed {
         // if (row_count_opt_.has_value()) {
         //     AssertInfo(row_count_opt_.value() == row_count, "load data has different row count from other columns");
         // } else {
-        row_count_opt_ = row_count;
+        num_rows_ = row_count;
         // }
     }
 
@@ -230,7 +230,7 @@ class SegmentSealedImpl : public SegmentSealed {
     // segment data
 
     // TODO: generate index for scalar
-    std::optional<int64_t> row_count_opt_;
+    std::optional<int64_t> num_rows_;
 
     // scalar field index
     std::unordered_map<FieldId, index::IndexBasePtr> scalar_indexings_;
