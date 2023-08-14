@@ -2068,9 +2068,8 @@ ExecExprVisitor::visit(AlwaysTrueExpr& expr) {
 }
 
 bool
-compareTwoJsonArray(
-    simdjson::simdjson_result<simdjson::fallback::ondemand::array> arr1,
-    const proto::plan::Array& arr2) {
+compareTwoJsonArray(simdjson::simdjson_result<simdjson::ondemand::array> arr1,
+                    const proto::plan::Array& arr2) {
     if (arr2.array_size() != arr1.count_elements()) {
         return false;
     }
