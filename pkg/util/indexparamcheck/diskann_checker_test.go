@@ -22,8 +22,8 @@ func Test_diskannChecker_CheckTrain(t *testing.T) {
 		Metric: metric.L2,
 	}
 
-	invalidParamsSmallDim := copyParams(validParams)
-	invalidParamsSmallDim[DIM] = strconv.Itoa(15)
+	validParamsSmallDim := copyParams(validParams)
+	validParamsSmallDim[DIM] = strconv.Itoa(15)
 
 	p1 := map[string]string{
 		DIM:    strconv.Itoa(128),
@@ -53,7 +53,7 @@ func Test_diskannChecker_CheckTrain(t *testing.T) {
 		{validParams, true},
 		{validParamsBigDim, true},
 		{invalidParamsWithoutDim, false},
-		{invalidParamsSmallDim, false},
+		{validParamsSmallDim, true},
 		{p1, true},
 		{p2, true},
 		{p3, true},

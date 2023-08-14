@@ -10,10 +10,10 @@ func (c diskannChecker) StaticCheck(params map[string]string) error {
 }
 
 func (c diskannChecker) CheckTrain(params map[string]string) error {
-	if !CheckIntByRange(params, DIM, DiskAnnMinDim, DefaultMaxDim) {
-		return errOutOfRange(DIM, DiskAnnMinDim, DefaultMaxDim)
+	if err := c.StaticCheck(params); err != nil {
+		return err
 	}
-	return c.StaticCheck(params)
+	return c.baseChecker.CheckTrain(params)
 }
 
 func newDiskannChecker() IndexChecker {
