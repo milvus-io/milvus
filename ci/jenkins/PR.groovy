@@ -17,7 +17,8 @@ pipeline {
     }
     agent {
             kubernetes {
-                inheritFrom 'milvus-e2e'
+                cloud '4am'
+                inheritFrom 'milvus-e2e-4am'
                 defaultContainer 'main'
                 yamlFile 'ci/jenkins/pod/rte-build.yaml'
                 customWorkspace '/home/jenkins/agent/workspace'
@@ -42,7 +43,9 @@ pipeline {
             steps {
                 container('main') {
                     dir ('build'){
-                            sh './set_docker_mirror.sh'
+                            sh """
+                            MIRROR_URL="https://docker-nexus-ci.zilliz.cc" ./set_docker_mirror.sh
+                            """
                     }
                     dir ('tests/scripts') {
                         script {
@@ -96,7 +99,7 @@ pipeline {
                                     script {
                                         sh 'printenv'
                                         def clusterEnabled = "false"
-                                        def valuesFile = "pr.yaml"
+                                        def valuesFile = "pr-4am.yaml"
                                         if ("${MILVUS_SERVER_TYPE}".contains('distributed')) {
                                             clusterEnabled = "true"
                                         }
@@ -125,7 +128,7 @@ pipeline {
                                                     chmod +x /usr/bin/yq
                                                 '''
                                                 sh """
-                                                    cp values/ci/pr.yaml values/ci/pr_kafka.yaml
+                                                    cp values/ci/pr-4am.yaml values/ci/pr_kafka.yaml
                                                     yq -i '.pulsar.enabled=false' values/ci/pr_kafka.yaml
                                                     yq -i '.kafka.enabled=true' values/ci/pr_kafka.yaml
                                                     yq -i '.kafka.metrics.kafka.enabled=true' values/ci/pr_kafka.yaml
@@ -136,7 +139,7 @@ pipeline {
                                             withCredentials([usernamePassword(credentialsId: "${env.CI_DOCKER_CREDENTIAL_ID}", usernameVariable: 'CI_REGISTRY_USERNAME', passwordVariable: 'CI_REGISTRY_PASSWORD')]){
                                                 sh """
                                                     MILVUS_CLUSTER_ENABLED=${clusterEnabled} \
-                                                    MILVUS_HELM_REPO="http://nexus-nexus-repository-manager.nexus:8081/repository/milvus-proxy" \
+                                                    MILVUS_HELM_REPO="https://nexus-ci.zilliz.cc/repository/milvus-proxy" \
                                                     TAG=${imageTag}\
                                                     ./e2e-k8s.sh \
                                                     --skip-export-logs \
@@ -171,6 +174,7 @@ pipeline {
                         }
                         agent {
                                 kubernetes {
+                                    cloud '4am'
                                     inheritFrom 'default'
                                     defaultContainer 'main'
                                     yamlFile 'ci/jenkins/pod/e2e.yaml'
@@ -196,7 +200,7 @@ pipeline {
                                             MILVUS_HELM_NAMESPACE="milvus-ci" \
                                             MILVUS_CLUSTER_ENABLED="${clusterEnabled}" \
                                             TEST_TIMEOUT="${e2e_timeout_seconds}" \
-                                            ./ci_e2e.sh  "-n 6 -x --tags L0 L1 --timeout ${case_timeout_seconds}"
+                                            ./ci_e2e_4am.sh  "-n 6 -x --tags L0 L1 --timeout ${case_timeout_seconds}"
                                             """
                             
                                         } else {
