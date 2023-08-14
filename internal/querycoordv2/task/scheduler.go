@@ -545,7 +545,7 @@ func (scheduler *taskScheduler) schedule(node int64) {
 		zap.Int("toRemoveNum", len(toRemove)),
 	)
 
-	log.Debug("process tasks related to node done",
+	log.Info("process tasks related to node done",
 		zap.Int("processingTaskNum", scheduler.processQueue.Len()),
 		zap.Int("waitingTaskNum", scheduler.waitQueue.Len()),
 		zap.Int("segmentTaskNum", len(scheduler.segmentTasks)),

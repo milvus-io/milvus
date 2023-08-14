@@ -100,8 +100,7 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(collectionID int64) error {
 		zap.Int64s("PartitionIDs", partitionIDs))
 	segments, channels, err := mgr.PullNextTargetV2(mgr.broker, collectionID, partitionIDs...)
 	if err != nil {
-		log.Error("failed to get next targets for collection",
-			zap.Error(err))
+		log.Warn("failed to get next targets for collection", zap.Error(err))
 		return err
 	}
 

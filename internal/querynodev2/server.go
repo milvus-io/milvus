@@ -172,9 +172,6 @@ func (node *QueryNode) Register() error {
 			}
 		}
 	})
-
-	// TODO Reset the logger
-	// paramtable.Get().initLogCfg()
 	return nil
 }
 
@@ -477,13 +474,13 @@ func (node *QueryNode) initHook() error {
 	if path == "" {
 		return fmt.Errorf("fail to set the plugin path")
 	}
-	log.Debug("start to load plugin", zap.String("path", path))
+	log.Info("start to load plugin", zap.String("path", path))
 
 	p, err := plugin.Open(path)
 	if err != nil {
 		return fmt.Errorf("fail to open the plugin, error: %s", err.Error())
 	}
-	log.Debug("plugin open")
+	log.Info("plugin open")
 
 	h, err := p.Lookup("QueryNodePlugin")
 	if err != nil {
@@ -520,11 +517,11 @@ func (node *QueryNode) handleQueryHookEvent() {
 			realKey := strings.TrimPrefix(event.Key, paramtable.Get().HookCfg.QueryNodePluginTuningConfig.KeyPrefix)
 			if event.EventType == config.CreateType || event.EventType == config.UpdateType {
 				if err := node.queryHook.InitTuningConfig(map[string]string{realKey: event.Value}); err != nil {
-					log.Error("failed to refresh hook tuning config", zap.Error(err))
+					log.Warn("failed to refresh hook tuning config", zap.Error(err))
 				}
 			} else if event.EventType == config.DeleteType {
 				if err := node.queryHook.DeleteTuningConfig(realKey); err != nil {
-					log.Error("failed to delete hook tuning config", zap.Error(err))
+					log.Warn("failed to delete hook tuning config", zap.Error(err))
 				}
 			}
 		}

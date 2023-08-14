@@ -184,7 +184,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		}
 		segment, err := NewSegment(collection, segmentID, partitionID, collectionID, shard, segmentType, version, info.GetStartPosition(), info.GetDeltaPosition())
 		if err != nil {
-			log.Error("load segment failed when create new segment",
+			log.Warn("load segment failed when create new segment",
 				zap.Int64("partitionID", partitionID),
 				zap.Int64("segmentID", segmentID),
 				zap.Error(err),
@@ -205,7 +205,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		tr := timerecord.NewTimeRecorder("loadDurationPerSegment")
 		err := loader.loadSegment(ctx, segment, loadInfo)
 		if err != nil {
-			log.Error("load segment failed when load data into memory",
+			log.Warn("load segment failed when load data into memory",
 				zap.Int64("partitionID", partitionID),
 				zap.Int64("segmentID", segmentID),
 				zap.Error(err),
@@ -864,7 +864,7 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 			if fieldIndexInfo, ok := vecFieldID2IndexInfo[fieldID]; ok {
 				neededMemSize, neededDiskSize, err := GetIndexResourceUsage(fieldIndexInfo)
 				if err != nil {
-					log.Error("failed to get index size",
+					log.Warn("failed to get index size",
 						zap.Int64("collectionID", loadInfo.CollectionID),
 						zap.Int64("segmentID", loadInfo.SegmentID),
 						zap.Int64("indexBuildID", fieldIndexInfo.BuildID),

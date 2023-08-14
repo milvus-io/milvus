@@ -255,8 +255,7 @@ func (d *distribution) SyncTargetVersion(newVersion int64, growingInTarget []int
 	for _, segmentID := range sealedInTarget {
 		entry, ok := d.sealedSegments[segmentID]
 		if !ok {
-			log.Error("readable sealed segment lost, make it unserviceable",
-				zap.Int64("segmentID", segmentID))
+			log.Warn("readable sealed segment lost, make it unserviceable", zap.Int64("segmentID", segmentID))
 			available = false
 			continue
 		}

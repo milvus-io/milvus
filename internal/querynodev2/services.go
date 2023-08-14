@@ -75,7 +75,6 @@ func (node *QueryNode) GetComponentStates(ctx context.Context) (*milvuspb.Compon
 		StateCode: code,
 	}
 	stats.State = info
-	log.Debug("Get QueryNode component state done", zap.Any("stateCode", info.StateCode))
 	return stats, nil
 }
 
@@ -1125,7 +1124,7 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 	}
 
 	log.Debug("QueryNode.GetMetrics failed, request metric type is not implemented yet",
-		zap.Int64("nodeId", paramtable.GetNodeID()),
+		zap.Int64("nodeID", paramtable.GetNodeID()),
 		zap.String("req", req.Request),
 		zap.String("metricType", metricType))
 

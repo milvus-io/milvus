@@ -310,7 +310,7 @@ func (s *Server) initMeta() error {
 	log.Info("recover meta...")
 	err := s.meta.CollectionManager.Recover(s.broker)
 	if err != nil {
-		log.Error("failed to recover collections")
+		log.Warn("failed to recover collections")
 		return err
 	}
 	collections := s.meta.GetAll()
@@ -323,13 +323,13 @@ func (s *Server) initMeta() error {
 
 	err = s.meta.ReplicaManager.Recover(collections)
 	if err != nil {
-		log.Error("failed to recover replicas")
+		log.Warn("failed to recover replicas")
 		return err
 	}
 
 	err = s.meta.ResourceManager.Recover()
 	if err != nil {
-		log.Error("failed to recover resource groups")
+		log.Warn("failed to recover resource groups")
 		return err
 	}
 
@@ -619,7 +619,7 @@ func (s *Server) watchNodes(revision int64) {
 		case event, ok := <-eventChan:
 			if !ok {
 				// ErrCompacted is handled inside SessionWatcher
-				log.Error("Session Watcher channel closed", zap.Int64("serverID", paramtable.GetNodeID()))
+				log.Warn("Session Watcher channel closed", zap.Int64("serverID", paramtable.GetNodeID()))
 				go s.Stop()
 				if s.session.TriggerKill {
 					if p, err := os.FindProcess(os.Getpid()); err == nil {

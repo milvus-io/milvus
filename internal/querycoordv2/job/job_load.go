@@ -116,7 +116,7 @@ func (job *LoadCollectionJob) Execute() error {
 	partitionIDs, err := job.broker.GetPartitions(job.ctx, req.GetCollectionID())
 	if err != nil {
 		msg := "failed to get partitions from RootCoord"
-		log.Error(msg, zap.Error(err))
+		log.Warn(msg, zap.Error(err))
 		return errors.Wrap(err, msg)
 	}
 	loadedPartitionIDs := lo.Map(job.meta.CollectionManager.GetPartitionsByCollection(req.GetCollectionID()),
@@ -150,7 +150,7 @@ func (job *LoadCollectionJob) Execute() error {
 		replicas, err = utils.SpawnReplicasWithRG(job.meta, req.GetCollectionID(), req.GetResourceGroups(), req.GetReplicaNumber())
 		if err != nil {
 			msg := "failed to spawn replica for collection"
-			log.Error(msg, zap.Error(err))
+			log.Warn(msg, zap.Error(err))
 			return errors.Wrap(err, msg)
 		}
 		for _, replica := range replicas {
@@ -192,7 +192,7 @@ func (job *LoadCollectionJob) Execute() error {
 	err = job.meta.CollectionManager.PutCollection(collection, partitions...)
 	if err != nil {
 		msg := "failed to store collection and partitions"
-		log.Error(msg, zap.Error(err))
+		log.Warn(msg, zap.Error(err))
 		return errors.Wrap(err, msg)
 	}
 	eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("Start load collection %d", collection.CollectionID)))
@@ -323,7 +323,7 @@ func (job *LoadPartitionJob) Execute() error {
 		replicas, err = utils.SpawnReplicasWithRG(job.meta, req.GetCollectionID(), req.GetResourceGroups(), req.GetReplicaNumber())
 		if err != nil {
 			msg := "failed to spawn replica for collection"
-			log.Error(msg, zap.Error(err))
+			log.Warn(msg, zap.Error(err))
 			return errors.Wrap(err, msg)
 		}
 		for _, replica := range replicas {
@@ -366,14 +366,14 @@ func (job *LoadPartitionJob) Execute() error {
 		err = job.meta.CollectionManager.PutCollection(collection, partitions...)
 		if err != nil {
 			msg := "failed to store collection and partitions"
-			log.Error(msg, zap.Error(err))
+			log.Warn(msg, zap.Error(err))
 			return errors.Wrap(err, msg)
 		}
 	} else { // collection exists, put partitions only
 		err = job.meta.CollectionManager.PutPartition(partitions...)
 		if err != nil {
 			msg := "failed to store partitions"
-			log.Error(msg, zap.Error(err))
+			log.Warn(msg, zap.Error(err))
 			return errors.Wrap(err, msg)
 		}
 	}

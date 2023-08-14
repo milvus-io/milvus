@@ -244,12 +244,12 @@ func (o *LeaderObserver) sync(ctx context.Context, replicaID int64, leaderView *
 
 	schema, err := o.broker.GetCollectionSchema(ctx, leaderView.CollectionID)
 	if err != nil {
-		log.Error("sync distribution failed, cannot get schema of collection", zap.Error(err))
+		log.Warn("sync distribution failed, cannot get schema of collection", zap.Error(err))
 		return false
 	}
 	partitions, err := utils.GetPartitions(o.meta.CollectionManager, leaderView.CollectionID)
 	if err != nil {
-		log.Error("sync distribution failed, cannot get partitions of collection", zap.Error(err))
+		log.Warn("sync distribution failed, cannot get partitions of collection", zap.Error(err))
 		return false
 	}
 
@@ -271,12 +271,12 @@ func (o *LeaderObserver) sync(ctx context.Context, replicaID int64, leaderView *
 	}
 	resp, err := o.cluster.SyncDistribution(ctx, leaderView.ID, req)
 	if err != nil {
-		log.Error("failed to sync distribution", zap.Error(err))
+		log.Warn("failed to sync distribution", zap.Error(err))
 		return false
 	}
 
 	if resp.ErrorCode != commonpb.ErrorCode_Success {
-		log.Error("failed to sync distribution", zap.String("reason", resp.GetReason()))
+		log.Warn("failed to sync distribution", zap.String("reason", resp.GetReason()))
 		return false
 	}
 
