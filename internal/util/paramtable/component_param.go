@@ -1312,7 +1312,7 @@ func (p *queryNodeConfig) initCPURatio() {
 }
 
 func (p *queryNodeConfig) initMinCPUParallelTaskNumRatio() {
-	p.MinCPUParallelTaskNumRatio = p.Base.ParseInt32WithDefault("queryNode.scheduler.minCPUParallelTaskNumRatio", 4)
+	p.MinCPUParallelTaskNumRatio = p.Base.ParseInt32WithDefault("queryNode.scheduler.minCPUParallelTaskNumRatio", 0)
 }
 
 func (p *queryNodeConfig) initKnowhereThreadPoolSize() {
