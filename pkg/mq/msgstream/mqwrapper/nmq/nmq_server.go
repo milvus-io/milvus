@@ -17,9 +17,12 @@
 package nmq
 
 import (
+	"os"
+	"path"
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/nats-io/nats-server/v2/server"
 	"go.uber.org/zap"
 
@@ -43,21 +46,38 @@ type NatsMQConfig struct {
 // Panic if initailizing operation failed.
 func MustInitNatsMQ(cfg *NatsMQConfig) {
 	once.Do(func() {
-		log.Info("try to initialize global nmq", zap.Any("config", cfg))
 		var err error
-		Nmq, err = server.NewServer(&cfg.Opts)
+		Nmq, err = initNatsMQ(cfg)
 		if err != nil {
-			log.Fatal("fail to initailize nmq", zap.Error(err))
+			log.Fatal("initialize nmq failed", zap.Error(err))
 		}
-
-		// Start Nmq in background and wait until it's ready for connection.
-		go Nmq.Start()
-		// Wait for server to be ready for connections
-		if !Nmq.ReadyForConnections(cfg.InitializeTimeout) {
-			log.Fatal("nmq is not ready within timeout")
-		}
-		log.Info("initialize nmq finished", zap.String("client-url", Nmq.ClientURL()), zap.Error(err))
 	})
+}
+
+func initNatsMQ(cfg *NatsMQConfig) (*server.Server, error) {
+	log.Info("try to initialize global nmq", zap.Any("config", cfg))
+	natsServer, err := server.NewServer(&cfg.Opts)
+	if err != nil {
+		return nil, errors.Wrap(err, "fail to initailize nmq")
+	}
+	// Config log if log file set.
+	if cfg.Opts.LogFile != "" {
+		if err := os.MkdirAll(path.Dir(cfg.Opts.LogFile), 0o744); err != nil {
+			return nil, errors.Wrap(err, "fail to create directory for nats log file")
+		}
+		// make directory for the file
+		natsServer.ConfigureLogger()
+	}
+	// Start Nmq in background and wait until it's ready for connection.
+	if err := server.Run(natsServer); err != nil {
+		return nil, errors.Wrap(err, "start nmq failed")
+	}
+	// Wait for server to be ready for connections
+	if !natsServer.ReadyForConnections(cfg.InitializeTimeout) {
+		return nil, errors.New("nmq is not ready within timeout")
+	}
+	log.Info("initialize nmq finished", zap.String("client-url", natsServer.ClientURL()), zap.Error(err))
+	return natsServer, nil
 }
 
 // ParseServerOption get nats server option from paramstable.
@@ -71,6 +91,7 @@ func ParseServerOption(params *paramtable.ComponentParam) *NatsMQConfig {
 			JetStream:         true,
 			JetStreamMaxStore: params.NatsmqCfg.ServerMaxFileStore.GetAsInt64(),
 			StoreDir:          params.NatsmqCfg.ServerStoreDir.GetValue(),
+			Trace:             params.NatsmqCfg.ServerMonitorTrace.GetAsBool(),
 			Debug:             params.NatsmqCfg.ServerMonitorDebug.GetAsBool(),
 			Logtime:           params.NatsmqCfg.ServerMonitorLogTime.GetAsBool(),
 			LogFile:           params.NatsmqCfg.ServerMonitorLogFile.GetValue(),

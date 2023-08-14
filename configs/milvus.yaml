@@ -137,6 +137,7 @@ rocksmq:
   compressionTypes: [0, 0, 7, 7, 7]
 
 # natsmq configuration.
+# more detail: https://docs.nats.io/running-a-nats-service/configuration
 natsmq:
   server: # server side configuration for natsmq.
     port: 4222 # 4222 by default, Port for nats server listening.
@@ -146,10 +147,11 @@ natsmq:
     maxPending: 67108864 # (B) 64MB by default, Maximum number of bytes buffered for a connection Applies to client connections.
     initializeTimeout: 4000 # (ms) 4s by default, waiting for initialization of natsmq finished.
     monitor:
+      trace: false # false by default, If true enable protocol trace log messages.
       debug: false # false by default, If true enable debug log messages.
       logTime: true # true by default, If set to false, log without timestamps.
-      logFile: # no log file by default, Log file path relative to.. .
-      logSizeLimit: 0 # (B) 0, unlimited by default, Size in bytes after the log file rolls over to a new one.
+      logFile: /tmp/milvus/logs/nats.log # /tmp/milvus/logs/nats.log by default, Log file path relative to .. of milvus binary if use relative path.
+      logSizeLimit: 536870912 # (B) 512MB by default, Size in bytes after the log file rolls over to a new one.
     retention:
       maxAge: 4320 # (min) 3 days by default, Maximum age of any message in the P-channel.
       maxBytes: # (B) None by default, How many bytes the single P-channel may contain. Removing oldest messages if the P-channel exceeds this size.

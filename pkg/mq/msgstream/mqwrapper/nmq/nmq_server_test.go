@@ -17,11 +17,13 @@
 package nmq
 
 import (
+	"fmt"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/nats-io/nats-server/v2/server"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -34,6 +36,7 @@ func TestMain(m *testing.M) {
 	defer os.RemoveAll(storeDir)
 
 	cfg := ParseServerOption(paramtable.Get())
+	cfg.Opts.Port = server.RANDOM_PORT
 	cfg.Opts.StoreDir = storeDir
 	MustInitNatsMQ(cfg)
 	defer CloseNatsMQ()
@@ -41,6 +44,62 @@ func TestMain(m *testing.M) {
 	natsServerAddress = Nmq.ClientURL()
 	exitCode := m.Run()
 	os.Exit(exitCode)
+}
+
+func TestInitNatsMQ(t *testing.T) {
+	func() {
+		cfg := ParseServerOption(paramtable.Get())
+		storeDir, _ := os.MkdirTemp("", "milvus_mq_nmq")
+		defer os.RemoveAll(storeDir)
+		cfg.Opts.StoreDir = storeDir
+		cfg.Opts.Port = server.RANDOM_PORT
+		cfg.Opts.LogFile = ""
+		mq, err := initNatsMQ(cfg)
+		assert.NoError(t, err)
+		assert.NotNil(t, mq)
+		mq.Shutdown()
+		mq.WaitForShutdown()
+	}()
+
+	func() {
+		cfg := ParseServerOption(paramtable.Get())
+		storeDir, _ := os.MkdirTemp("", "milvus_mq_nmq")
+		defer os.RemoveAll(storeDir)
+		cfg.Opts.StoreDir = storeDir
+		cfg.Opts.Port = server.RANDOM_PORT
+		cfg.Opts.LogFile = ""
+		mq, err := initNatsMQ(cfg)
+		assert.NoError(t, err)
+		assert.NotNil(t, mq)
+		mq.Shutdown()
+		mq.WaitForShutdown()
+	}()
+
+	func() {
+		cfg := ParseServerOption(paramtable.Get())
+		storeDir, _ := os.MkdirTemp("", "milvus_mq_nmq")
+		defer os.RemoveAll(storeDir)
+		cfg.Opts.StoreDir = storeDir
+		cfg.Opts.Port = server.RANDOM_PORT
+		cfg.Opts.MaxPending = -1
+		mq, err := initNatsMQ(cfg)
+		assert.Error(t, err)
+		assert.Nil(t, mq)
+	}()
+
+	func() {
+		ex, err := os.Executable()
+		assert.NoError(t, err)
+		cfg := ParseServerOption(paramtable.Get())
+		storeDir, _ := os.MkdirTemp("", "milvus_mq_nmq")
+		defer os.RemoveAll(storeDir)
+		cfg.Opts.StoreDir = storeDir
+		cfg.Opts.Port = server.RANDOM_PORT
+		cfg.Opts.LogFile = fmt.Sprintf("%s/test", ex)
+		mq, err := initNatsMQ(cfg)
+		assert.Error(t, err)
+		assert.Nil(t, mq)
+	}()
 }
 
 func TestGetServerOptionDefault(t *testing.T) {
@@ -54,7 +113,8 @@ func TestGetServerOptionDefault(t *testing.T) {
 	assert.Equal(t, int64(67108864), cfg.Opts.MaxPending)
 	assert.Equal(t, 4000*time.Millisecond, cfg.InitializeTimeout)
 	assert.Equal(t, false, cfg.Opts.Debug)
+	assert.Equal(t, false, cfg.Opts.Trace)
 	assert.Equal(t, true, cfg.Opts.Logtime)
-	assert.Equal(t, "", cfg.Opts.LogFile)
-	assert.Equal(t, int64(0), cfg.Opts.LogSizeLimit)
+	assert.Equal(t, "/tmp/milvus/logs/nats.log", cfg.Opts.LogFile)
+	assert.Equal(t, int64(536870912), cfg.Opts.LogSizeLimit)
 }

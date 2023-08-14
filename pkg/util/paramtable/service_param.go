@@ -723,6 +723,7 @@ type NatsmqConfig struct {
 	ServerMaxPayload          ParamItem `refreshable:"false"`
 	ServerMaxPending          ParamItem `refreshable:"false"`
 	ServerInitializeTimeout   ParamItem `refreshable:"false"`
+	ServerMonitorTrace        ParamItem `refreshable:"false"`
 	ServerMonitorDebug        ParamItem `refreshable:"false"`
 	ServerMonitorLogTime      ParamItem `refreshable:"false"`
 	ServerMonitorLogFile      ParamItem `refreshable:"false"`
@@ -743,10 +744,11 @@ func (r *NatsmqConfig) Init(base *BaseTable) {
 	}
 	r.ServerPort.Init(base.mgr)
 	r.ServerStoreDir = ParamItem{
-		Key:     "natsmq.server.storeDir",
-		Version: "2.3.0",
-		Doc:     `Directory to use for JetStream storage of nats`,
-		Export:  true,
+		Key:          "natsmq.server.storeDir",
+		DefaultValue: "/var/lib/milvus/nats",
+		Version:      "2.3.0",
+		Doc:          `Directory to use for JetStream storage of nats`,
+		Export:       true,
 	}
 	r.ServerStoreDir.Init(base.mgr)
 	r.ServerMaxFileStore = ParamItem{
@@ -781,7 +783,14 @@ func (r *NatsmqConfig) Init(base *BaseTable) {
 		Export:       true,
 	}
 	r.ServerInitializeTimeout.Init(base.mgr)
-
+	r.ServerMonitorTrace = ParamItem{
+		Key:          "natsmq.server.monitor.trace",
+		Version:      "2.3.0",
+		DefaultValue: "false",
+		Doc:          `If true enable protocol trace log messages`,
+		Export:       true,
+	}
+	r.ServerMonitorTrace.Init(base.mgr)
 	r.ServerMonitorDebug = ParamItem{
 		Key:          "natsmq.server.monitor.debug",
 		Version:      "2.3.0",
@@ -801,15 +810,15 @@ func (r *NatsmqConfig) Init(base *BaseTable) {
 	r.ServerMonitorLogFile = ParamItem{
 		Key:          "natsmq.server.monitor.logFile",
 		Version:      "2.3.0",
-		DefaultValue: "",
-		Doc:          `Log file path relative to..`,
+		DefaultValue: "/tmp/milvus/logs/nats.log",
+		Doc:          `Log file path relative to .. of milvus binary if use relative path`,
 		Export:       true,
 	}
 	r.ServerMonitorLogFile.Init(base.mgr)
 	r.ServerMonitorLogSizeLimit = ParamItem{
 		Key:          "natsmq.server.monitor.logSizeLimit",
 		Version:      "2.3.0",
-		DefaultValue: "0",
+		DefaultValue: "536870912",
 		Doc:          `Size in bytes after the log file rolls over to a new one`,
 		Export:       true,
 	}
