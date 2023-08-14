@@ -94,7 +94,7 @@ func searchSegments(ctx context.Context, manager *Manager, segType SegmentType, 
 	}
 
 	if len(segmentsWithoutIndex) > 0 {
-		log.Ctx(ctx).Info("search growing/sealed segments without indexes", zap.Int64s("segmentIDs", segmentsWithoutIndex))
+		log.Ctx(ctx).Debug("search growing/sealed segments without indexes", zap.Int64s("segmentIDs", segmentsWithoutIndex))
 	}
 
 	return searchResults, nil
