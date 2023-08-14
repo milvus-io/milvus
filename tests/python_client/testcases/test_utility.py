@@ -1647,6 +1647,33 @@ class TestUtilityBase(TestcaseBase):
         assert collection_alias[0] in collections
         assert old_collection_name not in collections
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_create_alias_using_dropped_collection_name(self):
+        """
+        target: test create alias using a dropped collection name
+        method: create 2 collections and drop one collection
+        expected: raise no exception
+        """
+        # 1. create 2 collections
+        a_name = cf.gen_unique_str("aa")
+        b_name = cf.gen_unique_str("bb")
+        self.init_collection_wrap(name=a_name, schema=default_schema,
+                                  check_task=CheckTasks.check_collection_property,
+                                  check_items={exp_name: a_name, exp_schema: default_schema})
+        self.init_collection_wrap(name=b_name, schema=default_schema,
+                                  check_task=CheckTasks.check_collection_property,
+                                  check_items={exp_name: b_name, exp_schema: default_schema})
+
+        # 2. drop collection a
+        self.utility_wrap.drop_collection(a_name)
+        assert self.utility_wrap.has_collection(a_name)[0] is False
+        assert len(self.utility_wrap.list_aliases(b_name)[0]) == 0
+
+        # 3. create alias with the name of collection a
+        self.utility_wrap.create_alias(b_name, a_name)
+        b_alias, _ = self.utility_wrap.list_aliases(b_name)
+        assert a_name in b_alias
+
 
 class TestUtilityAdvanced(TestcaseBase):
     """ Test case of index interface """

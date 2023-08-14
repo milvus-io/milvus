@@ -5425,6 +5425,26 @@ class TestSearchPagination(TestcaseBase):
             # assert sorted(search_res[0].distances, key=numpy.float32) == sorted(res_distance, key=numpy.float32)
             assert set(search_res[0].ids) == set(res[0].ids[offset:])
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("offset", [100, default_nb // 2])
+    def test_search_offset_different_position(self, offset):
+        """
+        target: test search pagination with offset in different position
+        method: create connection, collection, insert entities and search with offset
+        expected: search successfully
+        """
+        # 1. initialize
+        collection_w = self.init_collection_general(prefix, True)[0]
+        # 2. search with offset in params
+        search_params = {"metric_type": "COSINE", "params": {"nprobe": 10}, "offset": offset}
+        res1 = collection_w.search(vectors[:default_nq], default_search_field,
+                                   search_params, default_limit)[0]
+
+        # 3. search with offset outside params
+        res2 = collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
+                                   default_limit, offset=offset)[0]
+        assert res1[0].ids == res2[0].ids
+
 
 class TestSearchPaginationInvalid(TestcaseBase):
     """ Test case of search pagination """

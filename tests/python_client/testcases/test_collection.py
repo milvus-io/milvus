@@ -3805,7 +3805,8 @@ class TestCollectionString(TestcaseBase):
         schema = self.collection_schema_wrap.init_collection_schema(fields=fields)[0]
         self.init_collection_wrap(schema=schema, check_task=CheckTasks.check_collection_property,
                                   check_items={"schema": schema, "primary": ct.default_string_field_name})
-        
+
+
 class TestCollectionJSON(TestcaseBase):
     """
     ******************************************************************
@@ -3884,5 +3885,3 @@ class TestCollectionJSON(TestcaseBase):
         self.collection_wrap.init_collection(name=c_name, schema=schema,
                                              check_task=CheckTasks.check_collection_property,
                                              check_items={exp_name: c_name, exp_schema: schema})
-
-
