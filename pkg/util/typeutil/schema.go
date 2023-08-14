@@ -256,24 +256,20 @@ func (helper *SchemaHelper) GetFieldFromName(fieldName string) (*schemapb.FieldS
 func (helper *SchemaHelper) GetFieldFromNameDefaultJSON(fieldName string) (*schemapb.FieldSchema, error) {
 	offset, ok := helper.nameOffset[fieldName]
 	if !ok {
-		return helper.getDefaultJSONField()
+		return helper.getDefaultJSONField(fieldName)
 	}
 	return helper.schema.Fields[offset], nil
 }
 
-func (helper *SchemaHelper) getDefaultJSONField() (*schemapb.FieldSchema, error) {
-	var field *schemapb.FieldSchema
+func (helper *SchemaHelper) getDefaultJSONField(fieldName string) (*schemapb.FieldSchema, error) {
 	for _, f := range helper.schema.GetFields() {
 		if f.DataType == schemapb.DataType_JSON && f.IsDynamic {
 			return f, nil
 		}
 	}
-	if field == nil {
-		errMsg := "there is no dynamic json field in schema, need to specified field name"
-		log.Warn(errMsg)
-		return nil, fmt.Errorf(errMsg)
-	}
-	return field, nil
+	errMsg := fmt.Sprintf("field %s not exist", fieldName)
+	log.Warn(errMsg)
+	return nil, fmt.Errorf(errMsg)
 }
 
 // GetFieldFromID returns the schema of specified field
