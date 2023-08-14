@@ -52,6 +52,7 @@ class MilvusConan(ConanFile):
         "google-cloud-cpp/2.5.0@milvus/dev",
         "opentelemetry-cpp/1.8.1.1@milvus/dev",
         "librdkafka/1.9.1",
+        "openblas/0.3.23@milvus/dev",
     )
     generators = ("cmake", "cmake_find_package")
     default_options = {
@@ -72,8 +73,10 @@ class MilvusConan(ConanFile):
         "glog:shared": True,
         "prometheus-cpp:with_pull": False,
         "fmt:header_only": True,
-        "onnetbb:tbbmalloc": False,
+        "onetbb:tbbmalloc": False,
         "onetbb:tbbproxy": False,
+        "openblas:shared": True,
+        "openblas:dynamic_arch": True,
     }
 
     def configure(self):
@@ -83,6 +86,8 @@ class MilvusConan(ConanFile):
                 del self.options["folly"].use_sse4_2
 
             self.options["arrow"].with_jemalloc = False
+        if self.settings.arch == "armv8":
+            self.options["openblas"].dynamic_arch = False
 
     def imports(self):
         self.copy("*.dylib", "../lib", "lib")
