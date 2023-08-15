@@ -40,16 +40,6 @@ func (f *CommonFactory) NewTtMsgStream(ctx context.Context) (ms MsgStream, err e
 	return NewMqTtMsgStream(ctx, f.ReceiveBufSize, f.MQBufSize, cli, f.DispatcherFactory.NewUnmarshalDispatcher())
 }
 
-// NewQueryMsgStream is used to generate a new QueryMsgstream object
-func (f *CommonFactory) NewQueryMsgStream(ctx context.Context) (ms MsgStream, err error) {
-	defer wrapError(&err, "NewQueryMsgStream")
-	cli, err := f.Newer()
-	if err != nil {
-		return nil, err
-	}
-	return NewMqMsgStream(ctx, f.ReceiveBufSize, f.MQBufSize, cli, f.DispatcherFactory.NewUnmarshalDispatcher())
-}
-
 // NewMsgStreamDisposer returns a function that can be used to dispose of a message stream.
 // The returned function takes a slice of channel names and a subscription name, and
 // disposes of the message stream associated with those arguments.

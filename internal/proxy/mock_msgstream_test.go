@@ -58,13 +58,6 @@ func (m *mockMsgStreamFactory) NewTtMsgStream(ctx context.Context) (msgstream.Ms
 	return nil, errors.New("mock")
 }
 
-func (m *mockMsgStreamFactory) NewQueryMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
-	if m.fQStream != nil {
-		return m.fQStream(ctx)
-	}
-	return nil, errors.New("mock")
-}
-
 func newMockMsgStreamFactory() *mockMsgStreamFactory {
 	return &mockMsgStreamFactory{}
 }

@@ -213,7 +213,7 @@ func Test_createStream(t *testing.T) {
 		factory.fQStream = func(ctx context.Context) (msgstream.MsgStream, error) {
 			return nil, errors.New("mock")
 		}
-		_, err := createStream(factory, dmlStreamType, nil, nil)
+		_, err := createStream(factory, nil, nil)
 		assert.Error(t, err)
 	})
 
@@ -222,7 +222,7 @@ func Test_createStream(t *testing.T) {
 		factory.f = func(ctx context.Context) (msgstream.MsgStream, error) {
 			return nil, errors.New("mock")
 		}
-		_, err := createStream(factory, dqlStreamType, nil, nil)
+		_, err := createStream(factory, nil, nil)
 		assert.Error(t, err)
 	})
 
@@ -231,7 +231,7 @@ func Test_createStream(t *testing.T) {
 		factory.f = func(ctx context.Context) (msgstream.MsgStream, error) {
 			return newMockMsgStream(), nil
 		}
-		_, err := createStream(factory, dmlStreamType, []string{"111"}, func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error) {
+		_, err := createStream(factory, []string{"111"}, func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error) {
 			return nil, nil
 		})
 		assert.NoError(t, err)
@@ -271,7 +271,6 @@ func Test_singleTypeChannelsMgr_createMsgStream(t *testing.T) {
 				return channelInfos{vchans: []string{"111", "222"}, pchans: []string{"111"}}, nil
 			},
 			msgStreamFactory: factory,
-			singleStreamType: dmlStreamType,
 			repackFunc:       nil,
 		}
 		_, err := m.createMsgStream(100)
@@ -289,7 +288,6 @@ func Test_singleTypeChannelsMgr_createMsgStream(t *testing.T) {
 				return channelInfos{vchans: []string{"111", "222"}, pchans: []string{"111"}}, nil
 			},
 			msgStreamFactory: factory,
-			singleStreamType: dmlStreamType,
 			repackFunc:       nil,
 		}
 		stream, err := m.createMsgStream(100)
@@ -356,7 +354,6 @@ func Test_singleTypeChannelsMgr_getStream(t *testing.T) {
 				return channelInfos{vchans: []string{"111", "222"}, pchans: []string{"111"}}, nil
 			},
 			msgStreamFactory: factory,
-			singleStreamType: dmlStreamType,
 			repackFunc:       nil,
 		}
 		stream, err := m.getOrCreateStream(100)

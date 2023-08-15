@@ -245,11 +245,6 @@ func (f *mockFactory) NewTtMsgStream(context.Context) (msgstream.MsgStream, erro
 	return nil, errNotImplErr
 }
 
-func (f *mockFactory) NewQueryMsgStream(context.Context) (msgstream.MsgStream, error) {
-	// TODO
-	return nil, errNotImplErr
-}
-
 func (f *mockFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, string) error {
 	// TODO
 	return nil
