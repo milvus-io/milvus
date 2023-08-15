@@ -19,6 +19,7 @@
 
 #include "SegmentInterface.h"
 #include "Utils.h"
+#include "exceptions/EasyAssert.h"
 #include "pkVisitor.h"
 
 namespace milvus::segcore {
@@ -86,12 +87,20 @@ ReduceHelper::FilterInvalidSearchResult(SearchResult* search_result) {
                    ", expected size = " + std::to_string(nq * topK));
     std::vector<int64_t> real_topks(nq, 0);
     uint32_t valid_index = 0;
+    auto segment = static_cast<SegmentInterface*>(search_result->segment_);
     auto& offsets = search_result->seg_offsets_;
     auto& distances = search_result->distances_;
     for (auto i = 0; i < nq; ++i) {
         for (auto j = 0; j < topK; ++j) {
             auto index = i * topK + j;
             if (offsets[index] != INVALID_SEG_OFFSET) {
+                AssertInfo(0 <= offsets[index] &&
+                               offsets[index] < segment->get_row_count(),
+                           fmt::format("invalid offset {}, segment {} with "
+                                       "rows num {}, data or index corruption",
+                                       offsets[index],
+                                       segment->get_segment_id(),
+                                       segment->get_row_count()));
                 real_topks[i]++;
                 offsets[valid_index] = offsets[index];
                 distances[valid_index] = distances[index];
