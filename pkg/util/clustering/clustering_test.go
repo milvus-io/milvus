@@ -15,7 +15,7 @@
 // limitations under the License.
 //
 
-package funcutil
+package clustering
 
 import (
 	"testing"
@@ -79,5 +79,63 @@ func TestClusteringInfoParse(t *testing.T) {
 		},
 	}
 	_, err = ClusteringInfoFromKV(kv4)
+	assert.Error(t, err)
+}
+
+func TestClusteringOptionsParse(t *testing.T) {
+	kv := []*commonpb.KeyValuePair{
+		{
+			Key:   SEARCH_ENABLE_CLUSTERING,
+			Value: "true",
+		},
+		{
+			Key:   SEARCH_CLUSTERING_FILTER_RATIO,
+			Value: "0.3",
+		},
+	}
+
+	options, err := SearchClusteringOptions(kv)
+	assert.NoError(t, err)
+	assert.Equal(t, true, options.Enable)
+	assert.Equal(t, float32(0.3), options.FilterRate)
+
+	kv2 := []*commonpb.KeyValuePair{
+		{
+			Key:   SEARCH_ENABLE_CLUSTERING,
+			Value: "true2",
+		},
+		{
+			Key:   SEARCH_CLUSTERING_FILTER_RATIO,
+			Value: "0.3",
+		},
+	}
+	options2, err := SearchClusteringOptions(kv2)
+	assert.Error(t, err)
+	assert.Nil(t, options2)
+
+	kv3 := []*commonpb.KeyValuePair{
+		{
+			Key:   SEARCH_ENABLE_CLUSTERING,
+			Value: "true",
+		},
+		{
+			Key:   SEARCH_CLUSTERING_FILTER_RATIO,
+			Value: "3",
+		},
+	}
+	_, err = SearchClusteringOptions(kv3)
+	assert.Error(t, err)
+
+	kv4 := []*commonpb.KeyValuePair{
+		{
+			Key:   SEARCH_ENABLE_CLUSTERING,
+			Value: "true",
+		},
+		{
+			Key:   SEARCH_CLUSTERING_FILTER_RATIO,
+			Value: "1.2",
+		},
+	}
+	_, err = SearchClusteringOptions(kv4)
 	assert.Error(t, err)
 }

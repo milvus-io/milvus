@@ -22,6 +22,7 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/samber/lo"
@@ -78,11 +79,12 @@ type distribution struct {
 
 // SegmentEntry stores the segment meta information.
 type SegmentEntry struct {
-	NodeID        int64
-	SegmentID     UniqueID
-	PartitionID   UniqueID
-	Version       int64
-	TargetVersion int64
+	NodeID         int64
+	SegmentID      UniqueID
+	PartitionID    UniqueID
+	Version        int64
+	TargetVersion  int64
+	ClusteringInfo *internalpb.ClusteringInfo
 }
 
 // NewDistribution creates a new distribution instance with all field initialized.

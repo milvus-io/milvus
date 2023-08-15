@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package funcutil
+package clustering
 
 import (
 	"encoding/json"
@@ -23,17 +23,22 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 )
 
 const (
 	CLUSTERING_CENTER = "clustering.center"
 	CLUSTERING_SIZE   = "clustering.size"
+
+	SEARCH_ENABLE_CLUSTERING       = "clustering.enable"
+	SEARCH_CLUSTERING_FILTER_RATIO = "clustering.filter_ratio"
 )
 
 func ClusteringInfoFromKV(kv []*commonpb.KeyValuePair) (*internalpb.ClusteringInfo, error) {
-	kvMap := KeyValuePair2Map(kv)
+	kvMap := funcutil.KeyValuePair2Map(kv)
 	if v, ok := kvMap[CLUSTERING_CENTER]; ok {
 		var floatSlice []float32
 		err := json.Unmarshal([]byte(v), &floatSlice)
@@ -45,7 +50,7 @@ func ClusteringInfoFromKV(kv []*commonpb.KeyValuePair) (*internalpb.ClusteringIn
 			Center: floatSlice,
 		}
 		if sizeStr, ok := kvMap[CLUSTERING_SIZE]; ok {
-			size, err := strconv.ParseInt(sizeStr, 10, 0)
+			size, err := strconv.ParseInt(sizeStr, 10, 64)
 			if err != nil {
 				log.Error("Failed to parse cluster size value:", zap.String("value", sizeStr), zap.Error(err))
 				return nil, err
@@ -55,4 +60,34 @@ func ClusteringInfoFromKV(kv []*commonpb.KeyValuePair) (*internalpb.ClusteringIn
 		return clusterInfo, nil
 	}
 	return nil, nil
+}
+
+func SearchClusteringOptions(kv []*commonpb.KeyValuePair) (*internalpb.SearchClusteringOptions, error) {
+	kvMap := funcutil.KeyValuePair2Map(kv)
+
+	clusteringOptions := &internalpb.SearchClusteringOptions{
+		Enable:     false,
+		FilterRate: 0.5, // default
+	}
+
+	if enable, ok := kvMap[SEARCH_ENABLE_CLUSTERING]; ok {
+		b, err := strconv.ParseBool(enable)
+		if err != nil {
+			return nil, errors.New("illegal search params clustering.enable value, should be true or false")
+		}
+		clusteringOptions.Enable = b
+	}
+
+	if clusterBasedFilterRatio, ok := kvMap[SEARCH_CLUSTERING_FILTER_RATIO]; ok {
+		b, err := strconv.ParseFloat(clusterBasedFilterRatio, 32)
+		if err != nil {
+			return nil, errors.New("illegal search params clustering.filter_ratio value, should be a float in range (0.0, 1.0]")
+		}
+		if b <= 0.0 || b > 1.0 {
+			return nil, errors.New("invalid clustering.filter_ratio value, should be a float in range (0.0, 1.0]")
+		}
+		clusteringOptions.FilterRate = float32(b)
+	}
+
+	return clusteringOptions, nil
 }

@@ -16,6 +16,11 @@ type MockShardDelegator struct {
 	mock.Mock
 }
 
+func (_m *MockShardDelegator) OptimizeSearchBasedOnClustering(req *querypb.SearchRequest, sealeds []SnapshotItem) (*querypb.SearchRequest, []SnapshotItem) {
+	//TODO implement me
+	panic("implement me")
+}
+
 type MockShardDelegator_Expecter struct {
 	mock *mock.Mock
 }
