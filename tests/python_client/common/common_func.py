@@ -564,7 +564,7 @@ def gen_search_param(index_type, metric_type="L2"):
             binary_search_params = {"metric_type": metric_type, "params": {"nprobe": nprobe}}
             search_params.append(binary_search_params)
     elif index_type in ["HNSW"]:
-        for ef in [64, 32768]:
+        for ef in [64, 1500, 32768]:
             hnsw_search_param = {"metric_type": metric_type, "params": {"ef": ef}}
             search_params.append(hnsw_search_param)
     elif index_type == "ANNOY":
@@ -572,12 +572,14 @@ def gen_search_param(index_type, metric_type="L2"):
             annoy_search_param = {"metric_type": metric_type, "params": {"search_k": search_k}}
             search_params.append(annoy_search_param)
     elif index_type == "DISKANN":
-        for search_list in [20, 30]:
+        for search_list in [20, 300, 1500]:
             diskann_search_param = {"metric_type": metric_type, "params": {"search_list": search_list}}
             search_params.append(diskann_search_param)
     else:
         log.error("Invalid index_type.")
         raise Exception("Invalid index_type.")
+    log.debug(search_params)
+
     return search_params
 
 
