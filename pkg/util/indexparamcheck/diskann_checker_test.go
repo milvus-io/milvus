@@ -23,7 +23,7 @@ func Test_diskannChecker_CheckTrain(t *testing.T) {
 	}
 
 	invalidParamsSmallDim := copyParams(validParams)
-	invalidParamsSmallDim[DIM] = strconv.Itoa(15)
+	invalidParamsSmallDim[DIM] = strconv.Itoa(4)
 
 	p1 := map[string]string{
 		DIM:    strconv.Itoa(128),

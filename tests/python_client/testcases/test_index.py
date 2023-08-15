@@ -1881,7 +1881,7 @@ class TestIndexDiskann(TestcaseBase):
             t.join()
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("dim", [1, 2, 8, 16, 24, 31])
+    @pytest.mark.parametrize("dim", [1, 2, 4, 6])
     def test_create_index_with_small_dim(self, dim):
         """
         target: test create index with diskann
