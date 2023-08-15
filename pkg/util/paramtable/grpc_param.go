@@ -45,7 +45,7 @@ const (
 	// Grpc retry policy
 	DefaultMaxAttempts               = 5
 	DefaultInitialBackoff    float64 = 1.0
-	DefaultMaxBackoff        float64 = 60.0
+	DefaultMaxBackoff        float64 = 10.0
 	DefaultBackoffMultiplier float64 = 2.0
 
 	DefaultCompressionEnabled bool = false
