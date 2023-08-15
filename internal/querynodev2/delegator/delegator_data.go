@@ -652,3 +652,7 @@ func (sd *shardDelegator) SyncTargetVersion(newVersion int64, growingInTarget []
 func (sd *shardDelegator) GetTargetVersion() int64 {
 	return sd.distribution.getTargetVersion()
 }
+
+func (sd *shardDelegator) SyncOfflineSegments(offlineInLeader []int64) {
+	sd.distribution.SyncOfflineSegments(offlineInLeader)
+}

@@ -1266,18 +1266,16 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 	removeActions := make([]*querypb.SyncAction, 0)
 	addSegments := make(map[int64][]*querypb.SegmentLoadInfo)
 	for _, action := range req.GetActions() {
-		log := log.With(zap.String("Action",
-			action.GetType().String()),
-			zap.Int64("segmentID", action.SegmentID),
-			zap.Int64("TargetVersion", action.GetTargetVersion()),
-		)
-		log.Info("sync action")
+		log := log.With(zap.String("Action", action.GetType().String()))
 		switch action.GetType() {
 		case querypb.SyncType_Remove:
+			log.Info("sync action", zap.Int64("segmentID", action.SegmentID))
 			removeActions = append(removeActions, action)
 		case querypb.SyncType_Set:
+			log.Info("sync action", zap.Int64("segmentID", action.SegmentID))
 			addSegments[action.GetNodeID()] = append(addSegments[action.GetNodeID()], action.GetInfo())
 		case querypb.SyncType_UpdateVersion:
+			log.Info("sync action", zap.Int64("TargetVersion", action.GetTargetVersion()))
 			pipeline := node.pipelineManager.Get(req.GetChannel())
 			if pipeline != nil {
 				droppedInfos := lo.Map(action.GetDroppedInTarget(), func(id int64, _ int) *datapb.SegmentInfo {
@@ -1292,6 +1290,10 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 			}
 			shardDelegator.SyncTargetVersion(action.GetTargetVersion(), action.GetGrowingInTarget(),
 				action.GetSealedInTarget(), action.GetDroppedInTarget())
+		case querypb.SyncType_UpdateOffline:
+			offlineOnLeader := action.GetOfflineInLeader()
+			log.Info("sync action", zap.Int64s("offlineInLeader", offlineOnLeader))
+			shardDelegator.SyncOfflineSegments(offlineOnLeader)
 		default:
 			return &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,

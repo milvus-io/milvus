@@ -91,6 +91,7 @@ type ShardDelegator interface {
 	ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest, force bool) error
 	SyncTargetVersion(newVersion int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64)
 	GetTargetVersion() int64
+	SyncOfflineSegments(offlineInLeader []int64)
 
 	// control
 	Serviceable() bool
@@ -147,7 +148,7 @@ func (sd *shardDelegator) getLogger(ctx context.Context) *log.MLogger {
 
 // Serviceable returns whether delegator is serviceable now.
 func (sd *shardDelegator) Serviceable() bool {
-	return sd.lifetime.GetState() == working
+	return sd.lifetime.GetState() == working && sd.distribution.Serviceable()
 }
 
 // Start sets delegator to working state.

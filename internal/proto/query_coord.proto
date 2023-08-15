@@ -553,6 +553,7 @@ enum SyncType {
   Set = 1;
   Amend = 2;
   UpdateVersion = 3;
+  UpdateOffline = 4;
 }
 
 message SyncAction {
@@ -566,6 +567,7 @@ message SyncAction {
   repeated int64 sealedInTarget = 8;
   int64 TargetVersion = 9;
   repeated int64 droppedInTarget  = 10; 
+  repeated int64 offlineInLeader = 11;
 }
 
 message SyncDistributionRequest {

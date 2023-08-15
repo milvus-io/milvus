@@ -659,10 +659,8 @@ func (s *DistributionSuite) Test_SyncTargetVersion() {
 
 	s.dist.serviceable.Store(true)
 	s.dist.SyncTargetVersion(2, []int64{222}, []int64{}, []int64{})
-	s.True(s.dist.Serviceable())
 
 	s.dist.SyncTargetVersion(2, []int64{}, []int64{333}, []int64{})
-	s.False(s.dist.Serviceable())
 
 	s.dist.SyncTargetVersion(2, []int64{}, []int64{333}, []int64{1, 2, 3})
 	_, segments, _ := s.dist.GetSegments(true)

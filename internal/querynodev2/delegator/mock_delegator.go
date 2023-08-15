@@ -678,6 +678,39 @@ func (_c *MockShardDelegator_SyncDistribution_Call) RunAndReturn(run func(contex
 	return _c
 }
 
+// SyncOfflineSegments provides a mock function with given fields: offlineInLeader
+func (_m *MockShardDelegator) SyncOfflineSegments(offlineInLeader []int64) {
+	_m.Called(offlineInLeader)
+}
+
+// MockShardDelegator_SyncOfflineSegments_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SyncOfflineSegments'
+type MockShardDelegator_SyncOfflineSegments_Call struct {
+	*mock.Call
+}
+
+// SyncOfflineSegments is a helper method to define mock.On call
+//   - offlineInLeader []int64
+func (_e *MockShardDelegator_Expecter) SyncOfflineSegments(offlineInLeader interface{}) *MockShardDelegator_SyncOfflineSegments_Call {
+	return &MockShardDelegator_SyncOfflineSegments_Call{Call: _e.mock.On("SyncOfflineSegments", offlineInLeader)}
+}
+
+func (_c *MockShardDelegator_SyncOfflineSegments_Call) Run(run func(offlineInLeader []int64)) *MockShardDelegator_SyncOfflineSegments_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].([]int64))
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_SyncOfflineSegments_Call) Return() *MockShardDelegator_SyncOfflineSegments_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockShardDelegator_SyncOfflineSegments_Call) RunAndReturn(run func([]int64)) *MockShardDelegator_SyncOfflineSegments_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SyncTargetVersion provides a mock function with given fields: newVersion, growingInTarget, sealedInTarget, droppedInTarget
 func (_m *MockShardDelegator) SyncTargetVersion(newVersion int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64) {
 	_m.Called(newVersion, growingInTarget, sealedInTarget, droppedInTarget)

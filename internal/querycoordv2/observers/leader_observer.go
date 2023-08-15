@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/samber/lo"
 )
 
@@ -48,6 +49,8 @@ type LeaderObserver struct {
 	broker      meta.Broker
 	cluster     session.Cluster
 	manualCheck chan checkRequest
+
+	unserviceableLeader typeutil.UniqueSet
 
 	stopOnce sync.Once
 }
@@ -115,6 +118,12 @@ func (o *LeaderObserver) observeCollection(ctx context.Context, collection int64
 			if updateVersionAction != nil {
 				actions = append(actions, updateVersionAction)
 			}
+
+			updateOfflineAction := o.checkLeaderServiceable(ctx, replica, leaderView)
+			if updateOfflineAction != nil {
+				actions = append(actions, updateOfflineAction)
+			}
+
 			success := o.sync(ctx, replica.GetID(), leaderView, actions)
 			if !success {
 				result = false
@@ -131,6 +140,51 @@ func (ob *LeaderObserver) CheckTargetVersion(collectionID int64) bool {
 		Notifier:     notifier,
 	}
 	return <-notifier
+}
+
+func (o *LeaderObserver) checkLeaderServiceable(ctx context.Context, replica *meta.Replica, leaderView *meta.LeaderView) *querypb.SyncAction {
+	log := log.With(zap.Int64("collectionID", leaderView.CollectionID),
+		zap.String("channelName", leaderView.Channel),
+		zap.Int64("nodeID", leaderView.ID),
+	)
+
+	segmentInDist := typeutil.NewUniqueSet()
+	for _, node := range replica.GetNodes() {
+		segmentIDs := lo.Map(o.dist.SegmentDistManager.GetByCollectionAndNode(replica.CollectionID, node),
+			func(s *meta.Segment, _ int) int64 { return s.GetID() })
+		segmentInDist.Insert(segmentIDs...)
+	}
+
+	offlines := make([]int64, 0)
+	segmentInTarget := o.target.GetHistoricalSegmentsByChannel(leaderView.CollectionID, leaderView.Channel, meta.CurrentTarget)
+	for _, s := range segmentInTarget {
+		if !segmentInDist.Contain(s.GetID()) {
+			offlines = append(offlines, s.GetID())
+		}
+	}
+
+	// found leader view has no offline segments, sync a empty offline list, make leader serviceable
+	if len(offlines) == 0 && o.unserviceableLeader.Contain(leaderView.ID) {
+		log.Info("set delegator serviceable")
+		o.unserviceableLeader.Remove(leaderView.ID)
+		return &querypb.SyncAction{
+			NodeID: leaderView.ID,
+			Type:   querypb.SyncType_UpdateOffline,
+		}
+	}
+
+	// found leader view has no offline segments, sync offline segment list, make leader unserviceable
+	if !o.unserviceableLeader.Contain(leaderView.ID) && len(offlines) > 0 {
+		log.Info("set delegator unserviceable", zap.Int64s("offlines", offlines))
+		o.unserviceableLeader.Insert(leaderView.ID)
+		return &querypb.SyncAction{
+			NodeID:          leaderView.ID,
+			Type:            querypb.SyncType_UpdateOffline,
+			OfflineInLeader: offlines,
+		}
+	}
+
+	return nil
 }
 
 func (o *LeaderObserver) checkNeedUpdateTargetVersion(ctx context.Context, leaderView *meta.LeaderView) *querypb.SyncAction {
@@ -291,12 +345,13 @@ func NewLeaderObserver(
 	cluster session.Cluster,
 ) *LeaderObserver {
 	return &LeaderObserver{
-		closeCh:     make(chan struct{}),
-		dist:        dist,
-		meta:        meta,
-		target:      targetMgr,
-		broker:      broker,
-		cluster:     cluster,
-		manualCheck: make(chan checkRequest, 10),
+		closeCh:             make(chan struct{}),
+		dist:                dist,
+		meta:                meta,
+		target:              targetMgr,
+		broker:              broker,
+		cluster:             cluster,
+		manualCheck:         make(chan checkRequest, 10),
+		unserviceableLeader: typeutil.NewUniqueSet(),
 	}
 }
