@@ -1234,10 +1234,11 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 	}
 	for _, channelName := range req.GetChannelNames() {
 		ch := &channel{
-			Name:           channelName,
-			CollectionID:   req.GetCollectionID(),
-			StartPositions: req.GetStartPositions(),
-			Schema:         req.GetSchema(),
+			Name:            channelName,
+			CollectionID:    req.GetCollectionID(),
+			StartPositions:  req.GetStartPositions(),
+			Schema:          req.GetSchema(),
+			CreateTimestamp: req.GetCreateTimestamp(),
 		}
 		err := s.channelManager.Watch(ch)
 		if err != nil {

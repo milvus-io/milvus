@@ -275,6 +275,9 @@ func (h *ServerHandler) getCollectionStartPos(channel *channel) *msgpb.MsgPositi
 	} else {
 		// use passed start positions, skip to ask RootCoord.
 		startPosition = toMsgPosition(channel.Name, channel.StartPositions)
+		if startPosition != nil {
+			startPosition.Timestamp = channel.CreateTimestamp
+		}
 		log.Info("segment position not found, setting channel seek position to channel start position",
 			zap.String("channel", channel.Name),
 			zap.Uint64("posTs", startPosition.GetTimestamp()),
