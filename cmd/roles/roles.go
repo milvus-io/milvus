@@ -27,15 +27,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/cmd/components"
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/http/healthz"
 	rocksmqimpl "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	internalmetrics "github.com/milvus-io/milvus/internal/util/metrics"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/tracer"
@@ -45,13 +42,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	_ "github.com/milvus-io/milvus/pkg/util/symbolizer" // support symbolizer and crash dump
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.uber.org/zap"
 )
 
 // all milvus related metrics is in a separate registry
-var Registry *metrics.MilvusRegistry
+var Registry *internalmetrics.MilvusRegistry
 
 func init() {
-	Registry = metrics.NewMilvusRegistry()
+	Registry = internalmetrics.NewMilvusRegistry()
 	metrics.Register(Registry.GoRegistry)
 	metrics.RegisterMetaMetrics(Registry.GoRegistry)
 	metrics.RegisterMsgStreamMetrics(Registry.GoRegistry)
@@ -223,7 +223,7 @@ func (mr *MilvusRoles) setupLogger() {
 }
 
 // Register serves prometheus http service
-func setupPrometheusHTTPServer(r *metrics.MilvusRegistry) {
+func setupPrometheusHTTPServer(r *internalmetrics.MilvusRegistry) {
 	http.Register(&http.Handler{
 		Path:    "/metrics",
 		Handler: promhttp.HandlerFor(r, promhttp.HandlerOpts{}),
