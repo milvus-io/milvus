@@ -215,7 +215,7 @@ func (gc *garbageCollector) checkDroppedSegmentGC(segment *SegmentInfo,
 		// If the child is GC'ed first, then childSegment will be nil.
 		if childSegment != nil && !indexSet.Contain(childSegment.GetID()) {
 			log.WithRateGroup("GC_FAIL_COMPACT_TO_NOT_INDEXED", 1, 60).
-				RatedWarn(60, "skipping GC when compact target segment is not indexed",
+				RatedInfo(60, "skipping GC when compact target segment is not indexed",
 					zap.Int64("child segment ID", childSegment.GetID()))
 			return false
 		}
@@ -408,7 +408,7 @@ func (gc *garbageCollector) recycleUnusedIndexFiles() {
 		if !canRecycle {
 			// Even if the index is marked as deleted, the index file will not be recycled, wait for the next gc,
 			// and delete all index files about the buildID at one time.
-			log.Warn("garbageCollector can not recycle index files", zap.Int64("buildID", buildID))
+			log.Info("garbageCollector can not recycle index files", zap.Int64("buildID", buildID))
 			continue
 		}
 		if segIdx == nil {

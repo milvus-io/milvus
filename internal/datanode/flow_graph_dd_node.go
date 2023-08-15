@@ -149,7 +149,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 		case commonpb.MsgType_DropCollection:
 			if msg.(*msgstream.DropCollectionMsg).GetCollectionID() == ddn.collectionID {
 				log.Info("Receiving DropCollection msg",
-					zap.Any("collectionID", ddn.collectionID),
+					zap.Int64("collectionID", ddn.collectionID),
 					zap.String("vChannelName", ddn.vChannelName))
 				ddn.dropMode.Store(true)
 
@@ -174,7 +174,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 		case commonpb.MsgType_Insert:
 			imsg := msg.(*msgstream.InsertMsg)
 			if imsg.CollectionID != ddn.collectionID {
-				log.Warn("filter invalid insert message, collection mis-match",
+				log.Info("filter invalid insert message, collection mis-match",
 					zap.Int64("Get collID", imsg.CollectionID),
 					zap.Int64("Expected collID", ddn.collectionID))
 				continue

@@ -69,7 +69,7 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	log.Debug("PrivilegeInterceptor", zap.String("type", reflect.TypeOf(req).String()))
 	privilegeExt, err := funcutil.GetPrivilegeExtObj(req)
 	if err != nil {
-		log.Warn("GetPrivilegeExtObj err", zap.Error(err))
+		log.Info("GetPrivilegeExtObj err", zap.Error(err))
 		return ctx, nil
 	}
 	username, err := GetCurUserFromContext(ctx)
@@ -87,7 +87,7 @@ func PrivilegeInterceptorWithUsername(ctx context.Context, username string, req 
 	log.Debug("PrivilegeInterceptor", zap.String("type", reflect.TypeOf(req).String()))
 	privilegeExt, err := funcutil.GetPrivilegeExtObj(req)
 	if err != nil {
-		log.Warn("GetPrivilegeExtObj err", zap.Error(err))
+		log.Info("GetPrivilegeExtObj err", zap.Error(err))
 		return ctx, nil
 	}
 	return privilegeInterceptor(ctx, privilegeExt, username, req)
