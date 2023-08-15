@@ -11,6 +11,7 @@ default_nb_medium = 5000
 default_top_k = 10
 default_nq = 2
 default_limit = 10
+max_limit = 16384
 default_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10}}
 default_search_ip_params = {"metric_type": "IP", "params": {"nprobe": 10}}
 default_search_binary_params = {"metric_type": "JACCARD", "params": {"nprobe": 10}}
