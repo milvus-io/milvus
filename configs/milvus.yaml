@@ -126,6 +126,8 @@ rocksmq:
   # 0 means not compress, 7 will use zstd
   # len of types means num of rocksdb level.
   compressionTypes: [0, 0, 7, 7, 7]
+  maxWriteParallelism: 30
+  maxTtMsgBufferSize: 1000
 
 # natsmq configuration.
 # more detail: https://docs.nats.io/running-a-nats-service/configuration

@@ -16,6 +16,8 @@
 
 package mqwrapper
 
+var TtProperty = "isTt"
+
 // Message is the interface that provides operations of a consumer
 type Message interface {
 	// Topic get the topic from which this message originated from

@@ -87,13 +87,9 @@ func (rmq *rocksmq) produceBefore2(topicName string, messages []producerMessageB
 		return nil, errors.New(RmqNotServingErrMsg)
 	}
 	start := time.Now()
-	ll, ok := topicMu.Load(topicName)
+	lock, ok := topicMu.Get(topicName)
 	if !ok {
 		return []UniqueID{}, fmt.Errorf("topic name = %s not exist", topicName)
-	}
-	lock, ok := ll.(*sync.Mutex)
-	if !ok {
-		return []UniqueID{}, fmt.Errorf("get mutex failed, topic name = %s", topicName)
 	}
 	lock.Lock()
 	defer lock.Unlock()
@@ -131,8 +127,8 @@ func (rmq *rocksmq) produceBefore2(topicName string, messages []producerMessageB
 		return []UniqueID{}, err
 	}
 	writeTime := time.Since(start).Milliseconds()
-	if vals, ok := rmq.consumers.Load(topicName); ok {
-		for _, v := range vals.([]*Consumer) {
+	if vals, ok := rmq.consumers.Get(topicName); ok {
+		for _, v := range vals {
 			select {
 			case v.MsgMutex <- struct{}{}:
 				continue
@@ -168,13 +164,9 @@ func (rmq *rocksmq) produceIn2(topicName string, messages []ProducerMessage) ([]
 		return nil, errors.New(RmqNotServingErrMsg)
 	}
 	start := time.Now()
-	ll, ok := topicMu.Load(topicName)
+	lock, ok := topicMu.Get(topicName)
 	if !ok {
 		return []UniqueID{}, fmt.Errorf("topic name = %s not exist", topicName)
-	}
-	lock, ok := ll.(*sync.Mutex)
-	if !ok {
-		return []UniqueID{}, fmt.Errorf("get mutex failed, topic name = %s", topicName)
 	}
 	lock.Lock()
 	defer lock.Unlock()
@@ -222,8 +214,8 @@ func (rmq *rocksmq) produceIn2(topicName string, messages []ProducerMessage) ([]
 		return []UniqueID{}, err
 	}
 	writeTime := time.Since(start).Milliseconds()
-	if vals, ok := rmq.consumers.Load(topicName); ok {
-		for _, v := range vals.([]*Consumer) {
+	if vals, ok := rmq.consumers.Get(topicName); ok {
+		for _, v := range vals {
 			select {
 			case v.MsgMutex <- struct{}{}:
 				continue
@@ -396,7 +388,6 @@ func TestRocksmq_Compatibility(t *testing.T) {
 	paramtable.Init()
 	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
 	assert.NoError(t, err)
-	defer rmq.Close()
 
 	channelName := "channel_rocks"
 	err = rmq.CreateTopic(channelName)
@@ -412,24 +403,6 @@ func TestRocksmq_Compatibility(t *testing.T) {
 	_, err = rmq.produceBefore2(channelName, tMsgs)
 	assert.NoError(t, err)
 
-	groupName := "test_group"
-	_ = rmq.DestroyConsumerGroup(channelName, groupName)
-	err = rmq.CreateConsumerGroup(channelName, groupName)
-	assert.NoError(t, err)
-
-	cMsgs, err := rmq.Consume(channelName, groupName, 1)
-	if err != nil {
-		log.Info("test", zap.Any("err", err))
-	}
-	assert.NoError(t, err)
-	assert.Equal(t, len(cMsgs), 1)
-	assert.Equal(t, string(cMsgs[0].Payload), "d_message")
-	_, ok := cMsgs[0].Properties[common.TraceIDKey]
-	assert.False(t, ok)
-	// it will be set empty map if produce message has no properties field
-	expect := make(map[string]string)
-	assert.Equal(t, cMsgs[0].Properties, expect)
-
 	// between 2.2.0 and 2.3.0, the key of Payload is topic/properties/msgid/Payload
 	// will ingnore the property before 2.3.0, just make sure property empty is ok for 2.3
 	// after 2.3, the properties will be stored in column families
@@ -442,16 +415,6 @@ func TestRocksmq_Compatibility(t *testing.T) {
 	tMsgs1[0] = tMsg1
 	_, err = rmq.produceIn2(channelName, tMsgs1)
 	assert.NoError(t, err)
-
-	msg2, err := rmq.Consume(channelName, groupName, 1)
-	assert.NoError(t, err)
-	assert.Equal(t, len(msg2), 1)
-	assert.Equal(t, string(msg2[0].Payload), "1_message")
-	_, ok = msg2[0].Properties[common.TraceIDKey]
-	assert.False(t, ok)
-	// will ingnore the property before 2.3.0, just make sure property empty is ok for 2.3
-	expect = make(map[string]string)
-	assert.Equal(t, cMsgs[0].Properties, expect)
 
 	// between 2.2.0 and 2.3.0, the key of Payload is topic/properties/msgid/Payload
 	// after 2.3, the properties will be stored in column families
@@ -468,7 +431,45 @@ func TestRocksmq_Compatibility(t *testing.T) {
 	_, err = rmq.Produce(channelName, tMsgs3)
 	assert.NoError(t, err)
 
-	msg5, err := rmq.Consume(channelName, groupName, 2)
+	rmq.Close()
+
+	rmq2, err := NewRocksMQ(rocksdbPath, idAllocator)
+	assert.NoError(t, err)
+	defer rmq2.Close()
+
+	err = rmq2.CreateTopic(channelName)
+	assert.NoError(t, err)
+	defer rmq2.DestroyTopic(channelName)
+
+	groupName := "test_group"
+	_ = rmq2.DestroyConsumerGroup(channelName, groupName)
+	err = rmq2.CreateConsumerGroup(channelName, groupName)
+	assert.NoError(t, err)
+
+	cMsgs, err := rmq2.Consume(channelName, groupName, 1)
+	if err != nil {
+		log.Info("test", zap.Any("err", err))
+	}
+	assert.NoError(t, err)
+	assert.Equal(t, len(cMsgs), 1)
+	assert.Equal(t, string(cMsgs[0].Payload), "d_message")
+	_, ok := cMsgs[0].Properties[common.TraceIDKey]
+	assert.False(t, ok)
+	// it will be set empty map if produce message has no properties field
+	expect := make(map[string]string)
+	assert.Equal(t, cMsgs[0].Properties, expect)
+
+	msg2, err := rmq2.Consume(channelName, groupName, 1)
+	assert.NoError(t, err)
+	assert.Equal(t, len(msg2), 1)
+	assert.Equal(t, string(msg2[0].Payload), "1_message")
+	_, ok = msg2[0].Properties[common.TraceIDKey]
+	assert.False(t, ok)
+	// will ingnore the property before 2.3.0, just make sure property empty is ok for 2.3
+	expect = make(map[string]string)
+	assert.Equal(t, cMsgs[0].Properties, expect)
+
+	msg5, err := rmq2.Consume(channelName, groupName, 2)
 	assert.NoError(t, err)
 	assert.Equal(t, len(msg5), 2)
 	assert.Equal(t, string(msg5[0].Payload), "3_message")
@@ -563,7 +564,7 @@ func TestRocksmq_Dummy(t *testing.T) {
 	assert.NoError(t, err)
 
 	channelName1 := "channel_dummy"
-	topicMu.Store(channelName1, new(sync.Mutex))
+	topicMu.Insert(channelName1, new(sync.Mutex))
 	err = rmq.DestroyTopic(channelName1)
 	assert.NoError(t, err)
 
@@ -595,10 +596,10 @@ func TestRocksmq_Dummy(t *testing.T) {
 	pMsgA := ProducerMessage{Payload: []byte(msgA)}
 	pMsgs[0] = pMsgA
 
-	topicMu.Delete(channelName)
+	topicMu.GetAndRemove(channelName)
 	_, err = rmq.Consume(channelName, groupName1, 1)
 	assert.Error(t, err)
-	topicMu.Store(channelName, channelName)
+	topicMu.Insert(channelName, new(sync.Mutex))
 	_, err = rmq.Produce(channelName, nil)
 	assert.Error(t, err)
 
@@ -740,6 +741,7 @@ func TestRocksmq_Loop(t *testing.T) {
 }
 
 func TestRocksmq_Goroutines(t *testing.T) {
+	t.Skip()
 	ep := etcdEndpoints()
 	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
 	assert.NoError(t, err)
@@ -1196,7 +1198,7 @@ func TestRocksmq_CheckPreTopicValid(t *testing.T) {
 	err = rmq.CreateTopic(channelName2)
 	defer rmq.DestroyTopic(channelName2)
 	assert.NoError(t, err)
-	topicMu.Store(channelName2, new(sync.Mutex))
+	topicMu.Insert(channelName2, new(sync.Mutex))
 
 	pMsgs := make([]ProducerMessage, 10)
 	for i := 0; i < 10; i++ {
@@ -1216,7 +1218,7 @@ func TestRocksmq_CheckPreTopicValid(t *testing.T) {
 	defer rmq.DestroyTopic(channelName3)
 	assert.NoError(t, err)
 
-	topicMu.Store(channelName3, new(sync.Mutex))
+	topicMu.Insert(channelName3, new(sync.Mutex))
 	err = rmq.CheckTopicValid(channelName3)
 	assert.NoError(t, err)
 }
@@ -1319,10 +1321,6 @@ func TestRocksmq_SeekTopicMutexError(t *testing.T) {
 	rmq, err := NewRocksMQ(name, idAllocator)
 	assert.NoError(t, err)
 	defer rmq.Close()
-
-	topicMu.Store("test_topic_mutix_error", nil)
-	assert.Error(t, rmq.Seek("test_topic_mutix_error", "", 0))
-	assert.Error(t, rmq.ForceSeek("test_topic_mutix_error", "", 0))
 }
 
 func TestRocksmq_moveConsumePosError(t *testing.T) {

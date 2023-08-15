@@ -281,6 +281,16 @@ func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {
 			}
 
 			msg := &mqwrapper.ProducerMessage{Payload: m, Properties: map[string]string{}}
+			if v.Msgs[i].Type() == commonpb.MsgType_TimeTick {
+				msg.Properties[mqwrapper.TtProperty] = ""
+			}
+			if v.Msgs[i].Type() == commonpb.MsgType_Delete {
+				deletemsg := v.Msgs[i].(*DeleteMsg)
+				if deletemsg.NumRows == 0 {
+					msg.Properties[mqwrapper.TtProperty] = ""
+				}
+			}
+
 			InjectCtx(spanCtx, msg.Properties)
 
 			ms.producerLock.Lock()

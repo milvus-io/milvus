@@ -581,6 +581,9 @@ type RocksmqConfig struct {
 	// only support {0,7}, 0 means no compress, 7 means zstd
 	// default [0,7].
 	CompressionTypes ParamItem `refreshable:"false"`
+
+	MaxParallelsim  ParamItem `refreshable:"false"`
+	MaxTtBufferSize ParamItem `refreshable:"false"`
 }
 
 func (r *RocksmqConfig) Init(base *BaseTable) {
@@ -651,6 +654,20 @@ please adjust in embedded Milvus: /tmp/milvus/rdb_data`,
 		Version:      "2.2.12",
 	}
 	r.CompressionTypes.Init(base.mgr)
+
+	r.MaxParallelsim = ParamItem{
+		Key:          "rocksmq.maxWriteParallelism",
+		DefaultValue: "30",
+		Version:      "2.2.13",
+	}
+	r.MaxParallelsim.Init(base.mgr)
+
+	r.MaxTtBufferSize = ParamItem{
+		Key:          "rocksmq.maxTtMsgBufferSize",
+		DefaultValue: "1000",
+		Version:      "2.2.13",
+	}
+	r.MaxTtBufferSize.Init(base.mgr)
 }
 
 // NatsmqConfig describes the configuration options for the Nats message queue
