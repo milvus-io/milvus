@@ -377,9 +377,10 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 		s.Equal(int64(1), sealed[0].NodeID)
 		s.ElementsMatch([]SegmentEntry{
 			{
-				SegmentID:   100,
-				NodeID:      1,
-				PartitionID: 500,
+				SegmentID:     100,
+				NodeID:        1,
+				PartitionID:   500,
+				TargetVersion: unreadableTargetVersion,
 			},
 		}, sealed[0].Segments)
 	})
@@ -453,14 +454,16 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 		s.Equal(int64(1), sealed[0].NodeID)
 		s.ElementsMatch([]SegmentEntry{
 			{
-				SegmentID:   100,
-				NodeID:      1,
-				PartitionID: 500,
+				SegmentID:     100,
+				NodeID:        1,
+				PartitionID:   500,
+				TargetVersion: unreadableTargetVersion,
 			},
 			{
-				SegmentID:   200,
-				NodeID:      1,
-				PartitionID: 500,
+				SegmentID:     200,
+				NodeID:        1,
+				PartitionID:   500,
+				TargetVersion: unreadableTargetVersion,
 			},
 		}, sealed[0].Segments)
 	})
@@ -657,9 +660,10 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 	s.Equal(int64(1), sealed[0].NodeID)
 	s.ElementsMatch([]SegmentEntry{
 		{
-			SegmentID:   1000,
-			NodeID:      1,
-			PartitionID: 500,
+			SegmentID:     1000,
+			NodeID:        1,
+			PartitionID:   500,
+			TargetVersion: unreadableTargetVersion,
 		},
 	}, sealed[0].Segments)
 

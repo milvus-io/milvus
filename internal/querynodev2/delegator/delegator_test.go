@@ -192,10 +192,11 @@ func (s *DelegatorSuite) TestGetSegmentInfo() {
 			NodeID: 1,
 			Segments: []SegmentEntry{
 				{
-					NodeID:      1,
-					SegmentID:   1001,
-					PartitionID: 500,
-					Version:     2001,
+					NodeID:        1,
+					SegmentID:     1001,
+					PartitionID:   500,
+					Version:       2001,
+					TargetVersion: unreadableTargetVersion,
 				},
 			},
 		},

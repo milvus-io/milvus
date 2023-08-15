@@ -64,12 +64,14 @@ func (s *DistributionSuite) TestAddDistribution() {
 					NodeID: 1,
 					Segments: []SegmentEntry{
 						{
-							NodeID:    1,
-							SegmentID: 1,
+							NodeID:        1,
+							SegmentID:     1,
+							TargetVersion: unreadableTargetVersion,
 						},
 						{
-							NodeID:    1,
-							SegmentID: 2,
+							NodeID:        1,
+							SegmentID:     2,
+							TargetVersion: unreadableTargetVersion,
 						},
 					},
 				},
@@ -93,8 +95,9 @@ func (s *DistributionSuite) TestAddDistribution() {
 					NodeID: 1,
 					Segments: []SegmentEntry{
 						{
-							NodeID:    1,
-							SegmentID: 1,
+							NodeID:        1,
+							SegmentID:     1,
+							TargetVersion: unreadableTargetVersion,
 						},
 					},
 				},
@@ -122,13 +125,15 @@ func (s *DistributionSuite) TestAddDistribution() {
 					NodeID: 1,
 					Segments: []SegmentEntry{
 						{
-							NodeID:    1,
-							SegmentID: 1,
+							NodeID:        1,
+							SegmentID:     1,
+							TargetVersion: unreadableTargetVersion,
 						},
 
 						{
-							NodeID:    1,
-							SegmentID: 3,
+							NodeID:        1,
+							SegmentID:     3,
+							TargetVersion: unreadableTargetVersion,
 						},
 					},
 				},
@@ -136,8 +141,9 @@ func (s *DistributionSuite) TestAddDistribution() {
 					NodeID: 2,
 					Segments: []SegmentEntry{
 						{
-							NodeID:    2,
-							SegmentID: 2,
+							NodeID:        2,
+							SegmentID:     2,
+							TargetVersion: unreadableTargetVersion,
 						},
 					},
 				},
@@ -157,8 +163,8 @@ func (s *DistributionSuite) TestAddDistribution() {
 				{
 					NodeID: 1,
 					Segments: []SegmentEntry{
-						{NodeID: 1, SegmentID: 1},
-						{NodeID: 1, SegmentID: 2},
+						{NodeID: 1, SegmentID: 1, TargetVersion: unreadableTargetVersion},
+						{NodeID: 1, SegmentID: 2, TargetVersion: unreadableTargetVersion},
 					},
 				},
 			},
@@ -287,13 +293,13 @@ func (s *DistributionSuite) TestRemoveDistribution() {
 				{
 					NodeID: 1,
 					Segments: []SegmentEntry{
-						{NodeID: 1, SegmentID: 3},
+						{NodeID: 1, SegmentID: 3, TargetVersion: unreadableTargetVersion},
 					},
 				},
 				{
 					NodeID: 2,
 					Segments: []SegmentEntry{
-						{NodeID: 2, SegmentID: 2},
+						{NodeID: 2, SegmentID: 2, TargetVersion: unreadableTargetVersion},
 					},
 				},
 			},
@@ -322,14 +328,14 @@ func (s *DistributionSuite) TestRemoveDistribution() {
 				{
 					NodeID: 1,
 					Segments: []SegmentEntry{
-						{NodeID: 1, SegmentID: 1},
-						{NodeID: 1, SegmentID: 3},
+						{NodeID: 1, SegmentID: 1, TargetVersion: unreadableTargetVersion},
+						{NodeID: 1, SegmentID: 3, TargetVersion: unreadableTargetVersion},
 					},
 				},
 				{
 					NodeID: 2,
 					Segments: []SegmentEntry{
-						{NodeID: 2, SegmentID: 2},
+						{NodeID: 2, SegmentID: 2, TargetVersion: unreadableTargetVersion},
 					},
 				},
 			},
@@ -358,13 +364,13 @@ func (s *DistributionSuite) TestRemoveDistribution() {
 				{
 					NodeID: 1,
 					Segments: []SegmentEntry{
-						{NodeID: 1, SegmentID: 3},
+						{NodeID: 1, SegmentID: 3, TargetVersion: unreadableTargetVersion},
 					},
 				},
 				{
 					NodeID: 2,
 					Segments: []SegmentEntry{
-						{NodeID: 2, SegmentID: 2},
+						{NodeID: 2, SegmentID: 2, TargetVersion: unreadableTargetVersion},
 					},
 				},
 			},
@@ -395,13 +401,21 @@ func (s *DistributionSuite) TestRemoveDistribution() {
 				{
 					NodeID: 1,
 					Segments: []SegmentEntry{
-						{NodeID: 1, SegmentID: 3},
+						{
+							NodeID:        1,
+							SegmentID:     3,
+							TargetVersion: unreadableTargetVersion,
+						},
 					},
 				},
 				{
 					NodeID: 2,
 					Segments: []SegmentEntry{
-						{NodeID: 2, SegmentID: 2},
+						{
+							NodeID:        2,
+							SegmentID:     2,
+							TargetVersion: unreadableTargetVersion,
+						},
 					},
 				},
 			},
@@ -476,12 +490,14 @@ func (s *DistributionSuite) TestPeek() {
 					NodeID: 1,
 					Segments: []SegmentEntry{
 						{
-							NodeID:    1,
-							SegmentID: 1,
+							NodeID:        1,
+							SegmentID:     1,
+							TargetVersion: unreadableTargetVersion,
 						},
 						{
-							NodeID:    1,
-							SegmentID: 2,
+							NodeID:        1,
+							SegmentID:     2,
+							TargetVersion: unreadableTargetVersion,
 						},
 					},
 				},
@@ -508,13 +524,15 @@ func (s *DistributionSuite) TestPeek() {
 					NodeID: 1,
 					Segments: []SegmentEntry{
 						{
-							NodeID:    1,
-							SegmentID: 1,
+							NodeID:        1,
+							SegmentID:     1,
+							TargetVersion: unreadableTargetVersion,
 						},
 
 						{
-							NodeID:    1,
-							SegmentID: 3,
+							NodeID:        1,
+							SegmentID:     3,
+							TargetVersion: unreadableTargetVersion,
 						},
 					},
 				},
@@ -522,8 +540,9 @@ func (s *DistributionSuite) TestPeek() {
 					NodeID: 2,
 					Segments: []SegmentEntry{
 						{
-							NodeID:    2,
-							SegmentID: 2,
+							NodeID:        2,
+							SegmentID:     2,
+							TargetVersion: unreadableTargetVersion,
 						},
 					},
 				},
