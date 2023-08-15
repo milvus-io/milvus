@@ -34,6 +34,8 @@ source ${ROOT_DIR}/scripts/setenv.sh
 pushd ${BUILD_OUTPUT_DIR}
 
 export CONAN_REVISIONS_ENABLED=1
+export CXXFLAGS=-Wno-error=address
+export CFLAGS=-Wno-error=address
 if [[ ! `conan remote list` == *default-conan-local* ]]; then
     conan remote add default-conan-local https://milvus01.jfrog.io/artifactory/api/conan/default-conan-local
 fi

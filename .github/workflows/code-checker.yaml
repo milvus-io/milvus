@@ -29,17 +29,11 @@ on:
 
 jobs:
   ubuntu:
-    name: ${{ matrix.name }}
-    runs-on: ${{ matrix.os }}
+    name: Code Checker AMD64 Ubuntu 20.04
+    runs-on: ubuntu-latest
     timeout-minutes: 180
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - name: Code Checker AMD64 Ubuntu 20.04
-            os: ubuntu-20.04
-    env:
-      UBUNTU: 20.04
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -50,7 +44,6 @@ jobs:
           echo "corehash=${CORE_HASH}" >> $GITHUB_ENV
           echo "Set CCache hash to ${CORE_HASH}"
       - name: Cache CCache Volumes
-        # uses: actions/cache@v3
         uses: pat-s/always-upload-cache@v3
         with:
           path: .docker/amd64-ubuntu20.04-ccache
@@ -63,21 +56,22 @@ jobs:
           key: ubuntu20.04-go-mod-${{ hashFiles('**/go.sum') }}
           restore-keys: ubuntu20.04-go-mod-
       - name: Cache Conan Packages
-        # uses: actions/cache@v3
         uses: pat-s/always-upload-cache@v3
         with:
           path: .docker/amd64-ubuntu20.04-conan
           key: ubuntu20.04-conan-${{ hashFiles('internal/core/conanfile.*') }}
           restore-keys: ubuntu20.04-conan-
+      # - name: Setup upterm session
+      #   uses: lhotari/action-upterm@v1
       - name: Code Check
         env:
           OS_NAME: 'ubuntu20.04'
         run: |
           ./build/builder.sh /bin/bash -c "make check-proto-product && make verifiers"
-  centos:
-    name: Code Checker CentOS 7
-    # Run in centos docker
-    runs-on: ubuntu-20.04
+  amazonlinux:
+    name: Code Checker Amazonlinux 2023
+    # Run in amazonlinux docker
+    runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
       - name: Checkout
@@ -89,33 +83,31 @@ jobs:
           echo "corehash=${CORE_HASH}" >> $GITHUB_ENV
           echo "Set CCache hash to ${CORE_HASH}"
       - name: Cache CCache Volumes
-        # uses: actions/cache@v3
         uses: pat-s/always-upload-cache@v3
         with:
-          path: .docker/amd64-centos7-ccache
-          key: centos7-ccache-${{ env.corehash }}
-          restore-keys: centos7-ccache-
+          path: .docker/amd64-amazonlinux2023-ccache
+          key: amazonlinux2023-ccache-${{ env.corehash }}
+          restore-keys: amazonlinux2023-ccache-
       - name: Cache Third Party
         uses: actions/cache@v3
         with:
           path: .docker/thirdparty
-          key: centos7-thirdparty-${{ hashFiles('internal/core/thirdparty/**') }}
-          restore-keys: centos7-thirdparty-
+          key: amazonlinux2023-thirdparty-${{ hashFiles('internal/core/thirdparty/**') }}
+          restore-keys: amazonlinux2023-thirdparty-
       - name: Cache Go Mod Volumes
         uses: actions/cache@v3
         with:
-          path: .docker/amd64-centos7-go-mod
-          key: centos7-go-mod-${{ hashFiles('**/go.sum') }}
-          restore-keys: centos7-go-mod-
+          path: .docker/amd64-amazonlinux2023-go-mod
+          key: amazonlinux2023-go-mod-${{ hashFiles('**/go.sum') }}
+          restore-keys: amazonlinux2023-go-mod-
       - name: Cache Conan Packages
-        # uses: actions/cache@v3
         uses: pat-s/always-upload-cache@v3
         with:
-          path: .docker/amd64-centos7-conan
-          key: centos7-conan-${{ hashFiles('internal/core/conanfile.*') }}
-          # restore-keys: centos7-conan-
+          path: .docker/amd64-amazonlinux2023-conan
+          key: amazonlinux2023-conan-${{ hashFiles('internal/core/conanfile.*') }}
+          restore-keys: amazonlinux2023-conan-
       - name: Code Check
         env:
-          OS_NAME: 'centos7'
+          OS_NAME: 'amazonlinux2023'
         run: |
           ./build/builder.sh /bin/bash -c "make install"

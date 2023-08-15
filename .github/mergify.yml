@@ -2,9 +2,9 @@ pull_request_rules:
   - name: Add needs-dco label when DCO check failed
     conditions:
       - or:
-        - base=master
-        - base=sql_beta
-        - base~=^2(\.\d+){2}$
+          - base=master
+          - base=sql_beta
+          - base~=^2(\.\d+){2}$
       - -status-success=DCO
     actions:
       label:
@@ -19,9 +19,9 @@ pull_request_rules:
   - name: Add dco-passed label when DCO check passed
     conditions:
       - or:
-        - base=master
-        - base~=^2(\.\d+){2}$
-        - base=sql_beta
+          - base=master
+          - base~=^2(\.\d+){2}$
+          - base=sql_beta
       - status-success=DCO
     actions:
       label:
@@ -33,15 +33,15 @@ pull_request_rules:
   - name: Test passed for code changed-master
     conditions:
       - or:
-        - base=sql_beta
-        - base=master
-      - "status-success=Code Checker AMD64 Ubuntu 20.04"
-      - "status-success=Build and test AMD64 Ubuntu 20.04"
-      - "status-success=Code Checker MacOS 12"
-      - "status-success=Code Checker CentOS 7"
-      - "status-success=cpu-e2e"
-      - "status-success=codecov/patch"
-      - "status-success=codecov/project"
+          - base=sql_beta
+          - base=master
+      - 'status-success=Build and test AMD64 Ubuntu 20.04'
+      - 'status-success=Code Checker AMD64 Ubuntu 20.04'
+      - 'status-success=Code Checker MacOS 12'
+      - 'status-success=Code Checker Amazonlinux 2023'
+      - 'status-success=cpu-e2e'
+      - 'status-success=codecov/patch'
+      - 'status-success=codecov/project'
     actions:
       label:
         add:
@@ -49,13 +49,13 @@ pull_request_rules:
   - name: Test passed for code changed -2.*.*
     conditions:
       - base~=^2(\.\d+){2}$
-      - "status-success=Code Checker AMD64 Ubuntu 20.04"
-      - "status-success=Build and test AMD64 Ubuntu 20.04"
-      - "status-success=Code Checker MacOS 12"
-      - "status-success=Code Checker CentOS 7"
-      - "status-success=cpu-e2e"
-      - "status-success=codecov/patch"
-      - "status-success=codecov/project"
+      - 'status-success=Code Checker AMD64 Ubuntu 20.04'
+      - 'status-success=Build and test AMD64 Ubuntu 20.04'
+      - 'status-success=Code Checker MacOS 12'
+      - 'status-success=Code Checker CentOS 7'
+      - 'status-success=cpu-e2e'
+      - 'status-success=codecov/patch'
+      - 'status-success=codecov/project'
     actions:
       label:
         add:
@@ -63,37 +63,36 @@ pull_request_rules:
   - name: Test passed for tests changed
     conditions:
       - or:
-        - base=master
-        - base=sql_beta
-        - base~=^2(\.\d+){2}$
+          - base=master
+          - base=sql_beta
+          - base~=^2(\.\d+){2}$
       - -files~=^(?!tests\/python_client).+
-      - "status-success=cpu-e2e"
-    actions:
-      label:
-        add:
-          - ci-passed
-  
-  - name: Test passed for docs changed only
-    conditions:
-      - or:
-        - base=master
-        - base=sql_beta
-        - base~=^2(\.\d+){2}$
-      - -files~=^(?!.*\.(md)).*$ 
+      - 'status-success=cpu-e2e'
     actions:
       label:
         add:
           - ci-passed
 
+  - name: Test passed for docs changed only
+    conditions:
+      - or:
+          - base=master
+          - base=sql_beta
+          - base~=^2(\.\d+){2}$
+      - -files~=^(?!.*\.(md)).*$
+    actions:
+      label:
+        add:
+          - ci-passed
 
   - name: Test passed for non go or c++ code changed
     conditions:
       - or:
-        - base=master
-        - base=sql_beta
-        - base~=^2(\.\d+){2}$
+          - base=master
+          - base=sql_beta
+          - base~=^2(\.\d+){2}$
       - -files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt|conanfile\.*))).*$
-      - "status-success=cpu-e2e"
+      - 'status-success=cpu-e2e'
     actions:
       label:
         add:
@@ -102,16 +101,16 @@ pull_request_rules:
   - name: Test passed for go unittest code changed-master
     conditions:
       - or:
-        - base=master
-        - base=sql_beta
-      - "status-success=Code Checker AMD64 Ubuntu 20.04"
-      - "status-success=Build and test AMD64 Ubuntu 20.04"
-      - "status-success=Code Checker MacOS 12"
-      - "status-success=Code Checker CentOS 7"
-      - "status-success=UT for Go (20.04)"
+          - base=master
+          - base=sql_beta
+      - 'status-success=Build and test AMD64 Ubuntu 20.04'
+      - 'status-success=Code Checker AMD64 Ubuntu 20.04'
+      - 'status-success=Code Checker MacOS 12'
+      - 'status-success=Code Checker Amazonlinux 2023'
+      - 'status-success=UT for Go (20.04)'
       - or:
-        - -files~=^(?!pkg\/..*test\.go).*$
-        - -files~=^(?!internal\/.*_test\.go).*$
+          - -files~=^(?!pkg\/..*test\.go).*$
+          - -files~=^(?!internal\/.*_test\.go).*$
     actions:
       label:
         add:
@@ -119,10 +118,10 @@ pull_request_rules:
   - name: Test passed for go unittest code changed -2.*.*
     conditions:
       - base~=^2(\.\d+){2}$
-      - "status-success=Code Checker AMD64 Ubuntu 20.04"
-      - "status-success=Build and test AMD64 Ubuntu 20.04"
-      - "status-success=Code Checker MacOS 12"
-      - "status-success=Code Checker CentOS 7"
+      - 'status-success=Code Checker AMD64 Ubuntu 20.04'
+      - 'status-success=Build and test AMD64 Ubuntu 20.04'
+      - 'status-success=Code Checker MacOS 12'
+      - 'status-success=Code Checker CentOS 7'
       - -files~=^(?!internal\/.*_test\.go).*$
     actions:
       label:
@@ -132,9 +131,9 @@ pull_request_rules:
   - name: Test passed for mergify changed
     conditions:
       - or:
-        - base=master
-        - base=sql_beta
-        - base~=^2(\.\d+){2}$
+          - base=master
+          - base=sql_beta
+          - base~=^2(\.\d+){2}$
       - -files~=^(?!\.github\/mergify\.yml).*$
     actions:
       label:
@@ -144,9 +143,9 @@ pull_request_rules:
   - name: Test passed for title skip e2e
     conditions:
       - or:
-        - base=master
-        - base=sql_beta
-        - base~=^2(\.\d+){2}$
+          - base=master
+          - base=sql_beta
+          - base~=^2(\.\d+){2}$
       - title~=\[skip e2e\]
       - label=kind/improvement
       - -files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt))).*$
@@ -155,16 +154,15 @@ pull_request_rules:
         add:
           - ci-passed
 
-
   - name: Blocking PR if missing a related issue or doesn't have kind/improvement label
     conditions:
       - or:
-        - base=master
-        - base=sql_beta
-        - base~=^2(\.\d+){2}$
+          - base=master
+          - base=sql_beta
+          - base~=^2(\.\d+){2}$
       - and:
-        - -body~=\#[0-9]{1,6}(\s+|$)
-        - -body~=https://github.com/milvus-io/milvus/issues/[0-9]{1,6}(\s+|$)
+          - -body~=\#[0-9]{1,6}(\s+|$)
+          - -body~=https://github.com/milvus-io/milvus/issues/[0-9]{1,6}(\s+|$)
       - -label=kind/improvement
       - -title~=\[automated\]
     actions:
@@ -175,24 +173,23 @@ pull_request_rules:
         message: |
           @{{author}} Please associate the related issue to the body of your Pull Request.  (eg. “issue: #<xyz>”)
 
-
   - name: Dismiss block label if related issue be added into PR
     conditions:
       - or:
-        - and:
-          - or:
-            - base=master
-            - base=sql_beta
-            - base~=^2(\.\d+){2}$
-          - or:
-            - body~=\#[0-9]{1,6}(\s+|$)
-            - body~=https://github.com/milvus-io/milvus/issues/[0-9]{1,6}(\s+|$)
-        - and:
-          - or:
-            - base=master
-            - base=sql_beta
-            - base~=^2(\.\d+){2}$
-          - label=kind/improvement
+          - and:
+              - or:
+                  - base=master
+                  - base=sql_beta
+                  - base~=^2(\.\d+){2}$
+              - or:
+                  - body~=\#[0-9]{1,6}(\s+|$)
+                  - body~=https://github.com/milvus-io/milvus/issues/[0-9]{1,6}(\s+|$)
+          - and:
+              - or:
+                  - base=master
+                  - base=sql_beta
+                  - base~=^2(\.\d+){2}$
+              - label=kind/improvement
     actions:
       label:
         remove:
@@ -203,8 +200,8 @@ pull_request_rules:
       - base=2.2.0
       # - base~=^2(\.\d+){2}$
       - and:
-        - -body~=pr\:\ \#[0-9]{1,6}(\s+|$)
-        - -body~=https://github.com/milvus-io/milvus/pull/[0-9]{1,6}(\s+|$)
+          - -body~=pr\:\ \#[0-9]{1,6}(\s+|$)
+          - -body~=https://github.com/milvus-io/milvus/pull/[0-9]{1,6}(\s+|$)
       - -label=kind/branch-feature
       - -title~=\[automated\]
     actions:
@@ -215,28 +212,25 @@ pull_request_rules:
         message: |
           @{{author}} Please associate the related pr of master to the body of your Pull Request.  (eg. “pr: #<xyz>”)
 
-
   - name: Dismiss block label if related pr be added into PR
     conditions:
       - base=2.2.0
       # - base~=^2(\.\d+){2}$
       - or:
-        - body~=pr\:\ \#[0-9]{1,6}(\s+|$)
-        - body~=https://github.com/milvus-io/milvus/pull/[0-9]{1,6}(\s+|$)
-        - label=kind/branch-feature
+          - body~=pr\:\ \#[0-9]{1,6}(\s+|$)
+          - body~=https://github.com/milvus-io/milvus/pull/[0-9]{1,6}(\s+|$)
+          - label=kind/branch-feature
     actions:
       label:
         remove:
           - do-not-merge/missing-related-pr
 
-
-
   - name: Dismiss block label if automated create PR
     conditions:
       - or:
-        - base=master
-        - base=sql_beta
-        - base~=^2(\.\d+){2}$
+          - base=master
+          - base=sql_beta
+          - base~=^2(\.\d+){2}$
       - title~=\[automated\]
     actions:
       label:
@@ -247,13 +241,13 @@ pull_request_rules:
   - name: Test passed for skip e2e-master
     conditions:
       - or:
-        - base=master
-        - base=sql_beta
+          - base=master
+          - base=sql_beta
       - title~=\[skip e2e\]
-      - "status-success=Code Checker AMD64 Ubuntu 20.04"
-      - "status-success=Build and test AMD64 Ubuntu 20.04"
-      - "status-success=Code Checker MacOS 12"
-      - "status-success=Code Checker CentOS 7"
+      - 'status-success=Code Checker AMD64 Ubuntu 20.04'
+      - 'status-success=Build and test AMD64 Ubuntu 20.04'
+      - 'status-success=Code Checker MacOS 12'
+      - 'status-success=Code Checker Amazonlinux 2023'
       - files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt))).*$
     actions:
       label:
@@ -264,10 +258,10 @@ pull_request_rules:
     conditions:
       - base~=^2(\.\d+){2}$
       - title~=\[skip e2e\]
-      - "status-success=Code Checker AMD64 Ubuntu 20.04"
-      - "status-success=Build and test AMD64 Ubuntu 20.04"
-      - "status-success=Code Checker MacOS 12"
-      - "status-success=Code Checker CentOS 7"
+      - 'status-success=Code Checker AMD64 Ubuntu 20.04'
+      - 'status-success=Build and test AMD64 Ubuntu 20.04'
+      - 'status-success=Code Checker MacOS 12'
+      - 'status-success=Code Checker CentOS 7'
       - files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt))).*$
     actions:
       label:
@@ -278,14 +272,14 @@ pull_request_rules:
     conditions:
       - label!=manual-pass
       - or:
-        - base=master
-        - base=sql_beta
+          - base=master
+          - base=sql_beta
       - files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt))).*$
       - or:
-        - "status-success!=Code Checker AMD64 Ubuntu 20.04"
-        - "status-success!=Build and test AMD64 Ubuntu 20.04" 
-        - "status-success!=Code Checker MacOS 12"    
-        - "status-success!=Code Checker CentOS 7"
+          - 'status-success!=Code Checker AMD64 Ubuntu 20.04'
+          - 'status-success!=Build and test AMD64 Ubuntu 20.04'
+          - 'status-success!=Code Checker MacOS 12'
+          - 'status-success=Code Checker Amazonlinux 2023'
     actions:
       label:
         remove:
@@ -296,10 +290,10 @@ pull_request_rules:
       - base~=^2(\.\d+){2}$
       - files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt))).*$
       - or:
-        - "status-success!=Code Checker AMD64 Ubuntu 20.04"
-        - "status-success!=Build and test AMD64 Ubuntu 20.04" 
-        - "status-success!=Code Checker MacOS 12"    
-        - "status-success!=Code Checker CentOS 7"
+          - 'status-success!=Code Checker AMD64 Ubuntu 20.04'
+          - 'status-success!=Build and test AMD64 Ubuntu 20.04'
+          - 'status-success!=Code Checker MacOS 12'
+          - 'status-success!=Code Checker CentOS 7'
     actions:
       label:
         remove:
@@ -308,25 +302,24 @@ pull_request_rules:
     conditions:
       - label!=manual-pass
       - or:
-        - base=master
-        - base=sql_beta
-        - base~=^2(\.\d+){2}$
+          - base=master
+          - base=sql_beta
+          - base~=^2(\.\d+){2}$
       - -title~=\[skip e2e\]
       - files~=^(?!(internal\/.*_test\.go|.*\.md)).*$
-      - "status-success!=cpu-e2e"        
+      - 'status-success!=cpu-e2e'
     actions:
       label:
         remove:
           - ci-passed
 
-
   - name: Add comment when jenkins job failed
     conditions:
       - or:
-        - base=master
-        - base=sql_beta
-        - base~=^2(\.\d+){2}$
-      - "check-failure=cpu-e2e"        
+          - base=master
+          - base=sql_beta
+          - base~=^2(\.\d+){2}$
+      - 'check-failure=cpu-e2e'
     actions:
       comment:
         message: |
@@ -335,11 +328,11 @@ pull_request_rules:
   - name: Add comment when code checker or ut failed -master
     conditions:
       - or:
-        - base=master
-        - base=sql_beta
+          - base=master
+          - base=sql_beta
       - or:
-        - "check-failure=Code Checker AMD64 Ubuntu 20.04"
-        - "check-failure=Build and test AMD64 Ubuntu 20.04"       
+          - 'check-failure=Code Checker AMD64 Ubuntu 20.04'
+          - 'check-failure=Build and test AMD64 Ubuntu 20.04'
     actions:
       comment:
         message: |
@@ -349,21 +342,20 @@ pull_request_rules:
     conditions:
       - base~=^2(\.\d+){2}$
       - or:
-        - "check-failure=Code Checker AMD64 Ubuntu 20.04"
-        - "check-failure=Build and test AMD64 Ubuntu 20.04"       
+          - 'check-failure=Code Checker AMD64 Ubuntu 20.04'
+          - 'check-failure=Build and test AMD64 Ubuntu 20.04'
     actions:
       comment:
         message: |
           @{{author}} ut workflow job failed, comment `rerun ut` can trigger the job again.
 
-
   - name: Add `needs-rebase` label when more than one commit in pr
     conditions:
       - or:
-        - base=master
-        - base=sql_beta
-        - base~=^2(\.\d+){2}$
-      - "#commits>1"
+          - base=master
+          - base=sql_beta
+          - base~=^2(\.\d+){2}$
+      - '#commits>1'
     actions:
       comment:
         message: |
@@ -375,10 +367,10 @@ pull_request_rules:
   - name: Remove `needs-rebase` label when only one commit in pr
     conditions:
       - or:
-        - base=master
-        - base=sql_beta
-        - base~=^2(\.\d+){2}$
-      - "#commits=1"
+          - base=master
+          - base=sql_beta
+          - base~=^2(\.\d+){2}$
+      - '#commits=1'
     actions:
       label:
         remove:

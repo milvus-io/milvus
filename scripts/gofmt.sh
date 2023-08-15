@@ -35,7 +35,7 @@ if [[ $# -ne 0 ]]; then
             files+=("$arg")
         fi
         if [ -d "$arg" ];then
-            for file in `find $arg -type f | grep "\.go$"`; do
+            for file in `find $arg -type f | grep "\.go$" | grep -v -e mock -e proto`; do
                 files+=("$file")
             done
         fi

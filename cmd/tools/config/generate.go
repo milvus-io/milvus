@@ -56,7 +56,7 @@ func collectRecursive(params *paramtable.ComponentParam, data *[]DocContent, val
 		tag := val.Type().Field(j).Tag
 		t := val.Type().Field(j).Type.String()
 		if t == "paramtable.ParamItem" {
-			item := subVal.Interface().(paramtable.ParamItem)
+			item := subVal.Interface().(paramtable.ParamItem) //nolint:govet
 			refreshable := tag.Get("refreshable")
 			defaultValue := params.GetWithDefault(item.Key, item.DefaultValue)
 			log.Debug("got key", zap.String("key", item.Key), zap.Any("value", defaultValue), zap.String("variable", val.Type().Field(j).Name))

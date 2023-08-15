@@ -1,4 +1,4 @@
-# Copyright (C) 2019-2022 Zilliz. All rights reserved.
+# Copyright (C) 2019-2020 Zilliz. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
 # with the License. You may obtain a copy of the License at
@@ -9,14 +9,12 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
-FROM ubuntu:focal-20220426
+FROM amazonlinux:2023
 
 ARG TARGETARCH
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl ca-certificates libaio-dev libgomp1 && \
-    apt-get remove --purge -y && \
-    rm -rf /var/lib/apt/lists/*
+RUN yum install -y wget libgomp libaio libatomic && \
+    rm -rf /var/cache/yum/*
 
 COPY ./bin/ /milvus/bin/
 
@@ -33,4 +31,4 @@ ADD https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TARGETARCH /
 RUN chmod +x /tini
 ENTRYPOINT ["/tini", "--"]
 
-WORKDIR /milvus/
+WORKDIR /milvus
