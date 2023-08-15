@@ -356,14 +356,17 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 	resource.MemorySize += mu
 	resource.DiskSize += du
 
+	toMB := func(mem uint64) float64 {
+		return float64(mem) / 1024 / 1024
+	}
 	loader.committedResource.Add(resource)
-	log.Info("request resource for loading segments",
+	log.Info("request resource for loading segments (unit in MiB)",
 		zap.Int("workerNum", resource.WorkNum),
 		zap.Int("committedWorkerNum", loader.committedResource.WorkNum),
-		zap.Uint64("memory", resource.MemorySize),
-		zap.Uint64("committedMemory", loader.committedResource.MemorySize),
-		zap.Uint64("disk", resource.DiskSize),
-		zap.Uint64("committedDisk", loader.committedResource.DiskSize),
+		zap.Float64("memory", toMB(resource.MemorySize)),
+		zap.Float64("committedMemory", toMB(loader.committedResource.MemorySize)),
+		zap.Float64("disk", toMB(resource.DiskSize)),
+		zap.Float64("committedDisk", toMB(loader.committedResource.DiskSize)),
 	)
 
 	return resource, concurrencyLevel, nil
@@ -827,8 +830,8 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 		zap.Int64("collectionID", segmentLoadInfos[0].GetCollectionID()),
 	)
 
-	toMB := func(mem uint64) uint64 {
-		return mem / 1024 / 1024
+	toMB := func(mem uint64) float64 {
+		return float64(mem) / 1024 / 1024
 	}
 
 	memUsage := hardware.GetUsedMemoryCount() + loader.committedResource.MemorySize
@@ -842,7 +845,7 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 		return 0, 0, errors.Wrap(err, "get local used size failed")
 	}
 
-	metrics.QueryNodeDiskUsedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(toMB(uint64(localDiskUsage))))
+	metrics.QueryNodeDiskUsedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(toMB(uint64(localDiskUsage)))
 	diskUsage := uint64(localDiskUsage) + loader.committedResource.DiskSize
 
 	mmapEnabled := len(paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue()) > 0
@@ -903,14 +906,14 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 	}
 
 	log.Info("predict memory and disk usage while loading (in MiB)",
-		zap.Uint64("maxSegmentSize", toMB(maxSegmentSize)),
+		zap.Float64("maxSegmentSize", toMB(maxSegmentSize)),
 		zap.Int("concurrency", concurrency),
-		zap.Uint64("committedMemSize", toMB(loader.committedResource.MemorySize)),
-		zap.Uint64("memUsage", toMB(memUsage)),
-		zap.Uint64("committedDiskSize", toMB(loader.committedResource.DiskSize)),
-		zap.Uint64("diskUsage", toMB(diskUsage)),
-		zap.Uint64("predictMemUsage", toMB(predictMemUsage)),
-		zap.Uint64("predictDiskUsage", toMB(predictDiskUsage)),
+		zap.Float64("committedMemSize", toMB(loader.committedResource.MemorySize)),
+		zap.Float64("memUsage", toMB(memUsage)),
+		zap.Float64("committedDiskSize", toMB(loader.committedResource.DiskSize)),
+		zap.Float64("diskUsage", toMB(diskUsage)),
+		zap.Float64("predictMemUsage", toMB(predictMemUsage)),
+		zap.Float64("predictDiskUsage", toMB(predictDiskUsage)),
 		zap.Bool("mmapEnabled", mmapEnabled),
 	)
 
