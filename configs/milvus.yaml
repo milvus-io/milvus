@@ -135,6 +135,9 @@ rocksmq:
   retentionSizeInMB: 8192 # 8 GB, 8 * 1024 MB, The retention size of the message in rocksmq.
   compactionInterval: 86400 # 1 day, trigger rocksdb compaction every day to remove deleted data
   lrucacheratio: 0.06 # rocksdb cache memory ratio
+  maxWriteParallelism: 30
+  maxTtMsgBufferSize: 1000
+
 
 # Related configuration of rootCoord, used to handle data definition language (DDL) and data control language (DCL) requests
 rootCoord:

@@ -17,7 +17,7 @@
 # limitations under the License.
 
 # Exit immediately for non zero status
-set -e
+set +e
 
 SOURCE="${BASH_SOURCE[0]}"
 # fix on zsh environment

@@ -18,7 +18,8 @@ type ProducerOptions struct {
 
 // ProducerMessage is the message of a producer
 type ProducerMessage struct {
-	Payload []byte
+	Payload    []byte
+	Properties map[string]string
 }
 
 // Producer provedes some operations for a producer

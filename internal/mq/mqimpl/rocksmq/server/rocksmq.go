@@ -13,7 +13,8 @@ package server
 
 // ProducerMessage that will be written to rocksdb
 type ProducerMessage struct {
-	Payload []byte
+	Payload    []byte
+	Properties map[string]string
 }
 
 // Consumer is rocksmq consumer
