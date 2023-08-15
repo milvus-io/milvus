@@ -93,6 +93,13 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	return HandleCStatus(&status, "InitRemoteChunkManagerSingleton failed")
 }
 
+func InitChunkCache(mmapDirPath string) error {
+	cMmapDirPath := C.CString(mmapDirPath)
+	defer C.free(unsafe.Pointer(cMmapDirPath))
+	status := C.InitChunkCacheSingleton(cMmapDirPath)
+	return HandleCStatus(&status, "InitChunkCacheSingleton failed")
+}
+
 func CleanRemoteChunkManager() {
 	C.CleanRemoteChunkManagerSingleton()
 }

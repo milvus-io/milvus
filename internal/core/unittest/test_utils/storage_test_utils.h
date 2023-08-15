@@ -22,6 +22,7 @@
 #include "common/LoadInfo.h"
 #include "storage/Types.h"
 #include "storage/InsertData.h"
+#include "storage/ThreadPools.h"
 
 using milvus::DataType;
 using milvus::FieldId;
@@ -68,6 +69,7 @@ PrepareInsertBinlog(int64_t collection_id,
             field_id,
             FieldBinlogInfo{field_id,
                             static_cast<int64_t>(row_count),
+                            std::vector<int64_t>{int64_t(row_count)},
                             std::vector<std::string>{file}});
     };
 
@@ -96,6 +98,42 @@ PrepareInsertBinlog(int64_t collection_id,
     }
 
     return load_info;
+}
+
+std::map<std::string, int64_t>
+PutFieldData(milvus::storage::ChunkManager* remote_chunk_manager,
+             const std::vector<const uint8_t*>& buffers,
+             const std::vector<int64_t>& element_counts,
+             const std::vector<std::string>& object_keys,
+             FieldDataMeta& field_data_meta,
+             milvus::FieldMeta& field_meta) {
+    auto& pool =
+        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+    std::vector<std::future<std::pair<std::string, size_t>>> futures;
+    AssertInfo(buffers.size() == element_counts.size(),
+               "inconsistent size of data slices with slice sizes!");
+    AssertInfo(buffers.size() == object_keys.size(),
+               "inconsistent size of data slices with slice names!");
+
+    for (int64_t i = 0; i < buffers.size(); ++i) {
+        futures.push_back(
+            pool.Submit(milvus::storage::EncodeAndUploadFieldSlice,
+                        remote_chunk_manager,
+                        const_cast<uint8_t*>(buffers[i]),
+                        element_counts[i],
+                        field_data_meta,
+                        field_meta,
+                        object_keys[i]));
+    }
+
+    std::map<std::string, int64_t> remote_paths_to_size;
+    for (auto& future : futures) {
+        auto res = future.get();
+        remote_paths_to_size[res.first] = res.second;
+    }
+
+    milvus::storage::ReleaseArrowUnused();
+    return remote_paths_to_size;
 }
 
 }  // namespace

@@ -41,7 +41,6 @@ class RemoteChunkManagerSingleton {
 
     void
     Init(const StorageConfig& storage_config) {
-        std::unique_lock lck(mutex_);
         if (rcm_ == nullptr) {
             rcm_ = CreateChunkManager(storage_config);
         }
@@ -49,8 +48,6 @@ class RemoteChunkManagerSingleton {
 
     void
     Release() {
-        std::unique_lock lck(mutex_);
-        rcm_ = nullptr;
     }
 
     ChunkManagerPtr
@@ -59,7 +56,6 @@ class RemoteChunkManagerSingleton {
     }
 
  private:
-    mutable std::shared_mutex mutex_;
     ChunkManagerPtr rcm_ = nullptr;
 };
 

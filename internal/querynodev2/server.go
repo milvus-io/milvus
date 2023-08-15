@@ -221,8 +221,24 @@ func (node *QueryNode) InitSegcore() error {
 	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
 	initcore.InitLocalChunkManager(localDataRootPath)
 
+	err := initcore.InitRemoteChunkManager(paramtable.Get())
+	if err != nil {
+		return err
+	}
+
+	mmapDirPath := paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue()
+	if len(mmapDirPath) == 0 {
+		mmapDirPath = paramtable.Get().LocalStorageCfg.Path.GetValue()
+	}
+	mmapDirPath += "/chunk_cache"
+	err = initcore.InitChunkCache(mmapDirPath)
+	if err != nil {
+		return err
+	}
+	log.Info("InitChunkCache done", zap.String("dir", mmapDirPath))
+
 	initcore.InitTraceConfig(paramtable.Get())
-	return initcore.InitRemoteChunkManager(paramtable.Get())
+	return nil
 }
 
 func (node *QueryNode) CloseSegcore() {
