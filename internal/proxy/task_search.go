@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/clustering"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -277,6 +278,30 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	t.SearchRequest.OutputFieldsId = outputFieldIDs
+
+	vecFieldSchema, err := typeutil.GetVectorFieldSchema(t.schema)
+	if err != nil {
+		log.Warn("vector field not found in schema", zap.Error(err))
+		return err
+	}
+	dim, err := funcutil.GetAttrByKeyFromRepeatedKV(DimKey, vecFieldSchema.GetTypeParams())
+	if err != nil {
+		log.Warn("fail to get dim from vector field schema", zap.Error(err))
+		return err
+	}
+	intValue, err := strconv.ParseInt(dim, 10, 32)
+	if err != nil {
+		log.Warn("fail to parse dim", zap.String("dim", dim), zap.Error(err))
+		return err
+	}
+	t.SearchRequest.Dim = int32(intValue)
+
+	searchClusteringOptions, err := clustering.SearchClusteringOptions(t.request.GetSearchParams())
+	if err != nil {
+		log.Warn("fail to parse SearchClusteringOptions", zap.Any("params", t.request.GetSearchParams()), zap.Error(err))
+		return err
+	}
+	t.SearchRequest.ClusteringOptions = searchClusteringOptions
 
 	partitionNames := t.request.GetPartitionNames()
 	if t.request.GetDslType() == commonpb.DslType_BoolExprV1 {

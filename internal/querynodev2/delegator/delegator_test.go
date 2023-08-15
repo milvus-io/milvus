@@ -18,11 +18,14 @@ package delegator
 
 import (
 	"context"
+	"encoding/binary"
+	"math"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -929,4 +932,110 @@ func TestDelegatorTSafeListenerClosed(t *testing.T) {
 	case <-time.After(time.Second):
 		assert.FailNow(t, "watchTsafe still working after listener closed")
 	}
+}
+
+func Serialize(fv []float32) []byte {
+	data := make([]byte, 0, 4*len(fv)) // float32 occupies 4 bytes
+	buf := make([]byte, 4)
+	for _, f := range fv {
+		binary.LittleEndian.PutUint32(buf, math.Float32bits(f))
+		data = append(data, buf...)
+	}
+	return data
+}
+
+func vector2Placeholder(vectors [][]float32) *commonpb.PlaceholderValue {
+	var placeHolderType commonpb.PlaceholderType
+	ph := &commonpb.PlaceholderValue{
+		Tag:    "$0",
+		Values: make([][]byte, 0, len(vectors)),
+	}
+	if len(vectors) == 0 {
+		return ph
+	}
+
+	ph.Type = placeHolderType
+	for _, vector := range vectors {
+		ph.Values = append(ph.Values, Serialize(vector))
+	}
+	return ph
+}
+
+func (s *DelegatorSuite) TestOptimizeSearchBasedOnClustering() {
+	s.delegator.Start()
+	paramtable.SetNodeID(1)
+
+	vector1 := []float32{0.8877872002188053, 0.6131822285635065, 0.8476814632326242, 0.6645877829359371, 0.9962627712600025, 0.8976183052440327, 0.41941169325798844, 0.7554387854258499}
+	vector2 := []float32{0.8644394874390322, 0.023327886647378615, 0.08330118483461302, 0.7068040179963112, 0.6983994910799851, 0.5562075958994153, 0.3288536247938002, 0.07077341010237759}
+	vectors := [][]float32{vector1, vector2}
+
+	phg := &commonpb.PlaceholderGroup{
+		Placeholders: []*commonpb.PlaceholderValue{
+			vector2Placeholder(vectors),
+		},
+	}
+
+	bs, _ := proto.Marshal(phg)
+
+	req := &querypb.SearchRequest{
+		Req: &internalpb.SearchRequest{
+			Dim:              8,
+			MetricType:       "L2",
+			PlaceholderGroup: bs,
+			ClusteringOptions: &internalpb.SearchClusteringOptions{
+				Enable:     true,
+				FilterRate: 0.5,
+			},
+		},
+	}
+	sealeds := []SnapshotItem{
+		{
+			NodeID: 1,
+			Segments: []SegmentEntry{
+				{
+					NodeID:    1,
+					SegmentID: 1000,
+					ClusteringInfo: &internalpb.ClusteringInfo{
+						Center: []float32{0.6951474, 0.45225978, 0.51508516, 0.24968886, 0.6085484, 0.964968, 0.32239532, 0.7771577},
+					},
+				},
+				{
+					NodeID:    1,
+					SegmentID: 1001,
+					ClusteringInfo: &internalpb.ClusteringInfo{
+						Center: []float32{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0},
+					},
+				},
+			},
+		},
+		{
+			NodeID: 2,
+			Segments: []SegmentEntry{
+				{
+					NodeID:    2,
+					SegmentID: 1002,
+					ClusteringInfo: &internalpb.ClusteringInfo{
+						Center: []float32{0.40448594, 0.16214314, 0.17850745, 0.6640584, 0.77309024, 0.48807725, 0.66572666, 0.15990956},
+					},
+				},
+				{
+					NodeID:    2,
+					SegmentID: 1003,
+					ClusteringInfo: &internalpb.ClusteringInfo{
+						Center: []float32{1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0},
+					},
+				},
+			},
+		},
+		{
+			NodeID: 3,
+			Segments: []SegmentEntry{
+				{
+					NodeID:    3,
+					SegmentID: 1004,
+				},
+			},
+		},
+	}
+	s.delegator.OptimizeSearchBasedOnClustering(req, sealeds)
 }

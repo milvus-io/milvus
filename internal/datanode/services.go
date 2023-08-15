@@ -27,7 +27,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/clustering"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -777,7 +777,7 @@ func saveSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest, res *rootcoo
 		log.Info("adding segment to the correct DataNode flow graph and saving binlog paths", logFields...)
 
 		err := retry.Do(context.Background(), func() error {
-			clusteringInfo, err := funcutil.ClusteringInfoFromKV(req.GetImportTask().GetInfos())
+			clusteringInfo, err := clustering.ClusteringInfoFromKV(req.GetImportTask().GetInfos())
 			if err != nil {
 				return fmt.Errorf(err.Error())
 			}

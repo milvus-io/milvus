@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/clustering"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -227,6 +228,44 @@ func TestSearchTask_PreExecute(t *testing.T) {
 
 		task := getSearchTask(t, collName)
 		task.request.SearchParams = getInvalidSearchParams(IgnoreGrowingKey)
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("search clustering options normal", func(t *testing.T) {
+		collName := "test_search_clustering" + funcutil.GenRandomStr()
+		createColl(t, collName, rc)
+
+		task := getSearchTask(t, collName)
+		task.request.SearchParams = []*commonpb.KeyValuePair{
+			{
+				Key:   clustering.SEARCH_ENABLE_CLUSTERING,
+				Value: "true",
+			},
+			{
+				Key:   clustering.SEARCH_CLUSTERING_FILTER_RATIO,
+				Value: "0.3",
+			},
+		}
+		err = task.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("search clustering options invalid", func(t *testing.T) {
+		collName := "test_search_clustering" + funcutil.GenRandomStr()
+		createColl(t, collName, rc)
+
+		task := getSearchTask(t, collName)
+		task.request.SearchParams = []*commonpb.KeyValuePair{
+			{
+				Key:   clustering.SEARCH_ENABLE_CLUSTERING,
+				Value: "true2",
+			},
+			{
+				Key:   clustering.SEARCH_CLUSTERING_FILTER_RATIO,
+				Value: "0.3",
+			},
+		}
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 	})

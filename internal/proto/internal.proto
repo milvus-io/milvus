@@ -101,6 +101,8 @@ message SearchRequest {
   string metricType = 16;
   bool ignoreGrowing = 17; // Optional
   string username = 18;
+  int32 dim = 19;
+  SearchClusteringOptions clustering_options = 20;
 }
 
 message SearchResults {
@@ -252,4 +254,10 @@ message Rate {
 message ClusteringInfo {
   repeated float center = 1; // cluster.center
   int64 size = 2; // cluster.size
+}
+
+// options to control clustering related behavior in SearchRequest 
+message SearchClusteringOptions {
+  bool enable = 1;
+  float filterRate = 2;
 }
