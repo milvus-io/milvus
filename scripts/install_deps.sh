@@ -22,7 +22,7 @@ function install_linux_deps() {
     sudo apt install -y wget curl ca-certificates gnupg2  \
       g++ gcc gfortran git make ccache libssl-dev zlib1g-dev unzip \
       clang-format-10 clang-tidy-10 lcov libtool m4 autoconf automake python3 python3-pip \
-      pkg-config uuid-dev libaio-dev libgoogle-perftools-dev
+      pkg-config uuid-dev libaio-dev libgoogle-perftools-dev libopenblas-dev
 
     sudo pip3 install conan==1.58.0
   elif [[ -x "$(command -v yum)" ]]; then
