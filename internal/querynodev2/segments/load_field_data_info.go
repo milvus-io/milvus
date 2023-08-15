@@ -21,7 +21,11 @@ package segments
 #include "segcore/load_field_data_c.h"
 */
 import "C"
-import "unsafe"
+import (
+	"unsafe"
+
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+)
 
 type LoadFieldDataInfo struct {
 	cLoadFieldDataInfo C.CLoadFieldDataInfo
@@ -49,12 +53,13 @@ func (ld *LoadFieldDataInfo) appendLoadFieldInfo(fieldID int64, rowCount int64) 
 	return HandleCStatus(&status, "appendLoadFieldInfo failed")
 }
 
-func (ld *LoadFieldDataInfo) appendLoadFieldDataPath(fieldID int64, file string) error {
+func (ld *LoadFieldDataInfo) appendLoadFieldDataPath(fieldID int64, binlog *datapb.Binlog) error {
 	cFieldID := C.int64_t(fieldID)
-	cFile := C.CString(file)
+	cEntriesNum := C.int64_t(binlog.GetEntriesNum())
+	cFile := C.CString(binlog.GetLogPath())
 	defer C.free(unsafe.Pointer(cFile))
 
-	status := C.AppendLoadFieldDataPath(ld.cLoadFieldDataInfo, cFieldID, cFile)
+	status := C.AppendLoadFieldDataPath(ld.cLoadFieldDataInfo, cFieldID, cEntriesNum, cFile)
 	return HandleCStatus(&status, "appendLoadFieldDataPath failed")
 }
 

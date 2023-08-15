@@ -79,6 +79,31 @@ class ColumnBase {
                                         mmap_flags,
                                         file.Descriptor(),
                                         0));
+        AssertInfo(data_ != MAP_FAILED,
+                   fmt::format("failed to create file-backed map, err: {}",
+                               strerror(errno)));
+    }
+
+    // mmap mode ctor
+    ColumnBase(const File& file,
+               size_t size,
+               int dim,
+               const DataType& data_type)
+        : type_size_(datatype_sizeof(data_type, dim)),
+          num_rows_(size / datatype_sizeof(data_type, dim)),
+          size_(size),
+          cap_size_(size) {
+        padding_ = data_type == DataType::JSON ? simdjson::SIMDJSON_PADDING : 0;
+
+        data_ = static_cast<char*>(mmap(nullptr,
+                                        cap_size_ + padding_,
+                                        PROT_READ,
+                                        mmap_flags,
+                                        file.Descriptor(),
+                                        0));
+        AssertInfo(data_ != MAP_FAILED,
+                   fmt::format("failed to create file-backed map, err: {}",
+                               strerror(errno)));
     }
 
     virtual ~ColumnBase() {
@@ -114,6 +139,11 @@ class ColumnBase {
     NumRows() const {
         return num_rows_;
     };
+
+    const size_t
+    ByteSize() const {
+        return cap_size_ + padding_;
+    }
 
     // The capacity of the column,
     // DO NOT call this for variable length column.
@@ -201,6 +231,11 @@ class Column : public ColumnBase {
     // mmap mode ctor
     Column(const File& file, size_t size, const FieldMeta& field_meta)
         : ColumnBase(file, size, field_meta) {
+    }
+
+    // mmap mode ctor
+    Column(const File& file, size_t size, int dim, DataType data_type)
+        : ColumnBase(file, size, dim, data_type) {
     }
 
     Column(Column&& column) noexcept : ColumnBase(std::move(column)) {

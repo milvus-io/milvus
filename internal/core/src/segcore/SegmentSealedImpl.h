@@ -38,7 +38,7 @@ namespace milvus::segcore {
 class SegmentSealedImpl : public SegmentSealed {
  public:
     explicit SegmentSealedImpl(SchemaPtr schema, int64_t segment_id);
-    ~SegmentSealedImpl() override = default;
+    ~SegmentSealedImpl() override;
     void
     LoadIndex(const LoadIndexInfo& info) override;
     void
@@ -61,6 +61,9 @@ class SegmentSealedImpl : public SegmentSealed {
     LoadFieldData(FieldId field_id, FieldDataInfo& data) override;
     void
     MapFieldData(const FieldId field_id, FieldDataInfo& data) override;
+    void
+    AddFieldDataInfoForSealed(
+        const LoadFieldDataInfo& field_data_info) override;
 
     int64_t
     get_segment_id() const override {
@@ -216,6 +219,9 @@ class SegmentSealedImpl : public SegmentSealed {
     std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
     search_ids(const IdArray& id_array, Timestamp timestamp) const override;
 
+    std::tuple<std::string, int64_t>
+    GetFieldDataPath(FieldId field_id, int64_t offset) const;
+
     void
     LoadVecIndex(const LoadIndexInfo& info);
 
@@ -242,6 +248,8 @@ class SegmentSealedImpl : public SegmentSealed {
 
     // deleted pks
     mutable DeletedRecord deleted_record_;
+
+    LoadFieldDataInfo field_data_info_;
 
     SchemaPtr schema_;
     int64_t id_;

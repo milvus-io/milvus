@@ -13,6 +13,7 @@
 
 #include <memory>
 #include <utility>
+#include <tuple>
 
 #include "common/LoadInfo.h"
 #include "pb/segcore.pb.h"
@@ -37,6 +38,8 @@ class SegmentSealed : public SegmentInternalInterface {
     LoadFieldData(FieldId field_id, FieldDataInfo& data) = 0;
     virtual void
     MapFieldData(const FieldId field_id, FieldDataInfo& data) = 0;
+    virtual void
+    AddFieldDataInfoForSealed(const LoadFieldDataInfo& field_data_info) = 0;
 
     SegmentType
     type() const override {

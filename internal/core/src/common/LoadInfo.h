@@ -28,6 +28,7 @@
 struct FieldBinlogInfo {
     int64_t field_id;
     int64_t row_count = -1;
+    std::vector<int64_t> entries_nums;
     std::vector<std::string> insert_files;
 };
 

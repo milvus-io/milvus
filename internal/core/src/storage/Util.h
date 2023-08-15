@@ -94,6 +94,14 @@ EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
                           FieldDataMeta field_meta,
                           std::string object_key);
 
+std::pair<std::string, size_t>
+EncodeAndUploadFieldSlice(ChunkManager* chunk_manager,
+                          uint8_t* buf,
+                          int64_t element_count,
+                          FieldDataMeta field_data_meta,
+                          const FieldMeta& field_meta,
+                          std::string object_key);
+
 std::vector<FieldDataPtr>
 GetObjectData(ChunkManager* remote_chunk_manager,
               const std::vector<std::string>& remote_files);

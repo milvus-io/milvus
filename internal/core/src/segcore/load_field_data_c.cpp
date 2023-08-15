@@ -58,6 +58,7 @@ AppendLoadFieldInfo(CLoadFieldDataInfo c_load_field_data_info,
 CStatus
 AppendLoadFieldDataPath(CLoadFieldDataInfo c_load_field_data_info,
                         int64_t field_id,
+                        int64_t entries_num,
                         const char* c_file_path) {
     try {
         auto load_field_data_info = (LoadFieldDataInfo*)c_load_field_data_info;
@@ -69,6 +70,8 @@ AppendLoadFieldDataPath(CLoadFieldDataInfo c_load_field_data_info,
 
         load_field_data_info->field_infos[field_id].insert_files.emplace_back(
             file_path);
+        load_field_data_info->field_infos[field_id].entries_nums.emplace_back(
+            entries_num);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(UnexpectedError, e.what());
