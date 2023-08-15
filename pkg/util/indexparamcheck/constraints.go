@@ -20,10 +20,10 @@ const (
 	// DefaultMaxDim is the largest dimension supported in Milvus
 	DefaultMaxDim = 32768
 
-	// If Dim = 32 and raw vector data = 2G, query node need 24G disk space When loading the vectors' disk index
-	// If Dim = 2, and raw vector data = 2G, query node need 240G disk space When loading the vectors' disk index
-	// So DiskAnnMinDim should be greater than or equal to 32 to avoid running out of disk space
-	DiskAnnMinDim = 32
+	// If Dim = 32 and raw vector data = 2G, query node need ~17G disk space When loading the vectors' disk index
+	// If Dim = 2, and raw vector data = 2G, query node need ~60G disk space When loading the vectors' disk index
+	// So DiskAnnMinDim should be greater than or equal to 8 to avoid running out of disk space
+	DiskAnnMinDim = 8
 
 	HNSWMinEfConstruction = 8
 	HNSWMaxEfConstruction = 512
