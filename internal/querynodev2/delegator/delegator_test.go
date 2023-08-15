@@ -995,15 +995,19 @@ func (s *DelegatorSuite) TestOptimizeSearchBasedOnClustering() {
 				{
 					NodeID:    1,
 					SegmentID: 1000,
-					ClusteringInfo: &internalpb.ClusteringInfo{
-						Center: []float32{0.6951474, 0.45225978, 0.51508516, 0.24968886, 0.6085484, 0.964968, 0.32239532, 0.7771577},
+					ClusteringInfos: []*internalpb.ClusteringInfo{
+						{
+							Centroid: []float32{0.6951474, 0.45225978, 0.51508516, 0.24968886, 0.6085484, 0.964968, 0.32239532, 0.7771577},
+						},
 					},
 				},
 				{
 					NodeID:    1,
 					SegmentID: 1001,
-					ClusteringInfo: &internalpb.ClusteringInfo{
-						Center: []float32{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0},
+					ClusteringInfos: []*internalpb.ClusteringInfo{
+						{
+							Centroid: []float32{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0},
+						},
 					},
 				},
 			},
@@ -1014,15 +1018,19 @@ func (s *DelegatorSuite) TestOptimizeSearchBasedOnClustering() {
 				{
 					NodeID:    2,
 					SegmentID: 1002,
-					ClusteringInfo: &internalpb.ClusteringInfo{
-						Center: []float32{0.40448594, 0.16214314, 0.17850745, 0.6640584, 0.77309024, 0.48807725, 0.66572666, 0.15990956},
+					ClusteringInfos: []*internalpb.ClusteringInfo{
+						{
+							Centroid: []float32{0.40448594, 0.16214314, 0.17850745, 0.6640584, 0.77309024, 0.48807725, 0.66572666, 0.15990956},
+						},
 					},
 				},
 				{
 					NodeID:    2,
 					SegmentID: 1003,
-					ClusteringInfo: &internalpb.ClusteringInfo{
-						Center: []float32{1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0},
+					ClusteringInfos: []*internalpb.ClusteringInfo{
+						{
+							Centroid: []float32{1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0},
+						},
 					},
 				},
 			},
@@ -1038,4 +1046,94 @@ func (s *DelegatorSuite) TestOptimizeSearchBasedOnClustering() {
 		},
 	}
 	s.delegator.OptimizeSearchBasedOnClustering(req, sealeds)
+}
+
+func (s *DelegatorSuite) TestOptimizeSearchBasedOnClustering2() {
+	s.delegator.Start()
+	paramtable.SetNodeID(1)
+
+	vector1 := []float32{0.40448594, 0.16214314, 0.17850745, 0.6640584, 0.77309024, 0.48807725, 0.66572666, 0.15990956}
+	vectors := [][]float32{vector1}
+
+	phg := &commonpb.PlaceholderGroup{
+		Placeholders: []*commonpb.PlaceholderValue{
+			vector2Placeholder(vectors),
+		},
+	}
+
+	bs, _ := proto.Marshal(phg)
+
+	req := &querypb.SearchRequest{
+		Req: &internalpb.SearchRequest{
+			Dim:              8,
+			MetricType:       "L2",
+			PlaceholderGroup: bs,
+			ClusteringOptions: &internalpb.SearchClusteringOptions{
+				Enable:     true,
+				FilterRate: 0.5,
+			},
+		},
+	}
+	sealeds := []SnapshotItem{
+		{
+			NodeID: 1,
+			Segments: []SegmentEntry{
+				{
+					NodeID:    1,
+					SegmentID: 1000,
+					ClusteringInfos: []*internalpb.ClusteringInfo{{
+						Centroid: []float32{0.6951474, 0.45225978, 0.51508516, 0.24968886, 0.6085484, 0.964968, 0.32239532, 0.7771577},
+					}},
+				},
+				{
+					NodeID:    1,
+					SegmentID: 1001,
+					ClusteringInfos: []*internalpb.ClusteringInfo{
+						{
+							Centroid: []float32{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0},
+						},
+						{
+							Centroid: []float32{1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0},
+						},
+					},
+				},
+			},
+		},
+		{
+			NodeID: 2,
+			Segments: []SegmentEntry{
+				{
+					NodeID:    2,
+					SegmentID: 1002,
+					ClusteringInfos: []*internalpb.ClusteringInfo{
+						{
+							Centroid: []float32{0.40448594, 0.16214314, 0.17850745, 0.6640584, 0.77309024, 0.48807725, 0.66572666, 0.15990956},
+						},
+						{
+							Centroid: []float32{0.41448594, 0.16214314, 0.17850745, 0.6640584, 0.77309024, 0.48807725, 0.66572666, 0.15990956},
+						},
+					},
+				},
+				{
+					NodeID:    2,
+					SegmentID: 1003,
+					ClusteringInfos: []*internalpb.ClusteringInfo{{
+						Centroid: []float32{1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0},
+					}},
+				},
+			},
+		},
+		{
+			NodeID: 3,
+			Segments: []SegmentEntry{
+				{
+					NodeID:    3,
+					SegmentID: 1004,
+				},
+			},
+		},
+	}
+	sr, snapshots := s.delegator.OptimizeSearchBasedOnClustering(req, sealeds)
+	assert.NotEmpty(s.T(), sr)
+	assert.NotEmpty(s.T(), snapshots)
 }

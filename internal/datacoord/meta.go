@@ -556,7 +556,7 @@ func (m *meta) UpdateFlushSegmentsInfo(
 				zap.Int64("segment bin log row count (correct)", count))
 		}
 		s.NumOfRows = count
-		s.ClusteringInfo = clusteringInfo
+		s.ClusteringInfos = []*internalpb.ClusteringInfo{clusteringInfo}
 		modSegments[segmentID] = s
 	} else {
 		for _, cp := range checkpoints {

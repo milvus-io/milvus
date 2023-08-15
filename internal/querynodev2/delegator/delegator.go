@@ -256,13 +256,15 @@ func (sd *shardDelegator) OptimizeSearchBasedOnClustering(req *querypb.SearchReq
 		var vectorSegmentDistance = make([]segmentDistanceStruct, 0)
 		for _, segment := range segments {
 
-			if segment.ClusteringInfo != nil {
-				distance, err := distance.CalcFloatDistance(int64(dim), searchVector, segment.ClusteringInfo.Center, metricType)
-				if err != nil {
-					log.Error("Fail to calculate distance between clustering center and search vector", zap.Error(err))
+			if segment.ClusteringInfos != nil {
+				for _, clusteringInfo := range segment.ClusteringInfos {
+					distance, err := distance.CalcFloatDistance(int64(dim), searchVector, clusteringInfo.Centroid, metricType)
+					if err != nil {
+						log.Error("Fail to calculate distance between clustering center and search vector", zap.Error(err))
+					}
+					log.Debug("distance between searchVector and cluster center", zap.Int64("segmentID", segment.SegmentID), zap.Float32s("distance", distance))
+					vectorSegmentDistance = append(vectorSegmentDistance, segmentDistanceStruct{segment: segment, distance: distance[0]})
 				}
-				log.Debug("distance between searchVector and cluster center", zap.Int64("segmentID", segment.SegmentID), zap.Float32s("distance", distance))
-				vectorSegmentDistance = append(vectorSegmentDistance, segmentDistanceStruct{segment: segment, distance: distance[0]})
 			} else {
 				vectorSegmentDistance = append(vectorSegmentDistance, segmentDistanceStruct{segment: segment, distance: float32(0.0)})
 			}

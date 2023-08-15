@@ -283,8 +283,8 @@ message SegmentInfo {
   // For compatibility reasons, this flag of an old compacted segment may still be False.
   // As for new fields added in the message, they will be populated with their respective field types' default values.
   bool compacted = 19;
-  // clustering info
-  internal.ClusteringInfo clustering_info = 20;
+  // clustering infos
+  repeated internal.ClusteringInfo clustering_infos = 20;
 }
 
 message SegmentStartPosition {

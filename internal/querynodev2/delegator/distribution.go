@@ -76,12 +76,12 @@ type distribution struct {
 
 // SegmentEntry stores the segment meta information.
 type SegmentEntry struct {
-	NodeID         int64
-	SegmentID      UniqueID
-	PartitionID    UniqueID
-	Version        int64
-	TargetVersion  int64
-	ClusteringInfo *internalpb.ClusteringInfo
+	NodeID          int64
+	SegmentID       UniqueID
+	PartitionID     UniqueID
+	Version         int64
+	TargetVersion   int64
+	ClusteringInfos []*internalpb.ClusteringInfo
 }
 
 // NewDistribution creates a new distribution instance with all field initialized.

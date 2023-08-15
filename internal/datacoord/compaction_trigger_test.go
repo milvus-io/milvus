@@ -2331,8 +2331,10 @@ func Test_forceCompaction_skip_clustering(t *testing.T) {
 
 		// half segments are clustering segments
 		if i%2 == 0 {
-			info.ClusteringInfo = &internalpb.ClusteringInfo{
-				Center: []float32{0.0, 0.0},
+			info.ClusteringInfos = []*internalpb.ClusteringInfo{
+				{
+					Centroid: []float32{0.0, 0.0},
+				},
 			}
 		}
 		segmentInfos.segments[i] = info
@@ -2479,8 +2481,10 @@ func Test_autoCompaction_skip_clustering(t *testing.T) {
 
 		// half segments are clustering segments
 		if i%2 == 0 {
-			info.ClusteringInfo = &internalpb.ClusteringInfo{
-				Center: []float32{0.0, 0.0},
+			info.ClusteringInfos = []*internalpb.ClusteringInfo{
+				{
+					Centroid: []float32{0.0, 0.0},
+				},
 			}
 		}
 		segmentInfos.segments[i] = info

@@ -931,7 +931,7 @@ func isFlush(segment *SegmentInfo) bool {
 }
 
 func isClusteringSegment(segment *SegmentInfo) bool {
-	return segment.GetClusteringInfo() != nil && segment.GetClusteringInfo().Center != nil
+	return segment.GetClusteringInfos() != nil && len(segment.GetClusteringInfos()) > 0
 }
 
 func fetchSegIDs(segBinLogs []*datapb.CompactionSegmentBinlogs) []int64 {

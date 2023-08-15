@@ -24,23 +24,35 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestClusteringInfoParse(t *testing.T) {
+func TestParseClusteringInfo(t *testing.T) {
 	kv := []*commonpb.KeyValuePair{
 		{
-			Key:   CLUSTERING_CENTER,
+			Key:   CLUSTERING_CENTROID,
 			Value: "[1.0,2.0,3.0,4.0,5.0]",
 		},
 		{
 			Key:   CLUSTERING_SIZE,
 			Value: "10000",
 		},
+		{
+			Key:   CLUSTERING_ID,
+			Value: "30000",
+		},
+		{
+			Key:   CLUSTERING_GROUPID,
+			Value: "60000",
+		},
 	}
 
 	cluster, err := ClusteringInfoFromKV(kv)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(10000), cluster.Size)
-	assert.Equal(t, []float32{1.0, 2.0, 3.0, 4.0, 5.0}, cluster.Center)
+	assert.Equal(t, []float32{1.0, 2.0, 3.0, 4.0, 5.0}, cluster.Centroid)
+	assert.Equal(t, int64(30000), cluster.Id)
+	assert.Equal(t, int64(60000), cluster.GroupID)
+}
 
+func TestParseInvalidClusteringInfo(t *testing.T) {
 	kv2 := []*commonpb.KeyValuePair{
 		{
 			Key:   "other key",
@@ -57,7 +69,7 @@ func TestClusteringInfoParse(t *testing.T) {
 
 	kv3 := []*commonpb.KeyValuePair{
 		{
-			Key:   CLUSTERING_CENTER,
+			Key:   CLUSTERING_CENTROID,
 			Value: "abcdefg",
 		},
 		{
@@ -70,7 +82,7 @@ func TestClusteringInfoParse(t *testing.T) {
 
 	kv4 := []*commonpb.KeyValuePair{
 		{
-			Key:   CLUSTERING_CENTER,
+			Key:   CLUSTERING_CENTROID,
 			Value: "[1.0,2.0,3.0,4.0,5.0]",
 		},
 		{

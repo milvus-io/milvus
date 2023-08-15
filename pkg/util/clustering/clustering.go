@@ -30,8 +30,10 @@ import (
 )
 
 const (
-	CLUSTERING_CENTER = "clustering.center"
-	CLUSTERING_SIZE   = "clustering.size"
+	CLUSTERING_CENTROID = "clustering.centroid"
+	CLUSTERING_SIZE     = "clustering.size"
+	CLUSTERING_ID       = "clustering.id"
+	CLUSTERING_GROUPID  = "clustering.groupID"
 
 	SEARCH_ENABLE_CLUSTERING       = "clustering.enable"
 	SEARCH_CLUSTERING_FILTER_RATIO = "clustering.filter_ratio"
@@ -39,7 +41,7 @@ const (
 
 func ClusteringInfoFromKV(kv []*commonpb.KeyValuePair) (*internalpb.ClusteringInfo, error) {
 	kvMap := funcutil.KeyValuePair2Map(kv)
-	if v, ok := kvMap[CLUSTERING_CENTER]; ok {
+	if v, ok := kvMap[CLUSTERING_CENTROID]; ok {
 		var floatSlice []float32
 		err := json.Unmarshal([]byte(v), &floatSlice)
 		if err != nil {
@@ -47,7 +49,7 @@ func ClusteringInfoFromKV(kv []*commonpb.KeyValuePair) (*internalpb.ClusteringIn
 			return nil, err
 		}
 		clusterInfo := &internalpb.ClusteringInfo{
-			Center: floatSlice,
+			Centroid: floatSlice,
 		}
 		if sizeStr, ok := kvMap[CLUSTERING_SIZE]; ok {
 			size, err := strconv.ParseInt(sizeStr, 10, 64)
@@ -56,6 +58,22 @@ func ClusteringInfoFromKV(kv []*commonpb.KeyValuePair) (*internalpb.ClusteringIn
 				return nil, err
 			}
 			clusterInfo.Size = size
+		}
+		if clusterIDStr, ok := kvMap[CLUSTERING_ID]; ok {
+			clusterID, err := strconv.ParseInt(clusterIDStr, 10, 64)
+			if err != nil {
+				log.Error("Failed to parse cluster id value:", zap.String("value", clusterIDStr), zap.Error(err))
+				return nil, err
+			}
+			clusterInfo.Id = clusterID
+		}
+		if groupIDStr, ok := kvMap[CLUSTERING_GROUPID]; ok {
+			groupID, err := strconv.ParseInt(groupIDStr, 10, 64)
+			if err != nil {
+				log.Error("Failed to parse cluster group id value:", zap.String("value", groupIDStr), zap.Error(err))
+				return nil, err
+			}
+			clusterInfo.GroupID = groupID
 		}
 		return clusterInfo, nil
 	}
