@@ -473,7 +473,8 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		req.GetField2StatslogPaths(),
 		req.GetDeltalogs(),
 		req.GetCheckPoints(),
-		req.GetStartPositions())
+		req.GetStartPositions(),
+		req.GetClusteringInfo())
 	if err != nil {
 		log.Error("save binlog and checkpoints failed", zap.Error(err))
 		resp.Reason = err.Error()
