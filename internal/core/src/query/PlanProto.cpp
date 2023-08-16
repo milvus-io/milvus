@@ -699,8 +699,11 @@ ProtoParser::ParseExpr(const proto::plan::Expr& expr_pb) {
         case ppe::kJsonContainsExpr: {
             return ParseJsonContainsExpr(expr_pb.json_contains_expr());
         }
-        default:
-            PanicInfo("unsupported expr proto node");
+        default: {
+            std::string s;
+            google::protobuf::TextFormat::PrintToString(expr_pb, &s);
+            PanicInfo(std::string("unsupported expr proto node: ") + s);
+        }
     }
 }
 
