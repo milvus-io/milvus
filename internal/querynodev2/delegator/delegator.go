@@ -230,38 +230,52 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
 	sealed, growing, version := sd.distribution.GetSegments(true, req.GetReq().GetPartitionIDs()...)
-	defer sd.distribution.FinishUsage(version)
-	existPartitions := sd.collection.GetPartitions()
-	growing = lo.Filter(growing, func(segment SegmentEntry, _ int) bool {
-		return funcutil.SliceContain(existPartitions, segment.PartitionID)
-	})
 
-	if req.Req.IgnoreGrowing {
-		growing = []SegmentEntry{}
-	}
+	result := make(chan taskResult[*internalpb.SearchResults], 1)
 
-	sealedNum := lo.SumBy(sealed, func(item SnapshotItem) int { return len(item.Segments) })
-	log.Debug("search segments...",
-		zap.Int("sealedNum", sealedNum),
-		zap.Int("growingNum", len(growing)),
-	)
-	tasks, err := organizeSubTask(req, sealed, growing, sd.workerManager, sd.modifySearchRequest)
-	if err != nil {
-		log.Warn("Search organizeSubTask failed", zap.Error(err))
-		return nil, err
-	}
+	go func() {
+		defer sd.distribution.FinishUsage(version)
 
-	results, err := executeSubTasks(ctx, tasks, func(ctx context.Context, req *querypb.SearchRequest, worker cluster.Worker) (*internalpb.SearchResults, error) {
-		return worker.SearchSegments(ctx, req)
-	}, "Search", log)
-	if err != nil {
-		log.Warn("Delegator search failed", zap.Error(err))
-		return nil, err
-	}
+		existPartitions := sd.collection.GetPartitions()
+		growing = lo.Filter(growing, func(segment SegmentEntry, _ int) bool {
+			return funcutil.SliceContain(existPartitions, segment.PartitionID)
+		})
 
-	log.Debug("Delegator search done")
+		if req.Req.IgnoreGrowing {
+			growing = []SegmentEntry{}
+		}
 
-	return results, nil
+		sealedNum := lo.SumBy(sealed, func(item SnapshotItem) int { return len(item.Segments) })
+		log.Debug("search segments...",
+			zap.Int("sealedNum", sealedNum),
+			zap.Int("growingNum", len(growing)),
+		)
+		tasks, err := organizeSubTask(req, sealed, growing, sd.workerManager, sd.modifySearchRequest)
+		if err != nil {
+			log.Warn("Search organizeSubTask failed", zap.Error(err))
+			errResult(result, err)
+			return
+		}
+
+		results, err := executeSubTasks(ctx, tasks, func(ctx context.Context, req *querypb.SearchRequest, worker cluster.Worker) (*internalpb.SearchResults, error) {
+			return worker.SearchSegments(ctx, req)
+		}, "Search", log)
+		if err != nil {
+			log.Warn("Delegator search failed", zap.Error(err))
+			// notify error, return client response early
+			errResult(result, err)
+			// wait all dispatched sub task done, finish usage safely
+			<-results
+			return
+		}
+
+		log.Debug("Delegator search done")
+		successResult(result, <-results)
+	}()
+
+	taskResult := <-result
+
+	return taskResult.result, taskResult.err
 }
 
 // Query performs query operation on shard.
@@ -295,37 +309,49 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
 	sealed, growing, version := sd.distribution.GetSegments(true, req.GetReq().GetPartitionIDs()...)
-	defer sd.distribution.FinishUsage(version)
-	existPartitions := sd.collection.GetPartitions()
-	growing = lo.Filter(growing, func(segment SegmentEntry, _ int) bool {
-		return funcutil.SliceContain(existPartitions, segment.PartitionID)
-	})
-	if req.Req.IgnoreGrowing {
-		growing = []SegmentEntry{}
-	}
 
-	sealedNum := lo.SumBy(sealed, func(item SnapshotItem) int { return len(item.Segments) })
-	log.Debug("query segments...",
-		zap.Int("sealedNum", sealedNum),
-		zap.Int("growingNum", len(growing)),
-	)
-	tasks, err := organizeSubTask(req, sealed, growing, sd.workerManager, sd.modifyQueryRequest)
-	if err != nil {
-		log.Warn("query organizeSubTask failed", zap.Error(err))
-		return nil, err
-	}
+	result := make(chan taskResult[*internalpb.RetrieveResults], 1)
 
-	results, err := executeSubTasks(ctx, tasks, func(ctx context.Context, req *querypb.QueryRequest, worker cluster.Worker) (*internalpb.RetrieveResults, error) {
-		return worker.QuerySegments(ctx, req)
-	}, "Query", log)
-	if err != nil {
-		log.Warn("Delegator query failed", zap.Error(err))
-		return nil, err
-	}
+	go func() {
+		defer sd.distribution.FinishUsage(version)
+		existPartitions := sd.collection.GetPartitions()
+		growing = lo.Filter(growing, func(segment SegmentEntry, _ int) bool {
+			return funcutil.SliceContain(existPartitions, segment.PartitionID)
+		})
+		if req.Req.IgnoreGrowing {
+			growing = []SegmentEntry{}
+		}
 
-	log.Debug("Delegator Query done")
+		sealedNum := lo.SumBy(sealed, func(item SnapshotItem) int { return len(item.Segments) })
+		log.Debug("query segments...",
+			zap.Int("sealedNum", sealedNum),
+			zap.Int("growingNum", len(growing)),
+		)
+		tasks, err := organizeSubTask(req, sealed, growing, sd.workerManager, sd.modifyQueryRequest)
+		if err != nil {
+			log.Warn("query organizeSubTask failed", zap.Error(err))
+			errResult(result, err)
+			return
+		}
 
-	return results, nil
+		results, err := executeSubTasks(ctx, tasks, func(ctx context.Context, req *querypb.QueryRequest, worker cluster.Worker) (*internalpb.RetrieveResults, error) {
+			return worker.QuerySegments(ctx, req)
+		}, "Query", log)
+		if err != nil {
+			log.Warn("Delegator query failed", zap.Error(err))
+			// notify error, return client response early
+			errResult(result, err)
+			// wait all dispatched sub task done, finish usage safely
+			<-results
+			return
+		}
+
+		log.Debug("Delegator Query done")
+	}()
+
+	taskResult := <-result
+
+	return taskResult.result, taskResult.err
 }
 
 // GetStatistics returns statistics aggregated by delegator.
@@ -350,36 +376,64 @@ func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetSta
 	}
 
 	sealed, growing, version := sd.distribution.GetSegments(true, req.Req.GetPartitionIDs()...)
-	defer sd.distribution.FinishUsage(version)
 
-	tasks, err := organizeSubTask(req, sealed, growing, sd.workerManager, func(req *querypb.GetStatisticsRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.GetStatisticsRequest {
-		nodeReq := proto.Clone(req).(*querypb.GetStatisticsRequest)
-		nodeReq.GetReq().GetBase().TargetID = targetID
-		nodeReq.Scope = scope
-		nodeReq.SegmentIDs = segmentIDs
-		nodeReq.FromShardLeader = true
-		return nodeReq
-	})
-	if err != nil {
-		log.Warn("Get statistics organizeSubTask failed", zap.Error(err))
-		return nil, err
-	}
+	result := make(chan taskResult[*internalpb.GetStatisticsResponse], 1)
 
-	results, err := executeSubTasks(ctx, tasks, func(ctx context.Context, req *querypb.GetStatisticsRequest, worker cluster.Worker) (*internalpb.GetStatisticsResponse, error) {
-		return worker.GetStatistics(ctx, req)
-	}, "GetStatistics", log)
-	if err != nil {
-		log.Warn("Delegator get statistics failed", zap.Error(err))
-		return nil, err
-	}
+	go func() {
+		defer sd.distribution.FinishUsage(version)
 
-	return results, nil
+		tasks, err := organizeSubTask(req, sealed, growing, sd.workerManager, func(req *querypb.GetStatisticsRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.GetStatisticsRequest {
+			nodeReq := proto.Clone(req).(*querypb.GetStatisticsRequest)
+			nodeReq.GetReq().GetBase().TargetID = targetID
+			nodeReq.Scope = scope
+			nodeReq.SegmentIDs = segmentIDs
+			nodeReq.FromShardLeader = true
+			return nodeReq
+		})
+		if err != nil {
+			log.Warn("Get statistics organizeSubTask failed", zap.Error(err))
+			errResult(result, err)
+			return
+		}
+
+		results, err := executeSubTasks(ctx, tasks, func(ctx context.Context, req *querypb.GetStatisticsRequest, worker cluster.Worker) (*internalpb.GetStatisticsResponse, error) {
+			return worker.GetStatistics(ctx, req)
+		}, "GetStatistics", log)
+		if err != nil {
+			log.Warn("Delegator get statistics failed", zap.Error(err))
+			errResult(result, err)
+			<-results
+			return
+		}
+
+		successResult(result, <-results)
+	}()
+
+	taskResult := <-result
+
+	return taskResult.result, taskResult.err
 }
 
 type subTask[T any] struct {
 	req      T
 	targetID int64
 	worker   cluster.Worker
+}
+
+type taskResult[T any] struct {
+	result []T
+	err    error
+}
+
+func errResult[T any](ch chan taskResult[T], err error) {
+	ch <- taskResult[T]{
+		err: err,
+	}
+}
+func successResult[T any](ch chan taskResult[T], result []T) {
+	ch <- taskResult[T]{
+		result: result,
+	}
 }
 
 func organizeSubTask[T any](req T, sealed []SnapshotItem, growing []SegmentEntry, workerManager cluster.Manager, modify func(T, querypb.DataScope, []int64, int64) T) ([]subTask[T], error) {
@@ -426,14 +480,12 @@ func organizeSubTask[T any](req T, sealed []SnapshotItem, growing []SegmentEntry
 
 func executeSubTasks[T any, R interface {
 	GetStatus() *commonpb.Status
-}](ctx context.Context, tasks []subTask[T], execute func(context.Context, T, cluster.Worker) (R, error), taskType string, log *log.MLogger) ([]R, error) {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
+}](ctx context.Context, tasks []subTask[T], execute func(context.Context, T, cluster.Worker) (R, error), taskType string, log *log.MLogger) (chan []R, error) {
 	var wg sync.WaitGroup
 	wg.Add(len(tasks))
 
 	resultCh := make(chan R, len(tasks))
+	ch := make(chan []R, 1)
 	errCh := make(chan error, 1)
 	for _, task := range tasks {
 		go func(task subTask[T]) {
@@ -452,30 +504,36 @@ func executeSubTasks[T any, R interface {
 				case errCh <- err: // must be the first
 				default: // skip other errors
 				}
-				cancel()
 				return
 			}
 			resultCh <- result
 		}(task)
 	}
 
-	wg.Wait()
-	close(resultCh)
-	select {
-	case err := <-errCh:
-		log.Warn("Delegator execute subTask failed",
-			zap.String("taskType", taskType),
-			zap.Error(err),
-		)
-		return nil, err
-	default:
+	results := make([]R, 0, len(tasks))
+	for i := 0; i < len(tasks); i++ {
+		select {
+		case item := <-resultCh:
+			results = append(results, item)
+		case err := <-errCh:
+			log.Warn("Delegator execute subTask failed",
+				zap.String("taskType", taskType),
+				zap.Error(err),
+			)
+			// start goroutine for wait all sub task done
+			go func() {
+				wg.Wait()
+				log.Info("wait subTasks done", zap.String("taskTask", taskType))
+				close(ch)
+			}()
+			// return early
+			return ch, err
+		}
 	}
 
-	results := make([]R, 0, len(tasks))
-	for result := range resultCh {
-		results = append(results, result)
-	}
-	return results, nil
+	ch <- results
+
+	return ch, nil
 }
 
 // waitTSafe returns when tsafe listener notifies a timestamp which meet the guarantee ts.
