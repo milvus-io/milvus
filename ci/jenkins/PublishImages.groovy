@@ -69,7 +69,7 @@ pipeline {
                 }
                 stage("Publish Milvus Images on arm64") {
                     agent {
-                        label: "arm"
+                        label 'arm'
                     }
                     steps {
                         script {
