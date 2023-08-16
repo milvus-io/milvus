@@ -5,17 +5,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/querycoordv2/params"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestMetricsLockLock(t *testing.T) {
+	params := paramtable.Get()
 	lManager := &MetricsLockManager{
 		rwLocks: make(map[string]*MetricsRWMutex, 0),
 	}
-	params.Params.Init()
-	params.Params.Save(params.Params.CommonCfg.EnableLockMetrics.Key, "true")
-	params.Params.Save(params.Params.CommonCfg.LockSlowLogInfoThreshold.Key, "10")
+	params.Init()
+	params.Save(params.CommonCfg.EnableLockMetrics.Key, "true")
+	params.Save(params.CommonCfg.LockSlowLogInfoThreshold.Key, "10")
 	lName := "testLock"
 	lockDuration := 10 * time.Millisecond
 
@@ -38,12 +39,13 @@ func TestMetricsLockLock(t *testing.T) {
 }
 
 func TestMetricsLockRLock(t *testing.T) {
+	params := paramtable.Get()
 	lManager := &MetricsLockManager{
 		rwLocks: make(map[string]*MetricsRWMutex, 0),
 	}
-	params.Params.Init()
-	params.Params.Save(params.Params.CommonCfg.EnableLockMetrics.Key, "true")
-	params.Params.Save(params.Params.CommonCfg.LockSlowLogWarnThreshold.Key, "10")
+	params.Init()
+	params.Save(params.CommonCfg.EnableLockMetrics.Key, "true")
+	params.Save(params.CommonCfg.LockSlowLogWarnThreshold.Key, "10")
 	lName := "testLock"
 	lockDuration := 10 * time.Millisecond
 
