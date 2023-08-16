@@ -313,17 +313,16 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
             column = std::make_shared<Column>(num_rows, field_meta);
             storage::FieldDataPtr field_data;
             while (data.channel->pop(field_data)) {
-                column->Append(static_cast<const char*>(field_data->Data()),
-                               field_data->Size());
+                column->AppendBatch(field_data);
             }
-
-            AssertInfo(column->NumRows() == num_rows,
-                       fmt::format("data lost while loading column {}: loaded "
-                                   "num rows {} but expected {}",
-                                   data.field_id,
-                                   column->NumRows(),
-                                   num_rows));
         }
+
+        AssertInfo(column->NumRows() == num_rows,
+                   fmt::format("data lost while loading column {}: loaded "
+                               "num rows {} but expected {}",
+                               data.field_id,
+                               column->NumRows(),
+                               num_rows));
 
         {
             std::unique_lock lck(mutex_);
@@ -737,6 +736,7 @@ SegmentSealedImpl::bulk_subscript_impl(const void* src_raw,
     static_assert(IsScalar<T>);
     auto src = reinterpret_cast<const T*>(src_raw);
     auto dst = reinterpret_cast<T*>(dst_raw);
+
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
         if (offset != INVALID_SEG_OFFSET) {

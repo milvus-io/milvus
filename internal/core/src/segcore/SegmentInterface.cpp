@@ -37,6 +37,7 @@ SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
     auto pk_field_id = pk_field_id_opt.value();
     AssertInfo(IsPrimaryKeyDataType(get_schema()[pk_field_id].get_data_type()),
                "Primary key field is not INT64 or VARCHAR type");
+
     auto field_data =
         bulk_subscript(pk_field_id, results.seg_offsets_.data(), size);
     results.pk_type_ = DataType(field_data->type());
