@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/kv"
 	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
@@ -118,6 +117,7 @@ var topicMu = sync.Map{}
 
 type rocksmq struct {
 	store       *gorocksdb.DB
+	cfh         []*gorocksdb.ColumnFamilyHandle
 	kv          kv.BaseKV
 	idAllocator allocator.Interface
 	storeMu     *sync.Mutex
@@ -222,8 +222,13 @@ func NewRocksMQ(name string, idAllocator allocator.Interface) (*rocksmq, error) 
 	optsStore.IncreaseParallelism(parallelism)
 	// enable back ground flush
 	optsStore.SetMaxBackgroundFlushes(1)
+	// use properties as the column families to store trace id
+	optsStore.SetCreateIfMissingColumnFamilies(true)
 
-	db, err := gorocksdb.OpenDb(optsStore, name)
+	// db, err := gorocksdb.OpenDb(opts, name)
+	// use properties as the column families to store trace id
+	giveColumnFamilies := []string{"default", "properties"}
+	db, cfHandles, err := gorocksdb.OpenDbColumnFamilies(optsStore, name, giveColumnFamilies, []*gorocksdb.Options{optsStore, optsStore})
 	if err != nil {
 		return nil, err
 	}
@@ -243,6 +248,7 @@ func NewRocksMQ(name string, idAllocator allocator.Interface) (*rocksmq, error) 
 
 	rmq := &rocksmq{
 		store:       db,
+		cfh:         cfHandles,
 		kv:          kv,
 		idAllocator: mqIDAllocator,
 		storeMu:     &sync.Mutex{},
@@ -634,17 +640,17 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 	for i := 0; i < msgLen && idStart+UniqueID(i) < idEnd; i++ {
 		msgID := idStart + UniqueID(i)
 		key := path.Join(topicName, strconv.FormatInt(msgID, 10))
-		batch.Put([]byte(key), messages[i].Payload)
-		properties, err := json.Marshal(messages[i].Properties)
-		if err != nil {
-			log.Warn("properties marshal failed",
-				zap.Int64("msgID", msgID),
-				zap.String("topicName", topicName),
-				zap.Error(err))
-			return nil, err
+		batch.PutCF(rmq.cfh[0], []byte(key), messages[i].Payload)
+		// batch.Put([]byte(key), messages[i].Payload)
+		if messages[i].Properties != nil {
+			properties, err := json.Marshal(messages[i].Properties)
+			if err != nil {
+				log.Warn("properties marshal failed", zap.Int64("msgID", msgID), zap.String("topicName", topicName),
+					zap.Error(err))
+				return nil, err
+			}
+			batch.PutCF(rmq.cfh[1], []byte(key), properties)
 		}
-		pKey := path.Join(common.PropertiesKey, topicName, strconv.FormatInt(msgID, 10))
-		batch.Put([]byte(pKey), properties)
 		msgIDs[i] = msgID
 		msgSizes[msgID] = int64(len(messages[i].Payload))
 	}
@@ -777,8 +783,10 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 	readOpts := gorocksdb.NewDefaultReadOptions()
 	defer readOpts.Destroy()
 	prefix := topicName + "/"
-	iter := rocksdbkv.NewRocksIteratorWithUpperBound(rmq.store, typeutil.AddOne(prefix), readOpts)
+	iter := rocksdbkv.NewRocksIteratorCFWithUpperBound(rmq.store, rmq.cfh[0], typeutil.AddOne(prefix), readOpts)
+	iterProperty := rocksdbkv.NewRocksIteratorCFWithUpperBound(rmq.store, rmq.cfh[1], typeutil.AddOne(prefix), readOpts)
 	defer iter.Close()
+	defer iterProperty.Close()
 
 	var dataKey string
 	if currentID == DefaultMessageID {
@@ -787,30 +795,39 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 		dataKey = path.Join(topicName, strconv.FormatInt(currentID, 10))
 	}
 	iter.Seek([]byte(dataKey))
+	iterProperty.Seek([]byte(dataKey))
+
 	consumerMessage := make([]ConsumerMessage, 0, n)
 	offset := 0
+
 	for ; iter.Valid() && offset < n; iter.Next() {
 		key := iter.Key()
 		val := iter.Value()
 		strKey := string(key.Data())
 		key.Free()
-		offset++
+		properties := make(map[string]string)
+		var propertiesValue []byte
+
 		msgID, err := strconv.ParseInt(strKey[len(topicName)+1:], 10, 64)
 		if err != nil {
 			val.Free()
 			return nil, err
 		}
-		askedProperties := path.Join(common.PropertiesKey, topicName, strconv.FormatInt(msgID, 10))
-		opts := gorocksdb.NewDefaultReadOptions()
-		defer opts.Destroy()
-		propertiesValue, err := rmq.store.GetBytes(opts, []byte(askedProperties))
-		if err != nil {
-			return nil, err
+		offset++
+
+		if iterProperty.Valid() && string(iterProperty.Key().Data()) == string(iter.Key().Data()) {
+			// the key of properties is the same with the key of payload
+			// to prevent mix message with or without property column family
+			propertiesValue = iterProperty.Value().Data()
+			iterProperty.Next()
 		}
-		properties := make(map[string]string)
+
+		// between 2.2.0 and 2.3.0, the key of Payload is topic/properties/msgid/Payload
+		// will ingnore the property before 2.3.0, just make sure property empty is ok for 2.3
+
+		// before 2.2.0, there have no properties in ProducerMessage and ConsumerMessage in rocksmq
+		// when produce before 2.2.0, but consume after 2.2.0, propertiesValue will be []
 		if len(propertiesValue) != 0 {
-			// before 2.2.0, there have no properties in ProducerMessage and ConsumerMessage in rocksmq
-			// when produce before 2.2.0, but consume in 2.2.0, propertiesValue will be []
 			if err = json.Unmarshal(propertiesValue, &properties); err != nil {
 				return nil, err
 			}
@@ -1008,11 +1025,11 @@ func (rmq *rocksmq) SeekToLatest(topicName, groupName string) error {
 func (rmq *rocksmq) getLatestMsg(topicName string) (int64, error) {
 	readOpts := gorocksdb.NewDefaultReadOptions()
 	defer readOpts.Destroy()
-	iter := rocksdbkv.NewRocksIterator(rmq.store, readOpts)
+	iter := rocksdbkv.NewRocksIteratorCF(rmq.store, rmq.cfh[0], readOpts)
 	defer iter.Close()
 
 	prefix := topicName + "/"
-	// seek to the last message of thie topic
+	// seek to the last message of the topic
 	iter.SeekForPrev([]byte(typeutil.AddOne(prefix)))
 
 	// if iterate fail
@@ -1037,6 +1054,7 @@ func (rmq *rocksmq) getLatestMsg(topicName string) (int64, error) {
 	}
 
 	msgID, err := strconv.ParseInt(seekMsgID[len(topicName)+1:], 10, 64)
+
 	if err != nil {
 		return DefaultMessageID, err
 	}
