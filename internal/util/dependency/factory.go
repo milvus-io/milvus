@@ -144,10 +144,6 @@ func (f *DefaultFactory) NewTtMsgStream(ctx context.Context) (msgstream.MsgStrea
 	return f.msgStreamFactory.NewTtMsgStream(ctx)
 }
 
-func (f *DefaultFactory) NewQueryMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
-	return f.msgStreamFactory.NewQueryMsgStream(ctx)
-}
-
 func (f *DefaultFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, string) error {
 	return f.msgStreamFactory.NewMsgStreamDisposer(ctx)
 }

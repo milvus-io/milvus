@@ -113,21 +113,12 @@ func getDmlChannelsFunc(ctx context.Context, rc types.RootCoord) getChannelsFunc
 	}
 }
 
-// streamType indicates which type of message stream should be created.
-type streamType int
-
-const (
-	dmlStreamType streamType = iota
-	dqlStreamType
-)
-
 type singleTypeChannelsMgr struct {
 	infos map[UniqueID]streamInfos // collection id -> stream infos
 	mu    sync.RWMutex
 
 	getChannelsFunc  getChannelsFuncType
 	repackFunc       repackFuncType
-	singleStreamType streamType
 	msgStreamFactory msgstream.Factory
 }
 
@@ -184,15 +175,11 @@ func (mgr *singleTypeChannelsMgr) streamExistPrivate(collectionID UniqueID) bool
 	return ok && streamInfos.stream != nil
 }
 
-func createStream(factory msgstream.Factory, streamType streamType, pchans []pChan, repack repackFuncType) (msgstream.MsgStream, error) {
+func createStream(factory msgstream.Factory, pchans []pChan, repack repackFuncType) (msgstream.MsgStream, error) {
 	var stream msgstream.MsgStream
 	var err error
 
-	if streamType == dqlStreamType {
-		stream, err = factory.NewQueryMsgStream(context.Background())
-	} else {
-		stream, err = factory.NewMsgStream(context.Background())
-	}
+	stream, err = factory.NewMsgStream(context.Background())
 
 	if err != nil {
 		return nil, err
@@ -240,7 +227,7 @@ func (mgr *singleTypeChannelsMgr) createMsgStream(collectionID UniqueID) (msgstr
 		return nil, err
 	}
 
-	stream, err := createStream(mgr.msgStreamFactory, mgr.singleStreamType, channelInfos.pchans, mgr.repackFunc)
+	stream, err := createStream(mgr.msgStreamFactory, channelInfos.pchans, mgr.repackFunc)
 	if err != nil {
 		// What if stream created by other goroutines?
 		log.Error("failed to create message stream", zap.Error(err), zap.Int64("collection", collectionID))
@@ -309,13 +296,11 @@ func newSingleTypeChannelsMgr(
 	getChannelsFunc getChannelsFuncType,
 	msgStreamFactory msgstream.Factory,
 	repackFunc repackFuncType,
-	singleStreamType streamType,
 ) *singleTypeChannelsMgr {
 	return &singleTypeChannelsMgr{
 		infos:            make(map[UniqueID]streamInfos),
 		getChannelsFunc:  getChannelsFunc,
 		repackFunc:       repackFunc,
-		singleStreamType: singleStreamType,
 		msgStreamFactory: msgStreamFactory,
 	}
 }
@@ -355,6 +340,6 @@ func newChannelsMgrImpl(
 	msgStreamFactory msgstream.Factory,
 ) *channelsMgrImpl {
 	return &channelsMgrImpl{
-		dmlChannelsMgr: newSingleTypeChannelsMgr(getDmlChannelsFunc, msgStreamFactory, dmlRepackFunc, dmlStreamType),
+		dmlChannelsMgr: newSingleTypeChannelsMgr(getDmlChannelsFunc, msgStreamFactory, dmlRepackFunc),
 	}
 }

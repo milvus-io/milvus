@@ -41,9 +41,4 @@ func TestRmsFactory(t *testing.T) {
 	_, err = rmsFactory.NewTtMsgStream(ctx)
 	assert.NoError(t, err)
 
-	_, err = rmsFactory.NewQueryMsgStream(ctx)
-	assert.NoError(t, err)
-
-	err = rmsFactory.NewMsgStreamDisposer(ctx)([]string{"hello"}, "xx")
-	assert.NoError(t, err)
 }

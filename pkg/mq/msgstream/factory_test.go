@@ -82,9 +82,6 @@ func testFactoryCommonOperation(t *testing.T, f Factory) {
 	_, err = f.NewTtMsgStream(ctx)
 	assert.NoError(t, err)
 
-	_, err = f.NewQueryMsgStream(ctx)
-	assert.NoError(t, err)
-
 	err = f.NewMsgStreamDisposer(ctx)([]string{"hello"}, "xx")
 	assert.NoError(t, err)
 }

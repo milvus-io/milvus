@@ -110,11 +110,6 @@ func (f *PmsFactory) getAuthentication() (pulsar.Authentication, error) {
 	return auth, nil
 }
 
-// NewQueryMsgStream is used to generate a new QueryMsgstream object
-func (f *PmsFactory) NewQueryMsgStream(ctx context.Context) (MsgStream, error) {
-	return f.NewMsgStream(ctx)
-}
-
 func (f *PmsFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, string) error {
 	return func(channels []string, subname string) error {
 		// try to delete the old subscription
@@ -164,10 +159,6 @@ func (f *KmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
 func (f *KmsFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
 	kafkaClient := kafkawrapper.NewKafkaClientInstanceWithConfig(f.config)
 	return NewMqTtMsgStream(ctx, f.ReceiveBufSize, f.MQBufSize, kafkaClient, f.dispatcherFactory.NewUnmarshalDispatcher())
-}
-
-func (f *KmsFactory) NewQueryMsgStream(ctx context.Context) (MsgStream, error) {
-	return f.NewMsgStream(ctx)
 }
 
 func (f *KmsFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, string) error {

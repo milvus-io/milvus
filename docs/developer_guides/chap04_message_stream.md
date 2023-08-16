@@ -216,7 +216,6 @@ type Factory interface {
 	Init(params *paramtable.ComponentParam) error
 	NewMsgStream(ctx context.Context) (MsgStream, error)
 	NewTtMsgStream(ctx context.Context) (MsgStream, error)
-	NewQueryMsgStream(ctx context.Context) (MsgStream, error)
 }
 
 // Pulsar
