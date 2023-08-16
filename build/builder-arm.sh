@@ -44,7 +44,7 @@ if [[ "${CHECK_BUILDER:-}" == "1" ]]; then
     docker-compose build armbuilder
 fi
 
-echo "id -u: ${id -u}"
+echo ${id -u}
 echo "uid: $uid"
 
 if [[ "$(id -u)" != "0" ]]; then
