@@ -36,10 +36,13 @@ class ThreadPool {
     explicit ThreadPool(const int thread_core_coefficient,
                         const std::string& name)
         : shutdown_(false), name_(name) {
-        auto thread_num = CPU_NUM * thread_core_coefficient;
-        threads_ = std::vector<std::thread>(thread_num);
+        idle_threads_size_ = 0;
+        current_threads_size_ = 0;
+        min_threads_size_ = CPU_NUM;
+        max_threads_size_ = CPU_NUM * thread_core_coefficient;
         LOG_SEGCORE_INFO_ << "Init thread pool:" << name_
-                          << " with worker num:" << thread_num;
+                          << " with min worker num:" << min_threads_size_
+                          << " and max worker num:" << max_threads_size_;
         Init();
     }
 
@@ -60,6 +63,12 @@ class ThreadPool {
     void
     ShutDown();
 
+    size_t
+    GetThreadNum() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return current_threads_size_;
+    }
+
     template <typename F, typename... Args>
     auto
     // Submit(F&& f, Args&&... args) -> std::future<decltype(f(args...))>;
@@ -73,15 +82,37 @@ class ThreadPool {
 
         work_queue_.enqueue(wrap_func);
 
-        condition_lock_.notify_one();
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        if (idle_threads_size_ > 0) {
+            condition_lock_.notify_one();
+        } else if (current_threads_size_ < max_threads_size_) {
+            // Dynamic increase thread number
+            std::thread t(&ThreadPool::Worker, this);
+            assert(threads_.find(t.get_id()) == threads_.end());
+            threads_[t.get_id()] = std::move(t);
+            current_threads_size_++;
+        }
 
         return task_ptr->get_future();
     }
 
+    void
+    Worker();
+
+    void
+    FinishThreads();
+
  public:
+    int min_threads_size_;
+    int idle_threads_size_;
+    int current_threads_size_;
+    int max_threads_size_;
     bool shutdown_;
+    static constexpr size_t WAIT_SECONDS = 2;
     SafeQueue<std::function<void()>> work_queue_;
-    std::vector<std::thread> threads_;
+    std::unordered_map<std::thread::id, std::thread> threads_;
+    SafeQueue<std::thread::id> need_finish_threads_;
     std::mutex mutex_;
     std::condition_variable condition_lock_;
     std::string name_;
