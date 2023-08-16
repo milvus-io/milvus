@@ -255,11 +255,13 @@ func (s *Server) startGrpcLoop(port int) {
 			otelgrpc.UnaryServerInterceptor(opts...),
 			logutil.UnaryTraceLoggerInterceptor,
 			interceptor.ClusterValidationUnaryServerInterceptor(),
+			interceptor.ServerIDValidationUnaryServerInterceptor(),
 		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
 			otelgrpc.StreamServerInterceptor(opts...),
 			logutil.StreamTraceLoggerInterceptor,
 			interceptor.ClusterValidationStreamServerInterceptor(),
+			interceptor.ServerIDValidationStreamServerInterceptor(),
 		)))
 	rootcoordpb.RegisterRootCoordServer(s.grpcServer, s)
 

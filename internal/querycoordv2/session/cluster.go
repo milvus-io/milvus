@@ -72,10 +72,10 @@ type QueryCluster struct {
 	stopOnce    sync.Once
 }
 
-type QueryNodeCreator func(ctx context.Context, addr string) (types.QueryNode, error)
+type QueryNodeCreator func(ctx context.Context, addr string, nodeID int64) (types.QueryNode, error)
 
-func DefaultQueryNodeCreator(ctx context.Context, addr string) (types.QueryNode, error) {
-	return grpcquerynodeclient.NewClient(ctx, addr)
+func DefaultQueryNodeCreator(ctx context.Context, addr string, nodeID int64) (types.QueryNode, error) {
+	return grpcquerynodeclient.NewClient(ctx, addr, nodeID)
 }
 
 func NewCluster(nodeManager *NodeManager, queryNodeCreator QueryNodeCreator) *QueryCluster {
@@ -303,8 +303,8 @@ func (c *clients) getOrCreate(ctx context.Context, node *NodeInfo) (types.QueryN
 	return c.create(node)
 }
 
-func createNewClient(ctx context.Context, addr string, queryNodeCreator QueryNodeCreator) (types.QueryNode, error) {
-	newCli, err := queryNodeCreator(ctx, addr)
+func createNewClient(ctx context.Context, addr string, nodeID int64, queryNodeCreator QueryNodeCreator) (types.QueryNode, error) {
+	newCli, err := queryNodeCreator(ctx, addr, nodeID)
 	if err != nil {
 		return nil, err
 	}
@@ -323,7 +323,7 @@ func (c *clients) create(node *NodeInfo) (types.QueryNode, error) {
 	if cli, ok := c.clients[node.ID()]; ok {
 		return cli, nil
 	}
-	cli, err := createNewClient(context.Background(), node.Addr(), c.queryNodeCreator)
+	cli, err := createNewClient(context.Background(), node.Addr(), node.ID(), c.queryNodeCreator)
 	if err != nil {
 		return nil, err
 	}

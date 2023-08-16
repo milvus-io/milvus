@@ -84,7 +84,7 @@ func (m *mockCore) SetQueryCoord(types.QueryCoord) error {
 	return nil
 }
 
-func (m *mockCore) SetProxyCreator(func(ctx context.Context, addr string) (types.Proxy, error)) {
+func (m *mockCore) SetProxyCreator(func(ctx context.Context, addr string, nodeID int64) (types.Proxy, error)) {
 }
 
 func (m *mockCore) Register() error {

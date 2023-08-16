@@ -68,7 +68,7 @@ func TestGetDataNodeMetrics(t *testing.T) {
 	_, err = svr.getDataNodeMetrics(ctx, req, NewSession(&NodeInfo{}, nil))
 	assert.Error(t, err)
 
-	creator := func(ctx context.Context, addr string) (types.DataNode, error) {
+	creator := func(ctx context.Context, addr string, nodeID int64) (types.DataNode, error) {
 		return newMockDataNodeClient(100, nil)
 	}
 
@@ -80,8 +80,8 @@ func TestGetDataNodeMetrics(t *testing.T) {
 	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.DataNodeRole, 100), info.BaseComponentInfos.Name)
 
 	getMockFailedClientCreator := func(mockFunc func() (*milvuspb.GetMetricsResponse, error)) dataNodeCreatorFunc {
-		return func(ctx context.Context, addr string) (types.DataNode, error) {
-			cli, err := creator(ctx, addr)
+		return func(ctx context.Context, addr string, nodeID int64) (types.DataNode, error) {
+			cli, err := creator(ctx, addr, nodeID)
 			assert.NoError(t, err)
 			return &mockMetricDataNodeClient{DataNode: cli, mock: mockFunc}, nil
 		}

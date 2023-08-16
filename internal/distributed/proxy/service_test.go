@@ -740,7 +740,7 @@ func (m *MockProxy) SetQueryCoordClient(queryCoord types.QueryCoord) {
 
 }
 
-func (m *MockProxy) SetQueryNodeCreator(func(ctx context.Context, addr string) (types.QueryNode, error)) {
+func (m *MockProxy) SetQueryNodeCreator(func(ctx context.Context, addr string, nodeID int64) (types.QueryNode, error)) {
 
 }
 

@@ -196,6 +196,14 @@ func WrapErrServiceDiskLimitExceeded(predict, limit float32, msg ...string) erro
 	return err
 }
 
+func WrapErrServerIDMismatch(expectedID, actualID int64, msg ...string) error {
+	err := errors.Wrapf(ErrServerIDMismatch, "expected=%s, actual=%s", expectedID, actualID)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
 func WrapErrDatabaseNotFound(database any, msg ...string) error {
 	err := wrapWithField(ErrDatabaseNotfound, "database", database)
 	if len(msg) > 0 {

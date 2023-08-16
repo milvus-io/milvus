@@ -315,7 +315,7 @@ func (node *QueryNode) Init() error {
 				}
 			}
 
-			client, err := grpcquerynodeclient.NewClient(node.ctx, addr)
+			client, err := grpcquerynodeclient.NewClient(node.ctx, addr, nodeID)
 			if err != nil {
 				return nil, err
 			}

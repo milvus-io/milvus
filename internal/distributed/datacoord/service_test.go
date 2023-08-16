@@ -107,10 +107,10 @@ func (m *MockDataCoord) SetEtcdClient(etcdClient *clientv3.Client) {
 func (m *MockDataCoord) SetRootCoord(rootCoord types.RootCoord) {
 }
 
-func (m *MockDataCoord) SetDataNodeCreator(func(context.Context, string) (types.DataNode, error)) {
+func (m *MockDataCoord) SetDataNodeCreator(func(context.Context, string, int64) (types.DataNode, error)) {
 }
 
-func (m *MockDataCoord) SetIndexNodeCreator(func(context.Context, string) (types.IndexNode, error)) {
+func (m *MockDataCoord) SetIndexNodeCreator(func(context.Context, string, int64) (types.IndexNode, error)) {
 }
 
 func (m *MockDataCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {

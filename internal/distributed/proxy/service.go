@@ -314,9 +314,12 @@ func (s *Server) startInternalGrpc(grpcPort int, errChan chan error) {
 			otelgrpc.UnaryServerInterceptor(opts...),
 			logutil.UnaryTraceLoggerInterceptor,
 			interceptor.ClusterValidationUnaryServerInterceptor(),
+			interceptor.ServerIDValidationUnaryServerInterceptor(),
 		)),
-		grpc.StreamInterceptor(interceptor.ClusterValidationStreamServerInterceptor()),
-	)
+		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
+			interceptor.ClusterValidationStreamServerInterceptor(),
+			interceptor.ServerIDValidationStreamServerInterceptor(),
+		)))
 	proxypb.RegisterProxyServer(s.grpcInternalServer, s)
 	grpc_health_v1.RegisterHealthServer(s.grpcInternalServer, s)
 	errChan <- nil

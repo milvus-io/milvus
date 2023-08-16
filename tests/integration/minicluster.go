@@ -1179,7 +1179,7 @@ func (cluster *MiniCluster) UpdateClusterSize(clusterConfig ClusterConfig) error
 	return nil
 }
 
-func (cluster *MiniCluster) GetProxy(ctx context.Context, addr string) (types.Proxy, error) {
+func (cluster *MiniCluster) GetProxy(ctx context.Context, addr string, nodeID int64) (types.Proxy, error) {
 	cluster.mu.RLock()
 	defer cluster.mu.RUnlock()
 	if cluster.Proxy.GetAddress() == addr {
@@ -1188,7 +1188,7 @@ func (cluster *MiniCluster) GetProxy(ctx context.Context, addr string) (types.Pr
 	return nil, nil
 }
 
-func (cluster *MiniCluster) GetQueryNode(ctx context.Context, addr string) (types.QueryNode, error) {
+func (cluster *MiniCluster) GetQueryNode(ctx context.Context, addr string, nodeID int64) (types.QueryNode, error) {
 	cluster.mu.RLock()
 	defer cluster.mu.RUnlock()
 	for _, queryNode := range cluster.QueryNodes {
@@ -1199,7 +1199,7 @@ func (cluster *MiniCluster) GetQueryNode(ctx context.Context, addr string) (type
 	return nil, errors.New("no related queryNode found")
 }
 
-func (cluster *MiniCluster) GetDataNode(ctx context.Context, addr string) (types.DataNode, error) {
+func (cluster *MiniCluster) GetDataNode(ctx context.Context, addr string, nodeID int64) (types.DataNode, error) {
 	cluster.mu.RLock()
 	defer cluster.mu.RUnlock()
 	for _, dataNode := range cluster.DataNodes {
@@ -1210,7 +1210,7 @@ func (cluster *MiniCluster) GetDataNode(ctx context.Context, addr string) (types
 	return nil, errors.New("no related dataNode found")
 }
 
-func (cluster *MiniCluster) GetIndexNode(ctx context.Context, addr string) (types.IndexNode, error) {
+func (cluster *MiniCluster) GetIndexNode(ctx context.Context, addr string, nodeID int64) (types.IndexNode, error) {
 	cluster.mu.RLock()
 	defer cluster.mu.RUnlock()
 	for _, indexNode := range cluster.IndexNodes {

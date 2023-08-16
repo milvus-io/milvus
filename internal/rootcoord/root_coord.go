@@ -252,7 +252,7 @@ func (c *Core) tsLoop() {
 	}
 }
 
-func (c *Core) SetProxyCreator(f func(ctx context.Context, addr string) (types.Proxy, error)) {
+func (c *Core) SetProxyCreator(f func(ctx context.Context, addr string, nodeID int64) (types.Proxy, error)) {
 	c.proxyCreator = f
 }
 

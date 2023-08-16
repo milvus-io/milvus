@@ -42,7 +42,7 @@ type Client struct {
 }
 
 // NewClient creates a new client instance
-func NewClient(ctx context.Context, addr string) (*Client, error) {
+func NewClient(ctx context.Context, addr string, nodeID int64) (*Client, error) {
 	if addr == "" {
 		return nil, fmt.Errorf("address is empty")
 	}
@@ -66,6 +66,7 @@ func NewClient(ctx context.Context, addr string) (*Client, error) {
 	client.grpcClient.SetRole(typeutil.ProxyRole)
 	client.grpcClient.SetGetAddrFunc(client.getAddr)
 	client.grpcClient.SetNewGrpcClientFunc(client.newGrpcClient)
+	client.grpcClient.SetNodeID(nodeID)
 	return client, nil
 }
 

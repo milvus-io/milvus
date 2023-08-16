@@ -36,10 +36,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 )
 
-type proxyCreator func(ctx context.Context, addr string) (types.Proxy, error)
+type proxyCreator func(ctx context.Context, addr string, nodeID int64) (types.Proxy, error)
 
-func DefaultProxyCreator(ctx context.Context, addr string) (types.Proxy, error) {
-	cli, err := grpcproxyclient.NewClient(ctx, addr)
+func DefaultProxyCreator(ctx context.Context, addr string, nodeID int64) (types.Proxy, error) {
+	cli, err := grpcproxyclient.NewClient(ctx, addr, nodeID)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +107,7 @@ func (p *proxyClientManager) updateProxyNumMetric() {
 }
 
 func (p *proxyClientManager) connect(session *sessionutil.Session) {
-	pc, err := p.creator(context.Background(), session.Address)
+	pc, err := p.creator(context.Background(), session.Address, session.ServerID)
 	if err != nil {
 		log.Warn("failed to create proxy client", zap.String("address", session.Address), zap.Int64("serverID", session.ServerID), zap.Error(err))
 		return

@@ -43,7 +43,7 @@ type Client struct {
 }
 
 // NewClient creates a new IndexNode client.
-func NewClient(ctx context.Context, addr string, encryption bool) (*Client, error) {
+func NewClient(ctx context.Context, addr string, nodeID int64, encryption bool) (*Client, error) {
 	if addr == "" {
 		return nil, fmt.Errorf("address is empty")
 	}
@@ -67,6 +67,7 @@ func NewClient(ctx context.Context, addr string, encryption bool) (*Client, erro
 	client.grpcClient.SetRole(typeutil.IndexNodeRole)
 	client.grpcClient.SetGetAddrFunc(client.getAddr)
 	client.grpcClient.SetNewGrpcClientFunc(client.newGrpcClient)
+	client.grpcClient.SetNodeID(nodeID)
 	if encryption {
 		client.grpcClient.EnableEncryption()
 	}
