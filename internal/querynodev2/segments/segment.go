@@ -79,7 +79,7 @@ type baseSegment struct {
 	shard          string
 	collectionID   int64
 	typ            SegmentType
-	version        int64
+	version        *atomic.Int64
 	startPosition  *msgpb.MsgPosition // for growing segment release
 	bloomFilterSet *pkoracle.BloomFilterSet
 }
@@ -91,7 +91,7 @@ func newBaseSegment(id, partitionID, collectionID int64, shard string, typ Segme
 		collectionID:   collectionID,
 		shard:          shard,
 		typ:            typ,
-		version:        version,
+		version:        atomic.NewInt64(version),
 		startPosition:  startPosition,
 		bloomFilterSet: pkoracle.NewBloomFilterSet(id, partitionID, typ),
 	}
@@ -123,11 +123,11 @@ func (s *baseSegment) StartPosition() *msgpb.MsgPosition {
 }
 
 func (s *baseSegment) Version() int64 {
-	return s.version
+	return s.version.Load()
 }
 
 func (s *baseSegment) UpdateVersion(version int64) {
-	s.version = version
+	s.version.Store(version)
 }
 
 func (s *baseSegment) UpdateBloomFilter(pks []storage.PrimaryKey) {
