@@ -450,6 +450,8 @@ class ResponseChecker:
         assert len(pk_list) == len(set(pk_list))
         if check_items.get("count", None):
             assert len(pk_list) == check_items["count"]
+        if check_items.get("exp_ids", None):
+            assert pk_list == check_items["exp_ids"]
         log.info("check: total %d results" % len(pk_list))
 
         return True
