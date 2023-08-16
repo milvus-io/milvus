@@ -7,14 +7,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
+	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
 type defaultHook struct {
@@ -67,6 +66,16 @@ func initHook() error {
 	if err = hoo.Init(Params.HookCfg.SoConfig.GetValue()); err != nil {
 		return fmt.Errorf("fail to init configs for the hook, error: %s", err.Error())
 	}
+	Params.HookCfg.WatchHookWithPrefix("watch_hook", "", func(event *config.Event) {
+		log.Info("receive the hook refresh event", zap.Any("event", event))
+		go func() {
+			soConfig := Params.HookCfg.SoConfig.GetValue()
+			log.Info("refresh hook configs", zap.Any("config", soConfig))
+			if err = hoo.Init(soConfig); err != nil {
+				log.Panic("fail to init configs for the hook when refreshing", zap.Error(err))
+			}
+		}()
+	})
 	return nil
 }
 
