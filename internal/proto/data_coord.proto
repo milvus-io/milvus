@@ -504,6 +504,7 @@ message WatchChannelsRequest {
   repeated string channelNames = 2;
   repeated common.KeyDataPair start_positions = 3;
   schema.CollectionSchema schema = 4; 
+  uint64 create_timestamp = 5;
 }
 
 message WatchChannelsResponse {
