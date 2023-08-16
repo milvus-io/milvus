@@ -528,8 +528,11 @@ ProtoParser::ParseExpr(const proto::plan::Expr& expr_pb) {
         case ppe::kExistsExpr: {
             return ParseExistExpr(expr_pb.exists_expr());
         }
-        default:
-            PanicInfo("unsupported expr proto node");
+        default: {
+            std::string s;
+            google::protobuf::TextFormat::PrintToString(expr_pb, &s);
+            PanicInfo(std::string("unsupported expr proto node: ") + s);
+        }
     }
 }
 
