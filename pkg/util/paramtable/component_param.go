@@ -2264,12 +2264,12 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.GCInterval.Init(base.mgr)
 
-	// Do you set this to incredible small value, make sure this to be more than 10 minutes at least
+	// Do not set this to incredible small value, make sure this to be more than 10 minutes at least
 	p.GCMissingTolerance = ParamItem{
 		Key:          "dataCoord.gc.missingTolerance",
 		Version:      "2.0.0",
 		DefaultValue: "3600",
-		Doc:          "file meta missing tolerance duration in seconds, 60*60*3",
+		Doc:          "file meta missing tolerance duration in seconds, default to 1hr",
 		Export:       true,
 	}
 	p.GCMissingTolerance.Init(base.mgr)
