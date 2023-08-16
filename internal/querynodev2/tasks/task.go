@@ -124,9 +124,12 @@ func (t *SearchTask) Execute() error {
 	}
 	defer searchReq.Delete()
 
-	var results []*segments.SearchResult
+	var (
+		results          []*segments.SearchResult
+		searchedSegments []segments.Segment
+	)
 	if req.GetScope() == querypb.DataScope_Historical {
-		results, _, _, err = segments.SearchHistorical(
+		results, searchedSegments, err = segments.SearchHistorical(
 			t.ctx,
 			t.segmentManager,
 			searchReq,
@@ -135,7 +138,7 @@ func (t *SearchTask) Execute() error {
 			req.GetSegmentIDs(),
 		)
 	} else if req.GetScope() == querypb.DataScope_Streaming {
-		results, _, _, err = segments.SearchStreaming(
+		results, searchedSegments, err = segments.SearchStreaming(
 			t.ctx,
 			t.segmentManager,
 			searchReq,
@@ -144,6 +147,7 @@ func (t *SearchTask) Execute() error {
 			req.GetSegmentIDs(),
 		)
 	}
+	defer t.segmentManager.Segment.Unpin(searchedSegments)
 	if err != nil {
 		return err
 	}

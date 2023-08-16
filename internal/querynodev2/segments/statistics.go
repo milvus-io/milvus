@@ -19,8 +19,6 @@ package segments
 import (
 	"context"
 	"sync"
-
-	"github.com/milvus-io/milvus/pkg/log"
 )
 
 // SegmentStats struct for segment statistics.
@@ -31,28 +29,22 @@ type SegmentStats struct {
 
 // statisticOnSegments performs statistic on listed segments
 // all segment ids are validated before calling this function
-func statisticOnSegments(ctx context.Context, manager *Manager, segType SegmentType, segIDs []int64) ([]SegmentStats, error) {
+func statisticOnSegments(ctx context.Context, segments []Segment, segType SegmentType) ([]SegmentStats, error) {
 	// results variables
-	results := make([]SegmentStats, 0, len(segIDs))
-	resultCh := make(chan SegmentStats, len(segIDs))
+	results := make([]SegmentStats, 0, len(segments))
+	resultCh := make(chan SegmentStats, len(segments))
 
 	// fetch seg statistics in goroutines
 	var wg sync.WaitGroup
-	for i, segID := range segIDs {
+	for i, segment := range segments {
 		wg.Add(1)
-		go func(segID int64, i int) {
+		go func(segment Segment, i int) {
 			defer wg.Done()
-			seg := manager.Segment.GetWithType(segID, segType)
-			if seg == nil {
-				log.Warn("segment released while get statistics")
-				return
-			}
-
 			resultCh <- SegmentStats{
-				SegmentID: segID,
-				RowCount:  seg.RowNum(),
+				SegmentID: segment.ID(),
+				RowCount:  segment.RowNum(),
 			}
-		}(segID, i)
+		}(segment, i)
 	}
 	wg.Wait()
 	close(resultCh)
@@ -67,30 +59,22 @@ func statisticOnSegments(ctx context.Context, manager *Manager, segType SegmentT
 // if segIDs is not specified, it will search on all the historical segments specified by partIDs.
 // if segIDs is specified, it will only search on the segments specified by the segIDs.
 // if partIDs is empty, it means all the partitions of the loaded collection or all the partitions loaded.
-func StatisticsHistorical(ctx context.Context, manager *Manager, collID int64, partIDs []int64, segIDs []int64) ([]SegmentStats, []int64, []int64, error) {
-	var err error
-	var result []SegmentStats
-	var searchSegmentIDs []int64
-	var searchPartIDs []int64
-	searchPartIDs, searchSegmentIDs, err = validateOnHistorical(ctx, manager, collID, partIDs, segIDs)
+func StatisticsHistorical(ctx context.Context, manager *Manager, collID int64, partIDs []int64, segIDs []int64) ([]SegmentStats, []Segment, error) {
+	segments, err := validateOnHistorical(ctx, manager, collID, partIDs, segIDs)
 	if err != nil {
-		return result, searchSegmentIDs, searchPartIDs, err
+		return nil, nil, err
 	}
-	result, err = statisticOnSegments(ctx, manager, SegmentTypeSealed, searchSegmentIDs)
-	return result, searchPartIDs, searchSegmentIDs, err
+	result, err := statisticOnSegments(ctx, segments, SegmentTypeSealed)
+	return result, segments, err
 }
 
 // StatisticStreaming will do statistics all the target segments in streaming
 // if partIDs is empty, it means all the partitions of the loaded collection or all the partitions loaded.
-func StatisticStreaming(ctx context.Context, manager *Manager, collID int64, partIDs []int64, segIDs []int64) ([]SegmentStats, []int64, []int64, error) {
-	var err error
-	var result []SegmentStats
-	var searchSegmentIDs []int64
-	var searchPartIDs []int64
-	searchPartIDs, searchSegmentIDs, err = validateOnStream(ctx, manager, collID, partIDs, segIDs)
+func StatisticStreaming(ctx context.Context, manager *Manager, collID int64, partIDs []int64, segIDs []int64) ([]SegmentStats, []Segment, error) {
+	segments, err := validateOnStream(ctx, manager, collID, partIDs, segIDs)
 	if err != nil {
-		return result, searchSegmentIDs, searchPartIDs, err
+		return nil, nil, err
 	}
-	result, err = statisticOnSegments(ctx, manager, SegmentTypeGrowing, searchSegmentIDs)
-	return result, searchPartIDs, searchSegmentIDs, err
+	result, err := statisticOnSegments(ctx, segments, SegmentTypeGrowing)
+	return result, segments, err
 }

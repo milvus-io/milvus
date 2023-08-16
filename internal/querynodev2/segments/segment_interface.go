@@ -32,6 +32,8 @@ type Segment interface {
 	Version() int64
 	StartPosition() *msgpb.MsgPosition
 	Type() SegmentType
+	RLock() error
+	RUnlock()
 
 	// Stats related
 	// InsertCount returns the number of inserted rows, not effected by deletion

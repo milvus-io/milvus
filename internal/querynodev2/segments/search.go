@@ -32,11 +32,11 @@ import (
 
 // searchOnSegments performs search on listed segments
 // all segment ids are validated before calling this function
-func searchSegments(ctx context.Context, manager *Manager, segType SegmentType, searchReq *SearchRequest, segIDs []int64) ([]*SearchResult, error) {
+func searchSegments(ctx context.Context, segments []Segment, segType SegmentType, searchReq *SearchRequest) ([]*SearchResult, error) {
 	var (
 		// results variables
-		resultCh = make(chan *SearchResult, len(segIDs))
-		errs     = make([]error, len(segIDs))
+		resultCh = make(chan *SearchResult, len(segments))
+		errs     = make([]error, len(segments))
 		wg       sync.WaitGroup
 
 		// For log only
@@ -50,19 +50,14 @@ func searchSegments(ctx context.Context, manager *Manager, segType SegmentType, 
 	}
 
 	// calling segment search in goroutines
-	for i, segID := range segIDs {
+	for i, segment := range segments {
 		wg.Add(1)
-		go func(segID int64, i int) {
+		go func(segment Segment, i int) {
 			defer wg.Done()
-			seg, _ := manager.Segment.GetWithType(segID, segType).(*LocalSegment)
-			if seg == nil {
-				log.Warn("segment released while searching", zap.Int64("segmentID", segID))
-				return
-			}
-
+			seg := segment.(*LocalSegment)
 			if !seg.ExistIndex(searchReq.searchFieldID) {
 				mu.Lock()
-				segmentsWithoutIndex = append(segmentsWithoutIndex, segID)
+				segmentsWithoutIndex = append(segmentsWithoutIndex, seg.ID())
 				mu.Unlock()
 			}
 			// record search time
@@ -76,12 +71,12 @@ func searchSegments(ctx context.Context, manager *Manager, segType SegmentType, 
 				metrics.SearchLabel, searchLabel).Observe(float64(elapsed))
 			metrics.QueryNodeSegmentSearchLatencyPerVector.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
 				metrics.SearchLabel, searchLabel).Observe(float64(elapsed) / float64(searchReq.getNumOfQuery()))
-		}(segID, i)
+		}(segment, i)
 	}
 	wg.Wait()
 	close(resultCh)
 
-	searchResults := make([]*SearchResult, 0, len(segIDs))
+	searchResults := make([]*SearchResult, 0, len(segments))
 	for result := range resultCh {
 		searchResults = append(searchResults, result)
 	}
@@ -104,31 +99,22 @@ func searchSegments(ctx context.Context, manager *Manager, segType SegmentType, 
 // if segIDs is not specified, it will search on all the historical segments speficied by partIDs.
 // if segIDs is specified, it will only search on the segments specified by the segIDs.
 // if partIDs is empty, it means all the partitions of the loaded collection or all the partitions loaded.
-func SearchHistorical(ctx context.Context, manager *Manager, searchReq *SearchRequest, collID int64, partIDs []int64, segIDs []int64) ([]*SearchResult, []int64, []int64, error) {
-	var err error
-	var searchResults []*SearchResult
-	var searchSegmentIDs []int64
-	var searchPartIDs []int64
-	searchPartIDs, searchSegmentIDs, err = validateOnHistorical(ctx, manager, collID, partIDs, segIDs)
+func SearchHistorical(ctx context.Context, manager *Manager, searchReq *SearchRequest, collID int64, partIDs []int64, segIDs []int64) ([]*SearchResult, []Segment, error) {
+	segments, err := validateOnHistorical(ctx, manager, collID, partIDs, segIDs)
 	if err != nil {
-		return searchResults, searchSegmentIDs, searchPartIDs, err
+		return nil, nil, err
 	}
-	searchResults, err = searchSegments(ctx, manager, SegmentTypeSealed, searchReq, searchSegmentIDs)
-	return searchResults, searchPartIDs, searchSegmentIDs, err
+	searchResults, err := searchSegments(ctx, segments, SegmentTypeSealed, searchReq)
+	return searchResults, segments, err
 }
 
 // searchStreaming will search all the target segments in streaming
 // if partIDs is empty, it means all the partitions of the loaded collection or all the partitions loaded.
-func SearchStreaming(ctx context.Context, manager *Manager, searchReq *SearchRequest, collID int64, partIDs []int64, segIDs []int64) ([]*SearchResult, []int64, []int64, error) {
-	var err error
-	var searchResults []*SearchResult
-	var searchPartIDs []int64
-	var searchSegmentIDs []int64
-
-	searchPartIDs, searchSegmentIDs, err = validateOnStream(ctx, manager, collID, partIDs, segIDs)
+func SearchStreaming(ctx context.Context, manager *Manager, searchReq *SearchRequest, collID int64, partIDs []int64, segIDs []int64) ([]*SearchResult, []Segment, error) {
+	segments, err := validateOnStream(ctx, manager, collID, partIDs, segIDs)
 	if err != nil {
-		return searchResults, searchSegmentIDs, searchPartIDs, err
+		return nil, nil, err
 	}
-	searchResults, err = searchSegments(ctx, manager, SegmentTypeGrowing, searchReq, searchSegmentIDs)
-	return searchResults, searchPartIDs, searchSegmentIDs, err
+	searchResults, err := searchSegments(ctx, segments, SegmentTypeGrowing, searchReq)
+	return searchResults, segments, err
 }

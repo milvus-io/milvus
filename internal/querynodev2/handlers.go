@@ -388,20 +388,24 @@ func (node *QueryNode) getChannelStatistics(ctx context.Context, req *querypb.Ge
 	}
 
 	if req.GetFromShardLeader() {
-		var results []segments.SegmentStats
-		var err error
+		var (
+			results      []segments.SegmentStats
+			readSegments []segments.Segment
+			err          error
+		)
 
 		switch req.GetScope() {
 		case querypb.DataScope_Historical:
-			results, _, _, err = segments.StatisticsHistorical(ctx, node.manager, req.Req.GetCollectionID(), req.Req.GetPartitionIDs(), req.GetSegmentIDs())
+			results, readSegments, err = segments.StatisticsHistorical(ctx, node.manager, req.Req.GetCollectionID(), req.Req.GetPartitionIDs(), req.GetSegmentIDs())
 		case querypb.DataScope_Streaming:
-			results, _, _, err = segments.StatisticStreaming(ctx, node.manager, req.Req.GetCollectionID(), req.Req.GetPartitionIDs(), req.GetSegmentIDs())
+			results, readSegments, err = segments.StatisticStreaming(ctx, node.manager, req.Req.GetCollectionID(), req.Req.GetPartitionIDs(), req.GetSegmentIDs())
 		}
 
 		if err != nil {
 			log.Warn("get segments statistics failed", zap.Error(err))
 			return nil, err
 		}
+		defer node.manager.Segment.Unpin(readSegments)
 		return segmentStatsResponse(results), nil
 	}
 

@@ -146,8 +146,8 @@ var _ Segment = (*LocalSegment)(nil)
 // Segment is a wrapper of the underlying C-structure segment.
 type LocalSegment struct {
 	baseSegment
-	mut sync.RWMutex // protects segmentPtr
-	ptr C.CSegmentInterface
+	ptrLock sync.RWMutex // protects segmentPtr
+	ptr     C.CSegmentInterface
 
 	size               int64
 	row                int64
@@ -199,9 +199,25 @@ func (s *LocalSegment) isValid() bool {
 	return s.ptr != nil
 }
 
+// RLock acquires the `ptrLock` and returns true if the pointer is valid
+// Provide ONLY the read lock operations,
+// don't make `ptrLock` public to avoid abusing of the mutex.
+func (s *LocalSegment) RLock() error {
+	s.ptrLock.RLock()
+	if !s.isValid() {
+		s.ptrLock.RUnlock()
+		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
+	}
+	return nil
+}
+
+func (s *LocalSegment) RUnlock() {
+	s.ptrLock.RUnlock()
+}
+
 func (s *LocalSegment) InsertCount() int64 {
-	s.mut.RLock()
-	defer s.mut.RUnlock()
+	s.ptrLock.RLock()
+	defer s.ptrLock.RUnlock()
 
 	if !s.isValid() {
 		return 0
@@ -216,8 +232,8 @@ func (s *LocalSegment) InsertCount() int64 {
 }
 
 func (s *LocalSegment) RowNum() int64 {
-	s.mut.RLock()
-	defer s.mut.RUnlock()
+	s.ptrLock.RLock()
+	defer s.ptrLock.RUnlock()
 
 	if !s.isValid() {
 		return 0
@@ -232,8 +248,8 @@ func (s *LocalSegment) RowNum() int64 {
 }
 
 func (s *LocalSegment) MemSize() int64 {
-	s.mut.RLock()
-	defer s.mut.RUnlock()
+	s.ptrLock.RLock()
+	defer s.ptrLock.RUnlock()
 
 	if !s.isValid() {
 		return 0
@@ -269,8 +285,8 @@ func (s *LocalSegment) ExistIndex(fieldID int64) bool {
 }
 
 func (s *LocalSegment) HasRawData(fieldID int64) bool {
-	s.mut.RLock()
-	defer s.mut.RUnlock()
+	s.ptrLock.RLock()
+	defer s.ptrLock.RUnlock()
 	if !s.isValid() {
 		return false
 	}
@@ -299,10 +315,10 @@ func DeleteSegment(segment *LocalSegment) {
 	// wait all read ops finished
 	var ptr C.CSegmentInterface
 
-	segment.mut.Lock()
+	segment.ptrLock.Lock()
 	ptr = segment.ptr
 	segment.ptr = nil
-	segment.mut.Unlock()
+	segment.ptrLock.Unlock()
 
 	if ptr == nil {
 		return
@@ -331,8 +347,8 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*S
 		zap.Int64("segmentID", s.ID()),
 		zap.String("segmentType", s.typ.String()),
 	)
-	s.mut.RLock()
-	defer s.mut.RUnlock()
+	s.ptrLock.RLock()
+	defer s.ptrLock.RUnlock()
 
 	if s.ptr == nil {
 		return nil, merr.WrapErrSegmentNotLoaded(s.segmentID, "segment released")
@@ -373,8 +389,8 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*S
 }
 
 func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segcorepb.RetrieveResults, error) {
-	s.mut.RLock()
-	defer s.mut.RUnlock()
+	s.ptrLock.RLock()
+	defer s.ptrLock.RUnlock()
 
 	if s.ptr == nil {
 		return nil, merr.WrapErrSegmentNotLoaded(s.segmentID, "segment released")
@@ -502,8 +518,8 @@ func (s *LocalSegment) Insert(rowIDs []int64, timestamps []typeutil.Timestamp, r
 		return fmt.Errorf("unexpected segmentType when segmentInsert, segmentType = %s", s.typ.String())
 	}
 
-	s.mut.RLock()
-	defer s.mut.RUnlock()
+	s.ptrLock.RLock()
+	defer s.ptrLock.RUnlock()
 
 	if s.ptr == nil {
 		return merr.WrapErrSegmentNotLoaded(s.segmentID, "segment released")
@@ -561,8 +577,8 @@ func (s *LocalSegment) Delete(primaryKeys []storage.PrimaryKey, timestamps []typ
 		           const unsigned long* timestamps);
 	*/
 
-	s.mut.RLock()
-	defer s.mut.RUnlock()
+	s.ptrLock.RLock()
+	defer s.ptrLock.RUnlock()
 
 	if s.ptr == nil {
 		return merr.WrapErrSegmentNotLoaded(s.segmentID, "segment released")
@@ -626,8 +642,8 @@ func (s *LocalSegment) Delete(primaryKeys []storage.PrimaryKey, timestamps []typ
 
 // -------------------------------------------------------------------------------------- interfaces for sealed segment
 func (s *LocalSegment) LoadMultiFieldData(rowCount int64, fields []*datapb.FieldBinlog) error {
-	s.mut.RLock()
-	defer s.mut.RUnlock()
+	s.ptrLock.RLock()
+	defer s.ptrLock.RUnlock()
 
 	if s.ptr == nil {
 		return merr.WrapErrSegmentNotLoaded(s.segmentID, "segment released")
@@ -679,8 +695,8 @@ func (s *LocalSegment) LoadMultiFieldData(rowCount int64, fields []*datapb.Field
 }
 
 func (s *LocalSegment) LoadFieldData(fieldID int64, rowCount int64, field *datapb.FieldBinlog) error {
-	s.mut.RLock()
-	defer s.mut.RUnlock()
+	s.ptrLock.RLock()
+	defer s.ptrLock.RUnlock()
 
 	if s.ptr == nil {
 		return merr.WrapErrSegmentNotLoaded(s.segmentID, "segment released")
@@ -732,8 +748,8 @@ func (s *LocalSegment) LoadDeltaData(deltaData *storage.DeleteData) error {
 	pks, tss := deltaData.Pks, deltaData.Tss
 	rowNum := deltaData.RowCount
 
-	s.mut.RLock()
-	defer s.mut.RUnlock()
+	s.ptrLock.RLock()
+	defer s.ptrLock.RUnlock()
 
 	if s.ptr == nil {
 		return merr.WrapErrSegmentNotLoaded(s.segmentID, "segment released")
@@ -834,8 +850,8 @@ func (s *LocalSegment) LoadIndexInfo(indexInfo *querypb.FieldIndexInfo, info *Lo
 		zap.Int64("segmentID", s.ID()),
 		zap.Int64("fieldID", indexInfo.FieldID),
 	)
-	s.mut.RLock()
-	defer s.mut.RUnlock()
+	s.ptrLock.RLock()
+	defer s.ptrLock.RUnlock()
 
 	if s.ptr == nil {
 		return merr.WrapErrSegmentNotLoaded(s.segmentID, "segment released")

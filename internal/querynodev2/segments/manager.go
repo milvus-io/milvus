@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/eventlog"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 	"go.uber.org/zap"
@@ -90,6 +91,10 @@ type SegmentManager interface {
 	Get(segmentID UniqueID) Segment
 	GetWithType(segmentID UniqueID, typ SegmentType) Segment
 	GetBy(filters ...SegmentFilter) []Segment
+	// Get segments and acquire the read locks
+	GetAndPinBy(filters ...SegmentFilter) ([]Segment, error)
+	GetAndPin(segments []int64, filters ...SegmentFilter) ([]Segment, error)
+	Unpin(segments []Segment)
 	GetSealed(segmentID UniqueID) Segment
 	GetGrowing(segmentID UniqueID) Segment
 	Empty() bool
@@ -250,6 +255,95 @@ func (mgr *segmentManager) GetBy(filters ...SegmentFilter) []Segment {
 		}
 	}
 	return ret
+}
+
+func (mgr *segmentManager) GetAndPinBy(filters ...SegmentFilter) ([]Segment, error) {
+	mgr.mu.RLock()
+	defer mgr.mu.RUnlock()
+
+	ret := make([]Segment, 0)
+	var err error
+	defer func() {
+		if err != nil {
+			for _, segment := range ret {
+				segment.RUnlock()
+			}
+		}
+	}()
+
+	for _, segment := range mgr.growingSegments {
+		if filter(segment, filters...) {
+			err = segment.RLock()
+			if err != nil {
+				return nil, err
+			}
+			ret = append(ret, segment)
+		}
+	}
+
+	for _, segment := range mgr.sealedSegments {
+		if filter(segment, filters...) {
+			err = segment.RLock()
+			if err != nil {
+				return nil, err
+			}
+			ret = append(ret, segment)
+		}
+	}
+	return ret, nil
+}
+
+func (mgr *segmentManager) GetAndPin(segments []int64, filters ...SegmentFilter) ([]Segment, error) {
+	mgr.mu.RLock()
+	defer mgr.mu.RUnlock()
+
+	lockedSegments := make([]Segment, 0, len(segments))
+	var err error
+	defer func() {
+		if err != nil {
+			for _, segment := range lockedSegments {
+				segment.RUnlock()
+			}
+		}
+	}()
+
+	for _, id := range segments {
+		growing, growingExist := mgr.growingSegments[id]
+		sealed, sealedExist := mgr.sealedSegments[id]
+
+		growingExist = growingExist && filter(growing, filters...)
+		sealedExist = sealedExist && filter(sealed, filters...)
+
+		if growingExist {
+			err = growing.RLock()
+			if err != nil {
+				return nil, err
+			}
+			lockedSegments = append(lockedSegments, growing)
+		}
+		if sealedExist {
+			err = sealed.RLock()
+			if err != nil {
+				return nil, err
+			}
+			lockedSegments = append(lockedSegments, sealed)
+		}
+
+		if !growingExist && !sealedExist {
+			err = merr.WrapErrSegmentNotLoaded(id, "segment not found")
+			return nil, err
+		}
+	}
+	return lockedSegments, nil
+}
+
+func (mgr *segmentManager) Unpin(segments []Segment) {
+	mgr.mu.RLock()
+	defer mgr.mu.RUnlock()
+
+	for _, segment := range segments {
+		segment.RUnlock()
+	}
 }
 
 func filter(segment Segment, filters ...SegmentFilter) bool {

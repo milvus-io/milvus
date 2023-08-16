@@ -140,36 +140,39 @@ func (suite *RetrieveSuite) TestRetrieveSealed() {
 	plan, err := genSimpleRetrievePlan(suite.collection)
 	suite.NoError(err)
 
-	res, _, _, err := RetrieveHistorical(context.TODO(), suite.manager, plan,
+	res, segments, err := RetrieveHistorical(context.TODO(), suite.manager, plan,
 		suite.collectionID,
 		[]int64{suite.partitionID},
 		[]int64{suite.sealed.ID()})
 	suite.NoError(err)
 	suite.Len(res[0].Offset, 3)
+	suite.manager.Segment.Unpin(segments)
 }
 
 func (suite *RetrieveSuite) TestRetrieveGrowing() {
 	plan, err := genSimpleRetrievePlan(suite.collection)
 	suite.NoError(err)
 
-	res, _, _, err := RetrieveStreaming(context.TODO(), suite.manager, plan,
+	res, segments, err := RetrieveStreaming(context.TODO(), suite.manager, plan,
 		suite.collectionID,
 		[]int64{suite.partitionID},
 		[]int64{suite.growing.ID()})
 	suite.NoError(err)
 	suite.Len(res[0].Offset, 3)
+	suite.manager.Segment.Unpin(segments)
 }
 
 func (suite *RetrieveSuite) TestRetrieveNonExistSegment() {
 	plan, err := genSimpleRetrievePlan(suite.collection)
 	suite.NoError(err)
 
-	res, _, _, err := RetrieveHistorical(context.TODO(), suite.manager, plan,
+	res, segments, err := RetrieveHistorical(context.TODO(), suite.manager, plan,
 		suite.collectionID,
 		[]int64{suite.partitionID},
 		[]int64{999})
-	suite.NoError(err)
+	suite.ErrorIs(err, merr.ErrSegmentNotLoaded)
 	suite.Len(res, 0)
+	suite.manager.Segment.Unpin(segments)
 }
 
 func (suite *RetrieveSuite) TestRetrieveNilSegment() {
@@ -177,12 +180,13 @@ func (suite *RetrieveSuite) TestRetrieveNilSegment() {
 	suite.NoError(err)
 
 	DeleteSegment(suite.sealed)
-	res, _, _, err := RetrieveHistorical(context.TODO(), suite.manager, plan,
+	res, segments, err := RetrieveHistorical(context.TODO(), suite.manager, plan,
 		suite.collectionID,
 		[]int64{suite.partitionID},
 		[]int64{suite.sealed.ID()})
 	suite.ErrorIs(err, merr.ErrSegmentNotLoaded)
 	suite.Len(res, 0)
+	suite.manager.Segment.Unpin(segments)
 }
 
 func TestRetrieve(t *testing.T) {
