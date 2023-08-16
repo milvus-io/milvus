@@ -29,7 +29,7 @@ pipeline {
     stages {
         stage('Publish Milvus Images & Build Centos Milvus'){
             parallel {
-                stage('Publish Milvus Images') {
+                stage('Publish Milvus Images on amd64') {
                     steps {
                         container('main') {
                             script {
@@ -44,12 +44,12 @@ pipeline {
                                     sh """
                                         export MILVUS_IMAGE_REPO="${env.TARGET_REPO}/milvus"
                                         export MILVUS_HARBOR_IMAGE_REPO="${env.HARBOR_REPO}/milvus/milvus"
-                                        export MILVUS_IMAGE_TAG="${env.BRANCH_NAME}-${date}-${gitShortCommit}"
+                                        export MILVUS_IMAGE_TAG="${env.BRANCH_NAME}-${date}-${gitShortCommit}-amd64"
                                         build/build_image.sh
                                         docker push \${MILVUS_IMAGE_REPO}:\${MILVUS_IMAGE_TAG}
-                                        docker tag \${MILVUS_IMAGE_REPO}:\${MILVUS_IMAGE_TAG} \${MILVUS_IMAGE_REPO}:${env.BRANCH_NAME}-latest
+                                        docker tag \${MILVUS_IMAGE_REPO}:\${MILVUS_IMAGE_TAG} \${MILVUS_IMAGE_REPO}:${env.BRANCH_NAME}-latest-amd64
                                         docker tag \${MILVUS_IMAGE_REPO}:\${MILVUS_IMAGE_TAG} \${MILVUS_HARBOR_IMAGE_REPO}:\${MILVUS_IMAGE_TAG}
-                                        docker push \${MILVUS_IMAGE_REPO}:${env.BRANCH_NAME}-latest
+                                        docker push \${MILVUS_IMAGE_REPO}:${env.BRANCH_NAME}-latest-amd64
                                         docker logout
                                     """
                                 }
@@ -58,13 +58,28 @@ pipeline {
                                     sh "docker login ${env.HARBOR_REPO} -u '${CI_REGISTRY_USERNAME}' -p '${CI_REGISTRY_PASSWORD}'"
                                     sh """
                                         export MILVUS_HARBOR_IMAGE_REPO="${env.HARBOR_REPO}/milvus/milvus"
-                                        export MILVUS_IMAGE_TAG="${env.BRANCH_NAME}-${date}-${gitShortCommit}"
+                                        export MILVUS_IMAGE_TAG="${env.BRANCH_NAME}-${date}-${gitShortCommit}-amd64"
                                         docker push \${MILVUS_HARBOR_IMAGE_REPO}:\${MILVUS_IMAGE_TAG}
                                         docker logout
                                     """
                                 }
                             }
                         }
+                    }
+                }
+                stage("Publish Milvus Images on arm64") {
+                    agent {
+                        label: "arm"
+                    }
+                    steps {
+                        script {
+                            sh "pwd"
+                            def date = sh(returnStdout: true, script: 'date +%Y%m%d').trim()
+                            def gitShortCommit = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
+                            echo "image tag: ${env.BRANCH_NAME}-${date}-${gitShortCommit}-arm64"
+
+                        }
+
                     }
                 }
                 stage('Build Centos Milvus Image'){
