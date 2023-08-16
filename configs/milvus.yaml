@@ -419,7 +419,7 @@ grpc:
     keepAliveTimeout: 20000
     maxMaxAttempts: 5
     initialBackoff: 1
-    maxBackoff: 60
+    maxBackoff: 10
     backoffMultiplier: 2
   clientMaxSendSize: 268435456
   clientMaxRecvSize: 268435456
