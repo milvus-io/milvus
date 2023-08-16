@@ -29,6 +29,9 @@ fi
 # not foolproof, but it works well in practice.
 uid=$(id -u)
 gid=$(id -g)
+
+echo "uid: $uid"
+
 [ "$uid" -lt 500 ] && uid=501
 [ "$gid" -lt 500 ] && gid=$uid
 
@@ -44,8 +47,8 @@ if [[ "${CHECK_BUILDER:-}" == "1" ]]; then
     docker-compose build armbuilder
 fi
 
-echo ${id -u}
-echo "uid: $uid"
+# echo ${id -u}
+echo "new uid: $uid"
 
 if [[ "$(id -u)" != "0" ]]; then
     docker-compose run --no-deps --rm -u "$uid:$gid" armbuilder "$@"
