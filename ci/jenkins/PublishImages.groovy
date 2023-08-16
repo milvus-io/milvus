@@ -74,7 +74,7 @@ pipeline {
                     steps {
                         script {
                             sh "pwd"
-                            sh "build/builder.sh /bin/bash -c \"make install\""
+                            sh "build/builder-arm.sh /bin/bash -c \"make install\""
 
                             def date = sh(returnStdout: true, script: 'date +%Y%m%d').trim()
                             def gitShortCommit = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
