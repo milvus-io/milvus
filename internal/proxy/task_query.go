@@ -284,7 +284,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	var iterationExtensionReduceRate int64
 	for i, kv := range t.request.GetQueryParams() {
 		if kv.GetKey() == IterationExtensionReduceRateKey {
-			iterationExtensionReduceRate, err = strconv.ParseInt(kv.Value, 0, 64)
+			iterationExtensionReduceRate, err = strconv.ParseInt(kv.Value, 10, 64)
 			if err != nil {
 				return errors.New("parse query iteration_extension_reduce_rate failed")
 			}
@@ -317,7 +317,15 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if err := t.createPlan(ctx); err != nil {
 		return err
 	}
-	t.plan.Node.(*planpb.PlanNode_Query).Query.Limit = t.RetrieveRequest.Limit
+
+	// since the limit is pushed down to segCore, so we have to push the extensionReduceRate accordingly
+	// to ensure the correctness, as the IterationExtensionReduceRate is only used for iterator and under this case
+	// offset is definitely 0, so we can simply multiply the IterationExtensionReduceRate with Limit
+	if t.RetrieveRequest.IterationExtensionReduceRate > 0 {
+		t.plan.Node.(*planpb.PlanNode_Query).Query.Limit = t.RetrieveRequest.Limit * t.RetrieveRequest.IterationExtensionReduceRate
+	} else {
+		t.plan.Node.(*planpb.PlanNode_Query).Query.Limit = t.RetrieveRequest.Limit
+	}
 
 	if planparserv2.IsAlwaysTruePlan(t.plan) && t.RetrieveRequest.Limit == typeutil.Unlimited {
 		return fmt.Errorf("empty expression should be used with limit")
