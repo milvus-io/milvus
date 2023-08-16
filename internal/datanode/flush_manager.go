@@ -656,6 +656,7 @@ func (m *rendezvousFlushManager) close() {
 		return true
 	})
 	m.waitForAllFlushQueue()
+	log.Ctx(context.Background()).Info("flush manager closed", zap.Int64("collectionID", m.Channel.getCollectionID()))
 }
 
 type flushBufferInsertTask struct {

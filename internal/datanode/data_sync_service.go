@@ -160,18 +160,25 @@ func (dsService *dataSyncService) start() {
 
 func (dsService *dataSyncService) close() {
 	dsService.stopOnce.Do(func() {
+		log := log.Ctx(context.Background()).With(
+			zap.Int64("collectionID", dsService.collectionID),
+			zap.String("vChanName", dsService.vchannelName),
+		)
 		if dsService.fg != nil {
-			log.Info("dataSyncService closing flowgraph", zap.Int64("collectionID", dsService.collectionID),
-				zap.String("vChanName", dsService.vchannelName))
+			log.Info("dataSyncService closing flowgraph")
 			dsService.dispClient.Deregister(dsService.vchannelName)
 			dsService.fg.Close()
+			log.Info("dataSyncService flowgraph closed")
 		}
 
 		dsService.clearGlobalFlushingCache()
 		close(dsService.flushCh)
 		dsService.flushManager.close()
+		log.Info("dataSyncService flush manager closed")
 		dsService.cancelFn()
 		dsService.channel.close()
+
+		log.Info("dataSyncService closed")
 	})
 }
 
