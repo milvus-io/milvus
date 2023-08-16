@@ -20,10 +20,10 @@ import (
 	"fmt"
 	"sync"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
+	"go.uber.org/zap"
 )
 
 // Manager is the interface for tsafe manager.
@@ -58,8 +58,9 @@ func (t *tSafeManager) WatchChannel(channel string) Listener {
 }
 
 func (t *tSafeManager) Add(vChannel string, timestamp uint64) {
+	ts, _ := tsoutil.ParseTS(timestamp)
 	log.Info("add tSafe done",
-		zap.String("channel", vChannel))
+		zap.String("channel", vChannel), zap.Time("timestamp", ts))
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if _, ok := t.tSafes[vChannel]; !ok {
