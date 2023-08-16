@@ -688,7 +688,9 @@ func (scheduler *taskScheduler) remove(task Task) {
 		index := NewReplicaSegmentIndex(task)
 		delete(scheduler.segmentTasks, index)
 		log = log.With(zap.Int64("segmentID", task.SegmentID()))
-		if task.Status() == TaskStatusFailed && task.Err() != nil && !errors.Is(task.Err(), merr.ErrChannelNotFound) {
+		if task.Status() == TaskStatusFailed &&
+			task.Err() != nil &&
+			!errors.IsAny(task.Err(), merr.ErrChannelNotFound, merr.ErrServiceRequestLimitExceeded) {
 			scheduler.recordSegmentTaskError(task)
 		}
 
