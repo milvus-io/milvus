@@ -121,6 +121,8 @@ var (
 	ErrShardDelegatorSearchFailed    = newMilvusError("fail to search on all shard leaders", 1502, true)
 	ErrShardDelegatorQueryFailed     = newMilvusError("fail to query on all shard leaders", 1503, true)
 	ErrShardDelegatorStatisticFailed = newMilvusError("get statistics on all shard leaders", 1504, true)
+	ErrShardDelegatorSQTimeout       = newMilvusError("search/query on shard leader timeout", 1505, true)
+	ErrShardDelegatorSQFailed        = newMilvusError("fail to search/query shard leader", 1506, true)
 
 	// field related
 	ErrFieldNotFound = newMilvusError("field not found", 1700, false)

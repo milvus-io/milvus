@@ -160,7 +160,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 
 		client, err := lb.clientMgr.GetClient(ctx, targetNode)
 		if err != nil {
-			log.Warn("query channel failed, node not available",
+			log.Warn("search/query channel failed, node not available",
 				zap.Int64("nodeID", targetNode),
 				zap.Error(err))
 			excludeNodes.Insert(targetNode)
@@ -172,12 +172,17 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 
 		err = workload.exec(ctx, targetNode, client, workload.channel)
 		if err != nil {
-			log.Warn("query channel failed",
+			log.Warn("search/query channel failed",
 				zap.Int64("nodeID", targetNode),
 				zap.Error(err))
 			excludeNodes.Insert(targetNode)
 			lb.balancer.CancelWorkload(targetNode, workload.nq)
-			return merr.WrapErrShardDelegatorAccessFailed(workload.channel, err.Error())
+
+			if err == context.Canceled || err == context.DeadlineExceeded {
+				return merr.WrapErrShardDelegatorSQTimeout(workload.channel, err.Error())
+			}
+
+			return merr.WrapErrShardDelegatorSQFailed(workload.channel, err.Error())
 		}
 
 		lb.balancer.CancelWorkload(targetNode, workload.nq)

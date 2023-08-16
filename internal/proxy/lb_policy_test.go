@@ -338,6 +338,29 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 		retryTimes: 2,
 	})
 	s.NoError(err)
+
+	// test exec timeout
+	s.mgr.ExpectedCalls = nil
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+	s.qn.EXPECT().GetAddress().Return("localhost").Maybe()
+	s.qn.EXPECT().GetComponentStates(mock.Anything).Return(nil, nil).Maybe()
+	s.qn.EXPECT().Search(mock.Anything, mock.Anything).Return(nil, context.Canceled).Times(1)
+	s.qn.EXPECT().Search(mock.Anything, mock.Anything).Return(nil, context.DeadlineExceeded)
+	err = s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+		db:             dbName,
+		collectionName: s.collectionName,
+		collectionID:   s.collectionID,
+		channel:        s.channels[0],
+		shardLeaders:   s.nodes,
+		nq:             1,
+		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNode, s ...string) error {
+			_, err := qn.Search(ctx, nil)
+			return err
+		},
+		retryTimes: 2,
+	})
+	s.ErrorIs(err, merr.ErrShardDelegatorSQTimeout)
 }
 
 func (s *LBPolicySuite) TestExecute() {

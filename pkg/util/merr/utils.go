@@ -505,6 +505,22 @@ func WrapErrShardDelegatorAccessFailed(channel string, msg ...string) error {
 	return err
 }
 
+func WrapErrShardDelegatorSQTimeout(channel string, msg ...string) error {
+	err := errors.Wrapf(ErrShardDelegatorSQTimeout, "channel=%s", channel)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+func WrapErrShardDelegatorSQFailed(channel string, msg ...string) error {
+	err := errors.Wrapf(ErrShardDelegatorSQFailed, "channel=%s", channel)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
 func WrapErrShardDelegatorSearchFailed(msg ...string) error {
 	err := error(ErrShardDelegatorSearchFailed)
 	if len(msg) > 0 {
