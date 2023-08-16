@@ -68,26 +68,21 @@ func (s *SingleflightSuite) TestDoChan() {
 }
 
 func (s *SingleflightSuite) TestForget() {
-	counter, hasShared := atomic.Int32{}, atomic.Bool{}
-
 	sf := Singleflight[any]{}
 	ch := make(chan struct{})
+	submitted := make(chan struct{})
 	var wg sync.WaitGroup
-	wg.Add(10)
-	for i := 0; i < 10; i++ {
-		go func(i int) {
+	wg.Add(1)
+	go func() {
+		sf.Do("test_forget", func() (any, error) {
 			defer wg.Done()
-			_, _, shared := sf.Do("test_forget", func() (any, error) {
-				<-ch
-				counter.Add(1)
-				return struct{}{}, nil
-			})
-			if shared {
-				hasShared.Store(true)
-			}
-		}(i)
-	}
+			close(submitted)
+			<-ch
+			return struct{}{}, nil
+		})
+	}()
 
+	<-submitted
 	flag := false
 	sf.Forget("test_forget")
 	sf.Do("test_forget", func() (any, error) {
@@ -98,7 +93,7 @@ func (s *SingleflightSuite) TestForget() {
 	close(ch)
 	wg.Wait()
 
-	s.True(flag)
+	s.True(flag, "new job shall be executed after forget")
 }
 
 func TestSingleFlight(t *testing.T) {
