@@ -11,11 +11,15 @@ from chaos.checker import (CreateChecker,
                            IndexChecker,
                            DeleteChecker,
                            DropChecker,
-                           Op)
+                           Op,
+                           EventRecords,
+                           ResultAnalyzer
+                           )
 from utils.util_log import test_log as log
 from utils.util_k8s import wait_pods_ready, get_milvus_instance_name
 from chaos import chaos_commons as cc
 from common.common_type import CaseLabel
+from common.milvus_sys import MilvusSys
 from chaos.chaos_commons import assert_statistic
 from chaos import constants
 from delayed_assert import assert_expectations
@@ -50,6 +54,7 @@ class TestOperations(TestBase):
         self.port = port
         self.user = user
         self.password = password
+        self.milvus_sys = MilvusSys(alias='default')
         self.milvus_ns = milvus_ns
         self.release_name = get_milvus_instance_name(self.milvus_ns, milvus_sys=self.milvus_sys)
 
@@ -72,8 +77,11 @@ class TestOperations(TestBase):
         # start the monitor threads to check the milvus ops
         log.info("*********************Test Start**********************")
         log.info(connections.get_connection_addr('default'))
+        event_records = EventRecords()
         c_name = None
+        event_records.insert("init_health_checkers", "start")
         self.init_health_checkers(collection_name=c_name)
+        event_records.insert("init_health_checkers", "finished")
         cc.start_monitor_threads(self.health_checkers)
         log.info("*********************Load Start**********************")
         # wait request_duration
@@ -83,6 +91,9 @@ class TestOperations(TestBase):
         request_duration = eval(request_duration)
         for i in range(10):
             sleep(request_duration // 10)
+            # add an event so that the chaos can start to apply
+            if i == 3:
+                event_records.insert("init_chaos", "ready")
             for k, v in self.health_checkers.items():
                 v.check_result()
         if is_check:
@@ -91,4 +102,9 @@ class TestOperations(TestBase):
         # wait all pod ready
         wait_pods_ready(self.milvus_ns, f"app.kubernetes.io/instance={self.release_name}")
         time.sleep(60)
+        for k, v in self.health_checkers.items():
+            v.pause()
+        ra = ResultAnalyzer()
+        ra.get_stage_success_rate()
+        ra.show_result_table()
         log.info("*********************Chaos Test Completed**********************")

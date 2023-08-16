@@ -1,8 +1,15 @@
 import pytest
+import unittest
 from enum import Enum
 from random import randint
 import time
+import threading
+import os
+import uuid
+import json
+import pandas as pd
 from datetime import datetime
+from prettytable import PrettyTable
 import functools
 from time import sleep
 from base.collection_wrapper import ApiCollectionWrapper
@@ -15,6 +22,167 @@ from chaos import constants
 from common.common_type import CheckTasks
 from utils.util_log import test_log as log
 from utils.api_request import Error
+
+lock = threading.Lock()
+
+
+def get_chaos_info():
+    try:
+        with open(constants.CHAOS_INFO_SAVE_PATH, 'r') as f:
+            chaos_info = json.load(f)
+    except Exception as e:
+        log.error(f"get_chaos_info error: {e}")
+        return None
+    return chaos_info
+
+
+class Singleton(type):
+    instances = {}
+
+    def __call__(cls, *args, **kwargs):
+        if cls not in cls.instances:
+            cls.instances[cls] = super().__call__(*args, **kwargs)
+        return cls.instances[cls]
+
+
+class EventRecords(metaclass=Singleton):
+
+    def __init__(self):
+        self.file_name = f"/tmp/ci_logs/event_records_{uuid.uuid4()}.parquet"
+        self.created_file = False
+
+    def insert(self, event_name, event_status, ts=None):
+        insert_ts = datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S.%f') if ts is None else ts
+        data = {
+            "event_name": [event_name],
+            "event_status": [event_status],
+            "event_ts": [insert_ts]
+        }
+        df = pd.DataFrame(data)
+        if not self.created_file:
+            with lock:
+                df.to_parquet(self.file_name, engine='fastparquet')
+                self.created_file = True
+        else:
+            with lock:
+                df.to_parquet(self.file_name, engine='fastparquet', append=True)
+
+    def get_records_df(self):
+        df = pd.read_parquet(self.file_name)
+        return df
+
+
+class RequestRecords(metaclass=Singleton):
+
+    def __init__(self):
+        self.file_name = f"/tmp/ci_logs/request_records_{uuid.uuid4()}.parquet"
+        self.buffer = []
+        self.created_file = False
+
+    def insert(self, operation_name, collection_name, start_time, time_cost, result):
+        data = {
+            "operation_name": operation_name,
+            "collection_name": collection_name,
+            "start_time": start_time,
+            "time_cost": time_cost,
+            "result": result
+        }
+        self.buffer.append(data)
+        if len(self.buffer) > 100:
+            df = pd.DataFrame(self.buffer)
+            if not self.created_file:
+                with lock:
+                    df.to_parquet(self.file_name, engine='fastparquet')
+                    self.created_file = True
+            else:
+                with lock:
+                    df.to_parquet(self.file_name, engine='fastparquet', append=True)
+            self.buffer = []
+
+    def sink(self):
+        df = pd.DataFrame(self.buffer)
+        if not self.created_file:
+            with lock:
+                df.to_parquet(self.file_name, engine='fastparquet')
+                self.created_file = True
+        else:
+            with lock:
+                df.to_parquet(self.file_name, engine='fastparquet', append=True)
+
+    def get_records_df(self):
+        self.sink()
+        df = pd.read_parquet(self.file_name)
+        return df
+
+
+class ResultAnalyzer:
+
+    def __init__(self):
+        rr = RequestRecords()
+        df = rr.get_records_df()
+        df["start_time"] = pd.to_datetime(df["start_time"])
+        df = df.sort_values(by='start_time')
+        self.df = df
+        self.chaos_info = get_chaos_info()
+
+    def get_stage_success_rate(self):
+        df = self.df
+        window = pd.offsets.Milli(1000)
+
+        result = df.groupby([pd.Grouper(key='start_time', freq=window), 'operation_name']).apply(lambda x: pd.Series({
+            'success_count': x[x['result'] == 'True'].shape[0],
+            'failed_count': x[x['result'] == 'False'].shape[0]
+        }))
+        data = result.reset_index()
+        data['success_rate'] = data['success_count'] / (data['success_count'] + data['failed_count']).replace(0, 1)
+        grouped_data = data.groupby('operation_name')
+        if self.chaos_info is None:
+            chaos_start_time = datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S.%f')
+            chaos_end_time = datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S.%f')
+            recovery_time = datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S.%f')
+        else:
+            chaos_start_time = self.chaos_info['create_time']
+            chaos_end_time = self.chaos_info['delete_time']
+            recovery_time = self.chaos_info['recovery_time']
+        stage_success_rate = {}
+        for name, group in grouped_data:
+            log.info(f"operation_name: {name}")
+            # spilt data to 3 parts by chaos start time and chaos end time and aggregate the success rate
+            data_before_chaos = group[group['start_time'] < chaos_start_time].agg(
+                {'success_rate': 'mean', 'failed_count': 'sum', 'success_count': 'sum'})
+            data_during_chaos = group[
+                (group['start_time'] >= chaos_start_time) & (group['start_time'] <= recovery_time)].agg(
+                {'success_rate': 'mean', 'failed_count': 'sum', 'success_count': 'sum'})
+            data_after_chaos = group[group['start_time'] > recovery_time].agg(
+                {'success_rate': 'mean', 'failed_count': 'sum', 'success_count': 'sum'})
+            stage_success_rate[name] = {
+                'before_chaos': f"{data_before_chaos['success_rate']}({data_before_chaos['success_count']}/{data_before_chaos['success_count'] + data_before_chaos['failed_count']})" if not data_before_chaos.empty else "no data",
+                'during_chaos': f"{data_during_chaos['success_rate']}({data_during_chaos['success_count']}/{data_during_chaos['success_count'] + data_during_chaos['failed_count']})" if not data_during_chaos.empty else "no data",
+                'after_chaos': f"{data_after_chaos['success_rate']}({data_after_chaos['success_count']}/{data_after_chaos['success_count'] + data_after_chaos['failed_count']})" if not data_after_chaos.empty else "no data",
+            }
+        log.info(f"stage_success_rate: {stage_success_rate}")
+        return stage_success_rate
+
+    def get_realtime_success_rate(self, interval=10):
+        df = self.df
+        window = pd.offsets.Second(interval)
+        result = df.groupby([pd.Grouper(key='start_time', freq=window), 'operation_name']).apply(lambda x: pd.Series({
+            'success_count': x[x['result'] == 'True'].shape[0],
+            'failed_count': x[x['result'] == 'False'].shape[0]
+        }))
+        data = result.reset_index()
+        data['success_rate'] = data['success_count'] / (data['success_count'] + data['failed_count']).replace(0, 1)
+        grouped_data = data.groupby('operation_name')
+        return grouped_data
+
+    def show_result_table(self):
+        table = PrettyTable()
+        table.field_names = ['operation_name', 'before_chaos', 'during_chaos', 'after_chaos']
+        data = self.get_stage_success_rate()
+        for operation, values in data.items():
+            row = [operation, values['before_chaos'], values['during_chaos'], values['after_chaos']]
+            table.add_row(row)
+        log.info(f"succ rate for operations in different stage\n{table}")
 
 
 class Op(Enum):
@@ -39,28 +207,36 @@ query_timeout = 10
 enable_traceback = False
 DEFAULT_FMT = '[start time:{start_time}][time cost:{elapsed:0.8f}s][operation_name:{operation_name}][collection name:{collection_name}] -> {result!r}'
 
+request_records = RequestRecords()
+
 
 def trace(fmt=DEFAULT_FMT, prefix='test', flag=True):
     def decorate(func):
         @functools.wraps(func)
         def inner_wrapper(self, *args, **kwargs):
-            start_time = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+            start_time = datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S.%f')
             start_time_ts = time.time()
             t0 = time.perf_counter()
             res, result = func(self, *args, **kwargs)
             elapsed = time.perf_counter() - t0
-            end_time = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+            end_time = datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S.%f')
             operation_name = func.__name__
             if flag:
                 collection_name = self.c_wrap.name
                 log_str = f"[{prefix}]" + fmt.format(**locals())
                 # TODO: add report function in this place, like uploading to influxdb
-                # it is better a async way to do this, in case of blocking the request processing
+                try:
+                    t0 = time.perf_counter()
+                    request_records.insert(operation_name, collection_name, start_time, elapsed, str(result))
+                    tt = time.perf_counter() - t0
+                    log.debug(f"insert request record cost {tt}s")
+                except Exception as e:
+                    log.error(e)
                 log.info(log_str)
             if result:
                 self.rsp_times.append(elapsed)
                 self.average_time = (
-                    elapsed + self.average_time * self._succ) / (self._succ + 1)
+                                            elapsed + self.average_time * self._succ) / (self._succ + 1)
                 self._succ += 1
                 # add first success record if there is no success record before
                 if len(self.fail_records) > 0 and self.fail_records[-1][0] == "failure" and \
@@ -70,7 +246,9 @@ def trace(fmt=DEFAULT_FMT, prefix='test', flag=True):
                 self._fail += 1
                 self.fail_records.append(("failure", self._succ + self._fail, start_time, start_time_ts))
             return res, result
+
         return inner_wrapper
+
     return decorate
 
 
@@ -85,10 +263,12 @@ def exception_handler():
                 log_row_length = 300
                 e_str = str(e)
                 log_e = e_str[0:log_row_length] + \
-                    '......' if len(e_str) > log_row_length else e_str
+                        '......' if len(e_str) > log_row_length else e_str
                 log.error(log_e)
                 return Error(e), False
+
         return inner_wrapper
+
     return wrapper
 
 
@@ -128,9 +308,10 @@ class Checker:
         if insert_data:
             log.info(f"collection {c_name} created, start to insert data")
             t0 = time.perf_counter()
-            self.c_wrap.insert(data=cf.get_column_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=schema, start=0),
-                               timeout=timeout,
-                               enable_traceback=enable_traceback)
+            self.c_wrap.insert(
+                data=cf.get_column_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=schema, start=0),
+                timeout=timeout,
+                enable_traceback=enable_traceback)
             log.info(f"insert data for collection {c_name} cost {time.perf_counter() - t0}s")
 
         self.initial_entities = self.c_wrap.num_entities  # do as a flush
@@ -220,7 +401,7 @@ class Checker:
 class SearchChecker(Checker):
     """check search operations in a dependent thread"""
 
-    def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None,):
+    def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None, ):
         if collection_name is None:
             collection_name = cf.gen_unique_str("SearchChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
@@ -229,7 +410,7 @@ class SearchChecker(Checker):
                                  index_name=cf.gen_unique_str('index_'),
                                  timeout=timeout,
                                  enable_traceback=enable_traceback,
-                                 check_task=CheckTasks.check_nothing)        
+                                 check_task=CheckTasks.check_nothing)
         # do load before search
         self.c_wrap.load(replica_number=replica_number)
 
@@ -268,10 +449,11 @@ class InsertFlushChecker(Checker):
         while True:
             t0 = time.time()
             _, insert_result = \
-                self.c_wrap.insert(data=cf.get_column_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=self.schema),
-                                   timeout=timeout,
-                                   enable_traceback=enable_traceback,
-                                   check_task=CheckTasks.check_nothing)
+                self.c_wrap.insert(
+                    data=cf.get_column_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=self.schema),
+                    timeout=timeout,
+                    enable_traceback=enable_traceback,
+                    check_task=CheckTasks.check_nothing)
             t1 = time.time()
             if not self._flush:
                 if insert_result:
@@ -318,10 +500,11 @@ class FlushChecker(Checker):
 
     @exception_handler()
     def run_task(self):
-        _, result = self.c_wrap.insert(data=cf.get_column_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=self.schema),
-                                       timeout=timeout,
-                                       enable_traceback=enable_traceback,
-                                       check_task=CheckTasks.check_nothing)
+        _, result = self.c_wrap.insert(
+            data=cf.get_column_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=self.schema),
+            timeout=timeout,
+            enable_traceback=enable_traceback,
+            check_task=CheckTasks.check_nothing)
         res, result = self.flush()
         return res, result
 
@@ -341,8 +524,8 @@ class InsertChecker(Checker):
         self._flush = flush
         self.initial_entities = self.c_wrap.num_entities
         self.inserted_data = []
-        self.scale = 1*10**6
-        self.start_time_stamp = int(time.time()*self.scale)  # us
+        self.scale = 1 * 10 ** 6
+        self.start_time_stamp = int(time.time() * self.scale)  # us
         self.term_expr = f'{self.int64_field_name} >= {self.start_time_stamp}'
 
     @trace()
@@ -351,7 +534,7 @@ class InsertChecker(Checker):
         ts_data = []
         for i in range(constants.DELTA_PER_INS):
             time.sleep(0.001)
-            offset_ts = int(time.time()*self.scale)
+            offset_ts = int(time.time() * self.scale)
             ts_data.append(offset_ts)
 
         data[0] = ts_data  # set timestamp (ms) as int64
@@ -385,7 +568,7 @@ class InsertChecker(Checker):
         except Exception as e:
             log.error(f"create index error: {e}")
         self.c_wrap.load()
-        end_time_stamp = int(time.time()*self.scale)
+        end_time_stamp = int(time.time() * self.scale)
         self.term_expr = f'{self.int64_field_name} >= {self.start_time_stamp} and ' \
                          f'{self.int64_field_name} <= {end_time_stamp}'
         data_in_client = []
@@ -561,7 +744,7 @@ class DeleteChecker(Checker):
         self.c_wrap.load()  # load before query
         term_expr = f'{self.int64_field_name} > 0'
         res, _ = self.c_wrap.query(term_expr, output_fields=[
-                                   self.int64_field_name])
+            self.int64_field_name])
         self.ids = [r[self.int64_field_name] for r in res]
         self.expr = None
 
@@ -640,7 +823,7 @@ class DropChecker(Checker):
             res, result = self.run_task()
             if result:
                 self.c_wrap.init_collection(
-                    name=cf.gen_unique_str("CreateChecker_"),
+                    name=cf.gen_unique_str("DropChecker_"),
                     schema=cf.gen_default_collection_schema(),
                     timeout=timeout,
                     check_task=CheckTasks.check_nothing)
@@ -755,3 +938,14 @@ class BulkInsertChecker(Checker):
         while self._keep_running:
             self.run_task()
             sleep(constants.WAIT_PER_OP / 10)
+
+
+class TestResultAnalyzer(unittest.TestCase):
+    def test_get_stage_success_rate(self):
+        ra = ResultAnalyzer()
+        res = ra.get_stage_success_rate()
+        print(res)
+
+
+if __name__ == '__main__':
+    unittest.main()

@@ -1,4 +1,4 @@
-import threading
+import time
 import pytest
 import json
 from time import sleep
@@ -9,38 +9,18 @@ from chaos.checker import (InsertChecker,
                            SearchChecker,
                            QueryChecker,
                            DeleteChecker,
-                           Op)
-from common.cus_resource_opts import CustomResourceOperations as CusResource
+                           Op,
+                           ResultAnalyzer
+                           )
+from utils.util_k8s import wait_pods_ready, get_milvus_instance_name
 from utils.util_log import test_log as log
 from chaos import chaos_commons as cc
 from common import common_func as cf
+from common.milvus_sys import MilvusSys
 from chaos.chaos_commons import assert_statistic
 from common.common_type import CaseLabel
 from chaos import constants
 from delayed_assert import expect, assert_expectations
-
-
-def assert_statistic(checkers, expectations={}):
-    for k in checkers.keys():
-        # expect succ if no expectations
-        succ_rate = checkers[k].succ_rate()
-        total = checkers[k].total()
-        average_time = checkers[k].average_time
-        if 'compact' in str(k):
-            log.info("skip compact check")
-            log.info(
-                f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
-            continue           
-        if expectations.get(k, '') == constants.FAIL:
-            log.info(
-                f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
-            expect(succ_rate < 0.49 or total < 2,
-                   f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
-        else:
-            log.info(
-                f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
-            expect(succ_rate > 0.90 and total > 2,
-                   f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
 
 
 def get_all_collections():
@@ -70,7 +50,7 @@ class TestBase:
 class TestOperations(TestBase):
 
     @pytest.fixture(scope="function", autouse=True)
-    def connection(self, host, port, user, password):
+    def connection(self, host, port, user, password, milvus_ns):
         if user and password:
             # log.info(f"connect to {host}:{port} with user {user} and password {password}")
             connections.connect('default', host=host, port=port, user=user, password=password, secure=True)
@@ -82,7 +62,10 @@ class TestOperations(TestBase):
         self.host = host
         self.port = port
         self.user = user
-        self.password = password        
+        self.password = password
+        self.milvus_sys = MilvusSys(alias='default')
+        self.milvus_ns = milvus_ns
+        self.release_name = get_milvus_instance_name(self.milvus_ns, milvus_sys=self.milvus_sys)
 
     def init_health_checkers(self, collection_name=None):
         c_name = collection_name
@@ -91,7 +74,7 @@ class TestOperations(TestBase):
             Op.flush: FlushChecker(collection_name=c_name),
             Op.search: SearchChecker(collection_name=c_name),
             Op.query: QueryChecker(collection_name=c_name),
-            Op.compact:CompactChecker(collection_name=c_name),
+            Op.compact: CompactChecker(collection_name=c_name),
             Op.delete: DeleteChecker(collection_name=c_name),
         }
         self.health_checkers = checkers
@@ -107,11 +90,14 @@ class TestOperations(TestBase):
         # start the monitor threads to check the milvus ops
         log.info("*********************Test Start**********************")
         log.info(connections.get_connection_addr('default'))
+        # event_records = EventRecords()
         c_name = collection_name if collection_name else cf.gen_unique_str("Checker_")
+        # event_records.insert("init_health_checkers", "start")
         self.init_health_checkers(collection_name=c_name)
+        # event_records.insert("init_health_checkers", "finished")
         cc.start_monitor_threads(self.health_checkers)
         log.info("*********************Load Start**********************")
-        request_duration = request_duration.replace("h","*3600+").replace("m","*60+").replace("s","")
+        request_duration = request_duration.replace("h", "*3600+").replace("m", "*60+").replace("s", "")
         if request_duration[-1] == "+":
             request_duration = request_duration[:-1]
         request_duration = eval(request_duration)
@@ -120,7 +106,11 @@ class TestOperations(TestBase):
             for k, v in self.health_checkers.items():
                 v.check_result()
                 # log.info(v.check_result())
+        wait_pods_ready(self.milvus_ns, f"app.kubernetes.io/instance={self.release_name}")
+        time.sleep(60)
+        ra = ResultAnalyzer()
+        ra.get_stage_success_rate()
         if is_check:
             assert_statistic(self.health_checkers)
-            assert_expectations()        
+            assert_expectations()
         log.info("*********************Chaos Test Completed**********************")

@@ -39,9 +39,15 @@ Faker==19.2.0
 h5py==3.8.0
 
 # for log
-loguru==0.6.0
+loguru==0.7.0
 
 # util
 psutil==5.9.4
+pandas==1.5.3
 # for standby test
 etcd-sdk-python==0.0.2
+
+# for test result anaylszer
+prettytable==3.8.0
+pyarrow==11.0.0
+fastparquet==2023.7.0
