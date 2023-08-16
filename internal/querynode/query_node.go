@@ -290,6 +290,16 @@ func (node *QueryNode) InitSegcore() error {
 	return initcore.InitRemoteChunkManager(&Params)
 }
 
+func (node *QueryNode) InitMetrics() error {
+	localUsedSize, err := GetLocalUsedSize(Params.LocalStorageCfg.Path)
+	if err != nil {
+		return err
+	}
+	metrics.QueryNodeDiskUsedSize.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(localUsedSize / 1024 / 1024))
+
+	return nil
+}
+
 // Init function init historical and streaming module to manage segments
 func (node *QueryNode) Init() error {
 	var initError error = nil
@@ -357,6 +367,13 @@ func (node *QueryNode) Init() error {
 		} else {
 			action := func(uint32) {}
 			gc.NewTuner(Params.QueryNodeCfg.OverloadedMemoryThresholdPercentage, uint32(Params.QueryNodeCfg.MinimumGOGCConfig), uint32(Params.QueryNodeCfg.MaximumGOGCConfig), action)
+		}
+
+		err = node.InitMetrics()
+		if err != nil {
+			log.Warn("QueryNode init metrics failed", zap.Error(err))
+			initError = err
+			return
 		}
 
 		log.Info("query node init successfully",

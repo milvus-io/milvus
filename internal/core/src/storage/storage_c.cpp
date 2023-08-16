@@ -24,11 +24,11 @@
 #endif
 
 CStatus
-GetLocalUsedSize(int64_t* size) {
+GetLocalUsedSize(const char* c_dir, int64_t* size) {
     try {
 #ifdef BUILD_DISK_ANN
         auto& local_chunk_manager = milvus::storage::LocalChunkManager::GetInstance();
-        auto dir = milvus::ChunkMangerConfig::GetLocalRootPath();
+        std::string dir(c_dir);
         if (local_chunk_manager.DirExist(dir)) {
             *size = local_chunk_manager.GetSizeOfDir(dir);
         } else {
