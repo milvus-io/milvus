@@ -592,7 +592,7 @@ class TestQueryParams(TestcaseBase):
             res = collection_w.query(expression)[0]
             assert len(res) == limit
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_query_expr_list_json_contains(self):
         """
         target: test query with expression using json_contains
@@ -685,6 +685,158 @@ class TestQueryParams(TestcaseBase):
         for expression in expressions:
             res = collection_w.query(expression, limit=limit, offset=offset)[0]
             assert len(res) == limit - offset
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_expr_empty_without_limit(self):
+        """
+        target: test query with empty expression and no limit
+        method: query empty expression without setting limit
+        expected: raise error
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, True)[0]
+
+        # 2. query with no limit and no offset
+        error = {ct.err_code: 1, ct.err_msg: "empty expression should be used with limit"}
+        collection_w.query("", check_task=CheckTasks.err_res, check_items=error)
+
+        # 3. query with offset but no limit
+        collection_w.query("", offset=1, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_query_empty(self):
+        """
+        target: test query  empty
+        method: query empty
+        expected: return error
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, True)[0]
+
+        # 2. query
+        try:
+            collection_w.query()
+        except TypeError as e:
+            assert "missing 1 required positional argument: 'expr'" in str(e)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("limit", [10, 100, 1000])
+    @pytest.mark.parametrize("auto_id", [True, False])
+    def test_query_expr_empty(self, auto_id, limit):
+        """
+        target: test query with empty expression
+        method: query empty expression with a limit
+        expected: return topK results by order
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, auto_id=auto_id)[0:4]
+        exp_ids, res = insert_ids[:limit], []
+        for ids in exp_ids:
+            res.append({ct.default_int64_field_name: ids})
+
+        # 2. query with limit
+        collection_w.query("", limit=limit, check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_query_expr_empty_pk_string(self):
+        """
+        target: test query with empty expression
+        method: query empty expression with a limit
+        expected: return topK results by order
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids = \
+            self.init_collection_general(prefix, True, primary_field=ct.default_string_field_name)[0:4]
+        # string field is sorted by lexicographical order
+        exp_ids, res = ['0', '1', '10', '100', '1000', '1001', '1002', '1003', '1004', '1005'], []
+        for ids in exp_ids:
+            res.append({ct.default_string_field_name: ids})
+
+        # 2. query with limit
+        collection_w.query("", limit=ct.default_limit, check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+
+        # 2. query with limit + offset
+        res = res[5:]
+        collection_w.query("", limit=5, offset=5, check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("offset", [100, 1000])
+    @pytest.mark.parametrize("limit", [100, 1000])
+    @pytest.mark.parametrize("auto_id", [True, False])
+    def test_query_expr_empty_with_pagination(self, auto_id, limit, offset):
+        """
+        target: test query with empty expression
+        method: query empty expression with a limit
+        expected: return topK results by order
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, auto_id=auto_id)[0:4]
+        exp_ids, res = insert_ids[:limit + offset][offset:], []
+        for ids in exp_ids:
+            res.append({ct.default_int64_field_name: ids})
+
+        # 2. query with limit and offset
+        collection_w.query("", limit=limit, offset=offset,
+                           check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("offset", [100, 1000])
+    @pytest.mark.parametrize("limit", [100, 1000])
+    def test_query_expr_empty_with_random_pk(self, limit, offset):
+        """
+        target: test query with empty expression
+        method: create a collection using random pk, query empty expression with a limit
+        expected: return topK results by order
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, with_json=False)[0]
+
+        # 2. generate unordered pk array and insert
+        unordered_ids = [i for i in range(ct.default_nb)]
+        random.shuffle(unordered_ids)
+        float_value = [np.float32(i) for i in unordered_ids]
+        string_value = [str(i) for i in unordered_ids]
+        vector_value = cf.gen_vectors(nb=ct.default_nb, dim=ct.default_dim)
+        collection_w.insert([unordered_ids, float_value, string_value, vector_value])
+        collection_w.load()
+
+        # 3. query with empty expr and check the result
+        exp_ids, res = sorted(unordered_ids)[:limit], []
+        for ids in exp_ids:
+            res.append({ct.default_int64_field_name: ids, ct.default_string_field_name: str(ids)})
+
+        collection_w.query("", limit=limit, output_fields=[ct.default_string_field_name],
+                           check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+
+        # 4. query with pagination
+        exp_ids, res = sorted(unordered_ids)[:limit + offset][offset:], []
+        for ids in exp_ids:
+            res.append({ct.default_int64_field_name: ids, ct.default_string_field_name: str(ids)})
+
+        collection_w.query("", limit=limit, offset=offset, output_fields=[ct.default_string_field_name],
+                           check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_query_expr_with_limit_offset_out_of_range(self):
+        """
+        target: test query with empty expression
+        method: query empty expression with limit and offset out of range
+        expected: raise error
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, True)[0]
+
+        # 2. query with limit > 16384
+        error = {ct.err_code: 1, ct.err_msg: "invalid max query result window, (offset+limit) should be in range [1, 16384]"}
+        collection_w.query("", limit=16385, check_task=CheckTasks.err_res, check_items=error)
+
+        # 3. query with offset + limit > 16384
+        collection_w.query("", limit=1, offset=16384, check_task=CheckTasks.err_res, check_items=error)
+        collection_w.query("", limit=16384, offset=1, check_task=CheckTasks.err_res, check_items=error)
+
+        # 4. query with limit < 0
+        error = {ct.err_code: 1, ct.err_msg: "invalid max query result window, offset [-1] is invalid, should be gte than 0"}
+        collection_w.query("", limit=2, offset=-1, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_output_field_none_or_empty(self, enable_dynamic_field):
