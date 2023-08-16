@@ -31,6 +31,7 @@ default_nb_medium = ct.default_nb_medium
 default_nq = ct.default_nq
 default_dim = ct.default_dim
 default_limit = ct.default_limit
+max_limit = ct.max_limit
 default_search_exp = "int64 >= 0"
 default_search_string_exp = "varchar >= \"0\""
 default_search_mix_exp = "int64 >= 0 && varchar >= \"0\""
@@ -3258,7 +3259,8 @@ class TestCollectionSearch(TestcaseBase):
                              zip(ct.all_index_types[:6],
                                  ct.default_index_params[:6]))
     @pytest.mark.parametrize("metrics", ct.float_metrics)
-    def test_search_output_field_vector_after_different_index_metrics(self, index, params, metrics):
+    @pytest.mark.parametrize("limit", [20, 1200])
+    def test_search_output_field_vector_after_different_index_metrics(self, index, params, metrics, limit):
         """
         target: test search with output vector field after different index
         method: 1. create a collection and insert data
@@ -3282,15 +3284,23 @@ class TestCollectionSearch(TestcaseBase):
         collection_w.load()
 
         # 3. search with output field vector
-        search_params = cf.gen_search_param(index, metrics)[0]
-        collection_w.search(vectors[:1], default_search_field,
-                            search_params, default_limit, default_search_exp,
-                            output_fields=[field_name],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1,
-                                         "limit": default_limit,
-                                         "original_entities": _vectors,
-                                         "output_fields": [field_name]})
+        search_params = cf.gen_search_param(index, metrics)
+        for search_param in search_params:
+            log.info(search_param)
+            if index == "HNSW":
+                limit = search_param["params"]["ef"]
+                if limit > max_limit:
+                    limit = default_nb
+            if index == "DISKANN":
+                limit = search_param["params"]["search_list"]
+            collection_w.search(vectors[:1], default_search_field,
+                                search_param, limit, default_search_exp,
+                                output_fields=[field_name],
+                                check_task=CheckTasks.check_search_results,
+                                check_items={"nq": 1,
+                                             "limit": limit,
+                                             "original_entities": _vectors,
+                                             "output_fields": [field_name]})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index", ["HNSW", "BIN_FLAT", "BIN_IVF_FLAT"])
@@ -5943,7 +5953,7 @@ class TestCollectionRangeSearch(TestcaseBase):
             vectors = np.array(_vectors[0]).tolist()
             vectors = [vectors[i][-1] for i in range(nq)]
         # 3. range search
-        range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "radius": radius,
+        range_search_params = {"metric_type": "COSINE", "params": {"radius": radius,
                                                                    "range_filter": range_filter}}
         search_res = collection_w.search(vectors[:nq], default_search_field,
                                          range_search_params, default_limit,
@@ -5972,7 +5982,7 @@ class TestCollectionRangeSearch(TestcaseBase):
         vectors = np.array(_vectors[0]).tolist()
         vectors = [vectors[i][-1] for i in range(default_nq)]
         # 3. range search with L2
-        range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "range_filter": 1}}
+        range_search_params = {"metric_type": "COSINE", "params": {"range_filter": 1}}
         collection_w.search(vectors[:default_nq], default_search_field,
                             range_search_params, default_limit,
                             default_search_exp,
@@ -5981,7 +5991,7 @@ class TestCollectionRangeSearch(TestcaseBase):
                                          "ids": insert_ids,
                                          "limit": default_limit})
         # 4. range search with IP
-        range_search_params = {"metric_type": "IP", "params": {"nprobe": 10, "range_filter": 1}}
+        range_search_params = {"metric_type": "IP", "params": {"range_filter": 1}}
         collection_w.search(vectors[:default_nq], default_search_field,
                             range_search_params, default_limit,
                             default_search_exp,
@@ -6004,7 +6014,7 @@ class TestCollectionRangeSearch(TestcaseBase):
         vectors = np.array(_vectors[0]).tolist()
         vectors = [vectors[i][-1] for i in range(default_nq)]
         # 3. range search with L2
-        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 0}}
+        range_search_params = {"metric_type": "L2", "params": {"radius": 0}}
         collection_w.search(vectors[:default_nq], default_search_field,
                             range_search_params, default_limit,
                             default_search_exp,
@@ -6013,7 +6023,7 @@ class TestCollectionRangeSearch(TestcaseBase):
                                          "ids": [],
                                          "limit": 0})
         # 4. range search with IP
-        range_search_params = {"metric_type": "IP", "params": {"nprobe": 10, "radius": 0}}
+        range_search_params = {"metric_type": "IP", "params": {"radius": 0}}
         collection_w.search(vectors[:default_nq], default_search_field,
                             range_search_params, default_limit,
                             default_search_exp,
@@ -6034,7 +6044,7 @@ class TestCollectionRangeSearch(TestcaseBase):
         vectors = np.array(_vectors[0]).tolist()
         vectors = [vectors[i][-1] for i in range(default_nq)]
         # 3. range search with L2
-        range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10}, "radius": 0, "range_filter": 1}
+        range_search_params = {"metric_type": "COSINE", "radius": 0, "range_filter": 1}
         collection_w.search(vectors[:default_nq], default_search_field,
                             range_search_params, default_limit,
                             default_search_exp,
@@ -6043,7 +6053,7 @@ class TestCollectionRangeSearch(TestcaseBase):
                                          "ids": insert_ids,
                                          "limit": default_limit})
         # 4. range search with IP
-        range_search_params = {"metric_type": "IP", "params": {"nprobe": 10}, "radius": 1, "range_filter": 0}
+        range_search_params = {"metric_type": "IP", "radius": 1, "range_filter": 0}
         collection_w.search(vectors[:default_nq], default_search_field,
                             range_search_params, default_limit,
                             default_search_exp,
@@ -6297,11 +6307,11 @@ class TestCollectionRangeSearch(TestcaseBase):
                                                                                   enable_dynamic_field)[0:5]
         # 2. search for original data after load
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
-        range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "radius": 0,
+        range_search_params = {"metric_type": "COSINE", "params": {"radius": 0,
                                                                    "range_filter": 1000}}
         log.info("test_range_search_new_data: searching for original data after load")
         collection_w.search(vectors[:nq], default_search_field,
-                            default_search_params, limit,
+                            range_search_params, limit,
                             default_search_exp,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
@@ -6316,8 +6326,6 @@ class TestCollectionRangeSearch(TestcaseBase):
         # 4. search for new data without load
         # Using bounded staleness, maybe we could not search the "inserted" entities,
         # since the search requests arrived query nodes earlier than query nodes consume the insert requests.
-        range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "radius": 0,
-                                                                   "range_filter": 1000}}
         collection_w.search(vectors[:nq], default_search_field,
                             range_search_params, limit,
                             default_search_exp,
@@ -6351,7 +6359,7 @@ class TestCollectionRangeSearch(TestcaseBase):
         # 3. load and range search
         collection_w.load()
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
-        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
+        range_search_params = {"metric_type": "L2", "params": {"radius": 1000,
                                                                "range_filter": 0}}
         collection_w.search(vectors[:default_nq], default_search_field,
                             range_search_params, default_limit,
@@ -6428,6 +6436,8 @@ class TestCollectionRangeSearch(TestcaseBase):
         for search_param in search_params:
             search_param["params"]["radius"] = 1000
             search_param["params"]["range_filter"] = 0
+            if index.startswith("IVF_"):
+                search_param["params"].pop("nprobe")
             log.info("Searching with search params: {}".format(search_param))
             collection_w.search(vectors[:default_nq], default_search_field,
                                 search_param, default_limit,
@@ -6469,6 +6479,8 @@ class TestCollectionRangeSearch(TestcaseBase):
         for search_param in search_params:
             search_param["params"]["radius"] = 0
             search_param["params"]["range_filter"] = 1000
+            if index.startswith("IVF_"):
+                search_param["params"].pop("nprobe")
             log.info("Searching with search params: {}".format(search_param))
             collection_w.search(vectors[:default_nq], default_search_field,
                                 search_param, default_limit,
@@ -6503,8 +6515,7 @@ class TestCollectionRangeSearch(TestcaseBase):
             limit_check = par[1].num_entities
         else:
             limit_check = limit
-        range_search_params = {"metric_type": "L2", "params": {"nprobe": 128, "radius": 1000,
-                                                               "range_filter": 0}}
+        range_search_params = {"metric_type": "L2", "params": {"radius": 1000, "range_filter": 0}}
         collection_w.search(vectors[:default_nq], default_search_field,
                             range_search_params, limit, default_search_exp,
                             [par[1].name], _async=_async,
@@ -6539,8 +6550,7 @@ class TestCollectionRangeSearch(TestcaseBase):
         distance_0 = cf.jaccard(query_raw_vector[0], binary_raw_vector[0])
         distance_1 = cf.jaccard(query_raw_vector[0], binary_raw_vector[1])
         # 4. search and compare the distance
-        search_params = {"metric_type": "JACCARD", "params": {"nprobe": 10, "radius": 1000,
-                                                              "range_filter": 0}}
+        search_params = {"metric_type": "JACCARD", "params": {"radius": 1000, "range_filter": 0}}
         res = collection_w.search(binary_vectors[:nq], "binary_vector",
                                   search_params, default_limit, "int64 >= 0",
                                   _async=_async,
@@ -6574,8 +6584,7 @@ class TestCollectionRangeSearch(TestcaseBase):
         # 3. compute the distance
         query_raw_vector, binary_vectors = cf.gen_binary_vectors(3000, default_dim)
         # 4. range search
-        search_params = {"metric_type": "JACCARD", "params": {"nprobe": 10, "radius": -1,
-                                                              "range_filter": -10}}
+        search_params = {"metric_type": "JACCARD", "params": {"radius": -1, "range_filter": -10}}
         collection_w.search(binary_vectors[:default_nq], "binary_vector",
                             search_params, default_limit,
                             check_task=CheckTasks.check_search_results,
@@ -6616,8 +6625,7 @@ class TestCollectionRangeSearch(TestcaseBase):
         distance_0 = cf.hamming(query_raw_vector[0], binary_raw_vector[0])
         distance_1 = cf.hamming(query_raw_vector[0], binary_raw_vector[1])
         # 4. search and compare the distance
-        search_params = {"metric_type": "HAMMING", "params": {"nprobe": 10, "radius": 1000,
-                                                              "range_filter": 0}}
+        search_params = {"metric_type": "HAMMING", "params": {"radius": 1000, "range_filter": 0}}
         res = collection_w.search(binary_vectors[:nq], "binary_vector",
                                   search_params, default_limit, "int64 >= 0",
                                   _async=_async,
@@ -6701,7 +6709,7 @@ class TestCollectionRangeSearch(TestcaseBase):
             if radius > distance_single >= range_filter:
                 limit += 1
         # 5. range search and compare the distance
-        search_params = {"metric_type": "TANIMOTO", "params": {"nprobe": 10, "radius": radius,
+        search_params = {"metric_type": "TANIMOTO", "params": {"radius": radius,
                                                                "range_filter": range_filter}}
         res = collection_w.search(binary_vectors[:1], "binary_vector",
                                   search_params, default_limit, "int64 >= 0",
@@ -6737,7 +6745,7 @@ class TestCollectionRangeSearch(TestcaseBase):
         # 3. compute the distance
         query_raw_vector, binary_vectors = cf.gen_binary_vectors(3000, default_dim)
         # 4. range search
-        search_params = {"metric_type": "JACCARD", "params": {"nprobe": 10, "radius": -1, "range_filter": -10}}
+        search_params = {"metric_type": "JACCARD", "params": {"radius": -1, "range_filter": -10}}
         collection_w.search(binary_vectors[:default_nq], "binary_vector",
                             search_params, default_limit,
                             check_task=CheckTasks.check_search_results,
@@ -6763,7 +6771,7 @@ class TestCollectionRangeSearch(TestcaseBase):
         # 4. search
         log.info("test_range_search_binary_without_flush: searching collection %s" % collection_w.name)
         binary_vectors = cf.gen_binary_vectors(default_nq, default_dim)[1]
-        search_params = {"metric_type": metrics, "params": {"nprobe": 10, "radius": 1000,
+        search_params = {"metric_type": metrics, "params": {"radius": 1000,
                                                             "range_filter": 0}}
         collection_w.search(binary_vectors[:default_nq], "binary_vector",
                             search_params, default_limit,
@@ -6811,7 +6819,7 @@ class TestCollectionRangeSearch(TestcaseBase):
         # 3. search with expression
         log.info("test_range_search_with_expression: searching with expression: %s" % expression)
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
-        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
+        range_search_params = {"metric_type": "L2", "params": {"radius": 1000,
                                                                "range_filter": 0}}
         search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
                                             range_search_params, nb, expression,
@@ -6844,7 +6852,7 @@ class TestCollectionRangeSearch(TestcaseBase):
                                                                       enable_dynamic_field)[0:4]
         # 2. search
         log.info("test_range_search_with_output_field: Searching collection %s" % collection_w.name)
-        range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "radius": 0,
+        range_search_params = {"metric_type": "COSINE", "params": {"radius": 0,
                                                                    "range_filter": 1000}}
         res = collection_w.search(vectors[:default_nq], default_search_field,
                                   range_search_params, default_limit,
@@ -6877,7 +6885,7 @@ class TestCollectionRangeSearch(TestcaseBase):
 
         def search(collection_w):
             vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
-            range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "radius": 0,
+            range_search_params = {"metric_type": "COSINE", "params": {"radius": 0,
                                                                        "range_filter": 1000}}
             collection_w.search(vectors[:nq], default_search_field,
                                 range_search_params, default_limit,
@@ -6955,7 +6963,7 @@ class TestCollectionRangeSearch(TestcaseBase):
 
         nums = 5000
         vectors = [[random.random() for _ in range(dim)] for _ in range(nums)]
-        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
+        range_search_params = {"metric_type": "L2", "params": {"radius": 1000,
                                                                "range_filter": 0}}
         search_res, _ = collection_w.search(vectors, default_search_field,
                                             range_search_params, default_limit, expression,
