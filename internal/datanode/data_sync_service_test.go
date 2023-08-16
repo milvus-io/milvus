@@ -534,7 +534,7 @@ func TestDataSyncService_Close(t *testing.T) {
 	assert.Equal(t, 0, len(syncService.flushListener))
 
 	// close will trigger a force sync
-	syncService.close()
+	syncService.GracefullyClose()
 	assert.Eventually(t, func() bool { return len(syncService.flushListener) == 1 },
 		5*time.Second, 100*time.Millisecond)
 	flushPack, ok := <-syncService.flushListener
@@ -547,7 +547,7 @@ func TestDataSyncService_Close(t *testing.T) {
 	<-syncService.ctx.Done()
 
 	// Double close is safe
-	syncService.close()
+	syncService.GracefullyClose()
 	<-syncService.ctx.Done()
 }
 

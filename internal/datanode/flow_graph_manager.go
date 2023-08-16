@@ -216,7 +216,7 @@ func (fm *flowgraphManager) getFlowGraphNum() int {
 func (fm *flowgraphManager) dropAll() {
 	log.Info("start drop all flowgraph resources in DataNode")
 	fm.flowgraphs.Range(func(key string, value *dataSyncService) bool {
-		value.close()
+		value.GracefullyClose()
 		fm.flowgraphs.GetAndRemove(key)
 
 		log.Info("successfully dropped flowgraph", zap.String("vChannelName", key))

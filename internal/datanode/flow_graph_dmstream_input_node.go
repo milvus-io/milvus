@@ -62,7 +62,15 @@ func newDmInputNode(dispatcherClient msgdispatcher.Client, seekPos *msgpb.MsgPos
 	}
 
 	name := fmt.Sprintf("dmInputNode-data-%d-%s", dmNodeConfig.collectionID, dmNodeConfig.vChannelName)
-	node := flowgraph.NewInputNode(input, name, dmNodeConfig.maxQueueLength, dmNodeConfig.maxParallelism,
-		typeutil.DataNodeRole, paramtable.GetNodeID(), dmNodeConfig.collectionID, metrics.AllLabel)
+	node := flowgraph.NewInputNode(
+		input,
+		name,
+		dmNodeConfig.maxQueueLength,
+		dmNodeConfig.maxParallelism,
+		typeutil.DataNodeRole,
+		paramtable.GetNodeID(),
+		dmNodeConfig.collectionID,
+		metrics.AllLabel,
+	)
 	return node, nil
 }
