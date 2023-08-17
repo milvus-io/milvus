@@ -11,11 +11,15 @@
 
 #include <gtest/gtest.h>
 #include <string.h>
+#include <boost/uuid/uuid.hpp>
+#include <boost/uuid/uuid_io.hpp>
+#include <boost/uuid/uuid_generators.hpp>
 
 #include "common/Utils.h"
 #include "query/Utils.h"
 #include "test_utils/DataGen.h"
 #include "common/Types.h"
+#include "index/Exception.h"
 
 TEST(Util, StringMatch) {
     using namespace milvus;
@@ -132,4 +136,31 @@ TEST(Util, upper_bound) {
     ASSERT_EQ(1, upper_bound(timestamps, 0, data.size(), 0));
     ASSERT_EQ(5, upper_bound(timestamps, 0, data.size(), 4));
     ASSERT_EQ(10, upper_bound(timestamps, 0, data.size(), 10));
+}
+
+TEST(Util, read_from_fd) {
+    auto uuid = boost::uuids::random_generator()();
+    auto uuid_string = boost::uuids::to_string(uuid);
+    auto file = std::string("/tmp/") + uuid_string;
+
+    auto fd = open(
+        file.c_str(), O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR | S_IXUSR);
+    ASSERT_NE(fd, -1);
+    size_t data_size = 100 * 1024 * 1024;  // 100M
+    auto index_data = std::shared_ptr<uint8_t[]>(new uint8_t[data_size]);
+    auto max_loop = size_t(INT_MAX) / data_size + 1;  // insert data > 2G
+    for (int i = 0; i < max_loop; ++i) {
+        auto size_write = write(fd, index_data.get(), data_size);
+        ASSERT_GE(size_write, 0);
+    }
+
+    auto read_buf =
+        std::shared_ptr<uint8_t[]>(new uint8_t[data_size * max_loop]);
+    EXPECT_NO_THROW(milvus::index::ReadDataFromFD(
+        fd, read_buf.get(), data_size * max_loop));
+
+    // On Linux, read() (and similar system calls) will transfer at most 0x7ffff000 (2,147,479,552) bytes once
+    EXPECT_THROW(milvus::index::ReadDataFromFD(
+                     fd, read_buf.get(), data_size * max_loop, INT_MAX),
+                 milvus::index::UnistdException);
 }
