@@ -1,6 +1,9 @@
+import time
+from pathlib import Path
+import subprocess
 import pytest
 from time import sleep
-from pymilvus import connections
+from pymilvus import connections, utility
 from chaos.checker import (CreateChecker,
                            InsertChecker,
                            FlushChecker,
@@ -87,10 +90,20 @@ class TestOperations(TestBase):
                         log.info(f"do bulk insert failed: {result}")
                         retry_times += 1
                         sleep(5)
-        # how to make sure the bulk insert done before rolling update?
+                # wait for index building complete
+                utility.wait_for_index_building_complete(v.c_name, timeout=120)
+                res = utility.index_building_progress(v.c_name)
+                index_completed = res["pending_index_rows"] == 0
+                while not index_completed:
+                    time.sleep(10)
+                    res = utility.index_building_progress(v.c_name)
+                    log.info(f"index building progress: {res}")
+                    index_completed = res["pending_index_rows"] == 0
+                log.info(f"index building progress: {res}")
 
         log.info("*********************Load Start**********************")
         cc.start_monitor_threads(self.health_checkers)
+
         # wait request_duration
         request_duration = request_duration.replace("h", "*3600+").replace("m", "*60+").replace("s", "")
         if request_duration[-1] == "+":
@@ -98,6 +111,16 @@ class TestOperations(TestBase):
         request_duration = eval(request_duration)
         for i in range(10):
             sleep(request_duration // 10)
+            if i == 3:
+                # apply rolling update after 30% time of request_duration
+                log.info("*********************Apply Rolling Update**********************")
+                file_path = f"{str(Path(__file__).parent.parent.parent)}/deploy/milvus_crd.yaml"
+                cmd = f"kubectl apply -f {file_path}"
+                log.info(f"cmd: {cmd}")
+                res = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                stdout, stderr = res.communicate()
+                log.info(f"{cmd}, stdout: {stdout}, stderr: {stderr}")
+
             for k, v in self.health_checkers.items():
                 v.check_result()
         for k, v in self.health_checkers.items():
