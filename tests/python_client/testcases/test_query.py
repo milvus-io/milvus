@@ -1901,68 +1901,6 @@ class TestQueryOperation(TestcaseBase):
         assert res[ct.default_bool_field_name] is False
         assert res[ct.default_string_field_name] == "abc"
 
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_query_iterator_normal(self):
-        """
-        target: test query iterator normal
-        method: 1. query iterator
-                2. check the result, expect pk
-        expected: query successfully
-        """
-        # 1. initialize with data
-        limit = 100
-        collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
-        collection_w.create_index(ct.default_float_vec_field_name, {"metric_type": "L2"})
-        collection_w.load()
-        # 2. search iterator
-        expr = "int64 >= 0"
-        collection_w.query_iterator(expr, limit=limit,
-                                    check_task=CheckTasks.check_query_iterator,
-                                    check_items={"count": ct.default_nb,
-                                                 "limit": limit})
-
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("offset", [500, 1000, 1777])
-    def test_query_iterator_with_offset(self, offset):
-        """
-        target: test query iterator normal
-        method: 1. query iterator
-                2. check the result, expect pk
-        expected: query successfully
-        """
-        # 1. initialize with data
-        limit = 100
-        collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
-        collection_w.create_index(ct.default_float_vec_field_name, {"metric_type": "L2"})
-        collection_w.load()
-        # 2. search iterator
-        expr = "int64 >= 0"
-        collection_w.query_iterator(expr, limit=limit, offset=offset,
-                                    check_task=CheckTasks.check_query_iterator,
-                                    check_items={"count": ct.default_nb - offset,
-                                                 "limit": limit})
-
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("limit", [10, 100, 777, 1000])
-    def test_query_iterator_with_different_limit(self, limit):
-        """
-        target: test query iterator normal
-        method: 1. query iterator
-                2. check the result, expect pk
-        expected: query successfully
-        """
-        # 1. initialize with data
-        offset = 500
-        collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
-        collection_w.create_index(ct.default_float_vec_field_name, {"metric_type": "L2"})
-        collection_w.load()
-        # 2. search iterator
-        expr = "int64 >= 0"
-        collection_w.query_iterator(expr, limit=limit, offset=offset,
-                                    check_task=CheckTasks.check_query_iterator,
-                                    check_items={"count": ct.default_nb - offset,
-                                                 "limit": limit})
-
 
 class TestQueryString(TestcaseBase):
     """
@@ -3006,3 +2944,132 @@ class TestQueryCount(TestcaseBase):
         collection_w.query(expr=expression, output_fields=[count],
                            check_task=CheckTasks.check_query_results,
                            check_items={exp_res: [{count: res}]})
+
+
+class TestQueryIterator(TestcaseBase):
+    """
+    ******************************************************************
+      The following cases are used to test query iterator
+    ******************************************************************
+    """
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_query_iterator_normal(self):
+        """
+        target: test query iterator normal
+        method: 1. query iterator
+                2. check the result, expect pk
+        expected: query successfully
+        """
+        # 1. initialize with data
+        limit = 100
+        collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
+        collection_w.create_index(ct.default_float_vec_field_name, {"metric_type": "L2"})
+        collection_w.load()
+        # 2. search iterator
+        expr = "int64 >= 0"
+        collection_w.query_iterator(expr, limit=limit,
+                                    check_task=CheckTasks.check_query_iterator,
+                                    check_items={"count": ct.default_nb,
+                                                 "limit": limit})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("offset", [500, 1000, 1777])
+    def test_query_iterator_with_offset(self, offset):
+        """
+        target: test query iterator normal
+        method: 1. query iterator
+                2. check the result, expect pk
+        expected: query successfully
+        """
+        # 1. initialize with data
+        limit = 100
+        collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
+        collection_w.create_index(ct.default_float_vec_field_name, {"metric_type": "L2"})
+        collection_w.load()
+        # 2. search iterator
+        expr = "int64 >= 0"
+        collection_w.query_iterator(expr, limit=limit, offset=offset,
+                                    check_task=CheckTasks.check_query_iterator,
+                                    check_items={"count": ct.default_nb - offset,
+                                                 "limit": limit})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("limit", [10, 100, 777, 2000])
+    def test_query_iterator_with_different_limit(self, limit):
+        """
+        target: test query iterator normal
+        method: 1. query iterator
+                2. check the result, expect pk
+        expected: query successfully
+        """
+        # 1. initialize with data
+        offset = 500
+        collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
+        collection_w.create_index(ct.default_float_vec_field_name, {"metric_type": "L2"})
+        collection_w.load()
+        # 2. search iterator
+        expr = "int64 >= 0"
+        collection_w.query_iterator(expr, limit=limit, offset=offset,
+                                    check_task=CheckTasks.check_query_iterator,
+                                    check_items={"count": ct.default_nb - offset,
+                                                 "limit": limit})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("issue #26397")
+    def test_query_iterator_invalid_limit_offset(self):
+        """
+        target: test query iterator invalid limit and offset
+        method: query iterator using invalid limit and offset
+        expected: raise exception
+        """
+        # 1. initialize with data
+        nb = 17000  # set nb > 16384
+        collection_w = self.init_collection_general(prefix, True, nb=nb)[0]
+        # 2. search iterator
+        expr = "int64 >= 0"
+        error = {"err_code": 1, "err_msg": "invalid max query result window, limit [-1] is invalid, should be greater than 0"}
+        collection_w.query_iterator(expr, limit=-1, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("limit", [100, 500])
+    @pytest.mark.parametrize("auto_id", [True, False])
+    def test_query_iterator_empty_expr(self, auto_id, limit):
+        """
+        target: test query iterator with empty expression
+        method: query iterator empty expression with a limit
+        expected: return topK results by order
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, auto_id=auto_id)[0:4]
+
+        # 2. query with limit
+        collection_w.query_iterator("", limit=limit,
+                                    check_task=CheckTasks.check_query_iterator,
+                                    check_items={"limit": limit,
+                                                 "count": ct.default_nb,
+                                                 "exp_ids": insert_ids})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("offset", [100, 1000])
+    @pytest.mark.parametrize("limit", [500, 1000])
+    def test_query_iterator_expr_empty_with_random_pk_pagination(self, limit, offset):
+        """
+        target: test query iterator with empty expression
+        method: create a collection using random pk, query empty expression with a limit
+        expected: return topK results by order
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, random_primary_key=True)[0:4]
+
+        # 3. query with empty expr and check the result
+        exp_ids = sorted(insert_ids)
+        collection_w.query_iterator("", limit=limit, output_fields=[ct.default_string_field_name],
+                                    check_task=CheckTasks.check_query_iterator,
+                                    check_items={"limit": limit, "count": ct.default_nb, "exp_ids": exp_ids})
+
+        # 4. query with pagination
+        exp_ids = sorted(insert_ids)[offset:]
+        collection_w.query_iterator("", limit=limit, offset=offset, output_fields=[ct.default_string_field_name],
+                                    check_task=CheckTasks.check_query_iterator,
+                                    check_items={"limit": limit, "count": ct.default_nb - offset, "exp_ids": exp_ids})
