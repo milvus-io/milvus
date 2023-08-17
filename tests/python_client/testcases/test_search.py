@@ -1991,13 +1991,20 @@ class TestCollectionSearch(TestcaseBase):
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         for search_param in search_params:
             log.info("Searching with search params: {}".format(search_param))
+            limit = default_limit
+            if index == "HNSW":
+                limit = search_param["params"]["ef"]
+                if limit > max_limit:
+                    limit = default_nb
+            if index == "DISKANN":
+                limit = search_param["params"]["search_list"]
             collection_w.search(vectors[:default_nq], default_search_field,
-                                search_param, default_limit,
+                                search_param, limit,
                                 default_search_exp, _async=_async,
                                 check_task=CheckTasks.check_search_results,
                                 check_items={"nq": default_nq,
                                              "ids": insert_ids,
-                                             "limit": default_limit,
+                                             "limit": limit,
                                              "_async": _async})
 
     @pytest.mark.tags(CaseLabel.GPU)
@@ -2189,13 +2196,20 @@ class TestCollectionSearch(TestcaseBase):
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         for search_param in search_params:
             log.info("Searching with search params: {}".format(search_param))
+            limit = default_limit
+            if index == "HNSW":
+                limit = search_param["params"]["ef"]
+                if limit > max_limit:
+                    limit = default_nb
+            if index == "DISKANN":
+                limit = search_param["params"]["search_list"]
             collection_w.search(vectors[:default_nq], default_search_field,
-                                search_param, default_limit,
+                                search_param, limit,
                                 default_search_exp, _async=_async,
                                 check_task=CheckTasks.check_search_results,
                                 check_items={"nq": default_nq,
                                              "ids": insert_ids,
-                                             "limit": default_limit,
+                                             "limit": limit,
                                              "_async": _async,
                                              "metric": metric_type,
                                              "vector_nq": vectors[:default_nq],
