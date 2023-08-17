@@ -35,13 +35,15 @@
 #include "log/Log.h"
 #include "signal.h"
 
-#define THROWS3ERROR(FUNCTION)                                            \
-    do {                                                                  \
-        auto& err = outcome.GetError();                                   \
-        std::stringstream err_msg;                                        \
-        err_msg << "Error:" << #FUNCTION << ":" << err.GetExceptionName() \
-                << "  " << err.GetMessage();                              \
-        throw S3ErrorException(err_msg.str());                            \
+#define THROWS3ERROR(FUNCTION)                                 \
+    do {                                                       \
+        auto& err = outcome.GetError();                        \
+        std::stringstream err_msg;                             \
+        err_msg << "Error:" << #FUNCTION                       \
+                << "[errcode:" << int(err.GetResponseCode())   \
+                << ", exception:" << err.GetExceptionName()    \
+                << ", errmessage:" << err.GetMessage() << "]"; \
+        throw S3ErrorException(err_msg.str());                 \
     } while (0)
 
 #define S3NoSuchBucket "NoSuchBucket"
