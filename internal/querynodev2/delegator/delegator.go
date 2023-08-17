@@ -594,7 +594,7 @@ func NewShardDelegator(collectionID UniqueID, replicaID UniqueID, channel string
 		deleteBuffer:   deletebuffer.NewDoubleCacheDeleteBuffer[*deletebuffer.Item](startTs, maxSegmentDeleteBuffer),
 		pkOracle:       pkoracle.NewPkOracle(),
 		tsafeManager:   tsafeManager,
-		latestTsafe:    atomic.NewUint64(0),
+		latestTsafe:    atomic.NewUint64(startTs),
 		loader:         loader,
 		factory:        factory,
 	}

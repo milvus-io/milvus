@@ -419,7 +419,7 @@ func (s *DelegatorSuite) TestSearch() {
 		_, err := s.delegator.Search(ctx, &querypb.SearchRequest{
 			Req: &internalpb.SearchRequest{
 				Base:               commonpbutil.NewMsgBase(),
-				GuaranteeTimestamp: 100,
+				GuaranteeTimestamp: 10100,
 			},
 			DmlChannels: []string{s.vchannelName},
 		})
@@ -434,7 +434,7 @@ func (s *DelegatorSuite) TestSearch() {
 		_, err := s.delegator.Search(ctx, &querypb.SearchRequest{
 			Req: &internalpb.SearchRequest{
 				Base:               commonpbutil.NewMsgBase(),
-				GuaranteeTimestamp: uint64(paramtable.Get().QueryNodeCfg.MaxTimestampLag.GetAsDuration(time.Second)) + 1,
+				GuaranteeTimestamp: uint64(paramtable.Get().QueryNodeCfg.MaxTimestampLag.GetAsDuration(time.Second)) + 10001,
 			},
 			DmlChannels: []string{s.vchannelName},
 		})
