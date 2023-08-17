@@ -1191,6 +1191,52 @@ func (suite *ServiceSuite) TestSearch_Failed() {
 	suite.Equal(commonpb.ErrorCode_NotReadyServe, resp.Status.GetErrorCode())
 }
 
+func (suite *ServiceSuite) TestSearchSegments_Unhealthy() {
+	ctx := context.Background()
+
+	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
+
+	req := &querypb.SearchRequest{
+		FromShardLeader: true,
+		DmlChannels:     []string{suite.vchannel},
+		TotalChannelNum: 2,
+	}
+
+	rsp, err := suite.node.SearchSegments(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_NotReadyServe, rsp.GetStatus().GetErrorCode())
+	suite.Equal(merr.Code(merr.ErrServiceNotReady), rsp.GetStatus().GetCode())
+}
+
+func (suite *ServiceSuite) TestSearchSegments_Failed() {
+	ctx := context.Background()
+
+	// collection found
+	req := &querypb.SearchRequest{
+		Req: &internalpb.SearchRequest{
+			CollectionID: -1, // not exist collection id
+		},
+		FromShardLeader: true,
+		DmlChannels:     []string{suite.vchannel},
+		TotalChannelNum: 2,
+	}
+
+	rsp, err := suite.node.SearchSegments(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_UnexpectedError, rsp.GetStatus().GetErrorCode())
+	suite.Equal(merr.Code(merr.ErrCollectionNotLoaded), rsp.GetStatus().GetCode())
+
+	suite.TestWatchDmChannelsInt64()
+
+	req.Req.CollectionID = suite.collectionID
+
+	ctx, cancel := context.WithCancel(ctx)
+	cancel()
+	rsp, err = suite.node.SearchSegments(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_UnexpectedError, rsp.GetStatus().GetErrorCode())
+}
+
 func (suite *ServiceSuite) TestSearchSegments_Normal() {
 	ctx := context.Background()
 	// pre
@@ -1288,6 +1334,35 @@ func (suite *ServiceSuite) TestQuery_Failed() {
 	resp, err = suite.node.Query(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_NotReadyServe, resp.Status.GetErrorCode())
+}
+
+func (suite *ServiceSuite) TestQuerySegments_Failed() {
+	ctx := context.Background()
+
+	req := &querypb.QueryRequest{
+		Req: &internalpb.RetrieveRequest{
+			CollectionID: -1,
+		},
+		FromShardLeader: true,
+		DmlChannels:     []string{suite.vchannel},
+	}
+
+	rsp, err := suite.node.QuerySegments(ctx, req)
+	suite.NoError(err)
+
+	suite.Equal(commonpb.ErrorCode_UnexpectedError, rsp.GetStatus().GetErrorCode())
+	suite.Equal(merr.Code(merr.ErrCollectionNotLoaded), rsp.GetStatus().GetCode())
+
+	suite.TestWatchDmChannelsInt64()
+
+	req.Req.CollectionID = suite.collectionID
+
+	ctx, cancel := context.WithCancel(ctx)
+	cancel()
+
+	rsp, err = suite.node.QuerySegments(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_UnexpectedError, rsp.GetStatus().GetErrorCode())
 }
 
 func (suite *ServiceSuite) TestQuerySegments_Normal() {
