@@ -24,21 +24,13 @@
 #include "index/StringIndexMarisa.h"
 #include "index/Utils.h"
 #include "index/Index.h"
+#include "index/Exception.h"
 #include "common/Utils.h"
 #include "common/Slice.h"
 
 namespace milvus::index {
 
 #if defined(__linux__) || defined(__APPLE__)
-
-class UnistdException : public std::runtime_error {
- public:
-    explicit UnistdException(const std::string& msg) : std::runtime_error(msg) {
-    }
-
-    virtual ~UnistdException() {
-    }
-};
 
 StringIndexMarisa::StringIndexMarisa(storage::FileManagerImplPtr file_manager) {
     if (file_manager != nullptr) {
@@ -131,20 +123,15 @@ StringIndexMarisa::Serialize(const Config& config) {
 
     auto fd = open(
         file.c_str(), O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR | S_IXUSR);
+    AssertInfo(fd != -1, "open file failed");
     trie_.write(fd);
 
     auto size = get_file_size(fd);
     auto index_data = std::shared_ptr<uint8_t[]>(new uint8_t[size]);
-
-    lseek(fd, 0, SEEK_SET);
-    auto status = read(fd, index_data.get(), size);
+    ReadDataFromFD(fd, index_data.get(), size);
 
     close(fd);
     remove(file.c_str());
-    if (status != size) {
-        throw UnistdException("read index from fd error, errorCode is " +
-                              std::to_string(status));
-    }
 
     auto str_ids_len = str_ids_.size() * sizeof(size_t);
     std::shared_ptr<uint8_t[]> str_ids(new uint8_t[str_ids_len]);
