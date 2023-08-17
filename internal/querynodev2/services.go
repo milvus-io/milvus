@@ -685,12 +685,13 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 		zap.String("scope", req.GetScope().String()),
 	)
 
+	failRet := WrapSearchResult(commonpb.ErrorCode_UnexpectedError, "")
 	if !node.lifetime.Add(commonpbutil.IsHealthy) {
-		return nil, merr.WrapErrServiceNotReady(fmt.Sprintf("node id: %d is unhealthy", paramtable.GetNodeID()))
+		failRet.Status = merr.Status(merr.WrapErrServiceNotReady(fmt.Sprintf("node id: %d is unhealthy", paramtable.GetNodeID())))
+		return failRet, nil
 	}
 	defer node.lifetime.Done()
 
-	failRet := WrapSearchResult(commonpb.ErrorCode_UnexpectedError, "")
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.TotalLabel, metrics.FromLeader).Inc()
 	defer func() {
 		if failRet.Status.ErrorCode != commonpb.ErrorCode_Success {
@@ -712,21 +713,21 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 		err := merr.WrapErrCollectionNotLoaded(req.GetReq().GetCollectionID())
 		log.Warn("failed to search segments", zap.Error(err))
 		failRet.Status = merr.Status(err)
-		return failRet, err
+		return failRet, nil
 	}
 
 	task := tasks.NewSearchTask(searchCtx, collection, node.manager, req)
 	if err := node.scheduler.Add(task); err != nil {
 		log.Warn("failed to search channel", zap.Error(err))
 		failRet.Status.Reason = err.Error()
-		return failRet, err
+		return failRet, nil
 	}
 
 	err := task.Wait()
 	if err != nil {
 		log.Warn("failed to search segments", zap.Error(err))
 		failRet.Status.Reason = err.Error()
-		return failRet, err
+		return failRet, nil
 	}
 
 	tr.CtxElapse(ctx, fmt.Sprintf("search segments done, channel = %s, segmentIDs = %v",
@@ -904,19 +905,21 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 	tr := timerecord.NewTimeRecorder("querySegments")
 	collection := node.manager.Collection.Get(req.Req.GetCollectionID())
 	if collection == nil {
-		return nil, merr.WrapErrCollectionNotFound(req.Req.GetCollectionID())
+		failRet.Status = merr.Status(merr.WrapErrCollectionNotLoaded(req.Req.GetCollectionID()))
+		return failRet, nil
 	}
 
 	// Send task to scheduler and wait until it finished.
 	task := tasks.NewQueryTask(queryCtx, collection, node.manager, req)
 	if err := node.scheduler.Add(task); err != nil {
 		log.Warn("failed to add query task into scheduler", zap.Error(err))
-		return nil, err
+		failRet.Status = merr.Status(err)
+		return failRet, nil
 	}
 	err := task.Wait()
 	if err != nil {
 		log.Warn("failed to query channel", zap.Error(err))
-		failRet.Status.Reason = err.Error()
+		failRet.Status = merr.Status(err)
 		return failRet, nil
 	}
 
