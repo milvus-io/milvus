@@ -86,7 +86,7 @@ func (nm *IndexNodeManager) AddNode(nodeID UniqueID, address string) error {
 		err        error
 	)
 
-	nodeClient, err = nm.indexNodeCreator(context.TODO(), address)
+	nodeClient, err = nm.indexNodeCreator(context.TODO(), address, nodeID)
 	if err != nil {
 		log.Error("create IndexNode client fail", zap.Error(err))
 		return err

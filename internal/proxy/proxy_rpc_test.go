@@ -52,7 +52,7 @@ func TestProxyRpcLimit(t *testing.T) {
 	go testServer.startGrpc(ctx, &wg, &p)
 	assert.NoError(t, testServer.waitForGrpcReady())
 	defer testServer.grpcServer.Stop()
-	client, err := grpcproxyclient.NewClient(ctx, "localhost:"+p.Port.GetValue())
+	client, err := grpcproxyclient.NewClient(ctx, "localhost:"+p.Port.GetValue(), 1)
 	assert.NoError(t, err)
 	proxy.stateCode.Store(commonpb.StateCode_Healthy)
 

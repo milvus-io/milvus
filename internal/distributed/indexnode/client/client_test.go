@@ -40,11 +40,11 @@ import (
 func Test_NewClient(t *testing.T) {
 	paramtable.Init()
 	ctx := context.Background()
-	client, err := NewClient(ctx, "", false)
+	client, err := NewClient(ctx, "", 1, false)
 	assert.Nil(t, client)
 	assert.Error(t, err)
 
-	client, err = NewClient(ctx, "test", false)
+	client, err = NewClient(ctx, "test", 2, false)
 	assert.NoError(t, err)
 	assert.NotNil(t, client)
 
@@ -148,7 +148,7 @@ func TestIndexNodeClient(t *testing.T) {
 	err = ins.Run()
 	assert.NoError(t, err)
 
-	inc, err := NewClient(ctx, "localhost:21121", false)
+	inc, err := NewClient(ctx, "localhost:21121", paramtable.GetNodeID(), false)
 	assert.NoError(t, err)
 	assert.NotNil(t, inc)
 

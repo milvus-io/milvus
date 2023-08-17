@@ -77,6 +77,7 @@ func (s *ErrSuite) TestWrap() {
 	s.ErrorIs(WrapErrServiceInternal("never throw out"), ErrServiceInternal)
 	s.ErrorIs(WrapErrCrossClusterRouting("ins-0", "ins-1"), ErrCrossClusterRouting)
 	s.ErrorIs(WrapErrServiceDiskLimitExceeded(110, 100, "DLE"), ErrServiceDiskLimitExceeded)
+	s.ErrorIs(WrapErrServerIDMismatch(0, 1, "SIM"), ErrServerIDMismatch)
 
 	// Collection related
 	s.ErrorIs(WrapErrCollectionNotFound("test_collection", "failed to get collection"), ErrCollectionNotFound)

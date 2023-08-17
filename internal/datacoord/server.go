@@ -79,9 +79,9 @@ type (
 	Timestamp = typeutil.Timestamp
 )
 
-type dataNodeCreatorFunc func(ctx context.Context, addr string) (types.DataNode, error)
+type dataNodeCreatorFunc func(ctx context.Context, addr string, nodeID int64) (types.DataNode, error)
 
-type indexNodeCreatorFunc func(ctx context.Context, addr string) (types.IndexNode, error)
+type indexNodeCreatorFunc func(ctx context.Context, addr string, nodeID int64) (types.IndexNode, error)
 
 type rootCoordCreatorFunc func(ctx context.Context, metaRootPath string, etcdClient *clientv3.Client) (types.RootCoord, error)
 
@@ -220,12 +220,12 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 	return s
 }
 
-func defaultDataNodeCreatorFunc(ctx context.Context, addr string) (types.DataNode, error) {
-	return datanodeclient.NewClient(ctx, addr)
+func defaultDataNodeCreatorFunc(ctx context.Context, addr string, nodeID int64) (types.DataNode, error) {
+	return datanodeclient.NewClient(ctx, addr, nodeID)
 }
 
-func defaultIndexNodeCreatorFunc(ctx context.Context, addr string) (types.IndexNode, error) {
-	return indexnodeclient.NewClient(context.TODO(), addr, Params.DataCoordCfg.WithCredential.GetAsBool())
+func defaultIndexNodeCreatorFunc(ctx context.Context, addr string, nodeID int64) (types.IndexNode, error) {
+	return indexnodeclient.NewClient(ctx, addr, nodeID, Params.DataCoordCfg.WithCredential.GetAsBool())
 }
 
 func defaultRootCoordCreatorFunc(ctx context.Context, metaRootPath string, client *clientv3.Client) (types.RootCoord, error) {
@@ -427,11 +427,11 @@ func (s *Server) SetRootCoord(rootCoord types.RootCoord) {
 	s.rootCoordClient = rootCoord
 }
 
-func (s *Server) SetDataNodeCreator(f func(context.Context, string) (types.DataNode, error)) {
+func (s *Server) SetDataNodeCreator(f func(context.Context, string, int64) (types.DataNode, error)) {
 	s.dataNodeCreator = f
 }
 
-func (s *Server) SetIndexNodeCreator(f func(context.Context, string) (types.IndexNode, error)) {
+func (s *Server) SetIndexNodeCreator(f func(context.Context, string, int64) (types.IndexNode, error)) {
 	s.indexNodeCreator = f
 }
 

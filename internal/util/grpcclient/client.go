@@ -201,10 +201,12 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 			grpc.WithUnaryInterceptor(grpc_middleware.ChainUnaryClient(
 				otelgrpc.UnaryClientInterceptor(opts...),
 				interceptor.ClusterInjectionUnaryClientInterceptor(),
+				interceptor.ServerIDInjectionUnaryClientInterceptor(c.GetNodeID()),
 			)),
 			grpc.WithStreamInterceptor(grpc_middleware.ChainStreamClient(
 				otelgrpc.StreamClientInterceptor(opts...),
 				interceptor.ClusterInjectionStreamClientInterceptor(),
+				interceptor.ServerIDInjectionStreamClientInterceptor(c.GetNodeID()),
 			)),
 			grpc.WithDefaultServiceConfig(retryPolicy),
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
@@ -239,10 +241,12 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 			grpc.WithUnaryInterceptor(grpc_middleware.ChainUnaryClient(
 				otelgrpc.UnaryClientInterceptor(opts...),
 				interceptor.ClusterInjectionUnaryClientInterceptor(),
+				interceptor.ServerIDInjectionUnaryClientInterceptor(c.GetNodeID()),
 			)),
 			grpc.WithStreamInterceptor(grpc_middleware.ChainStreamClient(
 				otelgrpc.StreamClientInterceptor(opts...),
 				interceptor.ClusterInjectionStreamClientInterceptor(),
+				interceptor.ServerIDInjectionStreamClientInterceptor(c.GetNodeID()),
 			)),
 			grpc.WithDefaultServiceConfig(retryPolicy),
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
@@ -279,6 +283,7 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 }
 
 func (c *ClientBase[T]) callOnce(ctx context.Context, caller func(client T) (any, error)) (any, error) {
+	log := log.Ctx(ctx).With(zap.String("role", c.GetRole()))
 	client, err := c.GetGrpcClient(ctx)
 	if err != nil {
 		return generic.Zero[T](), err
@@ -295,21 +300,20 @@ func (c *ClientBase[T]) callOnce(ctx context.Context, caller func(client T) (any
 		return generic.Zero[T](), err
 	}
 	if IsCrossClusterRoutingErr(err) {
-		log.Ctx(ctx).Warn("CrossClusterRoutingErr, start to reset connection",
-			zap.String("role", c.GetRole()),
-			zap.Error(err),
-		)
+		log.Warn("CrossClusterRoutingErr, start to reset connection", zap.Error(err))
 		c.resetConnection(client)
 		return ret, merr.ErrServiceUnavailable // For concealing ErrCrossClusterRouting from the client
 	}
+	if IsServerIDMismatchErr(err) {
+		log.Warn("Server ID mismatch, start to reset connection", zap.Error(err))
+		c.resetConnection(client)
+		return ret, err
+	}
 	if !funcutil.IsGrpcErr(err) {
-		log.Ctx(ctx).Warn("ClientBase:isNotGrpcErr", zap.Error(err))
+		log.Warn("ClientBase:isNotGrpcErr", zap.Error(err))
 		return generic.Zero[T](), err
 	}
-	log.Ctx(ctx).Info("ClientBase grpc error, start to reset connection",
-		zap.String("role", c.GetRole()),
-		zap.Error(err),
-	)
+	log.Info("ClientBase grpc error, start to reset connection", zap.Error(err))
 	c.resetConnection(client)
 	return ret, err
 }
@@ -397,4 +401,10 @@ func IsCrossClusterRoutingErr(err error) bool {
 	// GRPC utilizes `status.Status` to encapsulate errors,
 	// hence it is not viable to employ the `errors.Is` for assessment.
 	return strings.Contains(err.Error(), merr.ErrCrossClusterRouting.Error())
+}
+
+func IsServerIDMismatchErr(err error) bool {
+	// GRPC utilizes `status.Status` to encapsulate errors,
+	// hence it is not viable to employ the `errors.Is` for assessment.
+	return strings.Contains(err.Error(), merr.ErrServerIDMismatch.Error())
 }

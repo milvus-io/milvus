@@ -73,7 +73,7 @@ func (n *Session) GetOrCreateClient(ctx context.Context) (types.DataNode, error)
 }
 
 func (n *Session) initClient(ctx context.Context) (err error) {
-	if n.client, err = n.clientCreator(ctx, n.info.Address); err != nil {
+	if n.client, err = n.clientCreator(ctx, n.info.Address, n.info.NodeID); err != nil {
 		return
 	}
 	if err = n.client.Init(); err != nil {

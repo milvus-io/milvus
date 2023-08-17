@@ -33,11 +33,11 @@ func Test_NewClient(t *testing.T) {
 	paramtable.Init()
 
 	ctx := context.Background()
-	client, err := NewClient(ctx, "")
+	client, err := NewClient(ctx, "", 1)
 	assert.Nil(t, client)
 	assert.Error(t, err)
 
-	client, err = NewClient(ctx, "test")
+	client, err = NewClient(ctx, "test", 2)
 	assert.NoError(t, err)
 	assert.NotNil(t, client)
 

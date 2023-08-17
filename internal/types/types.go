@@ -396,10 +396,10 @@ type DataCoordComponent interface {
 	SetRootCoord(rootCoord RootCoord)
 
 	// SetDataNodeCreator set DataNode client creator func for DataCoord
-	SetDataNodeCreator(func(context.Context, string) (DataNode, error))
+	SetDataNodeCreator(func(context.Context, string, int64) (DataNode, error))
 
 	//SetIndexNodeCreator set Index client creator func for DataCoord
-	SetIndexNodeCreator(func(context.Context, string) (IndexNode, error))
+	SetIndexNodeCreator(func(context.Context, string, int64) (IndexNode, error))
 }
 
 // IndexNode is the interface `indexnode` package implements
@@ -837,7 +837,7 @@ type RootCoordComponent interface {
 	SetQueryCoord(queryCoord QueryCoord) error
 
 	// SetProxyCreator set Proxy client creator func for RootCoord
-	SetProxyCreator(func(ctx context.Context, addr string) (Proxy, error))
+	SetProxyCreator(func(ctx context.Context, addr string, nodeID int64) (Proxy, error))
 
 	// GetMetrics notifies RootCoordComponent to collect metrics for specified component
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
@@ -917,7 +917,7 @@ type ProxyComponent interface {
 	SetQueryCoordClient(queryCoord QueryCoord)
 
 	// SetQueryNodeCreator set QueryNode client creator func for Proxy
-	SetQueryNodeCreator(func(ctx context.Context, addr string) (QueryNode, error))
+	SetQueryNodeCreator(func(ctx context.Context, addr string, nodeID int64) (QueryNode, error))
 
 	// GetRateLimiter returns the rateLimiter in Proxy
 	GetRateLimiter() (Limiter, error)
@@ -1542,5 +1542,5 @@ type QueryCoordComponent interface {
 	SetRootCoord(rootCoord RootCoord) error
 
 	// SetQueryNodeCreator set QueryNode client creator func for QueryCoord
-	SetQueryNodeCreator(func(ctx context.Context, addr string) (QueryNode, error))
+	SetQueryNodeCreator(func(ctx context.Context, addr string, nodeID int64) (QueryNode, error))
 }

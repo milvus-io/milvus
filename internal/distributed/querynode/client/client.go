@@ -41,7 +41,7 @@ type Client struct {
 }
 
 // NewClient creates a new QueryNode client.
-func NewClient(ctx context.Context, addr string) (*Client, error) {
+func NewClient(ctx context.Context, addr string, nodeID int64) (*Client, error) {
 	if addr == "" {
 		return nil, fmt.Errorf("addr is empty")
 	}
@@ -65,6 +65,7 @@ func NewClient(ctx context.Context, addr string) (*Client, error) {
 	client.grpcClient.SetRole(typeutil.QueryNodeRole)
 	client.grpcClient.SetGetAddrFunc(client.getAddr)
 	client.grpcClient.SetNewGrpcClientFunc(client.newGrpcClient)
+	client.grpcClient.SetNodeID(nodeID)
 
 	return client, nil
 }
