@@ -319,9 +319,16 @@ func (s *Server) startInternalGrpc(grpcPort int, errChan chan error) {
 			ot.UnaryServerInterceptor(opts...),
 			logutil.UnaryTraceLoggerInterceptor,
 			interceptor.ClusterValidationUnaryServerInterceptor(),
+			interceptor.ServerIDValidationUnaryServerInterceptor(func() int64 {
+				return proxy.Params.ProxyCfg.GetNodeID()
+			}),
 		)),
-		grpc.StreamInterceptor(interceptor.ClusterValidationStreamServerInterceptor()),
-	)
+		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
+			interceptor.ClusterValidationStreamServerInterceptor(),
+			interceptor.ServerIDValidationStreamServerInterceptor(func() int64 {
+				return proxy.Params.ProxyCfg.GetNodeID()
+			}),
+		)))
 	proxypb.RegisterProxyServer(s.grpcInternalServer, s)
 	milvuspb.RegisterMilvusServiceServer(s.grpcInternalServer, s)
 	grpc_health_v1.RegisterHealthServer(s.grpcInternalServer, s)

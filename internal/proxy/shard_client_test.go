@@ -31,7 +31,7 @@ func TestShardClientMgr_UpdateShardLeaders_CreatorNil(t *testing.T) {
 }
 
 func TestShardClientMgr_UpdateShardLeaders_Empty(t *testing.T) {
-	mockCreator := func(ctx context.Context, addr string) (types.QueryNode, error) {
+	mockCreator := func(ctx context.Context, addr string, nodeID int64) (types.QueryNode, error) {
 		return &mock.QueryNodeClient{}, nil
 	}
 	mgr := newShardClientMgr(withShardClientCreator(mockCreator))

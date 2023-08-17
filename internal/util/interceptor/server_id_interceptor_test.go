@@ -18,6 +18,7 @@ package interceptor
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -27,45 +28,47 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 )
 
-func TestClusterInterceptor(t *testing.T) {
-	t.Run("test ClusterInjectionUnaryClientInterceptor", func(t *testing.T) {
+func TestServerIDInterceptor(t *testing.T) {
+	t.Run("test ServerIDInjectionUnaryClientInterceptor", func(t *testing.T) {
 		method := "MockMethod"
 		req := &milvuspb.InsertRequest{}
+		serverID := int64(1)
 
 		var incomingContext context.Context
 		invoker := func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, opts ...grpc.CallOption) error {
 			incomingContext = ctx
 			return nil
 		}
-		interceptor := ClusterInjectionUnaryClientInterceptor()
+		interceptor := ServerIDInjectionUnaryClientInterceptor(serverID)
 		ctx := metadata.NewOutgoingContext(context.Background(), metadata.New(make(map[string]string)))
 		err := interceptor(ctx, method, req, nil, nil, invoker)
 		assert.NoError(t, err)
 
 		md, ok := metadata.FromOutgoingContext(incomingContext)
 		assert.True(t, ok)
-		assert.Equal(t, Params.CommonCfg.GetClusterPrefix(), md.Get(ClusterKey)[0])
+		assert.Equal(t, fmt.Sprint(serverID), md.Get(ServerIDKey)[0])
 	})
 
-	t.Run("test ClusterInjectionStreamClientInterceptor", func(t *testing.T) {
+	t.Run("test ServerIDInjectionStreamClientInterceptor", func(t *testing.T) {
 		method := "MockMethod"
+		serverID := int64(1)
 
 		var incomingContext context.Context
 		streamer := func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
 			incomingContext = ctx
 			return nil, nil
 		}
-		interceptor := ClusterInjectionStreamClientInterceptor()
+		interceptor := ServerIDInjectionStreamClientInterceptor(serverID)
 		ctx := metadata.NewOutgoingContext(context.Background(), metadata.New(make(map[string]string)))
 		_, err := interceptor(ctx, nil, nil, method, streamer)
 		assert.NoError(t, err)
 
 		md, ok := metadata.FromOutgoingContext(incomingContext)
 		assert.True(t, ok)
-		assert.Equal(t, Params.CommonCfg.GetClusterPrefix(), md.Get(ClusterKey)[0])
+		assert.Equal(t, fmt.Sprint(serverID), md.Get(ServerIDKey)[0])
 	})
 
-	t.Run("test ClusterValidationUnaryServerInterceptor", func(t *testing.T) {
+	t.Run("test ServerIDValidationUnaryServerInterceptor", func(t *testing.T) {
 		method := "MockMethod"
 		req := &milvuspb.InsertRequest{}
 
@@ -73,53 +76,57 @@ func TestClusterInterceptor(t *testing.T) {
 			return nil, nil
 		}
 		serverInfo := &grpc.UnaryServerInfo{FullMethod: method}
-		interceptor := ClusterValidationUnaryServerInterceptor()
+		interceptor := ServerIDValidationUnaryServerInterceptor(func() int64 {
+			return int64(1)
+		})
 
 		// no md in context
 		_, err := interceptor(context.Background(), req, serverInfo, handler)
 		assert.NoError(t, err)
 
-		// no cluster in md
+		// no ServerID in md
 		ctx := metadata.NewIncomingContext(context.Background(), metadata.New(make(map[string]string)))
 		_, err = interceptor(ctx, req, serverInfo, handler)
 		assert.NoError(t, err)
 
-		// with cross-cluster
-		md := metadata.Pairs(ClusterKey, "ins-1")
+		// with mismatch ServerID
+		md := metadata.Pairs(ServerIDKey, "1234")
 		ctx = metadata.NewIncomingContext(context.Background(), md)
 		_, err = interceptor(ctx, req, serverInfo, handler)
-		assert.ErrorIs(t, err, ErrCrossClusterRouting)
+		assert.ErrorIs(t, err, ErrServerIDMismatch)
 
-		// with same cluster
-		md = metadata.Pairs(ClusterKey, Params.CommonCfg.GetClusterPrefix())
+		// with same ServerID
+		md = metadata.Pairs(ServerIDKey, "1")
 		ctx = metadata.NewIncomingContext(context.Background(), md)
 		_, err = interceptor(ctx, req, serverInfo, handler)
 		assert.NoError(t, err)
 	})
 
-	t.Run("test ClusterValidationUnaryServerInterceptor", func(t *testing.T) {
+	t.Run("test ServerIDValidationUnaryServerInterceptor", func(t *testing.T) {
 		handler := func(srv interface{}, stream grpc.ServerStream) error {
 			return nil
 		}
-		interceptor := ClusterValidationStreamServerInterceptor()
+		interceptor := ServerIDValidationStreamServerInterceptor(func() int64 {
+			return int64(1)
+		})
 
 		// no md in context
 		err := interceptor(nil, newMockSS(context.Background()), nil, handler)
 		assert.NoError(t, err)
 
-		// no cluster in md
+		// no ServerID in md
 		ctx := metadata.NewIncomingContext(context.Background(), metadata.New(make(map[string]string)))
 		err = interceptor(nil, newMockSS(ctx), nil, handler)
 		assert.NoError(t, err)
 
-		// with cross-cluster
-		md := metadata.Pairs(ClusterKey, "ins-1")
+		// with mismatch ServerID
+		md := metadata.Pairs(ServerIDKey, "1234")
 		ctx = metadata.NewIncomingContext(context.Background(), md)
 		err = interceptor(nil, newMockSS(ctx), nil, handler)
-		assert.ErrorIs(t, err, ErrCrossClusterRouting)
+		assert.ErrorIs(t, err, ErrServerIDMismatch)
 
-		// with same cluster
-		md = metadata.Pairs(ClusterKey, Params.CommonCfg.GetClusterPrefix())
+		// with same ServerID
+		md = metadata.Pairs(ServerIDKey, "1")
 		ctx = metadata.NewIncomingContext(context.Background(), md)
 		err = interceptor(nil, newMockSS(ctx), nil, handler)
 		assert.NoError(t, err)

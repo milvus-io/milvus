@@ -10,7 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 )
 
-type queryNodeCreatorFunc func(ctx context.Context, addr string) (types.QueryNode, error)
+type queryNodeCreatorFunc func(ctx context.Context, addr string, nodeID int64) (types.QueryNode, error)
 
 type nodeInfo struct {
 	nodeID  UniqueID
@@ -106,8 +106,8 @@ func withShardClientCreator(creator queryNodeCreatorFunc) shardClientMgrOpt {
 	return func(s *shardClientMgr) { s.clientCreator = creator }
 }
 
-func defaultShardClientCreator(ctx context.Context, addr string) (types.QueryNode, error) {
-	return qnClient.NewClient(ctx, addr)
+func defaultShardClientCreator(ctx context.Context, addr string, nodeID int64) (types.QueryNode, error) {
+	return qnClient.NewClient(ctx, addr, nodeID)
 }
 
 // NewShardClientMgr creates a new shardClientMgr
@@ -166,7 +166,7 @@ func (c *shardClientMgr) UpdateShardLeaders(oldLeaders map[string][]nodeInfo, ne
 			if c.clientCreator == nil {
 				return fmt.Errorf("clientCreator function is nil")
 			}
-			shardClient, err := c.clientCreator(context.Background(), node.address)
+			shardClient, err := c.clientCreator(context.Background(), node.address, node.nodeID)
 			if err != nil {
 				return err
 			}

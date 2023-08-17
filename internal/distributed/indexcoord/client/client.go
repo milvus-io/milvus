@@ -111,6 +111,8 @@ func (c *Client) getIndexCoordAddr() (string, error) {
 		log.Warn("IndexCoordClient msess key not existed", zap.Any("key", key), zap.Any("len of msess", len(msess)))
 		return "", fmt.Errorf("find no available indexcoord, check indexcoord state")
 	}
+
+	c.grpcClient.SetNodeID(ms.ServerID)
 	return ms.Address, nil
 }
 

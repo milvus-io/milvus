@@ -98,6 +98,8 @@ func (c *Client) getDataCoordAddr() (string, error) {
 		log.Warn("DataCoordClient, not existed in msess ", zap.Any("key", key), zap.Any("len of msess", len(msess)))
 		return "", fmt.Errorf("find no available datacoord, check datacoord state")
 	}
+
+	c.grpcClient.SetNodeID(ms.ServerID)
 	return ms.Address, nil
 }
 

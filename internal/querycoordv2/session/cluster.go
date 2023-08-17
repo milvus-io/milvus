@@ -265,8 +265,8 @@ func (c *clients) getOrCreate(ctx context.Context, node *NodeInfo) (*grpcqueryno
 	return c.create(node)
 }
 
-func createNewClient(ctx context.Context, addr string) (*grpcquerynodeclient.Client, error) {
-	newCli, err := grpcquerynodeclient.NewClient(ctx, addr)
+func createNewClient(ctx context.Context, addr string, nodeID int64) (*grpcquerynodeclient.Client, error) {
+	newCli, err := grpcquerynodeclient.NewClient(ctx, addr, nodeID)
 	if err != nil {
 		return nil, err
 	}
@@ -285,7 +285,7 @@ func (c *clients) create(node *NodeInfo) (*grpcquerynodeclient.Client, error) {
 	if cli, ok := c.clients[node.ID()]; ok {
 		return cli, nil
 	}
-	cli, err := createNewClient(context.Background(), node.Addr())
+	cli, err := createNewClient(context.Background(), node.Addr(), node.ID())
 	if err != nil {
 		return nil, err
 	}
