@@ -1419,21 +1419,33 @@ TEST(Expr, TestMultiLogicalExprsOptimization) {
         return std::make_shared<query::LogicalBinaryExpr>(
             LogicalBinaryExpr::OpType::LogicalAnd, child1_expr, child2_expr);
     };
-    auto start = std::chrono::steady_clock::now();
     auto expr = build_expr_with_optim();
-    auto final = visitor.call_child(*expr);
-    auto cost_op = std::chrono::duration_cast<std::chrono::microseconds>(
-                       std::chrono::steady_clock::now() - start)
-                       .count();
-    std::cout << "cost: " << cost_op << "us" << std::endl;
-    start = std::chrono::steady_clock::now();
+    auto cost_op = 0;
+    for (int i = 0; i < 10; ++i) {
+        auto start = std::chrono::steady_clock::now();
+        auto final = visitor.call_child(*expr);
+        auto cost = std::chrono::duration_cast<std::chrono::microseconds>(
+                        std::chrono::steady_clock::now() - start)
+                        .count();
+        std::cout << "cost: " << cost << "us" << std::endl;
+        cost_op += cost;
+    }
+    cost_op = cost_op / 10.0;
+    std::cout << cost_op << std::endl;
     expr = build_expr();
-    final = visitor.call_child(*expr);
-    auto cost = std::chrono::duration_cast<std::chrono::microseconds>(
-                    std::chrono::steady_clock::now() - start)
-                    .count();
-    std::cout << "cost: " << cost << "us" << std::endl;
-    ASSERT_LT(cost_op, cost);
+    auto cost_no_op = 0;
+    for (int i = 0; i < 10; ++i) {
+        auto start = std::chrono::steady_clock::now();
+        auto final = visitor.call_child(*expr);
+        auto cost = std::chrono::duration_cast<std::chrono::microseconds>(
+                        std::chrono::steady_clock::now() - start)
+                        .count();
+        std::cout << "cost: " << cost << "us" << std::endl;
+        cost_no_op += cost;
+    }
+    cost_no_op = cost_no_op / 10.0;
+    std::cout << cost_no_op << std::endl;
+    ASSERT_LT(cost_op, cost_no_op);
 }
 
 TEST(Expr, TestExprs) {
@@ -3431,7 +3443,7 @@ TEST(Expr, PraseJsonContainsExpr) {
         >)",
     };
 
-    for(auto& raw_plan : raw_plans) {
+    for (auto& raw_plan : raw_plans) {
         auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
         auto schema = std::make_shared<Schema>();
         schema->AddDebugField(
@@ -3672,8 +3684,9 @@ TEST(Expr, TestJsonContainsAll) {
 
     for (auto testcase : bool_testcases) {
         auto check = [&](const std::vector<bool>& values) {
-            for(auto const& e : testcase.term) {
-                if (std::find(values.begin(), values.end(), e) == values.end()) {
+            for (auto const& e : testcase.term) {
+                if (std::find(values.begin(), values.end(), e) ==
+                    values.end()) {
                     return false;
                 }
             }
@@ -3719,8 +3732,9 @@ TEST(Expr, TestJsonContainsAll) {
 
     for (auto testcase : double_testcases) {
         auto check = [&](const std::vector<double>& values) {
-            for(auto const& e : testcase.term) {
-                if (std::find(values.begin(), values.end(), e) == values.end()) {
+            for (auto const& e : testcase.term) {
+                if (std::find(values.begin(), values.end(), e) ==
+                    values.end()) {
                     return false;
                 }
             }
@@ -3766,8 +3780,9 @@ TEST(Expr, TestJsonContainsAll) {
 
     for (auto testcase : testcases) {
         auto check = [&](const std::vector<int64_t>& values) {
-            for(auto const& e : testcase.term) {
-                if (std::find(values.begin(), values.end(), e) == values.end()) {
+            for (auto const& e : testcase.term) {
+                if (std::find(values.begin(), values.end(), e) ==
+                    values.end()) {
                     return false;
                 }
             }
@@ -3811,8 +3826,9 @@ TEST(Expr, TestJsonContainsAll) {
 
     for (auto testcase : testcases_string) {
         auto check = [&](const std::vector<std::string_view>& values) {
-            for(auto const& e : testcase.term) {
-                if (std::find(values.begin(), values.end(), e) == values.end()) {
+            for (auto const& e : testcase.term) {
+                if (std::find(values.begin(), values.end(), e) ==
+                    values.end()) {
                     return false;
                 }
             }
@@ -3847,7 +3863,6 @@ TEST(Expr, TestJsonContainsAll) {
         }
     }
 }
-
 
 TEST(Expr, TestJsonContainsArray) {
     using namespace milvus;
@@ -3888,15 +3903,15 @@ TEST(Expr, TestJsonContainsArray) {
             proto::plan::GenericValue int_val;
             int_val.set_int64_val(int64_t(i));
             a.add_array()->CopyFrom(int_val);
-        }else if ((i-1) % 4 == 0 ) {
+        } else if ((i - 1) % 4 == 0) {
             proto::plan::GenericValue bool_val;
             bool_val.set_bool_val(bool(i));
             a.add_array()->CopyFrom(bool_val);
-        }else if ((i-2) % 4 == 0 ) {
+        } else if ((i - 2) % 4 == 0) {
             proto::plan::GenericValue float_val;
             float_val.set_float_val(double(i));
             a.add_array()->CopyFrom(float_val);
-        }else if ((i-3) % 4 == 0 ) {
+        } else if ((i - 3) % 4 == 0) {
             proto::plan::GenericValue string_val;
             string_val.set_string_val(std::to_string(i));
             a.add_array()->CopyFrom(string_val);
@@ -3916,25 +3931,25 @@ TEST(Expr, TestJsonContainsArray) {
     int_val3.set_int64_val(int64_t(3));
     b.add_array()->CopyFrom(int_val3);
 
-
     std::vector<Testcase<proto::plan::Array>> diff_testcases{{{a}, {"string"}},
                                                              {{b}, {"array"}}};
 
-    for (auto &testcase : diff_testcases) {
+    for (auto& testcase : diff_testcases) {
         auto check = [&](const std::vector<bool>& values, int i) {
-            if (testcase.nested_path[0] == "array" && (i == 1 || i == N+1)) {
+            if (testcase.nested_path[0] == "array" && (i == 1 || i == N + 1)) {
                 return true;
             }
             return false;
         };
         RetrievePlanNode plan;
         auto pointer = milvus::Json::pointer(testcase.nested_path);
-        plan.predicate_ = std::make_unique<JsonContainsExprImpl<proto::plan::Array>>(
-            ColumnInfo(json_fid, DataType::JSON, testcase.nested_path),
-            testcase.term,
-            true,
-            proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
-            proto::plan::GenericValue::ValCase::kArrayVal);
+        plan.predicate_ =
+            std::make_unique<JsonContainsExprImpl<proto::plan::Array>>(
+                ColumnInfo(json_fid, DataType::JSON, testcase.nested_path),
+                testcase.term,
+                true,
+                proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+                proto::plan::GenericValue::ValCase::kArrayVal);
         auto start = std::chrono::steady_clock::now();
         auto final = visitor.call_child(*plan.predicate_.value());
         std::cout << "cost"
@@ -3951,21 +3966,22 @@ TEST(Expr, TestJsonContainsArray) {
         }
     }
 
-    for (auto &testcase : diff_testcases) {
+    for (auto& testcase : diff_testcases) {
         auto check = [&](const std::vector<bool>& values, int i) {
-            if (testcase.nested_path[0] == "array" && (i == 1 || i == N+1)) {
+            if (testcase.nested_path[0] == "array" && (i == 1 || i == N + 1)) {
                 return true;
             }
             return false;
         };
         RetrievePlanNode plan;
         auto pointer = milvus::Json::pointer(testcase.nested_path);
-        plan.predicate_ = std::make_unique<JsonContainsExprImpl<proto::plan::Array>>(
-            ColumnInfo(json_fid, DataType::JSON, testcase.nested_path),
-            testcase.term,
-            true,
-            proto::plan::JSONContainsExpr_JSONOp_ContainsAll,
-            proto::plan::GenericValue::ValCase::kArrayVal);
+        plan.predicate_ =
+            std::make_unique<JsonContainsExprImpl<proto::plan::Array>>(
+                ColumnInfo(json_fid, DataType::JSON, testcase.nested_path),
+                testcase.term,
+                true,
+                proto::plan::JSONContainsExpr_JSONOp_ContainsAll,
+                proto::plan::GenericValue::ValCase::kArrayVal);
         auto start = std::chrono::steady_clock::now();
         auto final = visitor.call_child(*plan.predicate_.value());
         std::cout << "cost"
@@ -3974,7 +3990,7 @@ TEST(Expr, TestJsonContainsArray) {
                          .count()
                   << std::endl;
         EXPECT_EQ(final.size(), N * num_iters);
-        
+
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
             std::vector<bool> res;
@@ -4029,24 +4045,27 @@ TEST(Expr, TestJsonContainsDiffType) {
     proto::plan::GenericValue string_val;
     string_val.set_string_val("10dsf");
     a->add_array()->CopyFrom(string_val);
-//    a->set_same_type(false);
-//    v.set_allocated_array_val(a);
+    //    a->set_same_type(false);
+    //    v.set_allocated_array_val(a);
 
-    std::vector<Testcase<proto::plan::GenericValue>> diff_testcases{{{v}, {"string"}}};
+    std::vector<Testcase<proto::plan::GenericValue>> diff_testcases{
+        {{v}, {"string"}}};
 
-    for (auto &testcase : diff_testcases) {
+    for (auto& testcase : diff_testcases) {
         auto check = [&](const std::vector<std::string_view>& values) {
-            return std::find(values.begin(), values.end(), std::string_view("10dsf")) !=
-                   values.end();
+            return std::find(values.begin(),
+                             values.end(),
+                             std::string_view("10dsf")) != values.end();
         };
         RetrievePlanNode plan;
         auto pointer = milvus::Json::pointer(testcase.nested_path);
-        plan.predicate_ = std::make_unique<JsonContainsExprImpl<proto::plan::GenericValue>>(
-            ColumnInfo(json_fid, DataType::JSON, testcase.nested_path),
-            testcase.term,
-            false,
-            proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
-            proto::plan::GenericValue::ValCase::VAL_NOT_SET);
+        plan.predicate_ =
+            std::make_unique<JsonContainsExprImpl<proto::plan::GenericValue>>(
+                ColumnInfo(json_fid, DataType::JSON, testcase.nested_path),
+                testcase.term,
+                false,
+                proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+                proto::plan::GenericValue::ValCase::VAL_NOT_SET);
         auto start = std::chrono::steady_clock::now();
         auto final = visitor.call_child(*plan.predicate_.value());
         std::cout << "cost"
@@ -4069,18 +4088,19 @@ TEST(Expr, TestJsonContainsDiffType) {
         }
     }
 
-    for (auto &testcase : diff_testcases) {
+    for (auto& testcase : diff_testcases) {
         auto check = [&](const std::vector<std::string_view>& values) {
             return false;
         };
         RetrievePlanNode plan;
         auto pointer = milvus::Json::pointer(testcase.nested_path);
-        plan.predicate_ = std::make_unique<JsonContainsExprImpl<proto::plan::GenericValue>>(
-            ColumnInfo(json_fid, DataType::JSON, testcase.nested_path),
-            testcase.term,
-            false,
-            proto::plan::JSONContainsExpr_JSONOp_ContainsAll,
-            proto::plan::GenericValue::ValCase::VAL_NOT_SET);
+        plan.predicate_ =
+            std::make_unique<JsonContainsExprImpl<proto::plan::GenericValue>>(
+                ColumnInfo(json_fid, DataType::JSON, testcase.nested_path),
+                testcase.term,
+                false,
+                proto::plan::JSONContainsExpr_JSONOp_ContainsAll,
+                proto::plan::GenericValue::ValCase::VAL_NOT_SET);
         auto start = std::chrono::steady_clock::now();
         auto final = visitor.call_child(*plan.predicate_.value());
         std::cout << "cost"
@@ -4103,4 +4123,3 @@ TEST(Expr, TestJsonContainsDiffType) {
         }
     }
 }
-
