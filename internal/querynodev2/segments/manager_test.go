@@ -71,6 +71,12 @@ func (s *ManagerSuite) TestGetBy() {
 		segments := s.mgr.GetBy(WithType(typ))
 		s.Contains(segments, s.segments[i])
 	}
+	s.mgr.Clear()
+
+	for _, typ := range s.types {
+		segments := s.mgr.GetBy(WithType(typ))
+		s.Len(segments, 0)
+	}
 }
 
 func (s *ManagerSuite) TestRemoveGrowing() {
