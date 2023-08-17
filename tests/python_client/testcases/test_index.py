@@ -1880,6 +1880,7 @@ class TestIndexDiskann(TestcaseBase):
         for t in threads:
             t.join()
 
+    @pytest.mark.skip(reason = "diskann dim range is set to be [1, 32768)")
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("dim", [1, 2, 4, 6])
     def test_create_index_with_small_dim(self, dim):
