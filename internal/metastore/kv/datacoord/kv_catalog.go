@@ -618,8 +618,19 @@ func (kc *Catalog) AlterIndexes(ctx context.Context, indexes []*model.Index) err
 		}
 
 		kvs[key] = string(value)
+		// TODO when we have better txn kv we should make this as a transaction
+		if len(kvs) >= 64 {
+			err = kc.MetaKv.MultiSave(kvs)
+			if err != nil {
+				return err
+			}
+			kvs = make(map[string]string)
+		}
 	}
-	return kc.MetaKv.MultiSave(kvs)
+	if len(kvs) != 0 {
+		return kc.MetaKv.MultiSave(kvs)
+	}
+	return nil
 }
 
 func (kc *Catalog) DropIndex(ctx context.Context, collID typeutil.UniqueID, dropIdxID typeutil.UniqueID) error {
