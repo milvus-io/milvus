@@ -904,7 +904,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 	p.HealthCheckTimetout = ParamItem{
 		Key:          "proxy.healthCheckTimetout",
 		Version:      "2.3.0",
-		DefaultValue: "1000",
+		DefaultValue: "3000",
 		PanicIfEmpty: true,
 		Doc:          "ms, the interval that to do component healthy check",
 		Export:       true,
