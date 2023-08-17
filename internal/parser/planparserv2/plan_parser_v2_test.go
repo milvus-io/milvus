@@ -1935,3 +1935,70 @@ func Test_InvalidJSONContainsAny(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, plan)
 }
+
+func Test_UnsupportedExpr(t *testing.T) {
+	schema := newTestSchema()
+	expr := ""
+	var err error
+	var plan *planpb.PlanNode
+
+	expr = `A == [1, 2, 3]`
+	plan, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.Error(t, err)
+	assert.Nil(t, plan)
+
+	expr = `Int64Field == [1, 2, 3]`
+	plan, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.Error(t, err)
+	assert.Nil(t, plan)
+
+	expr = `Int64Field > [1, 2, 3]`
+	plan, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.Error(t, err)
+	assert.Nil(t, plan)
+
+	expr = `Int64Field + [1, 2, 3] == 10`
+	plan, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.Error(t, err)
+	assert.Nil(t, plan)
+
+	expr = `Int64Field % [1, 2, 3] == 10`
+	plan, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.Error(t, err)
+	assert.Nil(t, plan)
+
+	expr = `[1, 2, 3] < Int64Field < [4, 5, 6]`
+	plan, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.Error(t, err)
+	assert.Nil(t, plan)
+}

@@ -190,6 +190,10 @@ func (v *ParserVisitor) VisitAddSub(ctx *parser.AddSubContext) interface{} {
 		return fmt.Errorf("invalid arithmetic expression, left: %s, op: %s, right: %s", ctx.Expr(0).GetText(), ctx.GetOp(), ctx.Expr(1).GetText())
 	}
 
+	if typeutil.IsArrayType(leftExpr.dataType) || typeutil.IsArrayType(rightExpr.dataType) {
+		return fmt.Errorf("invalid expression, array is not supported for AddSub")
+	}
+
 	if (!typeutil.IsArithmetic(leftExpr.dataType) && !typeutil.IsJSONType(leftExpr.dataType)) ||
 		(!typeutil.IsArithmetic(rightExpr.dataType) && !typeutil.IsJSONType(rightExpr.dataType)) {
 		return fmt.Errorf("'%s' can only be used between integer or floating or json field expressions", arithNameMap[ctx.GetOp().GetTokenType()])
@@ -268,6 +272,10 @@ func (v *ParserVisitor) VisitMulDivMod(ctx *parser.MulDivModContext) interface{}
 		return fmt.Errorf("invalid arithmetic expression, left: %s, op: %s, right: %s", ctx.Expr(0).GetText(), ctx.GetOp(), ctx.Expr(1).GetText())
 	}
 
+	if typeutil.IsArrayType(leftExpr.dataType) || typeutil.IsArrayType(rightExpr.dataType) {
+		return fmt.Errorf("invalid expression, array is not supported for MulDivMod")
+	}
+
 	if (!typeutil.IsArithmetic(leftExpr.dataType) && !typeutil.IsJSONType(leftExpr.dataType)) ||
 		(!typeutil.IsArithmetic(rightExpr.dataType) && !typeutil.IsJSONType(rightExpr.dataType)) {
 		return fmt.Errorf("'%s' can only be used between integer or floating expressions", arithNameMap[ctx.GetOp().GetTokenType()])
@@ -338,6 +346,10 @@ func (v *ParserVisitor) VisitEquality(ctx *parser.EqualityContext) interface{} {
 		rightExpr = getExpr(right)
 	}
 
+	if typeutil.IsArrayType(leftExpr.dataType) || typeutil.IsArrayType(rightExpr.dataType) {
+		return fmt.Errorf("invalid expression, array is not supported for Equality")
+	}
+
 	expr, err := HandleCompare(ctx.GetOp().GetTokenType(), leftExpr, rightExpr)
 	if err != nil {
 		return err
@@ -389,6 +401,10 @@ func (v *ParserVisitor) VisitRelational(ctx *parser.RelationalContext) interface
 		rightExpr = toValueExpr(rightValue)
 	} else {
 		rightExpr = getExpr(right)
+	}
+
+	if typeutil.IsArrayType(leftExpr.dataType) || typeutil.IsArrayType(rightExpr.dataType) {
+		return fmt.Errorf("invalid expression, array is not supported for Relational")
 	}
 
 	expr, err := HandleCompare(ctx.GetOp().GetTokenType(), leftExpr, rightExpr)
