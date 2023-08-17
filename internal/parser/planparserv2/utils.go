@@ -108,6 +108,11 @@ func toValueExpr(n *planpb.GenericValue) *ExprWithType {
 			expr:     expr,
 			dataType: schemapb.DataType_VarChar,
 		}
+	case *planpb.GenericValue_ArrayVal:
+		return &ExprWithType{
+			expr:     expr,
+			dataType: schemapb.DataType_Array,
+		}
 	default:
 		return nil
 	}
