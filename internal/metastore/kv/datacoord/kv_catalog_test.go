@@ -854,6 +854,41 @@ func TestCatalog_AlterIndexes(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestCatalog_AlterSegmentMultiIndexes(t *testing.T) {
+	segIdx := make([]*model.Index, 100)
+	for i := 0; i < 100; i++ {
+		segIdx[i] = &model.Index{
+			CollectionID: 0,
+			FieldID:      0,
+			IndexID:      int64(i),
+			IndexName:    "",
+			IsDeleted:    false,
+			CreateTime:   0,
+			TypeParams:   nil,
+			IndexParams:  nil,
+		}
+	}
+
+	t.Run("batchAdd", func(t *testing.T) {
+		metakv := mocks.NewMetaKv(t)
+
+		metakv.EXPECT().MultiSave(mock.Anything).RunAndReturn(func(m map[string]string) error {
+			if len(m) > 64 {
+				return errors.New("fail")
+			}
+			return nil
+		})
+
+		metakv.EXPECT().MultiSave(mock.Anything).Return(nil)
+		catalog := &Catalog{
+			MetaKv: metakv,
+		}
+		err := catalog.AlterIndexes(context.Background(), segIdx)
+		fmt.Println(err)
+		assert.NoError(t, err)
+	})
+}
+
 func TestCatalog_DropIndex(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		metakv := mocks.NewMetaKv(t)
