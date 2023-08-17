@@ -19,9 +19,9 @@ package metrics
 import (
 	"fmt"
 
-	"github.com/prometheus/client_golang/prometheus"
-
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 const (
@@ -74,8 +74,11 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
 			Name:      "stored_rows_num",
-			Help:      "number of stored rows",
-		}, []string{})
+			Help:      "number of stored rows of healthy segment",
+		}, []string{
+			collectionIDLabelName,
+			segmentStateLabelName,
+		})
 
 	DataCoordNumStoredRowsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -247,4 +250,13 @@ func CleanupDataCoordSegmentMetrics(collectionID int64, segmentID int64) {
 		collectionIDLabelName: fmt.Sprint(collectionID),
 		segmentIDLabelName:    fmt.Sprint(segmentID),
 	})
+}
+
+func CleanupDataCoordNumStoredRows(collectionID int64) {
+	for _, state := range commonpb.SegmentState_name {
+		DataCoordNumStoredRows.Delete(prometheus.Labels{
+			collectionIDLabelName: fmt.Sprint(collectionID),
+			segmentStateLabelName: fmt.Sprint(state),
+		})
+	}
 }

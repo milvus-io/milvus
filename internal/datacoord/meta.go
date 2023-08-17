@@ -111,7 +111,6 @@ func (m *meta) reloadFromKV() error {
 	metrics.DataCoordNumSegments.WithLabelValues(metrics.FlushedSegmentLabel).Set(0)
 	metrics.DataCoordNumSegments.WithLabelValues(metrics.FlushingSegmentLabel).Set(0)
 	metrics.DataCoordNumSegments.WithLabelValues(metrics.DroppedSegmentLabel).Set(0)
-	metrics.DataCoordNumStoredRows.WithLabelValues().Set(0)
 	numStoredRows := int64(0)
 	for _, segment := range segments {
 		m.segments.SetSegment(segment.ID, NewSegmentInfo(segment))
@@ -138,7 +137,6 @@ func (m *meta) reloadFromKV() error {
 			metrics.FlushedSegmentFileNum.WithLabelValues(metrics.DeleteFileLabel).Observe(float64(deleteFileNum))
 		}
 	}
-	metrics.DataCoordNumStoredRows.WithLabelValues().Set(float64(numStoredRows))
 	metrics.DataCoordNumStoredRowsCounter.WithLabelValues().Add(float64(numStoredRows))
 
 	channelCPs, err := m.catalog.ListChannelCheckpoint(m.ctx)
@@ -274,6 +272,7 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64) {
 	m.RLock()
 	defer m.RUnlock()
 	collectionBinlogSize := make(map[UniqueID]int64)
+	collectionRowsNum := make(map[UniqueID]map[commonpb.SegmentState]int64)
 	segments := m.segments.GetSegments()
 	var total int64
 	for _, segment := range segments {
@@ -283,6 +282,15 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64) {
 			collectionBinlogSize[segment.GetCollectionID()] += segmentSize
 			metrics.DataCoordStoredBinlogSize.WithLabelValues(
 				fmt.Sprint(segment.GetCollectionID()), fmt.Sprint(segment.GetID())).Set(float64(segmentSize))
+			if _, ok := collectionRowsNum[segment.GetCollectionID()]; !ok {
+				collectionRowsNum[segment.GetCollectionID()] = make(map[commonpb.SegmentState]int64)
+			}
+			collectionRowsNum[segment.GetCollectionID()][segment.GetState()] += segment.GetNumOfRows()
+		}
+	}
+	for collection, statesRows := range collectionRowsNum {
+		for state, rows := range statesRows {
+			metrics.DataCoordNumStoredRows.WithLabelValues(fmt.Sprint(collection), state.String()).Set(float64(rows))
 		}
 	}
 	return total, collectionBinlogSize
@@ -1316,7 +1324,6 @@ func (s *segMetricMutation) commit() {
 	for state, change := range s.stateChange {
 		metrics.DataCoordNumSegments.WithLabelValues(state).Add(float64(change))
 	}
-	metrics.DataCoordNumStoredRows.WithLabelValues().Add(float64(s.rowCountChange))
 	metrics.DataCoordNumStoredRowsCounter.WithLabelValues().Add(float64(s.rowCountAccChange))
 }
 
