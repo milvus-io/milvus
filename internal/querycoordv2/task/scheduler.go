@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	. "github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/samber/lo"
 )
 
 const (
@@ -320,11 +321,18 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 
 			return ErrConflictTaskExisted
 		}
-		if GetTaskType(task) == TaskTypeGrow {
+
+		taskType := GetTaskType(task)
+		if taskType == TaskTypeGrow {
 			nodesWithSegment := scheduler.distMgr.LeaderViewManager.GetSealedSegmentDist(task.SegmentID())
 			replicaNodeMap := utils.GroupNodesByReplica(scheduler.meta.ReplicaManager, task.CollectionID(), nodesWithSegment)
 			if _, ok := replicaNodeMap[task.ReplicaID()]; ok {
 				return ErrTaskAlreadyDone
+			}
+		} else if taskType == TaskTypeMove {
+			leaderSegmentDist := scheduler.distMgr.LeaderViewManager.GetSealedSegmentDist(task.SegmentID())
+			if !lo.Contains(leaderSegmentDist, task.Actions()[1].Node()) {
+				return ErrTaskStale
 			}
 		}
 
@@ -347,11 +355,17 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 			return ErrConflictTaskExisted
 		}
 
-		if GetTaskType(task) == TaskTypeGrow {
+		taskType := GetTaskType(task)
+		if taskType == TaskTypeGrow {
 			nodesWithChannel := scheduler.distMgr.LeaderViewManager.GetChannelDist(task.Channel())
 			replicaNodeMap := utils.GroupNodesByReplica(scheduler.meta.ReplicaManager, task.CollectionID(), nodesWithChannel)
 			if _, ok := replicaNodeMap[task.ReplicaID()]; ok {
 				return ErrTaskAlreadyDone
+			}
+		} else if taskType == TaskTypeMove {
+			channelDist := scheduler.distMgr.LeaderViewManager.GetChannelDist(task.Channel())
+			if !lo.Contains(channelDist, task.Actions()[1].Node()) {
+				return ErrTaskStale
 			}
 		}
 
@@ -821,8 +835,7 @@ func (scheduler *taskScheduler) checkSegmentTaskStale(task *SegmentTask) bool {
 			}
 
 		case ActionTypeReduce:
-			// Do nothing here,
-			// the task should succeed if the segment not exists
+			// do nothing here
 		}
 	}
 	return false
@@ -844,8 +857,7 @@ func (scheduler *taskScheduler) checkChannelTaskStale(task *ChannelTask) bool {
 			}
 
 		case ActionTypeReduce:
-			// Do nothing here,
-			// the task should succeed if the channel not exists
+			// do nothing here
 		}
 	}
 	return false

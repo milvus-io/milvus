@@ -159,6 +159,7 @@ func (suite *TaskSuite) BeforeTest(suiteName, testName string) {
 		"TestSegmentTaskStale",
 		"TestTaskCanceled",
 		"TestMoveSegmentTask",
+		"TestMoveSegmentTaskStale",
 		"TestSubmitDuplicateLoadSegmentTask",
 		"TestSubmitDuplicateSubscribeChannelTask",
 		"TestNoExecutor":
@@ -783,13 +784,16 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 		)
 		suite.NoError(err)
 		tasks = append(tasks, task)
-		err = suite.scheduler.Add(task)
-		suite.NoError(err)
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection, int64(1)).Return(nil, segmentInfos, nil)
 	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, int64(1))
 	suite.dist.SegmentDistManager.Update(sourceNode, segments...)
 	suite.dist.LeaderViewManager.Update(leader, view)
+	for _, task := range tasks {
+		err := suite.scheduler.Add(task)
+		suite.NoError(err)
+	}
+
 	segmentsNum := len(suite.moveSegments)
 	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
 
@@ -817,6 +821,53 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 		suite.Equal(TaskStatusSucceeded, task.Status())
 		suite.NoError(task.Err())
 	}
+}
+
+func (suite *TaskSuite) TestMoveSegmentTaskStale() {
+	ctx := context.Background()
+	timeout := 10 * time.Second
+	leader := int64(1)
+	sourceNode := int64(2)
+	targetNode := int64(3)
+	channel := &datapb.VchannelInfo{
+		CollectionID: suite.collection,
+		ChannelName:  Params.CommonCfg.RootCoordDml + "-test",
+	}
+
+	vchannel := &datapb.VchannelInfo{
+		CollectionID: suite.collection,
+		ChannelName:  channel.ChannelName,
+	}
+	suite.dist.ChannelDistManager.Update(leader, meta.DmChannelFromVChannel(vchannel))
+	tasks := []Task{}
+	segmentInfos := make([]*datapb.SegmentInfo, 0)
+	for _, segment := range suite.moveSegments {
+		segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
+			ID:            segment,
+			PartitionID:   1,
+			InsertChannel: channel.ChannelName,
+		})
+
+		task, err := NewSegmentTask(
+			ctx,
+			timeout,
+			0,
+			suite.collection,
+			suite.replica,
+			NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segment),
+			NewSegmentAction(sourceNode, ActionTypeReduce, channel.GetChannelName(), segment),
+		)
+		suite.NoError(err)
+		tasks = append(tasks, task)
+	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return([]*datapb.VchannelInfo{vchannel}, segmentInfos, nil)
+	suite.target.UpdateCollectionNextTarget(suite.collection)
+	suite.target.UpdateCollectionCurrentTarget(suite.collection)
+	for _, task := range tasks {
+		err := suite.scheduler.Add(task)
+		suite.Error(err)
+	}
+	suite.AssertTaskNum(0, 0, 0, 0)
 }
 
 func (suite *TaskSuite) TestTaskCanceled() {
