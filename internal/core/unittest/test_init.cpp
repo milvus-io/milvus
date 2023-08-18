@@ -29,11 +29,11 @@ TEST(Init, Naive) {
 TEST(Init, KnowhereThreadPoolInit) {
 #ifdef BUILD_DISK_ANN
     try {
-        milvus::config::KnowhereInitThreadPool(0);
+        milvus::config::KnowhereInitSearchThreadPool(0);
     } catch (std::exception& e) {
         ASSERT_TRUE(std::string(e.what()).find(
                         "Failed to set aio context pool") != std::string::npos);
     }
 #endif
-    milvus::config::KnowhereInitThreadPool(8);
+    milvus::config::KnowhereInitSearchThreadPool(8);
 }

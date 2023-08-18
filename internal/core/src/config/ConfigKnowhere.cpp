@@ -72,8 +72,13 @@ KnowhereSetSimdType(const char* value) {
 }
 
 void
-KnowhereInitThreadPool(const uint32_t num_threads) {
-    knowhere::ThreadPool::InitGlobalThreadPool(num_threads);
+KnowhereInitBuildThreadPool(const uint32_t num_threads) {
+    knowhere::ThreadPool::InitGlobalBuildThreadPool(num_threads);
+}
+
+void
+KnowhereInitSearchThreadPool(const uint32_t num_threads) {
+    knowhere::ThreadPool::InitGlobalSearchThreadPool(num_threads);
     if (!knowhere::KnowhereConfig::SetAioContextPool(num_threads)) {
         PanicInfo("Failed to set aio context pool with num_threads " +
                   std::to_string(num_threads));

@@ -186,7 +186,7 @@ func (node *QueryNode) InitSegcore() error {
 	C.SegcoreSetChunkRows(cChunkRows)
 
 	cKnowhereThreadPoolSize := C.uint32_t(paramtable.Get().QueryNodeCfg.KnowhereThreadPoolSize.GetAsUint32())
-	C.SegcoreSetKnowhereThreadPoolNum(cKnowhereThreadPoolSize)
+	C.SegcoreSetKnowhereSearchThreadPoolNum(cKnowhereThreadPoolSize)
 
 	enableGrowingIndex := C.bool(paramtable.Get().QueryNodeCfg.EnableGrowingSegmentIndex.GetAsBool())
 	C.SegcoreSetEnableGrowingSegmentIndex(enableGrowingIndex)
