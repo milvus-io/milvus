@@ -579,6 +579,7 @@ func (t *searchTask) Requery() error {
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_Retrieve,
 		},
+		DbName:             t.request.DbName,
 		CollectionName:     t.request.GetCollectionName(),
 		Expr:               expr,
 		OutputFields:       t.request.GetOutputFields(),
