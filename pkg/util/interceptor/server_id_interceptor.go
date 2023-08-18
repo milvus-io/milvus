@@ -25,14 +25,15 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 const ServerIDKey = "ServerID"
 
+type GetServerIDFunc func() int64
+
 // ServerIDValidationUnaryServerInterceptor returns a new unary server interceptor that
 // verifies whether the target server ID of request matches with the server's ID and rejects it accordingly.
-func ServerIDValidationUnaryServerInterceptor() grpc.UnaryServerInterceptor {
+func ServerIDValidationUnaryServerInterceptor(fn GetServerIDFunc) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		md, ok := metadata.FromIncomingContext(ctx)
 		if !ok {
@@ -46,8 +47,9 @@ func ServerIDValidationUnaryServerInterceptor() grpc.UnaryServerInterceptor {
 		if err != nil {
 			return handler(ctx, req)
 		}
-		if serverID != paramtable.GetNodeID() {
-			return nil, merr.WrapErrServerIDMismatch(serverID, paramtable.GetNodeID())
+		actualServerID := fn()
+		if serverID != actualServerID {
+			return nil, merr.WrapErrServerIDMismatch(serverID, actualServerID)
 		}
 		return handler(ctx, req)
 	}
@@ -55,7 +57,7 @@ func ServerIDValidationUnaryServerInterceptor() grpc.UnaryServerInterceptor {
 
 // ServerIDValidationStreamServerInterceptor returns a new streaming server interceptor that
 // verifies whether the target server ID of request matches with the server's ID and rejects it accordingly.
-func ServerIDValidationStreamServerInterceptor() grpc.StreamServerInterceptor {
+func ServerIDValidationStreamServerInterceptor(fn GetServerIDFunc) grpc.StreamServerInterceptor {
 	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		md, ok := metadata.FromIncomingContext(ss.Context())
 		if !ok {
@@ -69,8 +71,9 @@ func ServerIDValidationStreamServerInterceptor() grpc.StreamServerInterceptor {
 		if err != nil {
 			return handler(srv, ss)
 		}
-		if serverID != paramtable.GetNodeID() {
-			return merr.WrapErrServerIDMismatch(serverID, paramtable.GetNodeID())
+		actualServerID := fn()
+		if serverID != actualServerID {
+			return merr.WrapErrServerIDMismatch(serverID, actualServerID)
 		}
 		return handler(srv, ss)
 	}
