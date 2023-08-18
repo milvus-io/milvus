@@ -106,8 +106,44 @@ test_worker(string s) {
     return 1;
 }
 
+int
+compute(int a) {
+    return a + 10;
+}
+
+TEST_F(DiskAnnFileManagerTest, TestThreadPoolBase) {
+    auto thread_pool = std::make_shared<milvus::ThreadPool>(10, "test1");
+    std::cout << "current thread num" << thread_pool->GetThreadNum()
+              << std::endl;
+    auto thread_num_1 = thread_pool->GetThreadNum();
+    EXPECT_GT(thread_num_1, 0);
+
+    auto fut = thread_pool->Submit(compute, 10);
+    auto res = fut.get();
+    EXPECT_EQ(res, 20);
+
+    std::vector<std::future<int>> futs;
+    for (int i = 0; i < 10; ++i) {
+        futs.push_back(thread_pool->Submit(compute, i));
+    }
+    std::cout << "current thread num" << thread_pool->GetThreadNum()
+              << std::endl;
+    auto thread_num_2 = thread_pool->GetThreadNum();
+    EXPECT_GT(thread_num_2, thread_num_1);
+
+    for (int i = 0; i < 10; ++i) {
+        std::cout << futs[i].get() << std::endl;
+    }
+
+    sleep(5);
+    std::cout << "current thread num" << thread_pool->GetThreadNum()
+              << std::endl;
+    auto thread_num_3 = thread_pool->GetThreadNum();
+    EXPECT_LT(thread_num_3, thread_num_2);
+}
+
 TEST_F(DiskAnnFileManagerTest, TestThreadPool) {
-    auto thread_pool = new milvus::ThreadPool(50, "test");
+    auto thread_pool = std::make_shared<milvus::ThreadPool>(50, "test");
     std::vector<std::future<int>> futures;
     auto start = chrono::system_clock::now();
     for (int i = 0; i < 100; i++) {
@@ -121,6 +157,7 @@ TEST_F(DiskAnnFileManagerTest, TestThreadPool) {
     auto duration = chrono::duration_cast<chrono::microseconds>(end - start);
     auto second = double(duration.count()) * chrono::microseconds::period::num /
                   chrono::microseconds::period::den;
+    std::cout << "cost time:" << second << std::endl;
     EXPECT_LT(second, 4 * 100);
 }
 
@@ -134,7 +171,7 @@ test_exception(string s) {
 
 TEST_F(DiskAnnFileManagerTest, TestThreadPoolException) {
     try {
-        auto thread_pool = new milvus::ThreadPool(50, "test");
+        auto thread_pool = std::make_shared<milvus::ThreadPool>(50, "test");
         std::vector<std::future<int>> futures;
         for (int i = 0; i < 100; i++) {
             futures.push_back(thread_pool->Submit(
