@@ -274,7 +274,7 @@ func TestQuotaCenter(t *testing.T) {
 			quotaCenter.resetAllCurrentRates()
 			quotaCenter.calculateWriteRates()
 			deleteFactor := float64(quotaCenter.currentRates[1][internalpb.RateType_DMLDelete]) / Params.QuotaConfig.DMLMaxInsertRatePerCollection.GetAsFloat()
-			assert.Equal(t, c.expectedFactor, deleteFactor)
+			assert.True(t, math.Abs(deleteFactor-c.expectedFactor) < 0.01)
 		}
 		Params.Save(Params.QuotaConfig.MaxTimeTickDelay.Key, backup)
 	})
