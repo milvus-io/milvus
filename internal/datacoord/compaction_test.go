@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -164,30 +165,34 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c := &compactionPlanHandler{
-				plans:      tt.fields.plans,
-				sessions:   tt.fields.sessions,
-				chManager:  tt.fields.chManager,
-				parallelCh: make(map[int64]chan struct{}),
-				allocator:  tt.fields.allocatorFactory(),
-			}
+			meta, err := newMemoryMeta()
+			require.NoError(t, err)
+			c := newCompactionPlanHandler(
+				tt.fields.sessions,
+				tt.fields.chManager,
+				meta,
+				tt.fields.allocatorFactory(),
+				make(chan UniqueID, 10),
+			)
 			Params.Save(Params.DataCoordCfg.CompactionCheckIntervalInSeconds.Key, "1")
 			c.start()
-			err := c.execCompactionPlan(tt.args.signal, tt.args.plan)
+			err = c.execCompactionPlan(tt.args.signal, tt.args.plan)
 			assert.Equal(t, tt.err, err)
 			if err == nil {
 				task := c.getCompaction(tt.args.plan.PlanID)
 				if !tt.wantErr {
 					assert.Equal(t, tt.args.plan, task.plan)
 					assert.Equal(t, tt.args.signal, task.triggerInfo)
-					assert.Equal(t, 1, c.executingTaskNum)
+					assert.Equal(t, int64(1), c.executingTaskNum.Load())
 				} else {
 
 					assert.Eventually(t,
 						func() bool {
-							c.mu.RLock()
-							defer c.mu.RUnlock()
-							return c.executingTaskNum == 0 && len(c.parallelCh[1]) == 0
+							c.plansGuard.RLock()
+							defer c.plansGuard.RUnlock()
+							ch, ok := c.parallelCh.Get(1)
+							assert.True(t, ok)
+							return c.executingTaskNum.Load() == int64(0) && len(ch) == 0
 						},
 						5*time.Second, 100*time.Millisecond)
 				}
@@ -202,9 +207,11 @@ func Test_compactionPlanHandler_execWithParallels(t *testing.T) {
 	mockDataNode := &mocks.MockDataNode{}
 	paramtable.Get().Save(Params.DataCoordCfg.CompactionCheckIntervalInSeconds.Key, "1")
 	defer paramtable.Get().Reset(Params.DataCoordCfg.CompactionCheckIntervalInSeconds.Key)
-	c := &compactionPlanHandler{
-		plans: map[int64]*compactionTask{},
-		sessions: &SessionManager{
+
+	meta, err := newMemoryMeta()
+	require.NoError(t, err)
+	c := newCompactionPlanHandler(
+		&SessionManager{
 			sessions: struct {
 				sync.RWMutex
 				data map[int64]*Session
@@ -214,23 +221,24 @@ func Test_compactionPlanHandler_execWithParallels(t *testing.T) {
 				},
 			},
 		},
-		chManager: &ChannelManager{
+		&ChannelManager{
 			store: &ChannelStore{
 				channelsInfo: map[int64]*NodeChannelInfo{
 					1: {NodeID: 1, Channels: []*channel{{Name: "ch1"}}},
 				},
 			},
 		},
-		parallelCh: make(map[int64]chan struct{}),
-		allocator:  newMockAllocator(),
-	}
+		meta,
+		newMockAllocator(),
+		make(chan UniqueID, 10),
+	)
 
 	signal := &compactionSignal{id: 100}
 	plan1 := &datapb.CompactionPlan{PlanID: 1, Channel: "ch1", Type: datapb.CompactionType_MergeCompaction}
 	plan2 := &datapb.CompactionPlan{PlanID: 2, Channel: "ch1", Type: datapb.CompactionType_MergeCompaction}
 	plan3 := &datapb.CompactionPlan{PlanID: 3, Channel: "ch1", Type: datapb.CompactionType_MergeCompaction}
 
-	c.parallelCh[1] = make(chan struct{}, 2)
+	c.parallelCh.Insert(1, make(chan struct{}, 2))
 
 	var mut sync.RWMutex
 	called := 0
@@ -247,9 +255,11 @@ func Test_compactionPlanHandler_execWithParallels(t *testing.T) {
 	}()
 
 	// wait for dispatch signal
-	<-c.parallelCh[1]
-	<-c.parallelCh[1]
-	<-c.parallelCh[1]
+	ch, ok := c.parallelCh.Get(1)
+	assert.True(t, ok)
+	for i := 0; i < 3; i++ {
+		<-ch
+	}
 
 	// wait for compaction called
 	assert.Eventually(t, func() bool {
@@ -285,7 +295,7 @@ func getDeltaLogPath(rootPath string, segmentID typeutil.UniqueID) string {
 	return metautil.BuildDeltaLogPath(rootPath, 10, 100, segmentID, 10000)
 }
 
-func TestCompactionPlanHandler_handleMergeCompactionResult(t *testing.T) {
+func Test_compactionPlanHandler_handleMergeCompactionResult(t *testing.T) {
 	mockDataNode := &mocks.MockDataNode{}
 	call := mockDataNode.EXPECT().SyncSegments(mock.Anything, mock.Anything).Run(func(ctx context.Context, req *datapb.SyncSegmentsRequest) {}).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
 
@@ -366,18 +376,37 @@ func TestCompactionPlanHandler_handleMergeCompactionResult(t *testing.T) {
 			},
 		},
 	}
+	c := newCompactionPlanHandler(
+		sessions,
+		&ChannelManager{
+			store: &ChannelStore{
+				channelsInfo: map[int64]*NodeChannelInfo{
+					1: {NodeID: 1, Channels: []*channel{{Name: "ch1"}}},
+				},
+			},
+		},
+		meta,
+		newMockAllocator(),
+		make(chan UniqueID, 10),
+	)
 
-	c := &compactionPlanHandler{
-		plans:    plans,
-		sessions: sessions,
-		meta:     meta,
-	}
+	c.plans = plans
 
-	c2 := &compactionPlanHandler{
-		plans:    plans,
-		sessions: sessions,
-		meta:     errMeta,
-	}
+	c2 := newCompactionPlanHandler(
+		sessions,
+		&ChannelManager{
+			store: &ChannelStore{
+				channelsInfo: map[int64]*NodeChannelInfo{
+					1: {NodeID: 1, Channels: []*channel{{Name: "ch1"}}},
+				},
+			},
+		},
+		errMeta,
+		newMockAllocator(),
+		make(chan UniqueID, 10),
+	)
+
+	c2.plans = plans
 
 	compactionResult := &datapb.CompactionResult{
 		PlanID:              1,
@@ -422,221 +451,6 @@ func TestCompactionPlanHandler_handleMergeCompactionResult(t *testing.T) {
 	call = mockDataNode.EXPECT().SyncSegments(mock.Anything, mock.Anything).Run(func(ctx context.Context, req *datapb.SyncSegmentsRequest) {}).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}, nil)
 	err = c.handleMergeCompactionResult(plan, compactionResult2)
 	assert.Error(t, err)
-}
-
-func TestCompactionPlanHandler_completeCompaction(t *testing.T) {
-	t.Run("test not exists compaction task", func(t *testing.T) {
-		c := &compactionPlanHandler{
-			plans: map[int64]*compactionTask{1: {}},
-		}
-		err := c.completeCompaction(&datapb.CompactionResult{PlanID: 2})
-		assert.Error(t, err)
-	})
-	t.Run("test completed compaction task", func(t *testing.T) {
-		c := &compactionPlanHandler{
-			plans: map[int64]*compactionTask{1: {state: completed}},
-		}
-		err := c.completeCompaction(&datapb.CompactionResult{PlanID: 1})
-		assert.Error(t, err)
-	})
-
-	t.Run("test complete merge compaction task", func(t *testing.T) {
-		mockDataNode := &mocks.MockDataNode{}
-		mockDataNode.EXPECT().SyncSegments(mock.Anything, mock.Anything).Run(func(ctx context.Context, req *datapb.SyncSegmentsRequest) {}).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
-
-		dataNodeID := UniqueID(111)
-
-		seg1 := &datapb.SegmentInfo{
-			ID:        1,
-			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(101, getInsertLogPath("log1", 1))},
-			Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getStatsLogPath("log2", 1))},
-			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log3", 1))},
-		}
-
-		seg2 := &datapb.SegmentInfo{
-			ID:        2,
-			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(101, getInsertLogPath("log4", 2))},
-			Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getStatsLogPath("log5", 2))},
-			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log6", 2))},
-		}
-
-		plan := &datapb.CompactionPlan{
-			PlanID: 1,
-			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-				{
-					SegmentID:           seg1.ID,
-					FieldBinlogs:        seg1.GetBinlogs(),
-					Field2StatslogPaths: seg1.GetStatslogs(),
-					Deltalogs:           seg1.GetDeltalogs(),
-				},
-				{
-					SegmentID:           seg2.ID,
-					FieldBinlogs:        seg2.GetBinlogs(),
-					Field2StatslogPaths: seg2.GetStatslogs(),
-					Deltalogs:           seg2.GetDeltalogs(),
-				},
-			},
-			Type: datapb.CompactionType_MergeCompaction,
-		}
-
-		sessions := &SessionManager{
-			sessions: struct {
-				sync.RWMutex
-				data map[int64]*Session
-			}{
-				data: map[int64]*Session{
-					dataNodeID: {client: mockDataNode}},
-			},
-		}
-
-		task := &compactionTask{
-			triggerInfo: &compactionSignal{id: 1},
-			state:       executing,
-			plan:        plan,
-			dataNodeID:  dataNodeID,
-		}
-
-		plans := map[int64]*compactionTask{1: task}
-
-		meta := &meta{
-			catalog: &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments: &SegmentsInfo{
-				map[int64]*SegmentInfo{
-					seg1.ID: {SegmentInfo: seg1},
-					seg2.ID: {SegmentInfo: seg2},
-				},
-			},
-		}
-		compactionResult := datapb.CompactionResult{
-			PlanID:              1,
-			SegmentID:           3,
-			NumOfRows:           15,
-			InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogPaths(101, getInsertLogPath("log301", 3))},
-			Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getStatsLogPath("log302", 3))},
-			Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log303", 3))},
-		}
-
-		flushCh := make(chan UniqueID, 1)
-		c := &compactionPlanHandler{
-			plans:    plans,
-			sessions: sessions,
-			meta:     meta,
-			flushCh:  flushCh,
-		}
-
-		err := c.completeCompaction(&compactionResult)
-
-		segID, ok := <-flushCh
-		assert.True(t, ok)
-		assert.Equal(t, compactionResult.GetSegmentID(), segID)
-		assert.NoError(t, err)
-	})
-
-	t.Run("test empty result merge compaction task", func(t *testing.T) {
-		mockDataNode := &mocks.MockDataNode{}
-		mockDataNode.EXPECT().SyncSegments(mock.Anything, mock.Anything).Run(func(ctx context.Context, req *datapb.SyncSegmentsRequest) {}).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
-
-		dataNodeID := UniqueID(111)
-
-		seg1 := &datapb.SegmentInfo{
-			ID:        1,
-			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(101, getInsertLogPath("log1", 1))},
-			Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getStatsLogPath("log2", 1))},
-			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log3", 1))},
-		}
-
-		seg2 := &datapb.SegmentInfo{
-			ID:        2,
-			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(101, getInsertLogPath("log4", 2))},
-			Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getStatsLogPath("log5", 2))},
-			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log6", 2))},
-		}
-
-		plan := &datapb.CompactionPlan{
-			PlanID: 1,
-			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-				{
-					SegmentID:           seg1.ID,
-					FieldBinlogs:        seg1.GetBinlogs(),
-					Field2StatslogPaths: seg1.GetStatslogs(),
-					Deltalogs:           seg1.GetDeltalogs(),
-				},
-				{
-					SegmentID:           seg2.ID,
-					FieldBinlogs:        seg2.GetBinlogs(),
-					Field2StatslogPaths: seg2.GetStatslogs(),
-					Deltalogs:           seg2.GetDeltalogs(),
-				},
-			},
-			Type: datapb.CompactionType_MergeCompaction,
-		}
-
-		sessions := &SessionManager{
-			sessions: struct {
-				sync.RWMutex
-				data map[int64]*Session
-			}{
-				data: map[int64]*Session{
-					dataNodeID: {client: mockDataNode}},
-			},
-		}
-
-		task := &compactionTask{
-			triggerInfo: &compactionSignal{id: 1},
-			state:       executing,
-			plan:        plan,
-			dataNodeID:  dataNodeID,
-		}
-
-		plans := map[int64]*compactionTask{1: task}
-
-		meta := &meta{
-			catalog: &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments: &SegmentsInfo{
-				map[int64]*SegmentInfo{
-					seg1.ID: {SegmentInfo: seg1},
-					seg2.ID: {SegmentInfo: seg2},
-				},
-			},
-		}
-
-		meta.AddSegment(NewSegmentInfo(seg1))
-		meta.AddSegment(NewSegmentInfo(seg2))
-
-		segments := meta.GetAllSegmentsUnsafe()
-		assert.Equal(t, len(segments), 2)
-		compactionResult := datapb.CompactionResult{
-			PlanID:              1,
-			SegmentID:           3,
-			NumOfRows:           0,
-			InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogPaths(101, getInsertLogPath("log301", 3))},
-			Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getStatsLogPath("log302", 3))},
-			Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log303", 3))},
-		}
-
-		flushCh := make(chan UniqueID, 1)
-		c := &compactionPlanHandler{
-			plans:    plans,
-			sessions: sessions,
-			meta:     meta,
-			flushCh:  flushCh,
-		}
-
-		err := c.completeCompaction(&compactionResult)
-		assert.NoError(t, err)
-
-		segID, ok := <-flushCh
-		assert.True(t, ok)
-		assert.Equal(t, compactionResult.GetSegmentID(), segID)
-		assert.NoError(t, err)
-
-		segments = meta.GetAllSegmentsUnsafe()
-		assert.Equal(t, len(segments), 3)
-
-		for _, segment := range segments {
-			assert.True(t, segment.State == commonpb.SegmentState_Dropped)
-		}
-	})
 }
 
 func Test_compactionPlanHandler_getCompaction(t *testing.T) {
@@ -684,6 +498,7 @@ func Test_compactionPlanHandler_getCompaction(t *testing.T) {
 	}
 }
 
+// TODO
 func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 	type fields struct {
 		plans    map[int64]*compactionTask
@@ -699,7 +514,6 @@ func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 		name      string
 		fields    fields
 		args      args
-		wantErr   bool
 		timeout   []int64
 		failed    []int64
 		unexpired []int64
@@ -765,7 +579,6 @@ func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 								compactionStateResp: &datapb.CompactionStateResponse{
 									Results: []*datapb.CompactionStateResult{
 										{PlanID: 1, State: commonpb.CompactionState_Executing},
-										{PlanID: 3, State: commonpb.CompactionState_Completed, Result: &datapb.CompactionResult{PlanID: 3}},
 										{PlanID: 4, State: commonpb.CompactionState_Executing},
 									},
 								},
@@ -775,22 +588,22 @@ func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 				},
 			},
 			args{ts: tsoutil.ComposeTS(ts.Add(5*time.Second).UnixNano()/int64(time.Millisecond), 0)},
-			false,
 			[]int64{4},
-			[]int64{2},
-			[]int64{1, 3},
+			[]int64{2, 3},
+			[]int64{1},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := &compactionPlanHandler{
-				plans:    tt.fields.plans,
-				sessions: tt.fields.sessions,
-				meta:     tt.fields.meta,
+				plans:            tt.fields.plans,
+				sessions:         tt.fields.sessions,
+				meta:             tt.fields.meta,
+				executingTaskNum: atomic.NewInt64(4),
+				parallelCh:       typeutil.NewConcurrentMap[int64, chan struct{}](),
 			}
 
-			err := c.updateCompaction(tt.args.ts)
-			assert.Equal(t, tt.wantErr, err != nil)
+			c.updateCompaction(tt.args.ts)
 
 			for _, id := range tt.timeout {
 				task := c.getCompaction(id)
@@ -806,47 +619,8 @@ func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 				task := c.getCompaction(id)
 				assert.NotEqual(t, failed, task.state)
 			}
-		})
-	}
-}
 
-func Test_newCompactionPlanHandler(t *testing.T) {
-	type args struct {
-		sessions  *SessionManager
-		cm        *ChannelManager
-		meta      *meta
-		allocator allocator
-		flush     chan UniqueID
-	}
-	tests := []struct {
-		name string
-		args args
-		want *compactionPlanHandler
-	}{
-		{
-			"test new handler",
-			args{
-				&SessionManager{},
-				&ChannelManager{},
-				&meta{},
-				newMockAllocator(),
-				nil,
-			},
-			&compactionPlanHandler{
-				plans:      map[int64]*compactionTask{},
-				sessions:   &SessionManager{},
-				chManager:  &ChannelManager{},
-				meta:       &meta{},
-				allocator:  newMockAllocator(),
-				flushCh:    nil,
-				parallelCh: make(map[int64]chan struct{}),
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := newCompactionPlanHandler(tt.args.sessions, tt.args.cm, tt.args.meta, tt.args.allocator, tt.args.flush)
-			assert.EqualValues(t, tt.want, got)
+			assert.Equal(t, int64(1), c.executingTaskNum.Load())
 		})
 	}
 }
@@ -909,6 +683,134 @@ func Test_getCompactionTasksBySignalID(t *testing.T) {
 			assert.ElementsMatch(t, tt.want, got)
 		})
 	}
+}
+func Test_compactionPlanHandler_completeCompaction(t *testing.T) {
+	t.Run("test complete merge compaction task", func(t *testing.T) {
+		mockDataNode := &mocks.MockDataNode{}
+		mockDataNode.EXPECT().SyncSegments(mock.Anything, mock.Anything).Run(func(ctx context.Context, req *datapb.SyncSegmentsRequest) {}).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
+
+		dataNodeID := UniqueID(111)
+
+		seg1 := &datapb.SegmentInfo{
+			ID:        1,
+			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(101, getInsertLogPath("log1", 1))},
+			Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getStatsLogPath("log2", 1))},
+			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log3", 1))},
+		}
+
+		seg2 := &datapb.SegmentInfo{
+			ID:        2,
+			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(101, getInsertLogPath("log4", 2))},
+			Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getStatsLogPath("log5", 2))},
+			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log6", 2))},
+		}
+
+		plan := &datapb.CompactionPlan{
+			PlanID: 1,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{
+					SegmentID:           seg1.ID,
+					FieldBinlogs:        seg1.GetBinlogs(),
+					Field2StatslogPaths: seg1.GetStatslogs(),
+					Deltalogs:           seg1.GetDeltalogs(),
+				},
+				{
+					SegmentID:           seg2.ID,
+					FieldBinlogs:        seg2.GetBinlogs(),
+					Field2StatslogPaths: seg2.GetStatslogs(),
+					Deltalogs:           seg2.GetDeltalogs(),
+				},
+			},
+			StartTime:        tsoutil.GetCurrentTime(),
+			TimeoutInSeconds: 5,
+			Type:             datapb.CompactionType_MergeCompaction,
+		}
+
+		sessions := &SessionManager{
+			sessions: struct {
+				sync.RWMutex
+				data map[int64]*Session
+			}{
+				data: map[int64]*Session{
+					dataNodeID: {client: mockDataNode}},
+			},
+		}
+
+		task := &compactionTask{
+			triggerInfo: &compactionSignal{id: 1},
+			state:       executing,
+			plan:        plan,
+			dataNodeID:  dataNodeID,
+		}
+
+		meta := &meta{
+			catalog: &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments: &SegmentsInfo{
+				map[int64]*SegmentInfo{
+					seg1.ID: {SegmentInfo: seg1},
+					seg2.ID: {SegmentInfo: seg2},
+				},
+			},
+		}
+		compactionResult := datapb.CompactionResult{
+			PlanID:              1,
+			SegmentID:           3,
+			InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogPaths(101, getInsertLogPath("log301", 3))},
+			Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getStatsLogPath("log302", 3))},
+			Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log303", 3))},
+		}
+
+		flushCh := make(chan UniqueID, 1)
+
+		tests := []struct {
+			description   string
+			resultsState  commonpb.CompactionState
+			resultNumRows int
+		}{
+			{"completed state", commonpb.CompactionState_Completed, 15},
+			{"completed state with 0 numRow segment", commonpb.CompactionState_Completed, 0},
+			{"executing state timeout", commonpb.CompactionState_Executing, 15},
+		}
+
+		for _, test := range tests {
+			t.Run(test.description, func(t *testing.T) {
+				c := newCompactionPlanHandler(
+					sessions,
+					&ChannelManager{},
+					meta,
+					newMockAllocator(),
+					flushCh,
+				)
+
+				c.plansGuard.Lock()
+				c.addTask(1, task)
+				c.plansGuard.Unlock()
+				c.acquireQueue(dataNodeID)
+
+				assert.Equal(t, int64(1), c.executingTaskNum.Load())
+				ch, ok := c.parallelCh.Get(dataNodeID)
+				assert.True(t, ok)
+				assert.Equal(t, 1, len(ch))
+
+				compactionResult.NumOfRows = int64(test.resultNumRows)
+				stateResult := &datapb.CompactionStateResult{PlanID: 1, State: test.resultsState, Result: &compactionResult}
+				err := c.completeCompaction(tsoutil.AddPhysicalDurationOnTs(tsoutil.GetCurrentTime(), 10*time.Second), task, stateResult)
+				assert.NoError(t, err)
+
+				if test.resultsState == commonpb.CompactionState_Completed {
+					segID, ok := <-flushCh
+					assert.True(t, ok)
+					assert.Equal(t, compactionResult.GetSegmentID(), segID)
+				}
+
+				assert.Equal(t, int64(0), c.executingTaskNum.Load())
+
+				ch, ok = c.parallelCh.Get(dataNodeID)
+				assert.True(t, ok)
+				assert.Equal(t, 0, len(ch))
+			})
+		}
+	})
 }
 
 func getFieldBinlogPaths(id int64, paths ...string) *datapb.FieldBinlog {
