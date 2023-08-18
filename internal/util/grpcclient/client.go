@@ -36,6 +36,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util"
@@ -62,6 +63,7 @@ type GrpcClient[T interface {
 	Close() error
 	SetNodeID(int64)
 	GetNodeID() int64
+	SetSession(sess *sessionutil.Session)
 }
 
 // ClientBase is a base of grpc client
@@ -90,6 +92,7 @@ type ClientBase[T interface {
 	MaxBackoff        float32
 	BackoffMultiplier float32
 	NodeID            atomic.Int64
+	sess              *sessionutil.Session
 
 	sf singleflight.Group
 }
@@ -294,11 +297,6 @@ func (c *ClientBase[T]) callOnce(ctx context.Context, caller func(client T) (any
 		return ret, nil
 	}
 
-	if !funcutil.CheckCtxValid(ctx) {
-		// start bg check in case of https://github.com/milvus-io/milvus/issues/22435
-		go c.bgHealthCheck(client)
-		return generic.Zero[T](), err
-	}
 	if IsCrossClusterRoutingErr(err) {
 		log.Warn("CrossClusterRoutingErr, start to reset connection", zap.Error(err))
 		c.resetConnection(client)
@@ -308,6 +306,26 @@ func (c *ClientBase[T]) callOnce(ctx context.Context, caller func(client T) (any
 		log.Warn("Server ID mismatch, start to reset connection", zap.Error(err))
 		c.resetConnection(client)
 		return ret, err
+	}
+	if !funcutil.CheckCtxValid(ctx) {
+		// check if server ID matches coord session, if not, reset connection
+		if c.sess != nil {
+			sessions, _, getSessionErr := c.sess.GetSessions(c.GetRole())
+			if getSessionErr != nil {
+				// Only log but not handle this error as it is an auxiliary logic
+				log.Warn("Fail to GetSessions", zap.Error(getSessionErr))
+			}
+			if coordSess, exist := sessions[c.GetRole()]; exist {
+				if c.GetNodeID() != coordSess.ServerID {
+					log.Warn("Server ID mismatch, may connected to a old server, start to reset connection", zap.Error(err))
+					c.resetConnection(client)
+					return ret, err
+				}
+			}
+		}
+		// start bg check in case of https://github.com/milvus-io/milvus/issues/22435
+		go c.bgHealthCheck(client)
+		return generic.Zero[T](), err
 	}
 	if !funcutil.IsGrpcErr(err) {
 		log.Warn("ClientBase:isNotGrpcErr", zap.Error(err))
@@ -395,6 +413,11 @@ func (c *ClientBase[T]) SetNodeID(nodeID int64) {
 // GetNodeID returns ID of client
 func (c *ClientBase[T]) GetNodeID() int64 {
 	return c.NodeID.Load()
+}
+
+// SetSession set session role of client
+func (c *ClientBase[T]) SetSession(sess *sessionutil.Session) {
+	c.sess = sess
 }
 
 func IsCrossClusterRoutingErr(err error) bool {
