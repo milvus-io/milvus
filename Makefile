@@ -52,7 +52,7 @@ get-build-deps:
 getdeps:
 	@mkdir -p $(INSTALL_PATH)
 	@$(INSTALL_PATH)/golangci-lint --version 2>&1 1>/dev/null || (echo "Installing golangci-lint into ./bin/" && curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(INSTALL_PATH) v1.53.1)
-	@$(INSTALL_PATH)/mockery --version 2>&1 1>/dev/null || (echo "Installing mockery v2.16.0 to ./bin/" && GOBIN=$(INSTALL_PATH)/ go install github.com/vektra/mockery/v2@v2.16.0)
+	@$(INSTALL_PATH)/mockery --version 2>&1 1>/dev/null || (echo "Installing mockery to ./bin/" && GOBIN=$(INSTALL_PATH)/ go install github.com/vektra/mockery/v2@v2.32.4)
 
 tools/bin/revive: tools/check/go.mod
 	cd tools/check; \
