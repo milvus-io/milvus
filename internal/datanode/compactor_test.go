@@ -374,9 +374,9 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 
 			mockbIO := &binlogIO{cm, alloc}
 			paramtable.Get().Save(Params.CommonCfg.EntityExpirationTTL.Key, "0")
-			BinLogMaxSize := Params.DataNodeCfg.BinLogMaxSize
+			BinLogMaxSize := Params.DataNodeCfg.BinLogMaxSize.GetAsInt()
 			defer func() {
-				Params.DataNodeCfg.BinLogMaxSize = BinLogMaxSize
+				paramtable.Get().Save(Params.DataNodeCfg.BinLogMaxSize.Key, fmt.Sprintf("%d", BinLogMaxSize))
 			}()
 			paramtable.Get().Save(Params.DataNodeCfg.BinLogMaxSize.Key, "1")
 			iData := genInsertDataWithExpiredTS()

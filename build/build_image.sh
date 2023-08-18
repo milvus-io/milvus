@@ -28,20 +28,21 @@ OS_NAME="${OS_NAME:-ubuntu20.04}"
 MILVUS_IMAGE_REPO="${MILVUS_IMAGE_REPO:-milvusdb/milvus}"
 MILVUS_IMAGE_TAG="${MILVUS_IMAGE_TAG:-latest}"
 
-MILVUS_BASE_IMAGE_REPO="${MILVUS_BASE_IMAGE_REPO:-milvusdb/milvus-base}"
-MILVUS_BASE_IMAGE_TAG="local"
+if [ -z "$IMAGE_ARCH" ]; then
+    MACHINE=$(uname -m)
+    if [ "$MACHINE" = "x86_64" ]; then
+        IMAGE_ARCH="amd64"
+    else
+        IMAGE_ARCH="arm64"
+    fi
+
+fi
+
 BUILD_ARGS=""
 
 pushd "${toplevel}"
-BUILD_BASE_IMAGE=${BUILD_BASE_IMAGE:-"false"}
 
-# Seperate base dockerfile to ignore install dependencies when build milvus image
-if [[ ${OS_NAME} == "ubuntu20.04" && ${BUILD_BASE_IMAGE} == "true" ]]; then 
-  docker build -f "./build/docker/milvus/${OS_NAME}/Dockerfile.base" -t "${MILVUS_BASE_IMAGE_REPO}:${MILVUS_BASE_IMAGE_TAG}" .
-  BUILD_ARGS="--build-arg MILVUS_BASE_IMAGE_REPO=${MILVUS_BASE_IMAGE_REPO} --build-arg MILVUS_BASE_IMAGE_TAG=${MILVUS_BASE_IMAGE_TAG}"
-fi 
-
-docker build ${BUILD_ARGS} -f "./build/docker/milvus/${OS_NAME}/Dockerfile" -t "${MILVUS_IMAGE_REPO}:${MILVUS_IMAGE_TAG}" .
+docker build ${BUILD_ARGS} --platform linux/${IMAGE_ARCH} -f "./build/docker/milvus/${OS_NAME}/Dockerfile" -t "${MILVUS_IMAGE_REPO}:${MILVUS_IMAGE_TAG}" .
 
 image_size=$(docker inspect ${MILVUS_IMAGE_REPO}:${MILVUS_IMAGE_TAG}  -f '{{.Size}}'| awk '{ byte =$1 /1024/1024/1024; print byte " GB" }')
 

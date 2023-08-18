@@ -18,15 +18,17 @@ on:
 
 jobs:
   publish-builder:
-    name: AMD64 ${{ matrix.os }}
+    name: ${{ matrix.arch }} ${{ matrix.os }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu20.04, centos7]
+        os: [ubuntu20.04, amazonlinux2023]
+        arch: [amd64]
     env:
       OS_NAME: ${{ matrix.os }}
+      IMAGE_ARCH: ${{ matrix.arch }}
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -35,6 +37,8 @@ jobs:
         run: |
           echo "::set-output name=version::$(date +%Y%m%d)"
           echo "::set-output name=sha_short::$(git rev-parse --short HEAD)"
+      # - name: Setup upterm session
+      #   uses: lhotari/action-upterm@v1
       - name: Docker Pull
         shell: bash
         run: |

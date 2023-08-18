@@ -1,4 +1,4 @@
-from conans import ConanFile, CMake
+from conans import ConanFile
 
 
 class MilvusConan(ConanFile):
@@ -57,6 +57,7 @@ class MilvusConan(ConanFile):
     default_options = {
         "librdkafka:shared": True,
         "librdkafka:zstd": True,
+        "librdkafka:sasl": False,
         "rocksdb:shared": True,
         "rocksdb:with_zstd": True,
         "arrow:parquet": True,
@@ -72,8 +73,10 @@ class MilvusConan(ConanFile):
         "glog:shared": True,
         "prometheus-cpp:with_pull": False,
         "fmt:header_only": True,
-        "onnetbb:tbbmalloc": False,
+        "onetbb:tbbmalloc": False,
         "onetbb:tbbproxy": False,
+        "openblas:shared": True,
+        "openblas:dynamic_arch": True,
     }
 
     def configure(self):
@@ -83,6 +86,13 @@ class MilvusConan(ConanFile):
                 del self.options["folly"].use_sse4_2
 
             self.options["arrow"].with_jemalloc = False
+        if self.settings.arch == "armv8":
+            self.options["openblas"].dynamic_arch = False
+
+    def requirements(self):
+        if self.settings.os != "Macos":
+            # MacOS does not need openblas
+            self.requires("openblas/0.3.23@milvus/dev")
 
     def imports(self):
         self.copy("*.dylib", "../lib", "lib")
