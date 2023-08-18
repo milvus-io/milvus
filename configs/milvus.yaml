@@ -407,7 +407,7 @@ grpc:
     keepAliveTimeout: 20000
     maxMaxAttempts: 5
     initialBackOff: 1.0
-    maxBackoff: 60.0
+    maxBackoff: 10.0
     backoffMultiplier: 2.0
   server:
     retryTimes: 5 # retry times when receiving a grpc return value with a failure and retryable state code

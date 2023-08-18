@@ -217,8 +217,8 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 				MinConnectTimeout: c.DialTimeout,
 			}),
 			grpc.WithPerRPCCredentials(&Token{Value: crypto.Base64Encode(util.MemberCredID)}),
-			grpc.WithDisableRetry(),
 			grpc.FailOnNonTempDialError(true),
+			grpc.WithReturnConnectionError(),
 		)
 	} else {
 		conn, err = grpc.DialContext(
@@ -256,8 +256,8 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 				MinConnectTimeout: c.DialTimeout,
 			}),
 			grpc.WithPerRPCCredentials(&Token{Value: crypto.Base64Encode(util.MemberCredID)}),
-			grpc.WithDisableRetry(),
 			grpc.FailOnNonTempDialError(true),
+			grpc.WithReturnConnectionError(),
 		)
 	}
 
