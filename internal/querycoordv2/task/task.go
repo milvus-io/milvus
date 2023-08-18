@@ -249,9 +249,10 @@ func (task *baseTask) String() string {
 		}
 	}
 	return fmt.Sprintf(
-		"[id=%d] [type=%s] [reason=%s] [collectionID=%d] [replicaID=%d] [priority=%s] [actionsCount=%d] [actions=%s]",
+		"[id=%d] [type=%s] [source=%d] [reason=%s] [collectionID=%d] [replicaID=%d] [priority=%s] [actionsCount=%d] [actions=%s]",
 		task.id,
 		GetTaskType(task).String(),
+		task.sourceID,
 		task.reason,
 		task.collectionID,
 		task.replicaID,
