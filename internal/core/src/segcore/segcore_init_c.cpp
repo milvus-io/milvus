@@ -50,8 +50,13 @@ SegcoreSetNprobe(const int64_t value) {
 }
 
 extern "C" void
-SegcoreSetKnowhereThreadPoolNum(const uint32_t num_threads) {
-    milvus::config::KnowhereInitThreadPool(num_threads);
+SegcoreSetKnowhereBuildThreadPoolNum(const uint32_t num_threads) {
+    milvus::config::KnowhereInitBuildThreadPool(num_threads);
+}
+
+extern "C" void
+SegcoreSetKnowhereSearchThreadPoolNum(const uint32_t num_threads) {
+    milvus::config::KnowhereInitSearchThreadPool(num_threads);
 }
 
 // return value must be freed by the caller
