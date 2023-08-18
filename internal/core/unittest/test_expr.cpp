@@ -3997,6 +3997,164 @@ TEST(Expr, TestJsonContainsArray) {
             ASSERT_EQ(ans, check(res, i));
         }
     }
+
+    proto::plan::Array sub_arr1;
+    sub_arr1.set_same_type(true);
+    proto::plan::GenericValue int_val11;
+    int_val11.set_int64_val(int64_t(1));
+    sub_arr1.add_array()->CopyFrom(int_val11);
+
+    proto::plan::GenericValue int_val12;
+    int_val12.set_int64_val(int64_t(2));
+    sub_arr1.add_array()->CopyFrom(int_val12);
+
+    proto::plan::Array sub_arr2;
+    sub_arr2.set_same_type(true);
+    proto::plan::GenericValue int_val21;
+    int_val21.set_int64_val(int64_t(3));
+    sub_arr2.add_array()->CopyFrom(int_val21);
+
+    proto::plan::GenericValue int_val22;
+    int_val22.set_int64_val(int64_t(4));
+    sub_arr2.add_array()->CopyFrom(int_val22);
+    std::vector<Testcase<proto::plan::Array>> diff_testcases2{{{sub_arr1, sub_arr2}, {"array2"}}};
+
+    for (auto& testcase : diff_testcases2) {
+        auto check = [&](const std::vector<bool>& values, int i) {
+            return true;
+        };
+        RetrievePlanNode plan;
+        auto pointer = milvus::Json::pointer(testcase.nested_path);
+        plan.predicate_ =
+            std::make_unique<JsonContainsExprImpl<proto::plan::Array>>(
+                ColumnInfo(json_fid, DataType::JSON, testcase.nested_path),
+                testcase.term,
+                true,
+                proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+                proto::plan::GenericValue::ValCase::kArrayVal);
+        auto start = std::chrono::steady_clock::now();
+        auto final = visitor.call_child(*plan.predicate_.value());
+        std::cout << "cost"
+                  << std::chrono::duration_cast<std::chrono::microseconds>(
+                         std::chrono::steady_clock::now() - start)
+                         .count()
+                  << std::endl;
+        EXPECT_EQ(final.size(), N * num_iters);
+
+        for (int i = 0; i < N * num_iters; ++i) {
+            auto ans = final[i];
+            std::vector<bool> res;
+            ASSERT_EQ(ans, check(res, i));
+        }
+    }
+
+    for (auto& testcase : diff_testcases2) {
+        auto check = [&](const std::vector<bool>& values, int i) {
+            return true;
+        };
+        RetrievePlanNode plan;
+        auto pointer = milvus::Json::pointer(testcase.nested_path);
+        plan.predicate_ =
+            std::make_unique<JsonContainsExprImpl<proto::plan::Array>>(
+                ColumnInfo(json_fid, DataType::JSON, testcase.nested_path),
+                testcase.term,
+                true,
+                proto::plan::JSONContainsExpr_JSONOp_ContainsAll,
+                proto::plan::GenericValue::ValCase::kArrayVal);
+        auto start = std::chrono::steady_clock::now();
+        auto final = visitor.call_child(*plan.predicate_.value());
+        std::cout << "cost"
+                  << std::chrono::duration_cast<std::chrono::microseconds>(
+                         std::chrono::steady_clock::now() - start)
+                         .count()
+                  << std::endl;
+        EXPECT_EQ(final.size(), N * num_iters);
+
+        for (int i = 0; i < N * num_iters; ++i) {
+            auto ans = final[i];
+            std::vector<bool> res;
+            ASSERT_EQ(ans, check(res, i));
+        }
+    }
+
+    proto::plan::Array sub_arr3;
+    sub_arr3.set_same_type(true);
+    proto::plan::GenericValue int_val31;
+    int_val31.set_int64_val(int64_t(5));
+    sub_arr3.add_array()->CopyFrom(int_val31);
+
+    proto::plan::GenericValue int_val32;
+    int_val32.set_int64_val(int64_t(6));
+    sub_arr3.add_array()->CopyFrom(int_val32);
+
+    proto::plan::Array sub_arr4;
+    sub_arr4.set_same_type(true);
+    proto::plan::GenericValue int_val41;
+    int_val41.set_int64_val(int64_t(7));
+    sub_arr4.add_array()->CopyFrom(int_val41);
+
+    proto::plan::GenericValue int_val42;
+    int_val42.set_int64_val(int64_t(8));
+    sub_arr4.add_array()->CopyFrom(int_val42);
+    std::vector<Testcase<proto::plan::Array>> diff_testcases3{{{sub_arr3, sub_arr4}, {"array2"}}};
+
+    for (auto& testcase : diff_testcases2) {
+        auto check = [&](const std::vector<bool>& values, int i) {
+            return true;
+        };
+        RetrievePlanNode plan;
+        auto pointer = milvus::Json::pointer(testcase.nested_path);
+        plan.predicate_ =
+            std::make_unique<JsonContainsExprImpl<proto::plan::Array>>(
+                ColumnInfo(json_fid, DataType::JSON, testcase.nested_path),
+                testcase.term,
+                true,
+                proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+                proto::plan::GenericValue::ValCase::kArrayVal);
+        auto start = std::chrono::steady_clock::now();
+        auto final = visitor.call_child(*plan.predicate_.value());
+        std::cout << "cost"
+                  << std::chrono::duration_cast<std::chrono::microseconds>(
+                         std::chrono::steady_clock::now() - start)
+                         .count()
+                  << std::endl;
+        EXPECT_EQ(final.size(), N * num_iters);
+
+        for (int i = 0; i < N * num_iters; ++i) {
+            auto ans = final[i];
+            std::vector<bool> res;
+            ASSERT_EQ(ans, check(res, i));
+        }
+    }
+
+    for (auto& testcase : diff_testcases2) {
+        auto check = [&](const std::vector<bool>& values, int i) {
+            return true;
+        };
+        RetrievePlanNode plan;
+        auto pointer = milvus::Json::pointer(testcase.nested_path);
+        plan.predicate_ =
+            std::make_unique<JsonContainsExprImpl<proto::plan::Array>>(
+                ColumnInfo(json_fid, DataType::JSON, testcase.nested_path),
+                testcase.term,
+                true,
+                proto::plan::JSONContainsExpr_JSONOp_ContainsAll,
+                proto::plan::GenericValue::ValCase::kArrayVal);
+        auto start = std::chrono::steady_clock::now();
+        auto final = visitor.call_child(*plan.predicate_.value());
+        std::cout << "cost"
+                  << std::chrono::duration_cast<std::chrono::microseconds>(
+                         std::chrono::steady_clock::now() - start)
+                         .count()
+                  << std::endl;
+        EXPECT_EQ(final.size(), N * num_iters);
+
+        for (int i = 0; i < N * num_iters; ++i) {
+            auto ans = final[i];
+            std::vector<bool> res;
+            ASSERT_EQ(ans, check(res, i));
+        }
+    }
 }
 
 TEST(Expr, TestJsonContainsDiffType) {

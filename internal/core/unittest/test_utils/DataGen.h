@@ -420,7 +420,8 @@ DataGenForJsonArray(SchemaPtr schema,
                                R"(],"double":[)" + join(doubleVec, ",") +
                                R"(],"string":[)" + join(stringVec, ",") +
                                R"(],"bool": [)" + join(boolVec, ",") +
-                               R"(],"array": [)" + join(arrayVec, ",") + "]}";
+                               R"(],"array": [)" + join(arrayVec, ",") +
+                               R"(],"array2": [[1,2], [3,4]])" + "}";
                     //std::cout << str << std::endl;
                     data[i] = str;
                 }
