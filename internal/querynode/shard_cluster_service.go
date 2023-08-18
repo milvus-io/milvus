@@ -73,7 +73,7 @@ func (s *ShardClusterService) addShardCluster(collectionID, replicaID int64, vch
 				return &shardQueryNodeWrapper{QueryNode: s.node}
 			}
 			ctx := context.Background()
-			qn, _ := grpcquerynodeclient.NewClient(ctx, addr)
+			qn, _ := grpcquerynodeclient.NewClient(ctx, addr, nodeID)
 			return qn
 		})
 

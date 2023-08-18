@@ -32,11 +32,11 @@ func Test_NewClient(t *testing.T) {
 	ClientParams.InitOnce(typeutil.QueryNodeRole)
 
 	ctx := context.Background()
-	client, err := NewClient(ctx, "")
+	client, err := NewClient(ctx, "", 1)
 	assert.Nil(t, client)
 	assert.NotNil(t, err)
 
-	client, err = NewClient(ctx, "test")
+	client, err = NewClient(ctx, "test", 2)
 	assert.Nil(t, err)
 	assert.NotNil(t, client)
 

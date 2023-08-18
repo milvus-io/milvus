@@ -48,7 +48,7 @@ func TestQueryTask_all(t *testing.T) {
 		}
 	)
 
-	mockCreator := func(ctx context.Context, address string) (types.QueryNode, error) {
+	mockCreator := func(ctx context.Context, address string, nodeID int64) (types.QueryNode, error) {
 		return qn, nil
 	}
 

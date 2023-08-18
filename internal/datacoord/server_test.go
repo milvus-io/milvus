@@ -3578,7 +3578,7 @@ func TestOptions(t *testing.T) {
 	t.Run("SetDataNodeCreator", func(t *testing.T) {
 		var target int64
 		var val = rand.Int63()
-		opt := SetDataNodeCreator(func(context.Context, string) (types.DataNode, error) {
+		opt := SetDataNodeCreator(func(context.Context, string, int64) (types.DataNode, error) {
 			target = val
 			return nil, nil
 		})
@@ -3587,7 +3587,7 @@ func TestOptions(t *testing.T) {
 		factory := dependency.NewDefaultFactory(true)
 
 		svr := CreateServer(context.TODO(), factory, opt)
-		dn, err := svr.dataNodeCreator(context.Background(), "")
+		dn, err := svr.dataNodeCreator(context.Background(), "", 1)
 		assert.Nil(t, dn)
 		assert.Nil(t, err)
 		assert.Equal(t, target, val)
@@ -4309,7 +4309,7 @@ func newTestServer(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 	svr := CreateServer(context.TODO(), factory)
 	svr.SetEtcdClient(etcdCli)
 
-	svr.dataNodeCreator = func(ctx context.Context, addr string) (types.DataNode, error) {
+	svr.dataNodeCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNode, error) {
 		return newMockDataNodeClient(0, receiveCh)
 	}
 
@@ -4367,7 +4367,7 @@ func newTestServerWithMeta(t *testing.T, receiveCh chan any, meta *meta, opts ..
 
 	svr := CreateServer(context.TODO(), factory, opts...)
 	svr.SetEtcdClient(etcdCli)
-	svr.dataNodeCreator = func(ctx context.Context, addr string) (types.DataNode, error) {
+	svr.dataNodeCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNode, error) {
 		return newMockDataNodeClient(0, receiveCh)
 	}
 	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
@@ -4423,7 +4423,7 @@ func newTestServer2(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 
 	svr := CreateServer(context.TODO(), factory, opts...)
 	svr.SetEtcdClient(etcdCli)
-	svr.dataNodeCreator = func(ctx context.Context, addr string) (types.DataNode, error) {
+	svr.dataNodeCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNode, error) {
 		return newMockDataNodeClient(0, receiveCh)
 	}
 	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
@@ -4470,7 +4470,7 @@ func Test_CheckHealth(t *testing.T) {
 			data map[int64]*Session
 		}{data: map[int64]*Session{1: {
 			client: healthClient,
-			clientCreator: func(ctx context.Context, addr string) (types.DataNode, error) {
+			clientCreator: func(ctx context.Context, addr string, nodeID int64) (types.DataNode, error) {
 				return healthClient, nil
 			},
 		}}}
@@ -4495,7 +4495,7 @@ func Test_CheckHealth(t *testing.T) {
 			data map[int64]*Session
 		}{data: map[int64]*Session{1: {
 			client: unhealthClient,
-			clientCreator: func(ctx context.Context, addr string) (types.DataNode, error) {
+			clientCreator: func(ctx context.Context, addr string, nodeID int64) (types.DataNode, error) {
 				return unhealthClient, nil
 			},
 		}}}
@@ -4616,7 +4616,7 @@ func testDataCoordBase(t *testing.T, opts ...Option) *Server {
 
 	svr := CreateServer(context.TODO(), factory, opts...)
 	svr.SetEtcdClient(etcdCli)
-	svr.dataNodeCreator = func(ctx context.Context, addr string) (types.DataNode, error) {
+	svr.dataNodeCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNode, error) {
 		return newMockDataNodeClient(0, nil)
 	}
 	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {

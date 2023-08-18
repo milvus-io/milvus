@@ -107,6 +107,8 @@ func (c *Client) getRootCoordAddr() (string, error) {
 		return "", fmt.Errorf("find no available rootcoord, check rootcoord state")
 	}
 	log.Info("RootCoordClient GetSessions success", zap.String("address", ms.Address))
+
+	c.grpcClient.SetNodeID(ms.ServerID)
 	return ms.Address, nil
 }
 

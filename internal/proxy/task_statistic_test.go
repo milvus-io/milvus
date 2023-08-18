@@ -41,7 +41,7 @@ func TestStatisticTask_all(t *testing.T) {
 	qc.EXPECT().Stop().Return(nil)
 	qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(&successStatus, nil)
 
-	mockCreator := func(ctx context.Context, address string) (types.QueryNode, error) {
+	mockCreator := func(ctx context.Context, address string, nodeID int64) (types.QueryNode, error) {
 		return qn, nil
 	}
 

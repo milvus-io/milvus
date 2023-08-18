@@ -154,7 +154,7 @@ func NewCore(c context.Context, factory dependency.Factory) (*Core, error) {
 
 	core.UpdateStateCode(commonpb.StateCode_Abnormal)
 	core.proxyCreator = func(se *sessionutil.Session) (types.Proxy, error) {
-		cli, err := pnc.NewClient(c, se.Address)
+		cli, err := pnc.NewClient(c, se.Address, se.ServerID)
 		if err != nil {
 			return nil, err
 		}
@@ -333,6 +333,7 @@ func (c *Core) initSession() error {
 	c.session.Init(typeutil.RootCoordRole, Params.RootCoordCfg.Address, true, true)
 	c.session.SetEnableActiveStandBy(c.enableActiveStandBy)
 	Params.SetLogger(c.session.ServerID)
+	Params.RootCoordCfg.SetNodeID(c.session.ServerID)
 	return nil
 }
 

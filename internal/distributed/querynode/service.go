@@ -193,11 +193,17 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 			ot.UnaryServerInterceptor(opts...),
 			logutil.UnaryTraceLoggerInterceptor,
 			interceptor.ClusterValidationUnaryServerInterceptor(),
+			interceptor.ServerIDValidationUnaryServerInterceptor(func() int64 {
+				return qn.Params.QueryNodeCfg.GetNodeID()
+			}),
 		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
 			ot.StreamServerInterceptor(opts...),
 			logutil.StreamTraceLoggerInterceptor,
 			interceptor.ClusterValidationStreamServerInterceptor(),
+			interceptor.ServerIDValidationStreamServerInterceptor(func() int64 {
+				return qn.Params.QueryNodeCfg.GetNodeID()
+			}),
 		)))
 	querypb.RegisterQueryNodeServer(s.grpcServer, s)
 

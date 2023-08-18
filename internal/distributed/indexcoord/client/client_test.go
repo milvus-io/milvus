@@ -91,6 +91,10 @@ func TestIndexCoordClient(t *testing.T) {
 	err = icc.Start()
 	assert.NoError(t, err)
 
+	_, err = icc.getIndexCoordAddr()
+	assert.NoError(t, err)
+	indexcoord.Params.IndexCoordCfg.SetNodeID(icc.grpcClient.GetNodeID())
+
 	t.Run("GetComponentStates", func(t *testing.T) {
 		states, err := icc.GetComponentStates(ctx)
 		assert.NoError(t, err)

@@ -24,22 +24,14 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
-
-	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
 const ClusterKey = "Cluster"
-
-var Params paramtable.ComponentParam
 
 var (
 	ErrCrossClusterRouting = fmt.Errorf("cross cluster routing")
 	ErrServiceUnavailable  = fmt.Errorf("service unavailable") // For concealing ErrCrossClusterRouting from the client
 )
-
-func init() {
-	Params.Init()
-}
 
 func WrapErrCrossClusterRouting(expectedCluster, actualCluster string, msg ...string) error {
 	err := errors.Wrapf(ErrCrossClusterRouting, "expectedCluster=%s, actualCluster=%s", expectedCluster, actualCluster)

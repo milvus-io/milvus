@@ -94,6 +94,8 @@ func (c *Client) getQueryCoordAddr() (string, error) {
 		log.Warn("QueryCoordClient msess key not existed", zap.Any("key", key))
 		return "", fmt.Errorf("find no available querycoord, check querycoord state")
 	}
+
+	c.grpcClient.SetNodeID(ms.ServerID)
 	return ms.Address, nil
 }
 

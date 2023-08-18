@@ -175,19 +175,19 @@ func (s *CrossClusterRoutingSuite) SetupTest() {
 
 	var proxyGrpcServerParam paramtable.GrpcServerConfig
 	proxyGrpcServerParam.InitOnce(typeutil.ProxyRole)
-	s.proxyClient, err = grpcproxyclient.NewClient(s.ctx, proxyGrpcServerParam.GetInternalAddress())
+	s.proxyClient, err = grpcproxyclient.NewClient(s.ctx, proxyGrpcServerParam.GetInternalAddress(), 1)
 	s.NoError(err)
 	var dataNodeGrpcServerParam paramtable.GrpcServerConfig
 	dataNodeGrpcServerParam.Init(typeutil.DataNodeRole)
-	s.dataNodeClient, err = grpcdatanodeclient.NewClient(s.ctx, dataNodeGrpcServerParam.GetAddress())
+	s.dataNodeClient, err = grpcdatanodeclient.NewClient(s.ctx, dataNodeGrpcServerParam.GetAddress(), 1)
 	s.NoError(err)
 	var queryNodeServerParam paramtable.GrpcServerConfig
 	queryNodeServerParam.InitOnce(typeutil.QueryNodeRole)
-	s.queryNodeClient, err = grpcquerynodeclient.NewClient(s.ctx, queryNodeServerParam.GetAddress())
+	s.queryNodeClient, err = grpcquerynodeclient.NewClient(s.ctx, queryNodeServerParam.GetAddress(), 1)
 	s.NoError(err)
 	var indexNodeGrpcServerParam paramtable.GrpcServerConfig
 	indexNodeGrpcServerParam.Init(typeutil.IndexNodeRole)
-	s.indexNodeClient, err = grpcindexnodeclient.NewClient(s.ctx, indexNodeGrpcServerParam.GetAddress(), false)
+	s.indexNodeClient, err = grpcindexnodeclient.NewClient(s.ctx, indexNodeGrpcServerParam.GetAddress(), 1, false)
 	s.NoError(err)
 }
 
