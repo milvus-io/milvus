@@ -642,12 +642,12 @@ func (c *Core) startInternal() error {
 			if err := c.proxyClientManager.RefreshPolicyInfoCache(c.ctx, &proxypb.RefreshPolicyInfoCacheRequest{
 				OpType: int32(typeutil.CacheRefresh),
 			}); err != nil {
-				log.Warn("fail to refresh policy info cache", zap.Error(err))
+				log.Info("fail to refresh policy info cache", zap.Error(err))
 				return err
 			}
 			return nil
 		}, retry.Attempts(100), retry.Sleep(time.Second)); err != nil {
-			log.Panic("fail to refresh policy info cache", zap.Error(err))
+			log.Warn("fail to refresh policy info cache", zap.Error(err))
 		}
 	}()
 

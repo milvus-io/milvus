@@ -35,7 +35,7 @@ const (
 	// DefaultIndexSliceSize defines the default slice size of index file when serializing.
 	DefaultIndexSliceSize                      = 16
 	DefaultGracefulTime                        = 5000 // ms
-	DefaultGracefulStopTimeout                 = 30   // s
+	DefaultGracefulStopTimeout                 = 1800 // s
 	DefaultHighPriorityThreadCoreCoefficient   = 100
 	DefaultMiddlePriorityThreadCoreCoefficient = 50
 	DefaultLowPriorityThreadCoreCoefficient    = 10
@@ -475,7 +475,7 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "common.gracefulStopTimeout",
 		Version:      "2.2.1",
-		DefaultValue: "30",
+		DefaultValue: strconv.Itoa(DefaultGracefulStopTimeout),
 		Doc:          "seconds. it will force quit the server if the graceful stop process is not completed during this time.",
 		Export:       true,
 	}

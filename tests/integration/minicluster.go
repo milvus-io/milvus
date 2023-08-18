@@ -484,6 +484,7 @@ func DefaultParams() map[string]string {
 		params.LocalStorageCfg.Path.Key:               path.Join("/tmp", testPath),
 		params.CommonCfg.StorageType.Key:              "local",
 		params.DataNodeCfg.MemoryForceSyncEnable.Key:  "false", // local execution will print too many logs
+		params.CommonCfg.GracefulStopTimeout.Key:      "10",
 	}
 }
 

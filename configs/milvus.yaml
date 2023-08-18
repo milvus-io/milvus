@@ -290,7 +290,6 @@ queryNode:
       enableCrossUserGrouping: false # false by default Enable Cross user grouping when using user-task-polling policy. (close it if task of any user can not merge others).
       maxPendingTaskPerUser: 1024 # 50 by default, max pending task in scheduler per user.
 
-  gracefulStopTimeout: 30
   port: 21123
   grpc:
     serverMaxSendSize: 536870912
@@ -312,7 +311,6 @@ indexNode:
     buildParallel: 1
   enableDisk: true # enable index node build disk vector index
   maxDiskUsagePercentage: 95
-  gracefulStopTimeout: 30
   port: 21121
   grpc:
     serverMaxSendSize: 536870912
@@ -467,7 +465,7 @@ common:
     LoadNumThreadRatio: 8
     BeamWidthRatio: 4
   gracefulTime: 5000 # milliseconds. it represents the interval (in ms) by which the request arrival time needs to be subtracted in the case of Bounded Consistency.
-  gracefulStopTimeout: 30 # seconds. it will force quit the server if the graceful stop process is not completed during this time.
+  gracefulStopTimeout: 1800 # seconds. it will force quit the server if the graceful stop process is not completed during this time.
   storageType: minio # please adjust in embedded Milvus: local
   # Default value: auto
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
