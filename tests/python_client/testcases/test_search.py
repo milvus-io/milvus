@@ -5671,8 +5671,7 @@ class TestSearchDiskann(TestcaseBase):
                             output_fields=output_fields,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 1,
-                                         "err_msg": "fail to search on all shard leaders"}
-                            )
+                                         "err_msg": "fail to search on all shard leaders"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_with_diskann_with_string_pk(self, dim, enable_dynamic_field):

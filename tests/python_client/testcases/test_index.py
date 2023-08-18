@@ -1658,19 +1658,15 @@ class TestIndexDiskann(TestcaseBase):
                                                          "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_create_index_with_max_dim(self):
+    @pytest.mark.parametrize("dim", [1, 32768])
+    def test_create_index_diskann_with_max_min_dim(self, dim):
         """
         target: test create index with diskann
         method: 1.create collection, when the max dim of the vector is 32768
                 2.create diskann index
         expected: create index raise an error
         """
-        dim = 32768
-        c_name = cf.gen_unique_str(prefix)
-        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(), cf.gen_string_field(),
-                  cf.gen_float_vec_field(dim=dim)]
-        schema = cf.gen_collection_schema(fields=fields)
-        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
+        collection_w = self.init_collection_general(prefix, False, dim=dim, is_index=False)[0]
         collection_w.create_index(default_float_vec_field_name, ct.default_diskann_index)
         assert len(collection_w.indexes) == 1
 
@@ -1882,23 +1878,19 @@ class TestIndexDiskann(TestcaseBase):
 
     @pytest.mark.skip(reason = "diskann dim range is set to be [1, 32768)")
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("dim", [1, 2, 4, 6])
+    @pytest.mark.parametrize("dim", [2, 4, 8])
     def test_create_index_with_small_dim(self, dim):
         """
         target: test create index with diskann
-        method: 1.create collection, when the dim of the vector Less than 32
+        method: 1.create collection, when the dim of the vector Less than 8
                 2.create diskann index
         expected: create index raise an error
         """
-        c_name = cf.gen_unique_str(prefix)
-        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(), cf.gen_string_field(),
-                  cf.gen_float_vec_field(dim=dim)]
-        schema = cf.gen_collection_schema(fields=fields)
-        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
+        collection_w = self.init_collection_general(prefix, False, dim=dim, is_index=False)[0]
         collection_w.create_index(default_float_vec_field_name, ct.default_diskann_index,
                                   check_task=CheckTasks.err_res,
                                   check_items={ct.err_code: 1,
-                                               ct.err_msg: "invalid index params"})
+                                               ct.err_msg: "dim out of range: [8, 32768]"})
 
 
 @pytest.mark.tags(CaseLabel.GPU)
