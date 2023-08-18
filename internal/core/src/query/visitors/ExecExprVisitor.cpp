@@ -2067,10 +2067,21 @@ ExecExprVisitor::visit(AlwaysTrueExpr& expr) {
     bitset_opt_ = std::move(res);
 }
 
+template <typename T>
 bool
-compareTwoJsonArray(simdjson::simdjson_result<simdjson::ondemand::array> arr1,
-                    const proto::plan::Array& arr2) {
-    if (arr2.array_size() != arr1.count_elements()) {
+compareTwoJsonArray(T arr1, const proto::plan::Array& arr2) {
+    int json_array_length = 0;
+    if constexpr (std::is_same_v<
+                      T,
+                      simdjson::simdjson_result<simdjson::ondemand::array>>) {
+        json_array_length = arr1.count_elements();
+    }
+    if constexpr (std::is_same_v<T,
+                                 std::vector<simdjson::simdjson_result<
+                                     simdjson::ondemand::value>>>) {
+        json_array_length = arr1.size();
+    }
+    if (arr2.array_size() != json_array_length) {
         return false;
     }
     int i = 0;
@@ -2165,13 +2176,19 @@ ExecExprVisitor::ExecJsonContainsArray(JsonContainsExpr& expr_raw)
         if (array.error()) {
             return false;
         }
-        for (auto const& element : elements) {
-            for (auto&& it : array) {
-                auto val = it.get_array();
-                if (val.error()) {
-                    continue;
-                }
-                if (compareTwoJsonArray(val, element)) {
+        for (auto&& it : array) {
+            auto val = it.get_array();
+            if (val.error()) {
+                continue;
+            }
+            std::vector<simdjson::simdjson_result<simdjson::ondemand::value>>
+                json_array;
+            json_array.reserve(val.count_elements());
+            for (auto&& e : val) {
+                json_array.emplace_back(e);
+            }
+            for (auto const& element : elements) {
+                if (compareTwoJsonArray(json_array, element)) {
                     return true;
                 }
             }
@@ -2322,33 +2339,39 @@ ExecExprVisitor::ExecJsonContainsAllArray(JsonContainsExpr& expr_raw)
         elements_index.insert(i);
         i++;
     }
-    auto elem_func =
-        [&elements, &elements_index, &pointer](const milvus::Json& json) {
-            auto doc = json.doc();
-            auto array = doc.at_pointer(pointer).get_array();
-            if (array.error()) {
-                return false;
+    auto elem_func = [&elements, &elements_index, &pointer](
+                         const milvus::Json& json) {
+        auto doc = json.doc();
+        auto array = doc.at_pointer(pointer).get_array();
+        if (array.error()) {
+            return false;
+        }
+        std::unordered_set<int> tmp_elements_index(elements_index);
+        for (auto&& it : array) {
+            auto val = it.get_array();
+            if (val.error()) {
+                continue;
             }
-            std::unordered_set<int> tmp_elements_index(elements_index);
-            for (auto&& it : array) {
-                auto val = it.get_array();
-                if (val.error()) {
-                    continue;
-                }
-                int i = -1;
-                for (auto const& element : elements) {
-                    i++;
-                    if (compareTwoJsonArray(val, element)) {
-                        tmp_elements_index.erase(i);
-                        break;
-                    }
-                }
-                if (tmp_elements_index.size() == 0) {
-                    return true;
+            std::vector<simdjson::simdjson_result<simdjson::ondemand::value>>
+                json_array;
+            json_array.reserve(val.count_elements());
+            for (auto&& e : val) {
+                json_array.emplace_back(e);
+            }
+            for (auto index : tmp_elements_index) {
+                if (compareTwoJsonArray(json_array, elements[index])) {
+                    tmp_elements_index.erase(index);
+                    // TODO: construct array set.
+                    //  prevent expression json_contains_all(json_array, [[1,2], [3,4], [1,2]]) being unsuccessful
+                    // break;
                 }
             }
-            return tmp_elements_index.size() == 0;
-        };
+            if (tmp_elements_index.size() == 0) {
+                return true;
+            }
+        }
+        return tmp_elements_index.size() == 0;
+    };
 
     return ExecRangeVisitorImpl<milvus::Json>(
         expr.column_.field_id, index_func, elem_func);
