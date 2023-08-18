@@ -52,7 +52,7 @@ All Linux distributions are available for Milvus development. However a majority
 Here's a list of verified OS types where Milvus can successfully build and run:
 
 - Debian/Ubuntu
-- CentOS
+- Amazon Linux
 - MacOS (x86_64)
 - MacOS (Apple Silicon)
 

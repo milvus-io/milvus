@@ -30,7 +30,7 @@ mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-conan"
 chmod -R 777 "${DOCKER_VOLUME_DIRECTORY:-.docker}"
 
 docker-compose pull --ignore-pull-failures builder
-if [[ "${CHECK_BUILDER:-1}" == "1" ]]; then
+if [[ "${CHECK_BUILDER:-}" == "1" ]]; then
     docker-compose build builder
 fi
 
