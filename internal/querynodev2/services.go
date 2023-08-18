@@ -253,6 +253,13 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 	}
 	defer node.subscribingChannels.Remove(channel.GetChannelName())
 
+	// to avoid concurrent watch/unwatch
+	if node.unsubscribingChannels.Contain(channel.GetChannelName()) {
+		err := merr.WrapErrChannelUnsubscribing(channel.GetChannelName())
+		log.Warn(err.Error())
+		return merr.Status(err), nil
+	}
+
 	_, exist := node.delegators.Get(channel.GetChannelName())
 	if exist {
 		log.Info("channel already subscribed")
@@ -375,6 +382,8 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 		return status, nil
 	}
 
+	node.unsubscribingChannels.Insert(req.GetChannelName())
+	defer node.unsubscribingChannels.Remove(req.GetChannelName())
 	delegator, ok := node.delegators.GetAndRemove(req.GetChannelName())
 	if ok {
 		// close the delegator first to block all coming query/search requests
@@ -386,7 +395,6 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 
 		node.manager.Collection.Unref(req.GetCollectionID(), 1)
 	}
-
 	log.Info("unsubscribed channel")
 
 	return util.SuccessStatus(), nil

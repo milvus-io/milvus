@@ -95,12 +95,13 @@ type QueryNode struct {
 	stopOnce  sync.Once
 
 	// internal components
-	manager             *segments.Manager
-	clusterManager      cluster.Manager
-	tSafeManager        tsafe.Manager
-	pipelineManager     pipeline.Manager
-	subscribingChannels *typeutil.ConcurrentSet[string]
-	delegators          *typeutil.ConcurrentMap[string, delegator.ShardDelegator]
+	manager               *segments.Manager
+	clusterManager        cluster.Manager
+	tSafeManager          tsafe.Manager
+	pipelineManager       pipeline.Manager
+	subscribingChannels   *typeutil.ConcurrentSet[string]
+	unsubscribingChannels *typeutil.ConcurrentSet[string]
+	delegators            *typeutil.ConcurrentMap[string, delegator.ShardDelegator]
 
 	// segment loader
 	loader segments.Loader
@@ -324,6 +325,7 @@ func (node *QueryNode) Init() error {
 		})
 		node.delegators = typeutil.NewConcurrentMap[string, delegator.ShardDelegator]()
 		node.subscribingChannels = typeutil.NewConcurrentSet[string]()
+		node.unsubscribingChannels = typeutil.NewConcurrentSet[string]()
 		node.manager = segments.NewManager()
 		node.loader = segments.NewLoader(node.manager, node.vectorStorage)
 		node.dispClient = msgdispatcher.NewClient(node.factory, typeutil.QueryNodeRole, paramtable.GetNodeID())

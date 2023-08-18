@@ -930,4 +930,8 @@ func TestDelegatorTSafeListenerClosed(t *testing.T) {
 	case <-time.After(time.Second):
 		assert.FailNow(t, "watchTsafe still working after listener closed")
 	}
+
+	sd.Close()
+	assert.Equal(t, sd.Serviceable(), false)
+	assert.Equal(t, sd.Stopped(), true)
 }

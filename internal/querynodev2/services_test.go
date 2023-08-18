@@ -373,13 +373,20 @@ func (suite *ServiceSuite) TestWatchDmChannels_Failed() {
 		},
 	}
 
+	// test channel is unsubscribing
+	suite.node.unsubscribingChannels.Insert(suite.vchannel)
+	status, err := suite.node.WatchDmChannels(ctx, req)
+	suite.NoError(err)
+	suite.Equal(status.GetReason(), merr.WrapErrChannelUnsubscribing(suite.vchannel).Error())
+	suite.node.unsubscribingChannels.Remove(suite.vchannel)
+
 	// init msgstream failed
 	suite.factory.EXPECT().NewTtMsgStream(mock.Anything).Return(suite.msgStream, nil)
 	suite.msgStream.EXPECT().AsConsumer([]string{suite.pchannel}, mock.Anything, mock.Anything).Return()
 	suite.msgStream.EXPECT().Close().Return()
 	suite.msgStream.EXPECT().Seek(mock.Anything).Return(errors.New("mock error"))
 
-	status, err := suite.node.WatchDmChannels(ctx, req)
+	status, err = suite.node.WatchDmChannels(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
 
