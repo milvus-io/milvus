@@ -180,19 +180,14 @@ func (mgr *segmentManager) UpdateSegmentVersion(segmentType SegmentType, segment
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 
-	targetMap := mgr.growingSegments
-	switch segmentType {
-	case SegmentTypeGrowing:
-		targetMap = mgr.growingSegments
-	case SegmentTypeSealed:
-		targetMap = mgr.sealedSegments
-	default:
-		panic("unexpected segment type")
+	segment, ok := mgr.sealedSegments[segmentID]
+	if !ok {
+		segment, ok = mgr.growingSegments[segmentID]
 	}
 
-	segment, ok := targetMap[segmentID]
 	if !ok {
 		log.Warn("segment not exist, skip segment version change",
+			zap.Any("type", segmentType),
 			zap.Int64("segmentID", segmentID),
 			zap.Int64("newVersion", newVersion),
 		)
@@ -202,13 +197,13 @@ func (mgr *segmentManager) UpdateSegmentVersion(segmentType SegmentType, segment
 	if segment.Version() >= newVersion {
 		log.Warn("Invalid segment version changed, skip it",
 			zap.Int64("segmentID", segment.ID()),
+			zap.Any("type", segmentType),
 			zap.Int64("oldVersion", segment.Version()),
 			zap.Int64("newVersion", newVersion))
 		return
 	}
 
 	segment.UpdateVersion(newVersion)
-	targetMap[segmentID] = segment
 }
 
 func (mgr *segmentManager) Get(segmentID UniqueID) Segment {
