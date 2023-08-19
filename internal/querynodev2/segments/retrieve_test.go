@@ -18,6 +18,7 @@ package segments
 
 import (
 	"context"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/cgo"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -42,9 +43,9 @@ type RetrieveSuite struct {
 	collectionID int64
 	partitionID  int64
 	segmentID    int64
-	collection   *Collection
-	sealed       *LocalSegment
-	growing      *LocalSegment
+	collection   *cgo.Collection
+	sealed       *cgo.LocalSegment
+	growing      *cgo.LocalSegment
 }
 
 func (suite *RetrieveSuite) SetupSuite() {
@@ -79,12 +80,12 @@ func (suite *RetrieveSuite) SetupTest() {
 	)
 	suite.collection = suite.manager.Collection.Get(suite.collectionID)
 
-	suite.sealed, err = NewSegment(suite.collection,
+	suite.sealed, err = cgo.NewSegment(suite.collection,
 		suite.segmentID,
 		suite.partitionID,
 		suite.collectionID,
 		"dml",
-		SegmentTypeSealed,
+		cgo.SegmentTypeSealed,
 		0,
 		nil,
 		nil,
@@ -105,33 +106,33 @@ func (suite *RetrieveSuite) SetupTest() {
 		suite.Require().NoError(err)
 	}
 
-	suite.growing, err = NewSegment(suite.collection,
+	suite.growing, err = cgo.NewSegment(suite.collection,
 		suite.segmentID+1,
 		suite.partitionID,
 		suite.collectionID,
 		"dml",
-		SegmentTypeGrowing,
+		cgo.SegmentTypeGrowing,
 		0,
 		nil,
 		nil,
 	)
 	suite.Require().NoError(err)
 
-	insertMsg, err := genInsertMsg(suite.collection, suite.partitionID, suite.growing.segmentID, msgLength)
+	insertMsg, err := genInsertMsg(suite.collection, suite.partitionID, suite.growing.SegmentID(), msgLength)
 	suite.Require().NoError(err)
 	insertRecord, err := storage.TransferInsertMsgToInsertRecord(suite.collection.Schema(), insertMsg)
 	suite.Require().NoError(err)
 	err = suite.growing.Insert(insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
 	suite.Require().NoError(err)
 
-	suite.manager.Segment.Put(SegmentTypeSealed, suite.sealed)
-	suite.manager.Segment.Put(SegmentTypeGrowing, suite.growing)
+	suite.manager.Segment.Put(cgo.SegmentTypeSealed, suite.sealed)
+	suite.manager.Segment.Put(cgo.SegmentTypeGrowing, suite.growing)
 }
 
 func (suite *RetrieveSuite) TearDownTest() {
-	DeleteSegment(suite.sealed)
-	DeleteSegment(suite.growing)
-	DeleteCollection(suite.collection)
+	cgo.DeleteSegment(suite.sealed)
+	cgo.DeleteSegment(suite.growing)
+	cgo.DeleteCollection(suite.collection)
 	ctx := context.Background()
 	suite.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
 }
@@ -179,7 +180,7 @@ func (suite *RetrieveSuite) TestRetrieveNilSegment() {
 	plan, err := genSimpleRetrievePlan(suite.collection)
 	suite.NoError(err)
 
-	DeleteSegment(suite.sealed)
+	cgo.DeleteSegment(suite.sealed)
 	res, segments, err := RetrieveHistorical(context.TODO(), suite.manager, plan,
 		suite.collectionID,
 		[]int64{suite.partitionID},

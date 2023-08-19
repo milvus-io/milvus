@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/cgo"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -80,12 +81,12 @@ func (suite *FilterNodeSuite) TestWithLoadCollection() {
 	suite.validSegmentIDs = []int64{2, 3, 4, 5, 6}
 
 	//mock
-	collection := segments.NewCollectionWithoutSchema(suite.collectionID, querypb.LoadType_LoadCollection)
+	collection := cgo.NewCollectionWithoutSchema(suite.collectionID, querypb.LoadType_LoadCollection)
 	for _, partitionID := range suite.partitionIDs {
 		collection.AddPartition(partitionID)
 	}
 
-	mockCollectionManager := segments.NewMockCollectionManager(suite.T())
+	mockCollectionManager := cgo.NewMockCollectionManager(suite.T())
 	mockCollectionManager.EXPECT().Get(suite.collectionID).Return(collection)
 
 	mockSegmentManager := segments.NewMockSegmentManager(suite.T())
@@ -115,10 +116,10 @@ func (suite *FilterNodeSuite) TestWithLoadPartation() {
 	suite.validSegmentIDs = []int64{2, 3, 4, 5, 6}
 
 	//mock
-	collection := segments.NewCollectionWithoutSchema(suite.collectionID, querypb.LoadType_LoadPartition)
+	collection := cgo.NewCollectionWithoutSchema(suite.collectionID, querypb.LoadType_LoadPartition)
 	collection.AddPartition(suite.partitionIDs[0])
 
-	mockCollectionManager := segments.NewMockCollectionManager(suite.T())
+	mockCollectionManager := cgo.NewMockCollectionManager(suite.T())
 	mockCollectionManager.EXPECT().Get(suite.collectionID).Return(collection)
 
 	mockSegmentManager := segments.NewMockSegmentManager(suite.T())

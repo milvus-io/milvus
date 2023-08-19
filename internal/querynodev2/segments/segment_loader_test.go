@@ -18,6 +18,7 @@ package segments
 
 import (
 	"context"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/cgo"
 	"math/rand"
 	"testing"
 
@@ -107,7 +108,7 @@ func (suite *SegmentLoaderSuite) TestLoad() {
 	)
 	suite.NoError(err)
 
-	_, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
+	_, err = suite.loader.Load(ctx, suite.collectionID, cgo.SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
 		SegmentID:    suite.segmentID,
 		PartitionID:  suite.partitionID,
 		CollectionID: suite.collectionID,
@@ -128,7 +129,7 @@ func (suite *SegmentLoaderSuite) TestLoad() {
 	)
 	suite.NoError(err)
 
-	_, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeGrowing, 0, &querypb.SegmentLoadInfo{
+	_, err = suite.loader.Load(ctx, suite.collectionID, cgo.SegmentTypeGrowing, 0, &querypb.SegmentLoadInfo{
 		SegmentID:    suite.segmentID + 1,
 		PartitionID:  suite.partitionID,
 		CollectionID: suite.collectionID,
@@ -166,7 +167,7 @@ func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 		})
 	}
 
-	segments, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, loadInfos...)
+	segments, err := suite.loader.Load(ctx, suite.collectionID, cgo.SegmentTypeSealed, 0, loadInfos...)
 	suite.NoError(err)
 
 	// Won't load bloom filter with sealed segments
@@ -200,7 +201,7 @@ func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 		})
 	}
 
-	segments, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeGrowing, 0, loadInfos...)
+	segments, err = suite.loader.Load(ctx, suite.collectionID, cgo.SegmentTypeGrowing, 0, loadInfos...)
 	suite.NoError(err)
 	// Should load bloom filter with growing segments
 	for _, segment := range segments {
@@ -253,7 +254,7 @@ func (suite *SegmentLoaderSuite) TestLoadWithIndex() {
 		})
 	}
 
-	segments, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, loadInfos...)
+	segments, err := suite.loader.Load(ctx, suite.collectionID, cgo.SegmentTypeSealed, 0, loadInfos...)
 	suite.NoError(err)
 
 	vecFields := funcutil.GetVecFieldIDs(suite.schema)
@@ -338,7 +339,7 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogs() {
 		})
 	}
 
-	segments, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeGrowing, 0, loadInfos...)
+	segments, err := suite.loader.Load(ctx, suite.collectionID, cgo.SegmentTypeGrowing, 0, loadInfos...)
 	suite.NoError(err)
 
 	for _, segment := range segments {
@@ -355,7 +356,7 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogs() {
 
 func (suite *SegmentLoaderSuite) TestLoadIndex() {
 	ctx := context.Background()
-	segment := &LocalSegment{}
+	segment := &cgo.LocalSegment{}
 	loadInfo := &querypb.SegmentLoadInfo{
 		SegmentID:    1,
 		PartitionID:  suite.partitionID,
@@ -390,7 +391,7 @@ func (suite *SegmentLoaderSuite) TestLoadWithMmap() {
 	)
 	suite.NoError(err)
 
-	_, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
+	_, err = suite.loader.Load(ctx, suite.collectionID, cgo.SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
 		SegmentID:    suite.segmentID,
 		PartitionID:  suite.partitionID,
 		CollectionID: suite.collectionID,
@@ -445,7 +446,7 @@ func (suite *SegmentLoaderSuite) TestPatchEntryNum() {
 		}
 	}
 
-	segments, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, loadInfo)
+	segments, err := suite.loader.Load(ctx, suite.collectionID, cgo.SegmentTypeSealed, 0, loadInfo)
 	suite.Require().NoError(err)
 	suite.Require().Equal(1, len(segments))
 
@@ -475,7 +476,7 @@ func (suite *SegmentLoaderSuite) TestRunOutMemory() {
 	)
 	suite.NoError(err)
 
-	_, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
+	_, err = suite.loader.Load(ctx, suite.collectionID, cgo.SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
 		SegmentID:    suite.segmentID,
 		PartitionID:  suite.partitionID,
 		CollectionID: suite.collectionID,
@@ -496,7 +497,7 @@ func (suite *SegmentLoaderSuite) TestRunOutMemory() {
 	)
 	suite.NoError(err)
 
-	_, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeGrowing, 0, &querypb.SegmentLoadInfo{
+	_, err = suite.loader.Load(ctx, suite.collectionID, cgo.SegmentTypeGrowing, 0, &querypb.SegmentLoadInfo{
 		SegmentID:    suite.segmentID + 1,
 		PartitionID:  suite.partitionID,
 		CollectionID: suite.collectionID,
@@ -507,7 +508,7 @@ func (suite *SegmentLoaderSuite) TestRunOutMemory() {
 	suite.Error(err)
 
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapDirPath.Key, "./mmap")
-	_, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
+	_, err = suite.loader.Load(ctx, suite.collectionID, cgo.SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
 		SegmentID:    suite.segmentID,
 		PartitionID:  suite.partitionID,
 		CollectionID: suite.collectionID,
@@ -516,7 +517,7 @@ func (suite *SegmentLoaderSuite) TestRunOutMemory() {
 		NumOfRows:    int64(msgLength),
 	})
 	suite.Error(err)
-	_, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeGrowing, 0, &querypb.SegmentLoadInfo{
+	_, err = suite.loader.Load(ctx, suite.collectionID, cgo.SegmentTypeGrowing, 0, &querypb.SegmentLoadInfo{
 		SegmentID:    suite.segmentID + 1,
 		PartitionID:  suite.partitionID,
 		CollectionID: suite.collectionID,

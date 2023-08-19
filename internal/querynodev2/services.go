@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/collector"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/cgo"
 	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util"
@@ -381,7 +382,7 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 		delegator.Close()
 
 		node.pipelineManager.Remove(req.GetChannelName())
-		node.manager.Segment.RemoveBy(segments.WithChannel(req.GetChannelName()), segments.WithType(segments.SegmentTypeGrowing))
+		node.manager.Segment.RemoveBy(segments.WithChannel(req.GetChannelName()), segments.WithType(cgo.SegmentTypeGrowing))
 		node.tSafeManager.Remove(req.GetChannelName())
 
 		node.manager.Collection.Unref(req.GetCollectionID(), 1)
@@ -479,7 +480,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 	log.Info("start to load segments...")
 	loaded, err := node.loader.Load(ctx,
 		req.GetCollectionID(),
-		segments.SegmentTypeSealed,
+		cgo.SegmentTypeSealed,
 		req.GetVersion(),
 		req.GetInfos()...,
 	)
@@ -1175,7 +1176,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			Channel:            s.Shard(),
 			Version:            s.Version(),
 			LastDeltaTimestamp: s.LastDeltaTimestamp(),
-			IndexInfo: lo.SliceToMap(s.Indexes(), func(info *segments.IndexedFieldInfo) (int64, *querypb.FieldIndexInfo) {
+			IndexInfo: lo.SliceToMap(s.Indexes(), func(info *cgo.IndexedFieldInfo) (int64, *querypb.FieldIndexInfo) {
 				return info.IndexInfo.FieldID, info.IndexInfo
 			}),
 		})
@@ -1207,7 +1208,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 
 		growingSegments := make(map[int64]*msgpb.MsgPosition)
 		for _, entry := range growing {
-			segment := node.manager.Segment.GetWithType(entry.SegmentID, segments.SegmentTypeGrowing)
+			segment := node.manager.Segment.GetWithType(entry.SegmentID, cgo.SegmentTypeGrowing)
 			if segment == nil {
 				log.Warn("leader view growing not found", zap.String("channel", key), zap.Int64("segmentID", entry.SegmentID))
 				growingSegments[entry.SegmentID] = &msgpb.MsgPosition{}

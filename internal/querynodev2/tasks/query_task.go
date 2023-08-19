@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/querynodev2/collector"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/cgo"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -19,7 +20,7 @@ import (
 var _ Task = &QueryTask{}
 
 func NewQueryTask(ctx context.Context,
-	collection *segments.Collection,
+	collection *cgo.Collection,
 	manager *segments.Manager,
 	req *querypb.QueryRequest,
 ) *QueryTask {
@@ -35,7 +36,7 @@ func NewQueryTask(ctx context.Context,
 
 type QueryTask struct {
 	ctx            context.Context
-	collection     *segments.Collection
+	collection     *cgo.Collection
 	segmentManager *segments.Manager
 	req            *querypb.QueryRequest
 	result         *internalpb.RetrieveResults
@@ -77,7 +78,7 @@ func (t *QueryTask) PreExecute() error {
 func (t *QueryTask) Execute() error {
 	tr := timerecord.NewTimeRecorderWithTrace(t.ctx, "QueryTask")
 
-	retrievePlan, err := segments.NewRetrievePlan(
+	retrievePlan, err := cgo.NewRetrievePlan(
 		t.collection,
 		t.req.Req.GetSerializedExprPlan(),
 		t.req.Req.GetMvccTimestamp(),

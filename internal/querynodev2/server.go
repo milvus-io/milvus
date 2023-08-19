@@ -30,6 +30,7 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/cgo"
 	"os"
 	"path"
 	"path/filepath"
@@ -257,7 +258,7 @@ func (node *QueryNode) Init() error {
 
 		localRootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
 		localChunkManager := storage.NewLocalChunkManager(storage.RootPath(localRootPath))
-		localUsedSize, err := segments.GetLocalUsedSize(localRootPath)
+		localUsedSize, err := cgo.GetLocalUsedSize(localRootPath)
 		if err != nil {
 			log.Warn("get local used size failed", zap.Error(err))
 			initError = err
@@ -398,8 +399,8 @@ func (node *QueryNode) Stop() error {
 						channelNum      = 0
 					)
 					if node.manager != nil {
-						sealedSegments = node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeSealed))
-						growingSegments = node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeGrowing))
+						sealedSegments = node.manager.Segment.GetBy(segments.WithType(cgo.SegmentTypeSealed))
+						growingSegments = node.manager.Segment.GetBy(segments.WithType(cgo.SegmentTypeGrowing))
 					}
 					if node.pipelineManager != nil {
 						channelNum = node.pipelineManager.Num()

@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/cgo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
@@ -60,11 +61,11 @@ func (suite *InsertNodeSuite) TestBasic() {
 	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
 	in := suite.buildInsertNodeMsg(schema)
 
-	collection := segments.NewCollection(suite.collectionID, schema, segments.GenTestIndexMeta(suite.collectionID, schema), querypb.LoadType_LoadCollection)
+	collection := cgo.NewCollection(suite.collectionID, schema, segments.GenTestIndexMeta(suite.collectionID, schema), querypb.LoadType_LoadCollection)
 	collection.AddPartition(suite.partitionID)
 
 	//init mock
-	mockCollectionManager := segments.NewMockCollectionManager(suite.T())
+	mockCollectionManager := cgo.NewMockCollectionManager(suite.T())
 	mockCollectionManager.EXPECT().Get(suite.collectionID).Return(collection)
 
 	mockSegmentManager := segments.NewMockSegmentManager(suite.T())
@@ -94,11 +95,11 @@ func (suite *InsertNodeSuite) TestDataTypeNotSupported() {
 	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
 	in := suite.buildInsertNodeMsg(schema)
 
-	collection := segments.NewCollection(suite.collectionID, schema, segments.GenTestIndexMeta(suite.collectionID, schema), querypb.LoadType_LoadCollection)
+	collection := cgo.NewCollection(suite.collectionID, schema, segments.GenTestIndexMeta(suite.collectionID, schema), querypb.LoadType_LoadCollection)
 	collection.AddPartition(suite.partitionID)
 
 	//init mock
-	mockCollectionManager := segments.NewMockCollectionManager(suite.T())
+	mockCollectionManager := cgo.NewMockCollectionManager(suite.T())
 	mockCollectionManager.EXPECT().Get(suite.collectionID).Return(collection)
 
 	mockSegmentManager := segments.NewMockSegmentManager(suite.T())

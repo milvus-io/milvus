@@ -18,6 +18,7 @@ package segments
 
 import (
 	"context"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/cgo"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -37,9 +38,9 @@ type SearchSuite struct {
 	collectionID int64
 	partitionID  int64
 	segmentID    int64
-	collection   *Collection
-	sealed       *LocalSegment
-	growing      *LocalSegment
+	collection   *cgo.Collection
+	sealed       *cgo.LocalSegment
+	growing      *cgo.LocalSegment
 }
 
 func (suite *SearchSuite) SetupSuite() {
@@ -73,12 +74,12 @@ func (suite *SearchSuite) SetupTest() {
 	)
 	suite.collection = suite.manager.Collection.Get(suite.collectionID)
 
-	suite.sealed, err = NewSegment(suite.collection,
+	suite.sealed, err = cgo.NewSegment(suite.collection,
 		suite.segmentID,
 		suite.partitionID,
 		suite.collectionID,
 		"dml",
-		SegmentTypeSealed,
+		cgo.SegmentTypeSealed,
 		0,
 		nil,
 		nil,
@@ -99,12 +100,12 @@ func (suite *SearchSuite) SetupTest() {
 		suite.Require().NoError(err)
 	}
 
-	suite.growing, err = NewSegment(suite.collection,
+	suite.growing, err = cgo.NewSegment(suite.collection,
 		suite.segmentID+1,
 		suite.partitionID,
 		suite.collectionID,
 		"dml",
-		SegmentTypeGrowing,
+		cgo.SegmentTypeGrowing,
 		0,
 		nil,
 		nil,
@@ -117,13 +118,13 @@ func (suite *SearchSuite) SetupTest() {
 	suite.Require().NoError(err)
 	suite.growing.Insert(insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
 
-	suite.manager.Segment.Put(SegmentTypeSealed, suite.sealed)
-	suite.manager.Segment.Put(SegmentTypeGrowing, suite.growing)
+	suite.manager.Segment.Put(cgo.SegmentTypeSealed, suite.sealed)
+	suite.manager.Segment.Put(cgo.SegmentTypeGrowing, suite.growing)
 }
 
 func (suite *SearchSuite) TearDownTest() {
-	DeleteSegment(suite.sealed)
-	DeleteCollection(suite.collection)
+	cgo.DeleteSegment(suite.sealed)
+	cgo.DeleteCollection(suite.collection)
 	ctx := context.Background()
 	suite.chunkManager.RemoveWithPrefix(ctx, paramtable.Get().MinioCfg.RootPath.GetValue())
 }

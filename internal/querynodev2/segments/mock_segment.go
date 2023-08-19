@@ -4,6 +4,8 @@ package segments
 
 import (
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	cgo "github.com/milvus-io/milvus/internal/querynodev2/segments/cgo"
+
 	mock "github.com/stretchr/testify/mock"
 
 	msgpb "github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -27,7 +29,7 @@ func (_m *MockSegment) EXPECT() *MockSegment_Expecter {
 }
 
 // AddIndex provides a mock function with given fields: fieldID, index
-func (_m *MockSegment) AddIndex(fieldID int64, index *IndexedFieldInfo) {
+func (_m *MockSegment) AddIndex(fieldID int64, index *cgo.IndexedFieldInfo) {
 	_m.Called(fieldID, index)
 }
 
@@ -38,14 +40,14 @@ type MockSegment_AddIndex_Call struct {
 
 // AddIndex is a helper method to define mock.On call
 //   - fieldID int64
-//   - index *IndexedFieldInfo
+//   - index *cgo.IndexedFieldInfo
 func (_e *MockSegment_Expecter) AddIndex(fieldID interface{}, index interface{}) *MockSegment_AddIndex_Call {
 	return &MockSegment_AddIndex_Call{Call: _e.mock.On("AddIndex", fieldID, index)}
 }
 
-func (_c *MockSegment_AddIndex_Call) Run(run func(fieldID int64, index *IndexedFieldInfo)) *MockSegment_AddIndex_Call {
+func (_c *MockSegment_AddIndex_Call) Run(run func(fieldID int64, index *cgo.IndexedFieldInfo)) *MockSegment_AddIndex_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(*IndexedFieldInfo))
+		run(args[0].(int64), args[1].(*cgo.IndexedFieldInfo))
 	})
 	return _c
 }
@@ -55,7 +57,7 @@ func (_c *MockSegment_AddIndex_Call) Return() *MockSegment_AddIndex_Call {
 	return _c
 }
 
-func (_c *MockSegment_AddIndex_Call) RunAndReturn(run func(int64, *IndexedFieldInfo)) *MockSegment_AddIndex_Call {
+func (_c *MockSegment_AddIndex_Call) RunAndReturn(run func(int64, *cgo.IndexedFieldInfo)) *MockSegment_AddIndex_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -187,15 +189,15 @@ func (_c *MockSegment_ExistIndex_Call) RunAndReturn(run func(int64) bool) *MockS
 }
 
 // GetIndex provides a mock function with given fields: fieldID
-func (_m *MockSegment) GetIndex(fieldID int64) *IndexedFieldInfo {
+func (_m *MockSegment) GetIndex(fieldID int64) *cgo.IndexedFieldInfo {
 	ret := _m.Called(fieldID)
 
-	var r0 *IndexedFieldInfo
-	if rf, ok := ret.Get(0).(func(int64) *IndexedFieldInfo); ok {
+	var r0 *cgo.IndexedFieldInfo
+	if rf, ok := ret.Get(0).(func(int64) *cgo.IndexedFieldInfo); ok {
 		r0 = rf(fieldID)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*IndexedFieldInfo)
+			r0 = ret.Get(0).(*cgo.IndexedFieldInfo)
 		}
 	}
 
@@ -220,12 +222,12 @@ func (_c *MockSegment_GetIndex_Call) Run(run func(fieldID int64)) *MockSegment_G
 	return _c
 }
 
-func (_c *MockSegment_GetIndex_Call) Return(_a0 *IndexedFieldInfo) *MockSegment_GetIndex_Call {
+func (_c *MockSegment_GetIndex_Call) Return(_a0 *cgo.IndexedFieldInfo) *MockSegment_GetIndex_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockSegment_GetIndex_Call) RunAndReturn(run func(int64) *IndexedFieldInfo) *MockSegment_GetIndex_Call {
+func (_c *MockSegment_GetIndex_Call) RunAndReturn(run func(int64) *cgo.IndexedFieldInfo) *MockSegment_GetIndex_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -272,15 +274,15 @@ func (_c *MockSegment_ID_Call) RunAndReturn(run func() int64) *MockSegment_ID_Ca
 }
 
 // Indexes provides a mock function with given fields:
-func (_m *MockSegment) Indexes() []*IndexedFieldInfo {
+func (_m *MockSegment) Indexes() []*cgo.IndexedFieldInfo {
 	ret := _m.Called()
 
-	var r0 []*IndexedFieldInfo
-	if rf, ok := ret.Get(0).(func() []*IndexedFieldInfo); ok {
+	var r0 []*cgo.IndexedFieldInfo
+	if rf, ok := ret.Get(0).(func() []*cgo.IndexedFieldInfo); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*IndexedFieldInfo)
+			r0 = ret.Get(0).([]*cgo.IndexedFieldInfo)
 		}
 	}
 
@@ -304,12 +306,12 @@ func (_c *MockSegment_Indexes_Call) Run(run func()) *MockSegment_Indexes_Call {
 	return _c
 }
 
-func (_c *MockSegment_Indexes_Call) Return(_a0 []*IndexedFieldInfo) *MockSegment_Indexes_Call {
+func (_c *MockSegment_Indexes_Call) Return(_a0 []*cgo.IndexedFieldInfo) *MockSegment_Indexes_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockSegment_Indexes_Call) RunAndReturn(run func() []*IndexedFieldInfo) *MockSegment_Indexes_Call {
+func (_c *MockSegment_Indexes_Call) RunAndReturn(run func() []*cgo.IndexedFieldInfo) *MockSegment_Indexes_Call {
 	_c.Call.Return(run)
 	return _c
 }

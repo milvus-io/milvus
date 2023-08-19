@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/cgo"
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -44,7 +45,7 @@ type PipelineManagerTestSuite struct {
 
 	//mocks
 	segmentManager    *segments.MockSegmentManager
-	collectionManager *segments.MockCollectionManager
+	collectionManager *cgo.MockCollectionManager
 	delegator         *delegator.MockShardDelegator
 	msgDispatcher     *msgdispatcher.MockClient
 	msgChan           chan *msgstream.MsgPack
@@ -65,7 +66,7 @@ func (suite *PipelineManagerTestSuite) SetupTest() {
 
 	//init mock
 	//	init manager
-	suite.collectionManager = segments.NewMockCollectionManager(suite.T())
+	suite.collectionManager = cgo.NewMockCollectionManager(suite.T())
 	suite.segmentManager = segments.NewMockSegmentManager(suite.T())
 	//	init delegator
 	suite.delegator = delegator.NewMockShardDelegator(suite.T())
@@ -77,7 +78,7 @@ func (suite *PipelineManagerTestSuite) SetupTest() {
 func (suite *PipelineManagerTestSuite) TestBasic() {
 	//init mock
 	//  mock collection manager
-	suite.collectionManager.EXPECT().Get(suite.collectionID).Return(&segments.Collection{})
+	suite.collectionManager.EXPECT().Get(suite.collectionID).Return(&cgo.Collection{})
 	//  mock mq factory
 	suite.msgDispatcher.EXPECT().Register(suite.channel, mock.Anything, mqwrapper.SubscriptionPositionUnknown).Return(suite.msgChan, nil)
 	suite.msgDispatcher.EXPECT().Deregister(suite.channel)

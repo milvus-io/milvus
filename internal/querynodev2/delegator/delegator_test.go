@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/cgo"
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -82,12 +83,12 @@ func (s *DelegatorSuite) SetupTest() {
 	s.tsafeManager = tsafe.NewTSafeReplica()
 	s.loader = &segments.MockLoader{}
 	s.loader.EXPECT().
-		Load(mock.Anything, s.collectionID, segments.SegmentTypeGrowing, int64(0), mock.Anything).
-		Call.Return(func(ctx context.Context, collectionID int64, segmentType segments.SegmentType, version int64, infos ...*querypb.SegmentLoadInfo) []segments.Segment {
+		Load(mock.Anything, s.collectionID, cgo.SegmentTypeGrowing, int64(0), mock.Anything).
+		Call.Return(func(ctx context.Context, collectionID int64, segmentType cgo.SegmentType, version int64, infos ...*querypb.SegmentLoadInfo) []segments.Segment {
 		return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) segments.Segment {
-			ms := &segments.MockSegment{}
+			ms := &cgo.MockSegment{}
 			ms.EXPECT().ID().Return(info.GetSegmentID())
-			ms.EXPECT().Type().Return(segments.SegmentTypeGrowing)
+			ms.EXPECT().Type().Return(cgo.SegmentTypeGrowing)
 			ms.EXPECT().Partition().Return(info.GetPartitionID())
 			ms.EXPECT().Collection().Return(info.GetCollectionID())
 			ms.EXPECT().Indexes().Return(nil)

@@ -19,6 +19,7 @@ package querynodev2
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/cgo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -53,7 +54,7 @@ func (w *LocalWorker) LoadSegments(ctx context.Context, req *querypb.LoadSegment
 	log.Info("start to load segments...")
 	loaded, err := w.node.loader.Load(ctx,
 		req.GetCollectionID(),
-		segments.SegmentTypeSealed,
+		cgo.SegmentTypeSealed,
 		req.GetVersion(),
 		req.GetInfos()...,
 	)

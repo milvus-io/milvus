@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package segments
+package cgo
 
 /*
 #cgo pkg-config: milvus_segcore milvus_storage

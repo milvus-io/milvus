@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package segments
+package cgo
 
 /*
 #cgo pkg-config: milvus_segcore
@@ -62,7 +62,7 @@ func createSearchPlanByExpr(col *Collection, expr []byte, metricType string) (*S
 	return newPlan, nil
 }
 
-func (plan *SearchPlan) getTopK() int64 {
+func (plan *SearchPlan) GetTopK() int64 {
 	topK := C.GetTopK(plan.cSearchPlan)
 	return int64(topK)
 }
@@ -133,7 +133,11 @@ func NewSearchRequest(collection *Collection, req *querypb.SearchRequest, placeh
 	return ret, nil
 }
 
-func (req *SearchRequest) getNumOfQuery() int64 {
+func (req *SearchRequest) GetSearchFieldID() int64 {
+	return req.searchFieldID
+}
+
+func (req *SearchRequest) GetNumOfQuery() int64 {
 	numQueries := C.GetNumOfQueries(req.cPlaceholderGroup)
 	return int64(numQueries)
 }

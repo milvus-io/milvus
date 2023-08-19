@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package segments
+package cgo
 
 /*
 #cgo pkg-config: milvus_segcore
@@ -28,6 +28,7 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/util"
 	"sync"
 	"unsafe"
 
@@ -130,6 +131,14 @@ func (s *baseSegment) UpdateVersion(version int64) {
 	s.version.Store(version)
 }
 
+func (s *baseSegment) SegmentID() int64 {
+	return s.segmentID
+}
+
+func (s *baseSegment) BllomFilterSet() *pkoracle.BloomFilterSet {
+	return s.bloomFilterSet
+}
+
 func (s *baseSegment) UpdateBloomFilter(pks []storage.PrimaryKey) {
 	s.bloomFilterSet.UpdateBloomFilter(pks)
 }
@@ -140,8 +149,6 @@ func (s *baseSegment) UpdateBloomFilter(pks []storage.PrimaryKey) {
 func (s *baseSegment) MayPkExist(pk storage.PrimaryKey) bool {
 	return s.bloomFilterSet.MayPkExist(pk)
 }
-
-var _ Segment = (*LocalSegment)(nil)
 
 // Segment is a wrapper of the underlying C-structure segment.
 type LocalSegment struct {
@@ -223,7 +230,7 @@ func (s *LocalSegment) InsertCount() int64 {
 		return 0
 	}
 	var rowCount C.int64_t
-	GetDynamicPool().Submit(func() (any, error) {
+	util.GetDynamicPool().Submit(func() (any, error) {
 		rowCount = C.GetRowCount(s.ptr)
 		return nil, nil
 	}).Await()
@@ -239,7 +246,7 @@ func (s *LocalSegment) RowNum() int64 {
 		return 0
 	}
 	var rowCount C.int64_t
-	GetDynamicPool().Submit(func() (any, error) {
+	util.GetDynamicPool().Submit(func() (any, error) {
 		rowCount = C.GetRealCount(s.ptr)
 		return nil, nil
 	}).Await()
@@ -255,7 +262,7 @@ func (s *LocalSegment) MemSize() int64 {
 		return 0
 	}
 	var memoryUsageInBytes C.int64_t
-	GetDynamicPool().Submit(func() (any, error) {
+	util.GetDynamicPool().Submit(func() (any, error) {
 		memoryUsageInBytes = C.GetMemoryUsageInBytes(s.ptr)
 		return nil, nil
 	}).Await()
@@ -265,6 +272,10 @@ func (s *LocalSegment) MemSize() int64 {
 
 func (s *LocalSegment) LastDeltaTimestamp() uint64 {
 	return s.lastDeltaTimestamp.Load()
+}
+
+func (s *LocalSegment) GetFieldIndexes() *typeutil.ConcurrentMap[int64, *IndexedFieldInfo] {
+	return s.fieldIndexes
 }
 
 func (s *LocalSegment) AddIndex(fieldID int64, info *IndexedFieldInfo) {
@@ -301,10 +312,6 @@ func (s *LocalSegment) Indexes() []*IndexedFieldInfo {
 		return true
 	})
 	return result
-}
-
-func (s *LocalSegment) Type() SegmentType {
-	return s.typ
 }
 
 func DeleteSegment(segment *LocalSegment) {
@@ -370,7 +377,7 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*S
 
 	var searchResult SearchResult
 	var status C.CStatus
-	GetSQPool().Submit(func() (any, error) {
+	util.GetSQPool().Submit(func() (any, error) {
 		tr := timerecord.NewTimeRecorder("cgoSearch")
 		status = C.Search(s.ptr,
 			searchReq.plan.cSearchPlan,
@@ -417,7 +424,7 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 	maxLimitSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	var retrieveResult RetrieveResult
 	var status C.CStatus
-	GetSQPool().Submit(func() (any, error) {
+	util.GetSQPool().Submit(func() (any, error) {
 		ts := C.uint64_t(plan.Timestamp)
 		tr := timerecord.NewTimeRecorder("cgoRetrieve")
 		status = C.Retrieve(s.ptr,
@@ -503,7 +510,7 @@ func (s *LocalSegment) preInsert(numOfRecords int) (int64, error) {
 	cOffset := (*C.int64_t)(&offset)
 
 	var status C.CStatus
-	GetDynamicPool().Submit(func() (any, error) {
+	util.GetDynamicPool().Submit(func() (any, error) {
 		status = C.PreInsert(s.ptr, C.int64_t(int64(numOfRecords)), cOffset)
 		return nil, nil
 	}).Await()
@@ -543,7 +550,7 @@ func (s *LocalSegment) Insert(rowIDs []int64, timestamps []typeutil.Timestamp, r
 
 	var status C.CStatus
 
-	GetDynamicPool().Submit(func() (any, error) {
+	util.GetDynamicPool().Submit(func() (any, error) {
 		status = C.Insert(s.ptr,
 			cOffset,
 			cNumOfRows,
@@ -620,7 +627,7 @@ func (s *LocalSegment) Delete(primaryKeys []storage.PrimaryKey, timestamps []typ
 		return fmt.Errorf("failed to marshal ids: %s", err)
 	}
 	var status C.CStatus
-	GetDynamicPool().Submit(func() (any, error) {
+	util.GetDynamicPool().Submit(func() (any, error) {
 		status = C.Delete(s.ptr,
 			cOffset,
 			cSize,
@@ -679,7 +686,7 @@ func (s *LocalSegment) LoadMultiFieldData(rowCount int64, fields []*datapb.Field
 	}
 
 	var status C.CStatus
-	GetDynamicPool().Submit(func() (any, error) {
+	util.GetDynamicPool().Submit(func() (any, error) {
 		status = C.LoadFieldData(s.ptr, loadFieldDataInfo.cLoadFieldDataInfo)
 		return nil, nil
 	}).Await()
@@ -728,7 +735,7 @@ func (s *LocalSegment) LoadFieldData(fieldID int64, rowCount int64, field *datap
 	loadFieldDataInfo.appendMMapDirPath(paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue())
 
 	var status C.CStatus
-	GetDynamicPool().Submit(func() (any, error) {
+	util.GetDynamicPool().Submit(func() (any, error) {
 		status = C.LoadFieldData(s.ptr, loadFieldDataInfo.cLoadFieldDataInfo)
 		return nil, nil
 	}).Await()
@@ -804,7 +811,7 @@ func (s *LocalSegment) LoadDeltaData(deltaData *storage.DeleteData) error {
 		LoadDeletedRecord(CSegmentInterface c_segment, CLoadDeletedRecordInfo deleted_record_info)
 	*/
 	var status C.CStatus
-	GetDynamicPool().Submit(func() (any, error) {
+	util.GetDynamicPool().Submit(func() (any, error) {
 		status = C.LoadDeletedRecord(s.ptr, loadInfo)
 		return nil, nil
 	}).Await()
@@ -858,7 +865,7 @@ func (s *LocalSegment) LoadIndexInfo(indexInfo *querypb.FieldIndexInfo, info *Lo
 	}
 
 	var status C.CStatus
-	GetDynamicPool().Submit(func() (any, error) {
+	util.GetDynamicPool().Submit(func() (any, error) {
 		status = C.UpdateSealedSegmentIndex(s.ptr, info.cLoadIndexInfo)
 		return nil, nil
 	}).Await()
@@ -878,7 +885,7 @@ func (s *LocalSegment) UpdateFieldRawDataSize(numRows int64, fieldBinlog *datapb
 	for _, binlog := range fieldBinlog.GetBinlogs() {
 		fieldDataSize += binlog.LogSize
 	}
-	GetDynamicPool().Submit(func() (any, error) {
+	util.GetDynamicPool().Submit(func() (any, error) {
 		status = C.UpdateFieldRawDataSize(s.ptr, C.int64_t(fieldID), C.int64_t(numRows), C.int64_t(fieldDataSize))
 		return nil, nil
 	}).Await()

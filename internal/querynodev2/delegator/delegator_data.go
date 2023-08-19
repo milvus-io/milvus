@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator/deletebuffer"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/cgo"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -79,7 +80,7 @@ func (d *DeleteData) Append(ad DeleteData) {
 func (sd *shardDelegator) newGrowing(segmentID int64, insertData *InsertData) segments.Segment {
 	log := sd.getLogger(context.Background()).With(zap.Int64("segmentID", segmentID))
 
-	segment, err := segments.NewSegment(sd.collection, segmentID, insertData.PartitionID, sd.collectionID, sd.vchannelName, segments.SegmentTypeGrowing, 0, insertData.StartPosition, insertData.StartPosition)
+	segment, err := cgo.NewSegment(sd.collection, segmentID, insertData.PartitionID, sd.collectionID, sd.vchannelName, cgo.SegmentTypeGrowing, 0, insertData.StartPosition, insertData.StartPosition)
 	if err != nil {
 		log.Error("failed to create new segment", zap.Error(err))
 		panic(err)
@@ -87,7 +88,7 @@ func (sd *shardDelegator) newGrowing(segmentID int64, insertData *InsertData) se
 
 	sd.pkOracle.Register(segment, paramtable.GetNodeID())
 
-	sd.segmentManager.Put(segments.SegmentTypeGrowing, segment)
+	sd.segmentManager.Put(cgo.SegmentTypeGrowing, segment)
 	sd.addGrowing(SegmentEntry{
 		NodeID:        paramtable.GetNodeID(),
 		SegmentID:     segmentID,
@@ -299,7 +300,7 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 
 	segmentIDs := lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })
 	log.Info("loading growing segments...", zap.Int64s("segmentIDs", segmentIDs))
-	loaded, err := sd.loader.Load(ctx, sd.collectionID, segments.SegmentTypeGrowing, version, infos...)
+	loaded, err := sd.loader.Load(ctx, sd.collectionID, cgo.SegmentTypeGrowing, version, infos...)
 	if err != nil {
 		log.Warn("failed to load growing segment", zap.Error(err))
 		return err
@@ -621,7 +622,7 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 
 func (sd *shardDelegator) SyncTargetVersion(newVersion int64, growingInTarget []int64,
 	sealedInTarget []int64, droppedInTarget []int64) {
-	growings := sd.segmentManager.GetBy(segments.WithType(segments.SegmentTypeGrowing))
+	growings := sd.segmentManager.GetBy(segments.WithType(cgo.SegmentTypeGrowing))
 
 	sealedSet := typeutil.NewUniqueSet(sealedInTarget...)
 	growingSet := typeutil.NewUniqueSet(growingInTarget...)

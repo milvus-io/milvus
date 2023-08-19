@@ -19,6 +19,7 @@ package querynodev2
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/cgo"
 	"strconv"
 
 	"github.com/golang/protobuf/proto"
@@ -86,7 +87,7 @@ func (node *QueryNode) loadDeltaLogs(ctx context.Context, req *querypb.LoadSegme
 			continue
 		}
 
-		local := segment.(*segments.LocalSegment)
+		local := segment.(*cgo.LocalSegment)
 		err := node.loader.LoadDeltaLogs(ctx, local, info.GetDeltalogs())
 		if err != nil {
 			if finalErr == nil {
@@ -120,7 +121,7 @@ func (node *QueryNode) loadIndex(ctx context.Context, req *querypb.LoadSegmentsR
 			log.Warn("segment not found for load index operation")
 			continue
 		}
-		localSegment, ok := segment.(*segments.LocalSegment)
+		localSegment, ok := segment.(*cgo.LocalSegment)
 		if !ok {
 			log.Warn("segment not local for load index opeartion")
 			continue

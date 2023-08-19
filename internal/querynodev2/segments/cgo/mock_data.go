@@ -14,12 +14,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package segments
+package cgo
 
 import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"math"
 	"math/rand"
 	"path"
@@ -40,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
-	"github.com/milvus-io/milvus/internal/querynodev2/segments/cgo"
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -639,7 +639,7 @@ func SaveBinLog(ctx context.Context,
 			return nil, nil, err
 		}
 
-		k := JoinIDPath(collectionID, partitionID, segmentID, fieldID)
+		k := metautil.JoinIDPath(collectionID, partitionID, segmentID, fieldID)
 		//key := path.Join(defaultLocalStorage, "insert-log", k)
 		key := path.Join(chunkManager.RootPath(), "insert-log", k)
 		kvs[key] = blob.Value
@@ -662,7 +662,7 @@ func SaveBinLog(ctx context.Context,
 			return nil, nil, err
 		}
 
-		k := JoinIDPath(collectionID, partitionID, segmentID, fieldID)
+		k := metautil.JoinIDPath(collectionID, partitionID, segmentID, fieldID)
 		//key := path.Join(defaultLocalStorage, "stats-log", k)
 		key := path.Join(chunkManager.RootPath(), "stats-log", k)
 		kvs[key] = blob.Value[:]
@@ -840,7 +840,7 @@ func SaveDeltaLog(collectionID int64,
 	pkFieldID := int64(106)
 	fieldBinlog := make([]*datapb.FieldBinlog, 0)
 	log.Debug("[query node unittest] save delta log", zap.Int64("fieldID", pkFieldID))
-	key := JoinIDPath(collectionID, partitionID, segmentID, pkFieldID)
+	key := metautil.JoinIDPath(collectionID, partitionID, segmentID, pkFieldID)
 	//keyPath := path.Join(defaultLocalStorage, "delta-log", key)
 	keyPath := path.Join(cm.RootPath(), "delta-log", key)
 	kvs[keyPath] = blob.Value[:]
@@ -961,7 +961,7 @@ func genStorageConfig() *indexpb.StorageConfig {
 	}
 }
 
-func genSearchRequest(nq int64, indexType string, collection *cgo.Collection) (*internalpb.SearchRequest, error) {
+func genSearchRequest(nq int64, indexType string, collection *Collection) (*internalpb.SearchRequest, error) {
 	placeHolder, err := genPlaceHolderGroup(nq)
 	if err != nil {
 		return nil, err
@@ -1103,22 +1103,22 @@ func genHNSWDSL(schema *schemapb.CollectionSchema, ef int, topK int64, roundDeci
             >`, nil
 }
 
-func checkSearchResult(nq int64, plan *cgo.SearchPlan, searchResult *cgo.SearchResult) error {
-	searchResults := make([]*cgo.SearchResult, 0)
+func checkSearchResult(nq int64, plan *SearchPlan, searchResult *SearchResult) error {
+	searchResults := make([]*SearchResult, 0)
 	searchResults = append(searchResults, searchResult)
 
 	topK := plan.GetTopK()
 	sliceNQs := []int64{nq / 5, nq / 5, nq / 5, nq / 5, nq / 5}
 	sliceTopKs := []int64{topK, topK / 2, topK, topK, topK / 2}
-	sInfo := cgo.ParseSliceInfo(sliceNQs, sliceTopKs, nq)
+	sInfo := ParseSliceInfo(sliceNQs, sliceTopKs, nq)
 
-	res, err := cgo.ReduceSearchResultsAndFillData(plan, searchResults, 1, sInfo.SliceNQs, sInfo.SliceTopKs)
+	res, err := ReduceSearchResultsAndFillData(plan, searchResults, 1, sInfo.SliceNQs, sInfo.SliceTopKs)
 	if err != nil {
 		return err
 	}
 
 	for i := 0; i < len(sInfo.SliceNQs); i++ {
-		blob, err := cgo.GetSearchResultDataBlob(res, i)
+		blob, err := GetSearchResultDataBlob(res, i)
 		if err != nil {
 			return err
 		}
@@ -1147,12 +1147,12 @@ func checkSearchResult(nq int64, plan *cgo.SearchPlan, searchResult *cgo.SearchR
 		}
 	}
 
-	cgo.DeleteSearchResults(searchResults)
-	cgo.DeleteSearchResultDataBlobs(res)
+	DeleteSearchResults(searchResults)
+	DeleteSearchResultDataBlobs(res)
 	return nil
 }
 
-func genSearchPlanAndRequests(collection *cgo.Collection, segments []int64, indexType string, nq int64) (*cgo.SearchRequest, error) {
+func genSearchPlanAndRequests(collection *Collection, segments []int64, indexType string, nq int64) (*SearchRequest, error) {
 
 	iReq, _ := genSearchRequest(nq, indexType, collection)
 	queryReq := &querypb.SearchRequest{
@@ -1162,10 +1162,10 @@ func genSearchPlanAndRequests(collection *cgo.Collection, segments []int64, inde
 		FromShardLeader: true,
 		Scope:           querypb.DataScope_Historical,
 	}
-	return cgo.NewSearchRequest(collection, queryReq, queryReq.Req.GetPlaceholderGroup())
+	return NewSearchRequest(collection, queryReq, queryReq.Req.GetPlaceholderGroup())
 }
 
-func genInsertMsg(collection *cgo.Collection, partitionID, segment int64, numRows int) (*msgstream.InsertMsg, error) {
+func genInsertMsg(collection *Collection, partitionID, segment int64, numRows int) (*msgstream.InsertMsg, error) {
 	fieldsData := make([]*schemapb.FieldData, 0)
 
 	for _, f := range collection.Schema().Fields {
@@ -1254,14 +1254,14 @@ func genSimpleRowIDField(numRows int) []int64 {
 	return ids
 }
 
-func genSimpleRetrievePlan(collection *cgo.Collection) (*cgo.RetrievePlan, error) {
+func genSimpleRetrievePlan(collection *Collection) (*RetrievePlan, error) {
 	timestamp := storage.Timestamp(1000)
 	planBytes, err := genSimpleRetrievePlanExpr(collection.Schema())
 	if err != nil {
 		return nil, err
 	}
 
-	plan, err2 := cgo.NewRetrievePlan(collection, planBytes, timestamp, 100)
+	plan, err2 := NewRetrievePlan(collection, planBytes, timestamp, 100)
 	return plan, err2
 }
 

@@ -19,8 +19,8 @@ package segments
 import (
 	"context"
 	"fmt"
-
 	"github.com/cockroachdb/errors"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/cgo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -85,9 +85,9 @@ func validate(ctx context.Context, manager *Manager, collectionID int64, partiti
 }
 
 func validateOnHistorical(ctx context.Context, manager *Manager, collectionID int64, partitionIDs []int64, segmentIDs []int64) ([]Segment, error) {
-	return validate(ctx, manager, collectionID, partitionIDs, segmentIDs, WithType(SegmentTypeSealed))
+	return validate(ctx, manager, collectionID, partitionIDs, segmentIDs, WithType(cgo.SegmentTypeSealed))
 }
 
 func validateOnStream(ctx context.Context, manager *Manager, collectionID int64, partitionIDs []int64, segmentIDs []int64) ([]Segment, error) {
-	return validate(ctx, manager, collectionID, partitionIDs, segmentIDs, WithType(SegmentTypeGrowing))
+	return validate(ctx, manager, collectionID, partitionIDs, segmentIDs, WithType(cgo.SegmentTypeGrowing))
 }

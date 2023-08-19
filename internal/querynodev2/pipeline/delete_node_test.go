@@ -21,6 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/cgo"
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
@@ -73,7 +74,7 @@ func (suite *DeleteNodeSuite) buildDeleteNodeMsg() *deleteNodeMsg {
 
 func (suite *DeleteNodeSuite) TestBasic() {
 	//mock
-	mockCollectionManager := segments.NewMockCollectionManager(suite.T())
+	mockCollectionManager := cgo.NewMockCollectionManager(suite.T())
 	mockSegmentManager := segments.NewMockSegmentManager(suite.T())
 	suite.manager = &segments.Manager{
 		Collection: mockCollectionManager,

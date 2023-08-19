@@ -1,4 +1,4 @@
-package segments
+package cgo
 
 import (
 	"context"
@@ -22,7 +22,6 @@ type SegmentSuite struct {
 	chunkManager storage.ChunkManager
 
 	// Data
-	manager      *Manager
 	collectionID int64
 	partitionID  int64
 	segmentID    int64
@@ -49,10 +48,10 @@ func (suite *SegmentSuite) SetupTest() {
 	suite.partitionID = 10
 	suite.segmentID = 1
 
-	suite.manager = NewManager()
 	schema := GenTestCollectionSchema("test-reduce", schemapb.DataType_Int64)
 	indexMeta := GenTestIndexMeta(suite.collectionID, schema)
-	suite.manager.Collection.PutOrRef(suite.collectionID,
+	Collection := NewCollectionManager()
+	Collection.PutOrRef(suite.collectionID,
 		schema,
 		indexMeta,
 		&querypb.LoadMetaInfo{
@@ -61,7 +60,7 @@ func (suite *SegmentSuite) SetupTest() {
 			PartitionIDs: []int64{suite.partitionID},
 		},
 	)
-	suite.collection = suite.manager.Collection.Get(suite.collectionID)
+	suite.collection = Collection.Get(suite.collectionID)
 
 	suite.sealed, err = NewSegment(suite.collection,
 		suite.segmentID,
@@ -101,15 +100,12 @@ func (suite *SegmentSuite) SetupTest() {
 	)
 	suite.Require().NoError(err)
 
-	insertMsg, err := genInsertMsg(suite.collection, suite.partitionID, suite.growing.segmentID, msgLength)
+	insertMsg, err := genInsertMsg(suite.collection, suite.partitionID, suite.growing.SegmentID(), msgLength)
 	suite.Require().NoError(err)
 	insertRecord, err := storage.TransferInsertMsgToInsertRecord(suite.collection.Schema(), insertMsg)
 	suite.Require().NoError(err)
 	err = suite.growing.Insert(insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
 	suite.Require().NoError(err)
-
-	suite.manager.Segment.Put(SegmentTypeSealed, suite.sealed)
-	suite.manager.Segment.Put(SegmentTypeGrowing, suite.growing)
 }
 
 func (suite *SegmentSuite) TearDownTest() {

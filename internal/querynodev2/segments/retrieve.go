@@ -19,6 +19,7 @@ package segments
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/cgo"
 	"sync"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -31,7 +32,7 @@ import (
 
 // retrieveOnSegments performs retrieve on listed segments
 // all segment ids are validated before calling this function
-func retrieveOnSegments(ctx context.Context, segments []Segment, segType SegmentType, plan *RetrievePlan) ([]*segcorepb.RetrieveResults, error) {
+func retrieveOnSegments(ctx context.Context, segments []Segment, segType cgo.SegmentType, plan *cgo.RetrievePlan) ([]*segcorepb.RetrieveResults, error) {
 	var (
 		resultCh = make(chan *segcorepb.RetrieveResults, len(segments))
 		errs     = make([]error, len(segments))
@@ -47,7 +48,7 @@ func retrieveOnSegments(ctx context.Context, segments []Segment, segType Segment
 		wg.Add(1)
 		go func(segment Segment, i int) {
 			defer wg.Done()
-			seg := segment.(*LocalSegment)
+			seg := segment.(*cgo.LocalSegment)
 			tr := timerecord.NewTimeRecorder("retrieveOnSegments")
 			result, err := seg.Retrieve(ctx, plan)
 			if err != nil {
@@ -82,22 +83,22 @@ func retrieveOnSegments(ctx context.Context, segments []Segment, segType Segment
 }
 
 // retrieveHistorical will retrieve all the target segments in historical
-func RetrieveHistorical(ctx context.Context, manager *Manager, plan *RetrievePlan, collID UniqueID, partIDs []UniqueID, segIDs []UniqueID) ([]*segcorepb.RetrieveResults, []Segment, error) {
+func RetrieveHistorical(ctx context.Context, manager *Manager, plan *cgo.RetrievePlan, collID UniqueID, partIDs []UniqueID, segIDs []UniqueID) ([]*segcorepb.RetrieveResults, []Segment, error) {
 	segments, err := validateOnHistorical(ctx, manager, collID, partIDs, segIDs)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	retrieveResults, err := retrieveOnSegments(ctx, segments, SegmentTypeSealed, plan)
+	retrieveResults, err := retrieveOnSegments(ctx, segments, cgo.SegmentTypeSealed, plan)
 	return retrieveResults, segments, err
 }
 
 // retrieveStreaming will retrieve all the target segments in streaming
-func RetrieveStreaming(ctx context.Context, manager *Manager, plan *RetrievePlan, collID UniqueID, partIDs []UniqueID, segIDs []UniqueID) ([]*segcorepb.RetrieveResults, []Segment, error) {
+func RetrieveStreaming(ctx context.Context, manager *Manager, plan *cgo.RetrievePlan, collID UniqueID, partIDs []UniqueID, segIDs []UniqueID) ([]*segcorepb.RetrieveResults, []Segment, error) {
 	segments, err := validateOnStream(ctx, manager, collID, partIDs, segIDs)
 	if err != nil {
 		return nil, nil, err
 	}
-	retrieveResults, err := retrieveOnSegments(ctx, segments, SegmentTypeGrowing, plan)
+	retrieveResults, err := retrieveOnSegments(ctx, segments, cgo.SegmentTypeGrowing, plan)
 	return retrieveResults, segments, err
 }

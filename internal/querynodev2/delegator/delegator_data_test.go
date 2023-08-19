@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/cgo"
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -221,12 +222,12 @@ func (s *DelegatorDataSuite) TestProcessInsert() {
 
 func (s *DelegatorDataSuite) TestProcessDelete() {
 	s.loader.EXPECT().
-		Load(mock.Anything, s.collectionID, segments.SegmentTypeGrowing, int64(0), mock.Anything).
-		Call.Return(func(ctx context.Context, collectionID int64, segmentType segments.SegmentType, version int64, infos ...*querypb.SegmentLoadInfo) []segments.Segment {
+		Load(mock.Anything, s.collectionID, cgo.SegmentTypeGrowing, int64(0), mock.Anything).
+		Call.Return(func(ctx context.Context, collectionID int64, segmentType cgo.SegmentType, version int64, infos ...*querypb.SegmentLoadInfo) []segments.Segment {
 		return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) segments.Segment {
-			ms := &segments.MockSegment{}
+			ms := &cgo.MockSegment{}
 			ms.EXPECT().ID().Return(info.GetSegmentID())
-			ms.EXPECT().Type().Return(segments.SegmentTypeGrowing)
+			ms.EXPECT().Type().Return(cgo.SegmentTypeGrowing)
 			ms.EXPECT().Collection().Return(info.GetCollectionID())
 			ms.EXPECT().Partition().Return(info.GetPartitionID())
 			ms.EXPECT().Indexes().Return(nil)
@@ -580,12 +581,12 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 
 func (s *DelegatorDataSuite) TestReleaseSegment() {
 	s.loader.EXPECT().
-		Load(mock.Anything, s.collectionID, segments.SegmentTypeGrowing, int64(0), mock.Anything).
-		Call.Return(func(ctx context.Context, collectionID int64, segmentType segments.SegmentType, version int64, infos ...*querypb.SegmentLoadInfo) []segments.Segment {
+		Load(mock.Anything, s.collectionID, cgo.SegmentTypeGrowing, int64(0), mock.Anything).
+		Call.Return(func(ctx context.Context, collectionID int64, segmentType cgo.SegmentType, version int64, infos ...*querypb.SegmentLoadInfo) []segments.Segment {
 		return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) segments.Segment {
-			ms := &segments.MockSegment{}
+			ms := &cgo.MockSegment{}
 			ms.EXPECT().ID().Return(info.GetSegmentID())
-			ms.EXPECT().Type().Return(segments.SegmentTypeGrowing)
+			ms.EXPECT().Type().Return(cgo.SegmentTypeGrowing)
 			ms.EXPECT().Partition().Return(info.GetPartitionID())
 			ms.EXPECT().Collection().Return(info.GetCollectionID())
 			ms.EXPECT().Indexes().Return(nil)
@@ -720,17 +721,17 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 
 func (s *DelegatorDataSuite) TestSyncTargetVersion() {
 	for i := int64(0); i < 5; i++ {
-		ms := &segments.MockSegment{}
+		ms := &cgo.MockSegment{}
 		ms.EXPECT().ID().Return(i)
 		ms.EXPECT().StartPosition().Return(&msgpb.MsgPosition{
 			Timestamp: uint64(i),
 		})
-		ms.EXPECT().Type().Return(segments.SegmentTypeGrowing)
+		ms.EXPECT().Type().Return(cgo.SegmentTypeGrowing)
 		ms.EXPECT().Collection().Return(1)
 		ms.EXPECT().Partition().Return(1)
 		ms.EXPECT().RowNum().Return(0)
 		ms.EXPECT().Indexes().Return(nil)
-		s.manager.Segment.Put(segments.SegmentTypeGrowing, ms)
+		s.manager.Segment.Put(cgo.SegmentTypeGrowing, ms)
 	}
 
 	s.delegator.SyncTargetVersion(int64(5), []int64{1}, []int64{2}, []int64{3, 4})

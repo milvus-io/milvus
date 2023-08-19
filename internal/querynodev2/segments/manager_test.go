@@ -1,6 +1,7 @@
 package segments
 
 import (
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/cgo"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -18,8 +19,8 @@ type ManagerSuite struct {
 	collectionIDs []int64
 	partitionIDs  []int64
 	channels      []string
-	types         []SegmentType
-	segments      []*LocalSegment
+	types         []cgo.SegmentType
+	segments      []*cgo.LocalSegment
 
 	mgr *segmentManager
 }
@@ -30,7 +31,7 @@ func (s *ManagerSuite) SetupSuite() {
 	s.collectionIDs = []int64{100, 200, 300}
 	s.partitionIDs = []int64{10, 11, 12}
 	s.channels = []string{"dml1", "dml2", "dml3"}
-	s.types = []SegmentType{SegmentTypeSealed, SegmentTypeGrowing, SegmentTypeSealed}
+	s.types = []cgo.SegmentType{cgo.SegmentTypeSealed, cgo.SegmentTypeGrowing, cgo.SegmentTypeSealed}
 }
 
 func (s *ManagerSuite) SetupTest() {
@@ -38,8 +39,8 @@ func (s *ManagerSuite) SetupTest() {
 
 	for i, id := range s.segmentIDs {
 		schema := GenTestCollectionSchema("manager-suite", schemapb.DataType_Int64)
-		segment, err := NewSegment(
-			NewCollection(s.collectionIDs[i], schema, GenTestIndexMeta(s.collectionIDs[i], schema), querypb.LoadType_LoadCollection),
+		segment, err := cgo.NewSegment(
+			cgo.NewCollection(s.collectionIDs[i], schema, GenTestIndexMeta(s.collectionIDs[i], schema), querypb.LoadType_LoadCollection),
 			id,
 			s.partitionIDs[i],
 			s.collectionIDs[i],
@@ -81,7 +82,7 @@ func (s *ManagerSuite) TestGetBy() {
 
 func (s *ManagerSuite) TestRemoveGrowing() {
 	for i, id := range s.segmentIDs {
-		isGrowing := s.types[i] == SegmentTypeGrowing
+		isGrowing := s.types[i] == cgo.SegmentTypeGrowing
 
 		s.mgr.Remove(id, querypb.DataScope_Streaming)
 		s.Equal(s.mgr.Get(id) == nil, isGrowing)
@@ -90,7 +91,7 @@ func (s *ManagerSuite) TestRemoveGrowing() {
 
 func (s *ManagerSuite) TestRemoveSealed() {
 	for i, id := range s.segmentIDs {
-		isSealed := s.types[i] == SegmentTypeSealed
+		isSealed := s.types[i] == cgo.SegmentTypeSealed
 
 		s.mgr.Remove(id, querypb.DataScope_Historical)
 		s.Equal(s.mgr.Get(id) == nil, isSealed)

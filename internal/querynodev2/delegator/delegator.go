@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator/deletebuffer"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/cgo"
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -114,7 +115,7 @@ type shardDelegator struct {
 	vchannelName string
 	version      int64
 	// collection schema
-	collection *segments.Collection
+	collection *cgo.Collection
 
 	workerManager cluster.Manager
 

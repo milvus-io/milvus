@@ -16,19 +16,12 @@
 
 package segments
 
-/*
-#cgo pkg-config: milvus_segcore
-
-#include "segcore/collection_c.h"
-#include "segcore/segment_c.h"
-*/
-import "C"
-
 import (
 	"fmt"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/cgo"
 	"github.com/milvus-io/milvus/pkg/eventlog"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -52,7 +45,7 @@ func WithChannel(channel string) SegmentFilter {
 	}
 }
 
-func WithType(typ SegmentType) SegmentFilter {
+func WithType(typ cgo.SegmentType) SegmentFilter {
 	return func(segment Segment) bool {
 		return segment.Type() == typ
 	}
@@ -64,13 +57,6 @@ func WithID(id int64) SegmentFilter {
 	}
 }
 
-type actionType int32
-
-const (
-	removeAction actionType = iota
-	addAction
-)
-
 type Manager struct {
 	Collection CollectionManager
 	Segment    SegmentManager
@@ -78,7 +64,7 @@ type Manager struct {
 
 func NewManager() *Manager {
 	return &Manager{
-		Collection: NewCollectionManager(),
+		Collection: cgo.NewCollectionManager(),
 		Segment:    NewSegmentManager(),
 	}
 }
@@ -87,9 +73,9 @@ type SegmentManager interface {
 	// Put puts the given segments in,
 	// and increases the ref count of the corresponding collection,
 	// dup segments will not increase the ref count
-	Put(segmentType SegmentType, segments ...Segment)
+	Put(segmentType cgo.SegmentType, segments ...Segment)
 	Get(segmentID UniqueID) Segment
-	GetWithType(segmentID UniqueID, typ SegmentType) Segment
+	GetWithType(segmentID UniqueID, typ cgo.SegmentType) Segment
 	GetBy(filters ...SegmentFilter) []Segment
 	// Get segments and acquire the read locks
 	GetAndPinBy(filters ...SegmentFilter) ([]Segment, error)
@@ -106,7 +92,7 @@ type SegmentManager interface {
 	RemoveBy(filters ...SegmentFilter) (int, int)
 	Clear()
 
-	UpdateSegmentVersion(segmentType SegmentType, segmentID int64, newVersion int64)
+	UpdateSegmentVersion(segmentType cgo.SegmentType, segmentID int64, newVersion int64)
 }
 
 var _ SegmentManager = (*segmentManager)(nil)
@@ -126,15 +112,15 @@ func NewSegmentManager() *segmentManager {
 	}
 }
 
-func (mgr *segmentManager) Put(segmentType SegmentType, segments ...Segment) {
+func (mgr *segmentManager) Put(segmentType cgo.SegmentType, segments ...Segment) {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 
 	targetMap := mgr.growingSegments
 	switch segmentType {
-	case SegmentTypeGrowing:
+	case cgo.SegmentTypeGrowing:
 		targetMap = mgr.growingSegments
-	case SegmentTypeSealed:
+	case cgo.SegmentTypeSealed:
 		targetMap = mgr.sealedSegments
 	default:
 		panic("unexpected segment type")
@@ -176,15 +162,15 @@ func (mgr *segmentManager) Put(segmentType SegmentType, segments ...Segment) {
 	mgr.updateMetric()
 }
 
-func (mgr *segmentManager) UpdateSegmentVersion(segmentType SegmentType, segmentID int64, newVersion int64) {
+func (mgr *segmentManager) UpdateSegmentVersion(segmentType cgo.SegmentType, segmentID int64, newVersion int64) {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 
 	targetMap := mgr.growingSegments
 	switch segmentType {
-	case SegmentTypeGrowing:
+	case cgo.SegmentTypeGrowing:
 		targetMap = mgr.growingSegments
-	case SegmentTypeSealed:
+	case cgo.SegmentTypeSealed:
 		targetMap = mgr.sealedSegments
 	default:
 		panic("unexpected segment type")
@@ -224,14 +210,14 @@ func (mgr *segmentManager) Get(segmentID UniqueID) Segment {
 	return nil
 }
 
-func (mgr *segmentManager) GetWithType(segmentID UniqueID, typ SegmentType) Segment {
+func (mgr *segmentManager) GetWithType(segmentID UniqueID, typ cgo.SegmentType) Segment {
 	mgr.mu.RLock()
 	defer mgr.mu.RUnlock()
 
 	switch typ {
-	case SegmentTypeSealed:
+	case cgo.SegmentTypeSealed:
 		return mgr.sealedSegments[segmentID]
-	case SegmentTypeGrowing:
+	case cgo.SegmentTypeGrowing:
 		return mgr.growingSegments[segmentID]
 	default:
 		return nil
@@ -387,27 +373,27 @@ func (mgr *segmentManager) Remove(segmentID UniqueID, scope querypb.DataScope) (
 	mgr.mu.Lock()
 
 	var removeGrowing, removeSealed int
-	var growing, sealed *LocalSegment
+	var growing, sealed *cgo.LocalSegment
 	switch scope {
 	case querypb.DataScope_Streaming:
-		growing = mgr.removeSegmentWithType(SegmentTypeGrowing, segmentID)
+		growing = mgr.removeSegmentWithType(cgo.SegmentTypeGrowing, segmentID)
 		if growing != nil {
 			removeGrowing = 1
 		}
 
 	case querypb.DataScope_Historical:
-		sealed = mgr.removeSegmentWithType(SegmentTypeSealed, segmentID)
+		sealed = mgr.removeSegmentWithType(cgo.SegmentTypeSealed, segmentID)
 		if sealed != nil {
 			removeSealed = 1
 		}
 
 	case querypb.DataScope_All:
-		growing = mgr.removeSegmentWithType(SegmentTypeGrowing, segmentID)
+		growing = mgr.removeSegmentWithType(cgo.SegmentTypeGrowing, segmentID)
 		if growing != nil {
 			removeGrowing = 1
 		}
 
-		sealed = mgr.removeSegmentWithType(SegmentTypeSealed, segmentID)
+		sealed = mgr.removeSegmentWithType(cgo.SegmentTypeSealed, segmentID)
 		if sealed != nil {
 			removeSealed = 1
 		}
@@ -426,20 +412,20 @@ func (mgr *segmentManager) Remove(segmentID UniqueID, scope querypb.DataScope) (
 	return removeGrowing, removeSealed
 }
 
-func (mgr *segmentManager) removeSegmentWithType(typ SegmentType, segmentID UniqueID) *LocalSegment {
+func (mgr *segmentManager) removeSegmentWithType(typ cgo.SegmentType, segmentID UniqueID) *cgo.LocalSegment {
 	switch typ {
-	case SegmentTypeGrowing:
+	case cgo.SegmentTypeGrowing:
 		s, ok := mgr.growingSegments[segmentID]
 		if ok {
 			delete(mgr.growingSegments, segmentID)
-			return s.(*LocalSegment)
+			return s.(*cgo.LocalSegment)
 		}
 
-	case SegmentTypeSealed:
+	case cgo.SegmentTypeSealed:
 		s, ok := mgr.sealedSegments[segmentID]
 		if ok {
 			delete(mgr.sealedSegments, segmentID)
-			return s.(*LocalSegment)
+			return s.(*cgo.LocalSegment)
 		}
 	default:
 		return nil
@@ -451,10 +437,10 @@ func (mgr *segmentManager) removeSegmentWithType(typ SegmentType, segmentID Uniq
 func (mgr *segmentManager) RemoveBy(filters ...SegmentFilter) (int, int) {
 	mgr.mu.Lock()
 
-	var removeGrowing, removeSealed []*LocalSegment
+	var removeGrowing, removeSealed []*cgo.LocalSegment
 	for id, segment := range mgr.growingSegments {
 		if filter(segment, filters...) {
-			s := mgr.removeSegmentWithType(SegmentTypeGrowing, id)
+			s := mgr.removeSegmentWithType(cgo.SegmentTypeGrowing, id)
 			if s != nil {
 				removeGrowing = append(removeGrowing, s)
 			}
@@ -463,7 +449,7 @@ func (mgr *segmentManager) RemoveBy(filters ...SegmentFilter) (int, int) {
 
 	for id, segment := range mgr.sealedSegments {
 		if filter(segment, filters...) {
-			s := mgr.removeSegmentWithType(SegmentTypeSealed, id)
+			s := mgr.removeSegmentWithType(cgo.SegmentTypeSealed, id)
 			if s != nil {
 				removeSealed = append(removeSealed, s)
 			}
@@ -489,12 +475,12 @@ func (mgr *segmentManager) Clear() {
 
 	for id, segment := range mgr.growingSegments {
 		delete(mgr.growingSegments, id)
-		remove(segment.(*LocalSegment))
+		remove(segment.(*cgo.LocalSegment))
 	}
 
 	for id, segment := range mgr.sealedSegments {
 		delete(mgr.sealedSegments, id)
-		remove(segment.(*LocalSegment))
+		remove(segment.(*cgo.LocalSegment))
 	}
 	mgr.updateMetric()
 }
@@ -514,9 +500,9 @@ func (mgr *segmentManager) updateMetric() {
 	metrics.QueryNodeNumPartitions.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(partiations.Len()))
 }
 
-func remove(segment *LocalSegment) bool {
+func remove(segment *cgo.LocalSegment) bool {
 	rowNum := segment.RowNum()
-	DeleteSegment(segment)
+	cgo.DeleteSegment(segment)
 
 	metrics.QueryNodeNumSegments.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()),

@@ -18,6 +18,7 @@ package querynodev2
 import (
 	"context"
 	"encoding/json"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/cgo"
 	"math/rand"
 	"testing"
 	"time"
@@ -538,7 +539,7 @@ func (suite *ServiceSuite) TestLoadSegments_VarChar() {
 		CollectionID: suite.collectionID,
 		PartitionIDs: suite.partitionIDs,
 	}
-	suite.node.manager.Collection = segments.NewCollectionManager()
+	suite.node.manager.Collection = cgo.NewCollectionManager()
 	suite.node.manager.Collection.PutOrRef(suite.collectionID, schema, nil, loadMeta)
 	req := &querypb.LoadSegmentsRequest{
 		Base: &commonpb.MsgBase{

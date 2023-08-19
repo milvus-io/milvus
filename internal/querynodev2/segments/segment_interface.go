@@ -19,6 +19,7 @@ package segments
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/cgo"
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -31,7 +32,7 @@ type Segment interface {
 	Shard() string
 	Version() int64
 	StartPosition() *msgpb.MsgPosition
-	Type() SegmentType
+	Type() cgo.SegmentType
 	RLock() error
 	RUnlock()
 
@@ -43,10 +44,10 @@ type Segment interface {
 	MemSize() int64
 
 	// Index related
-	AddIndex(fieldID int64, index *IndexedFieldInfo)
-	GetIndex(fieldID int64) *IndexedFieldInfo
+	AddIndex(fieldID int64, index *cgo.IndexedFieldInfo)
+	GetIndex(fieldID int64) *cgo.IndexedFieldInfo
 	ExistIndex(fieldID int64) bool
-	Indexes() []*IndexedFieldInfo
+	Indexes() []*cgo.IndexedFieldInfo
 
 	// Modification related
 	Insert(rowIDs []int64, timestamps []typeutil.Timestamp, record *segcorepb.InsertRecord) error

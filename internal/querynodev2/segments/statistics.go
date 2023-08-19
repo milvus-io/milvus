@@ -18,6 +18,7 @@ package segments
 
 import (
 	"context"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/cgo"
 	"sync"
 )
 
@@ -29,7 +30,7 @@ type SegmentStats struct {
 
 // statisticOnSegments performs statistic on listed segments
 // all segment ids are validated before calling this function
-func statisticOnSegments(ctx context.Context, segments []Segment, segType SegmentType) ([]SegmentStats, error) {
+func statisticOnSegments(ctx context.Context, segments []Segment, segType cgo.SegmentType) ([]SegmentStats, error) {
 	// results variables
 	results := make([]SegmentStats, 0, len(segments))
 	resultCh := make(chan SegmentStats, len(segments))
@@ -64,7 +65,7 @@ func StatisticsHistorical(ctx context.Context, manager *Manager, collID int64, p
 	if err != nil {
 		return nil, nil, err
 	}
-	result, err := statisticOnSegments(ctx, segments, SegmentTypeSealed)
+	result, err := statisticOnSegments(ctx, segments, cgo.SegmentTypeSealed)
 	return result, segments, err
 }
 
@@ -75,6 +76,6 @@ func StatisticStreaming(ctx context.Context, manager *Manager, collID int64, par
 	if err != nil {
 		return nil, nil, err
 	}
-	result, err := statisticOnSegments(ctx, segments, SegmentTypeGrowing)
+	result, err := statisticOnSegments(ctx, segments, cgo.SegmentTypeGrowing)
 	return result, segments, err
 }

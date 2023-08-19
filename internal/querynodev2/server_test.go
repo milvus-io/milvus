@@ -18,6 +18,7 @@ package querynodev2
 
 import (
 	"context"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/cgo"
 	"os"
 	"sync/atomic"
 	"testing"
@@ -219,10 +220,10 @@ func (suite *QueryNodeSuite) TestStop() {
 	suite.node.manager = segments.NewManager()
 
 	schema := segments.GenTestCollectionSchema("test_stop", schemapb.DataType_Int64)
-	collection := segments.NewCollection(1, schema, nil, querypb.LoadType_LoadCollection)
-	segment, err := segments.NewSegment(collection, 100, 10, 1, "test_stop_channel", segments.SegmentTypeSealed, 1, nil, nil)
+	collection := cgo.NewCollection(1, schema, nil, querypb.LoadType_LoadCollection)
+	segment, err := cgo.NewSegment(collection, 100, 10, 1, "test_stop_channel", cgo.SegmentTypeSealed, 1, nil, nil)
 	suite.NoError(err)
-	suite.node.manager.Segment.Put(segments.SegmentTypeSealed, segment)
+	suite.node.manager.Segment.Put(cgo.SegmentTypeSealed, segment)
 	err = suite.node.Stop()
 	suite.NoError(err)
 	suite.True(suite.node.manager.Segment.Empty())

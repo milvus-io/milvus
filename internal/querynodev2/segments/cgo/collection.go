@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package segments
+package cgo
 
 /*
 #cgo pkg-config: milvus_segcore
@@ -38,16 +38,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
-
-type CollectionManager interface {
-	Get(collectionID int64) *Collection
-	PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo)
-	Ref(collectionID int64, count uint32) bool
-	// unref the collection,
-	// returns true if the collection ref count goes 0, or the collection not exists,
-	// return false otherwise
-	Unref(collectionID int64, count uint32) bool
-}
 
 type collectionManager struct {
 	mut         sync.RWMutex

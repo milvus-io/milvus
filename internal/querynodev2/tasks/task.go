@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/collector"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/cgo"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -32,7 +33,7 @@ var (
 
 type SearchTask struct {
 	ctx              context.Context
-	collection       *segments.Collection
+	collection       *cgo.Collection
 	segmentManager   *segments.Manager
 	req              *querypb.SearchRequest
 	result           *internalpb.SearchResults
@@ -50,7 +51,7 @@ type SearchTask struct {
 }
 
 func NewSearchTask(ctx context.Context,
-	collection *segments.Collection,
+	collection *cgo.Collection,
 	manager *segments.Manager,
 	req *querypb.SearchRequest,
 ) *SearchTask {
@@ -118,14 +119,14 @@ func (t *SearchTask) Execute() error {
 
 	req := t.req
 	t.combinePlaceHolderGroups()
-	searchReq, err := segments.NewSearchRequest(t.collection, req, t.placeholderGroup)
+	searchReq, err := cgo.NewSearchRequest(t.collection, req, t.placeholderGroup)
 	if err != nil {
 		return err
 	}
 	defer searchReq.Delete()
 
 	var (
-		results          []*segments.SearchResult
+		results          []*cgo.SearchResult
 		searchedSegments []segments.Segment
 	)
 	if req.GetScope() == querypb.DataScope_Historical {
@@ -151,7 +152,7 @@ func (t *SearchTask) Execute() error {
 	if err != nil {
 		return err
 	}
-	defer segments.DeleteSearchResults(results)
+	defer cgo.DeleteSearchResults(results)
 
 	if len(results) == 0 {
 		for i := range t.originNqs {
@@ -181,7 +182,7 @@ func (t *SearchTask) Execute() error {
 	}
 
 	tr.RecordSpan()
-	blobs, err := segments.ReduceSearchResultsAndFillData(
+	blobs, err := cgo.ReduceSearchResultsAndFillData(
 		searchReq.Plan(),
 		results,
 		int64(len(results)),
@@ -192,11 +193,11 @@ func (t *SearchTask) Execute() error {
 		log.Warn("failed to reduce search results", zap.Error(err))
 		return err
 	}
-	defer segments.DeleteSearchResultDataBlobs(blobs)
+	defer cgo.DeleteSearchResultDataBlobs(blobs)
 	reduceLatency := tr.RecordSpan()
 
 	for i := range t.originNqs {
-		blob, err := segments.GetSearchResultDataBlob(blobs, i)
+		blob, err := cgo.GetSearchResultDataBlob(blobs, i)
 		if err != nil {
 			return err
 		}

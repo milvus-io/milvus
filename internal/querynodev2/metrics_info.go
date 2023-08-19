@@ -19,6 +19,7 @@ package querynodev2
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/cgo"
 	"time"
 
 	"github.com/samber/lo"
@@ -105,7 +106,7 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 	minTsafeChannel, minTsafe := node.tSafeManager.Min()
 
 	var totalGrowingSize int64
-	growingSegments := node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeGrowing))
+	growingSegments := node.manager.Segment.GetBy(segments.WithType(cgo.SegmentTypeGrowing))
 	growingGroupByCollection := lo.GroupBy(growingSegments, func(seg segments.Segment) int64 {
 		return seg.Collection()
 	})
@@ -115,10 +116,10 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 		})
 		totalGrowingSize += size
 		metrics.QueryNodeEntitiesSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
-			fmt.Sprint(collection), segments.SegmentTypeGrowing.String()).Set(float64(size))
+			fmt.Sprint(collection), cgo.SegmentTypeGrowing.String()).Set(float64(size))
 	}
 
-	sealedSegments := node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeSealed))
+	sealedSegments := node.manager.Segment.GetBy(segments.WithType(cgo.SegmentTypeSealed))
 	sealedGroupByCollection := lo.GroupBy(sealedSegments, func(seg segments.Segment) int64 {
 		return seg.Collection()
 	})
@@ -127,7 +128,7 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 			return seg.MemSize()
 		})
 		metrics.QueryNodeEntitiesSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
-			fmt.Sprint(collection), segments.SegmentTypeSealed.String()).Set(float64(size))
+			fmt.Sprint(collection), cgo.SegmentTypeSealed.String()).Set(float64(size))
 	}
 
 	allSegments := node.manager.Segment.GetBy()

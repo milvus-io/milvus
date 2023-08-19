@@ -24,6 +24,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/cgo"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -32,10 +33,10 @@ import (
 
 // searchOnSegments performs search on listed segments
 // all segment ids are validated before calling this function
-func searchSegments(ctx context.Context, segments []Segment, segType SegmentType, searchReq *SearchRequest) ([]*SearchResult, error) {
+func searchSegments(ctx context.Context, segments []Segment, segType cgo.SegmentType, searchReq *cgo.SearchRequest) ([]*cgo.SearchResult, error) {
 	var (
 		// results variables
-		resultCh = make(chan *SearchResult, len(segments))
+		resultCh = make(chan *cgo.SearchResult, len(segments))
 		errs     = make([]error, len(segments))
 		wg       sync.WaitGroup
 
@@ -54,8 +55,8 @@ func searchSegments(ctx context.Context, segments []Segment, segType SegmentType
 		wg.Add(1)
 		go func(segment Segment, i int) {
 			defer wg.Done()
-			seg := segment.(*LocalSegment)
-			if !seg.ExistIndex(searchReq.searchFieldID) {
+			seg := segment.(*cgo.LocalSegment)
+			if !seg.ExistIndex(searchReq.GetSearchFieldID()) {
 				mu.Lock()
 				segmentsWithoutIndex = append(segmentsWithoutIndex, seg.ID())
 				mu.Unlock()
@@ -70,20 +71,20 @@ func searchSegments(ctx context.Context, segments []Segment, segType SegmentType
 			metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
 				metrics.SearchLabel, searchLabel).Observe(float64(elapsed))
 			metrics.QueryNodeSegmentSearchLatencyPerVector.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
-				metrics.SearchLabel, searchLabel).Observe(float64(elapsed) / float64(searchReq.getNumOfQuery()))
+				metrics.SearchLabel, searchLabel).Observe(float64(elapsed) / float64(searchReq.GetNumOfQuery()))
 		}(segment, i)
 	}
 	wg.Wait()
 	close(resultCh)
 
-	searchResults := make([]*SearchResult, 0, len(segments))
+	searchResults := make([]*cgo.SearchResult, 0, len(segments))
 	for result := range resultCh {
 		searchResults = append(searchResults, result)
 	}
 
 	for _, err := range errs {
 		if err != nil {
-			DeleteSearchResults(searchResults)
+			cgo.DeleteSearchResults(searchResults)
 			return nil, err
 		}
 	}
@@ -99,22 +100,22 @@ func searchSegments(ctx context.Context, segments []Segment, segType SegmentType
 // if segIDs is not specified, it will search on all the historical segments speficied by partIDs.
 // if segIDs is specified, it will only search on the segments specified by the segIDs.
 // if partIDs is empty, it means all the partitions of the loaded collection or all the partitions loaded.
-func SearchHistorical(ctx context.Context, manager *Manager, searchReq *SearchRequest, collID int64, partIDs []int64, segIDs []int64) ([]*SearchResult, []Segment, error) {
+func SearchHistorical(ctx context.Context, manager *Manager, searchReq *cgo.SearchRequest, collID int64, partIDs []int64, segIDs []int64) ([]*cgo.SearchResult, []Segment, error) {
 	segments, err := validateOnHistorical(ctx, manager, collID, partIDs, segIDs)
 	if err != nil {
 		return nil, nil, err
 	}
-	searchResults, err := searchSegments(ctx, segments, SegmentTypeSealed, searchReq)
+	searchResults, err := searchSegments(ctx, segments, cgo.SegmentTypeSealed, searchReq)
 	return searchResults, segments, err
 }
 
 // searchStreaming will search all the target segments in streaming
 // if partIDs is empty, it means all the partitions of the loaded collection or all the partitions loaded.
-func SearchStreaming(ctx context.Context, manager *Manager, searchReq *SearchRequest, collID int64, partIDs []int64, segIDs []int64) ([]*SearchResult, []Segment, error) {
+func SearchStreaming(ctx context.Context, manager *Manager, searchReq *cgo.SearchRequest, collID int64, partIDs []int64, segIDs []int64) ([]*cgo.SearchResult, []Segment, error) {
 	segments, err := validateOnStream(ctx, manager, collID, partIDs, segIDs)
 	if err != nil {
 		return nil, nil, err
 	}
-	searchResults, err := searchSegments(ctx, segments, SegmentTypeGrowing, searchReq)
+	searchResults, err := searchSegments(ctx, segments, cgo.SegmentTypeGrowing, searchReq)
 	return searchResults, segments, err
 }
