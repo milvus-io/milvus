@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/generic"
 	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
 )
 
@@ -43,6 +44,7 @@ type GRPCClientBase[T any] struct {
 	GetGrpcClientErr error
 	role             string
 	nodeID           int64
+	sess             *sessionutil.Session
 }
 
 func (c *GRPCClientBase[T]) SetGetAddrFunc(f func() (string, error)) {
@@ -168,4 +170,8 @@ func (c *GRPCClientBase[T]) SetNodeID(nodeID int64) {
 
 func SuccessStatus() *commonpb.Status {
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
+}
+
+func (c *GRPCClientBase[T]) SetSession(sess *sessionutil.Session) {
+	c.sess = sess
 }

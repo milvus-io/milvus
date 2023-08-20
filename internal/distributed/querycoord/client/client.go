@@ -73,6 +73,7 @@ func NewClient(ctx context.Context, metaRoot string, etcdCli *clientv3.Client) (
 	client.grpcClient.SetRole(typeutil.QueryCoordRole)
 	client.grpcClient.SetGetAddrFunc(client.getQueryCoordAddr)
 	client.grpcClient.SetNewGrpcClientFunc(client.newGrpcClient)
+	client.grpcClient.SetSession(sess)
 
 	return client, nil
 }
