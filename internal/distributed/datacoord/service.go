@@ -32,6 +32,7 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -53,6 +54,8 @@ import (
 type Server struct {
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	serverID atomic.Int64
 
 	wg        sync.WaitGroup
 	dataCoord types.DataCoordComponent
@@ -154,13 +157,23 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 			otelgrpc.UnaryServerInterceptor(opts...),
 			logutil.UnaryTraceLoggerInterceptor,
 			interceptor.ClusterValidationUnaryServerInterceptor(),
-			interceptor.ServerIDValidationUnaryServerInterceptor(),
+			interceptor.ServerIDValidationUnaryServerInterceptor(func() int64 {
+				if s.serverID.Load() == 0 {
+					s.serverID.Store(paramtable.GetNodeID())
+				}
+				return s.serverID.Load()
+			}),
 		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
 			otelgrpc.StreamServerInterceptor(opts...),
 			logutil.StreamTraceLoggerInterceptor,
 			interceptor.ClusterValidationStreamServerInterceptor(),
-			interceptor.ServerIDValidationStreamServerInterceptor(),
+			interceptor.ServerIDValidationStreamServerInterceptor(func() int64 {
+				if s.serverID.Load() == 0 {
+					s.serverID.Store(paramtable.GetNodeID())
+				}
+				return s.serverID.Load()
+			}),
 		)))
 	indexpb.RegisterIndexCoordServer(s.grpcServer, s)
 	datapb.RegisterDataCoordServer(s.grpcServer, s)
