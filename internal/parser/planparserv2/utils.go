@@ -377,3 +377,7 @@ func IsAlwaysTruePlan(plan *planpb.PlanNode) bool {
 	}
 	return false
 }
+
+func canBeExecuted(e *ExprWithType) bool {
+	return typeutil.IsBoolType(e.dataType) && !e.nodeDependent
+}

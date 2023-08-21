@@ -131,3 +131,46 @@ func TestIsAlwaysTruePlan(t *testing.T) {
 		})
 	}
 }
+
+func Test_canBeExecuted(t *testing.T) {
+	type args struct {
+		e *ExprWithType
+	}
+	tests := []struct {
+		name string
+		args args
+		want bool
+	}{
+		{
+			args: args{
+				e: &ExprWithType{
+					dataType: schemapb.DataType_Int64,
+				},
+			},
+			want: false,
+		},
+		{
+			args: args{
+				e: &ExprWithType{
+					dataType:      schemapb.DataType_Bool,
+					nodeDependent: true,
+				},
+			},
+			want: false,
+		},
+		{
+			args: args{
+				e: &ExprWithType{
+					dataType:      schemapb.DataType_Bool,
+					nodeDependent: false,
+				},
+			},
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equalf(t, tt.want, canBeExecuted(tt.args.e), "canBeExecuted(%v)", tt.args.e)
+		})
+	}
+}
