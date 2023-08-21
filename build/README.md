@@ -66,12 +66,12 @@ The following scripts are found in the [`build/`](.) directory. Note that all sc
   - `build/builder.sh make unittest`: Run all unit tests.
   - `build/builder.sh make clean`: Clean up all the generated files.
 
-You can specify different OS for builder by setting `OS_NAME` which defaults to `ubuntu20.04`. Valid OS are `ubuntu20.04`, `centos7`.
+You can specify different OS for builder by setting `OS_NAME` which defaults to `ubuntu20.04`. Valid OS are `ubuntu20.04`, `amazonlinux2023`.
 
-To specify `centos7` builder, use these commands:
+To specify `amazonlinux2023` builder, use these commands:
 
 ```shell
-export OS_NAME=centos7
+export OS_NAME=amazonlinux2023
 build/builder.sh make
 ```
 
