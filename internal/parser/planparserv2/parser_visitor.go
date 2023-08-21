@@ -960,11 +960,16 @@ func (v *ParserVisitor) VisitBitOr(ctx *parser.BitOrContext) interface{} {
 func (v *ParserVisitor) getColumnInfoFromJSONIdentifier(identifier string) (*planpb.ColumnInfo, error) {
 	fieldName := strings.Split(identifier, "[")[0]
 	nestedPath := make([]string, 0)
-	jsonField, err := v.schema.GetFieldFromNameDefaultJSON(fieldName)
+	field, err := v.schema.GetFieldFromNameDefaultJSON(fieldName)
 	if err != nil {
 		return nil, err
 	}
-	if fieldName != jsonField.Name {
+	if field.GetDataType() != schemapb.DataType_JSON &&
+		field.GetDataType() != schemapb.DataType_Array {
+		errMsg := fmt.Sprintf("%s data type not supported accessed with []", field.GetDataType())
+		return nil, fmt.Errorf(errMsg)
+	}
+	if fieldName != field.Name {
 		nestedPath = append(nestedPath, fieldName)
 	}
 	jsonKeyStr := identifier[len(fieldName):]
@@ -986,13 +991,13 @@ func (v *ParserVisitor) getColumnInfoFromJSONIdentifier(identifier string) (*pla
 		nestedPath = append(nestedPath, path)
 	}
 
-	if typeutil.IsJSONType(jsonField.DataType) && len(nestedPath) == 0 {
+	if typeutil.IsJSONType(field.DataType) && len(nestedPath) == 0 {
 		return nil, fmt.Errorf("can not comparisons jsonField directly")
 	}
 
 	return &planpb.ColumnInfo{
-		FieldId:    jsonField.FieldID,
-		DataType:   jsonField.DataType,
+		FieldId:    field.FieldID,
+		DataType:   field.DataType,
 		NestedPath: nestedPath,
 	}, nil
 }
