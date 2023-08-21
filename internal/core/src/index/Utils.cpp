@@ -22,6 +22,7 @@
 
 #include "index/Utils.h"
 #include "index/Meta.h"
+#include "index/Exception.h"
 #include <google/protobuf/text_format.h>
 #include "exceptions/EasyAssert.h"
 #include "common/Slice.h"
@@ -228,6 +229,21 @@ AssembleIndexDatas(std::map<std::string, storage::FieldDataPtr>& index_datas) {
             AssertInfo(new_field_data->IsFull(), "index len is inconsistent after disassemble and assemble");
             index_datas[prefix] = new_field_data;
         }
+    }
+}
+
+void
+ReadDataFromFD(int fd, void* buf, size_t size, size_t chunk_size) {
+    lseek(fd, 0, SEEK_SET);
+    while (size != 0) {
+        const size_t count = (size < chunk_size) ? size : chunk_size;
+        const ssize_t size_read = read(fd, buf, count);
+        if (size_read != count) {
+            throw UnistdException("read data from fd error, returned read size is " + std::to_string(size_read));
+        }
+
+        buf = static_cast<char*>(buf) + size_read;
+        size -= static_cast<std::size_t>(size_read);
     }
 }
 
