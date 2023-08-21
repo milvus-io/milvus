@@ -30,6 +30,7 @@ default_nb_medium = ct.default_nb_medium
 default_nq = ct.default_nq
 default_dim = ct.default_dim
 default_limit = ct.default_limit
+max_limit = ct.max_limit
 default_search_exp = "int64 >= 0"
 default_json_search_exp = "json_field[\"number\"] >= 0"
 default_search_string_exp = "varchar >= \"0\""
@@ -2911,7 +2912,8 @@ class TestCollectionSearch(TestcaseBase):
                              zip(ct.all_index_types[:6],
                                  ct.default_index_params[:6]))
     @pytest.mark.parametrize("metrics", ct.float_metrics)
-    def test_search_output_field_vector_after_different_index_metrics(self, index, params, metrics):
+    @pytest.mark.parametrize("limit", [20, 1200])
+    def test_search_output_field_vector_after_different_index_metrics(self, index, params, metrics, limit):
         """
         target: test search with output vector field after different index
         method: 1. create a collection and insert data
@@ -2929,15 +2931,23 @@ class TestCollectionSearch(TestcaseBase):
         collection_w.load()
 
         # 3. search with output field vector
-        search_params = cf.gen_search_param(index, metrics)[0]
-        collection_w.search(vectors[:1], default_search_field,
-                            search_params, default_limit, default_search_exp,
-                            output_fields=[field_name],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1,
-                                         "limit": default_limit,
-                                         "original_entities": _vectors,
-                                         "output_fields": [field_name]})
+        search_params = cf.gen_search_param(index, metrics)
+        for search_param in search_params:
+            log.info(search_param)
+            if index == "HNSW":
+                limit = search_param["params"]["ef"]
+                if limit > max_limit:
+                    limit = default_nb
+            if index == "DISKANN":
+                limit = search_param["params"]["search_list"]
+            collection_w.search(vectors[:1], default_search_field,
+                                search_param, limit, default_search_exp,
+                                output_fields=[field_name],
+                                check_task=CheckTasks.check_search_results,
+                                check_items={"nq": 1,
+                                             "limit": limit,
+                                             "original_entities": _vectors,
+                                             "output_fields": [field_name]})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index", ["BIN_FLAT", "BIN_IVF_FLAT"])
