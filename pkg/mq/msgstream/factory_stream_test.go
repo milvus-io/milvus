@@ -89,12 +89,6 @@ func testInsertWithRepack(t *testing.T, f []Factory) {
 }
 
 func testInsertRepackFuncWithDifferentClient(t *testing.T, f []Factory) {
-	baseMsg := BaseMsg{
-		BeginTimestamp: 0,
-		EndTimestamp:   0,
-		HashValues:     []uint32{1, 3},
-	}
-
 	insertRequest := msgpb.InsertRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_Insert,
@@ -111,7 +105,11 @@ func testInsertRepackFuncWithDifferentClient(t *testing.T, f []Factory) {
 		RowData:        []*commonpb.Blob{{}, {}},
 	}
 	insertMsg := &InsertMsg{
-		BaseMsg:       baseMsg,
+		BaseMsg: BaseMsg{
+			BeginTimestamp: 0,
+			EndTimestamp:   0,
+			HashValues:     []uint32{1, 3},
+		},
 		InsertRequest: insertRequest,
 	}
 	msgPack := MsgPack{}
@@ -120,12 +118,6 @@ func testInsertRepackFuncWithDifferentClient(t *testing.T, f []Factory) {
 }
 
 func testDeleteRepackFuncWithDifferentClient(t *testing.T, f []Factory) {
-	baseMsg := BaseMsg{
-		BeginTimestamp: 0,
-		EndTimestamp:   0,
-		HashValues:     []uint32{1},
-	}
-
 	deleteRequest := msgpb.DeleteRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_Delete,
@@ -140,7 +132,11 @@ func testDeleteRepackFuncWithDifferentClient(t *testing.T, f []Factory) {
 		NumRows:          1,
 	}
 	deleteMsg := &DeleteMsg{
-		BaseMsg:       baseMsg,
+		BaseMsg: BaseMsg{
+			BeginTimestamp: 0,
+			EndTimestamp:   0,
+			HashValues:     []uint32{1},
+		},
 		DeleteRequest: deleteRequest,
 	}
 

@@ -19,6 +19,7 @@ package msgstream
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
@@ -57,6 +58,7 @@ type TsMsg interface {
 
 // BaseMsg is a basic structure that contains begin timestamp, end timestamp and the position of msgstream
 type BaseMsg struct {
+	mu             sync.Mutex
 	Ctx            context.Context
 	BeginTimestamp Timestamp
 	EndTimestamp   Timestamp
@@ -66,12 +68,22 @@ type BaseMsg struct {
 
 // TraceCtx returns the context of opentracing
 func (bm *BaseMsg) TraceCtx() context.Context {
+	// TODO: There's data race when non-dml msg is sent to different flow graph.
+	// Wrong open-trancing information is generated, Fix in future.
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	// A context.Context interface should never be nil.
+	if bm.Ctx == nil {
+		return context.Background()
+	}
 	return bm.Ctx
 }
 
 // SetTraceCtx is used to set context for opentracing
 func (bm *BaseMsg) SetTraceCtx(ctx context.Context) {
+	bm.mu.Lock()
 	bm.Ctx = ctx
+	bm.mu.Unlock()
 }
 
 // BeginTs returns the begin timestamp of this message pack

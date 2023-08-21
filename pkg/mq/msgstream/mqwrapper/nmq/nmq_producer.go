@@ -56,7 +56,7 @@ func (np *nmqProducer) Send(ctx context.Context, message *mqwrapper.ProducerMess
 	}
 
 	// publish to nats-server
-	pa, err := np.js.PublishMsg(msg)
+	pa, err := np.js.PublishMsg(msg, nats.Context(ctx))
 	if err != nil {
 		metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.FailLabel).Inc()
 		log.Warn("failed to publish message by nmq", zap.String("topic", np.topic), zap.Error(err), zap.Int("payload_size", len(message.Payload)))

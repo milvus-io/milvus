@@ -304,7 +304,7 @@ func (t *createCollectionTask) assignPartitionIDs() error {
 
 func (t *createCollectionTask) assignChannels() error {
 	vchanNames := make([]string, t.Req.GetShardsNum())
-	//physical channel names
+	// physical channel names
 	chanNames := t.core.chanTimeTick.getDmlChannelNames(int(t.Req.GetShardsNum()))
 
 	if int32(len(chanNames)) < t.Req.GetShardsNum() {
@@ -359,14 +359,13 @@ func (t *createCollectionTask) genCreateCollectionMsg(ctx context.Context) *ms.M
 	vChannels := t.channels.virtualChannels
 
 	msgPack := ms.MsgPack{}
-	baseMsg := ms.BaseMsg{
-		Ctx:            ctx,
-		BeginTimestamp: ts,
-		EndTimestamp:   ts,
-		HashValues:     []uint32{0},
-	}
 	msg := &ms.CreateCollectionMsg{
-		BaseMsg: baseMsg,
+		BaseMsg: ms.BaseMsg{
+			Ctx:            ctx,
+			BeginTimestamp: ts,
+			EndTimestamp:   ts,
+			HashValues:     []uint32{0},
+		},
 		CreateCollectionRequest: msgpb.CreateCollectionRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_CreateCollection),

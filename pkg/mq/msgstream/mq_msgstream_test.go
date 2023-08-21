@@ -214,11 +214,6 @@ func TestStream_PulsarMsgStream_InsertRepackFunc(t *testing.T) {
 	producerChannels := []string{c1, c2}
 	consumerChannels := []string{c1, c2}
 	consumerSubName := funcutil.RandomString(8)
-	baseMsg := BaseMsg{
-		BeginTimestamp: 0,
-		EndTimestamp:   0,
-		HashValues:     []uint32{1, 3},
-	}
 
 	insertRequest := msgpb.InsertRequest{
 		Base: &commonpb.MsgBase{
@@ -236,7 +231,11 @@ func TestStream_PulsarMsgStream_InsertRepackFunc(t *testing.T) {
 		RowData:        []*commonpb.Blob{{}, {}},
 	}
 	insertMsg := &InsertMsg{
-		BaseMsg:       baseMsg,
+		BaseMsg: BaseMsg{
+			BeginTimestamp: 0,
+			EndTimestamp:   0,
+			HashValues:     []uint32{1, 3},
+		},
 		InsertRequest: insertRequest,
 	}
 
@@ -270,12 +269,6 @@ func TestStream_PulsarMsgStream_DeleteRepackFunc(t *testing.T) {
 	consumerChannels := []string{c1, c2}
 	consumerSubName := funcutil.RandomString(8)
 
-	baseMsg := BaseMsg{
-		BeginTimestamp: 0,
-		EndTimestamp:   0,
-		HashValues:     []uint32{1},
-	}
-
 	deleteRequest := msgpb.DeleteRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_Delete,
@@ -290,7 +283,11 @@ func TestStream_PulsarMsgStream_DeleteRepackFunc(t *testing.T) {
 		NumRows:          1,
 	}
 	deleteMsg := &DeleteMsg{
-		BaseMsg:       baseMsg,
+		BaseMsg: BaseMsg{
+			BeginTimestamp: 0,
+			EndTimestamp:   0,
+			HashValues:     []uint32{1},
+		},
 		DeleteRequest: deleteRequest,
 	}
 
@@ -901,7 +898,6 @@ func TestStream_MqMsgStream_Seek(t *testing.T) {
 		assert.Equal(t, result.Msgs[0].ID(), int64(i))
 	}
 	outputStream2.Close()
-
 }
 
 func TestStream_MqMsgStream_SeekInvalidMessage(t *testing.T) {
@@ -1129,11 +1125,6 @@ func repackFunc(msgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error) {
 func getTsMsg(msgType MsgType, reqID UniqueID) TsMsg {
 	hashValue := uint32(reqID)
 	time := uint64(reqID)
-	baseMsg := BaseMsg{
-		BeginTimestamp: 0,
-		EndTimestamp:   0,
-		HashValues:     []uint32{hashValue},
-	}
 	switch msgType {
 	case commonpb.MsgType_Insert:
 		insertRequest := msgpb.InsertRequest{
@@ -1152,7 +1143,11 @@ func getTsMsg(msgType MsgType, reqID UniqueID) TsMsg {
 			RowData:        []*commonpb.Blob{{}},
 		}
 		insertMsg := &InsertMsg{
-			BaseMsg:       baseMsg,
+			BaseMsg: BaseMsg{
+				BeginTimestamp: 0,
+				EndTimestamp:   0,
+				HashValues:     []uint32{hashValue},
+			},
 			InsertRequest: insertRequest,
 		}
 		return insertMsg
@@ -1171,7 +1166,11 @@ func getTsMsg(msgType MsgType, reqID UniqueID) TsMsg {
 			NumRows:          1,
 		}
 		deleteMsg := &DeleteMsg{
-			BaseMsg:       baseMsg,
+			BaseMsg: BaseMsg{
+				BeginTimestamp: 0,
+				EndTimestamp:   0,
+				HashValues:     []uint32{hashValue},
+			},
 			DeleteRequest: deleteRequest,
 		}
 		return deleteMsg
@@ -1194,7 +1193,11 @@ func getTsMsg(msgType MsgType, reqID UniqueID) TsMsg {
 			PhysicalChannelNames: []string{},
 		}
 		createCollectionMsg := &CreateCollectionMsg{
-			BaseMsg:                 baseMsg,
+			BaseMsg: BaseMsg{
+				BeginTimestamp: 0,
+				EndTimestamp:   0,
+				HashValues:     []uint32{hashValue},
+			},
 			CreateCollectionRequest: createCollectionRequest,
 		}
 		return createCollectionMsg
@@ -1208,7 +1211,11 @@ func getTsMsg(msgType MsgType, reqID UniqueID) TsMsg {
 			},
 		}
 		timeTickMsg := &TimeTickMsg{
-			BaseMsg:     baseMsg,
+			BaseMsg: BaseMsg{
+				BeginTimestamp: 0,
+				EndTimestamp:   0,
+				HashValues:     []uint32{hashValue},
+			},
 			TimeTickMsg: timeTickResult,
 		}
 		return timeTickMsg
@@ -1219,11 +1226,6 @@ func getTsMsg(msgType MsgType, reqID UniqueID) TsMsg {
 func getTimeTickMsg(reqID UniqueID) TsMsg {
 	hashValue := uint32(reqID)
 	time := uint64(reqID)
-	baseMsg := BaseMsg{
-		BeginTimestamp: 0,
-		EndTimestamp:   0,
-		HashValues:     []uint32{hashValue},
-	}
 	timeTickResult := msgpb.TimeTickMsg{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_TimeTick,
@@ -1233,7 +1235,11 @@ func getTimeTickMsg(reqID UniqueID) TsMsg {
 		},
 	}
 	timeTickMsg := &TimeTickMsg{
-		BaseMsg:     baseMsg,
+		BaseMsg: BaseMsg{
+			BeginTimestamp: 0,
+			EndTimestamp:   0,
+			HashValues:     []uint32{hashValue},
+		},
 		TimeTickMsg: timeTickResult,
 	}
 	return timeTickMsg
@@ -1249,7 +1255,7 @@ func getRandInsertMsgPack(num int, start int, end int) *MsgPack {
 		_, ok := set[reqID]
 		if !ok {
 			set[reqID] = true
-			msgPack.Msgs = append(msgPack.Msgs, getInsertMsgUniqueID(int64(reqID))) //getTsMsg(commonpb.MsgType_Insert, int64(reqID)))
+			msgPack.Msgs = append(msgPack.Msgs, getInsertMsgUniqueID(int64(reqID))) // getTsMsg(commonpb.MsgType_Insert, int64(reqID)))
 		}
 	}
 	return &msgPack
@@ -1258,7 +1264,7 @@ func getRandInsertMsgPack(num int, start int, end int) *MsgPack {
 func getInsertMsgPack(ts []int) *MsgPack {
 	msgPack := MsgPack{}
 	for i := 0; i < len(ts); i++ {
-		msgPack.Msgs = append(msgPack.Msgs, getInsertMsgUniqueID(int64(ts[i]))) //getTsMsg(commonpb.MsgType_Insert, int64(ts[i])))
+		msgPack.Msgs = append(msgPack.Msgs, getInsertMsgUniqueID(int64(ts[i]))) // getTsMsg(commonpb.MsgType_Insert, int64(ts[i])))
 	}
 	return &msgPack
 }
@@ -1268,11 +1274,6 @@ var idCounter atomic.Int64
 func getInsertMsgUniqueID(ts UniqueID) TsMsg {
 	hashValue := uint32(ts)
 	time := uint64(ts)
-	baseMsg := BaseMsg{
-		BeginTimestamp: 0,
-		EndTimestamp:   0,
-		HashValues:     []uint32{hashValue},
-	}
 
 	insertRequest := msgpb.InsertRequest{
 		Base: &commonpb.MsgBase{
@@ -1290,11 +1291,14 @@ func getInsertMsgUniqueID(ts UniqueID) TsMsg {
 		RowData:        []*commonpb.Blob{{}},
 	}
 	insertMsg := &InsertMsg{
-		BaseMsg:       baseMsg,
+		BaseMsg: BaseMsg{
+			BeginTimestamp: 0,
+			EndTimestamp:   0,
+			HashValues:     []uint32{hashValue},
+		},
 		InsertRequest: insertRequest,
 	}
 	return insertMsg
-
 }
 
 func getTimeTickMsgPack(reqID UniqueID) *MsgPack {

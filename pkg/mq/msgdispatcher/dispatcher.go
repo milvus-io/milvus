@@ -209,7 +209,7 @@ func (d *Dispatcher) work() {
 			targetPacks := d.groupingMsgs(pack)
 			for vchannel, p := range targetPacks {
 				var err error
-				var t = d.targets[vchannel]
+				t := d.targets[vchannel]
 				if d.isMain {
 					// for main dispatcher, split target if err occurs
 					err = t.send(p)
@@ -263,6 +263,8 @@ func (d *Dispatcher) groupingMsgs(pack *MsgPack) map[string]*MsgPack {
 			// for non-dml msg, such as CreateCollection, DropCollection, ...
 			// we need to dispatch it to all the vchannels.
 			for k := range targetPacks {
+				// TODO: There's data race when non-dml msg is sent to different flow graph.
+				// Wrong open-trancing information is generated, Fix in future.
 				targetPacks[k].Msgs = append(targetPacks[k].Msgs, msg)
 			}
 			continue

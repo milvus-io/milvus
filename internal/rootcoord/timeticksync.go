@@ -58,7 +58,6 @@ func newTtHistogram() *ttHistogram {
 
 func (h *ttHistogram) update(channel string, ts Timestamp) {
 	h.Insert(channel, ts)
-
 }
 
 func (h *ttHistogram) get(channel string) Timestamp {
@@ -328,11 +327,6 @@ func (t *timetickSync) sendTimeTickToChannel(chanNames []string, ts typeutil.Tim
 	}()
 
 	msgPack := msgstream.MsgPack{}
-	baseMsg := msgstream.BaseMsg{
-		BeginTimestamp: ts,
-		EndTimestamp:   ts,
-		HashValues:     []uint32{0},
-	}
 	timeTickResult := msgpb.TimeTickMsg{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_TimeTick),
@@ -342,7 +336,11 @@ func (t *timetickSync) sendTimeTickToChannel(chanNames []string, ts typeutil.Tim
 		),
 	}
 	timeTickMsg := &msgstream.TimeTickMsg{
-		BaseMsg:     baseMsg,
+		BaseMsg: msgstream.BaseMsg{
+			BeginTimestamp: ts,
+			EndTimestamp:   ts,
+			HashValues:     []uint32{0},
+		},
 		TimeTickMsg: timeTickResult,
 	}
 	msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)

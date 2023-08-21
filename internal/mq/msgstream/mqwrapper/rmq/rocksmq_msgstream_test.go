@@ -357,7 +357,6 @@ func TestStream_RmqTtMsgStream_Insert(t *testing.T) {
 }
 
 func TestStream_RmqTtMsgStream_DuplicatedIDs(t *testing.T) {
-
 	c1 := funcutil.RandomString(8)
 	producerChannels := []string{c1}
 	consumerChannels := []string{c1}
@@ -416,7 +415,6 @@ func TestStream_RmqTtMsgStream_DuplicatedIDs(t *testing.T) {
 }
 
 func TestStream_RmqTtMsgStream_Seek(t *testing.T) {
-
 	c1 := funcutil.RandomString(8)
 	producerChannels := []string{c1}
 	consumerChannels := []string{c1}
@@ -627,11 +625,6 @@ func getTimeTickMsgPack(reqID msgstream.UniqueID) *msgstream.MsgPack {
 func getTsMsg(msgType msgstream.MsgType, reqID msgstream.UniqueID) msgstream.TsMsg {
 	hashValue := uint32(reqID)
 	time := uint64(reqID)
-	baseMsg := msgstream.BaseMsg{
-		BeginTimestamp: 0,
-		EndTimestamp:   0,
-		HashValues:     []uint32{hashValue},
-	}
 	switch msgType {
 	case commonpb.MsgType_Insert:
 		insertRequest := msgpb.InsertRequest{
@@ -650,7 +643,11 @@ func getTsMsg(msgType msgstream.MsgType, reqID msgstream.UniqueID) msgstream.TsM
 			RowData:        []*commonpb.Blob{{}},
 		}
 		insertMsg := &msgstream.InsertMsg{
-			BaseMsg:       baseMsg,
+			BaseMsg: msgstream.BaseMsg{
+				BeginTimestamp: 0,
+				EndTimestamp:   0,
+				HashValues:     []uint32{hashValue},
+			},
 			InsertRequest: insertRequest,
 		}
 		return insertMsg
@@ -673,7 +670,11 @@ func getTsMsg(msgType msgstream.MsgType, reqID msgstream.UniqueID) msgstream.TsM
 			PhysicalChannelNames: []string{},
 		}
 		createCollectionMsg := &msgstream.CreateCollectionMsg{
-			BaseMsg:                 baseMsg,
+			BaseMsg: msgstream.BaseMsg{
+				BeginTimestamp: 0,
+				EndTimestamp:   0,
+				HashValues:     []uint32{hashValue},
+			},
 			CreateCollectionRequest: createCollectionRequest,
 		}
 		return createCollectionMsg
@@ -684,11 +685,6 @@ func getTsMsg(msgType msgstream.MsgType, reqID msgstream.UniqueID) msgstream.TsM
 func getTimeTickMsg(reqID msgstream.UniqueID) msgstream.TsMsg {
 	hashValue := uint32(reqID)
 	time := uint64(reqID)
-	baseMsg := msgstream.BaseMsg{
-		BeginTimestamp: 0,
-		EndTimestamp:   0,
-		HashValues:     []uint32{hashValue},
-	}
 	timeTickResult := msgpb.TimeTickMsg{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_TimeTick,
@@ -698,7 +694,11 @@ func getTimeTickMsg(reqID msgstream.UniqueID) msgstream.TsMsg {
 		},
 	}
 	timeTickMsg := &msgstream.TimeTickMsg{
-		BaseMsg:     baseMsg,
+		BaseMsg: msgstream.BaseMsg{
+			BeginTimestamp: 0,
+			EndTimestamp:   0,
+			HashValues:     []uint32{hashValue},
+		},
 		TimeTickMsg: timeTickResult,
 	}
 	return timeTickMsg
