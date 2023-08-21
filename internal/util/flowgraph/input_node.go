@@ -30,7 +30,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
+)
+
+const (
+	CloseGracefully  bool = true
+	CloseImmediately bool = false
 )
 
 // InputNode is the entry point of flowgragh
@@ -43,7 +49,9 @@ type InputNode struct {
 	nodeID       int64
 	collectionID int64
 	dataType     string
-	closeOnce    sync.Once
+
+	closeOnce       sync.Once
+	closeGracefully *atomic.Bool
 }
 
 // IsInputNode returns whether Node is InputNode
@@ -60,14 +68,27 @@ func (inNode *InputNode) Name() string {
 	return inNode.name
 }
 
+func (inNode *InputNode) SetCloseMethod(gracefully bool) {
+	inNode.closeGracefully.Store(gracefully)
+	log.Info("input node close method set",
+		zap.String("node", inNode.Name()),
+		zap.Int64("collection", inNode.collectionID),
+		zap.Any("gracefully", gracefully))
+}
+
 // Operate consume a message pack from msgstream and return
 func (inNode *InputNode) Operate(in []Msg) []Msg {
 	msgPack, ok := <-inNode.input
 	if !ok {
-		log.Warn("input closed", zap.Any("input node", inNode.Name()))
-		if inNode.lastMsg != nil {
-			log.Info("trigger force sync",
-				zap.Int64("collection", inNode.collectionID),
+		log := log.With(
+			zap.String("node", inNode.Name()),
+			zap.Int64("collection", inNode.collectionID),
+		)
+		log.Info("input node message stream closed",
+			zap.Bool("closeGracefully", inNode.closeGracefully.Load()),
+		)
+		if inNode.lastMsg != nil && inNode.closeGracefully.Load() {
+			log.Info("input node trigger force sync",
 				zap.Any("position", inNode.lastMsg.EndPositions))
 			return []Msg{&MsgStreamMsg{
 				BaseMsg:        NewBaseMsg(true),
@@ -144,12 +165,13 @@ func NewInputNode(input <-chan *msgstream.MsgPack, nodeName string, maxQueueLeng
 	baseNode.SetMaxParallelism(maxParallelism)
 
 	return &InputNode{
-		BaseNode:     baseNode,
-		input:        input,
-		name:         nodeName,
-		role:         role,
-		nodeID:       nodeID,
-		collectionID: collectionID,
-		dataType:     dataType,
+		BaseNode:        baseNode,
+		input:           input,
+		name:            nodeName,
+		role:            role,
+		nodeID:          nodeID,
+		collectionID:    collectionID,
+		dataType:        dataType,
+		closeGracefully: atomic.NewBool(CloseImmediately),
 	}
 }

@@ -161,6 +161,14 @@ func (dsService *dataSyncService) start() {
 	}
 }
 
+func (dsService *dataSyncService) GracefullyClose() {
+	if dsService.fg != nil {
+		log.Info("dataSyncService gracefully closing flowgraph")
+		dsService.fg.SetCloseMethod(flowgraph.CloseGracefully)
+		dsService.close()
+	}
+}
+
 func (dsService *dataSyncService) close() {
 	dsService.stopOnce.Do(func() {
 		log := log.Ctx(context.Background()).With(
