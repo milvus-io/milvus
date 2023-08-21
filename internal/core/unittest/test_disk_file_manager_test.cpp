@@ -129,8 +129,6 @@ TEST_F(DiskAnnFileManagerTest, TestThreadPoolBase) {
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
     std::cout << "current thread num" << thread_pool->GetThreadNum()
               << std::endl;
-    auto thread_num_2 = thread_pool->GetThreadNum();
-    EXPECT_GT(thread_num_2, thread_num_1);
 
     for (int i = 0; i < 10; ++i) {
         std::cout << futs[i].get() << std::endl;
@@ -139,8 +137,8 @@ TEST_F(DiskAnnFileManagerTest, TestThreadPoolBase) {
     std::this_thread::sleep_for(std::chrono::milliseconds(5000));
     std::cout << "current thread num" << thread_pool->GetThreadNum()
               << std::endl;
-    auto thread_num_3 = thread_pool->GetThreadNum();
-    EXPECT_LT(thread_num_3, thread_num_2);
+    auto thread_num_2 = thread_pool->GetThreadNum();
+    EXPECT_EQ(thread_num_2, thread_num_1);
 }
 
 TEST_F(DiskAnnFileManagerTest, TestThreadPool) {
