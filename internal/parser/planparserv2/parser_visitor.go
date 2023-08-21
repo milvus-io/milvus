@@ -53,7 +53,8 @@ func (v *ParserVisitor) translateIdentifier(identifier string) (*ExprWithType, e
 				},
 			},
 		},
-		dataType: field.DataType,
+		dataType:      field.DataType,
+		nodeDependent: true,
 	}, nil
 }
 
@@ -83,6 +84,7 @@ func (v *ParserVisitor) VisitBoolean(ctx *parser.BooleanContext) interface{} {
 				},
 			},
 		},
+		nodeDependent: true,
 	}
 }
 
@@ -102,6 +104,7 @@ func (v *ParserVisitor) VisitInteger(ctx *parser.IntegerContext) interface{} {
 				},
 			},
 		},
+		nodeDependent: true,
 	}
 }
 
@@ -121,6 +124,7 @@ func (v *ParserVisitor) VisitFloating(ctx *parser.FloatingContext) interface{} {
 				},
 			},
 		},
+		nodeDependent: true,
 	}
 }
 
@@ -143,6 +147,7 @@ func (v *ParserVisitor) VisitString(ctx *parser.StringContext) interface{} {
 				},
 			},
 		},
+		nodeDependent: true,
 	}
 }
 
@@ -213,8 +218,9 @@ func (v *ParserVisitor) VisitAddSub(ctx *parser.AddSubContext) interface{} {
 		return err
 	}
 	return &ExprWithType{
-		expr:     expr,
-		dataType: dataType,
+		expr:          expr,
+		dataType:      dataType,
+		nodeDependent: true,
 	}
 }
 
@@ -304,8 +310,9 @@ func (v *ParserVisitor) VisitMulDivMod(ctx *parser.MulDivModContext) interface{}
 		return err
 	}
 	return &ExprWithType{
-		expr:     expr,
-		dataType: dataType,
+		expr:          expr,
+		dataType:      dataType,
+		nodeDependent: true,
 	}
 }
 
@@ -1019,7 +1026,8 @@ func (v *ParserVisitor) VisitJSONIdentifier(ctx *parser.JSONIdentifierContext) i
 				},
 			},
 		},
-		dataType: jsonField.GetDataType(),
+		dataType:      jsonField.GetDataType(),
+		nodeDependent: true,
 	}
 }
 
@@ -1134,6 +1142,7 @@ func (v *ParserVisitor) VisitArray(ctx *parser.ArrayContext) interface{} {
 				},
 			},
 		},
+		nodeDependent: true,
 	}
 }
 

@@ -8,6 +8,10 @@ import (
 type ExprWithType struct {
 	expr     *planpb.Expr
 	dataType schemapb.DataType
+	// ExprWithType can be a node only when nodeDependent is set to false.
+	// For example, a column expression or a value expression itself cannot be an expression node independently.
+	// Unless our execution backend can support them.
+	nodeDependent bool
 }
 
 func getError(obj interface{}) error {
