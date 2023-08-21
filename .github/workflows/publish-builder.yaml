@@ -20,12 +20,12 @@ jobs:
   publish-builder:
     name: ${{ matrix.arch }} ${{ matrix.os }}
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 500
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu20.04, amazonlinux2023]
-        arch: [amd64]
+        arch: [amd64&arm64]
     env:
       OS_NAME: ${{ matrix.os }}
       IMAGE_ARCH: ${{ matrix.arch }}
@@ -42,22 +42,25 @@ jobs:
       - name: Docker Pull
         shell: bash
         run: |
-          docker-compose pull --ignore-pull-failures builder
+          docker run --rm --privileged tonistiigi/binfmt:latest --install arm64
+          docker buildx ls
+          docker buildx create --use --name=milvus --driver docker-container
       - name: Docker Build
+        if: success() && github.event_name == 'pull_request' && github.repository == 'milvus-io/milvus'
         shell: bash
         run: |
-          DATE_VERSION=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} docker-compose build builder
-          export LATEST_DATE_VERSION=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}
-          DATE_VERSION=latest docker-compose build builder
-      - name: Docker Push
+          docker buildx ls
+          docker buildx build --platform linux/amd64,linux/arm64 -t milvusdb/milvus-env:${OS_NAME}-${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} -f build/docker/builder/cpu/${OS_NAME}/Dockerfile .      
+      - name: Docker Build&Push
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
         continue-on-error: true
         shell: bash
         run: |
+          docker buildx ls
           docker login -u ${{ secrets.DOCKERHUB_USER }} \
                        -p ${{ secrets.DOCKERHUB_TOKEN }}
-          DATE_VERSION=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} docker-compose push builder
-          DATE_VERSION=latest docker-compose push builder
+          docker buildx build --platform linux/amd64,linux/arm64 --push -t milvusdb/milvus-env:${OS_NAME}-${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} -f build/docker/builder/cpu/${OS_NAME}/Dockerfile .
+          docker buildx build --platform linux/amd64,linux/arm64 --push -t milvusdb/milvus-env:${OS_NAME}-latest -f build/docker/builder/cpu/${OS_NAME}/Dockerfile .
       - name: Update Builder Image Changes
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
         continue-on-error: true
