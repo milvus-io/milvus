@@ -9,7 +9,7 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 ARG MILVUS_BASE_IMAGE_REPO="milvusdb/milvus-base"
-ARG MILVUS_BASE_IMAGE_TAG="gpu-20230317-e62607a"
+ARG MILVUS_BASE_IMAGE_TAG="gpu-20230822-34f9067"
 FROM ${MILVUS_BASE_IMAGE_REPO}:${MILVUS_BASE_IMAGE_TAG}
 
 COPY ./bin/ /milvus/bin/
