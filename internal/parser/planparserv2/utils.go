@@ -343,3 +343,7 @@ func HandleCompare(op int, left, right *ExprWithType) (*planpb.Expr, error) {
 		return handleCompare(cmpOp, left, right)
 	}
 }
+
+func canBeExecuted(e *ExprWithType) bool {
+	return typeutil.IsBoolType(e.dataType) && !e.nodeDependent
+}

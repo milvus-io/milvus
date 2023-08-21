@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/stretchr/testify/assert"
 )
 
 func Test_relationalCompatible(t *testing.T) {
@@ -54,6 +55,49 @@ func Test_relationalCompatible(t *testing.T) {
 			if got := relationalCompatible(tt.args.t1, tt.args.t2); got != tt.want {
 				t.Errorf("relationalCompatible() = %v, want %v", got, tt.want)
 			}
+		})
+	}
+}
+
+func Test_canBeExecuted(t *testing.T) {
+	type args struct {
+		e *ExprWithType
+	}
+	tests := []struct {
+		name string
+		args args
+		want bool
+	}{
+		{
+			args: args{
+				e: &ExprWithType{
+					dataType: schemapb.DataType_Int64,
+				},
+			},
+			want: false,
+		},
+		{
+			args: args{
+				e: &ExprWithType{
+					dataType:      schemapb.DataType_Bool,
+					nodeDependent: true,
+				},
+			},
+			want: false,
+		},
+		{
+			args: args{
+				e: &ExprWithType{
+					dataType:      schemapb.DataType_Bool,
+					nodeDependent: false,
+				},
+			},
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equalf(t, tt.want, canBeExecuted(tt.args.e), "canBeExecuted(%v)", tt.args.e)
 		})
 	}
 }
