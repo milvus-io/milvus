@@ -30,6 +30,17 @@ func NewRocksIterator(db *gorocksdb.DB, opts *gorocksdb.ReadOptions) *RocksItera
 	return it
 }
 
+func NewRocksIteratorCF(db *gorocksdb.DB, cf *gorocksdb.ColumnFamilyHandle, opts *gorocksdb.ReadOptions) *RocksIterator {
+	iter := db.NewIteratorCF(opts, cf)
+	it := &RocksIterator{iter, nil, false}
+	runtime.SetFinalizer(it, func(rocksit *RocksIterator) {
+		if !rocksit.close {
+			log.Error("iterator is leaking.. please check")
+		}
+	})
+	return it
+}
+
 func NewRocksIteratorWithUpperBound(db *gorocksdb.DB, upperBoundString string, opts *gorocksdb.ReadOptions) *RocksIterator {
 	upperBound := []byte(upperBoundString)
 	opts.SetIterateUpperBound(upperBound)
@@ -38,6 +49,19 @@ func NewRocksIteratorWithUpperBound(db *gorocksdb.DB, upperBoundString string, o
 	runtime.SetFinalizer(it, func(rocksit *RocksIterator) {
 		if !rocksit.close {
 			log.Error("iterator is leaking.. please check")
+		}
+	})
+	return it
+}
+
+func NewRocksIteratorCFWithUpperBound(db *gorocksdb.DB, cf *gorocksdb.ColumnFamilyHandle, upperBoundString string, opts *gorocksdb.ReadOptions) *RocksIterator {
+	upperBound := []byte(upperBoundString)
+	opts.SetIterateUpperBound(upperBound)
+	iter := db.NewIteratorCF(opts, cf)
+	it := &RocksIterator{iter, upperBound, false}
+	runtime.SetFinalizer(it, func(rocksit *RocksIterator) {
+		if !rocksit.close {
+			log.Error("iteratorCF is leaking.. please check")
 		}
 	})
 	return it
