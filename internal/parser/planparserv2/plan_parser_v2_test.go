@@ -1543,3 +1543,18 @@ func Test_InvalidJSONContains(t *testing.T) {
 	})
 	assert.Error(t, err)
 }
+
+func Test_InvalidAccess(t *testing.T) {
+	schema := newTestSchema()
+	expr := ""
+	var err error
+
+	expr = `Int64Field["A"] == 123`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.Error(t, err)
+}
