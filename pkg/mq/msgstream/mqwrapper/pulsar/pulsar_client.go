@@ -114,7 +114,7 @@ func (pc *pulsarClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.
 	consumer, err := pc.client.Subscribe(pulsar.ConsumerOptions{
 		Topic:                       fullTopicName,
 		SubscriptionName:            options.SubscriptionName,
-		Type:                        pulsar.Exclusive,
+		Type:                        pulsar.Shared,
 		SubscriptionInitialPosition: pulsar.SubscriptionInitialPosition(options.SubscriptionInitialPosition),
 		MessageChannel:              receiveChannel,
 	})
