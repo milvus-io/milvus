@@ -118,6 +118,9 @@ func newDataSyncService(ctx context.Context,
 	if err := service.initNodes(vchan, tickler); err != nil {
 		return nil, err
 	}
+	if tickler.isWatchFailed {
+		return nil, errors.New("tickler watch failed")
+	}
 	return service, nil
 }
 

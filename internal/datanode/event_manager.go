@@ -108,9 +108,10 @@ type tickler struct {
 	path      string
 	watchInfo *datapb.ChannelWatchInfo
 
-	interval time.Duration
-	closeCh  chan struct{}
-	closeWg  sync.WaitGroup
+	interval      time.Duration
+	closeCh       chan struct{}
+	closeWg       sync.WaitGroup
+	isWatchFailed bool
 }
 
 func (t *tickler) inc() {
@@ -128,6 +129,7 @@ func (t *tickler) watch() {
 	t.closeWg.Add(1)
 	ticker := time.NewTicker(t.interval)
 	go func() {
+		defer t.closeWg.Done()
 		for {
 			select {
 			case <-ticker.C:
@@ -143,6 +145,7 @@ func (t *tickler) watch() {
 						zap.String("vChanName", t.watchInfo.Vchan.ChannelName),
 						zap.Int32("progree", nowProgress),
 						zap.Error(err))
+					t.isWatchFailed = true
 					return
 				}
 				success, err := t.kv.CompareVersionAndSwap(t.path, t.version, string(v))
@@ -155,13 +158,13 @@ func (t *tickler) watch() {
 					log.Error("tickler update failed: failed to compare version and swap",
 						zap.String("key", t.path), zap.Int32("progress", nowProgress), zap.Int64("version", t.version),
 						zap.String("vChanName", t.watchInfo.GetVchan().ChannelName))
+					t.isWatchFailed = true
 					return
 				}
 				log.Debug("tickler update success", zap.Int32("progress", nowProgress), zap.Int64("version", t.version),
 					zap.String("vChanName", t.watchInfo.GetVchan().ChannelName))
 				t.version++
 			case <-t.closeCh:
-				t.closeWg.Done()
 				return
 			}
 		}
