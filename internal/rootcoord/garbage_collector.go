@@ -166,14 +166,13 @@ func (c *bgGarbageCollector) notifyCollectionGc(ctx context.Context, coll *model
 	}
 
 	msgPack := ms.MsgPack{}
-	baseMsg := ms.BaseMsg{
-		Ctx:            ctx,
-		BeginTimestamp: ts,
-		EndTimestamp:   ts,
-		HashValues:     []uint32{0},
-	}
 	msg := &ms.DropCollectionMsg{
-		BaseMsg: baseMsg,
+		BaseMsg: ms.BaseMsg{
+			Ctx:            ctx,
+			BeginTimestamp: ts,
+			EndTimestamp:   ts,
+			HashValues:     []uint32{0},
+		},
 		DropCollectionRequest: msgpb.DropCollectionRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_DropCollection),
@@ -199,14 +198,13 @@ func (c *bgGarbageCollector) notifyPartitionGc(ctx context.Context, pChannels []
 	}
 
 	msgPack := ms.MsgPack{}
-	baseMsg := ms.BaseMsg{
-		Ctx:            ctx,
-		BeginTimestamp: ts,
-		EndTimestamp:   ts,
-		HashValues:     []uint32{0},
-	}
 	msg := &ms.DropPartitionMsg{
-		BaseMsg: baseMsg,
+		BaseMsg: ms.BaseMsg{
+			Ctx:            ctx,
+			BeginTimestamp: ts,
+			EndTimestamp:   ts,
+			HashValues:     []uint32{0},
+		},
 		DropPartitionRequest: msgpb.DropPartitionRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_DropPartition),
