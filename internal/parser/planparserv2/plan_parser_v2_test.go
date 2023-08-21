@@ -474,6 +474,10 @@ func TestExpr_Invalid(t *testing.T) {
 		`1 ** 2`,
 		`1 << 2`,
 		`1 | 2`,
+		// -------------------- cannot be independent ----------------------
+		`BoolField`,
+		`true`,
+		`false`,
 	}
 	for _, exprStr := range exprStrs {
 		_, err := ParseExpr(helper, exprStr)
