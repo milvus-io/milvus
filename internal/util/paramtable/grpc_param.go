@@ -46,7 +46,7 @@ const (
 	// Grpc retry policy
 	DefaultMaxAttempts               = 5
 	DefaultInitialBackoff    float32 = 1.0
-	DefaultMaxBackoff        float32 = 60.0
+	DefaultMaxBackoff        float32 = 10.0
 	DefaultBackoffMultiplier float32 = 2.0
 
 	ProxyInternalPort = 19529
