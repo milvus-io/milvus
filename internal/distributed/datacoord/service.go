@@ -29,6 +29,7 @@ import (
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	icc "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -57,6 +58,8 @@ var Params paramtable.GrpcServerConfig
 type Server struct {
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	serverID atomic.Int64
 
 	wg        sync.WaitGroup
 	dataCoord types.DataCoordComponent
@@ -184,7 +187,10 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 			logutil.UnaryTraceLoggerInterceptor,
 			interceptor.ClusterValidationUnaryServerInterceptor(),
 			interceptor.ServerIDValidationUnaryServerInterceptor(func() int64 {
-				return datacoord.Params.DataCoordCfg.GetNodeID()
+				if s.serverID.Load() == 0 {
+					s.serverID.Store(datacoord.Params.DataCoordCfg.GetNodeID())
+				}
+				return s.serverID.Load()
 			}),
 		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
@@ -192,7 +198,10 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 			logutil.StreamTraceLoggerInterceptor,
 			interceptor.ClusterValidationStreamServerInterceptor(),
 			interceptor.ServerIDValidationStreamServerInterceptor(func() int64 {
-				return datacoord.Params.DataCoordCfg.GetNodeID()
+				if s.serverID.Load() == 0 {
+					s.serverID.Store(datacoord.Params.DataCoordCfg.GetNodeID())
+				}
+				return s.serverID.Load()
 			}),
 		)))
 	datapb.RegisterDataCoordServer(s.grpcServer, s)

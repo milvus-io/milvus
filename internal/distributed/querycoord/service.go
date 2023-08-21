@@ -27,6 +27,7 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -59,6 +60,8 @@ type Server struct {
 	loopCtx    context.Context
 	loopCancel context.CancelFunc
 	grpcServer *grpc.Server
+
+	serverID atomic.Int64
 
 	grpcErrChan chan error
 
@@ -271,7 +274,10 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 			logutil.UnaryTraceLoggerInterceptor,
 			interceptor.ClusterValidationUnaryServerInterceptor(),
 			interceptor.ServerIDValidationUnaryServerInterceptor(func() int64 {
-				return qc.Params.QueryCoordCfg.GetNodeID()
+				if s.serverID.Load() == 0 {
+					s.serverID.Store(qc.Params.QueryCoordCfg.GetNodeID())
+				}
+				return s.serverID.Load()
 			}),
 		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
@@ -279,7 +285,10 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 			logutil.StreamTraceLoggerInterceptor,
 			interceptor.ClusterValidationStreamServerInterceptor(),
 			interceptor.ServerIDValidationStreamServerInterceptor(func() int64 {
-				return qc.Params.QueryCoordCfg.GetNodeID()
+				if s.serverID.Load() == 0 {
+					s.serverID.Store(qc.Params.QueryCoordCfg.GetNodeID())
+				}
+				return s.serverID.Load()
 			}),
 		)))
 	querypb.RegisterQueryCoordServer(s.grpcServer, s)

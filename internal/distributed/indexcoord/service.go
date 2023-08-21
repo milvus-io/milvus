@@ -25,6 +25,7 @@ import (
 	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -67,6 +68,8 @@ type Server struct {
 	loopCtx    context.Context
 	loopCancel func()
 	loopWg     sync.WaitGroup
+
+	serverID atomic.Int64
 
 	etcdCli *clientv3.Client
 
@@ -344,7 +347,10 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 			logutil.UnaryTraceLoggerInterceptor,
 			interceptor.ClusterValidationUnaryServerInterceptor(),
 			interceptor.ServerIDValidationUnaryServerInterceptor(func() int64 {
-				return indexcoord.Params.IndexCoordCfg.GetNodeID()
+				if s.serverID.Load() == 0 {
+					s.serverID.Store(indexcoord.Params.IndexCoordCfg.GetNodeID())
+				}
+				return s.serverID.Load()
 			}),
 		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
@@ -352,7 +358,10 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 			logutil.StreamTraceLoggerInterceptor,
 			interceptor.ClusterValidationStreamServerInterceptor(),
 			interceptor.ServerIDValidationStreamServerInterceptor(func() int64 {
-				return indexcoord.Params.IndexCoordCfg.GetNodeID()
+				if s.serverID.Load() == 0 {
+					s.serverID.Store(indexcoord.Params.IndexCoordCfg.GetNodeID())
+				}
+				return s.serverID.Load()
 			}),
 		)))
 	indexpb.RegisterIndexCoordServer(s.grpcServer, s)
