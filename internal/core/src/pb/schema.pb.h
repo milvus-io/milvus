@@ -141,12 +141,13 @@ enum DataType : int {
   JSON = 23,
   BinaryVector = 100,
   FloatVector = 101,
+  Float16Vector = 102,
   DataType_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::min(),
   DataType_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::max()
 };
 bool DataType_IsValid(int value);
 constexpr DataType DataType_MIN = None;
-constexpr DataType DataType_MAX = FloatVector;
+constexpr DataType DataType_MAX = Float16Vector;
 constexpr int DataType_ARRAYSIZE = DataType_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* DataType_descriptor();
@@ -2861,6 +2862,7 @@ class VectorField final :
   enum DataCase {
     kFloatVector = 2,
     kBinaryVector = 3,
+    kFloat16Vector = 4,
     DATA_NOT_SET = 0,
   };
 
@@ -2945,6 +2947,7 @@ class VectorField final :
     kDimFieldNumber = 1,
     kFloatVectorFieldNumber = 2,
     kBinaryVectorFieldNumber = 3,
+    kFloat16VectorFieldNumber = 4,
   };
   // int64 dim = 1;
   void clear_dim();
@@ -2991,6 +2994,24 @@ class VectorField final :
   std::string* _internal_mutable_binary_vector();
   public:
 
+  // bytes float16_vector = 4;
+  bool has_float16_vector() const;
+  private:
+  bool _internal_has_float16_vector() const;
+  public:
+  void clear_float16_vector();
+  const std::string& float16_vector() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_float16_vector(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_float16_vector();
+  PROTOBUF_NODISCARD std::string* release_float16_vector();
+  void set_allocated_float16_vector(std::string* float16_vector);
+  private:
+  const std::string& _internal_float16_vector() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_float16_vector(const std::string& value);
+  std::string* _internal_mutable_float16_vector();
+  public:
+
   void clear_data();
   DataCase data_case() const;
   // @@protoc_insertion_point(class_scope:milvus.proto.schema.VectorField)
@@ -2998,6 +3019,7 @@ class VectorField final :
   class _Internal;
   void set_has_float_vector();
   void set_has_binary_vector();
+  void set_has_float16_vector();
 
   inline bool has_data() const;
   inline void clear_has_data();
@@ -3012,6 +3034,7 @@ class VectorField final :
         ::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized _constinit_;
       ::milvus::proto::schema::FloatArray* float_vector_;
       ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr binary_vector_;
+      ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr float16_vector_;
     } data_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
     uint32_t _oneof_case_[1];
@@ -6119,6 +6142,83 @@ inline void VectorField::set_allocated_binary_vector(std::string* binary_vector)
     _impl_.data_.binary_vector_.InitAllocated(binary_vector, GetArenaForAllocation());
   }
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.schema.VectorField.binary_vector)
+}
+
+// bytes float16_vector = 4;
+inline bool VectorField::_internal_has_float16_vector() const {
+  return data_case() == kFloat16Vector;
+}
+inline bool VectorField::has_float16_vector() const {
+  return _internal_has_float16_vector();
+}
+inline void VectorField::set_has_float16_vector() {
+  _impl_._oneof_case_[0] = kFloat16Vector;
+}
+inline void VectorField::clear_float16_vector() {
+  if (_internal_has_float16_vector()) {
+    _impl_.data_.float16_vector_.Destroy();
+    clear_has_data();
+  }
+}
+inline const std::string& VectorField::float16_vector() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.VectorField.float16_vector)
+  return _internal_float16_vector();
+}
+template <typename ArgT0, typename... ArgT>
+inline void VectorField::set_float16_vector(ArgT0&& arg0, ArgT... args) {
+  if (!_internal_has_float16_vector()) {
+    clear_data();
+    set_has_float16_vector();
+    _impl_.data_.float16_vector_.InitDefault();
+  }
+  _impl_.data_.float16_vector_.SetBytes( static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.VectorField.float16_vector)
+}
+inline std::string* VectorField::mutable_float16_vector() {
+  std::string* _s = _internal_mutable_float16_vector();
+  // @@protoc_insertion_point(field_mutable:milvus.proto.schema.VectorField.float16_vector)
+  return _s;
+}
+inline const std::string& VectorField::_internal_float16_vector() const {
+  if (_internal_has_float16_vector()) {
+    return _impl_.data_.float16_vector_.Get();
+  }
+  return ::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited();
+}
+inline void VectorField::_internal_set_float16_vector(const std::string& value) {
+  if (!_internal_has_float16_vector()) {
+    clear_data();
+    set_has_float16_vector();
+    _impl_.data_.float16_vector_.InitDefault();
+  }
+  _impl_.data_.float16_vector_.Set(value, GetArenaForAllocation());
+}
+inline std::string* VectorField::_internal_mutable_float16_vector() {
+  if (!_internal_has_float16_vector()) {
+    clear_data();
+    set_has_float16_vector();
+    _impl_.data_.float16_vector_.InitDefault();
+  }
+  return _impl_.data_.float16_vector_.Mutable(      GetArenaForAllocation());
+}
+inline std::string* VectorField::release_float16_vector() {
+  // @@protoc_insertion_point(field_release:milvus.proto.schema.VectorField.float16_vector)
+  if (_internal_has_float16_vector()) {
+    clear_has_data();
+    return _impl_.data_.float16_vector_.Release();
+  } else {
+    return nullptr;
+  }
+}
+inline void VectorField::set_allocated_float16_vector(std::string* float16_vector) {
+  if (has_data()) {
+    clear_data();
+  }
+  if (float16_vector != nullptr) {
+    set_has_float16_vector();
+    _impl_.data_.float16_vector_.InitAllocated(float16_vector, GetArenaForAllocation());
+  }
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.schema.VectorField.float16_vector)
 }
 
 inline bool VectorField::has_data() const {

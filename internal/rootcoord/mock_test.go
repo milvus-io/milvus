@@ -155,7 +155,7 @@ func (m mockMetaTable) AlterCollection(ctx context.Context, oldColl *model.Colle
 	return m.AlterCollectionFunc(ctx, oldColl, newColl, ts)
 }
 
-func (m *mockMetaTable) RenameCollection(ctx context.Context, dbName string, oldName string, newName string, ts Timestamp) error {
+func (m *mockMetaTable) RenameCollection(ctx context.Context, dbName string, oldName string, newDBName string, newName string, ts Timestamp) error {
 	return m.RenameCollectionFunc(ctx, oldName, newName, ts)
 }
 
