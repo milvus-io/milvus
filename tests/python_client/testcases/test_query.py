@@ -32,7 +32,8 @@ binary_index_params = {"index_type": "BIN_IVF_FLAT", "metric_type": "JACCARD", "
 
 default_entities = ut.gen_entities(ut.default_nb, is_normal=True)
 default_pos = 5
-default_int_field_name = "int64"
+json_field = ct.default_json_field_name
+default_int_field_name = ct.default_int64_field_name
 default_float_field_name = "float"
 default_string_field_name = "varchar"
 
@@ -562,7 +563,8 @@ class TestQueryParams(TestcaseBase):
             collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_query_expr_json_contains(self, enable_dynamic_field):
+    @pytest.mark.parametrize("expr_prefix", ["json_contains", "JSON_CONTAINS"])
+    def test_query_expr_json_contains(self, enable_dynamic_field, expr_prefix):
         """
         target: test query with expression using json_contains
         method: query with expression using json_contains
@@ -572,28 +574,22 @@ class TestQueryParams(TestcaseBase):
         collection_w = self.init_collection_general(prefix, enable_dynamic_field=enable_dynamic_field)[0]
 
         # 2. insert data
+        array = cf.gen_default_rows_data()
         limit = 99
-        array = []
         for i in range(ct.default_nb):
-            data = {
-                ct.default_int64_field_name: i,
-                ct.default_float_field_name: i * 1.0,
-                ct.default_string_field_name: str(i),
-                ct.default_json_field_name: {"number": i, "list": [m for m in range(i, i + limit)]},
-                ct.default_float_vec_field_name: cf.gen_vectors(1, ct.default_dim)[0]
-            }
-            array.append(data)
+            array[i][json_field] = {"number": i, "list": [m for m in range(i, i + limit)]}
+
         collection_w.insert(array)
 
         # 3. query
         collection_w.load()
-        expressions = ["json_contains(json_field['list'], 1000)", "JSON_CONTAINS(json_field['list'], 1000)"]
-        for expression in expressions:
-            res = collection_w.query(expression)[0]
-            assert len(res) == limit
+        expression = f"{expr_prefix}({json_field}['list'], 1000)"
+        res = collection_w.query(expression)[0]
+        assert len(res) == limit
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_query_expr_list_json_contains(self):
+    @pytest.mark.parametrize("expr_prefix", ["json_contains", "JSON_CONTAINS"])
+    def test_query_expr_list_json_contains(self, expr_prefix):
         """
         target: test query with expression using json_contains
         method: query with expression using json_contains
@@ -616,13 +612,13 @@ class TestQueryParams(TestcaseBase):
 
         # 3. query
         collection_w.load()
-        expressions = ["json_contains(json_field, '1000')", "JSON_CONTAINS(json_field, '1000')"]
-        for expression in expressions:
-            res = collection_w.query(expression, output_fields=["count(*)"])[0]
-            assert res[0]["count(*)"] == limit
+        expression = f"{expr_prefix}({json_field}, '1000')"
+        res = collection_w.query(expression, output_fields=["count(*)"])[0]
+        assert res[0]["count(*)"] == limit
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_query_expr_json_contains_combined_with_normal(self, enable_dynamic_field):
+    @pytest.mark.parametrize("expr_prefix", ["json_contains", "JSON_CONTAINS"])
+    def test_query_expr_json_contains_combined_with_normal(self, enable_dynamic_field, expr_prefix):
         """
         target: test query with expression using json_contains
         method: query with expression using json_contains
@@ -632,30 +628,23 @@ class TestQueryParams(TestcaseBase):
         collection_w = self.init_collection_general(prefix, enable_dynamic_field=enable_dynamic_field)[0]
 
         # 2. insert data
+        array = cf.gen_default_rows_data()
         limit = ct.default_nb // 3
-        array = []
         for i in range(ct.default_nb):
-            data = {
-                ct.default_int64_field_name: i,
-                ct.default_float_field_name: i * 1.0,
-                ct.default_string_field_name: str(i),
-                ct.default_json_field_name: {"number": i, "list": [m for m in range(i, i + limit)]},
-                ct.default_float_vec_field_name: cf.gen_vectors(1, ct.default_dim)[0]
-            }
-            array.append(data)
+            array[i][ct.default_json_field_name] = {"number": i, "list": [m for m in range(i, i + limit)]}
+
         collection_w.insert(array)
 
         # 3. query
         collection_w.load()
         tar = 1000
-        expressions = [f"json_contains(json_field['list'], {tar}) && float > {tar - limit // 2}",
-                       f"JSON_CONTAINS(json_field['list'], {tar}) && float > {tar - limit // 2}"]
-        for expression in expressions:
-            res = collection_w.query(expression)[0]
-            assert len(res) == limit // 2
+        expression = f"{expr_prefix}({json_field}['list'], {tar}) && float > {tar - limit // 2}"
+        res = collection_w.query(expression)[0]
+        assert len(res) == limit // 2
 
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_query_expr_json_contains_pagination(self, enable_dynamic_field):
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("expr_prefix", ["json_contains_all", "JSON_CONTAINS_ALL"])
+    def test_query_expr_all_datatype_json_contains_all(self, enable_dynamic_field, expr_prefix):
         """
         target: test query with expression using json_contains
         method: query with expression using json_contains
@@ -665,26 +654,342 @@ class TestQueryParams(TestcaseBase):
         collection_w = self.init_collection_general(prefix, enable_dynamic_field=enable_dynamic_field)[0]
 
         # 2. insert data
-        limit = ct.default_nb // 3
-        array = []
+        array = cf.gen_default_rows_data()
+        limit = 10
         for i in range(ct.default_nb):
-            data = {
-                ct.default_int64_field_name: i,
-                ct.default_float_field_name: i * 1.0,
-                ct.default_string_field_name: str(i),
-                ct.default_json_field_name: {"number": i, "list": [m for m in range(i, i + limit)]},
-                ct.default_float_vec_field_name: cf.gen_vectors(1, ct.default_dim)[0]
+            content = {
+                "listInt": [m for m in range(i, i + limit)],  # test for int
+                "listStr": [str(m) for m in range(i, i + limit)],  # test for string
+                "listFlt": [m * 1.0 for m in range(i, i + limit)],  # test for float
+                "listBool": [bool(i % 2)],  # test for bool
+                "listList": [[i, str(i + 1)], [i * 1.0, i + 1]],  # test for list
+                "listMix": [i, i * 1.1, str(i), bool(i % 2), [i, str(i)]]  # test for mixed data
             }
-            array.append(data)
+            array[i][ct.default_json_field_name] = content
+
         collection_w.insert(array)
 
         # 3. query
         collection_w.load()
-        expressions = ["json_contains(json_field['list'], 1000)", "JSON_CONTAINS(json_field['list'], 1000)"]
+        # test for int
+        _id = random.randint(0, ct.default_nb)
+        ids = [i for i in range(_id, _id + limit)]
+        expression = f"{expr_prefix}({json_field}['listInt'], {ids})"
+        res = collection_w.query(expression)[0]
+        assert len(res) == 1
+
+        # test for string
+        ids = [str(_id), str(_id + 1), str(_id + 2)]
+        expression = f"{expr_prefix}({json_field}['listStr'], {ids})"
+        res = collection_w.query(expression)[0]
+        assert len(res) == limit - len(ids) + 1
+
+        # test for float
+        ids = [_id * 1.0]
+        expression = f"{expr_prefix}({json_field}['listFlt'], {ids})"
+        res = collection_w.query(expression)[0]
+        assert len(res) == limit
+
+        # test for bool
+        ids = [True]
+        expression = f"{expr_prefix}({json_field}['listBool'], {ids})"
+        res = collection_w.query(expression)[0]
+        assert len(res) == ct.default_nb // 2
+
+        # test for list
+        ids = [[_id, str(_id + 1)]]
+        expression = f"{expr_prefix}({json_field}['listList'], {ids})"
+        res = collection_w.query(expression)[0]
+        assert len(res) == 1
+
+        # test for mixed data
+        ids = [_id * 1.1, bool(_id % 2)]
+        expression = f"{expr_prefix}({json_field}['listMix'], {ids})"
+        res = collection_w.query(expression)[0]
+        assert len(res) == 1
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("expr_prefix", ["json_contains_all", "JSON_CONTAINS_ALL"])
+    def test_query_expr_list_all_datatype_json_contains_all(self, expr_prefix):
+        """
+        target: test query with expression using json_contains_all
+        method: query with expression using json_contains_all
+        expected: succeed
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, enable_dynamic_field=True)[0]
+
+        # 2. insert data
+        array = cf.gen_default_rows_data(with_json=False)
+        limit = 10
+        for i in range(ct.default_nb):
+            array[i]["listInt"] = [m for m in range(i, i + limit)]  # test for int
+            array[i]["listStr"] = [str(m) for m in range(i, i + limit)]  # test for string
+            array[i]["listFlt"] = [m * 1.0 for m in range(i, i + limit)]  # test for float
+            array[i]["listBool"] = [bool(i % 2)]  # test for bool
+            array[i]["listList"] = [[i, str(i + 1)], [i * 1.0, i + 1]]  # test for list
+            array[i]["listMix"] = [i, i * 1.1, str(i), bool(i % 2), [i, str(i)]]  # test for mixed data
+
+        collection_w.insert(array)
+
+        # 3. query
+        collection_w.load()
+
+        # test for int
+        _id = random.randint(0, ct.default_nb)
+        ids = [i for i in range(_id, _id + limit)]
+        expression = f"{expr_prefix}(listInt, {ids})"
+        res = collection_w.query(expression)[0]
+        assert len(res) == 1
+
+        # test for string
+        ids = [str(_id), str(_id + 1), str(_id + 2)]
+        expression = f"{expr_prefix}(listStr, {ids})"
+        res = collection_w.query(expression)[0]
+        assert len(res) == limit - len(ids) + 1
+
+        # test for float
+        ids = [_id * 1.0]
+        expression = f"{expr_prefix}(listFlt, {ids})"
+        res = collection_w.query(expression, output_fields=["count(*)"])[0]
+        assert res[0]["count(*)"] == limit
+
+        # test for bool
+        ids = [True]
+        expression = f"{expr_prefix}(listBool, {ids})"
+        res = collection_w.query(expression)[0]
+        assert len(res) == ct.default_nb // 2
+
+        # test for list
+        ids = [[_id, str(_id + 1)]]
+        expression = f"{expr_prefix}(listList, {ids})"
+        res = collection_w.query(expression)[0]
+        assert len(res) == 1
+
+        # test for mixed data
+        ids = [_id * 1.1, bool(_id % 2)]
+        expression = f"{expr_prefix}(listMix, {ids})"
+        res = collection_w.query(expression)[0]
+        assert len(res) == 1
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("expr_prefix", ["json_contains_any", "JSON_CONTAINS_ANY"])
+    def test_query_expr_all_datatype_json_contains_any(self, enable_dynamic_field, expr_prefix):
+        """
+        target: test query with expression using json_contains
+        method: query with expression using json_contains
+        expected: succeed
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, enable_dynamic_field=enable_dynamic_field)[0]
+
+        # 2. insert data
+        array = cf.gen_default_rows_data()
+        limit = 10
+        for i in range(ct.default_nb):
+            content = {
+                "listInt": [m for m in range(i, i + limit)],  # test for int
+                "listStr": [str(m) for m in range(i, i + limit)],  # test for string
+                "listFlt": [m * 1.0 for m in range(i, i + limit)],  # test for float
+                "listBool": [bool(i % 2)],  # test for bool
+                "listList": [[i, str(i + 1)], [i * 1.0, i + 1]],  # test for list
+                "listMix": [i, i * 1.1, str(i), bool(i % 2), [i, str(i)]]  # test for mixed data
+            }
+            array[i][ct.default_json_field_name] = content
+
+        collection_w.insert(array)
+
+        # 3. query
+        collection_w.load()
+
+        # test for int
+        _id = random.randint(limit, ct.default_nb - limit)
+        ids = [i for i in range(_id, _id + limit)]
+        expression = f"{expr_prefix}({json_field}['listInt'], {ids})"
+        res = collection_w.query(expression)[0]
+        assert len(res) == 2 * limit - 1
+
+        # test for string
+        ids = [str(_id), str(_id + 1), str(_id + 2)]
+        expression = f"{expr_prefix}({json_field}['listStr'], {ids})"
+        res = collection_w.query(expression)[0]
+        assert len(res) == limit + len(ids) - 1
+
+        # test for float
+        ids = [_id * 1.0]
+        expression = f"{expr_prefix}({json_field}['listFlt'], {ids})"
+        res = collection_w.query(expression)[0]
+        assert len(res) == limit
+
+        # test for bool
+        ids = [True]
+        expression = f"{expr_prefix}({json_field}['listBool'], {ids})"
+        res = collection_w.query(expression)[0]
+        assert len(res) == ct.default_nb // 2
+
+        # test for list
+        ids = [[_id, str(_id + 1)]]
+        expression = f"{expr_prefix}({json_field}['listList'], {ids})"
+        res = collection_w.query(expression)[0]
+        assert len(res) == 1
+
+        # test for mixed data
+        ids = [_id, bool(_id % 2)]
+        expression = f"{expr_prefix}({json_field}['listMix'], {ids})"
+        res = collection_w.query(expression)[0]
+        assert len(res) == ct.default_nb // 2
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("expr_prefix", ["json_contains_any", "JSON_CONTAINS_ANY"])
+    def test_query_expr_list_all_datatype_json_contains_any(self, expr_prefix):
+        """
+        target: test query with expression using json_contains_any
+        method: query with expression using json_contains_any
+        expected: succeed
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, enable_dynamic_field=True)[0]
+
+        # 2. insert data
+        array = cf.gen_default_rows_data(with_json=False)
+        limit = 10
+        for i in range(ct.default_nb):
+            array[i]["listInt"] = [m for m in range(i, i + limit)]  # test for int
+            array[i]["listStr"] = [str(m) for m in range(i, i + limit)]  # test for string
+            array[i]["listFlt"] = [m * 1.0 for m in range(i, i + limit)]  # test for float
+            array[i]["listBool"] = [bool(i % 2)]  # test for bool
+            array[i]["listList"] = [[i, str(i + 1)], [i * 1.0, i + 1]]  # test for list
+            array[i]["listMix"] = [i, i * 1.1, str(i), bool(i % 2), [i, str(i)]]  # test for mixed data
+
+        collection_w.insert(array)
+
+        # 3. query
+        collection_w.load()
+
+        # test for int
+        _id = random.randint(limit, ct.default_nb - limit)
+        ids = [i for i in range(_id, _id + limit)]
+        expression = f"{expr_prefix}(listInt, {ids})"
+        res = collection_w.query(expression)[0]
+        assert len(res) == 2 * limit - 1
+
+        # test for string
+        ids = [str(_id), str(_id + 1), str(_id + 2)]
+        expression = f"{expr_prefix}(listStr, {ids})"
+        res = collection_w.query(expression)[0]
+        assert len(res) == limit + len(ids) - 1
+
+        # test for float
+        ids = [_id * 1.0]
+        expression = f"{expr_prefix}(listFlt, {ids})"
+        res = collection_w.query(expression, output_fields=["count(*)"])[0]
+        assert res[0]["count(*)"] == limit
+
+        # test for bool
+        ids = [True]
+        expression = f"{expr_prefix}(listBool, {ids})"
+        res = collection_w.query(expression)[0]
+        assert len(res) == ct.default_nb // 2
+
+        # test for list
+        ids = [[_id, str(_id + 1)]]
+        expression = f"{expr_prefix}(listList, {ids})"
+        res = collection_w.query(expression)[0]
+        assert len(res) == 1
+
+        # test for mixed data
+        ids = [_id * 1.1, bool(_id % 2)]
+        expression = f"{expr_prefix}(listMix, {ids})"
+        res = collection_w.query(expression)[0]
+        assert len(res) == ct.default_nb // 2
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("expr_prefix", ["json_contains_any", "json_contains_all"])
+    def test_query_expr_json_contains_list_in_list(self, expr_prefix, enable_dynamic_field):
+        """
+        target: test query with expression using json_contains_any
+        method: query with expression using json_contains_any
+        expected: succeed
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, enable_dynamic_field=enable_dynamic_field)[0]
+
+        # 2. insert data
+        array = cf.gen_default_rows_data()
+        for i in range(ct.default_nb):
+            array[i][json_field] = {"list": [[i, i + 1], [i, i + 2], [i, i + 3]]}
+
+        collection_w.insert(array)
+
+        # 3. query
+        collection_w.load()
+        _id = random.randint(3, ct.default_nb-3)
+        ids = [[_id, _id + 1]]
+        expression = f"{expr_prefix}({json_field}['list'], {ids})"
+        res = collection_w.query(expression)[0]
+        assert len(res) == 1
+
+        ids = [[_id + 4, _id], [_id]]
+        expression = f"{expr_prefix}({json_field}['list'], {ids})"
+        collection_w.query(expression, check_task=CheckTasks.check_query_empty)
+
+    @pytest.fixture(scope="function", params=ct.get_invalid_strs)
+    def get_not_list(self, request):
+        if request.param == [1, "2", 3]:
+            pytest.skip('[1, "2", 3] is valid type for list')
+        yield request.param
+    
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("expr_prefix", ["json_contains_any", "JSON_CONTAINS_ANY",
+                                             "json_contains_all", "JSON_CONTAINS_ALL"])
+    def test_query_expr_json_contains_invalid_type(self, expr_prefix, enable_dynamic_field, get_not_list):
+        """
+        target: test query with expression using json_contains_any
+        method: query with expression using json_contains_any
+        expected: succeed
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, enable_dynamic_field=enable_dynamic_field)[0]
+
+        # 2. insert data
+        array = cf.gen_default_rows_data()
+        for i in range(ct.default_nb):
+            array[i][json_field] = {"number": i, "list": [m for m in range(i, i + 10)]}
+
+        collection_w.insert(array)
+
+        # 3. query
+        collection_w.load()
+        expression = f"{expr_prefix}({json_field}['list'], {get_not_list})"
+        error = {ct.err_code: 1, ct.err_msg: f"cannot parse expression {expression}, error: "
+                                             f"error: {expr_prefix} operation element must be an array"}
+        collection_w.query(expression, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("expr_prefix", ["json_contains", "JSON_CONTAINS"])
+    def test_query_expr_json_contains_pagination(self, enable_dynamic_field, expr_prefix):
+        """
+        target: test query with expression using json_contains
+        method: query with expression using json_contains
+        expected: succeed
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, enable_dynamic_field=enable_dynamic_field)[0]
+
+        # 2. insert data
+        array = cf.gen_default_rows_data()
+        limit = ct.default_nb // 3
+        for i in range(ct.default_nb):
+            array[i][json_field] = {"number": i, "list": [m for m in range(i, i + limit)]}
+
+        collection_w.insert(array)
+
+        # 3. query
+        collection_w.load()
+        expression = f"{expr_prefix}({json_field}['list'], 1000)"
         offset = random.randint(1, limit)
-        for expression in expressions:
-            res = collection_w.query(expression, limit=limit, offset=offset)[0]
-            assert len(res) == limit - offset
+        res = collection_w.query(expression, limit=limit, offset=offset)[0]
+        assert len(res) == limit - offset
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_expr_empty_without_limit(self):
