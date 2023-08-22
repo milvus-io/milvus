@@ -33,13 +33,14 @@ import (
 )
 
 type NumpyColumnReader struct {
-	fieldName string             // name of the target column
-	fieldID   storage.FieldID    // ID of the target column
-	dataType  schemapb.DataType  // data type of the target column
-	rowCount  int                // how many rows need to be read
-	dimension int                // only for vector
-	file      storage.FileReader // file to be read
-	reader    *NumpyAdapter      // data reader
+	fieldName     string             // name of the target column
+	fieldID       storage.FieldID    // ID of the target column
+	dataType      schemapb.DataType  // data type of the target column
+	rowCount      int                // how many rows need to be read
+	dimension     int                // only for vector
+	maxVarcharLen int                // only for varchar
+	file          storage.FileReader // file to be read
+	reader        *NumpyAdapter      // data reader
 }
 
 func closeReaders(columnReaders []*NumpyColumnReader) {
@@ -221,14 +222,16 @@ func (p *NumpyParser) createReaders(filePaths []string) ([]*NumpyColumnReader, e
 			return nil, fmt.Errorf("failed to open file '%s'", filePath)
 		}
 
-		dim, _ := getFieldDimension(schema)
+		dim, _ := getVectorDimension(schema)
+		maxLen, _ := getVarcharMaxLen(schema)
 		columnReader := &NumpyColumnReader{
-			fieldName: schema.GetName(),
-			fieldID:   schema.GetFieldID(),
-			dataType:  schema.GetDataType(),
-			dimension: dim,
-			file:      file,
-			reader:    adapter,
+			fieldName:     schema.GetName(),
+			fieldID:       schema.GetFieldID(),
+			dataType:      schema.GetDataType(),
+			dimension:     dim,
+			maxVarcharLen: maxLen,
+			file:          file,
+			reader:        adapter,
 		}
 
 		// the validation method only check the file header information
@@ -341,6 +344,20 @@ func (p *NumpyParser) validateHeader(columnReader *NumpyColumnReader) error {
 			log.Warn("Numpy parser: illegal shape of numpy file for scalar field, shape should be 1", zap.Int("shape", len(shape)),
 				zap.String("fieldName", columnReader.fieldName))
 			return fmt.Errorf("illegal shape %d of numpy file for scalar field '%s', shape should be 1", shape, columnReader.fieldName)
+		}
+
+		// check varchar/JSON max length
+		if columnReader.dataType == schemapb.DataType_VarChar || columnReader.dataType == schemapb.DataType_JSON {
+			varcharLen, _, err := stringLen(columnReader.reader.GetDescType())
+			if err != nil {
+				log.Warn("Numpy adapter: failed to get max length of numpy file", zap.Error(err))
+				return err
+			}
+			if varcharLen > columnReader.maxVarcharLen {
+				log.Warn("Numpy adapter: length of varchar exceeds max length", zap.Int("len", varcharLen),
+					zap.Int("maxlen", columnReader.maxVarcharLen), zap.Error(err))
+				return fmt.Errorf("length of varchar %d exceeds max length %d", varcharLen, columnReader.maxVarcharLen)
+			}
 		}
 	}
 

@@ -293,14 +293,16 @@ func Test_NumpyParserValidateHeader(t *testing.T) {
 		adapter, err := NewNumpyAdapter(file)
 		assert.NoError(t, err)
 
-		dim, _ := getFieldDimension(fieldSchema)
+		dim, _ := getVectorDimension(fieldSchema)
+		length, _ := getVarcharMaxLen(fieldSchema)
 		columnReader := &NumpyColumnReader{
-			fieldName: fieldSchema.GetName(),
-			fieldID:   fieldSchema.GetFieldID(),
-			dataType:  fieldSchema.GetDataType(),
-			dimension: dim,
-			file:      file,
-			reader:    adapter,
+			fieldName:     fieldSchema.GetName(),
+			fieldID:       fieldSchema.GetFieldID(),
+			dataType:      fieldSchema.GetDataType(),
+			dimension:     dim,
+			maxVarcharLen: length,
+			file:          file,
+			reader:        adapter,
 		}
 		err = parser.validateHeader(columnReader)
 		return err
@@ -374,6 +376,37 @@ func Test_NumpyParserValidateHeader(t *testing.T) {
 		err = validateHeader(data2, schema)
 		assert.Error(t, err)
 	})
+
+	t.Run("varchar length exceeds max", func(t *testing.T) {
+		var str string
+		for i := 0; i < 8; i++ {
+			str = str + "12345678abcdefgh"
+		}
+		// varchar length(128) <= max length(128)
+		schema := findSchema(sampleSchema(), schemapb.DataType_VarChar)
+		err = validateHeader([]string{str}, schema)
+		assert.NoError(t, err)
+
+		// varchar length(129) > max length(128)
+		str = str + "0"
+		err = validateHeader([]string{str}, schema)
+		assert.Error(t, err)
+	})
+
+	t.Run("JSON length exceeds max", func(t *testing.T) {
+		// length <= defaultMaxVarCharLength(65535)
+		schema := findSchema(sampleSchema(), schemapb.DataType_JSON)
+		err = validateHeader([]string{"1"}, schema)
+		assert.NoError(t, err)
+
+		// length > defaultMaxVarCharLength(65535)
+		var str string
+		for i := 0; i < 1000; i++ {
+			str = str + "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789===="
+		}
+		err = validateHeader([]string{str}, schema)
+		assert.Error(t, err)
+	})
 }
 
 func Test_NumpyParserCreateReaders(t *testing.T) {
@@ -427,7 +460,7 @@ func Test_NumpyParserCreateReaders(t *testing.T) {
 			assert.NotNil(t, schema)
 			assert.Equal(t, schema.GetName(), reader.fieldName)
 			assert.Equal(t, schema.GetFieldID(), reader.fieldID)
-			dim, _ := getFieldDimension(schema)
+			dim, _ := getVectorDimension(schema)
 			assert.Equal(t, dim, reader.dimension)
 		}
 		defer closeReaders(readers)
@@ -1164,6 +1197,9 @@ func Test_NumpyParserHashToPartition(t *testing.T) {
 				FieldID:  102,
 				Name:     "FieldVarchar",
 				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "max_length", Value: "128"},
+				},
 			},
 			{
 				FieldID:  103,

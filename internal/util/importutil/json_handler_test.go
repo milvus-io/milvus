@@ -167,6 +167,9 @@ func Test_JSONRowConsumerHandleIntPK(t *testing.T) {
 				FieldID:  102,
 				Name:     "FieldVarchar",
 				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "max_length", Value: "128"},
+				},
 			},
 			{
 				FieldID:  103,
@@ -576,6 +579,9 @@ func Test_JSONRowHashToPartition(t *testing.T) {
 				FieldID:  101,
 				Name:     "FieldVarchar",
 				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "max_length", Value: "128"},
+				},
 			},
 			{
 				FieldID:  102,

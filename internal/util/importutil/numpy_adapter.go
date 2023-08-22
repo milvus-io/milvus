@@ -223,6 +223,10 @@ func (n *NumpyAdapter) GetType() schemapb.DataType {
 	return n.dataType
 }
 
+func (n *NumpyAdapter) GetDescType() string {
+	return n.npyReader.Header.Descr.Type
+}
+
 func (n *NumpyAdapter) GetShape() []int {
 	return n.npyReader.Header.Descr.Shape
 }
