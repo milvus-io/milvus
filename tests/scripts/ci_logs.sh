@@ -94,7 +94,7 @@ else
   for log_file in ${log_files}
   do 
    file_name=$(basename ${log_file})
-    mv  ${log_file} ${RELEASE_LOG_DIR}/`echo ${file_name} | sed 's/jenkins.var.log.containers.//g' `
+    mv  ${log_file} ${RELEASE_LOG_DIR}/`echo ${file_name} | sed 's/ci.var.log.containers.//g' `
   done 
 
   tar -zcvf ${ARTIFACTS_NAME:-artifacts}.tar.gz ${RELEASE_LOG_DIR}/*
