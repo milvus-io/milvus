@@ -38,7 +38,9 @@ if [ -z "$IMAGE_ARCH" ]; then
 
 fi
 
-BUILD_ARGS=""
+echo ${IMAGE_ARCH}
+
+BUILD_ARGS="${BUILD_ARGS:-}"
 
 pushd "${toplevel}"
 
