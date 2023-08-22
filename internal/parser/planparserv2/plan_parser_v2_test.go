@@ -478,6 +478,9 @@ func TestExpr_Invalid(t *testing.T) {
 		`BoolField`,
 		`true`,
 		`false`,
+		`Int64Field > 100 and BoolField`,
+		`Int64Field < 100 or false`, // maybe this can be optimized.
+		`!BoolField`,
 	}
 	for _, exprStr := range exprStrs {
 		_, err := ParseExpr(helper, exprStr)

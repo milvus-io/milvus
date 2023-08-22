@@ -758,7 +758,7 @@ func (v *ParserVisitor) VisitUnary(ctx *parser.UnaryContext) interface{} {
 	case parser.PlanParserADD:
 		return childExpr
 	case parser.PlanParserNOT:
-		if !typeutil.IsBoolType(childExpr.dataType) {
+		if !canBeExecuted(childExpr) {
 			return fmt.Errorf("%s op can only be applied on boolean expression", unaryLogicalNameMap[parser.PlanParserNOT])
 		}
 		return &ExprWithType{
@@ -806,7 +806,7 @@ func (v *ParserVisitor) VisitLogicalOr(ctx *parser.LogicalOrContext) interface{}
 	leftExpr = getExpr(left)
 	rightExpr = getExpr(right)
 
-	if !typeutil.IsBoolType(leftExpr.dataType) || !typeutil.IsBoolType(rightExpr.dataType) {
+	if !canBeExecuted(leftExpr) || !canBeExecuted(rightExpr) {
 		return fmt.Errorf("'or' can only be used between boolean expressions")
 	}
 	expr := &planpb.Expr{
@@ -854,7 +854,7 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 	leftExpr = getExpr(left)
 	rightExpr = getExpr(right)
 
-	if !typeutil.IsBoolType(leftExpr.dataType) || !typeutil.IsBoolType(rightExpr.dataType) {
+	if !canBeExecuted(leftExpr) || !canBeExecuted(rightExpr) {
 		return fmt.Errorf("'and' can only be used between boolean expressions")
 	}
 	expr := &planpb.Expr{
