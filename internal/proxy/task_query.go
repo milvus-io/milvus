@@ -337,7 +337,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 
 		partitionNames = append(partitionNames, hashedPartitionNames...)
 	}
-	t.RetrieveRequest.PartitionIDs, err = getPartitionIDs(ctx, t.request.CollectionName, partitionNames)
+	t.RetrieveRequest.PartitionIDs, err = getPartitionIDs(ctx, t.request.GetDbName(), t.request.CollectionName, partitionNames)
 	if err != nil {
 		return err
 	}

@@ -2211,11 +2211,16 @@ func (t *DescribeResourceGroupTask) Execute(ctx context.Context) error {
 	getCollectionName := func(collections map[int64]int32) (map[string]int32, error) {
 		ret := make(map[string]int32)
 		for key, value := range collections {
-			name, err := globalMetaCache.GetCollectionName(ctx, GetCurDBNameFromContextOrDefault(ctx), key)
+			name, err := globalMetaCache.GetCollectionName(ctx, "", key)
 			if err != nil {
 				log.Warn("failed to get collection name",
 					zap.Int64("collectionID", key),
 					zap.Error(err))
+
+				// if collection has been dropped, skip it
+				if common.IsCollectionNotExistError(err) {
+					continue
+				}
 				return nil, err
 			}
 			ret[name] = value
