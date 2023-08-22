@@ -505,6 +505,23 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             check_items={"err_code": 1,
                                          "err_msg": "failed to create query plan"})
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("expression", cf.gen_invalid_bool_expressions())
+    def test_search_with_expression_invalid_bool(self, expression):
+        """
+        target: test search invalid bool
+        method: test search invalid bool
+        expected: searched failed
+        """
+        collection_w = self.init_collection_general(prefix, True, is_all_data_type=True)[0]
+        log.info("test_search_with_expression: searching with expression: %s" % expression)
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit, expression,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1,
+                                         "err_msg": "failed to create query plan: cannot parse "
+                                                    "expression: %s" % expression})
+
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("expression", ["int64 like 33", "float LIKE 33"])
     def test_search_with_expression_invalid_like(self, expression):

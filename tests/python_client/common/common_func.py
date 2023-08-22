@@ -1001,6 +1001,18 @@ def gen_invalid_string_expressions():
     return expressions
 
 
+def gen_invalid_bool_expressions():
+    expressions = [
+        "bool",
+        "!bool",
+        "true",
+        "false",
+        "int64 > 0 and bool",
+        "int64 > 0 or false"
+    ]
+    return expressions
+
+
 def gen_normal_expressions_field(field):
     expressions = [
         "",
