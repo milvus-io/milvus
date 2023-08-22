@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/milvus-io/milvus/internal/log"
@@ -47,6 +48,7 @@ type PmsFactory struct {
 	PulsarAuthParams string
 	PulsarTenant     string
 	PulsarNameSpace  string
+	RequestTimeout   time.Duration
 }
 
 func NewPmsFactory(config *paramtable.PulsarConfig) *PmsFactory {
@@ -59,6 +61,7 @@ func NewPmsFactory(config *paramtable.PulsarConfig) *PmsFactory {
 		PulsarAuthParams: config.AuthParams,
 		PulsarTenant:     config.Tenant,
 		PulsarNameSpace:  config.Namespace,
+		RequestTimeout:   config.RequestTimeout,
 	}
 }
 
@@ -69,8 +72,9 @@ func (f *PmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
 		return nil, err
 	}
 	clientOpts := pulsar.ClientOptions{
-		URL:            f.PulsarAddress,
-		Authentication: auth,
+		URL:              f.PulsarAddress,
+		Authentication:   auth,
+		OperationTimeout: f.RequestTimeout,
 	}
 
 	pulsarClient, err := pulsarmqwrapper.NewClient(f.PulsarTenant, f.PulsarNameSpace, clientOpts)
