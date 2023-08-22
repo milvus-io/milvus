@@ -75,6 +75,7 @@ type ClientBase[T interface {
 
 	grpcClient             T
 	encryption             bool
+	addr                   string
 	conn                   *grpc.ClientConn
 	grpcClientMtx          sync.RWMutex
 	role                   string
@@ -105,6 +106,11 @@ func (c *ClientBase[T]) SetRole(role string) {
 // GetRole returns role of client
 func (c *ClientBase[T]) GetRole() string {
 	return c.role
+}
+
+// GetAddr returns address of client
+func (c *ClientBase[T]) GetAddr() string {
+	return c.addr
 }
 
 // SetGetAddrFunc sets getAddrFunc of client
@@ -159,6 +165,7 @@ func (c *ClientBase[T]) resetConnection(client T) {
 		_ = c.conn.Close()
 	}
 	c.conn = nil
+	c.addr = ""
 	c.grpcClient = generic.Zero[T]()
 }
 
@@ -281,6 +288,7 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 	}
 
 	c.conn = conn
+	c.addr = addr
 	c.grpcClient = c.newGrpcClient(c.conn)
 	return nil
 }
@@ -347,6 +355,7 @@ func (c *ClientBase[T]) Call(ctx context.Context, caller func(client T) (any, er
 		traceErr := fmt.Errorf("err: %w\n, %s", err, tracer.StackTrace())
 		log.Ctx(ctx).Warn("ClientBase Call grpc first call get error",
 			zap.String("role", c.GetRole()),
+			zap.String("address", c.GetAddr()),
 			zap.Error(traceErr),
 		)
 		return generic.Zero[T](), traceErr
@@ -365,8 +374,9 @@ func (c *ClientBase[T]) ReCall(ctx context.Context, caller func(client T) (any, 
 		return ret, nil
 	}
 
+	log := log.Ctx(ctx).With(zap.String("role", c.GetRole()), zap.String("address", c.GetAddr()))
 	traceErr := fmt.Errorf("err: %w\n, %s", err, tracer.StackTrace())
-	log.Ctx(ctx).Warn("ClientBase ReCall grpc first call get error ", zap.String("role", c.GetRole()), zap.Error(traceErr))
+	log.Warn("ClientBase ReCall grpc first call get error ", zap.Error(traceErr))
 
 	if !funcutil.CheckCtxValid(ctx) {
 		return generic.Zero[T](), ctx.Err()
@@ -375,7 +385,7 @@ func (c *ClientBase[T]) ReCall(ctx context.Context, caller func(client T) (any, 
 	ret, err = c.callOnce(ctx, caller)
 	if err != nil {
 		traceErr = fmt.Errorf("err: %w\n, %s", err, tracer.StackTrace())
-		log.Ctx(ctx).Warn("ClientBase ReCall grpc second call get error", zap.String("role", c.GetRole()), zap.Error(traceErr))
+		log.Warn("ClientBase ReCall grpc second call get error", zap.Error(traceErr))
 		return generic.Zero[T](), traceErr
 	}
 	return ret, err
