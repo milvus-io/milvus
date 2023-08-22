@@ -43,9 +43,18 @@ const (
 	IndexDISKANN         = indexparamcheck.IndexDISKANN
 )
 
+func (s *MiniClusterSuite) WaitForIndexBuiltWithDB(ctx context.Context, dbName, collection, field string) {
+	s.waitForIndexBuiltInternal(ctx, dbName, collection, field)
+}
+
 func (s *MiniClusterSuite) WaitForIndexBuilt(ctx context.Context, collection, field string) {
+	s.waitForIndexBuiltInternal(ctx, "", collection, field)
+}
+
+func (s *MiniClusterSuite) waitForIndexBuiltInternal(ctx context.Context, dbName, collection, field string) {
 	getIndexBuilt := func() bool {
 		resp, err := s.Cluster.Proxy.DescribeIndex(ctx, &milvuspb.DescribeIndexRequest{
+			DbName:         dbName,
 			CollectionName: collection,
 			FieldName:      field,
 		})

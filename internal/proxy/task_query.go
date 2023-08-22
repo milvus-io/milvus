@@ -330,14 +330,14 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 			return err
 		}
 		partitionKeys := ParsePartitionKeys(expr)
-		hashedPartitionNames, err := assignPartitionKeys(ctx, "", t.request.CollectionName, partitionKeys)
+		hashedPartitionNames, err := assignPartitionKeys(ctx, t.request.GetDbName(), t.request.CollectionName, partitionKeys)
 		if err != nil {
 			return err
 		}
 
 		partitionNames = append(partitionNames, hashedPartitionNames...)
 	}
-	t.RetrieveRequest.PartitionIDs, err = getPartitionIDs(ctx, t.request.CollectionName, partitionNames)
+	t.RetrieveRequest.PartitionIDs, err = getPartitionIDs(ctx, t.request.GetDbName(), t.request.CollectionName, partitionNames)
 	if err != nil {
 		return err
 	}

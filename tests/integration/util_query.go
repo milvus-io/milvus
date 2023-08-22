@@ -44,10 +44,19 @@ const (
 	LimitKey        = "limit"
 )
 
+func (s *MiniClusterSuite) WaitForLoadWithDB(ctx context.Context, dbName, collection string) {
+	s.waitForLoadInternal(ctx, dbName, collection)
+}
+
 func (s *MiniClusterSuite) WaitForLoad(ctx context.Context, collection string) {
+	s.waitForLoadInternal(ctx, "", collection)
+}
+
+func (s *MiniClusterSuite) waitForLoadInternal(ctx context.Context, dbName, collection string) {
 	cluster := s.Cluster
 	getLoadingProgress := func() *milvuspb.GetLoadingProgressResponse {
 		loadProgress, err := cluster.Proxy.GetLoadingProgress(ctx, &milvuspb.GetLoadingProgressRequest{
+			DbName:         dbName,
 			CollectionName: collection,
 		})
 		if err != nil {

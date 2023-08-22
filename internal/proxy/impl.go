@@ -1653,7 +1653,7 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 		}
 	} else {
 		if loadProgress, refreshProgress, err = getPartitionProgress(ctx, node.queryCoord, request.GetBase(),
-			request.GetPartitionNames(), request.GetCollectionName(), collectionID); err != nil {
+			request.GetPartitionNames(), request.GetCollectionName(), collectionID, request.GetDbName()); err != nil {
 			return getErrResponse(err), nil
 		}
 	}
@@ -1755,7 +1755,7 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 		}
 	} else {
 		if progress, _, err = getPartitionProgress(ctx, node.queryCoord, request.GetBase(),
-			request.GetPartitionNames(), request.GetCollectionName(), collectionID); err != nil {
+			request.GetPartitionNames(), request.GetCollectionName(), collectionID, request.GetDbName()); err != nil {
 			if errors.Is(err, ErrInsufficientMemory) {
 				return &milvuspb.GetLoadStateResponse{
 					Status: InSufficientMemoryStatus(request.GetCollectionName()),

@@ -38,6 +38,8 @@ import (
 type TestGetVectorSuite struct {
 	integration.MiniClusterSuite
 
+	dbName string
+
 	// test params
 	nq         int
 	topK       int
@@ -61,6 +63,14 @@ func (s *TestGetVectorSuite) run() {
 		NB  = 10000
 		dim = 128
 	)
+
+	if len(s.dbName) > 0 {
+		createDataBaseStatus, err := s.Cluster.Proxy.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{
+			DbName: s.dbName,
+		})
+		s.Require().NoError(err)
+		s.Require().Equal(createDataBaseStatus.GetErrorCode(), commonpb.ErrorCode_Success)
+	}
 
 	pkFieldName := "pkField"
 	vecFieldName := "vecField"
@@ -98,6 +108,7 @@ func (s *TestGetVectorSuite) run() {
 	s.Require().NoError(err)
 
 	createCollectionStatus, err := s.Cluster.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		DbName:         s.dbName,
 		CollectionName: collection,
 		Schema:         marshaledSchema,
 		ShardsNum:      2,
@@ -120,6 +131,7 @@ func (s *TestGetVectorSuite) run() {
 	fieldsData = append(fieldsData, vecFieldData)
 	hashKeys := integration.GenerateHashKeys(NB)
 	_, err = s.Cluster.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+		DbName:         s.dbName,
 		CollectionName: collection,
 		FieldsData:     fieldsData,
 		HashKeys:       hashKeys,
@@ -130,6 +142,7 @@ func (s *TestGetVectorSuite) run() {
 
 	// flush
 	flushResp, err := s.Cluster.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+		DbName:          s.dbName,
 		CollectionNames: []string{collection},
 	})
 	s.Require().NoError(err)
@@ -146,6 +159,7 @@ func (s *TestGetVectorSuite) run() {
 
 	// create index
 	_, err = s.Cluster.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+		DbName:         s.dbName,
 		CollectionName: collection,
 		FieldName:      vecFieldName,
 		IndexName:      "_default",
@@ -154,15 +168,16 @@ func (s *TestGetVectorSuite) run() {
 	s.Require().NoError(err)
 	s.Require().Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
-	s.WaitForIndexBuilt(ctx, collection, vecFieldName)
+	s.WaitForIndexBuiltWithDB(ctx, s.dbName, collection, vecFieldName)
 
 	// load
 	_, err = s.Cluster.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+		DbName:         s.dbName,
 		CollectionName: collection,
 	})
 	s.Require().NoError(err)
 	s.Require().Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
-	s.WaitForLoad(ctx, collection)
+	s.WaitForLoadWithDB(ctx, s.dbName, collection)
 
 	// search
 	nq := s.nq
@@ -170,7 +185,7 @@ func (s *TestGetVectorSuite) run() {
 
 	outputFields := []string{vecFieldName}
 	params := integration.GetSearchParams(s.indexType, s.metricType)
-	searchReq := integration.ConstructSearchRequest("", collection, "",
+	searchReq := integration.ConstructSearchRequest(s.dbName, collection, "",
 		vecFieldName, s.vecType, outputFields, s.metricType, params, nq, dim, topk, -1)
 
 	searchResp, err := s.Cluster.Proxy.Search(ctx, searchReq)
@@ -248,6 +263,7 @@ func (s *TestGetVectorSuite) run() {
 	}
 
 	status, err := s.Cluster.Proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{
+		DbName:         s.dbName,
 		CollectionName: collection,
 	})
 	s.Require().NoError(err)
@@ -357,6 +373,18 @@ func (s *TestGetVectorSuite) TestGetVector_Big_NQ_TOPK() {
 	s.T().Skip("skip big NQ Top due to timeout")
 	s.nq = 10000
 	s.topK = 200
+	s.indexType = integration.IndexHNSW
+	s.metricType = metric.L2
+	s.pkType = schemapb.DataType_Int64
+	s.vecType = schemapb.DataType_FloatVector
+	s.searchFailed = false
+	s.run()
+}
+
+func (s *TestGetVectorSuite) TestGetVector_With_DB_Name() {
+	s.dbName = "test_db"
+	s.nq = 10
+	s.topK = 10
 	s.indexType = integration.IndexHNSW
 	s.metricType = metric.L2
 	s.pkType = schemapb.DataType_Int64

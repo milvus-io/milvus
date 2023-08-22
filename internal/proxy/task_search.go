@@ -68,14 +68,14 @@ type searchTask struct {
 	lb   LBPolicy
 }
 
-func getPartitionIDs(ctx context.Context, collectionName string, partitionNames []string) (partitionIDs []UniqueID, err error) {
+func getPartitionIDs(ctx context.Context, dbName string, collectionName string, partitionNames []string) (partitionIDs []UniqueID, err error) {
 	for _, tag := range partitionNames {
 		if err := validatePartitionTag(tag, false); err != nil {
 			return nil, err
 		}
 	}
 
-	partitionsMap, err := globalMetaCache.GetPartitions(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
+	partitionsMap, err := globalMetaCache.GetPartitions(ctx, dbName, collectionName)
 	if err != nil {
 		return nil, err
 	}
@@ -351,7 +351,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	}
 
 	// translate partition name to partition ids. Use regex-pattern to match partition name.
-	t.SearchRequest.PartitionIDs, err = getPartitionIDs(ctx, collectionName, partitionNames)
+	t.SearchRequest.PartitionIDs, err = getPartitionIDs(ctx, t.request.GetDbName(), collectionName, partitionNames)
 	if err != nil {
 		log.Warn("failed to get partition ids", zap.Error(err))
 		return err
@@ -579,6 +579,7 @@ func (t *searchTask) Requery() error {
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_Retrieve,
 		},
+		DbName:             t.request.GetDbName(),
 		CollectionName:     t.request.GetCollectionName(),
 		Expr:               expr,
 		OutputFields:       t.request.GetOutputFields(),
