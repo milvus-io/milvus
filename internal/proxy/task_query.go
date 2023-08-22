@@ -243,7 +243,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	t.queryParams = queryParams
 	t.RetrieveRequest.Limit = queryParams.limit + queryParams.offset
 
-	loaded, err := checkIfLoaded(ctx, t.qc, collectionName, t.RetrieveRequest.GetPartitionIDs())
+	loaded, err := checkIfLoaded(ctx, t.qc, t.request.GetDbName(), collectionName, t.RetrieveRequest.GetPartitionIDs())
 	if err != nil {
 		return fmt.Errorf("checkIfLoaded failed when query, collection:%v, partitions:%v, err = %s", collectionName, t.request.GetPartitionNames(), err)
 	}
@@ -287,7 +287,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 
 		partitionNames = append(partitionNames, hashedPartitionNames...)
 	}
-	t.RetrieveRequest.PartitionIDs, err = getPartitionIDs(ctx, collectionName, partitionNames)
+	t.RetrieveRequest.PartitionIDs, err = getPartitionIDs(ctx, t.request.GetDbName(), collectionName, partitionNames)
 	if err != nil {
 		log.Ctx(ctx).Warn("failed to get partitions in collection.", zap.String("collection name", collectionName),
 			zap.Error(err),
