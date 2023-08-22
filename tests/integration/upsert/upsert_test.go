@@ -47,7 +47,7 @@ func (s *UpsertSuite) TestUpsert() {
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
 	dim := 128
-	rowNum := 3000
+	rowNum := 100
 
 	schema := integration.ConstructSchema(collectionName, dim, false)
 	marshaledSchema, err := proto.Marshal(schema)
@@ -75,6 +75,7 @@ func (s *UpsertSuite) TestUpsert() {
 	pkFieldData := integration.NewInt64FieldData(integration.Int64Field, rowNum)
 	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
 	hashKeys := integration.GenerateHashKeys(rowNum)
+	// colletion not loaded, do delete operate
 	upsertResult, err := c.Proxy.Upsert(ctx, &milvuspb.UpsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
@@ -130,6 +131,7 @@ func (s *UpsertSuite) TestUpsert() {
 		log.Warn("LoadCollection fail reason", zap.Error(err))
 	}
 	s.WaitForLoad(ctx, collectionName)
+
 	// search
 	expr := fmt.Sprintf("%s > 0", integration.Int64Field)
 	nq := 10

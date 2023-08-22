@@ -2521,6 +2521,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		segIDAssigner: node.segAssigner,
 		chMgr:         node.chMgr,
 		chTicker:      node.chTicker,
+		node:          node,
 	}
 
 	constructFailedResponse := func(err error, errCode commonpb.ErrorCode) *milvuspb.MutationResult {
@@ -2561,7 +2562,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		zap.Uint64("EndTS", it.EndTs()))
 
 	if err := it.WaitToFinish(); err != nil {
-		log.Info("Failed to execute insert task in task scheduler",
+		log.Info("Failed to execute upsert task in task scheduler",
 			zap.Error(err))
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 			metrics.FailLabel).Inc()
@@ -2588,7 +2589,12 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	insertReceiveSize := proto.Size(it.upsertMsg.InsertMsg)
 	deleteReceiveSize := proto.Size(it.upsertMsg.DeleteMsg)
 
-	rateCol.Add(internalpb.RateType_DMLUpsert.String(), float64(insertReceiveSize+deleteReceiveSize))
+	upsertReceiveSize := insertReceiveSize + it.queryReceiveSize
+	if it.needDelete {
+		upsertReceiveSize += deleteReceiveSize
+	}
+
+	rateCol.Add(internalpb.RateType_DMLUpsert.String(), float64(upsertReceiveSize))
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 		metrics.SuccessLabel).Inc()
@@ -2875,10 +2881,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 			metrics.AbandonLabel).Inc()
 
 		return &milvuspb.QueryResults{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 	tr.CtxRecord(ctx, "query request enqueue")
@@ -2894,10 +2897,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 			metrics.FailLabel).Inc()
 
 		return &milvuspb.QueryResults{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 	span := tr.CtxRecord(ctx, "wait query result")

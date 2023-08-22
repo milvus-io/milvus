@@ -19,8 +19,10 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/cockroachdb/errors"
+	"github.com/golang/protobuf/proto"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
@@ -29,11 +31,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -48,19 +52,23 @@ type upsertTask struct {
 
 	ctx context.Context
 
-	timestamps       []uint64
-	rowIDs           []int64
-	result           *milvuspb.MutationResult
-	idAllocator      *allocator.IDAllocator
-	segIDAssigner    *segIDAssigner
-	collectionID     UniqueID
-	chMgr            channelsMgr
-	chTicker         channelsTimeTicker
-	vChannels        []vChan
-	pChannels        []pChan
-	schema           *schemapb.CollectionSchema
-	partitionKeyMode bool
-	partitionKeys    *schemapb.FieldData
+	timestamps        []uint64
+	rowIDs            []int64
+	result            *milvuspb.MutationResult
+	idAllocator       *allocator.IDAllocator
+	segIDAssigner     *segIDAssigner
+	collectionID      UniqueID
+	chMgr             channelsMgr
+	chTicker          channelsTimeTicker
+	vChannels         []vChan
+	pChannels         []pChan
+	schema            *schemapb.CollectionSchema
+	partitionKeyMode  bool
+	partitionKeys     *schemapb.FieldData
+	node              types.ProxyComponent
+	deletePrimaryKeys *schemapb.IDs
+	needDelete        bool
+	queryReceiveSize  int
 }
 
 // TraceCtx returns upsertTask context
@@ -231,13 +239,6 @@ func (it *upsertTask) deletePreExecute(ctx context.Context) error {
 		log.Info("Invalid collectionName", zap.Error(err))
 		return err
 	}
-	collID, err := globalMetaCache.GetCollectionID(ctx, it.req.GetDbName(), collName)
-	if err != nil {
-		log.Info("Failed to get collection id", zap.Error(err))
-		return err
-	}
-	it.upsertMsg.DeleteMsg.CollectionID = collID
-	it.collectionID = collID
 
 	if it.partitionKeyMode {
 		// multi entities with same pk and diff partition keys may be hashed to multi physical partitions
@@ -314,6 +315,13 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
+	collID, err := globalMetaCache.GetCollectionID(ctx, it.req.GetDbName(), it.req.CollectionName)
+	if err != nil {
+		log.Info("Failed to get collection id", zap.Error(err))
+		return err
+	}
+	it.collectionID = collID
+
 	it.upsertMsg = &msgstream.UpsertMsg{
 		InsertMsg: &msgstream.InsertMsg{
 			InsertRequest: msgpb.InsertRequest{
@@ -337,7 +345,6 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 				),
 				DbName:         it.req.DbName,
 				CollectionName: it.req.CollectionName,
-				NumRows:        int64(it.req.NumRows),
 				PartitionName:  it.req.PartitionName,
 				CollectionID:   it.collectionID,
 			},
@@ -348,19 +355,57 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		log.Warn("Fail to insertPreExecute", zap.Error(err))
 		return err
 	}
+	it.result.InsertCnt = int64(it.upsertMsg.InsertMsg.NumRows)
 
-	err = it.deletePreExecute(ctx)
+	// query to find if pk were exist
+	// if pk not exist, then skip delete operate
+	queryResult, err := it.queryPK()
 	if err != nil {
-		log.Warn("Fail to deletePreExecute", zap.Error(err))
+		log.Warn("Fail to query pk when upsert", zap.Error(err))
 		return err
 	}
 
-	it.result.DeleteCnt = it.upsertMsg.DeleteMsg.NumRows
-	it.result.InsertCnt = int64(it.upsertMsg.InsertMsg.NumRows)
-	if it.result.DeleteCnt != it.result.InsertCnt {
-		log.Info("DeleteCnt and InsertCnt are not the same when upsert",
-			zap.Int64("DeleteCnt", it.result.DeleteCnt),
-			zap.Int64("InsertCnt", it.result.InsertCnt))
+	err = merr.Error(queryResult.GetStatus())
+	// Todo(smellthemoon): use error.Any to check error here, need to use merr in retry func first
+	if isNotFullLoad(err) {
+		it.needDelete = true
+		it.deletePrimaryKeys = it.result.IDs
+		it.upsertMsg.DeleteMsg.NumRows = int64(it.req.NumRows)
+		log.Info("upsert on a unloaded or not loaded fully collection or partition", zap.Error(err))
+	} else if err != nil {
+		log.Warn("Fail to query pk when upsert", zap.Error(err))
+		return err
+	} else {
+		queryPkFieldData := queryResult.GetFieldsData()[0]
+		if queryPkFieldData.GetScalars().GetLongData() != nil || queryPkFieldData.GetScalars().GetStringData() != nil {
+			it.needDelete = true
+			it.deletePrimaryKeys, err = parsePrimaryFieldData2IDs(queryPkFieldData)
+			if queryPkFieldData.GetScalars().GetLongData() != nil {
+				it.upsertMsg.DeleteMsg.NumRows = int64(len(queryPkFieldData.GetScalars().GetLongData().Data))
+			} else {
+				it.upsertMsg.DeleteMsg.NumRows = int64(len(queryPkFieldData.GetScalars().GetStringData().Data))
+			}
+			if err != nil {
+				log.Error("get delete primary field data failed when upsert", zap.String("collectionName", it.req.CollectionName), zap.Error(err))
+				return err
+			}
+		}
+	}
+
+	// need to do delete
+	if it.needDelete {
+		err = it.deletePreExecute(ctx)
+		if err != nil {
+			log.Warn("Fail to deletePreExecute", zap.Error(err))
+			return err
+		}
+
+		it.result.DeleteCnt = it.upsertMsg.DeleteMsg.NumRows
+		if it.result.DeleteCnt > it.result.InsertCnt {
+			log.Warn("DeleteCnt are more than InsertCnt when upsert", zap.Int64("DeleteCnt", it.result.DeleteCnt),
+				zap.Int64("InsertCnt", it.result.InsertCnt))
+			return merr.WrapErrParameterInvalidRange(0, it.result.InsertCnt, it.result.DeleteCnt, "DeleteCnt less than or equal to InsertCnt when upsert")
+		}
 	}
 	it.result.UpsertCnt = it.result.InsertCnt
 	log.Debug("Proxy Upsert PreExecute done")
@@ -443,7 +488,7 @@ func (it *upsertTask) deleteExecute(ctx context.Context, msgPack *msgstream.MsgP
 		it.result.Status.Reason = err.Error()
 		return err
 	}
-	it.upsertMsg.DeleteMsg.PrimaryKeys = it.result.IDs
+	it.upsertMsg.DeleteMsg.PrimaryKeys = it.deletePrimaryKeys
 	it.upsertMsg.DeleteMsg.HashValues = typeutil.HashPK2Channels(it.upsertMsg.DeleteMsg.PrimaryKeys, channelNames)
 
 	// repack delete msg by dmChannel
@@ -531,10 +576,13 @@ func (it *upsertTask) Execute(ctx context.Context) (err error) {
 		return err
 	}
 
-	err = it.deleteExecute(ctx, msgPack)
-	if err != nil {
-		log.Warn("Fail to deleteExecute", zap.Error(err))
-		return err
+	// need to do delete
+	if it.needDelete {
+		err = it.deleteExecute(ctx, msgPack)
+		if err != nil {
+			log.Warn("Fail to deleteExecute", zap.Error(err))
+			return err
+		}
 	}
 
 	tr.RecordSpan()
@@ -554,4 +602,80 @@ func (it *upsertTask) Execute(ctx context.Context) (err error) {
 
 func (it *upsertTask) PostExecute(ctx context.Context) error {
 	return nil
+}
+
+func (it *upsertTask) queryPK() (*milvuspb.QueryResults, error) {
+	log := log.Ctx(it.ctx)
+	log = log.With(
+		zap.Int64("collectionID", it.collectionID),
+		zap.String("collectionName", it.req.CollectionName),
+		zap.String("partitionName", it.req.PartitionName),
+	)
+	pkField, err := typeutil.GetPrimaryFieldSchema(it.schema)
+	if err != nil {
+		return nil, err
+	}
+	ids := it.result.IDs
+	expr := IDs2Expr(pkField.GetName(), ids)
+	partitionNames := make([]string, 0)
+	partitionNames = append(partitionNames, it.req.GetPartitionName())
+
+	// the GuaranteeTimestamp and TravelTimestamp can only set the channel have reached
+	// get the last timestamps of all pChannels
+	getAvalibleTickFunc := func(ticker channelsTimeTicker) (Timestamp, error) {
+		stats, ts, err := ticker.getMinTsStatistics()
+		if err != nil {
+			log.Warn("sendChannelsTimeTickLoop.getMinTsStatistics",
+				zap.Error(err))
+		}
+
+		if ts == 0 {
+			log.Warn("sendChannelsTimeTickLoop.getMinTsStatistics default timestamp equal 0")
+		}
+
+		maxTs := ts
+		for _, ts := range stats {
+			if ts > maxTs {
+				maxTs = ts
+			}
+		}
+		return maxTs, nil
+	}
+
+	avalibleTimestamp, err := getAvalibleTickFunc(it.chTicker)
+	if err != nil {
+		log.Info("fail to get avalible tick when query in upsert", zap.Error(err))
+		return nil, err
+	}
+
+	queryReq := &milvuspb.QueryRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_Retrieve,
+		},
+		CollectionName:     it.req.GetCollectionName(),
+		DbName:             it.req.GetDbName(),
+		Expr:               expr,
+		OutputFields:       []string{pkField.GetName()},
+		PartitionNames:     partitionNames,
+		GuaranteeTimestamp: avalibleTimestamp,
+		TravelTimestamp:    avalibleTimestamp,
+		ConsistencyLevel:   commonpb.ConsistencyLevel_Strong,
+	}
+	queryResult, err := it.node.Query(it.ctx, queryReq)
+	it.queryReceiveSize = proto.Size(queryResult)
+
+	if err != nil {
+		return nil, err
+	}
+	return queryResult, nil
+}
+
+func isNotFullLoad(err error) bool {
+	if err != nil {
+		return strings.Contains(err.Error(), merr.ErrCollectionNotLoaded.Error()) ||
+			strings.Contains(err.Error(), merr.ErrPartitionNotLoaded.Error()) ||
+			strings.Contains(err.Error(), merr.ErrCollectionNotFullyLoaded.Error()) ||
+			strings.Contains(err.Error(), merr.ErrPartitionNotFullyLoaded.Error())
+	}
+	return false
 }

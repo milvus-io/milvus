@@ -520,8 +520,9 @@ func TestProxy(t *testing.T) {
 	shardsNum := common.DefaultShardsNum
 	int64Field := "int64"
 	floatVecField := "fVec"
+	stringField := "string"
 	dim := 128
-	rowNum := 3000
+	rowNum := 100
 	indexName := "_default"
 	nlist := 10
 	// nprobe := 10
@@ -535,7 +536,7 @@ func TestProxy(t *testing.T) {
 	// an int64 field (pk) & a float vector field
 	constructCollectionSchema := func() *schemapb.CollectionSchema {
 		pk := &schemapb.FieldSchema{
-			FieldID:      0,
+			FieldID:      100,
 			Name:         int64Field,
 			IsPrimaryKey: true,
 			Description:  "",
@@ -545,7 +546,7 @@ func TestProxy(t *testing.T) {
 			AutoID:       true,
 		}
 		fVec := &schemapb.FieldSchema{
-			FieldID:      0,
+			FieldID:      101,
 			Name:         floatVecField,
 			IsPrimaryKey: false,
 			Description:  "",
@@ -3319,7 +3320,7 @@ func TestProxy(t *testing.T) {
 
 	constructCollectionSchema = func() *schemapb.CollectionSchema {
 		pk := &schemapb.FieldSchema{
-			FieldID:      0,
+			FieldID:      100,
 			Name:         int64Field,
 			IsPrimaryKey: true,
 			Description:  "",
@@ -3329,7 +3330,7 @@ func TestProxy(t *testing.T) {
 			AutoID:       false,
 		}
 		fVec := &schemapb.FieldSchema{
-			FieldID:      0,
+			FieldID:      101,
 			Name:         floatVecField,
 			IsPrimaryKey: false,
 			Description:  "",
@@ -3398,8 +3399,57 @@ func TestProxy(t *testing.T) {
 		}
 	}
 
-	constructCollectionUpsertRequestValid := func() *milvuspb.UpsertRequest {
-		pkFieldData := newScalarFieldData(schema.Fields[0], int64Field, rowNum)
+	generateUpsertInt64Array := func(numRows int, start int64) []int64 {
+		ret := make([]int64, 0, numRows)
+		for i := 0; i < numRows; i++ {
+			ret = append(ret, int64(i)+start)
+		}
+		return ret
+	}
+
+	constructCollectionUpsertRequestValidFirst := func() *milvuspb.UpsertRequest {
+		// pkFieldData := newScalarFieldData(schema.Fields[0], int64Field, rowNum)
+		pkFieldData := &schemapb.FieldData{
+			Type:      schema.Fields[0].DataType,
+			FieldName: int64Field,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: generateUpsertInt64Array(rowNum, 0),
+						},
+					},
+				},
+			},
+		}
+		fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
+		hashKeys := generateHashKeys(rowNum)
+		return &milvuspb.UpsertRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			PartitionName:  partitionName,
+			FieldsData:     []*schemapb.FieldData{pkFieldData, fVecColumn},
+			HashKeys:       hashKeys,
+			NumRows:        uint32(rowNum),
+		}
+	}
+
+	constructCollectionUpsertRequestValidSecond := func() *milvuspb.UpsertRequest {
+		// pkFieldData := newScalarFieldData(schema.Fields[0], int64Field, rowNum)
+		pkFieldData := &schemapb.FieldData{
+			Type:      schema.Fields[0].DataType,
+			FieldName: int64Field,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: generateUpsertInt64Array(rowNum, int64(rowNum)),
+						},
+					},
+				},
+			},
+		}
 		fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
 		hashKeys := generateHashKeys(rowNum)
 		return &milvuspb.UpsertRequest{
@@ -3488,8 +3538,272 @@ func TestProxy(t *testing.T) {
 	})
 
 	wg.Add(1)
-	t.Run("upsert when autoID == false", func(t *testing.T) {
+	t.Run("upsert when autoID == false when pk is int64", func(t *testing.T) {
 		defer wg.Done()
+		req := constructCollectionUpsertRequestValidFirst()
+
+		resp, err := proxy.Upsert(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, rowNum, len(resp.SuccIndex))
+		assert.Equal(t, 0, len(resp.ErrIndex))
+		assert.Equal(t, int64(rowNum), resp.UpsertCnt)
+		// collection not load, do delete operate
+		assert.Equal(t, int64(rowNum), resp.DeleteCnt)
+
+		flushed = true
+
+		flushResp, err := proxy.Flush(ctx, &milvuspb.FlushRequest{
+			Base:            nil,
+			DbName:          dbName,
+			CollectionNames: []string{collectionName},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, flushResp.Status.ErrorCode)
+		segmentIDs = flushResp.CollSegIDs[collectionName].Data
+		log.Info("flush collection", zap.Int64s("segments to be flushed", segmentIDs))
+
+		f := func() bool {
+			resp, err := proxy.GetFlushState(ctx, &milvuspb.GetFlushStateRequest{
+				SegmentIDs: segmentIDs,
+			})
+			if err != nil {
+				return false
+			}
+			return resp.GetFlushed()
+		}
+
+		// waiting for flush operation to be done
+		counter := 0
+		for !f() {
+			if counter > 100 {
+				flushed = false
+				break
+			}
+			// avoid too frequent rpc call
+			time.Sleep(100 * time.Millisecond)
+			counter++
+		}
+
+		if !flushed {
+			log.Warn("flush operation was not sure to be done")
+		}
+
+		indexReq := constructCreateIndexRequest()
+
+		indexResp, err := proxy.CreateIndex(ctx, indexReq)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, indexResp.ErrorCode)
+
+		loaded = true
+
+		{
+			stateResp, err := proxy.GetLoadState(ctx, &milvuspb.GetLoadStateRequest{
+				DbName:         dbName,
+				CollectionName: collectionName,
+			})
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, stateResp.Status.ErrorCode)
+			assert.Equal(t, commonpb.LoadState_LoadStateNotLoad, stateResp.State)
+		}
+
+		loadResp, err := proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, loadResp.ErrorCode)
+
+		f = func() bool {
+			resp, err := proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
+				Base:            nil,
+				DbName:          dbName,
+				TimeStamp:       0,
+				Type:            milvuspb.ShowType_InMemory,
+				CollectionNames: []string{collectionName},
+			})
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+			for idx, name := range resp.CollectionNames {
+				if name == collectionName && resp.InMemoryPercentages[idx] == 100 {
+					return true
+				}
+			}
+
+			return false
+		}
+
+		// waiting for collection to be loaded
+		counter = 0
+		for !f() {
+			if counter > 100 {
+				loaded = false
+				break
+			}
+			// avoid too frequent rpc call
+			time.Sleep(100 * time.Millisecond)
+			counter++
+		}
+		assert.True(t, loaded)
+
+		resp, err = proxy.Upsert(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, rowNum, len(resp.SuccIndex))
+		assert.Equal(t, 0, len(resp.ErrIndex))
+		assert.Equal(t, int64(rowNum), resp.UpsertCnt)
+		// has pk and loaded, do delete operate
+		assert.Equal(t, int64(rowNum), resp.DeleteCnt)
+
+		req = constructCollectionUpsertRequestValidSecond()
+
+		resp, err = proxy.Upsert(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, rowNum, len(resp.SuccIndex))
+		assert.Equal(t, 0, len(resp.ErrIndex))
+		assert.Equal(t, int64(rowNum), resp.UpsertCnt)
+		// has no pk and loaded, skip delete operate
+		assert.Equal(t, int64(0), resp.DeleteCnt)
+	})
+
+	wg.Add(1)
+	t.Run("drop collection", func(t *testing.T) {
+		defer wg.Done()
+		_, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		assert.NoError(t, err)
+
+		resp, err := proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		assert.Equal(t, "", resp.Reason)
+
+		// invalidate meta cache
+		resp, err = proxy.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		// release collection load cache
+		resp, err = proxy.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
+			Base:           nil,
+			CollectionName: collectionName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	constructCollectionSchema = func() *schemapb.CollectionSchema {
+		pk := &schemapb.FieldSchema{
+			FieldID:      100,
+			Name:         stringField,
+			IsPrimaryKey: true,
+			Description:  "",
+			DataType:     schemapb.DataType_VarChar,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.MaxLengthKey,
+					Value: "100",
+				},
+			},
+			IndexParams: nil,
+			AutoID:      false,
+		}
+		fVec := &schemapb.FieldSchema{
+			FieldID:      101,
+			Name:         floatVecField,
+			IsPrimaryKey: false,
+			Description:  "",
+			DataType:     schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.DimKey,
+					Value: strconv.Itoa(dim),
+				},
+			},
+			IndexParams: nil,
+			AutoID:      false,
+		}
+		return &schemapb.CollectionSchema{
+			Name:        collectionName,
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				pk,
+				fVec,
+			},
+		}
+	}
+	schema = constructCollectionSchema()
+
+	constructCreateCollectionRequest = func() *milvuspb.CreateCollectionRequest {
+		bs, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+		return &milvuspb.CreateCollectionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			Schema:         bs,
+			ShardsNum:      shardsNum,
+		}
+	}
+	createCollectionReq = constructCreateCollectionRequest()
+
+	constructCollectionUpsertRequestValid := func() *milvuspb.UpsertRequest {
+		data := make([]string, rowNum)
+		for i := 0; i < rowNum; i++ {
+			data[i] = fmt.Sprint(i)
+		}
+		pkFieldData := &schemapb.FieldData{
+			Type:      schemapb.DataType_VarChar,
+			FieldName: schema.Fields[0].Name,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: data,
+						},
+					},
+				},
+			},
+		}
+		fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
+		hashKeys := generateHashKeys(rowNum)
+		return &milvuspb.UpsertRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			PartitionName:  partitionName,
+			FieldsData:     []*schemapb.FieldData{pkFieldData, fVecColumn},
+			HashKeys:       hashKeys,
+			NumRows:        uint32(rowNum),
+		}
+	}
+
+	wg.Add(1)
+	t.Run("upsert when autoID == false when pk is varchar", func(t *testing.T) {
+		defer wg.Done()
+		createCollectionResp, err := proxy.CreateCollection(ctx, createCollectionReq)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, createCollectionResp.ErrorCode)
+
+		creatPartitionResp, err := proxy.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			PartitionName:  partitionName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, creatPartitionResp.ErrorCode)
+
 		req := constructCollectionUpsertRequestValid()
 
 		resp, err := proxy.Upsert(ctx, req)
@@ -3498,6 +3812,114 @@ func TestProxy(t *testing.T) {
 		assert.Equal(t, rowNum, len(resp.SuccIndex))
 		assert.Equal(t, 0, len(resp.ErrIndex))
 		assert.Equal(t, int64(rowNum), resp.UpsertCnt)
+		// collection not load, do delete operate
+		assert.Equal(t, int64(rowNum), resp.DeleteCnt)
+
+		flushed = true
+
+		flushResp, err := proxy.Flush(ctx, &milvuspb.FlushRequest{
+			Base:            nil,
+			DbName:          dbName,
+			CollectionNames: []string{collectionName},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, flushResp.Status.ErrorCode)
+		segmentIDs = flushResp.CollSegIDs[collectionName].Data
+		log.Info("flush collection", zap.Int64s("segments to be flushed", segmentIDs))
+
+		f := func() bool {
+			resp, err := proxy.GetFlushState(ctx, &milvuspb.GetFlushStateRequest{
+				SegmentIDs: segmentIDs,
+			})
+			if err != nil {
+				return false
+			}
+			return resp.GetFlushed()
+		}
+
+		// waiting for flush operation to be done
+		counter := 0
+		for !f() {
+			if counter > 100 {
+				flushed = false
+				break
+			}
+			// avoid too frequent rpc call
+			time.Sleep(100 * time.Millisecond)
+			counter++
+		}
+
+		if !flushed {
+			log.Warn("flush operation was not sure to be done")
+		}
+
+		indexReq := constructCreateIndexRequest()
+
+		indexResp, err := proxy.CreateIndex(ctx, indexReq)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, indexResp.ErrorCode)
+
+		loaded = true
+
+		{
+			stateResp, err := proxy.GetLoadState(ctx, &milvuspb.GetLoadStateRequest{
+				DbName:         dbName,
+				CollectionName: collectionName,
+			})
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, stateResp.Status.ErrorCode)
+			assert.Equal(t, commonpb.LoadState_LoadStateNotLoad, stateResp.State)
+		}
+
+		loadResp, err := proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, loadResp.ErrorCode)
+
+		f = func() bool {
+			resp, err := proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
+				Base:            nil,
+				DbName:          dbName,
+				TimeStamp:       0,
+				Type:            milvuspb.ShowType_InMemory,
+				CollectionNames: []string{collectionName},
+			})
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+			for idx, name := range resp.CollectionNames {
+				if name == collectionName && resp.InMemoryPercentages[idx] == 100 {
+					return true
+				}
+			}
+
+			return false
+		}
+
+		// waiting for collection to be loaded
+		counter = 0
+		for !f() {
+			if counter > 100 {
+				loaded = false
+				break
+			}
+			// avoid too frequent rpc call
+			time.Sleep(100 * time.Millisecond)
+			counter++
+		}
+		assert.True(t, loaded)
+
+		resp, err = proxy.Upsert(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, rowNum, len(resp.SuccIndex))
+		assert.Equal(t, 0, len(resp.ErrIndex))
+		assert.Equal(t, int64(rowNum), resp.UpsertCnt)
+		// has pk and loaded, do delete operate
+		assert.Equal(t, int64(rowNum), resp.DeleteCnt)
 	})
 
 	testServer.gracefulStop()

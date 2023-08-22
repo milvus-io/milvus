@@ -332,3 +332,39 @@ func TestUpsertTask(t *testing.T) {
 		assert.ElementsMatch(t, channels, resChannels)
 	})
 }
+
+func TestUpsertQueryPK(t *testing.T) {
+	t.Run("not get pkField", func(t *testing.T) {
+		int64Field := &schemapb.FieldSchema{
+			FieldID:  100,
+			Name:     "int64Field",
+			DataType: schemapb.DataType_Int64,
+		}
+
+		floatField := &schemapb.FieldSchema{
+			FieldID:  101,
+			Name:     "floatField",
+			DataType: schemapb.DataType_Float,
+		}
+
+		//  no primary field error
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{int64Field, floatField},
+		}
+
+		ut := upsertTask{
+			req: &milvuspb.UpsertRequest{
+				NumRows: 0,
+			},
+			upsertMsg: &msgstream.UpsertMsg{
+				InsertMsg: &msgstream.InsertMsg{
+					InsertRequest: msgpb.InsertRequest{},
+				},
+			},
+			schema: schema,
+		}
+
+		_, err := ut.queryPK()
+		assert.Error(t, err)
+	})
+}

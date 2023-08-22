@@ -1922,6 +1922,12 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 
 	t.Run("upsert", func(t *testing.T) {
 		hash := generateHashKeys(nb)
+		// collection not load, do delete operate
+		node := mocks.NewMockProxy(t)
+		node.EXPECT().Query(mock.Anything, mock.Anything).
+			Return(&milvuspb.QueryResults{
+				Status: merr.Status(merr.ErrCollectionNotLoaded),
+			}, nil)
 		task := &upsertTask{
 			upsertMsg: &msgstream.UpsertMsg{
 				InsertMsg: &BaseInsertTask{
@@ -1972,7 +1978,8 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 				HashKeys:       hash,
 				NumRows:        uint32(nb),
 			},
-			ctx: ctx,
+			ctx:  ctx,
+			node: node,
 			result: &milvuspb.MutationResult{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_Success,
@@ -3485,6 +3492,12 @@ func TestPartitionKey(t *testing.T) {
 
 	t.Run("Upsert", func(t *testing.T) {
 		hash := generateHashKeys(nb)
+		// collection not load, do delete operate
+		node := mocks.NewMockProxy(t)
+		node.EXPECT().Query(mock.Anything, mock.Anything).
+			Return(&milvuspb.QueryResults{
+				Status: merr.Status(merr.ErrCollectionNotLoaded),
+			}, nil)
 		ut := &upsertTask{
 			ctx:       ctx,
 			Condition: NewTaskCondition(ctx),
@@ -3500,7 +3513,7 @@ func TestPartitionKey(t *testing.T) {
 				FieldsData:     fieldDatas,
 				NumRows:        uint32(nb),
 			},
-
+			node: node,
 			result: &milvuspb.MutationResult{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_Success,
