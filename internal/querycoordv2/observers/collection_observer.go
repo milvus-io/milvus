@@ -101,47 +101,48 @@ func (ob *CollectionObserver) Observe() {
 }
 
 func (ob *CollectionObserver) observeTimeout() {
-	collections := ob.meta.CollectionManager.GetAllCollections()
-	for _, collection := range collections {
-		if collection.GetStatus() != querypb.LoadStatus_Loading ||
-			time.Now().Before(collection.UpdatedAt.Add(Params.QueryCoordCfg.LoadTimeoutSeconds.GetAsDuration(time.Second))) {
+	partitions := utils.GroupPartitionsByCollection(
+		ob.meta.CollectionManager.GetAllPartitions())
+	if len(partitions) == 0 {
+		return
+	}
+
+	log.Info("observes load timeout",
+		zap.Int("partitionNum", len(partitions)),
+	)
+	for collectionID, partitions := range partitions {
+		log := log.With(
+			zap.Int64("collectionID", collectionID),
+		)
+		collection := ob.meta.CollectionManager.GetCollection(collectionID)
+		if collection.GetStatus() == querypb.LoadStatus_Loading &&
+			time.Since(collection.UpdatedAt) > Params.QueryCoordCfg.LoadTimeoutSeconds.GetAsDuration(time.Second) {
+			log.Info("load collection timeout, cancel it",
+				zap.Duration("loadTime", time.Since(collection.CreatedAt)))
+			ob.meta.CollectionManager.RemoveCollection(collection.GetCollectionID())
+			ob.meta.ReplicaManager.RemoveCollection(collection.GetCollectionID())
+			ob.targetMgr.RemoveCollection(collection.GetCollectionID())
 			continue
 		}
 
-		log.Info("load collection timeout, cancel it",
-			zap.Int64("collectionID", collection.GetCollectionID()),
-			zap.Duration("loadTime", time.Since(collection.CreatedAt)))
-		ob.meta.CollectionManager.RemoveCollection(collection.GetCollectionID())
-		ob.meta.ReplicaManager.RemoveCollection(collection.GetCollectionID())
-		ob.targetMgr.RemoveCollection(collection.GetCollectionID())
-	}
-
-	partitions := utils.GroupPartitionsByCollection(
-		ob.meta.CollectionManager.GetAllPartitions())
-	if len(partitions) > 0 {
-		log.Info("observes partitions timeout", zap.Int("partitionNum", len(partitions)))
-	}
-	for collection, partitions := range partitions {
 		for _, partition := range partitions {
-			if partition.GetStatus() != querypb.LoadStatus_Loading ||
-				time.Now().Before(partition.UpdatedAt.Add(Params.QueryCoordCfg.LoadTimeoutSeconds.GetAsDuration(time.Second))) {
-				continue
+			if partition.GetStatus() == querypb.LoadStatus_Loading &&
+				time.Since(partition.UpdatedAt) > Params.QueryCoordCfg.LoadTimeoutSeconds.GetAsDuration(time.Second) {
+				log.Info("load partition timeout, cancel it",
+					zap.Int64("partitionID", partition.GetPartitionID()),
+					zap.Duration("loadTime", time.Since(partition.CreatedAt)))
+				ob.meta.CollectionManager.RemovePartition(partition.GetPartitionID())
+				ob.targetMgr.RemovePartition(partition.GetCollectionID(), partition.GetPartitionID())
+
+				// all partition timeout, remove collection
+				if len(ob.meta.CollectionManager.GetPartitionsByCollection(collectionID)) == 0 {
+					log.Info("collection timeout due to all partition removed")
+
+					ob.meta.CollectionManager.RemoveCollection(collectionID)
+					ob.meta.ReplicaManager.RemoveCollection(collectionID)
+					ob.targetMgr.RemoveCollection(collectionID)
+				}
 			}
-
-			log.Info("load partition timeout, cancel it",
-				zap.Int64("collectionID", collection),
-				zap.Int64("partitionID", partition.GetPartitionID()),
-				zap.Duration("loadTime", time.Since(partition.CreatedAt)))
-			ob.meta.CollectionManager.RemovePartition(collection, partition.GetPartitionID())
-			ob.targetMgr.RemovePartition(partition.GetCollectionID(), partition.GetPartitionID())
-		}
-		// all partition timeout, remove collection
-		if len(ob.meta.CollectionManager.GetPartitionsByCollection(collection)) == 0 {
-			log.Info("collection timeout due to all partition removed", zap.Int64("collection", collection))
-
-			ob.meta.CollectionManager.RemoveCollection(collection)
-			ob.meta.ReplicaManager.RemoveCollection(collection)
-			ob.targetMgr.RemoveCollection(collection)
 		}
 	}
 }
@@ -155,27 +156,71 @@ func (ob *CollectionObserver) readyToObserve(collectionID int64) bool {
 
 func (ob *CollectionObserver) observeLoadStatus() {
 	partitions := ob.meta.CollectionManager.GetAllPartitions()
-	if len(partitions) > 0 {
-		log.Info("observe partitions status", zap.Int("partitionNum", len(partitions)))
+	if len(partitions) == 0 {
+		return
 	}
-	loading := false
+
+	log.Info("observe load status",
+		zap.Int("partitionNum", len(partitions)),
+	)
+
+	loadedPartitions := make([]*meta.Partition, 0)
 	for _, partition := range partitions {
-		if partition.LoadPercentage == 100 {
+		if !ob.readyToObserve(partition.GetCollectionID()) ||
+			partition.LoadPercentage == 100 && ob.targetMgr.IsCurrentTargetExist(partition.GetCollectionID()) {
 			continue
 		}
-		if ob.readyToObserve(partition.CollectionID) {
-			replicaNum := ob.meta.GetReplicaNumber(partition.GetCollectionID())
-			ob.observePartitionLoadStatus(partition, replicaNum)
-			loading = true
+
+		replicaNum := ob.meta.GetReplicaNumber(partition.GetCollectionID())
+		percentage, isAdvanced := ob.observePartitionLoadStatus(partition, replicaNum)
+		if percentage == 100 {
+			loadedPartitions = append(loadedPartitions, partition)
+			delete(ob.partitionLoadedCount, partition.GetPartitionID())
+		} else if isAdvanced {
+			ob.meta.CollectionManager.UpdateLoadPercent(partition.GetPartitionID(), percentage)
 		}
 	}
-	// trigger check logic when loading collections/partitions
-	if loading {
-		ob.checkerController.Check()
+
+	// group partitions by collection,
+	// then we can check the target and version only once for each collection,
+	// this will be much faster if many partitions exist.
+	toUpdate := utils.GroupPartitionsByCollection(loadedPartitions)
+	for collectionID, partitions := range toUpdate {
+		log := log.With(
+			zap.Int64("collectionID", collectionID),
+		)
+		var (
+			percentage int32
+			err        error
+		)
+		for _, partition := range partitions {
+			percentage, err = ob.meta.CollectionManager.UpdateLoadPercent(partition.GetPartitionID(), 100)
+			if err != nil {
+				log.Warn("failed to update load percentage",
+					zap.Int64("partitionID", partition.GetPartitionID()),
+					zap.Error(err),
+				)
+				break
+			}
+		}
+
+		if percentage == 100 &&
+			ob.targetObserver.Check(collectionID) &&
+			ob.leaderObserver.CheckTargetVersion(collectionID) {
+			log.Info("collection load done")
+		}
+
+		log.Info("load status updated",
+			zap.Int32("collectionLoadPercentage", percentage),
+		)
+		eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("collection %d load percentage update: %d", collectionID, percentage)))
 	}
 }
 
-func (ob *CollectionObserver) observePartitionLoadStatus(partition *meta.Partition, replicaNum int32) {
+// observePartitionLoadStatus checks whether the given partition is loaded,
+// returns the load percentage and whether the progress advanced,
+// this doesn't update the metadata, as after loaded we need to update target and leader view.
+func (ob *CollectionObserver) observePartitionLoadStatus(partition *meta.Partition, replicaNum int32) (int32, bool) {
 	log := log.With(
 		zap.Int64("collectionID", partition.GetCollectionID()),
 		zap.Int64("partitionID", partition.GetPartitionID()),
@@ -187,7 +232,7 @@ func (ob *CollectionObserver) observePartitionLoadStatus(partition *meta.Partiti
 	targetNum := len(segmentTargets) + len(channelTargets)
 	if targetNum == 0 {
 		log.Info("segments and channels in target are both empty, waiting for new target content")
-		return
+		return 0, false
 	}
 
 	log.Info("partition targets",
@@ -221,20 +266,9 @@ func (ob *CollectionObserver) observePartitionLoadStatus(partition *meta.Partiti
 
 	if loadedCount <= ob.partitionLoadedCount[partition.GetPartitionID()] && loadPercentage != 100 {
 		ob.partitionLoadedCount[partition.GetPartitionID()] = loadedCount
-		return
+		return loadPercentage, false
 	}
 
 	ob.partitionLoadedCount[partition.GetPartitionID()] = loadedCount
-	if loadPercentage == 100 && ob.targetObserver.Check(partition.GetCollectionID()) && ob.leaderObserver.CheckTargetVersion(partition.GetCollectionID()) {
-		delete(ob.partitionLoadedCount, partition.GetPartitionID())
-	}
-	collectionPercentage, err := ob.meta.CollectionManager.UpdateLoadPercent(partition.PartitionID, loadPercentage)
-	if err != nil {
-		log.Warn("failed to update load percentage")
-	}
-	log.Info("load status updated",
-		zap.Int32("partitionLoadPercentage", loadPercentage),
-		zap.Int32("collectionLoadPercentage", collectionPercentage),
-	)
-	eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("collection %d load percentage update: %d", partition.CollectionID, loadPercentage)))
+	return loadPercentage, true
 }

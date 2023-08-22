@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -58,7 +59,7 @@ func waitCollectionReleased(dist *meta.DistributionManager, checkerController *c
 
 		// trigger check more frequently
 		checkerController.Check()
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(paramtable.Get().QueryCoordCfg.SegmentCheckInterval.GetAsDuration(time.Millisecond) / 2)
 	}
 }
 

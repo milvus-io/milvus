@@ -49,6 +49,16 @@ type Collection struct {
 	refreshNotifier chan struct{}
 }
 
+func NewCollection(info *querypb.CollectionLoadInfo) *Collection {
+	now := time.Now()
+	return &Collection{
+		CollectionLoadInfo: info,
+
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+}
+
 func (collection *Collection) SetRefreshNotifier(notifier chan struct{}) {
 	collection.mut.Lock()
 	defer collection.mut.Unlock()
@@ -89,6 +99,16 @@ type Partition struct {
 	LoadPercentage int32
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+}
+
+func NewPartition(info *querypb.PartitionLoadInfo) *Partition {
+	now := time.Now()
+	return &Partition{
+		PartitionLoadInfo: info,
+
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
 }
 
 func (partition *Partition) Clone() *Partition {
@@ -164,9 +184,7 @@ func (m *CollectionManager) Recover(broker Broker) error {
 			continue
 		}
 
-		m.collections[collection.CollectionID] = &Collection{
-			CollectionLoadInfo: collection,
-		}
+		m.collections[collection.CollectionID] = NewCollection(collection)
 	}
 
 	for collection, partitions := range partitions {
@@ -211,9 +229,7 @@ func (m *CollectionManager) Recover(broker Broker) error {
 				continue
 			}
 
-			m.partitions[partition.PartitionID] = &Partition{
-				PartitionLoadInfo: partition,
-			}
+			m.partitions[partition.PartitionID] = NewPartition(partition)
 		}
 	}
 
@@ -236,16 +252,17 @@ func (m *CollectionManager) upgradeRecover(broker Broker) error {
 				return err
 			}
 			partitions := lo.Map(partitionIDs, func(partitionID int64, _ int) *Partition {
-				return &Partition{
-					PartitionLoadInfo: &querypb.PartitionLoadInfo{
-						CollectionID:  collection.GetCollectionID(),
-						PartitionID:   partitionID,
-						ReplicaNumber: collection.GetReplicaNumber(),
-						Status:        querypb.LoadStatus_Loaded,
-						FieldIndexID:  collection.GetFieldIndexID(),
-					},
-					LoadPercentage: 100,
+				info := &querypb.PartitionLoadInfo{
+					CollectionID:  collection.GetCollectionID(),
+					PartitionID:   partitionID,
+					ReplicaNumber: collection.GetReplicaNumber(),
+					Status:        querypb.LoadStatus_Loaded,
+					FieldIndexID:  collection.GetFieldIndexID(),
 				}
+
+				partition := NewPartition(info)
+				partition.LoadPercentage = 100
+				return partition
 			})
 			err = m.putPartition(partitions, true)
 			if err != nil {
@@ -256,17 +273,17 @@ func (m *CollectionManager) upgradeRecover(broker Broker) error {
 	for _, partition := range m.GetAllPartitions() {
 		// In old version, collection would NOT be stored if the partition existed.
 		if _, ok := m.collections[partition.GetCollectionID()]; !ok {
-			col := &Collection{
-				CollectionLoadInfo: &querypb.CollectionLoadInfo{
-					CollectionID:  partition.GetCollectionID(),
-					ReplicaNumber: partition.GetReplicaNumber(),
-					Status:        partition.GetStatus(),
-					FieldIndexID:  partition.GetFieldIndexID(),
-					LoadType:      querypb.LoadType_LoadPartition,
-				},
-				LoadPercentage: 100,
+			info := &querypb.CollectionLoadInfo{
+				CollectionID:  partition.GetCollectionID(),
+				ReplicaNumber: partition.GetReplicaNumber(),
+				Status:        partition.GetStatus(),
+				FieldIndexID:  partition.GetFieldIndexID(),
+				LoadType:      querypb.LoadType_LoadPartition,
 			}
-			err := m.PutCollection(col)
+
+			collection := NewCollection(info)
+			collection.LoadPercentage = 100
+			err := m.PutCollection(collection)
 			if err != nil {
 				return err
 			}
@@ -493,6 +510,8 @@ func (m *CollectionManager) putPartition(partitions []*Partition, withSave bool)
 	return nil
 }
 
+// update partition load percentage,
+// return the collection load percentage if no error.
 func (m *CollectionManager) UpdateLoadPercent(partitionID int64, loadPercent int32) (int32, error) {
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()

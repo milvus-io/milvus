@@ -19,7 +19,6 @@ package job
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -168,28 +167,21 @@ func (job *LoadCollectionJob) Execute() error {
 
 	// 4. put collection/partitions meta
 	partitions := lo.Map(lackPartitionIDs, func(partID int64, _ int) *meta.Partition {
-		return &meta.Partition{
-			PartitionLoadInfo: &querypb.PartitionLoadInfo{
-				CollectionID:  req.GetCollectionID(),
-				PartitionID:   partID,
-				ReplicaNumber: req.GetReplicaNumber(),
-				Status:        querypb.LoadStatus_Loading,
-				FieldIndexID:  req.GetFieldIndexID(),
-			},
-			CreatedAt: time.Now(),
-		}
-	})
-	collection := &meta.Collection{
-		CollectionLoadInfo: &querypb.CollectionLoadInfo{
+		return meta.NewPartition(&querypb.PartitionLoadInfo{
 			CollectionID:  req.GetCollectionID(),
+			PartitionID:   partID,
 			ReplicaNumber: req.GetReplicaNumber(),
 			Status:        querypb.LoadStatus_Loading,
 			FieldIndexID:  req.GetFieldIndexID(),
-			LoadType:      querypb.LoadType_LoadCollection,
-		},
-		CreatedAt: time.Now(),
-	}
-	job.undo.IsNewCollection = true
+		})
+	})
+	collection := meta.NewCollection(&querypb.CollectionLoadInfo{
+		CollectionID:  req.GetCollectionID(),
+		ReplicaNumber: req.GetReplicaNumber(),
+		Status:        querypb.LoadStatus_Loading,
+		FieldIndexID:  req.GetFieldIndexID(),
+		LoadType:      querypb.LoadType_LoadCollection,
+	})
 	err = job.meta.CollectionManager.PutCollection(collection, partitions...)
 	if err != nil {
 		msg := "failed to store collection and partitions"
@@ -342,29 +334,22 @@ func (job *LoadPartitionJob) Execute() error {
 
 	// 4. put collection/partitions meta
 	partitions := lo.Map(lackPartitionIDs, func(partID int64, _ int) *meta.Partition {
-		return &meta.Partition{
-			PartitionLoadInfo: &querypb.PartitionLoadInfo{
-				CollectionID:  req.GetCollectionID(),
-				PartitionID:   partID,
-				ReplicaNumber: req.GetReplicaNumber(),
-				Status:        querypb.LoadStatus_Loading,
-				FieldIndexID:  req.GetFieldIndexID(),
-			},
-			CreatedAt: time.Now(),
-		}
+		return meta.NewPartition(&querypb.PartitionLoadInfo{
+			CollectionID:  req.GetCollectionID(),
+			PartitionID:   partID,
+			ReplicaNumber: req.GetReplicaNumber(),
+			Status:        querypb.LoadStatus_Loading,
+			FieldIndexID:  req.GetFieldIndexID(),
+		})
 	})
 	if !job.meta.CollectionManager.Exist(req.GetCollectionID()) {
-		job.undo.IsNewCollection = true
-		collection := &meta.Collection{
-			CollectionLoadInfo: &querypb.CollectionLoadInfo{
-				CollectionID:  req.GetCollectionID(),
-				ReplicaNumber: req.GetReplicaNumber(),
-				Status:        querypb.LoadStatus_Loading,
-				FieldIndexID:  req.GetFieldIndexID(),
-				LoadType:      querypb.LoadType_LoadPartition,
-			},
-			CreatedAt: time.Now(),
-		}
+		collection := meta.NewCollection(&querypb.CollectionLoadInfo{
+			CollectionID:  req.GetCollectionID(),
+			ReplicaNumber: req.GetReplicaNumber(),
+			Status:        querypb.LoadStatus_Loading,
+			FieldIndexID:  req.GetFieldIndexID(),
+			LoadType:      querypb.LoadType_LoadPartition,
+		})
 		err = job.meta.CollectionManager.PutCollection(collection, partitions...)
 		if err != nil {
 			msg := "failed to store collection and partitions"
