@@ -71,14 +71,14 @@ type searchTask struct {
 	node types.ProxyComponent
 }
 
-func getPartitionIDs(ctx context.Context, collectionName string, partitionNames []string) (partitionIDs []UniqueID, err error) {
+func getPartitionIDs(ctx context.Context, dbName string, collectionName string, partitionNames []string) (partitionIDs []UniqueID, err error) {
 	for _, tag := range partitionNames {
 		if err := validatePartitionTag(tag, false); err != nil {
 			return nil, err
 		}
 	}
 
-	partitionsMap, err := globalMetaCache.GetPartitions(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
+	partitionsMap, err := globalMetaCache.GetPartitions(ctx, dbName, collectionName)
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +250,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	}
 
 	// check if collection/partitions are loaded into query node
-	loaded, err := checkIfLoaded(ctx, t.qc, collectionName, t.SearchRequest.GetPartitionIDs())
+	loaded, err := checkIfLoaded(ctx, t.qc, t.request.GetDbName(), collectionName, t.SearchRequest.GetPartitionIDs())
 	if err != nil {
 		return fmt.Errorf("checkIfLoaded failed when search, collection:%v, partitions:%v, err = %s", collectionName, t.request.GetPartitionNames(), err)
 	}
@@ -372,7 +372,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	}
 
 	// translate partition name to partition ids. Use regex-pattern to match partition name.
-	t.SearchRequest.PartitionIDs, err = getPartitionIDs(ctx, collectionName, partitionNames)
+	t.SearchRequest.PartitionIDs, err = getPartitionIDs(ctx, t.request.GetDbName(), collectionName, partitionNames)
 	if err != nil {
 		return err
 	}
@@ -623,6 +623,7 @@ func (t *searchTask) Requery() error {
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_Retrieve,
 		},
+		DbName:             t.request.GetDbName(),
 		CollectionName:     t.request.GetCollectionName(),
 		Expr:               expr,
 		OutputFields:       t.request.GetOutputFields(),
@@ -728,10 +729,10 @@ func (t *searchTask) collectSearchResults(ctx context.Context) error {
 }
 
 // checkIfLoaded check if collection was loaded into QueryNode
-func checkIfLoaded(ctx context.Context, qc types.QueryCoord, collectionName string, searchPartitionIDs []UniqueID) (bool, error) {
-	info, err := globalMetaCache.GetCollectionInfo(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
+func checkIfLoaded(ctx context.Context, qc types.QueryCoord, dbName string, collectionName string, searchPartitionIDs []UniqueID) (bool, error) {
+	info, err := globalMetaCache.GetCollectionInfo(ctx, dbName, collectionName)
 	if err != nil {
-		return false, fmt.Errorf("GetCollectionInfo failed, collection = %s, err = %s", collectionName, err)
+		return false, fmt.Errorf("GetCollectionInfo failed, dbName = %s, collection = %s, err = %s", dbName, collectionName, err)
 	}
 	if info.isLoaded {
 		return true, nil
@@ -750,10 +751,10 @@ func checkIfLoaded(ctx context.Context, qc types.QueryCoord, collectionName stri
 		PartitionIDs: searchPartitionIDs,
 	})
 	if err != nil {
-		return false, fmt.Errorf("showPartitions failed, collection = %s, partitionIDs = %v, err = %s", collectionName, searchPartitionIDs, err)
+		return false, fmt.Errorf("showPartitions failed, dbName = %s, collection = %s, partitionIDs = %v, err = %s", dbName, collectionName, searchPartitionIDs, err)
 	}
 	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return false, fmt.Errorf("showPartitions failed, collection = %s, partitionIDs = %v, reason = %s", collectionName, searchPartitionIDs, resp.GetStatus().GetReason())
+		return false, fmt.Errorf("showPartitions failed, dbName = %s, collection = %s, partitionIDs = %v, reason = %s", dbName, collectionName, searchPartitionIDs, resp.GetStatus().GetReason())
 	}
 
 	for _, persent := range resp.InMemoryPercentages {

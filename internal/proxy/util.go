@@ -1072,13 +1072,18 @@ func getCollectionProgress(ctx context.Context, queryCoord types.QueryCoord,
 	return resp.InMemoryPercentages[0], nil
 }
 
-func getPartitionProgress(ctx context.Context, queryCoord types.QueryCoord,
-	msgBase *commonpb.MsgBase, partitionNames []string, collectionName string, collectionID int64,
+func getPartitionProgress(ctx context.Context,
+	queryCoord types.QueryCoord,
+	msgBase *commonpb.MsgBase,
+	partitionNames []string,
+	collectionName string,
+	collectionID int64,
+	dbname string,
 ) (int64, error) {
 	IDs2Names := make(map[int64]string)
 	partitionIDs := make([]int64, 0)
 	for _, partitionName := range partitionNames {
-		partitionID, err := globalMetaCache.GetPartitionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName, partitionName)
+		partitionID, err := globalMetaCache.GetPartitionID(ctx, dbname, collectionName, partitionName)
 		if err != nil {
 			return 0, err
 		}

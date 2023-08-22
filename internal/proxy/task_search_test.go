@@ -1616,7 +1616,7 @@ func Test_checkIfLoaded(t *testing.T) {
 		).Return(nil, errors.New("error mock GetCollectionInfo"))
 		globalMetaCache = cache
 		var qc types.QueryCoord
-		_, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{})
+		_, err := checkIfLoaded(context.Background(), qc, "", "test", []UniqueID{})
 		assert.Error(t, err)
 	})
 
@@ -1629,7 +1629,7 @@ func Test_checkIfLoaded(t *testing.T) {
 		).Return(&collectionInfo{isLoaded: true}, nil)
 		globalMetaCache = cache
 		var qc types.QueryCoord
-		loaded, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{})
+		loaded, err := checkIfLoaded(context.Background(), qc, "", "test", []UniqueID{})
 		assert.NoError(t, err)
 		assert.True(t, loaded)
 	})
@@ -1646,7 +1646,7 @@ func Test_checkIfLoaded(t *testing.T) {
 		qc.SetShowPartitionsFunc(func(ctx context.Context, request *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
 			return nil, errors.New("mock")
 		})
-		_, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{1, 2})
+		_, err := checkIfLoaded(context.Background(), qc, "", "test", []UniqueID{1, 2})
 		assert.Error(t, err)
 	})
 
@@ -1662,7 +1662,7 @@ func Test_checkIfLoaded(t *testing.T) {
 		qc.SetShowPartitionsFunc(func(ctx context.Context, request *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
 			return &querypb.ShowPartitionsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_CollectionNotExists}}, nil
 		})
-		_, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{1, 2})
+		_, err := checkIfLoaded(context.Background(), qc, "", "test", []UniqueID{1, 2})
 		assert.Error(t, err)
 	})
 
@@ -1678,7 +1678,7 @@ func Test_checkIfLoaded(t *testing.T) {
 		qc.SetShowPartitionsFunc(func(ctx context.Context, request *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
 			return &querypb.ShowPartitionsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, InMemoryPercentages: []int64{100, 100}}, nil
 		})
-		loaded, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{1, 2})
+		loaded, err := checkIfLoaded(context.Background(), qc, "", "test", []UniqueID{1, 2})
 		assert.NoError(t, err)
 		assert.True(t, loaded)
 	})
@@ -1695,7 +1695,7 @@ func Test_checkIfLoaded(t *testing.T) {
 		qc.SetShowPartitionsFunc(func(ctx context.Context, request *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
 			return &querypb.ShowPartitionsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, InMemoryPercentages: []int64{100, 50}}, nil
 		})
-		loaded, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{1, 2})
+		loaded, err := checkIfLoaded(context.Background(), qc, "", "test", []UniqueID{1, 2})
 		assert.NoError(t, err)
 		assert.False(t, loaded)
 	})
@@ -1712,7 +1712,7 @@ func Test_checkIfLoaded(t *testing.T) {
 		qc.SetShowPartitionsFunc(func(ctx context.Context, request *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
 			return nil, errors.New("mock")
 		})
-		_, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{1, 2})
+		_, err := checkIfLoaded(context.Background(), qc, "", "test", []UniqueID{1, 2})
 		assert.Error(t, err)
 	})
 
@@ -1728,7 +1728,7 @@ func Test_checkIfLoaded(t *testing.T) {
 		qc.SetShowPartitionsFunc(func(ctx context.Context, request *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
 			return &querypb.ShowPartitionsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_CollectionNotExists}}, nil
 		})
-		_, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{1, 2})
+		_, err := checkIfLoaded(context.Background(), qc, "", "test", []UniqueID{1, 2})
 		assert.Error(t, err)
 	})
 
@@ -1744,7 +1744,7 @@ func Test_checkIfLoaded(t *testing.T) {
 		qc.SetShowPartitionsFunc(func(ctx context.Context, request *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
 			return &querypb.ShowPartitionsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, PartitionIDs: []UniqueID{1, 2}}, nil
 		})
-		loaded, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{})
+		loaded, err := checkIfLoaded(context.Background(), qc, "", "test", []UniqueID{})
 		assert.NoError(t, err)
 		assert.False(t, loaded)
 	})
@@ -1761,7 +1761,7 @@ func Test_checkIfLoaded(t *testing.T) {
 		qc.SetShowPartitionsFunc(func(ctx context.Context, request *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
 			return &querypb.ShowPartitionsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, PartitionIDs: []UniqueID{}}, nil
 		})
-		loaded, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{})
+		loaded, err := checkIfLoaded(context.Background(), qc, "", "test", []UniqueID{})
 		assert.NoError(t, err)
 		assert.False(t, loaded)
 	})
