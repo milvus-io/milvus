@@ -1219,12 +1219,13 @@ func getPartitionProgress(
 	partitionNames []string,
 	collectionName string,
 	collectionID int64,
+	dbName string,
 ) (loadProgress int64, refreshProgress int64, err error) {
 	IDs2Names := make(map[int64]string)
 	partitionIDs := make([]int64, 0)
 	for _, partitionName := range partitionNames {
 		var partitionID int64
-		partitionID, err = globalMetaCache.GetPartitionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName, partitionName)
+		partitionID, err = globalMetaCache.GetPartitionID(ctx, dbName, collectionName, partitionName)
 		if err != nil {
 			return
 		}
