@@ -4180,16 +4180,6 @@ func Test_newChunkManagerFactory(t *testing.T) {
 	paramtable.Get().Save(Params.DataCoordCfg.EnableGarbageCollection.Key, "true")
 	defer closeTestServer(t, server)
 
-	t.Run("err_minio_bad_address", func(t *testing.T) {
-		paramtable.Get().Save(Params.CommonCfg.StorageType.Key, "minio")
-		paramtable.Get().Save(Params.MinioCfg.Address.Key, "host:9000:bad")
-		defer paramtable.Get().Reset(Params.MinioCfg.Address.Key)
-		storageCli, err := server.newChunkManagerFactory()
-		assert.Nil(t, storageCli)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "invalid port")
-	})
-
 	t.Run("local storage init", func(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.StorageType.Key, "local")
 		defer paramtable.Get().Reset(Params.CommonCfg.StorageType.Key)
@@ -4203,30 +4193,25 @@ func Test_initGarbageCollection(t *testing.T) {
 	paramtable.Get().Save(Params.DataCoordCfg.EnableGarbageCollection.Key, "true")
 	defer paramtable.Get().Reset(Params.DataCoordCfg.EnableGarbageCollection.Key)
 
-	server := newTestServer2(t, nil)
-	defer closeTestServer(t, server)
+	factory := dependency.NewDefaultFactory(true)
+	server := CreateServer(context.TODO(), factory)
 
 	t.Run("ok", func(t *testing.T) {
-		storageCli, err := server.newChunkManagerFactory()
-		assert.NotNil(t, storageCli)
-		assert.NoError(t, err)
-		server.initGarbageCollection(storageCli)
-	})
-	t.Run("err_minio_bad_address", func(t *testing.T) {
-		paramtable.Get().Save(Params.CommonCfg.StorageType.Key, "minio")
-		paramtable.Get().Save(Params.MinioCfg.Address.Key, "host:9000:bad")
-		defer paramtable.Get().Reset(Params.MinioCfg.Address.Key)
-		storageCli, err := server.newChunkManagerFactory()
-		assert.Nil(t, storageCli)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "invalid port")
+		cli := mocks.NewChunkManager(t)
+		assert.NotPanics(t, func() {
+			server.initGarbageCollection(cli)
+		})
 	})
 }
 
 func testDataCoordBase(t *testing.T, opts ...Option) *Server {
 	var err error
 	paramtable.Get().Save(Params.CommonCfg.DataCoordTimeTick.Key, Params.CommonCfg.DataCoordTimeTick.GetValue()+strconv.Itoa(rand.Int()))
-	factory := dependency.NewDefaultFactory(true)
+	cm := mocks.NewChunkManager(t)
+	cm.EXPECT().RootPath().Return("datcoord_ut_base").Maybe()
+	factory := dependency.NewMockFactory(t)
+	factory.EXPECT().Init(mock.Anything).Return().Maybe()
+	factory.EXPECT().NewPersistentStorageChunkManager(mock.Anything).Return(cm, nil).Maybe()
 
 	ctx := context.Background()
 	etcdCli, err := etcd.GetEtcdClient(

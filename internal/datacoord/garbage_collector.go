@@ -136,16 +136,17 @@ func (gc *garbageCollector) scan() {
 	segments := gc.meta.GetAllSegmentsUnsafe()
 	for _, segment := range segments {
 		segmentMap.Insert(segment.GetID())
-		for _, log := range getLogs(segment) {
-			filesMap.Insert(log.GetLogPath())
+		for _, l := range getLogs(segment) {
+			filesMap.Insert(l.GetLogPath())
 		}
 	}
 
 	// walk only data cluster related prefixes
 	prefixes := make([]string, 0, 3)
-	prefixes = append(prefixes, path.Join(gc.option.cli.RootPath(), insertLogPrefix))
-	prefixes = append(prefixes, path.Join(gc.option.cli.RootPath(), statsLogPrefix))
-	prefixes = append(prefixes, path.Join(gc.option.cli.RootPath(), deltaLogPrefix))
+	rootPath := gc.option.cli.RootPath()
+	prefixes = append(prefixes, path.Join(rootPath, insertLogPrefix))
+	prefixes = append(prefixes, path.Join(rootPath, statsLogPrefix))
+	prefixes = append(prefixes, path.Join(rootPath, deltaLogPrefix))
 	var removedKeys []string
 
 	for _, prefix := range prefixes {
@@ -154,14 +155,14 @@ func (gc *garbageCollector) scan() {
 		if err != nil {
 			log.Error("failed to list files with prefix",
 				zap.String("prefix", prefix),
-				zap.String("error", err.Error()),
+				zap.Error(err),
 			)
+			continue
 		}
 		log.Info("gc scan finish list object", zap.String("prefix", prefix), zap.Duration("time spent", time.Since(startTs)), zap.Int("keys", len(infoKeys)))
 		for i, infoKey := range infoKeys {
 			total++
-			_, has := filesMap[infoKey]
-			if has {
+			if filesMap.Contain(infoKey) {
 				valid++
 				continue
 			}
@@ -187,7 +188,6 @@ func (gc *garbageCollector) scan() {
 				removedKeys = append(removedKeys, infoKey)
 				err = gc.option.cli.Remove(ctx, infoKey)
 				if err != nil {
-					missing++
 					log.Error("failed to remove object",
 						zap.String("infoKey", infoKey),
 						zap.Error(err))

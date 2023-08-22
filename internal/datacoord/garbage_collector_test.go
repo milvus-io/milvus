@@ -17,21 +17,18 @@
 package datacoord
 
 import (
-	"bytes"
 	"context"
+	"fmt"
 	"path"
-	"strconv"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
-	minio "github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -44,288 +41,8 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 )
-
-func Test_garbageCollector_basic(t *testing.T) {
-	bucketName := `datacoord-ut` + strings.ToLower(funcutil.RandomString(8))
-	rootPath := `gc` + funcutil.RandomString(8)
-	//TODO change to Params
-	cli, _, _, _, _, err := initUtOSSEnv(bucketName, rootPath, 0)
-	require.NoError(t, err)
-
-	meta, err := newMemoryMeta()
-	assert.NoError(t, err)
-
-	t.Run("normal gc", func(t *testing.T) {
-		gc := newGarbageCollector(meta, newMockHandler(), GcOption{
-			cli:              cli,
-			enabled:          true,
-			checkInterval:    time.Millisecond * 10,
-			missingTolerance: time.Hour * 24,
-			dropTolerance:    time.Hour * 24,
-		})
-		gc.start()
-
-		time.Sleep(time.Millisecond * 20)
-		assert.NotPanics(t, func() {
-			gc.close()
-		})
-	})
-
-	t.Run("with nil cli", func(t *testing.T) {
-		gc := newGarbageCollector(meta, newMockHandler(), GcOption{
-			cli:              nil,
-			enabled:          true,
-			checkInterval:    time.Millisecond * 10,
-			missingTolerance: time.Hour * 24,
-			dropTolerance:    time.Hour * 24,
-		})
-		assert.NotPanics(t, func() {
-			gc.start()
-		})
-
-		assert.NotPanics(t, func() {
-			gc.close()
-		})
-	})
-
-}
-
-func validateMinioPrefixElements(t *testing.T, cli *minio.Client, bucketName string, prefix string, elements []string) {
-	var current []string
-	for info := range cli.ListObjects(context.TODO(), bucketName, minio.ListObjectsOptions{Prefix: prefix, Recursive: true}) {
-		current = append(current, info.Key)
-	}
-	assert.ElementsMatch(t, elements, current)
-}
-
-func Test_garbageCollector_scan(t *testing.T) {
-	bucketName := `datacoord-ut` + strings.ToLower(funcutil.RandomString(8))
-	rootPath := `gc` + funcutil.RandomString(8)
-	//TODO change to Params
-	cli, inserts, stats, delta, others, err := initUtOSSEnv(bucketName, rootPath, 4)
-	require.NoError(t, err)
-
-	meta, err := newMemoryMeta()
-	assert.NoError(t, err)
-
-	t.Run("key is reference", func(t *testing.T) {
-		gc := newGarbageCollector(meta, newMockHandler(), GcOption{
-			cli:              cli,
-			enabled:          true,
-			checkInterval:    time.Minute * 30,
-			missingTolerance: time.Hour * 24,
-			dropTolerance:    time.Hour * 24,
-		})
-		gc.scan()
-
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, insertLogPrefix), inserts)
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, statsLogPrefix), stats)
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, deltaLogPrefix), delta)
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, `indexes`), others)
-		gc.close()
-	})
-
-	t.Run("missing all but save tolerance", func(t *testing.T) {
-		gc := newGarbageCollector(meta, newMockHandler(), GcOption{
-			cli:              cli,
-			enabled:          true,
-			checkInterval:    time.Minute * 30,
-			missingTolerance: time.Hour * 24,
-			dropTolerance:    time.Hour * 24,
-		})
-		gc.scan()
-
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, insertLogPrefix), inserts)
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, statsLogPrefix), stats)
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, deltaLogPrefix), delta)
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, `indexes`), others)
-
-		gc.close()
-	})
-	t.Run("hit, no gc", func(t *testing.T) {
-		segment := buildSegment(1, 10, 100, "ch", false)
-		segment.State = commonpb.SegmentState_Flushed
-		segment.Binlogs = []*datapb.FieldBinlog{getFieldBinlogPaths(0, inserts[0])}
-		segment.Statslogs = []*datapb.FieldBinlog{getFieldBinlogPaths(0, stats[0])}
-		segment.Deltalogs = []*datapb.FieldBinlog{getFieldBinlogPaths(0, delta[0])}
-		err = meta.AddSegment(segment)
-		require.NoError(t, err)
-
-		gc := newGarbageCollector(meta, newMockHandler(), GcOption{
-			cli:              cli,
-			enabled:          true,
-			checkInterval:    time.Minute * 30,
-			missingTolerance: time.Hour * 24,
-			dropTolerance:    time.Hour * 24,
-		})
-		gc.start()
-		gc.scan()
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, insertLogPrefix), inserts)
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, statsLogPrefix), stats)
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, deltaLogPrefix), delta)
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, `indexes`), others)
-
-		gc.close()
-	})
-
-	t.Run("dropped gc one", func(t *testing.T) {
-		segment := buildSegment(1, 10, 100, "ch", false)
-		segment.State = commonpb.SegmentState_Dropped
-		segment.DroppedAt = uint64(time.Now().Add(-time.Hour).UnixNano())
-		segment.Binlogs = []*datapb.FieldBinlog{getFieldBinlogPaths(0, inserts[0])}
-		segment.Statslogs = []*datapb.FieldBinlog{getFieldBinlogPaths(0, stats[0])}
-		segment.Deltalogs = []*datapb.FieldBinlog{getFieldBinlogPaths(0, delta[0])}
-
-		err = meta.AddSegment(segment)
-		require.NoError(t, err)
-
-		gc := newGarbageCollector(meta, newMockHandler(), GcOption{
-			cli:              cli,
-			enabled:          true,
-			checkInterval:    time.Minute * 30,
-			missingTolerance: time.Hour * 24,
-			dropTolerance:    0,
-		})
-		gc.clearEtcd()
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, insertLogPrefix), inserts[1:])
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, statsLogPrefix), stats[1:])
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, deltaLogPrefix), delta[1:])
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, `indexes`), others)
-
-		gc.close()
-	})
-	t.Run("missing gc all", func(t *testing.T) {
-		gc := newGarbageCollector(meta, newMockHandler(), GcOption{
-			cli:              cli,
-			enabled:          true,
-			checkInterval:    time.Minute * 30,
-			missingTolerance: 0,
-			dropTolerance:    0,
-		})
-		gc.start()
-		gc.scan()
-		gc.clearEtcd()
-
-		// bad path shall remains since datacoord cannot determine file is garbage or not if path is not valid
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, insertLogPrefix), inserts[1:2])
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, statsLogPrefix), stats[1:2])
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, deltaLogPrefix), delta[1:2])
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, `indexes`), others)
-
-		gc.close()
-	})
-
-	t.Run("list object with error", func(t *testing.T) {
-		gc := newGarbageCollector(meta, newMockHandler(), GcOption{
-			cli:              cli,
-			enabled:          true,
-			checkInterval:    time.Minute * 30,
-			missingTolerance: 0,
-			dropTolerance:    0,
-		})
-		gc.start()
-		gc.scan()
-
-		// bad path shall remains since datacoord cannot determine file is garbage or not if path is not valid
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, insertLogPrefix), inserts[1:2])
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, statsLogPrefix), stats[1:2])
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, deltaLogPrefix), delta[1:2])
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, `indexes`), others)
-
-		gc.close()
-	})
-
-	cleanupOSS(cli.Client, bucketName, rootPath)
-}
-
-// initialize unit test sso env
-func initUtOSSEnv(bucket, root string, n int) (mcm *storage.MinioChunkManager, inserts []string, stats []string, delta []string, other []string, err error) {
-	Params.Init()
-	cli, err := minio.New(Params.MinioCfg.Address.GetValue(), &minio.Options{
-		Creds:  credentials.NewStaticV4(Params.MinioCfg.AccessKeyID.GetValue(), Params.MinioCfg.SecretAccessKey.GetValue(), ""),
-		Secure: Params.MinioCfg.UseSSL.GetAsBool(),
-	})
-	if err != nil {
-		return nil, nil, nil, nil, nil, err
-	}
-	has, err := cli.BucketExists(context.TODO(), bucket)
-	if err != nil {
-		return nil, nil, nil, nil, nil, err
-	}
-	if !has {
-		err = cli.MakeBucket(context.TODO(), bucket, minio.MakeBucketOptions{})
-		if err != nil {
-			return nil, nil, nil, nil, nil, err
-		}
-	}
-	inserts = make([]string, 0, n)
-	stats = make([]string, 0, n)
-	delta = make([]string, 0, n)
-	other = make([]string, 0, n)
-
-	content := []byte("test")
-	for i := 0; i < n; i++ {
-		reader := bytes.NewReader(content)
-		// collID/partID/segID/fieldID/fileName
-		// [str]/id/id/string/string
-
-		var token string
-		if i == 1 {
-			token = path.Join(strconv.Itoa(i), strconv.Itoa(i), "error-seg-id", funcutil.RandomString(8), funcutil.RandomString(8))
-		} else {
-			token = path.Join(strconv.Itoa(1+i), strconv.Itoa(10+i), strconv.Itoa(100+i), funcutil.RandomString(8), funcutil.RandomString(8))
-		}
-		// insert
-		filePath := path.Join(root, insertLogPrefix, token)
-		info, err := cli.PutObject(context.TODO(), bucket, filePath, reader, int64(len(content)), minio.PutObjectOptions{})
-		if err != nil {
-			return nil, nil, nil, nil, nil, err
-		}
-		inserts = append(inserts, info.Key)
-		// stats
-		filePath = path.Join(root, statsLogPrefix, token)
-		info, err = cli.PutObject(context.TODO(), bucket, filePath, reader, int64(len(content)), minio.PutObjectOptions{})
-		if err != nil {
-			return nil, nil, nil, nil, nil, err
-		}
-		stats = append(stats, info.Key)
-
-		// delta
-		if i == 1 {
-			token = path.Join(strconv.Itoa(i), strconv.Itoa(i), "error-seg-id", funcutil.RandomString(8))
-		} else {
-			token = path.Join(strconv.Itoa(1+i), strconv.Itoa(10+i), strconv.Itoa(100+i), funcutil.RandomString(8))
-		}
-		filePath = path.Join(root, deltaLogPrefix, token)
-		info, err = cli.PutObject(context.TODO(), bucket, filePath, reader, int64(len(content)), minio.PutObjectOptions{})
-		if err != nil {
-			return nil, nil, nil, nil, nil, err
-		}
-		delta = append(delta, info.Key)
-
-		// other
-		filePath = path.Join(root, `indexes`, token)
-		info, err = cli.PutObject(context.TODO(), bucket, filePath, reader, int64(len(content)), minio.PutObjectOptions{})
-		if err != nil {
-			return nil, nil, nil, nil, nil, err
-		}
-		other = append(other, info.Key)
-	}
-	mcm = &storage.MinioChunkManager{
-		Client: cli,
-	}
-	mcm.SetVar(bucket, root)
-	return mcm, inserts, stats, delta, other, nil
-}
-
-func cleanupOSS(cli *minio.Client, bucket, root string) {
-	ch := cli.ListObjects(context.TODO(), bucket, minio.ListObjectsOptions{Prefix: root, Recursive: true})
-	cli.RemoveObjects(context.TODO(), bucket, ch, minio.RemoveObjectsOptions{})
-	cli.RemoveBucket(context.TODO(), bucket)
-}
 
 func createMetaForRecycleUnusedIndexes(catalog metastore.DataCoordCatalog) *meta {
 	var (
@@ -1131,4 +848,311 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	assert.Nil(t, segA)
 	segB = gc.meta.GetSegment(segID + 1)
 	assert.Nil(t, segB)
+}
+
+type GarbageCollectorConstructSuite struct {
+	suite.Suite
+
+	meta         *meta
+	hander       *mockHandler
+	chunkManager *mocks.ChunkManager
+}
+
+func (suite *GarbageCollectorConstructSuite) SetupTest() {
+	meta, err := newMemoryMeta()
+	suite.Require().NoError(err)
+
+	suite.meta = meta
+
+	handler := newMockHandler()
+	suite.hander = handler
+
+	cm := mocks.NewChunkManager(suite.T())
+	suite.chunkManager = cm
+}
+
+func (suite *GarbageCollectorConstructSuite) TestBasic() {
+	suite.Run("normal_construct", func() {
+		gc := newGarbageCollector(suite.meta, suite.hander, GcOption{
+			cli:              suite.chunkManager,
+			enabled:          true,
+			checkInterval:    time.Millisecond * 10,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+
+		gc.start()
+
+		suite.NotPanics(func() {
+			gc.close()
+		})
+	})
+
+	suite.Run("with_nil_cli", func() {
+		gc := newGarbageCollector(suite.meta, suite.hander, GcOption{
+			cli:              nil,
+			enabled:          true,
+			checkInterval:    time.Millisecond * 10,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+
+		gc.start()
+
+		suite.NotPanics(func() {
+			gc.close()
+		})
+	})
+}
+
+type GarbageCollectionSuite struct {
+	suite.Suite
+
+	meta         *meta
+	hander       *mockHandler
+	chunkManager *mocks.ChunkManager
+
+	gc *garbageCollector
+}
+
+func (suite *GarbageCollectionSuite) SetupTest() {
+	meta, err := newMemoryMeta()
+	suite.Require().NoError(err)
+
+	suite.meta = meta
+
+	handler := newMockHandler()
+	suite.hander = handler
+
+	cm := mocks.NewChunkManager(suite.T())
+	suite.chunkManager = cm
+
+	suite.gc = newGarbageCollector(suite.meta, suite.hander, GcOption{
+		cli:              suite.chunkManager,
+		enabled:          true,
+		checkInterval:    time.Millisecond * 10,
+		missingTolerance: time.Hour * 24,
+		dropTolerance:    time.Hour * 24,
+	})
+}
+
+func (suite *GarbageCollectionSuite) setupMeta(segments []*SegmentInfo) {
+	meta := suite.meta
+	meta.Lock()
+	defer meta.Unlock()
+
+	meta.segments = NewSegmentsInfo()
+	lo.ForEach(segments, func(info *SegmentInfo, _ int) {
+		meta.segments.SetSegment(info.GetID(), info)
+	})
+}
+
+func (suite *GarbageCollectionSuite) composeBinlogPath(collID, partID, segmentID, fieldID, logID int64) string {
+	return fmt.Sprintf("%d/%d/%d/%d/%d", collID, partID, segmentID, fieldID, logID)
+}
+
+func (suite *GarbageCollectionSuite) composeDeltalogPath(collID, partID, segmentID, logID int64) string {
+	return fmt.Sprintf("%d/%d/%d/%d", collID, partID, segmentID, logID)
+}
+
+func (suite *GarbageCollectionSuite) TestScan() {
+	type testCase struct {
+		tag       string
+		segmentID int64
+		binlogs   []int64
+		statslogs []int64
+		deltalogs []int64
+
+		storageBinlogs   []string
+		storageStatlogs  []string
+		storageDeltalogs []string
+
+		expectRemoves []string
+		lastModified  time.Duration
+	}
+
+	rootPath := fmt.Sprintf(`gc_%s`, funcutil.RandomString(8))
+	cases := []testCase{
+		{
+			tag:       "all_valid_files",
+			segmentID: 1000,
+			binlogs:   []int64{1234},
+			statslogs: []int64{1235},
+			deltalogs: []int64{1236},
+			storageBinlogs: []string{
+				suite.composeBinlogPath(100, 101, 1000, 100, 1234),
+			},
+			storageStatlogs: []string{
+				suite.composeBinlogPath(100, 101, 1000, 100, 1235),
+			},
+			storageDeltalogs: []string{
+				suite.composeDeltalogPath(100, 101, 1000, 1236),
+			},
+			expectRemoves: nil,
+			lastModified:  0,
+		},
+		{
+			tag:       "miss_within_tolerance",
+			segmentID: 1001,
+			storageBinlogs: []string{
+				suite.composeBinlogPath(100, 101, 1001, 100, 1234),
+			},
+			storageStatlogs: []string{
+				suite.composeBinlogPath(100, 101, 1001, 100, 1235),
+			},
+			storageDeltalogs: []string{
+				suite.composeDeltalogPath(100, 101, 1001, 1236),
+			},
+			expectRemoves: nil,
+			lastModified:  0,
+		},
+		{
+			tag:       "missing_files_gc",
+			segmentID: 1002,
+			storageBinlogs: []string{
+				suite.composeBinlogPath(100, 101, 1001, 100, 1234),
+			},
+			storageStatlogs: []string{
+				suite.composeBinlogPath(100, 101, 1001, 100, 1235),
+			},
+			storageDeltalogs: []string{
+				suite.composeDeltalogPath(100, 101, 1001, 1236),
+			},
+			expectRemoves: []string{
+				path.Join(rootPath, insertLogPrefix, suite.composeBinlogPath(100, 101, 1001, 100, 1234)),
+				path.Join(rootPath, statsLogPrefix, suite.composeBinlogPath(100, 101, 1001, 100, 1235)),
+				path.Join(rootPath, deltaLogPrefix, suite.composeDeltalogPath(100, 101, 1001, 1236)),
+			},
+			lastModified: -suite.gc.option.missingTolerance - time.Second,
+		},
+		{
+			tag:       "noise_files",
+			segmentID: 1003,
+			storageBinlogs: []string{
+				"other_path/shall/not/gc",
+			},
+			expectRemoves: nil,
+			lastModified:  -suite.gc.option.missingTolerance - time.Second,
+		},
+	}
+
+	for _, tc := range cases {
+		suite.Run(tc.tag, func() {
+			defer func() {
+				suite.chunkManager.AssertExpectations(suite.T())
+				suite.chunkManager.ExpectedCalls = nil
+				suite.chunkManager.Calls = nil
+				meta := suite.meta
+				meta.Lock()
+				defer meta.Unlock()
+				meta.segments.DropSegment(tc.segmentID)
+			}()
+			suite.setupMeta([]*SegmentInfo{
+				NewSegmentInfo(&datapb.SegmentInfo{
+					ID: tc.segmentID,
+					Binlogs: []*datapb.FieldBinlog{
+						{
+							FieldID: 100,
+							Binlogs: lo.Map(tc.binlogs, func(logID int64, _ int) *datapb.Binlog {
+								return &datapb.Binlog{LogID: logID, LogPath: path.Join(rootPath, insertLogPrefix, suite.composeBinlogPath(100, 101, tc.segmentID, 100, logID))}
+							}),
+						},
+					},
+					Statslogs: []*datapb.FieldBinlog{
+						{
+							FieldID: 100,
+							Binlogs: lo.Map(tc.statslogs, func(logID int64, _ int) *datapb.Binlog {
+								return &datapb.Binlog{LogID: logID, LogPath: path.Join(rootPath, statsLogPrefix, suite.composeBinlogPath(100, 101, tc.segmentID, 100, logID))}
+							}),
+						},
+					},
+					Deltalogs: []*datapb.FieldBinlog{
+						{
+							FieldID: 100,
+							Binlogs: lo.Map(tc.deltalogs, func(logID int64, _ int) *datapb.Binlog {
+								return &datapb.Binlog{LogID: logID, LogPath: path.Join(rootPath, deltaLogPrefix, suite.composeDeltalogPath(100, 101, tc.segmentID, logID))}
+							}),
+						},
+					},
+				}),
+			})
+
+			suite.chunkManager.EXPECT().RootPath().Return(rootPath)
+
+			setupList := func(prefix string, logs []string) {
+				suite.chunkManager.EXPECT().ListWithPrefix(
+					mock.Anything,
+					fmt.Sprintf("%s/%s", rootPath, prefix),
+					true,
+				).Return(lo.Map(logs, func(p string, _ int) string {
+					return path.Join(rootPath, prefix, p)
+				}), lo.Map(logs, func(_ string, _ int) time.Time {
+					return time.Now().Add(tc.lastModified)
+				}), nil)
+			}
+			setupList(insertLogPrefix, tc.storageBinlogs)
+			setupList(statsLogPrefix, tc.storageStatlogs)
+			setupList(deltaLogPrefix, tc.storageDeltalogs)
+			lo.ForEach(tc.expectRemoves, func(p string, _ int) {
+				suite.chunkManager.EXPECT().Remove(mock.Anything, p).Return(nil)
+			})
+
+			suite.NotPanics(func() {
+				suite.gc.scan()
+			}, "garbage collection shall not panic during scan")
+
+			if len(tc.expectRemoves) == 0 {
+				suite.chunkManager.AssertNotCalled(suite.T(), "Remove", mock.Anything, mock.Anything)
+			}
+		})
+	}
+}
+
+func (suite *GarbageCollectionSuite) TestScan_Failures() {
+
+	rootPath := fmt.Sprintf(`gc_%s`, funcutil.RandomString(8))
+	suite.Run("list_fails", func() {
+		defer func() {
+			suite.chunkManager.AssertExpectations(suite.T())
+			suite.chunkManager.ExpectedCalls = nil
+			suite.chunkManager.Calls = nil
+		}()
+
+		suite.chunkManager.EXPECT().RootPath().Return(rootPath)
+		suite.chunkManager.EXPECT().ListWithPrefix(mock.Anything, mock.AnythingOfType("string"), true).Return(nil, nil, errors.New("mocked"))
+
+		suite.NotPanics(func() {
+			suite.gc.scan()
+		}, "garbage collection shall not panic during scan")
+
+		suite.chunkManager.AssertNotCalled(suite.T(), "Remove", mock.Anything, mock.Anything)
+	})
+
+	suite.Run("remove_fails", func() {
+		defer func() {
+			suite.chunkManager.AssertExpectations(suite.T())
+			suite.chunkManager.ExpectedCalls = nil
+			suite.chunkManager.Calls = nil
+		}()
+
+		suite.chunkManager.EXPECT().RootPath().Return(rootPath)
+		suite.chunkManager.EXPECT().ListWithPrefix(mock.Anything, mock.AnythingOfType("string"), true).Return([]string{
+			path.Join(rootPath, "wild_cast", "100/101/1000/100/1234"),
+		}, []time.Time{{}}, nil)
+
+		suite.chunkManager.EXPECT().Remove(mock.Anything, path.Join(rootPath, "wild_cast", "100/101/1000/100/1234")).Return(errors.New("mocked"))
+
+		suite.NotPanics(func() {
+			suite.gc.scan()
+		}, "garbage collection shall not panic during scan")
+	})
+}
+
+func (suite *GarbageCollectionSuite) TestCleanEtcd() {
+
+}
+
+func TestGarbageCollector(t *testing.T) {
+	suite.Run(t, new(GarbageCollectorConstructSuite))
+	suite.Run(t, new(GarbageCollectionSuite))
 }

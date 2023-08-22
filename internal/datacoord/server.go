@@ -452,8 +452,7 @@ func (s *Server) stopCompactionTrigger() {
 }
 
 func (s *Server) newChunkManagerFactory() (storage.ChunkManager, error) {
-	chunkManagerFactory := storage.NewChunkManagerFactoryWithParam(Params)
-	cli, err := chunkManagerFactory.NewPersistentStorageChunkManager(s.ctx)
+	cli, err := s.factory.NewPersistentStorageChunkManager(s.ctx)
 	if err != nil {
 		log.Error("chunk manager init failed", zap.Error(err))
 		return nil, err
