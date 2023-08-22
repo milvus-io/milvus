@@ -23,6 +23,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util"
@@ -319,6 +320,9 @@ type PulsarConfig struct {
 	// support tenant
 	Tenant    string
 	Namespace string
+
+	// Global request timeout
+	RequestTimeout time.Duration
 }
 
 func (p *PulsarConfig) init(base *BaseTable) {
@@ -331,6 +335,12 @@ func (p *PulsarConfig) init(base *BaseTable) {
 	p.initAuthParams()
 	p.initTenant()
 	p.initNamespace()
+	p.initRequestTimeout()
+}
+
+func (p *PulsarConfig) initRequestTimeout() {
+	timeout := p.Base.ParseInt64WithDefault("pulsar.requestTimeout", 60)
+	p.RequestTimeout = time.Duration(timeout) * time.Second
 }
 
 func (p *PulsarConfig) initAddress() {
