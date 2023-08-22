@@ -43,6 +43,7 @@ import (
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	opentracing "github.com/opentracing/opentracing-go"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -97,6 +98,8 @@ type Server struct {
 	httpServer         *http.Server
 	grpcInternalServer *grpc.Server
 	grpcExternalServer *grpc.Server
+
+	serverID atomic.Int64
 
 	etcdCli          *clientv3.Client
 	rootCoordClient  types.RootCoord
@@ -320,13 +323,19 @@ func (s *Server) startInternalGrpc(grpcPort int, errChan chan error) {
 			logutil.UnaryTraceLoggerInterceptor,
 			interceptor.ClusterValidationUnaryServerInterceptor(),
 			interceptor.ServerIDValidationUnaryServerInterceptor(func() int64 {
-				return proxy.Params.ProxyCfg.GetNodeID()
+				if s.serverID.Load() == 0 {
+					s.serverID.Store(proxy.Params.ProxyCfg.GetNodeID())
+				}
+				return s.serverID.Load()
 			}),
 		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
 			interceptor.ClusterValidationStreamServerInterceptor(),
 			interceptor.ServerIDValidationStreamServerInterceptor(func() int64 {
-				return proxy.Params.ProxyCfg.GetNodeID()
+				if s.serverID.Load() == 0 {
+					s.serverID.Store(proxy.Params.ProxyCfg.GetNodeID())
+				}
+				return s.serverID.Load()
 			}),
 		)))
 	proxypb.RegisterProxyServer(s.grpcInternalServer, s)

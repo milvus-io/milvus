@@ -28,6 +28,7 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -61,6 +62,8 @@ type Server struct {
 	loopCtx    context.Context
 	loopCancel func()
 	loopWg     sync.WaitGroup
+
+	serverID atomic.Int64
 
 	etcdCli *clientv3.Client
 	closer  io.Closer
@@ -115,7 +118,10 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 			logutil.UnaryTraceLoggerInterceptor,
 			interceptor.ClusterValidationUnaryServerInterceptor(),
 			interceptor.ServerIDValidationUnaryServerInterceptor(func() int64 {
-				return indexnode.Params.IndexNodeCfg.GetNodeID()
+				if s.serverID.Load() == 0 {
+					s.serverID.Store(indexnode.Params.IndexNodeCfg.GetNodeID())
+				}
+				return s.serverID.Load()
 			}),
 		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
@@ -123,7 +129,10 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 			logutil.StreamTraceLoggerInterceptor,
 			interceptor.ClusterValidationStreamServerInterceptor(),
 			interceptor.ServerIDValidationStreamServerInterceptor(func() int64 {
-				return indexnode.Params.IndexNodeCfg.GetNodeID()
+				if s.serverID.Load() == 0 {
+					s.serverID.Store(indexnode.Params.IndexNodeCfg.GetNodeID())
+				}
+				return s.serverID.Load()
 			}),
 		)))
 	indexpb.RegisterIndexNodeServer(s.grpcServer, s)
