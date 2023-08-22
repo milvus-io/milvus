@@ -291,7 +291,7 @@ func createFieldsData(collectionSchema *schemapb.CollectionSchema, rowCount int)
 			}
 			fieldsData[schema.GetFieldID()] = int64Data
 		case schemapb.DataType_BinaryVector:
-			dim, _ := getFieldDimension(schema)
+			dim, _ := getVectorDimension(schema)
 			binVecData := make([][]byte, 0)
 			for i := 0; i < rowCount; i++ {
 				vec := make([]byte, 0)
@@ -302,7 +302,7 @@ func createFieldsData(collectionSchema *schemapb.CollectionSchema, rowCount int)
 			}
 			fieldsData[schema.GetFieldID()] = binVecData
 		case schemapb.DataType_FloatVector:
-			dim, _ := getFieldDimension(schema)
+			dim, _ := getVectorDimension(schema)
 			floatVecData := make([][]float32, 0)
 			for i := 0; i < rowCount; i++ {
 				vec := make([]float32, 0)
@@ -557,12 +557,24 @@ func Test_InitValidators(t *testing.T) {
 		checkConvertFunc("FieldFloat", validVal, invalidVal)
 		checkConvertFunc("FieldDouble", validVal, invalidVal)
 
+		// varchar length exceeds max length
 		validVal = "aa"
-		checkConvertFunc("FieldString", validVal, nil)
+		var invalidStr string
+		for i := 0; i < 10; i++ {
+			invalidStr = invalidStr + "12345678abcdefgh"
+		}
+		checkConvertFunc("FieldString", validVal, invalidStr)
+		checkConvertFunc("FieldString", validVal, 88)
 
+		// JSON string length exceeds defaultMaxVarCharLength
+		for i := 0; i < 1000; i++ {
+			invalidStr = invalidStr + "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789===="
+		}
 		validVal = map[string]interface{}{"x": 5, "y": true, "z": "hello"}
-		checkConvertFunc("FieldJSON", validVal, nil)
+		invalidVal = fmt.Sprintf("{\"x\": \"%s\"}", invalidStr)
+		checkConvertFunc("FieldJSON", validVal, invalidVal)
 		checkConvertFunc("FieldJSON", "{\"x\": 8}", "{")
+		checkConvertFunc("FieldJSON", validVal, 88)
 
 		// the binary vector dimension is 16, shoud input two uint8 values, each value should between 0~255
 		validVal = []interface{}{jsonNumber("100"), jsonNumber("101")}
@@ -694,21 +706,55 @@ func Test_GetFieldDimension(t *testing.T) {
 		},
 	}
 
-	dim, err := getFieldDimension(schema)
+	dim, err := getVectorDimension(schema)
 	assert.NoError(t, err)
 	assert.Equal(t, 4, dim)
 
 	schema.TypeParams = []*commonpb.KeyValuePair{
 		{Key: common.DimKey, Value: "abc"},
 	}
-	dim, err = getFieldDimension(schema)
+	dim, err = getVectorDimension(schema)
 	assert.Error(t, err)
 	assert.Equal(t, 0, dim)
 
 	schema.TypeParams = []*commonpb.KeyValuePair{}
-	dim, err = getFieldDimension(schema)
+	dim, err = getVectorDimension(schema)
 	assert.Error(t, err)
 	assert.Equal(t, 0, dim)
+}
+
+func Test_GetVarcharMaxLen(t *testing.T) {
+	schema := &schemapb.FieldSchema{
+		FieldID:      113,
+		Name:         "FieldVarchar",
+		IsPrimaryKey: false,
+		Description:  "varchar",
+		DataType:     schemapb.DataType_VarChar,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.MaxLengthKey, Value: "256"},
+		},
+	}
+
+	maxLen, err := getVarcharMaxLen(schema)
+	assert.NoError(t, err)
+	assert.Equal(t, 256, maxLen)
+
+	schema.TypeParams = []*commonpb.KeyValuePair{
+		{Key: common.MaxLengthKey, Value: "abc"},
+	}
+	maxLen, err = getVarcharMaxLen(schema)
+	assert.Error(t, err)
+	assert.Equal(t, 0, maxLen)
+
+	schema.TypeParams = []*commonpb.KeyValuePair{}
+	maxLen, err = getVarcharMaxLen(schema)
+	assert.Error(t, err)
+	assert.Equal(t, 0, maxLen)
+
+	schema.DataType = schemapb.DataType_JSON
+	maxLen, err = getVarcharMaxLen(schema)
+	assert.NoError(t, err)
+	assert.Equal(t, defaultMaxVarCharLength, maxLen)
 }
 
 func Test_FillDynamicData(t *testing.T) {

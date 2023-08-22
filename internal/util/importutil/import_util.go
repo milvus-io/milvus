@@ -37,6 +37,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+const (
+	defaultMaxVarCharLength = 65535
+)
+
 type BlockData map[storage.FieldID]storage.FieldData // a map of field ID to field data
 type ShardData map[int64]BlockData                   // a map of partition ID to block data
 
@@ -91,13 +95,13 @@ func initBlockData(collectionSchema *schemapb.CollectionSchema) BlockData {
 				Data: make([]int64, 0),
 			}
 		case schemapb.DataType_BinaryVector:
-			dim, _ := getFieldDimension(schema)
+			dim, _ := getVectorDimension(schema)
 			blockData[schema.GetFieldID()] = &storage.BinaryVectorFieldData{
 				Data: make([]byte, 0),
 				Dim:  dim,
 			}
 		case schemapb.DataType_FloatVector:
-			dim, _ := getFieldDimension(schema)
+			dim, _ := getVectorDimension(schema)
 			blockData[schema.GetFieldID()] = &storage.FloatVectorFieldData{
 				Data: make([]float32, 0),
 				Dim:  dim,
@@ -264,7 +268,7 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 				return nil
 			}
 		case schemapb.DataType_BinaryVector:
-			dim, err := getFieldDimension(schema)
+			dim, err := getVectorDimension(schema)
 			if err != nil {
 				return err
 			}
@@ -295,7 +299,7 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 				return nil
 			}
 		case schemapb.DataType_FloatVector:
-			dim, err := getFieldDimension(schema)
+			dim, err := getVectorDimension(schema)
 			if err != nil {
 				return err
 			}
@@ -329,6 +333,14 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 
 			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
 				if value, ok := obj.(string); ok {
+					maxLen, err := getVarcharMaxLen(schema)
+					if err != nil {
+						return err
+					}
+					if len(value) > maxLen {
+						return fmt.Errorf("varchar length '%d' exceeds max value '%d' for varchar type field '%s'",
+							len(value), maxLen, schema.GetName())
+					}
 					field.(*storage.StringFieldData).Data = append(field.(*storage.StringFieldData).Data, value)
 				} else {
 					return fmt.Errorf("illegal value '%v' for varchar type field '%s'", obj, schema.GetName())
@@ -340,6 +352,11 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 				// for JSON data, we accept two kinds input: string and map[string]interface
 				// user can write JSON content as {"FieldJSON": "{\"x\": 8}"} or {"FieldJSON": {"x": 8}}
 				if value, ok := obj.(string); ok {
+					if len(value) > defaultMaxVarCharLength {
+						return fmt.Errorf("string length '%d' exceeds max value '%d' for JSON type field '%s'",
+							len(value), defaultMaxVarCharLength, schema.GetName())
+					}
+
 					var dummy interface{}
 					err := json.Unmarshal([]byte(value), &dummy)
 					if err != nil {
@@ -386,20 +403,31 @@ func GetFileNameAndExt(filePath string) (string, string) {
 	return fileNameWithoutExt, fileType
 }
 
-// getFieldDimension gets dimension of vecotor field
-func getFieldDimension(schema *schemapb.FieldSchema) (int, error) {
+// getFieldParam gets param of field, such as dimension of vecotor field and varchar max length
+func getFieldParam(schema *schemapb.FieldSchema, keyName string) (int, error) {
 	for _, kvPair := range schema.GetTypeParams() {
 		key, value := kvPair.GetKey(), kvPair.GetValue()
-		if key == common.DimKey {
+		if key == keyName {
 			dim, err := strconv.Atoi(value)
 			if err != nil {
-				return 0, fmt.Errorf("illegal vector dimension '%s' for field '%s', error: %w", value, schema.GetName(), err)
+				return 0, fmt.Errorf("illegal value '%s' for field '%s' param '%s', error: %w", value, schema.GetName(), keyName, err)
 			}
 			return dim, nil
 		}
 	}
 
-	return 0, fmt.Errorf("vector dimension is not defined for field '%s'", schema.GetName())
+	return 0, fmt.Errorf("param '%s' is not defined for field '%s'", keyName, schema.GetName())
+}
+
+func getVectorDimension(schema *schemapb.FieldSchema) (int, error) {
+	return getFieldParam(schema, common.DimKey)
+}
+
+func getVarcharMaxLen(schema *schemapb.FieldSchema) (int, error) {
+	if schema.DataType == schemapb.DataType_JSON {
+		return defaultMaxVarCharLength, nil
+	}
+	return getFieldParam(schema, common.MaxLengthKey)
 }
 
 // triggerGC triggers golang gc to return all free memory back to the underlying system at once,

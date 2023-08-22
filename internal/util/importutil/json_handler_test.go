@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/common"
 )
 
 type mockIDAllocator struct {
@@ -168,6 +169,9 @@ func Test_JSONRowConsumerHandleIntPK(t *testing.T) {
 				FieldID:  102,
 				Name:     "FieldVarchar",
 				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxLengthKey, Value: "128"},
+				},
 			},
 			{
 				FieldID:  103,
@@ -577,6 +581,9 @@ func Test_JSONRowHashToPartition(t *testing.T) {
 				FieldID:  101,
 				Name:     "FieldVarchar",
 				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxLengthKey, Value: "128"},
+				},
 			},
 			{
 				FieldID:  102,
