@@ -451,6 +451,9 @@ type PulsarConfig struct {
 	// support tenant
 	Tenant    ParamItem `refreshable:"false"`
 	Namespace ParamItem `refreshable:"false"`
+
+	// Global request timeout
+	RequestTimeout ParamItem `refreshable:"false"`
 }
 
 func (p *PulsarConfig) Init(base *BaseTable) {
@@ -556,6 +559,14 @@ func (p *PulsarConfig) Init(base *BaseTable) {
 		},
 	}
 	p.AuthParams.Init(base.mgr)
+
+	p.RequestTimeout = ParamItem{
+		Key:          "pulsar.requestTimeout",
+		Version:      "2.3.0",
+		DefaultValue: "60",
+		Export:       true,
+	}
+	p.RequestTimeout.Init(base.mgr)
 }
 
 // --- kafka ---

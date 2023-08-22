@@ -113,6 +113,7 @@ pulsar:
   maxMessageSize: 5242880 # 5 * 1024 * 1024 Bytes, Maximum size of each message in pulsar.
   tenant: public
   namespace: default
+  requestTimeout: 60 # pulsar client global request timeout in seconds
 
 # If you want to enable kafka, needs to comment the pulsar configs
 # kafka:

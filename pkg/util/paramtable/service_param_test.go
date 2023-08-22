@@ -107,24 +107,30 @@ func TestServiceParam(t *testing.T) {
 	})
 
 	t.Run("test pulsar auth config", func(t *testing.T) {
-		Params := SParams.PulsarCfg
+		Params := &SParams.PulsarCfg
 
 		assert.Equal(t, "", Params.AuthPlugin.GetValue())
 		assert.Equal(t, "{}", Params.AuthParams.GetValue())
 	})
 
 	t.Run("test pulsar auth config formatter", func(t *testing.T) {
-		Params := SParams.PulsarCfg
+		Params := &SParams.PulsarCfg
 
 		assert.Equal(t, "{}", Params.AuthParams.Formatter(""))
 		assert.Equal(t, "{\"a\":\"b\"}", Params.AuthParams.Formatter("a:b"))
 	})
 
 	t.Run("test pulsar tenant/namespace config", func(t *testing.T) {
-		Params := SParams.PulsarCfg
+		Params := &SParams.PulsarCfg
 
 		assert.Equal(t, "public", Params.Tenant.GetValue())
 		assert.Equal(t, "default", Params.Namespace.GetValue())
+	})
+
+	t.Run("pulsar_operation_timeout", func(t *testing.T) {
+		Params := &SParams.PulsarCfg
+
+		assert.Equal(t, "60", Params.RequestTimeout.GetValue())
 	})
 
 	t.Run("test rocksmqConfig", func(t *testing.T) {
