@@ -91,6 +91,8 @@ func (fs *FileSource) Close() {
 }
 
 func (fs *FileSource) SetEventHandler(eh EventHandler) {
+	fs.RWMutex.Lock()
+	defer fs.RWMutex.Unlock()
 	fs.configRefresher.eh = eh
 }
 

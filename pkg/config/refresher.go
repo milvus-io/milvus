@@ -86,7 +86,7 @@ func (r *refresher) fireEvents(name string, source, target map[string]string) er
 		log.Warn("generating event error", zap.Error(err))
 		return err
 	}
-	//Generate OnEvent Callback based on the events created
+	// Generate OnEvent Callback based on the events created
 	if r.eh != nil {
 		for _, e := range events {
 			r.eh.OnEvent(e)
