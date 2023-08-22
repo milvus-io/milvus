@@ -11,7 +11,7 @@ import (
 // Note that `segCloned` should be a copied version of `seg`.
 func ReCalcRowCount(seg, segCloned *datapb.SegmentInfo) {
 	// `segment` is not mutated but only cloned above and is safe to be referred here.
-	if newCount := CalcRowCountFromBinLog(seg); newCount != seg.GetNumOfRows() {
+	if newCount := CalcRowCountFromBinLog(seg); newCount != seg.GetNumOfRows() && newCount > 0 {
 		log.Warn("segment row number meta inconsistent with bin log row count and will be corrected",
 			zap.Int64("segmentID", seg.GetID()),
 			zap.Int64("segment meta row count (wrong)", seg.GetNumOfRows()),
@@ -27,6 +27,10 @@ func CalcRowCountFromBinLog(seg *datapb.SegmentInfo) int64 {
 	if len(seg.GetBinlogs()) > 0 {
 		for _, ct := range seg.GetBinlogs()[0].GetBinlogs() {
 			rowCt += ct.GetEntriesNum()
+			// This segment contains stale log with incorrect entries num,
+			if ct.GetEntriesNum() <= 0 {
+				return -1
+			}
 		}
 	}
 	return rowCt

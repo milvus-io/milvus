@@ -554,14 +554,15 @@ func (m *meta) UpdateFlushSegmentsInfo(
 
 	if importing {
 		s := clonedSegment
+		s.NumOfRows = s.currRows
 		count := segmentutil.CalcRowCountFromBinLog(s.SegmentInfo)
-		if count != segment.currRows {
+		if count != segment.currRows && count > 0 {
 			log.Info("check point reported inconsistent with bin log row count",
 				zap.Int64("segmentID", segment.GetID()),
 				zap.Int64("current rows (wrong)", segment.currRows),
 				zap.Int64("segment bin log row count (correct)", count))
+			s.NumOfRows = count
 		}
-		s.NumOfRows = count
 		modSegments[segmentID] = s
 	} else {
 		for _, cp := range checkpoints {
@@ -578,15 +579,16 @@ func (m *meta) UpdateFlushSegmentsInfo(
 				continue
 			}
 
+			s.NumOfRows = cp.NumOfRows
 			count := segmentutil.CalcRowCountFromBinLog(s.SegmentInfo)
 			// count should smaller than or equal to cp reported
-			if count != cp.NumOfRows {
+			if count != cp.NumOfRows && count > 0 {
 				log.Info("check point reported inconsistent with bin log row count",
 					zap.Int64("segmentID", segment.GetID()),
 					zap.Int64("check point (wrong)", cp.NumOfRows),
 					zap.Int64("segment bin log row count (correct)", count))
+				s.NumOfRows = count
 			}
-			s.NumOfRows = count
 
 			s.DmlPosition = cp.GetPosition()
 			modSegments[cp.GetSegmentID()] = s
