@@ -319,12 +319,21 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 			return merr.WrapErrServiceInternal("task with the same segment exists")
 		}
 
-		if GetTaskType(task) == TaskTypeGrow {
+		taskType := GetTaskType(task)
+
+		if taskType == TaskTypeGrow {
 			leaderSegmentDist := scheduler.distMgr.LeaderViewManager.GetSealedSegmentDist(task.SegmentID())
 			nodeSegmentDist := scheduler.distMgr.SegmentDistManager.GetSegmentDist(task.SegmentID())
 			if lo.Contains(leaderSegmentDist, task.Actions()[0].Node()) &&
 				lo.Contains(nodeSegmentDist, task.Actions()[0].Node()) {
 				return merr.WrapErrServiceInternal("segment loaded, it can be only balanced")
+			}
+		} else if taskType == TaskTypeMove {
+			leaderSegmentDist := scheduler.distMgr.LeaderViewManager.GetSealedSegmentDist(task.SegmentID())
+			nodeSegmentDist := scheduler.distMgr.SegmentDistManager.GetSegmentDist(task.SegmentID())
+			if !lo.Contains(leaderSegmentDist, task.Actions()[1].Node()) ||
+				!lo.Contains(nodeSegmentDist, task.Actions()[1].Node()) {
+				return merr.WrapErrServiceInternal("source segment released, stop balancing")
 			}
 		}
 
@@ -345,11 +354,18 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 
 			return merr.WrapErrServiceInternal("task with the same channel exists")
 		}
-		if GetTaskType(task) == TaskTypeGrow {
+
+		taskType := GetTaskType(task)
+		if taskType == TaskTypeGrow {
 			nodesWithChannel := scheduler.distMgr.LeaderViewManager.GetChannelDist(task.Channel())
 			replicaNodeMap := utils.GroupNodesByReplica(scheduler.meta.ReplicaManager, task.CollectionID(), nodesWithChannel)
 			if _, ok := replicaNodeMap[task.ReplicaID()]; ok {
 				return merr.WrapErrServiceInternal("channel subscribed, it can be only balanced")
+			}
+		} else if taskType == TaskTypeMove {
+			channelDist := scheduler.distMgr.LeaderViewManager.GetChannelDist(task.Channel())
+			if !lo.Contains(channelDist, task.Actions()[1].Node()) {
+				return merr.WrapErrServiceInternal("source channel unsubscribed, stop balancing")
 			}
 		}
 	default:
@@ -779,8 +795,7 @@ func (scheduler *taskScheduler) checkSegmentTaskStale(task *SegmentTask) error {
 			}
 
 		case ActionTypeReduce:
-			// Do nothing here,
-			// the task should succeed if the segment not exists
+			// do nothing here
 		}
 	}
 	return nil
@@ -804,8 +819,7 @@ func (scheduler *taskScheduler) checkChannelTaskStale(task *ChannelTask) error {
 			}
 
 		case ActionTypeReduce:
-			// Do nothing here,
-			// the task should succeed if the channel not exists
+			// do nothing here
 		}
 	}
 	return nil
