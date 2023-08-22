@@ -18,6 +18,9 @@ package querycoordv2
 
 import (
 	"context"
+	"math/rand"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -45,6 +48,24 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
+
+func TestMain(m *testing.M) {
+	// init embed etcd
+	embedetcdServer, tempDir, err := etcd.StartTestEmbedEtcdServer()
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+	defer os.RemoveAll(tempDir)
+	defer embedetcdServer.Close()
+
+	addrs := etcd.GetEmbedEtcdEndpoints(embedetcdServer)
+
+	paramtable.Init()
+	paramtable.Get().Save(Params.EtcdCfg.Endpoints.Key, strings.Join(addrs, ","))
+
+	rand.Seed(time.Now().UnixNano())
+	os.Exit(m.Run())
+}
 
 type ServerSuite struct {
 	suite.Suite
