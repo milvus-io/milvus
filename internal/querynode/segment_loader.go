@@ -807,13 +807,18 @@ func (loader *segmentLoader) checkSegmentSize(collectionID UniqueID, segmentLoad
 		return fmt.Errorf("get memory failed when checkSegmentSize, collectionID = %d", collectionID)
 	}
 
+	toMB := func(mem uint64) uint64 {
+		return mem / 1024 / 1024
+	}
+
 	predictMemUsage := memUsage
 	maxSegmentSize := uint64(0)
 
-	localDiskUsage, err := GetLocalUsedSize()
+	localDiskUsage, err := GetLocalUsedSize(Params.LocalStorageCfg.Path)
 	if err != nil {
 		return fmt.Errorf("get local used size failed, collectionID = %d", collectionID)
 	}
+	metrics.QueryNodeDiskUsedSize.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(toMB(uint64(localDiskUsage))))
 	predictDiskUsage := uint64(localDiskUsage)
 
 	for _, loadInfo := range segmentLoadInfos {
@@ -867,10 +872,6 @@ func (loader *segmentLoader) checkSegmentSize(collectionID UniqueID, segmentLoad
 		if currentSegmentMemUsage > maxSegmentSize {
 			maxSegmentSize = currentSegmentMemUsage
 		}
-	}
-
-	toMB := func(mem uint64) uint64 {
-		return mem / 1024 / 1024
 	}
 
 	// when load segment, data will be copied from go memory to c++ memory

@@ -381,6 +381,16 @@ var (
 			Name:      "execute_bytes_counter",
 			Help:      "",
 		}, []string{nodeIDLabelName, msgTypeLabelName})
+
+	QueryNodeDiskUsedSize = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "disk_used_size",
+			Help:      "disk used size(MB)",
+		}, []string{
+			nodeIDLabelName,
+		})
 )
 
 // RegisterQueryNode registers QueryNode metrics
@@ -417,6 +427,7 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeConsumeTimeTickLag)
 	registry.MustRegister(QueryNodeSegmentSearchLatencyPerVector)
 	registry.MustRegister(QueryNodeWatchDmlChannelLatency)
+	registry.MustRegister(QueryNodeDiskUsedSize)
 }
 
 func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {

@@ -260,7 +260,7 @@ func (it *indexBuildTask) BuildIndex(ctx context.Context) error {
 		}
 
 		// check load size and size of field data
-		localUsedSize, err := indexcgowrapper.GetLocalUsedSize()
+		localUsedSize, err := indexcgowrapper.GetLocalUsedSize(Params.LocalStorageCfg.Path)
 		if err != nil {
 			log.Ctx(ctx).Warn("IndexNode get local used size failed")
 			return err
