@@ -36,6 +36,9 @@ queryNode:
 indexCoordinator:
   nodeSelector:
     nvidia.com/gpu.present: 'true'
+  extraEnv:
+    - name: KNOWHERE_STREAMS_PER_GPU
+      value: "16"
   resources:
     requests:
       cpu: "0.1"
@@ -44,6 +47,9 @@ indexCoordinator:
 indexNode:
   nodeSelector:
     nvidia.com/gpu.present: 'true'
+  extraEnv:
+    - name: KNOWHERE_STREAMS_PER_GPU
+      value: "16"
   resources:
     requests:
       cpu: "0.5"
@@ -182,6 +188,9 @@ minio:
 standalone:
   nodeSelector:
     nvidia.com/gpu.present: 'true'
+  extraEnv:
+    - name: KNOWHERE_STREAMS_PER_GPU
+      value: "16"
   resources:
     requests:
       nvidia.com/gpu: 1

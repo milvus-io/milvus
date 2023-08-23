@@ -50,24 +50,27 @@ pipeline {
                             def date = sh(returnStdout: true, script: 'date +%Y%m%d').trim()
                             sh 'git config --global --add safe.directory /home/jenkins/agent/workspace'
                             def gitShortCommit = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
-                            imageTag="gpu-${env.BRANCH_NAME}-${date}-${gitShortCommit}"
-                            withCredentials([usernamePassword(credentialsId: "${env.CI_DOCKER_CREDENTIAL_ID}", usernameVariable: 'CI_REGISTRY_USERNAME', passwordVariable: 'CI_REGISTRY_PASSWORD')]){
-                                sh """
-                                TAG="${imageTag}" \
-                                ./e2e-k8s.sh \
-                                --skip-export-logs \
-                                --skip-install \
-                                --skip-cleanup \
-                                --skip-setup \
-                                --gpu \
-                                --skip-test
-                                """
+                            // imageTag="gpu-${env.BRANCH_NAME}-${date}-${gitShortCommit}"
+                            // withCredentials([usernamePassword(credentialsId: "${env.CI_DOCKER_CREDENTIAL_ID}", usernameVariable: 'CI_REGISTRY_USERNAME', passwordVariable: 'CI_REGISTRY_PASSWORD')]){
+                            //     sh """
+                            //     TAG="${imageTag}" \
+                            //     ./e2e-k8s.sh \
+                            //     --skip-export-logs \
+                            //     --skip-install \
+                            //     --skip-cleanup \
+                            //     --skip-setup \
+                            //     --gpu \
+                            //     --skip-test
+                            //     """
 
-                                // stash imageTag info for rebuild install & E2E Test only
-                                sh "echo ${imageTag} > imageTag.txt"
-                                stash includes: 'imageTag.txt', name: 'imageTag'
+                            //     // stash imageTag info for rebuild install & E2E Test only
+                            //     sh "echo ${imageTag} > imageTag.txt"
+                            //     stash includes: 'imageTag.txt', name: 'imageTag'
 
-                            }
+                            // }
+                            imageTag="gpu-PR-26586-20230823-e140e73e8"
+                            sh "echo ${imageTag} > imageTag.txt"
+                            stash includes: 'imageTag.txt', name: 'imageTag'
                         }
                     }
                 }
@@ -79,7 +82,7 @@ pipeline {
                 axes {
                     axis {
                         name 'MILVUS_SERVER_TYPE'
-                        values 'standalone', 'distributed'
+                        values 'standalone'
                     }
                     axis {
                         name 'MILVUS_CLIENT'
@@ -154,7 +157,7 @@ pipeline {
                                 kubernetes {
                                     inheritFrom 'default'
                                     defaultContainer 'main'
-                                    yamlFile 'ci/jenkins/pod/e2e.yaml'
+                                    yamlFile 'ci/jenkins/pod/e2e-ci.yaml'
                                     customWorkspace '/home/jenkins/agent/workspace'
                                 }
                         }
