@@ -2333,20 +2333,14 @@ ExecExprVisitor::ExecJsonContainsAllArray(JsonContainsExpr& expr_raw)
     auto pointer = milvus::Json::pointer(expr.column_.nested_path);
     auto index_func = [](Index* index) { return TargetBitmap{}; };
     auto& elements = expr.elements_;
-    std::unordered_set<int> elements_index;
-    int i = 0;
-    for (auto& element : expr.elements_) {
-        elements_index.insert(i);
-        i++;
-    }
-    auto elem_func = [&elements, &elements_index, &pointer](
-                         const milvus::Json& json) {
+
+    auto elem_func = [&elements, &pointer](const milvus::Json& json) {
         auto doc = json.doc();
         auto array = doc.at_pointer(pointer).get_array();
         if (array.error()) {
             return false;
         }
-        std::unordered_set<int> tmp_elements_index(elements_index);
+        std::unordered_set<int> exist_elements_index;
         for (auto&& it : array) {
             auto val = it.get_array();
             if (val.error()) {
@@ -2358,19 +2352,16 @@ ExecExprVisitor::ExecJsonContainsAllArray(JsonContainsExpr& expr_raw)
             for (auto&& e : val) {
                 json_array.emplace_back(e);
             }
-            for (auto index : tmp_elements_index) {
+            for (int index = 0; index < elements.size(); ++index) {
                 if (compareTwoJsonArray(json_array, elements[index])) {
-                    tmp_elements_index.erase(index);
-                    // TODO: construct array set.
-                    //  prevent expression json_contains_all(json_array, [[1,2], [3,4], [1,2]]) being unsuccessful
-                    // break;
+                    exist_elements_index.insert(index);
                 }
             }
-            if (tmp_elements_index.size() == 0) {
+            if (exist_elements_index.size() == elements.size()) {
                 return true;
             }
         }
-        return tmp_elements_index.size() == 0;
+        return exist_elements_index.size() == elements.size();
     };
 
     return ExecRangeVisitorImpl<milvus::Json>(
