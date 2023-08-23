@@ -649,7 +649,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	assert.False(t, flag)
 	ch <- struct{}{}
 	assert.False(t, flag)
-	s1.safeCloseLiveCh()
+	close(s1.liveCh)
 	<-signal
 	assert.True(t, flag)
 
