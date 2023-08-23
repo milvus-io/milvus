@@ -714,6 +714,9 @@ func (c *Core) Stop() error {
 	c.UpdateStateCode(commonpb.StateCode_Abnormal)
 	c.stopExecutor()
 	c.stopScheduler()
+	if c.proxyManager != nil {
+		c.proxyManager.Stop()
+	}
 	c.cancelIfNotNil()
 	if c.quotaCenter != nil {
 		c.quotaCenter.stop()
