@@ -364,25 +364,25 @@ class ResponseChecker:
         pk_list = []
         while True:
             res = search_iterator.next()
-            if len(res[0]) == 0:
+            if len(res) == 0:
                 log.info("search iteration finished, close")
                 search_iterator.close()
                 break
-            if check_items.get("limit", None):
-                assert len(res[0].ids) <= check_items["limit"]
+            if check_items.get("batch_size", None):
+                assert len(res) <= check_items["batch_size"]
             if check_items.get("radius", None):
-                for distance in res[0].distances:
+                for distance in res.distances():
                     if check_items["metric_type"] == "L2":
                         assert distance < check_items["radius"]
                     else:
                         assert distance > check_items["radius"]
             if check_items.get("range_filter", None):
-                for distance in res[0].distances:
+                for distance in res.distances():
                     if check_items["metric_type"] == "L2":
                         assert distance >= check_items["range_filter"]
                     else:
                         assert distance <= check_items["range_filter"]
-            pk_list.extend(res[0].ids)
+            pk_list.extend(res.ids())
         assert len(pk_list) == len(set(pk_list))
         log.info("check: total %d results" % len(pk_list))
 

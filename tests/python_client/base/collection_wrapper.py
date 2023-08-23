@@ -177,13 +177,13 @@ class ApiCollectionWrapper:
         return res, check_result
 
     @trace()
-    def search_iterator(self, data, anns_field, param, limit, expr=None,
+    def search_iterator(self, data, anns_field, param, batch_size, limit=-1, expr=None,
                         partition_names=None, output_fields=None, timeout=None, round_decimal=-1,
                         check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
 
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([self.collection.search_iterator, data, anns_field, param, limit,
+        res, check = api_request([self.collection.search_iterator, data, anns_field, param, batch_size, limit,
                                   expr, partition_names, output_fields, timeout, round_decimal], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,
                                        data=data, anns_field=anns_field, param=param, limit=limit,
@@ -207,13 +207,13 @@ class ApiCollectionWrapper:
         return res, check_result
 
     @trace()
-    def query_iterator(self, expr, output_fields=None, partition_names=None, timeout=None, check_task=None,
+    def query_iterator(self, batch_size, limit=-1, expr=None, output_fields=None, partition_names=None, timeout=None, check_task=None,
                        check_items=None, **kwargs):
         # time.sleep(5)
         timeout = TIMEOUT if timeout is None else timeout
 
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([self.collection.query_iterator, expr, output_fields, partition_names, timeout], **kwargs)
+        res, check = api_request([self.collection.query_iterator, batch_size, limit, expr, output_fields, partition_names, timeout], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,
                                        expression=expr, partition_names=partition_names,
                                        output_fields=output_fields,
