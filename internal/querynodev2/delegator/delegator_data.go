@@ -370,10 +370,11 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 
 	entries := lo.Map(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) SegmentEntry {
 		return SegmentEntry{
-			SegmentID:   info.GetSegmentID(),
-			PartitionID: info.GetPartitionID(),
-			NodeID:      req.GetDstNodeID(),
-			Version:     req.GetVersion(),
+			SegmentID:       info.GetSegmentID(),
+			PartitionID:     info.GetPartitionID(),
+			NodeID:          req.GetDstNodeID(),
+			Version:         req.GetVersion(),
+			ClusteringInfos: info.GetClusteringInfos(),
 		}
 	})
 	log.Info("load delete...")

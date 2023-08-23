@@ -779,7 +779,23 @@ func saveSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest, res *rootcoo
 		err := retry.Do(context.Background(), func() error {
 			clusteringInfo, err := clustering.ClusteringInfoFromKV(req.GetImportTask().GetInfos())
 			if err != nil {
+				log.Warn("failed to parse clustering info from import request", zap.Error(err))
 				return fmt.Errorf(err.Error())
+			}
+			if clusteringInfo != nil && clusteringInfo.Id == 0 {
+				clusteringInfoId, err := node.rootCoord.AllocID(context.Background(), &rootcoordpb.AllocIDRequest{
+					Base: commonpbutil.NewMsgBase(
+						commonpbutil.WithMsgType(commonpb.MsgType_RequestID),
+						commonpbutil.WithMsgID(0),
+						commonpbutil.WithSourceID(node.session.ServerID),
+					),
+					Count: 1,
+				})
+				if err != nil {
+					log.Warn("failed to alloc id for cluster id", zap.Error(err))
+					return fmt.Errorf(err.Error())
+				}
+				clusteringInfo.Id = clusteringInfoId.ID
 			}
 			// Ask DataCoord to save binlog path and add segment to the corresponding DataNode flow graph.
 			resp, err := node.dataCoord.SaveImportSegment(context.Background(), &datapb.SaveImportSegmentRequest{
