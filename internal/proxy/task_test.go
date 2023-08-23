@@ -3115,7 +3115,9 @@ func TestDescribeResourceGroupTaskFailed(t *testing.T) {
 		},
 	}, nil)
 	err = task.Execute(ctx)
-	assert.Error(t, err)
+	assert.NoError(t, err)
+	assert.Len(t, task.result.ResourceGroup.NumOutgoingNode, 0)
+	assert.Len(t, task.result.ResourceGroup.NumIncomingNode, 0)
 }
 
 func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
