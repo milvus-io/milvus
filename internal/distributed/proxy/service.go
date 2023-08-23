@@ -1099,11 +1099,21 @@ func (s *Server) ListResourceGroups(ctx context.Context, req *milvuspb.ListResou
 }
 
 func (s *Server) ListIndexedSegment(ctx context.Context, req *federpb.ListIndexedSegmentRequest) (*federpb.ListIndexedSegmentResponse, error) {
-	panic("TODO: implement me")
+	return &federpb.ListIndexedSegmentResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "not implemented",
+		},
+	}, nil
 }
 
 func (s *Server) DescribeSegmentIndexData(ctx context.Context, req *federpb.DescribeSegmentIndexDataRequest) (*federpb.DescribeSegmentIndexDataResponse, error) {
-	panic("TODO: implement me")
+	return &federpb.DescribeSegmentIndexDataResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "not implemented",
+		},
+	}, nil
 }
 
 func (s *Server) Connect(ctx context.Context, req *milvuspb.ConnectRequest) (*milvuspb.ConnectResponse, error) {
