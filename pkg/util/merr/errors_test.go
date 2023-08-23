@@ -100,6 +100,7 @@ func (s *ErrSuite) TestWrap() {
 	s.ErrorIs(WrapErrChannelNotFound("test_Channel", "failed to get Channel"), ErrChannelNotFound)
 	s.ErrorIs(WrapErrChannelLack("test_Channel", "failed to get Channel"), ErrChannelLack)
 	s.ErrorIs(WrapErrChannelReduplicate("test_Channel", "failed to get Channel"), ErrChannelReduplicate)
+	s.ErrorIs(WrapErrChannelUnsubscribing("test_channel"), ErrChannelUnsubscribing)
 
 	// Segment related
 	s.ErrorIs(WrapErrSegmentNotFound(1, "failed to get Segment"), ErrSegmentNotFound)

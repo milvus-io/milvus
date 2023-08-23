@@ -150,6 +150,10 @@ func (sd *shardDelegator) Serviceable() bool {
 	return sd.lifetime.GetState() == working
 }
 
+func (sd *shardDelegator) Stopped() bool {
+	return sd.lifetime.GetState() == stopped
+}
+
 // Start sets delegator to working state.
 func (sd *shardDelegator) Start() {
 	sd.lifetime.SetState(working)

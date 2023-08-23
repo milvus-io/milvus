@@ -345,6 +345,14 @@ func WrapErrChannelNotAvailable(name string, msg ...string) error {
 	return err
 }
 
+func WrapErrChannelUnsubscribing(name string, msg ...string) error {
+	err := wrapWithField(ErrChannelUnsubscribing, "channel", name)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
 // Segment related
 func WrapErrSegmentNotFound(id int64, msg ...string) error {
 	err := wrapWithField(ErrSegmentNotFound, "segment", id)

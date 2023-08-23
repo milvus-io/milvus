@@ -76,10 +76,11 @@ var (
 	ErrReplicaNotAvailable = newMilvusError("replica not available", 401, false)
 
 	// Channel related
-	ErrChannelNotFound     = newMilvusError("channel not found", 500, false)
-	ErrChannelLack         = newMilvusError("channel lacks", 501, false)
-	ErrChannelReduplicate  = newMilvusError("channel reduplicates", 502, false)
-	ErrChannelNotAvailable = newMilvusError("channel not available", 503, false)
+	ErrChannelNotFound      = newMilvusError("channel not found", 500, false)
+	ErrChannelLack          = newMilvusError("channel lacks", 501, false)
+	ErrChannelReduplicate   = newMilvusError("channel reduplicates", 502, false)
+	ErrChannelNotAvailable  = newMilvusError("channel not available", 503, false)
+	ErrChannelUnsubscribing = newMilvusError("chanel is unsubscribing", 504, true)
 
 	// Segment related
 	ErrSegmentNotFound    = newMilvusError("segment not found", 600, false)
