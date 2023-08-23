@@ -456,6 +456,7 @@ func (q *QuotaCenter) calculateWriteRates() error {
 	updateCollectionFactor(growingSegFactors)
 
 	for collection, factor := range collectionFactors {
+		metrics.RootCoordRateLimitRatio.WithLabelValues(fmt.Sprint(collection)).Set(1 - factor)
 		if factor <= 0 {
 			if _, ok := ttFactors[collection]; ok && factor == ttFactors[collection] {
 				// factor comes from ttFactor

@@ -169,6 +169,15 @@ var (
 			"quota_states",
 		})
 
+	// RootCoordRateLimitRatio reflects the ratio of rate limit.
+	RootCoordRateLimitRatio = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.RootCoordRole,
+			Name:      "rate_limit_ratio",
+			Help:      "",
+		}, []string{collectionIDLabelName})
+
 	RootCoordDDLReqLatencyInQueue = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
@@ -208,5 +217,6 @@ func RegisterRootCoord(registry *prometheus.Registry) {
 	registry.MustRegister(RootCoordNumOfRoles)
 	registry.MustRegister(RootCoordTtDelay)
 	registry.MustRegister(RootCoordQuotaStates)
+	registry.MustRegister(RootCoordRateLimitRatio)
 	registry.MustRegister(RootCoordDDLReqLatencyInQueue)
 }
