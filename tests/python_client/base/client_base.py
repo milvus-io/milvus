@@ -346,7 +346,7 @@ class TestcaseBase(Base):
         :type privilege_object: str
         :param object_name: privilege object name
         :type object_name: str
-        :param privilege: pivilege
+        :param privilege: privilege
         :type privilege: str
         :param db_name: database name
         :type db_name: str
