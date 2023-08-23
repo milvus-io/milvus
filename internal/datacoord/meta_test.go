@@ -493,7 +493,7 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 		err = meta.UpdateFlushSegmentsInfo(1, true, false, false, []*datapb.FieldBinlog{getFieldBinlogPathsWithEntry(1, 10, getInsertLogPath("binlog1", 1))},
 			[]*datapb.FieldBinlog{getFieldBinlogPaths(1, getStatsLogPath("statslog1", 1))},
 			[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogPath: getDeltaLogPath("deltalog1", 1)}}}},
-			[]*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}, []*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}})
+			[]*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}, []*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}}, nil)
 		assert.NoError(t, err)
 
 		updated := meta.GetHealthySegment(1)
@@ -521,7 +521,7 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 		meta, err := newMemoryMeta()
 		assert.NoError(t, err)
 
-		err = meta.UpdateFlushSegmentsInfo(1, false, false, false, nil, nil, nil, nil, nil)
+		err = meta.UpdateFlushSegmentsInfo(1, false, false, false, nil, nil, nil, nil, nil, nil)
 		assert.NoError(t, err)
 	})
 
@@ -534,8 +534,7 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 		assert.NoError(t, err)
 
 		err = meta.UpdateFlushSegmentsInfo(1, false, false, false, nil, nil, nil, []*datapb.CheckPoint{{SegmentID: 2, NumOfRows: 10}},
-
-			[]*datapb.SegmentStartPosition{{SegmentID: 2, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}})
+			[]*datapb.SegmentStartPosition{{SegmentID: 2, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}}, nil)
 		assert.NoError(t, err)
 		assert.Nil(t, meta.GetHealthySegment(2))
 	})
@@ -562,7 +561,7 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 		err = meta.UpdateFlushSegmentsInfo(1, true, false, false, []*datapb.FieldBinlog{getFieldBinlogPaths(1, getInsertLogPath("binlog", 1))},
 			[]*datapb.FieldBinlog{getFieldBinlogPaths(1, getInsertLogPath("statslog", 1))},
 			[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogPath: getDeltaLogPath("deltalog", 1)}}}},
-			[]*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}, []*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}})
+			[]*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}, []*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}}, nil)
 		assert.Error(t, err)
 		assert.Equal(t, "mocked fail", err.Error())
 		segmentInfo = meta.GetHealthySegment(1)

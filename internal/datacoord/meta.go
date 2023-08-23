@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -448,6 +449,7 @@ func (m *meta) UpdateFlushSegmentsInfo(
 	binlogs, statslogs, deltalogs []*datapb.FieldBinlog,
 	checkpoints []*datapb.CheckPoint,
 	startPositions []*datapb.SegmentStartPosition,
+	clusteringInfo *internalpb.ClusteringInfo,
 ) error {
 	log.Debug("meta update: update flush segments info",
 		zap.Int64("segmentId", segmentID),
@@ -563,6 +565,7 @@ func (m *meta) UpdateFlushSegmentsInfo(
 				zap.Int64("segment bin log row count (correct)", count))
 			s.NumOfRows = count
 		}
+		s.ClusteringInfo = clusteringInfo
 		modSegments[segmentID] = s
 	} else {
 		for _, cp := range checkpoints {
