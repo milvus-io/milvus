@@ -747,6 +747,24 @@ func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 							TimeoutInSeconds: 1,
 						},
 					},
+					5: { // timeout and failed
+						state:      timeout,
+						dataNodeID: 2,
+						plan: &datapb.CompactionPlan{
+							PlanID:           5,
+							StartTime:        tsoutil.ComposeTS(ts.UnixNano()/int64(time.Millisecond), 0) - 200*1000,
+							TimeoutInSeconds: 1,
+						},
+					},
+					6: { // timeout and executing
+						state:      timeout,
+						dataNodeID: 2,
+						plan: &datapb.CompactionPlan{
+							PlanID:           6,
+							StartTime:        tsoutil.ComposeTS(ts.UnixNano()/int64(time.Millisecond), 0) - 200*1000,
+							TimeoutInSeconds: 1,
+						},
+					},
 				},
 				meta: &meta{
 					segments: &SegmentsInfo{
@@ -761,12 +779,13 @@ func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 						data map[int64]*Session
 					}{
 						data: map[int64]*Session{
-							1: {client: &mockDataNodeClient{
+							2: {client: &mockDataNodeClient{
 								compactionStateResp: &datapb.CompactionStateResponse{
 									Results: []*datapb.CompactionStateResult{
 										{PlanID: 1, State: commonpb.CompactionState_Executing},
 										{PlanID: 3, State: commonpb.CompactionState_Completed, Result: &datapb.CompactionResult{PlanID: 3}},
 										{PlanID: 4, State: commonpb.CompactionState_Executing},
+										{PlanID: 6, State: commonpb.CompactionState_Executing},
 									},
 								},
 							}},
@@ -776,17 +795,21 @@ func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 			},
 			args{ts: tsoutil.ComposeTS(ts.Add(5*time.Second).UnixNano()/int64(time.Millisecond), 0)},
 			false,
-			[]int64{4},
-			[]int64{2},
+			[]int64{4, 6},
+			[]int64{2, 5},
 			[]int64{1, 3},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := &compactionPlanHandler{
-				plans:    tt.fields.plans,
-				sessions: tt.fields.sessions,
-				meta:     tt.fields.meta,
+				plans:      tt.fields.plans,
+				sessions:   tt.fields.sessions,
+				meta:       tt.fields.meta,
+				parallelCh: make(map[int64]chan struct{}),
+			}
+			for range tt.failed {
+				c.acquireQueue(2)
 			}
 
 			err := c.updateCompaction(tt.args.ts)
@@ -806,6 +829,10 @@ func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 				task := c.getCompaction(id)
 				assert.NotEqual(t, failed, task.state)
 			}
+
+			c.mu.Lock()
+			assert.Equal(t, 0, len(c.parallelCh[2]))
+			c.mu.Unlock()
 		})
 	}
 }
