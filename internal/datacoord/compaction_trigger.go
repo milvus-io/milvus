@@ -20,9 +20,12 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -192,6 +195,15 @@ func (t *compactionTrigger) isCollectionAutoCompactionEnabled(coll *collectionIn
 	return enabled
 }
 
+func (t *compactionTrigger) isCollectionClusteringCompactionEnabled(coll *collectionInfo) bool {
+	enabled, err := getCollectionClusteringCompactionEnabled(coll.Properties)
+	if err != nil {
+		log.Warn("collection properties clustering compaction not valid, returning false", zap.Error(err))
+		return false
+	}
+	return enabled
+}
+
 func (t *compactionTrigger) getCompactTime(ts Timestamp, coll *collectionInfo) (*compactTime, error) {
 	collectionTTL, err := getCollectionTTL(coll.Properties)
 	if err != nil {
@@ -210,6 +222,13 @@ func (t *compactionTrigger) getCompactTime(ts Timestamp, coll *collectionInfo) (
 
 	// no expiration time
 	return &compactTime{ttRetentionLogic, 0, 0}, nil
+}
+
+func (t *compactionTrigger) getClusteringBuildParams(coll *collectionInfo) map[string]string {
+	params := lo.OmitBy(coll.Properties, func(key string, _ string) bool {
+		return strings.HasPrefix(key, "clustering")
+	})
+	return params
 }
 
 // triggerCompaction trigger a compaction if any compaction condition satisfy.
@@ -404,12 +423,15 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 			return
 		}
 
-		plans := t.generatePlans(group.segments, signal.isForce, isDiskIndex, ct)
+		clusteringBuildParams := t.getClusteringBuildParams(coll)
+		plans := t.generatePlans(group.segments, signal.isForce, isDiskIndex, ct, clusteringBuildParams)
 		for _, plan := range plans {
+			// Todo these preprocess should move into execCompactionPlan
 			segIDs := fetchSegIDs(plan.GetSegmentBinlogs())
 
-			if !signal.isForce && t.compactionHandler.isFull() {
+			if !signal.isForce && t.compactionHandler.isFull(plan.Type) {
 				log.Warn("compaction plan skipped due to handler full",
+					zap.String("compactionType", plan.Type.String()),
 					zap.Int64("collectionID", signal.collectionID),
 					zap.Int64s("segmentIDs", segIDs))
 				break
@@ -512,7 +534,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 		return
 	}
 
-	plans := t.generatePlans(segments, signal.isForce, isDiskIndex, ct)
+	plans := t.generatePlans(segments, signal.isForce, isDiskIndex, ct, nil)
 	for _, plan := range plans {
 		if t.compactionHandler.isFull() {
 			log.Warn("compaction plan skipped due to handler full", zap.Int64("collection", signal.collectionID), zap.Int64("planID", plan.PlanID))
@@ -541,7 +563,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 	}
 }
 
-func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, isDiskIndex bool, compactTime *compactTime) []*datapb.CompactionPlan {
+func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, isDiskIndex bool, compactTime *compactTime, clusteringBuildParams map[string]string) []*datapb.CompactionPlan {
 	// find segments need internal compaction
 	// TODO add low priority candidates, for example if the segment is smaller than full 0.9 * max segment size but larger than small segment boundary, we only execute compaction when there are no compaction running actively
 	var prioritizedCandidates []*SegmentInfo
@@ -612,7 +634,7 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, i
 			}
 		}
 		// since this is priority compaction, we will execute even if there is only segment
-		plan := segmentsToPlan(bucket, compactTime)
+		plan := segmentsToPlan(bucket, compactTime, datapb.CompactionType_MixCompaction)
 		var size int64
 		var row int64
 		for _, s := range bucket {
@@ -657,7 +679,7 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, i
 		// only merge if candidate number is large than MinSegmentToMerge or if target row is large enough
 		if len(bucket) >= Params.DataCoordCfg.MinSegmentToMerge.GetAsInt() ||
 			len(bucket) > 1 && t.isCompactableSegment(targetRow, segment) {
-			plan := segmentsToPlan(bucket, compactTime)
+			plan := segmentsToPlan(bucket, compactTime, datapb.CompactionType_MixCompaction)
 			log.Info("generate a plan for small candidates",
 				zap.Int64s("plan segmentIDs", lo.Map(bucket, getSegmentIDs)),
 				zap.Int64("target segment row", targetRow),
@@ -696,7 +718,8 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, i
 		}
 	}
 	// If there are still remaining small segments, try adding them to non-planned segments.
-	for _, npSeg := range nonPlannedSegments {
+	for j := 0; j < len(nonPlannedSegments); {
+		npSeg := nonPlannedSegments[j]
 		bucket := []*SegmentInfo{npSeg}
 		targetRow := npSeg.GetNumOfRows()
 		for i := len(remainingSmallSegs) - 1; i >= 0; i-- {
@@ -709,21 +732,49 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, i
 			}
 		}
 		if len(bucket) > 1 {
-			plan := segmentsToPlan(bucket, compactTime)
+			plan := segmentsToPlan(bucket, compactTime, datapb.CompactionType_MixCompaction)
 			plans = append(plans, plan)
 			log.Info("generate a plan for to squeeze small candidates into non-planned segment",
 				zap.Int64s("plan segmentIDs", lo.Map(bucket, getSegmentIDs)),
 				zap.Int64("target segment row", targetRow),
 			)
+			nonPlannedSegments = append(nonPlannedSegments[:j], nonPlannedSegments[j+1:]...)
+		} else {
+			j++
 		}
 	}
+
+	if len(nonPlannedSegments) > 0 &&
+		Params.DataCoordCfg.ClusteringCompactionEnable.GetAsBool() {
+		if collectionEnableClusteringCompact, exist := clusteringBuildParams[common.CollectionClusteringCompactionKey]; exist &&
+			strings.ToLower(collectionEnableClusteringCompact) == "true" {
+			log.Info("Generating clustering compaction plan...", zap.Int("candidates_num", len(nonPlannedSegments)))
+			clusteringMaxSize := Params.DataCoordCfg.ClusteringCompactionMaxSize.GetAsInt64()
+			clusteringMinSize := Params.DataCoordCfg.ClusteringCompactionMaxSize.GetAsInt64()
+			for len(nonPlannedSegments) > 0 {
+				var bucket []*SegmentInfo
+				free := clusteringMaxSize
+				prioritizedCandidates, bucket, free = greedySelectBySize(prioritizedCandidates, free)
+				if clusteringMaxSize-free > clusteringMinSize {
+					plan := segmentsToPlan(bucket, compactTime, datapb.CompactionType_ClusteringCompaction)
+					plan.ClusteringParams = funcutil.Map2KeyValuePair(clusteringBuildParams)
+					log.Info("generate a clustering compact plan", zap.Any("plan", plan),
+						zap.Int64("target segment size", clusteringMaxSize-free))
+					plans = append(plans, plan)
+				} else {
+					break
+				}
+			}
+		}
+	}
+
 	return plans
 }
 
-func segmentsToPlan(segments []*SegmentInfo, compactTime *compactTime) *datapb.CompactionPlan {
+func segmentsToPlan(segments []*SegmentInfo, compactTime *compactTime, compactType datapb.CompactionType) *datapb.CompactionPlan {
 	plan := &datapb.CompactionPlan{
 		Timetravel:    compactTime.travelTime,
-		Type:          datapb.CompactionType_MixCompaction,
+		Type:          compactType,
 		Channel:       segments[0].GetInsertChannel(),
 		CollectionTtl: compactTime.collectionTTL.Nanoseconds(),
 	}
@@ -750,6 +801,23 @@ func greedySelect(candidates []*SegmentInfo, free int64, maxSegment int) ([]*Seg
 		if len(result) < maxSegment && candidate.GetNumOfRows() < free {
 			result = append(result, candidate)
 			free -= candidate.GetNumOfRows()
+			candidates = append(candidates[:i], candidates[i+1:]...)
+		} else {
+			i++
+		}
+	}
+
+	return candidates, result, free
+}
+
+func greedySelectBySize(candidates []*SegmentInfo, free int64) ([]*SegmentInfo, []*SegmentInfo, int64) {
+	var result []*SegmentInfo
+
+	for i := 0; i < len(candidates); {
+		candidate := candidates[i]
+		if candidate.getSegmentSize() < free {
+			result = append(result, candidate)
+			free -= candidate.getSegmentSize()
 			candidates = append(candidates[:i], candidates[i+1:]...)
 		} else {
 			i++
@@ -816,6 +884,7 @@ func isExpandableSmallSegment(segment *SegmentInfo) bool {
 	return segment.GetNumOfRows() < int64(float64(segment.GetMaxRowNum())*(Params.DataCoordCfg.SegmentExpansionRate.GetAsFloat()-1))
 }
 
+// allocate unique id and task timeout for plan
 func (t *compactionTrigger) fillOriginPlan(plan *datapb.CompactionPlan) error {
 	// TODO context
 	id, err := t.allocator.allocID(context.TODO())
@@ -831,6 +900,11 @@ func (t *compactionTrigger) isStaleSegment(segment *SegmentInfo) bool {
 	return time.Since(segment.lastFlushTime).Minutes() >= segmentTimedFlushDuration
 }
 
+// ShouldDoSingleCompaction contains several rules to trigger a segment to compact single
+// 1, For flushed generated segment, if stats_log_num is too many, trigger compact
+// 2, If delta_log_num is too many, trigger compact
+// 3, For collection with TTL, if expired data is too large, trigger compact
+// 4, If delete data is too many, trigger compact
 func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, isDiskIndex bool, compactTime *compactTime) bool {
 	// no longer restricted binlog numbers because this is now related to field numbers
 	var binLog int

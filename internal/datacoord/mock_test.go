@@ -678,7 +678,7 @@ func (h *mockCompactionHandler) updateCompaction(ts Timestamp) error {
 }
 
 // isFull return true if the task pool is full
-func (h *mockCompactionHandler) isFull() bool {
+func (h *mockCompactionHandler) isFull(compactionType ...datapb.CompactionType) bool {
 	if f, ok := h.methods["isFull"]; ok {
 		if ff, ok := f.(func() bool); ok {
 			return ff()

@@ -146,7 +146,7 @@ func (mc *mockCompactor) injectDone(success bool) {
 
 }
 
-func (mc *mockCompactor) compact() (*datapb.CompactionResult, error) {
+func (mc *mockCompactor) compact() ([]*datapb.CompactionResult, error) {
 	if !mc.isvalid {
 		return nil, errStart
 	}

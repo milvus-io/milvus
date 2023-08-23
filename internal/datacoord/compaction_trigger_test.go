@@ -62,7 +62,7 @@ func (h *spyCompactionHandler) updateCompaction(ts Timestamp) error {
 }
 
 // isFull return true if the task pool is full
-func (h *spyCompactionHandler) isFull() bool {
+func (h *spyCompactionHandler) isFull(compactionType ...datapb.CompactionType) bool {
 	return false
 }
 

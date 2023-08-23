@@ -55,11 +55,9 @@ var (
 	errContext                 = errors.New("context done or timeout")
 )
 
-type iterator = storage.Iterator
-
 type compactor interface {
 	complete()
-	compact() (*datapb.CompactionResult, error)
+	compact() ([]*datapb.CompactionResult, error)
 	injectDone(success bool)
 	stop()
 	getPlanID() UniqueID
@@ -508,7 +506,7 @@ func (t *compactionTask) merge(
 	return insertPaths, statPaths, numRows, nil
 }
 
-func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
+func (t *compactionTask) compact() ([]*datapb.CompactionResult, error) {
 	compactStart := time.Now()
 	if ok := funcutil.CheckCtxValid(t.ctx); !ok {
 		log.Warn("compact wrong, task context done or timeout")
@@ -516,36 +514,53 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 	}
 
 	durInQueue := t.tr.RecordSpan()
+
+	if t.plan.GetType() == datapb.CompactionType_UndefinedCompaction {
+		log.Warn("compact wrong, compaction type undefined")
+		return nil, errCompactionTypeUndifined
+	}
+	if len(t.plan.GetSegmentBinlogs()) < 1 {
+		log.Warn("compact wrong, there's no segments in segment binlogs")
+		return nil, errIllegalCompactionPlan
+	}
+
+	var result []*datapb.CompactionResult
+	var err error
+	if t.plan.GetType() == datapb.CompactionType_ClusteringCompaction {
+		result, err = t.clusteringCompact()
+	} else {
+		result, err = t.mixCompact()
+	}
+
+	log.Info("overall elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Float64("elapse", nano2Milli(time.Since(compactStart))))
+	metrics.DataNodeCompactionLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(t.tr.ElapseSpan().Milliseconds()))
+	metrics.DataNodeCompactionLatencyInQueue.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(durInQueue.Milliseconds()))
+
+	return result, err
+}
+
+func (t *compactionTask) clusteringCompact() ([]*datapb.CompactionResult, error) {
+	return nil, nil
+}
+
+func (t *compactionTask) mixCompact() ([]*datapb.CompactionResult, error) {
 	ctxTimeout, cancelAll := context.WithTimeout(t.ctx, time.Duration(t.plan.GetTimeoutInSeconds())*time.Second)
 	defer cancelAll()
 
-	var targetSegID UniqueID
-	var err error
-	switch {
+	log.Info("compaction start", zap.Int64("planID", t.plan.GetPlanID()), zap.Int32("timeout in seconds", t.plan.GetTimeoutInSeconds()))
 
-	case t.plan.GetType() == datapb.CompactionType_UndefinedCompaction:
-		log.Warn("compact wrong, compaction type undefined")
-		return nil, errCompactionTypeUndifined
-
-	case len(t.plan.GetSegmentBinlogs()) < 1:
-		log.Warn("compact wrong, there's no segments in segment binlogs")
-		return nil, errIllegalCompactionPlan
-
-	case t.plan.GetType() == datapb.CompactionType_MergeCompaction || t.plan.GetType() == datapb.CompactionType_MixCompaction:
-		targetSegID, err = t.AllocOne()
-		if err != nil {
-			log.Warn("compact wrong", zap.Error(err))
-			return nil, err
-		}
+	targetSegID, err := t.AllocOne()
+	if err != nil {
+		log.Warn("compact wrong", zap.Error(err))
+		return nil, err
 	}
 
-	log.Info("compaction start", zap.Int64("planID", t.plan.GetPlanID()), zap.Int32("timeout in seconds", t.plan.GetTimeoutInSeconds()))
 	segIDs := make([]UniqueID, 0, len(t.plan.GetSegmentBinlogs()))
 	for _, s := range t.plan.GetSegmentBinlogs() {
 		segIDs = append(segIDs, s.GetSegmentID())
 	}
 
-	_, partID, meta, err := t.getSegmentMeta(segIDs[0])
+	_, partID, collectionMeta, err := t.getSegmentMeta(segIDs[0])
 	if err != nil {
 		log.Warn("compact wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
 		return nil, err
@@ -554,7 +569,7 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 	// Inject to stop flush
 	injectStart := time.Now()
 	ti := newTaskInjection(len(segIDs), func(pack *segmentFlushPack) {
-		collectionID := meta.GetID()
+		collectionID := collectionMeta.GetID()
 		pack.segmentID = targetSegID
 		for _, insertLog := range pack.insertLogs {
 			splits := strings.Split(insertLog.LogPath, "/")
@@ -730,14 +745,14 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 		return nil, err
 	}
 
-	inPaths, statsPaths, numRows, err := t.merge(ctxTimeout, allPath, targetSegID, partID, meta, deltaPk2Ts)
+	inPaths, statsPaths, numRows, err := t.merge(ctxTimeout, allPath, targetSegID, partID, collectionMeta, deltaPk2Ts)
 	if err != nil {
 		log.Warn("compact wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
 		return nil, err
 	}
 
 	uploadDeltaStart := time.Now()
-	deltaInfo, err := t.uploadDeltaLog(ctxTimeout, targetSegID, partID, deltaBuf.delData, meta)
+	deltaInfo, err := t.uploadDeltaLog(ctxTimeout, targetSegID, partID, deltaBuf.delData, collectionMeta)
 	if err != nil {
 		log.Warn("compact wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
 		return nil, err
@@ -774,11 +789,7 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 		zap.Int("num of delta paths", len(deltaInfo)),
 	)
 
-	log.Info("overall elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Float64("elapse", nano2Milli(time.Since(compactStart))))
-	metrics.DataNodeCompactionLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(t.tr.ElapseSpan().Milliseconds()))
-	metrics.DataNodeCompactionLatencyInQueue.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(durInQueue.Milliseconds()))
-
-	return pack, nil
+	return []*datapb.CompactionResult{pack}, nil
 }
 
 func (t *compactionTask) injectDone(success bool) {

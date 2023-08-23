@@ -440,6 +440,7 @@ enum CompactionType {
   reserved 1;
   MergeCompaction = 2;
   MixCompaction = 3;
+  ClusteringCompaction = 4;
 }
 
 message CompactionStateRequest {
@@ -472,6 +473,7 @@ message CompactionPlan {
   string channel = 7;
   int64 collection_ttl = 8;
   int64 total_rows = 9;
+  repeated common.KeyValuePair clustering_params = 10;
 }
 
 message CompactionResult {

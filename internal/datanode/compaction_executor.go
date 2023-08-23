@@ -100,7 +100,8 @@ func (c *compactionExecutor) executeTask(task compactor) {
 			zap.Error(err),
 		)
 	} else {
-		c.completed.Insert(task.getPlanID(), result)
+		// Todo compatible with clustering compact
+		c.completed.Insert(task.getPlanID(), result[0])
 		c.completedCompactor.Insert(task.getPlanID(), task)
 	}
 

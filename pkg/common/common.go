@@ -99,8 +99,9 @@ const (
 //  Collection properties key
 
 const (
-	CollectionTTLConfigKey      = "collection.ttl.seconds"
-	CollectionAutoCompactionKey = "collection.autocompaction.enabled"
+	CollectionTTLConfigKey            = "collection.ttl.seconds"
+	CollectionAutoCompactionKey       = "collection.autocompaction.enabled"
+	CollectionClusteringCompactionKey = "collection.clusteringCompaction.enabled"
 
 	// rate limit
 	CollectionInsertRateMaxKey   = "collection.insertRate.max.mb"

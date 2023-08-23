@@ -205,6 +205,20 @@ func getCollectionAutoCompactionEnabled(properties map[string]string) (bool, err
 	return Params.DataCoordCfg.EnableAutoCompaction.GetAsBool(), nil
 }
 
+// getCollectionClusteringCompactionEnabled returns whether clustering compaction for collection is enabled.
+// if not set, returns global clustering compaction config.
+func getCollectionClusteringCompactionEnabled(properties map[string]string) (bool, error) {
+	v, ok := properties[common.CollectionClusteringCompactionKey]
+	if ok {
+		enabled, err := strconv.ParseBool(v)
+		if err != nil {
+			return false, err
+		}
+		return enabled, nil
+	}
+	return Params.DataCoordCfg.ClusteringCompactionEnable.GetAsBool(), nil
+}
+
 func getIndexType(indexParams []*commonpb.KeyValuePair) string {
 	for _, param := range indexParams {
 		if param.Key == common.IndexTypeKey {

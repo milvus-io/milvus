@@ -1977,6 +1977,12 @@ type dataCoordConfig struct {
 	SingleCompactionDeltalogMaxNum    ParamItem `refreshable:"true"`
 	GlobalCompactionInterval          ParamItem `refreshable:"false"`
 
+	ClusteringCompactionEnable           ParamItem `refreshable:"true"`
+	ClusteringCompactionMinSize          ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxSize          ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxParallelTasks ParamItem `refreshable:"true"`
+	ClusteringCompactionTimeout          ParamItem `refreshable:"true"`
+
 	// Garbage Collection
 	EnableGarbageCollection ParamItem `refreshable:"false"`
 	GCInterval              ParamItem `refreshable:"false"`
@@ -2245,6 +2251,51 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		DefaultValue: "60",
 	}
 	p.GlobalCompactionInterval.Init(base.mgr)
+
+	p.ClusteringCompactionEnable = ParamItem{
+		Key:          "dataCoord.compaction.clusteringCompaction.enable",
+		Version:      "2.4.0",
+		DefaultValue: "false",
+		Doc:          "",
+		Export:       true,
+	}
+	p.ClusteringCompactionEnable.Init(base.mgr)
+
+	p.ClusteringCompactionMinSize = ParamItem{
+		Key:          "dataCoord.compaction.clusteringCompaction.minSize",
+		Version:      "2.4.0",
+		DefaultValue: "512m",
+		Doc:          "",
+		Export:       true,
+	}
+	p.ClusteringCompactionMinSize.Init(base.mgr)
+
+	p.ClusteringCompactionMaxSize = ParamItem{
+		Key:          "dataCoord.compaction.clusteringCompaction.maxSize",
+		Version:      "2.4.0",
+		DefaultValue: "10G",
+		Doc:          "",
+		Export:       true,
+	}
+	p.ClusteringCompactionMaxSize.Init(base.mgr)
+
+	p.ClusteringCompactionMaxParallelTasks = ParamItem{
+		Key:          "dataCoord.compaction.clusteringCompaction.maxParallelTasks",
+		Version:      "2.4.0",
+		DefaultValue: "1",
+		Doc:          "",
+		Export:       true,
+	}
+	p.ClusteringCompactionMaxParallelTasks.Init(base.mgr)
+
+	p.ClusteringCompactionTimeout = ParamItem{
+		Key:          "dataCoord.compaction.clusteringCompaction.timeout",
+		Version:      "2.4.0",
+		DefaultValue: "1800",
+		Doc:          "",
+		Export:       true,
+	}
+	p.ClusteringCompactionTimeout.Init(base.mgr)
 
 	p.EnableGarbageCollection = ParamItem{
 		Key:          "dataCoord.enableGarbageCollection",

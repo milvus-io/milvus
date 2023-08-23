@@ -48,7 +48,7 @@ type compactionPlanContext interface {
 	// updateCompaction set the compaction state to timeout or completed
 	updateCompaction(ts Timestamp) error
 	// isFull return true if the task pool is full
-	isFull() bool
+	isFull(compactionType ...datapb.CompactionType) bool
 	// get compaction tasks by signal id
 	getCompactionTasksBySignalID(signalID int64) []*compactionTask
 }
@@ -92,16 +92,17 @@ func (t *compactionTask) shadowClone(opts ...compactionTaskOpt) *compactionTask 
 var _ compactionPlanContext = (*compactionPlanHandler)(nil)
 
 type compactionPlanHandler struct {
-	plans            map[int64]*compactionTask // planID -> task
-	sessions         *SessionManager
-	meta             *meta
-	chManager        *ChannelManager
-	mu               sync.RWMutex
-	executingTaskNum int
-	allocator        allocator
-	quit             chan struct{}
-	wg               sync.WaitGroup
-	flushCh          chan UniqueID
+	plans                      map[int64]*compactionTask // planID -> task
+	sessions                   *SessionManager
+	meta                       *meta
+	chManager                  *ChannelManager
+	mu                         sync.RWMutex
+	executingTaskNum           int
+	executingClusteringTaskNum int
+	allocator                  allocator
+	quit                       chan struct{}
+	wg                         sync.WaitGroup
+	flushCh                    chan UniqueID
 	//segRefer         *SegmentReferenceManager
 	parallelCh map[int64]chan struct{}
 }
@@ -182,7 +183,11 @@ func (c *compactionPlanHandler) execCompactionPlan(signal *compactionSignal, pla
 		dataNodeID:  nodeID,
 	}
 	c.plans[plan.PlanID] = task
-	c.executingTaskNum++
+	if plan.Type == datapb.CompactionType_ClusteringCompaction {
+		c.executingClusteringTaskNum++
+	} else {
+		c.executingTaskNum++
+	}
 
 	go func() {
 		log.Info("acquire queue", zap.Int64("nodeID", nodeID), zap.Int64("planID", plan.GetPlanID()))
@@ -240,9 +245,15 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionResu
 		return errors.New("unknown compaction type")
 	}
 	c.plans[planID] = c.plans[planID].shadowClone(setState(completed), setResult(result))
-	c.executingTaskNum--
-	if c.plans[planID].plan.GetType() == datapb.CompactionType_MergeCompaction ||
-		c.plans[planID].plan.GetType() == datapb.CompactionType_MixCompaction {
+
+	// Todo CompactionType_MergeCompaction now has no usage
+	switch c.plans[planID].plan.GetType() {
+	case datapb.CompactionType_MergeCompaction:
+	case datapb.CompactionType_MixCompaction:
+		c.executingTaskNum--
+		c.flushCh <- result.GetSegmentID()
+	case datapb.CompactionType_ClusteringCompaction:
+		c.executingClusteringTaskNum--
 		c.flushCh <- result.GetSegmentID()
 	}
 	// TODO: when to clean task list
@@ -337,7 +348,11 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 		log.Info("compaction failed", zap.Int64("planID", task.plan.PlanID), zap.Int64("nodeID", task.dataNodeID))
 		c.plans[planID] = c.plans[planID].shadowClone(setState(failed))
 		c.setSegmentsCompacting(task.plan, false)
-		c.executingTaskNum--
+		if task.plan.Type == datapb.CompactionType_ClusteringCompaction {
+			c.executingClusteringTaskNum--
+		} else {
+			c.executingTaskNum--
+		}
 		c.releaseQueue(task.dataNodeID)
 	}
 
@@ -373,12 +388,20 @@ func (c *compactionPlanHandler) releaseQueue(nodeID int64) {
 	<-ch
 }
 
-// isFull return true if the task pool is full
-func (c *compactionPlanHandler) isFull() bool {
+// isFull return true if the task pool for the compactionType is full
+func (c *compactionPlanHandler) isFull(compactionType ...datapb.CompactionType) bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-
-	return c.executingTaskNum >= Params.DataCoordCfg.CompactionMaxParallelTasks.GetAsInt()
+	if compactionType != nil {
+		switch compactionType[0] {
+		case datapb.CompactionType_ClusteringCompaction:
+			return c.executingClusteringTaskNum >= Params.DataCoordCfg.ClusteringCompactionMaxParallelTasks.GetAsInt()
+		default:
+			return c.executingTaskNum >= Params.DataCoordCfg.CompactionMaxParallelTasks.GetAsInt()
+		}
+	} else {
+		return c.executingTaskNum >= Params.DataCoordCfg.CompactionMaxParallelTasks.GetAsInt()
+	}
 }
 
 func (c *compactionPlanHandler) getExecutingCompactions() []*compactionTask {
