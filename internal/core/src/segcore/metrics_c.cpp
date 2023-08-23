@@ -20,5 +20,6 @@ GetKnowhereMetrics() {
     auto len = str.length();
     char* res = (char*)malloc(len + 1);
     memcpy(res, str.data(), len);
+    res[len] = '\0';
     return res;
 }
