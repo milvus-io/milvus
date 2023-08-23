@@ -19,6 +19,7 @@ package msgstream
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/cockroachdb/errors"
@@ -47,6 +48,7 @@ type PmsFactory struct {
 	PulsarAuthParams string
 	PulsarTenant     string
 	PulsarNameSpace  string
+	RequestTimeout   time.Duration
 }
 
 func NewPmsFactory(serviceParam *paramtable.ServiceParam) *PmsFactory {
@@ -60,6 +62,7 @@ func NewPmsFactory(serviceParam *paramtable.ServiceParam) *PmsFactory {
 		PulsarAuthParams: config.AuthParams.GetValue(),
 		PulsarTenant:     config.Tenant.GetValue(),
 		PulsarNameSpace:  config.Namespace.GetValue(),
+		RequestTimeout:   config.RequestTimeout.GetAsDuration(time.Second),
 	}
 }
 
@@ -70,8 +73,9 @@ func (f *PmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
 		return nil, err
 	}
 	clientOpts := pulsar.ClientOptions{
-		URL:            f.PulsarAddress,
-		Authentication: auth,
+		URL:              f.PulsarAddress,
+		Authentication:   auth,
+		OperationTimeout: f.RequestTimeout,
 	}
 
 	pulsarClient, err := pulsarmqwrapper.NewClient(f.PulsarTenant, f.PulsarNameSpace, clientOpts)

@@ -32,12 +32,12 @@ func TestComponentParam(t *testing.T) {
 	params := Get()
 
 	t.Run("test commonConfig", func(t *testing.T) {
-		Params := params.CommonCfg
+		Params := &params.CommonCfg
 
 		assert.NotEqual(t, Params.DefaultPartitionName.GetValue(), "")
 		t.Logf("default partition name = %s", Params.DefaultPartitionName.GetValue())
 
-		assert.NotEqual(t, Params.DefaultIndexName, "")
+		assert.NotEqual(t, Params.DefaultIndexName.GetValue(), "")
 		t.Logf("default index name = %s", Params.DefaultIndexName.GetValue())
 
 		assert.Equal(t, Params.RetentionDuration.GetAsInt64(), int64(DefaultRetentionDuration))
@@ -114,7 +114,7 @@ func TestComponentParam(t *testing.T) {
 	})
 
 	t.Run("test rootCoordConfig", func(t *testing.T) {
-		Params := params.RootCoordCfg
+		Params := &params.RootCoordCfg
 
 		assert.NotEqual(t, Params.MaxPartitionNum.GetAsInt64(), 0)
 		t.Logf("master MaxPartitionNum = %d", Params.MaxPartitionNum.GetAsInt64())
@@ -130,11 +130,11 @@ func TestComponentParam(t *testing.T) {
 	})
 
 	t.Run("test proxyConfig", func(t *testing.T) {
-		Params := params.ProxyCfg
+		Params := &params.ProxyCfg
 
-		t.Logf("TimeTickInterval: %v", Params.TimeTickInterval)
+		t.Logf("TimeTickInterval: %v", &Params.TimeTickInterval)
 
-		t.Logf("healthCheckTimetout: %v", Params.HealthCheckTimetout)
+		t.Logf("healthCheckTimetout: %v", &Params.HealthCheckTimetout)
 
 		t.Logf("MsgStreamTimeTickBufSize: %d", Params.MsgStreamTimeTickBufSize.GetAsInt64())
 
@@ -166,7 +166,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, Params.CheckQueryNodeHealthInterval.GetAsInt(), 1000)
 		assert.Equal(t, Params.CostMetricsExpireTime.GetAsInt(), 1000)
 		assert.Equal(t, Params.RetryTimesOnReplica.GetAsInt(), 2)
-		assert.Equal(t, Params.HealthCheckTimetout.GetAsInt64(), 3000)
+		assert.EqualValues(t, Params.HealthCheckTimetout.GetAsInt64(), 3000)
 	})
 
 	// t.Run("test proxyConfig panic", func(t *testing.T) {
