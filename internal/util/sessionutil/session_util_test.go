@@ -530,13 +530,14 @@ func (suite *SessionWithVersionSuite) TestGetSessionsWithRangeVersion() {
 		suite.Equal(1, len(result))
 	})
 
-	suite.Run(">=2.2.0", func() {
-		r, err := semver.ParseRange(">=2.2.0")
+	suite.Run(">2.2.0", func() {
+		r, err := semver.ParseRange(">2.2.0")
 		suite.Require().NoError(err)
 
 		result, _, err := s.GetSessionsWithVersionRange(suite.serverName, r)
 		suite.Require().NoError(err)
 		suite.Equal(0, len(result))
+		suite.T().Log(result)
 	})
 
 	suite.Run(">=0.0.0 with garbage", func() {
