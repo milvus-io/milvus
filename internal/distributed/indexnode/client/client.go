@@ -19,7 +19,6 @@ package grpcindexnodeclient
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"google.golang.org/grpc"
@@ -47,22 +46,10 @@ func NewClient(ctx context.Context, addr string, nodeID int64, encryption bool) 
 	if addr == "" {
 		return nil, fmt.Errorf("address is empty")
 	}
-	clientParams := &Params.IndexNodeGrpcClientCfg
+	config := &Params.IndexNodeGrpcClientCfg
 	client := &Client{
-		addr: addr,
-		grpcClient: &grpcclient.ClientBase[indexpb.IndexNodeClient]{
-			ClientMaxRecvSize:      clientParams.ClientMaxRecvSize.GetAsInt(),
-			ClientMaxSendSize:      clientParams.ClientMaxSendSize.GetAsInt(),
-			DialTimeout:            clientParams.DialTimeout.GetAsDuration(time.Millisecond),
-			KeepAliveTime:          clientParams.KeepAliveTime.GetAsDuration(time.Millisecond),
-			KeepAliveTimeout:       clientParams.KeepAliveTimeout.GetAsDuration(time.Millisecond),
-			RetryServiceNameConfig: "milvus.proto.index.IndexNode",
-			MaxAttempts:            clientParams.MaxAttempts.GetAsInt(),
-			InitialBackoff:         float32(clientParams.InitialBackoff.GetAsFloat()),
-			MaxBackoff:             float32(clientParams.MaxBackoff.GetAsFloat()),
-			BackoffMultiplier:      float32(clientParams.BackoffMultiplier.GetAsFloat()),
-			CompressionEnabled:     clientParams.CompressionEnabled.GetAsBool(),
-		},
+		addr:       addr,
+		grpcClient: grpcclient.NewClientBase[indexpb.IndexNodeClient](config, "milvus.proto.index.IndexNode"),
 	}
 	client.grpcClient.SetRole(typeutil.IndexNodeRole)
 	client.grpcClient.SetGetAddrFunc(client.getAddr)

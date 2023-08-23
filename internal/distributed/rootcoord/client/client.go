@@ -19,7 +19,6 @@ package grpcrootcoordclient
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -60,22 +59,10 @@ func NewClient(ctx context.Context, metaRoot string, etcdCli *clientv3.Client) (
 		log.Debug("QueryCoordClient NewClient failed", zap.Error(err))
 		return nil, err
 	}
-	clientParams := &Params.RootCoordGrpcClientCfg
+	config := &Params.RootCoordGrpcClientCfg
 	client := &Client{
-		grpcClient: &grpcclient.ClientBase[rootcoordpb.RootCoordClient]{
-			ClientMaxRecvSize:      clientParams.ClientMaxRecvSize.GetAsInt(),
-			ClientMaxSendSize:      clientParams.ClientMaxSendSize.GetAsInt(),
-			DialTimeout:            clientParams.DialTimeout.GetAsDuration(time.Millisecond),
-			KeepAliveTime:          clientParams.KeepAliveTime.GetAsDuration(time.Millisecond),
-			KeepAliveTimeout:       clientParams.KeepAliveTimeout.GetAsDuration(time.Millisecond),
-			RetryServiceNameConfig: "milvus.proto.rootcoord.RootCoord",
-			MaxAttempts:            clientParams.MaxAttempts.GetAsInt(),
-			InitialBackoff:         float32(clientParams.InitialBackoff.GetAsFloat()),
-			MaxBackoff:             float32(clientParams.MaxBackoff.GetAsFloat()),
-			BackoffMultiplier:      float32(clientParams.BackoffMultiplier.GetAsFloat()),
-			CompressionEnabled:     clientParams.CompressionEnabled.GetAsBool(),
-		},
-		sess: sess,
+		grpcClient: grpcclient.NewClientBase[rootcoordpb.RootCoordClient](config, "milvus.proto.rootcoord.RootCoord"),
+		sess:       sess,
 	}
 	client.grpcClient.SetRole(typeutil.RootCoordRole)
 	client.grpcClient.SetGetAddrFunc(client.getRootCoordAddr)

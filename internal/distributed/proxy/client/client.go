@@ -19,7 +19,6 @@ package grpcproxyclient
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -46,22 +45,10 @@ func NewClient(ctx context.Context, addr string, nodeID int64) (*Client, error) 
 	if addr == "" {
 		return nil, fmt.Errorf("address is empty")
 	}
-	clientParams := &Params.ProxyGrpcClientCfg
+	config := &Params.ProxyGrpcClientCfg
 	client := &Client{
-		addr: addr,
-		grpcClient: &grpcclient.ClientBase[proxypb.ProxyClient]{
-			ClientMaxRecvSize:      clientParams.ClientMaxRecvSize.GetAsInt(),
-			ClientMaxSendSize:      clientParams.ClientMaxSendSize.GetAsInt(),
-			DialTimeout:            clientParams.DialTimeout.GetAsDuration(time.Millisecond),
-			KeepAliveTime:          clientParams.KeepAliveTime.GetAsDuration(time.Millisecond),
-			KeepAliveTimeout:       clientParams.KeepAliveTimeout.GetAsDuration(time.Millisecond),
-			RetryServiceNameConfig: "milvus.proto.proxy.Proxy",
-			MaxAttempts:            clientParams.MaxAttempts.GetAsInt(),
-			InitialBackoff:         float32(clientParams.InitialBackoff.GetAsFloat()),
-			MaxBackoff:             float32(clientParams.MaxBackoff.GetAsFloat()),
-			BackoffMultiplier:      float32(clientParams.BackoffMultiplier.GetAsFloat()),
-			CompressionEnabled:     clientParams.CompressionEnabled.GetAsBool(),
-		},
+		addr:       addr,
+		grpcClient: grpcclient.NewClientBase[proxypb.ProxyClient](config, "milvus.proto.proxy.Proxy"),
 	}
 	client.grpcClient.SetRole(typeutil.ProxyRole)
 	client.grpcClient.SetGetAddrFunc(client.getAddr)
