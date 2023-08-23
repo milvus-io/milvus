@@ -246,3 +246,10 @@ message Rate {
   RateType rt = 1;
   double r = 2;
 }
+
+// todo move to commonpb
+// clustering info for search optimization
+message ClusteringInfo {
+  repeated float center = 1; // cluster.center
+  int64 size = 2; // cluster.size
+}
