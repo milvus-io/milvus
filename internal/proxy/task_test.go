@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/distance"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
@@ -3170,9 +3171,10 @@ func TestDescribeResourceGroupTask(t *testing.T) {
 
 func TestDescribeResourceGroupTaskFailed(t *testing.T) {
 	rc := &MockRootCoordClientInterface{}
-	qc := NewQueryCoordMock()
-	qc.Start()
-	defer qc.Stop()
+	qc := types.NewMockQueryCoord(t)
+	qc.EXPECT().DescribeResourceGroup(mock.Anything, mock.Anything).Return(&querypb.DescribeResourceGroupResponse{
+		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
+	}, nil)
 	ctx := context.Background()
 	mgr := newShardClientMgr()
 	InitMetaCache(ctx, rc, qc, mgr)
@@ -3198,6 +3200,22 @@ func TestDescribeResourceGroupTaskFailed(t *testing.T) {
 	err := task.Execute(ctx)
 	assert.Nil(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, task.result.Status.ErrorCode)
+
+	qc.ExpectedCalls = nil
+	qc.EXPECT().DescribeResourceGroup(mock.Anything, mock.Anything).Return(&querypb.DescribeResourceGroupResponse{
+		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		ResourceGroup: &querypb.ResourceGroupInfo{
+			Name:             "rg",
+			Capacity:         2,
+			NumAvailableNode: 1,
+			NumOutgoingNode:  map[int64]int32{3: 1},
+			NumIncomingNode:  map[int64]int32{4: 2},
+		},
+	}, nil)
+	err = task.Execute(ctx)
+	assert.NoError(t, err)
+	assert.Len(t, task.result.ResourceGroup.NumOutgoingNode, 0)
+	assert.Len(t, task.result.ResourceGroup.NumIncomingNode, 0)
 }
 
 func TestPartitionKey(t *testing.T) {

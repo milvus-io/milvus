@@ -23,7 +23,6 @@ import (
 	"math"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -2204,20 +2203,40 @@ func (t *DescribeResourceGroupTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	getCollectionNameFunc := func(value int32, key int64) string {
-		_, name, err := globalMetaCache.GetDatabaseAndCollectionName(ctx, key)
-		if err != nil {
-			// unreachable logic path
-			return "unavailable_collection"
+	getCollectionName := func(collections map[int64]int32) (map[string]int32, error) {
+		ret := make(map[string]int32)
+		for key, value := range collections {
+			_, name, err := globalMetaCache.GetDatabaseAndCollectionName(ctx, key)
+			if err != nil {
+				log.Warn("failed to get collection name",
+					zap.Int64("collectionID", key),
+					zap.Error(err))
+
+				// if collection has been dropped, skip it
+				if common.IsCollectionNotExistError(err) {
+					continue
+				}
+				return nil, err
+			}
+			ret[name] = value
 		}
-		return name
+		return ret, nil
 	}
 
 	if resp.Status.ErrorCode == commonpb.ErrorCode_Success {
 		rgInfo := resp.GetResourceGroup()
-		loadReplicas := lo.MapKeys(rgInfo.NumLoadedReplica, getCollectionNameFunc)
-		outgoingNodes := lo.MapKeys(rgInfo.NumOutgoingNode, getCollectionNameFunc)
-		incomingNodes := lo.MapKeys(rgInfo.NumIncomingNode, getCollectionNameFunc)
+		numLoadedReplica, err := getCollectionName(rgInfo.NumLoadedReplica)
+		if err != nil {
+			return err
+		}
+		numOutgoingNode, err := getCollectionName(rgInfo.NumOutgoingNode)
+		if err != nil {
+			return err
+		}
+		numIncomingNode, err := getCollectionName(rgInfo.NumIncomingNode)
+		if err != nil {
+			return err
+		}
 
 		t.result = &milvuspb.DescribeResourceGroupResponse{
 			Status: resp.Status,
@@ -2225,9 +2244,9 @@ func (t *DescribeResourceGroupTask) Execute(ctx context.Context) error {
 				Name:             rgInfo.GetName(),
 				Capacity:         rgInfo.GetCapacity(),
 				NumAvailableNode: rgInfo.NumAvailableNode,
-				NumLoadedReplica: loadReplicas,
-				NumOutgoingNode:  outgoingNodes,
-				NumIncomingNode:  incomingNodes,
+				NumLoadedReplica: numLoadedReplica,
+				NumOutgoingNode:  numOutgoingNode,
+				NumIncomingNode:  numIncomingNode,
 			},
 		}
 	} else {
