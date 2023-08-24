@@ -42,6 +42,7 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/federpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -1715,5 +1716,27 @@ func Test_NewServer_GetVersion(t *testing.T) {
 		resp, err := server.GetVersion(context.TODO(), req)
 		assert.Equal(t, "v1", resp.GetVersion())
 		assert.NoError(t, err)
+	})
+}
+
+func TestNotImplementedAPIs(t *testing.T) {
+	server := getServer(t)
+
+	t.Run("ListIndexedSegment", func(t *testing.T) {
+		assert.NotPanics(t, func() {
+			resp, err := server.ListIndexedSegment(context.TODO(), &federpb.ListIndexedSegmentRequest{})
+			assert.NoError(t, err)
+			assert.NotNil(t, resp)
+			assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		})
+	})
+
+	t.Run("DescribeSegmentIndexData", func(t *testing.T) {
+		assert.NotPanics(t, func() {
+			resp, err := server.DescribeSegmentIndexData(context.TODO(), &federpb.DescribeSegmentIndexDataRequest{})
+			assert.NoError(t, err)
+			assert.NotNil(t, resp)
+			assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		})
 	})
 }
