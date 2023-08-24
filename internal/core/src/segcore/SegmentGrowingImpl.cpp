@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <algorithm>
+#include <cstring>
 #include <memory>
 #include <numeric>
 #include <queue>
@@ -334,14 +335,14 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
         if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
             bulk_subscript_impl<FloatVector>(field_id,
                                              field_meta.get_sizeof(),
-                                             *vec_ptr,
+                                             vec_ptr,
                                              seg_offsets,
                                              count,
                                              output.data());
         } else if (field_meta.get_data_type() == DataType::VECTOR_BINARY) {
             bulk_subscript_impl<BinaryVector>(field_id,
                                               field_meta.get_sizeof(),
-                                              *vec_ptr,
+                                              vec_ptr,
                                               seg_offsets,
                                               count,
                                               output.data());
@@ -357,55 +358,55 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
         case DataType::BOOL: {
             FixedVector<bool> output(count);
             bulk_subscript_impl<bool>(
-                *vec_ptr, seg_offsets, count, output.data());
+                vec_ptr, seg_offsets, count, output.data());
             return CreateScalarDataArrayFrom(output.data(), count, field_meta);
         }
         case DataType::INT8: {
             FixedVector<int8_t> output(count);
             bulk_subscript_impl<int8_t>(
-                *vec_ptr, seg_offsets, count, output.data());
+                vec_ptr, seg_offsets, count, output.data());
             return CreateScalarDataArrayFrom(output.data(), count, field_meta);
         }
         case DataType::INT16: {
             FixedVector<int16_t> output(count);
             bulk_subscript_impl<int16_t>(
-                *vec_ptr, seg_offsets, count, output.data());
+                vec_ptr, seg_offsets, count, output.data());
             return CreateScalarDataArrayFrom(output.data(), count, field_meta);
         }
         case DataType::INT32: {
             FixedVector<int32_t> output(count);
             bulk_subscript_impl<int32_t>(
-                *vec_ptr, seg_offsets, count, output.data());
+                vec_ptr, seg_offsets, count, output.data());
             return CreateScalarDataArrayFrom(output.data(), count, field_meta);
         }
         case DataType::INT64: {
             FixedVector<int64_t> output(count);
             bulk_subscript_impl<int64_t>(
-                *vec_ptr, seg_offsets, count, output.data());
+                vec_ptr, seg_offsets, count, output.data());
             return CreateScalarDataArrayFrom(output.data(), count, field_meta);
         }
         case DataType::FLOAT: {
             FixedVector<float> output(count);
             bulk_subscript_impl<float>(
-                *vec_ptr, seg_offsets, count, output.data());
+                vec_ptr, seg_offsets, count, output.data());
             return CreateScalarDataArrayFrom(output.data(), count, field_meta);
         }
         case DataType::DOUBLE: {
             FixedVector<double> output(count);
             bulk_subscript_impl<double>(
-                *vec_ptr, seg_offsets, count, output.data());
+                vec_ptr, seg_offsets, count, output.data());
             return CreateScalarDataArrayFrom(output.data(), count, field_meta);
         }
         case DataType::VARCHAR: {
             FixedVector<std::string> output(count);
             bulk_subscript_impl<std::string>(
-                *vec_ptr, seg_offsets, count, output.data());
+                vec_ptr, seg_offsets, count, output.data());
             return CreateScalarDataArrayFrom(output.data(), count, field_meta);
         }
         case DataType::JSON: {
             FixedVector<std::string> output(count);
             bulk_subscript_impl<Json, std::string>(
-                *vec_ptr, seg_offsets, count, output.data());
+                vec_ptr, seg_offsets, count, output.data());
             return CreateScalarDataArrayFrom(output.data(), count, field_meta);
         }
         default: {
@@ -418,26 +419,26 @@ template <typename T>
 void
 SegmentGrowingImpl::bulk_subscript_impl(FieldId field_id,
                                         int64_t element_sizeof,
-                                        const VectorBase& vec_raw,
+                                        const VectorBase* vec_raw,
                                         const int64_t* seg_offsets,
                                         int64_t count,
                                         void* output_raw) const {
     static_assert(IsVector<T>);
-    auto vec_ptr = dynamic_cast<const ConcurrentVector<T>*>(&vec_raw);
+    auto vec_ptr = dynamic_cast<const ConcurrentVector<T>*>(vec_raw);
     AssertInfo(vec_ptr, "Pointer of vec_raw is nullptr");
     auto& vec = *vec_ptr;
-    std::vector<uint8_t> empty(element_sizeof, 0);
 
     auto copy_from_chunk = [&]() {
         auto output_base = reinterpret_cast<char*>(output_raw);
         for (int i = 0; i < count; ++i) {
             auto dst = output_base + i * element_sizeof;
             auto offset = seg_offsets[i];
-            const uint8_t* src =
-                (offset == INVALID_SEG_OFFSET
-                     ? empty.data()
-                     : (const uint8_t*)vec.get_element(offset));
-            memcpy(dst, src, element_sizeof);
+            if (offset == INVALID_SEG_OFFSET) {
+                memset(dst, 0, element_sizeof);
+            } else {
+                auto src = (const uint8_t*)vec.get_element(offset);
+                memcpy(dst, src, element_sizeof);
+            }
         }
     };
     //HasRawData interface guarantees that data can be fetched from growing segment
@@ -457,12 +458,12 @@ SegmentGrowingImpl::bulk_subscript_impl(FieldId field_id,
 
 template <typename S, typename T>
 void
-SegmentGrowingImpl::bulk_subscript_impl(const VectorBase& vec_raw,
+SegmentGrowingImpl::bulk_subscript_impl(const VectorBase* vec_raw,
                                         const int64_t* seg_offsets,
                                         int64_t count,
                                         void* output_raw) const {
     static_assert(IsScalar<S>);
-    auto vec_ptr = dynamic_cast<const ConcurrentVector<S>*>(&vec_raw);
+    auto vec_ptr = dynamic_cast<const ConcurrentVector<S>*>(vec_raw);
     AssertInfo(vec_ptr, "Pointer of vec_raw is nullptr");
     auto& vec = *vec_ptr;
     auto output = reinterpret_cast<T*>(output_raw);
@@ -482,11 +483,11 @@ SegmentGrowingImpl::bulk_subscript(SystemFieldType system_type,
     switch (system_type) {
         case SystemFieldType::Timestamp:
             bulk_subscript_impl<Timestamp>(
-                this->insert_record_.timestamps_, seg_offsets, count, output);
+                &this->insert_record_.timestamps_, seg_offsets, count, output);
             break;
         case SystemFieldType::RowId:
             bulk_subscript_impl<int64_t>(
-                this->insert_record_.row_ids_, seg_offsets, count, output);
+                &this->insert_record_.row_ids_, seg_offsets, count, output);
             break;
         default:
             PanicInfo("unknown subscript fields");

@@ -149,7 +149,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     // for scalar vectors
     template <typename S, typename T = S>
     void
-    bulk_subscript_impl(const VectorBase& vec_raw,
+    bulk_subscript_impl(const VectorBase* vec_raw,
                         const int64_t* seg_offsets,
                         int64_t count,
                         void* output_raw) const;
@@ -158,7 +158,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     bulk_subscript_impl(FieldId field_id,
                         int64_t element_sizeof,
-                        const VectorBase& vec_raw,
+                        const VectorBase* vec_raw,
                         const int64_t* seg_offsets,
                         int64_t count,
                         void* output_raw) const;
