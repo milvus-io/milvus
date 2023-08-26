@@ -57,7 +57,8 @@ class MilvusConan(ConanFile):
     default_options = {
         "librdkafka:shared": True,
         "librdkafka:zstd": True,
-        "librdkafka:sasl": False,
+        "librdkafka:ssl": True,
+        "librdkafka:sasl": True,
         "rocksdb:shared": True,
         "rocksdb:with_zstd": True,
         "arrow:parquet": True,
