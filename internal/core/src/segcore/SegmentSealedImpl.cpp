@@ -37,6 +37,7 @@
 #include "storage/Util.h"
 #include "storage/ThreadPools.h"
 #include "utils/File.h"
+#include "common/Tracer.h"
 
 namespace milvus::segcore {
 
@@ -572,6 +573,7 @@ SegmentSealedImpl::vector_search(SearchInfo& search_info,
                                    query_count,
                                    bitset,
                                    output);
+        milvus::tracer::AddEvent("finish_searching_vector_index");
     } else {
         AssertInfo(
             get_bit(field_data_ready_bitset_, field_id),
@@ -587,6 +589,7 @@ SegmentSealedImpl::vector_search(SearchInfo& search_info,
                               row_count,
                               bitset,
                               output);
+        milvus::tracer::AddEvent("finish_searching_vector_data");
     }
 }
 

@@ -55,4 +55,7 @@ CloseRootSpan();
 std::shared_ptr<trace::Span>
 GetRootSpan();
 
+void
+AddEvent(std::string event_label);
+
 }  // namespace milvus::tracer

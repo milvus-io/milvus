@@ -12,6 +12,7 @@
 #include <cstddef>
 #include "common/BitsetView.h"
 #include "common/QueryInfo.h"
+#include "common/Tracer.h"
 #include "SearchOnGrowing.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnIndex.h"
@@ -123,7 +124,6 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                                            size_per_chunk,
                                            info.search_params_,
                                            sub_view);
-
             // convert chunk uid to segment uid
             for (auto& x : sub_qr.mutable_seg_offsets()) {
                 if (x != -1) {

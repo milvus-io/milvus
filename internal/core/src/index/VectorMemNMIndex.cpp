@@ -23,6 +23,7 @@
 #include "knowhere/factory.h"
 #include "knowhere/comp/time_recorder.h"
 #define RAW_DATA "RAW_DATA"
+#include "common/Tracer.h"
 
 namespace milvus::index {
 
@@ -87,7 +88,6 @@ VectorMemNMIndex::Query(const DatasetPtr dataset,
     // load -> query, raw data has been loaded
     // build -> query, this case just for test, should load raw data before query
     std::call_once(raw_data_loaded_, load_raw_data_closure);
-
     return VectorMemIndex::Query(dataset, search_info, bitset);
 }
 
@@ -127,6 +127,7 @@ VectorMemNMIndex::LoadRawData() {
         PanicCodeInfo(
             ErrorCodeEnum::UnexpectedError,
             "failed to Deserialize index, " + KnowhereStatusString(stat));
+    milvus::tracer::AddEvent("VectorMemNMIndex_Loaded_RawData");
 }
 
 }  // namespace milvus::index
