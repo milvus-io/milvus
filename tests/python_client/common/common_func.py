@@ -1034,6 +1034,22 @@ def gen_normal_expressions_field(field):
     return expressions
 
 
+def gen_integer_overflow_expressions():
+    expressions = [
+        "int8 < - 128",
+        "int8 > 127",
+        "int8 > -129 && int8 < 128",
+        "int16 < -32768",
+        "int16 >= 32768",
+        "int16 > -32769 && int16 <32768",
+        "int32 < -2147483648",
+        "int32 == 2147483648",
+        "int32 < 2147483648 || int32 == -2147483648",
+        "int8 in  [-129, 1] || int16 in [32769] || int32 in [2147483650, 0]"
+    ]
+    return expressions
+
+
 def l2(x, y):
     return np.linalg.norm(np.array(x) - np.array(y))
 
