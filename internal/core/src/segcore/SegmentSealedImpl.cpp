@@ -188,18 +188,23 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
         auto parallel_degree = static_cast<uint64_t>(
             DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
         field_data_info.channel->set_capacity(parallel_degree * 2);
-
         auto& pool =
             ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
         auto load_future = pool.Submit(
             LoadFieldDatasFromRemote, insert_files, field_data_info.channel);
-
+        LOG_SEGCORE_INFO_ << "finish submitting LoadFieldDatasFromRemote task "
+                             "to thread pool, "
+                          << "segmentID:" << this->id_
+                          << ", fieldID:" << info.field_id;
         if (load_info.mmap_dir_path.empty() ||
             SystemProperty::Instance().IsSystem(field_id)) {
             LoadFieldData(field_id, field_data_info);
         } else {
             MapFieldData(field_id, field_data_info);
         }
+        LOG_SEGCORE_INFO_ << "finish loading segment field, "
+                          << "segmentID:" << this->id_
+                          << ", fieldID:" << info.field_id;
     }
 }
 

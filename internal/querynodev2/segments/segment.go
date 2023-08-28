@@ -706,7 +706,10 @@ func (s *LocalSegment) LoadFieldData(fieldID int64, rowCount int64, field *datap
 		zap.Int64("collectionID", s.Collection()),
 		zap.Int64("partitionID", s.Partition()),
 		zap.Int64("segmentID", s.ID()),
+		zap.Int64("fieldID", fieldID),
+		zap.Int64("rowCount", rowCount),
 	)
+	log.Info("start loading field data for field")
 
 	loadFieldDataInfo, err := newLoadFieldDataInfo()
 	defer deleteFieldDataInfo(loadFieldDataInfo)
@@ -729,6 +732,7 @@ func (s *LocalSegment) LoadFieldData(fieldID int64, rowCount int64, field *datap
 
 	var status C.CStatus
 	GetDynamicPool().Submit(func() (any, error) {
+		log.Info("submitted loadFieldData task to dy pool")
 		status = C.LoadFieldData(s.ptr, loadFieldDataInfo.cLoadFieldDataInfo)
 		return nil, nil
 	}).Await()
@@ -736,10 +740,7 @@ func (s *LocalSegment) LoadFieldData(fieldID int64, rowCount int64, field *datap
 		return err
 	}
 
-	log.Info("load field done",
-		zap.Int64("fieldID", fieldID),
-		zap.Int64("row count", rowCount),
-		zap.Int64("segmentID", s.ID()))
+	log.Info("load field done")
 
 	return nil
 }

@@ -584,7 +584,7 @@ func (loader *segmentLoader) loadSealedSegmentFields(ctx context.Context, segmen
 		return err
 	}
 
-	log.Info("load field binlogs done for sealed segment",
+	log.Ctx(ctx).Info("load field binlogs done for sealed segment",
 		zap.Int64("collection", segment.collectionID),
 		zap.Int64("segment", segment.segmentID),
 		zap.Int("len(field)", len(fields)),

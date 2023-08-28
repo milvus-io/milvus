@@ -216,6 +216,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.String("channel", channel.GetChannelName()),
+		zap.Int64("currentNodeID", paramtable.GetNodeID()),
 	)
 
 	log.Info("received watch channel request",
@@ -360,6 +361,7 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.String("channel", req.GetChannelName()),
+		zap.Int64("currentNodeID", paramtable.GetNodeID()),
 	)
 
 	log.Info("received unsubscribe channel request")
@@ -433,6 +435,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		zap.Int64("partitionID", segment.GetPartitionID()),
 		zap.String("shard", segment.GetInsertChannel()),
 		zap.Int64("segmentID", segment.GetSegmentID()),
+		zap.Int64("currentNodeID", paramtable.GetNodeID()),
 	)
 
 	log.Info("received load segments request",
@@ -552,6 +555,7 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, req *querypb.Release
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.String("shard", req.GetShard()),
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
+		zap.Int64("currentNodeID", paramtable.GetNodeID()),
 	)
 
 	log.Info("received release segment request",
@@ -1244,7 +1248,8 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 }
 
 func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDistributionRequest) (*commonpb.Status, error) {
-	log := log.Ctx(ctx).With(zap.Int64("collectionID", req.GetCollectionID()), zap.String("channel", req.GetChannel()))
+	log := log.Ctx(ctx).With(zap.Int64("collectionID", req.GetCollectionID()),
+		zap.String("channel", req.GetChannel()), zap.Int64("currentNodeID", paramtable.GetNodeID()))
 	// check node healthy
 	if !node.lifetime.Add(commonpbutil.IsHealthy) {
 		msg := fmt.Sprintf("query node %d is not ready", paramtable.GetNodeID())
@@ -1266,7 +1271,7 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 	// get shard delegator
 	shardDelegator, ok := node.delegators.Get(req.GetChannel())
 	if !ok {
-		log.Warn("failed to find shard cluster when sync ", zap.String("channel", req.GetChannel()))
+		log.Warn("failed to find shard cluster when sync")
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    "shard not exist",
