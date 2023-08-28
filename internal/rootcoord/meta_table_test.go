@@ -1194,10 +1194,13 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 
 	t.Run("new collection name already exist-1", func(t *testing.T) {
 		meta := &MetaTable{
+			dbName2Meta: map[string]*model.Database{
+				util.DefaultDBName: model.NewDefaultDatabase(),
+			},
 			names:   newNameDb(),
 			aliases: newNameDb(),
 			collID2Meta: map[typeutil.UniqueID]*model.Collection{
-				2: {
+				util.DefaultDBID: {
 					CollectionID: 1,
 					Name:         "old",
 					State:        pb.CollectionState_CollectionCreated,
@@ -1205,8 +1208,7 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 			},
 		}
 		meta.names.insert(util.DefaultDBName, "old", 1)
-		meta.names.insert(util.DefaultDBName, "new", 2)
-		err := meta.RenameCollection(context.TODO(), "", "old", "", "new", 1000)
+		err := meta.RenameCollection(context.TODO(), util.DefaultDBName, "old", util.DefaultDBName, "old", 1000)
 		assert.Error(t, err)
 	})
 

@@ -736,7 +736,8 @@ func (mt *MetaTable) RenameCollection(ctx context.Context, dbName string, oldNam
 	// check new collection already exists
 	newColl, err := mt.getCollectionByNameInternal(ctx, newDBName, newName, ts)
 	if newColl != nil {
-		return fmt.Errorf("duplicated new collection name :%s with other collection name or alias", newName)
+		log.Warn("get collection name fail")
+		return fmt.Errorf("duplicated new collection name %s:%s with other collection name or alias", newDBName, newName)
 	}
 	if err != nil && !common.IsCollectionNotExistErrorV2(err) {
 		log.Warn("check new collection name fail")
