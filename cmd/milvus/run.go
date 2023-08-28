@@ -56,7 +56,7 @@ func (c *run) execute(args []string, flags *flag.FlagSet) {
 	signal.Ignore(syscall.SIGPIPE)
 
 	var local = false
-	role := roles.MilvusRoles{}
+	role := roles.NewMilvusRoles()
 	switch c.serverType {
 	case typeutil.RootCoordRole:
 		role.EnableRootCoord = true
