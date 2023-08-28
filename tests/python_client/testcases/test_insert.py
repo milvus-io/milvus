@@ -265,8 +265,8 @@ class TestInsertParams(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: "The name of field don't match, expected: float, got int"}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip("issue #23403 not passed in nightly ")
+    @pytest.mark.tags(CaseLabel.L0)
+    #  @pytest.mark.skip("issue #23403 not passed in nightly ")
     def test_insert_field_value_not_match(self):
         """
         target: test insert data value not match
@@ -279,7 +279,7 @@ class TestInsertParams(TestcaseBase):
         df = cf.gen_default_dataframe_data(nb)
         new_float_value = pd.Series(data=[float(i) for i in range(nb)], dtype="float64")
         df.iloc[:, 1] = new_float_value
-        error = {ct.err_code: 1, ct.err_msg: 'The data fields number is not match with schema.'}
+        error = {ct.err_code: 1, ct.err_msg: "The data type of field float doesn't match"}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
