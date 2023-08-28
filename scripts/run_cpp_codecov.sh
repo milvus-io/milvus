@@ -89,8 +89,8 @@ ${LCOV_CMD} -r "${FILE_INFO_COMBINE}" -o "${FILE_INFO_OUTPUT}" \
     "*/thirdparty/*"
 
 # generate html report
-${LCOV_GEN_CMD} ${FILE_INFO_OUTPUT} --output-directory ${DIR_LCOV_OUTPUT}/
-echo "Generate cpp code coverage report to ${DIR_LCOV_OUTPUT}"
+#${LCOV_GEN_CMD} ${FILE_INFO_OUTPUT} --output-directory ${DIR_LCOV_OUTPUT}/
+#echo "Generate cpp code coverage report to ${DIR_LCOV_OUTPUT}"
 
 
 endTime=`date +%s`

@@ -206,6 +206,7 @@ func (BinaryExpr_BinaryOp) EnumDescriptor() ([]byte, []int) {
 
 type GenericValue struct {
 	// Types that are valid to be assigned to Val:
+	//
 	//	*GenericValue_BoolVal
 	//	*GenericValue_Int64Val
 	//	*GenericValue_FloatVal
@@ -1250,6 +1251,7 @@ var xxx_messageInfo_AlwaysTrueExpr proto.InternalMessageInfo
 
 type Expr struct {
 	// Types that are valid to be assigned to Expr:
+	//
 	//	*Expr_TermExpr
 	//	*Expr_UnaryExpr
 	//	*Expr_BinaryExpr
@@ -1621,6 +1623,7 @@ func (m *QueryPlanNode) GetLimit() int64 {
 
 type PlanNode struct {
 	// Types that are valid to be assigned to Node:
+	//
 	//	*PlanNode_VectorAnns
 	//	*PlanNode_Predicates
 	//	*PlanNode_Query
