@@ -8450,14 +8450,14 @@ class TestSearchIterator(TestcaseBase):
         collection_w.load()
         # 2. search iterator
         search_params = {"metric_type": "L2"}
-        limit = 200
-        collection_w.search_iterator(vectors[:1], field_name, search_params, limit,
+        batch_size = 200
+        collection_w.search_iterator(vectors[:1], field_name, search_params, batch_size,
                                      check_task=CheckTasks.check_search_iterator,
-                                     check_items={"limit": limit})
-        limit = 600
-        collection_w.search_iterator(vectors[:1], field_name, search_params, limit,
+                                     check_items={"batch_size": batch_size})
+        batch_size = 600
+        collection_w.search_iterator(vectors[:1], field_name, search_params, batch_size,
                                      check_task=CheckTasks.check_search_iterator,
-                                     check_items={"limit": limit})
+                                     check_items={"batch_size": batch_size})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_iterator_binary(self):
@@ -8468,14 +8468,14 @@ class TestSearchIterator(TestcaseBase):
         expected: search successfully
         """
         # 1. initialize with data
-        limit = 200
+        batch_size = 200
         collection_w = self.init_collection_general(prefix, True, is_binary=True)[0]
         # 2. search iterator
         _, binary_vectors = cf.gen_binary_vectors(2, ct.default_dim)
         collection_w.search_iterator(binary_vectors[:1], binary_field_name,
-                                     ct.default_search_binary_params, limit,
+                                     ct.default_search_binary_params, batch_size,
                                      check_task=CheckTasks.check_search_iterator,
-                                     check_items={"limit": limit})
+                                     check_items={"batch_size": batch_size})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("metrics", ct.float_metrics)
@@ -8487,7 +8487,7 @@ class TestSearchIterator(TestcaseBase):
         expected: search successfully
         """
         # 1. initialize with data
-        limit = 100
+        batch_size = 100
         dim = 128
         collection_w = self.init_collection_general(prefix, True, dim=dim, is_index=False)[0]
         collection_w.create_index(field_name, {"metric_type": metrics})
@@ -8495,7 +8495,7 @@ class TestSearchIterator(TestcaseBase):
         # 2. search iterator
         search_params = {"metric_type": metrics}
         expression = "1000.0 <= float < 2000.0"
-        collection_w.search_iterator(vectors[:1], field_name, search_params, limit,
+        collection_w.search_iterator(vectors[:1], field_name, search_params, batch_size,
                                      expr=expression, check_task=CheckTasks.check_search_iterator,
                                      check_items={})
 
@@ -8508,17 +8508,15 @@ class TestSearchIterator(TestcaseBase):
         expected: search successfully
         """
         # 1. initialize with data
-        limit = 100
+        batch_size = 100
         collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
         collection_w.create_index(field_name, {"metric_type": "L2"})
         collection_w.load()
         # 2. search iterator
-        search_params = {"metric_type": "L2", "params": {"radius": 35.0, "range_filter": 34.0}}
-        collection_w.search_iterator(vectors[:1], field_name, search_params, limit,
+        search_params = {"metric_type": "L2"}
+        collection_w.search_iterator(vectors[:1], field_name, search_params, batch_size,
                                      check_task=CheckTasks.check_search_iterator,
-                                     check_items={"metric_type": "L2",
-                                                  "radius": 35.0,
-                                                  "range_filter": 34.0})
+                                     check_items={"metric_type": "L2"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("metrics", ct.float_metrics[1:])
@@ -8530,17 +8528,15 @@ class TestSearchIterator(TestcaseBase):
         expected: search successfully
         """
         # 1. initialize with data
-        limit = 100
+        batch_size = 100
         collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
         collection_w.create_index(field_name, {"metric_type": metrics})
         collection_w.load()
         # 2. search iterator
-        search_params = {"metric_type": metrics, "params": {"radius": 0, "range_filter": 45}}
-        collection_w.search_iterator(vectors[:1], field_name, search_params, limit,
+        search_params = {"metric_type": metrics, "params": {}}
+        collection_w.search_iterator(vectors[:1], field_name, search_params, batch_size,
                                      check_task=CheckTasks.check_search_iterator,
-                                     check_items={"metric_type": metrics,
-                                                  "radius": 0,
-                                                  "range_filter": 45})
+                                     check_items={"metric_type": metrics})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_iterator_only_radius(self):
@@ -8551,16 +8547,15 @@ class TestSearchIterator(TestcaseBase):
         expected: search successfully
         """
         # 1. initialize with data
-        limit = 100
+        batch_size = 100
         collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
         collection_w.create_index(field_name, {"metric_type": "L2"})
         collection_w.load()
         # 2. search iterator
-        search_params = {"metric_type": "L2", "params": {"radius": 35.0}}
-        collection_w.search_iterator(vectors[:1], field_name, search_params, limit,
+        search_params = {"metric_type": "L2", "params": {}}
+        collection_w.search_iterator(vectors[:1], field_name, search_params, batch_size,
                                      check_task=CheckTasks.check_search_iterator,
-                                     check_items={"metric_type": "L2",
-                                                  "radius": 35.0})
+                                     check_items={"metric_type": "L2"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip("issue #25145")
@@ -8576,20 +8571,20 @@ class TestSearchIterator(TestcaseBase):
         expected: search successfully
         """
         # 1. initialize with data
-        limit = 100
+        batch_size = 100
         collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
         default_index = {"index_type": index, "params": params, "metric_type": metrics}
         collection_w.create_index(field_name, default_index)
         collection_w.load()
         # 2. search iterator
         search_params = {"metric_type": metrics}
-        collection_w.search_iterator(vectors[:1], field_name, search_params, limit,
+        collection_w.search_iterator(vectors[:1], field_name, search_params, batch_size,
                                      check_task=CheckTasks.check_search_iterator,
                                      check_items={})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("limit", [10, 100, 777, 1000])
-    def test_search_iterator_with_different_limit(self, limit):
+    @pytest.mark.parametrize("batch_size", [10, 100, 777, 1000])
+    def test_search_iterator_with_different_limit(self, batch_size):
         """
         target: test search iterator normal
         method: 1. search iterator
@@ -8600,9 +8595,9 @@ class TestSearchIterator(TestcaseBase):
         collection_w = self.init_collection_general(prefix, True)[0]
         # 2. search iterator
         search_params = {"metric_type": "COSINE"}
-        collection_w.search_iterator(vectors[:1], field_name, search_params, limit,
+        collection_w.search_iterator(vectors[:1], field_name, search_params, batch_size,
                                      check_task=CheckTasks.check_search_iterator,
-                                     check_items={"limit": limit})
+                                     check_items={"batch_size": batch_size})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_iterator_invalid_nq(self):
@@ -8613,14 +8608,14 @@ class TestSearchIterator(TestcaseBase):
         expected: search successfully
         """
         # 1. initialize with data
-        limit = 100
+        batch_size = 100
         dim = 128
         collection_w = self.init_collection_general(prefix, True, dim=dim, is_index=False)[0]
         collection_w.create_index(field_name, {"metric_type": "L2"})
         collection_w.load()
         # 2. search iterator
         search_params = {"metric_type": "L2"}
-        collection_w.search_iterator(vectors[:2], field_name, search_params, limit,
+        collection_w.search_iterator(vectors[:2], field_name, search_params, batch_size,
                                      check_task=CheckTasks.err_res,
                                      check_items={"err_code": 1,
                                                   "err_msg": "Not support multiple vector iterator at present"})

@@ -3267,16 +3267,16 @@ class TestQueryIterator(TestcaseBase):
         expected: query successfully
         """
         # 1. initialize with data
-        limit = 100
+        batch_size = 100
         collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
         collection_w.create_index(ct.default_float_vec_field_name, {"metric_type": "L2"})
         collection_w.load()
         # 2. search iterator
         expr = "int64 >= 0"
-        collection_w.query_iterator(expr, limit=limit,
+        collection_w.query_iterator(batch_size, expr=expr,
                                     check_task=CheckTasks.check_query_iterator,
                                     check_items={"count": ct.default_nb,
-                                                 "limit": limit})
+                                                 "batch_size": batch_size})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("offset", [500, 1000, 1777])
@@ -3288,20 +3288,20 @@ class TestQueryIterator(TestcaseBase):
         expected: query successfully
         """
         # 1. initialize with data
-        limit = 100
+        batch_size = 100
         collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
         collection_w.create_index(ct.default_float_vec_field_name, {"metric_type": "L2"})
         collection_w.load()
         # 2. search iterator
         expr = "int64 >= 0"
-        collection_w.query_iterator(expr, limit=limit, offset=offset,
+        collection_w.query_iterator(batch_size, expr=expr, offset=offset,
                                     check_task=CheckTasks.check_query_iterator,
                                     check_items={"count": ct.default_nb - offset,
-                                                 "limit": limit})
+                                                 "batch_size": batch_size})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("limit", [10, 100, 777, 2000])
-    def test_query_iterator_with_different_limit(self, limit):
+    @pytest.mark.parametrize("batch_size", [10, 100, 777, 2000])
+    def test_query_iterator_with_different_limit(self, batch_size):
         """
         target: test query iterator normal
         method: 1. query iterator
@@ -3315,10 +3315,10 @@ class TestQueryIterator(TestcaseBase):
         collection_w.load()
         # 2. search iterator
         expr = "int64 >= 0"
-        collection_w.query_iterator(expr, limit=limit, offset=offset,
+        collection_w.query_iterator(batch_size, expr=expr, offset=offset,
                                     check_task=CheckTasks.check_query_iterator,
                                     check_items={"count": ct.default_nb - offset,
-                                                 "limit": limit})
+                                                 "batch_size": batch_size})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip("issue #26397")
@@ -3334,12 +3334,12 @@ class TestQueryIterator(TestcaseBase):
         # 2. search iterator
         expr = "int64 >= 0"
         error = {"err_code": 1, "err_msg": "invalid max query result window, limit [-1] is invalid, should be greater than 0"}
-        collection_w.query_iterator(expr, limit=-1, check_task=CheckTasks.err_res, check_items=error)
+        collection_w.query_iterator(-1, expr=expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("limit", [100, 500])
+    @pytest.mark.parametrize("batch_size", [100, 500])
     @pytest.mark.parametrize("auto_id", [True, False])
-    def test_query_iterator_empty_expr(self, auto_id, limit):
+    def test_query_iterator_empty_expr(self, auto_id, batch_size):
         """
         target: test query iterator with empty expression
         method: query iterator empty expression with a limit
@@ -3349,16 +3349,16 @@ class TestQueryIterator(TestcaseBase):
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, auto_id=auto_id)[0:4]
 
         # 2. query with limit
-        collection_w.query_iterator("", limit=limit,
+        collection_w.query_iterator(batch_size,
                                     check_task=CheckTasks.check_query_iterator,
-                                    check_items={"limit": limit,
+                                    check_items={"batch_size": batch_size,
                                                  "count": ct.default_nb,
                                                  "exp_ids": insert_ids})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("offset", [100, 1000])
-    @pytest.mark.parametrize("limit", [500, 1000])
-    def test_query_iterator_expr_empty_with_random_pk_pagination(self, limit, offset):
+    @pytest.mark.parametrize("batch_size", [500, 1000])
+    def test_query_iterator_expr_empty_with_random_pk_pagination(self, batch_size, offset):
         """
         target: test query iterator with empty expression
         method: create a collection using random pk, query empty expression with a limit
@@ -3369,12 +3369,12 @@ class TestQueryIterator(TestcaseBase):
 
         # 3. query with empty expr and check the result
         exp_ids = sorted(insert_ids)
-        collection_w.query_iterator("", limit=limit, output_fields=[ct.default_string_field_name],
+        collection_w.query_iterator(batch_size, output_fields=[ct.default_string_field_name],
                                     check_task=CheckTasks.check_query_iterator,
-                                    check_items={"limit": limit, "count": ct.default_nb, "exp_ids": exp_ids})
+                                    check_items={"batch_size": batch_size, "count": ct.default_nb, "exp_ids": exp_ids})
 
         # 4. query with pagination
         exp_ids = sorted(insert_ids)[offset:]
-        collection_w.query_iterator("", limit=limit, offset=offset, output_fields=[ct.default_string_field_name],
+        collection_w.query_iterator(batch_size, offset=offset, output_fields=[ct.default_string_field_name],
                                     check_task=CheckTasks.check_query_iterator,
-                                    check_items={"limit": limit, "count": ct.default_nb - offset, "exp_ids": exp_ids})
+                                    check_items={"batch_size": batch_size, "count": ct.default_nb - offset, "exp_ids": exp_ids})
