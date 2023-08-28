@@ -703,7 +703,7 @@ class TestQueryParams(TestcaseBase):
         assert len(res) == 1
 
         # test for mixed data
-        ids = [_id * 1.1, bool(_id % 2)]
+        ids = [[_id, str(_id)], bool(_id % 2)]
         expression = f"{expr_prefix}({json_field}['listMix'], {ids})"
         res = collection_w.query(expression)[0]
         assert len(res) == 1
