@@ -75,7 +75,7 @@ type ClientBase[T interface {
 
 	grpcClient             T
 	encryption             bool
-	addr                   string
+	addr                   atomic.String
 	conn                   *grpc.ClientConn
 	grpcClientMtx          sync.RWMutex
 	role                   string
@@ -98,6 +98,24 @@ type ClientBase[T interface {
 	sf singleflight.Group
 }
 
+func NewClientBase[T interface {
+	GetComponentStates(ctx context.Context, in *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error)
+}](config *paramtable.GrpcClientConfig, serviceName string) *ClientBase[T] {
+	return &ClientBase[T]{
+		ClientMaxRecvSize:      config.ClientMaxRecvSize.GetAsInt(),
+		ClientMaxSendSize:      config.ClientMaxSendSize.GetAsInt(),
+		DialTimeout:            config.DialTimeout.GetAsDuration(time.Millisecond),
+		KeepAliveTime:          config.KeepAliveTime.GetAsDuration(time.Millisecond),
+		KeepAliveTimeout:       config.KeepAliveTimeout.GetAsDuration(time.Millisecond),
+		RetryServiceNameConfig: serviceName,
+		MaxAttempts:            config.MaxAttempts.GetAsInt(),
+		InitialBackoff:         float32(config.InitialBackoff.GetAsFloat()),
+		MaxBackoff:             float32(config.MaxBackoff.GetAsFloat()),
+		BackoffMultiplier:      float32(config.BackoffMultiplier.GetAsFloat()),
+		CompressionEnabled:     config.CompressionEnabled.GetAsBool(),
+	}
+}
+
 // SetRole sets role of client
 func (c *ClientBase[T]) SetRole(role string) {
 	c.role = role
@@ -110,7 +128,7 @@ func (c *ClientBase[T]) GetRole() string {
 
 // GetAddr returns address of client
 func (c *ClientBase[T]) GetAddr() string {
-	return c.addr
+	return c.addr.Load()
 }
 
 // SetGetAddrFunc sets getAddrFunc of client
@@ -165,7 +183,7 @@ func (c *ClientBase[T]) resetConnection(client T) {
 		_ = c.conn.Close()
 	}
 	c.conn = nil
-	c.addr = ""
+	c.addr.Store("")
 	c.grpcClient = generic.Zero[T]()
 }
 
@@ -288,7 +306,7 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 	}
 
 	c.conn = conn
-	c.addr = addr
+	c.addr.Store(addr)
 	c.grpcClient = c.newGrpcClient(c.conn)
 	return nil
 }

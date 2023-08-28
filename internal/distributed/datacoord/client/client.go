@@ -19,7 +19,6 @@ package grpcdatacoordclient
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -60,22 +59,10 @@ func NewClient(ctx context.Context, metaRoot string, etcdCli *clientv3.Client) (
 		return nil, err
 	}
 
-	clientParams := &Params.DataCoordGrpcClientCfg
+	config := &Params.DataCoordGrpcClientCfg
 	client := &Client{
-		grpcClient: &grpcclient.ClientBase[datapb.DataCoordClient]{
-			ClientMaxRecvSize:      clientParams.ClientMaxRecvSize.GetAsInt(),
-			ClientMaxSendSize:      clientParams.ClientMaxSendSize.GetAsInt(),
-			DialTimeout:            clientParams.DialTimeout.GetAsDuration(time.Millisecond),
-			KeepAliveTime:          clientParams.KeepAliveTime.GetAsDuration(time.Millisecond),
-			KeepAliveTimeout:       clientParams.KeepAliveTimeout.GetAsDuration(time.Millisecond),
-			RetryServiceNameConfig: "milvus.proto.data.DataCoord",
-			MaxAttempts:            clientParams.MaxAttempts.GetAsInt(),
-			InitialBackoff:         float32(clientParams.InitialBackoff.GetAsFloat()),
-			MaxBackoff:             float32(clientParams.MaxBackoff.GetAsFloat()),
-			BackoffMultiplier:      float32(clientParams.BackoffMultiplier.GetAsFloat()),
-			CompressionEnabled:     clientParams.CompressionEnabled.GetAsBool(),
-		},
-		sess: sess,
+		grpcClient: grpcclient.NewClientBase[datapb.DataCoordClient](config, "milvus.proto.data.DataCoord"),
+		sess:       sess,
 	}
 	client.grpcClient.SetRole(typeutil.DataCoordRole)
 	client.grpcClient.SetGetAddrFunc(client.getDataCoordAddr)

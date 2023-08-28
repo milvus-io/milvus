@@ -19,7 +19,6 @@ package grpcquerynodeclient
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"google.golang.org/grpc"
@@ -45,22 +44,10 @@ func NewClient(ctx context.Context, addr string, nodeID int64) (*Client, error) 
 	if addr == "" {
 		return nil, fmt.Errorf("addr is empty")
 	}
-	clientParams := &paramtable.Get().QueryNodeGrpcClientCfg
+	config := &paramtable.Get().QueryNodeGrpcClientCfg
 	client := &Client{
-		addr: addr,
-		grpcClient: &grpcclient.ClientBase[querypb.QueryNodeClient]{
-			ClientMaxRecvSize:      clientParams.ClientMaxRecvSize.GetAsInt(),
-			ClientMaxSendSize:      clientParams.ClientMaxSendSize.GetAsInt(),
-			DialTimeout:            clientParams.DialTimeout.GetAsDuration(time.Millisecond),
-			KeepAliveTime:          clientParams.KeepAliveTime.GetAsDuration(time.Millisecond),
-			KeepAliveTimeout:       clientParams.KeepAliveTimeout.GetAsDuration(time.Millisecond),
-			RetryServiceNameConfig: "milvus.proto.query.QueryNode",
-			MaxAttempts:            clientParams.MaxAttempts.GetAsInt(),
-			InitialBackoff:         float32(clientParams.InitialBackoff.GetAsFloat()),
-			MaxBackoff:             float32(clientParams.MaxBackoff.GetAsFloat()),
-			BackoffMultiplier:      float32(clientParams.BackoffMultiplier.GetAsFloat()),
-			CompressionEnabled:     clientParams.CompressionEnabled.GetAsBool(),
-		},
+		addr:       addr,
+		grpcClient: grpcclient.NewClientBase[querypb.QueryNodeClient](config, "milvus.proto.query.QueryNode"),
 	}
 	client.grpcClient.SetRole(typeutil.QueryNodeRole)
 	client.grpcClient.SetGetAddrFunc(client.getAddr)
