@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/common"
 	pnc "github.com/milvus-io/milvus/internal/distributed/proxy/client"
@@ -43,9 +44,6 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/internal/metastore/db/dao"
-	"github.com/milvus-io/milvus/internal/metastore/db/dbcore"
-	"github.com/milvus-io/milvus/internal/metastore/db/rootcoord"
 	kvmetestore "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -363,14 +361,6 @@ func (c *Core) initMetaTable() error {
 			}
 
 			catalog = &kvmetestore.Catalog{Txn: metaKV, Snapshot: ss}
-		case util.MetaStoreTypeMysql:
-			// connect to database
-			err := dbcore.Connect(&Params.DBCfg)
-			if err != nil {
-				return err
-			}
-
-			catalog = rootcoord.NewTableCatalog(dbcore.NewTxImpl(), dao.NewMetaDomain())
 		default:
 			return retry.Unrecoverable(fmt.Errorf("not supported meta store: %s", Params.MetaStoreCfg.MetaStoreType))
 		}
