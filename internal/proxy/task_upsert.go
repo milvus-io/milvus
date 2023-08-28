@@ -170,6 +170,13 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	}
 	it.result.SuccIndex = sliceIndex
 
+	if it.schema.EnableDynamicField {
+		err := checkDynamicFieldData(it.schema, it.upsertMsg.InsertMsg)
+		if err != nil {
+			return err
+		}
+	}
+
 	// check primaryFieldData whether autoID is true or not
 	// only allow support autoID == false
 	var err error

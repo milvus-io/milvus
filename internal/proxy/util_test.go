@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -38,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -1810,4 +1812,121 @@ func Test_GetPartitionProgressFailed(t *testing.T) {
 	}, nil)
 	_, _, err := getPartitionProgress(context.TODO(), qc, &commonpb.MsgBase{}, []string{}, "", 1, "")
 	assert.Error(t, err)
+}
+
+func Test_CheckDynamicFieldData(t *testing.T) {
+	t.Run("normal case", func(t *testing.T) {
+		jsonData := make([][]byte, 0)
+		data := map[string]interface{}{
+			"bool":   true,
+			"int":    100,
+			"float":  1.2,
+			"string": "abc",
+			"json": map[string]interface{}{
+				"int":   20,
+				"array": []int{1, 2, 3},
+			},
+		}
+		jsonBytes, err := json.MarshalIndent(data, "", "  ")
+		assert.NoError(t, err)
+		jsonData = append(jsonData, jsonBytes)
+		jsonFieldData := autoGenDynamicFieldData(jsonData)
+		schema := newTestSchema()
+		insertMsg := &msgstream.InsertMsg{
+			InsertRequest: msgpb.InsertRequest{
+				CollectionName: "collectionName",
+				FieldsData:     []*schemapb.FieldData{jsonFieldData},
+				NumRows:        1,
+				Version:        msgpb.InsertDataVersion_ColumnBased,
+			},
+		}
+		err = checkDynamicFieldData(schema, insertMsg)
+		assert.NoError(t, err)
+	})
+	t.Run("key has $meta", func(t *testing.T) {
+		jsonData := make([][]byte, 0)
+		data := map[string]interface{}{
+			"bool":   true,
+			"int":    100,
+			"float":  1.2,
+			"string": "abc",
+			"json": map[string]interface{}{
+				"int":   20,
+				"array": []int{1, 2, 3},
+			},
+			"$meta": "error key",
+		}
+		jsonBytes, err := json.MarshalIndent(data, "", "  ")
+		assert.NoError(t, err)
+		jsonData = append(jsonData, jsonBytes)
+		jsonFieldData := autoGenDynamicFieldData(jsonData)
+		schema := newTestSchema()
+		insertMsg := &msgstream.InsertMsg{
+			InsertRequest: msgpb.InsertRequest{
+				CollectionName: "collectionName",
+				FieldsData:     []*schemapb.FieldData{jsonFieldData},
+				NumRows:        1,
+				Version:        msgpb.InsertDataVersion_ColumnBased,
+			},
+		}
+		err = checkDynamicFieldData(schema, insertMsg)
+		assert.Error(t, err)
+	})
+	t.Run("disable dynamic schema", func(t *testing.T) {
+		jsonData := make([][]byte, 0)
+		data := map[string]interface{}{
+			"bool":   true,
+			"int":    100,
+			"float":  1.2,
+			"string": "abc",
+			"json": map[string]interface{}{
+				"int":   20,
+				"array": []int{1, 2, 3},
+			},
+		}
+		jsonBytes, err := json.MarshalIndent(data, "", "  ")
+		assert.NoError(t, err)
+		jsonData = append(jsonData, jsonBytes)
+		jsonFieldData := autoGenDynamicFieldData(jsonData)
+		schema := newTestSchema()
+		insertMsg := &msgstream.InsertMsg{
+			InsertRequest: msgpb.InsertRequest{
+				CollectionName: "collectionName",
+				FieldsData:     []*schemapb.FieldData{jsonFieldData},
+				NumRows:        1,
+				Version:        msgpb.InsertDataVersion_ColumnBased,
+			},
+		}
+		schema.EnableDynamicField = false
+		err = checkDynamicFieldData(schema, insertMsg)
+		assert.Error(t, err)
+	})
+	t.Run("json data is string", func(t *testing.T) {
+		data := "abcdefg"
+		jsonFieldData := autoGenDynamicFieldData([][]byte{[]byte(data)})
+		schema := newTestSchema()
+		insertMsg := &msgstream.InsertMsg{
+			InsertRequest: msgpb.InsertRequest{
+				CollectionName: "collectionName",
+				FieldsData:     []*schemapb.FieldData{jsonFieldData},
+				NumRows:        1,
+				Version:        msgpb.InsertDataVersion_ColumnBased,
+			},
+		}
+		err := checkDynamicFieldData(schema, insertMsg)
+		assert.Error(t, err)
+	})
+	t.Run("no json data", func(t *testing.T) {
+		schema := newTestSchema()
+		insertMsg := &msgstream.InsertMsg{
+			InsertRequest: msgpb.InsertRequest{
+				CollectionName: "collectionName",
+				FieldsData:     []*schemapb.FieldData{},
+				NumRows:        1,
+				Version:        msgpb.InsertDataVersion_ColumnBased,
+			},
+		}
+		err := checkDynamicFieldData(schema, insertMsg)
+		assert.NoError(t, err)
+	})
 }

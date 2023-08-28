@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -1390,4 +1391,41 @@ func memsetLoop[T any](v T, numRows int) []T {
 	}
 
 	return ret
+}
+
+func verifyDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
+	for _, field := range insertMsg.FieldsData {
+		if field.GetFieldName() == common.MetaFieldName {
+			if !schema.EnableDynamicField {
+				return fmt.Errorf("without dynamic schema enabled, the field name cannot be set to %s", common.MetaFieldName)
+			}
+			for _, rowData := range field.GetScalars().GetJsonData().GetData() {
+				jsonData := make(map[string]interface{})
+				if err := json.Unmarshal(rowData, &jsonData); err != nil {
+					return err
+				}
+				if _, ok := jsonData[common.MetaFieldName]; ok {
+					return fmt.Errorf("cannot set json key to: %s", common.MetaFieldName)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+func checkDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
+	for _, data := range insertMsg.FieldsData {
+		if data.IsDynamic {
+			data.FieldName = common.MetaFieldName
+			return verifyDynamicFieldData(schema, insertMsg)
+		}
+	}
+	defaultData := make([][]byte, insertMsg.NRows())
+	for i := range defaultData {
+		defaultData[i] = []byte("{}")
+	}
+	dynamicData := autoGenDynamicFieldData(defaultData)
+	insertMsg.FieldsData = append(insertMsg.FieldsData, dynamicData)
+	return nil
 }
