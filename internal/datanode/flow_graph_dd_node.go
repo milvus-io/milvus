@@ -209,9 +209,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			log.Debug("DDNode receive delete messages",
 				zap.Int64("numRows", dmsg.NumRows),
 				zap.String("vChannelName", ddn.vChannelName))
-			for i := int64(0); i < dmsg.NumRows; i++ {
-				dmsg.HashValues = append(dmsg.HashValues, uint32(0))
-			}
+
 			if dmsg.CollectionID != ddn.collectionID {
 				log.Warn("filter invalid DeleteMsg, collection mis-match",
 					zap.Int64("Get collID", dmsg.CollectionID),
