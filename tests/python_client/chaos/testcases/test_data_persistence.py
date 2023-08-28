@@ -18,8 +18,17 @@ class TestDataPersistence(TestcaseBase):
         log.info("skip drop collection")
 
     @pytest.mark.tags(CaseLabel.L3)
-    def test_milvus_default(self):
-        # create
+    @pytest.mark.parametrize("db_name", ["default", "prod"])
+    def test_milvus_default(self, db_name):
+        self._connect()
+        # create database if not exist
+        dbs, _ = self.database_wrap.list_database()
+        log.info(f"all database: {dbs}")
+        if db_name not in dbs:
+            log.info(f"create database {db_name}")
+            self.database_wrap.create_database(db_name)
+        self.database_wrap.using_database(db_name)
+        # create collection
         name = "Hello_Milvus"
         t0 = time.time()
         collection_w = self.init_collection_wrap(name=name, active_trace=True)
