@@ -49,7 +49,7 @@ import (
 var dataSyncServiceTestDir = "/tmp/milvus_test/data_sync_service"
 
 func init() {
-	Params.Init()
+	paramtable.Init()
 }
 
 func getVchanInfo(info *testInfo) *datapb.VchannelInfo {

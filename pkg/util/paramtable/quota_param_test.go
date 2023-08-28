@@ -25,7 +25,7 @@ import (
 
 func TestQuotaParam(t *testing.T) {
 	qc := quotaConfig{}
-	qc.init(&baseParams)
+	qc.init(baseParams)
 
 	t.Run("test quota", func(t *testing.T) {
 		assert.True(t, qc.QuotaAndLimitsEnabled.GetAsBool())
@@ -48,7 +48,7 @@ func TestQuotaParam(t *testing.T) {
 	})
 
 	t.Run("test dml", func(t *testing.T) {
-		params.Init()
+		params.Init(NewBaseTable(SkipRemote(true)))
 		params.Save(params.QuotaConfig.DMLLimitEnabled.Key, "true")
 		params.Save(params.QuotaConfig.DMLMaxInsertRate.Key, "10")
 		params.Save(params.QuotaConfig.DMLMinInsertRate.Key, "1")
@@ -70,7 +70,7 @@ func TestQuotaParam(t *testing.T) {
 	})
 
 	t.Run("test collection dml", func(t *testing.T) {
-		params.Init()
+		params.Init(NewBaseTable(SkipRemote(true)))
 		params.Save(params.QuotaConfig.DMLLimitEnabled.Key, "true")
 		params.Save(params.QuotaConfig.DMLMaxInsertRatePerCollection.Key, "10")
 		params.Save(params.QuotaConfig.DMLMinInsertRatePerCollection.Key, "1")
@@ -128,7 +128,7 @@ func TestQuotaParam(t *testing.T) {
 	})
 
 	t.Run("test dql", func(t *testing.T) {
-		params.Init()
+		params.Init(NewBaseTable(SkipRemote(true)))
 		params.Save(params.QuotaConfig.DQLLimitEnabled.Key, "true")
 		params.Save(params.QuotaConfig.DQLMaxSearchRate.Key, "10")
 		params.Save(params.QuotaConfig.DQLMinSearchRate.Key, "1")
@@ -141,7 +141,7 @@ func TestQuotaParam(t *testing.T) {
 	})
 
 	t.Run("test collection dql", func(t *testing.T) {
-		params.Init()
+		params.Init(NewBaseTable(SkipRemote(true)))
 		params.Save(params.QuotaConfig.DQLLimitEnabled.Key, "true")
 		params.Save(params.QuotaConfig.DQLMaxSearchRatePerCollection.Key, "10")
 		params.Save(params.QuotaConfig.DQLMinSearchRatePerCollection.Key, "1")

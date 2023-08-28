@@ -50,8 +50,8 @@ const (
 var Params *paramtable.ComponentParam
 
 func TestMain(m *testing.M) {
+	paramtable.Init()
 	Params = paramtable.Get()
-	Params.Init()
 	mockKafkaCluster, err := kafka.NewMockCluster(1)
 	defer mockKafkaCluster.Close()
 	if err != nil {
@@ -69,16 +69,15 @@ func TestMain(m *testing.M) {
 }
 
 func getPulsarAddress() string {
-	pulsarHost := Params.GetWithDefault("pulsar.address", "")
-	port := Params.GetWithDefault("pulsar.port", "")
-	if len(pulsarHost) != 0 && len(port) != 0 {
-		return "pulsar://" + pulsarHost + ":" + port
+	pulsarAddress := Params.PulsarCfg.Address.GetValue()
+	if len(pulsarAddress) != 0 {
+		return pulsarAddress
 	}
 	panic("invalid pulsar address")
 }
 
 func getKafkaBrokerList() string {
-	brokerList := Params.Get("kafka.brokerList")
+	brokerList := Params.KafkaCfg.Address.GetValue()
 	log.Printf("kafka broker list: %s", brokerList)
 	return brokerList
 }

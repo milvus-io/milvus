@@ -439,10 +439,11 @@ func TestProxy(t *testing.T) {
 	testServer := newProxyTestServer(proxy)
 	wg.Add(1)
 
+	bt := paramtable.NewBaseTable(paramtable.SkipRemote(true))
 	base := &paramtable.ComponentParam{}
-	base.Init()
+	base.Init(bt)
 	var p paramtable.GrpcServerConfig
-	p.Init(typeutil.ProxyRole, &base.BaseTable)
+	p.Init(typeutil.ProxyRole, bt)
 	testServer.Proxy.SetAddress(p.GetAddress())
 	assert.Equal(t, p.GetAddress(), testServer.Proxy.GetAddress())
 

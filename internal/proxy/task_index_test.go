@@ -117,7 +117,7 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 	fieldName := "field1"
 	indexName := "_default_idx_101"
 
-	Params.Init()
+	paramtable.Init()
 	qc := getMockQueryCoord()
 	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 		Status: &commonpb.Status{
@@ -607,7 +607,7 @@ func Test_wrapUserIndexParams(t *testing.T) {
 }
 
 func Test_parseIndexParams_AutoIndex(t *testing.T) {
-	Params.Init()
+	paramtable.Init()
 	mgr := config.NewManager()
 	mgr.SetConfig("autoIndex.enable", "false")
 	mgr.SetConfig("autoIndex.params.build", `{"M": 30,"efConstruction": 360,"index_type": "HNSW", "metric_type": "IP"}`)

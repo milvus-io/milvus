@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type RowCountBasedBalancerTestSuite struct {
@@ -44,7 +45,7 @@ type RowCountBasedBalancerTestSuite struct {
 }
 
 func (suite *RowCountBasedBalancerTestSuite) SetupSuite() {
-	Params.Init()
+	paramtable.Init()
 }
 
 func (suite *RowCountBasedBalancerTestSuite) SetupTest() {

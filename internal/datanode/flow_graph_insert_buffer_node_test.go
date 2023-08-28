@@ -77,7 +77,7 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 	testPath := "/test/datanode/root/meta"
 	err := clearEtcd(testPath)
 	require.NoError(t, err)
-	Params.BaseTable.Save("etcd.rootPath", "/test/datanode/root")
+	Params.Save("etcd.rootPath", "/test/datanode/root")
 
 	Factory := &MetaFactory{}
 	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1", schemapb.DataType_Int64)
@@ -167,7 +167,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	testPath := "/test/datanode/root/meta"
 	err := clearEtcd(testPath)
 	require.NoError(t, err)
-	Params.BaseTable.Save("etcd.rootPath", "/test/datanode/root")
+	Params.Save("etcd.rootPath", "/test/datanode/root")
 
 	Factory := &MetaFactory{}
 	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1", schemapb.DataType_Int64)
@@ -331,7 +331,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	testPath := "/test/datanode/root/meta"
 	err := clearEtcd(testPath)
 	require.NoError(t, err)
-	Params.BaseTable.Save("etcd.rootPath", "/test/datanode/root")
+	Params.Save("etcd.rootPath", "/test/datanode/root")
 
 	Factory := &MetaFactory{}
 	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1", schemapb.DataType_Int64)
@@ -578,7 +578,7 @@ func TestInsertBufferNodeRollBF(t *testing.T) {
 	testPath := "/test/datanode/root/meta"
 	err := clearEtcd(testPath)
 	require.NoError(t, err)
-	Params.BaseTable.Save("etcd.rootPath", "/test/datanode/root")
+	Params.Save("etcd.rootPath", "/test/datanode/root")
 
 	Factory := &MetaFactory{}
 	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1", schemapb.DataType_Int64)
@@ -960,7 +960,7 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 	testPath := "/test/datanode/root/meta"
 	err := clearEtcd(testPath)
 	require.NoError(t, err)
-	Params.BaseTable.Save("etcd.rootPath", "/test/datanode/root")
+	Params.Save("etcd.rootPath", "/test/datanode/root")
 
 	Factory := &MetaFactory{}
 	tests := []struct {

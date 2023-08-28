@@ -34,10 +34,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
-var Params paramtable.ComponentParam
+var Params = paramtable.Get()
 
 func TestMain(m *testing.M) {
-	Params.Init()
+	paramtable.Init()
 	code := m.Run()
 	os.Exit(code)
 }

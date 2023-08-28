@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -460,7 +461,7 @@ func TestComponentState(t *testing.T) {
 		}
 		ctx = context.TODO()
 	)
-	Params.Init()
+	paramtable.Init()
 	in := NewIndexNode(ctx, factory)
 	in.SetEtcdClient(getEtcdClient())
 	state, err := in.GetComponentStates(ctx)
@@ -495,7 +496,7 @@ func TestGetTimeTickChannel(t *testing.T) {
 		}
 		ctx = context.TODO()
 	)
-	Params.Init()
+	paramtable.Init()
 	in := NewIndexNode(ctx, factory)
 	ret, err := in.GetTimeTickChannel(ctx)
 	assert.NoError(t, err)
@@ -509,7 +510,7 @@ func TestGetStatisticChannel(t *testing.T) {
 		}
 		ctx = context.TODO()
 	)
-	Params.Init()
+	paramtable.Init()
 	in := NewIndexNode(ctx, factory)
 
 	ret, err := in.GetStatisticsChannel(ctx)
@@ -524,7 +525,7 @@ func TestIndexTaskWhenStoppingNode(t *testing.T) {
 		}
 		ctx = context.TODO()
 	)
-	Params.Init()
+	paramtable.Init()
 	in := NewIndexNode(ctx, factory)
 
 	in.loadOrStoreTask("cluster-1", 1, &taskInfo{
@@ -558,7 +559,7 @@ func TestGetSetAddress(t *testing.T) {
 		}
 		ctx = context.TODO()
 	)
-	Params.Init()
+	paramtable.Init()
 	in := NewIndexNode(ctx, factory)
 	in.SetAddress("address")
 	assert.Equal(t, "address", in.GetAddress())

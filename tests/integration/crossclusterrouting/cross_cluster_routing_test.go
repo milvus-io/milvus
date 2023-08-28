@@ -87,7 +87,7 @@ func (s *CrossClusterRoutingSuite) SetupSuite() {
 	s.ctx, s.cancel = context.WithTimeout(context.Background(), time.Second*180)
 	rand.Seed(time.Now().UnixNano())
 
-	paramtable.Get().Init()
+	paramtable.Init()
 	s.factory = dependency.NewDefaultFactory(true)
 }
 

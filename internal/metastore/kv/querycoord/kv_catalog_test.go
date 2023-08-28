@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type CatalogTestSuite struct {
@@ -21,7 +22,7 @@ type CatalogTestSuite struct {
 }
 
 func (suite *CatalogTestSuite) SetupSuite() {
-	Params.Init()
+	paramtable.Init()
 }
 
 func (suite *CatalogTestSuite) SetupTest() {

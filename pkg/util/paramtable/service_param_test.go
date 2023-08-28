@@ -22,8 +22,8 @@ import (
 
 func TestServiceParam(t *testing.T) {
 	var SParams ServiceParam
-	SParams.init()
-
+	bt := NewBaseTable(SkipRemote(true))
+	SParams.init(bt)
 	t.Run("test etcdConfig", func(t *testing.T) {
 		Params := &SParams.EtcdCfg
 
@@ -54,11 +54,13 @@ func TestServiceParam(t *testing.T) {
 		// test UseEmbedEtcd
 		t.Setenv("etcd.use.embed", "true")
 		t.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.ClusterDeployMode)
-		assert.Panics(t, func() { SParams.init() })
+		assert.Panics(t, func() {
+			NewBaseTable()
+		})
 
 		t.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
 		t.Setenv("etcd.use.embed", "false")
-		SParams.init()
+		SParams.init(bt)
 	})
 
 	t.Run("test pulsarConfig", func(t *testing.T) {
@@ -77,13 +79,13 @@ func TestServiceParam(t *testing.T) {
 
 		address := "pulsar://localhost:6650"
 		{
-			SParams.BaseTable.Save("pulsar.address", address)
+			bt.Save("pulsar.address", address)
 			assert.Equal(t, SParams.PulsarCfg.Address.GetValue(), address)
 		}
 
 		{
-			SParams.BaseTable.Save("pulsar.address", "localhost")
-			SParams.BaseTable.Save("pulsar.port", "6650")
+			bt.Save("pulsar.address", "localhost")
+			bt.Save("pulsar.port", "6650")
 			assert.Equal(t, SParams.PulsarCfg.Address.GetValue(), address)
 		}
 	})
@@ -96,12 +98,12 @@ func TestServiceParam(t *testing.T) {
 		}
 
 		{
-			SParams.BaseTable.Save(SParams.PulsarCfg.Address.Key, "u\\invalid")
+			bt.Save(SParams.PulsarCfg.Address.Key, "u\\invalid")
 			assert.Equal(t, SParams.PulsarCfg.WebAddress.GetValue(), "")
 		}
 
 		{
-			SParams.BaseTable.Save(SParams.PulsarCfg.Address.Key, "")
+			bt.Save(SParams.PulsarCfg.Address.Key, "")
 			assert.Equal(t, SParams.PulsarCfg.WebAddress.GetValue(), "")
 		}
 	})

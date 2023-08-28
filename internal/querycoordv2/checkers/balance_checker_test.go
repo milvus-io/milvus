@@ -49,7 +49,7 @@ type BalanceCheckerTestSuite struct {
 }
 
 func (suite *BalanceCheckerTestSuite) SetupSuite() {
-	Params.Init()
+	paramtable.Init()
 }
 
 func (suite *BalanceCheckerTestSuite) SetupTest() {

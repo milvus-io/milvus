@@ -3684,8 +3684,8 @@ func TestDataCoord_Import(t *testing.T) {
 
 	t.Run("no datanode available", func(t *testing.T) {
 		svr := newTestServer(t, nil)
-		Params.BaseTable.Save("minio.address", "minio:9000")
-		defer Params.BaseTable.Reset("minio.address")
+		Params.Save("minio.address", "minio:9000")
+		defer Params.Reset("minio.address")
 		resp, err := svr.Import(svr.ctx, &datapb.ImportTaskRequest{
 			ImportTask: &datapb.ImportTask{
 				CollectionId: 100,

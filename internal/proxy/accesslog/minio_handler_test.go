@@ -29,7 +29,7 @@ import (
 
 func TestMinioHandler_ConnectError(t *testing.T) {
 	var params paramtable.ComponentParam
-	params.Init()
+	params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 	params.Save(params.MinioCfg.UseIAM.Key, "true")
 	params.Save(params.MinioCfg.Address.Key, "")
 
@@ -49,7 +49,7 @@ func TestMinioHandler_Join(t *testing.T) {
 
 func TestMinHandler_Basic(t *testing.T) {
 	var Params paramtable.ComponentParam
-	Params.Init()
+	Params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 	testPath := "/tmp/miniotest"
 	Params.Save(Params.ProxyCfg.AccessLog.MinioEnable.Key, "true")
 	Params.Save(Params.ProxyCfg.AccessLog.RemotePath.Key, "accesslog")
@@ -95,7 +95,7 @@ func TestMinHandler_Basic(t *testing.T) {
 
 func TestMinioHandler_WithTimeRetention(t *testing.T) {
 	var Params paramtable.ComponentParam
-	Params.Init()
+	Params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 	testPath := "/tmp/miniotest"
 	Params.Save(Params.ProxyCfg.AccessLog.MinioEnable.Key, "true")
 	Params.Save(Params.ProxyCfg.AccessLog.RemotePath.Key, "accesslog")

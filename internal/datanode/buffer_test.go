@@ -245,7 +245,7 @@ func TestUpdateCompactedSegments(t *testing.T) {
 	chanName := "datanode-test-FlowGraphDeletenode-showDelBuf"
 	testPath := "/test/datanode/root/meta"
 	assert.NoError(t, clearEtcd(testPath))
-	Params.BaseTable.Save("etcd.rootPath", "/test/datanode/root")
+	Params.Save("etcd.rootPath", "/test/datanode/root")
 
 	channel := ChannelMeta{
 		segments: make(map[UniqueID]*Segment),

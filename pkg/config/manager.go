@@ -285,7 +285,6 @@ func (m *Manager) getConfigValueBySource(configKey, sourceName string) (string, 
 
 func (m *Manager) updateEvent(e *Event) error {
 	// refresh all configuration one by one
-	log.Debug("receive update event", zap.Any("event", e))
 	if e.HasUpdated {
 		return nil
 	}
@@ -328,6 +327,7 @@ func (m *Manager) updateEvent(e *Event) error {
 
 	}
 
+	log.Info("receive update event", zap.Any("event", e))
 	e.HasUpdated = true
 	return nil
 }

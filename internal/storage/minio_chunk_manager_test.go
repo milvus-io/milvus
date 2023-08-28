@@ -21,24 +21,20 @@ import (
 	"io"
 	"math/rand"
 	"path"
-	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 // TODO: NewMinioChunkManager is deprecated. Rewrite this unittest.
 func newMinIOChunkManager(ctx context.Context, bucketName string, rootPath string) (*MinioChunkManager, error) {
 	endPoint := getMinioAddress()
-	accessKeyID, _ := Params.Load("minio.accessKeyID")
-	secretAccessKey, _ := Params.Load("minio.secretAccessKey")
-	useSSLStr, _ := Params.Load("minio.useSSL")
-	useSSL, _ := strconv.ParseBool(useSSLStr)
+	accessKeyID := Params.MinioCfg.AccessKeyID.GetValue()
+	secretAccessKey := Params.MinioCfg.SecretAccessKey.GetValue()
+	useSSL := Params.MinioCfg.UseSSL.GetAsBool()
 	client, err := NewMinioChunkManager(ctx,
 		RootPath(rootPath),
 		Address(endPoint),
@@ -57,23 +53,21 @@ func newMinIOChunkManager(ctx context.Context, bucketName string, rootPath strin
 }
 
 func getMinioAddress() string {
-	minioHost := Params.GetWithDefault("minio.address", paramtable.DefaultMinioHost)
+	minioHost := Params.MinioCfg.Address.GetValue()
 	if strings.Contains(minioHost, ":") {
 		return minioHost
 	}
-	port := Params.GetWithDefault("minio.port", paramtable.DefaultMinioPort)
+	port := Params.MinioCfg.Port.GetValue()
 	return minioHost + ":" + port
 }
 
 func TestMinIOCMFail(t *testing.T) {
 	ctx := context.Background()
-	endPoint, _ := Params.Load("9.9.9.9")
-	accessKeyID, _ := Params.Load("minio.accessKeyID")
-	secretAccessKey, _ := Params.Load("minio.secretAccessKey")
-	useSSLStr, _ := Params.Load("minio.useSSL")
-	useSSL, _ := strconv.ParseBool(useSSLStr)
+	accessKeyID := Params.MinioCfg.AccessKeyID.GetValue()
+	secretAccessKey := Params.MinioCfg.SecretAccessKey.GetValue()
+	useSSL := Params.MinioCfg.UseSSL.GetAsBool()
 	client, err := NewMinioChunkManager(ctx,
-		Address(endPoint),
+		Address("9.9.9.9:invalid"),
 		AccessKeyID(accessKeyID),
 		SecretAccessKeyID(secretAccessKey),
 		UseSSL(useSSL),
@@ -86,12 +80,9 @@ func TestMinIOCMFail(t *testing.T) {
 }
 
 func TestMinIOCM(t *testing.T) {
-	Params.Init()
-	testBucket, err := Params.Load("minio.bucketName")
-	require.NoError(t, err)
+	testBucket := Params.MinioCfg.BucketName.GetValue()
 
-	configRoot, err := Params.Load("minio.rootPath")
-	require.NoError(t, err)
+	configRoot := Params.MinioCfg.RootPath.GetValue()
 
 	testMinIOKVRoot := path.Join(configRoot, "milvus-minio-ut-root")
 

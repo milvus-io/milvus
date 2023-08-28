@@ -57,8 +57,6 @@ func TestMain(m *testing.M) {
 }
 
 func Test_NewClient(t *testing.T) {
-	proxy.Params.Init()
-
 	ctx := context.Background()
 
 	etcdCli, err := etcd.GetEtcdClient(

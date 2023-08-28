@@ -24,7 +24,6 @@ import (
 )
 
 func TestPmsFactory(t *testing.T) {
-	Params.Init()
 	pmsFactory := NewPmsFactory(&Params.ServiceParam)
 
 	ctx := context.Background()

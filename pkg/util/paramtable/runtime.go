@@ -13,6 +13,7 @@ package paramtable
 
 import (
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -23,22 +24,45 @@ const (
 	runtimeUpdateTimeKey = "runtime.updateTime"
 )
 
+var once sync.Once
 var params ComponentParam
+var hookParams hookConfig
 
 func Init() {
-	params.Init()
+	once.Do(func() {
+		baseTable := NewBaseTable()
+		params.Init(baseTable)
+		hookBaseTable := NewBaseTableFromYamlOnly(hookYamlFile)
+		hookParams.init(hookBaseTable)
+	})
+}
+
+func InitWithBaseTable(baseTable *BaseTable) {
+	once.Do(func() {
+		params.Init(baseTable)
+		hookBaseTable := NewBaseTableFromYamlOnly(hookYamlFile)
+		hookParams.init(hookBaseTable)
+	})
 }
 
 func Get() *ComponentParam {
 	return &params
 }
 
+func GetBaseTable() *BaseTable {
+	return params.baseTable
+}
+
+func GetHookParams() *hookConfig {
+	return &hookParams
+}
+
 func SetNodeID(newID UniqueID) {
-	params.Save(runtimeNodeIDKey, strconv.FormatInt(newID, 10))
+	params.baseTable.Save(runtimeNodeIDKey, strconv.FormatInt(newID, 10))
 }
 
 func GetNodeID() UniqueID {
-	nodeID, err := strconv.ParseInt(params.Get(runtimeNodeIDKey), 10, 64)
+	nodeID, err := strconv.ParseInt(params.baseTable.Get(runtimeNodeIDKey), 10, 64)
 	if err != nil {
 		return 0
 	}
@@ -46,27 +70,30 @@ func GetNodeID() UniqueID {
 }
 
 func SetRole(role string) {
-	params.Save(runtimeRoleKey, role)
+	params.baseTable.Save(runtimeRoleKey, role)
 }
 
 func GetRole() string {
-	return params.Get(runtimeRoleKey)
+	if params.baseTable == nil {
+		return ""
+	}
+	return params.baseTable.Get(runtimeRoleKey)
 }
 
 func SetCreateTime(d time.Time) {
-	params.Save(runtimeCreateTimeKey, strconv.FormatInt(d.UnixNano(), 10))
+	params.baseTable.Save(runtimeCreateTimeKey, strconv.FormatInt(d.UnixNano(), 10))
 }
 
 func GetCreateTime() time.Time {
-	v, _ := strconv.ParseInt(params.Get(runtimeCreateTimeKey), 10, 64)
+	v, _ := strconv.ParseInt(params.baseTable.Get(runtimeCreateTimeKey), 10, 64)
 	return time.Unix(v/1e9, v%1e9)
 }
 
 func SetUpdateTime(d time.Time) {
-	params.Save(runtimeUpdateTimeKey, strconv.FormatInt(d.UnixNano(), 10))
+	params.baseTable.Save(runtimeUpdateTimeKey, strconv.FormatInt(d.UnixNano(), 10))
 }
 
 func GetUpdateTime() time.Time {
-	v, _ := strconv.ParseInt(params.Get(runtimeUpdateTimeKey), 10, 64)
+	v, _ := strconv.ParseInt(params.baseTable.Get(runtimeUpdateTimeKey), 10, 64)
 	return time.Unix(v/1e9, v%1e9)
 }

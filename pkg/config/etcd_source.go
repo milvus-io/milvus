@@ -25,7 +25,9 @@ import (
 	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 )
 
@@ -41,10 +43,10 @@ type EtcdSource struct {
 	keyPrefix     string
 
 	configRefresher *refresher
-	eh              EventHandler
 }
 
 func NewEtcdSource(etcdInfo *EtcdInfo) (*EtcdSource, error) {
+	log.Debug("init etcd source", zap.Any("etcdInfo", etcdInfo))
 	etcdCli, err := etcd.GetEtcdClient(
 		etcdInfo.UseEmbed,
 		etcdInfo.UseSSL,
@@ -122,7 +124,9 @@ func (es *EtcdSource) UpdateOptions(opts Options) {
 	es.keyPrefix = opts.EtcdInfo.KeyPrefix
 	if es.configRefresher.refreshInterval != opts.EtcdInfo.RefreshInterval {
 		es.configRefresher.stop()
+		eh := es.configRefresher.eh
 		es.configRefresher = newRefresher(opts.EtcdInfo.RefreshInterval, es.refreshConfigurations)
+		es.configRefresher.eh = eh
 		es.configRefresher.start(es.GetSourceName())
 	}
 }
@@ -134,6 +138,7 @@ func (es *EtcdSource) refreshConfigurations() error {
 
 	ctx, cancel := context.WithTimeout(es.ctx, ReadConfigTimeout)
 	defer cancel()
+	log.Debug("etcd refreshConfigurations", zap.String("prefix", prefix), zap.Any("endpoints", es.etcdCli.Endpoints()))
 	response, err := es.etcdCli.Get(ctx, prefix, clientv3.WithPrefix(), clientv3.WithSerializable())
 	if err != nil {
 		return err
@@ -144,6 +149,7 @@ func (es *EtcdSource) refreshConfigurations() error {
 		key = strings.TrimPrefix(key, prefix+"/")
 		newConfig[key] = string(kv.Value)
 		newConfig[formatKey(key)] = string(kv.Value)
+		log.Debug("got config from etcd", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
 	}
 	es.Lock()
 	defer es.Unlock()

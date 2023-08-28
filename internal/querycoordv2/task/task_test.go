@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -82,7 +83,7 @@ type TaskSuite struct {
 }
 
 func (suite *TaskSuite) SetupSuite() {
-	Params.Init()
+	paramtable.Init()
 	suite.collection = 1000
 	suite.replica = 10
 	suite.subChannels = []string{

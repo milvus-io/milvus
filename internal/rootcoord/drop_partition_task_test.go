@@ -66,8 +66,6 @@ func Test_dropPartitionTask_Prepare(t *testing.T) {
 	})
 
 	t.Run("normal case", func(t *testing.T) {
-		Params.Init()
-
 		collectionName := funcutil.GenRandomStr()
 		coll := &model.Collection{Name: collectionName}
 

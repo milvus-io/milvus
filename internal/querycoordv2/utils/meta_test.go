@@ -31,11 +31,12 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestSpawnReplicasWithRG(t *testing.T) {
-	Params.Init()
+	paramtable.Init()
 	config := GenerateEtcdConfig()
 	cli, _ := etcd.GetEtcdClient(
 		config.UseEmbedEtcd.GetAsBool(),
@@ -118,7 +119,7 @@ func TestSpawnReplicasWithRG(t *testing.T) {
 }
 
 func TestAddNodesToCollectionsInRGFailed(t *testing.T) {
-	Params.Init()
+	paramtable.Init()
 
 	store := mocks.NewQueryCoordCatalog(t)
 	store.EXPECT().SaveCollection(mock.Anything).Return(nil)
@@ -180,7 +181,7 @@ func TestAddNodesToCollectionsInRGFailed(t *testing.T) {
 }
 
 func TestAddNodesToCollectionsInRG(t *testing.T) {
-	Params.Init()
+	paramtable.Init()
 
 	store := mocks.NewQueryCoordCatalog(t)
 	store.EXPECT().SaveCollection(mock.Anything).Return(nil)

@@ -58,7 +58,7 @@ type LBPolicySuite struct {
 }
 
 func (s *LBPolicySuite) SetupSuite() {
-	Params.Init()
+	paramtable.Init()
 }
 
 func (s *LBPolicySuite) SetupTest() {

@@ -603,7 +603,7 @@ func TestIndexBuilder(t *testing.T) {
 		nodeID  = UniqueID(700)
 	)
 
-	Params.Init()
+	paramtable.Init()
 	ctx := context.Background()
 	catalog := catalogmocks.NewDataCoordCatalog(t)
 	catalog.On("CreateSegmentIndex",
@@ -676,7 +676,7 @@ func TestIndexBuilder(t *testing.T) {
 }
 
 func TestIndexBuilder_Error(t *testing.T) {
-	Params.Init()
+	paramtable.Init()
 
 	sc := catalogmocks.NewDataCoordCatalog(t)
 	sc.On("AlterSegmentIndexes",

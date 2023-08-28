@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -155,7 +156,7 @@ func newTask(cancelStage fakeTaskState, reterror map[fakeTaskState]error, expect
 }
 
 func TestIndexTaskScheduler(t *testing.T) {
-	Params.Init()
+	paramtable.Init()
 
 	scheduler := NewTaskScheduler(context.TODO())
 	scheduler.Start()

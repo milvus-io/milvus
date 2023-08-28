@@ -21,10 +21,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/config"
 )
 
-var baseParams = BaseTable{}
+var baseParams = NewBaseTable(SkipRemote(true))
 
 func TestMain(m *testing.M) {
-	baseParams.init(0)
+	baseParams.init()
 	code := m.Run()
 	os.Exit(code)
 }
@@ -112,7 +112,7 @@ func TestBaseTable_Get(t *testing.T) {
 func TestBaseTable_Pulsar(t *testing.T) {
 	//test PULSAR ADDRESS
 	t.Setenv("PULSAR_ADDRESS", "pulsar://localhost:6650")
-	baseParams.init(0)
+	baseParams.init()
 
 	address := baseParams.Get("pulsar.address")
 	assert.Equal(t, "pulsar://localhost:6650", address)
@@ -125,7 +125,7 @@ func TestBaseTable_Env(t *testing.T) {
 	t.Setenv("milvus.test", "test")
 	t.Setenv("milvus.test.test2", "test2")
 
-	baseParams.init(0)
+	baseParams.init()
 	result, _ := baseParams.Load("test")
 	assert.Equal(t, result, "test")
 
@@ -134,7 +134,7 @@ func TestBaseTable_Env(t *testing.T) {
 
 	t.Setenv("milvus.invalid", "xxx=test")
 
-	baseParams.init(0)
+	baseParams.init()
 	result, _ = baseParams.Load("invalid")
 	assert.Equal(t, result, "xxx=test")
 }

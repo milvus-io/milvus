@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type LeaderObserverTestSuite struct {
@@ -50,7 +51,7 @@ type LeaderObserverTestSuite struct {
 }
 
 func (suite *LeaderObserverTestSuite) SetupSuite() {
-	Params.Init()
+	paramtable.Init()
 }
 
 func (suite *LeaderObserverTestSuite) SetupTest() {

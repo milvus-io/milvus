@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type proxyMock struct {
@@ -101,7 +102,7 @@ func (p *proxyMock) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.Ref
 }
 
 func TestProxyClientManager_GetProxyClients(t *testing.T) {
-	Params.Init()
+	paramtable.Init()
 
 	core, err := NewCore(context.Background(), nil)
 	assert.NoError(t, err)
@@ -132,7 +133,7 @@ func TestProxyClientManager_GetProxyClients(t *testing.T) {
 }
 
 func TestProxyClientManager_AddProxyClient(t *testing.T) {
-	Params.Init()
+	paramtable.Init()
 
 	core, err := NewCore(context.Background(), nil)
 	assert.NoError(t, err)

@@ -24,7 +24,7 @@ import (
 var Params = paramtable.Get()
 
 func TestMain(m *testing.M) {
-	Params.Init()
+	paramtable.Init()
 	mockCluster, err := kafka.NewMockCluster(1)
 	defer mockCluster.Close()
 	if err != nil {
@@ -41,7 +41,7 @@ func TestMain(m *testing.M) {
 }
 
 func getKafkaBrokerList() string {
-	brokerList := Params.Get("kafka.brokerList")
+	brokerList := Params.KafkaCfg.Address.GetValue()
 	log.Info("get kafka broker list.", zap.String("address", brokerList))
 	return brokerList
 }

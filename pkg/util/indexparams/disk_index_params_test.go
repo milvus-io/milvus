@@ -31,7 +31,7 @@ import (
 func TestDiskIndexParams(t *testing.T) {
 	t.Run("fill index params without auto index param", func(t *testing.T) {
 		var params paramtable.ComponentParam
-		params.Init()
+		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 
 		indexParams := make(map[string]string)
 		err := FillDiskIndexParams(&params, indexParams)
@@ -52,7 +52,7 @@ func TestDiskIndexParams(t *testing.T) {
 
 	t.Run("fill index params with auto index", func(t *testing.T) {
 		var params paramtable.ComponentParam
-		params.Init()
+		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 		params.Save(params.AutoIndexConfig.Enable.Key, "true")
 
 		mapString := make(map[string]string)
@@ -85,7 +85,7 @@ func TestDiskIndexParams(t *testing.T) {
 
 	t.Run("fill index params with wrong auto index param", func(t *testing.T) {
 		var params paramtable.ComponentParam
-		params.Init()
+		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 		params.Save(params.AutoIndexConfig.Enable.Key, "true")
 		// ExtraParams wrong
 		params.Save(params.AutoIndexConfig.ExtraParams.Key, "")
@@ -148,7 +148,7 @@ func TestDiskIndexParams(t *testing.T) {
 
 	t.Run("set disk index load params without auto index param", func(t *testing.T) {
 		var params paramtable.ComponentParam
-		params.Init()
+		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 		indexParams := make(map[string]string)
 
 		err := SetDiskIndexLoadParams(&params, indexParams, 100)
@@ -201,7 +201,7 @@ func TestDiskIndexParams(t *testing.T) {
 
 	t.Run("set disk index load params with auto index param", func(t *testing.T) {
 		var params paramtable.ComponentParam
-		params.Init()
+		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 		params.Save(params.AutoIndexConfig.Enable.Key, "true")
 		mapString := make(map[string]string)
 		mapString[BuildRatioKey] = "{\"pq_code_budget_gb\": 0.125, \"num_threads\": 1}"
@@ -244,7 +244,7 @@ func TestDiskIndexParams(t *testing.T) {
 
 	t.Run("set disk index load params with wrong autoindex param", func(t *testing.T) {
 		var params paramtable.ComponentParam
-		params.Init()
+		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 		params.Save(params.AutoIndexConfig.Enable.Key, "true")
 		// ExtraParams wrong
 		params.Save(params.AutoIndexConfig.ExtraParams.Key, "")

@@ -131,7 +131,6 @@ func TestDmlChannels(t *testing.T) {
 	defer cancel()
 
 	factory := dependency.NewDefaultFactory(true)
-	Params.Init()
 
 	dml := newDmlChannels(ctx, factory, dmlChanPrefix, totalDmlChannelNum)
 	chanNames := dml.listChannels()

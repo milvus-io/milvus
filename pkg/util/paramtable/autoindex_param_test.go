@@ -37,7 +37,8 @@ const (
 
 func TestAutoIndexParams_build(t *testing.T) {
 	var CParams ComponentParam
-	CParams.Init()
+	bt := NewBaseTable(SkipRemote(true))
+	CParams.Init(bt)
 
 	t.Run("test parseBuildParams success", func(t *testing.T) {
 		//Params := CParams.AutoIndexConfig
@@ -51,7 +52,7 @@ func TestAutoIndexParams_build(t *testing.T) {
 		var jsonStrBytes []byte
 		jsonStrBytes, err = json.Marshal(map1)
 		assert.NoError(t, err)
-		CParams.Save(CParams.AutoIndexConfig.IndexParams.Key, string(jsonStrBytes))
+		bt.Save(CParams.AutoIndexConfig.IndexParams.Key, string(jsonStrBytes))
 		assert.Equal(t, "HNSW", CParams.AutoIndexConfig.IndexType.GetValue())
 		assert.Equal(t, strconv.Itoa(map1["M"].(int)), CParams.AutoIndexConfig.IndexParams.GetAsJSONMap()["M"])
 		assert.Equal(t, strconv.Itoa(map1["efConstruction"].(int)), CParams.AutoIndexConfig.IndexParams.GetAsJSONMap()["efConstruction"])
@@ -62,7 +63,7 @@ func TestAutoIndexParams_build(t *testing.T) {
 		}
 		jsonStrBytes, err = json.Marshal(map2)
 		assert.NoError(t, err)
-		CParams.Save(CParams.AutoIndexConfig.IndexParams.Key, string(jsonStrBytes))
+		bt.Save(CParams.AutoIndexConfig.IndexParams.Key, string(jsonStrBytes))
 		assert.Equal(t, "IVF_FLAT", CParams.AutoIndexConfig.IndexType.GetValue())
 		assert.Equal(t, strconv.Itoa(map2["nlist"].(int)), CParams.AutoIndexConfig.IndexParams.GetAsJSONMap()["nlist"])
 	})

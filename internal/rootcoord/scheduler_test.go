@@ -198,7 +198,7 @@ func Test_scheduler_updateDdlMinTsLoop(t *testing.T) {
 		}
 		ctx := context.Background()
 		s := newScheduler(ctx, idAlloc, tsoAlloc)
-		Params.Init()
+		paramtable.Init()
 		paramtable.Get().Save(Params.ProxyCfg.TimeTickInterval.Key, "1")
 		s.Start()
 
@@ -233,7 +233,7 @@ func Test_scheduler_updateDdlMinTsLoop(t *testing.T) {
 		}
 		ctx := context.Background()
 		s := newScheduler(ctx, idAlloc, tsoAlloc)
-		Params.Init()
+		paramtable.Init()
 		paramtable.Get().Save(Params.ProxyCfg.TimeTickInterval.Key, "1")
 		s.Start()
 

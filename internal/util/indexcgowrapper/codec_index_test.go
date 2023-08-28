@@ -2,6 +2,7 @@ package indexcgowrapper
 
 import (
 	"math/rand"
+	"os"
 	"strconv"
 	"testing"
 
@@ -13,7 +14,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/metric"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
+
+func TestMain(m *testing.M) {
+	paramtable.Init()
+	exitCode := m.Run()
+	os.Exit(exitCode)
+}
 
 type indexTestCase struct {
 	dtype       schemapb.DataType
@@ -289,17 +297,17 @@ func genIndexCase() []indexTestCase {
 }
 
 func genStorageConfig() *indexpb.StorageConfig {
-	Params.Init()
+	params := paramtable.Get()
 
 	return &indexpb.StorageConfig{
-		Address:         Params.MinioCfg.Address.GetValue(),
-		AccessKeyID:     Params.MinioCfg.AccessKeyID.GetValue(),
-		SecretAccessKey: Params.MinioCfg.SecretAccessKey.GetValue(),
-		BucketName:      Params.MinioCfg.BucketName.GetValue(),
-		RootPath:        Params.MinioCfg.RootPath.GetValue(),
-		IAMEndpoint:     Params.MinioCfg.IAMEndpoint.GetValue(),
-		UseSSL:          Params.MinioCfg.UseSSL.GetAsBool(),
-		UseIAM:          Params.MinioCfg.UseIAM.GetAsBool(),
+		Address:         params.MinioCfg.Address.GetValue(),
+		AccessKeyID:     params.MinioCfg.AccessKeyID.GetValue(),
+		SecretAccessKey: params.MinioCfg.SecretAccessKey.GetValue(),
+		BucketName:      params.MinioCfg.BucketName.GetValue(),
+		RootPath:        params.MinioCfg.RootPath.GetValue(),
+		IAMEndpoint:     params.MinioCfg.IAMEndpoint.GetValue(),
+		UseSSL:          params.MinioCfg.UseSSL.GetAsBool(),
+		UseIAM:          params.MinioCfg.UseIAM.GetAsBool(),
 	}
 }
 
