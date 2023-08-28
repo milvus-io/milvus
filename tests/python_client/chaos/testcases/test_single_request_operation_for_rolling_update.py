@@ -3,6 +3,8 @@ from pathlib import Path
 import subprocess
 import pytest
 from time import sleep
+
+from yaml import full_load
 from pymilvus import connections, utility
 from chaos.checker import (CreateChecker,
                            InsertChecker,
@@ -13,6 +15,7 @@ from chaos.checker import (CreateChecker,
                            DeleteChecker,
                            DropChecker,
                            Op)
+from utils.util_k8s import wait_pods_ready
 from utils.util_log import test_log as log
 from chaos import chaos_commons as cc
 from common.common_type import CaseLabel
@@ -120,7 +123,9 @@ class TestOperations(TestBase):
                 res = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 stdout, stderr = res.communicate()
                 log.info(f"{cmd}, stdout: {stdout}, stderr: {stderr}")
-
+                # reset all
+                for k, v in self.health_checkers.items():
+                    v.reset()
             for k, v in self.health_checkers.items():
                 v.check_result()
         for k, v in self.health_checkers.items():
@@ -131,10 +136,8 @@ class TestOperations(TestBase):
             log.info(f"{k} failed request: {v.fail_records}")
         for k, v in self.health_checkers.items():  
             log.info(f"{k} rto: {v.get_rto()}")
-
         if is_check:
             assert_statistic(self.health_checkers, succ_rate_threshold=0.98)
-            assert_expectations()
             # get each checker's rto
             for k, v in self.health_checkers.items():
                 log.info(f"{k} rto: {v.get_rto()}")
@@ -146,4 +149,25 @@ class TestOperations(TestBase):
                 log.info("*********************Verify Data Completeness**********************")
                 self.health_checkers[Op.insert].verify_data_completeness()
 
-        log.info("*********************Chaos Test Completed**********************")
+        #
+        for k, v in self.health_checkers.items():
+            v.reset()
+        # wait all pod running
+        file_path = f"{str(Path(__file__).parent.parent.parent)}/deploy/milvus_crd.yaml"
+        with open(file_path, "r") as f:
+            config = full_load(f)
+        meta_name = config["metadata"]["name"]
+        label_selector = f"app.kubernetes.io/instance={meta_name}"
+        is_ready = wait_pods_ready("chaos-testing", label_selector)
+        pytest.assume(is_ready is True, f"expect all pods ready but got {is_ready}")
+        cc.start_monitor_threads(self.health_checkers)
+        sleep(60)
+        log.info("check succ rate after rolling update finished")
+        for k, v in self.health_checkers.items():
+            v.check_result()
+        for k, v in self.health_checkers.items():
+            log.info(f"{k} failed request: {v.fail_records}")
+        for k, v in self.health_checkers.items():
+            log.info(f"{k} rto: {v.get_rto()}")
+        assert_statistic(self.health_checkers, succ_rate_threshold=1.0)
+        log.info("*********************Test Completed**********************")

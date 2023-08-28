@@ -110,6 +110,6 @@ def assert_statistic(
                 f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}"
             )
             pytest.assume(
-                succ_rate > succ_rate_threshold and total > 2,
+                succ_rate >= succ_rate_threshold and total > 2,
                 f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}",
             )
