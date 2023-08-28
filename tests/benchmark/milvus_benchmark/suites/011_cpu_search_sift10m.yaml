@@ -39,7 +39,7 @@ search_performance:
         cluster: true
         readonly:
           replicas: 2
-        external_mysql: true
+
       collection_name: sift_10m_128_l2_011
       run_count: 2
       top_ks: [1, 10, 100, 1000]

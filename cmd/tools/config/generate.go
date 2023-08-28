@@ -207,10 +207,6 @@ func WriteYaml() {
 			name: "metastore",
 		},
 		{
-			name:   "mysql",
-			header: "\n# Related configuration of mysql, used to store Milvus metadata.",
-		},
-		{
 			name: "localStorage",
 		},
 		{

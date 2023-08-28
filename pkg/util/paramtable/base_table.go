@@ -55,7 +55,7 @@ const (
 
 // Const of Global Config List
 func globalConfigPrefixs() []string {
-	return []string{"metastore", "localStorage", "etcd", "mysql", "minio", "pulsar", "kafka", "rocksmq", "log", "grpc", "common", "quotaAndLimits"}
+	return []string{"metastore", "localStorage", "etcd", "minio", "pulsar", "kafka", "rocksmq", "log", "grpc", "common", "quotaAndLimits"}
 }
 
 var defaultYaml = []string{"milvus.yaml", "default.yaml", "user.yaml"}

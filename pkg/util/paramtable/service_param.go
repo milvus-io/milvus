@@ -47,7 +47,6 @@ type ServiceParam struct {
 	LocalStorageCfg LocalStorageConfig
 	MetaStoreCfg    MetaStoreConfig
 	EtcdCfg         EtcdConfig
-	DBCfg           MetaDBConfig
 	MQCfg           MQConfig
 	PulsarCfg       PulsarConfig
 	KafkaCfg        KafkaConfig
@@ -62,7 +61,6 @@ func (p *ServiceParam) init() {
 	p.LocalStorageCfg.Init(&p.BaseTable)
 	p.MetaStoreCfg.Init(&p.BaseTable)
 	p.EtcdCfg.Init(&p.BaseTable)
-	p.DBCfg.Init(&p.BaseTable)
 	p.MQCfg.Init(&p.BaseTable)
 	p.PulsarCfg.Init(&p.BaseTable)
 	p.KafkaCfg.Init(&p.BaseTable)
@@ -287,81 +285,10 @@ func (p *MetaStoreConfig) Init(base *BaseTable) {
 		Key:          "metastore.type",
 		Version:      "2.2.0",
 		DefaultValue: util.MetaStoreTypeEtcd,
-		Doc: `Default value: etcd
-Valid values: [etcd, mysql]`,
+		Doc: `Default value: etcd, Valid values: etcd `,
 		Export: true,
 	}
 	p.MetaStoreType.Init(base.mgr)
-}
-
-// /////////////////////////////////////////////////////////////////////////////
-// --- meta db ---
-type MetaDBConfig struct {
-	Username     ParamItem `refreshable:"false"`
-	Password     ParamItem `refreshable:"false"`
-	Address      ParamItem `refreshable:"false"`
-	Port         ParamItem `refreshable:"false"`
-	DBName       ParamItem `refreshable:"false"`
-	MaxOpenConns ParamItem `refreshable:"false"`
-	MaxIdleConns ParamItem `refreshable:"false"`
-}
-
-func (p *MetaDBConfig) Init(base *BaseTable) {
-	p.Username = ParamItem{
-		Key:          "mysql.username",
-		Version:      "2.2.0",
-		PanicIfEmpty: true,
-		Export:       true,
-	}
-	p.Username.Init(base.mgr)
-
-	p.Password = ParamItem{
-		Key:          "mysql.password",
-		Version:      "2.2.0",
-		PanicIfEmpty: true,
-		Export:       true,
-	}
-	p.Password.Init(base.mgr)
-
-	p.Address = ParamItem{
-		Key:          "mysql.address",
-		Version:      "2.2.0",
-		PanicIfEmpty: true,
-		Export:       true,
-	}
-	p.Address.Init(base.mgr)
-
-	p.Port = ParamItem{
-		Key:          "mysql.port",
-		Version:      "2.2.0",
-		DefaultValue: "3306",
-		Export:       true,
-	}
-	p.Port.Init(base.mgr)
-
-	p.DBName = ParamItem{
-		Key:          "mysql.dbName",
-		Version:      "2.2.0",
-		PanicIfEmpty: true,
-		Export:       true,
-	}
-	p.DBName.Init(base.mgr)
-
-	p.MaxOpenConns = ParamItem{
-		Key:          "mysql.maxOpenConns",
-		Version:      "2.2.0",
-		DefaultValue: "20",
-		Export:       true,
-	}
-	p.MaxOpenConns.Init(base.mgr)
-
-	p.MaxIdleConns = ParamItem{
-		Key:          "mysql.maxIdleConns",
-		Version:      "2.2.0",
-		DefaultValue: "5",
-		Export:       true,
-	}
-	p.MaxIdleConns.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

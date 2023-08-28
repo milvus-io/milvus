@@ -18,7 +18,7 @@ locust_search_performance:
           - gpu1
         wal_enable: true
         cluster: true
-        external_mysql: true
+
         readonly:
             replicas: 1
       collection_name: sift_1m_128_l2_2

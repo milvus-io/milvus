@@ -15,7 +15,7 @@ search_performance:
           - gpu0
           - gpu1
         wal_enable: true
-        external_mysql: true
+
         cluster: true
         readonly:
           replicas: 3

@@ -183,7 +183,7 @@ func combineToCollectionIndexesMeta220(fieldIndexes FieldIndexes210, collectionI
 				newIndexName = "_default_idx_" + strconv.FormatInt(index.GetFiledID(), 10)
 			}
 			record := &model.Index{
-				TenantID:        "", // TODO: how to set this if we support mysql later?
+				TenantID:        "",
 				CollectionID:    collectionID,
 				FieldID:         index.GetFiledID(),
 				IndexID:         index.GetIndexID(),

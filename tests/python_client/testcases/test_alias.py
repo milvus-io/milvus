@@ -448,7 +448,6 @@ class TestAliasOperationInvalid(TestcaseBase):
         #                          check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip("not supported on mysql")
     def test_alias_drop_not_exist_alias(self):
         """
         target: test collection dropping alias which is not exist

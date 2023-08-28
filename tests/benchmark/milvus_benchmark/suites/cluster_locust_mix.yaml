@@ -14,7 +14,7 @@ locust_mix_performance:
         gpu_resource_config.build_index_resources:
           gpu0
         wal_enable: true
-        external_mysql: true
+
         cluster: true
         readonly:
           replicas: 2 

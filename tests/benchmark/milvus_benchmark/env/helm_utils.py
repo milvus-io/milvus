@@ -151,25 +151,7 @@ def update_values(file_path, deploy_mode, hostname, server_tag, milvus_config, s
     #         if "replicas" in milvus_config["readonly"]:
     #             values_dict["readonly"]["replicas"] = milvus_config["readonly"]["replicas"]
 
-    # use_external_mysql = False
-    # if "external_mysql" in milvus_config and milvus_config["external_mysql"]:
-    #     use_external_mysql = True
-    # # meta mysql
-    # if use_external_mysql:
-    #     values_dict["mysql"]["enabled"] = False
-    #     # values_dict["mysql"]["persistence"]["enabled"] = True
-    #     # values_dict["mysql"]["persistence"]["existingClaim"] = hashlib.md5(path_value.encode(encoding='UTF-8')).hexdigest()
-    #     values_dict['externalMysql']['enabled'] = True
-    #     if deploy_mode == "local":
-    #         values_dict['externalMysql']["ip"] = "192.168.1.238"
-    #     else:
-    #         values_dict['externalMysql']["ip"] = "milvus-mysql.test"
-    #     values_dict['externalMysql']["port"] = 3306
-    #     values_dict['externalMysql']["user"] = "root"
-    #     values_dict['externalMysql']["password"] = "milvus"
-    #     values_dict['externalMysql']["database"] = "db"
-    # else:
-    #     values_dict["mysql"]["enabled"] = False
+
     # # update values.yaml with the given host
     node_config = None
     perf_tolerations = [{
@@ -351,7 +333,7 @@ def restart_server(helm_release_name, namespace):
     # body = {"replicas": 0}
     pods = v1.list_namespaced_pod(namespace)
     for i in pods.items:
-        if i.metadata.name.find(helm_release_name) != -1 and i.metadata.name.find("mysql") == -1:
+        if i.metadata.name.find(helm_release_name) != -1:
             pod_name = i.metadata.name
             break
             # v1.patch_namespaced_config_map(config_map_name, namespace, body, pretty='true')
@@ -374,7 +356,7 @@ def restart_server(helm_release_name, namespace):
             logger.error(pod_name_tmp)
             if pod_name_tmp == pod_name:
                 continue
-            elif pod_name_tmp.find(helm_release_name) == -1 or pod_name_tmp.find("mysql") != -1:
+            elif pod_name_tmp.find(helm_release_name) == -1:
                 continue
             else:
                 status_res = v1.read_namespaced_pod_status(pod_name_tmp, namespace, pretty='true')

@@ -15,7 +15,7 @@ ann_accuracy:
         cluster: true
         readonly:
           replicas: 2
-        external_mysql: true
+
       source_file: /test/milvus/ann_hdf5/sift-128-euclidean.hdf5
       collection_name: sift_128_euclidean
       index_types: ['ivf_flat', 'ivf_sq8']
@@ -38,7 +38,6 @@ ann_accuracy:
         #         gpu_resource_config.build_index_resources:
         #           - gpu0
         #         cluster: false
-        #         external_mysql: false
         #       source_file: /test/milvus/ann_hdf5/sift-128-euclidean.hdf5
         #       collection_name: sift_128_euclidean
         #       index_types: ['ivf_flat', 'ivf_sq8']

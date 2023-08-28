@@ -39,9 +39,6 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/internal/metastore/db/dao"
-	"github.com/milvus-io/milvus/internal/metastore/db/dbcore"
-	"github.com/milvus-io/milvus/internal/metastore/db/rootcoord"
 	kvmetestore "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -344,14 +341,6 @@ func (c *Core) initMetaTable() error {
 			}
 
 			catalog = &kvmetestore.Catalog{Txn: metaKV, Snapshot: ss}
-		case util.MetaStoreTypeMysql:
-			// connect to database
-			err := dbcore.Connect(&Params.DBCfg)
-			if err != nil {
-				return err
-			}
-
-			catalog = rootcoord.NewTableCatalog(dbcore.NewTxImpl(), dao.NewMetaDomain())
 		default:
 			return retry.Unrecoverable(fmt.Errorf("not supported meta store: %s", Params.MetaStoreCfg.MetaStoreType.GetValue()))
 		}
