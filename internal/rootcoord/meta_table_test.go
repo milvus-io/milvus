@@ -1170,7 +1170,16 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 			aliases: newNameDb(),
 		}
 		meta.names.insert("", "alias", 1)
-		err := meta.RenameCollection(context.TODO(), "", "alias", "new", typeutil.MaxTimestamp)
+		err := meta.RenameCollection(context.TODO(), "", "alias", "", "new", typeutil.MaxTimestamp)
+		assert.Error(t, err)
+	})
+
+	t.Run("target db doesn't exist", func(t *testing.T) {
+		meta := &MetaTable{
+			names:   newNameDb(),
+			aliases: newNameDb(),
+		}
+		err := meta.RenameCollection(context.TODO(), "", "non-exists", "non-exists", "new", typeutil.MaxTimestamp)
 		assert.Error(t, err)
 	})
 
@@ -1179,7 +1188,7 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 			names:   newNameDb(),
 			aliases: newNameDb(),
 		}
-		err := meta.RenameCollection(context.TODO(), "", "non-exists", "new", typeutil.MaxTimestamp)
+		err := meta.RenameCollection(context.TODO(), "", "non-exists", "", "new", typeutil.MaxTimestamp)
 		assert.Error(t, err)
 	})
 
@@ -1189,16 +1198,19 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 			aliases: newNameDb(),
 		}
 		meta.names.insert("", "old", 1)
-		err := meta.RenameCollection(context.TODO(), "", "old", "new", typeutil.MaxTimestamp)
+		err := meta.RenameCollection(context.TODO(), "", "old", "", "new", typeutil.MaxTimestamp)
 		assert.Error(t, err)
 	})
 
 	t.Run("new collection name already exist-1", func(t *testing.T) {
 		meta := &MetaTable{
+			dbName2Meta: map[string]*model.Database{
+				util.DefaultDBName: model.NewDefaultDatabase(),
+			},
 			names:   newNameDb(),
 			aliases: newNameDb(),
 			collID2Meta: map[typeutil.UniqueID]*model.Collection{
-				2: {
+				util.DefaultDBID: {
 					CollectionID: 1,
 					Name:         "old",
 					State:        pb.CollectionState_CollectionCreated,
@@ -1206,8 +1218,7 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 			},
 		}
 		meta.names.insert(util.DefaultDBName, "old", 1)
-		meta.names.insert(util.DefaultDBName, "new", 2)
-		err := meta.RenameCollection(context.TODO(), "", "old", "new", 1000)
+		err := meta.RenameCollection(context.TODO(), util.DefaultDBName, "old", util.DefaultDBName, "old", 1000)
 		assert.Error(t, err)
 	})
 
@@ -1229,7 +1240,7 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 		}
 		meta.names.insert(util.DefaultDBName, "old", 1)
 		meta.names.insert(util.DefaultDBName, "new", 2)
-		err := meta.RenameCollection(context.TODO(), util.DefaultDBName, "old", "new", 1000)
+		err := meta.RenameCollection(context.TODO(), util.DefaultDBName, "old", "", "new", 1000)
 		assert.Error(t, err)
 	})
 
@@ -1264,7 +1275,37 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 			},
 		}
 		meta.names.insert(util.DefaultDBName, "old", 1)
-		err := meta.RenameCollection(context.TODO(), util.DefaultDBName, "old", "new", 1000)
+		err := meta.RenameCollection(context.TODO(), util.DefaultDBName, "old", "", "new", 1000)
+		assert.Error(t, err)
+	})
+
+	t.Run("rename db name fails if aliases exists", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("GetCollectionByName",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil, common.NewCollectionNotExistError("error"))
+		meta := &MetaTable{
+			dbName2Meta: map[string]*model.Database{
+				util.DefaultDBName: model.NewDefaultDatabase(),
+				"db1":              model.NewDatabase(2, "db1", pb.DatabaseState_DatabaseCreated),
+			},
+			catalog: catalog,
+			names:   newNameDb(),
+			aliases: newNameDb(),
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				1: {
+					CollectionID: 1,
+					Name:         "old",
+				},
+			},
+		}
+		meta.names.insert(util.DefaultDBName, "old", 1)
+		meta.aliases.insert(util.DefaultDBName, "alias", 1)
+
+		err := meta.RenameCollection(context.TODO(), util.DefaultDBName, "old", "db1", "new", 1000)
 		assert.Error(t, err)
 	})
 
@@ -1298,7 +1339,7 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 			},
 		}
 		meta.names.insert(util.DefaultDBName, "old", 1)
-		err := meta.RenameCollection(context.TODO(), util.DefaultDBName, "old", "new", 1000)
+		err := meta.RenameCollection(context.TODO(), util.DefaultDBName, "old", "", "new", 1000)
 		assert.NoError(t, err)
 
 		id, ok := meta.names.get(util.DefaultDBName, "new")

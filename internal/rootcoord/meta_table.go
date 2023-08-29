@@ -65,7 +65,7 @@ type IMetaTable interface {
 	DropAlias(ctx context.Context, dbName string, alias string, ts Timestamp) error
 	AlterAlias(ctx context.Context, dbName string, alias string, collectionName string, ts Timestamp) error
 	AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts Timestamp) error
-	RenameCollection(ctx context.Context, dbName string, oldName string, newName string, ts Timestamp) error
+	RenameCollection(ctx context.Context, dbName string, oldName string, newDBName string, newName string, ts Timestamp) error
 
 	// TODO: it'll be a big cost if we handle the time travel logic, since we should always list all aliases in catalog.
 	IsAlias(db, name string) bool
@@ -700,14 +700,15 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, oldColl *model.Collect
 	return nil
 }
 
-func (mt *MetaTable) RenameCollection(ctx context.Context, dbName string, oldName string, newName string, ts Timestamp) error {
+func (mt *MetaTable) RenameCollection(ctx context.Context, dbName string, oldName string, newDBName string, newName string, ts Timestamp) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
 	ctx = contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
 	log := log.Ctx(ctx).With(
-		zap.String("db", dbName),
+		zap.String("oldDBName", dbName),
 		zap.String("oldName", oldName),
+		zap.String("newDBName", newDBName),
 		zap.String("newName", newName),
 	)
 
@@ -717,17 +718,29 @@ func (mt *MetaTable) RenameCollection(ctx context.Context, dbName string, oldNam
 		dbName = util.DefaultDBName
 	}
 
+	if newDBName == "" {
+		log.Warn("target db name is empty")
+		newDBName = dbName
+	}
+
+	// check target db
+	targetDB, ok := mt.dbName2Meta[newDBName]
+	if !ok {
+		return fmt.Errorf("target database:%s not found", newDBName)
+	}
+
 	//old collection should not be an alias
-	_, ok := mt.aliases.get(dbName, oldName)
+	_, ok = mt.aliases.get(dbName, oldName)
 	if ok {
 		log.Warn("unsupported use a alias to rename collection")
 		return fmt.Errorf("unsupported use an alias to rename collection, alias:%s", oldName)
 	}
 
 	// check new collection already exists
-	newColl, err := mt.getCollectionByNameInternal(ctx, dbName, newName, ts)
+	newColl, err := mt.getCollectionByNameInternal(ctx, newDBName, newName, ts)
 	if newColl != nil {
-		return fmt.Errorf("duplicated new collection name :%s with other collection name or alias", newName)
+		log.Warn("check new collection fail")
+		return fmt.Errorf("duplicated new collection name %s:%s with other collection name or alias", newDBName, newName)
 	}
 	if err != nil && !common.IsCollectionNotExistErrorV2(err) {
 		log.Warn("check new collection name fail")
@@ -737,16 +750,24 @@ func (mt *MetaTable) RenameCollection(ctx context.Context, dbName string, oldNam
 	// get old collection meta
 	oldColl, err := mt.getCollectionByNameInternal(ctx, dbName, oldName, ts)
 	if err != nil {
+		log.Warn("get old collection fail")
 		return err
+	}
+
+	// unsupported rename collection while the collection has aliases
+	aliases := mt.listAliasesByID(oldColl.CollectionID)
+	if len(aliases) > 0 && oldColl.DBID != targetDB.ID {
+		return fmt.Errorf("fail to rename db name, must drop all aliases of this collection before rename")
 	}
 
 	newColl = oldColl.Clone()
 	newColl.Name = newName
+	newColl.DBID = targetDB.ID
 	if err := mt.catalog.AlterCollection(ctx, oldColl, newColl, metastore.MODIFY, ts); err != nil {
 		return err
 	}
 
-	mt.names.insert(dbName, newName, oldColl.CollectionID)
+	mt.names.insert(newDBName, newName, oldColl.CollectionID)
 	mt.names.remove(dbName, oldName)
 
 	mt.collID2Meta[oldColl.CollectionID] = newColl

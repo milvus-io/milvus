@@ -42,9 +42,12 @@ func (t *listDatabaseTask) Execute(ctx context.Context) error {
 	}
 
 	dbNames := make([]string, 0, len(ret))
+	createdTimes := make([]uint64, 0, len(ret))
 	for _, db := range ret {
 		dbNames = append(dbNames, db.Name)
+		createdTimes = append(createdTimes, db.CreatedTime)
 	}
 	t.Resp.DbNames = dbNames
+	t.Resp.CreatedTimestamp = createdTimes
 	return nil
 }
