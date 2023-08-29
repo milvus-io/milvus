@@ -664,37 +664,59 @@ func (_c *MockSegmentManager_Unpin_Call) RunAndReturn(run func([]Segment)) *Mock
 	return _c
 }
 
-// UpdateSegmentVersion provides a mock function with given fields: segmentType, segmentID, newVersion
-func (_m *MockSegmentManager) UpdateSegmentVersion(segmentType commonpb.SegmentState, segmentID int64, newVersion int64) {
-	_m.Called(segmentType, segmentID, newVersion)
+// UpdateSegmentBy provides a mock function with given fields: action, filters
+func (_m *MockSegmentManager) UpdateSegmentBy(action SegmentAction, filters ...SegmentFilter) int {
+	_va := make([]interface{}, len(filters))
+	for _i := range filters {
+		_va[_i] = filters[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, action)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 int
+	if rf, ok := ret.Get(0).(func(SegmentAction, ...SegmentFilter) int); ok {
+		r0 = rf(action, filters...)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+
+	return r0
 }
 
-// MockSegmentManager_UpdateSegmentVersion_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateSegmentVersion'
-type MockSegmentManager_UpdateSegmentVersion_Call struct {
+// MockSegmentManager_UpdateSegmentBy_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateSegmentBy'
+type MockSegmentManager_UpdateSegmentBy_Call struct {
 	*mock.Call
 }
 
-// UpdateSegmentVersion is a helper method to define mock.On call
-//   - segmentType commonpb.SegmentState
-//   - segmentID int64
-//   - newVersion int64
-func (_e *MockSegmentManager_Expecter) UpdateSegmentVersion(segmentType interface{}, segmentID interface{}, newVersion interface{}) *MockSegmentManager_UpdateSegmentVersion_Call {
-	return &MockSegmentManager_UpdateSegmentVersion_Call{Call: _e.mock.On("UpdateSegmentVersion", segmentType, segmentID, newVersion)}
+// UpdateSegmentBy is a helper method to define mock.On call
+//   - action SegmentAction
+//   - filters ...SegmentFilter
+func (_e *MockSegmentManager_Expecter) UpdateSegmentBy(action interface{}, filters ...interface{}) *MockSegmentManager_UpdateSegmentBy_Call {
+	return &MockSegmentManager_UpdateSegmentBy_Call{Call: _e.mock.On("UpdateSegmentBy",
+		append([]interface{}{action}, filters...)...)}
 }
 
-func (_c *MockSegmentManager_UpdateSegmentVersion_Call) Run(run func(segmentType commonpb.SegmentState, segmentID int64, newVersion int64)) *MockSegmentManager_UpdateSegmentVersion_Call {
+func (_c *MockSegmentManager_UpdateSegmentBy_Call) Run(run func(action SegmentAction, filters ...SegmentFilter)) *MockSegmentManager_UpdateSegmentBy_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(commonpb.SegmentState), args[1].(int64), args[2].(int64))
+		variadicArgs := make([]SegmentFilter, len(args)-1)
+		for i, a := range args[1:] {
+			if a != nil {
+				variadicArgs[i] = a.(SegmentFilter)
+			}
+		}
+		run(args[0].(SegmentAction), variadicArgs...)
 	})
 	return _c
 }
 
-func (_c *MockSegmentManager_UpdateSegmentVersion_Call) Return() *MockSegmentManager_UpdateSegmentVersion_Call {
-	_c.Call.Return()
+func (_c *MockSegmentManager_UpdateSegmentBy_Call) Return(_a0 int) *MockSegmentManager_UpdateSegmentBy_Call {
+	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockSegmentManager_UpdateSegmentVersion_Call) RunAndReturn(run func(commonpb.SegmentState, int64, int64)) *MockSegmentManager_UpdateSegmentVersion_Call {
+func (_c *MockSegmentManager_UpdateSegmentBy_Call) RunAndReturn(run func(SegmentAction, ...SegmentFilter) int) *MockSegmentManager_UpdateSegmentBy_Call {
 	_c.Call.Return(run)
 	return _c
 }

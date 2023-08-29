@@ -30,6 +30,7 @@ type Segment interface {
 	Partition() int64
 	Shard() string
 	Version() int64
+	CASVersion(int64, int64) bool
 	StartPosition() *msgpb.MsgPosition
 	Type() SegmentType
 	RLock() error
@@ -56,5 +57,4 @@ type Segment interface {
 	// Bloom filter related
 	UpdateBloomFilter(pks []storage.PrimaryKey)
 	MayPkExist(pk storage.PrimaryKey) bool
-	UpdateVersion(version int64)
 }
