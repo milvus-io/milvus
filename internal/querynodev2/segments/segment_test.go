@@ -198,6 +198,17 @@ func (suite *SegmentSuite) TestValidateIndexedFieldsData() {
 	suite.Error(err)
 }
 
+func (suite *SegmentSuite) TestCASVersion() {
+	segment := suite.sealed
+
+	curVersion := segment.Version()
+	suite.False(segment.CASVersion(curVersion-1, curVersion+1))
+	suite.NotEqual(curVersion+1, segment.Version())
+
+	suite.True(segment.CASVersion(curVersion, curVersion+1))
+	suite.Equal(curVersion+1, segment.Version())
+}
+
 func (suite *SegmentSuite) TestSegmentReleased() {
 	DeleteSegment(suite.sealed)
 

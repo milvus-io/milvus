@@ -260,7 +260,8 @@ func (loader *segmentLoader) prepare(segmentType SegmentType, version int64, seg
 			loader.loadingSegments.Insert(segment.GetSegmentID(), make(chan struct{}))
 		} else {
 			// try to update segment version before skip load operation
-			loader.manager.Segment.UpdateSegmentVersion(segmentType, segment.SegmentID, version)
+			loader.manager.Segment.UpdateSegmentBy(IncreaseVersion(version),
+				WithType(segmentType), WithID(segment.SegmentID))
 			log.Info("skip loaded/loading segment", zap.Int64("segmentID", segment.GetSegmentID()),
 				zap.Bool("isLoaded", len(loader.manager.Segment.GetBy(WithType(segmentType), WithID(segment.GetSegmentID()))) > 0),
 				zap.Bool("isLoading", loader.loadingSegments.Contain(segment.GetSegmentID())),

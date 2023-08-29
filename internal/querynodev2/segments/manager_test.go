@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -109,6 +110,39 @@ func (s *ManagerSuite) TestRemoveBy() {
 		s.mgr.RemoveBy(WithID(id))
 		s.Nil(s.mgr.Get(id))
 	}
+}
+
+func (s *ManagerSuite) TestUpdateBy() {
+	action := IncreaseVersion(1)
+
+	s.Equal(2, s.mgr.UpdateSegmentBy(action, WithType(SegmentTypeSealed)))
+	s.Equal(1, s.mgr.UpdateSegmentBy(action, WithType(SegmentTypeGrowing)))
+
+	segments := s.mgr.GetBy()
+	for _, segment := range segments {
+		s.Equal(int64(1), segment.Version())
+	}
+}
+
+func (s *ManagerSuite) TestIncreaseVersion() {
+	action := IncreaseVersion(1)
+
+	segment := NewMockSegment(s.T())
+	segment.EXPECT().ID().Return(100)
+	segment.EXPECT().Type().Return(commonpb.SegmentState_Sealed)
+	segment.EXPECT().Version().Return(1)
+
+	s.False(action(segment), "version already gte version")
+	segment.AssertExpectations(s.T())
+
+	segment = NewMockSegment(s.T())
+	segment.EXPECT().ID().Return(100)
+	segment.EXPECT().Type().Return(commonpb.SegmentState_Sealed)
+	segment.EXPECT().Version().Return(0)
+	segment.EXPECT().CASVersion(int64(0), int64(1)).Return(true)
+
+	s.True(action(segment), "version lt execute CAS")
+	segment.AssertExpectations(s.T())
 }
 
 func TestManager(t *testing.T) {

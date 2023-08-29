@@ -25,6 +25,7 @@ package segments
 import "C"
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -64,6 +65,26 @@ func WithID(id int64) SegmentFilter {
 	}
 }
 
+type SegmentAction func(segment Segment) bool
+
+func IncreaseVersion(version int64) SegmentAction {
+	return func(segment Segment) bool {
+		log := log.Ctx(context.Background()).With(
+			zap.Int64("segmentID", segment.ID()),
+			zap.String("type", segment.Type().String()),
+			zap.Int64("segmentVersion", segment.Version()),
+			zap.Int64("updateVersion", version),
+		)
+		for oldVersion := segment.Version(); oldVersion < version; {
+			if segment.CASVersion(oldVersion, version) {
+				return true
+			}
+		}
+		log.Warn("segment version cannot go backwards, skip update")
+		return false
+	}
+}
+
 type actionType int32
 
 const (
@@ -95,6 +116,9 @@ type SegmentManager interface {
 	GetAndPinBy(filters ...SegmentFilter) ([]Segment, error)
 	GetAndPin(segments []int64, filters ...SegmentFilter) ([]Segment, error)
 	Unpin(segments []Segment)
+
+	UpdateSegmentBy(action SegmentAction, filters ...SegmentFilter) int
+
 	GetSealed(segmentID UniqueID) Segment
 	GetGrowing(segmentID UniqueID) Segment
 	Empty() bool
@@ -105,8 +129,6 @@ type SegmentManager interface {
 	Remove(segmentID UniqueID, scope querypb.DataScope) (int, int)
 	RemoveBy(filters ...SegmentFilter) (int, int)
 	Clear()
-
-	UpdateSegmentVersion(segmentType SegmentType, segmentID int64, newVersion int64)
 }
 
 var _ SegmentManager = (*segmentManager)(nil)
@@ -176,34 +198,27 @@ func (mgr *segmentManager) Put(segmentType SegmentType, segments ...Segment) {
 	mgr.updateMetric()
 }
 
-func (mgr *segmentManager) UpdateSegmentVersion(segmentType SegmentType, segmentID int64, newVersion int64) {
-	mgr.mu.Lock()
-	defer mgr.mu.Unlock()
+func (mgr *segmentManager) UpdateSegmentBy(action SegmentAction, filters ...SegmentFilter) int {
+	mgr.mu.RLock()
+	defer mgr.mu.RUnlock()
 
-	segment, ok := mgr.sealedSegments[segmentID]
-	if !ok {
-		segment, ok = mgr.growingSegments[segmentID]
+	updated := 0
+	for _, segment := range mgr.growingSegments {
+		if filter(segment, filters...) {
+			if action(segment) {
+				updated++
+			}
+		}
 	}
 
-	if !ok {
-		log.Warn("segment not exist, skip segment version change",
-			zap.Any("type", segmentType),
-			zap.Int64("segmentID", segmentID),
-			zap.Int64("newVersion", newVersion),
-		)
-		return
+	for _, segment := range mgr.sealedSegments {
+		if filter(segment, filters...) {
+			if action(segment) {
+				updated++
+			}
+		}
 	}
-
-	if segment.Version() >= newVersion {
-		log.Warn("Invalid segment version changed, skip it",
-			zap.Int64("segmentID", segment.ID()),
-			zap.Any("type", segmentType),
-			zap.Int64("oldVersion", segment.Version()),
-			zap.Int64("newVersion", newVersion))
-		return
-	}
-
-	segment.UpdateVersion(newVersion)
+	return updated
 }
 
 func (mgr *segmentManager) Get(segmentID UniqueID) Segment {

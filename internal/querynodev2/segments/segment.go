@@ -126,8 +126,8 @@ func (s *baseSegment) Version() int64 {
 	return s.version.Load()
 }
 
-func (s *baseSegment) UpdateVersion(version int64) {
-	s.version.Store(version)
+func (s *baseSegment) CASVersion(old, newVersion int64) bool {
+	return s.version.CompareAndSwap(old, newVersion)
 }
 
 func (s *baseSegment) UpdateBloomFilter(pks []storage.PrimaryKey) {

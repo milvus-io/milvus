@@ -60,6 +60,49 @@ func (_c *MockSegment_AddIndex_Call) RunAndReturn(run func(int64, *IndexedFieldI
 	return _c
 }
 
+// CASVersion provides a mock function with given fields: _a0, _a1
+func (_m *MockSegment) CASVersion(_a0 int64, _a1 int64) bool {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(int64, int64) bool); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockSegment_CASVersion_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CASVersion'
+type MockSegment_CASVersion_Call struct {
+	*mock.Call
+}
+
+// CASVersion is a helper method to define mock.On call
+//   - _a0 int64
+//   - _a1 int64
+func (_e *MockSegment_Expecter) CASVersion(_a0 interface{}, _a1 interface{}) *MockSegment_CASVersion_Call {
+	return &MockSegment_CASVersion_Call{Call: _e.mock.On("CASVersion", _a0, _a1)}
+}
+
+func (_c *MockSegment_CASVersion_Call) Run(run func(_a0 int64, _a1 int64)) *MockSegment_CASVersion_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *MockSegment_CASVersion_Call) Return(_a0 bool) *MockSegment_CASVersion_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_CASVersion_Call) RunAndReturn(run func(int64, int64) bool) *MockSegment_CASVersion_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Collection provides a mock function with given fields:
 func (_m *MockSegment) Collection() int64 {
 	ret := _m.Called()
@@ -832,39 +875,6 @@ func (_c *MockSegment_UpdateBloomFilter_Call) Return() *MockSegment_UpdateBloomF
 }
 
 func (_c *MockSegment_UpdateBloomFilter_Call) RunAndReturn(run func([]storage.PrimaryKey)) *MockSegment_UpdateBloomFilter_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// UpdateVersion provides a mock function with given fields: version
-func (_m *MockSegment) UpdateVersion(version int64) {
-	_m.Called(version)
-}
-
-// MockSegment_UpdateVersion_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateVersion'
-type MockSegment_UpdateVersion_Call struct {
-	*mock.Call
-}
-
-// UpdateVersion is a helper method to define mock.On call
-//   - version int64
-func (_e *MockSegment_Expecter) UpdateVersion(version interface{}) *MockSegment_UpdateVersion_Call {
-	return &MockSegment_UpdateVersion_Call{Call: _e.mock.On("UpdateVersion", version)}
-}
-
-func (_c *MockSegment_UpdateVersion_Call) Run(run func(version int64)) *MockSegment_UpdateVersion_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64))
-	})
-	return _c
-}
-
-func (_c *MockSegment_UpdateVersion_Call) Return() *MockSegment_UpdateVersion_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockSegment_UpdateVersion_Call) RunAndReturn(run func(int64)) *MockSegment_UpdateVersion_Call {
 	_c.Call.Return(run)
 	return _c
 }
