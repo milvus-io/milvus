@@ -51,6 +51,7 @@ RUN echo "Installing Packages ..." \
             python3-setuptools \
             rsync \
             software-properties-common \
+            zip \
             unzip \
             jq \
         && python3 -m pip install --no-cache-dir --upgrade pip \

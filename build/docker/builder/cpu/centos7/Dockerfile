@@ -16,7 +16,7 @@ RUN yum install -y epel-release centos-release-scl-rh && yum install -y wget cur
     yum install -y git make automake python3-devel \
     devtoolset-11-gcc devtoolset-11-gcc-c++ devtoolset-11-gcc-gfortran \
     llvm-toolset-11.0-clang llvm-toolset-11.0-clang-tools-extra \
-    libaio libuuid-devel unzip \
+    libaio libuuid-devel zip unzip \
     ccache lcov libtool m4 autoconf automake && \
     rm -rf /var/cache/yum/* && \
     echo "source scl_source enable devtoolset-11" >> /etc/profile.d/devtoolset-11.sh && \
