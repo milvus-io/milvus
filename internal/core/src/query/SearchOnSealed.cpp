@@ -44,9 +44,6 @@ SearchOnSealedIndex(const Schema& schema,
     auto final = [&] {
         auto ds = knowhere::GenDataSet(num_queries, dim, query_data);
 
-        auto conf = search_info.search_params_;
-        conf[knowhere::meta::TOPK] = search_info.topk_;
-        conf[knowhere::meta::METRIC_TYPE] = field_indexing->metric_type_;
         auto vec_index =
             dynamic_cast<index::VectorIndex*>(field_indexing->indexing_.get());
         auto index_type = vec_index->GetIndexType();
