@@ -1393,6 +1393,16 @@ func memsetLoop[T any](v T, numRows int) []T {
 	return ret
 }
 
+func ErrWithLog(logger *log.MLogger, msg string, err error) error {
+	wrapErr := errors.Wrap(err, msg)
+	if logger != nil {
+		logger.Warn(msg, zap.Error(err))
+		return wrapErr
+	}
+	log.Warn(msg, zap.Error(err))
+	return wrapErr
+}
+
 func verifyDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
 	for _, field := range insertMsg.FieldsData {
 		if field.GetFieldName() == common.MetaFieldName {
