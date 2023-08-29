@@ -104,21 +104,23 @@ class OffsetOrderedMap : public OffsetMap {
     find_first_by_index(int64_t limit,
                         const BitsetType& bitset,
                         bool false_filtered_out) const {
-        std::vector<int64_t> seg_offsets;
-        seg_offsets.reserve(limit);
         int64_t hit_num = 0;  // avoid counting the number everytime.
-        auto cnt = bitset.count();
+        int64_t cnt = bitset.count();
         if (!false_filtered_out) {
             cnt = bitset.size() - bitset.count();
         }
-        for (auto it = map_.begin(); it != map_.end(); it++) {
-            if (hit_num >= limit || hit_num >= cnt) {
-                break;
-            }
+        limit = std::min(limit, cnt);
+        std::vector<int64_t> seg_offsets;
+        seg_offsets.reserve(limit);
+        for (auto it = map_.begin(); hit_num < limit && it != map_.end();
+             it++) {
             for (auto seg_offset : it->second) {
                 if (!(bitset[seg_offset] ^ false_filtered_out)) {
                     seg_offsets.push_back(seg_offset);
                     hit_num++;
+                    if (hit_num >= limit) {
+                        break;
+                    }
                 }
             }
         }
@@ -191,17 +193,16 @@ class OffsetOrderedArray : public OffsetMap {
     find_first_by_index(int64_t limit,
                         const BitsetType& bitset,
                         bool false_filtered_out) const {
-        std::vector<int64_t> seg_offsets;
-        seg_offsets.reserve(limit);
         int64_t hit_num = 0;  // avoid counting the number everytime.
-        auto cnt = bitset.count();
+        int64_t cnt = bitset.count();
         if (!false_filtered_out) {
             cnt = bitset.size() - bitset.count();
         }
-        for (auto it = array_.begin(); it != array_.end(); it++) {
-            if (hit_num >= limit || hit_num >= cnt) {
-                break;
-            }
+        limit = std::min(limit, cnt);
+        std::vector<int64_t> seg_offsets;
+        seg_offsets.reserve(limit);
+        for (auto it = array_.begin(); hit_num < limit && it != array_.end();
+             it++) {
             if (!(bitset[it->second] ^ false_filtered_out)) {
                 seg_offsets.push_back(it->second);
                 hit_num++;
