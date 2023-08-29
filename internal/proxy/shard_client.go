@@ -23,6 +23,7 @@ func (n nodeInfo) String() string {
 }
 
 var errClosed = errors.New("client is closed")
+var errNodeNotExist = errors.New("can not find node client")
 
 type shardClient struct {
 	sync.RWMutex
@@ -168,10 +169,8 @@ func (c *shardClientMgrImpl) UpdateShardLeaders(oldLeaders map[string][]nodeInfo
 	defer c.clients.Unlock()
 
 	for _, node := range newLocalMap {
-		client, ok := c.clients.data[node.nodeID]
-		if ok {
-			client.inc()
-		} else {
+		_, ok := c.clients.data[node.nodeID]
+		if !ok {
 			// context.Background() is useless
 			// TODO QueryNode NewClient remove ctx parameter
 			// TODO Remove Init && Start interface in QueryNode client
@@ -201,7 +200,7 @@ func (c *shardClientMgrImpl) GetClient(ctx context.Context, nodeID UniqueID) (ty
 	c.clients.RUnlock()
 
 	if !ok {
-		return nil, fmt.Errorf("can not find client of node %d", nodeID)
+		return nil, errors.WithDetailf(errNodeNotExist, "node:%d", nodeID)
 	}
 	return client.getClient(ctx)
 }

@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -207,6 +208,18 @@ func (b *LookAsideBalancer) checkQueryNodeHealthLoop(ctx context.Context) {
 		case <-ticker.C:
 			now := time.Now().UnixMilli()
 			var futures []*conc.Future[any]
+
+			// remove old query node from metricsUpdateTs
+			b.failedHeartBeatCounter.Range(func(node int64, _ *atomic.Int64) bool {
+				_, err := b.clientMgr.GetClient(context.Background(), node)
+				if errors.Is(err, errNodeNotExist) {
+					b.metricsUpdateTs.GetAndRemove(node)
+					b.failedHeartBeatCounter.GetAndRemove(node)
+					b.unreachableQueryNodes.Remove(node)
+				}
+				return true
+			})
+
 			b.metricsUpdateTs.Range(func(node int64, lastUpdateTs int64) bool {
 				if now-lastUpdateTs > checkQueryNodeHealthInterval.Milliseconds() {
 					futures = append(futures, pool.Submit(func() (any, error) {
