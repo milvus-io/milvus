@@ -18,7 +18,7 @@ ann_accuracy:
         cluster: true
         readonly:
           replicas: 2
-        external_mysql: true
+
       source_file: /test/milvus/ann_hdf5/sift-128-euclidean.hdf5
       collection_name: sift_128_euclidean
       index_types: ['flat']
@@ -47,7 +47,7 @@ ann_accuracy:
         cluster: true
         readonly:
           replicas: 2
-        external_mysql: true
+
 
       source_file: /test/milvus/ann_hdf5/sift-128-euclidean.hdf5
       collection_name: sift_128_euclidean
@@ -77,7 +77,7 @@ ann_accuracy:
         cluster: true
         readonly:
           replicas: 2
-        external_mysql: true
+
 
       source_file: /test/milvus/ann_hdf5/sift-128-euclidean.hdf5
       collection_name: sift_128_euclidean
@@ -108,7 +108,7 @@ ann_accuracy:
         cluster: true
         readonly:
           replicas: 2
-        external_mysql: true
+
 
       source_file: /test/milvus/ann_hdf5/sift-128-euclidean.hdf5
       collection_name: sift_128_euclidean
@@ -138,7 +138,7 @@ ann_accuracy:
         cluster: true
         readonly:
           replicas: 2
-        external_mysql: true
+
 
       source_file: /test/milvus/ann_hdf5/sift-128-euclidean.hdf5
       collection_name: sift_128_euclidean
@@ -169,7 +169,7 @@ ann_accuracy:
         cluster: true
         readonly:
           replicas: 2
-        external_mysql: true
+
 
       source_file: /test/milvus/ann_hdf5/glove-200-angular.hdf5
       collection_name: glove_200_angular
@@ -199,7 +199,7 @@ ann_accuracy:
         cluster: true
         readonly:
           replicas: 2
-        external_mysql: true
+
 
       source_file: /test/milvus/ann_hdf5/glove-200-angular.hdf5
       collection_name: glove_200_angular
@@ -229,7 +229,7 @@ ann_accuracy:
         cluster: true
         readonly:
           replicas: 2
-        external_mysql: true
+
 
       source_file: /test/milvus/ann_hdf5/glove-200-angular.hdf5
       collection_name: glove_200_angular
@@ -259,7 +259,7 @@ ann_accuracy:
         cluster: true
         readonly:
           replicas: 2
-        external_mysql: true
+
 
       source_file: /test/milvus/ann_hdf5/glove-200-angular.hdf5
       collection_name: glove_200_angular
@@ -289,7 +289,7 @@ ann_accuracy:
         cluster: true
         readonly:
           replicas: 2
-        external_mysql: true
+
 
       source_file: /test/milvus/ann_hdf5/glove-200-angular.hdf5
       collection_name: glove_200_angular
@@ -320,7 +320,7 @@ ann_accuracy:
         cluster: true
         readonly:
           replicas: 2
-        external_mysql: true
+
 
       source_file: /test/milvus/ann_hdf5/glove-200-angular.hdf5
       collection_name: glove_200_angular

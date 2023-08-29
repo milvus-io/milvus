@@ -66,7 +66,7 @@ search_performance:
           #           - gpu1
           #         wal_enable: true
           #         cluster: true
-          #         external_mysql: true
+          #
           #       collection_name: sift_50m_128_l2_011
           #       run_count: 2
           #       top_ks: [1, 10, 100, 1000]

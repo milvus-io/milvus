@@ -863,7 +863,7 @@ def restart_server(helm_release_name):
     # body = {"replicas": 0}
     pods = v1.list_namespaced_pod(namespace)
     for i in pods.items:
-        if i.metadata.name.find(helm_release_name) != -1 and i.metadata.name.find("mysql") == -1:
+        if i.metadata.name.find(helm_release_name) != -1:
             pod_name = i.metadata.name
             break
             # v1.patch_namespaced_config_map(config_map_name, namespace, body, pretty='true')
@@ -886,7 +886,7 @@ def restart_server(helm_release_name):
             log.error(pod_name_tmp)
             if pod_name_tmp == pod_name:
                 continue
-            elif pod_name_tmp.find(helm_release_name) == -1 or pod_name_tmp.find("mysql") != -1:
+            elif pod_name_tmp.find(helm_release_name) == -1:
                 continue
             else:
                 status_res = v1.read_namespaced_pod_status(pod_name_tmp, namespace, pretty='true')

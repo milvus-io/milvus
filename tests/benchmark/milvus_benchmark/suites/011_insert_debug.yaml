@@ -15,7 +15,7 @@ insert_performance:
           - gpu0
           - gpu1
         wal_enable: true
-        external_mysql: true
+
         cluster: true
       collection_name: sift_1b_128_l2_sq8_011
       ni_per: 50000

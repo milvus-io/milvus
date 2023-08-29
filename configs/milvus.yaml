@@ -45,18 +45,8 @@ etcd:
 
 metastore:
   # Default value: etcd
-  # Valid values: [etcd, mysql]
+  # Valid values: etcd
   type: etcd
-
-# Related configuration of mysql, used to store Milvus metadata.
-mysql:
-  username: root
-  password: 123456
-  address: localhost
-  port: 3306
-  dbName: milvus_meta
-  maxOpenConns: 20
-  maxIdleConns: 5
 
 localStorage:
   path: /var/lib/milvus/data/ # please adjust in embedded Milvus: /tmp/milvus/data/
