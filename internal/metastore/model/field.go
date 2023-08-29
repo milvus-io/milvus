@@ -22,11 +22,11 @@ type Field struct {
 	DefaultValue   *schemapb.ValueField
 }
 
-func (f Field) Available() bool {
+func (f *Field) Available() bool {
 	return f.State == schemapb.FieldState_FieldCreated
 }
 
-func (f Field) Clone() *Field {
+func (f *Field) Clone() *Field {
 	return &Field{
 		FieldID:        f.FieldID,
 		Name:           f.Name,
@@ -56,7 +56,7 @@ func checkParamsEqual(paramsA, paramsB []*commonpb.KeyValuePair) bool {
 	return A.Equal(paramsB)
 }
 
-func (f Field) Equal(other Field) bool {
+func (f *Field) Equal(other Field) bool {
 	return f.FieldID == other.FieldID &&
 		f.Name == other.Name &&
 		f.IsPrimaryKey == other.IsPrimaryKey &&

@@ -31,7 +31,7 @@ func getLoggerOfClientInfo(info *commonpb.ClientInfo) []zap.Field {
 	return fields
 }
 
-func (c clientInfo) getLogger() []zap.Field {
+func (c *clientInfo) getLogger() []zap.Field {
 	fields := getLoggerOfClientInfo(c.ClientInfo)
 	fields = append(fields,
 		zap.Int64("identifier", c.identifier),
@@ -40,10 +40,10 @@ func (c clientInfo) getLogger() []zap.Field {
 	return fields
 }
 
-func (c clientInfo) ctxLogRegister(ctx context.Context) {
+func (c *clientInfo) ctxLogRegister(ctx context.Context) {
 	log.Ctx(ctx).Info("client register", c.getLogger()...)
 }
 
-func (c clientInfo) logDeregister() {
+func (c *clientInfo) logDeregister() {
 	log.Info("client deregister", c.getLogger()...)
 }

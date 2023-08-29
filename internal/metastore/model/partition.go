@@ -14,11 +14,11 @@ type Partition struct {
 	State                     pb.PartitionState
 }
 
-func (p Partition) Available() bool {
+func (p *Partition) Available() bool {
 	return p.State == pb.PartitionState_PartitionCreated
 }
 
-func (p Partition) Clone() *Partition {
+func (p *Partition) Clone() *Partition {
 	return &Partition{
 		PartitionID:               p.PartitionID,
 		PartitionName:             p.PartitionName,
@@ -37,7 +37,7 @@ func ClonePartitions(partitions []*Partition) []*Partition {
 	return clone
 }
 
-func (p Partition) Equal(other Partition) bool {
+func (p *Partition) Equal(other Partition) bool {
 	return p.PartitionName == other.PartitionName
 }
 

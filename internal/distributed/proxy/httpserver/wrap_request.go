@@ -77,7 +77,7 @@ type FieldData struct {
 }
 
 // AsSchemapb converts the FieldData to schemapb.FieldData
-func (f FieldData) AsSchemapb() (*schemapb.FieldData, error) {
+func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 	// is scarlar
 	ret := schemapb.FieldData{
 		Type:      f.Type,
@@ -319,16 +319,16 @@ type VectorsArray struct {
 	IDs *VectorIDs `json:"ids,omitempty"`
 }
 
-func (v VectorsArray) isIDs() bool {
+func (v *VectorsArray) isIDs() bool {
 	return v.IDs != nil
 }
 
-func (v VectorsArray) isBinaryVector() bool {
+func (v *VectorsArray) isBinaryVector() bool {
 	return v.IDs == nil && len(v.BinaryVectors) > 0
 }
 
 // AsPbVectorArray convert as milvuspb.VectorArray
-func (v VectorsArray) AsPbVectorArray() *milvuspb.VectorsArray {
+func (v *VectorsArray) AsPbVectorArray() *milvuspb.VectorsArray {
 	ret := &milvuspb.VectorsArray{}
 	switch {
 	case v.isIDs():

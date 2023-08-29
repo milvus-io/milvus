@@ -28,11 +28,11 @@ func NewDefaultDatabase() *Database {
 	return NewDatabase(util.DefaultDBID, util.DefaultDBName, pb.DatabaseState_DatabaseCreated)
 }
 
-func (c Database) Available() bool {
+func (c *Database) Available() bool {
 	return c.State == pb.DatabaseState_DatabaseCreated
 }
 
-func (c Database) Clone() *Database {
+func (c *Database) Clone() *Database {
 	return &Database{
 		TenantID:    c.TenantID,
 		ID:          c.ID,
@@ -42,7 +42,7 @@ func (c Database) Clone() *Database {
 	}
 }
 
-func (c Database) Equal(other Database) bool {
+func (c *Database) Equal(other Database) bool {
 	return c.TenantID == other.TenantID &&
 		c.Name == other.Name &&
 		c.ID == other.ID &&

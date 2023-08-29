@@ -93,7 +93,7 @@ type Allocation struct {
 	ExpireTime Timestamp
 }
 
-func (alloc Allocation) String() string {
+func (alloc *Allocation) String() string {
 	t, _ := tsoutil.ParseTS(alloc.ExpireTime)
 	return fmt.Sprintf("SegmentID: %d, NumOfRows: %d, ExpireTime: %v", alloc.SegmentID, alloc.NumOfRows, t)
 }

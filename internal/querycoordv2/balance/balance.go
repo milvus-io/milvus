@@ -32,7 +32,7 @@ type SegmentAssignPlan struct {
 	To        int64
 }
 
-func (segPlan SegmentAssignPlan) ToString() string {
+func (segPlan *SegmentAssignPlan) ToString() string {
 	return fmt.Sprintf("SegmentPlan:[collectionID: %d, replicaID: %d, segmentID: %d, from: %d, to: %d]\n",
 		segPlan.Segment.CollectionID, segPlan.ReplicaID, segPlan.Segment.ID, segPlan.From, segPlan.To)
 }
@@ -44,7 +44,7 @@ type ChannelAssignPlan struct {
 	To        int64
 }
 
-func (chanPlan ChannelAssignPlan) ToString() string {
+func (chanPlan *ChannelAssignPlan) ToString() string {
 	return fmt.Sprintf("ChannelPlan:[collectionID: %d, channel: %s, replicaID: %d, from: %d, to: %d]\n",
 		chanPlan.Channel.CollectionID, chanPlan.Channel.ChannelName, chanPlan.ReplicaID, chanPlan.From, chanPlan.To)
 }

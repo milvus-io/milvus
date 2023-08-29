@@ -29,11 +29,11 @@ type Collection struct {
 	EnableDynamicField   bool
 }
 
-func (c Collection) Available() bool {
+func (c *Collection) Available() bool {
 	return c.State == pb.CollectionState_CollectionCreated
 }
 
-func (c Collection) Clone() *Collection {
+func (c *Collection) Clone() *Collection {
 	return &Collection{
 		TenantID:             c.TenantID,
 		DBID:                 c.DBID,
@@ -56,14 +56,14 @@ func (c Collection) Clone() *Collection {
 	}
 }
 
-func (c Collection) GetPartitionNum(filterUnavailable bool) int {
+func (c *Collection) GetPartitionNum(filterUnavailable bool) int {
 	if !filterUnavailable {
 		return len(c.Partitions)
 	}
 	return lo.CountBy(c.Partitions, func(p *Partition) bool { return p.Available() })
 }
 
-func (c Collection) Equal(other Collection) bool {
+func (c *Collection) Equal(other Collection) bool {
 	return c.TenantID == other.TenantID &&
 		c.DBID == other.DBID &&
 		CheckPartitionsEqual(c.Partitions, other.Partitions) &&
