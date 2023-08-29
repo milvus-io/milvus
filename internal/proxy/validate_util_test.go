@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"fmt"
 	"math"
 	"testing"
 
@@ -2111,23 +2112,80 @@ func Test_validateUtil_checkIntegerFieldData(t *testing.T) {
 }
 
 func Test_validateUtil_checkJSONData(t *testing.T) {
-	v := newValidateUtil(withOverflowCheck())
+	t.Run("no json data", func(t *testing.T) {
+		v := newValidateUtil(withOverflowCheck())
 
-	f := &schemapb.FieldSchema{
-		DataType: schemapb.DataType_JSON,
-	}
-	data := &schemapb.FieldData{
-		Field: &schemapb.FieldData_Scalars{
-			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_IntData{
-					IntData: &schemapb.IntArray{
-						Data: []int32{int32(math.MinInt8 - 1)},
+		f := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_JSON,
+		}
+		data := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{
+							Data: []int32{int32(math.MinInt8 - 1)},
+						},
 					},
 				},
 			},
-		},
-	}
+		}
 
-	err := v.checkJSONFieldData(data, f)
-	assert.Error(t, err)
+		err := v.checkJSONFieldData(data, f)
+		assert.Error(t, err)
+	})
+
+	t.Run("json string exceed max length", func(t *testing.T) {
+		v := newValidateUtil(withOverflowCheck(), withMaxLenCheck())
+		jsonString := ""
+		for i := 0; i < Params.CommonCfg.JSONMaxLength.GetAsInt(); i++ {
+			jsonString += fmt.Sprintf("key: %d, value: %d", i, i)
+		}
+		jsonString = "{" + jsonString + "}"
+		f := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_JSON,
+		}
+		data := &schemapb.FieldData{
+			FieldName: "json",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_JsonData{
+						JsonData: &schemapb.JSONArray{
+							Data: [][]byte{[]byte(jsonString)},
+						},
+					},
+				},
+			},
+		}
+
+		err := v.checkJSONFieldData(data, f)
+		assert.Error(t, err)
+	})
+
+	t.Run("dynamic field exceed max length", func(t *testing.T) {
+		v := newValidateUtil(withOverflowCheck(), withMaxLenCheck())
+		jsonString := ""
+		for i := 0; i < Params.CommonCfg.JSONMaxLength.GetAsInt(); i++ {
+			jsonString += fmt.Sprintf("key: %d, value: %d", i, i)
+		}
+		jsonString = "{" + jsonString + "}"
+		f := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_JSON,
+		}
+		data := &schemapb.FieldData{
+			FieldName: "$meta",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_JsonData{
+						JsonData: &schemapb.JSONArray{
+							Data: [][]byte{[]byte(jsonString)},
+						},
+					},
+				},
+			},
+			IsDynamic: true,
+		}
+
+		err := v.checkJSONFieldData(data, f)
+		assert.Error(t, err)
+	})
 }
