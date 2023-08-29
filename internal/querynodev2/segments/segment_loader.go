@@ -234,6 +234,8 @@ func (loader *segmentLoader) Load(ctx context.Context,
 
 	// Wait for all segments loaded
 	if err := loader.waitSegmentLoadDone(ctx, segmentType, lo.Map(segments, func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })...); err != nil {
+		clearAll()
+		log.Warn("failed to wait the filtered out segments load done", zap.Error(err))
 		return nil, err
 	}
 
