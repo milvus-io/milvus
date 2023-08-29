@@ -11,6 +11,8 @@ import (
 	"github.com/milvus-io/milvus/cmd/tools/migration/allocator"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/cmd/tools/migration/versions"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
@@ -19,7 +21,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
 )
 
 func alias210ToAlias220(record *pb.CollectionInfo, ts Timestamp) *model.Alias {
@@ -183,7 +184,7 @@ func combineToCollectionIndexesMeta220(fieldIndexes FieldIndexes210, collectionI
 				newIndexName = "_default_idx_" + strconv.FormatInt(index.GetFiledID(), 10)
 			}
 			record := &model.Index{
-				TenantID:        "", // TODO: how to set this if we support mysql later?
+				TenantID:        "",
 				CollectionID:    collectionID,
 				FieldID:         index.GetFiledID(),
 				IndexID:         index.GetIndexID(),

@@ -24,8 +24,7 @@ import (
 
 // Meta Prefix consts
 const (
-	MetaStoreTypeEtcd  = "etcd"
-	MetaStoreTypeMysql = "mysql"
+	MetaStoreTypeEtcd = "etcd"
 
 	SegmentMetaPrefix    = "queryCoord-segmentMeta"
 	ChangeInfoMetaPrefix = "queryCoord-sealedSegmentChangeInfo"

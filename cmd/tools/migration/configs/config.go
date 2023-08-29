@@ -65,7 +65,6 @@ func (c *RunConfig) init(base *paramtable.BaseTable) {
 type MilvusConfig struct {
 	MetaStoreCfg *paramtable.MetaStoreConfig
 	EtcdCfg      *paramtable.EtcdConfig
-	MysqlCfg     *paramtable.MetaDBConfig
 }
 
 func newMilvusConfig(base *paramtable.BaseTable) *MilvusConfig {
@@ -77,17 +76,9 @@ func newMilvusConfig(base *paramtable.BaseTable) *MilvusConfig {
 func (c *MilvusConfig) init(base *paramtable.BaseTable) {
 	c.MetaStoreCfg = &paramtable.MetaStoreConfig{}
 	c.EtcdCfg = &paramtable.EtcdConfig{}
-	c.MysqlCfg = &paramtable.MetaDBConfig{}
 
 	c.MetaStoreCfg.Base = base
 	c.MetaStoreCfg.LoadCfgToMemory()
-
-	switch c.MetaStoreCfg.MetaStoreType {
-	case util.MetaStoreTypeMysql:
-		c.MysqlCfg.Base = base
-		c.MysqlCfg.LoadCfgToMemory()
-	default:
-	}
 
 	c.EtcdCfg.Base = base
 	c.EtcdCfg.LoadCfgToMemory()
