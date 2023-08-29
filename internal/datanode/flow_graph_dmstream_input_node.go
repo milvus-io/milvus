@@ -17,6 +17,7 @@
 package datanode
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -45,7 +46,7 @@ func newDmInputNode(dispatcherClient msgdispatcher.Client, seekPos *msgpb.MsgPos
 	var err error
 	var input <-chan *msgstream.MsgPack
 	if seekPos != nil && len(seekPos.MsgID) != 0 {
-		input, err = dispatcherClient.Register(dmNodeConfig.vChannelName, seekPos, mqwrapper.SubscriptionPositionUnknown)
+		input, err = dispatcherClient.Register(context.TODO(), dmNodeConfig.vChannelName, seekPos, mqwrapper.SubscriptionPositionUnknown)
 		if err != nil {
 			return nil, err
 		}
@@ -54,7 +55,7 @@ func newDmInputNode(dispatcherClient msgdispatcher.Client, seekPos *msgpb.MsgPos
 			zap.Time("tsTime", tsoutil.PhysicalTime(seekPos.GetTimestamp())),
 			zap.Duration("tsLag", time.Since(tsoutil.PhysicalTime(seekPos.GetTimestamp()))))
 	} else {
-		input, err = dispatcherClient.Register(dmNodeConfig.vChannelName, nil, mqwrapper.SubscriptionPositionEarliest)
+		input, err = dispatcherClient.Register(context.TODO(), dmNodeConfig.vChannelName, nil, mqwrapper.SubscriptionPositionEarliest)
 		if err != nil {
 			return nil, err
 		}

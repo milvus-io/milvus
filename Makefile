@@ -88,7 +88,7 @@ else
 	@GO111MODULE=on env bash $(PWD)/scripts/gofmt.sh internal/
 	@GO111MODULE=on env bash $(PWD)/scripts/gofmt.sh tests/integration/
 	@GO111MODULE=on env bash $(PWD)/scripts/gofmt.sh tests/go/
-	@GO111MODULE=on env bash $(PWD)/scripts/gofmt.sh pkg/ 
+	@GO111MODULE=on env bash $(PWD)/scripts/gofmt.sh pkg/
 endif
 
 lint: tools/bin/revive

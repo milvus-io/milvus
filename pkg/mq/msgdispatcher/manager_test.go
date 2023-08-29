@@ -46,7 +46,7 @@ func TestManager(t *testing.T) {
 			for j := 0; j < r; j++ {
 				offset++
 				t.Logf("dyh add, %s", fmt.Sprintf("mock-pchannel-0_vchannel_%d", offset))
-				_, err := c.Add(fmt.Sprintf("mock-pchannel-0_vchannel_%d", offset), nil, mqwrapper.SubscriptionPositionUnknown)
+				_, err := c.Add(context.Background(), fmt.Sprintf("mock-pchannel-0_vchannel_%d", offset), nil, mqwrapper.SubscriptionPositionUnknown)
 				assert.NoError(t, err)
 				assert.Equal(t, offset, c.Num())
 			}
@@ -61,13 +61,14 @@ func TestManager(t *testing.T) {
 
 	t.Run("test merge and split", func(t *testing.T) {
 		prefix := fmt.Sprintf("mock%d", time.Now().UnixNano())
+		ctx := context.Background()
 		c := NewDispatcherManager(prefix+"_pchannel_0", typeutil.ProxyRole, 1, newMockFactory())
 		assert.NotNil(t, c)
-		_, err := c.Add("mock_vchannel_0", nil, mqwrapper.SubscriptionPositionUnknown)
+		_, err := c.Add(ctx, "mock_vchannel_0", nil, mqwrapper.SubscriptionPositionUnknown)
 		assert.NoError(t, err)
-		_, err = c.Add("mock_vchannel_1", nil, mqwrapper.SubscriptionPositionUnknown)
+		_, err = c.Add(ctx, "mock_vchannel_1", nil, mqwrapper.SubscriptionPositionUnknown)
 		assert.NoError(t, err)
-		_, err = c.Add("mock_vchannel_2", nil, mqwrapper.SubscriptionPositionUnknown)
+		_, err = c.Add(ctx, "mock_vchannel_2", nil, mqwrapper.SubscriptionPositionUnknown)
 		assert.NoError(t, err)
 		assert.Equal(t, 3, c.Num())
 
@@ -85,13 +86,14 @@ func TestManager(t *testing.T) {
 
 	t.Run("test run and close", func(t *testing.T) {
 		prefix := fmt.Sprintf("mock%d", time.Now().UnixNano())
+		ctx := context.Background()
 		c := NewDispatcherManager(prefix+"_pchannel_0", typeutil.ProxyRole, 1, newMockFactory())
 		assert.NotNil(t, c)
-		_, err := c.Add("mock_vchannel_0", nil, mqwrapper.SubscriptionPositionUnknown)
+		_, err := c.Add(ctx, "mock_vchannel_0", nil, mqwrapper.SubscriptionPositionUnknown)
 		assert.NoError(t, err)
-		_, err = c.Add("mock_vchannel_1", nil, mqwrapper.SubscriptionPositionUnknown)
+		_, err = c.Add(ctx, "mock_vchannel_1", nil, mqwrapper.SubscriptionPositionUnknown)
 		assert.NoError(t, err)
-		_, err = c.Add("mock_vchannel_2", nil, mqwrapper.SubscriptionPositionUnknown)
+		_, err = c.Add(ctx, "mock_vchannel_2", nil, mqwrapper.SubscriptionPositionUnknown)
 		assert.NoError(t, err)
 		assert.Equal(t, 3, c.Num())
 
@@ -100,6 +102,28 @@ func TestManager(t *testing.T) {
 		assert.Eventually(t, func() bool {
 			return c.Num() == 1 // expected merged
 		}, 300*time.Millisecond, 10*time.Millisecond)
+
+		assert.NotPanics(t, func() {
+			c.Close()
+		})
+	})
+
+	t.Run("test add timeout", func(t *testing.T) {
+		prefix := fmt.Sprintf("mock%d", time.Now().UnixNano())
+		ctx := context.Background()
+		ctx, cancel := context.WithTimeout(ctx, time.Millisecond*2)
+		defer cancel()
+		time.Sleep(time.Millisecond * 2)
+		c := NewDispatcherManager(prefix+"_pchannel_0", typeutil.ProxyRole, 1, newMockFactory())
+		go c.Run()
+		assert.NotNil(t, c)
+		_, err := c.Add(ctx, "mock_vchannel_0", nil, mqwrapper.SubscriptionPositionUnknown)
+		assert.Error(t, err)
+		_, err = c.Add(ctx, "mock_vchannel_1", nil, mqwrapper.SubscriptionPositionUnknown)
+		assert.Error(t, err)
+		_, err = c.Add(ctx, "mock_vchannel_2", nil, mqwrapper.SubscriptionPositionUnknown)
+		assert.Error(t, err)
+		assert.Equal(t, 0, c.Num())
 
 		assert.NotPanics(t, func() {
 			c.Close()
@@ -255,7 +279,7 @@ func (suite *SimulationSuite) TestDispatchToVchannels() {
 	suite.vchannels = make(map[string]*vchannelHelper, vchannelNum)
 	for i := 0; i < vchannelNum; i++ {
 		vchannel := fmt.Sprintf("%s_vchannelv%d", suite.pchannel, i)
-		output, err := suite.manager.Add(vchannel, nil, mqwrapper.SubscriptionPositionEarliest)
+		output, err := suite.manager.Add(context.Background(), vchannel, nil, mqwrapper.SubscriptionPositionEarliest)
 		assert.NoError(suite.T(), err)
 		suite.vchannels[vchannel] = &vchannelHelper{output: output}
 	}
@@ -289,7 +313,7 @@ func (suite *SimulationSuite) TestMerge() {
 
 	for i := 0; i < vchannelNum; i++ {
 		vchannel := fmt.Sprintf("%s_vchannelv%d", suite.pchannel, i)
-		output, err := suite.manager.Add(vchannel, positions[rand.Intn(len(positions))],
+		output, err := suite.manager.Add(context.Background(), vchannel, positions[rand.Intn(len(positions))],
 			mqwrapper.SubscriptionPositionUnknown) // seek from random position
 		assert.NoError(suite.T(), err)
 		suite.vchannels[vchannel] = &vchannelHelper{output: output}
@@ -325,7 +349,7 @@ func (suite *SimulationSuite) TestSplit() {
 			DefaultTargetChanSize = 10
 		}
 		vchannel := fmt.Sprintf("%s_vchannelv%d", suite.pchannel, i)
-		_, err := suite.manager.Add(vchannel, nil, mqwrapper.SubscriptionPositionEarliest)
+		_, err := suite.manager.Add(context.Background(), vchannel, nil, mqwrapper.SubscriptionPositionEarliest)
 		assert.NoError(suite.T(), err)
 	}
 

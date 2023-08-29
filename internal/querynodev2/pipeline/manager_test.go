@@ -79,7 +79,7 @@ func (suite *PipelineManagerTestSuite) TestBasic() {
 	//  mock collection manager
 	suite.collectionManager.EXPECT().Get(suite.collectionID).Return(&segments.Collection{})
 	//  mock mq factory
-	suite.msgDispatcher.EXPECT().Register(suite.channel, mock.Anything, mqwrapper.SubscriptionPositionUnknown).Return(suite.msgChan, nil)
+	suite.msgDispatcher.EXPECT().Register(mock.Anything, suite.channel, mock.Anything, mqwrapper.SubscriptionPositionUnknown).Return(suite.msgChan, nil)
 	suite.msgDispatcher.EXPECT().Deregister(suite.channel)
 
 	//build manager

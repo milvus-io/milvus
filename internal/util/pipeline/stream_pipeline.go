@@ -17,6 +17,7 @@
 package pipeline
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -68,7 +69,7 @@ func (p *streamPipeline) ConsumeMsgStream(position *msgpb.MsgPosition) error {
 	}
 
 	start := time.Now()
-	p.input, err = p.dispatcher.Register(p.vChannel, position, mqwrapper.SubscriptionPositionUnknown)
+	p.input, err = p.dispatcher.Register(context.TODO(), p.vChannel, position, mqwrapper.SubscriptionPositionUnknown)
 	if err != nil {
 		log.Error("dispatcher register failed", zap.String("channel", position.ChannelName))
 		return WrapErrRegDispather(err)

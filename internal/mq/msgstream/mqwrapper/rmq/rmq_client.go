@@ -17,6 +17,7 @@
 package rmq
 
 import (
+	"context"
 	"strconv"
 
 	"github.com/cockroachdb/errors"
@@ -38,7 +39,7 @@ type rmqClient struct {
 	client client.Client
 }
 
-func NewClientWithDefaultOptions() (mqwrapper.Client, error) {
+func NewClientWithDefaultOptions(ctx context.Context) (mqwrapper.Client, error) {
 	option := client.Options{Server: server.Rmq}
 	return NewClient(option)
 }

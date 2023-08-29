@@ -33,6 +33,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -146,7 +147,7 @@ func (ms *mqMsgStream) CheckTopicValid(channel string) error {
 
 // AsConsumerWithPosition Create consumer to receive message from channels, with initial position
 // if initial position is set to latest, last message in the channel is exclusive
-func (ms *mqMsgStream) AsConsumer(channels []string, subName string, position mqwrapper.SubscriptionInitialPosition) {
+func (ms *mqMsgStream) AsConsumer(ctx context.Context, channels []string, subName string, position mqwrapper.SubscriptionInitialPosition) error {
 	for _, channel := range channels {
 		if _, ok := ms.consumers[channel]; ok {
 			continue
@@ -171,14 +172,19 @@ func (ms *mqMsgStream) AsConsumer(channels []string, subName string, position mq
 			ms.consumerChannels = append(ms.consumerChannels, channel)
 			return nil
 		}
-		// TODO if know the former subscribe is invalid, should we use pulsarctl to accelerate recovery speed
-		err := retry.Do(context.TODO(), fn, retry.Attempts(50), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
+
+		err := retry.Do(ctx, fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
 		if err != nil {
-			errMsg := "Failed to create consumer " + channel + ", error = " + err.Error()
-			panic(errMsg)
+			errMsg := fmt.Sprintf("Failed to create consumer %s", channel)
+			if merr.IsCanceledOrTimeout(err) {
+				return errors.Wrapf(err, errMsg)
+			}
+
+			panic(fmt.Sprintf("%s, errors = %s", errMsg, err.Error()))
 		}
 		log.Info("Successfully create consumer", zap.String("channel", channel), zap.String("subname", subName))
 	}
+	return nil
 }
 
 func (ms *mqMsgStream) SetRepackFunc(repackFunc RepackFunc) {
@@ -425,7 +431,7 @@ func (ms *mqMsgStream) Chan() <-chan *MsgPack {
 
 // Seek reset the subscription associated with this consumer to a specific position, the seek position is exclusive
 // User has to ensure mq_msgstream is not closed before seek, and the seek position is already written.
-func (ms *mqMsgStream) Seek(msgPositions []*msgpb.MsgPosition) error {
+func (ms *mqMsgStream) Seek(ctx context.Context, msgPositions []*msgpb.MsgPosition) error {
 	for _, mp := range msgPositions {
 		consumer, ok := ms.consumers[mp.ChannelName]
 		if !ok {
@@ -509,7 +515,7 @@ func (ms *MqTtMsgStream) addConsumer(consumer mqwrapper.Consumer, channel string
 }
 
 // AsConsumerWithPosition subscribes channels as consumer for a MsgStream and seeks to a certain position.
-func (ms *MqTtMsgStream) AsConsumer(channels []string, subName string, position mqwrapper.SubscriptionInitialPosition) {
+func (ms *MqTtMsgStream) AsConsumer(ctx context.Context, channels []string, subName string, position mqwrapper.SubscriptionInitialPosition) error {
 	for _, channel := range channels {
 		if _, ok := ms.consumers[channel]; ok {
 			continue
@@ -533,12 +539,19 @@ func (ms *MqTtMsgStream) AsConsumer(channels []string, subName string, position 
 			ms.addConsumer(pc, channel)
 			return nil
 		}
-		err := retry.Do(context.TODO(), fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
+
+		err := retry.Do(ctx, fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
 		if err != nil {
-			errMsg := "Failed to create consumer " + channel + ", error = " + err.Error()
-			panic(errMsg)
+			errMsg := fmt.Sprintf("Failed to create consumer %s", channel)
+			if merr.IsCanceledOrTimeout(err) {
+				return errors.Wrapf(err, errMsg)
+			}
+
+			panic(fmt.Sprintf("%s, errors = %s", errMsg, err.Error()))
 		}
 	}
+
+	return nil
 }
 
 // Close will stop goroutine and free internal producers and consumers
@@ -773,7 +786,7 @@ func (ms *MqTtMsgStream) allChanReachSameTtMsg(chanTtMsgSync map[mqwrapper.Consu
 }
 
 // Seek to the specified position
-func (ms *MqTtMsgStream) Seek(msgPositions []*msgpb.MsgPosition) error {
+func (ms *MqTtMsgStream) Seek(ctx context.Context, msgPositions []*msgpb.MsgPosition) error {
 	var consumer mqwrapper.Consumer
 	var mp *MsgPosition
 	var err error
@@ -815,7 +828,7 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*msgpb.MsgPosition) error {
 		if len(mp.MsgID) == 0 {
 			return fmt.Errorf("when msgID's length equal to 0, please use AsConsumer interface")
 		}
-		err = retry.Do(context.TODO(), fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
+		err = retry.Do(ctx, fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
 		if err != nil {
 			return fmt.Errorf("failed to seek, error %s", err.Error())
 		}
@@ -828,6 +841,8 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*msgpb.MsgPosition) error {
 			select {
 			case <-ms.ctx.Done():
 				return ms.ctx.Err()
+			case <-ctx.Done():
+				return ctx.Err()
 			case msg, ok := <-consumer.Chan():
 				if !ok {
 					return fmt.Errorf("consumer closed")

@@ -39,7 +39,7 @@ var (
 )
 
 type DispatcherManager interface {
-	Add(vchannel string, pos *Pos, subPos SubPos) (<-chan *MsgPack, error)
+	Add(ctx context.Context, vchannel string, pos *Pos, subPos SubPos) (<-chan *MsgPack, error)
 	Remove(vchannel string)
 	Num() int
 	Run()
@@ -85,14 +85,14 @@ func (c *dispatcherManager) constructSubName(vchannel string, isMain bool) strin
 	return fmt.Sprintf("%s-%d-%s-%t", c.role, c.nodeID, vchannel, isMain)
 }
 
-func (c *dispatcherManager) Add(vchannel string, pos *Pos, subPos SubPos) (<-chan *MsgPack, error) {
+func (c *dispatcherManager) Add(ctx context.Context, vchannel string, pos *Pos, subPos SubPos) (<-chan *MsgPack, error) {
 	log := log.With(zap.String("role", c.role),
 		zap.Int64("nodeID", c.nodeID), zap.String("vchannel", vchannel))
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	isMain := c.mainDispatcher == nil
-	d, err := NewDispatcher(c.factory, isMain, c.pchannel, pos,
+	d, err := NewDispatcher(ctx, c.factory, isMain, c.pchannel, pos,
 		c.constructSubName(vchannel, isMain), subPos, c.lagNotifyChan, c.lagTargets)
 	if err != nil {
 		return nil, err
@@ -236,7 +236,7 @@ func (c *dispatcherManager) split(t *target) {
 	var newSolo *Dispatcher
 	err := retry.Do(context.Background(), func() error {
 		var err error
-		newSolo, err = NewDispatcher(c.factory, false, c.pchannel, t.pos,
+		newSolo, err = NewDispatcher(context.Background(), c.factory, false, c.pchannel, t.pos,
 			c.constructSubName(t.vchannel, false), mqwrapper.SubscriptionPositionUnknown, c.lagNotifyChan, c.lagTargets)
 		return err
 	}, retry.Attempts(10))

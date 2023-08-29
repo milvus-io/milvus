@@ -1,10 +1,13 @@
 package kafka
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -54,8 +57,17 @@ func NewKafkaClientInstanceWithConfigMap(config kafka.ConfigMap, extraConsumerCo
 	return &kafkaClient{basicConfig: config, consumerConfig: extraConsumerConfig, producerConfig: extraProducerConfig}
 }
 
-func NewKafkaClientInstanceWithConfig(config *paramtable.KafkaConfig) *kafkaClient {
+func NewKafkaClientInstanceWithConfig(ctx context.Context, config *paramtable.KafkaConfig) (*kafkaClient, error) {
 	kafkaConfig := getBasicConfig(config.Address.GetValue())
+
+	// connection setup timeout, default as 30000ms
+	if deadline, ok := ctx.Deadline(); ok {
+		if deadline.Before(time.Now()) {
+			return nil, errors.New("context timeout when new kafka client")
+		}
+		timeout := time.Until(deadline).Milliseconds()
+		kafkaConfig.SetKey("socket.connection.setup.timeout.ms", timeout)
+	}
 
 	if (config.SaslUsername.GetValue() == "" && config.SaslPassword.GetValue() != "") ||
 		(config.SaslUsername.GetValue() != "" && config.SaslPassword.GetValue() == "") {
@@ -77,7 +89,10 @@ func NewKafkaClientInstanceWithConfig(config *paramtable.KafkaConfig) *kafkaClie
 		return kafkaConfigMap
 	}
 
-	return NewKafkaClientInstanceWithConfigMap(kafkaConfig, specExtraConfig(config.ConsumerExtraConfig.GetValue()), specExtraConfig(config.ProducerExtraConfig.GetValue()))
+	return NewKafkaClientInstanceWithConfigMap(
+		kafkaConfig,
+		specExtraConfig(config.ConsumerExtraConfig.GetValue()),
+		specExtraConfig(config.ProducerExtraConfig.GetValue())), nil
 
 }
 

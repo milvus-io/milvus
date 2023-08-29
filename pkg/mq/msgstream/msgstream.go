@@ -62,9 +62,9 @@ type MsgStream interface {
 	GetProduceChannels() []string
 	Broadcast(*MsgPack) (map[string][]MessageID, error)
 
-	AsConsumer(channels []string, subName string, position mqwrapper.SubscriptionInitialPosition)
+	AsConsumer(ctx context.Context, channels []string, subName string, position mqwrapper.SubscriptionInitialPosition) error
 	Chan() <-chan *MsgPack
-	Seek(offset []*MsgPosition) error
+	Seek(ctx context.Context, offset []*MsgPosition) error
 
 	GetLatestMsgID(channel string) (MessageID, error)
 	CheckTopicValid(channel string) error

@@ -17,6 +17,7 @@
 package nmq
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"time"
@@ -40,8 +41,17 @@ type nmqClient struct {
 
 // NewClientWithDefaultOptions returns a new NMQ client with default options.
 // It retrieves the NMQ client URL from the server configuration.
-func NewClientWithDefaultOptions() (mqwrapper.Client, error) {
+func NewClientWithDefaultOptions(ctx context.Context) (mqwrapper.Client, error) {
 	url := Nmq.ClientURL()
+
+	if deadline, ok := ctx.Deadline(); ok {
+		if deadline.Before(time.Now()) {
+			return nil, errors.New("context timeout when new nmq client")
+		}
+		timeoutOption := nats.Timeout(time.Until(deadline))
+		return NewClient(url, timeoutOption)
+	}
+
 	return NewClient(url)
 }
 

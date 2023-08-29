@@ -145,7 +145,7 @@ func TestStream_KafkaMsgStream_SeekToLast(t *testing.T) {
 	defer outputStream2.Close()
 	assert.NoError(t, err)
 
-	err = outputStream2.Seek([]*msgpb.MsgPosition{seekPosition})
+	err = outputStream2.Seek(ctx, []*msgpb.MsgPosition{seekPosition})
 	assert.NoError(t, err)
 
 	cnt := 0
@@ -408,7 +408,7 @@ func TestStream_KafkaTtMsgStream_DataNodeTimetickMsgstream(t *testing.T) {
 	factory := ProtoUDFactory{}
 	kafkaClient := kafkawrapper.NewKafkaClientInstance(kafkaAddress)
 	outputStream, _ := NewMqTtMsgStream(ctx, 100, 100, kafkaClient, factory.NewUnmarshalDispatcher())
-	outputStream.AsConsumer(consumerChannels, consumerSubName, mqwrapper.SubscriptionPositionLatest)
+	outputStream.AsConsumer(context.Background(), consumerChannels, consumerSubName, mqwrapper.SubscriptionPositionLatest)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -462,7 +462,7 @@ func getKafkaOutputStream(ctx context.Context, kafkaAddress string, consumerChan
 	factory := ProtoUDFactory{}
 	kafkaClient := kafkawrapper.NewKafkaClientInstance(kafkaAddress)
 	outputStream, _ := NewMqMsgStream(ctx, 100, 100, kafkaClient, factory.NewUnmarshalDispatcher())
-	outputStream.AsConsumer(consumerChannels, consumerSubName, position)
+	outputStream.AsConsumer(context.Background(), consumerChannels, consumerSubName, position)
 	return outputStream
 }
 
@@ -470,7 +470,7 @@ func getKafkaTtOutputStream(ctx context.Context, kafkaAddress string, consumerCh
 	factory := ProtoUDFactory{}
 	kafkaClient := kafkawrapper.NewKafkaClientInstance(kafkaAddress)
 	outputStream, _ := NewMqTtMsgStream(ctx, 100, 100, kafkaClient, factory.NewUnmarshalDispatcher())
-	outputStream.AsConsumer(consumerChannels, consumerSubName, mqwrapper.SubscriptionPositionEarliest)
+	outputStream.AsConsumer(context.Background(), consumerChannels, consumerSubName, mqwrapper.SubscriptionPositionEarliest)
 	return outputStream
 }
 
@@ -482,7 +482,7 @@ func getKafkaTtOutputStreamAndSeek(ctx context.Context, kafkaAddress string, pos
 	for _, c := range positions {
 		consumerName = append(consumerName, c.ChannelName)
 	}
-	outputStream.AsConsumer(consumerName, funcutil.RandomString(8), mqwrapper.SubscriptionPositionUnknown)
-	outputStream.Seek(positions)
+	outputStream.AsConsumer(context.Background(), consumerName, funcutil.RandomString(8), mqwrapper.SubscriptionPositionUnknown)
+	outputStream.Seek(context.Background(), positions)
 	return outputStream
 }

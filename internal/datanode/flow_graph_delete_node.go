@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -127,6 +128,10 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 					return dn.flushManager.flushDelData(buf, segmentToFlush, fgMsg.endPositions[0])
 				}, getFlowGraphRetryOpt())
 				if err != nil {
+					if merr.IsCanceledOrTimeout(err) {
+						log.Warn("skip syncing delete data for context done", zap.Int64("segmentID", segmentToFlush))
+						continue
+					}
 					log.Fatal("failed to flush delete data", zap.Int64("segmentID", segmentToFlush), zap.Error(err))
 				}
 				// remove delete buf

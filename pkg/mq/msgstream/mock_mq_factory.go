@@ -14,3 +14,7 @@ func NewMockMqFactory() *MockMqFactory {
 func (m MockMqFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
 	return m.NewMsgStreamFunc(ctx)
 }
+
+func (m MockMqFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
+	return m.NewMsgStreamFunc(ctx)
+}

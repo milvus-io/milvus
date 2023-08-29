@@ -19,6 +19,7 @@ package msgstream
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -26,15 +27,51 @@ import (
 func TestPmsFactory(t *testing.T) {
 	pmsFactory := NewPmsFactory(&Params.ServiceParam)
 
-	ctx := context.Background()
-	_, err := pmsFactory.NewMsgStream(ctx)
+	err := pmsFactory.NewMsgStreamDisposer(context.Background())([]string{"hello"}, "xx")
 	assert.NoError(t, err)
 
-	_, err = pmsFactory.NewTtMsgStream(ctx)
-	assert.NoError(t, err)
+	tests := []struct {
+		description   string
+		withTimeout   bool
+		ctxTimeouted  bool
+		expectedError bool
+	}{
+		{"normal ctx", false, false, false},
+		{"timeout ctx not timeout", true, false, false},
+		{"timeout ctx timeout", true, true, true},
+	}
 
-	err = pmsFactory.NewMsgStreamDisposer(ctx)([]string{"hello"}, "xx")
-	assert.NoError(t, err)
+	for _, test := range tests {
+		t.Run(test.description, func(t *testing.T) {
+			var cancel context.CancelFunc
+			ctx := context.Background()
+			if test.withTimeout {
+				ctx, cancel = context.WithTimeout(ctx, time.Millisecond)
+				defer cancel()
+			}
+
+			if test.ctxTimeouted {
+				time.Sleep(time.Millisecond)
+			}
+			stream, err := pmsFactory.NewMsgStream(ctx)
+			if test.expectedError {
+				assert.Error(t, err)
+				assert.Nil(t, stream)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, stream)
+			}
+
+			ttStream, err := pmsFactory.NewTtMsgStream(ctx)
+			if test.expectedError {
+				assert.Error(t, err)
+				assert.Nil(t, ttStream)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, ttStream)
+			}
+		})
+	}
 }
 
 func TestPmsFactoryWithAuth(t *testing.T) {
@@ -69,13 +106,47 @@ func TestPmsFactoryWithAuth(t *testing.T) {
 func TestKafkaFactory(t *testing.T) {
 	kmsFactory := NewKmsFactory(&Params.ServiceParam)
 
-	ctx := context.Background()
-	_, err := kmsFactory.NewMsgStream(ctx)
-	assert.NoError(t, err)
+	tests := []struct {
+		description   string
+		withTimeout   bool
+		ctxTimeouted  bool
+		expectedError bool
+	}{
+		{"normal ctx", false, false, false},
+		{"timeout ctx not timeout", true, false, false},
+		{"timeout ctx timeout", true, true, true},
+	}
 
-	_, err = kmsFactory.NewTtMsgStream(ctx)
-	assert.NoError(t, err)
+	for _, test := range tests {
+		t.Run(test.description, func(t *testing.T) {
+			var cancel context.CancelFunc
+			ctx := context.Background()
+			timeoutDur := time.Millisecond * 30
+			if test.withTimeout {
+				ctx, cancel = context.WithTimeout(ctx, timeoutDur)
+				defer cancel()
+			}
 
-	// err = kmsFactory.NewMsgStreamDisposer(ctx)([]string{"hello"}, "xx")
-	// assert.NoError(t, err)
+			if test.ctxTimeouted {
+				time.Sleep(timeoutDur)
+			}
+			stream, err := kmsFactory.NewMsgStream(ctx)
+			if test.expectedError {
+				assert.Error(t, err)
+				assert.Nil(t, stream)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, stream)
+			}
+
+			ttStream, err := kmsFactory.NewTtMsgStream(ctx)
+			if test.expectedError {
+				assert.Error(t, err)
+				assert.Nil(t, ttStream)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, ttStream)
+			}
+		})
+	}
 }

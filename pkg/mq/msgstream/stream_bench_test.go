@@ -25,7 +25,7 @@ func BenchmarkProduceAndConsumeNatsMQ(b *testing.B) {
 	cfg.Opts.StoreDir = storeDir
 	nmq.MustInitNatsMQ(cfg)
 
-	client, err := nmq.NewClientWithDefaultOptions()
+	client, err := nmq.NewClientWithDefaultOptions(context.Background())
 	if err != nil {
 		panic(err)
 	}

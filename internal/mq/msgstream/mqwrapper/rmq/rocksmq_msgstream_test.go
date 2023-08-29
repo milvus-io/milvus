@@ -66,8 +66,8 @@ func TestMqMsgStream_AsConsumer(t *testing.T) {
 	assert.NoError(t, err)
 
 	// repeat calling AsConsumer
-	m.AsConsumer([]string{"a"}, "b", mqwrapper.SubscriptionPositionUnknown)
-	m.AsConsumer([]string{"a"}, "b", mqwrapper.SubscriptionPositionUnknown)
+	m.AsConsumer(context.Background(), []string{"a"}, "b", mqwrapper.SubscriptionPositionUnknown)
+	m.AsConsumer(context.Background(), []string{"a"}, "b", mqwrapper.SubscriptionPositionUnknown)
 }
 
 func TestMqMsgStream_ComputeProduceChannelIndexes(t *testing.T) {
@@ -240,7 +240,7 @@ func TestMqMsgStream_SeekNotSubscribed(t *testing.T) {
 			ChannelName: "b",
 		},
 	}
-	err = m.Seek(p)
+	err = m.Seek(context.Background(), p)
 	assert.Error(t, err)
 }
 
@@ -265,7 +265,7 @@ func initRmqStream(ctx context.Context,
 ) (msgstream.MsgStream, msgstream.MsgStream) {
 	factory := msgstream.ProtoUDFactory{}
 
-	rmqClient, _ := NewClientWithDefaultOptions()
+	rmqClient, _ := NewClientWithDefaultOptions(ctx)
 	inputStream, _ := msgstream.NewMqMsgStream(ctx, 100, 100, rmqClient, factory.NewUnmarshalDispatcher())
 	inputStream.AsProducer(producerChannels)
 	for _, opt := range opts {
@@ -273,9 +273,9 @@ func initRmqStream(ctx context.Context,
 	}
 	var input msgstream.MsgStream = inputStream
 
-	rmqClient2, _ := NewClientWithDefaultOptions()
+	rmqClient2, _ := NewClientWithDefaultOptions(ctx)
 	outputStream, _ := msgstream.NewMqMsgStream(ctx, 100, 100, rmqClient2, factory.NewUnmarshalDispatcher())
-	outputStream.AsConsumer(consumerChannels, consumerGroupName, mqwrapper.SubscriptionPositionEarliest)
+	outputStream.AsConsumer(ctx, consumerChannels, consumerGroupName, mqwrapper.SubscriptionPositionEarliest)
 	var output msgstream.MsgStream = outputStream
 
 	return input, output
@@ -289,7 +289,7 @@ func initRmqTtStream(ctx context.Context,
 ) (msgstream.MsgStream, msgstream.MsgStream) {
 	factory := msgstream.ProtoUDFactory{}
 
-	rmqClient, _ := NewClientWithDefaultOptions()
+	rmqClient, _ := NewClientWithDefaultOptions(ctx)
 	inputStream, _ := msgstream.NewMqMsgStream(ctx, 100, 100, rmqClient, factory.NewUnmarshalDispatcher())
 	inputStream.AsProducer(producerChannels)
 	for _, opt := range opts {
@@ -297,9 +297,9 @@ func initRmqTtStream(ctx context.Context,
 	}
 	var input msgstream.MsgStream = inputStream
 
-	rmqClient2, _ := NewClientWithDefaultOptions()
+	rmqClient2, _ := NewClientWithDefaultOptions(ctx)
 	outputStream, _ := msgstream.NewMqTtMsgStream(ctx, 100, 100, rmqClient2, factory.NewUnmarshalDispatcher())
-	outputStream.AsConsumer(consumerChannels, consumerGroupName, mqwrapper.SubscriptionPositionEarliest)
+	outputStream.AsConsumer(ctx, consumerChannels, consumerGroupName, mqwrapper.SubscriptionPositionEarliest)
 	var output msgstream.MsgStream = outputStream
 
 	return input, output
@@ -399,11 +399,11 @@ func TestStream_RmqTtMsgStream_DuplicatedIDs(t *testing.T) {
 
 	factory := msgstream.ProtoUDFactory{}
 
-	rmqClient, _ := NewClientWithDefaultOptions()
+	rmqClient, _ := NewClientWithDefaultOptions(ctx)
 	outputStream, _ = msgstream.NewMqTtMsgStream(context.Background(), 100, 100, rmqClient, factory.NewUnmarshalDispatcher())
 	consumerSubName = funcutil.RandomString(8)
-	outputStream.AsConsumer(consumerChannels, consumerSubName, mqwrapper.SubscriptionPositionUnknown)
-	outputStream.Seek(receivedMsg.StartPositions)
+	outputStream.AsConsumer(ctx, consumerChannels, consumerSubName, mqwrapper.SubscriptionPositionUnknown)
+	outputStream.Seek(ctx, receivedMsg.StartPositions)
 	seekMsg := consumer(ctx, outputStream)
 	assert.Equal(t, len(seekMsg.Msgs), 1+2)
 	assert.EqualValues(t, seekMsg.Msgs[0].BeginTs(), 1)
@@ -501,12 +501,12 @@ func TestStream_RmqTtMsgStream_Seek(t *testing.T) {
 
 	factory := msgstream.ProtoUDFactory{}
 
-	rmqClient, _ := NewClientWithDefaultOptions()
+	rmqClient, _ := NewClientWithDefaultOptions(ctx)
 	outputStream, _ = msgstream.NewMqTtMsgStream(context.Background(), 100, 100, rmqClient, factory.NewUnmarshalDispatcher())
 	consumerSubName = funcutil.RandomString(8)
-	outputStream.AsConsumer(consumerChannels, consumerSubName, mqwrapper.SubscriptionPositionUnknown)
+	outputStream.AsConsumer(ctx, consumerChannels, consumerSubName, mqwrapper.SubscriptionPositionUnknown)
 
-	outputStream.Seek(receivedMsg3.StartPositions)
+	outputStream.Seek(ctx, receivedMsg3.StartPositions)
 	seekMsg := consumer(ctx, outputStream)
 	assert.Equal(t, len(seekMsg.Msgs), 3)
 	result := []uint64{14, 12, 13}
@@ -549,9 +549,9 @@ func TestStream_RMqMsgStream_SeekInvalidMessage(t *testing.T) {
 	outputStream.Close()
 
 	factory := msgstream.ProtoUDFactory{}
-	rmqClient2, _ := NewClientWithDefaultOptions()
+	rmqClient2, _ := NewClientWithDefaultOptions(ctx)
 	outputStream2, _ := msgstream.NewMqMsgStream(ctx, 100, 100, rmqClient2, factory.NewUnmarshalDispatcher())
-	outputStream2.AsConsumer(consumerChannels, funcutil.RandomString(8), mqwrapper.SubscriptionPositionUnknown)
+	outputStream2.AsConsumer(ctx, consumerChannels, funcutil.RandomString(8), mqwrapper.SubscriptionPositionUnknown)
 
 	id := common.Endian.Uint64(seekPosition.MsgID) + 10
 	bs := make([]byte, 8)
@@ -565,7 +565,7 @@ func TestStream_RMqMsgStream_SeekInvalidMessage(t *testing.T) {
 		},
 	}
 
-	err = outputStream2.Seek(p)
+	err = outputStream2.Seek(ctx, p)
 	assert.NoError(t, err)
 
 	for i := 10; i < 20; i++ {
@@ -589,7 +589,7 @@ func TestStream_RmqTtMsgStream_AsConsumerWithPosition(t *testing.T) {
 
 	factory := msgstream.ProtoUDFactory{}
 
-	rmqClient, _ := NewClientWithDefaultOptions()
+	rmqClient, _ := NewClientWithDefaultOptions(context.Background())
 
 	otherInputStream, _ := msgstream.NewMqMsgStream(context.Background(), 100, 100, rmqClient, factory.NewUnmarshalDispatcher())
 	otherInputStream.AsProducer([]string{"root_timetick"})
@@ -602,9 +602,9 @@ func TestStream_RmqTtMsgStream_AsConsumerWithPosition(t *testing.T) {
 		inputStream.Produce(getTimeTickMsgPack(int64(i)))
 	}
 
-	rmqClient2, _ := NewClientWithDefaultOptions()
+	rmqClient2, _ := NewClientWithDefaultOptions(context.Background())
 	outputStream, _ := msgstream.NewMqMsgStream(context.Background(), 100, 100, rmqClient2, factory.NewUnmarshalDispatcher())
-	outputStream.AsConsumer(consumerChannels, consumerSubName, mqwrapper.SubscriptionPositionLatest)
+	outputStream.AsConsumer(context.Background(), consumerChannels, consumerSubName, mqwrapper.SubscriptionPositionLatest)
 
 	inputStream.Produce(getTimeTickMsgPack(1000))
 	pack := <-outputStream.Chan()

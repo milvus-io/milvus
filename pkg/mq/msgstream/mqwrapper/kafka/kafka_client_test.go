@@ -364,10 +364,10 @@ func createKafkaConfig(opts ...kafkaCfgOption) *paramtable.KafkaConfig {
 func TestKafkaClient_NewKafkaClientInstanceWithConfig(t *testing.T) {
 	config1 := createKafkaConfig(withAddr("addr"), withPasswd("password"))
 
-	assert.Panics(t, func() { NewKafkaClientInstanceWithConfig(config1) })
+	assert.Panics(t, func() { NewKafkaClientInstanceWithConfig(context.Background(), config1) })
 
 	config2 := createKafkaConfig(withAddr("addr"), withUsername("username"))
-	assert.Panics(t, func() { NewKafkaClientInstanceWithConfig(config2) })
+	assert.Panics(t, func() { NewKafkaClientInstanceWithConfig(context.Background(), config2) })
 
 	producerConfig := make(map[string]string)
 	producerConfig["client.id"] = "dc1"
@@ -378,7 +378,8 @@ func TestKafkaClient_NewKafkaClientInstanceWithConfig(t *testing.T) {
 	config.ConsumerExtraConfig = paramtable.ParamGroup{GetFunc: func() map[string]string { return consumerConfig }}
 	config.ProducerExtraConfig = paramtable.ParamGroup{GetFunc: func() map[string]string { return producerConfig }}
 
-	client := NewKafkaClientInstanceWithConfig(config)
+	client, err := NewKafkaClientInstanceWithConfig(context.Background(), config)
+	assert.NoError(t, err)
 	assert.NotNil(t, client)
 	assert.NotNil(t, client.basicConfig)
 

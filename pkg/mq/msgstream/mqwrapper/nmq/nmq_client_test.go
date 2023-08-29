@@ -38,6 +38,42 @@ func Test_NewNmqClient(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, client)
 	client.Close()
+
+	tests := []struct {
+		description  string
+		withTimeout  bool
+		ctxTimeouted bool
+		expectErr    bool
+	}{
+		{"without context", false, false, false},
+		{"without timeout context, no timeout", true, false, false},
+		{"without timeout context, timeout", true, true, true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.description, func(t *testing.T) {
+			ctx := context.Background()
+			var cancel context.CancelFunc
+			if test.withTimeout {
+				ctx, cancel = context.WithTimeout(ctx, time.Millisecond)
+				defer cancel()
+			}
+
+			if test.ctxTimeouted {
+				<-time.After(time.Millisecond)
+			}
+			client, err := NewClientWithDefaultOptions(ctx)
+
+			if test.expectErr {
+				assert.Error(t, err)
+				assert.Nil(t, client)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, client)
+				client.Close()
+			}
+		})
+	}
 }
 
 func TestNmqClient_CreateProducer(t *testing.T) {

@@ -45,7 +45,7 @@ func (suite *StreamPipelineSuite) SetupTest() {
 	suite.inChannel = make(chan *msgstream.MsgPack, 1)
 	suite.outChannel = make(chan msgstream.Timestamp)
 	suite.msgDispatcher = msgdispatcher.NewMockClient(suite.T())
-	suite.msgDispatcher.EXPECT().Register(suite.channel, mock.Anything, mqwrapper.SubscriptionPositionUnknown).Return(suite.inChannel, nil)
+	suite.msgDispatcher.EXPECT().Register(mock.Anything, suite.channel, mock.Anything, mqwrapper.SubscriptionPositionUnknown).Return(suite.inChannel, nil)
 	suite.msgDispatcher.EXPECT().Deregister(suite.channel)
 	suite.pipeline = NewPipelineWithStream(suite.msgDispatcher, 0, false, suite.channel)
 	suite.length = 4

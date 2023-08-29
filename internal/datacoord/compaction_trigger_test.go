@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -623,7 +622,6 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 		collectionID int64
 		compactTime  *compactTime
 	}
-	paramtable.Init()
 	vecFieldID := int64(201)
 	segmentInfos := &SegmentsInfo{
 		segments: make(map[UniqueID]*SegmentInfo),
@@ -830,7 +828,6 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 		collectionID int64
 		compactTime  *compactTime
 	}
-	paramtable.Init()
 	Params.DataCoordCfg.MinSegmentToMerge.DefaultValue = "4"
 	vecFieldID := int64(201)
 	tests := []struct {
@@ -972,7 +969,6 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 		collectionID int64
 		compactTime  *compactTime
 	}
-	paramtable.Init()
 	vecFieldID := int64(201)
 
 	genSeg := func(segID, numRows int64) *datapb.SegmentInfo {
@@ -1155,7 +1151,6 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 		collectionID int64
 		compactTime  *compactTime
 	}
-	paramtable.Init()
 	vecFieldID := int64(201)
 
 	genSeg := func(segID, numRows int64) *datapb.SegmentInfo {
@@ -1338,7 +1333,6 @@ func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
 		collectionID int64
 		compactTime  *compactTime
 	}
-	paramtable.Init()
 	vecFieldID := int64(201)
 
 	genSeg := func(segID, numRows int64) *datapb.SegmentInfo {
@@ -1517,7 +1511,6 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 		collectionID int64
 		compactTime  *compactTime
 	}
-	paramtable.Init()
 
 	segmentInfos := &SegmentsInfo{
 		segments: make(map[UniqueID]*SegmentInfo),
@@ -1689,8 +1682,6 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 
 // Test shouldDoSingleCompaction
 func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
-	paramtable.Init()
-
 	trigger := newCompactionTrigger(&meta{}, &compactionPlanHandler{}, newMockAllocator(), newMockHandler())
 
 	// Test too many deltalogs.

@@ -17,10 +17,12 @@
 package msgdispatcher
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/atomic"
@@ -32,10 +34,25 @@ import (
 func TestClient(t *testing.T) {
 	client := NewClient(newMockFactory(), typeutil.ProxyRole, 1)
 	assert.NotNil(t, client)
-	_, err := client.Register("mock_vchannel_0", nil, mqwrapper.SubscriptionPositionUnknown)
+	_, err := client.Register(context.Background(), "mock_vchannel_0", nil, mqwrapper.SubscriptionPositionUnknown)
+	assert.NoError(t, err)
+	_, err = client.Register(context.Background(), "mock_vchannel_1", nil, mqwrapper.SubscriptionPositionUnknown)
 	assert.NoError(t, err)
 	assert.NotPanics(t, func() {
 		client.Deregister("mock_vchannel_0")
+		client.Close()
+	})
+
+	t.Run("with timeout ctx", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Millisecond)
+		defer cancel()
+		<-time.After(2 * time.Millisecond)
+
+		client := NewClient(newMockFactory(), typeutil.DataNodeRole, 1)
+		defer client.Close()
+		assert.NotNil(t, client)
+		_, err := client.Register(ctx, "mock_vchannel_1", nil, mqwrapper.SubscriptionPositionUnknown)
+		assert.Error(t, err)
 	})
 }
 
@@ -49,7 +66,7 @@ func TestClient_Concurrency(t *testing.T) {
 		vchannel := fmt.Sprintf("mock-vchannel-%d-%d", i, rand.Int())
 		wg.Add(1)
 		go func() {
-			_, err := client1.Register(vchannel, nil, mqwrapper.SubscriptionPositionUnknown)
+			_, err := client1.Register(context.Background(), vchannel, nil, mqwrapper.SubscriptionPositionUnknown)
 			assert.NoError(t, err)
 			for j := 0; j < rand.Intn(2); j++ {
 				client1.Deregister(vchannel)
