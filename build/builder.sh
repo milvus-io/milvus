@@ -23,6 +23,12 @@ if [[ "${1-}" == "down" ]]; then
     exit 0
 fi
 
+PLATFORM_ARCH="${PLATFORM_ARCH:-${IMAGE_ARCH}}"
+
+export IMAGE_ARCH=${PLATFORM_ARCH}
+
+echo ${IMAGE_ARCH}
+
 mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-ccache"
 mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-go-mod"
 mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-vscode-extensions"

@@ -35,12 +35,12 @@ if [ -z "$IMAGE_ARCH" ]; then
     else
         IMAGE_ARCH="arm64"
     fi
-
 fi
 
 echo ${IMAGE_ARCH}
 
-BUILD_ARGS="${BUILD_ARGS:-}"
+
+BUILD_ARGS="${BUILD_ARGS:---build-arg TARGETARCH=${IMAGE_ARCH}}"
 
 pushd "${toplevel}"
 
