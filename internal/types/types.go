@@ -19,6 +19,7 @@ package types
 import (
 	"context"
 
+	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -392,6 +393,9 @@ type DataCoordComponent interface {
 	// SetEtcdClient set EtcdClient for DataCoord
 	// `etcdClient` is a client of etcd
 	SetEtcdClient(etcdClient *clientv3.Client)
+
+	// SetTiKVClient set TiKV client for QueryNode
+	SetTiKVClient(client *txnkv.Client)
 
 	SetRootCoord(rootCoord RootCoord)
 
@@ -819,6 +823,9 @@ type RootCoordComponent interface {
 	// SetEtcdClient set EtcdClient for RootCoord
 	// `etcdClient` is a client of etcd
 	SetEtcdClient(etcdClient *clientv3.Client)
+
+	// SetTiKVClient set TiKV client for RootCoord
+	SetTiKVClient(client *txnkv.Client)
 
 	// UpdateStateCode updates state code for RootCoord
 	// State includes: Initializing, Healthy and Abnormal
@@ -1518,6 +1525,9 @@ type QueryCoordComponent interface {
 
 	// SetEtcdClient set etcd client for QueryCoord
 	SetEtcdClient(etcdClient *clientv3.Client)
+
+	// SetTiKVClient set TiKV client for QueryCoord
+	SetTiKVClient(client *txnkv.Client)
 
 	// UpdateStateCode updates state code for QueryCoord
 	//  `stateCode` is current statement of this QueryCoord, indicating whether it's healthy.

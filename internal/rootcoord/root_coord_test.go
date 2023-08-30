@@ -50,13 +50,20 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tikv"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestMain(m *testing.M) {
 	paramtable.Init()
 	rand.Seed(time.Now().UnixNano())
-	os.Exit(m.Run())
+	parameters := []string{"tikv", "etcd"}
+	var code int
+	for _, v := range parameters {
+		paramtable.Get().Save(paramtable.Get().MetaStoreCfg.MetaStoreType.Key, v)
+		code = m.Run()
+	}
+	os.Exit(code)
 }
 
 func TestRootCoord_CreateDatabase(t *testing.T) {
@@ -1656,6 +1663,8 @@ func TestRootcoord_EnableActiveStandby(t *testing.T) {
 	core, err := NewCore(ctx, coreFactory)
 	core.etcdCli = etcdCli
 	assert.NoError(t, err)
+	core.SetTiKVClient(tikv.SetupLocalTxn())
+
 	err = core.Init()
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.StateCode_StandBy, core.stateCode.Load().(commonpb.StateCode))
@@ -1704,6 +1713,8 @@ func TestRootcoord_DisableActiveStandby(t *testing.T) {
 	core, err := NewCore(ctx, coreFactory)
 	core.etcdCli = etcdCli
 	assert.NoError(t, err)
+	core.SetTiKVClient(tikv.SetupLocalTxn())
+
 	err = core.Init()
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.StateCode_Initializing, core.stateCode.Load().(commonpb.StateCode))

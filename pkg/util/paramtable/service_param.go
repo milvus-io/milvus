@@ -47,6 +47,7 @@ type ServiceParam struct {
 	LocalStorageCfg LocalStorageConfig
 	MetaStoreCfg    MetaStoreConfig
 	EtcdCfg         EtcdConfig
+	TiKVCfg         TiKVConfig
 	MQCfg           MQConfig
 	PulsarCfg       PulsarConfig
 	KafkaCfg        KafkaConfig
@@ -61,6 +62,7 @@ func (p *ServiceParam) init() {
 	p.LocalStorageCfg.Init(&p.BaseTable)
 	p.MetaStoreCfg.Init(&p.BaseTable)
 	p.EtcdCfg.Init(&p.BaseTable)
+	p.TiKVCfg.Init(&p.BaseTable)
 	p.MQCfg.Init(&p.BaseTable)
 	p.PulsarCfg.Init(&p.BaseTable)
 	p.KafkaCfg.Init(&p.BaseTable)
@@ -261,6 +263,72 @@ We recommend using version 1.2 and above.`,
 	p.EtcdTLSMinVersion.Init(base.mgr)
 }
 
+// /////////////////////////////////////////////////////////////////////////////
+// --- tikv ---
+type TiKVConfig struct {
+	Endpoints    ParamItem          `refreshable:"false"`
+	RootPath     ParamItem          `refreshable:"false"`
+	MetaSubPath  ParamItem          `refreshable:"false"`
+	KvSubPath    ParamItem          `refreshable:"false"`
+	MetaRootPath CompositeParamItem `refreshable:"false"`
+	KvRootPath   CompositeParamItem `refreshable:"false"`
+}
+
+func (p *TiKVConfig) Init(base *BaseTable) {
+	p.Endpoints = ParamItem{
+		Key:          "tikv.endpoints",
+		Version:      "2.3.0",
+		DefaultValue: "localhost:2379",
+		PanicIfEmpty: true,
+		Export:       true,
+	}
+	p.Endpoints.Init(base.mgr)
+
+	p.RootPath = ParamItem{
+		Key:          "tikv.rootPath",
+		Version:      "2.3.0",
+		DefaultValue: "by-dev",
+		PanicIfEmpty: true,
+		Doc:          "The root path where data is stored in tikv",
+		Export:       true,
+	}
+	p.RootPath.Init(base.mgr)
+
+	p.MetaSubPath = ParamItem{
+		Key:          "tikv.metaSubPath",
+		Version:      "2.3.0",
+		DefaultValue: "meta",
+		PanicIfEmpty: true,
+		Doc:          "metaRootPath = rootPath + '/' + metaSubPath",
+		Export:       true,
+	}
+	p.MetaSubPath.Init(base.mgr)
+
+	p.MetaRootPath = CompositeParamItem{
+		Items: []*ParamItem{&p.RootPath, &p.MetaSubPath},
+		Format: func(kvs map[string]string) string {
+			return path.Join(kvs[p.RootPath.Key], kvs[p.MetaSubPath.Key])
+		},
+	}
+
+	p.KvSubPath = ParamItem{
+		Key:          "tikv.kvSubPath",
+		Version:      "2.3.0",
+		DefaultValue: "kv",
+		PanicIfEmpty: true,
+		Doc:          "kvRootPath = rootPath + '/' + kvSubPath",
+		Export:       true,
+	}
+	p.KvSubPath.Init(base.mgr)
+
+	p.KvRootPath = CompositeParamItem{
+		Items: []*ParamItem{&p.RootPath, &p.KvSubPath},
+		Format: func(kvs map[string]string) string {
+			return path.Join(kvs[p.RootPath.Key], kvs[p.KvSubPath.Key])
+		},
+	}
+}
+
 type LocalStorageConfig struct {
 	Path ParamItem `refreshable:"false"`
 }
@@ -285,7 +353,7 @@ func (p *MetaStoreConfig) Init(base *BaseTable) {
 		Key:          "metastore.type",
 		Version:      "2.2.0",
 		DefaultValue: util.MetaStoreTypeEtcd,
-		Doc: `Default value: etcd, Valid values: etcd `,
+		Doc: `Default value: etcd. Valid values: [etcd, tikv]`,
 		Export: true,
 	}
 	p.MetaStoreType.Init(base.mgr)
