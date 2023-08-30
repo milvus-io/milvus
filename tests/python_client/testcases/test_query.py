@@ -1143,6 +1143,39 @@ class TestQueryParams(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: "invalid max query result window, offset [-1] is invalid, should be gte than 0"}
         collection_w.query("", limit=2, offset=-1, check_task=CheckTasks.err_res, check_items=error)
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("expression", cf.gen_integer_overflow_expressions())
+    def test_query_expr_out_of_range(self, expression):
+        """
+        target: test query expression out of range
+        method: query empty expression with limit and offset out of range
+        expected:
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, is_all_data_type=True)[0]
+        start = ct.default_nb // 2
+        _vectors = cf.gen_dataframe_all_data_type(start=start)
+
+        # increase the value to cover the int range
+        _vectors["int16"] = pd.Series(data=[np.int16(i*40) for i in range(start, start + ct.default_nb)], dtype="int16")
+        _vectors["int32"] = pd.Series(data=[np.int32(i*2200000) for i in range(start, start + ct.default_nb)], dtype="int32")
+        insert_ids = collection_w.insert(_vectors)[0].primary_keys
+
+        # filter result with expression in collection
+        expression = expression.replace("&&", "and").replace("||", "or")
+        filter_ids = []
+        for i, _id in enumerate(insert_ids):
+            int8 = _vectors.int8[i]
+            int16 = _vectors.int16[i]
+            int32 = _vectors.int32[i]
+            if not expression or eval(expression):
+                filter_ids.append(_id)
+
+        # query
+        collection_w.load()
+        res = collection_w.query(expression, output_fields=["int8"])[0]
+        assert len(res) == len(filter_ids)
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_output_field_none_or_empty(self, enable_dynamic_field):
         """

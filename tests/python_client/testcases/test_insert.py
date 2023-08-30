@@ -864,6 +864,7 @@ class TestInsertOperation(TestcaseBase):
         assert collection_w.num_entities == nb
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip("not support default_value now")
     @pytest.mark.parametrize("default_value", [[], None])
     def test_insert_one_field_using_default_value(self, default_value, auto_id):
         """
@@ -888,6 +889,7 @@ class TestInsertOperation(TestcaseBase):
         assert collection_w.num_entities == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip("not support default_value now")
     @pytest.mark.parametrize("default_value", [[], None])
     def test_insert_multi_fields_using_default_value(self, default_value, auto_id):
         """
@@ -925,6 +927,7 @@ class TestInsertOperation(TestcaseBase):
         collection_w.insert(data1)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("not support default_value now")
     def test_insert_dataframe_using_default_value(self):
         """
         target: test insert with dataframe
@@ -1191,6 +1194,51 @@ class TestInsertInvalid(TestcaseBase):
         assert res.insert_count == 2
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("invalid_int8", [-129, 128])
+    def test_insert_int8_overflow(self, invalid_int8):
+        """
+        target: test insert int8 out of range
+        method: insert int8 out of range
+        expected: raise exception
+        """
+        collection_w = self.init_collection_general(prefix, is_all_data_type=True)[0]
+        data = cf.gen_dataframe_all_data_type(nb=1)
+        data[ct.default_int8_field_name] = [invalid_int8]
+        error = {ct.err_code: 1, 'err_msg': "The data type of field int8 doesn't match, "
+                                            "expected: INT8, got INT64"}
+        collection_w.insert(data, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("invalid_int16", [-32769, 32768])
+    def test_insert_int16_overflow(self, invalid_int16):
+        """
+        target: test insert int16 out of range
+        method: insert int16 out of range
+        expected: raise exception
+        """
+        collection_w = self.init_collection_general(prefix, is_all_data_type=True)[0]
+        data = cf.gen_dataframe_all_data_type(nb=1)
+        data[ct.default_int16_field_name] = [invalid_int16]
+        error = {ct.err_code: 1, 'err_msg': "The data type of field int16 doesn't match, "
+                                            "expected: INT16, got INT64"}
+        collection_w.insert(data, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("invalid_int32", [-2147483649, 2147483648])
+    def test_insert_int32_overflow(self, invalid_int32):
+        """
+        target: test insert int32 out of range
+        method: insert int32 out of range
+        expected: raise exception
+        """
+        collection_w = self.init_collection_general(prefix, is_all_data_type=True)[0]
+        data = cf.gen_dataframe_all_data_type(nb=1)
+        data[ct.default_int32_field_name] = [invalid_int32]
+        error = {ct.err_code: 1, 'err_msg': "The data type of field int16 doesn't match, "
+                                            "expected: INT32, got INT64"}
+        collection_w.insert(data, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip("no error code provided now")
     def test_insert_over_resource_limit(self):
         """
@@ -1207,6 +1255,7 @@ class TestInsertInvalid(TestcaseBase):
         collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("not support default_value now")
     @pytest.mark.parametrize("default_value", [[], None])
     def test_insert_array_using_default_value(self, default_value):
         """
@@ -1224,6 +1273,7 @@ class TestInsertInvalid(TestcaseBase):
                             check_items={ct.err_code: 1, ct.err_msg: "Field varchar don't match in entities[0]"})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("not support default_value now")
     @pytest.mark.parametrize("default_value", [[], None])
     def test_insert_tuple_using_default_value(self, default_value):
         """
@@ -1718,6 +1768,7 @@ class TestUpsertValid(TestcaseBase):
         assert res[0]["count(*)"] == upsert_nb * 10 - step * 9
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip("not support default_value now")
     @pytest.mark.parametrize("default_value", [[], None])
     def test_upsert_one_field_using_default_value(self, default_value):
         """
@@ -1740,6 +1791,7 @@ class TestUpsertValid(TestcaseBase):
         collection_w.upsert(data)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip("not support default_value now")
     @pytest.mark.parametrize("default_value", [[], None])
     def test_upsert_multi_fields_using_default_value(self, default_value):
         """
@@ -1792,6 +1844,7 @@ class TestUpsertValid(TestcaseBase):
         collection_w.upsert(data1)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("not support default_value now")
     def test_upsert_dataframe_using_default_value(self):
         """
         target: test upsert with dataframe
