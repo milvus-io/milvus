@@ -79,10 +79,6 @@ Search(CSegmentInterface c_segment,
         auto ctx = milvus::tracer::TraceContext{
             c_trace.traceID, c_trace.spanID, c_trace.flag};
         auto span = milvus::tracer::StartSpan("SegCoreSearch", &ctx);
-        milvus::tracer::logTraceContext(
-            "SegCore_SegmentSearch_SegmentID:" +
-                std::to_string(segment->get_segment_id()),
-            span);
         milvus::tracer::SetRootSpan(span);
         auto search_result = segment->Search(plan, phg_ptr);
         if (!milvus::PositivelyRelated(

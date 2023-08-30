@@ -44,6 +44,7 @@
 #include "storage/ThreadPools.h"
 #include "storage/Util.h"
 #include "utils/File.h"
+#include "common/Tracer.h"
 
 namespace milvus::index {
 
@@ -304,17 +305,23 @@ VectorMemIndex::Query(const DatasetPtr dataset,
                                       search_conf[RANGE_FILTER],
                                       GetMetricType());
             }
+            milvus::tracer::AddEvent("start_knowhere_index_range_search");
             auto res = index_.RangeSearch(*dataset, search_conf, bitset);
+            milvus::tracer::AddEvent("finish_knowhere_index_range_search");
             if (!res.has_value()) {
                 PanicCodeInfo(ErrorCodeEnum::UnexpectedError,
                               fmt::format("failed to range search: {}: {}",
                                           KnowhereStatusString(res.error()),
                                           res.what()));
             }
-            return ReGenRangeSearchResult(
+            auto result = ReGenRangeSearchResult(
                 res.value(), topk, num_queries, GetMetricType());
+            milvus::tracer::AddEvent("finish_ReGenRangeSearchResult");
+            return result;
         } else {
+            milvus::tracer::AddEvent("start_knowhere_index_search");
             auto res = index_.Search(*dataset, search_conf, bitset);
+            milvus::tracer::AddEvent("finish_knowhere_index_search");
             if (!res.has_value()) {
                 PanicCodeInfo(ErrorCodeEnum::UnexpectedError,
                               fmt::format("failed to search: {}: {}",

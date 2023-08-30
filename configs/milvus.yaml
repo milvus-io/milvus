@@ -625,7 +625,8 @@ trace:
   # Fractions >= 1 will always sample. Fractions < 0 are treated as zero.
   sampleFraction: 0
   jaeger:
-    url: # when exporter is jaeger should set the jaeger's URL
+    url: # "http://127.0.0.1:14268/api/traces"
+    # when exporter is jaeger should set the jaeger's URL
 
 autoIndex:
   params:

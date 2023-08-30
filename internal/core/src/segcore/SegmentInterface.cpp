@@ -15,6 +15,7 @@
 
 #include "Utils.h"
 #include "common/SystemProperty.h"
+#include "common/Tracer.h"
 #include "common/Types.h"
 #include "query/generated/ExecPlanNodeVisitor.h"
 
@@ -67,6 +68,7 @@ SegmentInternalInterface::Search(
     const query::Plan* plan,
     const query::PlaceholderGroup* placeholder_group) const {
     std::shared_lock lck(mutex_);
+    milvus::tracer::AddEvent("obtained_segment_lock_mutex");
     check_search(plan);
     query::ExecPlanNodeVisitor visitor(*this, 1L << 63, placeholder_group);
     auto results = std::make_unique<SearchResult>();

@@ -15,6 +15,7 @@
 #include "common/Consts.h"
 #include "common/RangeSearchHelper.h"
 #include "common/Utils.h"
+#include "common/Tracer.h"
 #include "SearchBruteForce.h"
 #include "SubSearchResult.h"
 #include "knowhere/comp/brute_force.h"
@@ -71,7 +72,7 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
             }
             auto res = knowhere::BruteForce::RangeSearch(
                 base_dataset, query_dataset, config, bitset);
-
+            milvus::tracer::AddEvent("knowhere_finish_BruteForce_RangeSearch");
             if (!res.has_value()) {
                 PanicCodeInfo(ErrorCodeEnum::UnexpectedError,
                               fmt::format("failed to range search: {}: {}",
@@ -80,6 +81,7 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
             }
             auto result = ReGenRangeSearchResult(
                 res.value(), topk, nq, dataset.metric_type);
+            milvus::tracer::AddEvent("ReGenRangeSearchResult");
             std::copy_n(
                 GetDatasetIDs(result), nq * topk, sub_result.get_seg_offsets());
             std::copy_n(GetDatasetDistance(result),
@@ -93,7 +95,8 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
                 sub_result.mutable_distances().data(),
                 config,
                 bitset);
-
+            milvus::tracer::AddEvent(
+                "knowhere_finish_BruteForce_SearchWithBuf");
             if (stat != knowhere::Status::success) {
                 throw std::invalid_argument("invalid metric type, " +
                                             KnowhereStatusString(stat));

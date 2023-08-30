@@ -47,10 +47,12 @@ initTelementry(TraceConfig* config) {
         opts.transport_format = jaeger::TransportFormat::kThriftHttp;
         opts.endpoint = config->jaegerURL;
         exporter = jaeger::JaegerExporterFactory::Create(opts);
+        LOG_SEGCORE_INFO_ << "init jaeger exporter, endpoint:" << opts.endpoint;
     } else if (config->exporter == "otlp") {
         auto opts = otlp::OtlpGrpcExporterOptions{};
         opts.endpoint = config->otlpEndpoint;
         exporter = otlp::OtlpGrpcExporterFactory::Create(opts);
+        LOG_SEGCORE_INFO_ << "init otlp exporter, endpoint:" << opts.endpoint;
     } else {
         LOG_SEGCORE_INFO_ << "Empty Trace";
         enable_trace = false;
@@ -112,6 +114,13 @@ GetRootSpan() {
 }
 
 void
+AddEvent(std::string event_label) {
+    if (enable_trace && local_span != nullptr) {
+        local_span->AddEvent(event_label);
+    }
+}
+
+void
 logTraceContext(const std::string& extended_info,
                 const std::shared_ptr<trace::Span> span) {
     if (enable_trace && span != nullptr) {
@@ -119,7 +128,7 @@ logTraceContext(const std::string& extended_info,
         span->GetContext().trace_id().ToLowerBase16(
             nostd::span<char, 2 * opentelemetry::trace::TraceId::kSize>{
                 &traceID[0], trace_id_size});
-        LOG_SEGCORE_INFO_ << extended_info << ", traceID:" << traceID;
+        LOG_SEGCORE_DEBUG_ << extended_info << ", traceID:" << traceID;
     }
 }
 
