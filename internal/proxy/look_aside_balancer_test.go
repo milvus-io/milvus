@@ -323,6 +323,11 @@ func (suite *LookAsideBalancerSuite) TestCheckHealthLoop() {
 	suite.ErrorIs(err, merr.ErrServiceUnavailable)
 	suite.Equal(int64(-1), targetNode)
 
+	suite.balancer.UpdateCostMetrics(1, &internalpb.CostAggregation{})
+	suite.Eventually(func() bool {
+		return !suite.balancer.unreachableQueryNodes.Contain(1)
+	}, 3*time.Second, 100*time.Millisecond)
+
 	suite.Eventually(func() bool {
 		return !suite.balancer.unreachableQueryNodes.Contain(2)
 	}, 5*time.Second, 100*time.Millisecond)
