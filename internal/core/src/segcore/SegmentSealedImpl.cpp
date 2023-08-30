@@ -739,9 +739,7 @@ SegmentSealedImpl::bulk_subscript_impl(const void* src_raw,
 
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
-        if (offset != INVALID_SEG_OFFSET) {
-            dst[i] = src[offset];
-        }
+        dst[i] = src[offset];
     }
 }
 
@@ -755,9 +753,7 @@ SegmentSealedImpl::bulk_subscript_impl(const ColumnBase* column,
     auto dst = reinterpret_cast<T*>(dst_raw);
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
-        if (offset != INVALID_SEG_OFFSET) {
-            dst[i] = std::move(T(field->RawAt(offset)));
-        }
+        dst[i] = std::move(T(field->RawAt(offset)));
     }
 }
 
@@ -772,13 +768,8 @@ SegmentSealedImpl::bulk_subscript_impl(int64_t element_sizeof,
     auto dst_vec = reinterpret_cast<char*>(dst_raw);
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
+        auto src = src_vec + element_sizeof * offset;
         auto dst = dst_vec + i * element_sizeof;
-        const char* src = (offset == INVALID_SEG_OFFSET
-                               ? nullptr
-                               : (src_vec + element_sizeof * offset));
-        if (!src) {
-            continue;
-        }
         memcpy(dst, src, element_sizeof);
     }
 }

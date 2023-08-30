@@ -469,9 +469,7 @@ SegmentGrowingImpl::bulk_subscript_impl(const VectorBase* vec_raw,
     auto output = reinterpret_cast<T*>(output_raw);
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
-        if (offset != INVALID_SEG_OFFSET) {
-            output[i] = vec[offset];
-        }
+        output[i] = vec[offset];
     }
 }
 
