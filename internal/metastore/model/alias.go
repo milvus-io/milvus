@@ -10,11 +10,11 @@ type Alias struct {
 	DbID         int64
 }
 
-func (a Alias) Available() bool {
+func (a *Alias) Available() bool {
 	return a.State == pb.AliasState_AliasCreated
 }
 
-func (a Alias) Clone() *Alias {
+func (a *Alias) Clone() *Alias {
 	return &Alias{
 		Name:         a.Name,
 		CollectionID: a.CollectionID,
@@ -24,7 +24,7 @@ func (a Alias) Clone() *Alias {
 	}
 }
 
-func (a Alias) Equal(other Alias) bool {
+func (a *Alias) Equal(other Alias) bool {
 	return a.Name == other.Name &&
 		a.CollectionID == other.CollectionID &&
 		a.DbID == other.DbID
