@@ -984,6 +984,10 @@ func (s *Server) Stop() error {
 		s.session.Stop()
 	}
 
+	if s.icSession != nil {
+		s.icSession.Stop()
+	}
+
 	return nil
 }
 
