@@ -37,13 +37,15 @@ for d in $(go list ./internal/... | grep -v -e vendor -e kafka -e planparserv2/g
         rm profile.out
     fi
 done
-for d in $(go list ./pkg/... | grep -v -e vendor -e kafka -e planparserv2/generated -e mocks); do
+pushd pkg
+for d in $(go list ./... | grep -v -e vendor -e kafka -e planparserv2/generated -e mocks); do
     go test -race -tags dynamic -v -coverpkg=./... -coverprofile=profile.out -covermode=atomic "$d"
     if [ -f profile.out ]; then
-        grep -v kafka profile.out | grep -v planparserv2/generated | grep -v mocks | sed '1d' >> ${FILE_COVERAGE_INFO}
+        grep -v kafka profile.out | grep -v planparserv2/generated | grep -v mocks | sed '1d' >> ../${FILE_COVERAGE_INFO}
         rm profile.out
     fi
 done
+popd
 endTime=`date +%s`
 
 echo "Total time for go unittest:" $(($endTime-$beginTime)) "s"

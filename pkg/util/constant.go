@@ -25,7 +25,7 @@ import (
 
 // Meta Prefix consts
 const (
-	MetaStoreTypeEtcd  = "etcd"
+	MetaStoreTypeEtcd = "etcd"
 
 	SegmentMetaPrefix    = "queryCoord-segmentMeta"
 	ChangeInfoMetaPrefix = "queryCoord-sealedSegmentChangeInfo"
