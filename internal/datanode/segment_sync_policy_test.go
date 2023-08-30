@@ -21,14 +21,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-
-	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/atomic"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
 func TestSyncPeriodically(t *testing.T) {
@@ -36,13 +33,12 @@ func TestSyncPeriodically(t *testing.T) {
 
 	tests := []struct {
 		testName      string
-		lastTs        time.Time
-		ts            time.Time
+		bufferTs      time.Time
+		endPosTs      time.Time
 		isBufferEmpty bool
 		shouldSyncNum int
 	}{
-		{"test buffer empty and stale", t0, t0.Add(Params.DataNodeCfg.SyncPeriod.GetAsDuration(time.Second)), true, 0},
-		{"test buffer empty and not stale", t0, t0.Add(Params.DataNodeCfg.SyncPeriod.GetAsDuration(time.Second) / 2), true, 0},
+		{"test buffer empty", t0, t0.Add(Params.DataNodeCfg.SyncPeriod.GetAsDuration(time.Second)), true, 0},
 		{"test buffer not empty and stale", t0, t0.Add(Params.DataNodeCfg.SyncPeriod.GetAsDuration(time.Second)), false, 1},
 		{"test buffer not empty and not stale", t0, t0.Add(Params.DataNodeCfg.SyncPeriod.GetAsDuration(time.Second) / 2), false, 0},
 	}
@@ -51,11 +47,15 @@ func TestSyncPeriodically(t *testing.T) {
 		t.Run(test.testName, func(t *testing.T) {
 			policy := syncPeriodically()
 			segment := &Segment{}
-			segment.lastSyncTs = tsoutil.ComposeTSByTime(test.lastTs, 0)
-			if !test.isBufferEmpty {
-				segment.curInsertBuf = &BufferData{}
+			segment.setInsertBuffer(&BufferData{
+				startPos: &msgpb.MsgPosition{
+					Timestamp: tsoutil.ComposeTSByTime(test.bufferTs, 0),
+				},
+			})
+			if test.isBufferEmpty {
+				segment.curInsertBuf = nil
 			}
-			res := policy([]*Segment{segment}, tsoutil.ComposeTSByTime(test.ts, 0), nil)
+			res := policy([]*Segment{segment}, tsoutil.ComposeTSByTime(test.endPosTs, 0), nil)
 			assert.Equal(t, test.shouldSyncNum, len(res))
 		})
 	}
@@ -96,113 +96,6 @@ func TestSyncMemoryTooHigh(t *testing.T) {
 			}
 			segs := policy(segments, 0, atomic.NewBool(test.needToSync))
 			assert.ElementsMatch(t, segs, test.shouldSyncSegs)
-		})
-	}
-}
-
-func TestSyncCpLagBehindTooMuch(t *testing.T) {
-	nowTs := tsoutil.ComposeTSByTime(time.Now(), 0)
-	paramtable.Get().Save(Params.DataNodeCfg.CpLagPeriod.Key, "60")
-	paramtable.Get().Save(Params.DataNodeCfg.CpLagSyncLimit.Key, "2")
-	laggedTs := tsoutil.AddPhysicalDurationOnTs(nowTs, -2*Params.DataNodeCfg.CpLagPeriod.GetAsDuration(time.Second))
-	tests := []struct {
-		testName  string
-		segments  []*Segment
-		idsToSync []int64
-	}{
-		{"test_current_buf_lag_behind",
-			[]*Segment{
-				{
-					segmentID: 1,
-					curInsertBuf: &BufferData{
-						startPos: &msgpb.MsgPosition{
-							Timestamp: laggedTs,
-						},
-					},
-				},
-				{
-					segmentID: 2,
-					curDeleteBuf: &DelDataBuf{
-						startPos: &msgpb.MsgPosition{
-							Timestamp: laggedTs,
-						},
-					},
-				},
-			},
-			[]int64{1, 2},
-		},
-		{"test_history_buf_lag_behind",
-			[]*Segment{
-				{
-					segmentID: 1,
-					historyInsertBuf: []*BufferData{
-						{
-							startPos: &msgpb.MsgPosition{
-								Timestamp: laggedTs,
-							},
-						},
-					},
-				},
-				{
-					segmentID: 2,
-					historyDeleteBuf: []*DelDataBuf{
-						{
-							startPos: &msgpb.MsgPosition{
-								Timestamp: laggedTs,
-							},
-						},
-					},
-				},
-				{
-					segmentID: 3,
-				},
-			},
-			[]int64{1, 2},
-		},
-		{"test_cp_sync_limit",
-			[]*Segment{
-				{
-					segmentID: 1,
-					historyInsertBuf: []*BufferData{
-						{
-							startPos: &msgpb.MsgPosition{
-								Timestamp: tsoutil.AddPhysicalDurationOnTs(laggedTs, -3*time.Second),
-							},
-						},
-					},
-				},
-				{
-					segmentID: 2,
-					historyDeleteBuf: []*DelDataBuf{
-						{
-							startPos: &msgpb.MsgPosition{
-								Timestamp: tsoutil.AddPhysicalDurationOnTs(laggedTs, -2*time.Second),
-							},
-						},
-					},
-				},
-				{
-					segmentID: 3,
-					historyDeleteBuf: []*DelDataBuf{
-						{
-							startPos: &msgpb.MsgPosition{
-								Timestamp: tsoutil.AddPhysicalDurationOnTs(laggedTs, -1*time.Second),
-							},
-						},
-					},
-				},
-			},
-			[]int64{1, 2},
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.testName, func(t *testing.T) {
-			lo.ForEach(test.segments, func(segment *Segment, _ int) {
-				segment.setType(datapb.SegmentType_Flushed)
-			})
-			policy := syncCPLagTooBehind()
-			ids := policy(test.segments, tsoutil.ComposeTSByTime(time.Now(), 0), nil)
-			assert.Exactly(t, test.idsToSync, ids)
 		})
 	}
 }

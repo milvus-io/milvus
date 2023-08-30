@@ -40,7 +40,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -80,7 +79,6 @@ type Channel interface {
 	mergeFlushedSegments(ctx context.Context, seg *Segment, planID UniqueID, compactedFrom []UniqueID) error
 	listCompactedSegmentIDs() map[UniqueID][]UniqueID
 	listSegmentIDsToSync(ts Timestamp) []UniqueID
-	setSegmentLastSyncTs(segID UniqueID, ts Timestamp)
 
 	updateSegmentRowNumber(segID UniqueID, numRows int64)
 	updateSingleSegmentMemorySize(segID UniqueID)
@@ -153,7 +151,6 @@ func newChannel(channelName string, collID UniqueID, schema *schemapb.Collection
 		syncPolicies: []segmentSyncPolicy{
 			syncPeriodically(),
 			syncMemoryTooHigh(),
-			syncCPLagTooBehind(),
 		},
 
 		metaService:  metaService,
@@ -225,7 +222,6 @@ func (c *ChannelMeta) addSegment(req addSegmentReq) error {
 		historyInsertBuf: make([]*BufferData, 0),
 		historyDeleteBuf: make([]*DelDataBuf, 0),
 		startPos:         req.startPos,
-		lastSyncTs:       tsoutil.GetCurrentTime(),
 	}
 	seg.setType(req.segType)
 	// Set up pk stats
@@ -289,18 +285,6 @@ func (c *ChannelMeta) listSegmentIDsToSync(ts Timestamp) []UniqueID {
 		}
 	}
 	return segIDsToSync.Collect()
-}
-
-func (c *ChannelMeta) setSegmentLastSyncTs(segID UniqueID, ts Timestamp) {
-	c.segMu.Lock()
-	defer c.segMu.Unlock()
-	if _, ok := c.segments[segID]; ok {
-		c.segments[segID].lastSyncTs = ts
-		tsTime, _ := tsoutil.ParseTS(ts)
-		log.Debug("Set last syncTs for segment", zap.Int64("segmentID", segID), zap.Time("ts", tsTime))
-	} else {
-		log.Warn("Wrong! Try to set lastSync ts for non-existing segment", zap.Int64("segmentID", segID))
-	}
 }
 
 // filterSegments return segments with same partitionID for all segments
@@ -728,11 +712,6 @@ func (c *ChannelMeta) mergeFlushedSegments(ctx context.Context, seg *Segment, pl
 		// release bloom filter
 		s.currentStat = nil
 		s.historyStats = nil
-
-		// set correct lastSyncTs for 10-mins channelCP force sync.
-		if s.lastSyncTs < seg.lastSyncTs {
-			seg.lastSyncTs = s.lastSyncTs
-		}
 	}
 
 	// only store segments with numRows > 0
