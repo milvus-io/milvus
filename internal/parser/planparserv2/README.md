@@ -11,13 +11,7 @@ The version of antlr tool: `4.9`.
 After you install the antlr4, you can generate the parser code in golang with:
 
 ```shell
-export CLASSPATH=".:${PWD}/antlr-4.9-complete.jar:$CLASSPATH"
-alias antlr4='java -Xmx500M -cp "${PWD}/antlr-4.9-complete.jar:$CLASSPATH" org.antlr.v4.Tool'
-alias grun='java -Xmx500M -cp "${PWD}/antlr-4.9-complete.jar:$CLASSPATH" org.antlr.v4.gui.TestRig'
-```
-
-```shell
-antlr4 -Dlanguage=Go -package planparserv2 -o generated -no-listener -visitor Plan.g4
+go generate
 ```
 
 All generated code will be under directory `generated`.
