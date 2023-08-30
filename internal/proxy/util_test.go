@@ -25,6 +25,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/pkg/log"
+
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -1812,6 +1814,12 @@ func Test_GetPartitionProgressFailed(t *testing.T) {
 	}, nil)
 	_, _, err := getPartitionProgress(context.TODO(), qc, &commonpb.MsgBase{}, []string{}, "", 1, "")
 	assert.Error(t, err)
+}
+
+func TestErrWithLog(t *testing.T) {
+	err := errors.New("test")
+	assert.ErrorIs(t, ErrWithLog(nil, "foo", err), err)
+	assert.ErrorIs(t, ErrWithLog(log.Ctx(context.Background()), "foo", err), err)
 }
 
 func Test_CheckDynamicFieldData(t *testing.T) {

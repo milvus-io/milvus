@@ -5,6 +5,10 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+
+	"github.com/cockroachdb/errors"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
@@ -80,5 +84,160 @@ func TestDeleteTask(t *testing.T) {
 		// get channels again, should return task's pChannels, so getChannelsFunc should not invoke again
 		resChannels = dt.getChannels()
 		assert.ElementsMatch(t, channels, resChannels)
+	})
+
+	t.Run("empty collection name", func(t *testing.T) {
+		dt := deleteTask{
+			deleteMsg: &BaseDeleteTask{
+				DeleteRequest: msgpb.DeleteRequest{
+					Base: &commonpb.MsgBase{},
+				},
+			},
+		}
+		assert.Error(t, dt.PreExecute(context.Background()))
+	})
+
+	t.Run("fail to get collection id", func(t *testing.T) {
+		dt := deleteTask{deleteMsg: &BaseDeleteTask{
+			DeleteRequest: msgpb.DeleteRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: "foo",
+			},
+		}}
+		cache := NewMockCache(t)
+		cache.On("GetCollectionID",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(int64(0), errors.New("mock GetCollectionID err"))
+		globalMetaCache = cache
+		assert.Error(t, dt.PreExecute(context.Background()))
+	})
+
+	t.Run("fail partition key mode", func(t *testing.T) {
+		dt := deleteTask{deleteMsg: &BaseDeleteTask{
+			DeleteRequest: msgpb.DeleteRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: "foo",
+				DbName:         "db_1",
+			},
+		}}
+		cache := NewMockCache(t)
+		cache.On("GetCollectionID",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(int64(10000), nil)
+		cache.On("GetCollectionSchema",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(nil, errors.New("mock GetCollectionSchema err"))
+
+		globalMetaCache = cache
+		assert.Error(t, dt.PreExecute(context.Background()))
+	})
+
+	t.Run("invalid partition name", func(t *testing.T) {
+		dt := deleteTask{deleteMsg: &BaseDeleteTask{
+			DeleteRequest: msgpb.DeleteRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: "foo",
+				DbName:         "db_1",
+				PartitionName:  "aaa",
+			},
+		}}
+		cache := NewMockCache(t)
+		cache.On("GetCollectionID",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(int64(10000), nil)
+		cache.On("GetCollectionSchema",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(&schemapb.CollectionSchema{
+			Name:        "test_delete",
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:        common.StartOfUserFieldID,
+					Name:           "pk",
+					IsPrimaryKey:   true,
+					DataType:       schemapb.DataType_Int64,
+					IsPartitionKey: true,
+				},
+			},
+		}, nil)
+
+		globalMetaCache = cache
+		assert.Error(t, dt.PreExecute(context.Background()))
+	})
+
+	schema := &schemapb.CollectionSchema{
+		Name:        "test_delete",
+		Description: "",
+		AutoID:      false,
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      common.StartOfUserFieldID,
+				Name:         "pk",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:      common.StartOfUserFieldID + 1,
+				Name:         "non_pk",
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_Int64,
+			},
+		},
+	}
+
+	t.Run("invalie partition", func(t *testing.T) {
+		dt := deleteTask{
+			deleteMsg: &BaseDeleteTask{
+				DeleteRequest: msgpb.DeleteRequest{
+					Base:           &commonpb.MsgBase{},
+					CollectionName: "foo",
+					DbName:         "db_1",
+					PartitionName:  "_aaa",
+				},
+			},
+			deleteExpr: "non_pk in [1, 2, 3]",
+		}
+		cache := NewMockCache(t)
+		cache.On("GetCollectionID",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(int64(10000), nil)
+		cache.On("GetCollectionSchema",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(schema, nil)
+		cache.On("GetPartitionID",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(int64(0), errors.New("mock GetPartitionID err"))
+
+		globalMetaCache = cache
+		assert.Error(t, dt.PreExecute(context.Background()))
+
+		dt.deleteMsg.PartitionName = "aaa"
+		assert.Error(t, dt.PreExecute(context.Background()))
+
+		cache.On("GetPartitionID",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(int64(100001), nil)
+		assert.Error(t, dt.PreExecute(context.Background()))
 	})
 }

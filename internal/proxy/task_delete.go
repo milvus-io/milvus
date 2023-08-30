@@ -164,39 +164,35 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 	}
 
 	log := log.Ctx(ctx)
+
 	collName := dt.deleteMsg.CollectionName
 	if err := validateCollectionName(collName); err != nil {
-		log.Warn("Invalid collection name", zap.Error(err))
-		return err
+		return ErrWithLog(log, "Invalid collection name", err)
 	}
 	collID, err := globalMetaCache.GetCollectionID(ctx, dt.deleteMsg.GetDbName(), collName)
 	if err != nil {
-		log.Warn("Failed to get collection id", zap.Error(err))
-		return err
+		return ErrWithLog(log, "Failed to get collection id", err)
 	}
 	dt.deleteMsg.CollectionID = collID
 	dt.collectionID = collID
 
 	partitionKeyMode, err := isPartitionKeyMode(ctx, dt.deleteMsg.GetDbName(), dt.deleteMsg.CollectionName)
 	if err != nil {
-		log.Warn("Failed to get partition key mode", zap.Error(err))
-		return err
+		return ErrWithLog(log, "Failed to get partition key mode", err)
 	}
 	if partitionKeyMode && len(dt.deleteMsg.PartitionName) != 0 {
-		return errors.New("not support manually specifying the partition names if partition key mode is used")
+		return ErrWithLog(log, "", errors.New("not support manually specifying the partition names if partition key mode is used"))
 	}
 
 	// If partitionName is not empty, partitionID will be set.
 	if len(dt.deleteMsg.PartitionName) > 0 {
 		partName := dt.deleteMsg.PartitionName
 		if err := validatePartitionTag(partName, true); err != nil {
-			log.Info("Invalid partition name", zap.Error(err))
-			return err
+			return ErrWithLog(log, "Invalid partition name", err)
 		}
 		partID, err := globalMetaCache.GetPartitionID(ctx, dt.deleteMsg.GetDbName(), collName, partName)
 		if err != nil {
-			log.Info("Failed to get partition id", zap.Error(err))
-			return err
+			return ErrWithLog(log, "Failed to get partition id", err)
 		}
 		dt.deleteMsg.PartitionID = partID
 	} else {
@@ -205,16 +201,14 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, dt.deleteMsg.GetDbName(), collName)
 	if err != nil {
-		log.Info("Failed to get collection schema", zap.Error(err))
-		return err
+		return ErrWithLog(log, "Failed to get collection schema", err)
 	}
 	dt.schema = schema
 
 	// get delete.primaryKeys from delete expr
 	primaryKeys, numRow, err := getPrimaryKeysFromExpr(schema, dt.deleteExpr)
 	if err != nil {
-		log.Info("Failed to get primary keys from expr", zap.Error(err))
-		return err
+		return ErrWithLog(log, "Failed to get primary keys from expr", err)
 	}
 
 	dt.deleteMsg.NumRows = numRow
