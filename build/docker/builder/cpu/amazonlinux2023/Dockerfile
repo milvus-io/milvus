@@ -13,7 +13,7 @@ FROM amazonlinux:2023
 
 ARG TARGETARCH
 
-RUN yum install -y wget g++ gcc gdb libstdc++-static git make unzip tar which \
+RUN yum install -y wget g++ gcc gdb libstdc++-static git make zip unzip tar which \
     autoconf automake golang python3 python3-pip perl-FindBin texinfo \
     pkg-config libuuid-devel libaio && \
     rm -rf /var/cache/yum/*
