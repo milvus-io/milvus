@@ -11,13 +11,11 @@ const hookYamlFile = "hook.yaml"
 type hookConfig struct {
 	hookBase *BaseTable
 
-	SoPath                      ParamItem  `refreshable:"false"`
-	SoConfig                    ParamGroup `refreshable:"true"`
-	QueryNodePluginConfig       ParamItem  `refreshable:"true"`
-	QueryNodePluginTuningConfig ParamGroup `refreshable:"true"`
+	SoPath   ParamItem  `refreshable:"false"`
+	SoConfig ParamGroup `refreshable:"true"`
 }
 
-func (h *hookConfig) init(base *BaseTable) {
+func (h *hookConfig) init() {
 	hookBase := &BaseTable{YamlFiles: []string{hookYamlFile}}
 	hookBase.init(2)
 	h.hookBase = hookBase
@@ -36,18 +34,6 @@ func (h *hookConfig) init(base *BaseTable) {
 		Version:   "2.2.0",
 	}
 	h.SoConfig.Init(hookBase.mgr)
-
-	h.QueryNodePluginConfig = ParamItem{
-		Key:     "autoindex.params.search",
-		Version: "2.3.0",
-	}
-	h.QueryNodePluginConfig.Init(base.mgr)
-
-	h.QueryNodePluginTuningConfig = ParamGroup{
-		KeyPrefix: "autoindex.params.tuning.",
-		Version:   "2.3.0",
-	}
-	h.QueryNodePluginTuningConfig.Init(base.mgr)
 }
 
 func (h *hookConfig) WatchHookWithPrefix(ident string, keyPrefix string, onEvent func(*config.Event)) {
