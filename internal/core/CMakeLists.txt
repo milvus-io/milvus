@@ -27,6 +27,8 @@ add_definitions(-DELPP_THREAD_SAFE)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 message( STATUS "Building using CMake version: ${CMAKE_VERSION}" )
 
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
+
 project(core)
 include(CheckCXXCompilerFlag)
 if ( APPLE )
