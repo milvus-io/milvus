@@ -801,7 +801,7 @@ func (s *Server) GetIndexStatistics(ctx context.Context, request *milvuspb.GetIn
 	return s.proxy.GetIndexStatistics(ctx, request)
 }
 
-// GetIndexBuildProgress gets index build progress with filed_name and index_name.
+// GetIndexBuildProgress gets index build progress with field_name and index_name.
 // IndexRows is the num of indexed rows. And TotalRows is the total number of segment rows.
 // Deprecated: use DescribeIndex instead
 func (s *Server) GetIndexBuildProgress(ctx context.Context, request *milvuspb.GetIndexBuildProgressRequest) (*milvuspb.GetIndexBuildProgressResponse, error) {
