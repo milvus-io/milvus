@@ -469,7 +469,7 @@ func (m *MetaCache) GetPartitions(ctx context.Context, database, collectionName 
 
 	if !ok {
 		m.mu.RUnlock()
-		return nil, fmt.Errorf("can't find collection name:%s", collectionName)
+		return nil, fmt.Errorf("can't find collection name %s:%s", database, collectionName)
 	}
 
 	if collInfo.partInfo == nil || len(collInfo.partInfo) == 0 {
@@ -528,7 +528,7 @@ func (m *MetaCache) GetPartitionInfo(ctx context.Context, database, collectionNa
 
 	if !ok {
 		m.mu.RUnlock()
-		return nil, fmt.Errorf("can't find collection name:%s", collectionName)
+		return nil, fmt.Errorf("can't find collection name %s:%s", database, collectionName)
 	}
 
 	var partInfo *partitionInfo
