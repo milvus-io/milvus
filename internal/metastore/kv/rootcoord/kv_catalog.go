@@ -10,6 +10,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
@@ -593,7 +594,7 @@ func (kc *Catalog) GetCollectionByName(ctx context.Context, dbID int64, collecti
 		}
 	}
 
-	return nil, common.NewCollectionNotExistError(fmt.Sprintf("can't find collection: %s, at timestamp = %d", collectionName, ts))
+	return nil, common.NewCollectionNotExistError(fmt.Sprintf("can't find collection %d:%s, at timestamp = %d", dbID, collectionName, ts))
 }
 
 func (kc *Catalog) ListCollections(ctx context.Context, dbID int64, ts typeutil.Timestamp) ([]*model.Collection, error) {
