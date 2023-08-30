@@ -40,29 +40,31 @@ import (
 type PmsFactory struct {
 	dispatcherFactory ProtoUDFactory
 	// the following members must be public, so that mapstructure.Decode() can access them
-	PulsarAddress    string
-	PulsarWebAddress string
-	ReceiveBufSize   int64
-	MQBufSize        int64
-	PulsarAuthPlugin string
-	PulsarAuthParams string
-	PulsarTenant     string
-	PulsarNameSpace  string
-	RequestTimeout   time.Duration
+	PulsarAddress           string
+	PulsarWebAddress        string
+	ReceiveBufSize          int64
+	MQBufSize               int64
+	PulsarAuthPlugin        string
+	PulsarAuthParams        string
+	PulsarTenant            string
+	PulsarNameSpace         string
+	RequestTimeout          time.Duration
+	MaxConnectionsPerBroker int
 }
 
 func NewPmsFactory(serviceParam *paramtable.ServiceParam) *PmsFactory {
 	config := &serviceParam.PulsarCfg
 	return &PmsFactory{
-		MQBufSize:        serviceParam.MQCfg.MQBufSize.GetAsInt64(),
-		ReceiveBufSize:   serviceParam.MQCfg.ReceiveBufSize.GetAsInt64(),
-		PulsarAddress:    config.Address.GetValue(),
-		PulsarWebAddress: config.WebAddress.GetValue(),
-		PulsarAuthPlugin: config.AuthPlugin.GetValue(),
-		PulsarAuthParams: config.AuthParams.GetValue(),
-		PulsarTenant:     config.Tenant.GetValue(),
-		PulsarNameSpace:  config.Namespace.GetValue(),
-		RequestTimeout:   config.RequestTimeout.GetAsDuration(time.Second),
+		MQBufSize:               serviceParam.MQCfg.MQBufSize.GetAsInt64(),
+		ReceiveBufSize:          serviceParam.MQCfg.ReceiveBufSize.GetAsInt64(),
+		PulsarAddress:           config.Address.GetValue(),
+		PulsarWebAddress:        config.WebAddress.GetValue(),
+		PulsarAuthPlugin:        config.AuthPlugin.GetValue(),
+		PulsarAuthParams:        config.AuthParams.GetValue(),
+		PulsarTenant:            config.Tenant.GetValue(),
+		PulsarNameSpace:         config.Namespace.GetValue(),
+		RequestTimeout:          config.RequestTimeout.GetAsDuration(time.Second),
+		MaxConnectionsPerBroker: config.MaxConnectionsPerBroker.GetAsInt(),
 	}
 }
 
@@ -73,9 +75,10 @@ func (f *PmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
 		return nil, err
 	}
 	clientOpts := pulsar.ClientOptions{
-		URL:              f.PulsarAddress,
-		Authentication:   auth,
-		OperationTimeout: f.RequestTimeout,
+		URL:                     f.PulsarAddress,
+		Authentication:          auth,
+		OperationTimeout:        f.RequestTimeout,
+		MaxConnectionsPerBroker: f.MaxConnectionsPerBroker,
 	}
 
 	pulsarClient, err := pulsarmqwrapper.NewClient(f.PulsarTenant, f.PulsarNameSpace, clientOpts)

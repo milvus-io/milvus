@@ -133,6 +133,12 @@ func TestServiceParam(t *testing.T) {
 		assert.Equal(t, "60", Params.RequestTimeout.GetValue())
 	})
 
+	t.Run("pulsar_max_connections_per_broker", func(t *testing.T) {
+		Params := &SParams.PulsarCfg
+
+		assert.Equal(t, "16", Params.MaxConnectionsPerBroker.GetValue())
+	})
+
 	t.Run("test rocksmqConfig", func(t *testing.T) {
 		Params := &SParams.RocksmqCfg
 

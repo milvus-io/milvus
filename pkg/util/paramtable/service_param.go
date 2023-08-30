@@ -285,8 +285,8 @@ func (p *MetaStoreConfig) Init(base *BaseTable) {
 		Key:          "metastore.type",
 		Version:      "2.2.0",
 		DefaultValue: util.MetaStoreTypeEtcd,
-		Doc: `Default value: etcd, Valid values: etcd `,
-		Export: true,
+		Doc:          `Default value: etcd, Valid values: etcd `,
+		Export:       true,
 	}
 	p.MetaStoreType.Init(base.mgr)
 }
@@ -381,6 +381,9 @@ type PulsarConfig struct {
 
 	// Global request timeout
 	RequestTimeout ParamItem `refreshable:"false"`
+
+	// MaxConnectionsPerBroker max connections in pool per broker
+	MaxConnectionsPerBroker ParamItem `refreshable:"false"`
 }
 
 func (p *PulsarConfig) Init(base *BaseTable) {
@@ -494,6 +497,14 @@ func (p *PulsarConfig) Init(base *BaseTable) {
 		Export:       true,
 	}
 	p.RequestTimeout.Init(base.mgr)
+
+	p.MaxConnectionsPerBroker = ParamItem{
+		Key:          "pulsar.maxConnectionsPerBroker",
+		Version:      "2.3.1",
+		DefaultValue: "16",
+		Export:       true,
+	}
+	p.MaxConnectionsPerBroker.Init(base.mgr)
 }
 
 // --- kafka ---
