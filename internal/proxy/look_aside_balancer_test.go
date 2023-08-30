@@ -359,6 +359,31 @@ func (suite *LookAsideBalancerSuite) TestNodeRecover() {
 	}, 5*time.Second, 100*time.Millisecond)
 }
 
+func (suite *LookAsideBalancerSuite) TestNodeOffline() {
+	Params.Save(Params.CommonCfg.SessionTTL.Key, "10")
+	Params.Save(Params.ProxyCfg.HealthCheckTimeout.Key, "1000")
+	// mock qn down for a while and then recover
+	qn3 := mocks.NewMockQueryNode(suite.T())
+	suite.clientMgr.EXPECT().GetClient(mock.Anything, int64(3)).Return(qn3, nil)
+	qn3.EXPECT().GetComponentStates(mock.Anything).Return(&milvuspb.ComponentStates{
+		State: &milvuspb.ComponentInfo{
+			StateCode: commonpb.StateCode_Abnormal,
+		},
+	}, nil)
+
+	suite.balancer.metricsUpdateTs.Insert(3, time.Now().UnixMilli())
+	suite.Eventually(func() bool {
+		return suite.balancer.unreachableQueryNodes.Contain(3)
+	}, 5*time.Second, 100*time.Millisecond)
+
+	suite.Eventually(func() bool {
+		return !suite.balancer.metricsUpdateTs.Contain(3)
+	}, 10*time.Second, 100*time.Millisecond)
+	suite.Eventually(func() bool {
+		return !suite.balancer.unreachableQueryNodes.Contain(3)
+	}, time.Second, 100*time.Millisecond)
+}
+
 func TestLookAsideBalancerSuite(t *testing.T) {
 	suite.Run(t, new(LookAsideBalancerSuite))
 }
