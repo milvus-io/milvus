@@ -23,8 +23,9 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 
-	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
 )
 
 const (
@@ -196,12 +197,11 @@ func (node *BaseNode) Operate(in []Msg) []Msg {
 
 func (node *BaseNode) IsValidInMsg(in []Msg) bool {
 	if in == nil {
-		log.Info("type assertion failed because it's nil")
+		log.Warn("type assertion failed because it's nil")
 		return false
 	}
 
 	if len(in) != 1 {
-		log.Warn("Invalid operate message input", zap.Int("input length", len(in)))
 		return false
 	}
 	return true

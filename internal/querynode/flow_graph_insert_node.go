@@ -31,6 +31,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
@@ -317,7 +318,6 @@ func processDeleteMessages(replica ReplicaInterface, segType segmentType, msg *m
 	}
 	var resultSegmentIDs []UniqueID
 	resultSegmentIDs, err = replica.getSegmentIDsByVChannel(partitionIDs, vchannelName, segType)
-	log.Info("processDeleteMessage", zap.String("vchannel", vchannelName), zap.Int64s("segmentIDs", resultSegmentIDs), zap.Int64s("paritions", partitionIDs))
 	if err != nil {
 		if !errors.Is(err, ErrPartitionNotFound) {
 			return err
