@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -143,7 +144,7 @@ func (d *Dispatcher) GetTarget(vchannel string) (*target, error) {
 	if t, ok := d.targets[vchannel]; ok {
 		return t, nil
 	}
-	return nil, fmt.Errorf("cannot find target, vchannel=%s, isMain=%t", vchannel, d.isMain)
+	return nil, merr.WrapErrChannelNotFound(vchannel, fmt.Sprintf("isMain=%t", d.isMain))
 }
 
 func (d *Dispatcher) CloseTarget(vchannel string) {

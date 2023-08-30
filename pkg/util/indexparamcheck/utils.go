@@ -17,10 +17,10 @@
 package indexparamcheck
 
 import (
-	"fmt"
 	"strconv"
 
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 // CheckIntByRange check if the data corresponding to the key is in the range of [min, max].
@@ -60,7 +60,7 @@ func CheckStrByValues(params map[string]string, key string, container []string) 
 }
 
 func errOutOfRange(x interface{}, lb interface{}, ub interface{}) error {
-	return fmt.Errorf("%v out of range: [%v, %v]", x, lb, ub)
+	return merr.WrapErrParameterInvalidRange(lb, ub, x)
 }
 
 func setDefaultIfNotExist(params map[string]string, key string, defaultValue string) {

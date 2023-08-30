@@ -1,8 +1,9 @@
 package indexparamcheck
 
 import (
-	"fmt"
 	"strconv"
+
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 // raftIVFPQChecker checks if a RAFT_IVF_PQ index can be built.
@@ -22,12 +23,12 @@ func (c *raftIVFPQChecker) CheckTrain(params map[string]string) error {
 func (c *raftIVFPQChecker) checkPQParams(params map[string]string) error {
 	dimStr, dimensionExist := params[DIM]
 	if !dimensionExist {
-		return fmt.Errorf("dimension not found")
+		return merr.WrapErrParameterInvalidMsg("dimension not found")
 	}
 
 	dimension, err := strconv.Atoi(dimStr)
 	if err != nil { // invalid dimension
-		return fmt.Errorf("invalid dimension: %s", dimStr)
+		return merr.WrapErrParameterInvalidMsg("invalid dimension: %s", dimStr)
 	}
 
 	// nbits can be set to default: 8
@@ -35,17 +36,17 @@ func (c *raftIVFPQChecker) checkPQParams(params map[string]string) error {
 	if nbitsExist {
 		_, err := strconv.Atoi(nbitsStr)
 		if err != nil { // invalid nbits
-			return fmt.Errorf("invalid nbits: %s", nbitsStr)
+			return merr.WrapErrParameterInvalidMsg("invalid nbits: %s", nbitsStr)
 		}
 	}
 
 	mStr, ok := params[IVFM]
 	if !ok {
-		return fmt.Errorf("parameter `m` not found")
+		return merr.WrapErrParameterInvalidMsg("parameter `m` not found")
 	}
 	m, err := strconv.Atoi(mStr)
 	if err != nil { // invalid m
-		return fmt.Errorf("invalid `m`: %s", mStr)
+		return merr.WrapErrParameterInvalidMsg("invalid `m`: %s", mStr)
 	}
 
 	// here is the only difference with IVF_PQ
@@ -53,7 +54,7 @@ func (c *raftIVFPQChecker) checkPQParams(params map[string]string) error {
 		return nil
 	}
 	if dimension%m != 0 {
-		return fmt.Errorf("dimension must be abled to be divided by `m`, dimension: %d, m: %d", dimension, m)
+		return merr.WrapErrParameterInvalidMsg("dimension must be abled to be divided by `m`, dimension: %d, m: %d", dimension, m)
 	}
 	return nil
 }

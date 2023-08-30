@@ -18,7 +18,6 @@ package config
 
 import (
 	"context"
-	"fmt"
 	"path"
 	"strings"
 	"sync"
@@ -29,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 const (
@@ -74,7 +74,7 @@ func (es *EtcdSource) GetConfigurationByKey(key string) (string, error) {
 	v, ok := es.currentConfig[key]
 	es.RUnlock()
 	if !ok {
-		return "", fmt.Errorf("key not found: %s", key)
+		return "", merr.WrapErrIoKeyNotFound(key)
 	}
 	return v, nil
 }

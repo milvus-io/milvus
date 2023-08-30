@@ -23,17 +23,16 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/stretchr/testify/suite"
-
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	// "github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type ErrSuite struct {
 	suite.Suite
 }
 
-func (s *ErrSuite) SetupSuite() {
-	paramtable.Init()
-}
+// func (s *ErrSuite) SetupSuite() {
+// 	paramtable.Init()
+// }
 
 func (s *ErrSuite) TestCode() {
 	err := WrapErrCollectionNotFound(1)

@@ -24,6 +24,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -105,13 +106,13 @@ func (m *Manager) GetConfig(key string) (string, error) {
 	v, ok := m.overlays[realKey]
 	if ok {
 		if v == TombValue {
-			return "", fmt.Errorf("key not found %s", key)
+			return "", merr.WrapErrIoKeyNotFound(key)
 		}
 		return v, nil
 	}
 	sourceName, ok := m.keySourceMap[realKey]
 	if !ok {
-		return "", fmt.Errorf("key not found: %s", key)
+		return "", merr.WrapErrIoKeyNotFound(key)
 	}
 	return m.getConfigValueBySource(realKey, sourceName)
 }
@@ -186,7 +187,6 @@ func (m *Manager) AddSource(source Source) error {
 
 	err := m.pullSourceConfigs(sourceName)
 	if err != nil {
-		err = fmt.Errorf("failed to load %s cause: %x", sourceName, err)
 		return err
 	}
 

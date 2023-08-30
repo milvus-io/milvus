@@ -17,7 +17,6 @@
 package config
 
 import (
-	"fmt"
 	"os"
 	"sync"
 
@@ -27,6 +26,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 type FileSource struct {
@@ -52,7 +52,7 @@ func (fs *FileSource) GetConfigurationByKey(key string) (string, error) {
 	v, ok := fs.configs[key]
 	fs.RUnlock()
 	if !ok {
-		return "", fmt.Errorf("key not found: %s", key)
+		return "", merr.WrapErrIoKeyNotFound(key)
 	}
 	return v, nil
 }

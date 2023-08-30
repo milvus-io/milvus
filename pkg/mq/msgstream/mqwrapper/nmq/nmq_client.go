@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
@@ -93,18 +94,18 @@ func (nc *nmqClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Con
 
 	if options.Topic == "" {
 		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.FailLabel).Inc()
-		return nil, fmt.Errorf("invalid consumer config: empty topic")
+		return nil, merr.WrapErrParameterIsEmpty("invalid consumer config: empty topic")
 	}
 
 	if options.SubscriptionName == "" {
 		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.FailLabel).Inc()
-		return nil, fmt.Errorf("invalid consumer config: empty subscription name")
+		return nil, merr.WrapErrParameterIsEmpty("invalid consumer config: empty subscription name")
 	}
 	// TODO: inject jetstream options.
 	js, err := nc.conn.JetStream()
 	if err != nil {
 		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.FailLabel).Inc()
-		return nil, errors.Wrap(err, "failed to create jetstream context")
+		return nil, merr.WrapMQInternal(err, "failed to create jetstream context")
 	}
 	// TODO: do we allow passing in an existing natsChan from options?
 	// also, revisit the size or make it a user param
@@ -119,7 +120,7 @@ func (nc *nmqClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Con
 	})
 	if err != nil {
 		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.FailLabel).Inc()
-		return nil, errors.Wrap(err, "failed to add/connect to jetstream for consumer")
+		return nil, merr.WrapMQInternal(err, "failed to add/connect to jetstream for consumer")
 	}
 	closeChan := make(chan struct{})
 
@@ -134,7 +135,7 @@ func (nc *nmqClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Con
 	}
 	if err != nil {
 		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.FailLabel).Inc()
-		return nil, errors.Wrap(err, fmt.Sprintf("failed to get consumer info, subscribe position: %d", position))
+		return nil, merr.WrapMQInternal(err, fmt.Sprintf("failed to get consumer info, subscribe position: %d", position))
 	}
 
 	elapsed := start.ElapseSpan()

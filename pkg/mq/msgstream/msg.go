@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -208,7 +209,7 @@ func (it *InsertMsg) NRows() uint64 {
 
 func (it *InsertMsg) CheckAligned() error {
 	numRowsOfFieldDataMismatch := func(fieldName string, fieldNumRows, passedNumRows uint64) error {
-		return fmt.Errorf("the num_rows(%d) of %sth field is not equal to passed NumRows(%d)", fieldNumRows, fieldName, passedNumRows)
+		return merr.WrapErrParameterInvalid(passedNumRows, fieldNumRows, fmt.Sprintf("the num_rows of %sth field is not equal to passed", fieldName))
 	}
 	rowNums := it.NRows()
 	if it.IsColumnBased() {
@@ -224,11 +225,11 @@ func (it *InsertMsg) CheckAligned() error {
 	}
 
 	if len(it.GetRowIDs()) != len(it.GetTimestamps()) {
-		return fmt.Errorf("the num_rows(%d) of rowIDs  is not equal to the num_rows(%d) of timestamps", len(it.GetRowIDs()), len(it.GetTimestamps()))
+		return merr.WrapErrParameterInvalid(len(it.GetRowIDs()), len(it.GetTimestamps()), "the num_rows of rowIDs is not equal to timestamps")
 	}
 
 	if uint64(len(it.GetRowIDs())) != it.NRows() {
-		return fmt.Errorf("the num_rows(%d) of rowIDs  is not equal to passed NumRows(%d)", len(it.GetRowIDs()), it.NRows())
+		return merr.WrapErrParameterInvalid(len(it.GetRowIDs()), int(it.NRows()), "the num_rows of rowIDs is not equal to passed NumRows")
 	}
 
 	return nil
@@ -394,12 +395,12 @@ func (dt *DeleteMsg) CheckAligned() error {
 	numRows := dt.GetNumRows()
 
 	if numRows != int64(len(dt.GetTimestamps())) {
-		return fmt.Errorf("the num_rows(%d) of pks  is not equal to the num_rows(%d) of timestamps", numRows, len(dt.GetTimestamps()))
+		return merr.WrapErrParameterInvalid(int(numRows), len(dt.GetTimestamps()), "the num_rows of pks is not equal to timestamps")
 	}
 
 	numPks := int64(typeutil.GetSizeOfIDs(dt.PrimaryKeys))
 	if numRows != numPks {
-		return fmt.Errorf("the num_rows(%d) of pks is not equal to passed NumRows(%d)", numPks, numRows)
+		return merr.WrapErrParameterInvalid(int(numRows), int(numPks), "the num_rows of pks is not equal to NumRows")
 	}
 
 	return nil

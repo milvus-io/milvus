@@ -18,7 +18,6 @@ package msgstream
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -33,6 +32,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -338,18 +338,18 @@ func (ms *mqMsgStream) Broadcast(msgPack *MsgPack) (map[string][]MessageID, erro
 func (ms *mqMsgStream) getTsMsgFromConsumerMsg(msg mqwrapper.Message) (TsMsg, error) {
 	header := commonpb.MsgHeader{}
 	if msg.Payload() == nil {
-		return nil, fmt.Errorf("failed to unmarshal message header, payload is empty")
+		return nil, merr.WrapErrMsgInvalid(nil, "payload is empty")
 	}
 	err := proto.Unmarshal(msg.Payload(), &header)
 	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal message header, err %s", err.Error())
+		return nil, merr.WrapErrMsgInvalid(err, "failed to unmarshal message header")
 	}
 	if header.Base == nil {
-		return nil, fmt.Errorf("failed to unmarshal message, header is uncomplete")
+		return nil, merr.WrapErrMsgInvalid(nil, "failed to unmarshal message, header is uncomplete")
 	}
 	tsMsg, err := ms.unmarshal.Unmarshal(msg.Payload(), header.Base.MsgType)
 	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal tsMsg, err %s", err.Error())
+		return nil, merr.WrapErrMsgInvalid(err, "failed to unmarshal tsMsg")
 	}
 
 	// set msg info to tsMsg
@@ -429,18 +429,18 @@ func (ms *mqMsgStream) Seek(msgPositions []*msgpb.MsgPosition) error {
 	for _, mp := range msgPositions {
 		consumer, ok := ms.consumers[mp.ChannelName]
 		if !ok {
-			return fmt.Errorf("channel %s not subscribed", mp.ChannelName)
+			return merr.WrapErrFieldNotFound(mp.ChannelName)
 		}
 		messageID, err := ms.client.BytesToMsgID(mp.MsgID)
 		if err != nil {
-			return err
+			return merr.WrapErrMsgInvalid(err)
 		}
 
 		log.Info("MsgStream seek begin", zap.String("channel", mp.ChannelName), zap.Any("MessageID", mp.MsgID))
 		err = consumer.Seek(messageID, false)
 		if err != nil {
 			log.Warn("Failed to seek", zap.String("channel", mp.ChannelName), zap.Error(err))
-			return err
+			return merr.WrapMQInternal(err)
 		}
 		log.Info("MsgStream seek finished", zap.String("channel", mp.ChannelName))
 	}
@@ -781,26 +781,26 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*msgpb.MsgPosition) error {
 		var ok bool
 		consumer, ok = ms.consumers[mp.ChannelName]
 		if !ok {
-			return fmt.Errorf("please subcribe the channel, channel name =%s", mp.ChannelName)
+			return merr.WrapErrFieldNotFound(mp.ChannelName)
 		}
 
 		if consumer == nil {
-			return fmt.Errorf("consumer is nil")
+			return merr.WrapMQInternal(nil, "consumer is nil")
 		}
 
 		seekMsgID, err := ms.client.BytesToMsgID(mp.MsgID)
 		if err != nil {
-			return err
+			return merr.WrapMQInternal(err)
 		}
 		log.Info("MsgStream begin to seek start msg: ", zap.String("channel", mp.ChannelName), zap.Any("MessageID", mp.MsgID))
 		err = consumer.Seek(seekMsgID, true)
 		if err != nil {
 			log.Warn("Failed to seek", zap.String("channel", mp.ChannelName), zap.Error(err))
 			// stop retry if consumer topic not exist
-			if errors.Is(err, mqwrapper.ErrTopicNotExist) {
+			if errors.Is(err, merr.ErrTopicNotFound) {
 				return retry.Unrecoverable(err)
 			}
-			return err
+			return merr.WrapMQInternal(err)
 		}
 		log.Info("MsgStream seek finished", zap.String("channel", mp.ChannelName))
 
@@ -813,11 +813,11 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*msgpb.MsgPosition) error {
 	for idx := range msgPositions {
 		mp = msgPositions[idx]
 		if len(mp.MsgID) == 0 {
-			return fmt.Errorf("when msgID's length equal to 0, please use AsConsumer interface")
+			return merr.WrapErrMsgInvalid(nil, "when msgID's length equal to 0, please use AsConsumer interface")
 		}
 		err = retry.Do(context.TODO(), fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
 		if err != nil {
-			return fmt.Errorf("failed to seek, error %s", err.Error())
+			return merr.WrapMQInternal(err, "failed to seek")
 		}
 		ms.addConsumer(consumer, mp.ChannelName)
 		ms.chanMsgPos[consumer] = (proto.Clone(mp)).(*MsgPosition)
@@ -830,18 +830,18 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*msgpb.MsgPosition) error {
 				return ms.ctx.Err()
 			case msg, ok := <-consumer.Chan():
 				if !ok {
-					return fmt.Errorf("consumer closed")
+					return merr.WrapMQInternal(nil, "consumer closed")
 				}
 				consumer.Ack(msg)
 
 				headerMsg := commonpb.MsgHeader{}
 				err := proto.Unmarshal(msg.Payload(), &headerMsg)
 				if err != nil {
-					return fmt.Errorf("failed to unmarshal message header, err %s", err.Error())
+					return merr.WrapErrMsgInvalid(err, "failed to unmarshal message header")
 				}
 				tsMsg, err := ms.unmarshal.Unmarshal(msg.Payload(), headerMsg.Base.MsgType)
 				if err != nil {
-					return fmt.Errorf("failed to unmarshal tsMsg, err %s", err.Error())
+					return merr.WrapErrMsgInvalid(err, "failed to unmarshal tsMsg")
 				}
 				if tsMsg.Type() == commonpb.MsgType_TimeTick && tsMsg.BeginTs() >= mp.Timestamp {
 					runLoop = false

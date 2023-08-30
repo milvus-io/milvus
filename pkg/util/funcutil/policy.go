@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
@@ -18,12 +19,12 @@ func GetVersion(m proto.GeneratedMessage) (string, error) {
 	md, _ := descriptor.MessageDescriptorProto(m)
 	if md == nil {
 		log.Error("MessageDescriptorProto result is nil")
-		return "", fmt.Errorf("MessageDescriptorProto result is nil")
+		return "", merr.WrapErrProtoUnmarshal(nil, "MessageDescriptorProto result is nil")
 	}
 	extObj, err := proto.GetExtension(md.Options, milvuspb.E_MilvusExtObj)
 	if err != nil {
 		log.Error("GetExtension fail", zap.Error(err))
-		return "", err
+		return "", merr.WrapErrProtoUnmarshal(err, "GetExtension fail")
 	}
 	version := extObj.(*milvuspb.MilvusExt).Version
 	log.Debug("GetVersion success", zap.String("version", version))
@@ -34,13 +35,13 @@ func GetPrivilegeExtObj(m proto.GeneratedMessage) (commonpb.PrivilegeExt, error)
 	_, md := descriptor.MessageDescriptorProto(m)
 	if md == nil {
 		log.Info("MessageDescriptorProto result is nil")
-		return commonpb.PrivilegeExt{}, fmt.Errorf("MessageDescriptorProto result is nil")
+		return commonpb.PrivilegeExt{}, merr.WrapErrProtoUnmarshal(nil, "MessageDescriptorProto result is nil")
 	}
 
 	extObj, err := proto.GetExtension(md.Options, commonpb.E_PrivilegeExtObj)
 	if err != nil {
 		log.Warn("GetExtension fail", zap.Error(err))
-		return commonpb.PrivilegeExt{}, err
+		return commonpb.PrivilegeExt{}, merr.WrapErrProtoUnmarshal(err, "GetExtension fail")
 	}
 	privilegeExt := extObj.(*commonpb.PrivilegeExt)
 	log.Debug("GetPrivilegeExtObj success", zap.String("resource_type", privilegeExt.ObjectType.String()), zap.String("resource_privilege", privilegeExt.ObjectPrivilege.String()))

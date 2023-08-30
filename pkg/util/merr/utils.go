@@ -458,6 +458,14 @@ func WrapErrParameterInvalid[T any](expected, actual T, msg ...string) error {
 	return err
 }
 
+func WrapErrParameterLessThan[T any](lower, actual T, msg ...string) error {
+	err := errors.Wrapf(ErrParameterInvalid, "expected > %v, actual=%v", lower, actual)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
 func WrapErrParameterInvalidRange[T any](lower, upper, actual T, msg ...string) error {
 	err := errors.Wrapf(ErrParameterInvalid, "expected in [%v, %v], actual=%v", lower, upper, actual)
 	if len(msg) > 0 {
@@ -471,9 +479,21 @@ func WrapErrParameterInvalidMsg(fmt string, args ...any) error {
 	return err
 }
 
+func WrapErrParameterIsEmpty(msg ...string) error {
+	return errors.Wrapf(ErrParameterInvalid, "expected not empty, %s", strings.Join(msg, "; "))
+}
+
 // Metrics related
 func WrapErrMetricNotFound(name string, msg ...string) error {
 	err := errors.Wrapf(ErrMetricNotFound, "metric=%s", name)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+func WrapErrRateLabelNotFound(label string, msg ...string) error {
+	err := errors.Wrapf(ErrRateLabelNotFound, "label=%s", label)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "; "))
 	}
@@ -497,9 +517,55 @@ func WrapErrTopicNotEmpty(name string, msg ...string) error {
 	return err
 }
 
+func WrapErrTopicMismatch(target, actual string, msg ...string) error {
+	err := errors.Wrapf(ErrTopicMismatch, "target=%s, actual=%s", target, actual)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
 // field related
 func WrapErrFieldNotFound[T any](field T, msg ...string) error {
 	err := errors.Wrapf(ErrFieldNotFound, "field=%v", field)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+// MQ related
+func WrapMQInternal(err error, msg ...string) error {
+	if err == nil {
+		err = ErrMQInternal
+	} else {
+		err = errors.Wrapf(ErrMQInternal, err.Error())
+	}
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+func WrapErrMsgInvalid(err error, msg ...string) error {
+	if err == nil {
+		err = ErrMsgInvalid
+	} else {
+		err = errors.Wrapf(ErrMsgInvalid, err.Error())
+	}
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+// Serialization related
+func WrapErrProtoUnmarshal(err error, msg ...string) error {
+	if err == nil {
+		err = ErrProtoUnmarshal
+	} else {
+		err = errors.Wrapf(ErrProtoUnmarshal, err.Error())
+	}
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "; "))
 	}

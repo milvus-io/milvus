@@ -17,7 +17,6 @@
 package nmq
 
 import (
-	"fmt"
 	"sync"
 
 	"github.com/cockroachdb/errors"
@@ -158,7 +157,7 @@ func (nc *Consumer) CheckTopicValid(topic string) error {
 	// A consumer is tied to a topic. In a multi-tenant situation,
 	// a consumer is not supposed to check on other topics.
 	if topic != nc.topic {
-		return fmt.Errorf("consumer of topic %s checking validness of topic %s", nc.topic, topic)
+		return merr.WrapErrTopicMismatch(nc.topic, topic, "consumer of topic checking validness")
 	}
 
 	// check if topic valid or exist.
@@ -167,7 +166,7 @@ func (nc *Consumer) CheckTopicValid(topic string) error {
 		return merr.WrapErrTopicNotFound(topic, err.Error())
 	} else if err != nil {
 		log.Warn("fail to get stream info of nats", zap.String("topic", nc.topic), zap.Error(err))
-		return errors.Wrap(err, "failed to get stream info of nats jetstream")
+		return merr.WrapMQInternal(err, "failed to get stream info of nats jetstream")
 	}
 
 	// check if topic stream is empty.

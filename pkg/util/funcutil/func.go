@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"google.golang.org/grpc/codes"
 	grpcStatus "google.golang.org/grpc/status"
@@ -68,7 +69,7 @@ func JSONToMap(mStr string) (map[string]string, error) {
 	buffer := make(map[string]any)
 	err := json.Unmarshal([]byte(mStr), &buffer)
 	if err != nil {
-		return nil, fmt.Errorf("unmarshal params failed, %w", err)
+		return nil, merr.WrapErrParameterInvalidMsg("unmarshal params failed, %w", err)
 	}
 	ret := make(map[string]string)
 	for key, value := range buffer {
@@ -97,7 +98,7 @@ func GetAttrByKeyFromRepeatedKV(key string, kvs []*commonpb.KeyValuePair) (strin
 		}
 	}
 
-	return "", fmt.Errorf("key %s not found", key)
+	return "", merr.WrapErrParameterInvalidMsg("key %s not found", key)
 }
 
 // CheckCtxValid check if the context is valid
@@ -184,10 +185,10 @@ func ToPhysicalChannel(vchannel string) string {
 // ConvertChannelName assembles channel name according to parameters.
 func ConvertChannelName(chanName string, tokenFrom string, tokenTo string) (string, error) {
 	if tokenFrom == "" {
-		return "", fmt.Errorf("the tokenFrom is empty")
+		return "", merr.WrapErrParameterInvalidMsg("the tokenFrom is empty")
 	}
 	if !strings.Contains(chanName, tokenFrom) {
-		return "", fmt.Errorf("cannot find token '%s' in '%s'", tokenFrom, chanName)
+		return "", merr.WrapErrParameterInvalidMsg("cannot find token '%s' in '%s'", tokenFrom, chanName)
 	}
 	return strings.Replace(chanName, tokenFrom, tokenTo, 1), nil
 }
@@ -199,25 +200,25 @@ func getNumRowsOfScalarField(datas interface{}) uint64 {
 
 func GetNumRowsOfFloatVectorField(fDatas []float32, dim int64) (uint64, error) {
 	if dim <= 0 {
-		return 0, fmt.Errorf("dim(%d) should be greater than 0", dim)
+		return 0, merr.WrapErrParameterInvalidMsg("dim(%d) should be greater than 0", dim)
 	}
 	l := len(fDatas)
 	if int64(l)%dim != 0 {
-		return 0, fmt.Errorf("the length(%d) of float data should divide the dim(%d)", l, dim)
+		return 0, merr.WrapErrParameterInvalidMsg("the length(%d) of float data should divide the dim(%d)", l, dim)
 	}
 	return uint64(int64(l) / dim), nil
 }
 
 func GetNumRowsOfBinaryVectorField(bDatas []byte, dim int64) (uint64, error) {
 	if dim <= 0 {
-		return 0, fmt.Errorf("dim(%d) should be greater than 0", dim)
+		return 0, merr.WrapErrParameterInvalidMsg("dim(%d) should be greater than 0", dim)
 	}
 	if dim%8 != 0 {
-		return 0, fmt.Errorf("dim(%d) should divide 8", dim)
+		return 0, merr.WrapErrParameterInvalidMsg("dim(%d) should divide 8", dim)
 	}
 	l := len(bDatas)
 	if (8*int64(l))%dim != 0 {
-		return 0, fmt.Errorf("the num(%d) of all bits should divide the dim(%d)", 8*l, dim)
+		return 0, merr.WrapErrParameterInvalidMsg("the num(%d) of all bits should divide the dim(%d)", 8*l, dim)
 	}
 	return uint64((8 * int64(l)) / dim), nil
 }
@@ -247,7 +248,7 @@ func GetNumRowOfFieldData(fieldData *schemapb.FieldData) (uint64, error) {
 		case *schemapb.ScalarField_JsonData:
 			fieldNumRows = getNumRowsOfScalarField(scalarField.GetJsonData().Data)
 		default:
-			return 0, fmt.Errorf("%s is not supported now", scalarType)
+			return 0, merr.WrapErrParameterInvalidMsg("%s is not supported now", scalarType)
 		}
 	case *schemapb.FieldData_Vectors:
 		vectorField := fieldData.GetVectors()
@@ -265,10 +266,10 @@ func GetNumRowOfFieldData(fieldData *schemapb.FieldData) (uint64, error) {
 				return 0, err
 			}
 		default:
-			return 0, fmt.Errorf("%s is not supported now", vectorFieldType)
+			return 0, merr.WrapErrParameterInvalidMsg("%s is not supported now", vectorFieldType)
 		}
 	default:
-		return 0, fmt.Errorf("%s is not supported now", fieldType)
+		return 0, merr.WrapErrParameterInvalidMsg("%s is not supported now", fieldType)
 	}
 
 	return fieldNumRows, nil
@@ -325,7 +326,7 @@ func EncodeUserRoleCache(user string, role string) string {
 func DecodeUserRoleCache(cache string) (string, string, error) {
 	index := strings.LastIndex(cache, "/")
 	if index == -1 {
-		return "", "", fmt.Errorf("invalid param, cache: [%s]", cache)
+		return "", "", merr.WrapErrParameterInvalidMsg("invalid param, cache: [%s]", cache)
 	}
 	user := cache[:index]
 	role := cache[index+1:]

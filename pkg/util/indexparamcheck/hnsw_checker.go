@@ -1,9 +1,8 @@
 package indexparamcheck
 
 import (
-	"fmt"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 type hnswChecker struct {
@@ -18,7 +17,7 @@ func (c hnswChecker) StaticCheck(params map[string]string) error {
 		return errOutOfRange(HNSWM, HNSWMinM, HNSWMaxM)
 	}
 	if !CheckStrByValues(params, Metric, HnswMetrics) {
-		return fmt.Errorf("metric type not found or not supported, supported: %v", HnswMetrics)
+		return merr.WrapErrParameterInvalidMsg("metric type not found or not supported, supported: %v", HnswMetrics)
 	}
 	return nil
 }
@@ -32,7 +31,7 @@ func (c hnswChecker) CheckTrain(params map[string]string) error {
 
 func (c hnswChecker) CheckValidDataType(dType schemapb.DataType) error {
 	if dType != schemapb.DataType_FloatVector && dType != schemapb.DataType_BinaryVector {
-		return fmt.Errorf("only support float vector or binary vector")
+		return merr.WrapErrParameterInvalidMsg("only support float vector or binary vector")
 	}
 	return nil
 }

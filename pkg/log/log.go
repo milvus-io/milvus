@@ -30,7 +30,6 @@
 package log
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,6 +37,7 @@ import (
 	"sync/atomic"
 
 	"github.com/cockroachdb/errors"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/uber/jaeger-client-go/utils"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -117,7 +117,7 @@ func InitLoggerWithWriteSyncer(cfg *Config, output zapcore.WriteSyncer, opts ...
 	level := zap.NewAtomicLevel()
 	err := level.UnmarshalText([]byte(cfg.Level))
 	if err != nil {
-		return nil, nil, fmt.Errorf("initLoggerWithWriteSyncer UnmarshalText cfg.Level err:%w", err)
+		return nil, nil, merr.WrapErrParameterInvalidMsg("initLoggerWithWriteSyncer UnmarshalText cfg.Level err:%w", err)
 	}
 	core := NewTextCore(newZapTextEncoder(cfg), output, level)
 	opts = append(cfg.buildOptions(output), opts...)

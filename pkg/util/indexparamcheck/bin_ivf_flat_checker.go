@@ -1,8 +1,6 @@
 package indexparamcheck
 
-import (
-	"fmt"
-)
+import "github.com/milvus-io/milvus/pkg/util/merr"
 
 type binIVFFlatChecker struct {
 	binaryVectorBaseChecker
@@ -10,7 +8,7 @@ type binIVFFlatChecker struct {
 
 func (c binIVFFlatChecker) StaticCheck(params map[string]string) error {
 	if !CheckStrByValues(params, Metric, BinIvfMetrics) {
-		return fmt.Errorf("metric type not found or not supported, supported: %v", BinIvfMetrics)
+		return merr.WrapErrParameterInvalidMsg("metric type not found or not supported, supported: %v", BinIvfMetrics)
 	}
 
 	if !CheckIntByRange(params, NLIST, MinNList, MaxNList) {

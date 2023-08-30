@@ -21,6 +21,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 // InsertRepackFunc is used to repack messages after hash by primary key
@@ -85,18 +86,14 @@ func DeleteRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 // DefaultRepackFunc is used to repack messages after hash by primary key
 func DefaultRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error) {
 	if len(hashKeys) < len(tsMsgs) {
-		return nil, fmt.Errorf(
-			"the length of hash keys (%d) is less than the length of messages (%d)",
-			len(hashKeys),
-			len(tsMsgs),
-		)
+		return nil, merr.WrapErrParameterLessThan(len(tsMsgs), len(hashKeys), "the length of hash keys is less than the length of messages")
 	}
 
 	// after assigning segment id to msg, tsMsgs was already re-bucketed
 	pack := make(map[int32]*MsgPack)
 	for idx, msg := range tsMsgs {
-		if len(hashKeys[idx]) <= 0 {
-			return nil, fmt.Errorf("no hash key for %dth message", idx)
+		if len(hashKeys[idx]) < 1 {
+			return nil, merr.WrapErrParameterLessThan(1, len(hashKeys[idx]), fmt.Sprintf("no hash key for %dth message", idx))
 		}
 		key := hashKeys[idx][0]
 		_, ok := pack[key]

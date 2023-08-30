@@ -2,7 +2,6 @@ package kafka
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -11,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"go.uber.org/zap"
 )
@@ -34,7 +34,7 @@ func (kp *kafkaProducer) Send(ctx context.Context, message *mqwrapper.ProducerMe
 	if kp.isClosed {
 		metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.FailLabel).Inc()
 		log.Error("kafka produce message fail because the producer has been closed", zap.String("topic", kp.topic))
-		return nil, common.NewIgnorableError(fmt.Errorf("kafka producer is closed"))
+		return nil, common.NewIgnorableError(merr.WrapMQInternal(nil, "kafka producer is closed"))
 	}
 
 	headers := make([]kafka.Header, 0, len(message.Properties))
@@ -57,7 +57,7 @@ func (kp *kafkaProducer) Send(ctx context.Context, message *mqwrapper.ProducerMe
 	if !ok {
 		metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.FailLabel).Inc()
 		log.Error("kafka produce message fail because of delivery chan is closed", zap.String("topic", kp.topic))
-		return nil, common.NewIgnorableError(fmt.Errorf("delivery chan of kafka producer is closed"))
+		return nil, common.NewIgnorableError(merr.WrapMQInternal(nil, "delivery chan of kafka producer is closed"))
 	}
 
 	m := e.(*kafka.Message)

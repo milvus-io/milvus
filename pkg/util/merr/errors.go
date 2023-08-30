@@ -93,12 +93,14 @@ var (
 	// Parameter related
 	ErrParameterInvalid = newMilvusError("invalid parameter", 1100, false)
 
-	// Metrics related
-	ErrMetricNotFound = newMilvusError("metric not found", 1200, false)
+	// Metrics & Rate limit related
+	ErrMetricNotFound    = newMilvusError("metric not found", 1200, false)
+	ErrRateLabelNotFound = newMilvusError("rate label not found", 1201, false)
 
 	// Topic related
 	ErrTopicNotFound = newMilvusError("topic not found", 1300, false)
 	ErrTopicNotEmpty = newMilvusError("topic not empty", 1301, false)
+	ErrTopicMismatch = newMilvusError("topic mismatch", 1302, false)
 
 	// field related
 	ErrFieldNotFound = newMilvusError("field not found", 1700, false)
@@ -111,6 +113,13 @@ var (
 	ErrInvalidInsertData         = newMilvusError("fail to deal the insert data", 1804, false)
 	ErrInvalidSearchResult       = newMilvusError("fail to parse search result", 1805, false)
 	ErrCheckPrimaryKey           = newMilvusError("please check the primary key and its' type can only in [int, string]", 1806, false)
+
+	// MQ related error
+	ErrMQInternal = newMilvusError("MQ internal error", 1901, false)
+	ErrMsgInvalid = newMilvusError("invalid message", 1902, false)
+
+	// Serialization related error
+	ErrProtoUnmarshal = newMilvusError("proto unmarshal error", 2001, false)
 
 	// Do NOT export this,
 	// never allow programmer using this, keep only for converting unknown error to milvusError

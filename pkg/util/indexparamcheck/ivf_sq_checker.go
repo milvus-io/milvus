@@ -1,8 +1,6 @@
 package indexparamcheck
 
-import (
-	"fmt"
-)
+import "github.com/milvus-io/milvus/pkg/util/merr"
 
 // ivfSQChecker checks if a IVF_SQ index can be built.
 type ivfSQChecker struct {
@@ -15,7 +13,7 @@ func (c *ivfSQChecker) checkNBits(params map[string]string) error {
 	if exist {
 		// 8 is the only supported nbits.
 		if !CheckIntByRange(params, NBITS, DefaultNBits, DefaultNBits) {
-			return fmt.Errorf("nbits can be only set to 8 for IVF_SQ")
+			return merr.WrapErrParameterInvalidMsg("nbits can be only set to 8 for IVF_SQ")
 		}
 	}
 	return nil

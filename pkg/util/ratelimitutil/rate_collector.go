@@ -21,6 +21,8 @@ import (
 	"math"
 	"sync"
 	"time"
+
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 const (
@@ -50,10 +52,10 @@ func NewRateCollector(window time.Duration, granularity time.Duration) (*RateCol
 // newRateCollector returns a new RateCollector with given window and granularity.
 func newRateCollector(window time.Duration, granularity time.Duration, now time.Time) (*RateCollector, error) {
 	if window == 0 || granularity == 0 {
-		return nil, fmt.Errorf("create RateCollector failed, window or granularity cannot be 0, window = %d, granularity = %d", window, granularity)
+		return nil, merr.WrapErrParameterInvalidMsg("create RateCollector failed, window or granularity cannot be 0, window = %d, granularity = %d", window, granularity)
 	}
 	if window < granularity || window%granularity != 0 {
-		return nil, fmt.Errorf("create RateCollector failed, window has to be a multiplier of the granularity, window = %d, granularity = %d", window, granularity)
+		return nil, merr.WrapErrParameterInvalidMsg("create RateCollector failed, window has to be a multiplier of the granularity, window = %d, granularity = %d", window, granularity)
 	}
 	rc := &RateCollector{
 		window:      window,

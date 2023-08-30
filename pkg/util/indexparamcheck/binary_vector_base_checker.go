@@ -1,9 +1,8 @@
 package indexparamcheck
 
 import (
-	"fmt"
-
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
@@ -14,7 +13,7 @@ type binaryVectorBaseChecker struct {
 
 func (c binaryVectorBaseChecker) staticCheck(params map[string]string) error {
 	if !CheckStrByValues(params, Metric, BinIDMapMetrics) {
-		return fmt.Errorf("metric type not found or not supported, supported: %v", BinIDMapMetrics)
+		return merr.WrapErrParameterInvalidMsg("metric type not found or not supported, supported: %v", BinIDMapMetrics)
 	}
 
 	return nil
@@ -30,7 +29,7 @@ func (c binaryVectorBaseChecker) CheckTrain(params map[string]string) error {
 
 func (c binaryVectorBaseChecker) CheckValidDataType(dType schemapb.DataType) error {
 	if dType != schemapb.DataType_BinaryVector {
-		return fmt.Errorf("binary vector is only supported")
+		return merr.WrapErrParameterInvalid(schemapb.DataType_BinaryVector, dType, "binary vector is only supported")
 	}
 	return nil
 }

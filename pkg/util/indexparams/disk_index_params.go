@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -164,11 +165,11 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 		var ok bool
 		maxDegree, ok = indexParams[MaxDegreeKey]
 		if !ok {
-			return fmt.Errorf("index param max_degree not exist")
+			return merr.WrapErrParameterInvalidMsg("index param max_degree not exist")
 		}
 		searchListSize, ok = indexParams[SearchListSizeKey]
 		if !ok {
-			return fmt.Errorf("index param search_list_size not exist")
+			return merr.WrapErrParameterInvalidMsg("index param search_list_size not exist")
 		}
 		extraParams, err := NewBigDataExtraParamsFromJSON(params.AutoIndexConfig.ExtraParams.GetValue())
 		if err != nil {
@@ -192,7 +193,7 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 func SetDiskIndexBuildParams(indexParams map[string]string, fieldDataSize int64) error {
 	pqCodeBudgetGBRatioStr, ok := indexParams[PQCodeBudgetRatioKey]
 	if !ok {
-		return fmt.Errorf("index param pqCodeBudgetGBRatio not exist")
+		return merr.WrapErrParameterInvalidMsg("index param pqCodeBudgetGBRatio not exist")
 	}
 	pqCodeBudgetGBRatio, err := strconv.ParseFloat(pqCodeBudgetGBRatioStr, 64)
 	if err != nil {
@@ -200,20 +201,20 @@ func SetDiskIndexBuildParams(indexParams map[string]string, fieldDataSize int64)
 	}
 	buildNumThreadsRatioStr, ok := indexParams[NumBuildThreadRatioKey]
 	if !ok {
-		return fmt.Errorf("index param buildNumThreadsRatio not exist")
+		return merr.WrapErrParameterInvalidMsg("index param buildNumThreadsRatio not exist")
 	}
 	buildNumThreadsRatio, err := strconv.ParseFloat(buildNumThreadsRatioStr, 64)
 	if err != nil {
-		return err
+		return merr.WrapErrParameterInvalidMsg("parse buildNumThreadsRatio failed %v", err)
 	}
 
 	searchCacheBudgetGBRatioStr, ok := indexParams[SearchCacheBudgetRatioKey]
 	if !ok {
-		return fmt.Errorf("index param searchCacheBudgetGBRatio not exist")
+		return merr.WrapErrParameterInvalidMsg("index param searchCacheBudgetGBRatio not exist")
 	}
 	SearchCacheBudgetGBRatio, err := strconv.ParseFloat(searchCacheBudgetGBRatioStr, 64)
 	if err != nil {
-		return err
+		return merr.WrapErrParameterInvalidMsg("parse searchCacheBudgetGBRatio failed %v", err)
 	}
 	indexParams[PQCodeBudgetKey] = fmt.Sprintf("%f", float32(fieldDataSize)*float32(pqCodeBudgetGBRatio)/(1<<30))
 	indexParams[NumBuildThreadKey] = strconv.Itoa(int(float32(hardware.GetCPUNum()) * float32(buildNumThreadsRatio)))
@@ -228,7 +229,7 @@ func SetDiskIndexLoadParams(params *paramtable.ComponentParam, indexParams map[s
 	dimStr, ok := indexParams[common.DimKey]
 	if !ok {
 		// type param dim has been put into index params before build index
-		return fmt.Errorf("type param dim not exist")
+		return merr.WrapErrParameterInvalidMsg("type param dim not exist")
 	}
 	dim, err := strconv.ParseInt(dimStr, 10, 64)
 	if err != nil {

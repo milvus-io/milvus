@@ -118,9 +118,7 @@ func (node *QueryNode) GetStatistics(ctx context.Context, req *querypb.GetStatis
 			zap.Int64("nodeID", paramtable.GetNodeID()),
 		)
 		return &internalpb.GetStatisticsResponse{
-			Status: util.WrapStatus(commonpb.ErrorCode_NodeIDNotMatch,
-				common.WrapNodeIDNotMatchMsg(targetID, paramtable.GetNodeID()),
-			),
+			Status: merr.Status(merr.WrapErrNodeNotMatch(targetID, paramtable.GetNodeID())),
 		}, nil
 	}
 	failRet := &internalpb.GetStatisticsResponse{
@@ -224,10 +222,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 
 	// check target matches
 	if req.GetBase().GetTargetID() != paramtable.GetNodeID() {
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_NodeIDNotMatch,
-			Reason:    common.WrapNodeIDNotMatchMsg(req.GetBase().GetTargetID(), paramtable.GetNodeID()),
-		}
+		status := merr.Status(merr.WrapErrNodeNotMatch(req.GetBase().GetTargetID(), paramtable.GetNodeID()))
 		return status, nil
 	}
 
@@ -367,10 +362,7 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 
 	// check target matches
 	if req.GetBase().GetTargetID() != paramtable.GetNodeID() {
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_NodeIDNotMatch,
-			Reason:    common.WrapNodeIDNotMatchMsg(req.GetBase().GetTargetID(), paramtable.GetNodeID()),
-		}
+		status := merr.Status(merr.WrapErrNodeNotMatch(req.GetBase().GetTargetID(), paramtable.GetNodeID()))
 		return status, nil
 	}
 
@@ -442,8 +434,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 
 	// check target matches
 	if req.GetBase().GetTargetID() != paramtable.GetNodeID() {
-		return util.WrapStatus(commonpb.ErrorCode_NodeIDNotMatch,
-			common.WrapNodeIDNotMatchMsg(req.GetBase().GetTargetID(), paramtable.GetNodeID())), nil
+		return merr.Status(merr.WrapErrNodeNotMatch(req.GetBase().GetTargetID(), paramtable.GetNodeID())), nil
 	}
 
 	// Delegates request to workers
@@ -563,11 +554,7 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, req *querypb.Release
 
 	// check target matches
 	if req.GetBase().GetTargetID() != paramtable.GetNodeID() {
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_NodeIDNotMatch,
-			Reason:    common.WrapNodeIDNotMatchMsg(req.GetBase().GetTargetID(), paramtable.GetNodeID()),
-		}
-		return status, nil
+		return merr.Status(merr.WrapErrNodeNotMatch(req.GetBase().GetTargetID(), paramtable.GetNodeID())), nil
 	}
 
 	if req.GetNeedTransfer() {
@@ -781,8 +768,9 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 			zap.Int64("targetID", targetID),
 			zap.Int64("nodeID", paramtable.GetNodeID()),
 		)
-		return WrapSearchResult(commonpb.ErrorCode_NodeIDNotMatch,
-			common.WrapNodeIDNotMatchMsg(targetID, paramtable.GetNodeID())), nil
+		return &internalpb.SearchResults{
+			Status: merr.Status(merr.WrapErrNodeNotMatch(targetID, paramtable.GetNodeID())),
+		}, nil
 	}
 
 	failRet := &internalpb.SearchResults{
@@ -975,8 +963,9 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 			zap.Int64("targetID", targetID),
 			zap.Int64("nodeID", paramtable.GetNodeID()),
 		)
-		return WrapRetrieveResult(commonpb.ErrorCode_NodeIDNotMatch,
-			common.WrapNodeIDNotMatchMsg(targetID, paramtable.GetNodeID())), nil
+		return &internalpb.RetrieveResults{
+			Status: merr.Status(merr.WrapErrNodeNotMatch(targetID, paramtable.GetNodeID())),
+		}, nil
 	}
 
 	toMergeResults := make([]*internalpb.RetrieveResults, len(req.GetDmlChannels()))
@@ -1153,10 +1142,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 
 	// check target matches
 	if req.GetBase().GetTargetID() != paramtable.GetNodeID() {
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_NodeIDNotMatch,
-			Reason:    common.WrapNodeIDNotMatchMsg(req.GetBase().GetTargetID(), paramtable.GetNodeID()),
-		}
+		status := merr.Status(merr.WrapErrNodeNotMatch(req.GetBase().GetTargetID(), paramtable.GetNodeID()))
 		return &querypb.GetDataDistributionResponse{Status: status}, nil
 	}
 
@@ -1244,10 +1230,7 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 	// check target matches
 	if req.GetBase().GetTargetID() != paramtable.GetNodeID() {
 		log.Warn("failed to do match target id when sync ", zap.Int64("expect", req.GetBase().GetTargetID()), zap.Int64("actual", node.session.ServerID))
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_NodeIDNotMatch,
-			Reason:    common.WrapNodeIDNotMatchMsg(req.GetBase().GetTargetID(), paramtable.GetNodeID()),
-		}
+		status := merr.Status(merr.WrapErrNodeNotMatch(req.GetBase().GetTargetID(), paramtable.GetNodeID()))
 		return status, nil
 	}
 
@@ -1350,10 +1333,7 @@ func (node *QueryNode) Delete(ctx context.Context, req *querypb.DeleteRequest) (
 
 	// check target matches
 	if req.GetBase().GetTargetID() != paramtable.GetNodeID() {
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_NodeIDNotMatch,
-			Reason:    common.WrapNodeIDNotMatchMsg(req.GetBase().GetTargetID(), paramtable.GetNodeID()),
-		}
+		status := merr.Status(merr.WrapErrNodeNotMatch(req.GetBase().GetTargetID(), paramtable.GetNodeID()))
 		return status, nil
 	}
 

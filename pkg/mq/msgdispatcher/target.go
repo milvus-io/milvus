@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 // TODO: dyh, move to config
@@ -65,7 +67,7 @@ func (t *target) send(pack *MsgPack) error {
 	}
 	select {
 	case <-time.After(MaxTolerantLag):
-		return fmt.Errorf("send target timeout, vchannel=%s, timeout=%s", t.vchannel, MaxTolerantLag)
+		return merr.WrapMQInternal(nil, fmt.Sprintf("send target timeout, vchannel=%s, timeout=%s", t.vchannel, MaxTolerantLag))
 	case t.ch <- pack:
 		return nil
 	}

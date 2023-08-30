@@ -19,7 +19,6 @@ package etcd
 import (
 	"crypto/tls"
 	"crypto/x509"
-	"fmt"
 	"io/ioutil"
 	"net/url"
 	"os"
@@ -31,6 +30,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 var (
@@ -167,13 +167,13 @@ func RemoveByBatch(removals []string, op func(partialKeys []string) error) error
 
 func buildKvGroup(keys, values []string) (map[string]string, error) {
 	if len(keys) != len(values) {
-		return nil, fmt.Errorf("length of keys (%d) and values (%d) are not equal", len(keys), len(values))
+		return nil, merr.WrapErrParameterInvalidMsg("length of keys (%d) and values (%d) are not equal", len(keys), len(values))
 	}
 	ret := make(map[string]string, len(keys))
 	for i, k := range keys {
 		_, ok := ret[k]
 		if ok {
-			return nil, fmt.Errorf("duplicated key was found: %s", k)
+			return nil, merr.WrapErrParameterInvalidMsg("duplicated key was found: %s", k)
 		}
 		ret[k] = values[i]
 	}
