@@ -15,7 +15,9 @@
 // limitations under the License.
 
 #include "storage/FieldData.h"
+#include "arrow/array/array_binary.h"
 #include "common/Json.h"
+#include "simdjson/padded_string.h"
 
 namespace milvus::storage {
 
