@@ -79,7 +79,7 @@ minio:
   iamEndpoint:
   # Log level for aws sdk log. 
   # Supported level:  off, fatal, error, warn, info, debug, trace
-  logLevel: error
+  logLevel: fatal
   # Cloud data center region
   region: ""
   # Cloud whether use virtual host bucket mode
