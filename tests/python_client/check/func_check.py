@@ -449,6 +449,7 @@ class ResponseChecker:
                 assert len(res) <= check_items["limit"]
         assert len(pk_list) == len(set(pk_list))
         if check_items.get("count", None):
+            log.info(len(pk_list))
             assert len(pk_list) == check_items["count"]
         if check_items.get("exp_ids", None):
             assert pk_list == check_items["exp_ids"]

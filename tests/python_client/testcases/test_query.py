@@ -672,7 +672,7 @@ class TestQueryParams(TestcaseBase):
         # 3. query
         collection_w.load()
         # test for int
-        _id = random.randint(0, ct.default_nb)
+        _id = random.randint(limit, ct.default_nb - limit)
         ids = [i for i in range(_id, _id + limit)]
         expression = f"{expr_prefix}({json_field}['listInt'], {ids})"
         res = collection_w.query(expression)[0]
@@ -736,7 +736,7 @@ class TestQueryParams(TestcaseBase):
         collection_w.load()
 
         # test for int
-        _id = random.randint(0, ct.default_nb)
+        _id = random.randint(limit, ct.default_nb - limit)
         ids = [i for i in range(_id, _id + limit)]
         expression = f"{expr_prefix}(listInt, {ids})"
         res = collection_w.query(expression)[0]
@@ -2200,6 +2200,7 @@ class TestQueryOperation(TestcaseBase):
                            check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("not support default_value now")
     def test_query_using_all_types_of_default_value(self):
         """
         target: test create collection with default_value
@@ -3311,6 +3312,21 @@ class TestQueryIterator(TestcaseBase):
                                     check_items={"count": ct.default_nb,
                                                  "batch_size": batch_size})
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_iterator_using_default_batch_size(self):
+        """
+        target: test query iterator normal
+        method: 1. query iterator
+                2. check the result, expect pk
+        expected: query successfully
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, True)[0]
+        # 2. query iterator
+        collection_w.query_iterator(check_task=CheckTasks.check_query_iterator,
+                                    check_items={"count": ct.default_nb,
+                                                 "batch_size": ct.default_batch_size})
+
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("offset", [500, 1000, 1777])
     def test_query_iterator_with_offset(self, offset):
@@ -3321,7 +3337,7 @@ class TestQueryIterator(TestcaseBase):
         expected: query successfully
         """
         # 1. initialize with data
-        batch_size = 100
+        batch_size = 300
         collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
         collection_w.create_index(ct.default_float_vec_field_name, {"metric_type": "L2"})
         collection_w.load()
@@ -3334,7 +3350,7 @@ class TestQueryIterator(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("batch_size", [10, 100, 777, 2000])
-    def test_query_iterator_with_different_limit(self, batch_size):
+    def test_query_iterator_with_different_batch_size(self, batch_size):
         """
         target: test query iterator normal
         method: 1. query iterator
@@ -3348,14 +3364,33 @@ class TestQueryIterator(TestcaseBase):
         collection_w.load()
         # 2. search iterator
         expr = "int64 >= 0"
-        collection_w.query_iterator(batch_size, expr=expr, offset=offset,
+        collection_w.query_iterator(batch_size=batch_size, expr=expr, offset=offset,
                                     check_task=CheckTasks.check_query_iterator,
                                     check_items={"count": ct.default_nb - offset,
                                                  "batch_size": batch_size})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip("issue #26397")
-    def test_query_iterator_invalid_limit_offset(self):
+    @pytest.mark.skip("issue #26767")
+    @pytest.mark.parametrize("offset", [0, 10, 100, 1000])
+    @pytest.mark.parametrize("limit", [0, 100, 1500, 2000, 10000])
+    def test_query_iterator_with_different_limit(self, limit, offset):
+        """
+        target: test query iterator normal
+        method: 1. query iterator
+                2. check the result, expect pk
+        expected: query successfully
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, True)[0]
+        # 2. query iterator
+        Count = limit - offset if limit <= ct.default_nb else ct.default_nb - offset
+        collection_w.query_iterator(limit=limit, expr="", offset=offset,
+                                    check_task=CheckTasks.check_query_iterator,
+                                    check_items={"count": max(Count, 0),
+                                                 "batch_size": ct.default_batch_size})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_query_iterator_invalid_batch_size(self):
         """
         target: test query iterator invalid limit and offset
         method: query iterator using invalid limit and offset
@@ -3366,8 +3401,8 @@ class TestQueryIterator(TestcaseBase):
         collection_w = self.init_collection_general(prefix, True, nb=nb)[0]
         # 2. search iterator
         expr = "int64 >= 0"
-        error = {"err_code": 1, "err_msg": "invalid max query result window, limit [-1] is invalid, should be greater than 0"}
-        collection_w.query_iterator(-1, expr=expr, check_task=CheckTasks.err_res, check_items=error)
+        error = {"err_code": 1, "err_msg": "batch size cannot be less than zero"}
+        collection_w.query_iterator(batch_size=-1, expr=expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("batch_size", [100, 500])
@@ -3382,7 +3417,7 @@ class TestQueryIterator(TestcaseBase):
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, auto_id=auto_id)[0:4]
 
         # 2. query with limit
-        collection_w.query_iterator(batch_size,
+        collection_w.query_iterator(batch_size=batch_size,
                                     check_task=CheckTasks.check_query_iterator,
                                     check_items={"batch_size": batch_size,
                                                  "count": ct.default_nb,

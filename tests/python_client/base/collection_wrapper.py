@@ -207,16 +207,17 @@ class ApiCollectionWrapper:
         return res, check_result
 
     @trace()
-    def query_iterator(self, batch_size, limit=-1, expr=None, output_fields=None, partition_names=None, timeout=None, check_task=None,
-                       check_items=None, **kwargs):
+    def query_iterator(self, batch_size=1000, limit=-1, expr=None, output_fields=None, partition_names=None, timeout=None,
+                       check_task=None, check_items=None, **kwargs):
         # time.sleep(5)
         timeout = TIMEOUT if timeout is None else timeout
 
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([self.collection.query_iterator, batch_size, limit, expr, output_fields, partition_names, timeout], **kwargs)
+        res, check = api_request([self.collection.query_iterator, batch_size, limit, expr, output_fields, partition_names,
+                                  timeout], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,
-                                       expression=expr, partition_names=partition_names,
-                                       output_fields=output_fields,
+                                       batch_size=batch_size, limit=limit, expression=expr,
+                                       output_fields=output_fields, partition_names=partition_names,
                                        timeout=timeout, **kwargs).run()
         return res, check_result
 

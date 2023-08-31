@@ -635,7 +635,7 @@ class TestPartitionOperations(TestcaseBase):
             assert collection_w.has_partition(partition_name)[0]
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="skip temporarily for debug")
+    # @pytest.mark.skip(reason="skip temporarily for debug")
     def test_partition_maximum_partitions(self):
         """
         target: verify create maximum partitions
@@ -661,6 +661,7 @@ class TestPartitionOperations(TestcaseBase):
         for t in threads:
             t.join()
         p_name = cf.gen_unique_str()
+        log.info(f"partitions: {len(collection_w.partitions)}")
         self.partition_wrap.init_partition(
             collection_w.collection, p_name,
             check_task=CheckTasks.err_res,

@@ -1220,10 +1220,8 @@ class TestCollectionSearch(TestcaseBase):
     def _async(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=["JACCARD", "HAMMING", "TANIMOTO"])
+    @pytest.fixture(scope="function", params=["JACCARD", "HAMMING"])
     def metrics(self, request):
-        if request.param == "TANIMOTO":
-            pytest.skip("TANIMOTO not supported now")
         yield request.param
 
     @pytest.fixture(scope="function", params=[False, True])
@@ -3992,6 +3990,7 @@ class TestCollectionSearch(TestcaseBase):
         assert [res1[i].ids for i in range(nq)] == [res2[i].ids for i in range(nq)]
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("not support default_value now")
     def test_search_using_all_types_of_default_value(self, auto_id):
         """
         target: test create collection with default_value
@@ -8258,7 +8257,7 @@ class TestCollectionSearchJSON(TestcaseBase):
     def _async(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=["JACCARD", "HAMMING", "TANIMOTO"])
+    @pytest.fixture(scope="function", params=["JACCARD", "HAMMING"])
     def metrics(self, request):
         yield request.param
 
