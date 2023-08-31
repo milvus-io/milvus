@@ -859,10 +859,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 }
 
 // --------------------- error code --------------------- //
-func code(code int32) int32 {
-	return code & merr.RootReasonCodeMask
-}
 
 func Code(err error) int32 {
-	return code(merr.Code(err))
+	return merr.Code(err)
 }

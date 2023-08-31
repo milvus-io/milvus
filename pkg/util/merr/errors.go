@@ -19,27 +19,12 @@ package merr
 import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const (
-	rootCoordBits = (iota + 1) << 16
-	dataCoordBits
-	queryCoordBits
-	dataNodeBits
-	queryNodeBits
-	indexNodeBits
-	proxyBits
-	standaloneBits
-	embededBits
-
-	retriableFlag      = 1 << 20
-	RootReasonCodeMask = (1 << 16) - 1
-
-	CanceledCode int32 = 10000
-	TimeoutCode  int32 = 10001
+	retriableFlag       = 1 << 16
+	CanceledCode  int32 = 10000
+	TimeoutCode   int32 = 10001
 )
 
 // Define leaf errors here,
@@ -143,30 +128,6 @@ var (
 	errUnexpected = newMilvusError("unexpected error", (1<<16)-1, false)
 )
 
-func maskComponentBits(code int32) int32 {
-	switch paramtable.GetRole() {
-	case typeutil.RootCoordRole:
-		return code | rootCoordBits
-	case typeutil.DataCoordRole:
-		return code | dataCoordBits
-	case typeutil.QueryCoordRole:
-		return code | queryCoordBits
-	case typeutil.DataNodeRole:
-		return code | dataNodeBits
-	case typeutil.QueryNodeRole:
-		return code | queryNodeBits
-	case typeutil.IndexNodeRole:
-		return code | indexNodeBits
-	case typeutil.ProxyRole:
-		return code | proxyBits
-	case typeutil.StandaloneRole:
-		return code | standaloneBits
-	case typeutil.EmbeddedRole:
-		return code | embededBits
-	}
-	return code
-}
-
 type milvusError struct {
 	msg     string
 	errCode int32
@@ -183,7 +144,7 @@ func newMilvusError(msg string, code int32, retriable bool) milvusError {
 }
 
 func (e milvusError) code() int32 {
-	return maskComponentBits(e.errCode)
+	return e.errCode
 }
 
 func (e milvusError) Error() string {
