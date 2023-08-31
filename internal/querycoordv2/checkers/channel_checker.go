@@ -59,13 +59,22 @@ func (c *ChannelChecker) Description() string {
 	return "DmChannelChecker checks the lack of DmChannels, or some DmChannels are redundant"
 }
 
+func (c *ChannelChecker) readyToCheck(collectionID int64) bool {
+	metaExist := (c.meta.GetCollection(collectionID) != nil)
+	targetExist := c.targetMgr.IsNextTargetExist(collectionID) || c.targetMgr.IsCurrentTargetExist(collectionID)
+
+	return metaExist && targetExist
+}
+
 func (c *ChannelChecker) Check(ctx context.Context) []task.Task {
 	collectionIDs := c.meta.CollectionManager.GetAll()
 	tasks := make([]task.Task, 0)
 	for _, cid := range collectionIDs {
-		replicas := c.meta.ReplicaManager.GetByCollection(cid)
-		for _, r := range replicas {
-			tasks = append(tasks, c.checkReplica(ctx, r)...)
+		if c.readyToCheck(cid) {
+			replicas := c.meta.ReplicaManager.GetByCollection(cid)
+			for _, r := range replicas {
+				tasks = append(tasks, c.checkReplica(ctx, r)...)
+			}
 		}
 	}
 

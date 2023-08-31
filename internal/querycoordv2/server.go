@@ -28,7 +28,6 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -407,11 +406,9 @@ func (s *Server) startQueryCoord() error {
 	go s.handleNodeUpLoop()
 	go s.watchNodes(revision)
 
-	log.Info("start recovering dist and target")
-	err = s.recover()
-	if err != nil {
-		return err
-	}
+	// Recover dist, to avoid generate too much task when dist not ready after restart
+	s.distController.SyncAll(s.ctx)
+
 	s.startServerLoop()
 	s.afterStart()
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
@@ -571,39 +568,6 @@ func (s *Server) SetDataCoord(dataCoord types.DataCoord) error {
 
 func (s *Server) SetQueryNodeCreator(f func(ctx context.Context, addr string, nodeID int64) (types.QueryNode, error)) {
 	s.queryNodeCreator = f
-}
-
-func (s *Server) recover() error {
-	// Recover target managers
-	group, ctx := errgroup.WithContext(s.ctx)
-	for _, collection := range s.meta.GetAll() {
-		collection := collection
-		group.Go(func() error {
-			return s.recoverCollectionTargets(ctx, collection)
-		})
-	}
-	err := group.Wait()
-	if err != nil {
-		return err
-	}
-
-	// Recover dist
-	s.distController.SyncAll(s.ctx)
-
-	return nil
-}
-
-func (s *Server) recoverCollectionTargets(ctx context.Context, collection int64) error {
-	err := s.targetMgr.UpdateCollectionNextTarget(collection)
-	if err != nil {
-		s.meta.CollectionManager.RemoveCollection(collection)
-		s.meta.ReplicaManager.RemoveCollection(collection)
-		log.Error("failed to recover collection due to update next target failed",
-			zap.Int64("collectionID", collection),
-			zap.Error(err),
-		)
-	}
-	return nil
 }
 
 func (s *Server) watchNodes(revision int64) {

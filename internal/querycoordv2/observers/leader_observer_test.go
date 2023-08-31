@@ -212,6 +212,7 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncLoadedSegments() {
 		channels, segments, nil)
 	observer.target.UpdateCollectionNextTarget(int64(1))
 	observer.target.UpdateCollectionCurrentTarget(1)
+	observer.target.UpdateCollectionNextTarget(int64(1))
 	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 2, 1, "test-insert-channel"),
 		utils.CreateTestSegment(1, 1, 2, 2, 1, "test-insert-channel"))
 	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
@@ -407,11 +408,25 @@ func (suite *LeaderObserverTestSuite) TestSyncRemovedSegments() {
 	observer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 	observer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
 
-	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	observer.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{3: 2}, map[int64]*meta.Segment{}))
-
 	schema := utils.CreateTestSchema()
 	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, int64(1)).Return(schema, nil)
+
+	channels := []*datapb.VchannelInfo{
+		{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+	}
+
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
+		channels, nil, nil)
+	observer.target.UpdateCollectionNextTarget(int64(1))
+	observer.target.UpdateCollectionCurrentTarget(1)
+
+	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
+	view := utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{3: 2}, map[int64]*meta.Segment{})
+	view.TargetVersion = observer.target.GetCollectionTargetVersion(1, meta.CurrentTarget)
+	observer.dist.LeaderViewManager.Update(2, view)
 
 	expectReqeustFunc := func(version int64) *querypb.SyncDistributionRequest {
 		return &querypb.SyncDistributionRequest{

@@ -146,6 +146,13 @@ func (ob *CollectionObserver) observeTimeout() {
 	}
 }
 
+func (ob *CollectionObserver) readyToObserve(collectionID int64) bool {
+	metaExist := (ob.meta.GetCollection(collectionID) != nil)
+	targetExist := ob.targetMgr.IsNextTargetExist(collectionID) || ob.targetMgr.IsCurrentTargetExist(collectionID)
+
+	return metaExist && targetExist
+}
+
 func (ob *CollectionObserver) observeLoadStatus() {
 	partitions := ob.meta.CollectionManager.GetAllPartitions()
 	if len(partitions) > 0 {
@@ -156,9 +163,11 @@ func (ob *CollectionObserver) observeLoadStatus() {
 		if partition.LoadPercentage == 100 {
 			continue
 		}
-		replicaNum := ob.meta.GetReplicaNumber(partition.GetCollectionID())
-		ob.observePartitionLoadStatus(partition, replicaNum)
-		loading = true
+		if ob.readyToObserve(partition.CollectionID) {
+			replicaNum := ob.meta.GetReplicaNumber(partition.GetCollectionID())
+			ob.observePartitionLoadStatus(partition, replicaNum)
+			loading = true
+		}
 	}
 	// trigger check logic when loading collections/partitions
 	if loading {
