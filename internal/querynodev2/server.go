@@ -493,10 +493,10 @@ func (node *QueryNode) initHook() error {
 	if !ok {
 		return fmt.Errorf("fail to convert the `Hook` interface")
 	}
-	if err = hoo.Init(paramtable.Get().HookCfg.QueryNodePluginConfig.GetValue()); err != nil {
+	if err = hoo.Init(paramtable.Get().AutoIndexConfig.AutoIndexSearchConfig.GetValue()); err != nil {
 		return fmt.Errorf("fail to init configs for the hook, error: %s", err.Error())
 	}
-	if err = hoo.InitTuningConfig(paramtable.Get().HookCfg.QueryNodePluginTuningConfig.GetValue()); err != nil {
+	if err = hoo.InitTuningConfig(paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.GetValue()); err != nil {
 		return fmt.Errorf("fail to init tuning configs for the hook, error: %s", err.Error())
 	}
 
@@ -515,8 +515,8 @@ func (node *QueryNode) handleQueryHookEvent() {
 		}
 	}
 	onEvent2 := func(event *config.Event) {
-		if node.queryHook != nil && strings.HasPrefix(event.Key, paramtable.Get().HookCfg.QueryNodePluginTuningConfig.KeyPrefix) {
-			realKey := strings.TrimPrefix(event.Key, paramtable.Get().HookCfg.QueryNodePluginTuningConfig.KeyPrefix)
+		if node.queryHook != nil && strings.HasPrefix(event.Key, paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.KeyPrefix) {
+			realKey := strings.TrimPrefix(event.Key, paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.KeyPrefix)
 			if event.EventType == config.CreateType || event.EventType == config.UpdateType {
 				if err := node.queryHook.InitTuningConfig(map[string]string{realKey: event.Value}); err != nil {
 					log.Warn("failed to refresh hook tuning config", zap.Error(err))
@@ -528,7 +528,7 @@ func (node *QueryNode) handleQueryHookEvent() {
 			}
 		}
 	}
-	paramtable.Get().Watch(paramtable.Get().HookCfg.QueryNodePluginConfig.Key, config.NewHandler("queryHook", onEvent))
+	paramtable.Get().Watch(paramtable.Get().AutoIndexConfig.AutoIndexSearchConfig.Key, config.NewHandler("queryHook", onEvent))
 
-	paramtable.Get().WatchKeyPrefix(paramtable.Get().HookCfg.QueryNodePluginTuningConfig.KeyPrefix, config.NewHandler("queryHook2", onEvent2))
+	paramtable.Get().WatchKeyPrefix(paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.KeyPrefix, config.NewHandler("queryHook2", onEvent2))
 }

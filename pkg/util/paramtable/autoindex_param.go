@@ -31,10 +31,12 @@ import (
 type autoIndexConfig struct {
 	Enable ParamItem `refreshable:"true"`
 
-	IndexParams       ParamItem `refreshable:"true"`
-	ExtraParams       ParamItem `refreshable:"true"`
-	IndexType         ParamItem `refreshable:"true"`
-	AutoIndexTypeName ParamItem `refreshable:"true"`
+	IndexParams           ParamItem  `refreshable:"true"`
+	ExtraParams           ParamItem  `refreshable:"true"`
+	IndexType             ParamItem  `refreshable:"true"`
+	AutoIndexTypeName     ParamItem  `refreshable:"true"`
+	AutoIndexSearchConfig ParamItem  `refreshable:"true"`
+	AutoIndexTuningConfig ParamGroup `refreshable:"true"`
 }
 
 func (p *autoIndexConfig) init(base *BaseTable) {
@@ -76,6 +78,18 @@ func (p *autoIndexConfig) init(base *BaseTable) {
 		Version: "2.2.0",
 	}
 	p.AutoIndexTypeName.Init(base.mgr)
+
+	p.AutoIndexSearchConfig = ParamItem{
+		Key:     "autoindex.params.search",
+		Version: "2.2.0",
+	}
+	p.AutoIndexSearchConfig.Init(base.mgr)
+
+	p.AutoIndexTuningConfig = ParamGroup{
+		KeyPrefix: "autoindex.params.tuning.",
+		Version:   "2.3.0",
+	}
+	p.AutoIndexTuningConfig.Init(base.mgr)
 
 	p.panicIfNotValidAndSetDefaultMetricType(base.mgr)
 }

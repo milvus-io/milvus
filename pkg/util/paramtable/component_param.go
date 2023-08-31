@@ -118,7 +118,7 @@ func (p *ComponentParam) init() {
 	p.IndexNodeCfg.init(&p.BaseTable)
 	p.HTTPCfg.init(&p.BaseTable)
 	p.LogCfg.init(&p.BaseTable)
-	p.HookCfg.init(&p.BaseTable)
+	p.HookCfg.init()
 
 	p.RootCoordGrpcServerCfg.Init("rootCoord", &p.BaseTable)
 	p.ProxyGrpcServerCfg.Init("proxy", &p.BaseTable)
