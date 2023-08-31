@@ -1,9 +1,5 @@
 grammar Plan;
 
-@lexer::members {
-    var str = ""
-}
-
 expr:
 	IntegerConstant											                     # Integer
 	| FloatingConstant										                     # Floating
@@ -96,45 +92,16 @@ FloatingConstant:
 
 Identifier: Nondigit (Nondigit | Digit)* | '$meta';
 
-//StringLiteral: EncodingPrefix? ('"' DoubleSCharSequence? '"' | '\'' SingleSCharSequence? '\'');
-StringLiteral: EncodingPrefix?
-                '"'             {str += "\""}
-                (   '\\'
-                    (
-                    '\''        {str += "'" }
-                    |   ~[']    {str += ("\\" + string(l.GetInputStream().LA(-1)))}
-                    )
-                |   ~["\\]      {str += string(l.GetInputStream().LA(-1))}
-                )*
-                '"' {
-                        str += "\""
-                        l.SetText(str)
-                        str = ""
-                    }
-               |
-               '\''             {str += "'"}
-                (   '\\'
-                    (
-                    '\''        {str += "'" }
-                    |   ~[']    {str += ("\\" + string(l.GetInputStream().LA(-1)))}
-                    )
-                |   '"'         {str += "\\\"" }
-                |   ~['"\\]     {str += string(l.GetInputStream().LA(-1))}
-                )*
-                '\'' {
-                        str += "'"
-                        l.SetText(str)
-                        str = ""
-                     };
+StringLiteral: EncodingPrefix? ('"' DoubleSCharSequence? '"' | '\'' SingleSCharSequence? '\'');
 JSONIdentifier: Identifier('[' (StringLiteral | DecimalConstant) ']')+;
 
 fragment EncodingPrefix: 'u8' | 'u' | 'U' | 'L';
 
-//fragment DoubleSCharSequence: DoubleSChar+;
-//fragment SingleSCharSequence: SingleSChar+;
-//
-//fragment DoubleSChar: ~["\\\r\n] | EscapeSequence | '\\\n' | '\\\r\n';
-//fragment SingleSChar: ~['\\\r\n] | EscapeSequence | '\\\n' | '\\\r\n';
+fragment DoubleSCharSequence: DoubleSChar+;
+fragment SingleSCharSequence: SingleSChar+;
+
+fragment DoubleSChar: ~["\\\r\n] | EscapeSequence | '\\\n' | '\\\r\n';
+fragment SingleSChar: ~['\\\r\n] | EscapeSequence | '\\\n' | '\\\r\n';
 fragment Nondigit: [a-zA-Z_];
 fragment Digit: [0-9];
 fragment BinaryConstant: '0' [bB] [0-1]+;

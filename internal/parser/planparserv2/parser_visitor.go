@@ -130,11 +130,7 @@ func (v *ParserVisitor) VisitFloating(ctx *parser.FloatingContext) interface{} {
 
 // VisitString translates expr to GenericValue.
 func (v *ParserVisitor) VisitString(ctx *parser.StringContext) interface{} {
-	literal := ctx.StringLiteral().GetText()
-	if strings.HasPrefix(literal, "'") && strings.HasSuffix(literal, "'") {
-		literal = "\"" + literal[1:len(literal)-1] + "\""
-	}
-	pattern, err := strconv.Unquote(literal)
+	pattern, err := convertEscapeSingle(ctx.StringLiteral().GetText())
 	if err != nil {
 		return err
 	}
@@ -445,12 +441,7 @@ func (v *ParserVisitor) VisitLike(ctx *parser.LikeContext) interface{} {
 	if column == nil {
 		return fmt.Errorf("like operation on complicated expr is unsupported")
 	}
-
-	literal := ctx.StringLiteral().GetText()
-	if strings.HasPrefix(literal, "'") && strings.HasSuffix(literal, "'") {
-		literal = "\"" + literal[1:len(literal)-1] + "\""
-	}
-	pattern, err := strconv.Unquote(literal)
+	pattern, err := convertEscapeSingle(ctx.StringLiteral().GetText())
 	if err != nil {
 		return err
 	}

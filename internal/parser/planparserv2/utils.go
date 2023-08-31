@@ -2,6 +2,7 @@ package planparserv2
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -380,4 +381,46 @@ func IsAlwaysTruePlan(plan *planpb.PlanNode) bool {
 
 func canBeExecuted(e *ExprWithType) bool {
 	return typeutil.IsBoolType(e.dataType) && !e.nodeDependent
+}
+
+func convertEscapeSingle(literal string) (string, error) {
+	needReplaceIndex := make([]int, 0)
+	escapeChCount := 0
+	stringLength := len(literal)
+	newStringLength := 2
+	for i := 1; i < stringLength-1; i++ {
+		newStringLength++
+		if literal[i] == '\\' {
+			escapeChCount++
+			continue
+		}
+		if literal[i] == '"' && escapeChCount%2 == 0 {
+			needReplaceIndex = append(needReplaceIndex, i)
+			newStringLength++
+		}
+		if literal[i] == '\'' && escapeChCount%2 != 0 {
+			needReplaceIndex = append(needReplaceIndex, i)
+			newStringLength--
+		}
+		escapeChCount = 0
+	}
+	var b strings.Builder
+	b.Grow(newStringLength)
+	b.WriteString(`"`)
+	needReplaceIndexLength := len(needReplaceIndex)
+	start, end := 1, 0
+	for i := 0; i < needReplaceIndexLength; i++ {
+		end = needReplaceIndex[i]
+		if literal[end] == '"' {
+			b.WriteString(literal[start:end])
+			b.WriteString(`\"`)
+		} else {
+			b.WriteString(literal[start : end-1])
+			b.WriteString(`'`)
+		}
+		start = end
+	}
+	b.WriteString(literal[end+1 : len(literal)-1])
+	b.WriteString(`"`)
+	return strconv.Unquote(b.String())
 }

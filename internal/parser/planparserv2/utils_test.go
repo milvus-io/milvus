@@ -174,3 +174,38 @@ func Test_canBeExecuted(t *testing.T) {
 		})
 	}
 }
+
+func Test_convertEscapeSingle(t *testing.T) {
+	type testCases struct {
+		input    string
+		expected string
+	}
+	normalCases := []testCases{
+		{`"\'"`, `'`},
+		{`"\\'"`, `\'`},
+		{`"\\\'"`, `\'`},
+		{`"\\\\'"`, `\\'`},
+		{`"\\\\\'"`, `\\'`},
+		{`'"'`, `"`},
+		{`'\"'`, `"`},
+		{`'\\"'`, `\"`},
+		{`'\\\"'`, `\"`},
+		{`'\\\\"'`, `\\"`},
+		{`'\\\\\"'`, `\\"`},
+	}
+	for _, c := range normalCases {
+		actual, err := convertEscapeSingle(c.input)
+		assert.NoError(t, err)
+		assert.Equal(t, c.expected, actual)
+	}
+
+	unNormalCases := []testCases{
+		{`"\423"`, ``},
+		{`'\378'`, ``},
+	}
+	for _, c := range unNormalCases {
+		actual, err := convertEscapeSingle(c.input)
+		assert.Error(t, err)
+		assert.Equal(t, c.expected, actual)
+	}
+}
