@@ -30,4 +30,10 @@ const (
 
 	// JACCARD represents jaccard distance
 	JACCARD MetricType = "JACCARD"
+
+	// SUBSTRUCTURE represents substructure distance
+	SUBSTRUCTURE MetricType = "SUBSTRUCTURE"
+
+	// SUPERSTRUCTURE represents superstructure distance
+	SUPERSTRUCTURE MetricType = "SUPERSTRUCTURE"
 )
