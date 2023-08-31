@@ -730,7 +730,7 @@ def gen_npy_files_for_bulk_insert(data, schema, data_dir):
         if len(d) > 0:
             nb = len(d)
     dim = get_dim_by_schema(schema)
-    vec_filed_name = get_float_vec_field_name(schema)
+    vec_field_name = get_float_vec_field_name(schema)
     fields_name = [field.name for field in schema.fields]
     files = []
     uuid_str = uuid.uuid4()
@@ -741,7 +741,7 @@ def gen_npy_files_for_bulk_insert(data, schema, data_dir):
         #  mkdir for npy file
         Path(data_source).parent.mkdir(parents=True, exist_ok=True)
         log.info(f"save file {data_source}")
-        if vec_filed_name in file:
+        if vec_field_name in file:
             log.info(f"generate {nb} vectors with dim {dim} for {data_source}")
             with NpyAppendArray(data_source, "wb") as npaa:
                 for j in range(nb):
