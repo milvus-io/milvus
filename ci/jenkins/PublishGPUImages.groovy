@@ -44,12 +44,12 @@ pipeline {
                             sh """
                                 export MILVUS_IMAGE_REPO="${env.TARGET_REPO}/milvus"
                                 export MILVUS_HARBOR_IMAGE_REPO="${env.HARBOR_REPO}/milvus/milvus"
-                                export MILVUS_IMAGE_TAG="${env.BRANCH_NAME}-${date}-${gitShortCommit}"
+                                export MILVUS_IMAGE_TAG="${env.BRANCH_NAME}-${date}-${gitShortCommit}-gpu"
                                 build/build_image_gpu.sh
                                 docker push \${MILVUS_IMAGE_REPO}:\${MILVUS_IMAGE_TAG}
-                                docker tag \${MILVUS_IMAGE_REPO}:\${MILVUS_IMAGE_TAG} \${MILVUS_IMAGE_REPO}:${env.BRANCH_NAME}-latest
+                                docker tag \${MILVUS_IMAGE_REPO}:\${MILVUS_IMAGE_TAG} \${MILVUS_IMAGE_REPO}:${env.BRANCH_NAME}-latest-gpu
                                 docker tag \${MILVUS_IMAGE_REPO}:\${MILVUS_IMAGE_TAG} \${MILVUS_HARBOR_IMAGE_REPO}:\${MILVUS_IMAGE_TAG}
-                                docker push \${MILVUS_IMAGE_REPO}:${env.BRANCH_NAME}-latest
+                                docker push \${MILVUS_IMAGE_REPO}:${env.BRANCH_NAME}-latest-gpu
                                 docker logout
                             """
                         }
@@ -58,7 +58,7 @@ pipeline {
                             sh "docker login ${env.HARBOR_REPO} -u '${CI_REGISTRY_USERNAME}' -p '${CI_REGISTRY_PASSWORD}'"
                             sh """
                                 export MILVUS_HARBOR_IMAGE_REPO="${env.HARBOR_REPO}/milvus/milvus"
-                                export MILVUS_IMAGE_TAG="${env.BRANCH_NAME}-${date}-${gitShortCommit}"
+                                export MILVUS_IMAGE_TAG="${env.BRANCH_NAME}-${date}-${gitShortCommit}-gpu"
                                 docker push \${MILVUS_HARBOR_IMAGE_REPO}:\${MILVUS_IMAGE_TAG}
                                 docker logout
                             """
