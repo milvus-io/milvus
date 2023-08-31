@@ -98,9 +98,8 @@ func runComponent[T component](ctx context.Context,
 	creator func(context.Context, dependency.Factory) (T, error),
 	metricRegister func(*prometheus.Registry)) T {
 	var role T
-	var wg sync.WaitGroup
 
-	wg.Add(1)
+	sign := make(chan struct{})
 	go func() {
 		if extraInit != nil {
 			extraInit()
@@ -116,12 +115,13 @@ func runComponent[T component](ctx context.Context,
 		if err != nil {
 			panic(err)
 		}
-		wg.Done()
+		close(sign)
 		if err := role.Run(); err != nil {
 			panic(err)
 		}
 	}()
-	wg.Wait()
+
+	<-sign
 
 	healthz.Register(role)
 	metricRegister(Registry)
@@ -138,6 +138,17 @@ type MilvusRoles struct {
 	EnableDataNode   bool `env:"ENABLE_DATA_NODE"`
 	EnableIndexCoord bool `env:"ENABLE_INDEX_COORD"`
 	EnableIndexNode  bool `env:"ENABLE_INDEX_NODE"`
+
+	closed chan struct{}
+	once   sync.Once
+}
+
+// NewMilvusRoles creates a new MilvusRoles with private fields initialized.
+func NewMilvusRoles() *MilvusRoles {
+	mr := &MilvusRoles{
+		closed: make(chan struct{}),
+	}
+	return mr
 }
 
 // EnvValue not used now.
@@ -223,14 +234,48 @@ func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool, alias st
 		metrics.RegisterIndexNode)
 }
 
+func (mr *MilvusRoles) handleSignals() func() {
+	sign := make(chan struct{})
+	done := make(chan struct{})
+
+	sc := make(chan os.Signal, 1)
+	signal.Notify(sc,
+		syscall.SIGHUP,
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		syscall.SIGQUIT)
+
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-sign:
+				log.Info("All cleanup done, handleSignals goroutine quit")
+				return
+			case sig := <-sc:
+				log.Warn("Get signal to exit", zap.String("signal", sig.String()))
+				mr.once.Do(func() {
+					close(mr.closed)
+				})
+			}
+		}
+	}()
+	return func() {
+		close(sign)
+		<-done
+	}
+}
+
 // Run Milvus components.
 func (mr *MilvusRoles) Run(local bool, alias string) {
+	// start signal handler, defer close func
+	closeFn := mr.handleSignals()
+	defer closeFn()
+
 	log.Info("starting running Milvus components")
 	ctx, cancel := context.WithCancel(context.Background())
-	defer func() {
-		// some deferred Stop has race with context cancel
-		cancel()
-	}()
+	defer cancel()
+
 	mr.printLDPreLoad()
 
 	// only standalone enable localMsg
@@ -339,12 +384,5 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 
 	metrics.Register(Registry)
 
-	sc := make(chan os.Signal, 1)
-	signal.Notify(sc,
-		syscall.SIGHUP,
-		syscall.SIGINT,
-		syscall.SIGTERM,
-		syscall.SIGQUIT)
-	sig := <-sc
-	log.Error("Get signal to exit\n", zap.String("signal", sig.String()))
+	<-mr.closed
 }
