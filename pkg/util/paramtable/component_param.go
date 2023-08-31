@@ -29,9 +29,6 @@ import (
 )
 
 const (
-	// DefaultRetentionDuration defines the default duration for retention which is 1 days in seconds.
-	DefaultRetentionDuration = 0
-
 	// DefaultIndexSliceSize defines the default slice size of index file when serializing.
 	DefaultIndexSliceSize                      = 16
 	DefaultGracefulTime                        = 5000 // ms
@@ -178,7 +175,6 @@ type commonConfig struct {
 
 	DefaultPartitionName ParamItem `refreshable:"false"`
 	DefaultIndexName     ParamItem `refreshable:"true"`
-	RetentionDuration    ParamItem `refreshable:"true"`
 	EntityExpirationTTL  ParamItem `refreshable:"true"`
 
 	IndexSliceSize                      ParamItem `refreshable:"false"`
@@ -355,15 +351,6 @@ func (p *commonConfig) init(base *BaseTable) {
 	}
 	p.DefaultIndexName.Init(base.mgr)
 
-	p.RetentionDuration = ParamItem{
-		Key:          "common.retentionDuration",
-		Version:      "2.0.0",
-		DefaultValue: strconv.Itoa(DefaultRetentionDuration),
-		Doc:          "time travel reserved time, insert/delete will not be cleaned in this period. disable it by default",
-		Export:       true,
-	}
-	p.RetentionDuration.Init(base.mgr)
-
 	p.EntityExpirationTTL = ParamItem{
 		Key:          "common.entityExpiration",
 		Version:      "2.1.0",
@@ -374,13 +361,9 @@ func (p *commonConfig) init(base *BaseTable) {
 				return "-1"
 			}
 
-			// make sure ttl is larger than retention duration to ensure time travel works
-			if ttl > p.RetentionDuration.GetAsInt() {
-				return strconv.Itoa(ttl)
-			}
-			return p.RetentionDuration.GetValue()
+			return strconv.Itoa(ttl)
 		},
-		Doc:    "Entity expiration in seconds, CAUTION make sure entityExpiration >= retentionDuration and -1 means never expire",
+		Doc:    "Entity expiration in seconds, CAUTION -1 means never expire",
 		Export: true,
 	}
 	p.EntityExpirationTTL.Init(base.mgr)

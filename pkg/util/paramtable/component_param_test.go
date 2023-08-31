@@ -40,9 +40,6 @@ func TestComponentParam(t *testing.T) {
 		assert.NotEqual(t, Params.DefaultIndexName.GetValue(), "")
 		t.Logf("default index name = %s", Params.DefaultIndexName.GetValue())
 
-		assert.Equal(t, Params.RetentionDuration.GetAsInt64(), int64(DefaultRetentionDuration))
-		t.Logf("default retention duration = %d", Params.RetentionDuration.GetAsInt64())
-
 		assert.Equal(t, Params.EntityExpirationTTL.GetAsInt64(), int64(-1))
 		t.Logf("default entity expiration = %d", Params.EntityExpirationTTL.GetAsInt64())
 

@@ -139,7 +139,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 	})
 
 	t.Run("Test mergeDeltalogs", func(t *testing.T) {
-		t.Run("One segment with timetravel", func(t *testing.T) {
+		t.Run("One segment", func(t *testing.T) {
 			invalidBlobs := map[UniqueID][]*Blob{
 				1: {},
 			}
@@ -171,13 +171,12 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			tests := []struct {
 				isvalid bool
 
-				dBlobs     map[UniqueID][]*Blob
-				timetravel Timestamp
+				dBlobs map[UniqueID][]*Blob
 
 				description string
 			}{
-				{false, invalidBlobs, 0, "invalid dBlobs"},
-				{true, validBlobs, 21000, "valid blobs"},
+				{false, invalidBlobs, "invalid dBlobs"},
+				{true, validBlobs, "valid blobs"},
 			}
 
 			for _, test := range tests {
@@ -185,29 +184,19 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 					done: make(chan struct{}, 1),
 				}
 				t.Run(test.description, func(t *testing.T) {
+					pk2ts, err := task.mergeDeltalogs(test.dBlobs)
 					if test.isvalid {
-						pk2ts, db, err := task.mergeDeltalogs(test.dBlobs, test.timetravel)
 						assert.NoError(t, err)
-						assert.Equal(t, 3, len(pk2ts))
-						assert.Equal(t, int64(3), db.GetEntriesNum())
-						assert.Equal(t, int64(3), db.delData.RowCount)
-						matchedPks := []primaryKey{newInt64PrimaryKey(1), newInt64PrimaryKey(4), newInt64PrimaryKey(5)}
-						assert.ElementsMatch(t, matchedPks, db.delData.Pks)
-						assert.ElementsMatch(t, []Timestamp{30000, 50000, 50000}, db.delData.Tss)
-
+						assert.Equal(t, 5, len(pk2ts))
 					} else {
-
-						pk2ts, db, err := task.mergeDeltalogs(test.dBlobs, test.timetravel)
 						assert.Error(t, err)
 						assert.Nil(t, pk2ts)
-						assert.Nil(t, db)
 					}
 				})
-
 			}
 		})
 
-		t.Run("Multiple segments with timetravel", func(t *testing.T) {
+		t.Run("Multiple segments", func(t *testing.T) {
 			tests := []struct {
 				segIDA  UniqueID
 				dataApk []UniqueID
@@ -221,22 +210,20 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 				dataCpk []UniqueID
 				dataCts []Timestamp
 
-				timetravel    Timestamp
 				expectedpk2ts int
-				expecteddb    int
 				description   string
 			}{
 				{
 					0, nil, nil,
 					100, []UniqueID{1, 2, 3}, []Timestamp{20000, 30000, 20005},
 					200, []UniqueID{4, 5, 6}, []Timestamp{50000, 50001, 50002},
-					40000, 3, 3, "2 segments with timetravel 40000",
+					6, "2 segments",
 				},
 				{
 					300, []UniqueID{10, 20}, []Timestamp{20001, 40001},
 					100, []UniqueID{1, 2, 3}, []Timestamp{20000, 30000, 20005},
 					200, []UniqueID{4, 5, 6}, []Timestamp{50000, 50001, 50002},
-					40000, 4, 4, "3 segments with timetravel 40000",
+					8, "3 segments",
 				},
 			}
 
@@ -262,10 +249,9 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 					task := &compactionTask{
 						done: make(chan struct{}, 1),
 					}
-					pk2ts, db, err := task.mergeDeltalogs(dBlobs, test.timetravel)
+					pk2ts, err := task.mergeDeltalogs(dBlobs)
 					assert.NoError(t, err)
 					assert.Equal(t, test.expectedpk2ts, len(pk2ts))
-					assert.Equal(t, test.expecteddb, int(db.GetEntriesNum()))
 				})
 			}
 		})
@@ -854,7 +840,6 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 				StartTime:        0,
 				TimeoutInSeconds: 10,
 				Type:             datapb.CompactionType_MergeCompaction,
-				Timetravel:       40000,
 				Channel:          "channelname",
 			}
 
@@ -870,12 +855,10 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			assert.NotEmpty(t, result.Field2StatslogPaths)
 
 			// New test, remove all the binlogs in memkv
-			//  Deltas in timetravel range
 			err = mockKv.RemoveWithPrefix("/")
 			require.NoError(t, err)
 			plan.PlanID++
 
-			plan.Timetravel = Timestamp(25000)
 			channel.addFlushedSegmentWithPKs(c.segID1, c.colID, c.parID, 2, c.iData1)
 			channel.addFlushedSegmentWithPKs(c.segID2, c.colID, c.parID, 2, c.iData2)
 			channel.removeSegments(19530)
@@ -889,31 +872,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 
 			assert.Equal(t, plan.GetPlanID(), result.GetPlanID())
 			assert.Equal(t, UniqueID(19530), result.GetSegmentID())
-			assert.Equal(t, int64(3), result.GetNumOfRows())
-			assert.NotEmpty(t, result.InsertLogs)
-			assert.NotEmpty(t, result.Field2StatslogPaths)
-
-			// New test, remove all the binlogs in memkv
-			//  Deltas in timetravel range
-			err = mockKv.RemoveWithPrefix("/")
-			require.NoError(t, err)
-			plan.PlanID++
-
-			plan.Timetravel = Timestamp(10000)
-			channel.addFlushedSegmentWithPKs(c.segID1, c.colID, c.parID, 2, c.iData1)
-			channel.addFlushedSegmentWithPKs(c.segID2, c.colID, c.parID, 2, c.iData2)
-			channel.removeSegments(19530)
-			require.True(t, channel.hasSegment(c.segID1, true))
-			require.True(t, channel.hasSegment(c.segID2, true))
-			require.False(t, channel.hasSegment(19530, true))
-
-			result, err = task.compact()
-			assert.NoError(t, err)
-			assert.NotNil(t, result)
-
-			assert.Equal(t, plan.GetPlanID(), result.GetPlanID())
-			assert.Equal(t, UniqueID(19530), result.GetSegmentID())
-			assert.Equal(t, int64(4), result.GetNumOfRows())
+			assert.Equal(t, int64(2), result.GetNumOfRows())
 			assert.NotEmpty(t, result.InsertLogs)
 			assert.NotEmpty(t, result.Field2StatslogPaths)
 
@@ -997,7 +956,6 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			StartTime:        0,
 			TimeoutInSeconds: 10,
 			Type:             datapb.CompactionType_MergeCompaction,
-			Timetravel:       40000,
 			Channel:          "channelname",
 		}
 

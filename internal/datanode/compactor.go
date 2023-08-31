@@ -19,7 +19,6 @@ package datanode
 import (
 	"context"
 	"fmt"
-	"math"
 	"path"
 	"strconv"
 	"strings"
@@ -151,59 +150,33 @@ func (t *compactionTask) getNumRows() (int64, error) {
 	return numRows, nil
 }
 
-func (t *compactionTask) mergeDeltalogs(dBlobs map[UniqueID][]*Blob, timetravelTs Timestamp) (
-	map[interface{}]Timestamp, *DelDataBuf, error) {
+func (t *compactionTask) mergeDeltalogs(dBlobs map[UniqueID][]*Blob) (map[interface{}]Timestamp, error) {
 	log := log.With(zap.Int64("planID", t.getPlanID()))
 	mergeStart := time.Now()
 	dCodec := storage.NewDeleteCodec()
 
-	var (
-		pk2ts = make(map[interface{}]Timestamp)
-		dbuff = &DelDataBuf{
-			delData: &DeleteData{
-				Pks: make([]primaryKey, 0),
-				Tss: make([]Timestamp, 0)},
-			Binlog: datapb.Binlog{
-				TimestampFrom: math.MaxUint64,
-				TimestampTo:   0,
-			},
-		}
-	)
+	var pk2ts = make(map[interface{}]Timestamp)
 
 	for _, blobs := range dBlobs {
 		_, _, dData, err := dCodec.Deserialize(blobs)
 		if err != nil {
 			log.Warn("merge deltalogs wrong", zap.Error(err))
-			return nil, nil, err
+			return nil, err
 		}
 
 		for i := int64(0); i < dData.RowCount; i++ {
 			pk := dData.Pks[i]
 			ts := dData.Tss[i]
 
-			if timetravelTs != Timestamp(0) && dData.Tss[i] <= timetravelTs {
-				pk2ts[pk.GetValue()] = ts
-				continue
-			}
-
-			dbuff.delData.Append(pk, ts)
-
-			if ts < dbuff.TimestampFrom {
-				dbuff.TimestampFrom = ts
-			}
-
-			if ts > dbuff.TimestampTo {
-				dbuff.TimestampTo = ts
-			}
+			pk2ts[pk.GetValue()] = ts
 		}
 	}
 
-	dbuff.accumulateEntriesNum(dbuff.delData.RowCount)
 	log.Info("mergeDeltalogs end",
 		zap.Int("number of deleted pks to compact in insert logs", len(pk2ts)),
 		zap.Duration("elapse", time.Since(mergeStart)))
 
-	return pk2ts, dbuff, nil
+	return pk2ts, nil
 }
 
 func (t *compactionTask) uploadRemainLog(
@@ -717,7 +690,7 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 		return nil, err
 	}
 
-	deltaPk2Ts, deltaBuf, err := t.mergeDeltalogs(dblobs, t.plan.GetTimetravel())
+	deltaPk2Ts, err := t.mergeDeltalogs(dblobs)
 	if err != nil {
 		return nil, err
 	}
@@ -728,29 +701,11 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 		return nil, err
 	}
 
-	uploadDeltaStart := time.Now()
-	deltaInfo, err := t.uploadDeltaLog(ctxTimeout, targetSegID, partID, deltaBuf.delData, meta)
-	if err != nil {
-		log.Warn("compact wrong", zap.Error(err))
-		return nil, err
-	}
-	log.Info("compact upload deltalog elapse", zap.Duration("elapse", time.Since(uploadDeltaStart)))
-
-	for _, fbl := range deltaInfo {
-		for _, deltaLogInfo := range fbl.GetBinlogs() {
-			deltaLogInfo.LogSize = deltaBuf.GetLogSize()
-			deltaLogInfo.TimestampFrom = deltaBuf.GetTimestampFrom()
-			deltaLogInfo.TimestampTo = deltaBuf.GetTimestampTo()
-			deltaLogInfo.EntriesNum = deltaBuf.GetEntriesNum()
-		}
-	}
-
 	pack := &datapb.CompactionResult{
 		PlanID:              t.plan.GetPlanID(),
 		SegmentID:           targetSegID,
 		InsertLogs:          inPaths,
 		Field2StatslogPaths: statsPaths,
-		Deltalogs:           deltaInfo,
 		NumOfRows:           numRows,
 		Channel:             t.plan.GetChannel(),
 	}
@@ -762,7 +717,7 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 		zap.Int64s("compactedFrom", segIDs),
 		zap.Int("num of binlog paths", len(inPaths)),
 		zap.Int("num of stats paths", len(statsPaths)),
-		zap.Int("num of delta paths", len(deltaInfo)),
+		zap.Int("num of delta paths", len(pack.GetDeltalogs())),
 	)
 
 	log.Info("compact overall elapse", zap.Duration("elapse", time.Since(compactStart)))

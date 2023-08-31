@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type spyCompactionHandler struct {
@@ -84,14 +83,6 @@ func Test_compactionTrigger_force(t *testing.T) {
 		compactionHandler compactionPlanContext
 		globalTrigger     *time.Ticker
 	}
-
-	paramtable.Init()
-	paramtable.Get().Save(Params.CommonCfg.RetentionDuration.Key, "200")
-	defer paramtable.Get().Reset(Params.CommonCfg.RetentionDuration.Key)
-
-	pts, _ := tsoutil.ParseTS(0)
-	ttRetention := pts.Add(-1 * Params.CommonCfg.RetentionDuration.GetAsDuration(time.Second))
-	timeTravel := tsoutil.ComposeTS(ttRetention.UnixNano()/int64(time.Millisecond), 0)
 
 	vecFieldID := int64(201)
 	indexID := int64(1001)
@@ -446,7 +437,6 @@ func Test_compactionTrigger_force(t *testing.T) {
 					StartTime:        0,
 					TimeoutInSeconds: Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt32(),
 					Type:             datapb.CompactionType_MixCompaction,
-					Timetravel:       timeTravel,
 					Channel:          "ch1",
 					TotalRows:        200,
 				},
@@ -741,7 +731,7 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 			},
 			args{
 				2,
-				&compactTime{travelTime: 200, expireTime: 0},
+				&compactTime{},
 			},
 			false,
 			[]*datapb.CompactionPlan{
@@ -788,7 +778,6 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 					StartTime:        3,
 					TimeoutInSeconds: Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt32(),
 					Type:             datapb.CompactionType_MixCompaction,
-					Timetravel:       200,
 					Channel:          "ch1",
 				},
 			},
@@ -933,7 +922,7 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 			},
 			args{
 				2,
-				&compactTime{travelTime: 200, expireTime: 0},
+				&compactTime{},
 			},
 			false,
 			nil,
@@ -992,13 +981,13 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 			PartitionID:    1,
 			LastExpireTime: 100,
 			NumOfRows:      numRows,
-			MaxRowNum:      110,
+			MaxRowNum:      150,
 			InsertChannel:  "ch1",
 			State:          commonpb.SegmentState_Flushed,
 			Binlogs: []*datapb.FieldBinlog{
 				{
 					Binlogs: []*datapb.Binlog{
-						{EntriesNum: 5, LogPath: "log1", LogSize: 100},
+						{EntriesNum: numRows, LogPath: "log1", LogSize: 100},
 					},
 				},
 			},
@@ -1030,7 +1019,6 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 	tests := []struct {
 		name      string
 		fields    fields
-		args      args
 		wantErr   bool
 		wantPlans []*datapb.CompactionPlan
 	}{
@@ -1038,7 +1026,7 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 			"test small segment",
 			fields{
 				&meta{
-					// 4 small segments
+					// 8 small segments
 					segments: &SegmentsInfo{
 						map[int64]*SegmentInfo{
 							1: {
@@ -1070,16 +1058,6 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 								SegmentInfo:    genSeg(6, 20),
 								lastFlushTime:  time.Now(),
 								segmentIndexes: genSegIndex(6, indexID, 20),
-							},
-							7: {
-								SegmentInfo:    genSeg(7, 20),
-								lastFlushTime:  time.Now(),
-								segmentIndexes: genSegIndex(7, indexID, 20),
-							},
-							8: {
-								SegmentInfo:    genSeg(8, 20),
-								lastFlushTime:  time.Now(),
-								segmentIndexes: genSegIndex(8, indexID, 20),
 							},
 						},
 					},
@@ -1130,10 +1108,6 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 				&spyCompactionHandler{spyChan: make(chan *datapb.CompactionPlan, 1)},
 				nil,
 			},
-			args{
-				2,
-				&compactTime{travelTime: 200, expireTime: 0},
-			},
 			false,
 			nil,
 		},
@@ -1157,7 +1131,7 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 			select {
 			case val := <-spy.spyChan:
 				// 6 segments in the final pick list
-				assert.Equal(t, len(val.SegmentBinlogs), 6)
+				assert.Equal(t, 6, len(val.SegmentBinlogs))
 				return
 			case <-time.After(3 * time.Second):
 				assert.Fail(t, "failed to get plan")
@@ -1312,7 +1286,7 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 			},
 			args{
 				2,
-				&compactTime{travelTime: 200, expireTime: 0},
+				&compactTime{},
 			},
 			false,
 			nil,
@@ -1490,7 +1464,7 @@ func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
 			},
 			args{
 				2,
-				&compactTime{travelTime: 200, expireTime: 0},
+				&compactTime{},
 			},
 			false,
 			nil,
@@ -1655,7 +1629,7 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 			},
 			args{
 				2,
-				&compactTime{travelTime: 200, expireTime: 0},
+				&compactTime{},
 			},
 			false,
 			nil,
@@ -1741,7 +1715,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 		},
 	}
 
-	couldDo := trigger.ShouldDoSingleCompaction(info, false, &compactTime{travelTime: 200, expireTime: 0})
+	couldDo := trigger.ShouldDoSingleCompaction(info, false, &compactTime{})
 	assert.True(t, couldDo)
 
 	//Test too many stats log
@@ -1759,22 +1733,22 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 		},
 	}
 
-	couldDo = trigger.ShouldDoSingleCompaction(info, false, &compactTime{travelTime: 200, expireTime: 0})
+	couldDo = trigger.ShouldDoSingleCompaction(info, false, &compactTime{})
 	assert.True(t, couldDo)
 
-	couldDo = trigger.ShouldDoSingleCompaction(info, true, &compactTime{travelTime: 200, expireTime: 0})
+	couldDo = trigger.ShouldDoSingleCompaction(info, true, &compactTime{})
 	assert.True(t, couldDo)
 
 	// if only 10 bin logs, then disk index won't trigger compaction
 	info.Statslogs = binlogs[0:20]
-	couldDo = trigger.ShouldDoSingleCompaction(info, false, &compactTime{travelTime: 200, expireTime: 0})
+	couldDo = trigger.ShouldDoSingleCompaction(info, false, &compactTime{})
 	assert.True(t, couldDo)
 
-	couldDo = trigger.ShouldDoSingleCompaction(info, true, &compactTime{travelTime: 200, expireTime: 0})
+	couldDo = trigger.ShouldDoSingleCompaction(info, true, &compactTime{})
 	assert.False(t, couldDo)
 	//Test too many stats log but compacted
 	info.CompactionFrom = []int64{0, 1}
-	couldDo = trigger.ShouldDoSingleCompaction(info, false, &compactTime{travelTime: 200, expireTime: 0})
+	couldDo = trigger.ShouldDoSingleCompaction(info, false, &compactTime{})
 	assert.False(t, couldDo)
 
 	//Test expire triggered  compaction
@@ -1809,15 +1783,15 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	}
 
 	// expire time < Timestamp To
-	couldDo = trigger.ShouldDoSingleCompaction(info2, false, &compactTime{travelTime: 200, expireTime: 300})
+	couldDo = trigger.ShouldDoSingleCompaction(info2, false, &compactTime{expireTime: 300})
 	assert.False(t, couldDo)
 
 	// didn't reach single compaction size 10 * 1024 * 1024
-	couldDo = trigger.ShouldDoSingleCompaction(info2, false, &compactTime{travelTime: 200, expireTime: 600})
+	couldDo = trigger.ShouldDoSingleCompaction(info2, false, &compactTime{expireTime: 600})
 	assert.False(t, couldDo)
 
 	// expire time < Timestamp False
-	couldDo = trigger.ShouldDoSingleCompaction(info2, false, &compactTime{travelTime: 200, expireTime: 1200})
+	couldDo = trigger.ShouldDoSingleCompaction(info2, false, &compactTime{expireTime: 1200})
 	assert.True(t, couldDo)
 
 	// Test Delete triggered compaction
@@ -1851,16 +1825,12 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 		},
 	}
 
-	// expire time < Timestamp To
-	couldDo = trigger.ShouldDoSingleCompaction(info3, false, &compactTime{travelTime: 600, expireTime: 0})
-	assert.False(t, couldDo)
-
 	// deltalog is large enough, should do compaction
-	couldDo = trigger.ShouldDoSingleCompaction(info3, false, &compactTime{travelTime: 800, expireTime: 0})
+	couldDo = trigger.ShouldDoSingleCompaction(info3, false, &compactTime{})
 	assert.True(t, couldDo)
 }
 
-func Test_newCompactionTrigger(t *testing.T) {
+func Test_compactionTrigger_new(t *testing.T) {
 	type args struct {
 		meta              *meta
 		compactionHandler compactionPlanContext
@@ -1889,7 +1859,7 @@ func Test_newCompactionTrigger(t *testing.T) {
 	}
 }
 
-func Test_handleSignal(t *testing.T) {
+func Test_compactionTrigger_handleSignal(t *testing.T) {
 	got := newCompactionTrigger(&meta{segments: NewSegmentsInfo()}, &compactionPlanHandler{}, newMockAllocator(), newMockHandler())
 	signal := &compactionSignal{
 		segmentID: 1,
@@ -1899,7 +1869,7 @@ func Test_handleSignal(t *testing.T) {
 	})
 }
 
-func Test_allocTs(t *testing.T) {
+func Test_compactionTrigger_allocTs(t *testing.T) {
 	got := newCompactionTrigger(&meta{segments: NewSegmentsInfo()}, &compactionPlanHandler{}, newMockAllocator(), newMockHandler())
 	ts, err := got.allocTs()
 	assert.NoError(t, err)
@@ -1911,7 +1881,7 @@ func Test_allocTs(t *testing.T) {
 	assert.Equal(t, uint64(0), ts)
 }
 
-func Test_getCompactTime(t *testing.T) {
+func Test_compactionTrigger_getCompactTime(t *testing.T) {
 	collections := map[UniqueID]*collectionInfo{
 		1: {
 			ID:         1,

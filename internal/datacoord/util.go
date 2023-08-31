@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -78,26 +77,6 @@ func failResponse(status *commonpb.Status, reason string) {
 func failResponseWithCode(status *commonpb.Status, errCode commonpb.ErrorCode, reason string) {
 	status.ErrorCode = errCode
 	status.Reason = reason
-}
-
-func GetCompactTime(ctx context.Context, allocator allocator) (*compactTime, error) {
-	ts, err := allocator.allocTimestamp(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	pts, _ := tsoutil.ParseTS(ts)
-	ttRetention := pts.Add(-1 * Params.CommonCfg.RetentionDuration.GetAsDuration(time.Second))
-	ttRetentionLogic := tsoutil.ComposeTS(ttRetention.UnixNano()/int64(time.Millisecond), 0)
-
-	// TODO, change to collection level
-	if Params.CommonCfg.EntityExpirationTTL.GetAsInt() > 0 {
-		ttexpired := pts.Add(-1 * Params.CommonCfg.EntityExpirationTTL.GetAsDuration(time.Second))
-		ttexpiredLogic := tsoutil.ComposeTS(ttexpired.UnixNano()/int64(time.Millisecond), 0)
-		return &compactTime{ttRetentionLogic, ttexpiredLogic, Params.CommonCfg.EntityExpirationTTL.GetAsDuration(time.Second)}, nil
-	}
-	// no expiration time
-	return &compactTime{ttRetentionLogic, 0, 0}, nil
 }
 
 func FilterInIndexedSegments(handler Handler, mt *meta, segments ...*SegmentInfo) []*SegmentInfo {

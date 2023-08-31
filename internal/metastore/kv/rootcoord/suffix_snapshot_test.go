@@ -502,7 +502,7 @@ func Test_SuffixSnapshotRemoveExpiredKvs(t *testing.T) {
 		cnt := countPrefix(prefix)
 		assert.Equal(t, keyCnt*keyVersion+keyCnt, cnt)
 
-		err = ss.removeExpiredKvs(now, time.Duration(50)*time.Millisecond)
+		err = ss.removeExpiredKvs(now)
 		assert.NoError(t, err)
 
 		cnt = countPrefix(prefix)
@@ -542,11 +542,12 @@ func Test_SuffixSnapshotRemoveExpiredKvs(t *testing.T) {
 		cnt := countPrefix(prefix)
 		assert.Equal(t, 12, cnt)
 
-		err = ss.removeExpiredKvs(now, time.Duration(50)*time.Millisecond)
+		// err = ss.removeExpiredKvs(now, time.Duration(50)*time.Millisecond)
+		err = ss.removeExpiredKvs(now)
 		assert.NoError(t, err)
 
 		cnt = countPrefix(prefix)
-		assert.Equal(t, 6, cnt)
+		assert.Equal(t, 4, cnt)
 
 		// clean all data
 		err := etcdkv.RemoveWithPrefix("")
@@ -559,7 +560,7 @@ func Test_SuffixSnapshotRemoveExpiredKvs(t *testing.T) {
 		err = etcdkv.Save(ss.composeSnapshotPrefix(key), "")
 		assert.NoError(t, err)
 
-		err = ss.removeExpiredKvs(now, time.Duration(50)*time.Millisecond)
+		err = ss.removeExpiredKvs(now)
 		assert.NoError(t, err)
 
 		cnt := countPrefix(prefix)
@@ -582,7 +583,7 @@ func Test_SuffixSnapshotRemoveExpiredKvs(t *testing.T) {
 		assert.NotNil(t, ss)
 		assert.NoError(t, err)
 
-		err = ss.removeExpiredKvs(time.Now(), time.Duration(100))
+		err = ss.removeExpiredKvs(time.Now())
 		assert.Error(t, err)
 	})
 }
