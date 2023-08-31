@@ -75,7 +75,7 @@ def skip_pq():
 
 
 def binary_metrics():
-    return ["JACCARD", "HAMMING"]
+    return ["JACCARD", "HAMMING", "SUBSTRUCTURE", "SUPERSTRUCTURE"]
 
 
 def structure_metrics():

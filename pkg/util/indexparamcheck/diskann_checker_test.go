@@ -37,6 +37,7 @@ func Test_diskannChecker_CheckTrain(t *testing.T) {
 		DIM:    strconv.Itoa(128),
 		Metric: metric.COSINE,
 	}
+
 	p4 := map[string]string{
 		DIM:    strconv.Itoa(128),
 		Metric: metric.HAMMING,
@@ -44,6 +45,14 @@ func Test_diskannChecker_CheckTrain(t *testing.T) {
 	p5 := map[string]string{
 		DIM:    strconv.Itoa(128),
 		Metric: metric.JACCARD,
+	}
+	p6 := map[string]string{
+		DIM:    strconv.Itoa(128),
+		Metric: metric.SUBSTRUCTURE,
+	}
+	p7 := map[string]string{
+		DIM:    strconv.Itoa(128),
+		Metric: metric.SUPERSTRUCTURE,
 	}
 
 	cases := []struct {
@@ -59,6 +68,8 @@ func Test_diskannChecker_CheckTrain(t *testing.T) {
 		{p3, true},
 		{p4, false},
 		{p5, false},
+		{p6, false},
+		{p7, false},
 	}
 
 	c := newDiskannChecker()

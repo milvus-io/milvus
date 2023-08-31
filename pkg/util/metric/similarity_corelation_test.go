@@ -43,6 +43,14 @@ func TestPositivelyRelated(t *testing.T) {
 			JACCARD,
 			false,
 		},
+		{
+			SUBSTRUCTURE,
+			false,
+		},
+		{
+			SUPERSTRUCTURE,
+			false,
+		},
 	}
 
 	for idx := range cases {
