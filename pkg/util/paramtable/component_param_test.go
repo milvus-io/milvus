@@ -234,30 +234,30 @@ func TestComponentParam(t *testing.T) {
 	// })
 
 	t.Run("test queryCoordConfig", func(t *testing.T) {
-		Params := params.QueryCoordCfg
+		Params := &params.QueryCoordCfg
 		assert.Equal(t, Params.EnableActiveStandby.GetAsBool(), false)
 		t.Logf("queryCoord EnableActiveStandby = %t", Params.EnableActiveStandby.GetAsBool())
 
 		params.Save("queryCoord.NextTargetSurviveTime", "100")
-		NextTargetSurviveTime := Params.NextTargetSurviveTime
+		NextTargetSurviveTime := &Params.NextTargetSurviveTime
 		assert.Equal(t, int64(100), NextTargetSurviveTime.GetAsInt64())
 
 		params.Save("queryCoord.UpdateNextTargetInterval", "100")
-		UpdateNextTargetInterval := Params.UpdateNextTargetInterval
+		UpdateNextTargetInterval := &Params.UpdateNextTargetInterval
 		assert.Equal(t, int64(100), UpdateNextTargetInterval.GetAsInt64())
 
 		params.Save("queryCoord.checkNodeInReplicaInterval", "100")
-		checkNodeInReplicaInterval := Params.CheckNodeInReplicaInterval
+		checkNodeInReplicaInterval := &Params.CheckNodeInReplicaInterval
 		assert.Equal(t, 100, checkNodeInReplicaInterval.GetAsInt())
 
 		params.Save("queryCoord.checkResourceGroupInterval", "10")
-		checkResourceGroupInterval := Params.CheckResourceGroupInterval
+		checkResourceGroupInterval := &Params.CheckResourceGroupInterval
 		assert.Equal(t, 10, checkResourceGroupInterval.GetAsInt())
 
-		enableResourceGroupAutoRecover := Params.EnableRGAutoRecover
+		enableResourceGroupAutoRecover := &Params.EnableRGAutoRecover
 		assert.Equal(t, true, enableResourceGroupAutoRecover.GetAsBool())
 		params.Save("queryCoord.enableRGAutoRecover", "false")
-		enableResourceGroupAutoRecover = Params.EnableRGAutoRecover
+		enableResourceGroupAutoRecover = &Params.EnableRGAutoRecover
 		assert.Equal(t, false, enableResourceGroupAutoRecover.GetAsBool())
 
 		checkHealthInterval := Params.CheckHealthInterval.GetAsInt()
@@ -284,7 +284,7 @@ func TestComponentParam(t *testing.T) {
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
-		Params := params.QueryNodeCfg
+		Params := &params.QueryNodeCfg
 
 		interval := Params.StatsPublishInterval.GetAsInt()
 		assert.Equal(t, 1000, interval)
@@ -338,14 +338,14 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int64(1024), chunkRows)
 
 		params.Save("queryNode.gracefulStopTimeout", "100")
-		gracefulStopTimeout := Params.GracefulStopTimeout
+		gracefulStopTimeout := &Params.GracefulStopTimeout
 		assert.Equal(t, int64(100), gracefulStopTimeout.GetAsInt64())
 
 		assert.Equal(t, false, Params.EnableWorkerSQCostMetrics.GetAsBool())
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {
-		Params := params.DataCoordCfg
+		Params := &params.DataCoordCfg
 		assert.Equal(t, 24*60*60*time.Second, Params.SegmentMaxLifetime.GetAsDuration(time.Second))
 		assert.True(t, Params.EnableGarbageCollection.GetAsBool())
 		assert.Equal(t, Params.EnableActiveStandby.GetAsBool(), false)
@@ -353,7 +353,7 @@ func TestComponentParam(t *testing.T) {
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {
-		Params := params.DataNodeCfg
+		Params := &params.DataNodeCfg
 
 		SetNodeID(2)
 
@@ -372,23 +372,23 @@ func TestComponentParam(t *testing.T) {
 		size := Params.FlushInsertBufferSize.GetAsInt()
 		t.Logf("FlushInsertBufferSize: %d", size)
 
-		period := Params.SyncPeriod
+		period := &Params.SyncPeriod
 		t.Logf("SyncPeriod: %v", period)
 		assert.Equal(t, 10*time.Minute, Params.SyncPeriod.GetAsDuration(time.Second))
 
-		bulkinsertTimeout := Params.BulkInsertTimeoutSeconds
+		bulkinsertTimeout := &Params.BulkInsertTimeoutSeconds
 		t.Logf("BulkInsertTimeoutSeconds: %v", bulkinsertTimeout)
 		assert.Equal(t, "18000", Params.BulkInsertTimeoutSeconds.GetValue())
 	})
 
 	t.Run("test indexNodeConfig", func(t *testing.T) {
-		Params := params.IndexNodeCfg
+		Params := &params.IndexNodeCfg
 		params.Save(Params.GracefulStopTimeout.Key, "50")
 		assert.Equal(t, Params.GracefulStopTimeout.GetAsInt64(), int64(50))
 	})
 
 	t.Run("channel config priority", func(t *testing.T) {
-		Params := params.CommonCfg
+		Params := &params.CommonCfg
 		params.Save(Params.RootCoordDml.Key, "dml1")
 		params.Save(Params.RootCoordDml.FallbackKeys[0], "dml2")
 

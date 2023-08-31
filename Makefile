@@ -72,6 +72,7 @@ else
 	@GO111MODULE=on env bash $(PWD)/scripts/gofmt.sh internal/
 	@GO111MODULE=on env bash $(PWD)/scripts/gofmt.sh tests/integration/
 	@GO111MODULE=on env bash $(PWD)/scripts/gofmt.sh tests/go/
+	@GO111MODULE=on env bash $(PWD)/scripts/gofmt.sh pkg/ 
 endif
 
 lint: tools/bin/revive
@@ -85,7 +86,7 @@ static-check: getdeps
 	@source $(PWD)/scripts/setenv.sh && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --timeout=30m --config ./.golangci.yml ./internal/...
 	@source $(PWD)/scripts/setenv.sh && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --timeout=30m --config ./.golangci.yml ./cmd/...
 	@source $(PWD)/scripts/setenv.sh && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --timeout=30m --config ./.golangci.yml ./tests/integration/...
-	@source $(PWD)/scripts/setenv.sh && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --timeout=30m --config ./.golangci.yml ./...
+	@source $(PWD)/scripts/setenv.sh && cd pkg && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --timeout=30m --config ../.golangci.yml ./...
 
 verifiers: build-cpp getdeps cppcheck fmt static-check
 

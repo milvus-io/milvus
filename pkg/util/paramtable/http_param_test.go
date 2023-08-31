@@ -9,8 +9,8 @@ import (
 func TestHTTPConfig_Init(t *testing.T) {
 	params := ComponentParam{}
 	params.Init()
-	cf := params.HTTPCfg
-	assert.Equal(t, cf.Enabled.GetAsBool(), true)
-	assert.Equal(t, cf.DebugMode.GetAsBool(), false)
-	assert.Equal(t, cf.Port.GetValue(), "")
+	cfg := &params.HTTPCfg
+	assert.Equal(t, cfg.Enabled.GetAsBool(), true)
+	assert.Equal(t, cfg.DebugMode.GetAsBool(), false)
+	assert.Equal(t, cfg.Port.GetValue(), "")
 }

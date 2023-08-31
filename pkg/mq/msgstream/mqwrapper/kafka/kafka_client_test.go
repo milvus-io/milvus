@@ -307,25 +307,66 @@ func TestKafkaClient_MsgSerializAndDeserialize(t *testing.T) {
 	assert.Nil(t, msgID)
 }
 
+/*
 func createParamItem(v string) paramtable.ParamItem {
 	item := paramtable.ParamItem{
 		Formatter: func(originValue string) string { return v },
 	}
 	item.Init(&config.Manager{})
 	return item
+}*/
+
+func initParamItem(item *paramtable.ParamItem, v string) {
+	item.Formatter = func(originValue string) string { return v }
+	item.Init(&config.Manager{})
+}
+
+type kafkaCfgOption func(cfg *paramtable.KafkaConfig)
+
+func withAddr(v string) kafkaCfgOption {
+	return func(cfg *paramtable.KafkaConfig) {
+		initParamItem(&cfg.Address, v)
+	}
+}
+
+func withUsername(v string) kafkaCfgOption {
+	return func(cfg *paramtable.KafkaConfig) {
+		initParamItem(&cfg.SaslUsername, v)
+	}
+}
+
+func withPasswd(v string) kafkaCfgOption {
+	return func(cfg *paramtable.KafkaConfig) {
+		initParamItem(&cfg.SaslPassword, v)
+	}
+}
+
+func withMechanism(v string) kafkaCfgOption {
+	return func(cfg *paramtable.KafkaConfig) {
+		initParamItem(&cfg.SaslMechanisms, v)
+	}
+}
+
+func withProtocol(v string) kafkaCfgOption {
+	return func(cfg *paramtable.KafkaConfig) {
+		initParamItem(&cfg.SecurityProtocol, v)
+	}
+}
+
+func createKafkaConfig(opts ...kafkaCfgOption) *paramtable.KafkaConfig {
+	cfg := &paramtable.KafkaConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+	return cfg
 }
 
 func TestKafkaClient_NewKafkaClientInstanceWithConfig(t *testing.T) {
-	config1 := &paramtable.KafkaConfig{
-		Address:      createParamItem("addr"),
-		SaslPassword: createParamItem("password"),
-	}
+	config1 := createKafkaConfig(withAddr("addr"), withPasswd("password"))
+
 	assert.Panics(t, func() { NewKafkaClientInstanceWithConfig(config1) })
 
-	config2 := &paramtable.KafkaConfig{
-		Address:      createParamItem("addr"),
-		SaslUsername: createParamItem("username"),
-	}
+	config2 := createKafkaConfig(withAddr("addr"), withUsername("username"))
 	assert.Panics(t, func() { NewKafkaClientInstanceWithConfig(config2) })
 
 	producerConfig := make(map[string]string)
@@ -333,15 +374,10 @@ func TestKafkaClient_NewKafkaClientInstanceWithConfig(t *testing.T) {
 	consumerConfig := make(map[string]string)
 	consumerConfig["client.id"] = "dc"
 
-	config := &paramtable.KafkaConfig{
-		Address:             createParamItem("addr"),
-		SaslUsername:        createParamItem("username"),
-		SaslPassword:        createParamItem("password"),
-		SaslMechanisms:      createParamItem("sasl"),
-		SecurityProtocol:    createParamItem("plain"),
-		ConsumerExtraConfig: paramtable.ParamGroup{GetFunc: func() map[string]string { return consumerConfig }},
-		ProducerExtraConfig: paramtable.ParamGroup{GetFunc: func() map[string]string { return producerConfig }},
-	}
+	config := createKafkaConfig(withAddr("addr"), withUsername("username"), withPasswd("password"), withMechanism("sasl"), withProtocol("plain"))
+	config.ConsumerExtraConfig = paramtable.ParamGroup{GetFunc: func() map[string]string { return consumerConfig }}
+	config.ProducerExtraConfig = paramtable.ParamGroup{GetFunc: func() map[string]string { return producerConfig }}
+
 	client := NewKafkaClientInstanceWithConfig(config)
 	assert.NotNil(t, client)
 	assert.NotNil(t, client.basicConfig)
