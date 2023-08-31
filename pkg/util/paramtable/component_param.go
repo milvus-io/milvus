@@ -2200,7 +2200,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.CompactionTimeoutInSeconds = ParamItem{
 		Key:          "dataCoord.compaction.timeout",
 		Version:      "2.0.0",
-		DefaultValue: "300",
+		DefaultValue: "900",
 	}
 	p.CompactionTimeoutInSeconds.Init(base.mgr)
 
