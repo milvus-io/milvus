@@ -807,9 +807,10 @@ func saveSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest, res *rootcoo
 				return fmt.Errorf(err.Error())
 			}
 			if resp.ErrorCode != commonpb.ErrorCode_Success && resp.ErrorCode != commonpb.ErrorCode_NotReadyServe {
-				return retry.Unrecoverable(fmt.Errorf("failed to save import segment, reason = %s", resp.Reason))
+				return merr.Unrecoverable(merr.Error(resp))
 			} else if resp.ErrorCode == commonpb.ErrorCode_NotReadyServe {
-				return fmt.Errorf("failed to save import segment: %s", resp.GetReason())
+				err := merr.WrapErrServiceNotReady(fmt.Sprintf("failed to save import segment: %s", resp.GetReason()))
+				return err
 			}
 			return nil
 		})

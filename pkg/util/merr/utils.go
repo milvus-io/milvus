@@ -56,6 +56,16 @@ func Code(err error) int32 {
 	}
 }
 
+// Unrecoverable method wrap an error to unrecoverableError. This will make retry
+// quick return.
+func Unrecoverable(err error) error {
+	return Combine(err, ErrUnrecoverable)
+}
+
+func IsRecoverable(err error) bool {
+	return !errors.Is(err, ErrUnrecoverable)
+}
+
 func IsRetryableErr(err error) bool {
 	return IsRetryableCode(Code(err))
 }

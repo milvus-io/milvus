@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -388,7 +387,8 @@ func (rmq *rocksmq) CreateTopic(topicName string) error {
 	// Check if topicName contains "/"
 	if strings.Contains(topicName, "/") {
 		log.Warn("rocksmq failed to create topic for topic name contains \"/\"", zap.String("topic", topicName))
-		return retry.Unrecoverable(fmt.Errorf("topic name = %s contains \"/\"", topicName))
+		err := merr.WrapErrParameterInvalid("topic name valid", "not", fmt.Sprintf("topic name = %s contains \"/\"", topicName))
+		return merr.Unrecoverable(err)
 	}
 
 	// topicIDKey is the only identifier of a topic
@@ -418,7 +418,7 @@ func (rmq *rocksmq) CreateTopic(topicName string) error {
 	nowTs := strconv.FormatInt(time.Now().Unix(), 10)
 	kvs[topicIDKey] = nowTs
 	if err = rmq.kv.MultiSave(kvs); err != nil {
-		return retry.Unrecoverable(err)
+		return merr.Unrecoverable(err)
 	}
 
 	rmq.retentionInfo.mutex.Lock()

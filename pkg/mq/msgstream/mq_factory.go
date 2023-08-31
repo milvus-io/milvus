@@ -32,8 +32,8 @@ import (
 	kafkawrapper "github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper/kafka"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper/nmq"
 	pulsarmqwrapper "github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper/pulsar"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/retry"
 )
 
 // PmsFactory is a pulsar msgstream factory that implemented Factory interface(msgstream.go)
@@ -129,7 +129,7 @@ func (f *PmsFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, st
 			topic, err := utils.GetTopicName(fullTopicName)
 			if err != nil {
 				log.Warn("failed to get topic name", zap.Error(err))
-				return retry.Unrecoverable(err)
+				return merr.Unrecoverable(err)
 			}
 			err = admin.Subscriptions().Delete(*topic, subname, true)
 			if err != nil {

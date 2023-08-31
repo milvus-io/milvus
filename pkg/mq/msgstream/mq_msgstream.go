@@ -33,6 +33,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -798,7 +799,7 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*msgpb.MsgPosition) error {
 			log.Warn("Failed to seek", zap.String("channel", mp.ChannelName), zap.Error(err))
 			// stop retry if consumer topic not exist
 			if errors.Is(err, mqwrapper.ErrTopicNotExist) {
-				return retry.Unrecoverable(err)
+				return merr.Unrecoverable(err)
 			}
 			return err
 		}

@@ -19,6 +19,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/lingdor/stackerror"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -94,7 +95,7 @@ func TestUnRecoveryError(t *testing.T) {
 	mockErr := errors.New("some error")
 	testFn := func() error {
 		attempts++
-		return Unrecoverable(mockErr)
+		return merr.Unrecoverable(mockErr)
 	}
 
 	err := Do(ctx, testFn, Attempts(3))

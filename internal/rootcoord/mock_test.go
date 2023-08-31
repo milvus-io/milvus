@@ -39,9 +39,9 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
@@ -571,7 +571,7 @@ func withUnhealthyQueryCoord() Opt {
 		&milvuspb.ComponentStates{
 			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Abnormal},
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "error mock GetComponentStates"),
-		}, retry.Unrecoverable(errors.New("error mock GetComponentStates")),
+		}, merr.Unrecoverable(errors.New("error mock GetComponentStates")),
 	)
 	return withQueryCoord(qc)
 }
@@ -688,7 +688,7 @@ func withUnhealthyDataCoord() Opt {
 		return &milvuspb.ComponentStates{
 			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Abnormal},
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "error mock GetComponentStates"),
-		}, retry.Unrecoverable(errors.New("error mock GetComponentStates"))
+		}, merr.Unrecoverable(errors.New("error mock GetComponentStates"))
 	}
 	return withDataCoord(dc)
 }

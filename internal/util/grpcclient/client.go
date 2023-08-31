@@ -353,7 +353,7 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 			}
 			log.Warn("fail to grpc call because of unknown error", zap.Error(callErr))
 			// not rpc error, it will stop to retry
-			return retry.Unrecoverable(callErr)
+			return merr.Unrecoverable(callErr)
 		}
 
 		var status *commonpb.Status
