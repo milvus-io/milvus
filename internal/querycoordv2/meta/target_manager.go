@@ -315,28 +315,6 @@ func (mgr *TargetManager) removePartitionFromCollectionTarget(oldTarget *Collect
 	return NewCollectionTarget(segments, channels)
 }
 
-func (mgr *TargetManager) removePartitionGrowingSegmentFromChannel(partitionIDSet typeutil.UniqueSet,
-	oldChannel *DmChannel) *DmChannel {
-	newChannel := oldChannel.Clone()
-
-	notMatchPartition := func(s *datapb.SegmentInfo, _ int) bool {
-		return !partitionIDSet.Contain(s.GetPartitionID())
-	}
-
-	getSegmentID := func(s *datapb.SegmentInfo, _ int) int64 {
-		return s.GetID()
-	}
-
-	newChannel.UnflushedSegments = lo.Filter(newChannel.GetUnflushedSegments(), notMatchPartition)
-	newChannel.UnflushedSegmentIds = lo.Map(newChannel.GetUnflushedSegments(), getSegmentID)
-	newChannel.FlushedSegments = lo.Filter(newChannel.GetFlushedSegments(), notMatchPartition)
-	newChannel.FlushedSegmentIds = lo.Map(newChannel.GetFlushedSegments(), getSegmentID)
-	newChannel.DroppedSegments = lo.Filter(newChannel.GetDroppedSegments(), notMatchPartition)
-	newChannel.DroppedSegmentIds = lo.Map(newChannel.GetDroppedSegments(), getSegmentID)
-
-	return newChannel
-}
-
 func (mgr *TargetManager) getTarget(scope TargetScope) *target {
 	if scope == CurrentTarget {
 		return mgr.current
