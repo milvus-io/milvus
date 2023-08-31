@@ -22,11 +22,14 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/pkg/log"
+	"go.uber.org/zap"
 )
 
 type UndoList struct {
-	TargetUpdated     bool // indicates if target updated during loading
-	NewReplicaCreated bool // indicates if created new replicas during loading
+	IsTargetUpdated  bool // indicates if target updated during loading
+	IsReplicaCreated bool // indicates if created new replicas during loading
+	IsNewCollection  bool // indicates if created new collection during loading
 
 	CollectionID   int64
 	LackPartitions []int64
@@ -50,11 +53,29 @@ func NewUndoList(ctx context.Context, meta *meta.Meta,
 }
 
 func (u *UndoList) RollBack() {
-	if u.NewReplicaCreated {
-		u.meta.ReplicaManager.RemoveCollection(u.CollectionID)
+	log := log.Ctx(u.ctx).With(
+		zap.Int64("collectionID", u.CollectionID),
+		zap.Int64s("partitionIDs", u.LackPartitions),
+	)
+
+	log.Warn("rollback failed loading request...",
+		zap.Bool("isNewCollection", u.IsNewCollection),
+		zap.Bool("isReplicaCreated", u.IsReplicaCreated),
+		zap.Bool("isTargetUpdated", u.IsTargetUpdated),
+	)
+
+	var err error
+	if u.IsNewCollection || u.IsReplicaCreated {
+		err = u.meta.CollectionManager.RemoveCollection(u.CollectionID)
+	} else {
+		err = u.meta.CollectionManager.RemovePartition(u.CollectionID, u.LackPartitions...)
 	}
-	if u.TargetUpdated {
-		if !u.meta.CollectionManager.Exist(u.CollectionID) {
+	if err != nil {
+		log.Warn("failed to rollback collection from meta", zap.Error(err))
+	}
+
+	if u.IsTargetUpdated {
+		if u.IsNewCollection {
 			u.targetMgr.RemoveCollection(u.CollectionID)
 			u.targetObserver.ReleaseCollection(u.CollectionID)
 		} else {

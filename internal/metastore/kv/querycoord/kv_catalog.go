@@ -41,30 +41,26 @@ func (s Catalog) SaveCollection(collection *querypb.CollectionLoadInfo, partitio
 	if err != nil {
 		return err
 	}
-	kvs := make(map[string]string)
-	for _, partition := range partitions {
-		key := EncodePartitionLoadInfoKey(partition.GetCollectionID(), partition.GetPartitionID())
-		value, err := proto.Marshal(partition)
-		if err != nil {
-			return err
-		}
-		kvs[key] = string(value)
+	err = s.cli.Save(k, string(v))
+	if err != nil {
+		return err
 	}
-	kvs[k] = string(v)
-	return s.cli.MultiSave(kvs)
+	return s.SavePartition(partitions...)
 }
 
 func (s Catalog) SavePartition(info ...*querypb.PartitionLoadInfo) error {
-	kvs := make(map[string]string)
 	for _, partition := range info {
-		key := EncodePartitionLoadInfoKey(partition.GetCollectionID(), partition.GetPartitionID())
-		value, err := proto.Marshal(partition)
+		k := EncodePartitionLoadInfoKey(partition.GetCollectionID(), partition.GetPartitionID())
+		v, err := proto.Marshal(partition)
 		if err != nil {
 			return err
 		}
-		kvs[key] = string(value)
+		err = s.cli.Save(k, string(v))
+		if err != nil {
+			return err
+		}
 	}
-	return s.cli.MultiSave(kvs)
+	return nil
 }
 
 func (s Catalog) SaveReplica(replica *querypb.Replica) error {

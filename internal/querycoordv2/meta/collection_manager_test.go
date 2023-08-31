@@ -259,7 +259,7 @@ func (suite *CollectionManagerSuite) TestRemove() {
 			err := mgr.RemoveCollection(collectionID)
 			suite.NoError(err)
 		} else {
-			err := mgr.RemovePartition(suite.partitions[collectionID]...)
+			err := mgr.RemovePartition(collectionID, suite.partitions[collectionID]...)
 			suite.NoError(err)
 		}
 	}

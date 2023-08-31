@@ -132,7 +132,7 @@ func (ob *CollectionObserver) observeTimeout() {
 				zap.Int64("collectionID", collection),
 				zap.Int64("partitionID", partition.GetPartitionID()),
 				zap.Duration("loadTime", time.Since(partition.CreatedAt)))
-			ob.meta.CollectionManager.RemovePartition(partition.GetPartitionID())
+			ob.meta.CollectionManager.RemovePartition(collection, partition.GetPartitionID())
 			ob.targetMgr.RemovePartition(partition.GetCollectionID(), partition.GetPartitionID())
 		}
 		// all partition timeout, remove collection

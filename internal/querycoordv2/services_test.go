@@ -291,7 +291,7 @@ func (suite *ServiceSuite) TestShowPartitions() {
 		} else {
 			partitionID := partitions[0]
 			parBak := suite.meta.CollectionManager.GetPartition(partitionID)
-			err = suite.meta.CollectionManager.RemovePartition(partitionID)
+			err = suite.meta.CollectionManager.RemovePartition(collection, partitionID)
 			suite.NoError(err)
 			meta.GlobalFailedLoadCache.Put(collection, merr.WrapErrServiceMemoryLimitExceeded(100, 10))
 			resp, err = server.ShowPartitions(ctx, req)

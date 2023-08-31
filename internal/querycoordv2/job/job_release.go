@@ -183,7 +183,7 @@ func (job *ReleasePartitionJob) Execute() error {
 		metrics.QueryCoordNumCollections.WithLabelValues().Dec()
 		waitCollectionReleased(job.dist, job.checkerController, req.GetCollectionID())
 	} else {
-		err := job.meta.CollectionManager.RemovePartition(toRelease...)
+		err := job.meta.CollectionManager.RemovePartition(req.GetCollectionID(), toRelease...)
 		if err != nil {
 			msg := "failed to release partitions from store"
 			log.Warn(msg, zap.Error(err))
