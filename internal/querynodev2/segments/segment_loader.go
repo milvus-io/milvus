@@ -215,7 +215,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		log.Info("load segment done", zap.Int64("segmentID", segmentID))
 		loader.notifyLoadFinish(loadInfo)
 
-		metrics.QueryNodeLoadSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		metrics.QueryNodeLoadSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(tr.ElapseSpan().Seconds())
 		return nil
 	}
 
