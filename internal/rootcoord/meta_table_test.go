@@ -435,6 +435,27 @@ func TestMetaTable_getCollectionByIDInternal(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("collection not exists", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("GetCollectionByID",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil, nil)
+		meta := &MetaTable{
+			catalog: catalog,
+			dbName2Meta: map[string]*model.Database{
+				util.DefaultDBName: model.NewDefaultDatabase(),
+			},
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{},
+		}
+		ctx := context.Background()
+		_, err := meta.getCollectionByIDInternal(ctx, util.DefaultDBName, 100, 101, false)
+		assert.Error(t, err)
+		assert.True(t, common.IsCollectionNotExistError(err))
+	})
+
 	t.Run("collection not available", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
 		catalog.On("GetCollectionByID",
