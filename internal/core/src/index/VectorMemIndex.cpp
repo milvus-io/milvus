@@ -482,6 +482,7 @@ VectorMemIndex::LoadFromFile(const Config& config) {
     LOG_SEGCORE_INFO_ << "load index into Knowhere...";
     auto conf = config;
     conf.erase(kMmapFilepath);
+    conf[kEnableMmap] = true;
     auto stat = index_.DeserializeFromFile(filepath.value(), conf);
     if (stat != knowhere::Status::success) {
         PanicCodeInfo(ErrorCodeEnum::UnexpectedError,
