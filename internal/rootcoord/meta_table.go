@@ -536,7 +536,7 @@ func (mt *MetaTable) getCollectionByIDInternal(ctx context.Context, dbName strin
 
 	if !coll.Available() {
 		// use coll.Name to match error message of regression. TODO: remove this after error code is ready.
-		return nil, common.NewCollectionNotExistError(fmt.Sprintf("can't find collection: %s", coll.Name))
+		return nil, common.NewCollectionNotExistError(fmt.Sprintf("can't find collection %s:%s", dbName, coll.Name))
 	}
 
 	return filterUnavailable(coll), nil
@@ -566,7 +566,7 @@ func (mt *MetaTable) getCollectionByNameInternal(ctx context.Context, dbName str
 	}
 
 	if isMaxTs(ts) {
-		return nil, common.NewCollectionNotExistError(fmt.Sprintf("can't find collection: %s", collectionName))
+		return nil, common.NewCollectionNotExistError(fmt.Sprintf("can't find collection %s:%s", dbName, collectionName))
 	}
 
 	db, err := mt.getDatabaseByNameInternal(ctx, dbName, typeutil.MaxTimestamp)
@@ -582,7 +582,7 @@ func (mt *MetaTable) getCollectionByNameInternal(ctx context.Context, dbName str
 	}
 
 	if coll == nil || !coll.Available() {
-		return nil, common.NewCollectionNotExistError(fmt.Sprintf("can't find collection: %s", collectionName))
+		return nil, common.NewCollectionNotExistError(fmt.Sprintf("can't find collection %s:%s", dbName, collectionName))
 	}
 	return filterUnavailable(coll), nil
 }
