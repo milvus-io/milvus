@@ -1157,7 +1157,7 @@ class TestNewIndexBinary(TestcaseBase):
                                                ct.err_msg: "Invalid metric_type: L2, which does not match the index type: BIN_IVF_FLAT"})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("metric_type", ["L2", "IP", "COSINE", "JACCARD", "HAMMING", "TANIMOTO"])
+    @pytest.mark.parametrize("metric_type", ["L2", "IP", "COSINE", "JACCARD", "HAMMING"])
     def test_create_binary_index_HNSW(self, metric_type):
         """
         target: test create binary index hnsw

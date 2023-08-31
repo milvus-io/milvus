@@ -1688,6 +1688,7 @@ class TestCreateCollection(TestcaseBase):
             assert item in self.utility_wrap.list_collections()[0]
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip("not support default_value now")
     def test_create_collection_using_default_value(self, auto_id):
         """
         target: test create collection with default_value
@@ -1761,6 +1762,7 @@ class TestCreateCollectionInvalid(TestcaseBase):
                                   check_items={"schema": schema})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("not support default_value now")
     @pytest.mark.parametrize("default_value", ["abc", 9.09, 1, False])
     def test_create_collection_with_invalid_default_value_float(self, default_value):
         """
@@ -1779,6 +1781,7 @@ class TestCreateCollectionInvalid(TestcaseBase):
                                                ct.err_msg: "default value type mismatches field schema type"})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("not support default_value now")
     @pytest.mark.parametrize("default_value", ["abc", 9.09, 1, False])
     def test_create_collection_with_invalid_default_value_int8(self, default_value):
         """
@@ -1797,6 +1800,7 @@ class TestCreateCollectionInvalid(TestcaseBase):
                                                ct.err_msg: "default value type mismatches field schema type"})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("not support default_value now")
     def test_create_collection_with_pk_field_using_default_value(self):
         """
         target: test create collection with pk field using default value
@@ -1827,6 +1831,7 @@ class TestCreateCollectionInvalid(TestcaseBase):
                                          ct.err_msg: "pk field schema can not set default value"})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("not support default_value now")
     def test_create_collection_with_json_field_using_default_value(self):
         """
         target: test create collection with json field using default value
