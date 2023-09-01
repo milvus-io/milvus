@@ -466,8 +466,8 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 
 		// task queue size has a limit, return error if import request contains too many data files, and skip entire job
 		if capacity-length < taskCount {
+			log.Error("failed to execute import job, task queue capability insufficient", zap.Int("capacity", capacity), zap.Int("length", length), zap.Int("taskCount", taskCount))
 			err := fmt.Errorf("import task queue max size is %v, currently there are %v tasks is pending. Not able to execute this request with %v tasks", capacity, length, taskCount)
-			log.Error(err.Error())
 			return err
 		}
 

@@ -17,11 +17,10 @@
 package collector
 
 import (
-	"fmt"
-
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
+	"go.uber.org/zap"
 )
 
 var Average *averageCollector
@@ -61,9 +60,7 @@ func init() {
 	var err error
 	Rate, err = ratelimitutil.NewRateCollector(ratelimitutil.DefaultWindow, ratelimitutil.DefaultGranularity)
 	if err != nil {
-		err = fmt.Errorf("querynode collector init failed, err = %s", err)
-		log.Error(err.Error())
-		panic(err)
+		log.Fatal("failed to initialize querynode rate collector", zap.Error(err))
 	}
 	Average = newAverageCollector()
 	Counter = newCounter()

@@ -196,7 +196,7 @@ func (i *IndexNode) Init() error {
 		log.Info("IndexNode init", zap.String("state", i.lifetime.GetState().String()))
 		err := i.initSession()
 		if err != nil {
-			log.Error(err.Error())
+			log.Error("failed to init session", zap.Error(err))
 			initErr = err
 			return
 		}

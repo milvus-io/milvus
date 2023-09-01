@@ -22,7 +22,6 @@ import (
 	"math"
 	"reflect"
 
-	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/atomic"
@@ -174,10 +173,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 
 	if startPositions[0].Timestamp < ibNode.lastTimestamp {
 		// message stream should guarantee that this should not happen
-		err := fmt.Errorf("insert buffer node consumed old messages, channel = %s, timestamp = %d, lastTimestamp = %d",
-			ibNode.channelName, startPositions[0].Timestamp, ibNode.lastTimestamp)
-		log.Error(err.Error())
-		panic(err)
+		log.Fatal("insert buffer node consumed old messages", zap.String("channel", ibNode.channelName), zap.Uint64("timestamp", startPositions[0].Timestamp), zap.Uint64("lastTimestamp", ibNode.lastTimestamp))
 	}
 
 	ibNode.lastTimestamp = endPositions[0].Timestamp
@@ -186,9 +182,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 	seg2Upload, err := ibNode.addSegmentAndUpdateRowNum(fgMsg.insertMessages, startPositions[0], endPositions[0])
 	if err != nil {
 		// Occurs only if the collectionID is mismatch, should not happen
-		err = errors.Wrap(err, "update segment states in channel meta wrong")
-		log.Error(err.Error())
-		panic(err)
+		log.Fatal("failed to update segment states in channel meta", zap.String("channelName", ibNode.channelName), zap.Error(err))
 	}
 
 	// insert messages -> buffer
@@ -196,9 +190,12 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		err := ibNode.bufferInsertMsg(msg, startPositions[0], endPositions[0])
 		if err != nil {
 			// error occurs when missing schema info or data is misaligned, should not happen
-			err = errors.Wrap(err, "insertBufferNode msg to buffer failed")
-			log.Error(err.Error())
-			panic(err)
+			log.Fatal("insertBufferNode failed to buffer insert msg",
+				zap.String("channelName", ibNode.channelName),
+				zap.Int64("segmentID", msg.SegmentID),
+				zap.Int64("msgID", msg.GetBase().GetMsgID()),
+				zap.Error(err),
+			)
 		}
 	}
 
@@ -498,9 +495,10 @@ func (ibNode *insertBufferNode) Sync(fgMsg *flowGraphMsg, seg2Upload []UniqueID,
 				metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.FailLabel).Inc()
 				metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.TotalLabel).Inc()
 			}
-			err = fmt.Errorf("insertBufferNode flushBufferData failed, err = %s", err)
-			log.Error(err.Error())
-			panic(err)
+			log.Fatal("insertBufferNode failed to flushBufferData",
+				zap.Int64("segmentID", task.segmentID),
+				zap.Error(err),
+			)
 		}
 		segmentsToSync = append(segmentsToSync, task.segmentID)
 		ibNode.channel.rollInsertBuffer(task.segmentID)

@@ -94,7 +94,7 @@ func GetMemoryCount() uint64 {
 	// get container memory by `cgroups`
 	limit, err := getContainerMemLimit()
 	if err != nil {
-		log.Error(err.Error())
+		log.Warn("failed to get container memory limit", zap.Error(err))
 		return 0
 	}
 	// in container, return min(hostMem, containerMem)
@@ -117,7 +117,7 @@ func GetUsedMemoryCount() uint64 {
 		// in container, calculate by `cgroups`
 		used, err := getContainerMemUsed()
 		if err != nil {
-			log.Error(err.Error())
+			log.Warn("failed to get container memory used", zap.Error(err))
 			return 0
 		}
 		return used

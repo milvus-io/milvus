@@ -26,6 +26,7 @@ import (
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -52,7 +53,7 @@ func TestMain(m *testing.M) {
 	// init embed etcd
 	embedetcdServer, tempDir, err := etcd.StartTestEmbedEtcdServer()
 	if err != nil {
-		log.Fatal(err.Error())
+		log.Fatal("failed to start embed etcd server", zap.Error(err))
 	}
 	defer os.RemoveAll(tempDir)
 	defer embedetcdServer.Close()

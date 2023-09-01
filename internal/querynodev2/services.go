@@ -257,7 +257,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 	// to avoid concurrent watch/unwatch
 	if node.unsubscribingChannels.Contain(channel.GetChannelName()) {
 		err := merr.WrapErrChannelUnsubscribing(channel.GetChannelName())
-		log.Warn(err.Error())
+		log.Warn("abort watch unsubscribing channel", zap.Error(err))
 		return merr.Status(err), nil
 	}
 

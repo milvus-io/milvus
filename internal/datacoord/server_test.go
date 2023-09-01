@@ -68,7 +68,7 @@ func TestMain(m *testing.M) {
 	// init embed etcd
 	embedetcdServer, tempDir, err := etcd.StartTestEmbedEtcdServer()
 	if err != nil {
-		log.Fatal(err.Error())
+		log.Fatal("failed to start embed etcd server", zap.Error(err))
 	}
 	defer os.RemoveAll(tempDir)
 	defer embedetcdServer.Close()
