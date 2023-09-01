@@ -19,12 +19,14 @@
 #include <cstddef>
 #include <iostream>
 #include <memory>
+#include <type_traits>
 #include <vector>
 #include <string>
 #include <mutex>
 #include <shared_mutex>
 
 #include "arrow/api.h"
+#include "arrow/array/array_binary.h"
 #include "common/FieldMeta.h"
 #include "common/Utils.h"
 #include "common/VectorTrait.h"
@@ -112,6 +114,12 @@ class FieldDataImpl : public FieldDataBase {
 
     void
     FillFieldData(const std::shared_ptr<arrow::Array> array) override;
+
+    virtual void
+    FillFieldData(const std::shared_ptr<arrow::StringArray>& array){};
+
+    virtual void
+    FillFieldData(const std::shared_ptr<arrow::BinaryArray>& array){};
 
     std::string
     GetName() const {
@@ -212,7 +220,7 @@ class FieldDataStringImpl : public FieldDataImpl<std::string, true> {
     }
 
     int64_t
-    Size() const {
+    Size() const override {
         int64_t data_size = 0;
         for (size_t offset = 0; offset < length(); ++offset) {
             data_size += field_data_[offset].size();
@@ -222,12 +230,32 @@ class FieldDataStringImpl : public FieldDataImpl<std::string, true> {
     }
 
     int64_t
-    Size(ssize_t offset) const {
+    Size(ssize_t offset) const override {
         AssertInfo(offset < get_num_rows(),
                    "field data subscript out of range");
         AssertInfo(offset < length(),
                    "subscript position don't has valid value");
         return field_data_[offset].size();
+    }
+
+    void
+    FillFieldData(const std::shared_ptr<arrow::StringArray>& array) override {
+        auto n = array->length();
+        if (n == 0) {
+            return;
+        }
+
+        std::lock_guard lck(tell_mutex_);
+        if (length_ + n > get_num_rows()) {
+            resize_field_data(length_ + n);
+        }
+
+        auto i = 0;
+        for (const auto& str : *array) {
+            field_data_[length_ + i] = str.value();
+            i++;
+        }
+        length_ += n;
     }
 };
 
@@ -238,7 +266,7 @@ class FieldDataJsonImpl : public FieldDataImpl<Json, true> {
     }
 
     int64_t
-    Size() const {
+    Size() const override {
         int64_t data_size = 0;
         for (size_t offset = 0; offset < length(); ++offset) {
             data_size += field_data_[offset].data().size();
@@ -248,12 +276,33 @@ class FieldDataJsonImpl : public FieldDataImpl<Json, true> {
     }
 
     int64_t
-    Size(ssize_t offset) const {
+    Size(ssize_t offset) const override {
         AssertInfo(offset < get_num_rows(),
                    "field data subscript out of range");
         AssertInfo(offset < length(),
                    "subscript position don't has valid value");
         return field_data_[offset].data().size();
+    }
+
+    void
+    FillFieldData(const std::shared_ptr<arrow::BinaryArray>& array) override {
+        auto n = array->length();
+        if (n == 0) {
+            return;
+        }
+
+        std::lock_guard lck(tell_mutex_);
+        if (length_ + n > get_num_rows()) {
+            resize_field_data(length_ + n);
+        }
+
+        auto i = 0;
+        for (const auto& json : *array) {
+            field_data_[length_ + i] =
+                Json(simdjson::padded_string(json.value()));
+            i++;
+        }
+        length_ += n;
     }
 };
 
