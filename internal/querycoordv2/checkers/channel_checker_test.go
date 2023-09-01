@@ -135,9 +135,22 @@ func (suite *ChannelCheckerTestSuite) TestLoadChannel() {
 func (suite *ChannelCheckerTestSuite) TestReduceChannel() {
 	checker := suite.checker
 	checker.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
+	checker.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1}))
 
-	checker.dist.ChannelDistManager.Update(1, utils.CreateTestChannel(1, 1, 1, "test-insert-channel"))
+	channels := []*datapb.VchannelInfo{
+		{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel1",
+		},
+	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
+		channels, nil, nil)
+	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
+	checker.targetMgr.UpdateCollectionCurrentTarget(int64(1))
+
+	checker.dist.ChannelDistManager.Update(1, utils.CreateTestChannel(1, 1, 1, "test-insert-channel1"))
+	checker.dist.ChannelDistManager.Update(1, utils.CreateTestChannel(1, 1, 1, "test-insert-channel2"))
 	tasks := checker.Check(context.TODO())
 	suite.Len(tasks, 1)
 	suite.EqualValues(1, tasks[0].ReplicaID())
@@ -146,7 +159,7 @@ func (suite *ChannelCheckerTestSuite) TestReduceChannel() {
 	action := tasks[0].Actions()[0].(*task.ChannelAction)
 	suite.Equal(task.ActionTypeReduce, action.Type())
 	suite.EqualValues(1, action.Node())
-	suite.EqualValues("test-insert-channel", action.ChannelName())
+	suite.EqualValues("test-insert-channel2", action.ChannelName())
 }
 
 func (suite *ChannelCheckerTestSuite) TestRepeatedChannels() {

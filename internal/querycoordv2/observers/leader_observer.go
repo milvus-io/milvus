@@ -90,10 +90,19 @@ func (o *LeaderObserver) observe(ctx context.Context) {
 	o.observeSegmentsDist(ctx)
 }
 
+func (o *LeaderObserver) readyToObserve(collectionID int64) bool {
+	metaExist := (o.meta.GetCollection(collectionID) != nil)
+	targetExist := o.target.IsNextTargetExist(collectionID) || o.target.IsCurrentTargetExist(collectionID)
+
+	return metaExist && targetExist
+}
+
 func (o *LeaderObserver) observeSegmentsDist(ctx context.Context) {
 	collectionIDs := o.meta.CollectionManager.GetAll()
 	for _, cid := range collectionIDs {
-		o.observeCollection(ctx, cid)
+		if o.readyToObserve(cid) {
+			o.observeCollection(ctx, cid)
+		}
 	}
 }
 

@@ -140,6 +140,14 @@ func (ob *TargetObserver) Check(collectionID int64) bool {
 }
 
 func (ob *TargetObserver) check(collectionID int64) {
+	if !ob.meta.Exist(collectionID) {
+		ob.ReleaseCollection(collectionID)
+		ob.targetMgr.RemoveCollection(collectionID)
+		log.Info("collection has been removed from target observer",
+			zap.Int64("collectionID", collectionID))
+		return
+	}
+
 	if ob.shouldUpdateCurrentTarget(collectionID) {
 		ob.updateCurrentTarget(collectionID)
 	}

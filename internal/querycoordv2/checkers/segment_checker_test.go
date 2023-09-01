@@ -121,8 +121,16 @@ func (suite *SegmentCheckerTestSuite) TestLoadSegments() {
 			InsertChannel: "test-insert-channel",
 		},
 	}
+
+	channels := []*datapb.VchannelInfo{
+		{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+	}
+
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		nil, segments, nil)
+		channels, segments, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 
 	// set dist
@@ -159,8 +167,15 @@ func (suite *SegmentCheckerTestSuite) TestSkipCheckReplica() {
 			InsertChannel: "test-insert-channel",
 		},
 	}
+
+	channels := []*datapb.VchannelInfo{
+		{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		nil, segments, nil)
+		channels, segments, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 
 	// set dist
@@ -177,7 +192,19 @@ func (suite *SegmentCheckerTestSuite) TestReleaseSegments() {
 	checker := suite.checker
 	// set meta
 	checker.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
+	checker.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
+
+	// set target
+	channels := []*datapb.VchannelInfo{
+		{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
+		channels, nil, nil)
+	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 
 	// set dist
 	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
@@ -210,8 +237,14 @@ func (suite *SegmentCheckerTestSuite) TestReleaseRepeatedSegments() {
 			InsertChannel: "test-insert-channel",
 		},
 	}
+	channels := []*datapb.VchannelInfo{
+		{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		nil, segments, nil)
+		channels, segments, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 
 	// set dist
@@ -249,9 +282,16 @@ func (suite *SegmentCheckerTestSuite) TestSkipReleaseSealedSegments() {
 	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, collectionID, []int64{1, 2}))
 
 	// set target
+	channels := []*datapb.VchannelInfo{
+		{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+			SeekPosition: &msgpb.MsgPosition{Timestamp: 10},
+		},
+	}
 	segments := []*datapb.SegmentInfo{}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		nil, segments, nil)
+		channels, segments, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(collectionID)
 	checker.targetMgr.UpdateCollectionCurrentTarget(collectionID)
 	readableVersion := checker.targetMgr.GetCollectionTargetVersion(collectionID, meta.CurrentTarget)

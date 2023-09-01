@@ -1726,7 +1726,7 @@ func (suite *ServiceSuite) expectGetRecoverInfo(collection int64) {
 	}
 	suite.broker.EXPECT().
 		GetRecoveryInfoV2(mock.Anything, collection, mock.Anything, mock.Anything).
-		Return(vChannels, segmentBinlogs, nil)
+		Return(vChannels, segmentBinlogs, nil).Maybe()
 }
 
 func (suite *ServiceSuite) expectLoadPartitions() {

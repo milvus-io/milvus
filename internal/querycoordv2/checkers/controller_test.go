@@ -84,7 +84,6 @@ func (suite *CheckerControllerSuite) SetupTest() {
 }
 
 func (suite *CheckerControllerSuite) TestBasic() {
-
 	// set meta
 	suite.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
 	suite.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
@@ -95,20 +94,27 @@ func (suite *CheckerControllerSuite) TestBasic() {
 	suite.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 2)
 
 	// set target
+	channels := []*datapb.VchannelInfo{
+		{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel2",
+		},
+	}
+
 	segments := []*datapb.SegmentInfo{
 		{
-			ID:            1,
+			ID:            3,
 			PartitionID:   1,
-			InsertChannel: "test-insert-channel",
+			InsertChannel: "test-insert-channel2",
 		},
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		nil, segments, nil)
+		channels, segments, nil)
 	suite.targetManager.UpdateCollectionNextTarget(int64(1))
 
 	// set dist
 	suite.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	suite.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{}))
+	suite.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{1: 2}, map[int64]*meta.Segment{}))
 
 	counter := atomic.NewInt64(0)
 	suite.scheduler.EXPECT().Add(mock.Anything).Run(func(task task.Task) {
