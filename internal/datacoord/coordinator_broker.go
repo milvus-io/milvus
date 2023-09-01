@@ -19,12 +19,13 @@ import (
 	"context"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"go.uber.org/zap"
 )
@@ -145,12 +146,9 @@ func (b *CoordinatorBroker) HasCollection(ctx context.Context, collectionID int6
 	if resp == nil {
 		return false, errNilResponse
 	}
-	if resp.Status.ErrorCode == commonpb.ErrorCode_Success {
-		return true, nil
-	}
-	statusErr := common.NewStatusError(resp.Status.ErrorCode, resp.Status.Reason)
-	if common.IsCollectionNotExistError(statusErr) {
+	err = merr.Error(resp.GetStatus())
+	if errors.Is(err, merr.ErrCollectionNotFound) {
 		return false, nil
 	}
-	return false, statusErr
+	return err == nil, err
 }

@@ -80,7 +80,7 @@ func (m *manager) Add(collectionID UniqueID, channel string) (Pipeline, error) {
 	//get shard delegator for add growing in pipeline
 	delegator, ok := m.delegators.Get(channel)
 	if !ok {
-		return nil, merr.WrapErrShardDelegatorNotFound(channel)
+		return nil, merr.WrapErrChannelNotFound(channel, "delegator not found")
 	}
 
 	newPipeLine, err := NewPipeLine(collectionID, channel, m.dataManager, m.tSafeManager, m.dispatcher, delegator)

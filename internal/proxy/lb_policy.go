@@ -18,6 +18,7 @@ package proxy
 import (
 	"context"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -167,7 +168,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 
 			// cancel work load which assign to the target node
 			lb.balancer.CancelWorkload(targetNode, workload.nq)
-			return merr.WrapErrShardDelegatorAccessFailed(workload.channel, err.Error())
+			return errors.Wrapf(err, "failed to get delegator %d for channel %s", targetNode, workload.channel)
 		}
 
 		err = workload.exec(ctx, targetNode, client, workload.channel)
@@ -178,11 +179,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			excludeNodes.Insert(targetNode)
 			lb.balancer.CancelWorkload(targetNode, workload.nq)
 
-			if err == context.Canceled || err == context.DeadlineExceeded {
-				return merr.WrapErrShardDelegatorSQTimeout(workload.channel, err.Error())
-			}
-
-			return merr.WrapErrShardDelegatorSQFailed(workload.channel, err.Error())
+			return errors.Wrapf(err, "failed to search/query delegator %d for channel %s", targetNode, workload.channel)
 		}
 
 		lb.balancer.CancelWorkload(targetNode, workload.nq)

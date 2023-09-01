@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/collector"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
@@ -130,7 +131,7 @@ func (t *QueryTask) Execute() error {
 		Base: &commonpb.MsgBase{
 			SourceID: paramtable.GetNodeID(),
 		},
-		Status:     &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		Status:     merr.Status(nil),
 		Ids:        reducedResult.Ids,
 		FieldsData: reducedResult.FieldsData,
 		CostAggregation: &internalpb.CostAggregation{

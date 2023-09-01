@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
@@ -103,10 +104,7 @@ func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest
 		tr:             timerecord.NewTimeRecorder(fmt.Sprintf("IndexBuildID: %d, ClusterID: %s", req.BuildID, req.ClusterID)),
 		serializedSize: 0,
 	}
-	ret := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-		Reason:    "",
-	}
+	ret := merr.Status(nil)
 	if err := i.sched.IndexBuildQueue.Enqueue(task); err != nil {
 		log.Ctx(ctx).Warn("IndexNode failed to schedule", zap.Int64("IndexBuildID", req.BuildID), zap.String("ClusterID", req.ClusterID), zap.Error(err))
 		ret.ErrorCode = commonpb.ErrorCode_UnexpectedError
@@ -146,10 +144,7 @@ func (i *IndexNode) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest
 		}
 	})
 	ret := &indexpb.QueryJobsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
+		Status:     merr.Status(nil),
 		ClusterID:  req.ClusterID,
 		IndexInfos: make([]*indexpb.IndexTaskInfo, 0, len(req.BuildIDs)),
 	}
@@ -196,10 +191,7 @@ func (i *IndexNode) DropJobs(ctx context.Context, req *indexpb.DropJobsRequest) 
 	}
 	log.Ctx(ctx).Info("drop index build jobs success", zap.String("ClusterID", req.ClusterID),
 		zap.Int64s("IndexBuildIDs", req.BuildIDs))
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-		Reason:    "",
-	}, nil
+	return merr.Status(nil), nil
 }
 
 func (i *IndexNode) GetJobStats(ctx context.Context, req *indexpb.GetJobStatsRequest) (*indexpb.GetJobStatsResponse, error) {
@@ -227,10 +219,7 @@ func (i *IndexNode) GetJobStats(ctx context.Context, req *indexpb.GetJobStatsReq
 	}
 	log.Ctx(ctx).Info("Get Index Job Stats", zap.Int("Unissued", unissued), zap.Int("Active", active), zap.Int("Slot", slots))
 	return &indexpb.GetJobStatsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
+		Status:           merr.Status(nil),
 		TotalJobNum:      int64(active) + int64(unissued),
 		InProgressJobNum: int64(active),
 		EnqueueJobNum:    int64(unissued),

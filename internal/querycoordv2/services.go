@@ -727,10 +727,7 @@ func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 	}
 
 	return &internalpb.ShowConfigurationsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
+		Status:        merr.Status(nil),
 		Configuations: configList,
 	}, nil
 }

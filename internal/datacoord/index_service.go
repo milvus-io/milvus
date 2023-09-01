@@ -258,10 +258,8 @@ func (s *Server) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRe
 		}, nil
 	}
 	ret := &indexpb.GetIndexStateResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		State: commonpb.IndexState_Finished,
+		Status: merr.Status(nil),
+		State:  commonpb.IndexState_Finished,
 	}
 
 	indexInfo := &indexpb.IndexInfo{
@@ -301,9 +299,7 @@ func (s *Server) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegme
 	}
 
 	ret := &indexpb.GetSegmentIndexStateResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status: merr.Status(nil),
 		States: make([]*indexpb.SegmentIndexState, 0),
 	}
 	indexID2CreateTs := s.meta.GetIndexIDByName(req.GetCollectionID(), req.GetIndexName())
@@ -510,9 +506,7 @@ func (s *Server) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetInde
 	log.Info("GetIndexBuildProgress success", zap.Int64("collectionID", req.GetCollectionID()),
 		zap.String("indexName", req.GetIndexName()))
 	return &indexpb.GetIndexBuildProgressResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status:           merr.Status(nil),
 		IndexedRows:      indexInfo.IndexedRows,
 		TotalRows:        indexInfo.TotalRows,
 		PendingIndexRows: indexInfo.PendingIndexRows,
@@ -580,9 +574,7 @@ func (s *Server) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRe
 	}
 	log.Info("DescribeIndex success", zap.String("indexName", req.GetIndexName()))
 	return &indexpb.DescribeIndexResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status:     merr.Status(nil),
 		IndexInfos: indexInfos,
 	}, nil
 }
@@ -640,9 +632,7 @@ func (s *Server) GetIndexStatistics(ctx context.Context, req *indexpb.GetIndexSt
 	log.Debug("GetIndexStatisticsResponse success",
 		zap.String("indexName", req.GetIndexName()))
 	return &indexpb.GetIndexStatisticsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status:     merr.Status(nil),
 		IndexInfos: indexInfos,
 	}, nil
 }
@@ -668,9 +658,7 @@ func (s *Server) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 		return errResp, nil
 	}
 
-	ret := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}
+	ret := merr.Status(nil)
 
 	indexes := s.meta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
 	if len(indexes) == 0 {
@@ -722,9 +710,7 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 		}, nil
 	}
 	ret := &indexpb.GetIndexInfoResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status:      merr.Status(nil),
 		SegmentInfo: map[int64]*indexpb.SegmentInfo{},
 	}
 

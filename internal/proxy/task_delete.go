@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -154,9 +155,7 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 	dt.deleteMsg.Base.SourceID = paramtable.GetNodeID()
 
 	dt.result = &milvuspb.MutationResult{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status: merr.Status(nil),
 		IDs: &schemapb.IDs{
 			IdField: nil,
 		},

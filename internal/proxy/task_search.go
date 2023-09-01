@@ -420,7 +420,7 @@ func (t *searchTask) Execute(ctx context.Context) error {
 	})
 	if err != nil {
 		log.Warn("search execute failed", zap.Error(err))
-		return merr.WrapErrShardDelegatorSearchFailed(err.Error())
+		return errors.Wrap(err, "failed to search")
 	}
 
 	log.Debug("Search Execute done.",
@@ -770,9 +770,7 @@ func reduceSearchResultData(ctx context.Context, subSearchResultData []*schemapb
 		zap.String("metricType", metricType))
 
 	ret := &milvuspb.SearchResults{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status: merr.Status(nil),
 		Results: &schemapb.SearchResultData{
 			NumQueries: nq,
 			TopK:       topk,

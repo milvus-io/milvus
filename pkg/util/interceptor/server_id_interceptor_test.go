@@ -101,7 +101,7 @@ func TestServerIDInterceptor(t *testing.T) {
 		md = metadata.Pairs(ServerIDKey, "1234")
 		ctx = metadata.NewIncomingContext(context.Background(), md)
 		_, err = interceptor(ctx, req, serverInfo, handler)
-		assert.ErrorIs(t, err, merr.ErrServerIDMismatch)
+		assert.ErrorIs(t, err, merr.ErrNodeNotMatch)
 
 		// with same ServerID
 		md = metadata.Pairs(ServerIDKey, fmt.Sprint(paramtable.GetNodeID()))
@@ -137,7 +137,7 @@ func TestServerIDInterceptor(t *testing.T) {
 		md = metadata.Pairs(ServerIDKey, "1234")
 		ctx = metadata.NewIncomingContext(context.Background(), md)
 		err = interceptor(nil, newMockSS(ctx), nil, handler)
-		assert.ErrorIs(t, err, merr.ErrServerIDMismatch)
+		assert.ErrorIs(t, err, merr.ErrNodeNotMatch)
 
 		// with same ServerID
 		md = metadata.Pairs(ServerIDKey, fmt.Sprint(paramtable.GetNodeID()))

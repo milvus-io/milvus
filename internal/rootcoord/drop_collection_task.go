@@ -22,11 +22,12 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -55,7 +56,7 @@ func (t *dropCollectionTask) Execute(ctx context.Context) error {
 	// dropping collection with `ts1` but a collection exists in catalog with newer ts which is bigger than `ts1`.
 	// fortunately, if ddls are promised to execute in sequence, then everything is OK. The `ts1` will always be latest.
 	collMeta, err := t.core.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp)
-	if common.IsCollectionNotExistError(err) {
+	if errors.Is(err, merr.ErrCollectionNotFound) {
 		// make dropping collection idempotent.
 		log.Warn("drop non-existent collection", zap.String("collection", t.Req.GetCollectionName()))
 		return nil

@@ -551,9 +551,8 @@ class TestUtilityParams(TestcaseBase):
         new_collection_name = cf.gen_unique_str(prefix)
         self.utility_wrap.rename_collection(old_collection_name, new_collection_name,
                                             check_task=CheckTasks.err_res,
-                                            check_items={"err_code": 1,
-                                                         "err_msg": "collection {} was not "
-                                                                    "loaded into memory)".format(collection_w.name)})
+                                            check_items={"err_code": 4,
+                                                         "err_msg": "collection not found"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_rename_collection_new_invalid_type(self, get_invalid_type_collection_name):

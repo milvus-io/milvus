@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 var _ rootcoordpb.RootCoordClient = &GrpcRootCoordClient{}
@@ -48,7 +49,7 @@ func (m *GrpcRootCoordClient) ListDatabases(ctx context.Context, in *milvuspb.Li
 }
 
 func (m *GrpcRootCoordClient) RenameCollection(ctx context.Context, in *milvuspb.RenameCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
+	return merr.Status(nil), nil
 }
 
 func (m *GrpcRootCoordClient) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest, opts ...grpc.CallOption) (*milvuspb.CheckHealthResponse, error) {

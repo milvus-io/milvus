@@ -177,8 +177,7 @@ class TestIndexParams(TestcaseBase):
                                    index_name=index_name,
                                    check_task=CheckTasks.err_res,
                                    check_items={ct.err_code: 1,
-                                                ct.err_msg: "CreateIndex failed: index already exist, "
-                                                            "but parameters are inconsistent"})
+                                                ct.err_msg: "invalid parameter"})
 
     @pytest.mark.tags(CaseLabel.L1)
     # @pytest.mark.xfail(reason="issue 19181")

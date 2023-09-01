@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
@@ -166,7 +167,7 @@ func (t *SearchTask) Execute() error {
 				Base: &commonpb.MsgBase{
 					SourceID: paramtable.GetNodeID(),
 				},
-				Status:         &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+				Status:         merr.Status(nil),
 				MetricType:     req.GetReq().GetMetricType(),
 				NumQueries:     t.originNqs[i],
 				TopK:           t.originTopks[i],

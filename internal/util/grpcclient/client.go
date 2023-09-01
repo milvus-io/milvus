@@ -457,5 +457,5 @@ func IsCrossClusterRoutingErr(err error) bool {
 func IsServerIDMismatchErr(err error) bool {
 	// GRPC utilizes `status.Status` to encapsulate errors,
 	// hence it is not viable to employ the `errors.Is` for assessment.
-	return strings.Contains(err.Error(), merr.ErrServerIDMismatch.Error())
+	return strings.Contains(err.Error(), merr.ErrNodeNotMatch.Error())
 }

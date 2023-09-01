@@ -251,7 +251,7 @@ func (sd *shardDelegator) applyDelete(ctx context.Context, nodeID int64, worker 
 			log.Debug("delegator plan to applyDelete via worker")
 			err := retry.Do(ctx, func() error {
 				if sd.Stopped() {
-					return retry.Unrecoverable(merr.WrapErrChannelUnsubscribing(sd.vchannelName))
+					return retry.Unrecoverable(merr.WrapErrChannelNotAvailable(sd.vchannelName, "channel is unsubscribing"))
 				}
 
 				err := worker.Delete(ctx, &querypb.DeleteRequest{

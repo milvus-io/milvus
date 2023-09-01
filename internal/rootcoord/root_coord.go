@@ -1111,19 +1111,15 @@ func (c *Core) describeCollectionImpl(ctx context.Context, in *milvuspb.Describe
 		log.Info("failed to enqueue request to describe collection", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("DescribeCollection", metrics.FailLabel).Inc()
 		return &milvuspb.DescribeCollectionResponse{
-			// TODO: use commonpb.ErrorCode_CollectionNotExists. SDK use commonpb.ErrorCode_UnexpectedError now.
 			Status: merr.Status(err),
-			// Status: common.StatusFromError(err),
 		}, nil
 	}
 
 	if err := t.WaitToFinish(); err != nil {
-		log.Info("failed to describe collection", zap.Error(err))
+		log.Warn("failed to describe collection", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("DescribeCollection", metrics.FailLabel).Inc()
 		return &milvuspb.DescribeCollectionResponse{
-			// TODO: use commonpb.ErrorCode_CollectionNotExists. SDK use commonpb.ErrorCode_UnexpectedError now.
 			Status: merr.Status(err),
-			// Status: common.StatusFromError(err),
 		}, nil
 	}
 
@@ -1581,10 +1577,7 @@ func (c *Core) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfi
 	}
 
 	return &internalpb.ShowConfigurationsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
+		Status:        merr.Status(nil),
 		Configuations: configList,
 	}, nil
 }
@@ -1988,9 +1981,7 @@ func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (
 		}
 	}
 
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
+	return merr.Status(nil), nil
 }
 
 // ExpireCredCache will call invalidate credential cache

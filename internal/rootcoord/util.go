@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -114,10 +115,7 @@ func failStatus(code commonpb.ErrorCode, reason string) *commonpb.Status {
 }
 
 func succStatus() *commonpb.Status {
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-		Reason:    "",
-	}
+	return merr.Status(nil)
 }
 
 type TimeTravelRequest interface {

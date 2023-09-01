@@ -1273,7 +1273,7 @@ func TestDropPartitionTask(t *testing.T) {
 		PartitionIDs: []int64{},
 	}, nil)
 	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
-		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		Status: merr.Status(nil),
 	}, nil)
 
 	mockCache := NewMockCache(t)
@@ -2554,7 +2554,7 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 		case "c1":
 			return errors.New("error mock DropCollection")
 		case "c2":
-			return common.NewStatusError(commonpb.ErrorCode_CollectionNotExists, "collection not exist")
+			return merr.WrapErrCollectionNotFound("mock")
 		default:
 			return nil
 		}
@@ -2594,7 +2594,7 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 		PartitionIDs: []int64{},
 	}, nil)
 	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
-		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		Status: merr.Status(nil),
 	}, nil)
 
 	dbName := funcutil.GenRandomStr()
@@ -2702,7 +2702,7 @@ func Test_loadPartitionTask_Execute(t *testing.T) {
 		PartitionIDs: []int64{},
 	}, nil)
 	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
-		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		Status: merr.Status(nil),
 	}, nil)
 
 	dbName := funcutil.GenRandomStr()
@@ -2802,7 +2802,7 @@ func TestCreateResourceGroupTask(t *testing.T) {
 	rc.Start()
 	defer rc.Stop()
 	qc := getQueryCoord()
-	qc.EXPECT().CreateResourceGroup(mock.Anything, mock.Anything).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
+	qc.EXPECT().CreateResourceGroup(mock.Anything, mock.Anything).Return(merr.Status(nil), nil)
 	qc.Start()
 	defer qc.Stop()
 	ctx := context.Background()
@@ -2842,7 +2842,7 @@ func TestDropResourceGroupTask(t *testing.T) {
 	rc.Start()
 	defer rc.Stop()
 	qc := getQueryCoord()
-	qc.EXPECT().DropResourceGroup(mock.Anything, mock.Anything).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
+	qc.EXPECT().DropResourceGroup(mock.Anything, mock.Anything).Return(merr.Status(nil), nil)
 	qc.Start()
 	defer qc.Stop()
 	ctx := context.Background()
@@ -2882,7 +2882,7 @@ func TestTransferNodeTask(t *testing.T) {
 	rc.Start()
 	defer rc.Stop()
 	qc := getQueryCoord()
-	qc.EXPECT().TransferNode(mock.Anything, mock.Anything).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
+	qc.EXPECT().TransferNode(mock.Anything, mock.Anything).Return(merr.Status(nil), nil)
 	qc.Start()
 	defer qc.Stop()
 	ctx := context.Background()
@@ -2922,7 +2922,7 @@ func TestTransferNodeTask(t *testing.T) {
 func TestTransferReplicaTask(t *testing.T) {
 	rc := &MockRootCoordClientInterface{}
 	qc := getQueryCoord()
-	qc.EXPECT().TransferReplica(mock.Anything, mock.Anything).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
+	qc.EXPECT().TransferReplica(mock.Anything, mock.Anything).Return(merr.Status(nil), nil)
 	qc.Start()
 	defer qc.Stop()
 	ctx := context.Background()
@@ -2966,7 +2966,7 @@ func TestListResourceGroupsTask(t *testing.T) {
 	rc := &MockRootCoordClientInterface{}
 	qc := getQueryCoord()
 	qc.EXPECT().ListResourceGroups(mock.Anything, mock.Anything).Return(&milvuspb.ListResourceGroupsResponse{
-		Status:         &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		Status:         merr.Status(nil),
 		ResourceGroups: []string{meta.DefaultResourceGroupName, "rg"},
 	}, nil)
 	qc.Start()
@@ -3009,7 +3009,7 @@ func TestDescribeResourceGroupTask(t *testing.T) {
 	rc := &MockRootCoordClientInterface{}
 	qc := getQueryCoord()
 	qc.EXPECT().DescribeResourceGroup(mock.Anything, mock.Anything).Return(&querypb.DescribeResourceGroupResponse{
-		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		Status: merr.Status(nil),
 		ResourceGroup: &querypb.ResourceGroupInfo{
 			Name:             "rg",
 			Capacity:         2,
@@ -3105,7 +3105,7 @@ func TestDescribeResourceGroupTaskFailed(t *testing.T) {
 	qc.ExpectedCalls = nil
 	qc.EXPECT().Stop().Return(nil)
 	qc.EXPECT().DescribeResourceGroup(mock.Anything, mock.Anything).Return(&querypb.DescribeResourceGroupResponse{
-		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		Status: merr.Status(nil),
 		ResourceGroup: &querypb.ResourceGroupInfo{
 			Name:             "rg",
 			Capacity:         2,

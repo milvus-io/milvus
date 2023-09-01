@@ -18,10 +18,8 @@ package common
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 )
 
 var (
@@ -75,69 +73,4 @@ type KeyNotExistError struct {
 
 func (k *KeyNotExistError) Error() string {
 	return fmt.Sprintf("there is no value on key = %s", k.key)
-}
-
-type statusError struct {
-	commonpb.Status
-}
-
-func (e *statusError) Error() string {
-	return fmt.Sprintf("code: %s, reason: %s", e.GetErrorCode().String(), e.GetReason())
-}
-
-func NewStatusError(code commonpb.ErrorCode, reason string) *statusError {
-	return &statusError{Status: commonpb.Status{ErrorCode: code, Reason: reason}}
-}
-
-func IsStatusError(e error) bool {
-	_, ok := e.(*statusError)
-	return ok
-}
-
-var (
-	// static variable, save temporary memory.
-	collectionNotExistCodes = []commonpb.ErrorCode{
-		commonpb.ErrorCode_UnexpectedError, // TODO: remove this after SDK remove this dependency.
-		commonpb.ErrorCode_CollectionNotExists,
-	}
-)
-
-func NewCollectionNotExistError(msg string) *statusError {
-	return NewStatusError(commonpb.ErrorCode_CollectionNotExists, msg)
-}
-
-func IsCollectionNotExistError(e error) bool {
-	statusError, ok := e.(*statusError)
-	if !ok {
-		return false
-	}
-	// cycle import: common -> funcutil -> types -> sessionutil -> common
-	// return funcutil.SliceContain(collectionNotExistCodes, statusError.GetErrorCode())
-	if statusError.Status.ErrorCode == commonpb.ErrorCode_CollectionNotExists {
-		return true
-	}
-
-	if (statusError.Status.ErrorCode == commonpb.ErrorCode_UnexpectedError) && strings.Contains(statusError.Status.Reason, "can't find collection") {
-		return true
-	}
-	return false
-}
-
-func IsCollectionNotExistErrorV2(e error) bool {
-	statusError, ok := e.(*statusError)
-	if !ok {
-		return false
-	}
-	return statusError.GetErrorCode() == commonpb.ErrorCode_CollectionNotExists
-}
-
-func StatusFromError(e error) *commonpb.Status {
-	if e == nil {
-		return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
-	}
-	statusError, ok := e.(*statusError)
-	if !ok {
-		return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: e.Error()}
-	}
-	return &commonpb.Status{ErrorCode: statusError.GetErrorCode(), Reason: statusError.GetReason()}
 }

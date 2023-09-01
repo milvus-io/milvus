@@ -56,6 +56,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -288,9 +289,7 @@ func (i *IndexNode) GetComponentStates(ctx context.Context) (*milvuspb.Component
 	ret := &milvuspb.ComponentStates{
 		State:              stateInfo,
 		SubcomponentStates: nil, // todo add subcomponents states
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status:             merr.Status(nil),
 	}
 
 	log.RatedInfo(10, "IndexNode Component states",
@@ -305,9 +304,7 @@ func (i *IndexNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRes
 	log.RatedInfo(10, "get IndexNode time tick channel ...")
 
 	return &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status: merr.Status(nil),
 	}, nil
 }
 
@@ -315,9 +312,7 @@ func (i *IndexNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRes
 func (i *IndexNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	log.RatedInfo(10, "get IndexNode statistics channel ...")
 	return &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status: merr.Status(nil),
 	}, nil
 }
 
@@ -352,10 +347,7 @@ func (i *IndexNode) ShowConfigurations(ctx context.Context, req *internalpb.Show
 	}
 
 	return &internalpb.ShowConfigurationsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
+		Status:        merr.Status(nil),
 		Configuations: configList,
 	}, nil
 }

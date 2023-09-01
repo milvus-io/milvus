@@ -1068,7 +1068,7 @@ class TestCollectionOperation(TestcaseBase):
                                              check_items={exp_name: c_name, exp_schema: default_schema})
         self.collection_wrap.drop()
         assert not self.utility_wrap.has_collection(c_name)[0]
-        error = {ct.err_code: 1, ct.err_msg: f'HasPartition failed: can\'t find collection: {c_name}'}
+        error = {ct.err_code: 1, ct.err_msg: f'HasPartition failed: collection not found: {c_name}'}
         collection_w.has_partition("p", check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1895,7 +1895,7 @@ class TestDropCollection(TestcaseBase):
         c_name = cf.gen_unique_str()
         self.init_collection_wrap(name=c_name)
         c_name_2 = cf.gen_unique_str()
-        # error = {ct.err_code: 0, ct.err_msg: 'DescribeCollection failed: can\'t find collection: %s' % c_name_2}
+        # error = {ct.err_code: 0, ct.err_msg: 'DescribeCollection failed: collection not found: %s' % c_name_2}
         # self.utility_wrap.drop_collection(c_name_2, check_task=CheckTasks.err_res, check_items=error)
         # @longjiquan: dropping collection should be idempotent.
         self.utility_wrap.drop_collection(c_name_2)
@@ -3360,7 +3360,7 @@ class TestLoadPartition(TestcaseBase):
                                                             "is_empty": True, "num_entities": 0}
                                                )
         collection_w.drop()
-        error = {ct.err_code: 0, ct.err_msg: "can\'t find collection"}
+        error = {ct.err_code: 0, ct.err_msg: "collection not found"}
         partition_w.load(check_task=CheckTasks.err_res, check_items=error)
         partition_w.release(check_task=CheckTasks.err_res, check_items=error)
 

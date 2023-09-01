@@ -915,10 +915,7 @@ func (gist *getIndexStateTask) Execute(ctx context.Context) error {
 	}
 
 	gist.result = &milvuspb.GetIndexStateResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
+		Status:     merr.Status(nil),
 		State:      state.GetState(),
 		FailReason: state.GetFailReason(),
 	}

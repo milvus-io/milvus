@@ -360,7 +360,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 		},
 		retryTimes: 2,
 	})
-	s.ErrorIs(err, merr.ErrShardDelegatorSQTimeout)
+	s.True(merr.IsCanceledOrTimeout(err))
 }
 
 func (s *LBPolicySuite) TestExecute() {

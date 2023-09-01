@@ -29,8 +29,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 func Test_dropCollectionTask_Prepare(t *testing.T) {
@@ -98,7 +98,7 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 		).Return(nil, func(ctx context.Context, dbName string, name string, ts Timestamp) error {
 			if collectionName == name {
-				return common.NewCollectionNotExistError("collection not exist")
+				return merr.WrapErrCollectionNotFound(collectionName)
 			}
 			return errors.New("error mock GetCollectionByName")
 		})

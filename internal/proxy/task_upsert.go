@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -275,9 +276,7 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	log := log.Ctx(ctx).With(zap.String("collectionName", collectionName))
 
 	it.result = &milvuspb.MutationResult{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status: merr.Status(nil),
 		IDs: &schemapb.IDs{
 			IdField: nil,
 		},
