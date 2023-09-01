@@ -543,24 +543,23 @@ func (m *CollectionManager) RemoveCollection(collectionID UniqueID) error {
 	return nil
 }
 
-func (m *CollectionManager) RemovePartition(ids ...UniqueID) error {
-	if len(ids) == 0 {
+func (m *CollectionManager) RemovePartition(collectionID UniqueID, partitionIDs ...UniqueID) error {
+	if len(partitionIDs) == 0 {
 		return nil
 	}
 
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
 
-	return m.removePartition(ids...)
+	return m.removePartition(collectionID, partitionIDs...)
 }
 
-func (m *CollectionManager) removePartition(ids ...UniqueID) error {
-	partition := m.partitions[ids[0]]
-	err := m.catalog.ReleasePartition(partition.CollectionID, ids...)
+func (m *CollectionManager) removePartition(collectionID UniqueID, partitionIDs ...UniqueID) error {
+	err := m.catalog.ReleasePartition(collectionID, partitionIDs...)
 	if err != nil {
 		return err
 	}
-	for _, id := range ids {
+	for _, id := range partitionIDs {
 		delete(m.partitions, id)
 	}
 

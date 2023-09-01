@@ -157,7 +157,7 @@ func (job *LoadCollectionJob) Execute() error {
 			log.Info("replica created", zap.Int64("replicaID", replica.GetID()),
 				zap.Int64s("nodes", replica.GetNodes()), zap.String("resourceGroup", replica.GetResourceGroup()))
 		}
-		job.undo.NewReplicaCreated = true
+		job.undo.IsReplicaCreated = true
 	}
 
 	// 3. loadPartitions on QueryNodes
@@ -189,6 +189,7 @@ func (job *LoadCollectionJob) Execute() error {
 		},
 		CreatedAt: time.Now(),
 	}
+	job.undo.IsNewCollection = true
 	err = job.meta.CollectionManager.PutCollection(collection, partitions...)
 	if err != nil {
 		msg := "failed to store collection and partitions"
@@ -204,7 +205,7 @@ func (job *LoadCollectionJob) Execute() error {
 		msg := "failed to update next target"
 		log.Warn(msg, zap.Error(err))
 	}
-	job.undo.TargetUpdated = true
+	job.undo.IsTargetUpdated = true
 
 	return nil
 }
@@ -330,7 +331,7 @@ func (job *LoadPartitionJob) Execute() error {
 			log.Info("replica created", zap.Int64("replicaID", replica.GetID()),
 				zap.Int64s("nodes", replica.GetNodes()), zap.String("resourceGroup", replica.GetResourceGroup()))
 		}
-		job.undo.NewReplicaCreated = true
+		job.undo.IsReplicaCreated = true
 	}
 
 	// 3. loadPartitions on QueryNodes
@@ -353,6 +354,7 @@ func (job *LoadPartitionJob) Execute() error {
 		}
 	})
 	if !job.meta.CollectionManager.Exist(req.GetCollectionID()) {
+		job.undo.IsNewCollection = true
 		collection := &meta.Collection{
 			CollectionLoadInfo: &querypb.CollectionLoadInfo{
 				CollectionID:  req.GetCollectionID(),
@@ -385,7 +387,7 @@ func (job *LoadPartitionJob) Execute() error {
 		msg := "failed to update next target"
 		log.Warn(msg, zap.Error(err))
 	}
-	job.undo.TargetUpdated = true
+	job.undo.IsTargetUpdated = true
 
 	return nil
 }
