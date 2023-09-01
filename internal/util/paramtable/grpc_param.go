@@ -44,10 +44,9 @@ const (
 	DefaultKeepAliveTimeout = 20000 * time.Millisecond
 
 	// Grpc retry policy
-	DefaultMaxAttempts               = 5
-	DefaultInitialBackoff    float32 = 1.0
-	DefaultMaxBackoff        float32 = 10.0
-	DefaultBackoffMultiplier float32 = 2.0
+	DefaultMaxAttempts            = 10
+	DefaultInitialBackoff float64 = 0.2
+	DefaultMaxBackoff     float64 = 10
 
 	ProxyInternalPort = 19529
 	ProxyExternalPort = 19530
@@ -187,10 +186,9 @@ type GrpcClientConfig struct {
 	KeepAliveTime    time.Duration
 	KeepAliveTimeout time.Duration
 
-	MaxAttempts       int
-	InitialBackoff    float32
-	MaxBackoff        float32
-	BackoffMultiplier float32
+	MaxAttempts    int
+	InitialBackoff float64
+	MaxBackoff     float64
 }
 
 // InitOnce initialize grpc client config once
@@ -211,7 +209,6 @@ func (p *GrpcClientConfig) init(domain string) {
 	p.initMaxAttempts()
 	p.initInitialBackoff()
 	p.initMaxBackoff()
-	p.initBackoffMultiplier()
 }
 
 func (p *GrpcClientConfig) ParseConfig(funcDesc string, key string, backKey string, parseValue func(string) (interface{}, error), applyValue func(interface{}, error)) {
@@ -390,7 +387,7 @@ func (p *GrpcClientConfig) initInitialBackoff() {
 	key := "grpc.client.initialBackOff"
 	p.ParseConfig(funcDesc, key, "",
 		func(s string) (interface{}, error) {
-			return strconv.ParseFloat(s, 32)
+			return strconv.ParseFloat(s, 64)
 		},
 		func(i interface{}, err error) {
 			if err != nil {
@@ -404,7 +401,7 @@ func (p *GrpcClientConfig) initInitialBackoff() {
 				p.InitialBackoff = DefaultInitialBackoff
 				return
 			}
-			p.InitialBackoff = float32(v)
+			p.InitialBackoff = v
 		})
 }
 
@@ -413,7 +410,7 @@ func (p *GrpcClientConfig) initMaxBackoff() {
 	key := "grpc.client.maxBackoff"
 	p.ParseConfig(funcDesc, key, "",
 		func(s string) (interface{}, error) {
-			return strconv.ParseFloat(s, 32)
+			return strconv.ParseFloat(s, 64)
 		},
 		func(i interface{}, err error) {
 			if err != nil {
@@ -427,29 +424,6 @@ func (p *GrpcClientConfig) initMaxBackoff() {
 				p.MaxBackoff = DefaultMaxBackoff
 				return
 			}
-			p.MaxBackoff = float32(v)
-		})
-}
-
-func (p *GrpcClientConfig) initBackoffMultiplier() {
-	funcDesc := "Init back off multiplier"
-	key := "grpc.client.backoffMultiplier"
-	p.ParseConfig(funcDesc, key, "",
-		func(s string) (interface{}, error) {
-			return strconv.ParseFloat(s, 32)
-		},
-		func(i interface{}, err error) {
-			if err != nil {
-				p.BackoffMultiplier = DefaultBackoffMultiplier
-				return
-			}
-			v, ok := i.(float64)
-			if !ok {
-				log.Warn(fmt.Sprintf("Failed to convert float64 when parsing %s, set to default", key),
-					zap.String("role", p.Domain), zap.Any(key, i))
-				p.BackoffMultiplier = DefaultBackoffMultiplier
-				return
-			}
-			p.BackoffMultiplier = float32(v)
+			p.MaxBackoff = v
 		})
 }

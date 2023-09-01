@@ -155,7 +155,7 @@ func TestGrpcClientParams(t *testing.T) {
 	assert.Equal(t, Params.InitialBackoff, DefaultInitialBackoff)
 	Params.Save("grpc.client.initialBackOff", "2.0")
 	Params.initInitialBackoff()
-	assert.Equal(t, Params.InitialBackoff, float32(2.0))
+	assert.Equal(t, Params.InitialBackoff, 2.0)
 
 	Params.initMaxBackoff()
 	assert.Equal(t, Params.MaxBackoff, DefaultMaxBackoff)
@@ -164,16 +164,7 @@ func TestGrpcClientParams(t *testing.T) {
 	assert.Equal(t, Params.MaxBackoff, DefaultMaxBackoff)
 	Params.Save("grpc.client.maxBackOff", "50.0")
 	Params.initMaxBackoff()
-	assert.Equal(t, Params.MaxBackoff, float32(50.0))
-
-	Params.initBackoffMultiplier()
-	assert.Equal(t, Params.BackoffMultiplier, DefaultBackoffMultiplier)
-	Params.Save("grpc.client.backoffMultiplier", "a")
-	Params.initBackoffMultiplier()
-	assert.Equal(t, Params.BackoffMultiplier, DefaultBackoffMultiplier)
-	Params.Save("grpc.client.backoffMultiplier", "3.0")
-	Params.initBackoffMultiplier()
-	assert.Equal(t, Params.BackoffMultiplier, float32(3.0))
+	assert.Equal(t, Params.MaxBackoff, 50.0)
 
 	Params.Save("common.security.tlsMode", "1")
 	Params.Save("tls.serverPemPath", "/pem")

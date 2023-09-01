@@ -310,7 +310,7 @@ func (s *Server) initMeta() error {
 	log.Info("recover meta...")
 	err := s.meta.CollectionManager.Recover(s.broker)
 	if err != nil {
-		log.Error("failed to recover collections")
+		log.Error("failed to recover collections", zap.Error(err))
 		return err
 	}
 
@@ -319,13 +319,13 @@ func (s *Server) initMeta() error {
 
 	err = s.meta.ReplicaManager.Recover(s.meta.CollectionManager.GetAll())
 	if err != nil {
-		log.Error("failed to recover replicas")
+		log.Error("failed to recover replicas", zap.Error(err))
 		return err
 	}
 
 	err = s.meta.ResourceManager.Recover()
 	if err != nil {
-		log.Error("failed to recover resource groups")
+		log.Error("failed to recover resource groups", zap.Error(err))
 		return err
 	}
 

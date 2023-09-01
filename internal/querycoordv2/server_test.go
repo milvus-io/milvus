@@ -109,7 +109,9 @@ func (suite *ServerSuite) SetupTest() {
 
 	for i := range suite.nodes {
 		suite.nodes[i] = mocks.NewMockQueryNode(suite.T(), suite.server.etcdCli)
-		suite.nodes[i].EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{}, nil).Maybe()
+		suite.nodes[i].EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
+			Status: &commonpb.Status{},
+		}, nil).Maybe()
 		err := suite.nodes[i].Start()
 		suite.Require().NoError(err)
 		ok := suite.waitNodeUp(suite.nodes[i], 5*time.Second)
@@ -158,7 +160,9 @@ func (suite *ServerSuite) TestNodeUp() {
 	}
 	node1 := mocks.NewMockQueryNode(suite.T(), suite.server.etcdCli)
 
-	node1.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{}, nil).Maybe()
+	node1.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
+		Status: &commonpb.Status{},
+	}, nil).Maybe()
 	node1.EXPECT().GetDataDistribution(mock.Anything, mock.Anything).Return(&querypb.GetDataDistributionResponse{Status: successStatus}, nil).Maybe()
 	err := node1.Start()
 	suite.NoError(err)
@@ -176,7 +180,9 @@ func (suite *ServerSuite) TestNodeUp() {
 	suite.server.nodeMgr.Add(session.NewNodeInfo(101, "localhost"))
 
 	node2 := mocks.NewMockQueryNode(suite.T(), suite.server.etcdCli)
-	node2.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{}, nil).Maybe()
+	node2.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
+		Status: &commonpb.Status{},
+	}, nil).Maybe()
 	node2.EXPECT().GetDataDistribution(mock.Anything, mock.Anything).Return(&querypb.GetDataDistributionResponse{Status: successStatus}, nil).Maybe()
 	err = node2.Start()
 	suite.NoError(err)

@@ -60,7 +60,6 @@ func NewClient(ctx context.Context, addr string, nodeID int64) (*Client, error) 
 			MaxAttempts:            ClientParams.MaxAttempts,
 			InitialBackoff:         ClientParams.InitialBackoff,
 			MaxBackoff:             ClientParams.MaxBackoff,
-			BackoffMultiplier:      ClientParams.BackoffMultiplier,
 		},
 	}
 	client.grpcClient.SetRole(typeutil.ProxyRole)

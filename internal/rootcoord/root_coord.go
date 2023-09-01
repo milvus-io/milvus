@@ -513,7 +513,7 @@ func (c *Core) Init() error {
 			if err != nil {
 				return err
 			}
-			log.Info("RootCoord startup success")
+			log.Info("RootCoord startup success", zap.String("address", c.session.Address))
 			return nil
 		}
 		c.UpdateStateCode(commonpb.StateCode_StandBy)

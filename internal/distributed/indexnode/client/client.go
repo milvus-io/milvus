@@ -61,7 +61,6 @@ func NewClient(ctx context.Context, addr string, nodeID int64, encryption bool) 
 			MaxAttempts:            ClientParams.MaxAttempts,
 			InitialBackoff:         ClientParams.InitialBackoff,
 			MaxBackoff:             ClientParams.MaxBackoff,
-			BackoffMultiplier:      ClientParams.BackoffMultiplier,
 		},
 	}
 	client.grpcClient.SetRole(typeutil.IndexNodeRole)

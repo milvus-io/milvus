@@ -85,7 +85,7 @@ func (broker *CoordinatorBroker) GetCollectionSchema(ctx context.Context, collec
 		return nil, err
 	}
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("failed to get collection schema",
+		log.Ctx(ctx).Warn("failed to get collection schema",
 			zap.Int64("collectionID", collectionID),
 			zap.String("code", resp.GetStatus().GetErrorCode().String()),
 			zap.String("reason", resp.GetStatus().GetReason()))

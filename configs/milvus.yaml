@@ -393,10 +393,10 @@ grpc:
     dialTimeout: 200
     keepAliveTime: 10000
     keepAliveTimeout: 20000
-    maxMaxAttempts: 5
-    initialBackOff: 1.0
-    maxBackoff: 10.0
-    backoffMultiplier: 2.0
+    maxMaxAttempts: 10
+    initialBackOff: 0.2 # seconds
+    maxBackoff: 10 # seconds
+    backoffMultiplier: 2.0 # deprecated
   server:
     retryTimes: 5 # retry times when receiving a grpc return value with a failure and retryable state code
 
