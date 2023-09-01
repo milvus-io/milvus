@@ -243,13 +243,14 @@ func (s *Server) Register() error {
 	s.icSession.Register()
 	s.session.Register()
 	if s.enableActiveStandBy {
-		err := s.icSession.ProcessActiveStandBy(nil)
+		err := s.session.ProcessActiveStandBy(s.activateFunc)
 		if err != nil {
 			return err
 		}
-		err = s.session.ProcessActiveStandBy(s.activateFunc)
+
+		err = s.icSession.ForceActiveStandby(nil)
 		if err != nil {
-			return err
+			return nil
 		}
 	}
 
@@ -341,9 +342,6 @@ func (s *Server) initDataCoord() error {
 
 	s.allocator = newRootCoordAllocator(s.rootCoordClient)
 
-	if err = s.initSession(); err != nil {
-		return err
-	}
 	s.initIndexNodeManager()
 
 	if err = s.initServiceDiscovery(); err != nil {
