@@ -1,5 +1,8 @@
+import glob
+import time
 from yaml import full_load
 import json
+import pandas as pd
 from utils.util_log import test_log as log
 
 def gen_experiment_config(yaml):
@@ -62,6 +65,7 @@ def get_collections(file_name="all_collections.json"):
         return []
     return collections
 
+
 def get_deploy_test_collections():
     try:
         with open("/tmp/ci_logs/deploy_test_all_collections.json", "r") as f:
@@ -71,6 +75,7 @@ def get_deploy_test_collections():
         log.error(f"get_all_collections error: {e}")
         return []
     return collections
+
 
 def get_chaos_test_collections():
     try:
@@ -83,6 +88,23 @@ def get_chaos_test_collections():
     return collections
 
 
+def wait_signal_to_apply_chaos():
+    all_db_file = glob.glob("/tmp/ci_logs/event_records*.parquet")
+    log.info(f"all files {all_db_file}")
+    ready_apply_chaos = True
+    timeout = 10*60
+    t0 = time.time()
+    for f in all_db_file:
+        while True and (time.time() - t0 < timeout):
+            df = pd.read_parquet(f)
+            result = df[(df['event_name'] == 'init_chaos') & (df['event_status'] == 'ready')]
+            if len(result) > 0:
+                log.info(f"{f}: {result}")
+                ready_apply_chaos = True
+                break
+            else:
+                ready_apply_chaos = False
+    return ready_apply_chaos
 
 
 if __name__ == "__main__":

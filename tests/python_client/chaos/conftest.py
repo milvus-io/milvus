@@ -9,8 +9,9 @@ def pytest_addoption(parser):
     parser.addoption("--target_number", action="store", default="1", help="target_number")
     parser.addoption("--chaos_duration", action="store", default="1m", help="chaos_duration")
     parser.addoption("--chaos_interval", action="store", default="10s", help="chaos_interval")
-    parser.addoption("--request_duration", action="store", default="3m", help="request_duration")
-    parser.addoption("--is_check", action="store", type=bool, default=False, help="is_check")   
+    parser.addoption("--request_duration", action="store", default="5m", help="request_duration")
+    parser.addoption("--is_check", action="store", type=bool, default=False, help="is_check")
+    parser.addoption("--wait_signal", action="store", type=bool, default=True, help="wait_signal")
 
 
 @pytest.fixture
@@ -56,3 +57,8 @@ def request_duration(request):
 @pytest.fixture
 def is_check(request):
     return request.config.getoption("--is_check")
+
+
+@pytest.fixture
+def wait_signal(request):
+    return request.config.getoption("--wait_signal")
