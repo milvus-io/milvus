@@ -58,7 +58,7 @@ func globalConfigPrefixs() []string {
 	return []string{"metastore", "localStorage", "etcd", "minio", "pulsar", "kafka", "rocksmq", "log", "grpc", "common", "quotaAndLimits"}
 }
 
-var defaultYaml = []string{"milvus.yaml", "default.yaml", "user.yaml"}
+var defaultYaml = []string{"milvus.yaml"}
 
 // BaseTable the basics of paramtable
 type BaseTable struct {
