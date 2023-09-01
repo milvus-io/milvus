@@ -234,7 +234,7 @@ var (
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "load_segment_latency",
 			Help:      "latency of load per segment",
-			Buckets:   buckets,
+			Buckets:   []float64{0.1, 0.5, 1, 5, 10, 20, 50, 100, 300, 600, 1200}, // unit seconds
 		}, []string{
 			nodeIDLabelName,
 		})
