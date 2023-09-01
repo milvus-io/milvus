@@ -47,7 +47,7 @@ func (h *Handlers) checkDatabase(c *gin.Context, dbName string) bool {
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(err), HTTPReturnMessage: err.Error()})
 		return false
 	} else if response.Status.ErrorCode != commonpb.ErrorCode_Success {
-		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: code(int32(response.Status.ErrorCode)), HTTPReturnMessage: response.Status.Reason})
+		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.Status.ErrorCode), HTTPReturnMessage: response.Status.Reason})
 		return false
 	}
 	for _, db := range response.DbNames {
@@ -74,7 +74,7 @@ func (h *Handlers) describeCollection(c *gin.Context, dbName string, collectionN
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(err), HTTPReturnMessage: err.Error()})
 		return nil, err
 	} else if response.Status.ErrorCode != commonpb.ErrorCode_Success {
-		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: code(int32(response.Status.ErrorCode)), HTTPReturnMessage: response.Status.Reason})
+		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.Status.ErrorCode), HTTPReturnMessage: response.Status.Reason})
 		return nil, errors.New(response.Status.Reason)
 	}
 	primaryField, ok := getPrimaryField(response.Schema)
@@ -95,7 +95,7 @@ func (h *Handlers) hasCollection(c *gin.Context, dbName string, collectionName s
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(err), HTTPReturnMessage: err.Error()})
 		return false, err
 	} else if response.Status.ErrorCode != commonpb.ErrorCode_Success {
-		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: code(int32(response.Status.ErrorCode)), HTTPReturnMessage: response.Status.Reason})
+		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.Status.ErrorCode), HTTPReturnMessage: response.Status.Reason})
 		return false, errors.New(response.Status.Reason)
 	} else {
 		return response.Value, nil
@@ -129,7 +129,7 @@ func (h *Handlers) listCollections(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: Code(err), HTTPReturnMessage: err.Error()})
 	} else if response.Status.ErrorCode != commonpb.ErrorCode_Success {
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: code(int32(response.Status.ErrorCode)), HTTPReturnMessage: response.Status.Reason})
+		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.Status.ErrorCode), HTTPReturnMessage: response.Status.Reason})
 	} else {
 		var collections []string
 		if response.CollectionNames != nil {
@@ -208,7 +208,7 @@ func (h *Handlers) createCollection(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(err), HTTPReturnMessage: err.Error()})
 		return
 	} else if response.ErrorCode != commonpb.ErrorCode_Success {
-		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: code(int32(response.ErrorCode)), HTTPReturnMessage: response.Reason})
+		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.ErrorCode), HTTPReturnMessage: response.Reason})
 		return
 	}
 
@@ -223,7 +223,7 @@ func (h *Handlers) createCollection(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(err), HTTPReturnMessage: err.Error()})
 		return
 	} else if response.ErrorCode != commonpb.ErrorCode_Success {
-		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: code(int32(response.ErrorCode)), HTTPReturnMessage: response.Reason})
+		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.ErrorCode), HTTPReturnMessage: response.Reason})
 		return
 	}
 	response, err = h.proxy.LoadCollection(c, &milvuspb.LoadCollectionRequest{
@@ -234,7 +234,7 @@ func (h *Handlers) createCollection(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(err), HTTPReturnMessage: err.Error()})
 		return
 	} else if response.ErrorCode != commonpb.ErrorCode_Success {
-		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: code(int32(response.ErrorCode)), HTTPReturnMessage: response.Reason})
+		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.ErrorCode), HTTPReturnMessage: response.Reason})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{}})
@@ -336,7 +336,7 @@ func (h *Handlers) dropCollection(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: Code(err), HTTPReturnMessage: err.Error()})
 	} else if response.ErrorCode != commonpb.ErrorCode_Success {
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: code(int32(response.ErrorCode)), HTTPReturnMessage: response.Reason})
+		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.ErrorCode), HTTPReturnMessage: response.Reason})
 	} else {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{}})
 	}
@@ -382,7 +382,7 @@ func (h *Handlers) query(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: Code(err), HTTPReturnMessage: err.Error()})
 	} else if response.Status.ErrorCode != commonpb.ErrorCode_Success {
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: code(int32(response.Status.ErrorCode)), HTTPReturnMessage: response.Status.Reason})
+		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.Status.ErrorCode), HTTPReturnMessage: response.Status.Reason})
 	} else {
 		outputData, err := buildQueryResp(int64(0), response.OutputFields, response.FieldsData, nil, nil)
 		if err != nil {
@@ -436,7 +436,7 @@ func (h *Handlers) get(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: Code(err), HTTPReturnMessage: err.Error()})
 	} else if response.Status.ErrorCode != commonpb.ErrorCode_Success {
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: code(int32(response.Status.ErrorCode)), HTTPReturnMessage: response.Status.Reason})
+		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.Status.ErrorCode), HTTPReturnMessage: response.Status.Reason})
 	} else {
 		outputData, err := buildQueryResp(int64(0), response.OutputFields, response.FieldsData, nil, nil)
 		if err != nil {
@@ -488,7 +488,7 @@ func (h *Handlers) delete(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: Code(err), HTTPReturnMessage: err.Error()})
 	} else if response.Status.ErrorCode != commonpb.ErrorCode_Success {
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: code(int32(response.Status.ErrorCode)), HTTPReturnMessage: response.Status.Reason})
+		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.Status.ErrorCode), HTTPReturnMessage: response.Status.Reason})
 	} else {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{}})
 	}
@@ -549,7 +549,7 @@ func (h *Handlers) insert(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: Code(err), HTTPReturnMessage: err.Error()})
 	} else if response.Status.ErrorCode != commonpb.ErrorCode_Success {
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: code(int32(response.Status.ErrorCode)), HTTPReturnMessage: response.Status.Reason})
+		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.Status.ErrorCode), HTTPReturnMessage: response.Status.Reason})
 	} else {
 		switch response.IDs.GetIdField().(type) {
 		case *schemapb.IDs_IntId:
@@ -608,7 +608,7 @@ func (h *Handlers) search(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: Code(err), HTTPReturnMessage: err.Error()})
 	} else if response.Status.ErrorCode != commonpb.ErrorCode_Success {
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: code(int32(response.Status.ErrorCode)), HTTPReturnMessage: response.Status.Reason})
+		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.Status.ErrorCode), HTTPReturnMessage: response.Status.Reason})
 	} else {
 		if response.Results.TopK == int64(0) {
 			c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: []interface{}{}})
