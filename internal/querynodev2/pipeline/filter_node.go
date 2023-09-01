@@ -72,9 +72,7 @@ func (fNode *filterNode) Operate(in Msg) Msg {
 	//Get collection from collection manager
 	collection := fNode.manager.Collection.Get(fNode.collectionID)
 	if collection == nil {
-		err := merr.WrapErrCollectionNotFound(fNode.collectionID)
-		log.Error(err.Error())
-		panic(err)
+		log.Fatal("collection not found in meta", zap.Int64("collectionID", fNode.collectionID))
 	}
 
 	out := &insertNodeMsg{

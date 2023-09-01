@@ -73,28 +73,20 @@ func (suite *HTTPServerTestSuite) TestDefaultLogHandler() {
 
 	// change log level through http
 	payload, err := json.Marshal(map[string]any{"level": "error"})
-	if err != nil {
-		log.Fatal(err.Error())
-	}
+	suite.Require().NoError(err)
 
 	url := suite.server.URL + "/log/level"
 	req, err := http.NewRequest(http.MethodPut, url, bytes.NewBuffer(payload))
 	req.Header.Set("Content-Type", "application/json")
-	if err != nil {
-		log.Fatal(err.Error())
-	}
+	suite.Require().NoError(err)
 
 	client := suite.server.Client()
 	resp, err := client.Do(req)
-	if err != nil {
-		log.Fatal(err.Error())
-	}
+	suite.Require().NoError(err)
 	defer resp.Body.Close()
 
 	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		log.Fatal(err.Error())
-	}
+	suite.Require().NoError(err)
 	suite.Equal("{\"level\":\"error\"}\n", string(body))
 	suite.Equal(zap.ErrorLevel, log.GetLevel())
 }

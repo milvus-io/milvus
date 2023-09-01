@@ -38,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -481,24 +480,20 @@ func TestMetaCache_GetPartitionError(t *testing.T) {
 	// Test the case where ShowPartitionsResponse is not aligned
 	id, err := globalMetaCache.GetPartitionID(ctx, dbName, "errorCollection", "par1")
 	assert.Error(t, err)
-	log.Debug(err.Error())
 	assert.Equal(t, id, typeutil.UniqueID(0))
 
 	partitions, err2 := globalMetaCache.GetPartitions(ctx, dbName, "errorCollection")
 	assert.NotNil(t, err2)
-	log.Debug(err.Error())
 	assert.Equal(t, len(partitions), 0)
 
 	// Test non existed tables
 	id, err = globalMetaCache.GetPartitionID(ctx, dbName, "nonExisted", "par1")
 	assert.Error(t, err)
-	log.Debug(err.Error())
 	assert.Equal(t, id, typeutil.UniqueID(0))
 
 	// Test non existed partition
 	id, err = globalMetaCache.GetPartitionID(ctx, dbName, "collection1", "par3")
 	assert.Error(t, err)
-	log.Debug(err.Error())
 	assert.Equal(t, id, typeutil.UniqueID(0))
 }
 

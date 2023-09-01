@@ -100,9 +100,7 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 		tmpSegIDs, err := dn.bufferDeleteMsg(msg, fgMsg.timeRange, fgMsg.startPositions[0], fgMsg.endPositions[0])
 		if err != nil {
 			// error occurs only when deleteMsg is misaligned, should not happen
-			err = fmt.Errorf("buffer delete msg failed, err = %s", err)
-			log.Error(err.Error())
-			panic(err)
+			log.Fatal("failed to buffer delete msg", zap.String("traceID", traceID), zap.Error(err))
 		}
 		segIDs.Insert(tmpSegIDs...)
 	}
@@ -129,9 +127,7 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 					return dn.flushManager.flushDelData(buf, segmentToFlush, fgMsg.endPositions[0])
 				}, getFlowGraphRetryOpt())
 				if err != nil {
-					err = fmt.Errorf("failed to flush delete data, err = %s", err)
-					log.Error(err.Error())
-					panic(err)
+					log.Fatal("failed to flush delete data", zap.Int64("segmentID", segmentToFlush), zap.Error(err))
 				}
 				// remove delete buf
 				dn.delBufferManager.Delete(segmentToFlush)
