@@ -89,7 +89,7 @@ func (c *ChannelChecker) Check(ctx context.Context) []task.Task {
 func (c *ChannelChecker) checkReplica(ctx context.Context, replica *meta.Replica) []task.Task {
 	ret := make([]task.Task, 0)
 
-	lacks, redundancies := c.getDmChannelDiff(c.targetMgr, c.dist, c.meta, replica.GetCollectionID(), replica.GetID())
+	lacks, redundancies := c.getDmChannelDiff(replica.GetCollectionID(), replica.GetID())
 	tasks := c.createChannelLoadTask(ctx, lacks, replica)
 	task.SetReason("lacks of channel", tasks...)
 	ret = append(ret, tasks...)
@@ -98,7 +98,7 @@ func (c *ChannelChecker) checkReplica(ctx context.Context, replica *meta.Replica
 	task.SetReason("collection released", tasks...)
 	ret = append(ret, tasks...)
 
-	repeated := c.findRepeatedChannels(c.dist, c.meta, replica.GetID())
+	repeated := c.findRepeatedChannels(replica.GetID())
 	tasks = c.createChannelReduceTasks(ctx, repeated, replica.GetID())
 	task.SetReason("redundancies of channel")
 	ret = append(ret, tasks...)
@@ -109,25 +109,22 @@ func (c *ChannelChecker) checkReplica(ctx context.Context, replica *meta.Replica
 }
 
 // GetDmChannelDiff get channel diff between target and dist
-func (c *ChannelChecker) getDmChannelDiff(targetMgr *meta.TargetManager,
-	distMgr *meta.DistributionManager,
-	metaInfo *meta.Meta,
-	collectionID int64,
+func (c *ChannelChecker) getDmChannelDiff(collectionID int64,
 	replicaID int64) (toLoad, toRelease []*meta.DmChannel) {
-	replica := metaInfo.Get(replicaID)
+	replica := c.meta.Get(replicaID)
 	if replica == nil {
 		log.Info("replica does not exist, skip it")
 		return
 	}
 
-	dist := c.getChannelDist(distMgr, replica)
+	dist := c.getChannelDist(replica)
 	distMap := typeutil.NewSet[string]()
 	for _, ch := range dist {
 		distMap.Insert(ch.GetChannelName())
 	}
 
-	nextTargetMap := targetMgr.GetDmChannelsByCollection(collectionID, meta.NextTarget)
-	currentTargetMap := targetMgr.GetDmChannelsByCollection(collectionID, meta.CurrentTarget)
+	nextTargetMap := c.targetMgr.GetDmChannelsByCollection(collectionID, meta.NextTarget)
+	currentTargetMap := c.targetMgr.GetDmChannelsByCollection(collectionID, meta.CurrentTarget)
 
 	// get channels which exists on dist, but not exist on current and next
 	for _, ch := range dist {
@@ -149,25 +146,23 @@ func (c *ChannelChecker) getDmChannelDiff(targetMgr *meta.TargetManager,
 	return
 }
 
-func (c *ChannelChecker) getChannelDist(distMgr *meta.DistributionManager, replica *meta.Replica) []*meta.DmChannel {
+func (c *ChannelChecker) getChannelDist(replica *meta.Replica) []*meta.DmChannel {
 	dist := make([]*meta.DmChannel, 0)
 	for _, nodeID := range replica.GetNodes() {
-		dist = append(dist, distMgr.ChannelDistManager.GetByCollectionAndNode(replica.GetCollectionID(), nodeID)...)
+		dist = append(dist, c.dist.ChannelDistManager.GetByCollectionAndNode(replica.GetCollectionID(), nodeID)...)
 	}
 	return dist
 }
 
-func (c *ChannelChecker) findRepeatedChannels(distMgr *meta.DistributionManager,
-	metaInfo *meta.Meta,
-	replicaID int64) []*meta.DmChannel {
-	replica := metaInfo.Get(replicaID)
+func (c *ChannelChecker) findRepeatedChannels(replicaID int64) []*meta.DmChannel {
+	replica := c.meta.Get(replicaID)
 	ret := make([]*meta.DmChannel, 0)
 
 	if replica == nil {
 		log.Info("replica does not exist, skip it")
 		return ret
 	}
-	dist := c.getChannelDist(distMgr, replica)
+	dist := c.getChannelDist(replica)
 
 	versionsMap := make(map[string]*meta.DmChannel)
 	for _, ch := range dist {
