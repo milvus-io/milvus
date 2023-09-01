@@ -95,6 +95,10 @@ enum class DataType {
     ARRAY = 22,
     JSON = 23,
 
+    // Some special Data type, start from after 50
+    // just for internal use now, may sync proto in future
+    ROW = 50,
+
     VECTOR_BINARY = 100,
     VECTOR_FLOAT = 101,
     VECTOR_FLOAT16 = 102,
@@ -182,8 +186,138 @@ using MayConstRef = std::conditional_t<std::is_same_v<T, std::string> ||
                                        const T&,
                                        T>;
 static_assert(std::is_same_v<const std::string&, MayConstRef<std::string>>);
+
+template <DataType T>
+struct TypeTraits {};
+
+template <>
+struct TypeTraits<DataType::NONE> {
+    static constexpr const char* Name = "NONE";
+};
+template <>
+struct TypeTraits<DataType::BOOL> {
+    using NativeType = bool;
+    static constexpr DataType TypeKind = DataType::BOOL;
+    static constexpr bool IsPrimitiveType = true;
+    static constexpr bool IsFixedWidth = true;
+    static constexpr const char* Name = "BOOL";
+};
+
+template <>
+struct TypeTraits<DataType::INT8> {
+    using NativeType = int8_t;
+    static constexpr DataType TypeKind = DataType::INT8;
+    static constexpr bool IsPrimitiveType = true;
+    static constexpr bool IsFixedWidth = true;
+    static constexpr const char* Name = "INT8";
+};
+
+template <>
+struct TypeTraits<DataType::INT16> {
+    using NativeType = int16_t;
+    static constexpr DataType TypeKind = DataType::INT16;
+    static constexpr bool IsPrimitiveType = true;
+    static constexpr bool IsFixedWidth = true;
+    static constexpr const char* Name = "INT16";
+};
+
+template <>
+struct TypeTraits<DataType::INT32> {
+    using NativeType = int32_t;
+    static constexpr DataType TypeKind = DataType::INT32;
+    static constexpr bool IsPrimitiveType = true;
+    static constexpr bool IsFixedWidth = true;
+    static constexpr const char* Name = "INT32";
+};
+
+template <>
+struct TypeTraits<DataType::INT64> {
+    using NativeType = int32_t;
+    static constexpr DataType TypeKind = DataType::INT64;
+    static constexpr bool IsPrimitiveType = true;
+    static constexpr bool IsFixedWidth = true;
+    static constexpr const char* Name = "INT64";
+};
+
+template <>
+struct TypeTraits<DataType::FLOAT> {
+    using NativeType = float;
+    static constexpr DataType TypeKind = DataType::FLOAT;
+    static constexpr bool IsPrimitiveType = true;
+    static constexpr bool IsFixedWidth = true;
+    static constexpr const char* Name = "FLOAT";
+};
+
+template <>
+struct TypeTraits<DataType::DOUBLE> {
+    using NativeType = double;
+    static constexpr DataType TypeKind = DataType::DOUBLE;
+    static constexpr bool IsPrimitiveType = true;
+    static constexpr bool IsFixedWidth = true;
+    static constexpr const char* Name = "DOUBLE";
+};
+
+template <>
+struct TypeTraits<DataType::VARCHAR> {
+    using NativeType = std::string;
+    static constexpr DataType TypeKind = DataType::VARCHAR;
+    static constexpr bool IsPrimitiveType = true;
+    static constexpr bool IsFixedWidth = false;
+    static constexpr const char* Name = "VARCHAR";
+};
+
+template <>
+struct TypeTraits<DataType::STRING> : public TypeTraits<DataType::VARCHAR> {
+    static constexpr DataType TypeKind = DataType::STRING;
+    static constexpr const char* Name = "STRING";
+};
+
+template <>
+struct TypeTraits<DataType::ARRAY> {
+    using NativeType = void;
+    static constexpr DataType TypeKind = DataType::ARRAY;
+    static constexpr bool IsPrimitiveType = false;
+    static constexpr bool IsFixedWidth = false;
+    static constexpr const char* Name = "ARRAY";
+};
+
+template <>
+struct TypeTraits<DataType::JSON> {
+    using NativeType = void;
+    static constexpr DataType TypeKind = DataType::JSON;
+    static constexpr bool IsPrimitiveType = false;
+    static constexpr bool IsFixedWidth = false;
+    static constexpr const char* Name = "JSON";
+};
+
+template <>
+struct TypeTraits<DataType::ROW> {
+    using NativeType = void;
+    static constexpr DataType TypeKind = DataType::ROW;
+    static constexpr bool IsPrimitiveType = false;
+    static constexpr bool IsFixedWidth = false;
+    static constexpr const char* Name = "ROW";
+};
+
+template <>
+struct TypeTraits<DataType::VECTOR_BINARY> {
+    using NativeType = uint8_t;
+    static constexpr DataType TypeKind = DataType::VECTOR_BINARY;
+    static constexpr bool IsPrimitiveType = false;
+    static constexpr bool IsFixedWidth = false;
+    static constexpr const char* Name = "VECTOR_BINARY";
+};
+
+template <>
+struct TypeTraits<DataType::VECTOR_FLOAT> {
+    using NativeType = float;
+    static constexpr DataType TypeKind = DataType::VECTOR_FLOAT;
+    static constexpr bool IsPrimitiveType = false;
+    static constexpr bool IsFixedWidth = false;
+    static constexpr const char* Name = "VECTOR_FLOAT";
+};
+
 }  // namespace milvus
-   //
 template <>
 struct fmt::formatter<milvus::DataType> : formatter<string_view> {
     auto
@@ -225,6 +359,9 @@ struct fmt::formatter<milvus::DataType> : formatter<string_view> {
                 break;
             case milvus::DataType::JSON:
                 name = "JSON";
+                break;
+            case milvus::DataType::ROW:
+                name = "ROW";
                 break;
             case milvus::DataType::VECTOR_BINARY:
                 name = "VECTOR_BINARY";

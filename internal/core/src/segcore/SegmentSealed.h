@@ -47,6 +47,7 @@ class SegmentSealed : public SegmentInternalInterface {
     }
 };
 
-using SegmentSealedPtr = std::unique_ptr<SegmentSealed>;
+using SegmentSealedSPtr = std::shared_ptr<SegmentSealed>;
+using SegmentSealedUPtr = std::unique_ptr<SegmentSealed>;
 
 }  // namespace milvus::segcore

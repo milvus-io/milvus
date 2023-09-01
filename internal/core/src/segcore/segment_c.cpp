@@ -10,21 +10,22 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "segcore/segment_c.h"
+
 #include <memory>
 
+#include "common/FieldData.h"
 #include "common/LoadInfo.h"
 #include "common/Types.h"
 #include "common/Tracer.h"
 #include "common/type_c.h"
 #include "google/protobuf/text_format.h"
 #include "log/Log.h"
+#include "mmap/Types.h"
 #include "segcore/Collection.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealedImpl.h"
 #include "segcore/Utils.h"
-#include "storage/FieldData.h"
 #include "storage/Util.h"
-#include "mmap/Types.h"
 #include "storage/space.h"
 
 //////////////////////////////    common interfaces    //////////////////////////////
@@ -292,8 +293,8 @@ LoadFieldRawData(CSegmentInterface c_segment,
         }
         auto field_data = milvus::storage::CreateFieldData(data_type, dim);
         field_data->FillFieldData(data, row_count);
-        milvus::storage::FieldDataChannelPtr channel =
-            std::make_shared<milvus::storage::FieldDataChannel>();
+        milvus::FieldDataChannelPtr channel =
+            std::make_shared<milvus::FieldDataChannel>();
         channel->push(field_data);
         channel->close();
         auto field_data_info = milvus::FieldDataInfo(

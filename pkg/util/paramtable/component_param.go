@@ -1686,6 +1686,8 @@ type queryNodeConfig struct {
 	CGOPoolSizeRatio ParamItem `refreshable:"false"`
 
 	EnableWorkerSQCostMetrics ParamItem `refreshable:"true"`
+
+	ExprEvalBatchSize ParamItem `refreshable:"false"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -2073,6 +2075,15 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Doc:          "whether use worker's cost to measure delegator's workload",
 	}
 	p.EnableWorkerSQCostMetrics.Init(base.mgr)
+
+	p.ExprEvalBatchSize = ParamItem{
+		Key:          "queryNode.segcore.exprEvalBatchSize",
+		Version:      "2.3.4",
+		DefaultValue: "8192",
+		Doc:          "expr eval batch size for getnext interface",
+	}
+
+	p.ExprEvalBatchSize.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

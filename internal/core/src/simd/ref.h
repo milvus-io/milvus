@@ -19,6 +19,21 @@ namespace simd {
 BitsetBlockType
 GetBitsetBlockRef(const bool* src);
 
+bool
+AllTrueRef(const bool* src, int64_t size);
+
+bool
+AllFalseRef(const bool* src, int64_t size);
+
+void
+InvertBoolRef(bool* src, int64_t size);
+
+void
+AndBoolRef(bool* left, bool* right, int64_t size);
+
+void
+OrBoolRef(bool* left, bool* right, int64_t size);
+
 template <typename T>
 bool
 FindTermRef(const T* src, size_t size, T val) {

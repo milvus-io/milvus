@@ -37,6 +37,9 @@ void
 InitLowPriorityThreadCoreCoefficient(const int64_t);
 
 void
+InitDefaultExprEvalBatchSize(int64_t val);
+
+void
 InitCpuNum(const int);
 
 void

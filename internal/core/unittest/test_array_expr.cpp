@@ -27,6 +27,8 @@
 #include "simdjson/padded_string.h"
 #include "test_utils/DataGen.h"
 #include "index/IndexFactory.h"
+#include "expr/ITypeExpr.h"
+#include "plan/PlanNode.h"
 
 TEST(Expr, TestArrayRange) {
     using namespace milvus;
@@ -595,8 +597,7 @@ TEST(Expr, TestArrayRange) {
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    ExecExprVisitor visitor(
-        *seg_promote, seg_promote->get_row_count(), MAX_TIMESTAMP);
+    query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
     for (auto [clause, array_type, ref_func] : testcases) {
         auto loc = raw_plan_tmp.find("@@@@");
         auto raw_plan = raw_plan_tmp;
@@ -604,7 +605,9 @@ TEST(Expr, TestArrayRange) {
         auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
         auto plan =
             CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
-        auto final = visitor.call_child(*plan->plan_node_->predicate_.value());
+        BitsetType final;
+        visitor.ExecuteExprNode(
+            plan->plan_node_->filter_plannode_.value(), seg_promote, final);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -712,8 +715,7 @@ TEST(Expr, TestArrayEqual) {
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    ExecExprVisitor visitor(
-        *seg_promote, seg_promote->get_row_count(), MAX_TIMESTAMP);
+    query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
     for (auto [clause, ref_func] : testcases) {
         auto loc = raw_plan_tmp.find("@@@@");
         auto raw_plan = raw_plan_tmp;
@@ -721,7 +723,9 @@ TEST(Expr, TestArrayEqual) {
         auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
         auto plan =
             CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
-        auto final = visitor.call_child(*plan->plan_node_->predicate_.value());
+        BitsetType final;
+        visitor.ExecuteExprNode(
+            plan->plan_node_->filter_plannode_.value(), seg_promote, final);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -890,11 +894,10 @@ TEST(Expr, TestArrayContains) {
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    ExecExprVisitor visitor(
-        *seg_promote, seg_promote->get_row_count(), MAX_TIMESTAMP);
+    query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
 
     std::vector<ArrayTestcase<bool>> bool_testcases{{{true, true}, {}},
-                                               {{false, false}, {}}};
+                                                    {{false, false}, {}}};
 
     for (auto testcase : bool_testcases) {
         auto check = [&](const std::vector<bool>& values) {
@@ -906,15 +909,22 @@ TEST(Expr, TestArrayContains) {
             }
             return false;
         };
-        RetrievePlanNode plan;
-        plan.predicate_ = std::make_unique<JsonContainsExprImpl<bool>>(
-            ColumnInfo(bool_array_fid, DataType::ARRAY),
-            testcase.term,
-            true,
-            proto::plan::JSONContainsExpr_JSONOp_Contains,
-            proto::plan::GenericValue::ValCase::kBoolVal);
+        std::vector<proto::plan::GenericValue> values;
+        for (const auto& val : testcase.term) {
+            proto::plan::GenericValue gen_val;
+            gen_val.set_bool_val(val);
+            values.push_back(gen_val);
+        }
         auto start = std::chrono::steady_clock::now();
-        auto final = visitor.call_child(*plan.predicate_.value());
+        auto expr = std::make_shared<milvus::expr::JsonContainsExpr>(
+            expr::ColumnInfo(bool_array_fid, DataType::ARRAY),
+            proto::plan::JSONContainsExpr_JSONOp_Contains,
+            true,
+            values);
+        BitsetType final;
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        visitor.ExecuteExprNode(plan, seg_promote, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -929,7 +939,7 @@ TEST(Expr, TestArrayContains) {
             for (int j = 0; j < array.length(); ++j) {
                 res.push_back(array.get_data<bool>(j));
             }
-            ASSERT_EQ(ans, check(res));
+            ASSERT_EQ(ans, check(res)) << "@" << i;
         }
     }
 
@@ -952,15 +962,23 @@ TEST(Expr, TestArrayContains) {
             }
             return false;
         };
-        RetrievePlanNode plan;
-        plan.predicate_ = std::make_unique<JsonContainsExprImpl<double>>(
-            ColumnInfo(double_array_fid, DataType::ARRAY),
-            testcase.term,
-            true,
-            proto::plan::JSONContainsExpr_JSONOp_Contains,
-            proto::plan::GenericValue::ValCase::kFloatVal);
+
+        std::vector<proto::plan::GenericValue> values;
+        for (const auto& val : testcase.term) {
+            proto::plan::GenericValue gen_val;
+            gen_val.set_float_val(val);
+            values.push_back(gen_val);
+        }
         auto start = std::chrono::steady_clock::now();
-        auto final = visitor.call_child(*plan.predicate_.value());
+        auto expr = std::make_shared<milvus::expr::JsonContainsExpr>(
+            expr::ColumnInfo(double_array_fid, DataType::ARRAY),
+            proto::plan::JSONContainsExpr_JSONOp_Contains,
+            true,
+            values);
+        BitsetType final;
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        visitor.ExecuteExprNode(plan, seg_promote, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -989,15 +1007,22 @@ TEST(Expr, TestArrayContains) {
             }
             return false;
         };
-        RetrievePlanNode plan;
-        plan.predicate_ = std::make_unique<JsonContainsExprImpl<double>>(
-            ColumnInfo(float_array_fid, DataType::ARRAY),
-            testcase.term,
-            true,
-            proto::plan::JSONContainsExpr_JSONOp_Contains,
-            proto::plan::GenericValue::ValCase::kFloatVal);
+        std::vector<proto::plan::GenericValue> values;
+        for (const auto& val : testcase.term) {
+            proto::plan::GenericValue gen_val;
+            gen_val.set_float_val(val);
+            values.push_back(gen_val);
+        }
         auto start = std::chrono::steady_clock::now();
-        auto final = visitor.call_child(*plan.predicate_.value());
+        auto expr = std::make_shared<milvus::expr::JsonContainsExpr>(
+            expr::ColumnInfo(float_array_fid, DataType::ARRAY),
+            proto::plan::JSONContainsExpr_JSONOp_Contains,
+            true,
+            values);
+        BitsetType final;
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        visitor.ExecuteExprNode(plan, seg_promote, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -1035,15 +1060,23 @@ TEST(Expr, TestArrayContains) {
             }
             return true;
         };
-        RetrievePlanNode plan;
-        plan.predicate_ = std::make_unique<JsonContainsExprImpl<int64_t>>(
-            ColumnInfo(int_array_fid, DataType::ARRAY),
-            testcase.term,
-            true,
-            proto::plan::JSONContainsExpr_JSONOp_ContainsAll,
-            proto::plan::GenericValue::ValCase::kInt64Val);
+
+        std::vector<proto::plan::GenericValue> values;
+        for (const auto& val : testcase.term) {
+            proto::plan::GenericValue gen_val;
+            gen_val.set_int64_val(val);
+            values.push_back(gen_val);
+        }
         auto start = std::chrono::steady_clock::now();
-        auto final = visitor.call_child(*plan.predicate_.value());
+        auto expr = std::make_shared<milvus::expr::JsonContainsExpr>(
+            expr::ColumnInfo(int_array_fid, DataType::ARRAY),
+            proto::plan::JSONContainsExpr_JSONOp_ContainsAll,
+            true,
+            values);
+        BitsetType final;
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        visitor.ExecuteExprNode(plan, seg_promote, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -1072,15 +1105,23 @@ TEST(Expr, TestArrayContains) {
             }
             return true;
         };
-        RetrievePlanNode plan;
-        plan.predicate_ = std::make_unique<JsonContainsExprImpl<int64_t>>(
-            ColumnInfo(long_array_fid, DataType::ARRAY),
-            testcase.term,
-            true,
-            proto::plan::JSONContainsExpr_JSONOp_ContainsAll,
-            proto::plan::GenericValue::ValCase::kInt64Val);
+
+        std::vector<proto::plan::GenericValue> values;
+        for (const auto& val : testcase.term) {
+            proto::plan::GenericValue gen_val;
+            gen_val.set_int64_val(val);
+            values.push_back(gen_val);
+        }
         auto start = std::chrono::steady_clock::now();
-        auto final = visitor.call_child(*plan.predicate_.value());
+        auto expr = std::make_shared<milvus::expr::JsonContainsExpr>(
+            expr::ColumnInfo(long_array_fid, DataType::ARRAY),
+            proto::plan::JSONContainsExpr_JSONOp_ContainsAll,
+            true,
+            values);
+        BitsetType final;
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        visitor.ExecuteExprNode(plan, seg_promote, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -1116,15 +1157,23 @@ TEST(Expr, TestArrayContains) {
             }
             return true;
         };
-        RetrievePlanNode plan;
-        plan.predicate_ = std::make_unique<JsonContainsExprImpl<std::string>>(
-            ColumnInfo(string_array_fid, DataType::ARRAY),
-            testcase.term,
-            true,
-            proto::plan::JSONContainsExpr_JSONOp_ContainsAll,
-            proto::plan::GenericValue::ValCase::kStringVal);
+
+        std::vector<proto::plan::GenericValue> values;
+        for (const auto& val : testcase.term) {
+            proto::plan::GenericValue gen_val;
+            gen_val.set_string_val(val);
+            values.push_back(gen_val);
+        }
         auto start = std::chrono::steady_clock::now();
-        auto final = visitor.call_child(*plan.predicate_.value());
+        auto expr = std::make_shared<milvus::expr::JsonContainsExpr>(
+            expr::ColumnInfo(string_array_fid, DataType::ARRAY),
+            proto::plan::JSONContainsExpr_JSONOp_ContainsAll,
+            true,
+            values);
+        BitsetType final;
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        visitor.ExecuteExprNode(plan, seg_promote, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -1195,8 +1244,7 @@ TEST(Expr, TestArrayBinaryArith) {
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    ExecExprVisitor visitor(
-        *seg_promote, seg_promote->get_row_count(), MAX_TIMESTAMP);
+    query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
 
     std::vector<std::tuple<std::string,
                            std::string,
@@ -1652,9 +1700,7 @@ TEST(Expr, TestArrayBinaryArith) {
               value:<int64_val:10 >
         >)",
              "int",
-             [](milvus::Array& array) {
-                 return array.length() == 10;
-             }},
+             [](milvus::Array& array) { return array.length() == 10; }},
             {R"(binary_arith_op_eval_range_expr: <
               column_info: <
                 field_id: 101
@@ -1667,9 +1713,7 @@ TEST(Expr, TestArrayBinaryArith) {
               value:<int64_val:8 >
         >)",
              "int",
-             [](milvus::Array& array) {
-                 return array.length() != 8;
-             }},
+             [](milvus::Array& array) { return array.length() != 8; }},
         };
 
     std::string raw_plan_tmp = R"(vector_anns: <
@@ -1692,7 +1736,9 @@ TEST(Expr, TestArrayBinaryArith) {
         auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
         auto plan =
             CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
-        auto final = visitor.call_child(*plan->plan_node_->predicate_.value());
+        BitsetType final;
+        visitor.ExecuteExprNode(
+            plan->plan_node_->filter_plannode_.value(), seg_promote, final);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -1743,8 +1789,7 @@ TEST(Expr, TestArrayStringMatch) {
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    ExecExprVisitor visitor(
-        *seg_promote, seg_promote->get_row_count(), MAX_TIMESTAMP);
+    query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
 
     std::vector<UnaryRangeTestcase<std::string>> prefix_testcases{
         {OpType::PrefixMatch,
@@ -1771,14 +1816,18 @@ TEST(Expr, TestArrayStringMatch) {
     };
     //vector_anns:<field_id:201 predicates:<unary_range_expr:<column_info:<field_id:131 data_type:Array nested_path:"0" element_type:VarChar > op:PrefixMatch value:<string_val:"abc" > > > query_info:<> placeholder_tag:"$0" >
     for (auto& testcase : prefix_testcases) {
-        RetrievePlanNode plan;
-        plan.predicate_ = std::make_unique<UnaryRangeExprImpl<std::string>>(
-            ColumnInfo(string_array_fid, DataType::ARRAY, testcase.nested_path),
-            testcase.op_type,
-            testcase.value,
-            proto::plan::GenericValue::ValCase::kStringVal);
         auto start = std::chrono::steady_clock::now();
-        auto final = visitor.call_child(*plan.predicate_.value());
+        proto::plan::GenericValue value;
+        value.set_string_val(testcase.value);
+        auto expr = std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
+            milvus::expr::ColumnInfo(
+                string_array_fid, DataType::ARRAY, testcase.nested_path),
+            testcase.op_type,
+            value);
+        BitsetType final;
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        visitor.ExecuteExprNode(plan, seg_promote, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -1844,10 +1893,9 @@ TEST(Expr, TestArrayInTerm) {
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    ExecExprVisitor visitor(
-        *seg_promote, seg_promote->get_row_count(), MAX_TIMESTAMP);
+    query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
 
-        std::vector<std::tuple<std::string,
+    std::vector<std::tuple<std::string,
                            std::string,
                            std::function<bool(milvus::Array & array)>>>
         testcases = {
@@ -1860,11 +1908,11 @@ TEST(Expr, TestArrayInTerm) {
               >
               values:<int64_val:1 > values:<int64_val:2 > values:<int64_val:3 >
         >)",
-       "long",
-       [](milvus::Array& array) {
-           auto val = array.get_data<int64_t>(0);
-           return val == 1 || val ==2 || val == 3;
-       }},
+             "long",
+             [](milvus::Array& array) {
+                 auto val = array.get_data<int64_t>(0);
+                 return val == 1 || val == 2 || val == 3;
+             }},
             {R"(term_expr: <
               column_info: <
                 field_id: 101
@@ -1874,9 +1922,7 @@ TEST(Expr, TestArrayInTerm) {
               >
         >)",
              "long",
-             [](milvus::Array& array) {
-                 return false;
-             }},
+             [](milvus::Array& array) { return false; }},
             {R"(term_expr: <
               column_info: <
                 field_id: 102
@@ -1900,9 +1946,7 @@ TEST(Expr, TestArrayInTerm) {
               >
         >)",
              "bool",
-             [](milvus::Array& array) {
-                 return false;
-             }},
+             [](milvus::Array& array) { return false; }},
             {R"(term_expr: <
               column_info: <
                 field_id: 103
@@ -1926,9 +1970,7 @@ TEST(Expr, TestArrayInTerm) {
               >
         >)",
              "float",
-             [](milvus::Array& array) {
-                 return false;
-             }},
+             [](milvus::Array& array) { return false; }},
             {R"(term_expr: <
               column_info: <
                 field_id: 104
@@ -1952,9 +1994,7 @@ TEST(Expr, TestArrayInTerm) {
               >
         >)",
              "string",
-             [](milvus::Array& array) {
-                 return false;
-             }},
+             [](milvus::Array& array) { return false; }},
             {R"(term_expr: <
               column_info: <
                 field_id: 104
@@ -1995,7 +2035,9 @@ TEST(Expr, TestArrayInTerm) {
         auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
         auto plan =
             CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
-        auto final = visitor.call_child(*plan->plan_node_->predicate_.value());
+        BitsetType final;
+        visitor.ExecuteExprNode(
+            plan->plan_node_->filter_plannode_.value(), seg_promote, final);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -2036,8 +2078,7 @@ TEST(Expr, TestTermInArray) {
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    ExecExprVisitor visitor(
-        *seg_promote, seg_promote->get_row_count(), MAX_TIMESTAMP);
+    query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
 
     struct TermTestCases {
         std::vector<int64_t> values;
@@ -2070,14 +2111,22 @@ TEST(Expr, TestTermInArray) {
     };
 
     for (auto& testcase : testcases) {
-        RetrievePlanNode plan;
-        plan.predicate_ = std::make_unique<TermExprImpl<int64_t>>(
-            ColumnInfo(long_array_fid, DataType::ARRAY, testcase.nested_path),
-            testcase.values,
-            proto::plan::GenericValue::ValCase::kInt64Val,
-            true);
         auto start = std::chrono::steady_clock::now();
-        auto final = visitor.call_child(*plan.predicate_.value());
+        std::vector<proto::plan::GenericValue> values;
+        for (auto& v : testcase.values) {
+            proto::plan::GenericValue val;
+            val.set_int64_val(v);
+            values.emplace_back(val);
+        }
+        auto expr = std::make_shared<milvus::expr::TermFilterExpr>(
+            milvus::expr::ColumnInfo(
+                long_array_fid, DataType::ARRAY, testcase.nested_path),
+            values,
+            true);
+        BitsetType final;
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        visitor.ExecuteExprNode(plan, seg_promote, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)

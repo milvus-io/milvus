@@ -306,7 +306,7 @@ class IndexingRecord {
     AppendingIndex(int64_t reserved_offset,
                    int64_t size,
                    FieldId fieldId,
-                   const storage::FieldDataPtr data,
+                   const FieldDataPtr data,
                    const InsertRecord<is_sealed>& record) {
         if (is_in(fieldId)) {
             auto& indexing = field_indexings_.at(fieldId);

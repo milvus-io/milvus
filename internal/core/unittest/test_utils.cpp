@@ -16,10 +16,11 @@
 #include <boost/uuid/uuid_generators.hpp>
 
 #include "common/EasyAssert.h"
+#include "common/Types.h"
 #include "common/Utils.h"
+#include "common/Exception.h"
 #include "query/Utils.h"
 #include "test_utils/DataGen.h"
-#include "common/Types.h"
 
 TEST(Util, StringMatch) {
     using namespace milvus;
@@ -144,13 +145,16 @@ struct TmpFileWrapper {
     std::string filename;
 
     TmpFileWrapper(const std::string& _filename) : filename{_filename} {
-        fd = open(
-            filename.c_str(), O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR | S_IXUSR);
+        fd = open(filename.c_str(),
+                  O_RDWR | O_CREAT | O_EXCL,
+                  S_IRUSR | S_IWUSR | S_IXUSR);
     }
     TmpFileWrapper(const TmpFileWrapper&) = delete;
     TmpFileWrapper(TmpFileWrapper&&) = delete;
-    TmpFileWrapper& operator =(const TmpFileWrapper&) = delete;
-    TmpFileWrapper& operator =(TmpFileWrapper&&) = delete;
+    TmpFileWrapper&
+    operator=(const TmpFileWrapper&) = delete;
+    TmpFileWrapper&
+    operator=(TmpFileWrapper&&) = delete;
     ~TmpFileWrapper() {
         if (fd != -1) {
             close(fd);
@@ -181,8 +185,8 @@ TEST(Util, read_from_fd) {
         tmp_file.fd, read_buf.get(), data_size * max_loop));
 
     // On Linux, read() (and similar system calls) will transfer at most 0x7ffff000 (2,147,479,552) bytes once
-    EXPECT_THROW(milvus::index::ReadDataFromFD(
-                     tmp_file.fd, read_buf.get(), data_size * max_loop, INT_MAX),
-                 milvus::SegcoreError);
+    EXPECT_THROW(
+        milvus::index::ReadDataFromFD(
+            tmp_file.fd, read_buf.get(), data_size * max_loop, INT_MAX),
+        milvus::SegcoreError);
 }
-

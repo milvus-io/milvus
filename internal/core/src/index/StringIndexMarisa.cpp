@@ -24,11 +24,12 @@
 
 #include "common/Types.h"
 #include "common/EasyAssert.h"
+#include "common/Exception.h"
+#include "common/Utils.h"
+#include "common/Slice.h"
 #include "index/StringIndexMarisa.h"
 #include "index/Utils.h"
 #include "index/Index.h"
-#include "common/Utils.h"
-#include "common/Slice.h"
 #include "storage/Util.h"
 #include "storage/space.h"
 
@@ -73,7 +74,7 @@ StringIndexMarisa::BuildV2(const Config& config) {
         PanicInfo(S3Error, "failed to create scan iterator");
     }
     auto reader = res.value();
-    std::vector<storage::FieldDataPtr> field_datas;
+    std::vector<FieldDataPtr> field_datas;
     for (auto rec = reader->Next(); rec != nullptr; rec = reader->Next()) {
         if (!rec.ok()) {
             PanicInfo(DataFormatBroken, "failed to read data");
@@ -315,7 +316,7 @@ StringIndexMarisa::LoadV2(const Config& config) {
             index_files.push_back(b.name);
         }
     }
-    std::map<std::string, storage::FieldDataPtr> index_datas{};
+    std::map<std::string, FieldDataPtr> index_datas{};
     for (auto& file_name : index_files) {
         auto res = space_->GetBlobByteSize(file_name);
         if (!res.ok()) {

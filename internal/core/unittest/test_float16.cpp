@@ -309,17 +309,21 @@ TEST(Float16, RetrieveEmpty) {
     auto segment = CreateSealedSegment(schema);
 
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
-    std::vector<int64_t> values;
-    for (int i = 0; i < req_size; ++i) {
-        values.emplace_back(choose(i));
+    std::vector<proto::plan::GenericValue> values;
+    {
+        for (int i = 0; i < req_size; ++i) {
+            proto::plan::GenericValue val;
+            val.set_int64_val(choose(i));
+            values.push_back(val);
+        }
     }
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
+    auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
+        milvus::expr::ColumnInfo(
             fid_64, DataType::INT64, std::vector<std::string>()),
-        values,
-        proto::plan::GenericValue::kInt64Val);
+        values);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->predicate_ = std::move(term_expr);
+    plan->plan_node_->filter_plannode_ =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
     std::vector<FieldId> target_offsets{fid_64, fid_vec};
     plan->field_ids_ = target_offsets;
 

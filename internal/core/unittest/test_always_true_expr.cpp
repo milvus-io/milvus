@@ -20,6 +20,8 @@
 #include "query/generated/ExecExprVisitor.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "test_utils/DataGen.h"
+#include "expr/ITypeExpr.h"
+#include "plan/PlanNode.h"
 
 TEST(Expr, AlwaysTrue) {
     using namespace milvus;
@@ -48,10 +50,12 @@ TEST(Expr, AlwaysTrue) {
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    ExecExprVisitor visitor(
-        *seg_promote, seg_promote->get_row_count(), MAX_TIMESTAMP);
-    auto expr = CreateAlwaysTrueExpr();
-    auto final = visitor.call_child(*expr);
+    query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
+    auto expr = std::make_shared<milvus::expr::AlwaysTrueExpr>();
+    BitsetType final;
+    std::shared_ptr<milvus::plan::PlanNode> plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+    visitor.ExecuteExprNode(plan, seg_promote, final);
     EXPECT_EQ(final.size(), N * num_iters);
 
     for (int i = 0; i < N * num_iters; ++i) {

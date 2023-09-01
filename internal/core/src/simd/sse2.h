@@ -24,6 +24,21 @@ namespace simd {
 BitsetBlockType
 GetBitsetBlockSSE2(const bool* src);
 
+bool
+AllFalseSSE2(const bool* src, int64_t size);
+
+bool
+AllTrueSSE2(const bool* src, int64_t size);
+
+void
+InvertBoolSSE2(bool* src, int64_t size);
+
+void
+AndBoolSSE2(bool* left, bool* right, int64_t size);
+
+void
+OrBoolSSE2(bool* left, bool* right, int64_t size);
+
 template <typename T>
 bool
 FindTermSSE2(const T* src, size_t vec_size, T va) {
