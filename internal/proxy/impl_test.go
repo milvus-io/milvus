@@ -363,6 +363,72 @@ func TestProxy_InvalidResourceGroupName(t *testing.T) {
 	})
 }
 
+func TestProxy_FlushAll_DbCollection(t *testing.T) {
+	tests := []struct {
+		testName        string
+		FlushRequest    *milvuspb.FlushAllRequest
+		ExpectedSuccess bool
+	}{
+		{"flushAll", &milvuspb.FlushAllRequest{}, true},
+		{"flushAll set db", &milvuspb.FlushAllRequest{DbName: "default"}, true},
+		{"flushAll set db, db not exist", &milvuspb.FlushAllRequest{DbName: "default2"}, false},
+	}
+	for _, test := range tests {
+		factory := dependency.NewDefaultFactory(true)
+		ctx := context.Background()
+		paramtable.Init()
+
+		node, err := NewProxy(ctx, factory)
+		assert.NoError(t, err)
+		node.stateCode.Store(commonpb.StateCode_Healthy)
+		node.tsoAllocator = &timestampAllocator{
+			tso: newMockTimestampAllocatorInterface(),
+		}
+
+		Params.Save(Params.ProxyCfg.MaxTaskNum.Key, "1000")
+		node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
+		assert.NoError(t, err)
+		err = node.sched.Start()
+		assert.NoError(t, err)
+		defer node.sched.Close()
+		node.dataCoord = mocks.NewMockDataCoord(t)
+		node.rootCoord = mocks.NewRootCoord(t)
+		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
+
+		// set expectations
+		cache := NewMockCache(t)
+		cache.On("GetCollectionID",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(UniqueID(0), nil).Maybe()
+
+		cache.On("RemoveDatabase",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+		).Maybe()
+
+		globalMetaCache = cache
+
+		node.dataCoord.(*mocks.MockDataCoord).EXPECT().Flush(mock.Anything, mock.Anything).
+			Return(&datapb.FlushResponse{Status: successStatus}, nil).Maybe()
+		node.rootCoord.(*mocks.RootCoord).EXPECT().ShowCollections(mock.Anything, mock.Anything).
+			Return(&milvuspb.ShowCollectionsResponse{Status: successStatus, CollectionNames: []string{"col-0"}}, nil).Maybe()
+		node.rootCoord.(*mocks.RootCoord).EXPECT().ListDatabases(mock.Anything, mock.Anything).
+			Return(&milvuspb.ListDatabasesResponse{Status: successStatus, DbNames: []string{"default"}}, nil).Maybe()
+
+		t.Run(test.testName, func(t *testing.T) {
+			resp, err := node.FlushAll(ctx, test.FlushRequest)
+			assert.NoError(t, err)
+			if test.ExpectedSuccess {
+				assert.Equal(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+			} else {
+				assert.NotEqual(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+			}
+		})
+	}
+}
+
 func TestProxy_FlushAll(t *testing.T) {
 	factory := dependency.NewDefaultFactory(true)
 	ctx := context.Background()

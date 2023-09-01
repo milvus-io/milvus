@@ -3557,6 +3557,82 @@ func TestGetFlushAllState(t *testing.T) {
 	}
 }
 
+func TestGetFlushAllStateWithDB(t *testing.T) {
+	tests := []struct {
+		testName        string
+		FlushAllTs      Timestamp
+		DbExist         bool
+		ExpectedSuccess bool
+		ExpectedFlushed bool
+	}{
+		{"test FlushAllWithDB, db exist", 99, true, true, true},
+		{"test FlushAllWithDB, db not exist", 99, false, false, false},
+	}
+	for _, test := range tests {
+		t.Run(test.testName, func(t *testing.T) {
+			collectionID := UniqueID(0)
+			dbName := "db"
+			collectionName := "collection"
+			vchannels := []string{"mock-vchannel-0", "mock-vchannel-1"}
+
+			svr := &Server{}
+			svr.stateCode.Store(commonpb.StateCode_Healthy)
+			var err error
+			svr.meta = &meta{}
+			svr.rootCoordClient = mocks.NewRootCoord(t)
+			svr.broker = NewCoordinatorBroker(svr.rootCoordClient)
+
+			if test.DbExist {
+				svr.rootCoordClient.(*mocks.RootCoord).EXPECT().ListDatabases(mock.Anything, mock.Anything).
+					Return(&milvuspb.ListDatabasesResponse{
+						DbNames: []string{dbName},
+						Status:  &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+					}, nil).Maybe()
+			} else {
+				svr.rootCoordClient.(*mocks.RootCoord).EXPECT().ListDatabases(mock.Anything, mock.Anything).
+					Return(&milvuspb.ListDatabasesResponse{
+						DbNames: []string{},
+						Status:  &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+					}, nil).Maybe()
+			}
+
+			svr.rootCoordClient.(*mocks.RootCoord).EXPECT().ShowCollections(mock.Anything, mock.Anything).
+				Return(&milvuspb.ShowCollectionsResponse{
+					Status:        &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+					CollectionIds: []int64{collectionID},
+				}, nil).Maybe()
+
+			svr.rootCoordClient.(*mocks.RootCoord).EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+				Return(&milvuspb.DescribeCollectionResponse{
+					Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+					VirtualChannelNames: vchannels,
+					CollectionID:        collectionID,
+					CollectionName:      collectionName,
+				}, nil).Maybe()
+
+			svr.meta.channelCPs = make(map[string]*msgpb.MsgPosition)
+			channelCPs := []Timestamp{100, 200}
+			for i, ts := range channelCPs {
+				channel := vchannels[i]
+				svr.meta.channelCPs[channel] = &msgpb.MsgPosition{
+					ChannelName: channel,
+					Timestamp:   ts,
+				}
+			}
+
+			var resp *milvuspb.GetFlushAllStateResponse
+			resp, err = svr.GetFlushAllState(context.TODO(), &milvuspb.GetFlushAllStateRequest{FlushAllTs: test.FlushAllTs, DbName: dbName})
+			assert.NoError(t, err)
+			if test.ExpectedSuccess {
+				assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+			} else {
+				assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+			}
+			assert.Equal(t, test.ExpectedFlushed, resp.GetFlushed())
+		})
+	}
+}
+
 func TestDataCoordServer_SetSegmentState(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
 		svr := newTestServer(t, nil)

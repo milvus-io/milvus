@@ -1294,6 +1294,16 @@ func (s *Server) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAll
 		resp.Status.Reason = err.Error()
 		return resp, nil
 	}
+	dbNames := dbsRsp.DbNames
+	if req.GetDbName() != "" {
+		dbNames = lo.Filter(dbNames, func(dbName string, _ int) bool {
+			return dbName == req.GetDbName()
+		})
+		if len(dbNames) == 0 {
+			resp.Status.Reason = merr.WrapErrDatabaseNotFound(req.GetDbName()).Error()
+			return resp, nil
+		}
+	}
 
 	for _, dbName := range dbsRsp.DbNames {
 		showColRsp, err := s.broker.ShowCollections(ctx, dbName)

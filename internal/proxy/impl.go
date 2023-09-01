@@ -26,6 +26,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
+	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -2952,9 +2953,10 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 }
 
 // FlushAll notifies Proxy to flush all collection's DML messages.
-func (node *Proxy) FlushAll(ctx context.Context, _ *milvuspb.FlushAllRequest) (*milvuspb.FlushAllResponse, error) {
+func (node *Proxy) FlushAll(ctx context.Context, req *milvuspb.FlushAllRequest) (*milvuspb.FlushAllResponse, error) {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-FlushAll")
 	defer sp.End()
+	log := log.With(zap.String("db", req.GetDbName()))
 
 	resp := &milvuspb.FlushAllResponse{
 		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
@@ -2985,8 +2987,18 @@ func (node *Proxy) FlushAll(ctx context.Context, _ *milvuspb.FlushAllRequest) (*
 	if hasError(dbsRsp.GetStatus(), err) {
 		return resp, nil
 	}
+	dbNames := dbsRsp.DbNames
+	if req.GetDbName() != "" {
+		dbNames = lo.Filter(dbNames, func(dbName string, _ int) bool {
+			return dbName == req.GetDbName()
+		})
+		if len(dbNames) == 0 {
+			resp.Status.Reason = fmt.Sprintf("failed to get db %s", req.GetDbName())
+			return resp, nil
+		}
+	}
 
-	for _, dbName := range dbsRsp.DbNames {
+	for _, dbName := range dbNames {
 		// Flush all collections to accelerate the flushAll progress
 		showColRsp, err := node.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
 			Base:   commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections)),
@@ -3635,7 +3647,8 @@ func (node *Proxy) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushA
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetFlushAllState")
 	defer sp.End()
 	log := log.Ctx(ctx).With(zap.Uint64("FlushAllTs", req.GetFlushAllTs()),
-		zap.Time("FlushAllTime", tsoutil.PhysicalTime(req.GetFlushAllTs())))
+		zap.Time("FlushAllTime", tsoutil.PhysicalTime(req.GetFlushAllTs())),
+		zap.String("db", req.GetDbName()))
 	log.Debug("receive GetFlushAllState request")
 
 	var err error
