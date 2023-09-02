@@ -34,8 +34,9 @@ namespace jaeger = opentelemetry::exporter::jaeger;
 namespace ostream = opentelemetry::exporter::trace;
 namespace otlp = opentelemetry::exporter::otlp;
 
-static const int trace_id_size = 2 * opentelemetry::trace::TraceId::kSize;
 static bool enable_trace = true;
+static std::shared_ptr<trace::TracerProvider> noop_trace_provider =
+    std::make_shared<opentelemetry::trace::NoopTracerProvider>();
 
 void
 initTelementry(TraceConfig* config) {
@@ -57,17 +58,21 @@ initTelementry(TraceConfig* config) {
         LOG_SEGCORE_INFO_ << "Empty Trace";
         enable_trace = false;
     }
-    auto processor =
-        trace_sdk::BatchSpanProcessorFactory::Create(std::move(exporter), {});
-    resource::ResourceAttributes attributes = {{"service.name", "segcore"},
-                                               {"NodeID", config->nodeID}};
-    auto resource = resource::Resource::Create(attributes);
-    auto sampler = std::make_unique<trace_sdk::ParentBasedSampler>(
-        std::make_shared<trace_sdk::AlwaysOnSampler>());
-    std::shared_ptr<trace::TracerProvider> provider =
-        trace_sdk::TracerProviderFactory::Create(
-            std::move(processor), resource, std::move(sampler));
-    trace::Provider::SetTracerProvider(provider);
+    if (enable_trace) {
+        auto processor = trace_sdk::BatchSpanProcessorFactory::Create(
+            std::move(exporter), {});
+        resource::ResourceAttributes attributes = {{"service.name", "segcore"},
+                                                   {"NodeID", config->nodeID}};
+        auto resource = resource::Resource::Create(attributes);
+        auto sampler = std::make_unique<trace_sdk::ParentBasedSampler>(
+            std::make_shared<trace_sdk::AlwaysOnSampler>());
+        std::shared_ptr<trace::TracerProvider> provider =
+            trace_sdk::TracerProviderFactory::Create(
+                std::move(processor), resource, std::move(sampler));
+        trace::Provider::SetTracerProvider(provider);
+    } else {
+        trace::Provider::SetTracerProvider(noop_trace_provider);
+    }
 }
 
 std::shared_ptr<trace::Tracer>
@@ -79,8 +84,12 @@ GetTracer() {
 std::shared_ptr<trace::Span>
 StartSpan(std::string name, TraceContext* parentCtx) {
     trace::StartSpanOptions opts;
-    if (parentCtx != nullptr && parentCtx->traceID != nullptr &&
+    if (enable_trace && parentCtx != nullptr && parentCtx->traceID != nullptr &&
         parentCtx->spanID != nullptr) {
+        if (isEmptyID(parentCtx->traceID, trace::TraceId::kSize) ||
+            isEmptyID(parentCtx->spanID, trace::SpanId::kSize)) {
+            return noop_trace_provider->GetTracer("noop")->StartSpan("noop");
+        }
         opts.parent = trace::SpanContext(
             trace::TraceId({parentCtx->traceID, trace::TraceId::kSize}),
             trace::SpanId({parentCtx->spanID, trace::SpanId::kSize}),
@@ -105,14 +114,6 @@ CloseRootSpan() {
     }
 }
 
-std::shared_ptr<trace::Span>
-GetRootSpan() {
-    if (enable_trace && local_span != nullptr) {
-        return local_span;
-    }
-    return nullptr;
-}
-
 void
 AddEvent(std::string event_label) {
     if (enable_trace && local_span != nullptr) {
@@ -120,16 +121,14 @@ AddEvent(std::string event_label) {
     }
 }
 
-void
-logTraceContext(const std::string& extended_info,
-                const std::shared_ptr<trace::Span> span) {
-    if (enable_trace && span != nullptr) {
-        char traceID[trace_id_size];
-        span->GetContext().trace_id().ToLowerBase16(
-            nostd::span<char, 2 * opentelemetry::trace::TraceId::kSize>{
-                &traceID[0], trace_id_size});
-        LOG_SEGCORE_DEBUG_ << extended_info << ", traceID:" << traceID;
+bool
+isEmptyID(const uint8_t* id, int length) {
+    for (size_t i = 0; i < length; i++) {
+        if (id[i] != 0) {
+            return false;
+        }
     }
+    return true;
 }
 
 }  // namespace milvus::tracer

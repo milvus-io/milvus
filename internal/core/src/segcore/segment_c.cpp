@@ -115,7 +115,7 @@ Retrieve(CSegmentInterface c_segment,
 
         auto ctx = milvus::tracer::TraceContext{
             c_trace.traceID, c_trace.spanID, c_trace.flag};
-        auto span = milvus::tracer::StartSpan("SegcoreRetrieve", &ctx);
+        auto span = milvus::tracer::StartSpan("SegCoreRetrieve", &ctx);
 
         auto retrieve_result = segment->Retrieve(plan, timestamp, limit_size);
 
