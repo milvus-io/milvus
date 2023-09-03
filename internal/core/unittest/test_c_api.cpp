@@ -311,7 +311,7 @@ TEST(CApiTest, CPlan) {
 
     milvus::proto::plan::PlanNode plan_node;
     auto vector_anns = plan_node.mutable_vector_anns();
-    vector_anns->set_is_binary(true);
+    vector_anns->set_vector_type(milvus::proto::plan::VectorType::BinaryVector);
     vector_anns->set_placeholder_tag("$0");
     vector_anns->set_field_id(100);
     auto query_info = vector_anns->mutable_query_info();
@@ -950,7 +950,7 @@ TEST(CApiTest, SearchTest) {
 
     milvus::proto::plan::PlanNode plan_node;
     auto vector_anns = plan_node.mutable_vector_anns();
-    vector_anns->set_is_binary(false);
+    vector_anns->set_vector_type(milvus::proto::plan::VectorType::FloatVector);
     vector_anns->set_placeholder_tag("$0");
     vector_anns->set_field_id(100);
     auto query_info = vector_anns->mutable_query_info();
@@ -1275,7 +1275,7 @@ TEST(CApiTest, ReudceNullResult) {
 
     milvus::proto::plan::PlanNode plan_node;
     auto vector_anns = plan_node.mutable_vector_anns();
-    vector_anns->set_is_binary(false);
+    vector_anns->set_vector_type(milvus::proto::plan::VectorType::FloatVector);
     vector_anns->set_placeholder_tag("$0");
     vector_anns->set_field_id(100);
     auto query_info = vector_anns->mutable_query_info();
@@ -1359,7 +1359,7 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
 
     milvus::proto::plan::PlanNode plan_node;
     auto vector_anns = plan_node.mutable_vector_anns();
-    vector_anns->set_is_binary(false);
+    vector_anns->set_vector_type(milvus::proto::plan::VectorType::FloatVector);
     vector_anns->set_placeholder_tag("$0");
     vector_anns->set_field_id(100);
     auto query_info = vector_anns->mutable_query_info();
@@ -1703,7 +1703,7 @@ TEST(CApiTest, Indexing_Without_Predicate) {
 
     milvus::proto::plan::PlanNode plan_node;
     auto vector_anns = plan_node.mutable_vector_anns();
-    vector_anns->set_is_binary(false);
+    vector_anns->set_vector_type(milvus::proto::plan::VectorType::FloatVector);
     vector_anns->set_placeholder_tag("$0");
     vector_anns->set_field_id(100);
     auto query_info = vector_anns->mutable_query_info();

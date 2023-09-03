@@ -892,6 +892,7 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id,
         }
 
         case DataType::VECTOR_FLOAT:
+        case DataType::VECTOR_FLOAT16:
         case DataType::VECTOR_BINARY: {
             aligned_vector<char> output(field_meta.get_sizeof() * count);
             bulk_subscript_impl(field_meta.get_sizeof(),

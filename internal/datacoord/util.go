@@ -104,7 +104,8 @@ func FilterInIndexedSegments(handler Handler, mt *meta, segments ...*SegmentInfo
 		}
 		for _, field := range coll.Schema.GetFields() {
 			if field.GetDataType() == schemapb.DataType_BinaryVector ||
-				field.GetDataType() == schemapb.DataType_FloatVector {
+				field.GetDataType() == schemapb.DataType_FloatVector ||
+				field.GetDataType() == schemapb.DataType_Float16Vector {
 				vecFieldID[collection] = field.GetFieldID()
 				break
 			}

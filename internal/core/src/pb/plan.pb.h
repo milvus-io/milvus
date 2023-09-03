@@ -290,6 +290,32 @@ inline bool ArithOpType_Parse(
   return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<ArithOpType>(
     ArithOpType_descriptor(), name, value);
 }
+enum VectorType : int {
+  BinaryVector = 0,
+  FloatVector = 1,
+  Float16Vector = 2,
+  VectorType_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::min(),
+  VectorType_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::max()
+};
+bool VectorType_IsValid(int value);
+constexpr VectorType VectorType_MIN = BinaryVector;
+constexpr VectorType VectorType_MAX = Float16Vector;
+constexpr int VectorType_ARRAYSIZE = VectorType_MAX + 1;
+
+const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* VectorType_descriptor();
+template<typename T>
+inline const std::string& VectorType_Name(T enum_t_value) {
+  static_assert(::std::is_same<T, VectorType>::value ||
+    ::std::is_integral<T>::value,
+    "Incorrect type passed to function VectorType_Name.");
+  return ::PROTOBUF_NAMESPACE_ID::internal::NameOfEnum(
+    VectorType_descriptor(), enum_t_value);
+}
+inline bool VectorType_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, VectorType* value) {
+  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<VectorType>(
+    VectorType_descriptor(), name, value);
+}
 // ===================================================================
 
 class GenericValue final :
@@ -4297,7 +4323,7 @@ class VectorANNS final :
     kPredicatesFieldNumber = 3,
     kQueryInfoFieldNumber = 4,
     kFieldIdFieldNumber = 2,
-    kIsBinaryFieldNumber = 1,
+    kVectorTypeFieldNumber = 1,
   };
   // string placeholder_tag = 5;
   void clear_placeholder_tag();
@@ -4358,13 +4384,13 @@ class VectorANNS final :
   void _internal_set_field_id(int64_t value);
   public:
 
-  // bool is_binary = 1;
-  void clear_is_binary();
-  bool is_binary() const;
-  void set_is_binary(bool value);
+  // .milvus.proto.plan.VectorType vector_type = 1;
+  void clear_vector_type();
+  ::milvus::proto::plan::VectorType vector_type() const;
+  void set_vector_type(::milvus::proto::plan::VectorType value);
   private:
-  bool _internal_is_binary() const;
-  void _internal_set_is_binary(bool value);
+  ::milvus::proto::plan::VectorType _internal_vector_type() const;
+  void _internal_set_vector_type(::milvus::proto::plan::VectorType value);
   public:
 
   // @@protoc_insertion_point(class_scope:milvus.proto.plan.VectorANNS)
@@ -4379,7 +4405,7 @@ class VectorANNS final :
     ::milvus::proto::plan::Expr* predicates_;
     ::milvus::proto::plan::QueryInfo* query_info_;
     int64_t field_id_;
-    bool is_binary_;
+    int vector_type_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   };
   union { Impl_ _impl_; };
@@ -8834,24 +8860,24 @@ inline Expr::ExprCase Expr::expr_case() const {
 
 // VectorANNS
 
-// bool is_binary = 1;
-inline void VectorANNS::clear_is_binary() {
-  _impl_.is_binary_ = false;
+// .milvus.proto.plan.VectorType vector_type = 1;
+inline void VectorANNS::clear_vector_type() {
+  _impl_.vector_type_ = 0;
 }
-inline bool VectorANNS::_internal_is_binary() const {
-  return _impl_.is_binary_;
+inline ::milvus::proto::plan::VectorType VectorANNS::_internal_vector_type() const {
+  return static_cast< ::milvus::proto::plan::VectorType >(_impl_.vector_type_);
 }
-inline bool VectorANNS::is_binary() const {
-  // @@protoc_insertion_point(field_get:milvus.proto.plan.VectorANNS.is_binary)
-  return _internal_is_binary();
+inline ::milvus::proto::plan::VectorType VectorANNS::vector_type() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.plan.VectorANNS.vector_type)
+  return _internal_vector_type();
 }
-inline void VectorANNS::_internal_set_is_binary(bool value) {
+inline void VectorANNS::_internal_set_vector_type(::milvus::proto::plan::VectorType value) {
   
-  _impl_.is_binary_ = value;
+  _impl_.vector_type_ = value;
 }
-inline void VectorANNS::set_is_binary(bool value) {
-  _internal_set_is_binary(value);
-  // @@protoc_insertion_point(field_set:milvus.proto.plan.VectorANNS.is_binary)
+inline void VectorANNS::set_vector_type(::milvus::proto::plan::VectorType value) {
+  _internal_set_vector_type(value);
+  // @@protoc_insertion_point(field_set:milvus.proto.plan.VectorANNS.vector_type)
 }
 
 // int64 field_id = 2;
@@ -9598,6 +9624,11 @@ template <> struct is_proto_enum< ::milvus::proto::plan::ArithOpType> : ::std::t
 template <>
 inline const EnumDescriptor* GetEnumDescriptor< ::milvus::proto::plan::ArithOpType>() {
   return ::milvus::proto::plan::ArithOpType_descriptor();
+}
+template <> struct is_proto_enum< ::milvus::proto::plan::VectorType> : ::std::true_type {};
+template <>
+inline const EnumDescriptor* GetEnumDescriptor< ::milvus::proto::plan::VectorType>() {
+  return ::milvus::proto::plan::VectorType_descriptor();
 }
 
 PROTOBUF_NAMESPACE_CLOSE

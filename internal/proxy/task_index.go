@@ -291,6 +291,7 @@ func fillDimension(field *schemapb.FieldSchema, indexParams map[string]string) e
 	vecDataTypes := []schemapb.DataType{
 		schemapb.DataType_FloatVector,
 		schemapb.DataType_BinaryVector,
+		schemapb.DataType_Float16Vector,
 	}
 	if !funcutil.SliceContain(vecDataTypes, field.GetDataType()) {
 		return nil
@@ -319,6 +320,7 @@ func checkTrain(field *schemapb.FieldSchema, indexParams map[string]string) erro
 	vecDataTypes := []schemapb.DataType{
 		schemapb.DataType_FloatVector,
 		schemapb.DataType_BinaryVector,
+		schemapb.DataType_Float16Vector,
 	}
 	if !funcutil.SliceContain(vecDataTypes, field.GetDataType()) {
 		return indexparamcheck.CheckIndexValid(field.GetDataType(), indexType, indexParams)

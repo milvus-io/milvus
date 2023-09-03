@@ -185,8 +185,12 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
     search_info.search_params_ = json::parse(query_info_proto.search_params());
 
     auto plan_node = [&]() -> std::unique_ptr<VectorPlanNode> {
-        if (anns_proto.is_binary()) {
+        if (anns_proto.vector_type() ==
+            milvus::proto::plan::VectorType::BinaryVector) {
             return std::make_unique<BinaryVectorANNS>();
+        } else if (anns_proto.vector_type() ==
+                   milvus::proto::plan::VectorType::Float16Vector) {
+            return std::make_unique<Float16VectorANNS>();
         } else {
             return std::make_unique<FloatVectorANNS>();
         }

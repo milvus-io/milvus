@@ -84,6 +84,12 @@ func isNumber(c uint8) bool {
 	return true
 }
 
+func isVectorType(dataType schemapb.DataType) bool {
+	return dataType == schemapb.DataType_FloatVector ||
+		dataType == schemapb.DataType_BinaryVector ||
+		dataType == schemapb.DataType_Float16Vector
+}
+
 func validateMaxQueryResultWindow(offset int64, limit int64) error {
 	if offset < 0 {
 		return fmt.Errorf("%s [%d] is invalid, should be gte than 0", OffsetKey, offset)
@@ -319,7 +325,7 @@ func validateMaxLengthPerRow(collectionName string, field *schemapb.FieldSchema)
 }
 
 func validateVectorFieldMetricType(field *schemapb.FieldSchema) error {
-	if (field.DataType != schemapb.DataType_FloatVector) && (field.DataType != schemapb.DataType_BinaryVector) {
+	if !isVectorType(field.DataType) {
 		return nil
 	}
 	for _, params := range field.IndexParams {
@@ -432,7 +438,7 @@ func isVector(dataType schemapb.DataType) (bool, error) {
 		schemapb.DataType_Float, schemapb.DataType_Double:
 		return false, nil
 
-	case schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector:
+	case schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector:
 		return true, nil
 	}
 
@@ -443,7 +449,7 @@ func validateMetricType(dataType schemapb.DataType, metricTypeStrRaw string) err
 	metricTypeStr := strings.ToUpper(metricTypeStrRaw)
 	switch metricTypeStr {
 	case metric.L2, metric.IP, metric.COSINE:
-		if dataType == schemapb.DataType_FloatVector {
+		if dataType == schemapb.DataType_FloatVector || dataType == schemapb.DataType_Float16Vector {
 			return nil
 		}
 	case metric.JACCARD, metric.HAMMING, metric.SUBSTRUCTURE, metric.SUPERSTRUCTURE:
@@ -548,7 +554,7 @@ func validateMultipleVectorFields(schema *schemapb.CollectionSchema) error {
 	for i := range schema.Fields {
 		name := schema.Fields[i].Name
 		dType := schema.Fields[i].DataType
-		isVec := dType == schemapb.DataType_BinaryVector || dType == schemapb.DataType_FloatVector
+		isVec := dType == schemapb.DataType_BinaryVector || dType == schemapb.DataType_FloatVector || dType == schemapb.DataType_Float16Vector
 		if isVec && vecExist && !enableMultipleVectorFields {
 			return fmt.Errorf(
 				"multiple vector fields is not supported, fields name: %s, %s",

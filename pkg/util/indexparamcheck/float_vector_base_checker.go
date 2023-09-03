@@ -29,10 +29,11 @@ func (c floatVectorBaseChecker) CheckTrain(params map[string]string) error {
 }
 
 func (c floatVectorBaseChecker) CheckValidDataType(dType schemapb.DataType) error {
-	if dType != schemapb.DataType_FloatVector {
-		return fmt.Errorf("float vector is only supported")
+	if dType == schemapb.DataType_FloatVector || dType == schemapb.DataType_Float16Vector {
+		return nil
+	} else {
+		return fmt.Errorf("float or float16 vector are only supported")
 	}
-	return nil
 }
 
 func (c floatVectorBaseChecker) SetDefaultMetricTypeIfNotExist(params map[string]string) {

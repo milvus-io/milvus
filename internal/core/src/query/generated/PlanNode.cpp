@@ -26,6 +26,11 @@ BinaryVectorANNS::accept(PlanNodeVisitor& visitor) {
 }
 
 void
+Float16VectorANNS::accept(PlanNodeVisitor& visitor) {
+    visitor.visit(*this);
+}
+
+void
 RetrievePlanNode::accept(PlanNodeVisitor& visitor) {
     visitor.visit(*this);
 }

@@ -309,7 +309,7 @@ PROTOBUF_CONSTEXPR VectorANNS::VectorANNS(
   , /*decltype(_impl_.predicates_)*/nullptr
   , /*decltype(_impl_.query_info_)*/nullptr
   , /*decltype(_impl_.field_id_)*/int64_t{0}
-  , /*decltype(_impl_.is_binary_)*/false
+  , /*decltype(_impl_.vector_type_)*/0
   , /*decltype(_impl_._cached_size_)*/{}} {}
 struct VectorANNSDefaultTypeInternal {
   PROTOBUF_CONSTEXPR VectorANNSDefaultTypeInternal()
@@ -355,7 +355,7 @@ PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORIT
 }  // namespace proto
 }  // namespace milvus
 static ::_pb::Metadata file_level_metadata_plan_2eproto[22];
-static const ::_pb::EnumDescriptor* file_level_enum_descriptors_plan_2eproto[5];
+static const ::_pb::EnumDescriptor* file_level_enum_descriptors_plan_2eproto[6];
 static constexpr ::_pb::ServiceDescriptor const** file_level_service_descriptors_plan_2eproto = nullptr;
 
 const uint32_t TableStruct_plan_2eproto::offsets[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) = {
@@ -548,7 +548,7 @@ const uint32_t TableStruct_plan_2eproto::offsets[] PROTOBUF_SECTION_VARIABLE(pro
   ~0u,  // no _oneof_case_
   ~0u,  // no _weak_field_map_
   ~0u,  // no _inlined_string_donated_
-  PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::VectorANNS, _impl_.is_binary_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::VectorANNS, _impl_.vector_type_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::VectorANNS, _impl_.field_id_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::VectorANNS, _impl_.predicates_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::VectorANNS, _impl_.query_info_),
@@ -711,33 +711,36 @@ const char descriptor_table_protodef_plan_2eproto[] PROTOBUF_SECTION_VARIABLE(pr
   "_true_expr\030\014 \001(\0132!.milvus.proto.plan.Alw"
   "aysTrueExprH\000\022A\n\022json_contains_expr\030\r \001("
   "\0132#.milvus.proto.plan.JSONContainsExprH\000"
-  "B\006\n\004expr\"\251\001\n\nVectorANNS\022\021\n\tis_binary\030\001 \001"
-  "(\010\022\020\n\010field_id\030\002 \001(\003\022+\n\npredicates\030\003 \001(\013"
-  "2\027.milvus.proto.plan.Expr\0220\n\nquery_info\030"
-  "\004 \001(\0132\034.milvus.proto.plan.QueryInfo\022\027\n\017p"
-  "laceholder_tag\030\005 \001(\t\"]\n\rQueryPlanNode\022+\n"
-  "\npredicates\030\001 \001(\0132\027.milvus.proto.plan.Ex"
-  "pr\022\020\n\010is_count\030\002 \001(\010\022\r\n\005limit\030\003 \001(\003\"\304\001\n\010"
-  "PlanNode\0224\n\013vector_anns\030\001 \001(\0132\035.milvus.p"
-  "roto.plan.VectorANNSH\000\022-\n\npredicates\030\002 \001"
-  "(\0132\027.milvus.proto.plan.ExprH\000\0221\n\005query\030\004"
-  " \001(\0132 .milvus.proto.plan.QueryPlanNodeH\000"
-  "\022\030\n\020output_field_ids\030\003 \003(\003B\006\n\004node*\272\001\n\006O"
-  "pType\022\013\n\007Invalid\020\000\022\017\n\013GreaterThan\020\001\022\020\n\014G"
-  "reaterEqual\020\002\022\014\n\010LessThan\020\003\022\r\n\tLessEqual"
-  "\020\004\022\t\n\005Equal\020\005\022\014\n\010NotEqual\020\006\022\017\n\013PrefixMat"
-  "ch\020\007\022\020\n\014PostfixMatch\020\010\022\t\n\005Match\020\t\022\t\n\005Ran"
-  "ge\020\n\022\006\n\002In\020\013\022\t\n\005NotIn\020\014*G\n\013ArithOpType\022\013"
-  "\n\007Unknown\020\000\022\007\n\003Add\020\001\022\007\n\003Sub\020\002\022\007\n\003Mul\020\003\022\007"
-  "\n\003Div\020\004\022\007\n\003Mod\020\005B3Z1github.com/milvus-io"
-  "/milvus/internal/proto/planpbb\006proto3"
+  "B\006\n\004expr\"\312\001\n\nVectorANNS\0222\n\013vector_type\030\001"
+  " \001(\0162\035.milvus.proto.plan.VectorType\022\020\n\010f"
+  "ield_id\030\002 \001(\003\022+\n\npredicates\030\003 \001(\0132\027.milv"
+  "us.proto.plan.Expr\0220\n\nquery_info\030\004 \001(\0132\034"
+  ".milvus.proto.plan.QueryInfo\022\027\n\017placehol"
+  "der_tag\030\005 \001(\t\"]\n\rQueryPlanNode\022+\n\npredic"
+  "ates\030\001 \001(\0132\027.milvus.proto.plan.Expr\022\020\n\010i"
+  "s_count\030\002 \001(\010\022\r\n\005limit\030\003 \001(\003\"\304\001\n\010PlanNod"
+  "e\0224\n\013vector_anns\030\001 \001(\0132\035.milvus.proto.pl"
+  "an.VectorANNSH\000\022-\n\npredicates\030\002 \001(\0132\027.mi"
+  "lvus.proto.plan.ExprH\000\0221\n\005query\030\004 \001(\0132 ."
+  "milvus.proto.plan.QueryPlanNodeH\000\022\030\n\020out"
+  "put_field_ids\030\003 \003(\003B\006\n\004node*\272\001\n\006OpType\022\013"
+  "\n\007Invalid\020\000\022\017\n\013GreaterThan\020\001\022\020\n\014GreaterE"
+  "qual\020\002\022\014\n\010LessThan\020\003\022\r\n\tLessEqual\020\004\022\t\n\005E"
+  "qual\020\005\022\014\n\010NotEqual\020\006\022\017\n\013PrefixMatch\020\007\022\020\n"
+  "\014PostfixMatch\020\010\022\t\n\005Match\020\t\022\t\n\005Range\020\n\022\006\n"
+  "\002In\020\013\022\t\n\005NotIn\020\014*G\n\013ArithOpType\022\013\n\007Unkno"
+  "wn\020\000\022\007\n\003Add\020\001\022\007\n\003Sub\020\002\022\007\n\003Mul\020\003\022\007\n\003Div\020\004"
+  "\022\007\n\003Mod\020\005*B\n\nVectorType\022\020\n\014BinaryVector\020"
+  "\000\022\017\n\013FloatVector\020\001\022\021\n\rFloat16Vector\020\002B3Z"
+  "1github.com/milvus-io/milvus/internal/pr"
+  "oto/planpbb\006proto3"
   ;
 static const ::_pbi::DescriptorTable* const descriptor_table_plan_2eproto_deps[1] = {
   &::descriptor_table_schema_2eproto,
 };
 static ::_pbi::once_flag descriptor_table_plan_2eproto_once;
 const ::_pbi::DescriptorTable descriptor_table_plan_2eproto = {
-    false, false, 4237, descriptor_table_protodef_plan_2eproto,
+    false, false, 4338, descriptor_table_protodef_plan_2eproto,
     "plan.proto",
     &descriptor_table_plan_2eproto_once, descriptor_table_plan_2eproto_deps, 1, 22,
     schemas, file_default_instances, TableStruct_plan_2eproto::offsets,
@@ -859,6 +862,21 @@ bool ArithOpType_IsValid(int value) {
     case 3:
     case 4:
     case 5:
+      return true;
+    default:
+      return false;
+  }
+}
+
+const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* VectorType_descriptor() {
+  ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&descriptor_table_plan_2eproto);
+  return file_level_enum_descriptors_plan_2eproto[5];
+}
+bool VectorType_IsValid(int value) {
+  switch (value) {
+    case 0:
+    case 1:
+    case 2:
       return true;
     default:
       return false;
@@ -6475,7 +6493,7 @@ VectorANNS::VectorANNS(const VectorANNS& from)
     , decltype(_impl_.predicates_){nullptr}
     , decltype(_impl_.query_info_){nullptr}
     , decltype(_impl_.field_id_){}
-    , decltype(_impl_.is_binary_){}
+    , decltype(_impl_.vector_type_){}
     , /*decltype(_impl_._cached_size_)*/{}};
 
   _internal_metadata_.MergeFrom<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(from._internal_metadata_);
@@ -6494,8 +6512,8 @@ VectorANNS::VectorANNS(const VectorANNS& from)
     _this->_impl_.query_info_ = new ::milvus::proto::plan::QueryInfo(*from._impl_.query_info_);
   }
   ::memcpy(&_impl_.field_id_, &from._impl_.field_id_,
-    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.is_binary_) -
-    reinterpret_cast<char*>(&_impl_.field_id_)) + sizeof(_impl_.is_binary_));
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.vector_type_) -
+    reinterpret_cast<char*>(&_impl_.field_id_)) + sizeof(_impl_.vector_type_));
   // @@protoc_insertion_point(copy_constructor:milvus.proto.plan.VectorANNS)
 }
 
@@ -6508,7 +6526,7 @@ inline void VectorANNS::SharedCtor(
     , decltype(_impl_.predicates_){nullptr}
     , decltype(_impl_.query_info_){nullptr}
     , decltype(_impl_.field_id_){int64_t{0}}
-    , decltype(_impl_.is_binary_){false}
+    , decltype(_impl_.vector_type_){0}
     , /*decltype(_impl_._cached_size_)*/{}
   };
   _impl_.placeholder_tag_.InitDefault();
@@ -6553,8 +6571,8 @@ void VectorANNS::Clear() {
   }
   _impl_.query_info_ = nullptr;
   ::memset(&_impl_.field_id_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&_impl_.is_binary_) -
-      reinterpret_cast<char*>(&_impl_.field_id_)) + sizeof(_impl_.is_binary_));
+      reinterpret_cast<char*>(&_impl_.vector_type_) -
+      reinterpret_cast<char*>(&_impl_.field_id_)) + sizeof(_impl_.vector_type_));
   _internal_metadata_.Clear<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
 }
 
@@ -6564,11 +6582,12 @@ const char* VectorANNS::_InternalParse(const char* ptr, ::_pbi::ParseContext* ct
     uint32_t tag;
     ptr = ::_pbi::ReadTag(ptr, &tag);
     switch (tag >> 3) {
-      // bool is_binary = 1;
+      // .milvus.proto.plan.VectorType vector_type = 1;
       case 1:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
-          _impl_.is_binary_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          uint64_t val = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
           CHK_(ptr);
+          _internal_set_vector_type(static_cast<::milvus::proto::plan::VectorType>(val));
         } else
           goto handle_unusual;
         continue;
@@ -6635,10 +6654,11 @@ uint8_t* VectorANNS::_InternalSerialize(
   uint32_t cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // bool is_binary = 1;
-  if (this->_internal_is_binary() != 0) {
+  // .milvus.proto.plan.VectorType vector_type = 1;
+  if (this->_internal_vector_type() != 0) {
     target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteBoolToArray(1, this->_internal_is_binary(), target);
+    target = ::_pbi::WireFormatLite::WriteEnumToArray(
+      1, this->_internal_vector_type(), target);
   }
 
   // int64 field_id = 2;
@@ -6713,9 +6733,10 @@ size_t VectorANNS::ByteSizeLong() const {
     total_size += ::_pbi::WireFormatLite::Int64SizePlusOne(this->_internal_field_id());
   }
 
-  // bool is_binary = 1;
-  if (this->_internal_is_binary() != 0) {
-    total_size += 1 + 1;
+  // .milvus.proto.plan.VectorType vector_type = 1;
+  if (this->_internal_vector_type() != 0) {
+    total_size += 1 +
+      ::_pbi::WireFormatLite::EnumSize(this->_internal_vector_type());
   }
 
   return MaybeComputeUnknownFieldsSize(total_size, &_impl_._cached_size_);
@@ -6750,8 +6771,8 @@ void VectorANNS::MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PRO
   if (from._internal_field_id() != 0) {
     _this->_internal_set_field_id(from._internal_field_id());
   }
-  if (from._internal_is_binary() != 0) {
-    _this->_internal_set_is_binary(from._internal_is_binary());
+  if (from._internal_vector_type() != 0) {
+    _this->_internal_set_vector_type(from._internal_vector_type());
   }
   _this->_internal_metadata_.MergeFrom<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(from._internal_metadata_);
 }
@@ -6777,8 +6798,8 @@ void VectorANNS::InternalSwap(VectorANNS* other) {
       &other->_impl_.placeholder_tag_, rhs_arena
   );
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(VectorANNS, _impl_.is_binary_)
-      + sizeof(VectorANNS::_impl_.is_binary_)
+      PROTOBUF_FIELD_OFFSET(VectorANNS, _impl_.vector_type_)
+      + sizeof(VectorANNS::_impl_.vector_type_)
       - PROTOBUF_FIELD_OFFSET(VectorANNS, _impl_.predicates_)>(
           reinterpret_cast<char*>(&_impl_.predicates_),
           reinterpret_cast<char*>(&other->_impl_.predicates_));

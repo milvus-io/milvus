@@ -31,6 +31,8 @@ func estimateFieldDataSize(dim int64, numRows int64, dataType schemapb.DataType)
 	if dataType == schemapb.DataType_BinaryVector {
 		return uint64(dim) / 8 * uint64(numRows), nil
 	}
-
+	if dataType == schemapb.DataType_Float16Vector {
+		return uint64(dim) * uint64(numRows) * 2, nil
+	}
 	return 0, nil
 }
