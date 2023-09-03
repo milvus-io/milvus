@@ -870,7 +870,9 @@ func (m *importManager) loadFromTaskStore(load2Mem bool) ([]*datapb.ImportTaskIn
 
 // persistTaskInfo stores or updates the import task info in Etcd.
 func (m *importManager) persistTaskInfo(ti *datapb.ImportTaskInfo) error {
-	log.Info("updating import task info in Etcd", zap.Int64("task ID", ti.GetId()))
+	log.Info("updating import task info in Etcd", zap.Int64("task ID", ti.GetId()),
+		zap.String("collection", ti.CollectionName),
+		zap.Any("state", ti.State))
 	var taskInfo []byte
 	var err error
 	if taskInfo, err = proto.Marshal(ti); err != nil {

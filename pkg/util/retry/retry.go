@@ -13,11 +13,13 @@ package retry
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
+	"github.com/lingdor/stackerror"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
@@ -39,7 +41,8 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 	for i := uint(0); i < c.attempts; i++ {
 		if err := fn(); err != nil {
 			if i%10 == 0 {
-				log.Error("retry func failed", zap.Uint("retry time", i), zap.Error(err))
+				stackerr := stackerror.NewParent(fmt.Sprintf("retry time %d", i), err)
+				log.Warn("retry func failed", zap.Error(stackerr))
 			}
 
 			err = errors.Wrapf(err, "attempt #%d", i)

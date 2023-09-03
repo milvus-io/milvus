@@ -1346,6 +1346,7 @@ func (s *Server) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAll
 // It returns a failed status if no dataNode is available or if any error occurs.
 func (s *Server) Import(ctx context.Context, itr *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 	log := log.Ctx(ctx)
+	log.With(zap.Int64("taskID", itr.GetImportTask().TaskId))
 	log.Info("DataCoord receives import request", zap.Any("import task request", itr))
 	resp := &datapb.ImportTaskResponse{
 		Status: &commonpb.Status{

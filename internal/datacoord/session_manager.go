@@ -209,6 +209,9 @@ func (c *SessionManager) Import(ctx context.Context, nodeID int64, itr *datapb.I
 
 // execImport gets the corresponding DataNode with its ID and calls its Import method.
 func (c *SessionManager) execImport(ctx context.Context, nodeID int64, itr *datapb.ImportTaskRequest) {
+	log := log.With(
+		zap.Int64("taskId", itr.ImportTask.TaskId),
+	)
 	cli, err := c.getClient(ctx, nodeID)
 	if err != nil {
 		log.Warn("failed to get client for import", zap.Int64("nodeID", nodeID), zap.Error(err))
