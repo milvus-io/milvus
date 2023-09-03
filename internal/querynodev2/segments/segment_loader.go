@@ -302,14 +302,20 @@ func (loader *segmentLoader) notifyLoadFinish(segments ...*querypb.SegmentLoadIn
 // requestResource requests memory & storage to load segments,
 // returns the memory usage, disk usage and concurrency with the gained memory.
 func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*querypb.SegmentLoadInfo) (LoadResource, int, error) {
+	resource := LoadResource{}
+	// we need to deal with empty infos case separately,
+	// because the following judgement for requested resources are based on current status and static config
+	// which may block empty-load operations by accident
+	if len(infos) == 0 {
+		return resource, 0, nil
+	}
+
 	segmentIDs := lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) int64 {
 		return info.GetSegmentID()
 	})
 	log := log.Ctx(ctx).With(
 		zap.Int64s("segmentIDs", segmentIDs),
 	)
-
-	resource := LoadResource{}
 
 	loader.mut.Lock()
 	defer loader.mut.Unlock()

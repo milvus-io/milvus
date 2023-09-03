@@ -576,6 +576,12 @@ func (sd *shardDelegator) Close() {
 func NewShardDelegator(collectionID UniqueID, replicaID UniqueID, channel string, version int64,
 	workerManager cluster.Manager, manager *segments.Manager, tsafeManager tsafe.Manager, loader segments.Loader,
 	factory msgstream.Factory, startTs uint64) (ShardDelegator, error) {
+	log := log.With(zap.Int64("collectionID", collectionID),
+		zap.Int64("replicaID", replicaID),
+		zap.String("channel", channel),
+		zap.Int64("version", version),
+		zap.Uint64("startTs", startTs),
+	)
 
 	collection := manager.Collection.Get(collectionID)
 	if collection == nil {
@@ -583,7 +589,7 @@ func NewShardDelegator(collectionID UniqueID, replicaID UniqueID, channel string
 	}
 
 	maxSegmentDeleteBuffer := paramtable.Get().QueryNodeCfg.MaxSegmentDeleteBuffer.GetAsInt64()
-	log.Info("Init delte cache", zap.Int64("maxSegmentCacheBuffer", maxSegmentDeleteBuffer), zap.Time("startTime", tsoutil.PhysicalTime(startTs)))
+	log.Info("Init delta cache", zap.Int64("maxSegmentCacheBuffer", maxSegmentDeleteBuffer), zap.Time("startTime", tsoutil.PhysicalTime(startTs)))
 
 	sd := &shardDelegator{
 		collectionID:   collectionID,
@@ -606,5 +612,6 @@ func NewShardDelegator(collectionID UniqueID, replicaID UniqueID, channel string
 	sd.tsCond = sync.NewCond(&m)
 	sd.wg.Add(1)
 	go sd.watchTSafe()
+	log.Info("finish build new shardDelegator")
 	return sd, nil
 }
