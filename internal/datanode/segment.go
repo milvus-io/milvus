@@ -18,6 +18,7 @@ package datanode
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -55,7 +56,6 @@ type Segment struct {
 	currentStat  *storage.PkStatistics
 	historyStats []*storage.PkStatistics
 
-	lastSyncTs  Timestamp
 	startPos    *msgpb.MsgPosition // TODO readonly
 	lazyLoading atomic.Value
 	syncing     atomic.Value
@@ -255,4 +255,25 @@ func (s *Segment) isBufferEmpty() bool {
 		s.curDeleteBuf == nil &&
 		len(s.historyInsertBuf) == 0 &&
 		len(s.historyDeleteBuf) == 0
+}
+
+func (s *Segment) minBufferTs() uint64 {
+	var minTs uint64 = math.MaxUint64
+	if s.curInsertBuf != nil && s.curInsertBuf.startPos != nil && s.curInsertBuf.startPos.Timestamp < minTs {
+		minTs = s.curInsertBuf.startPos.Timestamp
+	}
+	if s.curDeleteBuf != nil && s.curDeleteBuf.startPos != nil && s.curDeleteBuf.startPos.Timestamp < minTs {
+		minTs = s.curDeleteBuf.startPos.Timestamp
+	}
+	for _, ib := range s.historyInsertBuf {
+		if ib != nil && ib.startPos != nil && ib.startPos.Timestamp < minTs {
+			minTs = ib.startPos.Timestamp
+		}
+	}
+	for _, db := range s.historyDeleteBuf {
+		if db != nil && db.startPos != nil && db.startPos.Timestamp < minTs {
+			minTs = db.startPos.Timestamp
+		}
+	}
+	return minTs
 }

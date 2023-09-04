@@ -436,7 +436,6 @@ func TestDataSyncService_Close(t *testing.T) {
 
 	channel := newChannel(insertChannelName, collMeta.ID, collMeta.GetSchema(), mockRootCoord, cm)
 	channel.syncPolicies = []segmentSyncPolicy{
-		syncPeriodically(),
 		syncMemoryTooHigh(),
 	}
 	atimeTickSender := newTimeTickSender(mockDataCoord, 0)

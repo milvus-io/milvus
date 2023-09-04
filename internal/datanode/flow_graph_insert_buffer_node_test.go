@@ -223,7 +223,6 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	}
 
 	inMsg := genFlowGraphInsertMsg(insertChannelName)
-	iBNode.channel.setSegmentLastSyncTs(UniqueID(1), tsoutil.ComposeTSByTime(time.Now().Add(-11*time.Minute), 0))
 	assert.NotPanics(t, func() {
 		res := iBNode.Operate([]flowgraph.Msg{&inMsg})
 		assert.Subset(t, res[0].(*flowGraphMsg).segmentsToSync, []UniqueID{1})
