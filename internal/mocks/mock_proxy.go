@@ -3850,6 +3850,62 @@ func (_c *MockProxy_Query_Call) RunAndReturn(run func(context.Context, *milvuspb
 	return _c
 }
 
+// QueryImpl provides a mock function with given fields: ctx, request, retrieveRequest
+func (_m *MockProxy) QueryImpl(ctx context.Context, request *milvuspb.QueryRequest, retrieveRequest *internalpb.RetrieveRequest) (*milvuspb.QueryResults, error) {
+	ret := _m.Called(ctx, request, retrieveRequest)
+
+	var r0 *milvuspb.QueryResults
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.QueryRequest, *internalpb.RetrieveRequest) (*milvuspb.QueryResults, error)); ok {
+		return rf(ctx, request, retrieveRequest)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.QueryRequest, *internalpb.RetrieveRequest) *milvuspb.QueryResults); ok {
+		r0 = rf(ctx, request, retrieveRequest)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.QueryResults)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.QueryRequest, *internalpb.RetrieveRequest) error); ok {
+		r1 = rf(ctx, request, retrieveRequest)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_QueryImpl_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QueryImpl'
+type MockProxy_QueryImpl_Call struct {
+	*mock.Call
+}
+
+// QueryImpl is a helper method to define mock.On call
+//   - ctx context.Context
+//   - request *milvuspb.QueryRequest
+//   - retrieveRequest *internalpb.RetrieveRequest
+func (_e *MockProxy_Expecter) QueryImpl(ctx interface{}, request interface{}, retrieveRequest interface{}) *MockProxy_QueryImpl_Call {
+	return &MockProxy_QueryImpl_Call{Call: _e.mock.On("QueryImpl", ctx, request, retrieveRequest)}
+}
+
+func (_c *MockProxy_QueryImpl_Call) Run(run func(ctx context.Context, request *milvuspb.QueryRequest, retrieveRequest *internalpb.RetrieveRequest)) *MockProxy_QueryImpl_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.QueryRequest), args[2].(*internalpb.RetrieveRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_QueryImpl_Call) Return(_a0 *milvuspb.QueryResults, _a1 error) *MockProxy_QueryImpl_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_QueryImpl_Call) RunAndReturn(run func(context.Context, *milvuspb.QueryRequest, *internalpb.RetrieveRequest) (*milvuspb.QueryResults, error)) *MockProxy_QueryImpl_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RefreshPolicyInfoCache provides a mock function with given fields: ctx, req
 func (_m *MockProxy) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
 	ret := _m.Called(ctx, req)

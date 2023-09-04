@@ -1259,6 +1259,17 @@ type ProxyComponent interface {
 	// error is always nil
 	Query(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error)
 
+	// QueryImpl implements Query
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name, partition names(optional), filter expression, output fields
+	// retrieveRequest contains retrieve request params, includes collection id, etc, can specific the collection id by pass retrieveRequest
+	//
+	// The `Status` in response struct `QueryResults` indicates if this operation is processed successfully or fail cause;
+	// the `FieldsData` in `QueryResults` return query results.
+	// error is always nil
+	QueryImpl(ctx context.Context, request *milvuspb.QueryRequest, retrieveRequest *internalpb.RetrieveRequest) (*milvuspb.QueryResults, error)
+
 	// CalcDistance notifies Proxy to calculate distance between specified vectors
 	//
 	// ctx is the context to control request deadline and cancellation

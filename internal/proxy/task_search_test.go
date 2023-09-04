@@ -1869,7 +1869,7 @@ func TestSearchTask_Requery(t *testing.T) {
 	t.Run("Test normal", func(t *testing.T) {
 		schema := constructCollectionSchema(pkField, vecField, dim, collection)
 		node := mocks.NewMockProxy(t)
-		node.EXPECT().Query(mock.Anything, mock.Anything).
+		node.EXPECT().QueryImpl(mock.Anything, mock.Anything, mock.Anything).
 			Return(&milvuspb.QueryResults{
 				FieldsData: []*schemapb.FieldData{{
 					Type:      schemapb.DataType_Int64,
@@ -1950,7 +1950,7 @@ func TestSearchTask_Requery(t *testing.T) {
 	t.Run("Test requery failed 1", func(t *testing.T) {
 		schema := constructCollectionSchema(pkField, vecField, dim, collection)
 		node := mocks.NewMockProxy(t)
-		node.EXPECT().Query(mock.Anything, mock.Anything).
+		node.EXPECT().QueryImpl(mock.Anything, mock.Anything, mock.Anything).
 			Return(nil, fmt.Errorf("mock err 1"))
 
 		qt := &searchTask{
@@ -1975,7 +1975,7 @@ func TestSearchTask_Requery(t *testing.T) {
 	t.Run("Test requery failed 2", func(t *testing.T) {
 		schema := constructCollectionSchema(pkField, vecField, dim, collection)
 		node := mocks.NewMockProxy(t)
-		node.EXPECT().Query(mock.Anything, mock.Anything).
+		node.EXPECT().QueryImpl(mock.Anything, mock.Anything, mock.Anything).
 			Return(&milvuspb.QueryResults{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -2005,7 +2005,7 @@ func TestSearchTask_Requery(t *testing.T) {
 	t.Run("Test get pk field data failed", func(t *testing.T) {
 		schema := constructCollectionSchema(pkField, vecField, dim, collection)
 		node := mocks.NewMockProxy(t)
-		node.EXPECT().Query(mock.Anything, mock.Anything).
+		node.EXPECT().QueryImpl(mock.Anything, mock.Anything, mock.Anything).
 			Return(&milvuspb.QueryResults{
 				FieldsData: []*schemapb.FieldData{},
 			}, nil)
@@ -2032,7 +2032,7 @@ func TestSearchTask_Requery(t *testing.T) {
 	t.Run("Test incomplete query result", func(t *testing.T) {
 		schema := constructCollectionSchema(pkField, vecField, dim, collection)
 		node := mocks.NewMockProxy(t)
-		node.EXPECT().Query(mock.Anything, mock.Anything).
+		node.EXPECT().QueryImpl(mock.Anything, mock.Anything, mock.Anything).
 			Return(&milvuspb.QueryResults{
 				FieldsData: []*schemapb.FieldData{{
 					Type:      schemapb.DataType_Int64,
@@ -2086,7 +2086,7 @@ func TestSearchTask_Requery(t *testing.T) {
 	t.Run("Test postExecute with requery failed", func(t *testing.T) {
 		schema := constructCollectionSchema(pkField, vecField, dim, collection)
 		node := mocks.NewMockProxy(t)
-		node.EXPECT().Query(mock.Anything, mock.Anything).
+		node.EXPECT().QueryImpl(mock.Anything, mock.Anything, mock.Anything).
 			Return(nil, fmt.Errorf("mock err 1"))
 
 		resultIDs := &schemapb.IDs{

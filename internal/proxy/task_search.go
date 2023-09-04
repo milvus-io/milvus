@@ -587,7 +587,19 @@ func (t *searchTask) Requery() error {
 		GuaranteeTimestamp: t.request.GetGuaranteeTimestamp(),
 		QueryParams:        t.request.GetSearchParams(),
 	}
-	queryResult, err := t.node.Query(t.ctx, queryReq)
+
+	// has get collection id already, need to pass id here
+	// to avoid reget id when query, which may get different id from SearchRequest.CollectionID
+	// for the reason that the cache is not trustable, related with https://github.com/milvus-io/milvus/issues/25662
+	retrieveRequest := &internalpb.RetrieveRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+		),
+		ReqID:        paramtable.GetNodeID(),
+		CollectionID: t.SearchRequest.CollectionID,
+	}
+	queryResult, err := t.node.QueryImpl(t.ctx, queryReq, retrieveRequest)
 	if err != nil {
 		return err
 	}

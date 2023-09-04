@@ -2619,6 +2619,20 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 
 // Query get the records by primary keys.
 func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+	retrieveRequest := &internalpb.RetrieveRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+		),
+		ReqID: paramtable.GetNodeID(),
+	}
+	return node.QueryImpl(ctx, request, retrieveRequest)
+}
+
+// QueryImpl implements Query
+// can specific the collection id or other params by pass retrieveRequest
+func (node *Proxy) QueryImpl(ctx context.Context, request *milvuspb.QueryRequest, retrieveRequest *internalpb.RetrieveRequest) (*milvuspb.QueryResults, error) {
+
 	receiveSize := proto.Size(request)
 	metrics.ProxyReceiveBytes.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
@@ -2641,18 +2655,12 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	tr := timerecord.NewTimeRecorder("Query")
 
 	qt := &queryTask{
-		ctx:       ctx,
-		Condition: NewTaskCondition(ctx),
-		RetrieveRequest: &internalpb.RetrieveRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
-				commonpbutil.WithSourceID(paramtable.GetNodeID()),
-			),
-			ReqID: paramtable.GetNodeID(),
-		},
-		request: request,
-		qc:      node.queryCoord,
-		lb:      node.lbPolicy,
+		ctx:             ctx,
+		Condition:       NewTaskCondition(ctx),
+		RetrieveRequest: retrieveRequest,
+		request:         request,
+		qc:              node.queryCoord,
+		lb:              node.lbPolicy,
 	}
 
 	method := "Query"

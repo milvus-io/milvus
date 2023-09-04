@@ -240,12 +240,17 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	log.Debug("Validate collectionName.")
 
-	collID, err := globalMetaCache.GetCollectionID(ctx, t.request.GetDbName(), collectionName)
-	if err != nil {
-		log.Warn("Failed to get collection id.", zap.String("collectionName", collectionName), zap.Error(err))
-		return err
+	// if pass the collection id, not need to reget id
+	var collID int64
+	var err error
+	if t.CollectionID == 0 {
+		collID, err = globalMetaCache.GetCollectionID(ctx, t.request.GetDbName(), collectionName)
+		if err != nil {
+			log.Warn("Failed to get collection id.", zap.String("collectionName", collectionName), zap.Error(err))
+			return err
+		}
+		t.CollectionID = collID
 	}
-	t.CollectionID = collID
 	log.Debug("Get collection ID by name", zap.Int64("collectionID", t.CollectionID))
 
 	t.partitionKeyMode, err = isPartitionKeyMode(ctx, t.request.GetDbName(), collectionName)

@@ -673,6 +673,10 @@ func (m *MockProxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (
 	return nil, nil
 }
 
+func (m *MockProxy) QueryImpl(ctx context.Context, request *milvuspb.QueryRequest, retrieveRequest *internalpb.RetrieveRequest) (*milvuspb.QueryResults, error) {
+	return nil, nil
+}
+
 func (m *MockProxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDistanceRequest) (*milvuspb.CalcDistanceResults, error) {
 	return nil, nil
 }
