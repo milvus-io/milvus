@@ -54,10 +54,8 @@ func (s *Server) isClosed() bool {
 // GetTimeTickChannel legacy API, returns time tick channel name
 func (s *Server) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		Value: Params.CommonCfg.DataCoordTimeTick.GetValue(),
+		Status: merr.Status(nil),
+		Value:  Params.CommonCfg.DataCoordTimeTick.GetValue(),
 	}, nil
 }
 
@@ -203,18 +201,13 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 				CollectionID: r.CollectionID,
 				PartitionID:  r.PartitionID,
 				ExpireTime:   allocation.ExpireTime,
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-					Reason:    "",
-				},
+				Status:       merr.Status(nil),
 			}
 			assigns = append(assigns, result)
 		}
 	}
 	return &datapb.AssignSegmentIDResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status:           merr.Status(nil),
 		SegIDAssignments: assigns,
 	}, nil
 }
@@ -340,10 +333,8 @@ func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPart
 // GetSegmentInfoChannel legacy API, returns segment info statistics channel
 func (s *Server) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		Value: Params.CommonCfg.DataCoordSegmentInfo.GetValue(),
+		Status: merr.Status(nil),
+		Value:  Params.CommonCfg.DataCoordSegmentInfo.GetValue(),
 	}, nil
 }
 
@@ -591,9 +582,7 @@ func (s *Server) SetSegmentState(ctx context.Context, req *datapb.SetSegmentStat
 		}, nil
 	}
 	return &datapb.SetSegmentStateResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status: merr.Status(nil),
 	}, nil
 }
 
@@ -619,10 +608,7 @@ func (s *Server) GetComponentStates(ctx context.Context) (*milvuspb.ComponentSta
 			Role:      "datacoord",
 			StateCode: code,
 		},
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
+		Status: merr.Status(nil),
 	}
 	return resp, nil
 }
@@ -974,10 +960,7 @@ func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 	}
 
 	return &internalpb.ShowConfigurationsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
+		Status:        merr.Status(nil),
 		Configuations: configList,
 	}, nil
 }
@@ -1400,9 +1383,7 @@ func (s *Server) UpdateSegmentStatistics(ctx context.Context, req *datapb.Update
 		return resp, nil
 	}
 	s.updateSegmentStatistics(req.GetStats())
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
+	return merr.Status(nil), nil
 }
 
 // UpdateChannelCheckpoint updates channel checkpoint in dataCoord.
@@ -1424,9 +1405,7 @@ func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 		return resp, nil
 	}
 
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
+	return merr.Status(nil), nil
 }
 
 // ReportDataNodeTtMsgs send datenode timetick messages to dataCoord.
@@ -1590,9 +1569,7 @@ func (s *Server) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSe
 			Reason:    err.Error(),
 		}, nil
 	}
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
+	return merr.Status(nil), nil
 }
 
 // UnsetIsImportingState unsets the isImporting states of the given segments.
@@ -1615,9 +1592,7 @@ func (s *Server) UnsetIsImportingState(ctx context.Context, req *datapb.UnsetIsI
 			Reason:    reportErr.Error(),
 		}, nil
 	}
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
+	return merr.Status(nil), nil
 }
 
 // MarkSegmentsDropped marks the given segments as `Dropped`.
@@ -1638,9 +1613,7 @@ func (s *Server) MarkSegmentsDropped(ctx context.Context, req *datapb.MarkSegmen
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		}, nil
 	}
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
+	return merr.Status(nil), nil
 }
 
 func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.AlterCollectionRequest) (*commonpb.Status, error) {
@@ -1674,16 +1647,12 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 			Properties:     properties,
 		}
 		s.meta.AddCollection(collInfo)
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		}, nil
+		return merr.Status(nil), nil
 	}
 
 	clonedColl.Properties = properties
 	s.meta.AddCollection(clonedColl)
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
+	return merr.Status(nil), nil
 }
 
 func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {

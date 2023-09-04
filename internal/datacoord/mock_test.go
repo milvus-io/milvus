@@ -18,11 +18,11 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 	"sync/atomic"
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
@@ -395,10 +395,9 @@ func (m *mockRootCoordService) HasCollection(ctx context.Context, req *milvuspb.
 func (m *mockRootCoordService) DescribeCollection(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	// return not exist
 	if req.CollectionID == -1 {
-		err := common.NewCollectionNotExistError(fmt.Sprintf("can't find collection: %d", req.CollectionID))
+		err := merr.WrapErrCollectionNotFound(req.GetCollectionID())
 		return &milvuspb.DescribeCollectionResponse{
-			// TODO: use commonpb.ErrorCode_CollectionNotExists. SDK use commonpb.ErrorCode_UnexpectedError now.
-			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: err.Error()},
+			Status: merr.Status(err),
 		}, nil
 	}
 	return &milvuspb.DescribeCollectionResponse{

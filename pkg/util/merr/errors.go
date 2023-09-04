@@ -40,7 +40,6 @@ var (
 	ErrServiceInternal             = newMilvusError("service internal error", 5, false) // Never return this error out of Milvus
 	ErrCrossClusterRouting         = newMilvusError("cross cluster routing", 6, false)
 	ErrServiceDiskLimitExceeded    = newMilvusError("disk limit exceeded", 7, false)
-	ErrServerIDMismatch            = newMilvusError("server ID mismatch", 8, false)
 
 	// Collection related
 	ErrCollectionNotFound         = newMilvusError("collection not found", 100, false)
@@ -60,12 +59,11 @@ var (
 	ErrReplicaNotFound     = newMilvusError("replica not found", 400, false)
 	ErrReplicaNotAvailable = newMilvusError("replica not available", 401, false)
 
-	// Channel related
-	ErrChannelNotFound      = newMilvusError("channel not found", 500, false)
-	ErrChannelLack          = newMilvusError("channel lacks", 501, false)
-	ErrChannelReduplicate   = newMilvusError("channel reduplicates", 502, false)
-	ErrChannelNotAvailable  = newMilvusError("channel not available", 503, false)
-	ErrChannelUnsubscribing = newMilvusError("chanel is unsubscribing", 504, true)
+	// Channel & Delegator related
+	ErrChannelNotFound     = newMilvusError("channel not found", 500, false)
+	ErrChannelLack         = newMilvusError("channel lacks", 501, false)
+	ErrChannelReduplicate  = newMilvusError("channel reduplicates", 502, false)
+	ErrChannelNotAvailable = newMilvusError("channel not available", 503, false)
 
 	// Segment related
 	ErrSegmentNotFound    = newMilvusError("segment not found", 600, false)
@@ -101,15 +99,6 @@ var (
 	// Topic related
 	ErrTopicNotFound = newMilvusError("topic not found", 1300, false)
 	ErrTopicNotEmpty = newMilvusError("topic not empty", 1301, false)
-
-	// shard delegator related
-	ErrShardDelegatorNotFound        = newMilvusError("shard delegator not found", 1500, false)
-	ErrShardDelegatorAccessFailed    = newMilvusError("fail to access shard delegator", 1501, true)
-	ErrShardDelegatorSearchFailed    = newMilvusError("fail to search on all shard leaders", 1502, true)
-	ErrShardDelegatorQueryFailed     = newMilvusError("fail to query on all shard leaders", 1503, true)
-	ErrShardDelegatorStatisticFailed = newMilvusError("get statistics on all shard leaders", 1504, true)
-	ErrShardDelegatorSQTimeout       = newMilvusError("search/query on shard leader timeout", 1505, true)
-	ErrShardDelegatorSQFailed        = newMilvusError("fail to search/query shard leader", 1506, true)
 
 	// field related
 	ErrFieldNotFound = newMilvusError("field not found", 1700, false)

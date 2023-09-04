@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -84,22 +85,16 @@ func NewIndexNodeMock() *Mock {
 					StateCode: commonpb.StateCode_Healthy,
 				},
 				SubcomponentStates: nil,
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
+				Status:             merr.Status(nil),
 			}, nil
 		},
 		CallGetStatisticsChannel: func(ctx context.Context) (*milvuspb.StringResponse, error) {
 			return &milvuspb.StringResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
+				Status: merr.Status(nil),
 			}, nil
 		},
 		CallCreateJob: func(ctx context.Context, req *indexpb.CreateJobRequest) (*commonpb.Status, error) {
-			return &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			}, nil
+			return merr.Status(nil), nil
 		},
 		CallQueryJobs: func(ctx context.Context, in *indexpb.QueryJobsRequest) (*indexpb.QueryJobsResponse, error) {
 			indexInfos := make([]*indexpb.IndexTaskInfo, 0)
@@ -111,23 +106,17 @@ func NewIndexNodeMock() *Mock {
 				})
 			}
 			return &indexpb.QueryJobsResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
+				Status:     merr.Status(nil),
 				ClusterID:  in.ClusterID,
 				IndexInfos: indexInfos,
 			}, nil
 		},
 		CallDropJobs: func(ctx context.Context, in *indexpb.DropJobsRequest) (*commonpb.Status, error) {
-			return &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			}, nil
+			return merr.Status(nil), nil
 		},
 		CallGetJobStats: func(ctx context.Context, in *indexpb.GetJobStatsRequest) (*indexpb.GetJobStatsResponse, error) {
 			return &indexpb.GetJobStatsResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
+				Status:           merr.Status(nil),
 				TotalJobNum:      1,
 				EnqueueJobNum:    0,
 				InProgressJobNum: 1,
@@ -148,9 +137,7 @@ func NewIndexNodeMock() *Mock {
 		},
 		CallShowConfigurations: func(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 			return &internalpb.ShowConfigurationsResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
+				Status: merr.Status(nil),
 			}, nil
 		},
 	}
@@ -252,10 +239,7 @@ func getMockSystemInfoMetrics(
 	resp, _ := metricsinfo.MarshalComponentInfos(nodeInfos)
 
 	return &milvuspb.GetMetricsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
+		Status:        merr.Status(nil),
 		Response:      resp,
 		ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, paramtable.GetNodeID()),
 	}, nil

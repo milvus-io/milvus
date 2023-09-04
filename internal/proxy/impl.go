@@ -70,9 +70,7 @@ func (node *Proxy) UpdateStateCode(code commonpb.StateCode) {
 // GetComponentStates get state of Proxy.
 func (node *Proxy) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
 	stats := &milvuspb.ComponentStates{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status: merr.Status(nil),
 	}
 	code, ok := node.stateCode.Load().(commonpb.StateCode)
 	if !ok {
@@ -100,11 +98,8 @@ func (node *Proxy) GetComponentStates(ctx context.Context) (*milvuspb.ComponentS
 // GetStatisticsChannel gets statistics channel of Proxy.
 func (node *Proxy) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
-		Value: "",
+		Status: merr.Status(nil),
+		Value:  "",
 	}, nil
 }
 
@@ -148,10 +143,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 	}
 	log.Info("complete to invalidate collection meta cache")
 
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-		Reason:    "",
-	}, nil
+	return merr.Status(nil), nil
 }
 
 func (node *Proxy) CreateDatabase(ctx context.Context, request *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
@@ -183,10 +175,7 @@ func (node *Proxy) CreateDatabase(ctx context.Context, request *milvuspb.CreateD
 		log.Warn(rpcFailedToEnqueue(method), zap.Error(err))
 
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel).Inc()
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	log.Info(rpcEnqueued(method))
@@ -194,10 +183,7 @@ func (node *Proxy) CreateDatabase(ctx context.Context, request *milvuspb.CreateD
 		log.Warn(rpcFailedToWaitToFinish(method), zap.Error(err))
 
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	log.Info(rpcDone(method))
@@ -233,20 +219,14 @@ func (node *Proxy) DropDatabase(ctx context.Context, request *milvuspb.DropDatab
 	if err := node.sched.ddQueue.Enqueue(dct); err != nil {
 		log.Warn(rpcFailedToEnqueue(method), zap.Error(err))
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel).Inc()
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	log.Info(rpcEnqueued(method))
 	if err := dct.WaitToFinish(); err != nil {
 		log.Warn(rpcFailedToWaitToFinish(method), zap.Error(err))
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	log.Info(rpcDone(method))
@@ -284,10 +264,7 @@ func (node *Proxy) ListDatabases(ctx context.Context, request *milvuspb.ListData
 	if err := node.sched.ddQueue.Enqueue(dct); err != nil {
 		log.Warn(rpcFailedToEnqueue(method), zap.Error(err))
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel).Inc()
-		resp.Status = &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
@@ -295,10 +272,7 @@ func (node *Proxy) ListDatabases(ctx context.Context, request *milvuspb.ListData
 	if err := dct.WaitToFinish(); err != nil {
 		log.Warn(rpcFailedToWaitToFinish(method), zap.Error(err))
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
-		resp.Status = &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
@@ -348,10 +322,7 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 			zap.Error(err))
 
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel).Inc()
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	log.Debug(
@@ -368,10 +339,7 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 			zap.Uint64("EndTs", cct.EndTs()))
 
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	log.Debug(
@@ -417,10 +385,7 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 			zap.Error(err))
 
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel).Inc()
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	log.Debug("DropCollection enqueued",
@@ -434,10 +399,7 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 			zap.Uint64("EndTs", dct.EndTs()))
 
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	log.Debug("DropCollection done",
@@ -485,10 +447,7 @@ func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasColle
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 			metrics.AbandonLabel).Inc()
 		return &milvuspb.BoolResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -505,10 +464,7 @@ func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasColle
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 			metrics.FailLabel).Inc()
 		return &milvuspb.BoolResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -556,10 +512,7 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 			metrics.AbandonLabel).Inc()
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	log.Debug("LoadCollection enqueued",
@@ -573,10 +526,7 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 			zap.Uint64("EndTS", lct.EndTs()))
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 			metrics.FailLabel).Inc()
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	log.Debug("LoadCollection done",
@@ -623,10 +573,7 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 			metrics.AbandonLabel).Inc()
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	log.Debug(
@@ -643,10 +590,7 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 			metrics.FailLabel).Inc()
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	log.Debug(
@@ -696,10 +640,7 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 			metrics.AbandonLabel).Inc()
 		return &milvuspb.DescribeCollectionResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -717,10 +658,7 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 			metrics.FailLabel).Inc()
 
 		return &milvuspb.DescribeCollectionResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -728,7 +666,8 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 		zap.Uint64("BeginTS", dct.BeginTs()),
 		zap.Uint64("EndTS", dct.EndTs()),
 		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName))
+		zap.String("collection", request.CollectionName),
+	)
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 		metrics.SuccessLabel).Inc()
@@ -780,10 +719,7 @@ func (node *Proxy) GetStatistics(ctx context.Context, request *milvuspb.GetStati
 			metrics.AbandonLabel).Inc()
 
 		return &milvuspb.GetStatisticsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -805,10 +741,7 @@ func (node *Proxy) GetStatistics(ctx context.Context, request *milvuspb.GetStati
 			metrics.FailLabel).Inc()
 
 		return &milvuspb.GetStatisticsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -860,10 +793,7 @@ func (node *Proxy) GetCollectionStatistics(ctx context.Context, request *milvusp
 			metrics.AbandonLabel).Inc()
 
 		return &milvuspb.GetCollectionStatisticsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -883,10 +813,7 @@ func (node *Proxy) GetCollectionStatistics(ctx context.Context, request *milvusp
 			metrics.FailLabel).Inc()
 
 		return &milvuspb.GetCollectionStatisticsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -939,10 +866,7 @@ func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCo
 
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel).Inc()
 		return &milvuspb.ShowCollectionsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -958,10 +882,7 @@ func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCo
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
 
 		return &milvuspb.ShowCollectionsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -1007,10 +928,7 @@ func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterC
 			zap.Error(err))
 
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel).Inc()
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	log.Debug(
@@ -1027,10 +945,7 @@ func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterC
 			zap.Uint64("EndTs", act.EndTs()))
 
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	log.Debug(
@@ -1078,10 +993,7 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel).Inc()
 
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	log.Debug(
@@ -1098,10 +1010,7 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
 
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	log.Debug(
@@ -1150,10 +1059,7 @@ func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPart
 
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel).Inc()
 
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	log.Debug(
@@ -1170,10 +1076,7 @@ func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPart
 
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
 
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	log.Debug(
@@ -1227,11 +1130,8 @@ func (node *Proxy) HasPartition(ctx context.Context, request *milvuspb.HasPartit
 			metrics.AbandonLabel).Inc()
 
 		return &milvuspb.BoolResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
-			Value: false,
+			Status: merr.Status(err),
+			Value:  false,
 		}, nil
 	}
 
@@ -1251,11 +1151,8 @@ func (node *Proxy) HasPartition(ctx context.Context, request *milvuspb.HasPartit
 			metrics.FailLabel).Inc()
 
 		return &milvuspb.BoolResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
-			Value: false,
+			Status: merr.Status(err),
+			Value:  false,
 		}, nil
 	}
 
@@ -1307,10 +1204,7 @@ func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPar
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 			metrics.AbandonLabel).Inc()
 
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	log.Debug(
@@ -1328,10 +1222,7 @@ func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPar
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 			metrics.FailLabel).Inc()
 
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	log.Debug(
@@ -1382,10 +1273,7 @@ func (node *Proxy) ReleasePartitions(ctx context.Context, request *milvuspb.Rele
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 			metrics.AbandonLabel).Inc()
 
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	log.Debug(
@@ -1403,10 +1291,7 @@ func (node *Proxy) ReleasePartitions(ctx context.Context, request *milvuspb.Rele
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 			metrics.FailLabel).Inc()
 
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	log.Debug(
@@ -1459,10 +1344,7 @@ func (node *Proxy) GetPartitionStatistics(ctx context.Context, request *milvuspb
 			metrics.AbandonLabel).Inc()
 
 		return &milvuspb.GetPartitionStatisticsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -1482,10 +1364,7 @@ func (node *Proxy) GetPartitionStatistics(ctx context.Context, request *milvuspb
 			metrics.FailLabel).Inc()
 
 		return &milvuspb.GetPartitionStatisticsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -1542,10 +1421,7 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 			metrics.AbandonLabel).Inc()
 
 		return &milvuspb.ShowPartitionsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -1571,10 +1447,7 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 			metrics.FailLabel).Inc()
 
 		return &milvuspb.ShowPartitionsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -1664,9 +1537,7 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.SuccessLabel).Inc()
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return &milvuspb.GetLoadingProgressResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status:          merr.Status(nil),
 		Progress:        loadProgress,
 		RefreshProgress: refreshProgress,
 	}, nil
@@ -1711,9 +1582,7 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 	}
 
 	successResponse := &milvuspb.GetLoadStateResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status: merr.Status(nil),
 	}
 	defer func() {
 		log.Debug(
@@ -1812,10 +1681,7 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 			metrics.AbandonLabel).Inc()
 
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	log.Info(
@@ -1833,10 +1699,7 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 			metrics.FailLabel).Inc()
 
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	log.Info(
@@ -1892,10 +1755,7 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 			metrics.AbandonLabel).Inc()
 
 		return &milvuspb.DescribeIndexResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -1979,10 +1839,7 @@ func (node *Proxy) GetIndexStatistics(ctx context.Context, request *milvuspb.Get
 			metrics.AbandonLabel).Inc()
 
 		return &milvuspb.GetIndexStatisticsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -2056,10 +1913,7 @@ func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexReq
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 			metrics.AbandonLabel).Inc()
 
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	log.Debug(
@@ -2077,10 +1931,7 @@ func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexReq
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 			metrics.FailLabel).Inc()
 
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	log.Debug(
@@ -2137,10 +1988,7 @@ func (node *Proxy) GetIndexBuildProgress(ctx context.Context, request *milvuspb.
 			metrics.AbandonLabel).Inc()
 
 		return &milvuspb.GetIndexBuildProgressResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -2159,10 +2007,7 @@ func (node *Proxy) GetIndexBuildProgress(ctx context.Context, request *milvuspb.
 			metrics.FailLabel).Inc()
 
 		return &milvuspb.GetIndexBuildProgressResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -2220,10 +2065,7 @@ func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndex
 			metrics.AbandonLabel).Inc()
 
 		return &milvuspb.GetIndexStateResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -2242,10 +2084,7 @@ func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndex
 			metrics.FailLabel).Inc()
 
 		return &milvuspb.GetIndexStateResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -2321,10 +2160,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		}
 
 		return &milvuspb.MutationResult{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status:   merr.Status(err),
 			ErrIndex: errIndex,
 		}
 	}
@@ -2438,10 +2274,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 			metrics.AbandonLabel).Inc()
 
 		return &milvuspb.MutationResult{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -2452,10 +2285,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 			metrics.FailLabel).Inc()
 		return &milvuspb.MutationResult{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -2509,9 +2339,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		Condition: NewTaskCondition(ctx),
 		req:       request,
 		result: &milvuspb.MutationResult{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
+			Status: merr.Status(nil),
 			IDs: &schemapb.IDs{
 				IdField: nil,
 			},
@@ -2549,10 +2377,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 			metrics.AbandonLabel).Inc()
 		return &milvuspb.MutationResult{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -2673,10 +2498,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 			metrics.AbandonLabel).Inc()
 
 		return &milvuspb.SearchResults{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 	tr.CtxRecord(ctx, "search request enqueue")
@@ -2694,10 +2516,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 			metrics.FailLabel).Inc()
 
 		return &milvuspb.SearchResults{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -2875,10 +2694,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 			metrics.AbandonLabel).Inc()
 
 		return &milvuspb.QueryResults{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 	tr.CtxRecord(ctx, "query request enqueue")
@@ -2894,10 +2710,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 			metrics.FailLabel).Inc()
 
 		return &milvuspb.QueryResults{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 	span := tr.CtxRecord(ctx, "wait query result")
@@ -2954,10 +2767,7 @@ func (node *Proxy) CreateAlias(ctx context.Context, request *milvuspb.CreateAlia
 
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel).Inc()
 
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	log.Debug(
@@ -2973,10 +2783,7 @@ func (node *Proxy) CreateAlias(ctx context.Context, request *milvuspb.CreateAlia
 			zap.Uint64("EndTs", cat.EndTs()))
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
 
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	log.Debug(
@@ -3040,10 +2847,7 @@ func (node *Proxy) DropAlias(ctx context.Context, request *milvuspb.DropAliasReq
 			zap.Error(err))
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel).Inc()
 
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	log.Debug(
@@ -3060,10 +2864,7 @@ func (node *Proxy) DropAlias(ctx context.Context, request *milvuspb.DropAliasReq
 
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
 
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	log.Debug(
@@ -3110,10 +2911,7 @@ func (node *Proxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasR
 			zap.Error(err))
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel).Inc()
 
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	log.Debug(
@@ -3130,10 +2928,7 @@ func (node *Proxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasR
 
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
 
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	log.Debug(
@@ -3537,10 +3332,7 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 			zap.Error(err))
 
 		return &milvuspb.GetMetricsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status:   merr.Status(err),
 			Response: "",
 		}, nil
 	}
@@ -3608,10 +3400,7 @@ func (node *Proxy) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetrics
 			zap.Error(err))
 
 		return &milvuspb.GetMetricsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -3859,10 +3648,7 @@ func (node *Proxy) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushA
 
 	resp, err = node.dataCoord.GetFlushAllState(ctx, req)
 	if err != nil {
-		resp.Status = &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}
+		resp.Status = merr.Status(err)
 		log.Warn("GetFlushAllState failed", zap.String("err", err.Error()))
 		return resp, nil
 	}
@@ -3901,10 +3687,7 @@ func (node *Proxy) Import(ctx context.Context, req *milvuspb.ImportRequest) (*mi
 		zap.String("partition name", req.GetPartitionName()),
 		zap.Strings("files", req.GetFiles()))
 	resp := &milvuspb.ImportResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
+		Status: merr.Status(nil),
 	}
 	if !node.checkHealthy() {
 		resp.Status = unhealthyStatus()
@@ -4033,10 +3816,7 @@ func (node *Proxy) InvalidateCredentialCache(ctx context.Context, request *proxy
 	}
 	log.Debug("complete to invalidate credential cache")
 
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-		Reason:    "",
-	}, nil
+	return merr.Status(nil), nil
 }
 
 // UpdateCredentialCache update the credential cache of specified username.
@@ -4062,10 +3842,7 @@ func (node *Proxy) UpdateCredentialCache(ctx context.Context, request *proxypb.U
 	}
 	log.Debug("complete to update credential cache")
 
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-		Reason:    "",
-	}, nil
+	return merr.Status(nil), nil
 }
 
 func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
@@ -4124,10 +3901,7 @@ func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCre
 	if err != nil { // for error like conntext timeout etc.
 		log.Error("create credential fail",
 			zap.Error(err))
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 	return result, err
 }
@@ -4206,10 +3980,7 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 	if err != nil { // for error like conntext timeout etc.
 		log.Error("update credential fail",
 			zap.Error(err))
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 	return result, err
 }
@@ -4237,10 +4008,7 @@ func (node *Proxy) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCre
 	if err != nil { // for error like conntext timeout etc.
 		log.Error("delete credential fail",
 			zap.Error(err))
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 	return result, err
 }
@@ -4264,16 +4032,11 @@ func (node *Proxy) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUser
 	resp, err := node.rootCoord.ListCredUsers(ctx, rootCoordReq)
 	if err != nil {
 		return &milvuspb.ListCredUsersResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 	return &milvuspb.ListCredUsersResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status:    merr.Status(nil),
 		Usernames: resp.Usernames,
 	}, nil
 }
@@ -4303,10 +4066,7 @@ func (node *Proxy) CreateRole(ctx context.Context, req *milvuspb.CreateRoleReque
 	result, err := node.rootCoord.CreateRole(ctx, req)
 	if err != nil {
 		log.Warn("fail to create role", zap.Error(err))
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 	return result, nil
 }
@@ -4340,10 +4100,7 @@ func (node *Proxy) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) 
 		log.Warn("fail to drop role",
 			zap.String("role_name", req.RoleName),
 			zap.Error(err))
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 	return result, nil
 }
@@ -4374,10 +4131,7 @@ func (node *Proxy) OperateUserRole(ctx context.Context, req *milvuspb.OperateUse
 	result, err := node.rootCoord.OperateUserRole(ctx, req)
 	if err != nil {
 		log.Warn("fail to operate user role", zap.Error(err))
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 	return result, nil
 }
@@ -4396,10 +4150,7 @@ func (node *Proxy) SelectRole(ctx context.Context, req *milvuspb.SelectRoleReque
 	if req.Role != nil {
 		if err := ValidateRoleName(req.Role.Name); err != nil {
 			return &milvuspb.SelectRoleResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_IllegalArgument,
-					Reason:    err.Error(),
-				},
+				Status: merr.Status(err),
 			}, nil
 		}
 	}
@@ -4408,10 +4159,7 @@ func (node *Proxy) SelectRole(ctx context.Context, req *milvuspb.SelectRoleReque
 	if err != nil {
 		log.Warn("fail to select role", zap.Error(err))
 		return &milvuspb.SelectRoleResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 	return result, nil
@@ -4432,10 +4180,7 @@ func (node *Proxy) SelectUser(ctx context.Context, req *milvuspb.SelectUserReque
 		if err := ValidateUsername(req.User.Name); err != nil {
 			log.Warn("invalid username", zap.Error(err))
 			return &milvuspb.SelectUserResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_IllegalArgument,
-					Reason:    err.Error(),
-				},
+				Status: merr.Status(err),
 			}, nil
 		}
 	}
@@ -4444,10 +4189,7 @@ func (node *Proxy) SelectUser(ctx context.Context, req *milvuspb.SelectUserReque
 	if err != nil {
 		log.Warn("fail to select user", zap.Error(err))
 		return &milvuspb.SelectUserResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 	return result, nil
@@ -4514,10 +4256,7 @@ func (node *Proxy) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePr
 	result, err := node.rootCoord.OperatePrivilege(ctx, req)
 	if err != nil {
 		log.Warn("fail to operate privilege", zap.Error(err))
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 	return result, nil
 }
@@ -4573,10 +4312,7 @@ func (node *Proxy) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantReq
 	if err != nil {
 		log.Warn("fail to select grant", zap.Error(err))
 		return &milvuspb.SelectGrantResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 	return result, nil
@@ -4610,9 +4346,7 @@ func (node *Proxy) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.Refr
 	}
 	log.Debug("RefreshPrivilegeInfoCache success")
 
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
+	return merr.Status(nil), nil
 }
 
 // SetRates limits the rates of requests.
@@ -4689,9 +4423,7 @@ func (node *Proxy) CheckHealth(ctx context.Context, request *milvuspb.CheckHealt
 	err := group.Wait()
 	if err != nil || len(errReasons) != 0 {
 		return &milvuspb.CheckHealthResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
+			Status:    merr.Status(nil),
 			IsHealthy: false,
 			Reasons:   errReasons,
 		}, nil
@@ -4699,10 +4431,7 @@ func (node *Proxy) CheckHealth(ctx context.Context, request *milvuspb.CheckHealt
 
 	states, reasons := node.multiRateLimiter.GetQuotaStates()
 	return &milvuspb.CheckHealthResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
+		Status:      merr.Status(nil),
 		QuotaStates: states,
 		Reasons:     reasons,
 		IsHealthy:   true,
@@ -5038,10 +4767,7 @@ func (node *Proxy) ListResourceGroups(ctx context.Context, request *milvuspb.Lis
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 			metrics.AbandonLabel).Inc()
 		return &milvuspb.ListResourceGroupsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -5057,10 +4783,7 @@ func (node *Proxy) ListResourceGroups(ctx context.Context, request *milvuspb.Lis
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 			metrics.FailLabel).Inc()
 		return &milvuspb.ListResourceGroupsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -5086,10 +4809,7 @@ func (node *Proxy) DescribeResourceGroup(ctx context.Context, request *milvuspb.
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
 
 		return &milvuspb.DescribeResourceGroupResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}
 	}
 
@@ -5178,10 +4898,7 @@ func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest
 	if err != nil {
 		log.Info("connect failed, failed to list databases", zap.Error(err))
 		return &milvuspb.ConnectResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -5208,10 +4925,7 @@ func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest
 	if err != nil {
 		log.Info("connect failed, failed to allocate timestamp", zap.Error(err))
 		return &milvuspb.ConnectResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -5227,7 +4941,7 @@ func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest
 	GetConnectionManager().register(ctx, int64(ts), request.GetClientInfo())
 
 	return &milvuspb.ConnectResponse{
-		Status:     &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		Status:     merr.Status(nil),
 		ServerInfo: serverInfo,
 		Identifier: int64(ts),
 	}, nil
@@ -5241,7 +4955,7 @@ func (node *Proxy) ListClientInfos(ctx context.Context, req *proxypb.ListClientI
 	clients := GetConnectionManager().list()
 
 	return &proxypb.ListClientInfosResponse{
-		Status:      &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		Status:      merr.Status(nil),
 		ClientInfos: clients,
 	}, nil
 }
@@ -5256,17 +4970,14 @@ func (node *Proxy) AllocTimestamp(ctx context.Context, req *milvuspb.AllocTimest
 	if err != nil {
 		log.Info("AllocTimestamp failed", zap.Error(err))
 		return &milvuspb.AllocTimestampResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 
 	log.Info("AllocTimestamp request success", zap.Uint64("timestamp", ts))
 
 	return &milvuspb.AllocTimestampResponse{
-		Status:    &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		Status:    merr.Status(nil),
 		Timestamp: ts,
 	}, nil
 }

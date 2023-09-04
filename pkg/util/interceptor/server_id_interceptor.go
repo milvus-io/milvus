@@ -49,7 +49,7 @@ func ServerIDValidationUnaryServerInterceptor(fn GetServerIDFunc) grpc.UnaryServ
 		}
 		actualServerID := fn()
 		if serverID != actualServerID {
-			return nil, merr.WrapErrServerIDMismatch(serverID, actualServerID)
+			return nil, merr.WrapErrNodeNotMatch(serverID, actualServerID)
 		}
 		return handler(ctx, req)
 	}
@@ -73,7 +73,7 @@ func ServerIDValidationStreamServerInterceptor(fn GetServerIDFunc) grpc.StreamSe
 		}
 		actualServerID := fn()
 		if serverID != actualServerID {
-			return merr.WrapErrServerIDMismatch(serverID, actualServerID)
+			return merr.WrapErrNodeNotMatch(serverID, actualServerID)
 		}
 		return handler(srv, ss)
 	}

@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
@@ -510,30 +511,22 @@ func (s *Server) GetComponentStates(ctx context.Context) (*milvuspb.ComponentSta
 	}
 
 	return &milvuspb.ComponentStates{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		State: serviceComponentInfo,
+		Status: merr.Status(nil),
+		State:  serviceComponentInfo,
 		//SubcomponentStates: subComponentInfos,
 	}, nil
 }
 
 func (s *Server) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
+		Status: merr.Status(nil),
 	}, nil
 }
 
 func (s *Server) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
-		Value: Params.CommonCfg.QueryCoordTimeTick.GetValue(),
+		Status: merr.Status(nil),
+		Value:  Params.CommonCfg.QueryCoordTimeTick.GetValue(),
 	}, nil
 }
 

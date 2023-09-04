@@ -377,7 +377,7 @@ func (suite *ServiceSuite) TestWatchDmChannels_Failed() {
 	suite.node.unsubscribingChannels.Insert(suite.vchannel)
 	status, err := suite.node.WatchDmChannels(ctx, req)
 	suite.NoError(err)
-	suite.Equal(status.GetReason(), merr.WrapErrChannelUnsubscribing(suite.vchannel).Error())
+	suite.ErrorIs(merr.Error(status), merr.ErrChannelReduplicate)
 	suite.node.unsubscribingChannels.Remove(suite.vchannel)
 
 	// init msgstream failed

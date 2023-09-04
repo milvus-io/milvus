@@ -24,7 +24,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -415,7 +414,7 @@ func (t *queryTask) Execute(ctx context.Context) error {
 	})
 	if err != nil {
 		log.Warn("fail to execute query", zap.Error(err))
-		return merr.WrapErrShardDelegatorQueryFailed(err.Error())
+		return errors.Wrap(err, "failed to query")
 	}
 
 	log.Debug("Query Execute done.")

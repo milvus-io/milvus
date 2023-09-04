@@ -417,9 +417,7 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 	}()
 
 	importResult := &rootcoordpb.ImportResult{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status:     merr.Status(nil),
 		TaskId:     req.GetImportTask().TaskId,
 		DatanodeId: paramtable.GetNodeID(),
 		State:      commonpb.ImportState_ImportStarted,
@@ -519,9 +517,7 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 		return returnFailFunc("failed to import files", err)
 	}
 
-	resp := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}
+	resp := merr.Status(nil)
 	return resp, nil
 }
 
@@ -654,9 +650,7 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 	}
 	ds.flushingSegCache.Remove(req.GetSegmentId())
 	return &datapb.AddImportSegmentResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status:     merr.Status(nil),
 		ChannelPos: posID,
 	}, nil
 }
@@ -705,9 +699,7 @@ func assignSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest) importutil
 		// ignore the returned error, since even report failed the segments still can be cleaned
 		// retry 10 times, if the rootcoord is down, the report function will cost 20+ seconds
 		importResult := &rootcoordpb.ImportResult{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
+			Status:     merr.Status(nil),
 			TaskId:     req.GetImportTask().TaskId,
 			DatanodeId: paramtable.GetNodeID(),
 			State:      commonpb.ImportState_ImportStarted,

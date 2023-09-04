@@ -503,9 +503,7 @@ func (dct *describeCollectionTask) PreExecute(ctx context.Context) error {
 func (dct *describeCollectionTask) Execute(ctx context.Context) error {
 	var err error
 	dct.result = &milvuspb.DescribeCollectionResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status: merr.Status(nil),
 		Schema: &schemapb.CollectionSchema{
 			Name:        "",
 			Description: "",
@@ -526,6 +524,13 @@ func (dct *describeCollectionTask) Execute(ctx context.Context) error {
 
 	if result.Status.ErrorCode != commonpb.ErrorCode_Success {
 		dct.result.Status = result.Status
+
+		// compatibility with PyMilvus existing implementation
+		err := merr.Error(dct.result.GetStatus())
+		if errors.Is(err, merr.ErrCollectionNotFound) {
+			dct.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			dct.result.Status.Reason = "can't find collection " + dct.result.Status.Reason
+		}
 	} else {
 		dct.result.Schema.Name = result.Schema.Name
 		dct.result.Schema.Description = result.Schema.Description
@@ -1306,10 +1311,7 @@ func (ft *flushTask) Execute(ctx context.Context) error {
 		coll2SealTimes[collName] = resp.GetTimeOfSeal()
 	}
 	ft.result = &milvuspb.FlushResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
+		Status:          merr.Status(nil),
 		DbName:          ft.GetDbName(),
 		CollSegIDs:      coll2Segments,
 		FlushCollSegIDs: flushColl2Segments,
@@ -2218,7 +2220,7 @@ func (t *DescribeResourceGroupTask) Execute(ctx context.Context) error {
 					zap.Error(err))
 
 				// if collection has been dropped, skip it
-				if common.IsCollectionNotExistError(err) {
+				if errors.Is(err, merr.ErrCollectionNotFound) {
 					continue
 				}
 				return nil, err

@@ -77,7 +77,7 @@ func (s *ErrSuite) TestWrap() {
 	s.ErrorIs(WrapErrServiceInternal("never throw out"), ErrServiceInternal)
 	s.ErrorIs(WrapErrCrossClusterRouting("ins-0", "ins-1"), ErrCrossClusterRouting)
 	s.ErrorIs(WrapErrServiceDiskLimitExceeded(110, 100, "DLE"), ErrServiceDiskLimitExceeded)
-	s.ErrorIs(WrapErrServerIDMismatch(0, 1, "SIM"), ErrServerIDMismatch)
+	s.ErrorIs(WrapErrNodeNotMatch(0, 1, "SIM"), ErrNodeNotMatch)
 
 	// Collection related
 	s.ErrorIs(WrapErrCollectionNotFound("test_collection", "failed to get collection"), ErrCollectionNotFound)
@@ -100,7 +100,6 @@ func (s *ErrSuite) TestWrap() {
 	s.ErrorIs(WrapErrChannelNotFound("test_Channel", "failed to get Channel"), ErrChannelNotFound)
 	s.ErrorIs(WrapErrChannelLack("test_Channel", "failed to get Channel"), ErrChannelLack)
 	s.ErrorIs(WrapErrChannelReduplicate("test_Channel", "failed to get Channel"), ErrChannelReduplicate)
-	s.ErrorIs(WrapErrChannelUnsubscribing("test_channel"), ErrChannelUnsubscribing)
 
 	// Segment related
 	s.ErrorIs(WrapErrSegmentNotFound(1, "failed to get Segment"), ErrSegmentNotFound)
@@ -130,11 +129,6 @@ func (s *ErrSuite) TestWrap() {
 	// Topic related
 	s.ErrorIs(WrapErrTopicNotFound("unknown", "failed to get topic"), ErrTopicNotFound)
 	s.ErrorIs(WrapErrTopicNotEmpty("unknown", "topic is not empty"), ErrTopicNotEmpty)
-
-	// shard delegator related
-	s.ErrorIs(WrapErrShardDelegatorNotFound("unknown", "fail to get shard delegator"), ErrShardDelegatorNotFound)
-	s.ErrorIs(WrapErrShardDelegatorSQFailed("fake"), ErrShardDelegatorSQFailed)
-	s.ErrorIs(WrapErrShardDelegatorSQTimeout("fake"), ErrShardDelegatorSQTimeout)
 
 	// field related
 	s.ErrorIs(WrapErrFieldNotFound("meta", "failed to get field"), ErrFieldNotFound)

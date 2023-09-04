@@ -138,9 +138,7 @@ func TestCoordinatorBroker_GetPartitions(t *testing.T) {
 	t.Run("collection not exist", func(t *testing.T) {
 		rc := mocks.NewRootCoord(t)
 		rc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_CollectionNotExists,
-			},
+			Status: merr.Status(merr.WrapErrCollectionNotFound("mock")),
 		}, nil)
 
 		ctx := context.Background()

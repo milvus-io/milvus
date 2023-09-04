@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"go.uber.org/zap"
 )
@@ -189,7 +190,7 @@ func (kc *Catalog) loadCollectionFromDb(ctx context.Context, dbID int64, collect
 	collKey := BuildCollectionKey(dbID, collectionID)
 	collVal, err := kc.Snapshot.Load(collKey, ts)
 	if err != nil {
-		return nil, common.NewCollectionNotExistError(fmt.Sprintf("collection not found: %d, error: %s", collectionID, err.Error()))
+		return nil, merr.WrapErrCollectionNotFound(collectionID, err.Error())
 	}
 
 	collMeta := &pb.CollectionInfo{}
@@ -592,7 +593,7 @@ func (kc *Catalog) GetCollectionByName(ctx context.Context, dbID int64, collecti
 		}
 	}
 
-	return nil, common.NewCollectionNotExistError(fmt.Sprintf("can't find collection %d:%s, at timestamp = %d", dbID, collectionName, ts))
+	return nil, merr.WrapErrCollectionNotFoundWithDB(dbID, collectionName, fmt.Sprintf("timestample = %d", ts))
 }
 
 func (kc *Catalog) ListCollections(ctx context.Context, dbID int64, ts typeutil.Timestamp) ([]*model.Collection, error) {

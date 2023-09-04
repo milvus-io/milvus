@@ -440,7 +440,7 @@ func segmentStatsResponse(segStats []segments.SegmentStats) *internalpb.GetStati
 	resultMap["row_count"] = strconv.FormatInt(totalRowNum, 10)
 
 	ret := &internalpb.GetStatisticsResponse{
-		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		Status: merr.Status(nil),
 		Stats:  funcutil.Map2KeyValuePair(resultMap),
 	}
 	return ret
@@ -479,7 +479,7 @@ func reduceStatisticResponse(results []*internalpb.GetStatisticsResponse) (*inte
 	}
 
 	ret := &internalpb.GetStatisticsResponse{
-		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		Status: merr.Status(nil),
 		Stats:  funcutil.Map2KeyValuePair(stringMap),
 	}
 	return ret, nil

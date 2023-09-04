@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -40,9 +41,7 @@ func (r *defaultLimitReducer) afterReduce(result *milvuspb.QueryResults) error {
 	result.CollectionName = collectionName
 
 	if len(result.FieldsData) > 0 {
-		result.Status = &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		}
+		result.Status = merr.Status(nil)
 	} else {
 		result.Status = &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_EmptyCollection,

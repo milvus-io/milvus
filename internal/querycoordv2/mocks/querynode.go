@@ -28,12 +28,12 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -82,9 +82,7 @@ func (node *MockQueryNode) Start() error {
 		err = node.server.Serve(lis)
 	}()
 
-	successStatus := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}
+	successStatus := merr.Status(nil)
 	node.EXPECT().GetDataDistribution(mock.Anything, mock.Anything).Return(&querypb.GetDataDistributionResponse{
 		Status:   successStatus,
 		NodeID:   node.ID,

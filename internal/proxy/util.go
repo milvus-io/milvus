@@ -742,26 +742,27 @@ func validateName(entity string, nameType string) error {
 	entity = strings.TrimSpace(entity)
 
 	if entity == "" {
-		return fmt.Errorf("%s should not be empty", nameType)
+		return merr.WrapErrParameterInvalid("not empty", entity, nameType+" should be not empty")
 	}
 
-	invalidMsg := fmt.Sprintf("invalid %s: %s. ", nameType, entity)
 	if len(entity) > Params.ProxyCfg.MaxNameLength.GetAsInt() {
-		msg := invalidMsg + fmt.Sprintf("the length of %s must be less than ", nameType) + Params.ProxyCfg.MaxNameLength.GetValue() + " characters."
-		return errors.New(msg)
+		return merr.WrapErrParameterInvalidRange(0,
+			Params.ProxyCfg.MaxNameLength.GetAsInt(),
+			len(entity),
+			fmt.Sprintf("the length of %s must be not greater than limit", nameType))
 	}
 
 	firstChar := entity[0]
 	if firstChar != '_' && !isAlpha(firstChar) {
-		msg := invalidMsg + fmt.Sprintf("the first character of %s must be an underscore or letter.", nameType)
-		return errors.New(msg)
+		return merr.WrapErrParameterInvalid('_',
+			firstChar,
+			fmt.Sprintf("the first character of %s must be an underscore or letter", nameType))
 	}
 
 	for i := 1; i < len(entity); i++ {
 		c := entity[i]
 		if c != '_' && c != '$' && !isAlpha(c) && !isNumber(c) {
-			msg := invalidMsg + fmt.Sprintf("%s can only contain numbers, letters, dollars and underscores.", nameType)
-			return errors.New(msg)
+			return merr.WrapErrParameterInvalidMsg("%s can only contain numbers, letters, dollars and underscores, found %c at %d", nameType, c, i)
 		}
 	}
 	return nil
@@ -1035,7 +1036,7 @@ func fillFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstr
 	for _, data := range insertMsg.FieldsData {
 		fieldName := data.GetFieldName()
 		if dataNameSet.Contain(fieldName) {
-			return merr.WrapErrParameterDuplicateFieldData(fieldName, "The FieldDatas parameter being passed contains duplicate data for a field.")
+			return merr.WrapErrParameterInvalidMsg("The FieldDatas parameter being passed contains duplicate data for field %s", fieldName)
 		}
 		dataNameSet.Insert(fieldName)
 	}

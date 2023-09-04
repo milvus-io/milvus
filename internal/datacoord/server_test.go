@@ -2455,7 +2455,7 @@ func TestShouldDropChannel(t *testing.T) {
 		//myRoot.code = commonpb.ErrorCode_CollectionNotExists
 		myRoot.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
 			Return(&milvuspb.DescribeCollectionResponse{
-				Status:       &commonpb.Status{ErrorCode: commonpb.ErrorCode_CollectionNotExists},
+				Status:       merr.Status(merr.WrapErrCollectionNotFound(-1)),
 				CollectionID: -1,
 			}, nil).Once()
 		assert.True(t, svr.handler.CheckShouldDropChannel("ch99", -1))
@@ -2482,7 +2482,7 @@ func TestShouldDropChannel(t *testing.T) {
 	t.Run("collection name in kv, collection not exist", func(t *testing.T) {
 		myRoot.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
 			Return(&milvuspb.DescribeCollectionResponse{
-				Status:       &commonpb.Status{ErrorCode: commonpb.ErrorCode_CollectionNotExists},
+				Status:       merr.Status(merr.WrapErrCollectionNotFound(-1)),
 				CollectionID: -1,
 			}, nil).Once()
 		assert.True(t, svr.handler.CheckShouldDropChannel("ch1", -1))

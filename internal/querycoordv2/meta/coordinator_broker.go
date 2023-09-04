@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -79,14 +78,9 @@ func (broker *CoordinatorBroker) GetCollectionSchema(ctx context.Context, collec
 		return nil, err
 	}
 
-	statusErr := common.NewStatusError(resp.Status.ErrorCode, resp.Status.Reason)
-	if common.IsCollectionNotExistError(statusErr) {
-		return nil, merr.WrapErrCollectionNotFound(collectionID)
-	}
-
-	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		err = errors.New(resp.GetStatus().GetReason())
-		log.Warn("failed to get collection schema", zap.Int64("collectionID", collectionID), zap.Error(err))
+	err = merr.Error(resp.GetStatus())
+	if err != nil {
+		log.Warn("failed to get collection schema", zap.Error(err))
 		return nil, err
 	}
 	return resp.GetSchema(), nil
@@ -108,14 +102,9 @@ func (broker *CoordinatorBroker) GetPartitions(ctx context.Context, collectionID
 		return nil, err
 	}
 
-	statusErr := common.NewStatusError(resp.Status.ErrorCode, resp.Status.Reason)
-	if common.IsCollectionNotExistError(statusErr) {
-		return nil, merr.WrapErrCollectionNotFound(collectionID)
-	}
-
-	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		err = errors.New(resp.GetStatus().GetReason())
-		log.Warn("showPartition failed", zap.Int64("collectionID", collectionID), zap.Error(err))
+	err = merr.Error(resp.GetStatus())
+	if err != nil {
+		log.Warn("failed to get partitions", zap.Error(err))
 		return nil, err
 	}
 

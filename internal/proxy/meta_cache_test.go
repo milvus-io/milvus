@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -155,12 +156,9 @@ func (m *MockRootCoordClientInterface) DescribeCollection(ctx context.Context, i
 		}, nil
 	}
 
-	err := fmt.Errorf("can't find collection: " + in.CollectionName)
+	err := merr.WrapErrCollectionNotFound(in.CollectionName)
 	return &milvuspb.DescribeCollectionResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_CollectionNotExists,
-			Reason:    "describe collection failed: " + err.Error(),
-		},
+		Status: merr.Status(err),
 		Schema: nil,
 	}, nil
 }

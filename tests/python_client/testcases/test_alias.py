@@ -43,7 +43,7 @@ class TestAliasParamsInvalid(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name, schema=default_schema,
                                                  check_task=CheckTasks.check_collection_property,
                                                  check_items={exp_name: c_name, exp_schema: default_schema})
-        error = {ct.err_code: 1, ct.err_msg: f"Invalid collection alias: {alias_name}"}
+        error = {ct.err_code: 1, ct.err_msg: "Invalid collection alias"}
         self.utility_wrap.create_alias(collection_w.name, alias_name,
                                        check_task=CheckTasks.err_res,
                                        check_items=error)
@@ -79,7 +79,8 @@ class TestAliasOperation(TestcaseBase):
                                                                    check_items={exp_name: alias_name,
                                                                                 exp_schema: default_schema})
         # assert collection is equal to alias according to partitions
-        assert [p.name for p in collection_w.partitions] == [p.name for p in collection_alias.partitions]
+        assert [p.name for p in collection_w.partitions] == [
+            p.name for p in collection_alias.partitions]
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_alias_alter_operation_default(self):
@@ -105,8 +106,8 @@ class TestAliasOperation(TestcaseBase):
             partition_name = cf.gen_unique_str("partition")
             # create partition with different names and check the partition exists
             self.init_partition_wrap(collection_1, partition_name)
-            assert collection_1.has_partition(partition_name)[0]        
-        
+            assert collection_1.has_partition(partition_name)[0]
+
         alias_a_name = cf.gen_unique_str(prefix)
         self.utility_wrap.create_alias(collection_1.name, alias_a_name)
         collection_alias_a, _ = self.collection_wrap.init_collection(name=alias_a_name,
@@ -114,8 +115,9 @@ class TestAliasOperation(TestcaseBase):
                                                                      check_items={exp_name: alias_a_name,
                                                                                   exp_schema: default_schema})
         # assert collection is equal to alias according to partitions
-        assert [p.name for p in collection_1.partitions] == [p.name for p in collection_alias_a.partitions]        
-        
+        assert [p.name for p in collection_1.partitions] == [
+            p.name for p in collection_alias_a.partitions]
+
         # create collection_2 with 5 partitions and its alias alias_b
         c_2_name = cf.gen_unique_str("collection")
         collection_2 = self.init_collection_wrap(name=c_2_name, schema=default_schema,
@@ -135,15 +137,19 @@ class TestAliasOperation(TestcaseBase):
                                                                      check_items={exp_name: alias_b_name,
                                                                                   exp_schema: default_schema})
         # assert collection is equal to alias according to partitions
-        assert [p.name for p in collection_2.partitions] == [p.name for p in collection_alias_b.partitions]
-        
+        assert [p.name for p in collection_2.partitions] == [
+            p.name for p in collection_alias_b.partitions]
+
         # collection_1 alter alias to alias_b
         self.utility_wrap.alter_alias(collection_1.name, alias_b_name)
 
         # collection_1 has two alias name, alias_a and alias_b, but collection_2 has no alias any more
-        assert [p.name for p in collection_1.partitions] == [p.name for p in collection_alias_b.partitions]
-        assert [p.name for p in collection_1.partitions] == [p.name for p in collection_alias_a.partitions]
-        assert [p.name for p in collection_2.partitions] != [p.name for p in collection_alias_b.partitions]
+        assert [p.name for p in collection_1.partitions] == [
+            p.name for p in collection_alias_b.partitions]
+        assert [p.name for p in collection_1.partitions] == [
+            p.name for p in collection_alias_a.partitions]
+        assert [p.name for p in collection_2.partitions] != [
+            p.name for p in collection_alias_b.partitions]
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_alias_drop_operation_default(self):
@@ -176,7 +182,8 @@ class TestAliasOperation(TestcaseBase):
                                                                    check_items={exp_name: alias_name,
                                                                                 exp_schema: default_schema})
         # assert collection is equal to alias according to partitions
-        assert [p.name for p in collection_w.partitions] == [p.name for p in collection_alias.partitions]
+        assert [p.name for p in collection_w.partitions] == [
+            p.name for p in collection_alias.partitions]
         self.utility_wrap.drop_alias(alias_name)
         error = {ct.err_code: 0,
                  ct.err_msg: f"Collection '{alias_name}' not exist, or you can pass in schema to create one"}
@@ -216,7 +223,7 @@ class TestAliasOperation(TestcaseBase):
                                                                    check_task=CheckTasks.check_collection_property,
                                                                    check_items={exp_name: alias_name,
                                                                                 exp_schema: default_schema})
-        
+
         # create partition by alias
         partition_name = cf.gen_unique_str("partition")
         try:
@@ -225,11 +232,11 @@ class TestAliasOperation(TestcaseBase):
             log.info(f"alias create partition failed with exception {e}")
             create_partition_flag = False
             collection_w.create_partition(partition_name)
-        
+
         # assert partition
         pytest.assume(create_partition_flag is True and
                       [p.name for p in collection_alias.partitions] == [p.name for p in collection_w.partitions])
-        
+
         # insert data by alias
         df = cf.gen_default_dataframe_data(ct.default_nb)
         try:
@@ -238,26 +245,29 @@ class TestAliasOperation(TestcaseBase):
             log.info(f"alias insert data failed with exception {e}")
             insert_data_flag = False
             collection_w.insert(data=df)
-        
+
         # assert insert data
         pytest.assume(insert_data_flag is True and
                       collection_w.num_entities == ct.default_nb and
                       collection_alias.num_entities == ct.default_nb)
 
         # create index by alias
-        default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
+        default_index = {"index_type": "IVF_FLAT",
+                         "params": {"nlist": 128}, "metric_type": "L2"}
         try:
-            collection_alias.create_index(field_name="float_vector", index_params=default_index)
+            collection_alias.create_index(
+                field_name="float_vector", index_params=default_index)
         except Exception as e:
             log.info(f"alias create index failed with exception {e}")
             create_index_flag = False
-            collection_w.create_index(field_name="float_vector", index_params=default_index)
-        
+            collection_w.create_index(
+                field_name="float_vector", index_params=default_index)
+
         # assert create index
         pytest.assume(create_index_flag is True and
                       collection_alias.has_index() is True and
                       collection_w.has_index()[0] is True)
-        
+
         # load by alias
         try:
             collection_alias.load()
@@ -271,8 +281,9 @@ class TestAliasOperation(TestcaseBase):
         # search by alias
         topK = 5
         search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
-             
-        query = [[random.random() for _ in range(ct.default_dim)] for _ in range(1)]
+
+        query = [[random.random() for _ in range(ct.default_dim)]
+                 for _ in range(1)]
         alias_res = None
         try:
             alias_res = collection_alias.search(
@@ -282,13 +293,14 @@ class TestAliasOperation(TestcaseBase):
         except Exception as e:
             log.info(f"alias search failed with exception {e}")
             search_flag = False
-          
+
         collection_res, _ = collection_w.search(
             query, "float_vector", search_params, topK,
             "int64 >= 0", output_fields=["int64"]
         )
         # assert search
-        pytest.assume(search_flag is True and alias_res[0].ids == collection_res[0].ids)
+        pytest.assume(
+            search_flag is True and alias_res[0].ids == collection_res[0].ids)
 
         # release by alias
         try:
@@ -314,7 +326,7 @@ class TestAliasOperation(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name, schema=default_schema,
                                                  check_task=CheckTasks.check_collection_property,
                                                  check_items={exp_name: c_name, exp_schema: default_schema})
-        
+
         alias_name = cf.gen_unique_str(prefix)
         self.utility_wrap.create_alias(collection_w.name, alias_name)
         # collection_w.create_alias(alias_name)
@@ -340,7 +352,7 @@ class TestAliasOperation(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name, schema=default_schema,
                                                  check_task=CheckTasks.check_collection_property,
                                                  check_items={exp_name: c_name, exp_schema: default_schema})
-        
+
         alias_name = cf.gen_unique_str(prefix)
         self.utility_wrap.create_alias(collection_w.name, alias_name)
         # collection_w.create_alias(alias_name)
@@ -349,7 +361,8 @@ class TestAliasOperation(TestcaseBase):
                                                                    check_items={exp_name: alias_name,
                                                                                 exp_schema: default_schema})
         assert self.utility_wrap.has_collection(c_name)[0]
-        error = {ct.err_code: 1, ct.err_msg: f"cannot drop the collection via alias = {alias_name}"}
+        error = {ct.err_code: 1,
+                 ct.err_msg: f"cannot drop the collection via alias = {alias_name}"}
         self.utility_wrap.drop_collection(alias_name,
                                           check_task=CheckTasks.err_res,
                                           check_items=error)
@@ -372,7 +385,7 @@ class TestAliasOperation(TestcaseBase):
                                                  check_items={exp_name: c_name, exp_schema: default_schema})
         partition_name = cf.gen_unique_str("partition")
         self.init_partition_wrap(collection_w, partition_name)
-        
+
         alias_name = cf.gen_unique_str(prefix)
         self.utility_wrap.create_alias(collection_w.name, alias_name)
         # collection_w.create_alias(alias_name)
@@ -411,7 +424,8 @@ class TestAliasOperationInvalid(TestcaseBase):
         collection_2 = self.init_collection_wrap(name=c_2_name, schema=default_schema,
                                                  check_task=CheckTasks.check_collection_property,
                                                  check_items={exp_name: c_2_name, exp_schema: default_schema})
-        error = {ct.err_code: 1, ct.err_msg: "Create alias failed: duplicate collection alias"}                                         
+        error = {ct.err_code: 1,
+                 ct.err_msg: "Create alias failed: duplicate collection alias"}
         self.utility_wrap.create_alias(collection_2.name, alias_a_name,
                                        check_task=CheckTasks.err_res,
                                        check_items=error)
@@ -439,7 +453,8 @@ class TestAliasOperationInvalid(TestcaseBase):
         # collection_w.create_alias(alias_name)
 
         alias_not_exist_name = cf.gen_unique_str(prefix)
-        error = {ct.err_code: 1, ct.err_msg: "Alter alias failed: alias does not exist"}                                         
+        error = {ct.err_code: 1,
+                 ct.err_msg: "Alter alias failed: alias does not exist"}
         self.utility_wrap.alter_alias(collection_w.name, alias_not_exist_name,
                                       check_task=CheckTasks.err_res,
                                       check_items=error)
@@ -466,7 +481,8 @@ class TestAliasOperationInvalid(TestcaseBase):
         # collection_w.create_alias(alias_name)
 
         alias_not_exist_name = cf.gen_unique_str(prefix)
-        error = {ct.err_code: 1, ct.err_msg: "Drop alias failed: alias does not exist"}                                         
+        error = {ct.err_code: 1,
+                 ct.err_msg: "Drop alias failed: alias does not exist"}
         # self.utility_wrap.drop_alias(alias_not_exist_name,
         #                              check_task=CheckTasks.err_res,
         #                              check_items=error)
@@ -510,7 +526,7 @@ class TestAliasOperationInvalid(TestcaseBase):
         # collection_w.drop_alias(alias_name,
         #                         check_task=CheckTasks.err_res,
         #                         check_items=error)
-    
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_alias_create_dup_name_collection(self):
         """
@@ -556,6 +572,6 @@ class TestAliasOperationInvalid(TestcaseBase):
                                                                    check_task=CheckTasks.check_collection_property,
                                                                    check_items={exp_name: alias_name,
                                                                                 exp_schema: default_schema})
-        
+
         with pytest.raises(Exception):
             collection_alias.drop()

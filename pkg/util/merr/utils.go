@@ -60,6 +60,10 @@ func IsRetriable(err error) bool {
 	return Code(err)&retriableFlag != 0
 }
 
+func IsCanceledOrTimeout(err error) bool {
+	return errors.IsAny(err, context.Canceled, context.DeadlineExceeded)
+}
+
 // Status returns a status according to the given err,
 // returns Success status if err is nil
 func Status(err error) *commonpb.Status {
@@ -196,14 +200,6 @@ func WrapErrServiceDiskLimitExceeded(predict, limit float32, msg ...string) erro
 	return err
 }
 
-func WrapErrServerIDMismatch(expectedID, actualID int64, msg ...string) error {
-	err := errors.Wrapf(ErrServerIDMismatch, "expected=%s, actual=%s", expectedID, actualID)
-	if len(msg) > 0 {
-		err = errors.Wrap(err, strings.Join(msg, "; "))
-	}
-	return err
-}
-
 func WrapErrDatabaseNotFound(database any, msg ...string) error {
 	err := wrapWithField(ErrDatabaseNotfound, "database", database)
 	if len(msg) > 0 {
@@ -231,6 +227,14 @@ func WrapErrInvalidedDatabaseName(database any, msg ...string) error {
 // Collection related
 func WrapErrCollectionNotFound(collection any, msg ...string) error {
 	err := wrapWithField(ErrCollectionNotFound, "collection", collection)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+func WrapErrCollectionNotFoundWithDB(db any, collection any, msg ...string) error {
+	err := errors.Wrapf(ErrCollectionNotFound, "collection %v:%v", db, collection)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "; "))
 	}
@@ -339,14 +343,6 @@ func WrapErrChannelReduplicate(name string, msg ...string) error {
 
 func WrapErrChannelNotAvailable(name string, msg ...string) error {
 	err := wrapWithField(ErrChannelNotAvailable, "channel", name)
-	if len(msg) > 0 {
-		err = errors.Wrap(err, strings.Join(msg, "; "))
-	}
-	return err
-}
-
-func WrapErrChannelUnsubscribing(name string, msg ...string) error {
-	err := wrapWithField(ErrChannelUnsubscribing, "channel", name)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "; "))
 	}
@@ -463,18 +459,15 @@ func WrapErrParameterInvalid[T any](expected, actual T, msg ...string) error {
 }
 
 func WrapErrParameterInvalidRange[T any](lower, upper, actual T, msg ...string) error {
-	err := errors.Wrapf(ErrParameterInvalid, "expected in (%v, %v), actual=%v", lower, upper, actual)
+	err := errors.Wrapf(ErrParameterInvalid, "expected in [%v, %v], actual=%v", lower, upper, actual)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "; "))
 	}
 	return err
 }
 
-func WrapErrParameterDuplicateFieldData(fieldName string, msg ...string) error {
-	err := errors.Wrapf(ErrParameterInvalid, "field name=%v", fieldName)
-	if len(msg) > 0 {
-		err = errors.Wrap(err, strings.Join(msg, "; "))
-	}
+func WrapErrParameterInvalidMsg(fmt string, args ...any) error {
+	err := errors.Wrapf(ErrParameterInvalid, fmt, args...)
 	return err
 }
 
@@ -498,63 +491,6 @@ func WrapErrTopicNotFound(name string, msg ...string) error {
 
 func WrapErrTopicNotEmpty(name string, msg ...string) error {
 	err := errors.Wrapf(ErrTopicNotEmpty, "topic=%s", name)
-	if len(msg) > 0 {
-		err = errors.Wrap(err, strings.Join(msg, "; "))
-	}
-	return err
-}
-
-// shard delegator related
-func WrapErrShardDelegatorNotFound(channel string, msg ...string) error {
-	err := errors.Wrapf(ErrShardDelegatorNotFound, "channel=%s", channel)
-	if len(msg) > 0 {
-		err = errors.Wrap(err, strings.Join(msg, "; "))
-	}
-	return err
-}
-
-func WrapErrShardDelegatorAccessFailed(channel string, msg ...string) error {
-	err := errors.Wrapf(ErrShardDelegatorAccessFailed, "channel=%s", channel)
-	if len(msg) > 0 {
-		err = errors.Wrap(err, strings.Join(msg, "; "))
-	}
-	return err
-}
-
-func WrapErrShardDelegatorSQTimeout(channel string, msg ...string) error {
-	err := errors.Wrapf(ErrShardDelegatorSQTimeout, "channel=%s", channel)
-	if len(msg) > 0 {
-		err = errors.Wrap(err, strings.Join(msg, "; "))
-	}
-	return err
-}
-
-func WrapErrShardDelegatorSQFailed(channel string, msg ...string) error {
-	err := errors.Wrapf(ErrShardDelegatorSQFailed, "channel=%s", channel)
-	if len(msg) > 0 {
-		err = errors.Wrap(err, strings.Join(msg, "; "))
-	}
-	return err
-}
-
-func WrapErrShardDelegatorSearchFailed(msg ...string) error {
-	err := error(ErrShardDelegatorSearchFailed)
-	if len(msg) > 0 {
-		err = errors.Wrap(err, strings.Join(msg, "; "))
-	}
-	return err
-}
-
-func WrapErrShardDelegatorQueryFailed(msg ...string) error {
-	err := error(ErrShardDelegatorQueryFailed)
-	if len(msg) > 0 {
-		err = errors.Wrap(err, strings.Join(msg, "; "))
-	}
-	return err
-}
-
-func WrapErrShardDelegatorStatisticFailed(msg ...string) error {
-	err := error(ErrShardDelegatorStatisticFailed)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "; "))
 	}

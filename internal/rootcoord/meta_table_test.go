@@ -34,8 +34,8 @@ import (
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -463,7 +463,7 @@ func TestMetaTable_getCollectionByIDInternal(t *testing.T) {
 		ctx := context.Background()
 		_, err := meta.getCollectionByIDInternal(ctx, util.DefaultDBName, 100, 101, false)
 		assert.Error(t, err)
-		assert.True(t, common.IsCollectionNotExistError(err))
+		assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
 		coll, err := meta.getCollectionByIDInternal(ctx, util.DefaultDBName, 100, 101, true)
 		assert.NoError(t, err)
 		assert.False(t, coll.Available())
@@ -602,7 +602,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 		ctx := context.Background()
 		_, err := meta.GetCollectionByName(ctx, util.DefaultDBName, "name", 101)
 		assert.Error(t, err)
-		assert.True(t, common.IsCollectionNotExistError(err))
+		assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
 	})
 
 	t.Run("normal case, filter unavailable partitions", func(t *testing.T) {
@@ -642,7 +642,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 		meta := &MetaTable{names: newNameDb(), aliases: newNameDb()}
 		_, err := meta.GetCollectionByName(ctx, "", "not_exist", typeutil.MaxTimestamp)
 		assert.Error(t, err)
-		assert.True(t, common.IsCollectionNotExistError(err))
+		assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
 	})
 }
 
@@ -715,7 +715,7 @@ func TestMetaTable_getLatestCollectionByIDInternal(t *testing.T) {
 		mt := &MetaTable{collID2Meta: nil}
 		_, err := mt.getLatestCollectionByIDInternal(ctx, 100, false)
 		assert.Error(t, err)
-		assert.True(t, common.IsCollectionNotExistError(err))
+		assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
 	})
 
 	t.Run("nil case", func(t *testing.T) {
@@ -725,7 +725,7 @@ func TestMetaTable_getLatestCollectionByIDInternal(t *testing.T) {
 		}}
 		_, err := mt.getLatestCollectionByIDInternal(ctx, 100, false)
 		assert.Error(t, err)
-		assert.True(t, common.IsCollectionNotExistError(err))
+		assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
 	})
 
 	t.Run("unavailable", func(t *testing.T) {
@@ -735,7 +735,7 @@ func TestMetaTable_getLatestCollectionByIDInternal(t *testing.T) {
 		}}
 		_, err := mt.getLatestCollectionByIDInternal(ctx, 100, false)
 		assert.Error(t, err)
-		assert.True(t, common.IsCollectionNotExistError(err))
+		assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
 		coll, err := mt.getLatestCollectionByIDInternal(ctx, 100, true)
 		assert.NoError(t, err)
 		assert.False(t, coll.Available())
@@ -1258,7 +1258,7 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
-		).Return(nil, common.NewCollectionNotExistError("error"))
+		).Return(nil, merr.WrapErrCollectionNotFound("error"))
 
 		meta := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
@@ -1286,7 +1286,7 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
-		).Return(nil, common.NewCollectionNotExistError("error"))
+		).Return(nil, merr.WrapErrCollectionNotFound("error"))
 		meta := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
 				util.DefaultDBName: model.NewDefaultDatabase(),
@@ -1323,7 +1323,7 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
-		).Return(nil, common.NewCollectionNotExistError("error"))
+		).Return(nil, merr.WrapErrCollectionNotFound("error"))
 		meta := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
 				util.DefaultDBName: model.NewDefaultDatabase(),

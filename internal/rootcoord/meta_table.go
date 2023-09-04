@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -493,13 +494,13 @@ func filterUnavailable(coll *model.Collection) *model.Collection {
 func (mt *MetaTable) getLatestCollectionByIDInternal(ctx context.Context, collectionID UniqueID, allowAvailable bool) (*model.Collection, error) {
 	coll, ok := mt.collID2Meta[collectionID]
 	if !ok || coll == nil {
-		return nil, common.NewCollectionNotExistError(fmt.Sprintf("can't find collection: %d", collectionID))
+		return nil, merr.WrapErrCollectionNotFound(collectionID)
 	}
 	if allowAvailable {
 		return coll.Clone(), nil
 	}
 	if !coll.Available() {
-		return nil, common.NewCollectionNotExistError(fmt.Sprintf("can't find collection: %d", collectionID))
+		return nil, merr.WrapErrCollectionNotFound(collectionID)
 	}
 	return filterUnavailable(coll), nil
 }
@@ -527,7 +528,7 @@ func (mt *MetaTable) getCollectionByIDInternal(ctx context.Context, dbName strin
 
 	if coll == nil {
 		// use coll.Name to match error message of regression. TODO: remove this after error code is ready.
-		return nil, common.NewCollectionNotExistError(fmt.Sprintf("can't find collection: %d", collectionID))
+		return nil, merr.WrapErrCollectionNotFound(collectionID)
 	}
 
 	if allowUnavailable {
@@ -536,7 +537,7 @@ func (mt *MetaTable) getCollectionByIDInternal(ctx context.Context, dbName strin
 
 	if !coll.Available() {
 		// use coll.Name to match error message of regression. TODO: remove this after error code is ready.
-		return nil, common.NewCollectionNotExistError(fmt.Sprintf("can't find collection %s:%s", dbName, coll.Name))
+		return nil, merr.WrapErrCollectionNotFound(dbName, coll.Name)
 	}
 
 	return filterUnavailable(coll), nil
@@ -566,7 +567,7 @@ func (mt *MetaTable) getCollectionByNameInternal(ctx context.Context, dbName str
 	}
 
 	if isMaxTs(ts) {
-		return nil, common.NewCollectionNotExistError(fmt.Sprintf("can't find collection %s:%s", dbName, collectionName))
+		return nil, merr.WrapErrCollectionNotFoundWithDB(dbName, collectionName)
 	}
 
 	db, err := mt.getDatabaseByNameInternal(ctx, dbName, typeutil.MaxTimestamp)
@@ -582,7 +583,7 @@ func (mt *MetaTable) getCollectionByNameInternal(ctx context.Context, dbName str
 	}
 
 	if coll == nil || !coll.Available() {
-		return nil, common.NewCollectionNotExistError(fmt.Sprintf("can't find collection %s:%s", dbName, collectionName))
+		return nil, merr.WrapErrCollectionNotFoundWithDB(dbName, collectionName)
 	}
 	return filterUnavailable(coll), nil
 }
@@ -742,7 +743,7 @@ func (mt *MetaTable) RenameCollection(ctx context.Context, dbName string, oldNam
 		log.Warn("check new collection fail")
 		return fmt.Errorf("duplicated new collection name %s:%s with other collection name or alias", newDBName, newName)
 	}
-	if err != nil && !common.IsCollectionNotExistErrorV2(err) {
+	if err != nil && !errors.Is(err, merr.ErrCollectionNotFound) {
 		log.Warn("check new collection name fail")
 		return err
 	}

@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -436,10 +437,8 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 	}
 
 	resp := &milvuspb.ImportResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		Tasks: make([]int64, 0),
+		Status: merr.Status(nil),
+		Tasks:  make([]int64, 0),
 	}
 
 	log.Info("receive import job",
@@ -735,9 +734,7 @@ func (m *importManager) setCollectionPartitionName(dbName string, colID, partID 
 }
 
 func (m *importManager) copyTaskInfo(input *datapb.ImportTaskInfo, output *milvuspb.GetImportStateResponse) {
-	output.Status = &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}
+	output.Status = merr.Status(nil)
 
 	output.Id = input.GetId()
 	output.CollectionId = input.GetCollectionId()

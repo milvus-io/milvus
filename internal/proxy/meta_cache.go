@@ -579,8 +579,9 @@ func (m *MetaCache) describeCollection(ctx context.Context, database, collection
 	if err != nil {
 		return nil, err
 	}
-	if coll.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return nil, common.NewStatusError(coll.GetStatus().GetErrorCode(), coll.GetStatus().GetReason())
+	err = merr.Error(coll.GetStatus())
+	if err != nil {
+		return nil, err
 	}
 	resp := &milvuspb.DescribeCollectionResponse{
 		Status: coll.Status,

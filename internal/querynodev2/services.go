@@ -58,9 +58,7 @@ import (
 // GetComponentStates returns information about whether the node is healthy
 func (node *QueryNode) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
 	stats := &milvuspb.ComponentStates{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status: merr.Status(nil),
 	}
 
 	code := node.lifetime.GetState()
@@ -82,11 +80,8 @@ func (node *QueryNode) GetComponentStates(ctx context.Context) (*milvuspb.Compon
 // TimeTickChannel contains many time tick messages, which will be sent by query nodes
 func (node *QueryNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
-		Value: paramtable.Get().CommonCfg.QueryCoordTimeTick.GetValue(),
+		Status: merr.Status(nil),
+		Value:  paramtable.Get().CommonCfg.QueryCoordTimeTick.GetValue(),
 	}, nil
 }
 
@@ -94,10 +89,7 @@ func (node *QueryNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.String
 // Statistics channel contains statistics infos of query nodes, such as segment infos, memory infos
 func (node *QueryNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
+		Status: merr.Status(nil),
 	}, nil
 }
 
@@ -132,9 +124,7 @@ func (node *QueryNode) GetStatistics(ctx context.Context, req *querypb.GetStatis
 		}, nil
 	}
 	failRet := &internalpb.GetStatisticsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status: merr.Status(nil),
 	}
 
 	var toReduceResults []*internalpb.GetStatisticsResponse
@@ -256,8 +246,8 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 
 	// to avoid concurrent watch/unwatch
 	if node.unsubscribingChannels.Contain(channel.GetChannelName()) {
-		err := merr.WrapErrChannelUnsubscribing(channel.GetChannelName())
-		log.Warn("abort watch unsubscribing channel", zap.Error(err))
+		err := merr.WrapErrChannelReduplicate(channel.GetChannelName(), "the other same channel is unsubscribing")
+		log.Warn("failed to unsubscribe channel", zap.Error(err))
 		return merr.Status(err), nil
 	}
 
@@ -680,10 +670,8 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *querypb.GetSegmen
 	}
 
 	return &querypb.GetSegmentInfoResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		Infos: segmentInfos,
+		Status: merr.Status(nil),
+		Infos:  segmentInfos,
 	}, nil
 }
 
@@ -798,9 +786,7 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 	}
 
 	failRet := &internalpb.SearchResults{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status: merr.Status(nil),
 	}
 	collection := node.manager.Collection.Get(req.GetReq().GetCollectionID())
 	if collection == nil {
@@ -1075,10 +1061,7 @@ func (node *QueryNode) ShowConfigurations(ctx context.Context, req *internalpb.S
 	}
 
 	return &internalpb.ShowConfigurationsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
+		Status:        merr.Status(nil),
 		Configuations: configList,
 	}, nil
 }
@@ -1239,7 +1222,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 	})
 
 	return &querypb.GetDataDistributionResponse{
-		Status:      &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		Status:      merr.Status(nil),
 		NodeID:      paramtable.GetNodeID(),
 		Segments:    segmentVersionInfos,
 		Channels:    channelVersionInfos,
@@ -1346,10 +1329,7 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 		}, true)
 	}
 
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-		Reason:    "",
-	}, nil
+	return merr.Status(nil), nil
 }
 
 // Delete is used to forward delete message between delegator and workers.
@@ -1406,8 +1386,5 @@ func (node *QueryNode) Delete(ctx context.Context, req *querypb.DeleteRequest) (
 		}
 	}
 
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-		Reason:    "",
-	}, nil
+	return merr.Status(nil), nil
 }
