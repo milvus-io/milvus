@@ -23,7 +23,8 @@ from common.common_type import CheckTasks
 from utils.util_log import test_log as log
 from utils.api_request import Error
 
-lock = threading.Lock()
+event_lock = threading.Lock()
+request_lock = threading.Lock()
 
 
 def get_chaos_info():
@@ -52,6 +53,7 @@ class EventRecords(metaclass=Singleton):
         self.created_file = False
 
     def insert(self, event_name, event_status, ts=None):
+        log.info(f"insert event: {event_name}, {event_status}")
         insert_ts = datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S.%f') if ts is None else ts
         data = {
             "event_name": [event_name],
@@ -60,11 +62,11 @@ class EventRecords(metaclass=Singleton):
         }
         df = pd.DataFrame(data)
         if not self.created_file:
-            with lock:
+            with event_lock:
                 df.to_parquet(self.file_name, engine='fastparquet')
                 self.created_file = True
         else:
-            with lock:
+            with event_lock:
                 df.to_parquet(self.file_name, engine='fastparquet', append=True)
 
     def get_records_df(self):
@@ -91,22 +93,22 @@ class RequestRecords(metaclass=Singleton):
         if len(self.buffer) > 100:
             df = pd.DataFrame(self.buffer)
             if not self.created_file:
-                with lock:
+                with request_lock:
                     df.to_parquet(self.file_name, engine='fastparquet')
                     self.created_file = True
             else:
-                with lock:
+                with request_lock:
                     df.to_parquet(self.file_name, engine='fastparquet', append=True)
             self.buffer = []
 
     def sink(self):
         df = pd.DataFrame(self.buffer)
         if not self.created_file:
-            with lock:
+            with request_lock:
                 df.to_parquet(self.file_name, engine='fastparquet')
                 self.created_file = True
         else:
-            with lock:
+            with request_lock:
                 df.to_parquet(self.file_name, engine='fastparquet', append=True)
 
     def get_records_df(self):
@@ -232,7 +234,7 @@ def trace(fmt=DEFAULT_FMT, prefix='test', flag=True):
                     log.debug(f"insert request record cost {tt}s")
                 except Exception as e:
                     log.error(e)
-                log.info(log_str)
+                log.debug(log_str)
             if result:
                 self.rsp_times.append(elapsed)
                 self.average_time = (
