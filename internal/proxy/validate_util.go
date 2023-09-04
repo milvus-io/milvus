@@ -284,7 +284,18 @@ func (v *validateUtil) checkJSONFieldData(field *schemapb.FieldData, fieldSchema
 	}
 
 	if v.checkMaxLen {
-		return verifyLengthPerRow(jsonArray, paramtable.Get().CommonCfg.JSONMaxLength.GetAsInt64())
+		for _, s := range jsonArray {
+			if int64(len(s)) > paramtable.Get().CommonCfg.JSONMaxLength.GetAsInt64() {
+				if field.GetIsDynamic() {
+					msg := fmt.Sprintf("the length (%d) of dynamic field exceeds max length (%d)", len(s),
+						paramtable.Get().CommonCfg.JSONMaxLength.GetAsInt64())
+					return merr.WrapErrParameterInvalid("valid length dynamic field", "length exceeds max length", msg)
+				}
+				msg := fmt.Sprintf("the length (%d) of json field (%s) exceeds max length (%d)", len(s),
+					field.GetFieldName(), paramtable.Get().CommonCfg.JSONMaxLength.GetAsInt64())
+				return merr.WrapErrParameterInvalid("valid length json string", "length exceeds max length", msg)
+			}
+		}
 	}
 
 	return nil
