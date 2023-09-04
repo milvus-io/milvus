@@ -459,7 +459,7 @@ func (ibNode *insertBufferNode) Sync(fgMsg *flowGraphMsg, seg2Upload []UniqueID,
 			zap.Bool("auto", task.auto),
 			zap.Any("position", endPosition),
 			zap.String("channel", ibNode.channelName),
-		)
+		).WithRateGroup("ibNode.sync", 1, 60)
 		// check if segment is syncing
 		segment := ibNode.channel.getSegment(task.segmentID)
 		if !task.dropped && !task.flushed && segment.isSyncing() {
