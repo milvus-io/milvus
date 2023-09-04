@@ -35,7 +35,6 @@ import (
 )
 
 type compactTime struct {
-	travelTime    Timestamp
 	expireTime    Timestamp
 	collectionTTL time.Duration
 }
@@ -199,17 +198,15 @@ func (t *compactionTrigger) getCompactTime(ts Timestamp, coll *collectionInfo) (
 	}
 
 	pts, _ := tsoutil.ParseTS(ts)
-	ttRetention := pts.Add(Params.CommonCfg.RetentionDuration.GetAsDuration(time.Second) * -1)
-	ttRetentionLogic := tsoutil.ComposeTS(ttRetention.UnixNano()/int64(time.Millisecond), 0)
 
 	if collectionTTL > 0 {
 		ttexpired := pts.Add(-collectionTTL)
 		ttexpiredLogic := tsoutil.ComposeTS(ttexpired.UnixNano()/int64(time.Millisecond), 0)
-		return &compactTime{ttRetentionLogic, ttexpiredLogic, collectionTTL}, nil
+		return &compactTime{ttexpiredLogic, collectionTTL}, nil
 	}
 
 	// no expiration time
-	return &compactTime{ttRetentionLogic, 0, 0}, nil
+	return &compactTime{0, 0}, nil
 }
 
 // triggerCompaction trigger a compaction if any compaction condition satisfy.
@@ -558,6 +555,7 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, i
 			nonPlannedSegments = append(nonPlannedSegments, segment)
 		}
 	}
+
 	var plans []*datapb.CompactionPlan
 	// sort segment from large to small
 	sort.Slice(prioritizedCandidates, func(i, j int) bool {
@@ -587,7 +585,6 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, i
 	}
 	// greedy pick from large segment to small, the goal is to fill each segment to reach 512M
 	// we must ensure all prioritized candidates is in a plan
-	//TODO the compaction policy should consider segment with similar timestamp together so timetravel and data expiration could work better.
 	//TODO the compaction selection policy should consider if compaction workload is high
 	for len(prioritizedCandidates) > 0 {
 		var bucket []*SegmentInfo
@@ -720,7 +717,6 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, i
 
 func segmentsToPlan(segments []*SegmentInfo, compactTime *compactTime) *datapb.CompactionPlan {
 	plan := &datapb.CompactionPlan{
-		Timetravel:    compactTime.travelTime,
 		Type:          datapb.CompactionType_MixCompaction,
 		Channel:       segments[0].GetInsertChannel(),
 		CollectionTtl: compactTime.collectionTTL.Nanoseconds(),
@@ -894,29 +890,22 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, isDis
 		return true
 	}
 
-	// single compaction only merge insert and delta log beyond the timetravel
-	// segment's insert binlogs dont have time range info, so we wait until the segment's last expire time is less than timetravel
-	// to ensure that all insert logs is beyond the timetravel.
-	// TODO: add meta in insert binlog
-	if segment.LastExpireTime >= compactTime.travelTime {
-		return false
-	}
-
 	totalDeletedRows := 0
 	totalDeleteLogSize := int64(0)
 	for _, deltaLogs := range segment.GetDeltalogs() {
 		for _, l := range deltaLogs.GetBinlogs() {
-			if l.TimestampTo < compactTime.travelTime {
-				totalDeletedRows += int(l.GetEntriesNum())
-				totalDeleteLogSize += l.GetLogSize()
-			}
+			totalDeletedRows += int(l.GetEntriesNum())
+			totalDeleteLogSize += l.GetLogSize()
 		}
 	}
 
 	// currently delta log size and delete ratio policy is applied
 	if float64(totalDeletedRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() || totalDeleteLogSize > Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetAsInt64() {
-		log.Info("total delete entities is too much, trigger compaction", zap.Int64("segmentID", segment.ID),
-			zap.Int("deleted rows", totalDeletedRows), zap.Int64("delete log size", totalDeleteLogSize))
+		log.Info("total delete entities is too much, trigger compaction",
+			zap.Int64("segmentID", segment.ID),
+			zap.Int64("numRows", segment.GetNumOfRows()),
+			zap.Int("deleted rows", totalDeletedRows),
+			zap.Int64("delete log size", totalDeleteLogSize))
 		return true
 	}
 

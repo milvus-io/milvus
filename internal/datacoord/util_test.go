@@ -22,13 +22,12 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
 type UtilSuite struct {
@@ -115,38 +114,6 @@ func (suite *UtilSuite) TestVerifyResponse() {
 		} else {
 			suite.Equal(c.expected, r)
 		}
-	}
-}
-
-func (suite *UtilSuite) TestGetCompactTime() {
-	paramtable.Get().Save(Params.CommonCfg.RetentionDuration.Key, "43200") // 5 days
-	defer paramtable.Get().Reset(Params.CommonCfg.RetentionDuration.Key)   // 5 days
-
-	tFixed := time.Date(2021, 11, 15, 0, 0, 0, 0, time.Local)
-	tBefore := tFixed.Add(-1 * Params.CommonCfg.RetentionDuration.GetAsDuration(time.Second))
-
-	type args struct {
-		allocator allocator
-	}
-	tests := []struct {
-		name    string
-		args    args
-		want    *compactTime
-		wantErr bool
-	}{
-		{
-			"test get timetravel",
-			args{&fixedTSOAllocator{fixedTime: tFixed}},
-			&compactTime{tsoutil.ComposeTS(tBefore.UnixNano()/int64(time.Millisecond), 0), 0, 0},
-			false,
-		},
-	}
-	for _, tt := range tests {
-		suite.Run(tt.name, func() {
-			got, err := GetCompactTime(context.TODO(), tt.args.allocator)
-			suite.Equal(tt.wantErr, err != nil)
-			suite.EqualValues(tt.want, got)
-		})
 	}
 }
 

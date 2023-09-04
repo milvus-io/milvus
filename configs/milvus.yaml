@@ -77,7 +77,7 @@ minio:
   # Custom endpoint for fetch IAM role credentials. when useIAM is true & cloudProvider is "aws".
   # Leave it empty if you want to use AWS default endpoint
   iamEndpoint:
-  # Log level for aws sdk log. 
+  # Log level for aws sdk log.
   # Supported level:  off, fatal, error, warn, info, debug, trace
   logLevel: fatal
   # Cloud data center region
@@ -440,8 +440,7 @@ common:
     dataNodeSubNamePrefix: dataNode
   defaultPartitionName: _default # default partition name for a collection
   defaultIndexName: _default_idx # default index name
-  retentionDuration: 0 # time travel reserved time, insert/delete will not be cleaned in this period. disable it by default
-  entityExpiration: -1 # Entity expiration in seconds, CAUTION make sure entityExpiration >= retentionDuration and -1 means never expire
+  entityExpiration: -1 # Entity expiration in seconds, CAUTION -1 means never expire
   indexSliceSize: 16 # MB
   threadCoreCoefficient:
     highPriority: 10 # This parameter specify how many times the number of threads is the number of cores in high priority thread pool

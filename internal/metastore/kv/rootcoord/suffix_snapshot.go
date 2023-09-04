@@ -36,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -559,16 +558,13 @@ func (ss *SuffixSnapshot) startBackgroundGC() {
 	ticker := time.NewTicker(60 * time.Minute)
 	defer ticker.Stop()
 
-	params := paramtable.Get()
-	retentionDuration := params.CommonCfg.RetentionDuration.GetAsDuration(time.Second)
-
 	for {
 		select {
 		case <-ss.closeGC:
 			log.Warn("quit suffix snapshot GC goroutine!")
 			return
 		case now := <-ticker.C:
-			err := ss.removeExpiredKvs(now, retentionDuration)
+			err := ss.removeExpiredKvs(now)
 			if err != nil {
 				log.Warn("remove expired data fail during GC", zap.Error(err))
 			}
@@ -602,7 +598,7 @@ func (ss *SuffixSnapshot) batchRemoveExpiredKvs(keyGroup []string, originalKey s
 	return etcd.RemoveByBatch(keyGroup, removeFn)
 }
 
-func (ss *SuffixSnapshot) removeExpiredKvs(now time.Time, retentionDuration time.Duration) error {
+func (ss *SuffixSnapshot) removeExpiredKvs(now time.Time) error {
 	keyGroup := make([]string, 0)
 	latestOriginalKey := ""
 	latestValue := ""
@@ -652,8 +648,7 @@ func (ss *SuffixSnapshot) removeExpiredKvs(now time.Time, retentionDuration time
 		latestOriginalKey = curOriginalKey
 
 		// record keys if the kv is expired
-		pts, _ := tsoutil.ParseTS(ts)
-		expireTime := pts.Add(retentionDuration)
+		expireTime, _ := tsoutil.ParseTS(ts)
 		// break loop if it reaches expire time
 		if expireTime.Before(now) {
 			keyGroup = append(keyGroup, key)

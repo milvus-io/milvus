@@ -1421,32 +1421,6 @@ func TestProxy(t *testing.T) {
 	//     })
 	//
 	//     wg.Add(1)
-	//     t.Run("search_travel", func(t *testing.T) {
-	//         defer wg.Done()
-	//         past := time.Now().Add(time.Duration(-1*Params.CommonCfg.RetentionDuration-100) * time.Second)
-	//         travelTs := tsoutil.ComposeTSByTime(past, 0)
-	//         req := constructSearchRequest()
-	//         req.TravelTimestamp = travelTs
-	//         //resp, err := proxy.Search(ctx, req)
-	//         res, err := proxy.Search(ctx, req)
-	//         assert.NoError(t, err)
-	//         assert.NotEqual(t, commonpb.ErrorCode_Success, res.Status.ErrorCode)
-	//     })
-	//
-	//     wg.Add(1)
-	//     t.Run("search_travel_succ", func(t *testing.T) {
-	//         defer wg.Done()
-	//         past := time.Now().Add(time.Duration(-1*Params.CommonCfg.RetentionDuration+100) * time.Second)
-	//         travelTs := tsoutil.ComposeTSByTime(past, 0)
-	//         req := constructSearchRequest()
-	//         req.TravelTimestamp = travelTs
-	//         //resp, err := proxy.Search(ctx, req)
-	//         res, err := proxy.Search(ctx, req)
-	//         assert.NoError(t, err)
-	//         assert.Equal(t, commonpb.ErrorCode_Success, res.Status.ErrorCode)
-	//     })
-	//
-	//     wg.Add(1)
 	//     t.Run("query", func(t *testing.T) {
 	//         defer wg.Done()
 	//         //resp, err := proxy.Query(ctx, &milvuspb.QueryRequest{
@@ -1465,47 +1439,6 @@ func TestProxy(t *testing.T) {
 	//         // assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	//         // TODO(dragondriver): compare query result
 	//     })
-	//
-	//     wg.Add(1)
-	//     t.Run("query_travel", func(t *testing.T) {
-	//         defer wg.Done()
-	//         past := time.Now().Add(time.Duration(-1*Params.CommonCfg.RetentionDuration-100) * time.Second)
-	//         travelTs := tsoutil.ComposeTSByTime(past, 0)
-	//         queryReq := &milvuspb.QueryRequest{
-	//             Base:               nil,
-	//             DbName:             dbName,
-	//             CollectionName:     collectionName,
-	//             Expr:               expr,
-	//             OutputFields:       nil,
-	//             PartitionNames:     nil,
-	//             TravelTimestamp:    travelTs,
-	//             GuaranteeTimestamp: 0,
-	//         }
-	//         res, err := proxy.Query(ctx, queryReq)
-	//         assert.NoError(t, err)
-	//         assert.NotEqual(t, commonpb.ErrorCode_Success, res.Status.ErrorCode)
-	//     })
-	//
-	//     wg.Add(1)
-	//     t.Run("query_travel_succ", func(t *testing.T) {
-	//         defer wg.Done()
-	//         past := time.Now().Add(time.Duration(-1*Params.CommonCfg.RetentionDuration+100) * time.Second)
-	//         travelTs := tsoutil.ComposeTSByTime(past, 0)
-	//         queryReq := &milvuspb.QueryRequest{
-	//             Base:               nil,
-	//             DbName:             dbName,
-	//             CollectionName:     collectionName,
-	//             Expr:               expr,
-	//             OutputFields:       nil,
-	//             PartitionNames:     nil,
-	//             TravelTimestamp:    travelTs,
-	//             GuaranteeTimestamp: 0,
-	//         }
-	//         res, err := proxy.Query(ctx, queryReq)
-	//         assert.NoError(t, err)
-	//         assert.Equal(t, commonpb.ErrorCode_EmptyCollection, res.Status.ErrorCode)
-	//     })
-	// }
 
 	wg.Add(1)
 	t.Run("calculate distance", func(t *testing.T) {
