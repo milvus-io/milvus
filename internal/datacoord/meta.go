@@ -980,9 +980,10 @@ func (m *meta) SetSegmentCompacting(segmentID UniqueID, compacting bool) {
 // - the segment info of compactedFrom segments after compaction to alter
 // - the segment info of compactedTo segment after compaction to add
 // The compactedTo segment could contain 0 numRows
-func (m *meta) PrepareCompleteCompactionMutation(compactionLogs []*datapb.CompactionSegmentBinlogs,
+func (m *meta) PrepareCompleteCompactionMutation(plan *datapb.CompactionPlan,
 	result *datapb.CompactionResult) ([]*SegmentInfo, []*SegmentInfo, *SegmentInfo, *segMetricMutation, error) {
 	log.Info("meta update: prepare for complete compaction mutation")
+	compactionLogs := plan.GetSegmentBinlogs()
 	m.Lock()
 	defer m.Unlock()
 
@@ -1057,6 +1058,7 @@ func (m *meta) PrepareCompleteCompactionMutation(compactionLogs []*datapb.Compac
 		DmlPosition:         dmlPosition,
 		CreatedByCompaction: true,
 		CompactionFrom:      compactionFrom,
+		LastExpireTime:      plan.GetStartTime(),
 	}
 	segment := NewSegmentInfo(segmentInfo)
 	metricMutation.addNewSeg(segment.GetState(), segment.GetNumOfRows())

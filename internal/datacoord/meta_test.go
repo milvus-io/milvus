@@ -651,19 +651,22 @@ func TestMeta_PrepareCompleteCompactionMutation(t *testing.T) {
 		segments: prepareSegments,
 	}
 
-	inCompactionLogs := []*datapb.CompactionSegmentBinlogs{
-		{
-			SegmentID:           1,
-			FieldBinlogs:        []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1", "log2")},
-			Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog1", "statlog2")},
-			Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog1", "deltalog2")},
+	plan := &datapb.CompactionPlan{
+		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+			{
+				SegmentID:           1,
+				FieldBinlogs:        []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1", "log2")},
+				Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog1", "statlog2")},
+				Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog1", "deltalog2")},
+			},
+			{
+				SegmentID:           2,
+				FieldBinlogs:        []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log3", "log4")},
+				Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog3", "statlog4")},
+				Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog3", "deltalog4")},
+			},
 		},
-		{
-			SegmentID:           2,
-			FieldBinlogs:        []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log3", "log4")},
-			Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog3", "statlog4")},
-			Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog3", "deltalog4")},
-		},
+		StartTime: 15,
 	}
 
 	inCompactionResult := &datapb.CompactionResult{
@@ -673,7 +676,7 @@ func TestMeta_PrepareCompleteCompactionMutation(t *testing.T) {
 		Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog5")},
 		NumOfRows:           2,
 	}
-	beforeCompact, afterCompact, newSegment, metricMutation, err := m.PrepareCompleteCompactionMutation(inCompactionLogs, inCompactionResult)
+	beforeCompact, afterCompact, newSegment, metricMutation, err := m.PrepareCompleteCompactionMutation(plan, inCompactionResult)
 	assert.NoError(t, err)
 	assert.NotNil(t, beforeCompact)
 	assert.NotNil(t, afterCompact)
@@ -704,6 +707,7 @@ func TestMeta_PrepareCompleteCompactionMutation(t *testing.T) {
 	assert.EqualValues(t, inCompactionResult.GetField2StatslogPaths(), newSegment.GetStatslogs())
 	assert.EqualValues(t, inCompactionResult.GetDeltalogs(), newSegment.GetDeltalogs())
 	assert.NotZero(t, newSegment.lastFlushTime)
+	assert.Equal(t, uint64(15), newSegment.GetLastExpireTime())
 }
 
 func Test_meta_SetSegmentCompacting(t *testing.T) {
