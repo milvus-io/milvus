@@ -111,9 +111,6 @@ func mustSelectMQType(standalone bool, mqType string, enable mqEnable) string {
 		if enable.Rocksmq {
 			return mqTypeRocksmq
 		}
-		if enable.Natsmq {
-			return mqTypeNatsmq
-		}
 	}
 	if enable.Pulsar {
 		return mqTypePulsar
