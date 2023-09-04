@@ -252,7 +252,7 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionResu
 
 func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.CompactionPlan, result *datapb.CompactionResult) error {
 	// Also prepare metric updates.
-	_, modSegments, newSegment, metricMutation, err := c.meta.PrepareCompleteCompactionMutation(plan.GetSegmentBinlogs(), result)
+	_, modSegments, newSegment, metricMutation, err := c.meta.PrepareCompleteCompactionMutation(plan, result)
 	if err != nil {
 		return err
 	}

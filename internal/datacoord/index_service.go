@@ -393,7 +393,7 @@ func (s *Server) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.In
 		segIdx, ok := seg.segmentIndexes[index.IndexID]
 
 		if !ok {
-			if seg.GetStartPosition().GetTimestamp() <= ts && !seg.GetCreatedByCompaction() {
+			if seg.GetLastExpireTime() <= ts {
 				cntUnissued++
 			}
 			pendingIndexRows += seg.GetNumOfRows()
@@ -405,7 +405,7 @@ func (s *Server) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.In
 
 		// if realTime, calculate current statistics
 		// if not realTime, skip segments created after index create
-		if !realTime && (seg.GetCreatedByCompaction() || seg.GetStartPosition().GetTimestamp() > ts) {
+		if !realTime && seg.GetLastExpireTime() > ts {
 			continue
 		}
 
