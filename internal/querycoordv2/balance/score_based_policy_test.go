@@ -18,6 +18,7 @@ package balance
 import (
 	"testing"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -37,7 +38,7 @@ import (
 
 type ScoreBasedBalancerTestSuite struct {
 	suite.Suite
-	balancer      *ScoreBasedBalancer
+	balancer      *Balancer
 	kv            kv.MetaKv
 	broker        *meta.MockBroker
 	mockScheduler *task.MockScheduler
@@ -70,7 +71,19 @@ func (suite *ScoreBasedBalancerTestSuite) SetupTest() {
 
 	distManager := meta.NewDistributionManager()
 	suite.mockScheduler = task.NewMockScheduler(suite.T())
-	suite.balancer = NewScoreBasedBalancer(suite.mockScheduler, nodeManager, distManager, testMeta, testTarget)
+	policy := NewScoreBasedPolicy(suite.mockScheduler, distManager)
+	suite.balancer = NewBalancer(testMeta, distManager, testTarget, nodeManager, policy)
+	suite.mockScheduler.EXPECT().GetNodeChannelDelta(mock.Anything).Return(0).Maybe()
+	suite.mockScheduler.EXPECT().GetNodeSegmentDelta(mock.Anything).Return(0).Maybe()
+
+	segments := make([]*datapb.SegmentInfo, 0)
+	for i := range lo.Range(9) {
+		segments = append(segments, &datapb.SegmentInfo{
+			ID:          int64(i),
+			PartitionID: 1,
+		})
+	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything, mock.Anything).Return(nil, segments, nil).Maybe()
 }
 
 func (suite *ScoreBasedBalancerTestSuite) TearDownTest() {
@@ -101,7 +114,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestAssignSegment() {
 				},
 			},
 			nodes:         []int64{1, 2, 3},
-			collectionIDs: []int64{0},
+			collectionIDs: []int64{1},
 			states:        []session.State{session.NodeStateNormal, session.NodeStateNormal, session.NodeStateNormal},
 			segmentCnts:   []int{0, 0, 0},
 			expectPlans: [][]SegmentAssignPlan{
@@ -227,7 +240,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestAssignSegment() {
 				suite.balancer.nodeManager.Add(nodeInfo)
 			}
 			for i := range c.collectionIDs {
-				plans := balancer.AssignSegment(c.collectionIDs[i], c.assignments[i], c.nodes)
+				plans := balancer.policy.AssignSegment(c.collectionIDs[i], c.assignments[i], c.nodes)
 				suite.ElementsMatch(c.expectPlans[i], plans)
 			}
 		})
@@ -310,6 +323,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceOneRound() {
 			balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(c.replicaID, c.collectionID, c.nodes))
 			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
 			balancer.targetMgr.UpdateCollectionCurrentTarget(c.collectionID)
+			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
 
 			// 2. set up target for distribution for multi collections
 			for node, s := range c.distributions {
@@ -372,7 +386,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceMultiRound() {
 				},
 				2: {
 					{SegmentInfo: &datapb.SegmentInfo{ID: 3, CollectionID: 1, NumOfRows: 20}, Node: 2},
-					{SegmentInfo: &datapb.SegmentInfo{ID: 4, CollectionID: 2, NumOfRows: 30}, Node: 2},
+					{SegmentInfo: &datapb.SegmentInfo{ID: 4, CollectionID: 2, NumOfRows: 400}, Node: 2},
 				},
 			},
 			{
@@ -420,6 +434,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceMultiRound() {
 			append(balanceCase.nodes, balanceCase.notExistedNodes...)))
 		balancer.targetMgr.UpdateCollectionNextTarget(balanceCase.collectionIDs[i])
 		balancer.targetMgr.UpdateCollectionCurrentTarget(balanceCase.collectionIDs[i])
+		balancer.targetMgr.UpdateCollectionNextTarget(balanceCase.collectionIDs[i])
 	}
 
 	// 2. set up target for distribution for multi collections
@@ -540,11 +555,8 @@ func (suite *ScoreBasedBalancerTestSuite) TestStoppedBalance() {
 			expectChannelPlans: []ChannelAssignPlan{},
 		},
 	}
-	for i, c := range cases {
+	for _, c := range cases {
 		suite.Run(c.name, func() {
-			if i == 0 {
-				suite.mockScheduler.Mock.On("GetNodeChannelDelta", mock.Anything).Return(0)
-			}
 			suite.SetupSuite()
 			defer suite.TearDownTest()
 			balancer := suite.balancer
@@ -561,6 +573,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestStoppedBalance() {
 			balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(c.replicaID, c.collectionID, c.nodes))
 			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
 			balancer.targetMgr.UpdateCollectionCurrentTarget(c.collectionID)
+			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
 
 			// 2. set up target for distribution for multi collections
 			for node, s := range c.distributions {
@@ -574,9 +587,9 @@ func (suite *ScoreBasedBalancerTestSuite) TestStoppedBalance() {
 			for i := range c.nodes {
 				nodeInfo := session.NewNodeInfo(c.nodes[i], "127.0.0.1:0")
 				nodeInfo.UpdateStats(session.WithChannelCnt(len(c.distributionChannels[c.nodes[i]])))
-				nodeInfo.SetState(c.states[i])
 				suite.balancer.nodeManager.Add(nodeInfo)
 				suite.balancer.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, c.nodes[i])
+				nodeInfo.SetState(c.states[i])
 			}
 
 			for i := range c.outBoundNodes {
@@ -595,7 +608,7 @@ func TestScoreBasedBalancerSuite(t *testing.T) {
 	suite.Run(t, new(ScoreBasedBalancerTestSuite))
 }
 
-func (suite *ScoreBasedBalancerTestSuite) getCollectionBalancePlans(balancer *ScoreBasedBalancer,
+func (suite *ScoreBasedBalancerTestSuite) getCollectionBalancePlans(balancer *Balancer,
 	collectionID int64,
 ) ([]SegmentAssignPlan, []ChannelAssignPlan) {
 	replicas := balancer.meta.ReplicaManager.GetByCollection(collectionID)

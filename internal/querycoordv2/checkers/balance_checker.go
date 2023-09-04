@@ -44,7 +44,11 @@ type BalanceChecker struct {
 	scheduler                            task.Scheduler
 }
 
-func NewBalanceChecker(meta *meta.Meta, balancer balance.Balance, nodeMgr *session.NodeManager, scheduler task.Scheduler) *BalanceChecker {
+func NewBalanceChecker(meta *meta.Meta,
+	nodeMgr *session.NodeManager,
+	scheduler task.Scheduler,
+	balancer balance.Balance,
+) *BalanceChecker {
 	return &BalanceChecker{
 		Balance:                              balancer,
 		meta:                                 meta,

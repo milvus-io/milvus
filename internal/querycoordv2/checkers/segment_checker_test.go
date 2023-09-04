@@ -75,7 +75,7 @@ func (suite *SegmentCheckerTestSuite) SetupTest() {
 	suite.broker = meta.NewMockBroker(suite.T())
 	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
 
-	balancer := suite.createMockBalancer()
+	balancer := suite.mockBalancePolicy()
 	suite.checker = NewSegmentChecker(suite.meta, distManager, targetManager, balancer, suite.nodeMgr)
 
 	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil).Maybe()
@@ -85,9 +85,9 @@ func (suite *SegmentCheckerTestSuite) TearDownTest() {
 	suite.kv.Close()
 }
 
-func (suite *SegmentCheckerTestSuite) createMockBalancer() balance.Balance {
-	balancer := balance.NewMockBalancer(suite.T())
-	balancer.EXPECT().AssignSegment(mock.Anything, mock.Anything, mock.Anything).Maybe().Return(func(collectionID int64, segments []*meta.Segment, nodes []int64) []balance.SegmentAssignPlan {
+func (suite *SegmentCheckerTestSuite) mockBalancePolicy() balance.BalancePolicy {
+	policy := balance.NewMockBalancePolicy(suite.T())
+	policy.EXPECT().AssignSegment(mock.Anything, mock.Anything, mock.Anything).Maybe().Return(func(collectionID int64, segments []*meta.Segment, nodes []int64) []balance.SegmentAssignPlan {
 		plans := make([]balance.SegmentAssignPlan, 0, len(segments))
 		for i, s := range segments {
 			plan := balance.SegmentAssignPlan{
@@ -100,7 +100,7 @@ func (suite *SegmentCheckerTestSuite) createMockBalancer() balance.Balance {
 		}
 		return plans
 	})
-	return balancer
+	return policy
 }
 
 func (suite *SegmentCheckerTestSuite) TestLoadSegments() {

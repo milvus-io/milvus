@@ -112,8 +112,7 @@ type Server struct {
 	replicaObserver    *observers.ReplicaObserver
 	resourceObserver   *observers.ResourceObserver
 
-	balancer    balance.Balance
-	balancerMap map[string]balance.Balance
+	balancePolicy balance.BalancePolicy
 
 	// Active-standby
 	enableActiveStandBy bool
@@ -270,19 +269,7 @@ func (s *Server) initQueryCoord() error {
 
 	// Init balancer map and balancer
 	log.Info("init all available balancer")
-	s.balancerMap = make(map[string]balance.Balance)
-	s.balancerMap[balance.RoundRobinBalancerName] = balance.NewRoundRobinBalancer(s.taskScheduler, s.nodeMgr)
-	s.balancerMap[balance.RowCountBasedBalancerName] = balance.NewRowCountBasedBalancer(s.taskScheduler,
-		s.nodeMgr, s.dist, s.meta, s.targetMgr)
-	s.balancerMap[balance.ScoreBasedBalancerName] = balance.NewScoreBasedBalancer(s.taskScheduler,
-		s.nodeMgr, s.dist, s.meta, s.targetMgr)
-	if balancer, ok := s.balancerMap[params.Params.QueryCoordCfg.Balancer.GetValue()]; ok {
-		s.balancer = balancer
-		log.Info("use config balancer", zap.String("balancer", params.Params.QueryCoordCfg.Balancer.GetValue()))
-	} else {
-		s.balancer = s.balancerMap[balance.RowCountBasedBalancerName]
-		log.Info("use rowCountBased auto balancer")
-	}
+	s.balancePolicy = balance.GetBalancePolicy(s.taskScheduler, s.dist)
 
 	// Init checker controller
 	log.Info("init checker controller")
@@ -290,10 +277,10 @@ func (s *Server) initQueryCoord() error {
 		s.meta,
 		s.dist,
 		s.targetMgr,
-		s.balancer,
 		s.nodeMgr,
 		s.taskScheduler,
 		s.broker,
+		s.balancePolicy,
 	)
 
 	// Init observers

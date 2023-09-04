@@ -51,7 +51,7 @@ type CheckerController struct {
 	targetMgr      *meta.TargetManager
 	broker         meta.Broker
 	nodeMgr        *session.NodeManager
-	balancer       balance.Balance
+	balancer       balance.Balancer
 
 	scheduler task.Scheduler
 	checkers  map[string]Checker
@@ -63,17 +63,18 @@ func NewCheckerController(
 	meta *meta.Meta,
 	dist *meta.DistributionManager,
 	targetMgr *meta.TargetManager,
-	balancer balance.Balance,
 	nodeMgr *session.NodeManager,
 	scheduler task.Scheduler,
 	broker meta.Broker,
+	balancePolicy balance.BalancePolicy,
 ) *CheckerController {
 	// CheckerController runs checkers with the order,
 	// the former checker has higher priority
+	balancer := balance.NewBalancer(meta, dist, targetMgr, nodeMgr, balancePolicy)
 	checkers := map[string]Checker{
-		channelChecker: NewChannelChecker(meta, dist, targetMgr, balancer),
-		segmentChecker: NewSegmentChecker(meta, dist, targetMgr, balancer, nodeMgr),
-		balanceChecker: NewBalanceChecker(meta, balancer, nodeMgr, scheduler),
+		channelChecker: NewChannelChecker(meta, dist, targetMgr, balancePolicy),
+		segmentChecker: NewSegmentChecker(meta, dist, targetMgr, balancePolicy, nodeMgr),
+		balanceChecker: NewBalanceChecker(meta, nodeMgr, scheduler, balancer),
 		indexChecker:   NewIndexChecker(meta, dist, broker),
 	}
 

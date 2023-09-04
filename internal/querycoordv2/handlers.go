@@ -133,7 +133,7 @@ func (s *Server) balanceSegments(ctx context.Context, req *querypb.LoadBalanceRe
 		zap.Int64("srcNodeID", srcNode),
 		zap.Int64s("destNodeIDs", dstNodeSet.Collect()),
 	)
-	plans := s.balancer.AssignSegment(req.GetCollectionID(), toBalance.Collect(), dstNodeSet.Collect())
+	plans := s.balancePolicy.AssignSegment(req.GetCollectionID(), toBalance.Collect(), dstNodeSet.Collect())
 	tasks := make([]task.Task, 0, len(plans))
 	for _, plan := range plans {
 		log.Info("manually balance segment...",

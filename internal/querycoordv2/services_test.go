@@ -80,7 +80,7 @@ type ServiceSuite struct {
 	nodeMgr        *session.NodeManager
 	jobScheduler   *job.Scheduler
 	taskScheduler  *task.MockScheduler
-	balancer       balance.Balance
+	balancePolicy  balance.BalancePolicy
 
 	distMgr        *meta.DistributionManager
 	distController *dist.MockController
@@ -158,15 +158,12 @@ func (suite *ServiceSuite) SetupTest() {
 	}
 	suite.cluster = session.NewMockCluster(suite.T())
 	suite.jobScheduler = job.NewScheduler()
-	suite.taskScheduler = task.NewMockScheduler(suite.T())
 	suite.jobScheduler.Start()
-	suite.balancer = balance.NewRowCountBasedBalancer(
-		suite.taskScheduler,
-		suite.nodeMgr,
-		suite.dist,
-		suite.meta,
-		suite.targetMgr,
-	)
+	suite.taskScheduler = task.NewMockScheduler(suite.T())
+	suite.taskScheduler.EXPECT().GetNodeChannelDelta(mock.Anything).Return(0).Maybe()
+	suite.taskScheduler.EXPECT().GetNodeSegmentDelta(mock.Anything).Return(0).Maybe()
+	suite.balancePolicy = balance.GetBalancePolicy(suite.taskScheduler, suite.dist)
+
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
 	suite.distMgr = meta.NewDistributionManager()
 	suite.distController = dist.NewMockController(suite.T())
@@ -185,7 +182,7 @@ func (suite *ServiceSuite) SetupTest() {
 		cluster:             suite.cluster,
 		jobScheduler:        suite.jobScheduler,
 		taskScheduler:       suite.taskScheduler,
-		balancer:            suite.balancer,
+		balancePolicy:       suite.balancePolicy,
 		distController:      suite.distController,
 		ctx:                 context.Background(),
 	}
@@ -1091,6 +1088,8 @@ func (suite *ServiceSuite) TestLoadBalance() {
 			SealedSegmentIDs: segments,
 		}
 		suite.taskScheduler.ExpectedCalls = make([]*mock.Call, 0)
+		suite.taskScheduler.EXPECT().GetNodeChannelDelta(mock.Anything).Return(0).Maybe()
+		suite.taskScheduler.EXPECT().GetNodeSegmentDelta(mock.Anything).Return(0).Maybe()
 		suite.taskScheduler.EXPECT().Add(mock.Anything).Run(func(task task.Task) {
 			actions := task.Actions()
 			suite.Len(actions, 2)
@@ -1164,6 +1163,8 @@ func (suite *ServiceSuite) TestLoadBalanceWithEmptySegmentList() {
 			DstNodeIDs:    []int64{dstNode},
 		}
 		suite.taskScheduler.ExpectedCalls = make([]*mock.Call, 0)
+		suite.taskScheduler.EXPECT().GetNodeChannelDelta(mock.Anything).Return(0).Maybe()
+		suite.taskScheduler.EXPECT().GetNodeSegmentDelta(mock.Anything).Return(0).Maybe()
 		suite.taskScheduler.EXPECT().Add(mock.Anything).Run(func(t task.Task) {
 			actions := t.Actions()
 			suite.Len(actions, 2)

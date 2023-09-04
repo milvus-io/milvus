@@ -47,7 +47,7 @@ type CheckerControllerSuite struct {
 	dist          *meta.DistributionManager
 	targetManager *meta.TargetManager
 	scheduler     *task.MockScheduler
-	balancer      *balance.MockBalancer
+	balancePolicy *balance.MockBalancePolicy
 
 	controller *CheckerController
 }
@@ -79,9 +79,9 @@ func (suite *CheckerControllerSuite) SetupTest() {
 	suite.broker = meta.NewMockBroker(suite.T())
 	suite.targetManager = meta.NewTargetManager(suite.broker, suite.meta)
 
-	suite.balancer = balance.NewMockBalancer(suite.T())
+	suite.balancePolicy = balance.NewMockBalancePolicy(suite.T())
 	suite.scheduler = task.NewMockScheduler(suite.T())
-	suite.controller = NewCheckerController(suite.meta, suite.dist, suite.targetManager, suite.balancer, suite.nodeMgr, suite.scheduler, suite.broker)
+	suite.controller = NewCheckerController(suite.meta, suite.dist, suite.targetManager, suite.nodeMgr, suite.scheduler, suite.broker, suite.balancePolicy)
 }
 
 func (suite *CheckerControllerSuite) TestBasic() {
@@ -124,8 +124,8 @@ func (suite *CheckerControllerSuite) TestBasic() {
 	suite.scheduler.EXPECT().GetSegmentTaskNum().Return(0).Maybe()
 	suite.scheduler.EXPECT().GetChannelTaskNum().Return(0).Maybe()
 
-	suite.balancer.EXPECT().AssignSegment(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	suite.balancer.EXPECT().AssignChannel(mock.Anything, mock.Anything).Return(nil)
+	suite.balancePolicy.EXPECT().AssignSegment(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	suite.balancePolicy.EXPECT().AssignChannel(mock.Anything, mock.Anything).Return(nil)
 	suite.controller.Start()
 	defer suite.controller.Stop()
 

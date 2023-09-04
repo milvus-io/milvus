@@ -20,97 +20,6 @@ func (_m *MockBalancer) EXPECT() *MockBalancer_Expecter {
 	return &MockBalancer_Expecter{mock: &_m.Mock}
 }
 
-// AssignChannel provides a mock function with given fields: channels, nodes
-func (_m *MockBalancer) AssignChannel(channels []*meta.DmChannel, nodes []int64) []ChannelAssignPlan {
-	ret := _m.Called(channels, nodes)
-
-	var r0 []ChannelAssignPlan
-	if rf, ok := ret.Get(0).(func([]*meta.DmChannel, []int64) []ChannelAssignPlan); ok {
-		r0 = rf(channels, nodes)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]ChannelAssignPlan)
-		}
-	}
-
-	return r0
-}
-
-// MockBalancer_AssignChannel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AssignChannel'
-type MockBalancer_AssignChannel_Call struct {
-	*mock.Call
-}
-
-// AssignChannel is a helper method to define mock.On call
-//   - channels []*meta.DmChannel
-//   - nodes []int64
-func (_e *MockBalancer_Expecter) AssignChannel(channels interface{}, nodes interface{}) *MockBalancer_AssignChannel_Call {
-	return &MockBalancer_AssignChannel_Call{Call: _e.mock.On("AssignChannel", channels, nodes)}
-}
-
-func (_c *MockBalancer_AssignChannel_Call) Run(run func(channels []*meta.DmChannel, nodes []int64)) *MockBalancer_AssignChannel_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].([]*meta.DmChannel), args[1].([]int64))
-	})
-	return _c
-}
-
-func (_c *MockBalancer_AssignChannel_Call) Return(_a0 []ChannelAssignPlan) *MockBalancer_AssignChannel_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockBalancer_AssignChannel_Call) RunAndReturn(run func([]*meta.DmChannel, []int64) []ChannelAssignPlan) *MockBalancer_AssignChannel_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// AssignSegment provides a mock function with given fields: collectionID, segments, nodes
-func (_m *MockBalancer) AssignSegment(collectionID int64, segments []*meta.Segment, nodes []int64) []SegmentAssignPlan {
-	ret := _m.Called(collectionID, segments, nodes)
-
-	var r0 []SegmentAssignPlan
-	if rf, ok := ret.Get(0).(func(int64, []*meta.Segment, []int64) []SegmentAssignPlan); ok {
-		r0 = rf(collectionID, segments, nodes)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]SegmentAssignPlan)
-		}
-	}
-
-	return r0
-}
-
-// MockBalancer_AssignSegment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AssignSegment'
-type MockBalancer_AssignSegment_Call struct {
-	*mock.Call
-}
-
-// AssignSegment is a helper method to define mock.On call
-//   - collectionID int64
-//   - segments []*meta.Segment
-//   - nodes []int64
-func (_e *MockBalancer_Expecter) AssignSegment(collectionID interface{}, segments interface{}, nodes interface{}) *MockBalancer_AssignSegment_Call {
-	return &MockBalancer_AssignSegment_Call{Call: _e.mock.On("AssignSegment", collectionID, segments, nodes)}
-}
-
-func (_c *MockBalancer_AssignSegment_Call) Run(run func(collectionID int64, segments []*meta.Segment, nodes []int64)) *MockBalancer_AssignSegment_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].([]*meta.Segment), args[2].([]int64))
-	})
-	return _c
-}
-
-func (_c *MockBalancer_AssignSegment_Call) Return(_a0 []SegmentAssignPlan) *MockBalancer_AssignSegment_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockBalancer_AssignSegment_Call) RunAndReturn(run func(int64, []*meta.Segment, []int64) []SegmentAssignPlan) *MockBalancer_AssignSegment_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // BalanceReplica provides a mock function with given fields: replica
 func (_m *MockBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan) {
 	ret := _m.Called(replica)
@@ -163,6 +72,49 @@ func (_c *MockBalancer_BalanceReplica_Call) Return(_a0 []SegmentAssignPlan, _a1 
 }
 
 func (_c *MockBalancer_BalanceReplica_Call) RunAndReturn(run func(*meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan)) *MockBalancer_BalanceReplica_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetPolicy provides a mock function with given fields:
+func (_m *MockBalancer) GetPolicy() BalancePolicy {
+	ret := _m.Called()
+
+	var r0 BalancePolicy
+	if rf, ok := ret.Get(0).(func() BalancePolicy); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(BalancePolicy)
+		}
+	}
+
+	return r0
+}
+
+// MockBalancer_GetPolicy_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPolicy'
+type MockBalancer_GetPolicy_Call struct {
+	*mock.Call
+}
+
+// GetPolicy is a helper method to define mock.On call
+func (_e *MockBalancer_Expecter) GetPolicy() *MockBalancer_GetPolicy_Call {
+	return &MockBalancer_GetPolicy_Call{Call: _e.mock.On("GetPolicy")}
+}
+
+func (_c *MockBalancer_GetPolicy_Call) Run(run func()) *MockBalancer_GetPolicy_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockBalancer_GetPolicy_Call) Return(_a0 BalancePolicy) *MockBalancer_GetPolicy_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBalancer_GetPolicy_Call) RunAndReturn(run func() BalancePolicy) *MockBalancer_GetPolicy_Call {
 	_c.Call.Return(run)
 	return _c
 }

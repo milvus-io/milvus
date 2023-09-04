@@ -75,8 +75,8 @@ func (suite *ChannelCheckerTestSuite) SetupTest() {
 
 	distManager := meta.NewDistributionManager()
 
-	balancer := suite.createMockBalancer()
-	suite.checker = NewChannelChecker(suite.meta, distManager, targetManager, balancer)
+	balancePolicy := suite.mockBalancePolicy()
+	suite.checker = NewChannelChecker(suite.meta, distManager, targetManager, balancePolicy)
 
 	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil).Maybe()
 }
@@ -85,9 +85,9 @@ func (suite *ChannelCheckerTestSuite) TearDownTest() {
 	suite.kv.Close()
 }
 
-func (suite *ChannelCheckerTestSuite) createMockBalancer() balance.Balance {
-	balancer := balance.NewMockBalancer(suite.T())
-	balancer.EXPECT().AssignChannel(mock.Anything, mock.Anything).Maybe().Return(func(channels []*meta.DmChannel, nodes []int64) []balance.ChannelAssignPlan {
+func (suite *ChannelCheckerTestSuite) mockBalancePolicy() balance.BalancePolicy {
+	policy := balance.NewMockBalancePolicy(suite.T())
+	policy.EXPECT().AssignChannel(mock.Anything, mock.Anything).Maybe().Return(func(channels []*meta.DmChannel, nodes []int64) []balance.ChannelAssignPlan {
 		plans := make([]balance.ChannelAssignPlan, 0, len(channels))
 		for i, c := range channels {
 			plan := balance.ChannelAssignPlan{
@@ -100,7 +100,7 @@ func (suite *ChannelCheckerTestSuite) createMockBalancer() balance.Balance {
 		}
 		return plans
 	})
-	return balancer
+	return policy
 }
 
 func (suite *ChannelCheckerTestSuite) TestLoadChannel() {

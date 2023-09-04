@@ -37,26 +37,26 @@ import (
 
 type SegmentChecker struct {
 	baseChecker
-	meta      *meta.Meta
-	dist      *meta.DistributionManager
-	targetMgr *meta.TargetManager
-	balancer  balance.Balance
-	nodeMgr   *session.NodeManager
+	meta          *meta.Meta
+	dist          *meta.DistributionManager
+	targetMgr     *meta.TargetManager
+	balancePolicy balance.BalancePolicy
+	nodeMgr       *session.NodeManager
 }
 
 func NewSegmentChecker(
 	meta *meta.Meta,
 	dist *meta.DistributionManager,
 	targetMgr *meta.TargetManager,
-	balancer balance.Balance,
+	balancePolicy balance.BalancePolicy,
 	nodeMgr *session.NodeManager,
 ) *SegmentChecker {
 	return &SegmentChecker{
-		meta:      meta,
-		dist:      dist,
-		targetMgr: targetMgr,
-		balancer:  balancer,
-		nodeMgr:   nodeMgr,
+		meta:          meta,
+		dist:          dist,
+		targetMgr:     targetMgr,
+		balancePolicy: balancePolicy,
+		nodeMgr:       nodeMgr,
 	}
 }
 
@@ -366,9 +366,10 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 			return !outboundNodes.Contain(node) && !stop
 		})
 
-		shardPlans := c.balancer.AssignSegment(replica.CollectionID, segments, availableNodes)
+		shardPlans := c.balancePolicy.AssignSegment(replica.CollectionID, segments, availableNodes)
 		for i := range shardPlans {
 			shardPlans[i].ReplicaID = replica.GetID()
+			plans[i].From = -1
 		}
 		plans = append(plans, shardPlans...)
 	}
