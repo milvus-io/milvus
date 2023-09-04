@@ -213,7 +213,7 @@ func (b *LookAsideBalancer) checkQueryNodeHealthLoop(ctx context.Context) {
 			b.metricsUpdateTs.Range(func(node int64, lastUpdateTs int64) bool {
 				if now-lastUpdateTs > checkQueryNodeHealthInterval.Milliseconds() {
 					futures = append(futures, pool.Submit(func() (any, error) {
-						checkInterval := Params.ProxyCfg.HealthCheckTimetout.GetAsDuration(time.Millisecond)
+						checkInterval := Params.ProxyCfg.HealthCheckTimeout.GetAsDuration(time.Millisecond)
 						ctx, cancel := context.WithTimeout(context.Background(), checkInterval)
 						defer cancel()
 
@@ -263,11 +263,25 @@ func (b *LookAsideBalancer) trySetQueryNodeUnReachable(node int64, err error) bo
 	failures.Inc()
 	b.failedHeartBeatCounter.Insert(node, failures)
 
+	log.Info("get component status failed",
+		zap.Int64("node", node),
+		zap.Int64("times", failures.Load()),
+		zap.Error(err))
+
 	if failures.Load() < Params.ProxyCfg.RetryTimesOnHealthCheck.GetAsInt64() {
-		log.Warn("get component status failed",
-			zap.Int64("node", node),
-			zap.Int64("times", failures.Load()),
-			zap.Error(err))
+		return false
+	}
+	// if the total time of consecutive heartbeat failures reach the session.ttl, remove the offline query node
+	limit := Params.CommonCfg.SessionTTL.GetAsDuration(time.Second).Seconds() /
+		Params.ProxyCfg.HealthCheckTimeout.GetAsDuration(time.Millisecond).Seconds()
+	if failures.Load() > Params.ProxyCfg.RetryTimesOnHealthCheck.GetAsInt64() && float64(failures.Load()) >= limit {
+		log.Info("the heartbeat failures has reach it's upper limit, remove the query node",
+			zap.Int64("nodeID", node))
+		// stop the heartbeat
+		b.metricsUpdateTs.GetAndRemove(node)
+		b.metricsMap.GetAndRemove(node)
+		b.executingTaskTotalNQ.GetAndRemove(node)
+		b.unreachableQueryNodes.Remove(node)
 		return false
 	}
 

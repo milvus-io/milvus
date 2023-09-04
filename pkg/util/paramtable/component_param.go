@@ -851,7 +851,7 @@ type proxyConfig struct {
 	SoPath ParamItem `refreshable:"false"`
 
 	TimeTickInterval             ParamItem `refreshable:"false"`
-	HealthCheckTimetout          ParamItem `refreshable:"true"`
+	HealthCheckTimeout           ParamItem `refreshable:"true"`
 	MsgStreamTimeTickBufSize     ParamItem `refreshable:"true"`
 	MaxNameLength                ParamItem `refreshable:"true"`
 	MaxUsernameLength            ParamItem `refreshable:"true"`
@@ -884,15 +884,16 @@ func (p *proxyConfig) init(base *BaseTable) {
 	}
 	p.TimeTickInterval.Init(base.mgr)
 
-	p.HealthCheckTimetout = ParamItem{
-		Key:          "proxy.healthCheckTimetout",
+	p.HealthCheckTimeout = ParamItem{
+		Key:          "proxy.healthCheckTimeout",
+		FallbackKeys: []string{"proxy.healthCheckTimetout"},
 		Version:      "2.3.0",
 		DefaultValue: "3000",
 		PanicIfEmpty: true,
 		Doc:          "ms, the interval that to do component healthy check",
 		Export:       true,
 	}
-	p.HealthCheckTimetout.Init(base.mgr)
+	p.HealthCheckTimeout.Init(base.mgr)
 
 	p.MsgStreamTimeTickBufSize = ParamItem{
 		Key:          "proxy.msgStream.timeTick.bufSize",
