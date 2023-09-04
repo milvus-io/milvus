@@ -19,6 +19,7 @@ package session
 import (
 	"context"
 	"net"
+	"strconv"
 	"testing"
 	"time"
 
@@ -45,10 +46,12 @@ type ClusterTestSuite struct {
 
 func (suite *ClusterTestSuite) SetupSuite() {
 	paramtable.Init()
+	paramtable.Get().Save("grpc.client.maxMaxAttempts", "1")
 	suite.setupServers()
 }
 
 func (suite *ClusterTestSuite) TearDownSuite() {
+	paramtable.Get().Save("grpc.client.maxMaxAttempts", strconv.FormatInt(paramtable.DefaultMaxAttempts, 10))
 	for _, svr := range suite.svrs {
 		svr.GracefulStop()
 	}

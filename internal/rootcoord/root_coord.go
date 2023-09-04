@@ -491,7 +491,7 @@ func (c *Core) Init() error {
 					log.Error("RootCoord start failed", zap.Error(err))
 				}
 			})
-			log.Info("RootCoord startup success")
+			log.Info("RootCoord startup success", zap.String("address", c.session.Address))
 			return err
 		}
 		c.UpdateStateCode(commonpb.StateCode_StandBy)

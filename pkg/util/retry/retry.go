@@ -38,7 +38,7 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 
 	for i := uint(0); i < c.attempts; i++ {
 		if err := fn(); err != nil {
-			if i%10 == 0 {
+			if i%4 == 0 {
 				log.Error("retry func failed", zap.Uint("retry time", i), zap.Error(err))
 			}
 

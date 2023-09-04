@@ -56,8 +56,12 @@ func Code(err error) int32 {
 	}
 }
 
-func IsRetriable(err error) bool {
-	return Code(err)&retriableFlag != 0
+func IsRetryableErr(err error) bool {
+	return IsRetryableCode(Code(err))
+}
+
+func IsRetryableCode(code int32) bool {
+	return code&retryableFlag != 0
 }
 
 func IsCanceledOrTimeout(err error) bool {
@@ -130,7 +134,7 @@ func Error(status *commonpb.Status) error {
 		return newMilvusError(fmt.Sprintf("legacy error code:%d, reason: %s", status.GetErrorCode(), status.GetReason()), errUnexpected.errCode, false)
 	}
 
-	return newMilvusError(status.GetReason(), code, code&retriableFlag != 0)
+	return newMilvusError(status.GetReason(), code, code&retryableFlag != 0)
 }
 
 // CheckHealthy checks whether the state is healthy,

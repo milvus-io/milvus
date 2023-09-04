@@ -80,7 +80,7 @@ func (broker *CoordinatorBroker) GetCollectionSchema(ctx context.Context, collec
 
 	err = merr.Error(resp.GetStatus())
 	if err != nil {
-		log.Warn("failed to get collection schema", zap.Error(err))
+		log.Ctx(ctx).Warn("failed to get collection schema", zap.Error(err))
 		return nil, err
 	}
 	return resp.GetSchema(), nil
