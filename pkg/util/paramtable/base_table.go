@@ -47,7 +47,7 @@ const (
 	DefaultLogFormat                         = "text"
 	DefaultLogLevelForBase                   = "debug"
 	DefaultRootPath                          = ""
-	DefaultMinioLogLevel                     = "error"
+	DefaultMinioLogLevel                     = "fatal"
 	DefaultKnowhereThreadPoolNumRatioInBuild = 1
 	DefaultMinioRegion                       = ""
 	DefaultMinioUseVirtualHost               = "false"
