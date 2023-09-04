@@ -256,6 +256,8 @@ func (mr *MilvusRoles) handleSignals() func() {
 				log.Warn("Get signal to exit", zap.String("signal", sig.String()))
 				mr.once.Do(func() {
 					close(mr.closed)
+					// reset other signals, only handle SIGINT from now
+					signal.Reset(syscall.SIGQUIT, syscall.SIGHUP, syscall.SIGTERM)
 				})
 			}
 		}
@@ -320,69 +322,83 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 	var rc *components.RootCoord
 	if mr.EnableRootCoord {
 		rc = mr.runRootCoord(ctx, local)
-		if rc != nil {
-			defer rc.Stop()
-		}
 	}
 
 	var pn *components.Proxy
 	if mr.EnableProxy {
 		pctx := log.WithModule(ctx, "Proxy")
 		pn = mr.runProxy(pctx, local, alias)
-		if pn != nil {
-			defer pn.Stop()
-		}
 	}
 
 	var qs *components.QueryCoord
 	if mr.EnableQueryCoord {
 		qs = mr.runQueryCoord(ctx, local)
-		if qs != nil {
-			defer qs.Stop()
-		}
 	}
 
 	var qn *components.QueryNode
 	if mr.EnableQueryNode {
 		qn = mr.runQueryNode(ctx, local, alias)
-		if qn != nil {
-			defer qn.Stop()
-		}
 	}
 
 	var ds *components.DataCoord
 	if mr.EnableDataCoord {
 		ds = mr.runDataCoord(ctx, local)
-		if ds != nil {
-			defer ds.Stop()
-		}
 	}
 
 	var dn *components.DataNode
 	if mr.EnableDataNode {
 		dn = mr.runDataNode(ctx, local, alias)
-		if dn != nil {
-			defer dn.Stop()
-		}
 	}
 
 	var is *components.IndexCoord
 	if mr.EnableIndexCoord {
 		is = mr.runIndexCoord(ctx, local)
-		if is != nil {
-			defer is.Stop()
-		}
 	}
 
 	var in *components.IndexNode
 	if mr.EnableIndexNode {
 		in = mr.runIndexNode(ctx, local, alias)
-		if in != nil {
-			defer in.Stop()
-		}
 	}
 
 	metrics.Register(Registry)
 
 	<-mr.closed
+
+	var wg sync.WaitGroup
+	// stop coordinators first
+	//	var component
+	coordinators := []component{rc, qs, ds, is}
+	for _, coord := range coordinators {
+		if coord != nil {
+			wg.Add(1)
+			go func(coord component) {
+				defer wg.Done()
+				coord.Stop()
+			}(coord)
+		}
+	}
+	wg.Wait()
+	log.Info("All coordinators have stopped")
+
+	// stop nodes
+	nodes := []component{qn, in, dn}
+	for _, node := range nodes {
+		if node != nil {
+			wg.Add(1)
+			go func(node component) {
+				defer wg.Done()
+				node.Stop()
+			}(node)
+		}
+	}
+	wg.Wait()
+	log.Info("All nodes have stopped")
+
+	// stop proxy
+	if pn != nil {
+		pn.Stop()
+		log.Info("proxy stopped")
+	}
+
+	log.Info("Milvus components graceful stop done")
 }
