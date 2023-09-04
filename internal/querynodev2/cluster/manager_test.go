@@ -17,6 +17,7 @@
 package cluster
 
 import (
+	context "context"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -25,23 +26,24 @@ import (
 )
 
 func TestManager(t *testing.T) {
+	ctx := context.Background()
 	t.Run("normal_get", func(t *testing.T) {
 		worker := &MockWorker{}
 		worker.EXPECT().IsHealthy().Return(true)
 		var buildErr error
 		var called int
-		builder := func(nodeID int64) (Worker, error) {
+		builder := func(_ context.Context, nodeID int64) (Worker, error) {
 			called++
 			return worker, buildErr
 		}
 		manager := NewWorkerManager(builder)
 
-		w, err := manager.GetWorker(0)
+		w, err := manager.GetWorker(ctx, 0)
 		assert.Equal(t, worker, w)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, called)
 
-		w, err = manager.GetWorker(0)
+		w, err = manager.GetWorker(ctx, 0)
 		assert.Equal(t, worker, w)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, called)
@@ -53,13 +55,13 @@ func TestManager(t *testing.T) {
 		var buildErr error
 		var called int
 		buildErr = errors.New("mocked error")
-		builder := func(nodeID int64) (Worker, error) {
+		builder := func(_ context.Context, nodeID int64) (Worker, error) {
 			called++
 			return worker, buildErr
 		}
 		manager := NewWorkerManager(builder)
 
-		_, err := manager.GetWorker(0)
+		_, err := manager.GetWorker(ctx, 0)
 		assert.Error(t, err)
 		assert.Equal(t, 1, called)
 	})
@@ -69,13 +71,13 @@ func TestManager(t *testing.T) {
 		worker.EXPECT().IsHealthy().Return(false)
 		var buildErr error
 		var called int
-		builder := func(nodeID int64) (Worker, error) {
+		builder := func(_ context.Context, nodeID int64) (Worker, error) {
 			called++
 			return worker, buildErr
 		}
 		manager := NewWorkerManager(builder)
 
-		_, err := manager.GetWorker(0)
+		_, err := manager.GetWorker(ctx, 0)
 		assert.Error(t, err)
 		assert.Equal(t, 1, called)
 	})

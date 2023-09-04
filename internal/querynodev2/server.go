@@ -298,7 +298,7 @@ func (node *QueryNode) Init() error {
 		)
 		log.Info("queryNode init scheduler", zap.String("policy", schedulePolicy))
 
-		node.clusterManager = cluster.NewWorkerManager(func(nodeID int64) (cluster.Worker, error) {
+		node.clusterManager = cluster.NewWorkerManager(func(ctx context.Context, nodeID int64) (cluster.Worker, error) {
 			if nodeID == paramtable.GetNodeID() {
 				return NewLocalWorker(node), nil
 			}
@@ -316,7 +316,7 @@ func (node *QueryNode) Init() error {
 				}
 			}
 
-			client, err := grpcquerynodeclient.NewClient(node.ctx, addr, nodeID)
+			client, err := grpcquerynodeclient.NewClient(ctx, addr, nodeID)
 			if err != nil {
 				return nil, err
 			}

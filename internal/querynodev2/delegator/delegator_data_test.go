@@ -262,7 +262,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
 		Return(nil)
 	worker1.EXPECT().Delete(mock.Anything, mock.AnythingOfType("*querypb.DeleteRequest")).Return(nil)
-	s.workerManager.EXPECT().GetWorker(mock.AnythingOfType("int64")).Call.Return(func(nodeID int64) cluster.Worker {
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
 		return workers[nodeID]
 	}, nil)
 	// load growing
@@ -351,7 +351,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 
 		worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
 			Return(nil)
-		s.workerManager.EXPECT().GetWorker(mock.AnythingOfType("int64")).Call.Return(func(nodeID int64) cluster.Worker {
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
 			return workers[nodeID]
 		}, nil)
 
@@ -416,7 +416,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 		worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
 			Return(nil)
 		worker1.EXPECT().Delete(mock.Anything, mock.AnythingOfType("*querypb.DeleteRequest")).Return(nil)
-		s.workerManager.EXPECT().GetWorker(mock.AnythingOfType("int64")).Call.Return(func(nodeID int64) cluster.Worker {
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
 			return workers[nodeID]
 		}, nil)
 
@@ -474,7 +474,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 			s.loader.ExpectedCalls = nil
 		}()
 
-		s.workerManager.EXPECT().GetWorker(mock.AnythingOfType("int64")).Return(nil, errors.New("mock error"))
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(nil, errors.New("mock error"))
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -510,7 +510,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 
 		worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
 			Return(nil)
-		s.workerManager.EXPECT().GetWorker(mock.AnythingOfType("int64")).Call.Return(func(nodeID int64) cluster.Worker {
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
 			return workers[nodeID]
 		}, nil)
 
@@ -554,7 +554,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 
 		worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
 			Return(errors.New("mocked error"))
-		s.workerManager.EXPECT().GetWorker(mock.AnythingOfType("int64")).Call.Return(func(nodeID int64) cluster.Worker {
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
 			return workers[nodeID]
 		}, nil)
 
@@ -624,7 +624,7 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 		Return(nil)
 	worker1.EXPECT().ReleaseSegments(mock.Anything, mock.AnythingOfType("*querypb.ReleaseSegmentsRequest")).Return(nil)
 	worker2.EXPECT().ReleaseSegments(mock.Anything, mock.AnythingOfType("*querypb.ReleaseSegmentsRequest")).Return(nil)
-	s.workerManager.EXPECT().GetWorker(mock.AnythingOfType("int64")).Call.Return(func(nodeID int64) cluster.Worker {
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
 		return workers[nodeID]
 	}, nil)
 	// load growing
