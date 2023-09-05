@@ -24,7 +24,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/tests/integration"
 	"github.com/stretchr/testify/suite"
@@ -733,7 +732,10 @@ func (s *JSONExprSuite) insertFlushIndexLoad(ctx context.Context, dbName, collec
 	s.NoError(err)
 	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
 	ids := segmentIDs.GetData()
-	s.NotEmpty(segmentIDs)
+	s.Require().NotEmpty(segmentIDs)
+	s.Require().True(has)
+	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
+	s.True(has)
 
 	segments, err := s.Cluster.MetaWatcher.ShowSegments()
 	s.NoError(err)
@@ -741,28 +743,7 @@ func (s *JSONExprSuite) insertFlushIndexLoad(ctx context.Context, dbName, collec
 	for _, segment := range segments {
 		log.Info("ShowSegments result", zap.String("segment", segment.String()))
 	}
-
-	if has && len(ids) > 0 {
-		flushed := func() bool {
-			resp, err := s.Cluster.Proxy.GetFlushState(ctx, &milvuspb.GetFlushStateRequest{
-				SegmentIDs: ids,
-			})
-			if err != nil {
-				//panic(errors.New("GetFlushState failed"))
-				return false
-			}
-			return resp.GetFlushed()
-		}
-		for !flushed() {
-			// respect context deadline/cancel
-			select {
-			case <-ctx.Done():
-				panic(errors.New("deadline exceeded"))
-			default:
-			}
-			time.Sleep(500 * time.Millisecond)
-		}
-	}
+	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
 
 	// create index
 	createIndexStatus, err := s.Cluster.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{

@@ -368,8 +368,8 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 	return s.dataCoord.WatchChannels(ctx, req)
 }
 
-// GetFlushState gets the flush state of multiple segments
-func (s *Server) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
+// GetFlushState gets the flush state of the collection based on the provided flush ts and segment IDs.
+func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
 	return s.dataCoord.GetFlushState(ctx, req)
 }
 

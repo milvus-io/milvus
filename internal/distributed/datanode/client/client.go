@@ -227,3 +227,10 @@ func (c *Client) SyncSegments(ctx context.Context, req *datapb.SyncSegmentsReque
 		return client.SyncSegments(ctx, req)
 	})
 }
+
+// FlushChannels notifies DataNode to sync all the segments belongs to the target channels.
+func (c *Client) FlushChannels(ctx context.Context, req *datapb.FlushChannelsRequest) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataNodeClient) (*commonpb.Status, error) {
+		return client.FlushChannels(ctx, req)
+	})
+}

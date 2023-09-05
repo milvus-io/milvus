@@ -807,3 +807,36 @@ func (s *DataNodeServicesSuite) TestResendSegmentStats() {
 	s.Assert().True(merr.Ok(resp.GetStatus()))
 	s.Assert().ElementsMatch([]UniqueID{0, 1, 2}, resp.GetSegResent())
 }
+
+func (s *DataNodeServicesSuite) TestFlushChannels() {
+	dmChannelName := "fake-by-dev-rootcoord-dml-channel-TestFlushChannels"
+
+	vChan := &datapb.VchannelInfo{
+		CollectionID:        1,
+		ChannelName:         dmChannelName,
+		UnflushedSegmentIds: []int64{},
+		FlushedSegmentIds:   []int64{},
+	}
+
+	err := s.node.flowgraphManager.addAndStart(s.node, vChan, nil, genTestTickler())
+	s.Require().NoError(err)
+
+	fgService, ok := s.node.flowgraphManager.getFlowgraphService(dmChannelName)
+	s.Require().True(ok)
+
+	flushTs := Timestamp(100)
+
+	req := &datapb.FlushChannelsRequest{
+		Base: &commonpb.MsgBase{
+			TargetID: s.node.GetSession().ServerID,
+		},
+		FlushTs:  flushTs,
+		Channels: []string{dmChannelName},
+	}
+
+	status, err := s.node.FlushChannels(s.ctx, req)
+	s.Assert().NoError(err)
+	s.Assert().True(merr.Ok(status))
+
+	s.Assert().True(fgService.channel.getFlushTs() == flushTs)
+}

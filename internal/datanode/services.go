@@ -520,6 +520,30 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 	return resp, nil
 }
 
+func (node *DataNode) FlushChannels(ctx context.Context, req *datapb.FlushChannelsRequest) (*commonpb.Status, error) {
+	log := log.Ctx(ctx).With(zap.Int64("nodeId", paramtable.GetNodeID()),
+		zap.Time("flushTs", tsoutil.PhysicalTime(req.GetFlushTs())),
+		zap.Int("len(channels)", len(req.GetChannels())))
+
+	log.Info("DataNode receives FlushChannels request")
+
+	if !node.isHealthy() {
+		err := merr.WrapErrServiceNotReady(node.GetStateCode().String())
+		log.Warn("DataNode.FlushChannels failed", zap.Error(err))
+		return merr.Status(err), nil
+	}
+
+	for _, channel := range req.GetChannels() {
+		fg, ok := node.flowgraphManager.getFlowgraphService(channel)
+		if !ok {
+			return merr.Status(merr.WrapErrChannelNotFound(channel)), nil
+		}
+		fg.channel.setFlushTs(req.GetFlushTs())
+	}
+
+	return merr.Status(nil), nil
+}
+
 func (node *DataNode) getPartitions(ctx context.Context, dbName string, collectionName string) (map[string]int64, error) {
 	req := &milvuspb.ShowPartitionsRequest{
 		Base: commonpbutil.NewMsgBase(
