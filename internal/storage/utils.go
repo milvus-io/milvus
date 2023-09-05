@@ -731,23 +731,23 @@ func MergeFieldData(data *InsertData, fid FieldID, field FieldData) {
 	}
 }
 
-// MergeInsertData merge insert datas. Maybe there are large write zoom if frequent inserts are met.
-func MergeInsertData(datas ...*InsertData) *InsertData {
-	ret := &InsertData{
-		Data:  make(map[FieldID]FieldData),
-		Infos: nil,
+// MergeInsertData append the insert datas to the original buffer.
+func MergeInsertData(buffer *InsertData, datas ...*InsertData) {
+	if buffer == nil {
+		log.Warn("Attempt to merge data into a nil buffer, skip the data merge.")
+		return
 	}
+
 	for _, data := range datas {
 		if data != nil {
 			for fid, field := range data.Data {
-				MergeFieldData(ret, fid, field)
+				MergeFieldData(buffer, fid, field)
 			}
 
 			// TODO: handle storage.InsertData.Infos
-			ret.Infos = append(ret.Infos, data.Infos...)
+			buffer.Infos = append(buffer.Infos, data.Infos...)
 		}
 	}
-	return ret
 }
 
 // TODO: string type.

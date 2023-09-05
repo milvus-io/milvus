@@ -604,7 +604,7 @@ func (ibNode *insertBufferNode) bufferInsertMsg(msg *msgstream.InsertMsg, startP
 	}
 
 	// Maybe there are large write zoom if frequent insert requests are met.
-	buffer.buffer = storage.MergeInsertData(buffer.buffer, addedBuffer)
+	storage.MergeInsertData(buffer.buffer, addedBuffer)
 
 	tsData, err := storage.GetTimestampFromInsertData(addedBuffer)
 	if err != nil {

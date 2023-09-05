@@ -1034,62 +1034,62 @@ func TestMergeInsertData(t *testing.T) {
 		Infos: nil,
 	}
 
-	merged := MergeInsertData(d1, d2)
+	MergeInsertData(d1, d2)
 
-	f, ok := merged.Data[common.RowIDField]
+	f, ok := d1.Data[common.RowIDField]
 	assert.True(t, ok)
 	assert.Equal(t, []int64{1, 2}, f.(*Int64FieldData).Data)
 
-	f, ok = merged.Data[common.TimeStampField]
+	f, ok = d1.Data[common.TimeStampField]
 	assert.True(t, ok)
 	assert.Equal(t, []int64{1, 2}, f.(*Int64FieldData).Data)
 
-	f, ok = merged.Data[BoolField]
+	f, ok = d1.Data[BoolField]
 	assert.True(t, ok)
 	assert.Equal(t, []bool{true, false}, f.(*BoolFieldData).Data)
 
-	f, ok = merged.Data[Int8Field]
+	f, ok = d1.Data[Int8Field]
 	assert.True(t, ok)
 	assert.Equal(t, []int8{1, 2}, f.(*Int8FieldData).Data)
 
-	f, ok = merged.Data[Int16Field]
+	f, ok = d1.Data[Int16Field]
 	assert.True(t, ok)
 	assert.Equal(t, []int16{1, 2}, f.(*Int16FieldData).Data)
 
-	f, ok = merged.Data[Int32Field]
+	f, ok = d1.Data[Int32Field]
 	assert.True(t, ok)
 	assert.Equal(t, []int32{1, 2}, f.(*Int32FieldData).Data)
 
-	f, ok = merged.Data[Int64Field]
+	f, ok = d1.Data[Int64Field]
 	assert.True(t, ok)
 	assert.Equal(t, []int64{1, 2}, f.(*Int64FieldData).Data)
 
-	f, ok = merged.Data[FloatField]
+	f, ok = d1.Data[FloatField]
 	assert.True(t, ok)
 	assert.Equal(t, []float32{0, 0}, f.(*FloatFieldData).Data)
 
-	f, ok = merged.Data[DoubleField]
+	f, ok = d1.Data[DoubleField]
 	assert.True(t, ok)
 	assert.Equal(t, []float64{0, 0}, f.(*DoubleFieldData).Data)
 
-	f, ok = merged.Data[StringField]
+	f, ok = d1.Data[StringField]
 	assert.True(t, ok)
 	assert.Equal(t, []string{"1", "2"}, f.(*StringFieldData).Data)
 
-	f, ok = merged.Data[BinaryVectorField]
+	f, ok = d1.Data[BinaryVectorField]
 	assert.True(t, ok)
 	assert.Equal(t, []byte{0, 0}, f.(*BinaryVectorFieldData).Data)
 
-	f, ok = merged.Data[FloatVectorField]
+	f, ok = d1.Data[FloatVectorField]
 	assert.True(t, ok)
 	assert.Equal(t, []float32{0, 0}, f.(*FloatVectorFieldData).Data)
 
-	f, ok = merged.Data[ArrayField]
+	f, ok = d1.Data[ArrayField]
 	assert.True(t, ok)
 	assert.Equal(t, []int32{1, 2, 3}, f.(*ArrayFieldData).Data[0].GetIntData().GetData())
 	assert.Equal(t, []int32{4, 5, 6}, f.(*ArrayFieldData).Data[1].GetIntData().GetData())
 
-	f, ok = merged.Data[JSONField]
+	f, ok = d1.Data[JSONField]
 	assert.True(t, ok)
 	assert.EqualValues(t, [][]byte{[]byte(`{"key":"value"}`), []byte(`{"hello":"world"}`)}, f.(*JSONFieldData).Data)
 }
