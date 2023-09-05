@@ -17,6 +17,7 @@
 package cluster
 
 import (
+	context "context"
 	"fmt"
 	"strconv"
 
@@ -29,11 +30,11 @@ import (
 
 // Manager is the interface for worker manager.
 type Manager interface {
-	GetWorker(nodeID int64) (Worker, error)
+	GetWorker(ctx context.Context, nodeID int64) (Worker, error)
 }
 
 // WorkerBuilder is function alias to build a worker from NodeID
-type WorkerBuilder func(nodeID int64) (Worker, error)
+type WorkerBuilder func(ctx context.Context, nodeID int64) (Worker, error)
 
 type grpcWorkerManager struct {
 	workers *typeutil.ConcurrentMap[int64, Worker]
@@ -42,12 +43,12 @@ type grpcWorkerManager struct {
 }
 
 // GetWorker returns worker with specified nodeID.
-func (m *grpcWorkerManager) GetWorker(nodeID int64) (Worker, error) {
+func (m *grpcWorkerManager) GetWorker(ctx context.Context, nodeID int64) (Worker, error) {
 	worker, ok := m.workers.Get(nodeID)
 	var err error
 	if !ok {
 		worker, err, _ = m.sf.Do(strconv.FormatInt(nodeID, 10), func() (Worker, error) {
-			worker, err = m.builder(nodeID)
+			worker, err = m.builder(ctx, nodeID)
 			if err != nil {
 				log.Warn("failed to build worker",
 					zap.Int64("nodeID", nodeID),

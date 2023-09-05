@@ -249,7 +249,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		zap.Int("sealedNum", sealedNum),
 		zap.Int("growingNum", len(growing)),
 	)
-	tasks, err := organizeSubTask(req, sealed, growing, sd.workerManager, sd.modifySearchRequest)
+	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, sd.modifySearchRequest)
 	if err != nil {
 		log.Warn("Search organizeSubTask failed", zap.Error(err))
 		return nil, err
@@ -313,7 +313,7 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		zap.Int("sealedNum", sealedNum),
 		zap.Int("growingNum", len(growing)),
 	)
-	tasks, err := organizeSubTask(req, sealed, growing, sd.workerManager, sd.modifyQueryRequest)
+	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, sd.modifyQueryRequest)
 	if err != nil {
 		log.Warn("query organizeSubTask failed", zap.Error(err))
 		return nil, err
@@ -356,7 +356,7 @@ func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetSta
 	sealed, growing, version := sd.distribution.GetSegments(true, req.Req.GetPartitionIDs()...)
 	defer sd.distribution.FinishUsage(version)
 
-	tasks, err := organizeSubTask(req, sealed, growing, sd.workerManager, func(req *querypb.GetStatisticsRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.GetStatisticsRequest {
+	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, func(req *querypb.GetStatisticsRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.GetStatisticsRequest {
 		nodeReq := proto.Clone(req).(*querypb.GetStatisticsRequest)
 		nodeReq.GetReq().GetBase().TargetID = targetID
 		nodeReq.Scope = scope
@@ -386,7 +386,8 @@ type subTask[T any] struct {
 	worker   cluster.Worker
 }
 
-func organizeSubTask[T any](req T, sealed []SnapshotItem, growing []SegmentEntry, workerManager cluster.Manager, modify func(T, querypb.DataScope, []int64, int64) T) ([]subTask[T], error) {
+func organizeSubTask[T any](ctx context.Context, req T, sealed []SnapshotItem, growing []SegmentEntry, sd *shardDelegator, modify func(T, querypb.DataScope, []int64, int64) T) ([]subTask[T], error) {
+	log := sd.getLogger(ctx)
 	result := make([]subTask[T], 0, len(sealed)+1)
 
 	packSubTask := func(segments []SegmentEntry, workerID int64, scope querypb.DataScope) error {
@@ -399,7 +400,7 @@ func organizeSubTask[T any](req T, sealed []SnapshotItem, growing []SegmentEntry
 		// update request
 		req := modify(req, scope, segmentIDs, workerID)
 
-		worker, err := workerManager.GetWorker(workerID)
+		worker, err := sd.workerManager.GetWorker(ctx, workerID)
 		if err != nil {
 			log.Warn("failed to get worker",
 				zap.Int64("nodeID", workerID),

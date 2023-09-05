@@ -193,7 +193,7 @@ func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 	for _, entry := range sealed {
 		entry := entry
 		eg.Go(func() error {
-			worker, err := sd.workerManager.GetWorker(entry.NodeID)
+			worker, err := sd.workerManager.GetWorker(ctx, entry.NodeID)
 			if err != nil {
 				log.Warn("failed to get worker",
 					zap.Int64("nodeID", paramtable.GetNodeID()),
@@ -209,7 +209,7 @@ func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 	}
 	if len(growing) > 0 {
 		eg.Go(func() error {
-			worker, err := sd.workerManager.GetWorker(paramtable.GetNodeID())
+			worker, err := sd.workerManager.GetWorker(ctx, paramtable.GetNodeID())
 			if err != nil {
 				log.Error("failed to get worker(local)",
 					zap.Int64("nodeID", paramtable.GetNodeID()),
@@ -338,7 +338,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		zap.Int64s("segments", lo.Map(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })),
 	)
 
-	worker, err := sd.workerManager.GetWorker(targetNodeID)
+	worker, err := sd.workerManager.GetWorker(ctx, targetNodeID)
 	if err != nil {
 		log.Warn("delegator failed to find worker", zap.Error(err))
 		return err
@@ -603,7 +603,7 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 	}
 
 	if !force {
-		worker, err := sd.workerManager.GetWorker(targetNodeID)
+		worker, err := sd.workerManager.GetWorker(ctx, targetNodeID)
 		if err != nil {
 			log.Warn("delegator failed to find worker",
 				zap.Error(err),

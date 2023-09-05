@@ -277,7 +277,7 @@ func (s *DelegatorSuite) TestSearch() {
 				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
 			}).Return(&internalpb.SearchResults{}, nil)
 
-		s.workerManager.EXPECT().GetWorker(mock.AnythingOfType("int64")).Call.Return(func(nodeID int64) cluster.Worker {
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
 			return workers[nodeID]
 		}, nil)
 
@@ -308,7 +308,7 @@ func (s *DelegatorSuite) TestSearch() {
 		worker2.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
 			Return(&internalpb.SearchResults{}, nil)
 
-		s.workerManager.EXPECT().GetWorker(mock.AnythingOfType("int64")).Call.Return(func(nodeID int64) cluster.Worker {
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
 			return workers[nodeID]
 		}, nil)
 
@@ -346,7 +346,7 @@ func (s *DelegatorSuite) TestSearch() {
 				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
 			}).Return(&internalpb.SearchResults{}, nil)
 
-		s.workerManager.EXPECT().GetWorker(mock.AnythingOfType("int64")).Call.Return(func(nodeID int64) cluster.Worker {
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
 			return workers[nodeID]
 		}, nil)
 
@@ -386,7 +386,7 @@ func (s *DelegatorSuite) TestSearch() {
 				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
 			}).Return(&internalpb.SearchResults{}, nil)
 
-		s.workerManager.EXPECT().GetWorker(mock.AnythingOfType("int64")).Call.Return(func(nodeID int64) cluster.Worker {
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
 			return workers[nodeID]
 		}, nil)
 
@@ -530,7 +530,7 @@ func (s *DelegatorSuite) TestQuery() {
 				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
 			}).Return(&internalpb.RetrieveResults{}, nil)
 
-		s.workerManager.EXPECT().GetWorker(mock.AnythingOfType("int64")).Call.Return(func(nodeID int64) cluster.Worker {
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
 			return workers[nodeID]
 		}, nil)
 
@@ -561,7 +561,7 @@ func (s *DelegatorSuite) TestQuery() {
 		worker2.EXPECT().QuerySegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
 			Return(&internalpb.RetrieveResults{}, nil)
 
-		s.workerManager.EXPECT().GetWorker(mock.AnythingOfType("int64")).Call.Return(func(nodeID int64) cluster.Worker {
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
 			return workers[nodeID]
 		}, nil)
 
@@ -599,7 +599,7 @@ func (s *DelegatorSuite) TestQuery() {
 				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
 			}).Return(&internalpb.RetrieveResults{}, nil)
 
-		s.workerManager.EXPECT().GetWorker(mock.AnythingOfType("int64")).Call.Return(func(nodeID int64) cluster.Worker {
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
 			return workers[nodeID]
 		}, nil)
 
@@ -636,7 +636,7 @@ func (s *DelegatorSuite) TestQuery() {
 				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
 			}).Return(&internalpb.RetrieveResults{}, nil)
 
-		s.workerManager.EXPECT().GetWorker(mock.AnythingOfType("int64")).Call.Return(func(nodeID int64) cluster.Worker {
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
 			return workers[nodeID]
 		}, nil)
 
@@ -751,7 +751,7 @@ func (s *DelegatorSuite) TestGetStats() {
 				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
 			}).Return(&internalpb.GetStatisticsResponse{}, nil)
 
-		s.workerManager.EXPECT().GetWorker(mock.AnythingOfType("int64")).Call.Return(func(nodeID int64) cluster.Worker {
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
 			return workers[nodeID]
 		}, nil)
 
@@ -787,7 +787,7 @@ func (s *DelegatorSuite) TestGetStats() {
 				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
 			}).Return(&internalpb.GetStatisticsResponse{}, nil)
 
-		s.workerManager.EXPECT().GetWorker(mock.AnythingOfType("int64")).Call.Return(func(nodeID int64) cluster.Worker {
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
 			return workers[nodeID]
 		}, nil)
 
@@ -824,7 +824,7 @@ func (s *DelegatorSuite) TestGetStats() {
 				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
 			}).Return(&internalpb.GetStatisticsResponse{}, nil)
 
-		s.workerManager.EXPECT().GetWorker(mock.AnythingOfType("int64")).Call.Return(func(nodeID int64) cluster.Worker {
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
 			return workers[nodeID]
 		}, nil)
 
