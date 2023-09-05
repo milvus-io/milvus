@@ -112,10 +112,12 @@ class TestChaosApply:
         log.info("chaos deleted")
         res = chaos_res.list_all()
         chaos_list = [r['metadata']['name'] for r in res['items']]
-        # verify the chaos is deleted
-        sleep(10)
-        res = chaos_res.list_all()
-        chaos_list = [r['metadata']['name'] for r in res['items']]
+        # verify the chaos is deleted in 60s
+        t0 = time.time()
+        while meta_name in chaos_list and time.time() - t0 < 60:
+            sleep(10)
+            res = chaos_res.list_all()
+            chaos_list = [r['metadata']['name'] for r in res['items']]
         assert meta_name not in chaos_list
         # wait all pods ready
         t0 = time.time()
