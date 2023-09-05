@@ -192,6 +192,26 @@ $ go test ./internal/datanode -run SegmentReplica/segmentFlushed
 ok  	github.com/milvus-io/milvus/internal/datanode 0.019s
 ```
 
+### Using mockery
+
+It is recommended to use [Mockery](https://github.com/vektra/mockery) to generate mock implementations for unit test dependencies.
+
+If your PR changes any interface definition, you shall run following commands to update all mockery implemented type before submitting it:
+
+```shell
+make generate-mockery
+```
+
+If your PR adds any new interface and related mockery types, please add a new entry under proper [Makefile](Makefile) `generate-mockery-xxx` command.
+
+```Makefile
+generate-mockery-xxx: getdeps
+    # ...
+    # other mockery generation commands
+    # use mockery under $(INSTALL_PATH) to unify mockery binary version
+    $(INSTALL_PATH)/mockery --name=NewInterface ...
+```
+
 ### Run C++ unit tests
 
 Install lcov
