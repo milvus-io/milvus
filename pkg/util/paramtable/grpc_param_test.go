@@ -23,9 +23,9 @@ import (
 func TestGrpcServerParams(t *testing.T) {
 	role := typeutil.DataNodeRole
 	base := &ComponentParam{}
-	base.Init()
+	base.Init(NewBaseTable(SkipRemote(true)))
 	var serverConfig GrpcServerConfig
-	serverConfig.Init(role, &base.BaseTable)
+	serverConfig.Init(role, base.baseTable)
 
 	assert.Equal(t, serverConfig.Domain, role)
 	t.Logf("Domain = %s", serverConfig.Domain)
@@ -66,9 +66,9 @@ func TestGrpcServerParams(t *testing.T) {
 func TestGrpcClientParams(t *testing.T) {
 	role := typeutil.DataNodeRole
 	base := ComponentParam{}
-	base.Init()
+	base.Init(NewBaseTable(SkipRemote(true)))
 	var clientConfig GrpcClientConfig
-	clientConfig.Init(role, &base.BaseTable)
+	clientConfig.Init(role, base.baseTable)
 
 	assert.Equal(t, clientConfig.Domain, role)
 	t.Logf("Domain = %s", clientConfig.Domain)

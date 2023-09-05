@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type ReplicaManagerSuite struct {
@@ -44,7 +45,7 @@ type ReplicaManagerSuite struct {
 }
 
 func (suite *ReplicaManagerSuite) SetupSuite() {
-	Params.Init()
+	paramtable.Init()
 
 	suite.nodes = []int64{1, 2, 3}
 	suite.collections = []int64{100, 101, 102}

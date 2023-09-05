@@ -145,7 +145,7 @@ func (i *IndexNode) Register() error {
 }
 
 func (i *IndexNode) initSegcore() {
-	cGlogConf := C.CString(path.Join(Params.BaseTable.GetConfigDir(), paramtable.DefaultGlogConf))
+	cGlogConf := C.CString(path.Join(paramtable.GetBaseTable().GetConfigDir(), paramtable.DefaultGlogConf))
 	C.IndexBuilderInit(cGlogConf)
 	C.free(unsafe.Pointer(cGlogConf))
 

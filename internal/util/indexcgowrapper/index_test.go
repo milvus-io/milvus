@@ -9,7 +9,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/metric"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 const (
@@ -33,8 +32,6 @@ const (
 	efConstruction = 200
 	ef             = 200
 )
-
-var Params paramtable.ComponentParam
 
 type vecTestCase struct {
 	indexType  string

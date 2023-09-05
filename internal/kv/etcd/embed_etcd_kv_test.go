@@ -40,7 +40,7 @@ func TestEmbedEtcd(te *testing.T) {
 	dir := te.TempDir()
 	te.Setenv("etcd.data.dir", dir)
 
-	param.Init()
+	param.Init(paramtable.NewBaseTable())
 
 	te.Run("etcdKV SaveAndLoad", func(t *testing.T) {
 		rootPath := "/etcd/test/root/saveandload"

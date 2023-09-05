@@ -40,7 +40,7 @@ func TestRmqRetention_Basic(t *testing.T) {
 	defer os.RemoveAll(metaPath)
 
 	params := paramtable.Get()
-	params.Init()
+	paramtable.Init()
 
 	params.Save(params.RocksmqCfg.PageSize.Key, "10")
 	params.Save(params.RocksmqCfg.TickerTimeInSeconds.Key, "2")
@@ -135,7 +135,7 @@ func TestRmqRetention_NotConsumed(t *testing.T) {
 	defer os.RemoveAll(metaPath)
 
 	params := paramtable.Get()
-	params.Init()
+	paramtable.Init()
 
 	params.Save(params.RocksmqCfg.PageSize.Key, "10")
 	params.Save(params.RocksmqCfg.TickerTimeInSeconds.Key, "2")
@@ -245,7 +245,7 @@ func TestRmqRetention_MultipleTopic(t *testing.T) {
 	os.RemoveAll(metaPath)
 
 	params := paramtable.Get()
-	params.Init()
+	paramtable.Init()
 
 	params.Save(params.RocksmqCfg.PageSize.Key, "10")
 	params.Save(params.RocksmqCfg.TickerTimeInSeconds.Key, "1")
@@ -412,8 +412,7 @@ func TestRetentionInfo_InitRetentionInfo(t *testing.T) {
 
 	defer os.RemoveAll(metaPath)
 
-	params := paramtable.Get()
-	params.Init()
+	paramtable.Init()
 	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
 	assert.NoError(t, err)
 	assert.NotNil(t, rmq)
@@ -468,7 +467,7 @@ func TestRmqRetention_PageTimeExpire(t *testing.T) {
 	os.RemoveAll(metaPath)
 
 	params := paramtable.Get()
-	params.Init()
+	paramtable.Init()
 
 	params.Save(params.RocksmqCfg.PageSize.Key, "10")
 	params.Save(params.RocksmqCfg.TickerTimeInSeconds.Key, "1")
@@ -594,7 +593,7 @@ func TestRmqRetention_PageSizeExpire(t *testing.T) {
 	os.RemoveAll(metaPath)
 
 	params := paramtable.Get()
-	params.Init()
+	paramtable.Init()
 
 	params.Save(params.RocksmqCfg.PageSize.Key, "10")
 	params.Save(params.RocksmqCfg.TickerTimeInSeconds.Key, "1")

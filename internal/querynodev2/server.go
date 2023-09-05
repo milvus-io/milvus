@@ -178,7 +178,7 @@ func (node *QueryNode) Register() error {
 
 // InitSegcore set init params of segCore, such as chunckRows, SIMD type...
 func (node *QueryNode) InitSegcore() error {
-	cGlogConf := C.CString(path.Join(paramtable.Get().BaseTable.GetConfigDir(), paramtable.DefaultGlogConf))
+	cGlogConf := C.CString(path.Join(paramtable.GetBaseTable().GetConfigDir(), paramtable.DefaultGlogConf))
 	C.SegcoreInit(cGlogConf)
 	C.free(unsafe.Pointer(cGlogConf))
 

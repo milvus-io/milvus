@@ -210,7 +210,7 @@ func (c *mck) formatFlags(args []string, flags *flag.FlagSet) {
 }
 
 func (c *mck) connectEctd() {
-	c.params.Init()
+	c.params.Init(paramtable.NewBaseTable())
 	var etcdCli *clientv3.Client
 	var err error
 	if c.etcdIP != "" {

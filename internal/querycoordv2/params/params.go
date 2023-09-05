@@ -40,7 +40,7 @@ func GenerateEtcdConfig() *paramtable.EtcdConfig {
 	rand.Seed(time.Now().UnixNano())
 	suffix := "-test-querycoord" + strconv.FormatInt(rand.Int63(), 10)
 
-	Params.BaseTable.Save("etcd.rootPath", config.MetaRootPath.GetValue()+suffix)
+	Params.Save("etcd.rootPath", config.MetaRootPath.GetValue()+suffix)
 	return &Params.EtcdCfg
 }
 

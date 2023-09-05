@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type SegmentCheckerTestSuite struct {
@@ -48,7 +49,7 @@ type SegmentCheckerTestSuite struct {
 }
 
 func (suite *SegmentCheckerTestSuite) SetupSuite() {
-	Params.Init()
+	paramtable.Init()
 }
 
 func (suite *SegmentCheckerTestSuite) SetupTest() {

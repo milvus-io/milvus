@@ -34,6 +34,7 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type CollectionManagerSuite struct {
@@ -57,7 +58,7 @@ type CollectionManagerSuite struct {
 }
 
 func (suite *CollectionManagerSuite) SetupSuite() {
-	Params.Init()
+	paramtable.Init()
 
 	suite.collections = []int64{100, 101, 102, 103}
 	suite.partitions = map[int64][]int64{

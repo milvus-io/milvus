@@ -86,7 +86,7 @@ type ServerSuite struct {
 }
 
 func (suite *ServerSuite) SetupSuite() {
-	Params.Init()
+	paramtable.Init()
 	params.GenerateEtcdConfig()
 
 	suite.collections = []int64{1000, 1001}

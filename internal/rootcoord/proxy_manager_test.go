@@ -29,11 +29,12 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestProxyManager(t *testing.T) {
-	Params.Init()
+	paramtable.Init()
 
 	etcdCli, err := etcd.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
@@ -109,7 +110,7 @@ func TestProxyManager(t *testing.T) {
 }
 
 func TestProxyManager_ErrCompacted(t *testing.T) {
-	Params.Init()
+	paramtable.Init()
 
 	etcdCli, err := etcd.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),

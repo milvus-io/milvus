@@ -33,9 +33,9 @@ func TestEtcdRestartLoad(te *testing.T) {
 	te.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
 	te.Setenv("ETCD_USE_EMBED", "true")
 	param := new(paramtable.ComponentParam)
-	param.Init()
-	param.BaseTable.Save("etcd.config.path", "../../../configs/advanced/etcd.yaml")
-	param.BaseTable.Save("etcd.data.dir", etcdDataDir)
+	param.Init(paramtable.NewBaseTable())
+	param.Save("etcd.config.path", "../../../configs/advanced/etcd.yaml")
+	param.Save("etcd.data.dir", etcdDataDir)
 	//clean up data
 	defer func() {
 		err := os.RemoveAll(etcdDataDir)

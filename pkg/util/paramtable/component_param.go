@@ -52,7 +52,8 @@ const (
 // ComponentParam is used to quickly and easily access all components' configurations.
 type ComponentParam struct {
 	ServiceParam
-	once sync.Once
+	once      sync.Once
+	baseTable *BaseTable
 
 	CommonCfg       commonConfig
 	QuotaConfig     quotaConfig
@@ -68,7 +69,6 @@ type ComponentParam struct {
 	IndexNodeCfg  indexNodeConfig
 	HTTPCfg       httpConfig
 	LogCfg        logConfig
-	HookCfg       hookConfig
 
 	RootCoordGrpcServerCfg  GrpcServerConfig
 	ProxyGrpcServerCfg      GrpcServerConfig
@@ -90,68 +90,68 @@ type ComponentParam struct {
 }
 
 // Init initialize once
-func (p *ComponentParam) Init() {
+func (p *ComponentParam) Init(bt *BaseTable) {
 	p.once.Do(func() {
-		p.init()
+		p.init(bt)
 	})
 }
 
 // init initialize the global param table
 
-func (p *ComponentParam) init() {
-	p.ServiceParam.init()
+func (p *ComponentParam) init(bt *BaseTable) {
+	p.baseTable = bt
+	p.ServiceParam.init(bt)
 
-	p.CommonCfg.init(&p.BaseTable)
-	p.QuotaConfig.init(&p.BaseTable)
-	p.AutoIndexConfig.init(&p.BaseTable)
-	p.TraceCfg.init(&p.BaseTable)
+	p.CommonCfg.init(bt)
+	p.QuotaConfig.init(bt)
+	p.AutoIndexConfig.init(bt)
+	p.TraceCfg.init(bt)
 
-	p.RootCoordCfg.init(&p.BaseTable)
-	p.ProxyCfg.init(&p.BaseTable)
-	p.QueryCoordCfg.init(&p.BaseTable)
-	p.QueryNodeCfg.init(&p.BaseTable)
-	p.DataCoordCfg.init(&p.BaseTable)
-	p.DataNodeCfg.init(&p.BaseTable)
-	p.IndexNodeCfg.init(&p.BaseTable)
-	p.HTTPCfg.init(&p.BaseTable)
-	p.LogCfg.init(&p.BaseTable)
-	p.HookCfg.init()
+	p.RootCoordCfg.init(bt)
+	p.ProxyCfg.init(bt)
+	p.QueryCoordCfg.init(bt)
+	p.QueryNodeCfg.init(bt)
+	p.DataCoordCfg.init(bt)
+	p.DataNodeCfg.init(bt)
+	p.IndexNodeCfg.init(bt)
+	p.HTTPCfg.init(bt)
+	p.LogCfg.init(bt)
 
-	p.RootCoordGrpcServerCfg.Init("rootCoord", &p.BaseTable)
-	p.ProxyGrpcServerCfg.Init("proxy", &p.BaseTable)
+	p.RootCoordGrpcServerCfg.Init("rootCoord", bt)
+	p.ProxyGrpcServerCfg.Init("proxy", bt)
 	p.ProxyGrpcServerCfg.InternalPort.Export = true
-	p.QueryCoordGrpcServerCfg.Init("queryCoord", &p.BaseTable)
-	p.QueryNodeGrpcServerCfg.Init("queryNode", &p.BaseTable)
-	p.DataCoordGrpcServerCfg.Init("dataCoord", &p.BaseTable)
-	p.DataNodeGrpcServerCfg.Init("dataNode", &p.BaseTable)
-	p.IndexNodeGrpcServerCfg.Init("indexNode", &p.BaseTable)
+	p.QueryCoordGrpcServerCfg.Init("queryCoord", bt)
+	p.QueryNodeGrpcServerCfg.Init("queryNode", bt)
+	p.DataCoordGrpcServerCfg.Init("dataCoord", bt)
+	p.DataNodeGrpcServerCfg.Init("dataNode", bt)
+	p.IndexNodeGrpcServerCfg.Init("indexNode", bt)
 
-	p.RootCoordGrpcClientCfg.Init("rootCoord", &p.BaseTable)
-	p.ProxyGrpcClientCfg.Init("proxy", &p.BaseTable)
-	p.QueryCoordGrpcClientCfg.Init("queryCoord", &p.BaseTable)
-	p.QueryNodeGrpcClientCfg.Init("queryNode", &p.BaseTable)
-	p.DataCoordGrpcClientCfg.Init("dataCoord", &p.BaseTable)
-	p.DataNodeGrpcClientCfg.Init("dataNode", &p.BaseTable)
-	p.IndexNodeGrpcClientCfg.Init("indexNode", &p.BaseTable)
+	p.RootCoordGrpcClientCfg.Init("rootCoord", bt)
+	p.ProxyGrpcClientCfg.Init("proxy", bt)
+	p.QueryCoordGrpcClientCfg.Init("queryCoord", bt)
+	p.QueryNodeGrpcClientCfg.Init("queryNode", bt)
+	p.DataCoordGrpcClientCfg.Init("dataCoord", bt)
+	p.DataNodeGrpcClientCfg.Init("dataNode", bt)
+	p.IndexNodeGrpcClientCfg.Init("indexNode", bt)
 
-	p.IntegrationTestCfg.init(&p.BaseTable)
+	p.IntegrationTestCfg.init(bt)
 }
 
 func (p *ComponentParam) GetComponentConfigurations(componentName string, sub string) map[string]string {
 	allownPrefixs := append(globalConfigPrefixs(), componentName+".")
-	return p.mgr.GetBy(config.WithSubstr(sub), config.WithOneOfPrefixs(allownPrefixs...))
+	return p.baseTable.mgr.GetBy(config.WithSubstr(sub), config.WithOneOfPrefixs(allownPrefixs...))
 }
 
 func (p *ComponentParam) GetAll() map[string]string {
-	return p.mgr.GetConfigs()
+	return p.baseTable.mgr.GetConfigs()
 }
 
 func (p *ComponentParam) Watch(key string, watcher config.EventHandler) {
-	p.mgr.Dispatcher.Register(key, watcher)
+	p.baseTable.mgr.Dispatcher.Register(key, watcher)
 }
 
 func (p *ComponentParam) WatchKeyPrefix(keyPrefix string, watcher config.EventHandler) {
-	p.mgr.Dispatcher.RegisterForKeyPrefix(keyPrefix, watcher)
+	p.baseTable.mgr.Dispatcher.RegisterForKeyPrefix(keyPrefix, watcher)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -2586,4 +2586,17 @@ func (p *integrationTestConfig) init(base *BaseTable) {
 		PanicIfEmpty: true,
 	}
 	p.IntegrationMode.Init(base.mgr)
+}
+
+func (params *ComponentParam) Save(key string, value string) error {
+	return params.baseTable.Save(key, value)
+}
+func (params *ComponentParam) Remove(key string) error {
+	return params.baseTable.Remove(key)
+}
+func (params *ComponentParam) Reset(key string) error {
+	return params.baseTable.Reset(key)
+}
+func (params *ComponentParam) GetWithDefault(key string, dft string) string {
+	return params.baseTable.GetWithDefault(key, dft)
 }

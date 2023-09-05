@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
@@ -52,7 +53,7 @@ type CheckerControllerSuite struct {
 }
 
 func (suite *CheckerControllerSuite) SetupSuite() {
-	Params.Init()
+	paramtable.Init()
 }
 
 func (suite *CheckerControllerSuite) SetupTest() {

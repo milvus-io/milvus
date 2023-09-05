@@ -62,41 +62,70 @@ var defaultYaml = []string{"milvus.yaml"}
 
 // BaseTable the basics of paramtable
 type BaseTable struct {
-	once sync.Once
-	mgr  *config.Manager
+	once   sync.Once
+	mgr    *config.Manager
+	config *baseTableConfig
+}
 
-	configDir string
-	YamlFiles []string
+type baseTableConfig struct {
+	configDir       string
+	refreshInterval int
+	skipRemote      bool
+	skipEnv         bool
+	yamlFiles       []string
+}
+
+type Option func(*baseTableConfig)
+
+func Files(files []string) Option {
+	return func(bt *baseTableConfig) {
+		bt.yamlFiles = files
+	}
+}
+
+func Interval(interval int) Option {
+	return func(bt *baseTableConfig) {
+		bt.refreshInterval = interval
+	}
+}
+
+func SkipRemote(skip bool) Option {
+	return func(bt *baseTableConfig) {
+		bt.skipRemote = skip
+	}
+}
+
+func skipEnv(skip bool) Option {
+	return func(bt *baseTableConfig) {
+		bt.skipEnv = skip
+	}
 }
 
 // NewBaseTableFromYamlOnly only used in migration tool.
 // Maybe we shouldn't limit the configDir internally.
 func NewBaseTableFromYamlOnly(yaml string) *BaseTable {
-	mgr, _ := config.Init(config.WithFilesSource(&config.FileInfo{
-		Files:           []string{yaml},
-		RefreshInterval: 10 * time.Second,
-	}))
-	gp := &BaseTable{mgr: mgr, YamlFiles: []string{yaml}}
-	return gp
+	return NewBaseTable(Files([]string{yaml}), SkipRemote(true), skipEnv(true))
 }
 
-// GlobalInitWithYaml initializes the param table with the given yaml.
-// We will update the global DefaultYaml variable directly, once and for all.
-// GlobalInitWithYaml shall be called at the very beginning before initiating the base table.
-// GlobalInitWithYaml should be called only in standalone and embedded Milvus.
-func (gp *BaseTable) GlobalInitWithYaml(yaml string) {
-	gp.once.Do(func() {
-		defaultYaml = []string{yaml}
-	})
-}
-
-func (gp *BaseTable) UpdateSourceOptions(opts ...config.Option) {
-	gp.mgr.UpdateSourceOptions(opts...)
+func NewBaseTable(opts ...Option) *BaseTable {
+	defaultConfig := &baseTableConfig{
+		configDir:       initConfPath(),
+		yamlFiles:       defaultYaml,
+		refreshInterval: 5,
+		skipRemote:      false,
+		skipEnv:         false,
+	}
+	for _, opt := range opts {
+		opt(defaultConfig)
+	}
+	bt := &BaseTable{config: defaultConfig}
+	bt.init()
+	return bt
 }
 
 // init initializes the param table.
 // if refreshInterval greater than 0 will auto refresh config from source
-func (gp *BaseTable) init(refreshInterval int) {
+func (bt *BaseTable) init() {
 	formatter := func(key string) string {
 		ret := strings.ToLower(key)
 		ret = strings.TrimPrefix(ret, "milvus.")
@@ -105,35 +134,39 @@ func (gp *BaseTable) init(refreshInterval int) {
 		ret = strings.ReplaceAll(ret, ".", "")
 		return ret
 	}
-	if len(gp.YamlFiles) == 0 {
-		gp.YamlFiles = defaultYaml
+	bt.mgr, _ = config.Init()
+	if !bt.config.skipEnv {
+		err := bt.mgr.AddSource(config.NewEnvSource(formatter))
+		if err != nil {
+			log.Warn("init baseTable with env failed", zap.Error(err))
+			return
+		}
 	}
-	var err error
-	gp.mgr, err = config.Init(config.WithEnvSource(formatter))
-	if err != nil {
-		return
+	bt.initConfigsFromLocal()
+	if !bt.config.skipRemote {
+		bt.initConfigsFromRemote()
 	}
-	gp.initConfigsFromLocal(refreshInterval)
-	gp.initConfigsFromRemote(refreshInterval)
+	log.Info("Got Config", zap.Any("configs", bt.mgr.GetConfigs()))
 }
 
-func (gp *BaseTable) initConfigsFromLocal(refreshInterval int) {
-	gp.configDir = gp.initConfPath()
-	err := gp.mgr.AddSource(config.NewFileSource(&config.FileInfo{
-		Files: lo.Map(gp.YamlFiles, func(file string, _ int) string {
-			return path.Join(gp.configDir, file)
+func (bt *BaseTable) initConfigsFromLocal() {
+	refreshInterval := bt.config.refreshInterval
+	err := bt.mgr.AddSource(config.NewFileSource(&config.FileInfo{
+		Files: lo.Map(bt.config.yamlFiles, func(file string, _ int) string {
+			return path.Join(bt.config.configDir, file)
 		}),
 		RefreshInterval: time.Duration(refreshInterval) * time.Second,
 	}))
 	if err != nil {
-		log.Warn("init baseTable with file failed", zap.Strings("configFile", gp.YamlFiles), zap.Error(err))
+		log.Warn("init baseTable with file failed", zap.Strings("configFile", bt.config.yamlFiles), zap.Error(err))
 		return
 	}
 }
 
-func (gp *BaseTable) initConfigsFromRemote(refreshInterval int) {
+func (bt *BaseTable) initConfigsFromRemote() {
+	refreshInterval := bt.config.refreshInterval
 	etcdConfig := EtcdConfig{}
-	etcdConfig.Init(gp)
+	etcdConfig.Init(bt)
 	etcdConfig.Endpoints.PanicIfEmpty = false
 	etcdConfig.RootPath.PanicIfEmpty = false
 	if etcdConfig.Endpoints.GetValue() == "" {
@@ -159,52 +192,57 @@ func (gp *BaseTable) initConfigsFromRemote(refreshInterval int) {
 		log.Info("init with etcd failed", zap.Error(err))
 		return
 	}
-	gp.mgr.AddSource(s)
-	s.SetEventHandler(gp.mgr)
+	bt.mgr.AddSource(s)
+	s.SetEventHandler(bt.mgr)
 }
 
 // GetConfigDir returns the config directory
-func (gp *BaseTable) GetConfigDir() string {
-	return gp.configDir
+func (bt *BaseTable) GetConfigDir() string {
+	return bt.config.configDir
 }
 
-func (gp *BaseTable) initConfPath() string {
+func initConfPath() string {
 	// check if user set conf dir through env
-	configDir, err := gp.mgr.GetConfig("MILVUSCONF")
+	configDir := os.Getenv("MILVUSCONF")
+	if len(configDir) != 0 {
+		return configDir
+	}
+	runPath, err := os.Getwd()
 	if err != nil {
-		runPath, err := os.Getwd()
-		if err != nil {
-			panic(err)
-		}
-		configDir = runPath + "/configs"
-		if _, err := os.Stat(configDir); err != nil {
-			_, fpath, _, _ := runtime.Caller(0)
-			configDir = path.Dir(fpath) + "/../../../configs"
-		}
+		panic(err)
+	}
+	configDir = runPath + "/configs"
+	if _, err := os.Stat(configDir); err != nil {
+		_, fpath, _, _ := runtime.Caller(0)
+		configDir = path.Dir(fpath) + "/../../../configs"
 	}
 	return configDir
 }
 
-func (gp *BaseTable) FileConfigs() map[string]string {
-	return gp.mgr.FileConfigs()
+func (bt *BaseTable) FileConfigs() map[string]string {
+	return bt.mgr.FileConfigs()
+}
+
+func (bt *BaseTable) UpdateSourceOptions(opts ...config.Option) {
+	bt.mgr.UpdateSourceOptions(opts...)
 }
 
 // Load loads an object with @key.
-func (gp *BaseTable) Load(key string) (string, error) {
-	return gp.mgr.GetConfig(key)
+func (bt *BaseTable) Load(key string) (string, error) {
+	return bt.mgr.GetConfig(key)
 }
 
-func (gp *BaseTable) Get(key string) string {
-	return gp.GetWithDefault(key, "")
+func (bt *BaseTable) Get(key string) string {
+	return bt.GetWithDefault(key, "")
 }
 
 // GetWithDefault loads an object with @key. If the object does not exist, @defaultValue will be returned.
-func (gp *BaseTable) GetWithDefault(key, defaultValue string) string {
-	if gp.mgr == nil {
+func (bt *BaseTable) GetWithDefault(key, defaultValue string) string {
+	if bt.mgr == nil {
 		return defaultValue
 	}
 
-	str, err := gp.mgr.GetConfig(key)
+	str, err := bt.mgr.GetConfig(key)
 	if err != nil {
 		return defaultValue
 	}
@@ -212,19 +250,19 @@ func (gp *BaseTable) GetWithDefault(key, defaultValue string) string {
 }
 
 // Remove Config by key
-func (gp *BaseTable) Remove(key string) error {
-	gp.mgr.DeleteConfig(key)
+func (bt *BaseTable) Remove(key string) error {
+	bt.mgr.DeleteConfig(key)
 	return nil
 }
 
 // Update Config
-func (gp *BaseTable) Save(key, value string) error {
-	gp.mgr.SetConfig(key, value)
+func (bt *BaseTable) Save(key, value string) error {
+	bt.mgr.SetConfig(key, value)
 	return nil
 }
 
 // Reset Config to default value
-func (gp *BaseTable) Reset(key string) error {
-	gp.mgr.ResetConfig(key)
+func (bt *BaseTable) Reset(key string) error {
+	bt.mgr.ResetConfig(key)
 	return nil
 }

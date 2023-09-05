@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -42,7 +43,7 @@ type ResourceManagerSuite struct {
 }
 
 func (suite *ResourceManagerSuite) SetupSuite() {
-	Params.Init()
+	paramtable.Init()
 }
 
 func (suite *ResourceManagerSuite) SetupTest() {

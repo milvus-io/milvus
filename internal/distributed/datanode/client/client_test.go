@@ -22,16 +22,16 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/internal/util/mock"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/stretchr/testify/assert"
 )
 
 func Test_NewClient(t *testing.T) {
-	proxy.Params.Init()
+	paramtable.Init()
 	ctx := context.Background()
 	client, err := NewClient(ctx, "", 1)
 	assert.Nil(t, client)

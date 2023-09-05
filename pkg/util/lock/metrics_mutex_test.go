@@ -14,7 +14,7 @@ func TestMetricsLockLock(t *testing.T) {
 	lManager := &MetricsLockManager{
 		rwLocks: make(map[string]*MetricsRWMutex, 0),
 	}
-	params.Init()
+	params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 	params.Save(params.CommonCfg.EnableLockMetrics.Key, "true")
 	params.Save(params.CommonCfg.LockSlowLogInfoThreshold.Key, "10")
 	lName := "testLock"
@@ -43,7 +43,7 @@ func TestMetricsLockRLock(t *testing.T) {
 	lManager := &MetricsLockManager{
 		rwLocks: make(map[string]*MetricsRWMutex, 0),
 	}
-	params.Init()
+	params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 	params.Save(params.CommonCfg.EnableLockMetrics.Key, "true")
 	params.Save(params.CommonCfg.LockSlowLogWarnThreshold.Key, "10")
 	lName := "testLock"

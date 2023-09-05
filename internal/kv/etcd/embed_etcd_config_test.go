@@ -36,7 +36,7 @@ func TestEtcdConfigLoad(te *testing.T) {
 	te.Setenv("etcd.config.path", "../../../configs/advanced/etcd.yaml")
 	te.Setenv("etcd.data.dir", "etcd.test.data.dir")
 
-	param.Init()
+	param.Init(paramtable.NewBaseTable())
 	//clean up data
 	defer func() {
 		os.RemoveAll("etcd.test.data.dir")

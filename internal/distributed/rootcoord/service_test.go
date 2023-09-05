@@ -180,8 +180,7 @@ func TestRun(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 	randVal := rand.Int()
 	rootPath := fmt.Sprintf("/%d/test", randVal)
-	rootcoord.Params.BaseTable.Save("etcd.rootPath", rootPath)
-	rootcoord.Params.Init()
+	rootcoord.Params.Save("etcd.rootPath", rootPath)
 
 	etcdCli, err := etcd.GetEtcdClient(
 		etcdConfig.UseEmbedEtcd.GetAsBool(),

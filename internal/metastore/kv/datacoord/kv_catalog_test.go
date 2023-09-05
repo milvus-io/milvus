@@ -1064,7 +1064,7 @@ func TestCatalog_DropSegmentIndex(t *testing.T) {
 }
 
 func BenchmarkCatalog_List1000Segments(b *testing.B) {
-	Params.Init()
+	paramtable.Init()
 	etcdCli, err := etcd.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
@@ -1170,7 +1170,7 @@ func addSegment(rootPath string, collectionID, partitionID, segmentID, fieldID i
 var Params = paramtable.Get()
 
 func TestMain(m *testing.M) {
-	Params.Init()
+	paramtable.Init()
 	code := m.Run()
 	os.Exit(code)
 }

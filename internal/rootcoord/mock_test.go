@@ -661,7 +661,7 @@ func withTtSynchronizer(ticker *timetickSync) Opt {
 }
 
 func newRocksMqTtSynchronizer() *timetickSync {
-	Params.Init()
+	paramtable.Init()
 	paramtable.Get().Save(Params.RootCoordCfg.DmlChannelNum.Key, "4")
 	ctx := context.Background()
 	factory := dependency.NewDefaultFactory(true)
@@ -1063,7 +1063,7 @@ func newTickerWithMockNormalStream() *timetickSync {
 }
 
 func newTickerWithFactory(factory msgstream.Factory) *timetickSync {
-	Params.Init()
+	paramtable.Init()
 	paramtable.Get().Save(Params.RootCoordCfg.DmlChannelNum.Key, "4")
 	ctx := context.Background()
 	chans := map[UniqueID][]string{}

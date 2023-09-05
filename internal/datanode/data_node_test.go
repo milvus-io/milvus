@@ -66,7 +66,7 @@ func TestMain(t *testing.M) {
 	os.Setenv("ROCKSMQ_PATH", path)
 	defer os.RemoveAll(path)
 
-	Params.Init()
+	paramtable.Init()
 	// change to specific channel for test
 	paramtable.Get().Save(Params.EtcdCfg.Endpoints.Key, strings.Join(addrs, ","))
 	paramtable.Get().Save(Params.CommonCfg.DataCoordTimeTick.Key, Params.CommonCfg.DataCoordTimeTick.GetValue()+strconv.Itoa(rand.Int()))

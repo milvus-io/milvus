@@ -890,7 +890,7 @@ func TestRootCoord_ShowConfigurations(t *testing.T) {
 	})
 
 	t.Run("normal case", func(t *testing.T) {
-		Params.Init()
+		paramtable.Init()
 
 		pattern := "rootcoord.Port"
 		req := &internalpb.ShowConfigurationsRequest{
@@ -1634,8 +1634,8 @@ func TestCore_startTimeTickLoop(t *testing.T) {
 // make sure the main functions work well when EnableActiveStandby=true
 func TestRootcoord_EnableActiveStandby(t *testing.T) {
 	randVal := rand.Int()
-	Params.Init()
-	Params.BaseTable.Save("etcd.rootPath", fmt.Sprintf("/%d", randVal))
+	paramtable.Init()
+	Params.Save("etcd.rootPath", fmt.Sprintf("/%d", randVal))
 	paramtable.Get().Save(Params.RootCoordCfg.EnableActiveStandby.Key, "true")
 	paramtable.Get().Save(Params.CommonCfg.RootCoordTimeTick.Key, fmt.Sprintf("rootcoord-time-tick-%d", randVal))
 	paramtable.Get().Save(Params.CommonCfg.RootCoordStatistics.Key, fmt.Sprintf("rootcoord-statistics-%d", randVal))
@@ -1682,8 +1682,8 @@ func TestRootcoord_EnableActiveStandby(t *testing.T) {
 // make sure the main functions work well when EnableActiveStandby=false
 func TestRootcoord_DisableActiveStandby(t *testing.T) {
 	randVal := rand.Int()
-	Params.Init()
-	Params.BaseTable.Save("etcd.rootPath", fmt.Sprintf("/%d", randVal))
+	paramtable.Init()
+	Params.Save("etcd.rootPath", fmt.Sprintf("/%d", randVal))
 	paramtable.Get().Save(Params.RootCoordCfg.EnableActiveStandby.Key, "false")
 	paramtable.Get().Save(Params.CommonCfg.RootCoordTimeTick.Key, fmt.Sprintf("rootcoord-time-tick-%d", randVal))
 	paramtable.Get().Save(Params.CommonCfg.RootCoordStatistics.Key, fmt.Sprintf("rootcoord-statistics-%d", randVal))

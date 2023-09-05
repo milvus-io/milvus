@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func Test_garbageCollector_basic(t *testing.T) {
@@ -243,7 +244,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 
 // initialize unit test sso env
 func initUtOSSEnv(bucket, root string, n int) (mcm *storage.MinioChunkManager, inserts []string, stats []string, delta []string, other []string, err error) {
-	Params.Init()
+	paramtable.Init()
 	cli, err := minio.New(Params.MinioCfg.Address.GetValue(), &minio.Options{
 		Creds:  credentials.NewStaticV4(Params.MinioCfg.AccessKeyID.GetValue(), Params.MinioCfg.SecretAccessKey.GetValue(), ""),
 		Secure: Params.MinioCfg.UseSSL.GetAsBool(),

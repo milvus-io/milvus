@@ -44,7 +44,7 @@ var (
 var Params = paramtable.Get()
 
 func TestMain(m *testing.M) {
-	Params.Init()
+	paramtable.Init()
 	code := m.Run()
 	os.Exit(code)
 }
@@ -279,7 +279,6 @@ func Test_SuffixSnapshotLoad(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 	randVal := rand.Int()
 
-	Params.Init()
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	sep := "_ts"
 
@@ -336,7 +335,6 @@ func Test_SuffixSnapshotMultiSave(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 	randVal := rand.Int()
 
-	Params.Init()
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	sep := "_ts"
 	etcdCli, err := etcd.GetEtcdClient(
@@ -416,7 +414,6 @@ func Test_SuffixSnapshotRemoveExpiredKvs(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 	randVal := rand.Int()
 
-	Params.Init()
 	rootPath := fmt.Sprintf("/test/meta/remove-expired-test-%d", randVal)
 	sep := "_ts"
 
@@ -592,7 +589,6 @@ func Test_SuffixSnapshotMultiSaveAndRemoveWithPrefix(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 	randVal := rand.Int()
 
-	Params.Init()
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	sep := "_ts"
 
@@ -685,7 +681,6 @@ func TestSuffixSnapshot_LoadWithPrefix(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 	randVal := rand.Int()
 
-	Params.Init()
 	rootPath := fmt.Sprintf("/test/meta/loadWithPrefix-test-%d", randVal)
 	sep := "_ts"
 

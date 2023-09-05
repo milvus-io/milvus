@@ -14,7 +14,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -55,8 +54,8 @@ func (c *run) execute(args []string, flags *flag.FlagSet) {
 	// make go ignore SIGPIPE when all cgo threads set mask of SIGPIPE
 	signal.Ignore(syscall.SIGPIPE)
 
-	var local = false
 	role := roles.NewMilvusRoles()
+	role.Local = false
 	switch c.serverType {
 	case typeutil.RootCoordRole:
 		role.EnableRootCoord = true
@@ -83,7 +82,8 @@ func (c *run) execute(args []string, flags *flag.FlagSet) {
 		role.EnableDataNode = true
 		role.EnableIndexCoord = true
 		role.EnableIndexNode = true
-		local = true
+		role.Local = true
+		role.Embedded = c.serverType == typeutil.EmbeddedRole
 	case roleMixture:
 		role.EnableRootCoord = c.enableRootCoord
 		role.EnableQueryCoord = c.enableQueryCoord
@@ -98,12 +98,6 @@ func (c *run) execute(args []string, flags *flag.FlagSet) {
 		os.Exit(-1)
 	}
 
-	// setup config for embedded milvus
-	if c.serverType == typeutil.EmbeddedRole {
-		var params paramtable.BaseTable
-		params.GlobalInitWithYaml("embedded-milvus.yaml")
-	}
-
 	runtimeDir := createRuntimeDir(c.serverType)
 	filename := getPidFileName(c.serverType, c.svrAlias)
 
@@ -114,7 +108,7 @@ func (c *run) execute(args []string, flags *flag.FlagSet) {
 		panic(err)
 	}
 	defer removePidFile(lock)
-	role.Run(local, c.svrAlias)
+	role.Run(c.svrAlias)
 }
 
 func (c *run) formatFlags(args []string, flags *flag.FlagSet) {

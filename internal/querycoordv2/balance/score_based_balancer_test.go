@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type ScoreBasedBalancerTestSuite struct {
@@ -43,7 +44,7 @@ type ScoreBasedBalancerTestSuite struct {
 }
 
 func (suite *ScoreBasedBalancerTestSuite) SetupSuite() {
-	Params.Init()
+	paramtable.Init()
 }
 
 func (suite *ScoreBasedBalancerTestSuite) SetupTest() {

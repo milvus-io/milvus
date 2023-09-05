@@ -132,8 +132,10 @@ type MilvusRoles struct {
 	EnableIndexCoord bool `env:"ENABLE_INDEX_COORD"`
 	EnableIndexNode  bool `env:"ENABLE_INDEX_NODE"`
 
-	closed chan struct{}
-	once   sync.Once
+	Local    bool
+	Embedded bool
+	closed   chan struct{}
+	once     sync.Once
 }
 
 // NewMilvusRoles creates a new MilvusRoles with private fields initialized.
@@ -280,7 +282,7 @@ func (mr *MilvusRoles) handleSignals() func() {
 }
 
 // Run Milvus components.
-func (mr *MilvusRoles) Run(local bool, alias string) {
+func (mr *MilvusRoles) Run(alias string) {
 	// start signal handler, defer close func
 	closeFn := mr.handleSignals()
 	defer closeFn()
@@ -292,12 +294,17 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 	mr.printLDPreLoad()
 
 	// only standalone enable localMsg
-	if local {
+	if mr.Local {
 		if err := os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode); err != nil {
 			log.Error("Failed to set deploy mode: ", zap.Error(err))
 		}
 
-		paramtable.Init()
+		if mr.Embedded {
+			// setup config for embedded milvus
+			paramtable.InitWithBaseTable(paramtable.NewBaseTable(paramtable.Files([]string{"embedded-milvus.yaml"})))
+		} else {
+			paramtable.Init()
+		}
 		params := paramtable.Get()
 		if params.EtcdCfg.UseEmbedEtcd.GetAsBool() {
 			// Start etcd server.
@@ -321,6 +328,7 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 
 	var rc *components.RootCoord
 	var wg sync.WaitGroup
+	local := mr.Local
 	if mr.EnableRootCoord {
 		rc = mr.runRootCoord(ctx, local, &wg)
 	}

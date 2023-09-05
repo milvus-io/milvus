@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/testutils"
 
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
@@ -156,7 +157,7 @@ type MetaBasicSuite struct {
 }
 
 func (suite *MetaBasicSuite) SetupSuite() {
-	Params.Init()
+	paramtable.Init()
 }
 
 func (suite *MetaBasicSuite) SetupTest() {
@@ -215,8 +216,6 @@ func TestMeta_Basic(t *testing.T) {
 	assert.NoError(t, err)
 
 	testSchema := newTestSchema()
-
-	Params.Init()
 
 	collInfo := &collectionInfo{
 		ID:             collID,

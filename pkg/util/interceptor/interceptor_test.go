@@ -40,5 +40,5 @@ func (m *mockSS) Context() context.Context {
 }
 
 func init() {
-	paramtable.Get().Init()
+	paramtable.Init()
 }

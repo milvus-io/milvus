@@ -397,7 +397,7 @@ func TestForbiddenItem(t *testing.T) {
 	Init()
 	params := Get()
 
-	params.mgr.OnEvent(&config.Event{
+	params.baseTable.mgr.OnEvent(&config.Event{
 		Key:   params.CommonCfg.ClusterPrefix.Key,
 		Value: "new-cluster",
 	})

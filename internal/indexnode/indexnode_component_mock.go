@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type mockIndexNodeComponent struct {
@@ -13,7 +14,7 @@ type mockIndexNodeComponent struct {
 var _ types.IndexNodeComponent = &mockIndexNodeComponent{}
 
 func NewMockIndexNodeComponent(ctx context.Context) (types.IndexNodeComponent, error) {
-	Params.Init()
+	paramtable.Init()
 	factory := &mockFactory{
 		chunkMgr: &mockChunkmgr{},
 	}

@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -50,7 +51,7 @@ type DistControllerTestSuite struct {
 }
 
 func (suite *DistControllerTestSuite) SetupTest() {
-	Params.Init()
+	paramtable.Init()
 
 	var err error
 	config := GenerateEtcdConfig()

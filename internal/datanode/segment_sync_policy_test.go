@@ -85,8 +85,7 @@ func TestSyncMemoryTooHigh(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.testName, func(t *testing.T) {
-			var baseParams = &Params.BaseTable
-			baseParams.Save(Params.DataNodeCfg.MemoryForceSyncSegmentNum.Key, fmt.Sprintf("%d", test.syncSegmentNum))
+			Params.Save(Params.DataNodeCfg.MemoryForceSyncSegmentNum.Key, fmt.Sprintf("%d", test.syncSegmentNum))
 			policy := syncMemoryTooHigh()
 			segments := make([]*Segment, len(test.memorySizesInMB))
 			for i := range segments {

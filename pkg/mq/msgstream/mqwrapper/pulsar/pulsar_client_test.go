@@ -48,17 +48,16 @@ const (
 var Params = paramtable.Get()
 
 func TestMain(m *testing.M) {
-	Params.Init()
+	paramtable.Init()
 	exitCode := m.Run()
 	os.Exit(exitCode)
 }
 
 func getPulsarAddress() string {
-	pulsarHost := Params.GetWithDefault("pulsar.address", "")
-	port := Params.GetWithDefault("pulsar.port", "")
-	log.Info("pulsar address", zap.String("host", pulsarHost), zap.String("port", port))
-	if len(pulsarHost) != 0 && len(port) != 0 {
-		return "pulsar://" + pulsarHost + ":" + port
+	pulsarAddress := Params.PulsarCfg.Address.GetValue()
+	log.Info("pulsar address", zap.String("address", pulsarAddress))
+	if len(pulsarAddress) != 0 {
+		return pulsarAddress
 	}
 	panic("invalid pulsar address")
 }
@@ -745,7 +744,7 @@ func TestPulsarCtl(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	webport := Params.GetWithDefault("pulsar.webport", "80")
+	webport := Params.PulsarCfg.WebPort.GetValue()
 	webServiceURL := "http://" + pulsarURL.Hostname() + ":" + webport
 	admin, err := NewAdminClient(webServiceURL, "", "")
 	assert.NoError(t, err)

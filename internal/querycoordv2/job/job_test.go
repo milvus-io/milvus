@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 const (
@@ -74,7 +75,7 @@ type JobSuite struct {
 }
 
 func (suite *JobSuite) SetupSuite() {
-	Params.Init()
+	paramtable.Init()
 
 	suite.collections = []int64{1000, 1001}
 	suite.partitions = map[int64][]int64{

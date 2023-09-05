@@ -39,7 +39,7 @@ func TestGetServerIDConcurrently(t *testing.T) {
 	paramtable.Init()
 	params := paramtable.Get()
 
-	endpoints := params.GetWithDefault("etcd.endpoints", paramtable.DefaultEtcdEndpoints)
+	endpoints := params.EtcdCfg.Endpoints.GetValue()
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
 
 	etcdEndpoints := strings.Split(endpoints, ",")
@@ -82,7 +82,7 @@ func TestInit(t *testing.T) {
 	paramtable.Init()
 	params := paramtable.Get()
 
-	endpoints := params.GetWithDefault("etcd.endpoints", paramtable.DefaultEtcdEndpoints)
+	endpoints := params.EtcdCfg.Endpoints.GetValue()
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
 
 	etcdEndpoints := strings.Split(endpoints, ",")
@@ -110,7 +110,7 @@ func TestUpdateSessions(t *testing.T) {
 	paramtable.Init()
 	params := paramtable.Get()
 
-	endpoints := params.GetWithDefault("etcd.endpoints", paramtable.DefaultEtcdEndpoints)
+	endpoints := params.EtcdCfg.Endpoints.GetValue()
 	etcdEndpoints := strings.Split(endpoints, ",")
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
 	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
@@ -187,7 +187,7 @@ func TestSessionLivenessCheck(t *testing.T) {
 	paramtable.Init()
 	params := paramtable.Get()
 
-	endpoints := params.GetWithDefault("etcd.endpoints", paramtable.DefaultEtcdEndpoints)
+	endpoints := params.EtcdCfg.Endpoints.GetValue()
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
 
 	etcdEndpoints := strings.Split(endpoints, ",")
@@ -234,7 +234,7 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 	paramtable.Init()
 	params := paramtable.Get()
 
-	endpoints := params.GetWithDefault("etcd.endpoints", paramtable.DefaultEtcdEndpoints)
+	endpoints := params.EtcdCfg.Endpoints.GetValue()
 	etcdEndpoints := strings.Split(endpoints, ",")
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
 
@@ -589,10 +589,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	// initial etcd
 	paramtable.Init()
 	params := paramtable.Get()
-	endpoints, err := params.Load("_EtcdEndpoints")
-	if err != nil {
-		panic(err)
-	}
+	endpoints := params.EtcdCfg.Endpoints.GetValue()
 	metaRoot := fmt.Sprintf("%d/%s1", rand.Int(), DefaultServiceRoot)
 
 	etcdEndpoints := strings.Split(endpoints, ",")
@@ -686,11 +683,11 @@ func TestSession_apply(t *testing.T) {
 
 func TestIntegrationMode(t *testing.T) {
 	ctx := context.Background()
+	paramtable.Init()
 	params := paramtable.Get()
-	params.Init()
 	params.Save(params.IntegrationTestCfg.IntegrationMode.Key, "true")
 
-	endpoints := params.GetWithDefault("etcd.endpoints", paramtable.DefaultEtcdEndpoints)
+	endpoints := params.EtcdCfg.Endpoints.GetValue()
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
 
 	etcdEndpoints := strings.Split(endpoints, ",")

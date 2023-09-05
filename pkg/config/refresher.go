@@ -73,7 +73,7 @@ func (r *refresher) refreshPeriodically(name string) {
 				r.stop()
 			}
 		case <-r.intervalDone:
-			log.Info("stop refreshing configurations")
+			log.Info("stop refreshing configurations", zap.String("source", name))
 			return
 		}
 	}

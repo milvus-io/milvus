@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
@@ -234,7 +235,7 @@ func Test_ImportWrapperRowBased(t *testing.T) {
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
 	assert.NoError(t, err)
 	defer os.RemoveAll(TempFilesPath)
-	params.Params.Init()
+	paramtable.Init()
 
 	// NewDefaultFactory() use "/tmp/milvus" as default root path, and cannot specify root path
 	// NewChunkManagerFactory() can specify the root path
@@ -962,7 +963,7 @@ func Test_ImportWrapperUpdateProgressPercent(t *testing.T) {
 
 func Test_ImportWrapperFlushFunc(t *testing.T) {
 	ctx := context.Background()
-	params.Params.Init()
+	paramtable.Init()
 
 	shardID := 0
 	partitionID := int64(1)

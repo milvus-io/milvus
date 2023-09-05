@@ -42,8 +42,6 @@ const (
 
 // ServiceParam is used to quickly and easily access all basic service configurations.
 type ServiceParam struct {
-	BaseTable
-
 	LocalStorageCfg LocalStorageConfig
 	MetaStoreCfg    MetaStoreConfig
 	EtcdCfg         EtcdConfig
@@ -55,18 +53,16 @@ type ServiceParam struct {
 	MinioCfg        MinioConfig
 }
 
-func (p *ServiceParam) init() {
-	p.BaseTable.init(2)
-
-	p.LocalStorageCfg.Init(&p.BaseTable)
-	p.MetaStoreCfg.Init(&p.BaseTable)
-	p.EtcdCfg.Init(&p.BaseTable)
-	p.MQCfg.Init(&p.BaseTable)
-	p.PulsarCfg.Init(&p.BaseTable)
-	p.KafkaCfg.Init(&p.BaseTable)
-	p.RocksmqCfg.Init(&p.BaseTable)
-	p.NatsmqCfg.Init(&p.BaseTable)
-	p.MinioCfg.Init(&p.BaseTable)
+func (p *ServiceParam) init(bt *BaseTable) {
+	p.LocalStorageCfg.Init(bt)
+	p.MetaStoreCfg.Init(bt)
+	p.EtcdCfg.Init(bt)
+	p.MQCfg.Init(bt)
+	p.PulsarCfg.Init(bt)
+	p.KafkaCfg.Init(bt)
+	p.RocksmqCfg.Init(bt)
+	p.NatsmqCfg.Init(bt)
+	p.MinioCfg.Init(bt)
 }
 
 func (p *ServiceParam) RocksmqEnable() bool {

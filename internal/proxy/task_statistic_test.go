@@ -49,7 +49,7 @@ type StatisticTaskSuite struct {
 }
 
 func (s *StatisticTaskSuite) SetupSuite() {
-	Params.Init()
+	paramtable.Init()
 }
 
 func (s *StatisticTaskSuite) SetupTest() {

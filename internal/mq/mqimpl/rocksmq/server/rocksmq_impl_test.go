@@ -1452,7 +1452,7 @@ func TestRocksmq_Info(t *testing.T) {
 
 func TestRocksmq_ParseCompressionTypeError(t *testing.T) {
 	params := paramtable.Get()
-	params.Init()
+	paramtable.Init()
 	params.Save(params.RocksmqCfg.CompressionTypes.Key, "invalid,1")
 	_, err := parseCompressionType(params)
 	assert.Error(t, err)

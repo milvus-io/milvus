@@ -125,7 +125,7 @@ func StartMiniCluster(ctx context.Context, opts ...Option) (cluster *MiniCluster
 	cluster = &MiniCluster{
 		ctx: ctx,
 	}
-	params.Init()
+	paramtable.Init()
 	cluster.params = DefaultParams()
 	cluster.clusterConfig = DefaultClusterConfig()
 	for _, opt := range opts {
@@ -134,7 +134,7 @@ func StartMiniCluster(ctx context.Context, opts ...Option) (cluster *MiniCluster
 	for k, v := range cluster.params {
 		params.Save(k, v)
 	}
-	params.UpdateSourceOptions(config.WithEtcdSource(&config.EtcdInfo{
+	paramtable.GetBaseTable().UpdateSourceOptions(config.WithEtcdSource(&config.EtcdInfo{
 		KeyPrefix:       cluster.params[EtcdRootPath],
 		RefreshInterval: 2 * time.Second,
 	}))
