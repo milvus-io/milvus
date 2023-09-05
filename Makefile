@@ -28,6 +28,14 @@ use_dynamic_simd = OFF
 ifdef USE_DYNAMIC_SIMD
 	use_dynamic_simd = ${USE_DYNAMIC_SIMD}
 endif
+# golangci-lint
+GOLANGCI_LINT_VERSION := 1.53.1
+GOLANGCI_LINT_OUTPUT := $(shell $(INSTALL_PATH)/golangci-lint --version 2>/dev/null)
+INSTALL_GOLANGCI_LINT := $(findstring $(GOLANGCI_LINT_VERSION), $(GOLANGCI_LINT_OUTPUT))
+# mockery
+MOCKERY_VERSION := 2.32.4
+MOCKERY_OUTPUT := $(shell $(INSTALL_PATH)/mockery --version 2>/dev/null)
+INSTALL_MOCKERY := $(findstring $(MOCKERY_VERSION),$(MOCKERY_OUTPUT))
 
 export GIT_BRANCH=master
 
@@ -51,8 +59,16 @@ get-build-deps:
 # attention: upgrade golangci-lint should also change Dockerfiles in build/docker/builder/cpu/<os>
 getdeps:
 	@mkdir -p $(INSTALL_PATH)
-	@$(INSTALL_PATH)/golangci-lint --version 2>&1 1>/dev/null || (echo "Installing golangci-lint into ./bin/" && curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(INSTALL_PATH) v1.53.1)
-	@$(INSTALL_PATH)/mockery --version 2>&1 1>/dev/null || (echo "Installing mockery to ./bin/" && GOBIN=$(INSTALL_PATH)/ go install github.com/vektra/mockery/v2@v2.32.4)
+	@if [ -z "$(INSTALL_GOLANGCI_LINT)" ]; then \
+		echo "Installing golangci-lint into ./bin/" && curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(INSTALL_PATH) v1.53.1 ; \
+	else \
+		echo "golangci-lint v@$(GOLANGCI_LINT_VERSION) already installed"; \
+	fi
+	@if [ -z "$(INSTALL_MOCKERY)" ]; then \
+		echo "Installing mockery v$(MOCKERY_VERSION) to ./bin/" && GOBIN=$(INSTALL_PATH) go install github.com/vektra/mockery/v2@v$(MOCKERY_VERSION); \
+	else \
+		echo "Mockery v$(MOCKERY_VERSION) already installed"; \
+	fi 
 
 tools/bin/revive: tools/check/go.mod
 	cd tools/check; \
