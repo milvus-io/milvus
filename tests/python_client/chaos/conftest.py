@@ -6,6 +6,7 @@ def pytest_addoption(parser):
     parser.addoption("--role_type", action="store", default="activated", help="role_type")
     parser.addoption("--target_component", action="store", default="querynode", help="target_component")
     parser.addoption("--target_pod", action="store", default="etcd_leader", help="target_pod")
+    parser.addoption("--target_scope", action="store", default="all", help="target_scope")
     parser.addoption("--target_number", action="store", default="1", help="target_number")
     parser.addoption("--chaos_duration", action="store", default="1m", help="chaos_duration")
     parser.addoption("--chaos_interval", action="store", default="10s", help="chaos_interval")
@@ -32,6 +33,11 @@ def target_component(request):
 @pytest.fixture
 def target_pod(request):
     return request.config.getoption("--target_pod")
+
+
+@pytest.fixture
+def target_scope(request):
+    return request.config.getoption("--target_scope")
 
 
 @pytest.fixture
