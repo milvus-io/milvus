@@ -1085,18 +1085,15 @@ class TestNewIndexBinary(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     # @pytest.mark.timeout(BUILD_TIMEOUT)
-    def test_create_index(self):
+    def test_create_binary_index_on_scalar_field(self):
         """
         target: test create index interface
         method: create collection and add entities in it, create index
         expected: return search success
         """
-        c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name, schema=default_binary_schema)
-        df, _ = cf.gen_default_binary_dataframe_data()
-        collection_w.insert(data=df)
+        collection_w = self.init_collection_general(prefix, True, is_binary=True, is_index=False)[0]
         collection_w.create_index(default_string_field_name, default_string_index_params, index_name=binary_field_name)
-        assert collection_w.has_index(index_name=binary_field_name)[0] == True
+        assert collection_w.has_index(index_name=binary_field_name)[0] is True
 
     @pytest.mark.tags(CaseLabel.L0)
     # @pytest.mark.timeout(BUILD_TIMEOUT)
@@ -1166,14 +1163,21 @@ class TestNewIndexBinary(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name, schema=default_binary_schema)
         binary_index_params = {'index_type': 'HNSW', "M": '18', "efConstruction": '240', 'metric_type': metric_type}
-        if metric_type == "TANIMOTO":
-            collection_w.create_index(default_binary_vec_field_name, binary_index_params,
-                                      check_task=CheckTasks.err_res,
-                                      check_items={ct.err_code: 1,
-                                                   ct.err_msg: "metric type not found or not supported"})
-        else:
-            collection_w.create_index(default_binary_vec_field_name, binary_index_params)
-            assert collection_w.index()[0].params == binary_index_params
+        collection_w.create_index(default_binary_vec_field_name, binary_index_params)
+        assert collection_w.index()[0].params == binary_index_params
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("metric", ct.binary_metrics)
+    def test_create_binary_index_all_metrics(self, metric):
+        """
+        target: test create binary index using all supported metrics
+        method: create binary using all supported metrics
+        expected: succeed
+        """
+        collection_w = self.init_collection_general(prefix, True, is_binary=True, is_index=False)[0]
+        binary_index_params = {"index_type": "BIN_FLAT", "metric_type": metric, "params": {"nlist": 64}}
+        collection_w.create_index(binary_field_name, binary_index_params)
+        assert collection_w.has_index()[0] is True
 
     """
         ******************************************************************

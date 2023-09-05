@@ -1200,6 +1200,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                              "err_msg": f"Data type and metric type miss-match"})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="SUPERSTRUCTURE and SUBSTRUCTURE are supported again now")
     @pytest.mark.parametrize("metric", ["SUPERSTRUCTURE", "SUBSTRUCTURE"])
     def test_range_search_binary_not_supported_metrics(self, metric):
         """
@@ -5782,6 +5783,37 @@ class TestSearchDiskann(TestcaseBase):
                             )
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("search_list", [20, 200])
+    def test_search_with_limit_20(self, _async, enable_dynamic_field, search_list):
+        """
+        target: test delete after creating index
+        method: 1.create collection , insert data, primary_field is int field
+                2.create diskann index ,  then load
+                3.search
+        expected: search successfully
+        """
+        limit = 20
+        # 1. initialize with data
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, is_index=False,
+                                                                      enable_dynamic_field=enable_dynamic_field)[0:4]
+
+        # 2. create index
+        default_index = {"index_type": "DISKANN", "metric_type": "L2", "params": {}}
+        collection_w.create_index(ct.default_float_vec_field_name, default_index)
+        collection_w.load()
+
+        search_params = {"metric_type": "L2", "params": {"search_list": search_list}}
+        output_fields = [default_int64_field_name, default_float_field_name, default_string_field_name]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            search_params, limit, default_search_exp,
+                            output_fields=output_fields, _async=_async,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": limit,
+                                         "_async": _async})
+
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("limit", [1])
     @pytest.mark.parametrize("search_list", [-1, 0, 201])
     def test_search_invalid_params_with_diskann_A(self, dim, auto_id, search_list, limit):
@@ -5850,8 +5882,7 @@ class TestSearchDiskann(TestcaseBase):
                             output_fields=output_fields,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 1,
-                                         "err_msg": "fail to search on all shard leaders"}
-                            )
+                                         "err_msg": "fail to search on all shard leaders"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("limit", [6553])
