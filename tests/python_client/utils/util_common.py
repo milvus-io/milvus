@@ -96,13 +96,17 @@ def wait_signal_to_apply_chaos():
     t0 = time.time()
     for f in all_db_file:
         while True and (time.time() - t0 < timeout):
-            df = pd.read_parquet(f)
-            result = df[(df['event_name'] == 'init_chaos') & (df['event_status'] == 'ready')]
-            if len(result) > 0:
-                log.info(f"{f}: {result}")
-                ready_apply_chaos = True
-                break
-            else:
+            try:
+                df = pd.read_parquet(f)
+                result = df[(df['event_name'] == 'init_chaos') & (df['event_status'] == 'ready')]
+                if len(result) > 0:
+                    log.info(f"{f}: {result}")
+                    ready_apply_chaos = True
+                    break
+                else:
+                    ready_apply_chaos = False
+            except Exception as e:
+                log.error(f"read_parquet error: {e}")
                 ready_apply_chaos = False
     return ready_apply_chaos
 

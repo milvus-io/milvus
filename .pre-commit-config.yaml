@@ -5,11 +5,11 @@ repos:
       - id: golangci-lint
         args: [--config=.golangci.yml, --timeout=3m]
   - repo: https://github.com/crate-ci/typos
-    rev: v1.13.10
+    rev: v1.16.10
     hooks:
       - id: typos
-  - repo: https://github.com/zhuwenxing/trufflehog
-    rev: v3.28.5
+  - repo: https://github.com/trufflesecurity/trufflehog
+    rev: v3.54.3
     hooks:
       - id: trufflehog
         name: TruffleHog
