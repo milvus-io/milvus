@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util/interceptor"
+	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/atomic"
@@ -42,10 +43,12 @@ import (
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tikv"
 
 	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	qcc "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
@@ -65,6 +68,7 @@ type Server struct {
 	serverID atomic.Int64
 
 	etcdCli    *clientv3.Client
+	tikvCli    *txnkv.Client
 	dataCoord  types.DataCoord
 	queryCoord types.QueryCoord
 
@@ -152,9 +156,12 @@ func (s *Server) Run() error {
 	return nil
 }
 
+var getTiKVClient = tikv.GetTiKVClient
+
 func (s *Server) init() error {
-	etcdConfig := &paramtable.Get().EtcdCfg
-	Params := &paramtable.Get().RootCoordGrpcServerCfg
+	params := paramtable.Get()
+	etcdConfig := &params.EtcdCfg
+	rpcParams := &params.RootCoordGrpcServerCfg
 	log.Debug("init params done..")
 
 	etcdCli, err := etcd.GetEtcdClient(
@@ -171,10 +178,21 @@ func (s *Server) init() error {
 	}
 	s.etcdCli = etcdCli
 	s.rootCoord.SetEtcdClient(s.etcdCli)
-	s.rootCoord.SetAddress(Params.GetAddress())
+	s.rootCoord.SetAddress(rpcParams.GetAddress())
 	log.Debug("etcd connect done ...")
 
-	err = s.startGrpc(Params.Port.GetAsInt())
+	if params.MetaStoreCfg.MetaStoreType.GetValue() == util.MetaStoreTypeTiKV {
+		log.Info("Connecting to tikv metadata storage.")
+		s.tikvCli, err = getTiKVClient(&paramtable.Get().TiKVCfg)
+		if err != nil {
+			log.Debug("RootCoord failed to connect to tikv", zap.Error(err))
+			return err
+		}
+		s.rootCoord.SetTiKVClient(s.tikvCli)
+		log.Info("Connected to tikv. Using tikv as metadata storage.")
+	}
+
+	err = s.startGrpc(rpcParams.Port.GetAsInt())
 	if err != nil {
 		return err
 	}
@@ -304,6 +322,9 @@ func (s *Server) Stop() error {
 	log.Debug("Rootcoord stop", zap.String("Address", Params.GetAddress()))
 	if s.etcdCli != nil {
 		defer s.etcdCli.Close()
+	}
+	if s.tikvCli != nil {
+		defer s.tikvCli.Close()
 	}
 	if s.dataCoord != nil {
 		if err := s.dataCoord.Stop(); err != nil {

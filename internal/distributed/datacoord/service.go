@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/interceptor"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
+	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/atomic"
@@ -44,10 +45,12 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tikv"
 )
 
 // Server is the grpc server of datacoord
@@ -61,6 +64,7 @@ type Server struct {
 	dataCoord types.DataCoordComponent
 
 	etcdCli *clientv3.Client
+	tikvCli *txnkv.Client
 
 	grpcErrChan chan error
 	grpcServer  *grpc.Server
@@ -79,9 +83,11 @@ func NewServer(ctx context.Context, factory dependency.Factory, opts ...datacoor
 	return s
 }
 
+var getTiKVClient = tikv.GetTiKVClient
+
 func (s *Server) init() error {
-	etcdConfig := &paramtable.Get().EtcdCfg
-	Params := &paramtable.Get().DataCoordGrpcServerCfg
+	params := paramtable.Get()
+	etcdConfig := &params.EtcdCfg
 
 	etcdCli, err := etcd.GetEtcdClient(
 		etcdConfig.UseEmbedEtcd.GetAsBool(),
@@ -97,7 +103,18 @@ func (s *Server) init() error {
 	}
 	s.etcdCli = etcdCli
 	s.dataCoord.SetEtcdClient(etcdCli)
-	s.dataCoord.SetAddress(Params.GetAddress())
+	s.dataCoord.SetAddress(params.DataCoordGrpcServerCfg.GetAddress())
+
+	if params.MetaStoreCfg.MetaStoreType.GetValue() == util.MetaStoreTypeTiKV {
+		log.Info("Connecting to tikv metadata storage.")
+		tikvCli, err := getTiKVClient(&paramtable.Get().TiKVCfg)
+		if err != nil {
+			log.Warn("DataCoord failed to connect to tikv", zap.Error(err))
+			return err
+		}
+		s.dataCoord.SetTiKVClient(tikvCli)
+		log.Info("Connected to tikv. Using tikv as metadata storage.")
+	}
 
 	err = s.startGrpc()
 	if err != nil {
@@ -208,6 +225,9 @@ func (s *Server) Stop() error {
 
 	if s.etcdCli != nil {
 		defer s.etcdCli.Close()
+	}
+	if s.tikvCli != nil {
+		defer s.tikvCli.Close()
 	}
 	if s.grpcServer != nil {
 		log.Debug("Graceful stop grpc server...")

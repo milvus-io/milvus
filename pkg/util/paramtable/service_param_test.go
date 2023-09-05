@@ -63,6 +63,22 @@ func TestServiceParam(t *testing.T) {
 		SParams.init(bt)
 	})
 
+	t.Run("test tikvConfig", func(t *testing.T) {
+		Params := &SParams.TiKVCfg
+
+		assert.NotZero(t, len(Params.Endpoints.GetAsStrings()))
+		t.Logf("tikv endpoints = %s", Params.Endpoints.GetAsStrings())
+
+		assert.NotEqual(t, Params.MetaRootPath, "")
+		t.Logf("meta root path = %s", Params.MetaRootPath.GetValue())
+
+		assert.NotEqual(t, Params.KvRootPath, "")
+		t.Logf("kv root path = %s", Params.KvRootPath.GetValue())
+
+		t.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
+		SParams.init(bt)
+	})
+
 	t.Run("test pulsarConfig", func(t *testing.T) {
 		// test default value
 		{

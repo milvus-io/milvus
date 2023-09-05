@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util/interceptor"
+	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/atomic"
@@ -44,10 +45,12 @@ import (
 	qc "github.com/milvus-io/milvus/internal/querycoordv2"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tikv"
 )
 
 // Server is the grpc server of QueryCoord.
@@ -66,6 +69,7 @@ type Server struct {
 	factory dependency.Factory
 
 	etcdCli *clientv3.Client
+	tikvCli *txnkv.Client
 
 	dataCoord types.DataCoord
 	rootCoord types.RootCoord
@@ -104,10 +108,13 @@ func (s *Server) Run() error {
 	return nil
 }
 
+var getTiKVClient = tikv.GetTiKVClient
+
 // init initializes QueryCoord's grpc service.
 func (s *Server) init() error {
-	etcdConfig := &paramtable.Get().EtcdCfg
-	Params := &paramtable.Get().QueryCoordGrpcServerCfg
+	params := paramtable.Get()
+	etcdConfig := &params.EtcdCfg
+	rpcParams := &params.QueryCoordGrpcServerCfg
 
 	etcdCli, err := etcd.GetEtcdClient(
 		etcdConfig.UseEmbedEtcd.GetAsBool(),
@@ -123,10 +130,21 @@ func (s *Server) init() error {
 	}
 	s.etcdCli = etcdCli
 	s.SetEtcdClient(etcdCli)
-	s.queryCoord.SetAddress(Params.GetAddress())
+	s.queryCoord.SetAddress(rpcParams.GetAddress())
+
+	if params.MetaStoreCfg.MetaStoreType.GetValue() == util.MetaStoreTypeTiKV {
+		log.Info("Connecting to tikv metadata storage.")
+		s.tikvCli, err = getTiKVClient(&paramtable.Get().TiKVCfg)
+		if err != nil {
+			log.Warn("QueryCoord failed to connect to tikv", zap.Error(err))
+			return err
+		}
+		s.SetTiKVClient(s.tikvCli)
+		log.Info("Connected to tikv. Using tikv as metadata storage.")
+	}
 
 	s.wg.Add(1)
-	go s.startGrpcLoop(Params.Port.GetAsInt())
+	go s.startGrpcLoop(rpcParams.Port.GetAsInt())
 	// wait for grpc server loop start
 	err = <-s.grpcErrChan
 	if err != nil {
@@ -285,6 +303,10 @@ func (s *Server) Stop() error {
 // SetRootCoord sets root coordinator's client
 func (s *Server) SetEtcdClient(etcdClient *clientv3.Client) {
 	s.queryCoord.SetEtcdClient(etcdClient)
+}
+
+func (s *Server) SetTiKVClient(client *txnkv.Client) {
+	s.queryCoord.SetTiKVClient(client)
 }
 
 // SetRootCoord sets the RootCoord's client for QueryCoord component.

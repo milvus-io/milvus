@@ -14,25 +14,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package tsoutil
+package tikv
 
 import (
-	"path"
-
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/tikv/client-go/v2/config"
 	"github.com/tikv/client-go/v2/txnkv"
-	clientv3 "go.etcd.io/etcd/client/v3"
-
-	"github.com/milvus-io/milvus/internal/kv"
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/kv/tikv"
 )
 
-// NewTSOKVBase returns a kv.TxnKV object
-func NewTSOKVBase(client *clientv3.Client, tsoRoot, subPath string) kv.TxnKV {
-	return etcdkv.NewEtcdKV(client, path.Join(tsoRoot, subPath))
-}
-
-// NewTSOTiKVBase returns a kv.TxnKV object
-func NewTSOTiKVBase(client *txnkv.Client, tsoRoot, subPath string) kv.TxnKV {
-	return tikv.NewTiKV(client, path.Join(tsoRoot, subPath))
+func GetTiKVClient(cfg *paramtable.TiKVConfig) (*txnkv.Client, error) {
+	if cfg.TiKVUseSSL.GetAsBool() {
+		f := func(conf *config.Config) {
+			conf.Security = config.NewSecurity(cfg.TiKVTLSCACert.GetValue(), cfg.TiKVTLSCert.GetValue(), cfg.TiKVTLSKey.GetValue(), []string{})
+		}
+		config.UpdateGlobal(f)
+		return txnkv.NewClient([]string{cfg.Endpoints.GetValue()})
+	}
+	return txnkv.NewClient([]string{cfg.Endpoints.GetValue()})
 }

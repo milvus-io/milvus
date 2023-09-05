@@ -45,8 +45,18 @@ etcd:
 
 metastore:
   # Default value: etcd
-  # Valid values: etcd
+  # Valid values: [etcd, tikv]
   type: etcd
+
+# Related configuration of tikv, used to store Milvus metadata.
+# Notice that when TiKV is enabled for metastore, you still need to have etcd for service discovery.
+# TiKV is a good option when the metadata size requires better horizontal scalability.
+tikv:
+  # Note that the default pd port of tikv is 2379, which conflicts with etcd.
+  endpoints: 127.0.0.1:2389
+  rootPath: by-dev # The root path where data is stored
+  metaSubPath: meta # metaRootPath = rootPath + '/' + metaSubPath
+  kvSubPath: kv # kvRootPath = rootPath + '/' + kvSubPath
 
 localStorage:
   path: /var/lib/milvus/data/ # please adjust in embedded Milvus: /tmp/milvus/data/
