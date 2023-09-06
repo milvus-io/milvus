@@ -102,6 +102,8 @@ class RequestRecords(metaclass=Singleton):
             self.buffer = []
 
     def sink(self):
+        if len(self.buffer) == 0:
+            return
         df = pd.DataFrame(self.buffer)
         if not self.created_file:
             with request_lock:
