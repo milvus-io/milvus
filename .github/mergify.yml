@@ -109,7 +109,7 @@ pull_request_rules:
       - 'status-success=Code Checker Amazonlinux 2023'
       - 'status-success=UT for Go (20.04)'
       - or:
-          - -files~=^(?!pkg\/..*test\.go).*$
+          - -files~=^(?!pkg\/.*_test\.go).*$
           - -files~=^(?!internal\/.*_test\.go).*$
     actions:
       label:
@@ -306,7 +306,7 @@ pull_request_rules:
           - base=sql_beta
           - base~=^2(\.\d+){2}$
       - -title~=\[skip e2e\]
-      - files~=^(?!(internal\/.*_test\.go|.*\.md)).*$
+      - files~=^(?!(.*_test\.go|.*\.md)).*$
       - 'status-success!=cpu-e2e'
     actions:
       label:
