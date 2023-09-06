@@ -10,6 +10,7 @@ import (
 	"golang.org/x/exp/mmap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -246,6 +247,16 @@ func (f *mockFactory) NewTtMsgStream(context.Context) (msgstream.MsgStream, erro
 }
 
 func (f *mockFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, string) error {
+	// TODO
+	return nil
+}
+
+func (f *mockFactory) NewMetaKv(rootPath string) kv.MetaKv {
+	// TODO
+	return nil
+}
+
+func (f *mockFactory) NewTxnKV(rootPath string) kv.TxnKV {
 	// TODO
 	return nil
 }

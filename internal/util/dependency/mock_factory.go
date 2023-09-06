@@ -5,8 +5,10 @@ package dependency
 import (
 	context "context"
 
-	msgstream "github.com/milvus-io/milvus/pkg/mq/msgstream"
+	kv "github.com/milvus-io/milvus/internal/kv"
 	mock "github.com/stretchr/testify/mock"
+
+	msgstream "github.com/milvus-io/milvus/pkg/mq/msgstream"
 
 	paramtable "github.com/milvus-io/milvus/pkg/util/paramtable"
 
@@ -55,6 +57,50 @@ func (_c *MockFactory_Init_Call) Return() *MockFactory_Init_Call {
 }
 
 func (_c *MockFactory_Init_Call) RunAndReturn(run func(*paramtable.ComponentParam)) *MockFactory_Init_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// NewMetaKv provides a mock function with given fields: rootPath
+func (_m *MockFactory) NewMetaKv(rootPath string) kv.MetaKv {
+	ret := _m.Called(rootPath)
+
+	var r0 kv.MetaKv
+	if rf, ok := ret.Get(0).(func(string) kv.MetaKv); ok {
+		r0 = rf(rootPath)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(kv.MetaKv)
+		}
+	}
+
+	return r0
+}
+
+// MockFactory_NewMetaKv_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'NewMetaKv'
+type MockFactory_NewMetaKv_Call struct {
+	*mock.Call
+}
+
+// NewMetaKv is a helper method to define mock.On call
+//   - rootPath string
+func (_e *MockFactory_Expecter) NewMetaKv(rootPath interface{}) *MockFactory_NewMetaKv_Call {
+	return &MockFactory_NewMetaKv_Call{Call: _e.mock.On("NewMetaKv", rootPath)}
+}
+
+func (_c *MockFactory_NewMetaKv_Call) Run(run func(rootPath string)) *MockFactory_NewMetaKv_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockFactory_NewMetaKv_Call) Return(_a0 kv.MetaKv) *MockFactory_NewMetaKv_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockFactory_NewMetaKv_Call) RunAndReturn(run func(string) kv.MetaKv) *MockFactory_NewMetaKv_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -261,6 +307,50 @@ func (_c *MockFactory_NewTtMsgStream_Call) Return(_a0 msgstream.MsgStream, _a1 e
 }
 
 func (_c *MockFactory_NewTtMsgStream_Call) RunAndReturn(run func(context.Context) (msgstream.MsgStream, error)) *MockFactory_NewTtMsgStream_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// NewTxnKV provides a mock function with given fields: rootPath
+func (_m *MockFactory) NewTxnKV(rootPath string) kv.TxnKV {
+	ret := _m.Called(rootPath)
+
+	var r0 kv.TxnKV
+	if rf, ok := ret.Get(0).(func(string) kv.TxnKV); ok {
+		r0 = rf(rootPath)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(kv.TxnKV)
+		}
+	}
+
+	return r0
+}
+
+// MockFactory_NewTxnKV_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'NewTxnKV'
+type MockFactory_NewTxnKV_Call struct {
+	*mock.Call
+}
+
+// NewTxnKV is a helper method to define mock.On call
+//   - rootPath string
+func (_e *MockFactory_Expecter) NewTxnKV(rootPath interface{}) *MockFactory_NewTxnKV_Call {
+	return &MockFactory_NewTxnKV_Call{Call: _e.mock.On("NewTxnKV", rootPath)}
+}
+
+func (_c *MockFactory_NewTxnKV_Call) Run(run func(rootPath string)) *MockFactory_NewTxnKV_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockFactory_NewTxnKV_Call) Return(_a0 kv.TxnKV) *MockFactory_NewTxnKV_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockFactory_NewTxnKV_Call) RunAndReturn(run func(string) kv.TxnKV) *MockFactory_NewTxnKV_Call {
 	_c.Call.Return(run)
 	return _c
 }

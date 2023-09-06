@@ -4,10 +4,13 @@ import (
 	"context"
 
 	"github.com/cockroachdb/errors"
+	"github.com/milvus-io/milvus/internal/kv"
+	kvfactory "github.com/milvus-io/milvus/internal/kv/factory"
 	smsgstream "github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"go.uber.org/zap"
 )
@@ -27,11 +30,17 @@ type mqEnable struct {
 	Kafka   bool
 }
 
+const (
+	metaTypeEtcd = util.MetaStoreTypeEtcd
+	metaTypeTikv = util.MetaStoreTypeTiKV
+)
+
 // DefaultFactory is a factory that produces instances of storage.ChunkManager and message queue.
 type DefaultFactory struct {
 	standAlone          bool
 	chunkManagerFactory storage.Factory
 	msgStreamFactory    msgstream.Factory
+	metaFactory         kvfactory.Factory
 }
 
 // Only for test
@@ -41,6 +50,7 @@ func NewDefaultFactory(standAlone bool) *DefaultFactory {
 		msgStreamFactory: smsgstream.NewRocksmqFactory("/tmp/milvus/rocksmq/", &paramtable.Get().ServiceParam),
 		chunkManagerFactory: storage.NewChunkManagerFactory("local",
 			storage.RootPath("/tmp/milvus")),
+		metaFactory: kvfactory.NewETCDFactory(&paramtable.Get().ServiceParam),
 	}
 }
 
@@ -50,6 +60,7 @@ func MockDefaultFactory(standAlone bool, params *paramtable.ComponentParam) *Def
 		standAlone:          standAlone,
 		msgStreamFactory:    smsgstream.NewRocksmqFactory("/tmp/milvus/rocksmq/", &paramtable.Get().ServiceParam),
 		chunkManagerFactory: storage.NewChunkManagerFactoryWithParam(params),
+		metaFactory:         kvfactory.NewETCDFactory(&paramtable.Get().ServiceParam),
 	}
 }
 
@@ -74,6 +85,9 @@ func (f *DefaultFactory) Init(params *paramtable.ComponentParam) {
 
 	// initialize mq client or embedded mq.
 	if err := f.initMQ(f.standAlone, params); err != nil {
+		panic(err)
+	}
+	if err := f.initMeta(params); err != nil {
 		panic(err)
 	}
 }
@@ -149,8 +163,34 @@ func (f *DefaultFactory) NewPersistentStorageChunkManager(ctx context.Context) (
 	return f.chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
 }
 
+func (f *DefaultFactory) NewMetaKv(rootPath string) kv.MetaKv {
+	return f.metaFactory.NewMetaKv(rootPath)
+}
+
+func (f *DefaultFactory) NewTxnKV(rootPath string) kv.TxnKV {
+	return f.metaFactory.NewTxnKV(rootPath)
+}
+
+func (f *DefaultFactory) initMeta(params *paramtable.ComponentParam) error {
+	metaType := params.MetaStoreCfg.MetaStoreType.GetValue()
+	log.Info("try to init metastore", zap.String("metaType", metaType))
+	switch metaType {
+	case metaTypeEtcd:
+		f.metaFactory = kvfactory.NewETCDFactory(&params.ServiceParam)
+	case metaTypeTikv:
+		f.metaFactory = kvfactory.NewTiKVFactory(&params.ServiceParam)
+	default:
+		return errors.Newf("meta type %s is invalid", metaType)
+	}
+	if f.metaFactory == nil {
+		return errors.Newf("Failed to init metastore factory, look into Milvus logs for cause")
+	}
+	return nil
+}
+
 type Factory interface {
 	msgstream.Factory
+	kvfactory.Factory
 	Init(p *paramtable.ComponentParam)
 	NewPersistentStorageChunkManager(ctx context.Context) (storage.ChunkManager, error)
 }
