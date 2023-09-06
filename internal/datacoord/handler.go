@@ -366,7 +366,7 @@ func trimSegmentInfo(info *datapb.SegmentInfo) *datapb.SegmentInfo {
 // HasCollection returns whether the collection exist from user's perspective.
 func (h *ServerHandler) HasCollection(ctx context.Context, collectionID UniqueID) (bool, error) {
 	var hasCollection bool
-	ctx2, cancel := context.WithTimeout(ctx, time.Minute*30)
+	ctx2, cancel := context.WithTimeout(ctx, time.Second*10)
 	defer cancel()
 	if err := retry.Do(ctx2, func() error {
 		has, err := h.s.broker.HasCollection(ctx2, collectionID)
@@ -376,9 +376,13 @@ func (h *ServerHandler) HasCollection(ctx context.Context, collectionID UniqueID
 		}
 		hasCollection = has
 		return nil
-	}, retry.Attempts(500)); err != nil {
-		log.Ctx(ctx2).Error("datacoord ServerHandler HasCollection finally failed", zap.Int64("collectionID", collectionID))
-		log.Panic("datacoord ServerHandler HasCollection finally failed")
+	}, retry.Attempts(5)); err != nil {
+		log.Ctx(ctx2).Error("datacoord ServerHandler HasCollection finally failed",
+			zap.Int64("collectionID", collectionID),
+			zap.Error(err))
+		// A workaround for https://github.com/milvus-io/milvus/issues/26863. The collection may be considered as not
+		// dropped when any exception happened, but there are chances that finally the collection will be cleaned.
+		return true, nil
 	}
 	return hasCollection, nil
 }
