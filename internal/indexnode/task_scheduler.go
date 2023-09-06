@@ -220,9 +220,9 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 	pipelines := []func(context.Context) error{t.Prepare, t.BuildIndex, t.SaveIndexFiles}
 	for _, fn := range pipelines {
 		if err := wrap(fn); err != nil {
-			if err == errCancel {
-				log.Ctx(t.Ctx()).Warn("index build task canceled", zap.String("task", t.Name()))
-				t.SetState(commonpb.IndexState_Failed, err.Error())
+			if errors.Is(err, errCancel) {
+				log.Ctx(t.Ctx()).Warn("index build task canceled, retry it", zap.String("task", t.Name()))
+				t.SetState(commonpb.IndexState_Retry, err.Error())
 			} else if errors.Is(err, ErrNoSuchKey) {
 				t.SetState(commonpb.IndexState_Failed, err.Error())
 			} else {
