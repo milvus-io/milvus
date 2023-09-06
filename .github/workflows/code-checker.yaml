@@ -107,7 +107,6 @@ jobs:
           key: amazonlinux2023-conan-${{ hashFiles('internal/core/conanfile.*') }}
           restore-keys: amazonlinux2023-conan-
       - name: Code Check
-        env:
-          OS_NAME: 'amazonlinux2023'
         run: |
+          sed -i 's/ubuntu20.04/amazonlinux2023/g' .env
           ./build/builder.sh /bin/bash -c "make install"
