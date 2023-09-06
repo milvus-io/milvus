@@ -2219,7 +2219,7 @@ class TestLoadCollection(TestcaseBase):
         c_name = cf.gen_unique_str()
         collection_wr = self.init_collection_wrap(name=c_name)
         collection_wr.drop()
-        error = {ct.err_code: 1,
+        error = {ct.err_code: 4,
                  ct.err_msg: "DescribeCollection failed: can't find collection: %s" % c_name}
         collection_wr.load(check_task=CheckTasks.err_res, check_items=error)
 
@@ -2234,7 +2234,7 @@ class TestLoadCollection(TestcaseBase):
         c_name = cf.gen_unique_str()
         collection_wr = self.init_collection_wrap(name=c_name)
         collection_wr.drop()
-        error = {ct.err_code: 1,
+        error = {ct.err_code: 4,
                  ct.err_msg: "DescribeCollection failed: can't find collection: %s" % c_name}
         collection_wr.release(check_task=CheckTasks.err_res, check_items=error)
 
@@ -2595,7 +2595,7 @@ class TestLoadCollection(TestcaseBase):
         collection_wr.load()
         collection_wr.release()
         collection_wr.drop()
-        error = {ct.err_code: 1,
+        error = {ct.err_code: 4,
                  ct.err_msg: "DescribeCollection failed: can't find collection: %s" % c_name}
         collection_wr.load(check_task=CheckTasks.err_res, check_items=error)
         collection_wr.release(check_task=CheckTasks.err_res, check_items=error)
@@ -2613,7 +2613,7 @@ class TestLoadCollection(TestcaseBase):
         collection_wr.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_wr.load()
         collection_wr.drop()
-        error = {ct.err_code: 0,
+        error = {ct.err_code: 4,
                  ct.err_msg: "can't find collection"}
         collection_wr.release(check_task=CheckTasks.err_res, check_items=error)
 
