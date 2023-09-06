@@ -324,6 +324,7 @@ func (mr *MilvusRoles) Run(alias string) {
 		paramtable.Init()
 	}
 
+	mr.setupLogger()
 	http.ServeHTTP()
 
 	var rc *components.RootCoord
@@ -370,7 +371,6 @@ func (mr *MilvusRoles) Run(alias string) {
 
 	wg.Wait()
 
-	mr.setupLogger()
 	tracer.Init()
 	setupPrometheusHTTPServer(Registry)
 
