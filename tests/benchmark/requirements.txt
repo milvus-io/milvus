@@ -3,8 +3,8 @@
 # pymilvus==2.0.0rc3.dev8
 
 grpcio==1.53.0
-grpcio-testing==1.37.1
-grpcio-tools==1.37.1
+grpcio-testing==1.56.2
+grpcio-tools==1.56.2
 
 pandas==1.1.5
 scipy==1.10.0
