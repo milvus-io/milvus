@@ -19,7 +19,7 @@ from chaos import constants
 from delayed_assert import assert_expectations
 from utils.util_k8s import (get_milvus_instance_name,
                             get_milvus_deploy_tool,
-                            reset_healthy_checker_after_standby_activated)
+                            record_time_when_standby_activated)
 
 
 class TestBase:
@@ -84,19 +84,22 @@ class TestOperations(TestBase):
         if request_duration[-1] == "+":
             request_duration = request_duration[:-1]
         request_duration = eval(request_duration)
-        # start a thread to reset health_checkers when standby is activated.
-        t = threading.Thread(target=reset_healthy_checker_after_standby_activated,
-                             args=(self.milvus_ns, self.release_name, target_component, self.health_checkers),
+        # start a thread to record the time when standby is activated
+        t = threading.Thread(target=record_time_when_standby_activated,
+                             args=(self.milvus_ns, self.release_name, target_component),
                              kwargs={"timeout": request_duration//2},
                              daemon=True)
         t.start()
-        # t.join()
         log.info('start a thread to reset health_checkers when standby is activated')
         for i in range(10):
             sleep(request_duration//10)
             for k, v in self.health_checkers.items():
                 v.check_result()
         if is_check:
-            assert_statistic(self.health_checkers)
-            assert_expectations()
+            assert_statistic(self.health_checkers, succ_rate_threshold=0.99)
+            for k, v in self.health_checkers.items():
+                log.info(f"{k} rto: {v.get_rto()}")
+                rto = v.get_rto()
+                pytest.assume(rto < 30,  f"{k} rto expect 30s but get {rto}s")  # rto should be less than 30s
+
         log.info("*********************Chaos Test Completed**********************")
