@@ -3,7 +3,6 @@ module github.com/milvus-io/milvus
 go 1.18
 
 require (
-	github.com/DATA-DOG/go-sqlmock v1.5.0
 	github.com/aliyun/credentials-go v1.2.7
 	github.com/antlr/antlr4/runtime/Go/antlr v0.0.0-20210826220005-b48c857c3a0e
 	github.com/antonmedv/expr v1.8.9
@@ -22,7 +21,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/klauspost/compress v1.16.5
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.3.0
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.3.1-0.20230905091144-d8ce91954095
 	github.com/milvus-io/milvus/pkg v0.0.1
 	github.com/minio/minio-go/v7 v7.0.56
 	github.com/prometheus/client_golang v1.14.0
@@ -53,7 +52,6 @@ require (
 	golang.org/x/text v0.9.0
 	google.golang.org/grpc v1.54.0
 	google.golang.org/grpc/examples v0.0.0-20220617181431-3e7b97febc7f
-	gorm.io/gorm v1.23.8
 	stathat.com/c/consistent v1.0.0
 )
 
@@ -118,8 +116,6 @@ require (
 	github.com/gsterjov/go-libsecret v0.0.0-20161001094733-a6f4afe4910c // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/ianlancetaylor/cgosymbolizer v0.0.0-20221217025313-27d3c9f66b6a // indirect
-	github.com/jinzhu/inflection v1.0.0 // indirect
-	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/jonboulle/clockwork v0.2.2 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/asmfmt v1.3.1 // indirect
