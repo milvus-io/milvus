@@ -1,5 +1,5 @@
 import os
-import datetime
+from pathlib import Path
 
 class LogConfig:
     def __init__(self):
@@ -23,10 +23,10 @@ class LogConfig:
 
     @staticmethod
     def create_path(log_path):
-        if not os.path.isdir(str(log_path)):
-            print("[create_path] folder(%s) is not exist." % log_path)
-            print("[create_path] create path now...")
-            os.makedirs(log_path)
+        print("[create_path] folder(%s) is not exist." % log_path)
+        print("[create_path] create path now...")
+        folder_path = Path(str(log_path))
+        folder_path.mkdir(parents=True, exist_ok=True)
 
     def get_default_config(self):
         """ Make sure the path exists """
