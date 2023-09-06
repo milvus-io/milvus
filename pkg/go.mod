@@ -25,6 +25,7 @@ require (
 	github.com/spf13/viper v1.8.1
 	github.com/streamnative/pulsarctl v0.5.0
 	github.com/stretchr/testify v1.8.3
+	github.com/tikv/client-go/v2 v2.0.4
 	github.com/uber/jaeger-client-go v2.30.0+incompatible
 	go.etcd.io/etcd/client/v3 v3.5.5
 	go.etcd.io/etcd/server/v3 v3.5.5
@@ -37,7 +38,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.13.0
 	go.uber.org/atomic v1.10.0
 	go.uber.org/automaxprocs v1.5.2
-	go.uber.org/zap v1.17.0
+	go.uber.org/zap v1.20.0
 	golang.org/x/crypto v0.9.0
 	golang.org/x/exp v0.0.0-20220303212507-bbda1eaf7a17
 	golang.org/x/sync v0.1.0
@@ -53,6 +54,7 @@ require (
 	github.com/BurntSushi/toml v1.2.1 // indirect
 	github.com/DataDog/zstd v1.5.0 // indirect
 	github.com/ardielle/ardielle-go v1.5.2 // indirect
+	github.com/benbjohnson/clock v1.1.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cenkalti/backoff/v4 v4.2.0 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
@@ -60,8 +62,10 @@ require (
 	github.com/cockroachdb/redact v1.1.3 // indirect
 	github.com/coreos/go-semver v0.3.0 // indirect
 	github.com/coreos/go-systemd/v22 v22.3.2 // indirect
+	github.com/cznic/mathutil v0.0.0-20181122101859-297441e03548 // indirect
 	github.com/danieljoos/wincred v1.1.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/dgryski/go-farm v0.0.0-20190423205320-6a90982ecee2 // indirect
 	github.com/docker/go-units v0.4.0 // indirect
 	github.com/dustin/go-humanize v1.0.0 // indirect
 	github.com/dvsekhvalnov/jose2go v1.5.0 // indirect
@@ -76,7 +80,8 @@ require (
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang-jwt/jwt v3.2.2+incompatible // indirect
 	github.com/golang/snappy v0.0.4 // indirect
-	github.com/google/btree v1.0.1 // indirect
+	github.com/google/btree v1.1.2 // indirect
+	github.com/google/uuid v1.3.0 // indirect
 	github.com/gopherjs/gopherjs v0.0.0-20200217142428-fce0ec30dd00 // indirect
 	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0 // indirect
@@ -104,14 +109,21 @@ require (
 	github.com/nats-io/nkeys v0.4.4 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/opencontainers/runtime-spec v1.0.2 // indirect
+	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/pelletier/go-toml v1.9.3 // indirect
 	github.com/pierrec/lz4 v2.5.2+incompatible // indirect
+	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c // indirect
+	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00 // indirect
+	github.com/pingcap/goleveldb v0.0.0-20191226122134-f82aafb29989 // indirect
+	github.com/pingcap/kvproto v0.0.0-20221129023506-621ec37aac7a // indirect
+	github.com/pingcap/log v1.1.1-0.20221015072633-39906604fb81 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
 	github.com/prometheus/client_model v0.3.0 // indirect
 	github.com/prometheus/common v0.42.0 // indirect
 	github.com/prometheus/procfs v0.9.0 // indirect
+	github.com/remyoudompheng/bigfft v0.0.0-20200410134404-eec4a21b6bb0 // indirect
 	github.com/rogpeppe/go-internal v1.8.1 // indirect
 	github.com/sirupsen/logrus v1.8.1 // indirect
 	github.com/smartystreets/assertions v1.1.0 // indirect
@@ -119,11 +131,15 @@ require (
 	github.com/spf13/afero v1.6.0 // indirect
 	github.com/spf13/jwalterweatherman v1.1.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
+	github.com/stathat/consistent v1.0.0 // indirect
 	github.com/stretchr/objx v0.5.0 // indirect
 	github.com/subosito/gotenv v1.2.0 // indirect
+	github.com/tiancaiamao/gp v0.0.0-20221230034425-4025bc8a4d4a // indirect
+	github.com/tikv/pd/client v0.0.0-20221031025758-80f0d8ca4d07 // indirect
 	github.com/tklauser/go-sysconf v0.3.10 // indirect
 	github.com/tklauser/numcpus v0.4.0 // indirect
 	github.com/tmc/grpc-websocket-proxy v0.0.0-20201229170055-e5319fda7802 // indirect
+	github.com/twmb/murmur3 v1.1.3 // indirect
 	github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2 // indirect
 	github.com/yusufpapurcu/wmi v1.2.2 // indirect
 	go.etcd.io/bbolt v1.3.6 // indirect
@@ -136,7 +152,7 @@ require (
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.13.0 // indirect
 	go.opentelemetry.io/otel/metric v0.35.0 // indirect
 	go.opentelemetry.io/proto/otlp v0.19.0 // indirect
-	go.uber.org/multierr v1.6.0 // indirect
+	go.uber.org/multierr v1.7.0 // indirect
 	golang.org/x/net v0.10.0 // indirect
 	golang.org/x/oauth2 v0.6.0 // indirect
 	golang.org/x/sys v0.8.0 // indirect

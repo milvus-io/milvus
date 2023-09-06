@@ -60,6 +60,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tikv"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -79,7 +80,13 @@ func TestMain(m *testing.M) {
 	paramtable.Get().Save(Params.EtcdCfg.Endpoints.Key, strings.Join(addrs, ","))
 
 	rand.Seed(time.Now().UnixNano())
-	os.Exit(m.Run())
+	parameters := []string{"tikv", "etcd"}
+	var code int
+	for _, v := range parameters {
+		paramtable.Get().Save(paramtable.Get().MetaStoreCfg.MetaStoreType.Key, v)
+		code = m.Run()
+	}
+	os.Exit(code)
 }
 
 func TestGetSegmentInfoChannel(t *testing.T) {
@@ -4002,6 +4009,8 @@ func TestDataCoordServer_UpdateChannelCheckpoint(t *testing.T) {
 	})
 }
 
+var global_test_tikv = tikv.SetupLocalTxn()
+
 func newTestServer(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 	var err error
 	paramtable.Get().Save(Params.CommonCfg.DataCoordTimeTick.Key, Params.CommonCfg.DataCoordTimeTick.GetValue()+strconv.Itoa(rand.Int()))
@@ -4021,6 +4030,8 @@ func newTestServer(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 
 	svr := CreateServer(context.TODO(), factory)
 	svr.SetEtcdClient(etcdCli)
+	svr.SetTiKVClient(global_test_tikv)
+
 	svr.dataNodeCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNode, error) {
 		return newMockDataNodeClient(0, receiveCh)
 	}
@@ -4073,6 +4084,8 @@ func newTestServerWithMeta(t *testing.T, receiveCh chan any, meta *meta, opts ..
 
 	svr := CreateServer(context.TODO(), factory, opts...)
 	svr.SetEtcdClient(etcdCli)
+	svr.SetTiKVClient(global_test_tikv)
+
 	svr.dataNodeCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNode, error) {
 		return newMockDataNodeClient(0, receiveCh)
 	}
@@ -4128,6 +4141,8 @@ func newTestServer2(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 
 	svr := CreateServer(context.TODO(), factory, opts...)
 	svr.SetEtcdClient(etcdCli)
+	svr.SetTiKVClient(global_test_tikv)
+
 	svr.dataNodeCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNode, error) {
 		return newMockDataNodeClient(0, receiveCh)
 	}
@@ -4320,6 +4335,8 @@ func testDataCoordBase(t *testing.T, opts ...Option) *Server {
 
 	svr := CreateServer(ctx, factory, opts...)
 	svr.SetEtcdClient(etcdCli)
+	svr.SetTiKVClient(global_test_tikv)
+
 	svr.SetDataNodeCreator(func(ctx context.Context, addr string, nodeID int64) (types.DataNode, error) {
 		return newMockDataNodeClient(0, nil)
 	})

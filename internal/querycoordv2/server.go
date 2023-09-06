@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -34,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
@@ -52,6 +54,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -70,6 +73,7 @@ type Server struct {
 	wg                  sync.WaitGroup
 	status              atomic.Int32
 	etcdCli             *clientv3.Client
+	tikvCli             *txnkv.Client
 	address             string
 	session             *sessionutil.Session
 	kv                  kv.MetaKv
@@ -204,13 +208,21 @@ func (s *Server) Init() error {
 func (s *Server) initQueryCoord() error {
 	s.UpdateStateCode(commonpb.StateCode_Initializing)
 	log.Info("QueryCoord", zap.Any("State", commonpb.StateCode_Initializing))
-	// Init KV
-	etcdKV := etcdkv.NewEtcdKV(s.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
-	s.kv = etcdKV
-	log.Info("query coordinator try to connect etcd success")
+	// Init KV and ID allocator
+	metaType := Params.MetaStoreCfg.MetaStoreType.GetValue()
+	var idAllocatorKV kv.TxnKV
+	log.Info(fmt.Sprintf("query coordinator connecting to %s.", metaType))
+	if metaType == util.MetaStoreTypeTiKV {
+		s.kv = tikv.NewTiKV(s.tikvCli, Params.TiKVCfg.MetaRootPath.GetValue())
+		idAllocatorKV = tsoutil.NewTSOTiKVBase(s.tikvCli, Params.TiKVCfg.KvRootPath.GetValue(), "querycoord-id-allocator")
+	} else if metaType == util.MetaStoreTypeEtcd {
+		s.kv = etcdkv.NewEtcdKV(s.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
+		idAllocatorKV = tsoutil.NewTSOKVBase(s.etcdCli, Params.EtcdCfg.KvRootPath.GetValue(), "querycoord-id-allocator")
+	} else {
+		return fmt.Errorf("not supported meta store: %s", metaType)
+	}
+	log.Info(fmt.Sprintf("query coordinator successfully connected to %s.", metaType))
 
-	// Init ID allocator
-	idAllocatorKV := tsoutil.NewTSOKVBase(s.etcdCli, Params.EtcdCfg.KvRootPath.GetValue(), "querycoord-id-allocator")
 	idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", idAllocatorKV)
 	err := idAllocator.Initialize()
 	if err != nil {
@@ -537,6 +549,10 @@ func (s *Server) SetAddress(address string) {
 // SetEtcdClient sets etcd's client
 func (s *Server) SetEtcdClient(etcdClient *clientv3.Client) {
 	s.etcdCli = etcdClient
+}
+
+func (s *Server) SetTiKVClient(client *txnkv.Client) {
+	s.tikvCli = client
 }
 
 // SetRootCoord sets root coordinator's client
