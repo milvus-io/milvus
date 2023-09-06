@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -88,10 +89,13 @@ func (s *CrossClusterRoutingSuite) SetupSuite() {
 	rand.Seed(time.Now().UnixNano())
 
 	paramtable.Init()
+
+	paramtable.Get().Save("grpc.client.maxMaxAttempts", "1")
 	s.factory = dependency.NewDefaultFactory(true)
 }
 
 func (s *CrossClusterRoutingSuite) TearDownSuite() {
+	paramtable.Get().Save("grpc.client.maxMaxAttempts", strconv.FormatInt(paramtable.DefaultMaxAttempts, 10))
 }
 
 func (s *CrossClusterRoutingSuite) SetupTest() {

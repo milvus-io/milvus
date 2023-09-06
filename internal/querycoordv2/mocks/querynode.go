@@ -117,7 +117,9 @@ func (node *MockQueryNode) Start() error {
 		case <-node.ctx.Done():
 			return nil
 		default:
-			return &milvuspb.ComponentStates{}
+			return &milvuspb.ComponentStates{
+				Status: successStatus,
+			}
 		}
 	}, func(context.Context, *milvuspb.GetComponentStatesRequest) error {
 		select {

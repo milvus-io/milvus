@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	retriableFlag       = 1 << 16
+	retryableFlag       = 1 << 16
 	CanceledCode  int32 = 10000
 	TimeoutCode   int32 = 10001
 )
@@ -124,7 +124,7 @@ type milvusError struct {
 
 func newMilvusError(msg string, code int32, retriable bool) milvusError {
 	if retriable {
-		code |= retriableFlag
+		code |= retryableFlag
 	}
 	return milvusError{
 		msg:     msg,

@@ -43,12 +43,10 @@ const (
 	DefaultKeepAliveTimeout = 20000
 
 	// Grpc retry policy
-	DefaultMaxAttempts               = 5
-	DefaultInitialBackoff    float64 = 1.0
-	DefaultMaxBackoff        float64 = 10.0
-	DefaultBackoffMultiplier float64 = 2.0
-
-	DefaultCompressionEnabled bool = false
+	DefaultMaxAttempts                = 10
+	DefaultInitialBackoff     float64 = 0.2
+	DefaultMaxBackoff         float64 = 10
+	DefaultCompressionEnabled bool    = false
 
 	ProxyInternalPort = 19529
 	ProxyExternalPort = 19530
@@ -194,10 +192,9 @@ type GrpcClientConfig struct {
 	KeepAliveTime    ParamItem `refreshable:"false"`
 	KeepAliveTimeout ParamItem `refreshable:"false"`
 
-	MaxAttempts       ParamItem `refreshable:"false"`
-	InitialBackoff    ParamItem `refreshable:"false"`
-	MaxBackoff        ParamItem `refreshable:"false"`
-	BackoffMultiplier ParamItem `refreshable:"false"`
+	MaxAttempts    ParamItem `refreshable:"false"`
+	InitialBackoff ParamItem `refreshable:"false"`
+	MaxBackoff     ParamItem `refreshable:"false"`
 }
 
 func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
@@ -318,15 +315,9 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 			if v == "" {
 				return maxAttempts
 			}
-			iv, err := strconv.Atoi(v)
+			_, err := strconv.Atoi(v)
 			if err != nil {
 				log.Warn("Failed to convert int when parsing grpc.client.maxMaxAttempts, set to default",
-					zap.String("role", p.Domain),
-					zap.String("grpc.client.maxMaxAttempts", v))
-				return maxAttempts
-			}
-			if iv < 2 || iv > 5 {
-				log.Warn("The value of %s should be greater than 1 and less than 6, set to default",
 					zap.String("role", p.Domain),
 					zap.String("grpc.client.maxMaxAttempts", v))
 				return maxAttempts
@@ -345,7 +336,7 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 			if v == "" {
 				return initialBackoff
 			}
-			_, err := strconv.Atoi(v)
+			_, err := strconv.ParseFloat(v, 64)
 			if err != nil {
 				log.Warn("Failed to convert int when parsing grpc.client.initialBackoff, set to default",
 					zap.String("role", p.Domain),
@@ -379,27 +370,6 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 	}
 	p.MaxBackoff.Init(base.mgr)
 
-	backoffMultiplier := fmt.Sprintf("%f", DefaultBackoffMultiplier)
-	p.BackoffMultiplier = ParamItem{
-		Key:     "grpc.client.backoffMultiplier",
-		Version: "2.0.0",
-		Formatter: func(v string) string {
-			if v == "" {
-				return backoffMultiplier
-			}
-			_, err := strconv.ParseFloat(v, 64)
-			if err != nil {
-				log.Warn("Failed to convert int when parsing grpc.client.backoffMultiplier, set to default",
-					zap.String("role", p.Domain),
-					zap.String("grpc.client.backoffMultiplier", v))
-				return backoffMultiplier
-			}
-			return v
-		},
-		Export: true,
-	}
-	p.BackoffMultiplier.Init(base.mgr)
-
 	compressionEnabled := fmt.Sprintf("%t", DefaultCompressionEnabled)
 	p.CompressionEnabled = ParamItem{
 		Key:     "grpc.client.compressionEnabled",
@@ -413,7 +383,7 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 				log.Warn("Failed to convert int when parsing grpc.client.compressionEnabled, set to default",
 					zap.String("role", p.Domain),
 					zap.String("grpc.client.compressionEnabled", v))
-				return backoffMultiplier
+				return compressionEnabled
 			}
 			return v
 		},

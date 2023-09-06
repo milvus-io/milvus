@@ -245,7 +245,8 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 	)
 	var (
 		ret = &internalpb.RetrieveResults{
-			Ids: &schemapb.IDs{},
+			Status: merr.Status(nil),
+			Ids:    &schemapb.IDs{},
 		}
 		skipDupCnt int64
 		loopEnd    int

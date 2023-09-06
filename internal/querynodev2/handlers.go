@@ -219,7 +219,7 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 	))
 
 	//
-	failRet.Status.ErrorCode = commonpb.ErrorCode_Success
+	ret.Status = merr.Status(nil)
 	latency := tr.ElapseSpan()
 	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.Leader).Observe(float64(latency.Milliseconds()))
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.SuccessLabel, metrics.Leader).Inc()

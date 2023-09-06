@@ -19,6 +19,7 @@ package meta
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -123,20 +124,25 @@ func (m *CollectionManager) Recover(broker Broker) error {
 		return err
 	}
 
+	ctx := log.WithTraceID(context.Background(), strconv.FormatInt(time.Now().UnixNano(), 10))
+	ctxLog := log.Ctx(ctx)
+	ctxLog.Info("recover collections and partitions from kv store")
+
 	for _, collection := range collections {
 		// Dropped collection should be deprecated
-		_, err = broker.GetCollectionSchema(context.Background(), collection.GetCollectionID())
+		_, err = broker.GetCollectionSchema(ctx, collection.GetCollectionID())
 		if errors.Is(err, merr.ErrCollectionNotFound) {
-			log.Info("skip dropped collection during recovery", zap.Int64("collection", collection.GetCollectionID()))
+			ctxLog.Info("skip dropped collection during recovery", zap.Int64("collection", collection.GetCollectionID()))
 			m.catalog.ReleaseCollection(collection.GetCollectionID())
 			continue
 		}
 		if err != nil {
+			ctxLog.Warn("failed to get collection schema", zap.Error(err))
 			return err
 		}
 		// Collections not loaded done should be deprecated
 		if collection.GetStatus() != querypb.LoadStatus_Loaded || collection.GetReplicaNumber() <= 0 {
-			log.Info("skip recovery and release collection",
+			ctxLog.Info("skip recovery and release collection",
 				zap.Int64("collectionID", collection.GetCollectionID()),
 				zap.String("status", collection.GetStatus().String()),
 				zap.Int32("replicaNumber", collection.GetReplicaNumber()),
@@ -150,13 +156,14 @@ func (m *CollectionManager) Recover(broker Broker) error {
 	}
 
 	for collection, partitions := range partitions {
-		existPartitions, err := broker.GetPartitions(context.Background(), collection)
+		existPartitions, err := broker.GetPartitions(ctx, collection)
 		if errors.Is(err, merr.ErrCollectionNotFound) {
-			log.Info("skip dropped collection during recovery", zap.Int64("collection", collection))
+			ctxLog.Info("skip dropped collection during recovery", zap.Int64("collection", collection))
 			m.catalog.ReleaseCollection(collection)
 			continue
 		}
 		if err != nil {
+			ctxLog.Warn("failed to get partitions", zap.Error(err))
 			return err
 		}
 		omitPartitions := make([]int64, 0)
@@ -168,7 +175,7 @@ func (m *CollectionManager) Recover(broker Broker) error {
 			return true
 		})
 		if len(omitPartitions) > 0 {
-			log.Info("skip dropped partitions during recovery",
+			ctxLog.Info("skip dropped partitions during recovery",
 				zap.Int64("collection", collection), zap.Int64s("partitions", omitPartitions))
 			m.catalog.ReleasePartition(collection, omitPartitions...)
 		}

@@ -406,10 +406,10 @@ grpc:
     dialTimeout: 200
     keepAliveTime: 10000
     keepAliveTimeout: 20000
-    maxMaxAttempts: 5
-    initialBackoff: 1
-    maxBackoff: 10
-    backoffMultiplier: 2
+    maxMaxAttempts: 10
+    initialBackOff: 0.2 # seconds
+    maxBackoff: 10 # seconds
+    backoffMultiplier: 2.0 # deprecated
   clientMaxSendSize: 268435456
   clientMaxRecvSize: 268435456
 
