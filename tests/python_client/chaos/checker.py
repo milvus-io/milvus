@@ -531,6 +531,7 @@ class InsertChecker(Checker):
         self.scale = 1 * 10 ** 6
         self.start_time_stamp = int(time.time() * self.scale)  # us
         self.term_expr = f'{self.int64_field_name} >= {self.start_time_stamp}'
+        self.file_name = f"/tmp/ci_logs/insert_data_{uuid.uuid4()}.parquet"
 
     @trace()
     def insert(self):
@@ -548,6 +549,7 @@ class InsertChecker(Checker):
                                          enable_traceback=enable_traceback,
                                          check_task=CheckTasks.check_nothing)
         if result:
+            # TODO: persist data to file
             self.inserted_data.extend(ts_data)
         return res, result
 
@@ -812,12 +814,24 @@ class DropChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("DropChecker_")
         super().__init__(collection_name=collection_name, schema=schema)
+        self.collection_pool = []
+        self.gen_collection_pool(schema=self.schema)
+
+    def gen_collection_pool(self, pool_size=50, schema=None):
+        for i in range(pool_size):
+            collection_name = cf.gen_unique_str("DropChecker_")
+            res, result = self.c_wrap.init_collection(name=collection_name, schema=schema)
+            if result:
+                self.collection_pool.append(collection_name)
 
     @trace()
     def drop(self):
         res, result = self.c_wrap.drop()
+        if result:
+            self.collection_pool.remove(self.c_wrap.name)
         return res, result
 
+    @exception_handler()
     def run_task(self):
         res, result = self.drop()
         return res, result
@@ -826,11 +840,16 @@ class DropChecker(Checker):
         while self._keep_running:
             res, result = self.run_task()
             if result:
-                self.c_wrap.init_collection(
-                    name=cf.gen_unique_str("DropChecker_"),
-                    schema=cf.gen_default_collection_schema(),
-                    timeout=timeout,
-                    check_task=CheckTasks.check_nothing)
+                try:
+                    if len(self.collection_pool) <= 10:
+                        self.gen_collection_pool(schema=self.schema)
+                except Exception as e:
+                    log.error(f"Failed to generate collection pool: {e}")
+                try:
+                    c_name = self.collection_pool[0]
+                    self.c_wrap.init_collection(name=c_name)
+                except Exception as e:
+                    log.error(f"Failed to init new collection: {e}")
             sleep(constants.WAIT_PER_OP / 10)
 
 
