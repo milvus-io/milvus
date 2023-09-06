@@ -40,10 +40,11 @@ KnowhereInitImpl(const char* conf_file) {
 #ifdef EMBEDDED_MILVUS
         // always disable all logs for embedded milvus
         google::SetCommandLineOption("minloglevel", "4");
-#endif
+#else
         if (conf_file != nullptr) {
             gflags::SetCommandLineOption("flagfile", conf_file);
         }
+#endif
     };
 
     std::call_once(init_knowhere_once_, init);
