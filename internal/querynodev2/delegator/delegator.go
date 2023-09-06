@@ -41,37 +41,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
-
-type lifetime struct {
-	state     atomic.Int32
-	closeCh   chan struct{}
-	closeOnce sync.Once
-}
-
-func (lt *lifetime) SetState(state int32) {
-	lt.state.Store(state)
-}
-
-func (lt *lifetime) GetState() int32 {
-	return lt.state.Load()
-}
-
-func (lt *lifetime) Close() {
-	lt.closeOnce.Do(func() {
-		close(lt.closeCh)
-	})
-}
-
-func newLifetime() *lifetime {
-	return &lifetime{
-		closeCh: make(chan struct{}),
-	}
-}
 
 // ShardDelegator is the interface definition.
 type ShardDelegator interface {
@@ -106,6 +81,14 @@ const (
 	stopped
 )
 
+func notStopped(state int32) bool {
+	return state != stopped
+}
+
+func isWorking(state int32) bool {
+	return state == working
+}
+
 // shardDelegator maintains the shard distribution and streaming part of the data.
 type shardDelegator struct {
 	// shard information attributes
@@ -118,7 +101,7 @@ type shardDelegator struct {
 
 	workerManager cluster.Manager
 
-	lifetime *lifetime
+	lifetime lifetime.Lifetime[int32]
 
 	distribution   *distribution
 	segmentManager segments.SegmentManager
@@ -131,7 +114,6 @@ type shardDelegator struct {
 	factory msgstream.Factory
 
 	loader      segments.Loader
-	wg          sync.WaitGroup
 	tsCond      *sync.Cond
 	latestTsafe *atomic.Uint64
 }
@@ -206,9 +188,10 @@ func (sd *shardDelegator) modifyQueryRequest(req *querypb.QueryRequest, scope qu
 // Search preforms search operation on shard.
 func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest) ([]*internalpb.SearchResults, error) {
 	log := sd.getLogger(ctx)
-	if !sd.Serviceable() {
+	if !sd.lifetime.Add(isWorking) {
 		return nil, errors.New("delegator is not serviceable")
 	}
+	defer sd.lifetime.Done()
 
 	if !funcutil.SliceContain(req.GetDmlChannels(), sd.vchannelName) {
 		log.Warn("deletgator received search request not belongs to it",
@@ -271,9 +254,10 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 // Query performs query operation on shard.
 func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) ([]*internalpb.RetrieveResults, error) {
 	log := sd.getLogger(ctx)
-	if !sd.Serviceable() {
+	if !sd.lifetime.Add(isWorking) {
 		return nil, errors.New("delegator is not serviceable")
 	}
+	defer sd.lifetime.Done()
 
 	if !funcutil.SliceContain(req.GetDmlChannels(), sd.vchannelName) {
 		log.Warn("delegator received query request not belongs to it",
@@ -335,9 +319,10 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 // GetStatistics returns statistics aggregated by delegator.
 func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) ([]*internalpb.GetStatisticsResponse, error) {
 	log := sd.getLogger(ctx)
-	if !sd.Serviceable() {
+	if !sd.lifetime.Add(isWorking) {
 		return nil, errors.New("delegator is not serviceable")
 	}
+	defer sd.lifetime.Done()
 
 	if !funcutil.SliceContain(req.GetDmlChannels(), sd.vchannelName) {
 		log.Warn("deletgator received query request not belongs to it",
@@ -510,7 +495,9 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) error {
 		sd.tsCond.L.Lock()
 		defer sd.tsCond.L.Unlock()
 
-		for sd.latestTsafe.Load() < ts && ctx.Err() == nil {
+		for sd.latestTsafe.Load() < ts &&
+			ctx.Err() == nil &&
+			sd.Serviceable() {
 			sd.tsCond.Wait()
 		}
 		close(ch)
@@ -524,6 +511,9 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) error {
 			sd.tsCond.Broadcast()
 			return ctx.Err()
 		case <-ch:
+			if !sd.Serviceable() {
+				return merr.WrapErrChannelNotAvailable(sd.vchannelName, "delegator closed during wait tsafe")
+			}
 			return nil
 		}
 	}
@@ -531,7 +521,7 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) error {
 
 // watchTSafe is the worker function to update serviceable timestamp.
 func (sd *shardDelegator) watchTSafe() {
-	defer sd.wg.Done()
+	defer sd.lifetime.Done()
 	listener := sd.tsafeManager.WatchChannel(sd.vchannelName)
 	sd.updateTSafe()
 	log := sd.getLogger(context.Background())
@@ -544,7 +534,7 @@ func (sd *shardDelegator) watchTSafe() {
 				return
 			}
 			sd.updateTSafe()
-		case <-sd.lifetime.closeCh:
+		case <-sd.lifetime.CloseCh():
 			log.Info("updateTSafe quit")
 			// shard delegator closed
 			return
@@ -570,7 +560,9 @@ func (sd *shardDelegator) updateTSafe() {
 func (sd *shardDelegator) Close() {
 	sd.lifetime.SetState(stopped)
 	sd.lifetime.Close()
-	sd.wg.Wait()
+	// broadcast to all waitTsafe goroutine to quit
+	sd.tsCond.Broadcast()
+	sd.lifetime.Wait()
 }
 
 // NewShardDelegator creates a new ShardDelegator instance with all fields initialized.
@@ -600,7 +592,7 @@ func NewShardDelegator(collectionID UniqueID, replicaID UniqueID, channel string
 		collection:     collection,
 		segmentManager: manager.Segment,
 		workerManager:  workerManager,
-		lifetime:       newLifetime(),
+		lifetime:       lifetime.NewLifetime(initializing),
 		distribution:   NewDistribution(),
 		deleteBuffer:   deletebuffer.NewDoubleCacheDeleteBuffer[*deletebuffer.Item](startTs, maxSegmentDeleteBuffer),
 		pkOracle:       pkoracle.NewPkOracle(),
@@ -611,8 +603,9 @@ func NewShardDelegator(collectionID UniqueID, replicaID UniqueID, channel string
 	}
 	m := sync.Mutex{}
 	sd.tsCond = sync.NewCond(&m)
-	sd.wg.Add(1)
-	go sd.watchTSafe()
+	if sd.lifetime.Add(notStopped) {
+		go sd.watchTSafe()
+	}
 	log.Info("finish build new shardDelegator")
 	return sd, nil
 }

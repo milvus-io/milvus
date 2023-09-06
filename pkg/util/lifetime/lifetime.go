@@ -23,6 +23,7 @@ import (
 
 // Lifetime interface for lifetime control.
 type Lifetime[T any] interface {
+	SafeChan
 	// SetState is the method to change lifetime state.
 	SetState(state T)
 	// GetState returns current state.
@@ -43,13 +44,15 @@ var _ Lifetime[any] = (*lifetime[any])(nil)
 // NewLifetime returns a new instance of Lifetime with init state and isHealthy logic.
 func NewLifetime[T any](initState T) Lifetime[T] {
 	return &lifetime[T]{
-		state: initState,
+		safeChan: newSafeChan(),
+		state:    initState,
 	}
 }
 
 // lifetime implementation of Lifetime.
 // users shall not care about the internal fields of this struct.
 type lifetime[T any] struct {
+	*safeChan
 	// wg is used for keeping record each running task.
 	wg sync.WaitGroup
 	// state is the "atomic" value to store component state.
