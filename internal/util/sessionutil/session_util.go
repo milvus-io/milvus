@@ -149,7 +149,8 @@ func (s *Session) UnmarshalJSON(data []byte) error {
 		Exclusive   bool   `json:"Exclusive,omitempty"`
 		Stopping    bool   `json:"Stopping,omitempty"`
 		TriggerKill bool
-		Version     string `json:"Version"`
+		Version     string            `json:"Version"`
+		LeaseID     *clientv3.LeaseID `json:"LeaseID,omitempty"`
 	}
 	err := json.Unmarshal(data, &raw)
 	if err != nil {
@@ -169,6 +170,7 @@ func (s *Session) UnmarshalJSON(data []byte) error {
 	s.Exclusive = raw.Exclusive
 	s.Stopping = raw.Stopping
 	s.TriggerKill = raw.TriggerKill
+	s.leaseID = raw.LeaseID
 	return nil
 }
 
@@ -183,7 +185,8 @@ func (s *Session) MarshalJSON() ([]byte, error) {
 		Exclusive   bool   `json:"Exclusive,omitempty"`
 		Stopping    bool   `json:"Stopping,omitempty"`
 		TriggerKill bool
-		Version     string `json:"Version"`
+		Version     string            `json:"Version"`
+		LeaseID     *clientv3.LeaseID `json:"LeaseID,omitempty"`
 	}{
 		ServerID:    s.ServerID,
 		ServerName:  s.ServerName,
@@ -192,6 +195,7 @@ func (s *Session) MarshalJSON() ([]byte, error) {
 		Stopping:    s.Stopping,
 		TriggerKill: s.TriggerKill,
 		Version:     verStr,
+		LeaseID:     s.leaseID,
 	})
 
 }
@@ -1014,6 +1018,73 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 		log.Info(fmt.Sprintf("stop watching ACTIVE key %v", s.activeKey))
 	}
 
+	s.updateStandby(false)
+	log.Info(fmt.Sprintf("serverName: %v quit STANDBY mode, this node will become ACTIVE", s.ServerName))
+	if activateFunc != nil {
+		return activateFunc()
+	}
+	return nil
+}
+
+func (s *Session) ForceActiveStandby(activateFunc func() error) error {
+	s.activeKey = path.Join(s.metaRoot, DefaultServiceRoot, s.ServerName)
+
+	// force register to the active_key.
+	forceRegisterActiveFn := func() error {
+		log.Info(fmt.Sprintf("try to register as ACTIVE %v service...", s.ServerName))
+		sessionJSON, err := json.Marshal(s)
+		if err != nil {
+			log.Error("json marshal error", zap.Error(err))
+			return err
+		}
+
+		// try to release old session first
+		sessions, _, err := s.GetSessions(s.ServerName)
+		if err != nil {
+			return err
+		}
+
+		if len(sessions) != 0 {
+			activeSess := sessions[s.ServerName]
+			if activeSess == nil || activeSess.leaseID == nil {
+				//force delete all old sessions
+				s.etcdCli.Delete(s.ctx, s.activeKey)
+				for _, sess := range sessions {
+					if sess.ServerID != s.ServerID {
+						sess.getCompleteKey()
+						key := path.Join(s.metaRoot, DefaultServiceRoot, fmt.Sprintf("%s-%d", sess.ServerName, sess.ServerID))
+						s.etcdCli.Delete(s.ctx, key)
+					}
+				}
+			} else {
+				// force release old active session
+				_, _ = s.etcdCli.Revoke(s.ctx, *activeSess.leaseID)
+			}
+		}
+
+		// then try to register as active
+		resp, err := s.etcdCli.Txn(s.ctx).If(
+			clientv3.Compare(
+				clientv3.Version(s.activeKey),
+				"=",
+				0)).
+			Then(clientv3.OpPut(s.activeKey, string(sessionJSON), clientv3.WithLease(*s.leaseID))).Commit()
+
+		if !resp.Succeeded {
+			msg := fmt.Sprintf("failed to force register ACTIVE %s", s.ServerName)
+			log.Error(msg, zap.Error(err), zap.Any("resp", resp))
+			return errors.New(msg)
+		}
+
+		log.Info(fmt.Sprintf("force register ACTIVE %s", s.ServerName))
+		return nil
+	}
+
+	err := retry.Do(s.ctx, forceRegisterActiveFn, retry.Attempts(uint(s.sessionRetryTimes)))
+	if err != nil {
+		log.Warn(fmt.Sprintf("failed to force register ACTIVE %s", s.ServerName))
+		return err
+	}
 	s.updateStandby(false)
 	log.Info(fmt.Sprintf("serverName: %v quit STANDBY mode, this node will become ACTIVE", s.ServerName))
 	if activateFunc != nil {
