@@ -1179,17 +1179,17 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 	channelVersionInfos := make([]*querypb.ChannelVersionInfo, 0)
 	leaderViews := make([]*querypb.LeaderView, 0)
 
-	node.delegators.Range(func(key string, value delegator.ShardDelegator) bool {
-		if !value.Serviceable() {
+	node.delegators.Range(func(key string, delegator delegator.ShardDelegator) bool {
+		if !delegator.Serviceable() {
 			return true
 		}
 		channelVersionInfos = append(channelVersionInfos, &querypb.ChannelVersionInfo{
 			Channel:    key,
-			Collection: value.Collection(),
-			Version:    value.Version(),
+			Collection: delegator.Collection(),
+			Version:    delegator.Version(),
 		})
 
-		sealed, growing := value.GetSegmentInfo(false)
+		sealed, growing := delegator.GetSegmentInfo(false)
 		sealedSegments := make(map[int64]*querypb.SegmentDist)
 		for _, item := range sealed {
 			for _, segment := range item.Segments {
@@ -1212,11 +1212,11 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 		}
 
 		leaderViews = append(leaderViews, &querypb.LeaderView{
-			Collection:      value.Collection(),
+			Collection:      delegator.Collection(),
 			Channel:         key,
 			SegmentDist:     sealedSegments,
 			GrowingSegments: growingSegments,
-			TargetVersion:   value.GetTargetVersion(),
+			TargetVersion:   delegator.GetTargetVersion(),
 		})
 		return true
 	})
