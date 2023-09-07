@@ -251,12 +251,12 @@ func (f *mockFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, s
 	return nil
 }
 
-func (f *mockFactory) NewMetaKv(rootPath string) kv.MetaKv {
+func (f *mockFactory) NewMetaKv() kv.MetaKv {
 	// TODO
 	return nil
 }
 
-func (f *mockFactory) NewTxnKV(rootPath string) kv.TxnKV {
+func (f *mockFactory) NewTxnKV() kv.TxnKV {
 	// TODO
 	return nil
 }

@@ -163,14 +163,6 @@ func (f *DefaultFactory) NewPersistentStorageChunkManager(ctx context.Context) (
 	return f.chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
 }
 
-func (f *DefaultFactory) NewMetaKv(rootPath string) kv.MetaKv {
-	return f.metaFactory.NewMetaKv(rootPath)
-}
-
-func (f *DefaultFactory) NewTxnKV(rootPath string) kv.TxnKV {
-	return f.metaFactory.NewTxnKV(rootPath)
-}
-
 func (f *DefaultFactory) initMeta(params *paramtable.ComponentParam) error {
 	metaType := params.MetaStoreCfg.MetaStoreType.GetValue()
 	log.Info("try to init metastore", zap.String("metaType", metaType))
@@ -186,6 +178,14 @@ func (f *DefaultFactory) initMeta(params *paramtable.ComponentParam) error {
 		return errors.Newf("Failed to init metastore factory, look into Milvus logs for cause")
 	}
 	return nil
+}
+
+func (f *DefaultFactory) NewMetaKv() kv.MetaKv {
+	return f.metaFactory.NewMetaKv()
+}
+
+func (f *DefaultFactory) NewTxnKV() kv.TxnKV {
+	return f.metaFactory.NewTxnKV()
 }
 
 type Factory interface {
