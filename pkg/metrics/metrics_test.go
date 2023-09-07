@@ -39,3 +39,14 @@ func TestRegisterMetrics(t *testing.T) {
 		RegisterMsgStreamMetrics(r)
 	})
 }
+
+func TestGetRegisterer(t *testing.T) {
+	register := GetRegisterer()
+	assert.NotNil(t, register)
+	assert.Equal(t, prometheus.DefaultRegisterer, register)
+	r := prometheus.NewRegistry()
+	Register(r)
+	register = GetRegisterer()
+	assert.NotNil(t, register)
+	assert.Equal(t, r, register)
+}

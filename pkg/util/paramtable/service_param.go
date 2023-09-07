@@ -502,6 +502,9 @@ type PulsarConfig struct {
 
 	// Global request timeout
 	RequestTimeout ParamItem `refreshable:"false"`
+
+	// Enable Client side metrics
+	EnableClientMetrics ParamItem `refreshable:"false"`
 }
 
 func (p *PulsarConfig) Init(base *BaseTable) {
@@ -615,6 +618,14 @@ func (p *PulsarConfig) Init(base *BaseTable) {
 		Export:       true,
 	}
 	p.RequestTimeout.Init(base.mgr)
+
+	p.EnableClientMetrics = ParamItem{
+		Key:          "pulsar.enableClientMetrics",
+		Version:      "2.3.0",
+		DefaultValue: "false",
+		Export:       true,
+	}
+	p.EnableClientMetrics.Init(base.mgr)
 }
 
 // --- kafka ---
@@ -1067,5 +1078,4 @@ Leave it empty if you want to use AWS default endpoint`,
 		Export:       true,
 	}
 	p.UseVirtualHost.Init(base.mgr)
-
 }

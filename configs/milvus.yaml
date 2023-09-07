@@ -114,6 +114,7 @@ pulsar:
   tenant: public
   namespace: default
   requestTimeout: 60 # pulsar client global request timeout in seconds
+  enableClientMetrics: false # Whether to register pulsar client metrics into milvus metrics path.
 
 # If you want to enable kafka, needs to comment the pulsar configs
 # kafka:

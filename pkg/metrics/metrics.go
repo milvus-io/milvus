@@ -113,10 +113,23 @@ var (
 			lockType,
 			lockOp,
 		})
+
+	metricRegisterer prometheus.Registerer
 )
 
+// GetRegisterer returns the global prometheus registerer
+// metricsRegistry must be call after Register is called or no Register is called.
+func GetRegisterer() prometheus.Registerer {
+	if metricRegisterer == nil {
+		return prometheus.DefaultRegisterer
+	}
+	return metricRegisterer
+}
+
 // Register serves prometheus http service
-func Register(r *prometheus.Registry) {
+// Should be called by init function.
+func Register(r prometheus.Registerer) {
 	r.MustRegister(NumNodes)
 	r.MustRegister(LockCosts)
+	metricRegisterer = r
 }
