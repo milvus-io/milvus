@@ -473,64 +473,6 @@ func (kv *txnTiKV) MultiSaveAndRemove(saves map[string]string, removals []string
 	return nil
 }
 
-// MultiRemoveWithPrefix removes the keys with given prefix.
-func (kv *txnTiKV) MultiRemoveWithPrefix(prefixes []string) error {
-	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
-	defer cancel()
-
-	var logging_error error
-	defer logWarnOnFailure(&logging_error, "txnTiKV MultiRemoveWithPrefix error", zap.Strings("keys", prefixes), zap.Int("len", len(prefixes)))
-
-	txn, err := beginTxn(kv.txn)
-	if err != nil {
-		logging_error = errors.Wrap(err, "Failed to create txn for MultiRemoveWithPrefix")
-		return logging_error
-	}
-
-	// Defer a rollback only if the transaction hasn't been committed
-	defer rollbackOnFailure(&logging_error, txn)
-
-	// Need in order for err to be propogated to the defered logger
-	// := within forloop will shadow the original variable, resulting in logger
-	// missing it
-	for _, prefix := range prefixes {
-		prefix = path.Join(kv.rootPath, prefix)
-		// Get the start and end keys for the prefix range
-		startKey := []byte(prefix)
-		endKey := tikv.PrefixNextKey([]byte(prefix))
-		// Use Scan to iterate over keys in the prefix range
-		iter, err := txn.Iter(startKey, endKey)
-		if err != nil {
-			logging_error = errors.Wrap(err, "Failed to create iterater for MultiRemoveWithPrefix")
-			return logging_error
-		}
-		// Iterate over keys and delete them
-		for iter.Valid() {
-			key := iter.Key()
-			err = txn.Delete(key)
-			if err != nil {
-				logging_error = errors.Wrap(err, fmt.Sprintf("Failed to delete %s for MultiRemoveWithPrefix", string(key)))
-				return logging_error
-			}
-			// Move the iterator to the next key
-			err = iter.Next()
-			if err != nil {
-				logging_error = errors.Wrap(err, fmt.Sprintf("Failed to move Iterator after key %s for MultiRemoveWithPrefix", string(key)))
-				return logging_error
-			}
-		}
-	}
-
-	err = kv.executeTxn(txn, ctx)
-	if err != nil {
-		logging_error = errors.Wrap(err, "Failed to commit for MultiRemoveWithPrefix")
-		return logging_error
-	}
-	CheckElapseAndWarn(start, "Slow txnTiKV MultiRemoveWithPrefix() operation", zap.Strings("keys", prefixes))
-	return nil
-}
-
 // MultiSaveAndRemoveWithPrefix saves kv in @saves and removes the keys with given prefix in @removals.
 func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error {
 	start := time.Now()

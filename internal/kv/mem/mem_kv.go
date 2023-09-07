@@ -20,7 +20,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cockroachdb/errors"
 	"github.com/google/btree"
 	"github.com/milvus-io/milvus/pkg/common"
 )
@@ -280,11 +279,6 @@ func (kv *MemoryKV) LoadBytesWithPrefix(key string) ([]string, [][]byte, error) 
 
 // Close dummy close
 func (kv *MemoryKV) Close() {
-}
-
-// MultiRemoveWithPrefix not implemented
-func (kv *MemoryKV) MultiRemoveWithPrefix(keys []string) error {
-	return errors.New("not implement")
 }
 
 // MultiSaveAndRemoveWithPrefix saves key-value pairs in @saves, & remove key with prefix in @removals in MemoryKV atomically.

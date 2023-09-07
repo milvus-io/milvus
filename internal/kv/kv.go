@@ -58,7 +58,6 @@ type BaseKV interface {
 type TxnKV interface {
 	BaseKV
 	MultiSaveAndRemove(saves map[string]string, removals []string) error
-	MultiRemoveWithPrefix(keys []string) error
 	MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error
 }
 

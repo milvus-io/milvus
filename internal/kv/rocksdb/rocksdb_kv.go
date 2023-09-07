@@ -420,18 +420,6 @@ func (kv *RocksdbKV) DeleteRange(startKey, endKey string) error {
 	return err
 }
 
-// MultiRemoveWithPrefix is used to remove a batch of key-values with the same prefix
-func (kv *RocksdbKV) MultiRemoveWithPrefix(prefixes []string) error {
-	if kv.DB == nil {
-		return errors.New("rocksdb instance is nil when do RemoveWithPrefix")
-	}
-	writeBatch := gorocksdb.NewWriteBatch()
-	defer writeBatch.Destroy()
-	kv.prepareRemovePrefix(prefixes, writeBatch)
-	err := kv.DB.Write(kv.WriteOptions, writeBatch)
-	return err
-}
-
 // MultiSaveAndRemoveWithPrefix is used to execute a batch operators with the same prefix
 func (kv *RocksdbKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error {
 	if kv.DB == nil {
