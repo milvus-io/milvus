@@ -390,12 +390,6 @@ type DataCoordComponent interface {
 	DataCoord
 
 	SetAddress(address string)
-	// SetEtcdClient set EtcdClient for DataCoord
-	// `etcdClient` is a client of etcd
-	SetEtcdClient(etcdClient *clientv3.Client)
-
-	// SetTiKVClient set TiKV client for QueryNode
-	SetTiKVClient(client *txnkv.Client)
 
 	SetRootCoord(rootCoord RootCoord)
 

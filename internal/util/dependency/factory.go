@@ -41,6 +41,7 @@ type DefaultFactory struct {
 	chunkManagerFactory storage.Factory
 	msgStreamFactory    msgstream.Factory
 	metaFactory         kvfactory.Factory
+	watchFactory        kvfactory.Factory
 }
 
 // Only for test
@@ -50,7 +51,8 @@ func NewDefaultFactory(standAlone bool) *DefaultFactory {
 		msgStreamFactory: smsgstream.NewRocksmqFactory("/tmp/milvus/rocksmq/", &paramtable.Get().ServiceParam),
 		chunkManagerFactory: storage.NewChunkManagerFactory("local",
 			storage.RootPath("/tmp/milvus")),
-		metaFactory: kvfactory.NewETCDFactory(&paramtable.Get().ServiceParam),
+		metaFactory:  kvfactory.NewETCDFactory(&paramtable.Get().ServiceParam),
+		watchFactory: kvfactory.NewETCDFactory(&paramtable.Get().ServiceParam),
 	}
 }
 
@@ -61,6 +63,7 @@ func MockDefaultFactory(standAlone bool, params *paramtable.ComponentParam) *Def
 		msgStreamFactory:    smsgstream.NewRocksmqFactory("/tmp/milvus/rocksmq/", &paramtable.Get().ServiceParam),
 		chunkManagerFactory: storage.NewChunkManagerFactoryWithParam(params),
 		metaFactory:         kvfactory.NewETCDFactory(&paramtable.Get().ServiceParam),
+		watchFactory:        kvfactory.NewETCDFactory(&paramtable.Get().ServiceParam),
 	}
 }
 
@@ -164,6 +167,10 @@ func (f *DefaultFactory) NewPersistentStorageChunkManager(ctx context.Context) (
 }
 
 func (f *DefaultFactory) initMeta(params *paramtable.ComponentParam) error {
+
+	// At the moment watch needs to be etcd only
+	f.watchFactory = kvfactory.NewETCDFactory(&paramtable.Get().ServiceParam)
+
 	metaType := params.MetaStoreCfg.MetaStoreType.GetValue()
 	log.Info("try to init metastore", zap.String("metaType", metaType))
 	switch metaType {
@@ -186,6 +193,15 @@ func (f *DefaultFactory) NewMetaKv() kv.MetaKv {
 
 func (f *DefaultFactory) NewTxnKV() kv.TxnKV {
 	return f.metaFactory.NewTxnKV()
+}
+
+func (f *DefaultFactory) NewWatchKV() kv.WatchKV {
+	return f.watchFactory.NewWatchKV()
+}
+
+func (f *DefaultFactory) CloseKV() {
+	f.metaFactory.CloseKV()
+	f.watchFactory.CloseKV()
 }
 
 type Factory interface {

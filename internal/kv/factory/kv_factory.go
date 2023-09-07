@@ -17,67 +17,91 @@ import (
 type Factory interface {
 	NewMetaKv() kv.MetaKv
 	NewTxnKV() kv.TxnKV
+	NewWatchKV() kv.WatchKV
+	CloseKV()
 }
 
 var FatalLogger = FatalLogFunc
 
 // ETCD specific factory that stores only the client
 type ETCDFactory struct {
-	etcdClient *clientv3.Client
-	rootPath   string
+	etcdClient   *clientv3.Client
+	metaRootPath string
 }
 
 // Create a new ETCD specific factory
 func NewETCDFactory(cfg *paramtable.ServiceParam) *ETCDFactory {
-	client, err := GrabETCD(cfg)
+	client, err := CreateETCDClient(cfg)
 	if err != nil {
 		FatalLogger("ETCDFactory failed to grab client", err)
 		// We need a return when testing and disabling os.exit
 		return nil
 	}
-	return &ETCDFactory{etcdClient: client, rootPath: cfg.EtcdCfg.RootPath.GetValue()}
+	return &ETCDFactory{etcdClient: client, metaRootPath: cfg.EtcdCfg.MetaRootPath.GetValue()}
 }
 
 // Create a new Meta KV interface using ETCD
 func (fact *ETCDFactory) NewMetaKv() kv.MetaKv {
-	kv := etcdkv.NewEtcdKV(fact.etcdClient, fact.rootPath)
+	kv := etcdkv.NewEtcdKV(fact.etcdClient, fact.metaRootPath)
 	return kv
 }
 
 // Create a new Txn KV interface using ETCD
 func (fact *ETCDFactory) NewTxnKV() kv.TxnKV {
-	kv := etcdkv.NewEtcdKV(fact.etcdClient, fact.rootPath)
+	kv := etcdkv.NewEtcdKV(fact.etcdClient, fact.metaRootPath)
 	return kv
+}
+
+// Create a new Watch KV interface using ETCD
+func (fact *ETCDFactory) NewWatchKV() kv.WatchKV {
+	kv := etcdkv.NewEtcdKV(fact.etcdClient, fact.metaRootPath)
+	return kv
+}
+
+// Close the underlying client
+func (fact *ETCDFactory) CloseKV() {
+	fact.etcdClient.Close()
 }
 
 // TiKV specific factory that stores only the client
 type TiKVFactory struct {
-	tikvClient *txnkv.Client
-	rootPath   string
+	tikvClient   *txnkv.Client
+	metaRootPath string
 }
 
 // Create a new TiKV specific factory
 func NewTiKVFactory(cfg *paramtable.ServiceParam) *TiKVFactory {
-	client, err := GrabTiKVClient(cfg)
+	client, err := CreateTiKVClient(cfg)
 	if err != nil {
 		FatalLogger("TiKVFactory failed to grab client", err)
 		// We need a return when testing and disabling os.exit
 		return nil
 	}
-	return &TiKVFactory{tikvClient: client, rootPath: cfg.TiKVCfg.RootPath.GetValue()}
+	return &TiKVFactory{tikvClient: client, metaRootPath: cfg.TiKVCfg.MetaRootPath.GetValue()}
 
 }
 
 // Create a new Meta KV interface using TiKV
 func (fact *TiKVFactory) NewMetaKv() kv.MetaKv {
-	kv := tikv.NewTiKV(fact.tikvClient, fact.rootPath)
+	kv := tikv.NewTiKV(fact.tikvClient, fact.metaRootPath)
 	return kv
 }
 
 // Create a new Txn KV interface using TiKV
 func (fact *TiKVFactory) NewTxnKV() kv.TxnKV {
-	kv := tikv.NewTiKV(fact.tikvClient, fact.rootPath)
+	kv := tikv.NewTiKV(fact.tikvClient, fact.metaRootPath)
 	return kv
+}
+
+// Create a new Watch KV interface using ETCD
+func (fact *TiKVFactory) NewWatchKV() kv.WatchKV {
+	log.Fatal("Unable to use TiKV as WatchKV")
+	return nil
+}
+
+// Close the underlying client
+func (fact *TiKVFactory) CloseKV() {
+	fact.tikvClient.Close()
 }
 
 func FatalLogFunc(store string, err error) {

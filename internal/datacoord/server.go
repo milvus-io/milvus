@@ -28,7 +28,6 @@ import (
 
 	"github.com/blang/semver/v4"
 	"github.com/cockroachdb/errors"
-	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
@@ -37,8 +36,6 @@ import (
 	indexnodeclient "github.com/milvus-io/milvus/internal/distributed/indexnode/client"
 	rootcoordclient "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/kv"
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -49,7 +46,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
-	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -105,7 +101,6 @@ type Server struct {
 	helper           ServerHelper
 
 	etcdCli          *clientv3.Client
-	tikvCli          *txnkv.Client
 	address          string
 	watchClient      kv.WatchKV
 	kv               kv.MetaKv
@@ -423,15 +418,6 @@ func (s *Server) SetAddress(address string) {
 	s.address = address
 }
 
-// SetEtcdClient sets etcd client for datacoord.
-func (s *Server) SetEtcdClient(client *clientv3.Client) {
-	s.etcdCli = client
-}
-
-func (s *Server) SetTiKVClient(client *txnkv.Client) {
-	s.tikvCli = client
-}
-
 func (s *Server) SetRootCoord(rootCoord types.RootCoord) {
 	s.rootCoordClient = rootCoord
 }
@@ -543,28 +529,23 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	if s.meta != nil {
 		return nil
 	}
-	s.watchClient = etcdkv.NewEtcdKV(s.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
+	s.watchClient = s.factory.NewWatchKV()
 	metaType := Params.MetaStoreCfg.MetaStoreType.GetValue()
 	log.Info("data coordinator connecting to metadata store", zap.String("metaType", metaType))
-	if metaType == util.MetaStoreTypeTiKV {
-		s.kv = tikv.NewTiKV(s.tikvCli, Params.TiKVCfg.MetaRootPath.GetValue())
-	} else if metaType == util.MetaStoreTypeEtcd {
-		s.kv = etcdkv.NewEtcdKV(s.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
-	} else {
-		return retry.Unrecoverable(fmt.Errorf("not supported meta store: %s", metaType))
-	}
+	s.kv = s.factory.NewMetaKv()
 	log.Info("data coordinator successfully connected to metadata store", zap.String("metaType", metaType))
 
-	reloadEtcdFn := func() error {
+	retryMetaCreation := func() error {
 		var err error
-		catalog := datacoord.NewCatalog(s.kv, chunkManager.RootPath(), Params.EtcdCfg.MetaRootPath.GetValue())
+		// Using GetPath() with empty string will return the rootPath
+		catalog := datacoord.NewCatalog(s.kv, chunkManager.RootPath(), s.kv.GetPath(""))
 		s.meta, err = newMeta(s.ctx, catalog, chunkManager)
 		if err != nil {
 			return err
 		}
 		return nil
 	}
-	return retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime))
+	return retry.Do(s.ctx, retryMetaCreation, retry.Attempts(connMetaMaxRetryTime))
 }
 
 func (s *Server) initIndexBuilder(manager storage.ChunkManager) {
@@ -1004,6 +985,10 @@ func (s *Server) Stop() error {
 
 	if s.icSession != nil {
 		s.icSession.Stop()
+	}
+
+	if s.factory != nil {
+		s.factory.CloseKV()
 	}
 
 	return nil
