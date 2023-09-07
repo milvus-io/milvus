@@ -88,3 +88,11 @@ AppendMMapDirPath(CLoadFieldDataInfo c_load_field_data_info,
         static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
     load_field_data_info->mmap_dir_path = std::string(c_dir_path);
 }
+
+void
+EnableMmap(CLoadFieldDataInfo c_load_field_data_info,
+           int64_t field_id,
+           bool enabled) {
+    auto info = static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
+    info->field_infos[field_id].enable_mmap = enabled;
+}

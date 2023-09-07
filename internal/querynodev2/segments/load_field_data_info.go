@@ -64,6 +64,13 @@ func (ld *LoadFieldDataInfo) appendLoadFieldDataPath(fieldID int64, binlog *data
 	return HandleCStatus(&status, "appendLoadFieldDataPath failed")
 }
 
+func (ld *LoadFieldDataInfo) enableMmap(fieldID int64, enabled bool) {
+	cFieldID := C.int64_t(fieldID)
+	cEnabled := C.bool(enabled)
+
+	C.EnableMmap(ld.cLoadFieldDataInfo, cFieldID, cEnabled)
+}
+
 func (ld *LoadFieldDataInfo) appendMMapDirPath(dir string) {
 	cDir := C.CString(dir)
 	defer C.free(unsafe.Pointer(cDir))

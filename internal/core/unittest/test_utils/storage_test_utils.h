@@ -70,6 +70,7 @@ PrepareInsertBinlog(int64_t collection_id,
             FieldBinlogInfo{field_id,
                             static_cast<int64_t>(row_count),
                             std::vector<int64_t>{int64_t(row_count)},
+                            false,
                             std::vector<std::string>{file}});
     };
 

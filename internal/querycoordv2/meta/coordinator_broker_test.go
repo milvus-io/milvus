@@ -66,13 +66,14 @@ func (s *CoordinatorBrokerRootCoordSuite) TestGetCollectionSchema() {
 	s.Run("normal case", func() {
 		s.rootcoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
 			Return(&milvuspb.DescribeCollectionResponse{
-				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-				Schema: &schemapb.CollectionSchema{Name: "test_schema"},
+				Status:         merr.Success(),
+				Schema:         &schemapb.CollectionSchema{Name: "test_schema"},
+				CollectionName: "test_schema",
 			}, nil)
 
-		schema, err := s.broker.GetCollectionSchema(ctx, collectionID)
+		resp, err := s.broker.DescribeCollection(ctx, collectionID)
 		s.NoError(err)
-		s.Equal("test_schema", schema.GetName())
+		s.Equal("test_schema", resp.GetCollectionName())
 		s.resetMock()
 	})
 
@@ -80,7 +81,7 @@ func (s *CoordinatorBrokerRootCoordSuite) TestGetCollectionSchema() {
 		s.rootcoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
 			Return(nil, errors.New("mock error"))
 
-		_, err := s.broker.GetCollectionSchema(ctx, collectionID)
+		_, err := s.broker.DescribeCollection(ctx, collectionID)
 		s.Error(err)
 		s.resetMock()
 	})
@@ -91,7 +92,7 @@ func (s *CoordinatorBrokerRootCoordSuite) TestGetCollectionSchema() {
 				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_CollectionNotExists},
 			}, nil)
 
-		_, err := s.broker.GetCollectionSchema(ctx, collectionID)
+		_, err := s.broker.DescribeCollection(ctx, collectionID)
 		s.Error(err)
 		s.resetMock()
 	})

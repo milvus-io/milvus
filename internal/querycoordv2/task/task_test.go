@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -196,11 +197,13 @@ func (suite *TaskSuite) TestSubscribeChannelTask() {
 	partitions := []int64{100, 101}
 
 	// Expect
-	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, suite.collection).
-		Return(&schemapb.CollectionSchema{
-			Name: "TestSubscribeChannelTask",
-			Fields: []*schemapb.FieldSchema{
-				{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).
+		Return(&milvuspb.DescribeCollectionResponse{
+			Schema: &schemapb.CollectionSchema{
+				Name: "TestSubscribeChannelTask",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+				},
 			},
 		}, nil)
 	for channel, segment := range suite.growingSegments {
@@ -384,10 +387,12 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 	}
 
 	// Expect
-	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, suite.collection).Return(&schemapb.CollectionSchema{
-		Name: "TestLoadSegmentTask",
-		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).Return(&milvuspb.DescribeCollectionResponse{
+		Schema: &schemapb.CollectionSchema{
+			Name: "TestLoadSegmentTask",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+			},
 		},
 	}, nil)
 	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
@@ -480,10 +485,12 @@ func (suite *TaskSuite) TestLoadSegmentTaskNotIndex() {
 	}
 
 	// Expect
-	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, suite.collection).Return(&schemapb.CollectionSchema{
-		Name: "TestLoadSegmentTask",
-		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).Return(&milvuspb.DescribeCollectionResponse{
+		Schema: &schemapb.CollectionSchema{
+			Name: "TestLoadSegmentTask",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+			},
 		},
 	}, nil)
 	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
@@ -576,10 +583,12 @@ func (suite *TaskSuite) TestLoadSegmentTaskFailed() {
 	}
 
 	// Expect
-	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, suite.collection).Return(&schemapb.CollectionSchema{
-		Name: "TestLoadSegmentTask",
-		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).Return(&milvuspb.DescribeCollectionResponse{
+		Schema: &schemapb.CollectionSchema{
+			Name: "TestLoadSegmentTask",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+			},
 		},
 	}, nil)
 	for _, segment := range suite.loadSegments {
@@ -774,10 +783,12 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 	}
 
 	// Expect
-	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, suite.collection).Return(&schemapb.CollectionSchema{
-		Name: "TestMoveSegmentTask",
-		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).Return(&milvuspb.DescribeCollectionResponse{
+		Schema: &schemapb.CollectionSchema{
+			Name: "TestMoveSegmentTask",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+			},
 		},
 	}, nil)
 	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
@@ -944,10 +955,12 @@ func (suite *TaskSuite) TestTaskCanceled() {
 	}
 
 	// Expect
-	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, suite.collection).Return(&schemapb.CollectionSchema{
-		Name: "TestSubscribeChannelTask",
-		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).Return(&milvuspb.DescribeCollectionResponse{
+		Schema: &schemapb.CollectionSchema{
+			Name: "TestSubscribeChannelTask",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+			},
 		},
 	}, nil)
 	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
@@ -1031,10 +1044,12 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 	}
 
 	// Expect
-	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, suite.collection).Return(&schemapb.CollectionSchema{
-		Name: "TestSegmentTaskStale",
-		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).Return(&milvuspb.DescribeCollectionResponse{
+		Schema: &schemapb.CollectionSchema{
+			Name: "TestSegmentTaskStale",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+			},
 		},
 	}, nil)
 	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{

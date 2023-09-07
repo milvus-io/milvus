@@ -1239,6 +1239,7 @@ TEST(Sealed, GetVectorFromChunkCache) {
         FieldBinlogInfo{fakevec_id.get(),
                         N,
                         std::vector<int64_t>{N},
+                        false,
                         std::vector<std::string>{file_name}};
     segment_sealed->AddFieldDataInfoForSealed(LoadFieldDataInfo{
         std::map<int64_t, FieldBinlogInfo>{
