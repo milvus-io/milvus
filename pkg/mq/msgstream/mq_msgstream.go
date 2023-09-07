@@ -810,7 +810,7 @@ func (ms *MqTtMsgStream) Seek(ctx context.Context, msgPositions []*msgpb.MsgPosi
 		if err != nil {
 			log.Warn("Failed to seek", zap.String("channel", mp.ChannelName), zap.Error(err))
 			// stop retry if consumer topic not exist
-			if errors.Is(err, mqwrapper.ErrTopicNotExist) {
+			if errors.Is(err, merr.ErrMqTopicNotFound) {
 				return retry.Unrecoverable(err)
 			}
 			return err
