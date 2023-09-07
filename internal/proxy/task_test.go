@@ -1682,24 +1682,15 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 		assert.NoError(t, task.PostExecute(ctx))
 	})
 
-	t.Run("delete", func(t *testing.T) {
+	t.Run("simple delete", func(t *testing.T) {
 		task := &deleteTask{
 			Condition: NewTaskCondition(ctx),
-			deleteMsg: &msgstream.DeleteMsg{
-				BaseMsg: msgstream.BaseMsg{},
-				DeleteRequest: msgpb.DeleteRequest{
-					Base: &commonpb.MsgBase{
-						MsgType:   commonpb.MsgType_Delete,
-						MsgID:     0,
-						Timestamp: 0,
-						SourceID:  paramtable.GetNodeID(),
-					},
-					CollectionName: collectionName,
-					PartitionName:  partitionName,
-				},
+			req: &milvuspb.DeleteRequest{
+				CollectionName: collectionName,
+				PartitionName:  partitionName,
+				Expr:           "int64 in [0, 1]",
 			},
 			idAllocator: idAllocator,
-			deleteExpr:  "int64 in [0, 1]",
 			ctx:         ctx,
 			result: &milvuspb.MutationResult{
 				Status: &commonpb.Status{
@@ -1725,8 +1716,6 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 		id := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
 		task.SetID(id)
 		assert.Equal(t, id, task.ID())
-
-		task.deleteMsg.Base.MsgType = commonpb.MsgType_Delete
 		assert.Equal(t, commonpb.MsgType_Delete, task.Type())
 
 		ts := Timestamp(time.Now().UnixNano())
@@ -1737,24 +1726,19 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 		assert.NoError(t, task.PreExecute(ctx))
 		assert.NoError(t, task.Execute(ctx))
 		assert.NoError(t, task.PostExecute(ctx))
+	})
 
-		task2 := &deleteTask{
+	t.Run("complex delete", func(t *testing.T) {
+		lb := NewMockLBPolicy(t)
+		task := &deleteTask{
 			Condition: NewTaskCondition(ctx),
-			deleteMsg: &msgstream.DeleteMsg{
-				BaseMsg: msgstream.BaseMsg{},
-				DeleteRequest: msgpb.DeleteRequest{
-					Base: &commonpb.MsgBase{
-						MsgType:   commonpb.MsgType_Delete,
-						MsgID:     0,
-						Timestamp: 0,
-						SourceID:  paramtable.GetNodeID(),
-					},
-					CollectionName: collectionName,
-					PartitionName:  partitionName,
-				},
+			lb:        lb,
+			req: &milvuspb.DeleteRequest{
+				CollectionName: collectionName,
+				PartitionName:  partitionName,
+				Expr:           "int64 < 2",
 			},
 			idAllocator: idAllocator,
-			deleteExpr:  "int64 not in [0, 1]",
 			ctx:         ctx,
 			result: &milvuspb.MutationResult{
 				Status: &commonpb.Status{
@@ -1773,7 +1757,23 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 			chMgr:    chMgr,
 			chTicker: ticker,
 		}
-		assert.Error(t, task2.PreExecute(ctx))
+		lb.EXPECT().Execute(mock.Anything, mock.Anything).Return(nil)
+		assert.NoError(t, task.OnEnqueue())
+		assert.NotNil(t, task.TraceCtx())
+
+		id := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+		task.SetID(id)
+		assert.Equal(t, id, task.ID())
+		assert.Equal(t, commonpb.MsgType_Delete, task.Type())
+
+		ts := Timestamp(time.Now().UnixNano())
+		task.SetTs(ts)
+		assert.Equal(t, ts, task.BeginTs())
+		assert.Equal(t, ts, task.EndTs())
+
+		assert.NoError(t, task.PreExecute(ctx))
+		assert.NoError(t, task.Execute(ctx))
+		assert.NoError(t, task.PostExecute(ctx))
 	})
 }
 
@@ -2027,24 +2027,15 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 		assert.NoError(t, task.PostExecute(ctx))
 	})
 
-	t.Run("delete", func(t *testing.T) {
+	t.Run("simple delete", func(t *testing.T) {
 		task := &deleteTask{
 			Condition: NewTaskCondition(ctx),
-			deleteMsg: &msgstream.DeleteMsg{
-				BaseMsg: msgstream.BaseMsg{},
-				DeleteRequest: msgpb.DeleteRequest{
-					Base: &commonpb.MsgBase{
-						MsgType:   commonpb.MsgType_Delete,
-						MsgID:     0,
-						Timestamp: 0,
-						SourceID:  paramtable.GetNodeID(),
-					},
-					CollectionName: collectionName,
-					PartitionName:  partitionName,
-				},
+			req: &milvuspb.DeleteRequest{
+				CollectionName: collectionName,
+				PartitionName:  partitionName,
+				Expr:           "varChar in [\"milvus\", \"test\"]",
 			},
 			idAllocator: idAllocator,
-			deleteExpr:  "varChar in [\"milvus\", \"test\"]",
 			ctx:         ctx,
 			result: &milvuspb.MutationResult{
 				Status: &commonpb.Status{
@@ -2070,8 +2061,6 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 		id := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
 		task.SetID(id)
 		assert.Equal(t, id, task.ID())
-
-		task.deleteMsg.Base.MsgType = commonpb.MsgType_Delete
 		assert.Equal(t, commonpb.MsgType_Delete, task.Type())
 
 		ts := Timestamp(time.Now().UnixNano())
@@ -2082,43 +2071,6 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 		assert.NoError(t, task.PreExecute(ctx))
 		assert.NoError(t, task.Execute(ctx))
 		assert.NoError(t, task.PostExecute(ctx))
-
-		task2 := &deleteTask{
-			Condition: NewTaskCondition(ctx),
-			deleteMsg: &msgstream.DeleteMsg{
-				BaseMsg: msgstream.BaseMsg{},
-				DeleteRequest: msgpb.DeleteRequest{
-					Base: &commonpb.MsgBase{
-						MsgType:   commonpb.MsgType_Delete,
-						MsgID:     0,
-						Timestamp: 0,
-						SourceID:  paramtable.GetNodeID(),
-					},
-					CollectionName: collectionName,
-					PartitionName:  partitionName,
-				},
-			},
-			idAllocator: idAllocator,
-			deleteExpr:  "varChar not in [\"milvus\", \"test\"]",
-			ctx:         ctx,
-			result: &milvuspb.MutationResult{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-					Reason:    "",
-				},
-				IDs:          nil,
-				SuccIndex:    nil,
-				ErrIndex:     nil,
-				Acknowledged: false,
-				InsertCnt:    0,
-				DeleteCnt:    0,
-				UpsertCnt:    0,
-				Timestamp:    0,
-			},
-			chMgr:    chMgr,
-			chTicker: ticker,
-		}
-		assert.Error(t, task2.PreExecute(ctx))
 	})
 }
 
@@ -3548,20 +3500,11 @@ func TestPartitionKey(t *testing.T) {
 	t.Run("delete", func(t *testing.T) {
 		dt := &deleteTask{
 			Condition: NewTaskCondition(ctx),
-			deleteMsg: &BaseDeleteTask{
-				BaseMsg: msgstream.BaseMsg{},
-				DeleteRequest: msgpb.DeleteRequest{
-					Base: &commonpb.MsgBase{
-						MsgType:   commonpb.MsgType_Delete,
-						MsgID:     0,
-						Timestamp: 0,
-						SourceID:  paramtable.GetNodeID(),
-					},
-					CollectionName: collectionName,
-				},
+			req: &milvuspb.DeleteRequest{
+				CollectionName: collectionName,
+				Expr:           "int64_field in [0, 1]",
 			},
-			deleteExpr: "int64_field in [0, 1]",
-			ctx:        ctx,
+			ctx: ctx,
 			result: &milvuspb.MutationResult{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_Success,
@@ -3581,10 +3524,10 @@ func TestPartitionKey(t *testing.T) {
 			chTicker:    ticker,
 		}
 		// don't support specify partition name if use partition key
-		dt.deleteMsg.PartitionName = partitionNames[0]
+		dt.req.PartitionName = partitionNames[0]
 		assert.Error(t, dt.PreExecute(ctx))
 
-		dt.deleteMsg.PartitionName = ""
+		dt.req.PartitionName = ""
 		assert.NoError(t, dt.PreExecute(ctx))
 		assert.NoError(t, dt.Execute(ctx))
 		assert.NoError(t, dt.PostExecute(ctx))

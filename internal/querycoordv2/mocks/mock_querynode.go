@@ -689,6 +689,92 @@ func (_c *MockQueryNodeServer_QuerySegments_Call) RunAndReturn(run func(context.
 	return _c
 }
 
+// QueryStream provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryNodeServer) QueryStream(_a0 *querypb.QueryRequest, _a1 querypb.QueryNode_QueryStreamServer) error {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*querypb.QueryRequest, querypb.QueryNode_QueryStreamServer) error); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockQueryNodeServer_QueryStream_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QueryStream'
+type MockQueryNodeServer_QueryStream_Call struct {
+	*mock.Call
+}
+
+// QueryStream is a helper method to define mock.On call
+//   - _a0 *querypb.QueryRequest
+//   - _a1 querypb.QueryNode_QueryStreamServer
+func (_e *MockQueryNodeServer_Expecter) QueryStream(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_QueryStream_Call {
+	return &MockQueryNodeServer_QueryStream_Call{Call: _e.mock.On("QueryStream", _a0, _a1)}
+}
+
+func (_c *MockQueryNodeServer_QueryStream_Call) Run(run func(_a0 *querypb.QueryRequest, _a1 querypb.QueryNode_QueryStreamServer)) *MockQueryNodeServer_QueryStream_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*querypb.QueryRequest), args[1].(querypb.QueryNode_QueryStreamServer))
+	})
+	return _c
+}
+
+func (_c *MockQueryNodeServer_QueryStream_Call) Return(_a0 error) *MockQueryNodeServer_QueryStream_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockQueryNodeServer_QueryStream_Call) RunAndReturn(run func(*querypb.QueryRequest, querypb.QueryNode_QueryStreamServer) error) *MockQueryNodeServer_QueryStream_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// QueryStreamSegments provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryNodeServer) QueryStreamSegments(_a0 *querypb.QueryRequest, _a1 querypb.QueryNode_QueryStreamSegmentsServer) error {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*querypb.QueryRequest, querypb.QueryNode_QueryStreamSegmentsServer) error); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockQueryNodeServer_QueryStreamSegments_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QueryStreamSegments'
+type MockQueryNodeServer_QueryStreamSegments_Call struct {
+	*mock.Call
+}
+
+// QueryStreamSegments is a helper method to define mock.On call
+//   - _a0 *querypb.QueryRequest
+//   - _a1 querypb.QueryNode_QueryStreamSegmentsServer
+func (_e *MockQueryNodeServer_Expecter) QueryStreamSegments(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_QueryStreamSegments_Call {
+	return &MockQueryNodeServer_QueryStreamSegments_Call{Call: _e.mock.On("QueryStreamSegments", _a0, _a1)}
+}
+
+func (_c *MockQueryNodeServer_QueryStreamSegments_Call) Run(run func(_a0 *querypb.QueryRequest, _a1 querypb.QueryNode_QueryStreamSegmentsServer)) *MockQueryNodeServer_QueryStreamSegments_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*querypb.QueryRequest), args[1].(querypb.QueryNode_QueryStreamSegmentsServer))
+	})
+	return _c
+}
+
+func (_c *MockQueryNodeServer_QueryStreamSegments_Call) Return(_a0 error) *MockQueryNodeServer_QueryStreamSegments_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockQueryNodeServer_QueryStreamSegments_Call) RunAndReturn(run func(*querypb.QueryRequest, querypb.QueryNode_QueryStreamSegmentsServer) error) *MockQueryNodeServer_QueryStreamSegments_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ReleaseCollection provides a mock function with given fields: _a0, _a1
 func (_m *MockQueryNodeServer) ReleaseCollection(_a0 context.Context, _a1 *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)

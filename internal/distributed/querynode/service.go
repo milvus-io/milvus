@@ -26,6 +26,7 @@ import (
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util/interceptor"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -330,6 +331,18 @@ func (s *Server) SearchSegments(ctx context.Context, req *querypb.SearchRequest)
 // Query performs query of streaming/historical replica on QueryNode.
 func (s *Server) Query(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
 	return s.querynode.Query(ctx, req)
+}
+
+func (s *Server) QueryStream(req *querypb.QueryRequest, srv querypb.QueryNode_QueryStreamServer) error {
+	streamer := streamrpc.NewGrpcQueryStreamer()
+	streamer.SetServer(streamrpc.NewConcurrentQueryStreamServer(srv))
+	return s.querynode.QueryStream(srv.Context(), req, streamer)
+}
+
+func (s *Server) QueryStreamSegments(req *querypb.QueryRequest, srv querypb.QueryNode_QueryStreamSegmentsServer) error {
+	streamer := streamrpc.NewGrpcQueryStreamer()
+	streamer.SetServer(streamrpc.NewConcurrentQueryStreamServer(srv))
+	return s.querynode.QueryStreamSegments(srv.Context(), req, streamer)
 }
 
 func (s *Server) QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {

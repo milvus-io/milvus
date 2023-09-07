@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
+	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -57,6 +58,7 @@ type ShardDelegator interface {
 	SyncDistribution(ctx context.Context, entries ...SegmentEntry)
 	Search(ctx context.Context, req *querypb.SearchRequest) ([]*internalpb.SearchResults, error)
 	Query(ctx context.Context, req *querypb.QueryRequest) ([]*internalpb.RetrieveResults, error)
+	QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error
 	GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) ([]*internalpb.GetStatisticsResponse, error)
 
 	//data
@@ -251,6 +253,68 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 	log.Debug("Delegator search done")
 
 	return results, nil
+}
+
+func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error {
+	log := sd.getLogger(ctx)
+	if !sd.Serviceable() {
+		return errors.New("delegator is not serviceable")
+	}
+
+	if !funcutil.SliceContain(req.GetDmlChannels(), sd.vchannelName) {
+		log.Warn("deletgator received query request not belongs to it",
+			zap.Strings("reqChannels", req.GetDmlChannels()),
+		)
+		return fmt.Errorf("dml channel not match, delegator channel %s, search channels %v", sd.vchannelName, req.GetDmlChannels())
+	}
+
+	partitions := req.GetReq().GetPartitionIDs()
+	if !sd.collection.ExistPartition(partitions...) {
+		return merr.WrapErrPartitionNotLoaded(partitions)
+	}
+
+	// wait tsafe
+	waitTr := timerecord.NewTimeRecorder("wait tSafe")
+	err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
+	if err != nil {
+		log.Warn("delegator query failed to wait tsafe", zap.Error(err))
+		return err
+	}
+	metrics.QueryNodeSQLatencyWaitTSafe.WithLabelValues(
+		fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel).
+		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
+
+	sealed, growing, version := sd.distribution.GetSegments(true, req.GetReq().GetPartitionIDs()...)
+	defer sd.distribution.FinishUsage(version)
+	existPartitions := sd.collection.GetPartitions()
+	growing = lo.Filter(growing, func(segment SegmentEntry, _ int) bool {
+		return funcutil.SliceContain(existPartitions, segment.PartitionID)
+	})
+	if req.Req.IgnoreGrowing {
+		growing = []SegmentEntry{}
+	}
+
+	log.Info("query segments...",
+		zap.Int("sealedNum", len(sealed)),
+		zap.Int("growingNum", len(growing)),
+	)
+	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, sd.modifyQueryRequest)
+	if err != nil {
+		log.Warn("query organizeSubTask failed", zap.Error(err))
+		return err
+	}
+
+	_, err = executeSubTasks(ctx, tasks, func(ctx context.Context, req *querypb.QueryRequest, worker cluster.Worker) (*internalpb.RetrieveResults, error) {
+		return nil, worker.QueryStreamSegments(ctx, req, srv)
+	}, "Query", log)
+	if err != nil {
+		log.Warn("Delegator query failed", zap.Error(err))
+		return err
+	}
+
+	log.Info("Delegator Query done")
+
+	return nil
 }
 
 // Query performs query operation on shard.

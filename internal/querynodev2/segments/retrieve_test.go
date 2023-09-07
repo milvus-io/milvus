@@ -18,14 +18,17 @@ package segments
 
 import (
 	"context"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -140,10 +143,16 @@ func (suite *RetrieveSuite) TestRetrieveSealed() {
 	plan, err := genSimpleRetrievePlan(suite.collection)
 	suite.NoError(err)
 
-	res, segments, err := RetrieveHistorical(context.TODO(), suite.manager, plan,
-		suite.collectionID,
-		[]int64{suite.partitionID},
-		[]int64{suite.sealed.ID()})
+	req := &querypb.QueryRequest{
+		Req: &internalpb.RetrieveRequest{
+			CollectionID: suite.collectionID,
+			PartitionIDs: []int64{suite.partitionID},
+		},
+		SegmentIDs: []int64{suite.sealed.ID()},
+		Scope:      querypb.DataScope_Historical,
+	}
+
+	res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req)
 	suite.NoError(err)
 	suite.Len(res[0].Offset, 3)
 	suite.manager.Segment.Unpin(segments)
@@ -153,24 +162,80 @@ func (suite *RetrieveSuite) TestRetrieveGrowing() {
 	plan, err := genSimpleRetrievePlan(suite.collection)
 	suite.NoError(err)
 
-	res, segments, err := RetrieveStreaming(context.TODO(), suite.manager, plan,
-		suite.collectionID,
-		[]int64{suite.partitionID},
-		[]int64{suite.growing.ID()})
+	req := &querypb.QueryRequest{
+		Req: &internalpb.RetrieveRequest{
+			CollectionID: suite.collectionID,
+			PartitionIDs: []int64{suite.partitionID},
+		},
+		SegmentIDs: []int64{suite.growing.ID()},
+		Scope:      querypb.DataScope_Streaming,
+	}
+
+	res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req)
 	suite.NoError(err)
 	suite.Len(res[0].Offset, 3)
 	suite.manager.Segment.Unpin(segments)
+}
+
+func (suite *RetrieveSuite) TestRetrieveStreamSealed() {
+	plan, err := genSimpleRetrievePlan(suite.collection)
+	suite.NoError(err)
+
+	req := &querypb.QueryRequest{
+		Req: &internalpb.RetrieveRequest{
+			CollectionID: suite.collectionID,
+			PartitionIDs: []int64{suite.partitionID},
+		},
+		SegmentIDs: []int64{suite.sealed.ID()},
+		Scope:      querypb.DataScope_Historical,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client := streamrpc.NewLocalQueryClient(ctx)
+	server := client.CreateServer()
+
+	go func() {
+		segments, err := RetrieveStream(ctx, suite.manager, plan, req, server)
+		suite.NoError(err)
+		suite.manager.Segment.Unpin(segments)
+		server.FinishSend(err)
+	}()
+
+	sum := 0
+	for {
+		result, err := client.Recv()
+		if err != nil {
+			if err == io.EOF {
+				suite.Equal(3, sum)
+				break
+			}
+			suite.Fail("Retrieve stream fetch error")
+		}
+
+		err = merr.Error(result.GetStatus())
+		suite.NoError(err)
+
+		sum += len(result.Ids.GetIntId().GetData())
+	}
 }
 
 func (suite *RetrieveSuite) TestRetrieveNonExistSegment() {
 	plan, err := genSimpleRetrievePlan(suite.collection)
 	suite.NoError(err)
 
-	res, segments, err := RetrieveHistorical(context.TODO(), suite.manager, plan,
-		suite.collectionID,
-		[]int64{suite.partitionID},
-		[]int64{999})
-	suite.ErrorIs(err, merr.ErrSegmentNotLoaded)
+	req := &querypb.QueryRequest{
+		Req: &internalpb.RetrieveRequest{
+			CollectionID: suite.collectionID,
+			PartitionIDs: []int64{suite.partitionID},
+		},
+		SegmentIDs: []int64{999},
+		Scope:      querypb.DataScope_Streaming,
+	}
+
+	res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req)
+	suite.Error(err)
 	suite.Len(res, 0)
 	suite.manager.Segment.Unpin(segments)
 }
@@ -180,10 +245,16 @@ func (suite *RetrieveSuite) TestRetrieveNilSegment() {
 	suite.NoError(err)
 
 	suite.sealed.Release()
-	res, segments, err := RetrieveHistorical(context.TODO(), suite.manager, plan,
-		suite.collectionID,
-		[]int64{suite.partitionID},
-		[]int64{suite.sealed.ID()})
+	req := &querypb.QueryRequest{
+		Req: &internalpb.RetrieveRequest{
+			CollectionID: suite.collectionID,
+			PartitionIDs: []int64{suite.partitionID},
+		},
+		SegmentIDs: []int64{suite.sealed.ID()},
+		Scope:      querypb.DataScope_Historical,
+	}
+
+	res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req)
 	suite.ErrorIs(err, merr.ErrSegmentNotLoaded)
 	suite.Len(res, 0)
 	suite.manager.Segment.Unpin(segments)

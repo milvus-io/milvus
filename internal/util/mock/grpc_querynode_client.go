@@ -89,8 +89,16 @@ func (m *GrpcQueryNodeClient) Query(ctx context.Context, in *querypb.QueryReques
 	return &internalpb.RetrieveResults{}, m.Err
 }
 
+func (m *GrpcQueryNodeClient) QueryStream(ctx context.Context, in *querypb.QueryRequest, opts ...grpc.CallOption) (querypb.QueryNode_QueryStreamClient, error) {
+	return &GrpcQueryStreamClient{}, m.Err
+}
+
 func (m *GrpcQueryNodeClient) QuerySegments(ctx context.Context, in *querypb.QueryRequest, opts ...grpc.CallOption) (*internalpb.RetrieveResults, error) {
 	return &internalpb.RetrieveResults{}, m.Err
+}
+
+func (m *GrpcQueryNodeClient) QueryStreamSegments(ctx context.Context, in *querypb.QueryRequest, opts ...grpc.CallOption) (querypb.QueryNode_QueryStreamSegmentsClient, error) {
+	return &GrpcQueryStreamSegmentsClient{}, m.Err
 }
 
 func (m *GrpcQueryNodeClient) SyncReplicaSegments(ctx context.Context, in *querypb.SyncReplicaSegmentsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {

@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -216,10 +217,38 @@ func (c *Client) Query(ctx context.Context, req *querypb.QueryRequest) (*interna
 	})
 }
 
+func (c *Client) QueryStream(ctx context.Context, req *querypb.QueryRequest, streamer streamrpc.QueryStreamer) error {
+	_, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryNodeClient) (any, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		cli, err := client.QueryStream(ctx, req)
+		if err == nil {
+			streamer.SetClient(cli)
+		}
+		return nil, err
+	})
+	return err
+}
+
 func (c *Client) QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*internalpb.RetrieveResults, error) {
 		return client.QuerySegments(ctx, req)
 	})
+}
+
+func (c *Client) QueryStreamSegments(ctx context.Context, req *querypb.QueryRequest, streamer streamrpc.QueryStreamer) error {
+	_, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryNodeClient) (any, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		cli, err := client.QueryStreamSegments(ctx, req)
+		if err == nil {
+			streamer.SetClient(cli)
+		}
+		return nil, err
+	})
+	return err
 }
 
 // GetSegmentInfo gets the information of the specified segments in QueryNode.

@@ -18,7 +18,9 @@ package querynodev2
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"math/rand"
+	"sync"
 	"testing"
 	"time"
 
@@ -41,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
@@ -1316,7 +1319,8 @@ func (suite *ServiceSuite) TestQuery_Normal() {
 }
 
 func (suite *ServiceSuite) TestQuery_Failed() {
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	// data
 	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
@@ -1379,8 +1383,152 @@ func (suite *ServiceSuite) TestQuerySegments_Failed() {
 	suite.Equal(commonpb.ErrorCode_UnexpectedError, rsp.GetStatus().GetErrorCode())
 }
 
+func (suite *ServiceSuite) TestQueryStream_Normal() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// prepare
+	suite.TestWatchDmChannelsInt64()
+	suite.TestLoadSegments_Int64()
+
+	// data
+	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
+	creq, err := suite.genCQueryRequest(10, IndexFaissIDMap, schema)
+	suite.NoError(err)
+	req := &querypb.QueryRequest{
+		Req:             creq,
+		FromShardLeader: false,
+		DmlChannels:     []string{suite.vchannel},
+	}
+
+	client := streamrpc.NewLocalQueryClient(ctx)
+	server := client.CreateServer()
+
+	streamer := streamrpc.NewGrpcQueryStreamer()
+	streamer.SetServer(streamrpc.NewConcurrentQueryStreamServer(server))
+
+	go func() {
+		err := suite.node.QueryStream(ctx, req, streamer)
+		suite.NoError(err)
+		server.FinishSend(err)
+	}()
+
+	for {
+		result, err := client.Recv()
+		if err == io.EOF {
+			break
+		}
+		suite.NoError(err)
+
+		err = merr.Error(result.GetStatus())
+		suite.NoError(err)
+	}
+}
+
+func (suite *ServiceSuite) TestQueryStream_Failed() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// data
+	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
+	creq, err := suite.genCQueryRequest(10, IndexFaissIDMap, schema)
+	suite.NoError(err)
+	req := &querypb.QueryRequest{
+		Req:             creq,
+		FromShardLeader: false,
+		DmlChannels:     []string{suite.vchannel},
+	}
+
+	queryFunc := func(wg *sync.WaitGroup, req *querypb.QueryRequest, client *streamrpc.LocalQueryClient) {
+		server := client.CreateServer()
+		streamer := streamrpc.NewGrpcQueryStreamer()
+		streamer.SetServer(streamrpc.NewConcurrentQueryStreamServer(server))
+
+		defer wg.Done()
+		err := suite.node.QueryStream(ctx, req, streamer)
+		suite.NoError(err)
+		server.FinishSend(err)
+	}
+
+	// Delegator not found
+	suite.Run("delegator not found", func() {
+		client := streamrpc.NewLocalQueryClient(ctx)
+		wg := &sync.WaitGroup{}
+		wg.Add(1)
+		go queryFunc(wg, req, client)
+
+		for {
+			result, err := client.Recv()
+			if err == io.EOF {
+				break
+			}
+			suite.NoError(err)
+
+			err = merr.Error(result.GetStatus())
+			// Check result
+			if err != nil {
+				suite.Equal(commonpb.ErrorCode_UnexpectedError, result.GetStatus().GetErrorCode())
+				suite.Contains(err.Error(), merr.ErrServiceUnavailable.Error())
+			}
+
+		}
+		wg.Wait()
+	})
+
+	// prepare
+	suite.TestWatchDmChannelsInt64()
+	suite.TestLoadSegments_Int64()
+
+	// target not match
+	suite.Run("target not match", func() {
+		client := streamrpc.NewLocalQueryClient(ctx)
+		wg := &sync.WaitGroup{}
+		wg.Add(1)
+		go queryFunc(wg, req, client)
+
+		for {
+			result, err := client.Recv()
+			if err == io.EOF {
+				break
+			}
+			suite.NoError(err)
+
+			err = merr.Error(result.GetStatus())
+			if err != nil {
+				suite.Equal(commonpb.ErrorCode_NodeIDNotMatch, result.GetStatus().GetErrorCode())
+			}
+		}
+		wg.Wait()
+	})
+
+	// node not healthy
+	suite.Run("node not healthy", func() {
+		suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
+		client := streamrpc.NewLocalQueryClient(ctx)
+		wg := &sync.WaitGroup{}
+		wg.Add(1)
+		go queryFunc(wg, req, client)
+
+		for {
+			result, err := client.Recv()
+			if err == io.EOF {
+				break
+			}
+			suite.NoError(err)
+
+			err = merr.Error(result.GetStatus())
+			if err != nil {
+				suite.True(errors.Is(err, merr.ErrServiceNotReady))
+			}
+		}
+		wg.Wait()
+	})
+}
+
 func (suite *ServiceSuite) TestQuerySegments_Normal() {
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	// pre
 	suite.TestWatchDmChannelsInt64()
 	suite.TestLoadSegments_Int64()
@@ -1398,6 +1546,52 @@ func (suite *ServiceSuite) TestQuerySegments_Normal() {
 	rsp, err := suite.node.QuerySegments(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, rsp.GetStatus().GetErrorCode())
+}
+
+func (suite *ServiceSuite) TestQueryStreamSegments_Normal() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// pre
+	suite.TestWatchDmChannelsInt64()
+	suite.TestLoadSegments_Int64()
+
+	// data
+	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
+	creq, err := suite.genCQueryRequest(10, IndexFaissIDMap, schema)
+	suite.NoError(err)
+	req := &querypb.QueryRequest{
+		Req:             creq,
+		FromShardLeader: true,
+		DmlChannels:     []string{suite.vchannel},
+	}
+
+	client := streamrpc.NewLocalQueryClient(ctx)
+	server := client.CreateServer()
+
+	streamer := streamrpc.NewGrpcQueryStreamer()
+	streamer.SetServer(streamrpc.NewConcurrentQueryStreamServer(server))
+
+	go func() {
+		err := suite.node.QueryStreamSegments(ctx, req, streamer)
+		suite.NoError(err)
+		server.FinishSend(err)
+	}()
+
+	for {
+		result, err := client.Recv()
+		if err == io.EOF {
+			break
+		}
+		suite.NoError(err)
+
+		err = merr.Error(result.GetStatus())
+		suite.NoError(err)
+		// Check result
+		if !errors.Is(err, nil) {
+			suite.NoError(err)
+			break
+		}
+	}
 }
 
 func (suite *ServiceSuite) TestSyncReplicaSegments_Normal() {

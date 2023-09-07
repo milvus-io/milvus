@@ -20,6 +20,7 @@ package cluster
 
 import (
 	context "context"
+	"io"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -27,9 +28,12 @@ import (
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	internalpb "github.com/milvus-io/milvus/internal/proto/internalpb"
 	querypb "github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/streamrpc"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -329,6 +333,174 @@ func (s *RemoteWorkerSuite) TestQuery() {
 
 		s.Equal(err, serr)
 		s.Equal(result, sr)
+	})
+}
+
+func (s *RemoteWorkerSuite) TestQueryStream() {
+	s.Run("normal_run", func() {
+		defer func() { s.mockClient.ExpectedCalls = nil }()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		client := streamrpc.NewLocalQueryClient(ctx)
+		server := client.CreateServer()
+
+		ids := []int64{10, 11, 12}
+
+		s.mockClient.EXPECT().QueryStreamSegments(
+			mock.Anything,
+			mock.AnythingOfType("*querypb.QueryRequest"),
+			mock.AnythingOfType("*streamrpc.GrpcQueryStreamer"),
+		).Run(func(ctx context.Context, req *querypb.QueryRequest, streamer streamrpc.QueryStreamer) {
+			client := streamrpc.NewLocalQueryClient(ctx)
+			streamer.SetClient(client)
+
+			server := client.CreateServer()
+			for _, id := range ids {
+				server.Send(&internalpb.RetrieveResults{
+					Status: merr.Status(nil),
+					Ids: &schemapb.IDs{
+						IdField: &schemapb.IDs_IntId{
+							IntId: &schemapb.LongArray{Data: []int64{id}},
+						},
+					},
+				})
+			}
+			server.FinishSend(nil)
+		}).Return(nil)
+
+		go func() {
+			err := s.worker.QueryStreamSegments(ctx, &querypb.QueryRequest{}, server)
+			if err != nil {
+				server.Send(&internalpb.RetrieveResults{
+					Status: merr.Status(err),
+				})
+			}
+			server.FinishSend(err)
+		}()
+
+		recNum := 0
+		for {
+			result, err := client.Recv()
+			if err == io.EOF {
+				break
+			}
+			s.NoError(err)
+
+			err = merr.Error(result.GetStatus())
+			s.NoError(err)
+
+			s.Less(recNum, len(ids))
+			s.Equal(result.Ids.GetIntId().Data[0], ids[recNum])
+			recNum++
+		}
+	})
+
+	s.Run("send msg failed", func() {
+		defer func() { s.mockClient.ExpectedCalls = nil }()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		clientCtx, clientClose := context.WithCancel(ctx)
+		client := streamrpc.NewLocalQueryClient(clientCtx)
+		server := client.CreateServer()
+		clientClose()
+
+		ids := []int64{10, 11, 12}
+
+		s.mockClient.EXPECT().QueryStreamSegments(
+			mock.Anything,
+			mock.AnythingOfType("*querypb.QueryRequest"),
+			mock.AnythingOfType("*streamrpc.GrpcQueryStreamer"),
+		).Run(func(ctx context.Context, req *querypb.QueryRequest, streamer streamrpc.QueryStreamer) {
+			client := streamrpc.NewLocalQueryClient(ctx)
+			streamer.SetClient(client)
+
+			server := client.CreateServer()
+			for _, id := range ids {
+				err := server.Send(&internalpb.RetrieveResults{
+					Status: merr.Status(nil),
+					Ids: &schemapb.IDs{
+						IdField: &schemapb.IDs_IntId{
+							IntId: &schemapb.LongArray{Data: []int64{id}},
+						},
+					},
+				})
+				s.NoError(err)
+			}
+			server.FinishSend(nil)
+		}).Return(nil)
+
+		err := s.worker.QueryStreamSegments(ctx, &querypb.QueryRequest{}, server)
+		s.Error(err)
+	})
+
+	s.Run("client_return_error", func() {
+		defer func() { s.mockClient.ExpectedCalls = nil }()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		client := streamrpc.NewLocalQueryClient(ctx)
+		server := streamrpc.NewConcurrentQueryStreamServer(client.CreateServer())
+
+		s.mockClient.EXPECT().QueryStreamSegments(
+			mock.Anything,
+			mock.AnythingOfType("*querypb.QueryRequest"),
+			mock.AnythingOfType("*streamrpc.GrpcQueryStreamer"),
+		).Return(errors.New("mocked error"))
+
+		go func() {
+			err := s.worker.QueryStreamSegments(ctx, &querypb.QueryRequest{}, server)
+			server.Send(&internalpb.RetrieveResults{
+				Status: merr.Status(err),
+			})
+		}()
+
+		result, err := client.Recv()
+		s.NoError(err)
+
+		err = merr.Error(result.GetStatus())
+		// Check result
+		s.Error(err)
+	})
+
+	s.Run("client_return_fail_status", func() {
+		defer func() { s.mockClient.ExpectedCalls = nil }()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		client := streamrpc.NewLocalQueryClient(ctx)
+		server := streamrpc.NewConcurrentQueryStreamServer(client.CreateServer())
+
+		s.mockClient.EXPECT().QueryStreamSegments(
+			mock.Anything,
+			mock.AnythingOfType("*querypb.QueryRequest"),
+			mock.AnythingOfType("*streamrpc.GrpcQueryStreamer"),
+		).Run(func(ctx context.Context, req *querypb.QueryRequest, streamer streamrpc.QueryStreamer) {
+			client := streamrpc.NewLocalQueryClient(ctx)
+			streamer.SetClient(client)
+
+			server := client.CreateServer()
+
+			server.Send(&internalpb.RetrieveResults{
+				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
+			})
+			server.FinishSend(nil)
+		}).Return(nil)
+
+		go func() {
+			err := s.worker.QueryStreamSegments(ctx, &querypb.QueryRequest{}, server)
+			server.Send(&internalpb.RetrieveResults{
+				Status: merr.Status(err),
+			})
+		}()
+
+		result, err := client.Recv()
+		s.NoError(err)
+
+		err = merr.Error(result.GetStatus())
+		// Check result
+		s.Error(err)
 	})
 }
 

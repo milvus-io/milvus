@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/streamrpc"
 )
 
 var _ types.QueryNode = &QueryNodeClient{}
@@ -105,8 +106,28 @@ func (q QueryNodeClient) Query(ctx context.Context, req *querypb.QueryRequest) (
 	return q.grpcClient.Query(ctx, req)
 }
 
+func (q QueryNodeClient) QueryStream(ctx context.Context, req *querypb.QueryRequest, streamer streamrpc.QueryStreamer) error {
+	cli, err := q.grpcClient.QueryStream(ctx, req)
+	if err != nil {
+		return err
+	}
+	// streamer
+	streamer.SetClient(cli)
+	return nil
+}
+
 func (q QueryNodeClient) QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
 	return q.grpcClient.Query(ctx, req)
+}
+
+func (q QueryNodeClient) QueryStreamSegments(ctx context.Context, req *querypb.QueryRequest, streamer streamrpc.QueryStreamer) error {
+	cli, err := q.grpcClient.QueryStreamSegments(ctx, req)
+	if err != nil {
+		return err
+	}
+	// streamer
+	streamer.SetClient(cli)
+	return nil
 }
 
 func (q QueryNodeClient) SyncReplicaSegments(ctx context.Context, req *querypb.SyncReplicaSegmentsRequest) (*commonpb.Status, error) {

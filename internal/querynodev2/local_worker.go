@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -99,6 +100,10 @@ func (w *LocalWorker) Delete(ctx context.Context, req *querypb.DeleteRequest) er
 
 func (w *LocalWorker) SearchSegments(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
 	return w.node.SearchSegments(ctx, req)
+}
+
+func (w *LocalWorker) QueryStreamSegments(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error {
+	return w.node.queryStreamSegments(ctx, req, srv)
 }
 
 func (w *LocalWorker) QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {

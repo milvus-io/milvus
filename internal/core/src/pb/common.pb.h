@@ -271,7 +271,6 @@ enum PlaceholderType : int {
   None = 0,
   BinaryVector = 100,
   FloatVector = 101,
-  Float16Vector = 102,
   Int64 = 5,
   VarChar = 21,
   PlaceholderType_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::min(),
@@ -279,7 +278,7 @@ enum PlaceholderType : int {
 };
 bool PlaceholderType_IsValid(int value);
 constexpr PlaceholderType PlaceholderType_MIN = None;
-constexpr PlaceholderType PlaceholderType_MAX = Float16Vector;
+constexpr PlaceholderType PlaceholderType_MAX = FloatVector;
 constexpr int PlaceholderType_ARRAYSIZE = PlaceholderType_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* PlaceholderType_descriptor();

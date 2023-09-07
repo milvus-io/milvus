@@ -55,6 +55,30 @@ class TestDeleteParams(TestcaseBase):
         # query with deleted ids
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize('is_binary', [False, True])
+    def test_delete_entities_with_range(self, is_binary):
+        """
+        target: test delete data from collection
+        method: 1.create and insert nb with flush
+                2.load collection
+                3.delete half of nb
+                4.query with deleted ids
+        expected: Query result is empty
+        """
+        # init collection with default_nb default data
+        collection_w, _, _, ids = self.init_collection_general(prefix, insert_data=True, auto_id=True, is_binary=is_binary)[0:4]
+        expr = f'{ct.default_int64_field_name} < {ids[half_nb]}'
+
+        # delete half of data
+        del_res = collection_w.delete(expr)[0]
+        assert del_res.delete_count == half_nb
+        # This flush will not persist the deleted ids, just delay the time to ensure that queryNode consumes deleteMsg
+        collection_w.num_entities
+
+        # query with deleted ids
+        collection_w.query(expr, check_task=CheckTasks.check_query_empty)
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_without_connection(self):
         """
@@ -159,32 +183,18 @@ class TestDeleteParams(TestcaseBase):
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_delete_expr_non_primary_key(self):
+    def test_delete_expr_with_vector(self):
         """
-        target: test delete with non-pk field
-        method: delete with expr field not pk
+        target: test delete with vector field
+        method: delete with expr vector field
         expected: raise exception
         """
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True, is_all_data_type=True, is_index=True)[0]
-        exprs = [
-            f"{ct.default_int32_field_name} in [1]",
-            f"{ct.default_int16_field_name} in [1]",
-            f"{ct.default_int8_field_name} in [1]",
-            f"{ct.default_bool_field_name} in [True]",
-            f"{ct.default_float_field_name} in [1.0]",
-            f"{ct.default_double_field_name} in [1.0]",
-            f"{ct.default_string_field_name} in [ \"0\"]",
-            f"{ct.default_float_vec_field_name} in [[0.1]]"
-        ]
+        expr = f"{ct.default_float_vec_field_name} in [[0.1]]"
         error = {ct.err_code: 1,
-                 ct.err_msg: f"invalid expression, we only support to delete by pk"}
-        for expr in exprs:
-            collection_w.delete(expr, check_task=CheckTasks.err_res, check_items=error)
+            ct.err_msg: f"failed to create expr plan, expr = {expr}"}
 
-        # query
-        _query_res_tmp_expr = [{ct.default_int64_field_name: 0, ct.default_string_field_name: '0'}]
-        collection_w.query(tmp_expr, output_fields=[ct.default_string_field_name], check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: _query_res_tmp_expr})
+        collection_w.delete(expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_not_existed_values(self):

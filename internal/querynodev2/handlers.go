@@ -32,7 +32,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
 	"github.com/milvus-io/milvus/internal/util"
+	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -155,13 +157,6 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 		}
 	}()
 
-	if !node.lifetime.Add(commonpbutil.IsHealthy) {
-		err := merr.WrapErrServiceUnavailable(fmt.Sprintf("node id: %d is unhealthy", paramtable.GetNodeID()))
-		failRet.Status = merr.Status(err)
-		return failRet, nil
-	}
-	defer node.lifetime.Done()
-
 	log.Debug("start do query with channel",
 		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
@@ -224,6 +219,78 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.Leader).Observe(float64(latency.Milliseconds()))
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.SuccessLabel, metrics.Leader).Inc()
 	return ret, nil
+}
+
+func (node *QueryNode) queryChannelStream(ctx context.Context, req *querypb.QueryRequest, channel string, srv streamrpc.QueryStreamServer) error {
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.TotalLabel, metrics.Leader).Inc()
+	failRet := WrapRetrieveResult(commonpb.ErrorCode_UnexpectedError, "")
+	msgID := req.Req.Base.GetMsgID()
+	log := log.Ctx(ctx).With(
+		zap.Int64("msgID", msgID),
+		zap.Int64("collectionID", req.GetReq().GetCollectionID()),
+		zap.String("channel", channel),
+		zap.String("scope", req.GetScope().String()),
+	)
+
+	defer func() {
+		if failRet.Status.ErrorCode != commonpb.ErrorCode_Success {
+			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.FailLabel, metrics.Leader).Inc()
+		}
+	}()
+
+	log.Debug("start do streaming query with channel",
+		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
+		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
+	)
+
+	// add cancel when error occurs
+	queryCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// From Proxy
+	tr := timerecord.NewTimeRecorder("queryDelegator")
+	// get delegator
+	sd, ok := node.delegators.Get(channel)
+	if !ok {
+		err := merr.WrapErrServiceUnavailable("failed to get query shard delegator")
+		log.Warn("Query failed, failed to get query shard delegator", zap.Error(err))
+		return err
+	}
+
+	// do query
+	err := sd.QueryStream(queryCtx, req, srv)
+	if err != nil {
+		return err
+	}
+
+	tr.CtxElapse(ctx, fmt.Sprintf("do query with channel done , vChannel = %s, segmentIDs = %v",
+		channel,
+		req.GetSegmentIDs(),
+	))
+
+	return nil
+}
+
+func (node *QueryNode) queryStreamSegments(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error {
+	collection := node.manager.Collection.Get(req.Req.GetCollectionID())
+	if collection == nil {
+		return merr.WrapErrCollectionNotFound(req.Req.GetCollectionID())
+	}
+
+	// Send task to scheduler and wait until it finished.
+	task := tasks.NewQueryStreamTask(ctx, collection, node.manager, req, srv)
+	if err := node.scheduler.Add(task); err != nil {
+		log.Warn("failed to add query task into scheduler", zap.Error(err))
+		return err
+	}
+
+	err := task.Wait()
+	if err != nil {
+		log.Warn("failed to execute task by node scheduler", zap.Error(err))
+		return err
+	}
+
+	return nil
 }
 
 func (node *QueryNode) optimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, deleg delegator.ShardDelegator) (*querypb.SearchRequest, error) {
