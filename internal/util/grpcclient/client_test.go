@@ -342,7 +342,6 @@ func TestClientBase_RetryPolicy(t *testing.T) {
 			State: &milvuspb.ComponentInfo{
 				NodeID: randID,
 			},
-			Status: merr.Status(nil),
 		}, nil
 	})
 	assert.NoError(t, err)
