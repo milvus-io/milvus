@@ -30,11 +30,12 @@ pull_request_rules:
         add:
           - dco-passed
 
-  - name: Test passed for code changed-master
+  - name: Test passed for code changed-master 
     conditions:
       - or:
           - base=sql_beta
           - base=master
+          - base~=^2\.3\.\d+$
       - 'status-success=Build and test AMD64 Ubuntu 20.04'
       - 'status-success=Code Checker AMD64 Ubuntu 20.04'
       - 'status-success=Code Checker MacOS 12'
@@ -46,7 +47,7 @@ pull_request_rules:
       label:
         add:
           - ci-passed
-  - name: Test passed for code changed -2.*.*
+  - name: Test passed for code changed -2.2.*
     conditions:
       - base~=^2(\.\d+){2}$
       - 'status-success=Code Checker AMD64 Ubuntu 20.04'
@@ -60,6 +61,7 @@ pull_request_rules:
       label:
         add:
           - ci-passed
+
   - name: Test passed for tests changed
     conditions:
       - or:
@@ -103,6 +105,7 @@ pull_request_rules:
       - or:
           - base=master
           - base=sql_beta
+          - base~=^2\.3\.\d+$
       - 'status-success=Build and test AMD64 Ubuntu 20.04'
       - 'status-success=Code Checker AMD64 Ubuntu 20.04'
       - 'status-success=Code Checker MacOS 12'
@@ -115,9 +118,10 @@ pull_request_rules:
       label:
         add:
           - ci-passed
-  - name: Test passed for go unittest code changed -2.*.*
+
+  - name: Test passed for go unittest code changed -2.2.*
     conditions:
-      - base~=^2(\.\d+){2}$
+      - base~=^2\.2\.\d+$
       - 'status-success=Code Checker AMD64 Ubuntu 20.04'
       - 'status-success=Build and test AMD64 Ubuntu 20.04'
       - 'status-success=Code Checker MacOS 12'
@@ -197,8 +201,7 @@ pull_request_rules:
 
   - name: Blocking PR if missing a related master PR or doesn't have kind/branch-feature label
     conditions:
-      - base=2.2.0
-      # - base~=^2(\.\d+){2}$
+      - base~=^2(\.\d+){2}$
       - and:
           - -body~=pr\:\ \#[0-9]{1,6}(\s+|$)
           - -body~=https://github.com/milvus-io/milvus/pull/[0-9]{1,6}(\s+|$)
@@ -214,8 +217,7 @@ pull_request_rules:
 
   - name: Dismiss block label if related pr be added into PR
     conditions:
-      - base=2.2.0
-      # - base~=^2(\.\d+){2}$
+      - base~=^2(\.\d+){2}$
       - or:
           - body~=pr\:\ \#[0-9]{1,6}(\s+|$)
           - body~=https://github.com/milvus-io/milvus/pull/[0-9]{1,6}(\s+|$)
@@ -243,6 +245,7 @@ pull_request_rules:
       - or:
           - base=master
           - base=sql_beta
+          - base~=^2\.3\.\d+$
       - title~=\[skip e2e\]
       - 'status-success=Code Checker AMD64 Ubuntu 20.04'
       - 'status-success=Build and test AMD64 Ubuntu 20.04'
@@ -254,9 +257,9 @@ pull_request_rules:
         add:
           - ci-passed
 
-  - name: Test passed for skip e2e - 2.*.*
+  - name: Test passed for skip e2e - 2.2.*
     conditions:
-      - base~=^2(\.\d+){2}$
+      - base~=^2\.2\.\d+$
       - title~=\[skip e2e\]
       - 'status-success=Code Checker AMD64 Ubuntu 20.04'
       - 'status-success=Build and test AMD64 Ubuntu 20.04'
@@ -268,12 +271,13 @@ pull_request_rules:
         add:
           - ci-passed
 
-  - name: Remove ci-passed label when status for code checker or ut  is not success-master
+  - name: Remove ci-passed label when status for code checker or ut is not success-master
     conditions:
       - label!=manual-pass
       - or:
           - base=master
           - base=sql_beta
+          - base~=^2\.3\.\d+$
       - files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt))).*$
       - or:
           - 'status-success!=Code Checker AMD64 Ubuntu 20.04'
@@ -284,10 +288,11 @@ pull_request_rules:
       label:
         remove:
           - ci-passed
-  - name: Remove ci-passed label when status for code checker or ut  is not success-2.*.*
+
+  - name: Remove ci-passed label when status for code checker or ut  is not success-2.2.*
     conditions:
       - label!=manual-pass
-      - base~=^2(\.\d+){2}$
+      - base~=^2\.2\.\d+$
       - files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt))).*$
       - or:
           - 'status-success!=Code Checker AMD64 Ubuntu 20.04'
@@ -298,6 +303,7 @@ pull_request_rules:
       label:
         remove:
           - ci-passed
+
   - name: Remove ci-passed label when  status for jenkins job is not success
     conditions:
       - label!=manual-pass
@@ -338,9 +344,9 @@ pull_request_rules:
         message: |
           @{{author}} ut workflow job failed, comment `rerun ut` can trigger the job again.
 
-  - name: Add comment when code checker or ut failed -2.*.*
+  - name: Add comment when code checker or ut failed -2.2.*
     conditions:
-      - base~=^2(\.\d+){2}$
+      - base~=^2\.2\.\d+$
       - or:
           - 'check-failure=Code Checker AMD64 Ubuntu 20.04'
           - 'check-failure=Build and test AMD64 Ubuntu 20.04'
