@@ -11,7 +11,7 @@
 
 #include <cmath>
 
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
 #include "query/SubSearchResult.h"
 
 namespace milvus::query {

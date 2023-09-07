@@ -22,7 +22,7 @@
 #include <deque>
 
 #include "common/Types.h"
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
 #include "knowhere/bitsetview.h"
 
 namespace milvus {

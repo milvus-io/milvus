@@ -31,7 +31,7 @@
 #include "storage/MinioChunkManager.h"
 #include "storage/AliyunSTSClient.h"
 #include "storage/AliyunCredentialsProvider.h"
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
 #include "log/Log.h"
 #include "signal.h"
 

@@ -20,13 +20,8 @@ if ( EMBEDDED_MILVUS )
     add_compile_definitions( EMBEDDED_MILVUS )
 endif()
 
-set(CONFIG_SRC
-        ConfigKnowhere.cpp
-        )
+set(CONFIG_SRC ConfigKnowhere.cpp)
 
 add_library(milvus_config STATIC ${CONFIG_SRC})
 
-target_link_libraries(milvus_config
-        milvus_exceptions
-        knowhere
-        )
+target_link_libraries(milvus_config knowhere)

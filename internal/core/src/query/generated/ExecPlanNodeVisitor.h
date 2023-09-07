@@ -12,7 +12,7 @@
 #pragma once
 // Generated File
 // DO NOT EDIT
-#include "utils/Json.h"
+#include "common/Json.h"
 #include "query/PlanImpl.h"
 #include "segcore/SegmentGrowing.h"
 #include <utility>

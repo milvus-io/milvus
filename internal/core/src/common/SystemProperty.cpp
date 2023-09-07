@@ -18,7 +18,7 @@
 
 #include "SystemProperty.h"
 #include "Consts.h"
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
 
 namespace milvus {
 class SystemPropertyImpl : public SystemProperty {

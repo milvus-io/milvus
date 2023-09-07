@@ -12,7 +12,7 @@
 include_directories(${CMAKE_HOME_DIRECTORY}/src)
 include_directories(${CMAKE_HOME_DIRECTORY}/unittest)
 
-set(bench_srcs 
+set(bench_srcs
     bench_naive.cpp
     bench_search.cpp
 )
@@ -38,7 +38,6 @@ target_link_libraries(indexbuilder_bench
         milvus_log
         pthread
         knowhere
-        milvus_utils
         )
 
 target_link_libraries(indexbuilder_bench benchmark_main)

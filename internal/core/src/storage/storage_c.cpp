@@ -15,7 +15,6 @@
 // limitations under the License.
 
 #include "storage/storage_c.h"
-#include "common/CGoHelper.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/LocalChunkManagerSingleton.h"
 
@@ -33,7 +32,8 @@ GetLocalUsedSize(const char* c_dir, int64_t* size) {
         }
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(UnexpectedError, e.what());
+        return milvus::FailureCStatus(milvus::ErrorCodeEnum::UnexpectedError,
+                                      e.what());
     }
 }
 
@@ -45,7 +45,8 @@ InitLocalChunkManagerSingleton(const char* c_path) {
 
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(UnexpectedError, e.what());
+        return milvus::FailureCStatus(milvus::ErrorCodeEnum::UnexpectedError,
+                                      e.what());
     }
 }
 
@@ -74,7 +75,8 @@ InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config) {
 
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(UnexpectedError, e.what());
+        return milvus::FailureCStatus(milvus::ErrorCodeEnum::UnexpectedError,
+                                      e.what());
     }
 }
 

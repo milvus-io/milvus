@@ -31,12 +31,6 @@ enum SegmentType {
 
 typedef enum SegmentType SegmentType;
 
-enum ErrorCode {
-    Success = 0,
-    UnexpectedError = 1,
-    IllegalArgument = 5,
-};
-
 // pure C don't support that we use schemapb.DataType directly.
 // Note: the value of all enumerations must match the corresponding schemapb.DataType.
 // TODO: what if there are increments in schemapb.DataType.
@@ -108,4 +102,5 @@ typedef struct CTraceContext {
 } CTraceContext;
 #ifdef __cplusplus
 }
+
 #endif

@@ -27,7 +27,7 @@
 #include "arrow/type_fwd.h"
 #include "common/Json.h"
 #include "common/Types.h"
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
 #include "pb/plan.pb.h"
 #include "query/ExprImpl.h"
 #include "query/Relational.h"

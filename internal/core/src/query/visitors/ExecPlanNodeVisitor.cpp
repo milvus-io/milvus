@@ -17,7 +17,7 @@
 #include "query/SubSearchResult.h"
 #include "query/generated/ExecExprVisitor.h"
 #include "segcore/SegmentGrowing.h"
-#include "utils/Json.h"
+#include "common/Json.h"
 #include "log/Log.h"
 
 namespace milvus::query {

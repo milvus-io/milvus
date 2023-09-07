@@ -21,7 +21,7 @@
 #include <google/protobuf/text_format.h>
 
 #include "pb/schema.pb.h"
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
 
 using std::string;
 

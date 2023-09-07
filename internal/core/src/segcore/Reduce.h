@@ -18,7 +18,6 @@
 #include <queue>
 #include <unordered_set>
 
-#include "utils/Status.h"
 #include "common/type_c.h"
 #include "common/QueryResult.h"
 #include "query/PlanImpl.h"
@@ -84,14 +83,14 @@ class ReduceHelper {
     GetSearchResultDataSlice(int slice_index_);
 
  private:
-    std::vector<int64_t> slice_topKs_;
+    std::vector<SearchResult*>& search_results_;
+    milvus::query::Plan* plan_;
+
     std::vector<int64_t> slice_nqs_;
+    std::vector<int64_t> slice_topKs_;
     int64_t total_nq_;
     int64_t num_segments_;
     int64_t num_slices_;
-
-    milvus::query::Plan* plan_;
-    std::vector<SearchResult*>& search_results_;
 
     std::vector<int64_t> slice_nqs_prefix_sum_;
 

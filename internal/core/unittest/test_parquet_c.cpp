@@ -17,11 +17,13 @@
 #include <gtest/gtest.h>
 #include <fstream>
 
+#include "common/EasyAssert.h"
 #include "storage/parquet_c.h"
 #include "storage/PayloadReader.h"
 #include "storage/PayloadWriter.h"
 
 namespace wrapper = milvus::storage;
+using ErrorCode = milvus::ErrorCodeEnum;
 
 static void
 WriteToFile(CBuffer cb) {

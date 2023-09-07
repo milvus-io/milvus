@@ -30,7 +30,7 @@
 #include "common/Span.h"
 #include "common/Types.h"
 #include "common/Utils.h"
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
 #include "storage/FieldData.h"
 
 namespace milvus::segcore {

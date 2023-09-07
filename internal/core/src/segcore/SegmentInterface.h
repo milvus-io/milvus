@@ -83,7 +83,7 @@ class SegmentInterface {
     //  virtual int64_t
     //  PreDelete(int64_t size) = 0;
 
-    virtual Status
+    virtual SegcoreError
     Delete(int64_t reserved_offset,
            int64_t size,
            const IdArray* pks,

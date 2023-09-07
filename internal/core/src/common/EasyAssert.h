@@ -22,10 +22,26 @@
 #include <stdlib.h>
 #include <string>
 #include "pb/common.pb.h"
+#include "common/type_c.h"
 
 /* Paste this on the file if you want to debug. */
 namespace milvus {
-using ErrorCodeEnum = proto::common::ErrorCode;
+enum ErrorCodeEnum {
+    Success = 0,
+    UnexpectedError = 1,
+    BuildIndexError = 2,
+    IllegalArgument = 5,
+};
+
+inline CStatus
+SuccessCStatus() {
+    return CStatus{Success, ""};
+}
+
+inline CStatus
+FailureCStatus(int code, const std::string& msg) {
+    return CStatus{code, strdup(msg.data())};
+}
 namespace impl {
 void
 EasyAssertInfo(bool value,
@@ -39,6 +55,11 @@ EasyAssertInfo(bool value,
 
 class SegcoreError : public std::runtime_error {
  public:
+    static SegcoreError
+    success() {
+        return SegcoreError(ErrorCodeEnum::Success, "");
+    }
+
     SegcoreError(ErrorCodeEnum error_code, const std::string& error_msg)
         : std::runtime_error(error_msg), error_code_(error_code) {
     }
@@ -46,6 +67,11 @@ class SegcoreError : public std::runtime_error {
     ErrorCodeEnum
     get_error_code() {
         return error_code_;
+    }
+
+    bool
+    ok() {
+        return error_code_ == ErrorCodeEnum::Success;
     }
 
  private:

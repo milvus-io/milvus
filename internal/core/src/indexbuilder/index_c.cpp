@@ -15,7 +15,7 @@
 #include <malloc.h>
 #endif
 
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
 #include "indexbuilder/VecIndexCreator.h"
 #include "indexbuilder/index_c.h"
 #include "indexbuilder/IndexFactory.h"
@@ -26,6 +26,7 @@
 #include "pb/index_cgo_msg.pb.h"
 #include "storage/Util.h"
 
+using namespace milvus;
 CStatus
 CreateIndex(enum CDataType dtype,
             const char* serialized_type_params,

@@ -30,12 +30,12 @@
 #include "index/Meta.h"
 #include <google/protobuf/text_format.h>
 #include <unistd.h>
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
 #include "knowhere/comp/index_param.h"
 #include "common/Slice.h"
 #include "storage/FieldData.h"
 #include "storage/Util.h"
-#include "utils/File.h"
+#include "common/File.h"
 
 namespace milvus::index {
 

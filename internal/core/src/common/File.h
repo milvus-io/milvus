@@ -12,7 +12,7 @@
 #pragma once
 
 #include <string>
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
 #include "fmt/core.h"
 #include <fcntl.h>
 #include <unistd.h>

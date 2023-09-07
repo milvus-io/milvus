@@ -48,34 +48,34 @@ TEST(FloatVecIndex, All) {
     {
         status = CreateIndex(
             dtype, type_params_str.c_str(), index_params_str.c_str(), &index);
-        ASSERT_EQ(Success, status.error_code);
+        ASSERT_EQ(milvus::Success, status.error_code);
     }
     {
         status = BuildFloatVecIndex(index, NB * DIM, xb_data.data());
-        ASSERT_EQ(Success, status.error_code);
+        ASSERT_EQ(milvus::Success, status.error_code);
     }
     {
         status = SerializeIndexToBinarySet(index, &binary_set);
-        ASSERT_EQ(Success, status.error_code);
+        ASSERT_EQ(milvus::Success, status.error_code);
     }
     {
         status = CreateIndex(dtype,
                              type_params_str.c_str(),
                              index_params_str.c_str(),
                              &copy_index);
-        ASSERT_EQ(Success, status.error_code);
+        ASSERT_EQ(milvus::Success, status.error_code);
     }
     {
         status = LoadIndexFromBinarySet(copy_index, binary_set);
-        ASSERT_EQ(Success, status.error_code);
+        ASSERT_EQ(milvus::Success, status.error_code);
     }
     {
         status = DeleteIndex(index);
-        ASSERT_EQ(Success, status.error_code);
+        ASSERT_EQ(milvus::Success, status.error_code);
     }
     {
         status = DeleteIndex(copy_index);
-        ASSERT_EQ(Success, status.error_code);
+        ASSERT_EQ(milvus::Success, status.error_code);
     }
     { DeleteBinarySet(binary_set); }
 }
@@ -107,34 +107,34 @@ TEST(BinaryVecIndex, All) {
     {
         status = CreateIndex(
             dtype, type_params_str.c_str(), index_params_str.c_str(), &index);
-        ASSERT_EQ(Success, status.error_code);
+        ASSERT_EQ(milvus::Success, status.error_code);
     }
     {
         status = BuildBinaryVecIndex(index, NB * DIM / 8, xb_data.data());
-        ASSERT_EQ(Success, status.error_code);
+        ASSERT_EQ(milvus::Success, status.error_code);
     }
     {
         status = SerializeIndexToBinarySet(index, &binary_set);
-        ASSERT_EQ(Success, status.error_code);
+        ASSERT_EQ(milvus::Success, status.error_code);
     }
     {
         status = CreateIndex(dtype,
                              type_params_str.c_str(),
                              index_params_str.c_str(),
                              &copy_index);
-        ASSERT_EQ(Success, status.error_code);
+        ASSERT_EQ(milvus::Success, status.error_code);
     }
     {
         status = LoadIndexFromBinarySet(copy_index, binary_set);
-        ASSERT_EQ(Success, status.error_code);
+        ASSERT_EQ(milvus::Success, status.error_code);
     }
     {
         status = DeleteIndex(index);
-        ASSERT_EQ(Success, status.error_code);
+        ASSERT_EQ(milvus::Success, status.error_code);
     }
     {
         status = DeleteIndex(copy_index);
-        ASSERT_EQ(Success, status.error_code);
+        ASSERT_EQ(milvus::Success, status.error_code);
     }
     { DeleteBinarySet(binary_set); }
 }
@@ -166,40 +166,40 @@ TEST(CBoolIndexTest, All) {
                                  type_params_str.c_str(),
                                  index_params_str.c_str(),
                                  &index);
-            ASSERT_EQ(Success, status.error_code);
+            ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
             status = BuildScalarIndex(
                 index, half_ds->GetRows(), half_ds->GetTensor());
-            ASSERT_EQ(Success, status.error_code);
+            ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
             status = SerializeIndexToBinarySet(index, &binary_set);
-            ASSERT_EQ(Success, status.error_code);
+            ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
             status = CreateIndex(dtype,
                                  type_params_str.c_str(),
                                  index_params_str.c_str(),
                                  &copy_index);
-            ASSERT_EQ(Success, status.error_code);
+            ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
             status = LoadIndexFromBinarySet(copy_index, binary_set);
-            ASSERT_EQ(Success, status.error_code);
+            ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
             status = DeleteIndex(index);
-            ASSERT_EQ(Success, status.error_code);
+            ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
             status = DeleteIndex(copy_index);
-            ASSERT_EQ(Success, status.error_code);
+            ASSERT_EQ(milvus::Success, status.error_code);
         }
         { DeleteBinarySet(binary_set); }
     }
 
-    delete[](char*)(half_ds->GetTensor());
+    delete[] (char*)(half_ds->GetTensor());
 }
 
 // TODO: more scalar type.
@@ -224,34 +224,34 @@ TEST(CInt64IndexTest, All) {
                                  type_params_str.c_str(),
                                  index_params_str.c_str(),
                                  &index);
-            ASSERT_EQ(Success, status.error_code);
+            ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
             status = BuildScalarIndex(index, arr.size(), arr.data());
-            ASSERT_EQ(Success, status.error_code);
+            ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
             status = SerializeIndexToBinarySet(index, &binary_set);
-            ASSERT_EQ(Success, status.error_code);
+            ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
             status = CreateIndex(dtype,
                                  type_params_str.c_str(),
                                  index_params_str.c_str(),
                                  &copy_index);
-            ASSERT_EQ(Success, status.error_code);
+            ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
             status = LoadIndexFromBinarySet(copy_index, binary_set);
-            ASSERT_EQ(Success, status.error_code);
+            ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
             status = DeleteIndex(index);
-            ASSERT_EQ(Success, status.error_code);
+            ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
             status = DeleteIndex(copy_index);
-            ASSERT_EQ(Success, status.error_code);
+            ASSERT_EQ(milvus::Success, status.error_code);
         }
         { DeleteBinarySet(binary_set); }
     }
@@ -283,39 +283,39 @@ TEST(CStringIndexTest, All) {
                                  type_params_str.c_str(),
                                  index_params_str.c_str(),
                                  &index);
-            ASSERT_EQ(Success, status.error_code);
+            ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
             status = BuildScalarIndex(
                 index, (str_ds->GetRows()), (str_ds->GetTensor()));
-            ASSERT_EQ(Success, status.error_code);
+            ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
             status = SerializeIndexToBinarySet(index, &binary_set);
-            ASSERT_EQ(Success, status.error_code);
+            ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
             status = CreateIndex(dtype,
                                  type_params_str.c_str(),
                                  index_params_str.c_str(),
                                  &copy_index);
-            ASSERT_EQ(Success, status.error_code);
+            ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
             status = LoadIndexFromBinarySet(copy_index, binary_set);
-            ASSERT_EQ(Success, status.error_code);
+            ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
             status = DeleteIndex(index);
-            ASSERT_EQ(Success, status.error_code);
+            ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
             status = DeleteIndex(copy_index);
-            ASSERT_EQ(Success, status.error_code);
+            ASSERT_EQ(milvus::Success, status.error_code);
         }
         { DeleteBinarySet(binary_set); }
     }
 
-    delete[](char*)(str_ds->GetTensor());
+    delete[] (char*)(str_ds->GetTensor());
 }
 #endif

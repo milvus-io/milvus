@@ -14,7 +14,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "common/CGoHelper.h"
 #include "common/LoadInfo.h"
 #include "segcore/load_field_data_c.h"
 
@@ -25,7 +24,7 @@ NewLoadFieldDataInfo(CLoadFieldDataInfo* c_load_field_data_info) {
         *c_load_field_data_info = load_field_data_info.release();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(UnexpectedError, e.what());
+        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
     }
 }
 
@@ -51,7 +50,7 @@ AppendLoadFieldInfo(CLoadFieldDataInfo c_load_field_data_info,
         load_field_data_info->field_infos[field_id] = binlog_info;
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(UnexpectedError, e.what());
+        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
     }
 }
 
@@ -71,7 +70,7 @@ AppendLoadFieldDataPath(CLoadFieldDataInfo c_load_field_data_info,
             file_path);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(UnexpectedError, e.what());
+        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
     }
 }
 

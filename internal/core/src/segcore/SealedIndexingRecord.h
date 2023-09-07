@@ -19,7 +19,7 @@
 #include <tbb/concurrent_hash_map.h>
 
 #include "common/Types.h"
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
 #include "index/VectorIndex.h"
 
 namespace milvus::segcore {

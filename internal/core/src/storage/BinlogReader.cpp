@@ -15,32 +15,34 @@
 // limitations under the License.
 
 #include "storage/BinlogReader.h"
+#include "common/EasyAssert.h"
 
 namespace milvus::storage {
 
-Status
+milvus::SegcoreError
 BinlogReader::Read(int64_t nbytes, void* out) {
     auto remain = size_ - tell_;
     if (nbytes > remain) {
-        return Status(SERVER_UNEXPECTED_ERROR, "out range of binlog data");
+        return SegcoreError(milvus::UnexpectedError,
+                            "out range of binlog data");
     }
     std::memcpy(out, data_.get() + tell_, nbytes);
     tell_ += nbytes;
-    return Status(SERVER_SUCCESS, "");
+    return SegcoreError(milvus::Success, "");
 }
 
-std::pair<Status, std::shared_ptr<uint8_t[]>>
+std::pair<milvus::SegcoreError, std::shared_ptr<uint8_t[]>>
 BinlogReader::Read(int64_t nbytes) {
     auto remain = size_ - tell_;
     if (nbytes > remain) {
         return std::make_pair(
-            Status(SERVER_UNEXPECTED_ERROR, "out range of binlog data"),
+            SegcoreError(milvus::UnexpectedError, "out range of binlog data"),
             nullptr);
     }
     auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
     auto res = std::shared_ptr<uint8_t[]>(data_.get() + tell_, deleter);
     tell_ += nbytes;
-    return std::make_pair(Status(SERVER_SUCCESS, ""), res);
+    return std::make_pair(SegcoreError(milvus::Success, ""), res);
 }
 
 }  // namespace milvus::storage

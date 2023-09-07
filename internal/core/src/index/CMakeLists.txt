@@ -27,17 +27,6 @@ endif ()
 milvus_add_pkg_config("milvus_index")
 add_library(milvus_index SHARED ${INDEX_FILES})
 
-set(PLATFORM_LIBS )
-if ( LINUX OR APPLE )
-    set(PLATFORM_LIBS marisa)
-endif()
-if (MSYS)
-    set(PLATFORM_LIBS -Wl,--allow-multiple-definition)
-endif ()
-
-target_link_libraries(milvus_index
-        milvus_storage
-        ${PLATFORM_LIBS}
-        )
+target_link_libraries(milvus_index milvus_storage)
 
 install(TARGETS milvus_index DESTINATION "${CMAKE_INSTALL_LIBDIR}")

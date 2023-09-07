@@ -16,7 +16,9 @@
 #include <string>
 #include <vector>
 
+#include "common/EasyAssert.h"
 #include "knowhere/comp/index_param.h"
+#include "nlohmann/json.hpp"
 #include "query/SearchBruteForce.h"
 #include "segcore/Reduce.h"
 #include "index/IndexFactory.h"
@@ -55,7 +57,7 @@ generate_data(int N) {
 }
 }  // namespace
 
-Status
+SegcoreError
 merge_into(int64_t queries,
            int64_t topk,
            float* distances,
@@ -90,7 +92,7 @@ merge_into(int64_t queries,
         std::copy_n(buf_dis.data(), topk, src2_dis);
         std::copy_n(buf_uids.data(), topk, src2_uids);
     }
-    return Status::OK();
+    return SegcoreError::success();
 }
 
 /*
@@ -173,7 +175,7 @@ TEST(Indexing, BinaryBruteForce) {
     auto json = SearchResultToJson(sr);
     std::cout << json.dump(2);
 #ifdef __linux__
-    auto ref = json::parse(R"(
+    auto ref = nlohmann::json::parse(R"(
 [
   [
     [ "1024->0.000000", "48942->0.642000", "18494->0.644000", "68225->0.644000", "93557->0.644000" ],
@@ -190,7 +192,7 @@ TEST(Indexing, BinaryBruteForce) {
 ]
 )");
 #else  // for mac
-    auto ref = json::parse(R"(
+    auto ref = nlohmann::json::parse(R"(
 [
   [
     [ "1024->0.000000", "59169->0.645000", "98548->0.646000", "3356->0.646000", "90373->0.647000" ],

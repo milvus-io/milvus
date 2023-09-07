@@ -17,7 +17,7 @@
 #include "storage/InsertData.h"
 #include "storage/Event.h"
 #include "storage/Util.h"
-#include "utils/Json.h"
+#include "common/Json.h"
 #include "common/FieldMeta.h"
 #include "common/Consts.h"
 

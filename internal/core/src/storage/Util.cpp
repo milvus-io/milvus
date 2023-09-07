@@ -18,7 +18,7 @@
 #include <memory>
 #include "arrow/array/builder_binary.h"
 #include "arrow/type_fwd.h"
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
 #include "common/Consts.h"
 #include "storage/FieldData.h"
 #include "storage/FieldDataInterface.h"

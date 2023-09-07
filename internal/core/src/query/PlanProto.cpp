@@ -18,7 +18,7 @@
 
 #include "ExprImpl.h"
 #include "common/VectorTrait.h"
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
 #include "generated/ExtractInfoExprVisitor.h"
 #include "generated/ExtractInfoPlanNodeVisitor.h"
 #include "pb/plan.pb.h"
@@ -182,7 +182,8 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
     search_info.metric_type_ = query_info_proto.metric_type();
     search_info.topk_ = query_info_proto.topk();
     search_info.round_decimal_ = query_info_proto.round_decimal();
-    search_info.search_params_ = json::parse(query_info_proto.search_params());
+    search_info.search_params_ =
+        nlohmann::json::parse(query_info_proto.search_params());
 
     auto plan_node = [&]() -> std::unique_ptr<VectorPlanNode> {
         if (anns_proto.vector_type() ==

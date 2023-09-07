@@ -19,6 +19,7 @@
 #include <type_traits>
 
 #include "common/Consts.h"
+#include "common/EasyAssert.h"
 #include "common/Types.h"
 #include "nlohmann/json.hpp"
 #include "query/PlanNode.h"
@@ -222,7 +223,7 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
                                              reserved_offset + num_rows);
 }
 
-Status
+SegcoreError
 SegmentGrowingImpl::Delete(int64_t reserved_begin,
                            int64_t size,
                            const IdArray* ids,
@@ -250,7 +251,7 @@ SegmentGrowingImpl::Delete(int64_t reserved_begin,
 
     // step 2: fill delete record
     deleted_record_.push(sort_pks, sort_timestamps.data());
-    return Status::OK();
+    return SegcoreError::success();
 }
 
 int64_t

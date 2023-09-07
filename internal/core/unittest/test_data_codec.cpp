@@ -21,7 +21,7 @@
 #include "storage/IndexData.h"
 #include "storage/Util.h"
 #include "common/Consts.h"
-#include "utils/Json.h"
+#include "common/Json.h"
 
 using namespace milvus;
 
@@ -305,8 +305,8 @@ TEST(storage, InsertDataBinaryVector) {
 TEST(storage, InsertDataFloat16Vector) {
     std::vector<float16> data = {1, 2, 3, 4, 5, 6, 7, 8};
     int DIM = 2;
-    auto field_data =
-        milvus::storage::CreateFieldData(storage::DataType::VECTOR_FLOAT16, DIM);
+    auto field_data = milvus::storage::CreateFieldData(
+        storage::DataType::VECTOR_FLOAT16, DIM);
     field_data->FillFieldData(data.data(), data.size() / DIM);
 
     storage::InsertData insert_data(field_data);

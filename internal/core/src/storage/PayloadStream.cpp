@@ -17,7 +17,7 @@
 #include "arrow/api.h"
 
 #include "storage/PayloadStream.h"
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
 
 namespace milvus::storage {
 

@@ -25,7 +25,7 @@
 #include <string>
 #include <string_view>
 
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
 #include "simdjson.h"
 #include "fmt/core.h"
 #include "simdjson/common_defs.h"

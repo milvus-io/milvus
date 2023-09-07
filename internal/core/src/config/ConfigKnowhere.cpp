@@ -17,7 +17,7 @@
 #include <mutex>
 
 #include "ConfigKnowhere.h"
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
 #include "glog/logging.h"
 #include "log/Log.h"
 #include "knowhere/comp/thread_pool.h"
