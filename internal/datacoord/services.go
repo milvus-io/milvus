@@ -1668,7 +1668,7 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
 	if s.isClosed() {
 		reason := errorutil.UnHealthReason("datacoord", paramtable.GetNodeID(), "datacoord is closed")
-		return &milvuspb.CheckHealthResponse{IsHealthy: false, Reasons: []string{reason}}, nil
+		return &milvuspb.CheckHealthResponse{Status: s.UnhealthyStatus(), IsHealthy: false, Reasons: []string{reason}}, nil
 	}
 
 	mu := &sync.Mutex{}
@@ -1700,10 +1700,10 @@ func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthReque
 
 	err := group.Wait()
 	if err != nil || len(errReasons) != 0 {
-		return &milvuspb.CheckHealthResponse{IsHealthy: false, Reasons: errReasons}, nil
+		return &milvuspb.CheckHealthResponse{Status: merr.Status(nil), IsHealthy: false, Reasons: errReasons}, nil
 	}
 
-	return &milvuspb.CheckHealthResponse{IsHealthy: true, Reasons: errReasons}, nil
+	return &milvuspb.CheckHealthResponse{Status: merr.Status(nil), IsHealthy: true, Reasons: errReasons}, nil
 }
 
 func (s *Server) GcConfirm(ctx context.Context, request *datapb.GcConfirmRequest) (*datapb.GcConfirmResponse, error) {

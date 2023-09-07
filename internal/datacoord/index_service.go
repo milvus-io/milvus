@@ -754,7 +754,6 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 }
 
 func (s *Server) UnhealthyStatus() *commonpb.Status {
-	return merr.Status(
-		merr.WrapErrServiceNotReady(
-			fmt.Sprintf("datacoord %d is unhealthy", s.serverID())))
+	code := s.stateCode.Load().(commonpb.StateCode)
+	return merr.Status(merr.WrapErrServiceNotReady(code.String()))
 }

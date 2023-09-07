@@ -2787,9 +2787,13 @@ func (c *Core) RenameCollection(ctx context.Context, req *milvuspb.RenameCollect
 }
 
 func (c *Core) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
-	if _, ok := c.checkHealthy(); !ok {
+	if code, ok := c.checkHealthy(); !ok {
 		reason := errorutil.UnHealthReason("rootcoord", c.session.ServerID, "rootcoord is unhealthy")
-		return &milvuspb.CheckHealthResponse{IsHealthy: false, Reasons: []string{reason}}, nil
+		return &milvuspb.CheckHealthResponse{
+			Status:    merr.Status(merr.WrapErrServiceNotReady(code.String())),
+			IsHealthy: false,
+			Reasons:   []string{reason},
+		}, nil
 	}
 
 	mu := &sync.Mutex{}
@@ -2813,8 +2817,12 @@ func (c *Core) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest)
 
 	err := group.Wait()
 	if err != nil || len(errReasons) != 0 {
-		return &milvuspb.CheckHealthResponse{IsHealthy: false, Reasons: errReasons}, nil
+		return &milvuspb.CheckHealthResponse{
+			Status:    merr.Status(nil),
+			IsHealthy: false,
+			Reasons:   errReasons,
+		}, nil
 	}
 
-	return &milvuspb.CheckHealthResponse{IsHealthy: true, Reasons: errReasons}, nil
+	return &milvuspb.CheckHealthResponse{Status: merr.Status(nil), IsHealthy: true, Reasons: errReasons}, nil
 }
