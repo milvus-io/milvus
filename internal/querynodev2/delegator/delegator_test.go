@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -877,15 +878,16 @@ func TestDelegatorWatchTsafe(t *testing.T) {
 	sd := &shardDelegator{
 		tsafeManager: tsafeManager,
 		vchannelName: channelName,
-		lifetime:     newLifetime(),
+		lifetime:     lifetime.NewLifetime(initializing),
 		latestTsafe:  atomic.NewUint64(0),
 	}
 	defer sd.Close()
 
 	m := sync.Mutex{}
 	sd.tsCond = sync.NewCond(&m)
-	sd.wg.Add(1)
-	go sd.watchTSafe()
+	if sd.lifetime.Add(notStopped) {
+		go sd.watchTSafe()
+	}
 
 	err := tsafeManager.Set(channelName, 200)
 	require.NoError(t, err)
@@ -903,19 +905,20 @@ func TestDelegatorTSafeListenerClosed(t *testing.T) {
 	sd := &shardDelegator{
 		tsafeManager: tsafeManager,
 		vchannelName: channelName,
-		lifetime:     newLifetime(),
+		lifetime:     lifetime.NewLifetime(initializing),
 		latestTsafe:  atomic.NewUint64(0),
 	}
 	defer sd.Close()
 
 	m := sync.Mutex{}
 	sd.tsCond = sync.NewCond(&m)
-	sd.wg.Add(1)
 	signal := make(chan struct{})
-	go func() {
-		sd.watchTSafe()
-		close(signal)
-	}()
+	if sd.lifetime.Add(notStopped) {
+		go func() {
+			sd.watchTSafe()
+			close(signal)
+		}()
+	}
 
 	select {
 	case <-signal:
