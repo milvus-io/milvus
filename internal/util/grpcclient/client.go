@@ -368,6 +368,11 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 			return nil
 		}
 
+		if status == nil {
+			log.Warn("status is nil, please fix it", zap.Stack("stack"))
+			return nil
+		}
+
 		if merr.Ok(status) || !merr.IsRetryableCode(status.GetCode()) {
 			return nil
 		}

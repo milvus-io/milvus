@@ -973,15 +973,15 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		reason := errorutil.UnHealthReason("querycoord", paramtable.GetNodeID(), "querycoord is unhealthy")
-		return &milvuspb.CheckHealthResponse{IsHealthy: false, Reasons: []string{reason}}, nil
+		return &milvuspb.CheckHealthResponse{Status: merr.Status(err), IsHealthy: false, Reasons: []string{reason}}, nil
 	}
 
 	errReasons, err := s.checkNodeHealth(ctx)
 	if err != nil || len(errReasons) != 0 {
-		return &milvuspb.CheckHealthResponse{IsHealthy: false, Reasons: errReasons}, nil
+		return &milvuspb.CheckHealthResponse{Status: merr.Status(nil), IsHealthy: false, Reasons: errReasons}, nil
 	}
 
-	return &milvuspb.CheckHealthResponse{IsHealthy: true, Reasons: errReasons}, nil
+	return &milvuspb.CheckHealthResponse{Status: merr.Status(nil), IsHealthy: true, Reasons: errReasons}, nil
 }
 
 func (s *Server) checkNodeHealth(ctx context.Context) ([]string, error) {
