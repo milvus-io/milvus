@@ -571,7 +571,7 @@ class TestDeleteOperation(TestcaseBase):
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
 
         # raise exception
-        error = {ct.err_code: 1,
+        error = {ct.err_code: 15,
                  ct.err_msg: f"partitionID of partitionName:{ct.default_tag} can not be find"}
         collection_w.delete(tmp_expr, partition_name=ct.default_tag,
                             check_task=CheckTasks.err_res, check_items=error)
@@ -1139,6 +1139,31 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.delete(expr)
 
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("issue #26820")
+    @pytest.mark.parametrize("consistency_level", ["Bounded", "Session", "Eventually"])
+    def test_delete_flush_query_consistency_not_strong(self, consistency_level):
+        """
+        target: test delete, flush and query with Consistency level not strong
+        method: 1.delete ids
+                2.flush
+                3.query with Consistency level not strong
+        expected: query successfully
+        """
+        # init collection
+        collection_w = self.init_collection_general(prefix, True)[0]
+
+        # delete and flush
+        delete_ids = [i for i in range(ct.default_nb // 2)]
+        delete_expr = f"{ct.default_int64_field_name} in {delete_ids}"
+        res = collection_w.delete(delete_expr)[0]
+        assert res.delete_count == ct.default_nb // 2
+        collection_w.flush()
+
+        # query with Consistency level not strong
+        collection_w.query(expr=delete_expr, consistency_level=consistency_level,
+                           check_task=CheckTasks.check_query_empty)
 
 
 class TestDeleteString(TestcaseBase):

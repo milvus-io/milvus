@@ -241,7 +241,7 @@ class TestUtilityParams(TestcaseBase):
         self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=ct.default_int64_field_name)
         self.collection_wrap.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         self.collection_wrap.load()
-        error = {ct.err_code: 1, ct.err_msg: "describe collection failed: can't find collection"}
+        error = {ct.err_code: 4, ct.err_msg: "collection default:not_existed_name: collection not found"}
         self.utility_wrap.loading_progress("not_existed_name", check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -285,7 +285,7 @@ class TestUtilityParams(TestcaseBase):
         self.utility_wrap.wait_for_loading_complete(
             c_name,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1, ct.err_msg: "can't find collection"})
+            check_items={ct.err_code: 4, ct.err_msg: f"collection default:{c_name}: collection not found"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_wait_for_loading_partition_not_existed(self):
@@ -601,9 +601,9 @@ class TestUtilityParams(TestcaseBase):
         new_collection_name = cf.gen_unique_str(prefix)
         self.utility_wrap.rename_collection(old_collection_name, new_collection_name,
                                             check_task=CheckTasks.err_res,
-                                            check_items={"err_code": 1,
-                                                         "err_msg": "can't find collection: {}".format(
-                                                             collection_w.name)})
+                                            check_items={"err_code": 4,
+                                                         "err_msg": "collection 1:test_collection_non_exist: "
+                                                                    "collection not found"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_rename_collection_existed_collection_name(self):
