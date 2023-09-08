@@ -37,10 +37,22 @@ def gen_experiment_config(yaml):
 
 def start_monitor_threads(checkers={}):
     """start the threads by checkers"""
+    tasks = []
     for k, ch in checkers.items():
         ch._keep_running = True
         t = threading.Thread(target=ch.keep_running, args=(), name=k, daemon=True)
         t.start()
+        tasks.append(t)
+    return tasks
+
+
+def check_thread_status(tasks):
+    """check the status of all threads"""
+    for t in tasks:
+        if t.is_alive():
+            log.info(f"thread {t.name} is still running")
+        else:
+            log.info(f"thread {t.name} is not running")
 
 
 def get_env_variable_by_name(name):

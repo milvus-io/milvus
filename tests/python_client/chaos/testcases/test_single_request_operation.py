@@ -82,7 +82,7 @@ class TestOperations(TestBase):
         event_records.insert("init_health_checkers", "start")
         self.init_health_checkers(collection_name=c_name)
         event_records.insert("init_health_checkers", "finished")
-        cc.start_monitor_threads(self.health_checkers)
+        tasks = cc.start_monitor_threads(self.health_checkers)
         log.info("*********************Load Start**********************")
         # wait request_duration
         request_duration = request_duration.replace("h", "*3600+").replace("m", "*60+").replace("s", "")
@@ -102,6 +102,7 @@ class TestOperations(TestBase):
         # wait all pod ready
         wait_pods_ready(self.milvus_ns, f"app.kubernetes.io/instance={self.release_name}")
         time.sleep(60)
+        cc.check_thread_status(tasks)
         for k, v in self.health_checkers.items():
             v.pause()
         ra = ResultAnalyzer()
