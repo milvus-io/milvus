@@ -68,7 +68,7 @@ func (node *Proxy) UpdateStateCode(code commonpb.StateCode) {
 	node.stateCode.Store(code)
 }
 
-// GetComponentStates get state of Proxy.
+// GetComponentStates gets the state of Proxy.
 func (node *Proxy) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
 	stats := &milvuspb.ComponentStates{
 		Status: merr.Status(nil),
