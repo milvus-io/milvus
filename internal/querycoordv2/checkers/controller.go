@@ -144,7 +144,7 @@ func (controller *CheckerController) StartChecker(ctx context.Context, checkerTy
 		case <-controller.manualCheckChs[checkerType]:
 			ticker.Stop()
 			controller.check(ctx, checkerType)
-			ticker.Reset(Params.QueryCoordCfg.CheckInterval.GetAsDuration(time.Millisecond))
+			ticker.Reset(interval)
 		}
 	}
 }
