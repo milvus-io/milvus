@@ -91,6 +91,7 @@ func (t *dropPartitionTask) Execute(ctx context.Context) error {
 			PartitionName: t.Req.GetPartitionName(),
 			CollectionID:  t.collMeta.CollectionID,
 		},
+		isSkip: t.Req.GetBase().GetReplicateInfo().GetIsReplicate(),
 	})
 	redoTask.AddAsyncStep(newConfirmGCStep(t.core, t.collMeta.CollectionID, partID))
 	redoTask.AddAsyncStep(&removePartitionMetaStep{

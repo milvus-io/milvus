@@ -125,12 +125,15 @@ type unwatchChannelsStep struct {
 	baseStep
 	collectionID UniqueID
 	channels     collectionChannels
+
+	isSkip bool
 }
 
 func (s *unwatchChannelsStep) Execute(ctx context.Context) ([]nestedStep, error) {
 	unwatchByDropMsg := &deleteCollectionDataStep{
 		baseStep: baseStep{core: s.core},
 		coll:     &model.Collection{CollectionID: s.collectionID, PhysicalChannelNames: s.channels.physicalChannels},
+		isSkip:   s.isSkip,
 	}
 	return unwatchByDropMsg.Execute(ctx)
 }
@@ -183,9 +186,14 @@ func (s *expireCacheStep) Desc() string {
 type deleteCollectionDataStep struct {
 	baseStep
 	coll *model.Collection
+
+	isSkip bool
 }
 
 func (s *deleteCollectionDataStep) Execute(ctx context.Context) ([]nestedStep, error) {
+	if s.isSkip {
+		return nil, nil
+	}
 	ddlTs, err := s.core.garbageCollector.GcCollectionData(ctx, s.coll)
 	if err != nil {
 		return nil, err
@@ -239,9 +247,14 @@ type deletePartitionDataStep struct {
 	baseStep
 	pchans    []string
 	partition *model.Partition
+
+	isSkip bool
 }
 
 func (s *deletePartitionDataStep) Execute(ctx context.Context) ([]nestedStep, error) {
+	if s.isSkip {
+		return nil, nil
+	}
 	_, err := s.core.garbageCollector.GcPartitionData(ctx, s.pchans, s.partition)
 	return nil, err
 }

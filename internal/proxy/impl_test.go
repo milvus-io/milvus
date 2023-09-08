@@ -18,16 +18,20 @@ package proxy
 
 import (
 	"context"
+	"encoding/base64"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
@@ -35,8 +39,13 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/resource"
 )
 
 func TestProxy_InvalidateCollectionMetaCache_remove_stream(t *testing.T) {
@@ -402,6 +411,10 @@ func TestProxy_FlushAll_DbCollection(t *testing.T) {
 			node.tsoAllocator = &timestampAllocator{
 				tso: newMockTimestampAllocatorInterface(),
 			}
+			rpcRequestChannel := Params.CommonCfg.ReplicateMsgChannel.GetValue()
+			node.replicateMsgStream, err = node.factory.NewMsgStream(node.ctx)
+			assert.NoError(t, err)
+			node.replicateMsgStream.AsProducer([]string{rpcRequestChannel})
 
 			Params.Save(Params.ProxyCfg.MaxTaskNum.Key, "1000")
 			node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
@@ -441,6 +454,10 @@ func TestProxy_FlushAll(t *testing.T) {
 	node.tsoAllocator = &timestampAllocator{
 		tso: newMockTimestampAllocatorInterface(),
 	}
+	rpcRequestChannel := Params.CommonCfg.ReplicateMsgChannel.GetValue()
+	node.replicateMsgStream, err = node.factory.NewMsgStream(node.ctx)
+	assert.NoError(t, err)
+	node.replicateMsgStream.AsProducer([]string{rpcRequestChannel})
 
 	Params.Save(Params.ProxyCfg.MaxTaskNum.Key, "1000")
 	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
@@ -909,6 +926,11 @@ func TestProxyCreateDatabase(t *testing.T) {
 	assert.NoError(t, err)
 	defer node.sched.Close()
 
+	rpcRequestChannel := Params.CommonCfg.ReplicateMsgChannel.GetValue()
+	node.replicateMsgStream, err = node.factory.NewMsgStream(node.ctx)
+	assert.NoError(t, err)
+	node.replicateMsgStream.AsProducer([]string{rpcRequestChannel})
+
 	t.Run("create database fail", func(t *testing.T) {
 		rc := mocks.NewMockRootCoordClient(t)
 		rc.On("CreateDatabase", mock.Anything, mock.Anything).
@@ -962,6 +984,11 @@ func TestProxyDropDatabase(t *testing.T) {
 	err = node.sched.Start()
 	assert.NoError(t, err)
 	defer node.sched.Close()
+
+	rpcRequestChannel := Params.CommonCfg.ReplicateMsgChannel.GetValue()
+	node.replicateMsgStream, err = node.factory.NewMsgStream(node.ctx)
+	assert.NoError(t, err)
+	node.replicateMsgStream.AsProducer([]string{rpcRequestChannel})
 
 	t.Run("drop database fail", func(t *testing.T) {
 		rc := mocks.NewMockRootCoordClient(t)
@@ -1090,5 +1117,263 @@ func TestProxy_AllocTimestamp(t *testing.T) {
 		resp, err := node.AllocTimestamp(context.TODO(), nil)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+	})
+}
+
+func TestProxy_ReplicateMessage(t *testing.T) {
+	paramtable.Init()
+	defer paramtable.Get().Save(paramtable.Get().CommonCfg.TTMsgEnabled.Key, "true")
+	t.Run("proxy unhealthy", func(t *testing.T) {
+		node := &Proxy{}
+		node.UpdateStateCode(commonpb.StateCode_Abnormal)
+
+		resp, err := node.ReplicateMessage(context.TODO(), nil)
+		assert.NoError(t, err)
+		assert.NotEqual(t, 0, resp.GetStatus().GetCode())
+	})
+
+	t.Run("not backup instance", func(t *testing.T) {
+		node := &Proxy{}
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		resp, err := node.ReplicateMessage(context.TODO(), nil)
+		assert.NoError(t, err)
+		assert.NotEqual(t, 0, resp.GetStatus().GetCode())
+	})
+
+	t.Run("empty channel name", func(t *testing.T) {
+		node := &Proxy{}
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+		paramtable.Get().Save(paramtable.Get().CommonCfg.TTMsgEnabled.Key, "false")
+
+		resp, err := node.ReplicateMessage(context.TODO(), nil)
+		assert.NoError(t, err)
+		assert.NotEqual(t, 0, resp.GetStatus().GetCode())
+	})
+
+	t.Run("fail to get msg stream", func(t *testing.T) {
+		factory := newMockMsgStreamFactory()
+		factory.f = func(ctx context.Context) (msgstream.MsgStream, error) {
+			return nil, errors.New("mock error: get msg stream")
+		}
+		resourceManager := resource.NewManager(time.Second, 2*time.Second, nil)
+		manager := NewReplicateStreamManager(context.Background(), factory, resourceManager)
+
+		node := &Proxy{
+			replicateStreamManager: manager,
+		}
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+		paramtable.Get().Save(paramtable.Get().CommonCfg.TTMsgEnabled.Key, "false")
+
+		resp, err := node.ReplicateMessage(context.TODO(), &milvuspb.ReplicateMessageRequest{ChannelName: "unit_test_replicate_message"})
+		assert.NoError(t, err)
+		assert.NotEqual(t, 0, resp.GetStatus().GetCode())
+	})
+
+	t.Run("get latest position", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().CommonCfg.TTMsgEnabled.Key, "false")
+		defer paramtable.Get().Save(paramtable.Get().CommonCfg.TTMsgEnabled.Key, "true")
+
+		factory := dependency.NewMockFactory(t)
+		stream := msgstream.NewMockMsgStream(t)
+		mockMsgID := mqwrapper.NewMockMessageID(t)
+
+		factory.EXPECT().NewMsgStream(mock.Anything).Return(stream, nil).Once()
+		mockMsgID.EXPECT().Serialize().Return([]byte("mock")).Once()
+		stream.EXPECT().AsConsumer(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+		stream.EXPECT().GetLatestMsgID(mock.Anything).Return(mockMsgID, nil).Once()
+		stream.EXPECT().Close().Return()
+		node := &Proxy{
+			factory: factory,
+		}
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+		resp, err := node.ReplicateMessage(context.TODO(), &milvuspb.ReplicateMessageRequest{
+			ChannelName: Params.CommonCfg.ReplicateMsgChannel.GetValue(),
+		})
+		assert.NoError(t, err)
+		assert.EqualValues(t, 0, resp.GetStatus().GetCode())
+		assert.Equal(t, base64.StdEncoding.EncodeToString([]byte("mock")), resp.GetPosition())
+
+		factory.EXPECT().NewMsgStream(mock.Anything).Return(nil, errors.New("mock")).Once()
+		resp, err = node.ReplicateMessage(context.TODO(), &milvuspb.ReplicateMessageRequest{
+			ChannelName: Params.CommonCfg.ReplicateMsgChannel.GetValue(),
+		})
+		assert.NoError(t, err)
+		assert.NotEqualValues(t, 0, resp.GetStatus().GetCode())
+	})
+
+	t.Run("invalid msg pack", func(t *testing.T) {
+		node := &Proxy{
+			replicateStreamManager: NewReplicateStreamManager(context.Background(), nil, nil),
+		}
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+		paramtable.Get().Save(paramtable.Get().CommonCfg.TTMsgEnabled.Key, "false")
+		{
+			resp, err := node.ReplicateMessage(context.TODO(), &milvuspb.ReplicateMessageRequest{
+				ChannelName: "unit_test_replicate_message",
+				Msgs:        [][]byte{{1, 2, 3}},
+			})
+			assert.NoError(t, err)
+			assert.NotEqual(t, 0, resp.GetStatus().GetCode())
+		}
+
+		{
+			timeTickResult := msgpb.TimeTickMsg{}
+			timeTickMsg := &msgstream.TimeTickMsg{
+				BaseMsg: msgstream.BaseMsg{
+					BeginTimestamp: 1,
+					EndTimestamp:   10,
+					HashValues:     []uint32{0},
+				},
+				TimeTickMsg: timeTickResult,
+			}
+			msgBytes, _ := timeTickMsg.Marshal(timeTickMsg)
+			resp, err := node.ReplicateMessage(context.TODO(), &milvuspb.ReplicateMessageRequest{
+				ChannelName: "unit_test_replicate_message",
+				Msgs:        [][]byte{msgBytes.([]byte)},
+			})
+			assert.NoError(t, err)
+			log.Info("resp", zap.Any("resp", resp))
+			assert.NotEqual(t, 0, resp.GetStatus().GetCode())
+		}
+
+		{
+			timeTickResult := msgpb.TimeTickMsg{
+				Base: commonpbutil.NewMsgBase(
+					commonpbutil.WithMsgType(commonpb.MsgType(-1)),
+					commonpbutil.WithMsgID(0),
+					commonpbutil.WithTimeStamp(10),
+					commonpbutil.WithSourceID(-1),
+				),
+			}
+			timeTickMsg := &msgstream.TimeTickMsg{
+				BaseMsg: msgstream.BaseMsg{
+					BeginTimestamp: 1,
+					EndTimestamp:   10,
+					HashValues:     []uint32{0},
+				},
+				TimeTickMsg: timeTickResult,
+			}
+			msgBytes, _ := timeTickMsg.Marshal(timeTickMsg)
+			resp, err := node.ReplicateMessage(context.TODO(), &milvuspb.ReplicateMessageRequest{
+				ChannelName: "unit_test_replicate_message",
+				Msgs:        [][]byte{msgBytes.([]byte)},
+			})
+			assert.NoError(t, err)
+			log.Info("resp", zap.Any("resp", resp))
+			assert.NotEqual(t, 0, resp.GetStatus().GetCode())
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		paramtable.Init()
+		factory := newMockMsgStreamFactory()
+		msgStreamObj := msgstream.NewMockMsgStream(t)
+		msgStreamObj.EXPECT().SetRepackFunc(mock.Anything).Return()
+		msgStreamObj.EXPECT().AsProducer(mock.Anything).Return()
+		msgStreamObj.EXPECT().EnableProduce(mock.Anything).Return()
+		msgStreamObj.EXPECT().Close().Return()
+		mockMsgID1 := mqwrapper.NewMockMessageID(t)
+		mockMsgID2 := mqwrapper.NewMockMessageID(t)
+		mockMsgID2.EXPECT().Serialize().Return([]byte("mock message id 2"))
+		broadcastMock := msgStreamObj.EXPECT().Broadcast(mock.Anything).Return(map[string][]mqwrapper.MessageID{
+			"unit_test_replicate_message": {mockMsgID1, mockMsgID2},
+		}, nil)
+
+		factory.f = func(ctx context.Context) (msgstream.MsgStream, error) {
+			return msgStreamObj, nil
+		}
+		resourceManager := resource.NewManager(time.Second, 2*time.Second, nil)
+		manager := NewReplicateStreamManager(context.Background(), factory, resourceManager)
+
+		ctx := context.Background()
+		dataCoord := &mockDataCoord{}
+		dataCoord.expireTime = Timestamp(1000)
+		segAllocator, err := newSegIDAssigner(ctx, dataCoord, getLastTick1)
+		assert.NoError(t, err)
+		segAllocator.Start()
+
+		node := &Proxy{
+			replicateStreamManager: manager,
+			segAssigner:            segAllocator,
+		}
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+		paramtable.Get().Save(paramtable.Get().CommonCfg.TTMsgEnabled.Key, "false")
+
+		insertMsg := &msgstream.InsertMsg{
+			BaseMsg: msgstream.BaseMsg{
+				BeginTimestamp: 4,
+				EndTimestamp:   10,
+				HashValues:     []uint32{0},
+				MsgPosition: &msgstream.MsgPosition{
+					ChannelName: "unit_test_replicate_message",
+					MsgID:       []byte("mock message id 2"),
+				},
+			},
+			InsertRequest: msgpb.InsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_Insert,
+					MsgID:     10001,
+					Timestamp: 10,
+					SourceID:  -1,
+				},
+				ShardName:      "unit_test_replicate_message_v1",
+				DbName:         "default",
+				CollectionName: "foo_collection",
+				PartitionName:  "_default",
+				DbID:           1,
+				CollectionID:   11,
+				PartitionID:    22,
+				SegmentID:      33,
+				Timestamps:     []uint64{10},
+				RowIDs:         []int64{66},
+				NumRows:        1,
+			},
+		}
+		msgBytes, _ := insertMsg.Marshal(insertMsg)
+
+		replicateRequest := &milvuspb.ReplicateMessageRequest{
+			ChannelName: "unit_test_replicate_message",
+			BeginTs:     1,
+			EndTs:       10,
+			Msgs:        [][]byte{msgBytes.([]byte)},
+			StartPositions: []*msgpb.MsgPosition{
+				{ChannelName: "unit_test_replicate_message", MsgID: []byte("mock message id 1")},
+			},
+			EndPositions: []*msgpb.MsgPosition{
+				{ChannelName: "unit_test_replicate_message", MsgID: []byte("mock message id 2")},
+			},
+		}
+		resp, err := node.ReplicateMessage(context.TODO(), replicateRequest)
+		assert.NoError(t, err)
+		assert.EqualValues(t, 0, resp.GetStatus().GetCode())
+		assert.Equal(t, base64.StdEncoding.EncodeToString([]byte("mock message id 2")), resp.GetPosition())
+
+		res := resourceManager.Delete(ReplicateMsgStreamTyp, replicateRequest.GetChannelName())
+		assert.NotNil(t, res)
+		time.Sleep(2 * time.Second)
+
+		{
+			broadcastMock.Unset()
+			broadcastMock = msgStreamObj.EXPECT().Broadcast(mock.Anything).Return(nil, errors.New("mock error: broadcast"))
+			resp, err := node.ReplicateMessage(context.TODO(), replicateRequest)
+			assert.NoError(t, err)
+			assert.NotEqualValues(t, 0, resp.GetStatus().GetCode())
+			resourceManager.Delete(ReplicateMsgStreamTyp, replicateRequest.GetChannelName())
+			time.Sleep(2 * time.Second)
+		}
+		{
+			broadcastMock.Unset()
+			broadcastMock = msgStreamObj.EXPECT().Broadcast(mock.Anything).Return(map[string][]mqwrapper.MessageID{
+				"unit_test_replicate_message": {},
+			}, nil)
+			resp, err := node.ReplicateMessage(context.TODO(), replicateRequest)
+			assert.NoError(t, err)
+			assert.EqualValues(t, 0, resp.GetStatus().GetCode())
+			assert.Empty(t, resp.GetPosition())
+			resourceManager.Delete(ReplicateMsgStreamTyp, replicateRequest.GetChannelName())
+			time.Sleep(2 * time.Second)
+			broadcastMock.Unset()
+		}
 	})
 }

@@ -1109,3 +1109,7 @@ func (s *Server) ListDatabases(ctx context.Context, request *milvuspb.ListDataba
 func (s *Server) AllocTimestamp(ctx context.Context, req *milvuspb.AllocTimestampRequest) (*milvuspb.AllocTimestampResponse, error) {
 	return s.proxy.AllocTimestamp(ctx, req)
 }
+
+func (s *Server) ReplicateMessage(ctx context.Context, req *milvuspb.ReplicateMessageRequest) (*milvuspb.ReplicateMessageResponse, error) {
+	return s.proxy.ReplicateMessage(ctx, req)
+}

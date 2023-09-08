@@ -156,7 +156,9 @@ func (t *createCollectionTask) SetTs(ts Timestamp) {
 }
 
 func (t *createCollectionTask) OnEnqueue() error {
-	t.Base = commonpbutil.NewMsgBase()
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
 	t.Base.MsgType = commonpb.MsgType_CreateCollection
 	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
@@ -354,7 +356,9 @@ func (t *dropCollectionTask) SetTs(ts Timestamp) {
 }
 
 func (t *dropCollectionTask) OnEnqueue() error {
-	t.Base = commonpbutil.NewMsgBase()
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
 	return nil
 }
 
@@ -786,7 +790,9 @@ func (t *alterCollectionTask) SetTs(ts Timestamp) {
 }
 
 func (t *alterCollectionTask) OnEnqueue() error {
-	t.Base = commonpbutil.NewMsgBase()
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
 	return nil
 }
 
@@ -848,7 +854,9 @@ func (t *createPartitionTask) SetTs(ts Timestamp) {
 }
 
 func (t *createPartitionTask) OnEnqueue() error {
-	t.Base = commonpbutil.NewMsgBase()
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
 	return nil
 }
 
@@ -934,7 +942,9 @@ func (t *dropPartitionTask) SetTs(ts Timestamp) {
 }
 
 func (t *dropPartitionTask) OnEnqueue() error {
-	t.Base = commonpbutil.NewMsgBase()
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
 	return nil
 }
 
@@ -1248,6 +1258,8 @@ type flushTask struct {
 	ctx       context.Context
 	dataCoord types.DataCoordClient
 	result    *milvuspb.FlushResponse
+
+	replicateMsgStream msgstream.MsgStream
 }
 
 func (t *flushTask) TraceCtx() context.Context {
@@ -1283,7 +1295,9 @@ func (t *flushTask) SetTs(ts Timestamp) {
 }
 
 func (t *flushTask) OnEnqueue() error {
-	t.Base = commonpbutil.NewMsgBase()
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
 	return nil
 }
 
@@ -1323,6 +1337,7 @@ func (t *flushTask) Execute(ctx context.Context) error {
 		coll2SealTimes[collName] = resp.GetTimeOfSeal()
 		coll2FlushTs[collName] = resp.GetFlushTs()
 	}
+	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.FlushRequest)
 	t.result = &milvuspb.FlushResponse{
 		Status:          merr.Success(),
 		DbName:          t.GetDbName(),
@@ -1346,7 +1361,8 @@ type loadCollectionTask struct {
 	datacoord  types.DataCoordClient
 	result     *commonpb.Status
 
-	collectionID UniqueID
+	collectionID       UniqueID
+	replicateMsgStream msgstream.MsgStream
 }
 
 func (t *loadCollectionTask) TraceCtx() context.Context {
@@ -1382,7 +1398,9 @@ func (t *loadCollectionTask) SetTs(ts Timestamp) {
 }
 
 func (t *loadCollectionTask) OnEnqueue() error {
-	t.Base = commonpbutil.NewMsgBase()
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
 	return nil
 }
 
@@ -1472,6 +1490,7 @@ func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 	if err != nil {
 		return fmt.Errorf("call query coordinator LoadCollection: %s", err)
 	}
+	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.LoadCollectionRequest)
 	return nil
 }
 
@@ -1492,9 +1511,9 @@ type releaseCollectionTask struct {
 	ctx        context.Context
 	queryCoord types.QueryCoordClient
 	result     *commonpb.Status
-	chMgr      channelsMgr
 
-	collectionID UniqueID
+	collectionID       UniqueID
+	replicateMsgStream msgstream.MsgStream
 }
 
 func (t *releaseCollectionTask) TraceCtx() context.Context {
@@ -1530,7 +1549,9 @@ func (t *releaseCollectionTask) SetTs(ts Timestamp) {
 }
 
 func (t *releaseCollectionTask) OnEnqueue() error {
-	t.Base = commonpbutil.NewMsgBase()
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
 	return nil
 }
 
@@ -1565,7 +1586,10 @@ func (t *releaseCollectionTask) Execute(ctx context.Context) (err error) {
 	t.result, err = t.queryCoord.ReleaseCollection(ctx, request)
 
 	globalMetaCache.RemoveCollection(ctx, t.GetDbName(), t.CollectionName)
-
+	if err != nil {
+		return err
+	}
+	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.ReleaseCollectionRequest)
 	return err
 }
 
@@ -1618,7 +1642,9 @@ func (t *loadPartitionsTask) SetTs(ts Timestamp) {
 }
 
 func (t *loadPartitionsTask) OnEnqueue() error {
-	t.Base = commonpbutil.NewMsgBase()
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
 	return nil
 }
 
@@ -1759,7 +1785,9 @@ func (t *releasePartitionsTask) SetTs(ts Timestamp) {
 }
 
 func (t *releasePartitionsTask) OnEnqueue() error {
-	t.Base = commonpbutil.NewMsgBase()
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
 	return nil
 }
 
@@ -1867,7 +1895,9 @@ func (t *CreateAliasTask) SetTs(ts Timestamp) {
 
 // OnEnqueue defines the behavior task enqueued
 func (t *CreateAliasTask) OnEnqueue() error {
-	t.Base = commonpbutil.NewMsgBase()
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
 	return nil
 }
 
@@ -1947,7 +1977,9 @@ func (t *DropAliasTask) SetTs(ts Timestamp) {
 }
 
 func (t *DropAliasTask) OnEnqueue() error {
-	t.Base = commonpbutil.NewMsgBase()
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
 	return nil
 }
 
@@ -2013,7 +2045,9 @@ func (t *AlterAliasTask) SetTs(ts Timestamp) {
 }
 
 func (t *AlterAliasTask) OnEnqueue() error {
-	t.Base = commonpbutil.NewMsgBase()
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
 	return nil
 }
 
@@ -2086,7 +2120,9 @@ func (t *CreateResourceGroupTask) SetTs(ts Timestamp) {
 }
 
 func (t *CreateResourceGroupTask) OnEnqueue() error {
-	t.Base = commonpbutil.NewMsgBase()
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
 	return nil
 }
 
@@ -2148,7 +2184,9 @@ func (t *DropResourceGroupTask) SetTs(ts Timestamp) {
 }
 
 func (t *DropResourceGroupTask) OnEnqueue() error {
-	t.Base = commonpbutil.NewMsgBase()
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
 	return nil
 }
 
@@ -2331,7 +2369,9 @@ func (t *TransferNodeTask) SetTs(ts Timestamp) {
 }
 
 func (t *TransferNodeTask) OnEnqueue() error {
-	t.Base = commonpbutil.NewMsgBase()
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
 	return nil
 }
 
@@ -2393,7 +2433,9 @@ func (t *TransferReplicaTask) SetTs(ts Timestamp) {
 }
 
 func (t *TransferReplicaTask) OnEnqueue() error {
-	t.Base = commonpbutil.NewMsgBase()
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
 	return nil
 }
 

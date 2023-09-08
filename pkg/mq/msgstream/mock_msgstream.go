@@ -273,6 +273,39 @@ func (_c *MockMsgStream_Close_Call) RunAndReturn(run func()) *MockMsgStream_Clos
 	return _c
 }
 
+// EnableProduce provides a mock function with given fields: can
+func (_m *MockMsgStream) EnableProduce(can bool) {
+	_m.Called(can)
+}
+
+// MockMsgStream_EnableProduce_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'EnableProduce'
+type MockMsgStream_EnableProduce_Call struct {
+	*mock.Call
+}
+
+// EnableProduce is a helper method to define mock.On call
+//   - can bool
+func (_e *MockMsgStream_Expecter) EnableProduce(can interface{}) *MockMsgStream_EnableProduce_Call {
+	return &MockMsgStream_EnableProduce_Call{Call: _e.mock.On("EnableProduce", can)}
+}
+
+func (_c *MockMsgStream_EnableProduce_Call) Run(run func(can bool)) *MockMsgStream_EnableProduce_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(bool))
+	})
+	return _c
+}
+
+func (_c *MockMsgStream_EnableProduce_Call) Return() *MockMsgStream_EnableProduce_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockMsgStream_EnableProduce_Call) RunAndReturn(run func(bool)) *MockMsgStream_EnableProduce_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetLatestMsgID provides a mock function with given fields: channel
 func (_m *MockMsgStream) GetLatestMsgID(channel string) (mqwrapper.MessageID, error) {
 	ret := _m.Called(channel)

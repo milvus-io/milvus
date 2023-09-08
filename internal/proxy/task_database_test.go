@@ -45,6 +45,7 @@ func TestCreateDatabaseTask(t *testing.T) {
 		err = task.Execute(ctx)
 		assert.NoError(t, err)
 
+		task.Base = nil
 		err = task.OnEnqueue()
 		assert.NoError(t, err)
 		assert.Equal(t, paramtable.GetNodeID(), task.GetBase().GetSourceID())
@@ -98,6 +99,7 @@ func TestDropDatabaseTask(t *testing.T) {
 		err = task.Execute(ctx)
 		assert.NoError(t, err)
 
+		task.Base = nil
 		err = task.OnEnqueue()
 		assert.NoError(t, err)
 		assert.Equal(t, paramtable.GetNodeID(), task.GetBase().GetSourceID())

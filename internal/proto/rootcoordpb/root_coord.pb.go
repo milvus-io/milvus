@@ -793,28 +793,28 @@ type RootCoordClient interface {
 	GetComponentStates(ctx context.Context, in *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error)
 	GetTimeTickChannel(ctx context.Context, in *internalpb.GetTimeTickChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error)
 	GetStatisticsChannel(ctx context.Context, in *internalpb.GetStatisticsChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error)
-	//*
+	// *
 	// @brief This method is used to create collection
 	//
 	// @param CreateCollectionRequest, use to provide collection information to be created.
 	//
 	// @return Status
 	CreateCollection(ctx context.Context, in *milvuspb.CreateCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	//*
+	// *
 	// @brief This method is used to delete collection.
 	//
 	// @param DropCollectionRequest, collection name is going to be deleted.
 	//
 	// @return Status
 	DropCollection(ctx context.Context, in *milvuspb.DropCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	//*
+	// *
 	// @brief This method is used to test collection existence.
 	//
 	// @param HasCollectionRequest, collection name is going to be tested.
 	//
 	// @return BoolResponse
 	HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest, opts ...grpc.CallOption) (*milvuspb.BoolResponse, error)
-	//*
+	// *
 	// @brief This method is used to get collection schema.
 	//
 	// @param DescribeCollectionRequest, target collection name.
@@ -825,28 +825,28 @@ type RootCoordClient interface {
 	CreateAlias(ctx context.Context, in *milvuspb.CreateAliasRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	DropAlias(ctx context.Context, in *milvuspb.DropAliasRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	AlterAlias(ctx context.Context, in *milvuspb.AlterAliasRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	//*
+	// *
 	// @brief This method is used to list all collections.
 	//
 	// @return StringListResponse, collection name list
 	ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowCollectionsResponse, error)
 	AlterCollection(ctx context.Context, in *milvuspb.AlterCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	//*
+	// *
 	// @brief This method is used to create partition
 	//
 	// @return Status
 	CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	//*
+	// *
 	// @brief This method is used to drop partition
 	//
 	// @return Status
 	DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	//*
+	// *
 	// @brief This method is used to test partition existence.
 	//
 	// @return BoolResponse
 	HasPartition(ctx context.Context, in *milvuspb.HasPartitionRequest, opts ...grpc.CallOption) (*milvuspb.BoolResponse, error)
-	//*
+	// *
 	// @brief This method is used to show partition information
 	//
 	// @param ShowPartitionRequest, target collection name.
@@ -854,7 +854,7 @@ type RootCoordClient interface {
 	// @return StringListResponse
 	ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error)
 	ShowPartitionsInternal(ctx context.Context, in *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error)
-	//    rpc DescribeSegment(milvus.DescribeSegmentRequest) returns (milvus.DescribeSegmentResponse) {}
+	// rpc DescribeSegment(milvus.DescribeSegmentRequest) returns (milvus.DescribeSegmentResponse) {}
 	ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequest, opts ...grpc.CallOption) (*milvuspb.ShowSegmentsResponse, error)
 	AllocTimestamp(ctx context.Context, in *AllocTimestampRequest, opts ...grpc.CallOption) (*AllocTimestampResponse, error)
 	AllocID(ctx context.Context, in *AllocIDRequest, opts ...grpc.CallOption) (*AllocIDResponse, error)
@@ -1327,28 +1327,28 @@ type RootCoordServer interface {
 	GetComponentStates(context.Context, *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error)
 	GetTimeTickChannel(context.Context, *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error)
 	GetStatisticsChannel(context.Context, *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error)
-	//*
+	// *
 	// @brief This method is used to create collection
 	//
 	// @param CreateCollectionRequest, use to provide collection information to be created.
 	//
 	// @return Status
 	CreateCollection(context.Context, *milvuspb.CreateCollectionRequest) (*commonpb.Status, error)
-	//*
+	// *
 	// @brief This method is used to delete collection.
 	//
 	// @param DropCollectionRequest, collection name is going to be deleted.
 	//
 	// @return Status
 	DropCollection(context.Context, *milvuspb.DropCollectionRequest) (*commonpb.Status, error)
-	//*
+	// *
 	// @brief This method is used to test collection existence.
 	//
 	// @param HasCollectionRequest, collection name is going to be tested.
 	//
 	// @return BoolResponse
 	HasCollection(context.Context, *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error)
-	//*
+	// *
 	// @brief This method is used to get collection schema.
 	//
 	// @param DescribeCollectionRequest, target collection name.
@@ -1359,28 +1359,28 @@ type RootCoordServer interface {
 	CreateAlias(context.Context, *milvuspb.CreateAliasRequest) (*commonpb.Status, error)
 	DropAlias(context.Context, *milvuspb.DropAliasRequest) (*commonpb.Status, error)
 	AlterAlias(context.Context, *milvuspb.AlterAliasRequest) (*commonpb.Status, error)
-	//*
+	// *
 	// @brief This method is used to list all collections.
 	//
 	// @return StringListResponse, collection name list
 	ShowCollections(context.Context, *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error)
 	AlterCollection(context.Context, *milvuspb.AlterCollectionRequest) (*commonpb.Status, error)
-	//*
+	// *
 	// @brief This method is used to create partition
 	//
 	// @return Status
 	CreatePartition(context.Context, *milvuspb.CreatePartitionRequest) (*commonpb.Status, error)
-	//*
+	// *
 	// @brief This method is used to drop partition
 	//
 	// @return Status
 	DropPartition(context.Context, *milvuspb.DropPartitionRequest) (*commonpb.Status, error)
-	//*
+	// *
 	// @brief This method is used to test partition existence.
 	//
 	// @return BoolResponse
 	HasPartition(context.Context, *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error)
-	//*
+	// *
 	// @brief This method is used to show partition information
 	//
 	// @param ShowPartitionRequest, target collection name.
@@ -1388,7 +1388,7 @@ type RootCoordServer interface {
 	// @return StringListResponse
 	ShowPartitions(context.Context, *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error)
 	ShowPartitionsInternal(context.Context, *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error)
-	//    rpc DescribeSegment(milvus.DescribeSegmentRequest) returns (milvus.DescribeSegmentResponse) {}
+	// rpc DescribeSegment(milvus.DescribeSegmentRequest) returns (milvus.DescribeSegmentResponse) {}
 	ShowSegments(context.Context, *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error)
 	AllocTimestamp(context.Context, *AllocTimestampRequest) (*AllocTimestampResponse, error)
 	AllocID(context.Context, *AllocIDRequest) (*AllocIDResponse, error)

@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"strconv"
@@ -156,6 +157,7 @@ func (node *Proxy) CreateDatabase(ctx context.Context, request *milvuspb.CreateD
 		Condition:             NewTaskCondition(ctx),
 		CreateDatabaseRequest: request,
 		rootCoord:             node.rootCoord,
+		replicateMsgStream:    node.replicateMsgStream,
 	}
 
 	log := log.With(
@@ -216,6 +218,7 @@ func (node *Proxy) DropDatabase(ctx context.Context, request *milvuspb.DropDatab
 		Condition:           NewTaskCondition(ctx),
 		DropDatabaseRequest: request,
 		rootCoord:           node.rootCoord,
+		replicateMsgStream:  node.replicateMsgStream,
 	}
 
 	log := log.With(
@@ -580,6 +583,7 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 		LoadCollectionRequest: request,
 		queryCoord:            node.queryCoord,
 		datacoord:             node.dataCoord,
+		replicateMsgStream:    node.replicateMsgStream,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -652,7 +656,7 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 		Condition:                NewTaskCondition(ctx),
 		ReleaseCollectionRequest: request,
 		queryCoord:               node.queryCoord,
-		chMgr:                    node.chMgr,
+		replicateMsgStream:       node.replicateMsgStream,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -1746,11 +1750,12 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 	defer sp.End()
 
 	cit := &createIndexTask{
-		ctx:       ctx,
-		Condition: NewTaskCondition(ctx),
-		req:       request,
-		rootCoord: node.rootCoord,
-		datacoord: node.dataCoord,
+		ctx:                ctx,
+		Condition:          NewTaskCondition(ctx),
+		req:                request,
+		rootCoord:          node.rootCoord,
+		datacoord:          node.dataCoord,
+		replicateMsgStream: node.replicateMsgStream,
 	}
 
 	method := "CreateIndex"
@@ -1964,11 +1969,12 @@ func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexReq
 	defer sp.End()
 
 	dit := &dropIndexTask{
-		ctx:              ctx,
-		Condition:        NewTaskCondition(ctx),
-		DropIndexRequest: request,
-		dataCoord:        node.dataCoord,
-		queryCoord:       node.queryCoord,
+		ctx:                ctx,
+		Condition:          NewTaskCondition(ctx),
+		DropIndexRequest:   request,
+		dataCoord:          node.dataCoord,
+		queryCoord:         node.queryCoord,
+		replicateMsgStream: node.replicateMsgStream,
 	}
 
 	method := "DropIndex"
@@ -2710,10 +2716,11 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 	defer sp.End()
 
 	ft := &flushTask{
-		ctx:          ctx,
-		Condition:    NewTaskCondition(ctx),
-		FlushRequest: request,
-		dataCoord:    node.dataCoord,
+		ctx:                ctx,
+		Condition:          NewTaskCondition(ctx),
+		FlushRequest:       request,
+		dataCoord:          node.dataCoord,
+		replicateMsgStream: node.replicateMsgStream,
 	}
 
 	method := "Flush"
@@ -5021,6 +5028,104 @@ func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest
 		ServerInfo: serverInfo,
 		Identifier: int64(ts),
 	}, nil
+}
+
+func (node *Proxy) ReplicateMessage(ctx context.Context, req *milvuspb.ReplicateMessageRequest) (*milvuspb.ReplicateMessageResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.ReplicateMessageResponse{Status: merr.Status(err)}, nil
+	}
+
+	if paramtable.Get().CommonCfg.TTMsgEnabled.GetAsBool() {
+		return &milvuspb.ReplicateMessageResponse{
+			Status: merr.Status(merr.ErrDenyReplicateMessage),
+		}, nil
+	}
+	var err error
+	ctxLog := log.Ctx(ctx)
+
+	if req.GetChannelName() == "" {
+		ctxLog.Warn("channel name is empty")
+		return &milvuspb.ReplicateMessageResponse{
+			Status: merr.Status(merr.WrapErrParameterInvalidMsg("invalid channel name for the replicate message request")),
+		}, nil
+	}
+
+	// get the latest position of the replicate msg channel
+	replicateMsgChannel := Params.CommonCfg.ReplicateMsgChannel.GetValue()
+	if req.GetChannelName() == replicateMsgChannel {
+		msgID, err := msgstream.GetChannelLatestMsgID(ctx, node.factory, replicateMsgChannel)
+		if err != nil {
+			ctxLog.Warn("failed to get the latest message id of the replicate msg channel", zap.Error(err))
+			return &milvuspb.ReplicateMessageResponse{Status: merr.Status(err)}, nil
+		}
+		position := base64.StdEncoding.EncodeToString(msgID)
+		return &milvuspb.ReplicateMessageResponse{Status: merr.Status(nil), Position: position}, nil
+	}
+
+	msgPack := &msgstream.MsgPack{
+		BeginTs:        req.BeginTs,
+		EndTs:          req.EndTs,
+		Msgs:           make([]msgstream.TsMsg, 0),
+		StartPositions: req.StartPositions,
+		EndPositions:   req.EndPositions,
+	}
+	// getTsMsgFromConsumerMsg
+	for i, msgBytes := range req.Msgs {
+		header := commonpb.MsgHeader{}
+		err = proto.Unmarshal(msgBytes, &header)
+		if err != nil {
+			ctxLog.Warn("failed to unmarshal msg header", zap.Int("index", i), zap.Error(err))
+			return &milvuspb.ReplicateMessageResponse{Status: merr.Status(err)}, nil
+		}
+		if header.GetBase() == nil {
+			ctxLog.Warn("msg header base is nil", zap.Int("index", i))
+			return &milvuspb.ReplicateMessageResponse{Status: merr.Status(merr.ErrInvalidMsgBytes)}, nil
+		}
+		tsMsg, err := node.replicateStreamManager.GetMsgDispatcher().Unmarshal(msgBytes, header.GetBase().GetMsgType())
+		if err != nil {
+			ctxLog.Warn("failed to unmarshal msg", zap.Int("index", i), zap.Error(err))
+			return &milvuspb.ReplicateMessageResponse{Status: merr.Status(merr.ErrInvalidMsgBytes)}, nil
+		}
+		switch realMsg := tsMsg.(type) {
+		case *msgstream.InsertMsg:
+			assignedSegmentInfos, err := node.segAssigner.GetSegmentID(realMsg.GetCollectionID(), realMsg.GetPartitionID(),
+				realMsg.GetShardName(), uint32(realMsg.NumRows), req.EndTs)
+			if err != nil {
+				ctxLog.Warn("failed to get segment id", zap.Error(err))
+				return &milvuspb.ReplicateMessageResponse{Status: merr.Status(err)}, nil
+			}
+			if len(assignedSegmentInfos) == 0 {
+				ctxLog.Warn("no segment id assigned")
+				return &milvuspb.ReplicateMessageResponse{Status: merr.Status(merr.ErrNoAssignSegmentID)}, nil
+			}
+			for assignSegmentID := range assignedSegmentInfos {
+				realMsg.SegmentID = assignSegmentID
+				break
+			}
+		}
+		msgPack.Msgs = append(msgPack.Msgs, tsMsg)
+	}
+
+	msgStream, err := node.replicateStreamManager.GetReplicateMsgStream(ctx, req.ChannelName)
+	if err != nil {
+		ctxLog.Warn("failed to get msg stream from the replicate stream manager", zap.Error(err))
+		return &milvuspb.ReplicateMessageResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	messageIDsMap, err := msgStream.Broadcast(msgPack)
+	if err != nil {
+		ctxLog.Warn("failed to produce msg", zap.Error(err))
+		return &milvuspb.ReplicateMessageResponse{Status: merr.Status(err)}, nil
+	}
+	var position string
+	if len(messageIDsMap[req.GetChannelName()]) == 0 {
+		ctxLog.Warn("no message id returned")
+	} else {
+		messageIDs := messageIDsMap[req.GetChannelName()]
+		position = base64.StdEncoding.EncodeToString(messageIDs[len(messageIDs)-1].Serialize())
+	}
+	return &milvuspb.ReplicateMessageResponse{Status: merr.Status(nil), Position: position}, nil
 }
 
 func (node *Proxy) ListClientInfos(ctx context.Context, req *proxypb.ListClientInfosRequest) (*proxypb.ListClientInfosResponse, error) {
