@@ -78,7 +78,8 @@ type Dispatcher struct {
 	stream msgstream.MsgStream
 }
 
-func NewDispatcher(factory msgstream.Factory,
+func NewDispatcher(ctx context.Context,
+	factory msgstream.Factory,
 	isMain bool,
 	pchannel string,
 	position *Pos,
@@ -90,14 +91,19 @@ func NewDispatcher(factory msgstream.Factory,
 	log := log.With(zap.String("pchannel", pchannel),
 		zap.String("subName", subName), zap.Bool("isMain", isMain))
 	log.Info("creating dispatcher...")
-	stream, err := factory.NewTtMsgStream(context.Background())
+	stream, err := factory.NewTtMsgStream(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if position != nil && len(position.MsgID) != 0 {
 		position.ChannelName = funcutil.ToPhysicalChannel(position.ChannelName)
-		stream.AsConsumer([]string{pchannel}, subName, mqwrapper.SubscriptionPositionUnknown)
-		err = stream.Seek([]*Pos{position})
+		err = stream.AsConsumer(ctx, []string{pchannel}, subName, mqwrapper.SubscriptionPositionUnknown)
+		if err != nil {
+			log.Error("asConsumer failed", zap.Error(err))
+			return nil, err
+		}
+
+		err = stream.Seek(ctx, []*Pos{position})
 		if err != nil {
 			stream.Close()
 			log.Error("seek failed", zap.Error(err))
@@ -107,7 +113,11 @@ func NewDispatcher(factory msgstream.Factory,
 		log.Info("seek successfully", zap.Time("posTime", posTime),
 			zap.Duration("tsLag", time.Since(posTime)))
 	} else {
-		stream.AsConsumer([]string{pchannel}, subName, subPos)
+		err := stream.AsConsumer(ctx, []string{pchannel}, subName, subPos)
+		if err != nil {
+			log.Error("asConsumer failed", zap.Error(err))
+			return nil, err
+		}
 		log.Info("asConsumer successfully")
 	}
 

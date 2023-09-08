@@ -30,8 +30,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/util/merr"
-
 	"google.golang.org/grpc/credentials"
 
 	management "github.com/milvus-io/milvus/internal/http"
@@ -62,6 +60,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"

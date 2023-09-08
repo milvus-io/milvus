@@ -19,6 +19,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -26,8 +27,11 @@ import (
 // fn is the func to run.
 // Option can control the retry times and timeout.
 func Do(ctx context.Context, fn func() error, opts ...Option) error {
-	log := log.Ctx(ctx)
+	if !funcutil.CheckCtxValid(ctx) {
+		return ctx.Err()
+	}
 
+	log := log.Ctx(ctx)
 	c := newDefaultConfig()
 
 	for _, opt := range opts {
@@ -52,8 +56,7 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 			select {
 			case <-time.After(c.sleep):
 			case <-ctx.Done():
-				el = merr.Combine(el, errors.Wrapf(ctx.Err(), "context done during sleep after run#%d", i))
-				return el
+				return merr.Combine(el, ctx.Err())
 			}
 
 			c.sleep *= 2

@@ -21,15 +21,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"golang.org/x/net/context"
 
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 )
 
 func TestDispatcher(t *testing.T) {
+	ctx := context.Background()
 	t.Run("test base", func(t *testing.T) {
-		d, err := NewDispatcher(newMockFactory(), true, "mock_pchannel_0", nil,
+		d, err := NewDispatcher(ctx, newMockFactory(), true, "mock_pchannel_0", nil,
 			"mock_subName_0", mqwrapper.SubscriptionPositionEarliest, nil, nil)
 		assert.NoError(t, err)
 		assert.NotPanics(t, func() {
@@ -49,8 +53,23 @@ func TestDispatcher(t *testing.T) {
 		assert.Equal(t, pos.Timestamp, curTs)
 	})
 
+	t.Run("test AsConsumer fail", func(t *testing.T) {
+		ms := msgstream.NewMockMsgStream(t)
+		ms.EXPECT().AsConsumer(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock error"))
+		factory := &msgstream.MockMqFactory{
+			NewMsgStreamFunc: func(ctx context.Context) (msgstream.MsgStream, error) {
+				return ms, nil
+			},
+		}
+		d, err := NewDispatcher(ctx, factory, true, "mock_pchannel_0", nil,
+			"mock_subName_0", mqwrapper.SubscriptionPositionEarliest, nil, nil)
+
+		assert.Error(t, err)
+		assert.Nil(t, d)
+	})
+
 	t.Run("test target", func(t *testing.T) {
-		d, err := NewDispatcher(newMockFactory(), true, "mock_pchannel_0", nil,
+		d, err := NewDispatcher(ctx, newMockFactory(), true, "mock_pchannel_0", nil,
 			"mock_subName_0", mqwrapper.SubscriptionPositionEarliest, nil, nil)
 		assert.NoError(t, err)
 		output := make(chan *msgstream.MsgPack, 1024)
@@ -113,7 +132,7 @@ func TestDispatcher(t *testing.T) {
 }
 
 func BenchmarkDispatcher_handle(b *testing.B) {
-	d, err := NewDispatcher(newMockFactory(), true, "mock_pchannel_0", nil,
+	d, err := NewDispatcher(context.Background(), newMockFactory(), true, "mock_pchannel_0", nil,
 		"mock_subName_0", mqwrapper.SubscriptionPositionEarliest, nil, nil)
 	assert.NoError(b, err)
 

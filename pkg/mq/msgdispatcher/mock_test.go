@@ -66,7 +66,7 @@ func getSeekPositions(factory msgstream.Factory, pchannel string, maxNum int) ([
 		return nil, err
 	}
 	defer stream.Close()
-	stream.AsConsumer([]string{pchannel}, fmt.Sprintf("%d", rand.Int()), mqwrapper.SubscriptionPositionEarliest)
+	stream.AsConsumer(context.TODO(), []string{pchannel}, fmt.Sprintf("%d", rand.Int()), mqwrapper.SubscriptionPositionEarliest)
 	positions := make([]*msgstream.MsgPosition, 0)
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

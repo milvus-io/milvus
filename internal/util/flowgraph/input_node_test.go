@@ -32,7 +32,7 @@ func TestInputNode(t *testing.T) {
 
 	msgStream, _ := factory.NewMsgStream(context.TODO())
 	channels := []string{"cc"}
-	msgStream.AsConsumer(channels, "sub", mqwrapper.SubscriptionPositionEarliest)
+	msgStream.AsConsumer(context.Background(), channels, "sub", mqwrapper.SubscriptionPositionEarliest)
 
 	msgPack := generateMsgPack()
 	produceStream, _ := factory.NewMsgStream(context.TODO())

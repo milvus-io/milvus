@@ -280,8 +280,8 @@ func (suite *ServiceSuite) TestWatchDmChannelsInt64() {
 
 	// mocks
 	suite.factory.EXPECT().NewTtMsgStream(mock.Anything).Return(suite.msgStream, nil)
-	suite.msgStream.EXPECT().AsConsumer([]string{suite.pchannel}, mock.Anything, mock.Anything).Return()
-	suite.msgStream.EXPECT().Seek(mock.Anything).Return(nil)
+	suite.msgStream.EXPECT().AsConsumer(mock.Anything, []string{suite.pchannel}, mock.Anything, mock.Anything).Return(nil)
+	suite.msgStream.EXPECT().Seek(mock.Anything, mock.Anything).Return(nil)
 	suite.msgStream.EXPECT().Chan().Return(suite.msgChan)
 	suite.msgStream.EXPECT().Close()
 
@@ -329,8 +329,8 @@ func (suite *ServiceSuite) TestWatchDmChannelsVarchar() {
 
 	// mocks
 	suite.factory.EXPECT().NewTtMsgStream(mock.Anything).Return(suite.msgStream, nil)
-	suite.msgStream.EXPECT().AsConsumer([]string{suite.pchannel}, mock.Anything, mock.Anything).Return()
-	suite.msgStream.EXPECT().Seek(mock.Anything).Return(nil)
+	suite.msgStream.EXPECT().AsConsumer(mock.Anything, []string{suite.pchannel}, mock.Anything, mock.Anything).Return(nil)
+	suite.msgStream.EXPECT().Seek(mock.Anything, mock.Anything).Return(nil)
 	suite.msgStream.EXPECT().Chan().Return(suite.msgChan)
 	suite.msgStream.EXPECT().Close()
 
@@ -382,9 +382,9 @@ func (suite *ServiceSuite) TestWatchDmChannels_Failed() {
 
 	// init msgstream failed
 	suite.factory.EXPECT().NewTtMsgStream(mock.Anything).Return(suite.msgStream, nil)
-	suite.msgStream.EXPECT().AsConsumer([]string{suite.pchannel}, mock.Anything, mock.Anything).Return()
+	suite.msgStream.EXPECT().AsConsumer(mock.Anything, []string{suite.pchannel}, mock.Anything, mock.Anything).Return(nil)
 	suite.msgStream.EXPECT().Close().Return()
-	suite.msgStream.EXPECT().Seek(mock.Anything).Return(errors.New("mock error"))
+	suite.msgStream.EXPECT().Seek(mock.Anything, mock.Anything).Return(errors.New("mock error"))
 
 	status, err = suite.node.WatchDmChannels(ctx, req)
 	suite.NoError(err)

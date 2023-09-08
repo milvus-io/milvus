@@ -71,7 +71,8 @@ func (mtm *mockTtMsgStream) Chan() <-chan *msgstream.MsgPack {
 
 func (mtm *mockTtMsgStream) AsProducer(channels []string) {}
 
-func (mtm *mockTtMsgStream) AsConsumer(channels []string, subName string, position mqwrapper.SubscriptionInitialPosition) {
+func (mtm *mockTtMsgStream) AsConsumer(ctx context.Context, channels []string, subName string, position mqwrapper.SubscriptionInitialPosition) error {
+	return nil
 }
 
 func (mtm *mockTtMsgStream) SetRepackFunc(repackFunc msgstream.RepackFunc) {}
@@ -88,7 +89,7 @@ func (mtm *mockTtMsgStream) Broadcast(*msgstream.MsgPack) (map[string][]msgstrea
 	return nil, nil
 }
 
-func (mtm *mockTtMsgStream) Seek(offset []*msgpb.MsgPosition) error {
+func (mtm *mockTtMsgStream) Seek(ctx context.Context, offset []*msgpb.MsgPosition) error {
 	return nil
 }
 

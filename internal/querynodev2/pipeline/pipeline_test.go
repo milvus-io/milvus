@@ -112,7 +112,7 @@ func (suite *PipelineTestSuite) TestBasic() {
 	suite.collectionManager.EXPECT().Get(suite.collectionID).Return(collection)
 
 	//  mock mq factory
-	suite.msgDispatcher.EXPECT().Register(suite.channel, mock.Anything, mqwrapper.SubscriptionPositionUnknown).Return(suite.msgChan, nil)
+	suite.msgDispatcher.EXPECT().Register(mock.Anything, suite.channel, mock.Anything, mqwrapper.SubscriptionPositionUnknown).Return(suite.msgChan, nil)
 	suite.msgDispatcher.EXPECT().Deregister(suite.channel)
 
 	//	mock delegator

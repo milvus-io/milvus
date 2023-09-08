@@ -41,6 +41,7 @@ require (
 	go.uber.org/zap v1.20.0
 	golang.org/x/crypto v0.9.0
 	golang.org/x/exp v0.0.0-20220303212507-bbda1eaf7a17
+	golang.org/x/net v0.10.0
 	golang.org/x/sync v0.1.0
 	google.golang.org/grpc v1.54.0
 	google.golang.org/protobuf v1.30.0
@@ -153,7 +154,6 @@ require (
 	go.opentelemetry.io/otel/metric v0.35.0 // indirect
 	go.opentelemetry.io/proto/otlp v0.19.0 // indirect
 	go.uber.org/multierr v1.7.0 // indirect
-	golang.org/x/net v0.10.0 // indirect
 	golang.org/x/oauth2 v0.6.0 // indirect
 	golang.org/x/sys v0.8.0 // indirect
 	golang.org/x/term v0.8.0 // indirect

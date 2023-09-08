@@ -62,7 +62,7 @@ func TestNodeCtx_Start(t *testing.T) {
 
 	msgStream, _ := factory.NewMsgStream(context.TODO())
 	channels := []string{"cc"}
-	msgStream.AsConsumer(channels, "sub", mqwrapper.SubscriptionPositionEarliest)
+	msgStream.AsConsumer(context.TODO(), channels, "sub", mqwrapper.SubscriptionPositionEarliest)
 
 	produceStream, _ := factory.NewMsgStream(context.TODO())
 	produceStream.AsProducer(channels)

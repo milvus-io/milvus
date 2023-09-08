@@ -45,7 +45,7 @@ func TestNmq(t *testing.T) {
 	f1 := NewNatsmqFactory()
 	f2 := NewNatsmqFactory()
 
-	client, err := nmq.NewClientWithDefaultOptions()
+	client, err := nmq.NewClientWithDefaultOptions(context.Background())
 	if err != nil {
 		panic(err)
 	}

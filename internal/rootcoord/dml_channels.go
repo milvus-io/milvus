@@ -188,7 +188,7 @@ func newDmlChannels(ctx context.Context, factory msgstream.Factory, chanNamePref
 
 		if params.PreCreatedTopicEnabled.GetAsBool() {
 			subName := fmt.Sprintf("pre-created-topic-check-%s", name)
-			ms.AsConsumer([]string{name}, subName, mqwrapper.SubscriptionPositionUnknown)
+			ms.AsConsumer(ctx, []string{name}, subName, mqwrapper.SubscriptionPositionUnknown)
 			// check topic exist and check the existed topic whether empty or not
 			// kafka and rmq will err if the topic does not yet exist, pulsar will not
 			// if one of the topics is not empty, panic

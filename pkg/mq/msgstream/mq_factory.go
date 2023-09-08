@@ -68,6 +68,15 @@ func NewPmsFactory(serviceParam *paramtable.ServiceParam) *PmsFactory {
 
 // NewMsgStream is used to generate a new Msgstream object
 func (f *PmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
+	var timeout time.Duration = f.RequestTimeout
+
+	if deadline, ok := ctx.Deadline(); ok {
+		if deadline.Before(time.Now()) {
+			return nil, errors.New("context timeout when NewMsgStream")
+		}
+		timeout = time.Until(deadline)
+	}
+
 	auth, err := f.getAuthentication()
 	if err != nil {
 		return nil, err
@@ -75,7 +84,7 @@ func (f *PmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
 	clientOpts := pulsar.ClientOptions{
 		URL:              f.PulsarAddress,
 		Authentication:   auth,
-		OperationTimeout: f.RequestTimeout,
+		OperationTimeout: timeout,
 	}
 
 	pulsarClient, err := pulsarmqwrapper.NewClient(f.PulsarTenant, f.PulsarNameSpace, clientOpts)
@@ -87,13 +96,21 @@ func (f *PmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
 
 // NewTtMsgStream is used to generate a new TtMsgstream object
 func (f *PmsFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
+	var timeout time.Duration = f.RequestTimeout
+	if deadline, ok := ctx.Deadline(); ok {
+		if deadline.Before(time.Now()) {
+			return nil, errors.New("context timeout when NewTtMsgStream")
+		}
+		timeout = time.Until(deadline)
+	}
 	auth, err := f.getAuthentication()
 	if err != nil {
 		return nil, err
 	}
 	clientOpts := pulsar.ClientOptions{
-		URL:            f.PulsarAddress,
-		Authentication: auth,
+		URL:              f.PulsarAddress,
+		Authentication:   auth,
+		OperationTimeout: timeout,
 	}
 
 	pulsarClient, err := pulsarmqwrapper.NewClient(f.PulsarTenant, f.PulsarNameSpace, clientOpts)
@@ -156,12 +173,18 @@ type KmsFactory struct {
 }
 
 func (f *KmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
-	kafkaClient := kafkawrapper.NewKafkaClientInstanceWithConfig(f.config)
+	kafkaClient, err := kafkawrapper.NewKafkaClientInstanceWithConfig(ctx, f.config)
+	if err != nil {
+		return nil, err
+	}
 	return NewMqMsgStream(ctx, f.ReceiveBufSize, f.MQBufSize, kafkaClient, f.dispatcherFactory.NewUnmarshalDispatcher())
 }
 
 func (f *KmsFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
-	kafkaClient := kafkawrapper.NewKafkaClientInstanceWithConfig(f.config)
+	kafkaClient, err := kafkawrapper.NewKafkaClientInstanceWithConfig(ctx, f.config)
+	if err != nil {
+		return nil, err
+	}
 	return NewMqTtMsgStream(ctx, f.ReceiveBufSize, f.MQBufSize, kafkaClient, f.dispatcherFactory.NewUnmarshalDispatcher())
 }
 
@@ -171,7 +194,7 @@ func (f *KmsFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, st
 		if err != nil {
 			return err
 		}
-		msgstream.AsConsumer(channels, subname, mqwrapper.SubscriptionPositionUnknown)
+		msgstream.AsConsumer(ctx, channels, subname, mqwrapper.SubscriptionPositionUnknown)
 		msgstream.Close()
 		return nil
 	}

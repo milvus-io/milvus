@@ -252,7 +252,8 @@ func (ms *simpleMockMsgStream) Chan() <-chan *msgstream.MsgPack {
 func (ms *simpleMockMsgStream) AsProducer(channels []string) {
 }
 
-func (ms *simpleMockMsgStream) AsConsumer(channels []string, subName string, position mqwrapper.SubscriptionInitialPosition) {
+func (ms *simpleMockMsgStream) AsConsumer(ctx context.Context, channels []string, subName string, position mqwrapper.SubscriptionInitialPosition) error {
+	return nil
 }
 
 func (ms *simpleMockMsgStream) SetRepackFunc(repackFunc msgstream.RepackFunc) {
@@ -292,7 +293,7 @@ func (ms *simpleMockMsgStream) GetProduceChannels() []string {
 	return nil
 }
 
-func (ms *simpleMockMsgStream) Seek(offset []*msgstream.MsgPosition) error {
+func (ms *simpleMockMsgStream) Seek(ctx context.Context, offset []*msgstream.MsgPosition) error {
 	return nil
 }
 

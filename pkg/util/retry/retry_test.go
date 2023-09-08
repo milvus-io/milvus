@@ -19,6 +19,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/lingdor/stackerror"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -130,5 +131,6 @@ func TestContextCancel(t *testing.T) {
 
 	err := Do(ctx, testFn)
 	assert.Error(t, err)
+	assert.True(t, merr.IsCanceledOrTimeout(err))
 	t.Log(err)
 }
