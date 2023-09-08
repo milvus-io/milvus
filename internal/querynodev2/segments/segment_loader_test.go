@@ -20,9 +20,12 @@ import (
 	"context"
 	"math/rand"
 	"testing"
+	"time"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -527,6 +530,122 @@ func (suite *SegmentLoaderSuite) TestRunOutMemory() {
 	suite.Error(err)
 }
 
+type SegmentLoaderDetailSuite struct {
+	suite.Suite
+
+	loader            *segmentLoader
+	manager           *Manager
+	segmentManager    *MockSegmentManager
+	collectionManager *MockCollectionManager
+
+	rootPath     string
+	chunkManager storage.ChunkManager
+
+	// Data
+	collectionID int64
+	partitionID  int64
+	segmentID    int64
+	schema       *schemapb.CollectionSchema
+	segmentNum   int
+}
+
+func (suite *SegmentLoaderDetailSuite) SetupSuite() {
+	paramtable.Init()
+	suite.rootPath = suite.T().Name()
+	suite.collectionID = rand.Int63()
+	suite.partitionID = rand.Int63()
+	suite.segmentID = rand.Int63()
+	suite.segmentNum = 5
+	suite.schema = GenTestCollectionSchema("test", schemapb.DataType_Int64)
+}
+
+func (suite *SegmentLoaderDetailSuite) SetupTest() {
+	// Dependencies
+	suite.collectionManager = NewMockCollectionManager(suite.T())
+	suite.segmentManager = NewMockSegmentManager(suite.T())
+	suite.manager = &Manager{
+		Segment:    suite.segmentManager,
+		Collection: suite.collectionManager,
+	}
+
+	ctx := context.Background()
+	chunkManagerFactory := NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
+	suite.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
+	suite.loader = NewLoader(suite.manager, suite.chunkManager)
+	initcore.InitRemoteChunkManager(paramtable.Get())
+
+	// Data
+	schema := GenTestCollectionSchema("test", schemapb.DataType_Int64)
+
+	indexMeta := GenTestIndexMeta(suite.collectionID, schema)
+	loadMeta := &querypb.LoadMetaInfo{
+		LoadType:     querypb.LoadType_LoadCollection,
+		CollectionID: suite.collectionID,
+		PartitionIDs: []int64{suite.partitionID},
+	}
+
+	collection := NewCollection(suite.collectionID, schema, indexMeta, loadMeta.GetLoadType())
+	suite.collectionManager.EXPECT().Get(suite.collectionID).Return(collection).Maybe()
+}
+
+func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
+	suite.Run("wait_success", func() {
+		idx := 0
+
+		var infos []*querypb.SegmentLoadInfo
+		suite.segmentManager.EXPECT().GetBy(mock.Anything, mock.Anything).Return(nil)
+		suite.segmentManager.EXPECT().GetWithType(suite.segmentID, SegmentTypeSealed).RunAndReturn(func(segmentID int64, segmentType commonpb.SegmentState) Segment {
+			defer func() { idx++ }()
+			if idx == 0 {
+				go func() {
+					<-time.After(time.Second)
+					suite.loader.notifyLoadFinish(infos...)
+				}()
+			}
+			return nil
+		})
+		infos = suite.loader.prepare(SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
+			SegmentID:    suite.segmentID,
+			PartitionID:  suite.partitionID,
+			CollectionID: suite.collectionID,
+			NumOfRows:    100,
+		})
+
+		err := suite.loader.waitSegmentLoadDone(context.Background(), SegmentTypeSealed, suite.segmentID)
+		suite.NoError(err)
+	})
+
+	suite.Run("wait_failure", func() {
+
+		suite.SetupTest()
+
+		var idx int
+		var infos []*querypb.SegmentLoadInfo
+		suite.segmentManager.EXPECT().GetBy(mock.Anything, mock.Anything).Return(nil)
+		suite.segmentManager.EXPECT().GetWithType(suite.segmentID, SegmentTypeSealed).RunAndReturn(func(segmentID int64, segmentType commonpb.SegmentState) Segment {
+			defer func() { idx++ }()
+			if idx == 0 {
+				go func() {
+					<-time.After(time.Second)
+					suite.loader.unregister(infos...)
+				}()
+			}
+
+			return nil
+		})
+		infos = suite.loader.prepare(SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
+			SegmentID:    suite.segmentID,
+			PartitionID:  suite.partitionID,
+			CollectionID: suite.collectionID,
+			NumOfRows:    100,
+		})
+
+		err := suite.loader.waitSegmentLoadDone(context.Background(), SegmentTypeSealed, suite.segmentID)
+		suite.Error(err)
+	})
+}
+
 func TestSegmentLoader(t *testing.T) {
 	suite.Run(t, &SegmentLoaderSuite{})
+	suite.Run(t, &SegmentLoaderDetailSuite{})
 }

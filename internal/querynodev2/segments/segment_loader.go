@@ -28,6 +28,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
@@ -113,10 +114,35 @@ func NewLoader(
 	loader := &segmentLoader{
 		manager:         manager,
 		cm:              cm,
-		loadingSegments: typeutil.NewConcurrentMap[int64, chan struct{}](),
+		loadingSegments: typeutil.NewConcurrentMap[int64, *loadResult](),
 	}
 
 	return loader
+}
+
+type loadStatus = int32
+
+const (
+	loading loadStatus = iota + 1
+	success
+	failure
+)
+
+type loadResult struct {
+	status *atomic.Int32
+	cond   *sync.Cond
+}
+
+func newLoadResult() *loadResult {
+	return &loadResult{
+		status: atomic.NewInt32(loading),
+		cond:   sync.NewCond(&sync.Mutex{}),
+	}
+}
+
+func (r *loadResult) SetResult(status loadStatus) {
+	r.status.CompareAndSwap(loading, status)
+	r.cond.Broadcast()
 }
 
 // segmentLoader is only responsible for loading the field data from binlog
@@ -126,7 +152,7 @@ type segmentLoader struct {
 
 	mut sync.Mutex
 	// The channel will be closed as the segment loaded
-	loadingSegments   *typeutil.ConcurrentMap[int64, chan struct{}]
+	loadingSegments   *typeutil.ConcurrentMap[int64, *loadResult]
 	committedResource LoadResource
 }
 
@@ -259,7 +285,7 @@ func (loader *segmentLoader) prepare(segmentType SegmentType, version int64, seg
 		if len(loader.manager.Segment.GetBy(WithType(segmentType), WithID(segment.GetSegmentID()))) == 0 &&
 			!loader.loadingSegments.Contain(segment.GetSegmentID()) {
 			infos = append(infos, segment)
-			loader.loadingSegments.Insert(segment.GetSegmentID(), make(chan struct{}))
+			loader.loadingSegments.Insert(segment.GetSegmentID(), newLoadResult())
 		} else {
 			// try to update segment version before skip load operation
 			loader.manager.Segment.UpdateSegmentBy(IncreaseVersion(version),
@@ -278,13 +304,9 @@ func (loader *segmentLoader) unregister(segments ...*querypb.SegmentLoadInfo) {
 	loader.mut.Lock()
 	defer loader.mut.Unlock()
 	for i := range segments {
-		waitCh, ok := loader.loadingSegments.GetAndRemove(segments[i].GetSegmentID())
+		result, ok := loader.loadingSegments.GetAndRemove(segments[i].GetSegmentID())
 		if ok {
-			select {
-			case <-waitCh:
-			default: // close wait channel for failed task
-				close(waitCh)
-			}
+			result.SetResult(failure)
 		}
 	}
 }
@@ -292,9 +314,9 @@ func (loader *segmentLoader) unregister(segments ...*querypb.SegmentLoadInfo) {
 func (loader *segmentLoader) notifyLoadFinish(segments ...*querypb.SegmentLoadInfo) {
 
 	for _, loadInfo := range segments {
-		waitCh, ok := loader.loadingSegments.Get(loadInfo.GetSegmentID())
+		result, ok := loader.loadingSegments.Get(loadInfo.GetSegmentID())
 		if ok {
-			close(waitCh)
+			result.SetResult(success)
 		}
 	}
 }
@@ -395,18 +417,34 @@ func (loader *segmentLoader) waitSegmentLoadDone(ctx context.Context, segmentTyp
 			continue
 		}
 
-		waitCh, ok := loader.loadingSegments.Get(segmentID)
+		result, ok := loader.loadingSegments.Get(segmentID)
 		if !ok {
 			log.Warn("segment was removed from the loading map early", zap.Int64("segmentID", segmentID))
 			return errors.New("segment was removed from the loading map early")
 		}
 
 		log.Info("wait segment loaded...", zap.Int64("segmentID", segmentID))
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-waitCh:
+
+		signal := make(chan struct{})
+		go func() {
+			select {
+			case <-signal:
+			case <-ctx.Done():
+				result.cond.Broadcast()
+			}
+		}()
+		result.cond.L.Lock()
+		for result.status.Load() == loading && ctx.Err() == nil {
+			result.cond.Wait()
 		}
+		result.cond.L.Unlock()
+		close(signal)
+
+		if result.status.Load() == failure {
+			log.Warn("failed to wait segment loaded", zap.Int64("segmentID", segmentID))
+			return merr.WrapErrSegmentLack(segmentID, "failed to wait segment loaded")
+		}
+
 		log.Info("segment loaded...", zap.Int64("segmentID", segmentID))
 	}
 	return nil
