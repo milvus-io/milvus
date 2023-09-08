@@ -3,7 +3,10 @@
 package segments
 
 import (
+	context "context"
+
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+
 	mock "github.com/stretchr/testify/mock"
 
 	msgpb "github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -680,6 +683,93 @@ func (_c *MockSegment_RUnlock_Call) RunAndReturn(run func()) *MockSegment_RUnloc
 	return _c
 }
 
+// Release provides a mock function with given fields:
+func (_m *MockSegment) Release() {
+	_m.Called()
+}
+
+// MockSegment_Release_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Release'
+type MockSegment_Release_Call struct {
+	*mock.Call
+}
+
+// Release is a helper method to define mock.On call
+func (_e *MockSegment_Expecter) Release() *MockSegment_Release_Call {
+	return &MockSegment_Release_Call{Call: _e.mock.On("Release")}
+}
+
+func (_c *MockSegment_Release_Call) Run(run func()) *MockSegment_Release_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSegment_Release_Call) Return() *MockSegment_Release_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockSegment_Release_Call) RunAndReturn(run func()) *MockSegment_Release_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Retrieve provides a mock function with given fields: ctx, plan
+func (_m *MockSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segcorepb.RetrieveResults, error) {
+	ret := _m.Called(ctx, plan)
+
+	var r0 *segcorepb.RetrieveResults
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *RetrievePlan) (*segcorepb.RetrieveResults, error)); ok {
+		return rf(ctx, plan)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *RetrievePlan) *segcorepb.RetrieveResults); ok {
+		r0 = rf(ctx, plan)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*segcorepb.RetrieveResults)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *RetrievePlan) error); ok {
+		r1 = rf(ctx, plan)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockSegment_Retrieve_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Retrieve'
+type MockSegment_Retrieve_Call struct {
+	*mock.Call
+}
+
+// Retrieve is a helper method to define mock.On call
+//   - ctx context.Context
+//   - plan *RetrievePlan
+func (_e *MockSegment_Expecter) Retrieve(ctx interface{}, plan interface{}) *MockSegment_Retrieve_Call {
+	return &MockSegment_Retrieve_Call{Call: _e.mock.On("Retrieve", ctx, plan)}
+}
+
+func (_c *MockSegment_Retrieve_Call) Run(run func(ctx context.Context, plan *RetrievePlan)) *MockSegment_Retrieve_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*RetrievePlan))
+	})
+	return _c
+}
+
+func (_c *MockSegment_Retrieve_Call) Return(_a0 *segcorepb.RetrieveResults, _a1 error) *MockSegment_Retrieve_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockSegment_Retrieve_Call) RunAndReturn(run func(context.Context, *RetrievePlan) (*segcorepb.RetrieveResults, error)) *MockSegment_Retrieve_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RowNum provides a mock function with given fields:
 func (_m *MockSegment) RowNum() int64 {
 	ret := _m.Called()
@@ -717,6 +807,61 @@ func (_c *MockSegment_RowNum_Call) Return(_a0 int64) *MockSegment_RowNum_Call {
 }
 
 func (_c *MockSegment_RowNum_Call) RunAndReturn(run func() int64) *MockSegment_RowNum_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Search provides a mock function with given fields: ctx, searchReq
+func (_m *MockSegment) Search(ctx context.Context, searchReq *SearchRequest) (*SearchResult, error) {
+	ret := _m.Called(ctx, searchReq)
+
+	var r0 *SearchResult
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *SearchRequest) (*SearchResult, error)); ok {
+		return rf(ctx, searchReq)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *SearchRequest) *SearchResult); ok {
+		r0 = rf(ctx, searchReq)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*SearchResult)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *SearchRequest) error); ok {
+		r1 = rf(ctx, searchReq)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockSegment_Search_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Search'
+type MockSegment_Search_Call struct {
+	*mock.Call
+}
+
+// Search is a helper method to define mock.On call
+//   - ctx context.Context
+//   - searchReq *SearchRequest
+func (_e *MockSegment_Expecter) Search(ctx interface{}, searchReq interface{}) *MockSegment_Search_Call {
+	return &MockSegment_Search_Call{Call: _e.mock.On("Search", ctx, searchReq)}
+}
+
+func (_c *MockSegment_Search_Call) Run(run func(ctx context.Context, searchReq *SearchRequest)) *MockSegment_Search_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*SearchRequest))
+	})
+	return _c
+}
+
+func (_c *MockSegment_Search_Call) Return(_a0 *SearchResult, _a1 error) *MockSegment_Search_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockSegment_Search_Call) RunAndReturn(run func(context.Context, *SearchRequest) (*SearchResult, error)) *MockSegment_Search_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -875,6 +1020,49 @@ func (_c *MockSegment_UpdateBloomFilter_Call) Return() *MockSegment_UpdateBloomF
 }
 
 func (_c *MockSegment_UpdateBloomFilter_Call) RunAndReturn(run func([]storage.PrimaryKey)) *MockSegment_UpdateBloomFilter_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ValidateIndexedFieldsData provides a mock function with given fields: ctx, result
+func (_m *MockSegment) ValidateIndexedFieldsData(ctx context.Context, result *segcorepb.RetrieveResults) error {
+	ret := _m.Called(ctx, result)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *segcorepb.RetrieveResults) error); ok {
+		r0 = rf(ctx, result)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockSegment_ValidateIndexedFieldsData_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ValidateIndexedFieldsData'
+type MockSegment_ValidateIndexedFieldsData_Call struct {
+	*mock.Call
+}
+
+// ValidateIndexedFieldsData is a helper method to define mock.On call
+//   - ctx context.Context
+//   - result *segcorepb.RetrieveResults
+func (_e *MockSegment_Expecter) ValidateIndexedFieldsData(ctx interface{}, result interface{}) *MockSegment_ValidateIndexedFieldsData_Call {
+	return &MockSegment_ValidateIndexedFieldsData_Call{Call: _e.mock.On("ValidateIndexedFieldsData", ctx, result)}
+}
+
+func (_c *MockSegment_ValidateIndexedFieldsData_Call) Run(run func(ctx context.Context, result *segcorepb.RetrieveResults)) *MockSegment_ValidateIndexedFieldsData_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*segcorepb.RetrieveResults))
+	})
+	return _c
+}
+
+func (_c *MockSegment_ValidateIndexedFieldsData_Call) Return(_a0 error) *MockSegment_ValidateIndexedFieldsData_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_ValidateIndexedFieldsData_Call) RunAndReturn(run func(context.Context, *segcorepb.RetrieveResults) error) *MockSegment_ValidateIndexedFieldsData_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -307,31 +307,6 @@ func (s *LocalSegment) Type() SegmentType {
 	return s.typ
 }
 
-func DeleteSegment(segment *LocalSegment) {
-	/*
-		void
-		deleteSegment(CSegmentInterface segment);
-	*/
-	// wait all read ops finished
-	var ptr C.CSegmentInterface
-
-	segment.ptrLock.Lock()
-	ptr = segment.ptr
-	segment.ptr = nil
-	segment.ptrLock.Unlock()
-
-	if ptr == nil {
-		return
-	}
-
-	C.DeleteSegment(ptr)
-	log.Info("delete segment from memory",
-		zap.Int64("collectionID", segment.collectionID),
-		zap.Int64("partitionID", segment.partitionID),
-		zap.Int64("segmentID", segment.ID()),
-		zap.String("segmentType", segment.typ.String()))
-}
-
 func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*SearchResult, error) {
 	/*
 		CStatus
@@ -891,4 +866,30 @@ func (s *LocalSegment) UpdateFieldRawDataSize(numRows int64, fieldBinlog *datapb
 	log.Info("updateFieldRawDataSize done", zap.Int64("segmentID", s.ID()))
 
 	return nil
+}
+
+func (s *LocalSegment) Release() {
+	/*
+		void
+		deleteSegment(CSegmentInterface segment);
+	*/
+	// wait all read ops finished
+	var ptr C.CSegmentInterface
+
+	s.ptrLock.Lock()
+	ptr = s.ptr
+	s.ptr = nil
+	s.ptrLock.Unlock()
+
+	if ptr == nil {
+		return
+	}
+
+	C.DeleteSegment(ptr)
+	log.Info("delete segment from memory",
+		zap.Int64("collectionID", s.collectionID),
+		zap.Int64("partitionID", s.partitionID),
+		zap.Int64("segmentID", s.ID()),
+		zap.String("segmentType", s.typ.String()),
+	)
 }

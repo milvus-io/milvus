@@ -45,9 +45,8 @@ func retrieveOnSegments(ctx context.Context, segments []Segment, segType Segment
 
 	for i, segment := range segments {
 		wg.Add(1)
-		go func(segment Segment, i int) {
+		go func(seg Segment, i int) {
 			defer wg.Done()
-			seg := segment.(*LocalSegment)
 			tr := timerecord.NewTimeRecorder("retrieveOnSegments")
 			result, err := seg.Retrieve(ctx, plan)
 			if err != nil {
