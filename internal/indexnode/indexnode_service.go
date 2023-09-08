@@ -84,11 +84,13 @@ func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest
 	if err != nil {
 		log.Ctx(ctx).Error("create chunk manager failed", zap.String("Bucket", req.StorageConfig.BucketName),
 			zap.String("AccessKey", req.StorageConfig.AccessKeyID),
-			zap.String("ClusterID", req.ClusterID), zap.Int64("IndexBuildID", req.BuildID))
+			zap.String("ClusterID", req.ClusterID), zap.Int64("IndexBuildID", req.BuildID),
+			zap.Error(err),
+		)
 		metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.FailLabel).Inc()
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_BuildIndexError,
-			Reason:    "create chunk manager failed",
+			Reason:    "create chunk manager failed, error: " + err.Error(),
 		}, nil
 	}
 	task := &indexBuildTask{
