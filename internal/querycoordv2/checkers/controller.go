@@ -39,6 +39,7 @@ var (
 	Channel_Checker = "channel_checker"
 	Balance_Checker = "balance_checker"
 	Index_Checker   = "index_checker"
+	CheckerOrder    = []string{Channel_Checker, Segment_Checker, Balance_Checker, Index_Checker}
 )
 
 type CheckerController struct {
@@ -77,8 +78,8 @@ func NewCheckerController(
 	}
 
 	id := 0
-	for _, checker := range checkers {
-		checker.SetID(int64(id + 1))
+	for _, checkerName := range CheckerOrder {
+		checkers[checkerName].SetID(int64(id + 1))
 	}
 
 	manualCheckChs := map[string]chan struct{}{
