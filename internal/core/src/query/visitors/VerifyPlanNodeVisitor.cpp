@@ -68,6 +68,10 @@ VerifyPlanNodeVisitor::visit(BinaryVectorANNS&) {
 }
 
 void
+VerifyPlanNodeVisitor::visit(Float16VectorANNS&) {
+}
+
+void
 VerifyPlanNodeVisitor::visit(RetrievePlanNode&) {
 }
 

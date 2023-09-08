@@ -123,7 +123,9 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                                            chunk_data,
                                            size_per_chunk,
                                            info.search_params_,
-                                           sub_view);
+                                           sub_view,
+                                           data_type);
+
             // convert chunk uid to segment uid
             for (auto& x : sub_qr.mutable_seg_offsets()) {
                 if (x != -1) {

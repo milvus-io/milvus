@@ -265,7 +265,7 @@ func (cct *createCollectionTask) PreExecute(ctx context.Context) error {
 			return err
 		}
 		// validate vector field type parameters
-		if field.DataType == schemapb.DataType_FloatVector || field.DataType == schemapb.DataType_BinaryVector {
+		if isVectorType(field.DataType) {
 			err = validateDimension(field)
 			if err != nil {
 				return err
@@ -1426,7 +1426,7 @@ func (lct *loadCollectionTask) Execute(ctx context.Context) (err error) {
 	for _, index := range indexResponse.IndexInfos {
 		fieldIndexIDs[index.FieldID] = index.IndexID
 		for _, field := range collSchema.Fields {
-			if index.FieldID == field.FieldID && (field.DataType == schemapb.DataType_FloatVector || field.DataType == schemapb.DataType_BinaryVector) {
+			if index.FieldID == field.FieldID && (field.DataType == schemapb.DataType_FloatVector || field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_Float16Vector) {
 				hasVecIndex = true
 			}
 		}
@@ -1654,7 +1654,7 @@ func (lpt *loadPartitionsTask) Execute(ctx context.Context) error {
 	for _, index := range indexResponse.IndexInfos {
 		fieldIndexIDs[index.FieldID] = index.IndexID
 		for _, field := range collSchema.Fields {
-			if index.FieldID == field.FieldID && (field.DataType == schemapb.DataType_FloatVector || field.DataType == schemapb.DataType_BinaryVector) {
+			if index.FieldID == field.FieldID && (field.DataType == schemapb.DataType_FloatVector || field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_Float16Vector) {
 				hasVecIndex = true
 			}
 		}

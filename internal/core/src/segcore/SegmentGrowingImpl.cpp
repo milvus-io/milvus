@@ -346,6 +346,13 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                                               seg_offsets,
                                               count,
                                               output.data());
+        } else if (field_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
+            bulk_subscript_impl<Float16Vector>(field_id,
+                                               field_meta.get_sizeof(),
+                                               vec_ptr,
+                                               seg_offsets,
+                                               count,
+                                               output.data());
         } else {
             PanicInfo("logical error");
         }

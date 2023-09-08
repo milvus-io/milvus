@@ -49,6 +49,9 @@ datatype_sizeof(DataType data_type, int dim = 1) {
             AssertInfo(dim % 8 == 0, "dim=" + std::to_string(dim));
             return dim / 8;
         }
+        case DataType::VECTOR_FLOAT16: {
+            return sizeof(float16) * dim;
+        }
         default: {
             throw std::invalid_argument("unsupported data type");
         }
@@ -84,6 +87,9 @@ datatype_name(DataType data_type) {
         case DataType::VECTOR_BINARY: {
             return "vector_binary";
         }
+        case DataType::VECTOR_FLOAT16: {
+            return "vector_float16";
+        }
         default: {
             auto err_msg =
                 "Unsupported DataType(" + std::to_string((int)data_type) + ")";
@@ -95,7 +101,8 @@ datatype_name(DataType data_type) {
 inline bool
 datatype_is_vector(DataType datatype) {
     return datatype == DataType::VECTOR_BINARY ||
-           datatype == DataType::VECTOR_FLOAT;
+           datatype == DataType::VECTOR_FLOAT ||
+           datatype == DataType::VECTOR_FLOAT16;
 }
 
 inline bool

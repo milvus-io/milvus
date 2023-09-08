@@ -125,6 +125,8 @@ func (s *TestGetVectorSuite) run() {
 	var vecFieldData *schemapb.FieldData
 	if s.vecType == schemapb.DataType_FloatVector {
 		vecFieldData = integration.NewFloatVectorFieldData(vecFieldName, NB, dim)
+	} else if s.vecType == schemapb.DataType_Float16Vector {
+		vecFieldData = integration.NewFloat16VectorFieldData(vecFieldName, NB, dim)
 	} else {
 		vecFieldData = integration.NewBinaryVectorFieldData(vecFieldName, NB, dim)
 	}
@@ -235,6 +237,25 @@ func (s *TestGetVectorSuite) run() {
 				s.Require().ElementsMatch(expect, actual)
 			}
 		}
+	} else if s.vecType == schemapb.DataType_Float16Vector {
+		// s.Require().Len(result.GetFieldsData()[vecFieldIndex].GetVectors().GetFloat16Vector(), nq*topk*dim*2)
+		// rawData := vecFieldData.GetVectors().GetFloat16Vector()
+		// resData := result.GetFieldsData()[vecFieldIndex].GetVectors().GetFloat16Vector()
+		// if s.pkType == schemapb.DataType_Int64 {
+		// 	for i, id := range result.GetIds().GetIntId().GetData() {
+		// 		expect := rawData[int(id)*dim : (int(id)+1)*dim]
+		// 		actual := resData[i*dim : (i+1)*dim]
+		// 		s.Require().ElementsMatch(expect, actual)
+		// 	}
+		// } else {
+		// 	for i, idStr := range result.GetIds().GetStrId().GetData() {
+		// 		id, err := strconv.Atoi(idStr)
+		// 		s.Require().NoError(err)
+		// 		expect := rawData[id*dim : (id+1)*dim]
+		// 		actual := resData[i*dim : (i+1)*dim]
+		// 		s.Require().ElementsMatch(expect, actual)
+		// 	}
+		// }
 	} else {
 		s.Require().Len(result.GetFieldsData()[vecFieldIndex].GetVectors().GetBinaryVector(), nq*topk*dim/8)
 		rawData := vecFieldData.GetVectors().GetBinaryVector()
@@ -277,6 +298,17 @@ func (s *TestGetVectorSuite) TestGetVector_FLAT() {
 	s.metricType = metric.L2
 	s.pkType = schemapb.DataType_Int64
 	s.vecType = schemapb.DataType_FloatVector
+	s.searchFailed = false
+	s.run()
+}
+
+func (s *TestGetVectorSuite) TestGetVector_Float16Vector() {
+	s.nq = 10
+	s.topK = 10
+	s.indexType = integration.IndexFaissIDMap
+	s.metricType = metric.L2
+	s.pkType = schemapb.DataType_Int64
+	s.vecType = schemapb.DataType_Float16Vector
 	s.searchFailed = false
 	s.run()
 }

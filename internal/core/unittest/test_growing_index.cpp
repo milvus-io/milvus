@@ -46,7 +46,7 @@ TEST(GrowingIndex, Correctness) {
 
     milvus::proto::plan::PlanNode plan_node;
     auto vector_anns = plan_node.mutable_vector_anns();
-    vector_anns->set_is_binary(false);
+    vector_anns->set_vector_type(milvus::proto::plan::VectorType::FloatVector);
     vector_anns->set_placeholder_tag("$0");
     vector_anns->set_field_id(102);
     auto query_info = vector_anns->mutable_query_info();
@@ -58,7 +58,7 @@ TEST(GrowingIndex, Correctness) {
 
     milvus::proto::plan::PlanNode range_query_plan_node;
     auto vector_range_querys = range_query_plan_node.mutable_vector_anns();
-    vector_range_querys->set_is_binary(false);
+    vector_range_querys->set_vector_type(milvus::proto::plan::VectorType::FloatVector);
     vector_range_querys->set_placeholder_tag("$0");
     vector_range_querys->set_field_id(102);
     auto range_query_info = vector_range_querys->mutable_query_info();

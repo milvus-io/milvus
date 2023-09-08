@@ -212,4 +212,9 @@ ExecPlanNodeVisitor::visit(BinaryVectorANNS& node) {
     VectorVisitorImpl<BinaryVector>(node);
 }
 
+void
+ExecPlanNodeVisitor::visit(Float16VectorANNS& node) {
+    VectorVisitorImpl<Float16Vector>(node);
+}
+
 }  // namespace milvus::query

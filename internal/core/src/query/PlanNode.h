@@ -52,6 +52,12 @@ struct BinaryVectorANNS : VectorPlanNode {
     accept(PlanNodeVisitor&) override;
 };
 
+struct Float16VectorANNS : VectorPlanNode {
+ public:
+    void
+    accept(PlanNodeVisitor&) override;
+};
+
 struct RetrievePlanNode : PlanNode {
  public:
     void

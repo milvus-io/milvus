@@ -94,6 +94,13 @@ func (ds *DataSorter) Swap(i, j int) {
 			for idx := 0; idx < dim; idx++ {
 				data[i*dim+idx], data[j*dim+idx] = data[j*dim+idx], data[i*dim+idx]
 			}
+		case schemapb.DataType_Float16Vector:
+			data := singleData.(*Float16VectorFieldData).Data
+			dim := singleData.(*Float16VectorFieldData).Dim
+			steps := dim * 2
+			for idx := 0; idx < steps; idx++ {
+				data[i*steps+idx], data[j*steps+idx] = data[j*steps+idx], data[i*steps+idx]
+			}
 		case schemapb.DataType_Array:
 			data := singleData.(*ArrayFieldData).Data
 			data[i], data[j] = data[j], data[i]

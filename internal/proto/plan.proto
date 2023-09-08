@@ -29,6 +29,12 @@ enum ArithOpType {
   Mod = 5;
 };
 
+enum VectorType {
+  BinaryVector = 0;
+  FloatVector = 1;
+  Float16Vector = 2;
+};
+
 message GenericValue {
   oneof val {
     bool bool_val = 1;
@@ -176,7 +182,7 @@ message Expr {
 }
 
 message VectorANNS {
-  bool is_binary = 1;
+  VectorType vector_type = 1;
   int64 field_id = 2;
   Expr predicates = 3;
   QueryInfo query_info = 4;

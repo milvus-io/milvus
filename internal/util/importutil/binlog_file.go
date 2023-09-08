@@ -524,6 +524,49 @@ func (p *BinlogFile) ReadBinaryVector() ([]byte, int, error) {
 	return result, dim, nil
 }
 
+func (p *BinlogFile) ReadFloat16Vector() ([]byte, int, error) {
+	if p.reader == nil {
+		log.Warn("Binlog file: binlog reader not yet initialized")
+		return nil, 0, errors.New("binlog reader not yet initialized")
+	}
+
+	dim := 0
+	result := make([]byte, 0)
+	for {
+		event, err := p.reader.NextEventReader()
+		if err != nil {
+			log.Warn("Binlog file: failed to iterate events reader", zap.Error(err))
+			return nil, 0, fmt.Errorf("failed to iterate events reader, error: %w", err)
+		}
+
+		// end of the file
+		if event == nil {
+			break
+		}
+
+		if event.TypeCode != storage.InsertEventType {
+			log.Warn("Binlog file: binlog file is not insert log")
+			return nil, 0, errors.New("binlog file is not insert log")
+		}
+
+		if p.DataType() != schemapb.DataType_Float16Vector {
+			log.Warn("Binlog file: binlog data type is not float16 vector")
+			return nil, 0, errors.New("binlog data type is not float16 vector")
+		}
+
+		data, dimenson, err := event.PayloadReaderInterface.GetFloat16VectorFromPayload()
+		if err != nil {
+			log.Warn("Binlog file: failed to read float16 vector data", zap.Error(err))
+			return nil, 0, fmt.Errorf("failed to read float16 vector data, error: %w", err)
+		}
+
+		dim = dimenson
+		result = append(result, data...)
+	}
+
+	return result, dim, nil
+}
+
 // ReadFloatVector method reads all the blocks of a binlog by a data type.
 // A binlog is designed to support multiple blocks, but so far each binlog always contains only one block.
 // return vectors data and the dimension

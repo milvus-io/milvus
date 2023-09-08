@@ -36,6 +36,7 @@ type PayloadWriterInterface interface {
 	AddOneJSONToPayload(msg []byte) error
 	AddBinaryVectorToPayload(binVec []byte, dim int) error
 	AddFloatVectorToPayload(binVec []float32, dim int) error
+	AddFloat16VectorToPayload(binVec []byte, dim int) error
 	FinishPayloadWriter() error
 	GetPayloadBufferFromWriter() ([]byte, error)
 	GetPayloadLengthFromWriter() (int, error)
@@ -58,6 +59,7 @@ type PayloadReaderInterface interface {
 	GetArrayFromPayload() ([]*schemapb.ScalarField, error)
 	GetJSONFromPayload() ([][]byte, error)
 	GetBinaryVectorFromPayload() ([]byte, int, error)
+	GetFloat16VectorFromPayload() ([]byte, int, error)
 	GetFloatVectorFromPayload() ([]float32, int, error)
 	GetPayloadLengthFromReader() (int, error)
 	ReleasePayloadReader() error
