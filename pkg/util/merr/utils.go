@@ -118,7 +118,7 @@ func oldCode(code int32) commonpb.ErrorCode {
 }
 
 func Ok(status *commonpb.Status) bool {
-	return status.ErrorCode == commonpb.ErrorCode_Success && status.Code == 0
+	return status.GetErrorCode() == commonpb.ErrorCode_Success && status.GetCode() == 0
 }
 
 // Error returns a error according to the given status,
