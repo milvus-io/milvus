@@ -643,6 +643,29 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 		err := suite.loader.waitSegmentLoadDone(context.Background(), SegmentTypeSealed, suite.segmentID)
 		suite.Error(err)
 	})
+
+	suite.Run("wait_timeout", func() {
+
+		suite.SetupTest()
+
+		suite.segmentManager.EXPECT().GetBy(mock.Anything, mock.Anything).Return(nil)
+		suite.segmentManager.EXPECT().GetWithType(suite.segmentID, SegmentTypeSealed).RunAndReturn(func(segmentID int64, segmentType commonpb.SegmentState) Segment {
+			return nil
+		})
+		suite.loader.prepare(SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
+			SegmentID:    suite.segmentID,
+			PartitionID:  suite.partitionID,
+			CollectionID: suite.collectionID,
+			NumOfRows:    100,
+		})
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		err := suite.loader.waitSegmentLoadDone(ctx, SegmentTypeSealed, suite.segmentID)
+		suite.Error(err)
+		suite.True(merr.IsCanceledOrTimeout(err))
+	})
 }
 
 func TestSegmentLoader(t *testing.T) {
