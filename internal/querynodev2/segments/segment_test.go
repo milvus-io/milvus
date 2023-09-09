@@ -114,8 +114,8 @@ func (suite *SegmentSuite) SetupTest() {
 
 func (suite *SegmentSuite) TearDownTest() {
 	ctx := context.Background()
-	DeleteSegment(suite.sealed)
-	DeleteSegment(suite.growing)
+	suite.sealed.Release()
+	suite.growing.Release()
 	DeleteCollection(suite.collection)
 	suite.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
 }
@@ -183,7 +183,7 @@ func (suite *SegmentSuite) TestValidateIndexedFieldsData() {
 	suite.NoError(err)
 
 	// index doesn't have index type
-	DeleteSegment(suite.sealed)
+	suite.sealed.Release()
 	suite.True(suite.sealed.ExistIndex(101))
 	err = suite.sealed.ValidateIndexedFieldsData(context.Background(), result)
 	suite.Error(err)
@@ -192,7 +192,7 @@ func (suite *SegmentSuite) TestValidateIndexedFieldsData() {
 	index := suite.sealed.GetIndex(101)
 	_, indexParams := genIndexParams(IndexHNSW, metric.L2)
 	index.IndexInfo.IndexParams = funcutil.Map2KeyValuePair(indexParams)
-	DeleteSegment(suite.sealed)
+	suite.sealed.Release()
 	suite.True(suite.sealed.ExistIndex(101))
 	err = suite.sealed.ValidateIndexedFieldsData(context.Background(), result)
 	suite.Error(err)
@@ -210,7 +210,7 @@ func (suite *SegmentSuite) TestCASVersion() {
 }
 
 func (suite *SegmentSuite) TestSegmentReleased() {
-	DeleteSegment(suite.sealed)
+	suite.sealed.Release()
 
 	suite.sealed.ptrLock.RLock()
 	suite.False(suite.sealed.isValid())

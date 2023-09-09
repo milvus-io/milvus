@@ -122,7 +122,7 @@ func (suite *SearchSuite) SetupTest() {
 }
 
 func (suite *SearchSuite) TearDownTest() {
-	DeleteSegment(suite.sealed)
+	suite.sealed.Release()
 	DeleteCollection(suite.collection)
 	ctx := context.Background()
 	suite.chunkManager.RemoveWithPrefix(ctx, paramtable.Get().MinioCfg.RootPath.GetValue())

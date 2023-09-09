@@ -173,9 +173,7 @@ func (mgr *segmentManager) Put(segmentType SegmentType, segments ...Segment) {
 					zap.Int64("newVersion", segment.Version()),
 				)
 				// delete redundant segment
-				if s, ok := segment.(*LocalSegment); ok {
-					DeleteSegment(s)
-				}
+				segment.Release()
 				continue
 			}
 			replacedSegment = append(replacedSegment, oldSegment)
@@ -206,7 +204,7 @@ func (mgr *segmentManager) Put(segmentType SegmentType, segments ...Segment) {
 	if len(replacedSegment) > 0 {
 		go func() {
 			for _, segment := range replacedSegment {
-				remove(segment.(*LocalSegment))
+				remove(segment)
 			}
 		}()
 	}
@@ -411,7 +409,7 @@ func (mgr *segmentManager) Remove(segmentID UniqueID, scope querypb.DataScope) (
 	mgr.mu.Lock()
 
 	var removeGrowing, removeSealed int
-	var growing, sealed *LocalSegment
+	var growing, sealed Segment
 	switch scope {
 	case querypb.DataScope_Streaming:
 		growing = mgr.removeSegmentWithType(SegmentTypeGrowing, segmentID)
@@ -450,20 +448,20 @@ func (mgr *segmentManager) Remove(segmentID UniqueID, scope querypb.DataScope) (
 	return removeGrowing, removeSealed
 }
 
-func (mgr *segmentManager) removeSegmentWithType(typ SegmentType, segmentID UniqueID) *LocalSegment {
+func (mgr *segmentManager) removeSegmentWithType(typ SegmentType, segmentID UniqueID) Segment {
 	switch typ {
 	case SegmentTypeGrowing:
 		s, ok := mgr.growingSegments[segmentID]
 		if ok {
 			delete(mgr.growingSegments, segmentID)
-			return s.(*LocalSegment)
+			return s
 		}
 
 	case SegmentTypeSealed:
 		s, ok := mgr.sealedSegments[segmentID]
 		if ok {
 			delete(mgr.sealedSegments, segmentID)
-			return s.(*LocalSegment)
+			return s
 		}
 	default:
 		return nil
@@ -475,7 +473,7 @@ func (mgr *segmentManager) removeSegmentWithType(typ SegmentType, segmentID Uniq
 func (mgr *segmentManager) RemoveBy(filters ...SegmentFilter) (int, int) {
 	mgr.mu.Lock()
 
-	var removeGrowing, removeSealed []*LocalSegment
+	var removeGrowing, removeSealed []Segment
 	for id, segment := range mgr.growingSegments {
 		if filter(segment, filters...) {
 			s := mgr.removeSegmentWithType(SegmentTypeGrowing, id)
@@ -513,12 +511,12 @@ func (mgr *segmentManager) Clear() {
 
 	for id, segment := range mgr.growingSegments {
 		delete(mgr.growingSegments, id)
-		remove(segment.(*LocalSegment))
+		remove(segment)
 	}
 
 	for id, segment := range mgr.sealedSegments {
 		delete(mgr.sealedSegments, id)
-		remove(segment.(*LocalSegment))
+		remove(segment)
 	}
 	mgr.updateMetric()
 }
@@ -538,9 +536,9 @@ func (mgr *segmentManager) updateMetric() {
 	metrics.QueryNodeNumPartitions.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(partiations.Len()))
 }
 
-func remove(segment *LocalSegment) bool {
+func remove(segment Segment) bool {
 	rowNum := segment.RowNum()
-	DeleteSegment(segment)
+	segment.Release()
 
 	metrics.QueryNodeNumSegments.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()),

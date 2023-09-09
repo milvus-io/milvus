@@ -190,7 +190,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	newSegments := make(map[int64]*LocalSegment, len(infos))
 	clearAll := func() {
 		for _, s := range newSegments {
-			DeleteSegment(s)
+			s.Release()
 		}
 		debug.FreeOSMemory()
 	}
