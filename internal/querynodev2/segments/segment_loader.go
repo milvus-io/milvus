@@ -177,6 +177,11 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	infos := loader.prepare(segmentType, version, segments...)
 	defer loader.unregister(infos...)
 
+	log.With(
+		zap.Int64s("requestSegments", lo.Map(segments, func(s *querypb.SegmentLoadInfo, _ int) int64 { return s.GetSegmentID() })),
+		zap.Int64s("preparedSegments", lo.Map(infos, func(s *querypb.SegmentLoadInfo, _ int) int64 { return s.GetSegmentID() })),
+	)
+
 	// continue to wait other task done
 	log.Info("start loading...", zap.Int("segmentNum", len(segments)), zap.Int("afterFilter", len(infos)))
 
@@ -412,6 +417,10 @@ func (loader *segmentLoader) freeRequest(resource LoadResource) {
 }
 
 func (loader *segmentLoader) waitSegmentLoadDone(ctx context.Context, segmentType SegmentType, segmentIDs ...int64) error {
+	log := log.Ctx(ctx).With(
+		zap.String("segmentType", segmentType.String()),
+		zap.Int64s("segmentIDs", segmentIDs),
+	)
 	for _, segmentID := range segmentIDs {
 		if loader.manager.Segment.GetWithType(segmentID, segmentType) != nil {
 			continue
@@ -439,6 +448,11 @@ func (loader *segmentLoader) waitSegmentLoadDone(ctx context.Context, segmentTyp
 		}
 		result.cond.L.Unlock()
 		close(signal)
+
+		if ctx.Err() != nil {
+			log.Warn("failed to wait segment loaded due to context done", zap.Int64("segmentID", segmentID))
+			return ctx.Err()
+		}
 
 		if result.status.Load() == failure {
 			log.Warn("failed to wait segment loaded", zap.Int64("segmentID", segmentID))
