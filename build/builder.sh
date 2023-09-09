@@ -9,8 +9,6 @@ if [[ -f "$toplevel/.env" ]]; then
   export $(cat $toplevel/.env | xargs)
 fi
 
-export OS_NAME="${OS_NAME:-ubuntu20.04}"
-
 pushd "${toplevel}"
 
 if [[ "${1-}" == "pull" ]]; then
@@ -26,8 +24,6 @@ fi
 PLATFORM_ARCH="${PLATFORM_ARCH:-${IMAGE_ARCH}}"
 
 export IMAGE_ARCH=${PLATFORM_ARCH}
-
-echo ${IMAGE_ARCH}
 
 mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-ccache"
 mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-go-mod"
