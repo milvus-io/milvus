@@ -356,7 +356,38 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 
 	req.Base.TargetID = req.GetDstNodeID()
 	log.Info("worker loads segments...")
-	err = worker.LoadSegments(ctx, req)
+
+	sLoad := func(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
+		segmentID := req.GetInfos()[0].GetSegmentID()
+		nodeID := req.GetDstNodeID()
+		_, err, _ := sd.sf.Do(fmt.Sprintf("%d-%d", nodeID, segmentID), func() (struct{}, error) {
+			err := worker.LoadSegments(ctx, req)
+			return struct{}{}, err
+		})
+		return err
+	}
+
+	// separate infos into different load task
+	if len(req.GetInfos()) > 1 {
+		var reqs []*querypb.LoadSegmentsRequest
+		for _, info := range req.GetInfos() {
+			newReq := typeutil.Clone(req)
+			newReq.Infos = []*querypb.SegmentLoadInfo{info}
+			reqs = append(reqs, newReq)
+		}
+
+		group, ctx := errgroup.WithContext(ctx)
+		for _, req := range reqs {
+			req := req
+			group.Go(func() error {
+				return sLoad(ctx, req)
+			})
+		}
+		err = group.Wait()
+	} else {
+		err = sLoad(ctx, req)
+	}
+
 	if err != nil {
 		log.Warn("worker failed to load segments", zap.Error(err))
 		return err

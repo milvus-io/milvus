@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -130,6 +131,7 @@ type shardDelegator struct {
 	//dispatcherClient msgdispatcher.Client
 	factory msgstream.Factory
 
+	sf          conc.Singleflight[struct{}]
 	loader      segments.Loader
 	wg          sync.WaitGroup
 	tsCond      *sync.Cond
