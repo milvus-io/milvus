@@ -17,6 +17,8 @@
 package segments
 
 import (
+	"context"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	storage "github.com/milvus-io/milvus/internal/storage"
@@ -57,4 +59,11 @@ type Segment interface {
 	// Bloom filter related
 	UpdateBloomFilter(pks []storage.PrimaryKey)
 	MayPkExist(pk storage.PrimaryKey) bool
+
+	// Read operations
+	Search(ctx context.Context, searchReq *SearchRequest) (*SearchResult, error)
+	Retrieve(ctx context.Context, plan *RetrievePlan) (*segcorepb.RetrieveResults, error)
+	ValidateIndexedFieldsData(ctx context.Context, result *segcorepb.RetrieveResults) error
+
+	Release()
 }

@@ -129,8 +129,8 @@ func (suite *RetrieveSuite) SetupTest() {
 }
 
 func (suite *RetrieveSuite) TearDownTest() {
-	DeleteSegment(suite.sealed)
-	DeleteSegment(suite.growing)
+	suite.sealed.Release()
+	suite.growing.Release()
 	DeleteCollection(suite.collection)
 	ctx := context.Background()
 	suite.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
@@ -179,7 +179,7 @@ func (suite *RetrieveSuite) TestRetrieveNilSegment() {
 	plan, err := genSimpleRetrievePlan(suite.collection)
 	suite.NoError(err)
 
-	DeleteSegment(suite.sealed)
+	suite.sealed.Release()
 	res, segments, err := RetrieveHistorical(context.TODO(), suite.manager, plan,
 		suite.collectionID,
 		[]int64{suite.partitionID},

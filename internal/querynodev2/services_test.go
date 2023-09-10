@@ -516,23 +516,26 @@ func (suite *ServiceSuite) TestLoadSegments_Int64() {
 	suite.TestWatchDmChannelsInt64()
 	// data
 	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
-	req := &querypb.LoadSegmentsRequest{
-		Base: &commonpb.MsgBase{
-			MsgID:    rand.Int63(),
-			TargetID: suite.node.session.ServerID,
-		},
-		CollectionID:   suite.collectionID,
-		DstNodeID:      suite.node.session.ServerID,
-		Infos:          suite.genSegmentLoadInfos(schema),
-		Schema:         schema,
-		DeltaPositions: []*msgpb.MsgPosition{{Timestamp: 20000}},
-		NeedTransfer:   true,
-	}
+	infos := suite.genSegmentLoadInfos(schema)
+	for _, info := range infos {
+		req := &querypb.LoadSegmentsRequest{
+			Base: &commonpb.MsgBase{
+				MsgID:    rand.Int63(),
+				TargetID: suite.node.session.ServerID,
+			},
+			CollectionID:   suite.collectionID,
+			DstNodeID:      suite.node.session.ServerID,
+			Infos:          []*querypb.SegmentLoadInfo{info},
+			Schema:         schema,
+			DeltaPositions: []*msgpb.MsgPosition{{Timestamp: 20000}},
+			NeedTransfer:   true,
+		}
 
-	// LoadSegment
-	status, err := suite.node.LoadSegments(ctx, req)
-	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
+		// LoadSegment
+		status, err := suite.node.LoadSegments(ctx, req)
+		suite.NoError(err)
+		suite.Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
+	}
 }
 
 func (suite *ServiceSuite) TestLoadSegments_VarChar() {
@@ -547,24 +550,28 @@ func (suite *ServiceSuite) TestLoadSegments_VarChar() {
 	}
 	suite.node.manager.Collection = segments.NewCollectionManager()
 	suite.node.manager.Collection.PutOrRef(suite.collectionID, schema, nil, loadMeta)
-	req := &querypb.LoadSegmentsRequest{
-		Base: &commonpb.MsgBase{
-			MsgID:    rand.Int63(),
-			TargetID: suite.node.session.ServerID,
-		},
-		CollectionID:   suite.collectionID,
-		DstNodeID:      suite.node.session.ServerID,
-		Infos:          suite.genSegmentLoadInfos(schema),
-		Schema:         schema,
-		DeltaPositions: []*msgpb.MsgPosition{{Timestamp: 20000}},
-		NeedTransfer:   true,
-		LoadMeta:       loadMeta,
-	}
 
-	// LoadSegment
-	status, err := suite.node.LoadSegments(ctx, req)
-	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
+	infos := suite.genSegmentLoadInfos(schema)
+	for _, info := range infos {
+		req := &querypb.LoadSegmentsRequest{
+			Base: &commonpb.MsgBase{
+				MsgID:    rand.Int63(),
+				TargetID: suite.node.session.ServerID,
+			},
+			CollectionID:   suite.collectionID,
+			DstNodeID:      suite.node.session.ServerID,
+			Infos:          []*querypb.SegmentLoadInfo{info},
+			Schema:         schema,
+			DeltaPositions: []*msgpb.MsgPosition{{Timestamp: 20000}},
+			NeedTransfer:   true,
+			LoadMeta:       loadMeta,
+		}
+
+		// LoadSegment
+		status, err := suite.node.LoadSegments(ctx, req)
+		suite.NoError(err)
+		suite.Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
+	}
 }
 
 func (suite *ServiceSuite) TestLoadDeltaInt64() {

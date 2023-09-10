@@ -52,9 +52,8 @@ func searchSegments(ctx context.Context, segments []Segment, segType SegmentType
 	// calling segment search in goroutines
 	for i, segment := range segments {
 		wg.Add(1)
-		go func(segment Segment, i int) {
+		go func(seg Segment, i int) {
 			defer wg.Done()
-			seg := segment.(*LocalSegment)
 			if !seg.ExistIndex(searchReq.searchFieldID) {
 				mu.Lock()
 				segmentsWithoutIndex = append(segmentsWithoutIndex, seg.ID())
