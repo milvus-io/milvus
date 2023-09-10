@@ -73,12 +73,12 @@ func (c *SegmentChecker) readyToCheck(collectionID int64) bool {
 
 func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
 	collectionIDs := c.meta.CollectionManager.GetAll()
-	tasks := make([]task.Task, 0)
+	results := make([]task.Task, 0)
 	for _, cid := range collectionIDs {
 		if c.readyToCheck(cid) {
 			replicas := c.meta.ReplicaManager.GetByCollection(cid)
 			for _, r := range replicas {
-				tasks = append(tasks, c.checkReplica(ctx, r)...)
+				results = append(results, c.checkReplica(ctx, r)...)
 			}
 		}
 	}
@@ -86,9 +86,11 @@ func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
 	// find already released segments which are not contained in target
 	segments := c.dist.SegmentDistManager.GetAll()
 	released := utils.FilterReleased(segments, collectionIDs)
-	tasks = append(tasks, c.createSegmentReduceTasks(ctx, released, -1, querypb.DataScope_Historical)...)
-	task.SetPriority(task.TaskPriorityNormal, tasks...)
-	return tasks
+	reduceTasks := c.createSegmentReduceTasks(ctx, released, -1, querypb.DataScope_Historical)
+	task.SetReason("collection released", reduceTasks...)
+	results = append(results, reduceTasks...)
+	task.SetPriority(task.TaskPriorityNormal, results...)
+	return results
 }
 
 func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica) []task.Task {
