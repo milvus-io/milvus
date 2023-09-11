@@ -9,16 +9,16 @@ codecov:
 coverage:
   precision: 2
   round: down
-  range: "70...100"
+  range: "85...100"
 
   status:
     project:
       default:
-        target: 77%
+        target: 85%
         threshold: 0% #Allow the coverage to drop by threshold%, and posting a success status.
     patch:
       default:
-        target: 80%   #target of patch diff
+        target: 85%   #target of patch diff
         threshold: 0%
         if_ci_failed: error #success, failure, error, ignore
 
@@ -33,7 +33,11 @@ ignore:
   - "LICENSES"
   - ".git"
   - "*.yml"
+  - "*.yaml"
   - "*.md"
+  - "ci/jenkins/.*"
+  - "build/.*"
+  - "tests/scripts/.*"
   - "docs/.*"
   - "**/*.pb.go"
   - "**/*.proto"
