@@ -513,7 +513,8 @@ SegmentGrowingImpl::search_ids(const IdArray& id_array,
 
     auto res_id_arr = std::make_unique<IdArray>();
     std::vector<SegOffset> res_offsets;
-    for (auto pk : pks) {
+    res_offsets.reserve(pks.size());
+    for (auto& pk : pks) {
         auto segOffsets = insert_record_.search_pk(pk, timestamp);
         for (auto offset : segOffsets) {
             switch (data_type) {
@@ -524,7 +525,7 @@ SegmentGrowingImpl::search_ids(const IdArray& id_array,
                 }
                 case DataType::VARCHAR: {
                     res_id_arr->mutable_str_id()->add_data(
-                        std::get<std::string>(pk));
+                        std::get<std::string>(std::move(pk)));
                     break;
                 }
                 default: {
