@@ -55,13 +55,14 @@ func Test_NewNmqClient(t *testing.T) {
 			ctx := context.Background()
 			var cancel context.CancelFunc
 			if test.withTimeout {
-				ctx, cancel = context.WithTimeout(ctx, time.Millisecond)
-				defer cancel()
+				ctx, cancel = context.WithTimeout(ctx, time.Second)
+				if test.ctxTimeouted {
+					cancel()
+				} else {
+					defer cancel()
+				}
 			}
 
-			if test.ctxTimeouted {
-				<-time.After(time.Millisecond)
-			}
 			client, err := NewClientWithDefaultOptions(ctx)
 
 			if test.expectErr {
