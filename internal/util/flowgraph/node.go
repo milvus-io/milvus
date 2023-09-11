@@ -200,8 +200,14 @@ func (node *BaseNode) IsValidInMsg(in []Msg) bool {
 		return false
 	}
 
-	if len(in) != 1 {
-		log.Warn("Invalid operate message input", zap.Int("input length", len(in)))
+	msgLength := len(in)
+
+	if msgLength != 1 {
+		if msgLength != 0 {
+			// msgLength is pretty normal to be 0, so no need to warn here
+			// for example, during recovery, data from other collections needs to be filtered out
+			log.Warn("Invalid operate message input", zap.Int("input length", len(in)))
+		}
 		return false
 	}
 	return true
