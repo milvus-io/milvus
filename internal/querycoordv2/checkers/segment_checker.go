@@ -88,6 +88,7 @@ func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
 	released := utils.FilterReleased(segments, collectionIDs)
 	tasks = append(tasks, c.createSegmentReduceTasks(ctx, released, -1, querypb.DataScope_Historical)...)
 	task.SetPriority(task.TaskPriorityNormal, tasks...)
+	task.SetReason("collection released", tasks...)
 	return tasks
 }
 
