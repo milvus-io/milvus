@@ -15,7 +15,7 @@
 #include <random>
 
 #include "common/Tracer.h"
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
 
 using namespace milvus;
 using namespace milvus::tracer;

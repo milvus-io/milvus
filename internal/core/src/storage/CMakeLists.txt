@@ -31,7 +31,7 @@ set(STORAGE_FILES
     PayloadReader.cpp
     PayloadWriter.cpp
     BinlogReader.cpp
-        IndexData.cpp
+    IndexData.cpp
     InsertData.cpp
     Event.cpp
     ThreadPool.cpp
@@ -45,12 +45,9 @@ set(STORAGE_FILES
 
 add_library(milvus_storage SHARED ${STORAGE_FILES})
 
-find_package(Boost REQUIRED COMPONENTS filesystem)
-
-target_link_libraries(milvus_storage PUBLIC 
-        milvus_common 
-        Boost::filesystem 
-        pthread 
+target_link_libraries(milvus_storage PUBLIC
+        milvus_common
+        pthread
         ${CONAN_LIBS}
         )
 

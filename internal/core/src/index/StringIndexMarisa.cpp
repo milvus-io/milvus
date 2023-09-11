@@ -30,8 +30,6 @@
 
 namespace milvus::index {
 
-#if defined(__linux__) || defined(__APPLE__)
-
 StringIndexMarisa::StringIndexMarisa(storage::FileManagerImplPtr file_manager) {
     if (file_manager != nullptr) {
         file_manager_ = std::dynamic_pointer_cast<storage::MemFileManagerImpl>(
@@ -67,7 +65,7 @@ StringIndexMarisa::Build(const Config& config) {
     marisa::Keyset keyset;
     for (auto data : field_datas) {
         auto slice_num = data->get_num_rows();
-        for (size_t i = 0; i < slice_num; ++i) {
+        for (int64_t i = 0; i < slice_num; ++i) {
             keyset.push_back(
                 (*static_cast<const std::string*>(data->RawValue(i))).c_str());
         }
@@ -80,7 +78,7 @@ StringIndexMarisa::Build(const Config& config) {
     int64_t offset = 0;
     for (auto data : field_datas) {
         auto slice_num = data->get_num_rows();
-        for (size_t i = 0; i < slice_num; ++i) {
+        for (int64_t i = 0; i < slice_num; ++i) {
             auto str_id =
                 lookup(*static_cast<const std::string*>(data->RawValue(i)));
             AssertInfo(valid_str_id(str_id), "invalid marisa key");
@@ -389,7 +387,5 @@ StringIndexMarisa::Reverse_Lookup(size_t offset) const {
     trie_.reverse_lookup(agent);
     return std::string(agent.key().ptr(), agent.key().length());
 }
-
-#endif
 
 }  // namespace milvus::index

@@ -19,7 +19,6 @@
 #include <string>
 
 #include "Types.h"
-#include "utils/Json.h"
 
 namespace milvus {
 

@@ -12,8 +12,8 @@
 #pragma once
 // Generated File
 // DO NOT EDIT
-#include "exceptions/EasyAssert.h"
-#include "utils/Json.h"
+#include "common/EasyAssert.h"
+#include "common/Json.h"
 #include <optional>
 #include <utility>
 

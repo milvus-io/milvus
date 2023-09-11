@@ -16,7 +16,6 @@
 
 #include <iostream>
 #include "EasyAssert.h"
-// #define BOOST_STACKTRACE_USE_BACKTRACE
 #include <boost/stacktrace.hpp>
 #include <sstream>
 

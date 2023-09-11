@@ -15,7 +15,7 @@
 // limitations under the License.
 
 #include "storage/PayloadReader.h"
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
 #include "storage/Util.h"
 #include "parquet/column_reader.h"
 #include "arrow/io/api.h"

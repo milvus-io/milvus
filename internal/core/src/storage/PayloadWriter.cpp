@@ -15,7 +15,7 @@
 // limitations under the License.
 
 #include "storage/PayloadWriter.h"
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "storage/Util.h"
 

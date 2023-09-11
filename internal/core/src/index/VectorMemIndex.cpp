@@ -29,7 +29,7 @@
 #include "index/Index.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
 #include "config/ConfigKnowhere.h"
 #include "knowhere/factory.h"
 #include "knowhere/comp/time_recorder.h"
@@ -43,7 +43,7 @@
 #include "storage/MemFileManagerImpl.h"
 #include "storage/ThreadPools.h"
 #include "storage/Util.h"
-#include "utils/File.h"
+#include "common/File.h"
 #include "common/Tracer.h"
 
 namespace milvus::index {

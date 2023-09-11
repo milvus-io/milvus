@@ -19,7 +19,7 @@
 
 #include "SegmentInterface.h"
 #include "Utils.h"
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
 #include "pkVisitor.h"
 
 namespace milvus::segcore {

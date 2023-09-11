@@ -12,7 +12,6 @@
 #include "segcore/segment_c.h"
 #include <memory>
 
-#include "common/CGoHelper.h"
 #include "common/LoadInfo.h"
 #include "common/Types.h"
 #include "common/Tracer.h"
@@ -92,7 +91,7 @@ Search(CSegmentInterface c_segment,
         milvus::tracer::CloseRootSpan();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(UnexpectedError, e.what());
+        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
     }
 }
 
@@ -129,7 +128,7 @@ Retrieve(CSegmentInterface c_segment,
         span->End();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(UnexpectedError, e.what());
+        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
     }
 }
 
@@ -191,7 +190,7 @@ Insert(CSegmentInterface c_segment,
             reserved_offset, size, row_ids, timestamps, insert_data.get());
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(UnexpectedError, e.what());
+        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
     }
 }
 
@@ -202,7 +201,7 @@ PreInsert(CSegmentInterface c_segment, int64_t size, int64_t* offset) {
         *offset = segment->PreInsert(size);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(UnexpectedError, e.what());
+        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
     }
 }
 
@@ -222,7 +221,7 @@ Delete(CSegmentInterface c_segment,
             segment->Delete(reserved_offset, size, pks.get(), timestamps);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(UnexpectedError, e.what());
+        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
     }
 }
 
@@ -238,7 +237,7 @@ LoadFieldData(CSegmentInterface c_segment,
         segment->LoadFieldData(*load_info);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(UnexpectedError, e.what());
+        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
     }
 }
 
@@ -278,7 +277,7 @@ LoadFieldRawData(CSegmentInterface c_segment,
         segment->LoadFieldData(milvus::FieldId(field_id), field_data_info);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(UnexpectedError, e.what());
+        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
     }
 }
 
@@ -299,7 +298,7 @@ LoadDeletedRecord(CSegmentInterface c_segment,
         segment_interface->LoadDeletedRecord(load_info);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(UnexpectedError, e.what());
+        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
     }
 }
 
@@ -317,7 +316,7 @@ UpdateSealedSegmentIndex(CSegmentInterface c_segment,
         segment->LoadIndex(*load_index_info);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(UnexpectedError, e.what());
+        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
     }
 }
 
@@ -334,7 +333,7 @@ UpdateFieldRawDataSize(CSegmentInterface c_segment,
             milvus::FieldId(field_id), num_rows, field_data_size);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(UnexpectedError, e.what());
+        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
     }
 }
 
@@ -349,7 +348,7 @@ DropFieldData(CSegmentInterface c_segment, int64_t field_id) {
         segment->DropFieldData(milvus::FieldId(field_id));
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(UnexpectedError, e.what());
+        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
     }
 }
 
@@ -364,6 +363,6 @@ DropSealedSegmentIndex(CSegmentInterface c_segment, int64_t field_id) {
         segment->DropIndex(milvus::FieldId(field_id));
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(UnexpectedError, e.what());
+        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
     }
 }

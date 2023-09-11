@@ -29,10 +29,8 @@
 #include "SealedIndexingRecord.h"
 #include "SegmentGrowing.h"
 
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
 #include "query/PlanNode.h"
-#include "query/deprecated/GeneralQuery.h"
-#include "utils/Status.h"
 #include "common/IndexMeta.h"
 
 namespace milvus::segcore {
@@ -50,7 +48,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
            const InsertData* insert_data) override;
 
     // TODO: add id into delete log, possibly bitmap
-    Status
+    SegcoreError
     Delete(int64_t reserved_offset,
            int64_t size,
            const IdArray* pks,

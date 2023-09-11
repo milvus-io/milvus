@@ -11,6 +11,8 @@
 #include "log/Log.h"
 #include "Tracer.h"
 
+#include <utility>
+
 #include "opentelemetry/exporters/ostream/span_exporter_factory.h"
 #include "opentelemetry/exporters/jaeger/jaeger_exporter_factory.h"
 #include "opentelemetry/exporters/otlp/otlp_grpc_exporter_factory.h"
@@ -103,7 +105,7 @@ thread_local std::shared_ptr<trace::Span> local_span;
 void
 SetRootSpan(std::shared_ptr<trace::Span> span) {
     if (enable_trace) {
-        local_span = span;
+        local_span = std::move(span);
     }
 }
 
@@ -123,7 +125,7 @@ AddEvent(std::string event_label) {
 
 bool
 isEmptyID(const uint8_t* id, int length) {
-    for (size_t i = 0; i < length; i++) {
+    for (int i = 0; i < length; i++) {
         if (id[i] != 0) {
             return false;
         }

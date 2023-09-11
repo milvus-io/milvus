@@ -18,7 +18,6 @@
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "query/Plan.h"
-#include "query/deprecated/GeneralQuery.h"
 #include "segcore/SegmentInterface.h"
 
 namespace milvus::segcore {

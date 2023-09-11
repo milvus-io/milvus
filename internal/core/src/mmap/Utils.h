@@ -27,7 +27,7 @@
 #include "common/FieldMeta.h"
 #include "mmap/Types.h"
 #include "storage/Util.h"
-#include "utils/File.h"
+#include "common/File.h"
 
 namespace milvus {
 

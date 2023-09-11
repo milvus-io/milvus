@@ -30,7 +30,7 @@
 #include "common/FieldMeta.h"
 #include "common/Utils.h"
 #include "common/VectorTrait.h"
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
 #include "storage/Exception.h"
 
 namespace milvus::storage {

@@ -11,7 +11,7 @@
 
 #include <map>
 
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
 #include "indexbuilder/VecIndexCreator.h"
 #include "index/Utils.h"
 #include "index/IndexFactory.h"

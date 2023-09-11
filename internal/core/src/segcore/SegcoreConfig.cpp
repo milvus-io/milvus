@@ -11,7 +11,7 @@
 
 #include "common/Schema.h"
 #include "SegcoreConfig.h"
-#include "utils/Json.h"
+#include "common/Json.h"
 #include "yaml-cpp/yaml.h"
 
 namespace milvus::segcore {

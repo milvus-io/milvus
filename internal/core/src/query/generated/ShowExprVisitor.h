@@ -77,6 +77,6 @@ class ShowExprVisitor : public ExprVisitor {
     }
 
  private:
-    std::optional<json> json_opt_;
+    std::optional<nlohmann::json> json_opt_;
 };
 }  // namespace milvus::query

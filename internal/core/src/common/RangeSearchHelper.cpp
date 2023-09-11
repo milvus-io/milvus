@@ -88,7 +88,7 @@ ReGenRangeSearchResult(DatasetPtr data_set,
             pq(cmp);
         auto capacity = std::min<int64_t>(lims[i + 1] - lims[i], topk);
 
-        for (int j = lims[i]; j < lims[i + 1]; j++) {
+        for (size_t j = lims[i]; j < lims[i + 1]; j++) {
             auto curr = ResultPair(dist[j], id[j]);
             if (pq.size() < capacity) {
                 pq.push(curr);

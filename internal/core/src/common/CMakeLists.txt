@@ -20,14 +20,16 @@ set(COMMON_SRC
         Common.cpp
         RangeSearchHelper.cpp
         Tracer.cpp
-        IndexMeta.cpp)
+        IndexMeta.cpp
+        EasyAssert.cpp
+)
 
 add_library(milvus_common SHARED ${COMMON_SRC})
 
 target_link_libraries(milvus_common
         milvus_config
-        milvus_utils
         milvus_log
+        milvus_proto
         yaml-cpp
         boost_bitset_ext
         simdjson

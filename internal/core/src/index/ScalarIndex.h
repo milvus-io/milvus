@@ -22,7 +22,7 @@
 #include <string>
 
 #include "common/Types.h"
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
 #include "index/Index.h"
 
 namespace milvus::index {

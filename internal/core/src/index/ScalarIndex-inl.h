@@ -20,6 +20,7 @@
 
 #include "index/Meta.h"
 #include "knowhere/dataset.h"
+#include "common/Types.h"
 
 namespace milvus::index {
 template <typename T>
@@ -73,7 +74,6 @@ inline void
 ScalarIndex<std::string>::BuildWithRawData(size_t n,
                                            const void* values,
                                            const Config& config) {
-    // TODO :: use arrow
     proto::schema::StringArray arr;
     auto ok = arr.ParseFromArray(values, n);
     Assert(ok);

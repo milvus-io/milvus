@@ -23,12 +23,12 @@
 
 #include "common/FieldMeta.h"
 #include "common/Span.h"
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
+#include "common/File.h"
 #include "fmt/format.h"
 #include "log/Log.h"
 #include "mmap/Utils.h"
 #include "storage/FieldData.h"
-#include "utils/File.h"
 
 namespace milvus {
 

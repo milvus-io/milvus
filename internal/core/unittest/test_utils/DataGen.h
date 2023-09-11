@@ -105,15 +105,13 @@ struct GeneratedData {
                     auto src_data = reinterpret_cast<const T*>(
                         target_field_data.vectors().binary_vector().data());
                     std::copy_n(src_data, len, ret.data());
-                } else if (field_meta.get_data_type() == 
-                            DataType::VECTOR_FLOAT16) {
+                } else if (field_meta.get_data_type() ==
+                           DataType::VECTOR_FLOAT16) {
                     // int len = raw_->num_rows() * field_meta.get_dim() * sizeof(float16);
                     int len = raw_->num_rows() * field_meta.get_dim();
                     ret.resize(len);
-                    auto src_data =
-                        reinterpret_cast<const T*>(target_field_data.vectors()
-                                                       .float16_vector()
-                                                       .data());
+                    auto src_data = reinterpret_cast<const T*>(
+                        target_field_data.vectors().float16_vector().data());
                     std::copy_n(src_data, len, ret.data());
                 } else {
                     PanicInfo("unsupported");
@@ -269,7 +267,7 @@ DataGen(SchemaPtr schema,
                 insert_cols(data, N, field_meta);
                 break;
             }
-             case DataType::VECTOR_FLOAT16: {
+            case DataType::VECTOR_FLOAT16: {
                 auto dim = field_meta.get_dim();
                 vector<float16> final(dim * N);
                 for (auto& x : final) {
@@ -433,7 +431,8 @@ DataGenForJsonArray(SchemaPtr schema,
                             std::to_string(static_cast<double>(er())));
                         stringVec.push_back("\"" + std::to_string(er()) + "\"");
                         boolVec.push_back(i % 2 == 0 ? "true" : "false");
-                        arrayVec.push_back(fmt::format("[{}, {}, {}]", i, i+1, i+2));
+                        arrayVec.push_back(
+                            fmt::format("[{}, {}, {}]", i, i + 1, i + 2));
                     }
                     auto str = R"({"int":[)" + join(intVec, ",") +
                                R"(],"double":[)" + join(doubleVec, ",") +
@@ -604,7 +603,7 @@ SearchResultToVector(const SearchResult& sr) {
     return result;
 }
 
-inline json
+inline nlohmann::json
 SearchResultToJson(const SearchResult& sr) {
     int64_t num_queries = sr.total_nq_;
     int64_t topk = sr.unity_topK_;
@@ -618,7 +617,7 @@ SearchResultToJson(const SearchResult& sr) {
         }
         results.emplace_back(std::move(result));
     }
-    return json{results};
+    return nlohmann::json{results};
 };
 
 inline storage::FieldDataPtr

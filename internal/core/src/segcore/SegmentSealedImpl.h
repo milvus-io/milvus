@@ -28,6 +28,7 @@
 #include "SealedIndexingRecord.h"
 #include "SegmentSealed.h"
 #include "TimestampIndex.h"
+#include "common/EasyAssert.h"
 #include "mmap/Column.h"
 #include "index/ScalarIndex.h"
 #include "sys/mman.h"
@@ -104,7 +105,7 @@ class SegmentSealedImpl : public SegmentSealed {
     std::string
     debug() const override;
 
-    Status
+    SegcoreError
     Delete(int64_t reserved_offset,
            int64_t size,
            const IdArray* pks,

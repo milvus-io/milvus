@@ -15,7 +15,7 @@
 // limitations under the License.
 
 #include "storage/IndexData.h"
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
 #include "common/Consts.h"
 #include "storage/Event.h"
 

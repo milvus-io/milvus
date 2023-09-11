@@ -18,7 +18,7 @@
 
 #include <memory>
 #include <boost/dynamic_bitset.hpp>
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/dataset.h"
 #include "common/Types.h"

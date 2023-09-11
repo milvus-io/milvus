@@ -24,7 +24,7 @@
 #include "Utils.h"
 #include "Types.h"
 #include "common/Json.h"
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
 #include "mmap/Column.h"
 #include "common/Consts.h"
 #include "common/FieldMeta.h"
@@ -36,7 +36,7 @@
 #include "storage/FieldData.h"
 #include "storage/Util.h"
 #include "storage/ThreadPools.h"
-#include "utils/File.h"
+#include "common/File.h"
 #include "common/Tracer.h"
 
 namespace milvus::segcore {
@@ -980,7 +980,7 @@ SegmentSealedImpl::search_ids(const IdArray& id_array,
     return {std::move(res_id_arr), std::move(res_offsets)};
 }
 
-Status
+SegcoreError
 SegmentSealedImpl::Delete(int64_t reserved_offset,  // deprecated
                           int64_t size,
                           const IdArray* ids,
@@ -1007,7 +1007,7 @@ SegmentSealedImpl::Delete(int64_t reserved_offset,  // deprecated
     }
 
     deleted_record_.push(sort_pks, sort_timestamps.data());
-    return Status::OK();
+    return SegcoreError::success();
 }
 
 std::string

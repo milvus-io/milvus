@@ -9,7 +9,6 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "common/CGoHelper.h"
 #include "pb/segcore.pb.h"
 #include "query/Plan.h"
 #include "segcore/Collection.h"
@@ -28,7 +27,7 @@ CreateSearchPlanByExpr(CCollection c_col,
             *col->get_schema(), serialized_expr_plan, size);
 
         auto status = CStatus();
-        status.error_code = Success;
+        status.error_code = milvus::Success;
         status.error_msg = "";
         auto plan = (CSearchPlan)res.release();
         *res_plan = plan;
@@ -41,7 +40,7 @@ CreateSearchPlanByExpr(CCollection c_col,
         return status;
     } catch (std::exception& e) {
         auto status = CStatus();
-        status.error_code = UnexpectedError;
+        status.error_code = milvus::UnexpectedError;
         status.error_msg = strdup(e.what());
         *res_plan = nullptr;
         return status;
@@ -60,14 +59,14 @@ ParsePlaceholderGroup(CSearchPlan c_plan,
             plan, (const uint8_t*)(placeholder_group_blob), blob_size);
 
         auto status = CStatus();
-        status.error_code = Success;
+        status.error_code = milvus::Success;
         status.error_msg = "";
         auto group = (CPlaceholderGroup)res.release();
         *res_placeholder_group = group;
         return status;
     } catch (std::exception& e) {
         auto status = CStatus();
-        status.error_code = UnexpectedError;
+        status.error_code = milvus::UnexpectedError;
         status.error_msg = strdup(e.what());
         *res_placeholder_group = nullptr;
         return status;
@@ -94,7 +93,7 @@ GetFieldID(CSearchPlan plan, int64_t* field_id) {
         *field_id = milvus::query::GetFieldID(p);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(UnexpectedError, strdup(e.what()));
+        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
     }
 }
 
@@ -139,7 +138,7 @@ CreateRetrievePlanByExpr(CCollection c_col,
             *col->get_schema(), serialized_expr_plan, size);
 
         auto status = CStatus();
-        status.error_code = Success;
+        status.error_code = milvus::Success;
         status.error_msg = "";
         auto plan = (CRetrievePlan)res.release();
         *res_plan = plan;
@@ -152,7 +151,7 @@ CreateRetrievePlanByExpr(CCollection c_col,
         return status;
     } catch (std::exception& e) {
         auto status = CStatus();
-        status.error_code = UnexpectedError;
+        status.error_code = milvus::UnexpectedError;
         status.error_msg = strdup(e.what());
         *res_plan = nullptr;
         return status;

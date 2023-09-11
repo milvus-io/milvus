@@ -12,7 +12,7 @@
 #include "segcore/load_index_c.h"
 
 #include "common/FieldMeta.h"
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
 #include "index/Meta.h"
@@ -31,12 +31,12 @@ NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info) {
 
         *c_load_index_info = load_index_info.release();
         auto status = CStatus();
-        status.error_code = Success;
+        status.error_code = milvus::Success;
         status.error_msg = "";
         return status;
     } catch (std::exception& e) {
         auto status = CStatus();
-        status.error_code = UnexpectedError;
+        status.error_code = milvus::UnexpectedError;
         status.error_msg = strdup(e.what());
         return status;
     }
@@ -60,12 +60,12 @@ AppendIndexParam(CLoadIndexInfo c_load_index_info,
         load_index_info->index_params[index_key] = index_value;
 
         auto status = CStatus();
-        status.error_code = Success;
+        status.error_code = milvus::Success;
         status.error_msg = "";
         return status;
     } catch (std::exception& e) {
         auto status = CStatus();
-        status.error_code = UnexpectedError;
+        status.error_code = milvus::UnexpectedError;
         status.error_msg = strdup(e.what());
         return status;
     }
@@ -90,12 +90,12 @@ AppendFieldInfo(CLoadIndexInfo c_load_index_info,
         load_index_info->mmap_dir_path = std::string(mmap_dir_path);
 
         auto status = CStatus();
-        status.error_code = Success;
+        status.error_code = milvus::Success;
         status.error_msg = "";
         return status;
     } catch (std::exception& e) {
         auto status = CStatus();
-        status.error_code = UnexpectedError;
+        status.error_code = milvus::UnexpectedError;
         status.error_msg = strdup(e.what());
         return status;
     }
@@ -151,12 +151,12 @@ appendVecIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
                 index_info, file_manager);
         load_index_info->index->Load(*binary_set, config);
         auto status = CStatus();
-        status.error_code = Success;
+        status.error_code = milvus::Success;
         status.error_msg = "";
         return status;
     } catch (std::exception& e) {
         auto status = CStatus();
-        status.error_code = UnexpectedError;
+        status.error_code = milvus::UnexpectedError;
         status.error_msg = strdup(e.what());
         return status;
     }
@@ -184,12 +184,12 @@ appendScalarIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
                                                                    nullptr);
         load_index_info->index->Load(*binary_set);
         auto status = CStatus();
-        status.error_code = Success;
+        status.error_code = milvus::Success;
         status.error_msg = "";
         return status;
     } catch (std::exception& e) {
         auto status = CStatus();
-        status.error_code = UnexpectedError;
+        status.error_code = milvus::UnexpectedError;
         status.error_msg = strdup(e.what());
         return status;
     }
@@ -269,12 +269,12 @@ AppendIndexV2(CLoadIndexInfo c_load_index_info) {
 
         load_index_info->index->Load(config);
         auto status = CStatus();
-        status.error_code = Success;
+        status.error_code = milvus::Success;
         status.error_msg = "";
         return status;
     } catch (std::exception& e) {
         auto status = CStatus();
-        status.error_code = UnexpectedError;
+        status.error_code = milvus::UnexpectedError;
         status.error_msg = strdup(e.what());
         return status;
     }
@@ -289,12 +289,12 @@ AppendIndexFilePath(CLoadIndexInfo c_load_index_info, const char* c_file_path) {
         load_index_info->index_files.emplace_back(index_file_path);
 
         auto status = CStatus();
-        status.error_code = Success;
+        status.error_code = milvus::Success;
         status.error_msg = "";
         return status;
     } catch (std::exception& e) {
         auto status = CStatus();
-        status.error_code = UnexpectedError;
+        status.error_code = milvus::UnexpectedError;
         status.error_msg = strdup(e.what());
         return status;
     }
@@ -313,12 +313,12 @@ AppendIndexInfo(CLoadIndexInfo c_load_index_info,
         load_index_info->index_version = version;
 
         auto status = CStatus();
-        status.error_code = Success;
+        status.error_code = milvus::Success;
         status.error_msg = "";
         return status;
     } catch (std::exception& e) {
         auto status = CStatus();
-        status.error_code = UnexpectedError;
+        status.error_code = milvus::UnexpectedError;
         status.error_msg = strdup(e.what());
         return status;
     }
@@ -338,12 +338,12 @@ CleanLoadedIndex(CLoadIndexInfo c_load_index_info) {
                                                 load_index_info->index_version);
         local_chunk_manager->RemoveDir(index_file_path_prefix);
         auto status = CStatus();
-        status.error_code = Success;
+        status.error_code = milvus::Success;
         status.error_msg = "";
         return status;
     } catch (std::exception& e) {
         auto status = CStatus();
-        status.error_code = UnexpectedError;
+        status.error_code = milvus::UnexpectedError;
         status.error_msg = strdup(e.what());
         return status;
     }

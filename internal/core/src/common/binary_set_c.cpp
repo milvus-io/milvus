@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "common/EasyAssert.h"
 #include "knowhere/binaryset.h"
 #include "common/binary_set_c.h"
 
@@ -23,12 +24,12 @@ NewBinarySet(CBinarySet* c_binary_set) {
         auto binary_set = std::make_unique<knowhere::BinarySet>();
         *c_binary_set = binary_set.release();
         auto status = CStatus();
-        status.error_code = Success;
+        status.error_code = milvus::ErrorCodeEnum::Success;
         status.error_msg = "";
         return status;
     } catch (std::exception& e) {
         auto status = CStatus();
-        status.error_code = UnexpectedError;
+        status.error_code = milvus::ErrorCodeEnum::UnexpectedError;
         status.error_msg = strdup(e.what());
         return status;
     }
@@ -55,10 +56,10 @@ AppendIndexBinary(CBinarySet c_binary_set,
         std::shared_ptr<uint8_t[]> data(dup);
         binary_set->Append(index_key, data, index_size);
 
-        status.error_code = Success;
+        status.error_code = milvus::ErrorCodeEnum::Success;
         status.error_msg = "";
     } catch (std::exception& e) {
-        status.error_code = UnexpectedError;
+        status.error_code = milvus::ErrorCodeEnum::UnexpectedError;
         status.error_msg = strdup(e.what());
     }
     return status;
@@ -100,11 +101,11 @@ CopyBinarySetValue(void* data, const char* key, CBinarySet c_binary_set) {
     auto binary_set = (knowhere::BinarySet*)c_binary_set;
     try {
         auto binary = binary_set->GetByName(key);
-        status.error_code = Success;
+        status.error_code = milvus::ErrorCodeEnum::Success;
         status.error_msg = "";
         memcpy((uint8_t*)data, binary->data.get(), binary->size);
     } catch (std::exception& e) {
-        status.error_code = UnexpectedError;
+        status.error_code = milvus::ErrorCodeEnum::UnexpectedError;
         status.error_msg = strdup(e.what());
     }
     return status;

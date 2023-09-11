@@ -11,10 +11,10 @@
 
 #include <optional>
 
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
+#include "common/Json.h"
 #include "query/generated/ShowExprVisitor.h"
 #include "query/generated/ShowPlanNodeVisitor.h"
-#include "utils/Json.h"
 
 namespace milvus::query {
 #if 0

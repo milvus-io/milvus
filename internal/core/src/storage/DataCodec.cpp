@@ -20,7 +20,7 @@
 #include "storage/InsertData.h"
 #include "storage/IndexData.h"
 #include "storage/BinlogReader.h"
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
 #include "common/Consts.h"
 
 namespace milvus::storage {

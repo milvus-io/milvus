@@ -11,9 +11,8 @@
 
 #include <vector>
 #include "Reduce.h"
-#include "common/CGoHelper.h"
 #include "common/QueryResult.h"
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
 #include "query/Plan.h"
 #include "segcore/reduce_c.h"
 #include "segcore/Utils.h"
@@ -46,7 +45,7 @@ ReduceSearchResultsAndFillData(CSearchResultDataBlobs* cSearchResultDataBlobs,
         *cSearchResultDataBlobs = reduce_helper.GetSearchResultDataBlobs();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(UnexpectedError, e.what());
+        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
     }
 }
 
@@ -68,7 +67,7 @@ GetSearchResultDataBlob(CProto* searchResultDataBlob,
     } catch (std::exception& e) {
         searchResultDataBlob->proto_blob = nullptr;
         searchResultDataBlob->proto_size = 0;
-        return milvus::FailureCStatus(UnexpectedError, e.what());
+        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
     }
 }
 

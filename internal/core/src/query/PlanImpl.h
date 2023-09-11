@@ -19,8 +19,8 @@
 
 #include "Plan.h"
 #include "PlanNode.h"
-#include "exceptions/EasyAssert.h"
-#include "utils/Json.h"
+#include "common/EasyAssert.h"
+#include "common/Json.h"
 #include "common/Consts.h"
 
 namespace milvus::query {

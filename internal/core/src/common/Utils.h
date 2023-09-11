@@ -28,7 +28,7 @@
 #include "common/FieldMeta.h"
 #include "common/LoadInfo.h"
 #include "common/Types.h"
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
 #include "knowhere/dataset.h"
 #include "knowhere/expected.h"
 #include "simdjson.h"

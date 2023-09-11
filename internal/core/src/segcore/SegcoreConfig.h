@@ -15,9 +15,9 @@
 #include <string>
 
 #include "common/Types.h"
+#include "common/Json.h"
 #include "index/Utils.h"
-#include "exceptions/EasyAssert.h"
-#include "utils/Json.h"
+#include "common/EasyAssert.h"
 
 namespace milvus::segcore {
 

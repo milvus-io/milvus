@@ -22,6 +22,7 @@
 #include "test_utils/AssertUtils.h"
 #include "test_utils/DataGen.h"
 
+using json = nlohmann::json;
 using namespace milvus;
 using namespace milvus::query;
 using namespace milvus::segcore;
@@ -31,9 +32,6 @@ const int64_t ROW_COUNT = 100 * 1000;
 }
 
 TEST(Query, ShowExecutor) {
-    using namespace milvus::query;
-    using namespace milvus::segcore;
-    using namespace milvus;
     auto metric_type = knowhere::metric::L2;
     auto node = std::make_unique<FloatVectorANNS>();
     auto schema = std::make_shared<Schema>();

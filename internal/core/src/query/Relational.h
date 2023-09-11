@@ -16,7 +16,7 @@
 
 #include "common/Utils.h"
 #include "common/VectorTrait.h"
-#include "exceptions/EasyAssert.h"
+#include "common/EasyAssert.h"
 #include "query/Expr.h"
 #include "query/Utils.h"
 
