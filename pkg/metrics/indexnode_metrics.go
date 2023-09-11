@@ -23,6 +23,9 @@ import (
 )
 
 var (
+	// unit second, from 1ms to 2hrs
+	indexBucket = []float64{0.001, 0.1, 0.5, 1, 5, 10, 20, 50, 100, 250, 500, 1000, 3600, 5000, 10000}
+
 	IndexNodeBuildIndexTaskCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -37,7 +40,7 @@ var (
 			Subsystem: typeutil.IndexNodeRole,
 			Name:      "load_field_latency",
 			Help:      "latency of loading the field data",
-			Buckets:   buckets,
+			Buckets:   indexBucket,
 		}, []string{nodeIDLabelName})
 
 	IndexNodeDecodeFieldLatency = prometheus.NewHistogramVec(
@@ -46,7 +49,7 @@ var (
 			Subsystem: typeutil.IndexNodeRole,
 			Name:      "decode_field_latency",
 			Help:      "latency of decode field data",
-			Buckets:   buckets,
+			Buckets:   indexBucket,
 		}, []string{nodeIDLabelName})
 
 	IndexNodeKnowhereBuildIndexLatency = prometheus.NewHistogramVec(
@@ -55,7 +58,7 @@ var (
 			Subsystem: typeutil.IndexNodeRole,
 			Name:      "knowhere_build_index_latency",
 			Help:      "latency of building the index by knowhere",
-			Buckets:   buckets,
+			Buckets:   indexBucket,
 		}, []string{nodeIDLabelName})
 
 	IndexNodeEncodeIndexFileLatency = prometheus.NewHistogramVec(
@@ -64,7 +67,7 @@ var (
 			Subsystem: typeutil.IndexNodeRole,
 			Name:      "encode_index_latency",
 			Help:      "latency of encoding the index file",
-			Buckets:   buckets,
+			Buckets:   indexBucket,
 		}, []string{nodeIDLabelName})
 
 	IndexNodeSaveIndexFileLatency = prometheus.NewHistogramVec(
@@ -73,7 +76,7 @@ var (
 			Subsystem: typeutil.IndexNodeRole,
 			Name:      "save_index_latency",
 			Help:      "latency of saving the index file",
-			Buckets:   buckets,
+			Buckets:   indexBucket,
 		}, []string{nodeIDLabelName})
 
 	IndexNodeIndexTaskLatencyInQueue = prometheus.NewHistogramVec(
@@ -91,7 +94,7 @@ var (
 			Subsystem: typeutil.IndexNodeRole,
 			Name:      "build_index_latency",
 			Help:      "latency of build index for segment",
-			Buckets:   buckets,
+			Buckets:   indexBucket,
 		}, []string{nodeIDLabelName})
 )
 
