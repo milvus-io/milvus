@@ -16,7 +16,6 @@
 
 #include "index/IndexFactory.h"
 #include "index/VectorMemIndex.h"
-#include "index/VectorMemNMIndex.h"
 #include "index/Utils.h"
 #include "index/Meta.h"
 
@@ -93,10 +92,6 @@ IndexFactory::CreateVectorIndex(const CreateIndexInfo& create_index_info,
     }
 #endif
 
-    if (is_in_nm_list(index_type)) {
-        return std::make_unique<VectorMemNMIndex>(
-            index_type, metric_type, file_manager);
-    }
     // create mem index
     return std::make_unique<VectorMemIndex>(
         index_type, metric_type, file_manager);
