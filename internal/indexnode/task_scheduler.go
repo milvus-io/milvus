@@ -233,7 +233,7 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 	}
 	t.SetState(commonpb.IndexState_Finished, "")
 	if indexBuildTask, ok := t.(*indexBuildTask); ok {
-		metrics.IndexNodeBuildIndexLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(indexBuildTask.tr.ElapseSpan().Milliseconds()))
+		metrics.IndexNodeBuildIndexLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(indexBuildTask.tr.ElapseSpan().Seconds())
 		metrics.IndexNodeIndexTaskLatencyInQueue.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(indexBuildTask.queueDur.Milliseconds()))
 	}
 }
