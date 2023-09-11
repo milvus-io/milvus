@@ -188,7 +188,7 @@ func NewSegment(collection *Collection,
 	var segment = &LocalSegment{
 		baseSegment:        newBaseSegment(segmentID, partitionID, collectionID, shard, segmentType, version, startPosition),
 		ptr:                segmentPtr,
-		lastDeltaTimestamp: atomic.NewUint64(deltaPosition.GetTimestamp()),
+		lastDeltaTimestamp: atomic.NewUint64(0),
 		fieldIndexes:       typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
 	}
 
@@ -837,6 +837,8 @@ func (s *LocalSegment) LoadDeltaData(deltaData *storage.DeleteData) error {
 	if err := HandleCStatus(&status, "LoadDeletedRecord failed"); err != nil {
 		return err
 	}
+
+	s.lastDeltaTimestamp.Store(tss[len(tss)-1])
 
 	log.Info("load deleted record done",
 		zap.Int64("rowNum", rowNum),

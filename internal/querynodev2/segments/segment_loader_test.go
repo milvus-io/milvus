@@ -356,6 +356,66 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogs() {
 	}
 }
 
+func (suite *SegmentLoaderSuite) TestLoadDupDeltaLogs() {
+	ctx := context.Background()
+	loadInfos := make([]*querypb.SegmentLoadInfo, 0, suite.segmentNum)
+
+	msgLength := 100
+	// Load sealed
+	for i := 0; i < suite.segmentNum; i++ {
+		segmentID := suite.segmentID + int64(i)
+		binlogs, statsLogs, err := SaveBinLog(ctx,
+			suite.collectionID,
+			suite.partitionID,
+			segmentID,
+			msgLength,
+			suite.schema,
+			suite.chunkManager,
+		)
+		suite.NoError(err)
+
+		// Delete PKs 1, 2
+		deltaLogs, err := SaveDeltaLog(suite.collectionID,
+			suite.partitionID,
+			segmentID,
+			suite.chunkManager,
+		)
+		suite.NoError(err)
+
+		loadInfos = append(loadInfos, &querypb.SegmentLoadInfo{
+			SegmentID:    segmentID,
+			PartitionID:  suite.partitionID,
+			CollectionID: suite.collectionID,
+			BinlogPaths:  binlogs,
+			Statslogs:    statsLogs,
+			Deltalogs:    deltaLogs,
+			NumOfRows:    int64(msgLength),
+		})
+	}
+
+	segments, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeGrowing, 0, loadInfos...)
+	suite.NoError(err)
+
+	for i, segment := range segments {
+		suite.Equal(int64(100-2), segment.RowNum())
+		for pk := 0; pk < 100; pk++ {
+			if pk == 1 || pk == 2 {
+				continue
+			}
+			exist := segment.MayPkExist(storage.NewInt64PrimaryKey(int64(pk)))
+			suite.Require().True(exist)
+		}
+
+		seg := segment.(*LocalSegment)
+		// nothing would happen as the delta logs have been all applied,
+		// so the released segment won't cause error
+		seg.Release()
+		loadInfos[i].Deltalogs[0].Binlogs[0].TimestampTo--
+		err := suite.loader.LoadDeltaLogs(ctx, seg, loadInfos[i].GetDeltalogs())
+		suite.NoError(err)
+	}
+}
+
 func (suite *SegmentLoaderSuite) TestLoadIndex() {
 	ctx := context.Background()
 	segment := &LocalSegment{}
