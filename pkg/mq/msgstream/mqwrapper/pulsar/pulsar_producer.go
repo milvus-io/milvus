@@ -19,6 +19,9 @@ package pulsar
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/pkg/log"
+	"go.uber.org/zap"
+
 	"github.com/apache/pulsar-client-go/pulsar"
 
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -51,6 +54,7 @@ func (pp *pulsarProducer) Send(ctx context.Context, message *mqwrapper.ProducerM
 
 	metrics.MsgStreamRequestLatency.WithLabelValues(metrics.SendMsgLabel).Observe(float64(start.ElapseSpan().Milliseconds()))
 	metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.SuccessLabel).Inc()
+	log.Info("Send message success", zap.Int("bytes length", len(message.Payload)))
 	return &pulsarID{messageID: pmID}, nil
 }
 

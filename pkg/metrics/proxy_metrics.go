@@ -19,9 +19,8 @@ package metrics
 import (
 	"strconv"
 
-	"github.com/prometheus/client_golang/prometheus"
-
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 var (
@@ -288,6 +287,16 @@ var (
 		}, []string{
 			nodeIDLabelName,
 		})
+
+	// ProxyInsertLatency record the latency that mutate successfully.
+	ProxyInsertLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "insert_latency",
+			Help:      "latency of insert or delete successfully",
+			Buckets:   buckets, // unit: ms
+		}, []string{nodeIDLabelName, stepLabel})
 )
 
 // RegisterProxy registers Proxy metrics
@@ -331,6 +340,8 @@ func RegisterProxy(registry *prometheus.Registry) {
 
 	registry.MustRegister(ProxyWorkLoadScore)
 	registry.MustRegister(ProxyExecutingTotalNq)
+
+	registry.MustRegister(ProxyInsertLatency)
 }
 
 func CleanupCollectionMetrics(nodeID int64, collection string) {

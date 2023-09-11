@@ -94,6 +94,7 @@ func (it *insertTask) OnEnqueue() error {
 }
 
 func (it *insertTask) PreExecute(ctx context.Context) error {
+	tr := timerecord.NewTimeRecorder("PreExecute")
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Insert-PreExecute")
 	defer sp.End()
 
@@ -118,13 +119,15 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	}
 	it.schema = schema
 
+	metrics.ProxyInsertLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "GetCollectionSchema").Observe(float64(tr.RecordSpan().Milliseconds()))
+
 	rowNums := uint32(it.insertMsg.NRows())
 	// set insertTask.rowIDs
 	var rowIDBegin UniqueID
 	var rowIDEnd UniqueID
-	tr := timerecord.NewTimeRecorder("applyPK")
 	rowIDBegin, rowIDEnd, _ = it.idAllocator.Alloc(rowNums)
-	metrics.ProxyApplyPrimaryKeyLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.ProxyApplyPrimaryKeyLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.RecordSpan().Milliseconds()))
+	metrics.ProxyInsertLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "applyPk").Observe(float64(tr.RecordSpan().Milliseconds()))
 
 	it.insertMsg.RowIDs = make([]UniqueID, rowNums)
 	for i := rowIDBegin; i < rowIDEnd; i++ {
@@ -204,7 +207,8 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	}
 
 	log.Debug("Proxy Insert PreExecute done")
-
+	metrics.ProxyInsertLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "checkData").Observe(float64(tr.RecordSpan().Milliseconds()))
+	metrics.ProxyInsertLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "PreExecute").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return nil
 }
 
@@ -224,11 +228,13 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	it.insertMsg.CollectionID = collID
 
 	getCacheDur := tr.RecordSpan()
+	metrics.ProxyInsertLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "getCache").Observe(float64(getCacheDur.Milliseconds()))
 	stream, err := it.chMgr.getOrCreateDmlStream(collID)
 	if err != nil {
 		return err
 	}
 	getMsgStreamDur := tr.RecordSpan()
+	metrics.ProxyInsertLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "getMsgStream").Observe(float64(getMsgStreamDur.Milliseconds()))
 
 	channelNames, err := it.chMgr.getVChannels(collID)
 	if err != nil {
@@ -260,6 +266,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		return err
 	}
 	assignSegmentIDDur := tr.RecordSpan()
+	metrics.ProxyInsertLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "assignSegmentID").Observe(float64(assignSegmentIDDur.Milliseconds()))
 
 	log.Debug("assign segmentID for insert data success",
 		zap.Duration("assign segmentID duration", assignSegmentIDDur))
@@ -272,12 +279,13 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	}
 	sendMsgDur := tr.RecordSpan()
 	metrics.ProxySendMutationReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.InsertLabel).Observe(float64(sendMsgDur.Milliseconds()))
+	metrics.ProxyInsertLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "sendMsg").Observe(float64(sendMsgDur.Milliseconds()))
 	totalExecDur := tr.ElapseSpan()
 	log.Debug("Proxy Insert Execute done",
 		zap.String("collectionName", collectionName),
 		zap.Duration("send message duration", sendMsgDur),
 		zap.Duration("execute duration", totalExecDur))
-
+	metrics.ProxyInsertLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "sendMsg").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return nil
 }
 

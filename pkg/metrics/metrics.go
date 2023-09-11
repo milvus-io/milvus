@@ -88,6 +88,7 @@ const (
 	lockSource               = "lock_source"
 	lockType                 = "lock_type"
 	lockOp                   = "lock_op"
+	stepLabel                = "step"
 )
 
 var (
