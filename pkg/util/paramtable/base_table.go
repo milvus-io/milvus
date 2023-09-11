@@ -146,7 +146,6 @@ func (bt *BaseTable) init() {
 	if !bt.config.skipRemote {
 		bt.initConfigsFromRemote()
 	}
-	log.Info("Got Config", zap.Any("configs", bt.mgr.GetConfigs()))
 }
 
 func (bt *BaseTable) initConfigsFromLocal() {
