@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
@@ -60,8 +61,11 @@ func (d *nmqDialer) Dial(network, address string) (net.Conn, error) {
 // NewClientWithDefaultOptions returns a new NMQ client with default options.
 // It retrieves the NMQ client URL from the server configuration.
 func NewClientWithDefaultOptions(ctx context.Context) (mqwrapper.Client, error) {
-	url := Nmq.ClientURL()
+	if !funcutil.CheckCtxValid(ctx) {
+		return nil, ctx.Err()
+	}
 
+	url := Nmq.ClientURL()
 	opt := nats.SetCustomDialer(&nmqDialer{
 		ctx: func() context.Context { return ctx },
 	})

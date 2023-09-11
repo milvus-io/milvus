@@ -62,9 +62,14 @@ func NewClient(factory msgstream.Factory, role string, nodeID int64) Client {
 }
 
 func (c *client) Register(ctx context.Context, vchannel string, pos *Pos, subPos SubPos) (<-chan *MsgPack, error) {
-	log := log.With(zap.String("role", c.role),
-		zap.Int64("nodeID", c.nodeID), zap.String("vchannel", vchannel))
 	pchannel := funcutil.ToPhysicalChannel(vchannel)
+
+	log := log.With(
+		zap.String("role", c.role),
+		zap.Int64("nodeID", c.nodeID),
+		zap.String("vchannel", vchannel),
+		zap.String("pchannel", pchannel),
+	)
 	c.managerMut.Lock()
 	defer c.managerMut.Unlock()
 	var manager DispatcherManager

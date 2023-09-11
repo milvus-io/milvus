@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -51,7 +52,8 @@ func TestPmsFactory(t *testing.T) {
 			}
 
 			if test.ctxTimeouted {
-				time.Sleep(time.Millisecond)
+				<-time.After(time.Millisecond)
+				cancel()
 			}
 			stream, err := pmsFactory.NewMsgStream(ctx)
 			if test.expectedError {
@@ -66,6 +68,7 @@ func TestPmsFactory(t *testing.T) {
 			if test.expectedError {
 				assert.Error(t, err)
 				assert.Nil(t, ttStream)
+				assert.True(t, merr.IsCanceledOrTimeout(err))
 			} else {
 				assert.NoError(t, err)
 				assert.NotNil(t, ttStream)
@@ -121,14 +124,13 @@ func TestKafkaFactory(t *testing.T) {
 		t.Run(test.description, func(t *testing.T) {
 			var cancel context.CancelFunc
 			ctx := context.Background()
-			timeoutDur := time.Millisecond * 30
 			if test.withTimeout {
-				ctx, cancel = context.WithTimeout(ctx, timeoutDur)
+				ctx, cancel = context.WithTimeout(ctx, time.Millisecond*30)
 				defer cancel()
 			}
 
 			if test.ctxTimeouted {
-				time.Sleep(timeoutDur)
+				cancel()
 			}
 			stream, err := kmsFactory.NewMsgStream(ctx)
 			if test.expectedError {

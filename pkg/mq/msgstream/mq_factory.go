@@ -32,6 +32,7 @@ import (
 	kafkawrapper "github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper/kafka"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper/nmq"
 	pulsarmqwrapper "github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper/pulsar"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 )
@@ -68,12 +69,12 @@ func NewPmsFactory(serviceParam *paramtable.ServiceParam) *PmsFactory {
 
 // NewMsgStream is used to generate a new Msgstream object
 func (f *PmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
-	var timeout time.Duration = f.RequestTimeout
+	if !funcutil.CheckCtxValid(ctx) {
+		return nil, ctx.Err()
+	}
 
+	var timeout time.Duration = f.RequestTimeout
 	if deadline, ok := ctx.Deadline(); ok {
-		if deadline.Before(time.Now()) {
-			return nil, errors.New("context timeout when NewMsgStream")
-		}
 		timeout = time.Until(deadline)
 	}
 
@@ -96,11 +97,12 @@ func (f *PmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
 
 // NewTtMsgStream is used to generate a new TtMsgstream object
 func (f *PmsFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
+	if !funcutil.CheckCtxValid(ctx) {
+		return nil, ctx.Err()
+	}
+
 	var timeout time.Duration = f.RequestTimeout
 	if deadline, ok := ctx.Deadline(); ok {
-		if deadline.Before(time.Now()) {
-			return nil, errors.New("context timeout when NewTtMsgStream")
-		}
 		timeout = time.Until(deadline)
 	}
 	auth, err := f.getAuthentication()
