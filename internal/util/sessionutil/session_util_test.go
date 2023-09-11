@@ -603,8 +603,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	defer etcdKV.RemoveWithPrefix("")
 
 	var wg sync.WaitGroup
-	ch := make(chan struct{})
-	signal := make(chan struct{}, 1)
+	signal := make(chan struct{})
 	flag := false
 
 	// register session 1, will be active
@@ -614,15 +613,15 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	s1.SetEnableActiveStandBy(true)
 	s1.Register()
 	wg.Add(1)
-	s1.liveCh = ch
 	s1.ProcessActiveStandBy(func() error {
 		log.Debug("Session 1 become active")
 		wg.Done()
 		return nil
 	})
+	wg.Wait()
 	s1.LivenessCheck(ctx1, func() {
 		flag = true
-		signal <- struct{}{}
+		close(signal)
 		s1.cancelKeepAlive()
 	})
 	assert.False(t, s1.isStandby.Load().(bool))
@@ -645,14 +644,14 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	// stop session 1, session 2 will take over primary service
 	log.Debug("Stop session 1, session 2 will take over primary service")
 	assert.False(t, flag)
-	ch <- struct{}{}
-	assert.False(t, flag)
-	s1.safeCloseLiveCh()
+
+	s1.Stop()
 	<-signal
 	assert.True(t, flag)
 
 	wg.Wait()
 	assert.False(t, s2.isStandby.Load().(bool))
+	s2.Stop()
 }
 
 func TestSessionEventType_String(t *testing.T) {
