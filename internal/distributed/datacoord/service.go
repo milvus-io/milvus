@@ -98,7 +98,7 @@ func (s *Server) init() error {
 		etcdConfig.EtcdTLSCACert.GetValue(),
 		etcdConfig.EtcdTLSMinVersion.GetValue())
 	if err != nil {
-		log.Debug("DataCoord connect to etcd failed", zap.Error(err))
+		log.Error("DataCoord connect to etcd failed", zap.Error(err))
 		return err
 	}
 	s.etcdCli = etcdCli
@@ -109,7 +109,7 @@ func (s *Server) init() error {
 		log.Info("Connecting to tikv metadata storage.")
 		tikvCli, err := getTiKVClient(&paramtable.Get().TiKVCfg)
 		if err != nil {
-			log.Warn("DataCoord failed to connect to tikv", zap.Error(err))
+			log.Error("DataCoord failed to connect to tikv", zap.Error(err))
 			return err
 		}
 		s.dataCoord.SetTiKVClient(tikvCli)
@@ -118,7 +118,7 @@ func (s *Server) init() error {
 
 	err = s.startGrpc()
 	if err != nil {
-		log.Debug("DataCoord startGrpc failed", zap.Error(err))
+		log.Error("DataCoord startGrpc failed", zap.Error(err))
 		return err
 	}
 
@@ -203,7 +203,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 func (s *Server) start() error {
 	err := s.dataCoord.Register()
 	if err != nil {
-		log.Debug("DataCoord register service failed", zap.Error(err))
+		log.Error("DataCoord register service failed", zap.Error(err))
 		return err
 	}
 

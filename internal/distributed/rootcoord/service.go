@@ -173,7 +173,7 @@ func (s *Server) init() error {
 		etcdConfig.EtcdTLSCACert.GetValue(),
 		etcdConfig.EtcdTLSMinVersion.GetValue())
 	if err != nil {
-		log.Debug("RootCoord connect to etcd failed", zap.Error(err))
+		log.Error("RootCoord connect to etcd failed", zap.Error(err))
 		return err
 	}
 	s.etcdCli = etcdCli
@@ -185,7 +185,7 @@ func (s *Server) init() error {
 		log.Info("Connecting to tikv metadata storage.")
 		s.tikvCli, err = getTiKVClient(&paramtable.Get().TiKVCfg)
 		if err != nil {
-			log.Debug("RootCoord failed to connect to tikv", zap.Error(err))
+			log.Error("RootCoord failed to connect to tikv", zap.Error(err))
 			return err
 		}
 		s.rootCoord.SetTiKVClient(s.tikvCli)

@@ -125,7 +125,7 @@ func (s *Server) init() error {
 		etcdConfig.EtcdTLSCACert.GetValue(),
 		etcdConfig.EtcdTLSMinVersion.GetValue())
 	if err != nil {
-		log.Debug("QueryCoord connect to etcd failed", zap.Error(err))
+		log.Error("QueryCoord connect to etcd failed", zap.Error(err))
 		return err
 	}
 	s.etcdCli = etcdCli
@@ -231,7 +231,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	log.Debug("network", zap.String("port", strconv.Itoa(grpcPort)))
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
-		log.Debug("GrpcServer:failed to listen:", zap.String("error", err.Error()))
+		log.Error("GrpcServer:failed to listen:", zap.String("error", err.Error()))
 		s.grpcErrChan <- err
 		return
 	}

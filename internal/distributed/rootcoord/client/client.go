@@ -56,7 +56,7 @@ func NewClient(ctx context.Context, metaRoot string, etcdCli *clientv3.Client) (
 	sess := sessionutil.NewSession(ctx, metaRoot, etcdCli)
 	if sess == nil {
 		err := fmt.Errorf("new session error, maybe can not connect to etcd")
-		log.Debug("QueryCoordClient NewClient failed", zap.Error(err))
+		log.Warn("QueryCoordClient NewClient failed", zap.Error(err))
 		return nil, err
 	}
 	config := &Params.RootCoordGrpcClientCfg
@@ -85,7 +85,7 @@ func (c *Client) getRootCoordAddr() (string, error) {
 	key := c.grpcClient.GetRole()
 	msess, _, err := c.sess.GetSessions(key)
 	if err != nil {
-		log.Debug("RootCoordClient GetSessions failed", zap.Any("key", key))
+		log.Warn("RootCoordClient GetSessions failed", zap.Any("key", key))
 		return "", err
 	}
 	ms, ok := msess[key]

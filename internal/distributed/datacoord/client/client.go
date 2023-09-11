@@ -55,7 +55,7 @@ func NewClient(ctx context.Context, metaRoot string, etcdCli *clientv3.Client) (
 	sess := sessionutil.NewSession(ctx, metaRoot, etcdCli)
 	if sess == nil {
 		err := fmt.Errorf("new session error, maybe can not connect to etcd")
-		log.Debug("DataCoordClient NewClient failed", zap.Error(err))
+		log.Warn("DataCoordClient NewClient failed", zap.Error(err))
 		return nil, err
 	}
 
@@ -80,12 +80,12 @@ func (c *Client) getDataCoordAddr() (string, error) {
 	key := c.grpcClient.GetRole()
 	msess, _, err := c.sess.GetSessions(key)
 	if err != nil {
-		log.Debug("DataCoordClient, getSessions failed", zap.Any("key", key), zap.Error(err))
+		log.Warn("DataCoordClient, getSessions failed", zap.Any("key", key), zap.Error(err))
 		return "", err
 	}
 	ms, ok := msess[key]
 	if !ok {
-		log.Debug("DataCoordClient, not existed in msess ", zap.Any("key", key), zap.Any("len of msess", len(msess)))
+		log.Warn("DataCoordClient, not existed in msess ", zap.Any("key", key), zap.Any("len of msess", len(msess)))
 		return "", fmt.Errorf("find no available datacoord, check datacoord state")
 	}
 

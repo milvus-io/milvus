@@ -335,7 +335,7 @@ func (s *Server) start() error {
 	}
 	err := s.datanode.Register()
 	if err != nil {
-		log.Debug("failed to register to Etcd", zap.Error(err))
+		log.Error("failed to register to Etcd", zap.Error(err))
 		return err
 	}
 	return nil

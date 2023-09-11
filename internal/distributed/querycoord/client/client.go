@@ -49,7 +49,7 @@ func NewClient(ctx context.Context, metaRoot string, etcdCli *clientv3.Client) (
 	sess := sessionutil.NewSession(ctx, metaRoot, etcdCli)
 	if sess == nil {
 		err := fmt.Errorf("new session error, maybe can not connect to etcd")
-		log.Debug("QueryCoordClient NewClient failed", zap.Error(err))
+		log.Warn("QueryCoordClient NewClient failed", zap.Error(err))
 		return nil, err
 	}
 	config := &Params.QueryCoordGrpcClientCfg
@@ -74,12 +74,12 @@ func (c *Client) getQueryCoordAddr() (string, error) {
 	key := c.grpcClient.GetRole()
 	msess, _, err := c.sess.GetSessions(key)
 	if err != nil {
-		log.Debug("QueryCoordClient GetSessions failed", zap.Error(err))
+		log.Warn("QueryCoordClient GetSessions failed", zap.Error(err))
 		return "", err
 	}
 	ms, ok := msess[key]
 	if !ok {
-		log.Debug("QueryCoordClient msess key not existed", zap.Any("key", key))
+		log.Warn("QueryCoordClient msess key not existed", zap.Any("key", key))
 		return "", fmt.Errorf("find no available querycoord, check querycoord state")
 	}
 	c.grpcClient.SetNodeID(ms.ServerID)

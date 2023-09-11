@@ -106,7 +106,7 @@ func (s *Server) init() error {
 		etcdConfig.EtcdTLSCACert.GetValue(),
 		etcdConfig.EtcdTLSMinVersion.GetValue())
 	if err != nil {
-		log.Debug("QueryNode connect to etcd failed", zap.Error(err))
+		log.Error("QueryNode connect to etcd failed", zap.Error(err))
 		return err
 	}
 	s.etcdCli = etcdCli
@@ -211,7 +211,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(lis); err != nil {
-		log.Debug("QueryNode Start Grpc Failed!!!!")
+		log.Error("QueryNode Start Grpc Failed!!!!")
 		s.grpcErrChan <- err
 	}
 
