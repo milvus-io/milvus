@@ -507,20 +507,12 @@ func (dct *describeCollectionTask) PreExecute(ctx context.Context) error {
 func (dct *describeCollectionTask) Execute(ctx context.Context) error {
 	var err error
 	dct.result = &milvuspb.DescribeCollectionResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status: &commonpb.Status{},
 		Schema: &schemapb.CollectionSchema{
-			Name:        "",
-			Description: "",
-			AutoID:      false,
-			Fields:      make([]*schemapb.FieldSchema, 0),
+			Fields: make([]*schemapb.FieldSchema, 0),
 		},
-		CollectionID:         0,
-		VirtualChannelNames:  nil,
-		PhysicalChannelNames: nil,
-		CollectionName:       dct.GetCollectionName(),
-		DbName:               dct.GetDbName(),
+		CollectionName: dct.GetCollectionName(),
+		DbName:         dct.GetDbName(),
 	}
 
 	result, err := dct.rootCoord.DescribeCollection(ctx, dct.DescribeCollectionRequest)
@@ -529,7 +521,11 @@ func (dct *describeCollectionTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	if result.Status.ErrorCode != commonpb.ErrorCode_Success {
+	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_CollectionNotExists {
+		dct.result.Status = result.GetStatus()
+		dct.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		dct.result.Status.Reason = "can't find collection " + dct.result.Status.Reason
+	} else if result.Status.ErrorCode != commonpb.ErrorCode_Success {
 		dct.result.Status = result.Status
 	} else {
 		dct.result.Schema.Name = result.Schema.Name
