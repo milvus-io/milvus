@@ -67,7 +67,6 @@ func NewClient(ctx context.Context, metaRoot string, etcdCli *clientv3.Client) (
 			MaxAttempts:            ClientParams.MaxAttempts,
 			InitialBackoff:         ClientParams.InitialBackoff,
 			MaxBackoff:             ClientParams.MaxBackoff,
-			BackoffMultiplier:      ClientParams.BackoffMultiplier,
 		},
 		sess: sess,
 	}

@@ -24,7 +24,6 @@ import (
 	"math/rand"
 	"net"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -90,11 +89,18 @@ func TestClientBase_connect(t *testing.T) {
 func TestClientBase_Call(t *testing.T) {
 	// mock client with nothing
 	base := ClientBase[*mockClient]{}
-	base.grpcClientMtx.Lock()
-	base.grpcClient = &mockClient{}
-	base.grpcClientMtx.Unlock()
+	initClient := func() {
+		base.grpcClientMtx.Lock()
+		base.grpcClient = &mockClient{}
+		base.grpcClientMtx.Unlock()
+	}
+	base.MaxAttempts = 1
+	base.SetGetAddrFunc(func() (string, error) {
+		return "", errors.New("mocked address error")
+	})
 
 	t.Run("Call normal return", func(t *testing.T) {
+		initClient()
 		_, err := base.Call(context.Background(), func(client *mockClient) (any, error) {
 			return struct{}{}, nil
 		})
@@ -102,6 +108,7 @@ func TestClientBase_Call(t *testing.T) {
 	})
 
 	t.Run("Call with canceled context", func(t *testing.T) {
+		initClient()
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		_, err := base.Call(ctx, func(client *mockClient) (any, error) {
@@ -112,6 +119,7 @@ func TestClientBase_Call(t *testing.T) {
 	})
 
 	t.Run("Call canceled in caller func", func(t *testing.T) {
+		initClient()
 		ctx, cancel := context.WithCancel(context.Background())
 		errMock := errors.New("mocked")
 		_, err := base.Call(ctx, func(client *mockClient) (any, error) {
@@ -128,6 +136,7 @@ func TestClientBase_Call(t *testing.T) {
 	})
 
 	t.Run("Call returns non-grpc error", func(t *testing.T) {
+		initClient()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		errMock := errors.New("mocked")
@@ -144,6 +153,7 @@ func TestClientBase_Call(t *testing.T) {
 	})
 
 	t.Run("Call returns grpc error", func(t *testing.T) {
+		initClient()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		errGrpc := status.Error(codes.Unknown, "mocked")
@@ -179,11 +189,18 @@ func TestClientBase_Call(t *testing.T) {
 func TestClientBase_Recall(t *testing.T) {
 	// mock client with nothing
 	base := ClientBase[*mockClient]{}
-	base.grpcClientMtx.Lock()
-	base.grpcClient = &mockClient{}
-	base.grpcClientMtx.Unlock()
+	initClient := func() {
+		base.grpcClientMtx.Lock()
+		base.grpcClient = &mockClient{}
+		base.grpcClientMtx.Unlock()
+	}
+	base.MaxAttempts = 1
+	base.SetGetAddrFunc(func() (string, error) {
+		return "", errors.New("mocked address error")
+	})
 
 	t.Run("Recall normal return", func(t *testing.T) {
+		initClient()
 		_, err := base.ReCall(context.Background(), func(client *mockClient) (any, error) {
 			return struct{}{}, nil
 		})
@@ -191,6 +208,7 @@ func TestClientBase_Recall(t *testing.T) {
 	})
 
 	t.Run("ReCall with canceled context", func(t *testing.T) {
+		initClient()
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		_, err := base.ReCall(ctx, func(client *mockClient) (any, error) {
@@ -200,24 +218,8 @@ func TestClientBase_Recall(t *testing.T) {
 		assert.True(t, errors.Is(err, context.Canceled))
 	})
 
-	t.Run("ReCall fails first and success second", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		flag := false
-		var mut sync.Mutex
-		_, err := base.ReCall(ctx, func(client *mockClient) (any, error) {
-			mut.Lock()
-			defer mut.Unlock()
-			if flag {
-				return struct{}{}, nil
-			}
-			flag = true
-			return nil, errors.New("mock first")
-		})
-		assert.NoError(t, err)
-	})
-
 	t.Run("ReCall canceled in caller func", func(t *testing.T) {
+		initClient()
 		ctx, cancel := context.WithCancel(context.Background())
 		errMock := errors.New("mocked")
 		_, err := base.ReCall(ctx, func(client *mockClient) (any, error) {
@@ -226,7 +228,7 @@ func TestClientBase_Recall(t *testing.T) {
 		})
 
 		assert.Error(t, err)
-		assert.True(t, errors.Is(err, context.Canceled))
+		assert.True(t, errors.Is(err, errMock))
 		base.grpcClientMtx.RLock()
 		// client shall not be reset
 		assert.NotNil(t, base.grpcClient)
@@ -283,7 +285,7 @@ func TestClientBase_RetryPolicy(t *testing.T) {
 		Timeout: 60 * time.Second,
 	}
 
-	maxAttempts := 5
+	maxAttempts := 1
 	s := grpc.NewServer(
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
@@ -307,7 +309,6 @@ func TestClientBase_RetryPolicy(t *testing.T) {
 		MaxAttempts:            maxAttempts,
 		InitialBackoff:         10.0,
 		MaxBackoff:             60.0,
-		BackoffMultiplier:      2.0,
 	}
 	clientBase.SetRole(typeutil.DataCoordRole)
 	clientBase.SetGetAddrFunc(func() (string, error) {

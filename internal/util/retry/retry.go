@@ -13,10 +13,8 @@ package retry
 
 import (
 	"context"
-	"errors"
 	"time"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/errorutil"
 	"go.uber.org/zap"
@@ -40,8 +38,8 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 
 	for i := uint(0); i < c.attempts; i++ {
 		if err := fn(); err != nil {
-			if i%10 == 0 {
-				log.Warn("retry func failed", zap.Uint("retry time", i), zap.Error(err))
+			if i%10 == 4 {
+				log.Ctx(ctx).Warn("retry func failed", zap.Uint("retry time", i), zap.Error(err))
 			}
 
 			el = append(el, err)
@@ -82,49 +80,4 @@ func Unrecoverable(err error) error {
 func IsUnRecoverable(err error) bool {
 	_, isUnrecoverable := err.(unrecoverableError)
 	return isUnrecoverable
-}
-
-func DoGrpc(ctx context.Context, times uint, rpcFunc func() (any, error)) (any, error) {
-	innerCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	var (
-		result     any
-		innerError error
-	)
-
-	err := Do(innerCtx, func() error {
-		result, innerError = rpcFunc()
-		if innerError != nil {
-			result = nil
-			cancel()
-			return innerError
-		}
-
-		var errorCode commonpb.ErrorCode
-		var reason string
-		switch res := result.(type) {
-		case *commonpb.Status:
-			errorCode = res.GetErrorCode()
-			reason = res.GetReason()
-		case interface{ GetStatus() *commonpb.Status }:
-			errorCode = res.GetStatus().GetErrorCode()
-			reason = res.GetStatus().GetReason()
-		default:
-			cancel()
-			return innerError
-		}
-
-		if errorCode == commonpb.ErrorCode_Success {
-			return nil
-		}
-		innerError = errors.New(reason)
-		if errorCode != commonpb.ErrorCode_NotReadyServe {
-			cancel()
-		}
-		return innerError
-	}, Attempts(times), Sleep(50*time.Millisecond), MaxSleepTime(time.Second))
-	if result != nil {
-		return result, nil
-	}
-	return result, err
 }

@@ -19,21 +19,14 @@ package grpcclient
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpcopentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
-	"go.uber.org/zap"
-	"golang.org/x/sync/singleflight"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/backoff"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/keepalive"
-
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util"
@@ -44,6 +37,12 @@ import (
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 )
 
 // GrpcClient abstracts client of grpc
@@ -84,14 +83,11 @@ type ClientBase[T interface {
 	KeepAliveTime    time.Duration
 	KeepAliveTimeout time.Duration
 
-	MaxAttempts       int
-	InitialBackoff    float32
-	MaxBackoff        float32
-	BackoffMultiplier float32
-	NodeID            int64
-	sess              *sessionutil.Session
-
-	sf singleflight.Group
+	MaxAttempts    int
+	InitialBackoff float64
+	MaxBackoff     float64
+	NodeID         int64
+	sess           *sessionutil.Session
 }
 
 // SetRole sets role of client
@@ -169,19 +165,6 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 	opts := trace.GetInterceptorOpts()
 	dialContext, cancel := context.WithTimeout(ctx, c.DialTimeout)
 
-	// refer to https://github.com/grpc/grpc-proto/blob/master/grpc/service_config/service_config.proto
-	retryPolicy := fmt.Sprintf(`{
-		"methodConfig": [{
-		  "name": [{"service": "%s"}],
-		  "retryPolicy": {
-			  "MaxAttempts": %d,
-			  "InitialBackoff": "%fs",
-			  "MaxBackoff": "%fs",
-			  "BackoffMultiplier": %f,
-			  "RetryableStatusCodes": [ "UNAVAILABLE" ]
-		  }
-		}]}`, c.RetryServiceNameConfig, c.MaxAttempts, c.InitialBackoff, c.MaxBackoff, c.BackoffMultiplier)
-
 	var conn *grpc.ClientConn
 	if c.encryption {
 		conn, err = grpc.DialContext(
@@ -204,7 +187,6 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 				interceptor.ClusterInjectionStreamClientInterceptor(),
 				interceptor.ServerIDInjectionStreamClientInterceptor(c.GetNodeID()),
 			)),
-			grpc.WithDefaultServiceConfig(retryPolicy),
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
 				Time:                c.KeepAliveTime,
 				Timeout:             c.KeepAliveTimeout,
@@ -222,6 +204,7 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 			grpc.WithPerRPCCredentials(&Token{Value: crypto.Base64Encode(util.MemberCredID)}),
 			grpc.FailOnNonTempDialError(true),
 			grpc.WithReturnConnectionError(),
+			grpc.WithDisableRetry(),
 		)
 	} else {
 		conn, err = grpc.DialContext(
@@ -243,7 +226,6 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 				interceptor.ClusterInjectionStreamClientInterceptor(),
 				interceptor.ServerIDInjectionStreamClientInterceptor(c.GetNodeID()),
 			)),
-			grpc.WithDefaultServiceConfig(retryPolicy),
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
 				Time:                c.KeepAliveTime,
 				Timeout:             c.KeepAliveTimeout,
@@ -261,6 +243,7 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 			grpc.WithPerRPCCredentials(&Token{Value: crypto.Base64Encode(util.MemberCredID)}),
 			grpc.FailOnNonTempDialError(true),
 			grpc.WithReturnConnectionError(),
+			grpc.WithDisableRetry(),
 		)
 	}
 
@@ -277,62 +260,102 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 	return nil
 }
 
-func (c *ClientBase[T]) callOnce(ctx context.Context, caller func(client T) (any, error)) (any, error) {
-	log := log.Ctx(ctx).With(zap.String("role", c.GetRole()))
-	client, err := c.GetGrpcClient(ctx)
-	if err != nil {
-		return generic.Zero[T](), err
+func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, error)) (any, error) {
+	log := log.Ctx(ctx).With(zap.String("client_role", c.GetRole()))
+	var (
+		ret       any
+		clientErr error
+		callErr   error
+		client    T
+	)
+
+	client, clientErr = c.GetGrpcClient(ctx)
+	if clientErr != nil {
+		log.Warn("fail to get grpc client", zap.Error(clientErr))
 	}
 
-	var ret any
-
-	_, _ = retry.DoGrpc(ctx, uint(c.MaxAttempts*2), func() (any, error) {
-		ret, err = caller(client)
-		return ret, err
-	})
-	if err == nil {
-		return ret, nil
-	}
-
-	if IsCrossClusterRoutingErr(err) {
-		log.Warn("CrossClusterRoutingErr, start to reset connection", zap.Error(err))
+	resetClientFunc := func() {
 		c.resetConnection(client)
-		return ret, interceptor.ErrServiceUnavailable // For concealing ErrCrossClusterRouting from the client
-	}
-	if IsServerIDMismatchErr(err) {
-		log.Warn("Server ID mismatch, start to reset connection", zap.Error(err))
-		c.resetConnection(client)
-		return ret, err
+		client, clientErr = c.GetGrpcClient(ctx)
+		if clientErr != nil {
+			log.Warn("fail to get grpc client in the retry state", zap.Error(clientErr))
+		}
 	}
 
-	if !funcutil.CheckCtxValid(ctx) {
-		// check if server ID matches coord session, if not, reset connection
-		if c.sess != nil {
-			sessions, _, getSessionErr := c.sess.GetSessions(c.GetRole())
-			if getSessionErr != nil {
-				// Only log but not handle this error as it is an auxiliary logic
-				log.Warn("Fail to GetSessions", zap.Error(getSessionErr))
+	innerCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	_ = retry.Do(innerCtx, func() error {
+		if generic.IsZero(client) {
+			callErr = errors.Wrap(clientErr, "empty grpc client")
+			log.Warn("grpc client is nil, maybe fail to get client in the retry state")
+			resetClientFunc()
+			return callErr
+		}
+		ret, callErr = caller(client)
+		if callErr != nil {
+			if funcutil.IsGrpcErr(callErr) ||
+				IsCrossClusterRoutingErr(callErr) || IsServerIDMismatchErr(callErr) {
+				log.Warn("start to reset connection because of specific reasons", zap.Error(callErr))
+				resetClientFunc()
+				return callErr
 			}
-			if coordSess, exist := sessions[c.GetRole()]; exist {
-				if c.GetNodeID() != coordSess.ServerID {
-					log.Warn("Server ID mismatch, may connected to a old server, start to reset connection", zap.Error(err))
-					c.resetConnection(client)
-					return ret, err
+			if !funcutil.CheckCtxValid(ctx) {
+				// check if server ID matches coord session, if not, reset connection
+				if c.sess != nil {
+					sessions, _, getSessionErr := c.sess.GetSessions(c.GetRole())
+					if getSessionErr != nil {
+						// Only log but not handle this error as it is an auxiliary logic
+						log.Warn("Fail to GetSessions", zap.Error(getSessionErr))
+					}
+					if coordSess, exist := sessions[c.GetRole()]; exist {
+						if c.GetNodeID() != coordSess.ServerID {
+							log.Warn("server id mismatch, may connected to a old server, start to reset connection", zap.Error(callErr))
+							resetClientFunc()
+							return callErr
+						}
+					}
 				}
 			}
-		}
-		// start bg check in case of https://github.com/milvus-io/milvus/issues/22435
-		go c.bgHealthCheck(client)
-		return generic.Zero[T](), err
-	}
 
-	if !funcutil.IsGrpcErr(err) {
-		log.Warn("ClientBase:isNotGrpcErr", zap.Error(err))
-		return generic.Zero[T](), err
+			log.Warn("fail to grpc call because of unknown error", zap.Error(callErr))
+			// not rpc error, it will stop to retry
+			return retry.Unrecoverable(callErr)
+		}
+
+		var errorCode commonpb.ErrorCode
+		switch res := ret.(type) {
+		case *commonpb.Status:
+			errorCode = res.GetErrorCode()
+		case interface{ GetStatus() *commonpb.Status }:
+			errorCode = res.GetStatus().GetErrorCode()
+		default:
+			// it will directly return the result
+			log.Warn("unknown return type", zap.Any("return", ret))
+			return nil
+		}
+
+		if errorCode == commonpb.ErrorCode_Success {
+			return nil
+		}
+
+		// This is just to wait for the service to switch from not ready to healthy state, without reset.
+		if errorCode == commonpb.ErrorCode_NotReadyServe {
+			return errors.New("not ready to server")
+		}
+
+		return nil
+	}, retry.Attempts(uint(c.MaxAttempts)),
+		// Because the previous InitialBackoff and MaxBackoff were float, and the unit was s.
+		// For compatibility, this is multiplied by 1000.
+		retry.Sleep(time.Duration(c.InitialBackoff*1000)*time.Millisecond),
+		retry.MaxSleepTime(time.Duration(c.MaxBackoff*1000)*time.Millisecond))
+	// default value list: MaxAttempts 10, InitialBackoff 0.2s, MaxBackoff 10s
+	// and consume 52.8s if all retry failed
+
+	if callErr != nil {
+		return generic.Zero[T](), callErr
 	}
-	log.Info("ClientBase grpc error, start to reset connection", zap.Error(err))
-	c.resetConnection(client)
-	return ret, err
+	return ret, nil
 }
 
 // Call does a grpc call
@@ -341,9 +364,9 @@ func (c *ClientBase[T]) Call(ctx context.Context, caller func(client T) (any, er
 		return generic.Zero[T](), ctx.Err()
 	}
 
-	ret, err := c.callOnce(ctx, caller)
+	ret, err := c.call(ctx, caller)
 	if err != nil {
-		traceErr := fmt.Errorf("err: %w\n, %s", err, trace.StackTrace())
+		traceErr := errors.Wrapf(err, "stack trace: %s", trace.StackTrace())
 		log.Warn("ClientBase Call grpc first call get error",
 			zap.String("role", c.GetRole()),
 			zap.Error(traceErr),
@@ -355,47 +378,8 @@ func (c *ClientBase[T]) Call(ctx context.Context, caller func(client T) (any, er
 
 // ReCall does the grpc call twice
 func (c *ClientBase[T]) ReCall(ctx context.Context, caller func(client T) (any, error)) (any, error) {
-	if !funcutil.CheckCtxValid(ctx) {
-		return generic.Zero[T](), ctx.Err()
-	}
-
-	ret, err := c.callOnce(ctx, caller)
-	if err == nil {
-		return ret, nil
-	}
-
-	traceErr := fmt.Errorf("err: %w\n, %s", err, trace.StackTrace())
-	log.Warn("ClientBase ReCall grpc first call get error",
-		zap.String("role", c.GetRole()),
-		zap.Error(traceErr),
-	)
-
-	if !funcutil.CheckCtxValid(ctx) {
-		return generic.Zero[T](), ctx.Err()
-	}
-
-	ret, err = c.callOnce(ctx, caller)
-	if err != nil {
-		traceErr = fmt.Errorf("err: %w\n, %s", err, trace.StackTrace())
-		log.Error("ClientBase ReCall grpc second call get error", zap.String("role", c.GetRole()), zap.Error(traceErr))
-		return generic.Zero[T](), traceErr
-	}
-	return ret, err
-}
-
-func (c *ClientBase[T]) bgHealthCheck(client T) {
-	c.sf.Do("healthcheck", func() (any, error) {
-		// v2.2.0 does not has paramtable, use magic nubmer here
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
-
-		_, err := client.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
-		if err != nil {
-			c.resetConnection(client)
-		}
-
-		return struct{}{}, nil
-	})
+	// All retry operations are done in `call` function.
+	return c.Call(ctx, caller)
 }
 
 // Close close the client connection
