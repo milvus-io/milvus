@@ -230,7 +230,7 @@ func TestCheckTopicValid(t *testing.T) {
 	assert.NoError(t, err)
 
 	err = consumer.CheckTopicValid(topic)
-	assert.ErrorIs(t, err, merr.ErrTopicNotEmpty)
+	assert.ErrorIs(t, err, merr.ErrMqTopicNotEmpty)
 
 	consumer.Close()
 	err = consumer.CheckTopicValid(topic)

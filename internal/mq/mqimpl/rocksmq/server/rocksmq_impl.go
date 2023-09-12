@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -942,7 +941,7 @@ func (rmq *rocksmq) Seek(topicName string, groupName string, msgID UniqueID) err
 	/* Step I: Check if key exists */
 	ll, ok := topicMu.Load(topicName)
 	if !ok {
-		return fmt.Errorf("topic %s not exist, %w", topicName, mqwrapper.ErrTopicNotExist)
+		return merr.WrapErrMqTopicNotFound(topicName)
 	}
 	lock, ok := ll.(*sync.Mutex)
 	if !ok {
@@ -968,7 +967,7 @@ func (rmq *rocksmq) ForceSeek(topicName string, groupName string, msgID UniqueID
 	/* Step I: Check if key exists */
 	ll, ok := topicMu.Load(topicName)
 	if !ok {
-		return fmt.Errorf("topic %s not exist, %w", topicName, mqwrapper.ErrTopicNotExist)
+		return merr.WrapErrMqTopicNotFound(topicName)
 	}
 	lock, ok := ll.(*sync.Mutex)
 	if !ok {
@@ -1159,7 +1158,7 @@ func (rmq *rocksmq) CheckTopicValid(topic string) error {
 
 	_, ok := topicMu.Load(topic)
 	if !ok {
-		return merr.WrapErrTopicNotFound(topic, "failed to get topic")
+		return merr.WrapErrMqTopicNotFound(topic, "failed to get topic")
 	}
 
 	latestMsgID, err := rmq.GetLatestMsg(topic)
@@ -1168,7 +1167,7 @@ func (rmq *rocksmq) CheckTopicValid(topic string) error {
 	}
 
 	if latestMsgID != DefaultMessageID {
-		return merr.WrapErrTopicNotEmpty(topic, "topic is not empty")
+		return merr.WrapErrMqTopicNotEmpty(topic, "topic is not empty")
 	}
 	log.Info("created topic is empty")
 	return nil
