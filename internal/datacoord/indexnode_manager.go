@@ -123,7 +123,7 @@ func (nm *IndexNodeManager) PeekClient(meta *model.SegmentIndex) (UniqueID, type
 				log.Warn("get IndexNode slots failed", zap.Int64("nodeID", nodeID), zap.Error(err))
 				return
 			}
-			if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+			if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 				log.Warn("get IndexNode slots failed", zap.Int64("nodeID", nodeID),
 					zap.String("reason", resp.Status.Reason))
 				return
@@ -179,7 +179,7 @@ func (nm *IndexNodeManager) ClientSupportDisk() bool {
 				log.Warn("get IndexNode slots failed", zap.Int64("nodeID", nodeID), zap.Error(err))
 				return
 			}
-			if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+			if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 				log.Warn("get IndexNode slots failed", zap.Int64("nodeID", nodeID),
 					zap.String("reason", resp.Status.Reason))
 				return

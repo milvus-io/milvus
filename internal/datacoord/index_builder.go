@@ -353,7 +353,7 @@ func (ib *indexBuilder) getTaskState(buildID, nodeID UniqueID) indexTaskState {
 				zap.Error(err))
 			return indexTaskInProgress
 		}
-		if response.Status.ErrorCode != commonpb.ErrorCode_Success {
+		if response.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 			log.Ctx(ib.ctx).Warn("IndexCoord get jobs info from IndexNode fail", zap.Int64("nodeID", nodeID),
 				zap.Int64("buildID", buildID), zap.String("fail reason", response.Status.Reason))
 			return indexTaskInProgress

@@ -960,7 +960,7 @@ func (s *Server) Check(ctx context.Context, req *grpc_health_v1.HealthCheckReque
 	if err != nil {
 		return ret, err
 	}
-	if state.Status.ErrorCode != commonpb.ErrorCode_Success {
+	if state.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		return ret, nil
 	}
 	if state.State.StateCode != commonpb.StateCode_Healthy {
@@ -979,7 +979,7 @@ func (s *Server) Watch(req *grpc_health_v1.HealthCheckRequest, server grpc_healt
 	if err != nil {
 		return server.Send(ret)
 	}
-	if state.Status.ErrorCode != commonpb.ErrorCode_Success {
+	if state.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		return server.Send(ret)
 	}
 	if state.State.StateCode != commonpb.StateCode_Healthy {

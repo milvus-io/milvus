@@ -250,7 +250,7 @@ func (b *ServerBroker) GetSegmentIndexState(ctx context.Context, collID UniqueID
 	if err != nil {
 		return nil, err
 	}
-	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		return nil, errors.New(resp.Status.Reason)
 	}
 
