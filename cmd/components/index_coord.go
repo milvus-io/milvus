@@ -48,7 +48,6 @@ func (s *IndexCoord) Stop() error {
 
 // GetComponentStates returns indexnode's states
 func (s *IndexCoord) Health(ctx context.Context) commonpb.StateCode {
-	log.Info("IndexCoord is healthy")
 	return commonpb.StateCode_Healthy
 }
 
