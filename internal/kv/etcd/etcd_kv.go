@@ -529,25 +529,6 @@ func (kv *etcdKV) WatchWithRevision(key string, revision int64) clientv3.WatchCh
 	return rch
 }
 
-// MultiRemoveWithPrefix removes the keys with given prefix.
-func (kv *etcdKV) MultiRemoveWithPrefix(keys []string) error {
-	start := time.Now()
-	ops := make([]clientv3.Op, 0, len(keys))
-	for _, k := range keys {
-		op := clientv3.OpDelete(path.Join(kv.rootPath, k), clientv3.WithPrefix())
-		ops = append(ops, op)
-	}
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-
-	_, err := kv.executeTxn(kv.getTxnWithCmp(ctx), ops...)
-	if err != nil {
-		log.Warn("Etcd MultiRemoveWithPrefix error", zap.Strings("keys", keys), zap.Int("len", len(keys)), zap.Error(err))
-	}
-	CheckElapseAndWarn(start, "Slow etcd operation multi remove with prefix", zap.Strings("keys", keys))
-	return err
-}
-
 // MultiSaveAndRemoveWithPrefix saves kv in @saves and removes the keys with given prefix in @removals.
 func (kv *etcdKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error {
 	start := time.Now()

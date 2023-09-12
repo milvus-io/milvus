@@ -215,30 +215,6 @@ func TestRocksdbKV_Txn(t *testing.T) {
 	assert.Equal(t, len(keys), 3)
 	assert.Equal(t, len(vals), 3)
 
-	removePrefix := []string{"abc", "abd"}
-	rocksdbKV.MultiRemoveWithPrefix(removePrefix)
-
-	keys, vals, err = rocksdbKV.LoadWithPrefix("")
-	assert.NoError(t, err)
-	assert.Equal(t, len(keys), 0)
-	assert.Equal(t, len(vals), 0)
-
-	err = rocksdbKV.MultiSave(kvs)
-	assert.NoError(t, err)
-	keys, vals, err = rocksdbKV.LoadWithPrefix("")
-	assert.NoError(t, err)
-	assert.Equal(t, len(keys), 3)
-	assert.Equal(t, len(vals), 3)
-
-	// test delete the whole table
-	removePrefix = []string{"", "hello"}
-	rocksdbKV.MultiRemoveWithPrefix(removePrefix)
-
-	keys, vals, err = rocksdbKV.LoadWithPrefix("")
-	assert.NoError(t, err)
-	assert.Equal(t, len(keys), 0)
-	assert.Equal(t, len(vals), 0)
-
 	err = rocksdbKV.MultiSave(kvs)
 	assert.NoError(t, err)
 	keys, vals, err = rocksdbKV.LoadWithPrefix("")
@@ -247,7 +223,7 @@ func TestRocksdbKV_Txn(t *testing.T) {
 	assert.Equal(t, len(vals), 3)
 
 	// test remove and save
-	removePrefix = []string{"abc", "abd"}
+	removePrefix := []string{"abc", "abd"}
 	kvs2 := map[string]string{
 		"abfad": "12345",
 	}

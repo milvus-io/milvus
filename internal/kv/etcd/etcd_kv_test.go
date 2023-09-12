@@ -551,8 +551,8 @@ func TestEtcdKV_Load(te *testing.T) {
 		assert.Empty(t, vs)
 	})
 
-	te.Run("etcdKV MultiRemoveWithPrefix", func(t *testing.T) {
-		rootPath := "/etcd/test/root/multi_remove_with_prefix"
+	te.Run("etcdKV MultiSaveAndRemoveWithPrefix", func(t *testing.T) {
+		rootPath := "/etcd/test/root/multi_save_and_remove_with_prefix"
 		etcdKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
 		defer etcdKV.Close()
 		defer etcdKV.RemoveWithPrefix("")
@@ -565,45 +565,6 @@ func TestEtcdKV_Load(te *testing.T) {
 			"x/den/1": "100",
 			"x/den/2": "200",
 		}
-
-		err = etcdKV.MultiSave(prepareTests)
-		require.NoError(t, err)
-
-		multiRemoveWithPrefixTests := []struct {
-			prefix []string
-
-			testKey       string
-			expectedValue string
-		}{
-			{[]string{"x/abc"}, "x/abc/1", ""},
-			{[]string{}, "x/abc/2", ""},
-			{[]string{}, "x/def/1", "10"},
-			{[]string{}, "x/def/2", "20"},
-			{[]string{}, "x/den/1", "100"},
-			{[]string{}, "x/den/2", "200"},
-			{[]string{}, "not-exist", ""},
-			{[]string{"x/def", "x/den"}, "x/def/1", ""},
-			{[]string{}, "x/def/1", ""},
-			{[]string{}, "x/def/2", ""},
-			{[]string{}, "x/den/1", ""},
-			{[]string{}, "x/den/2", ""},
-			{[]string{}, "not-exist", ""},
-		}
-
-		for _, test := range multiRemoveWithPrefixTests {
-			if len(test.prefix) > 0 {
-				err = etcdKV.MultiRemoveWithPrefix(test.prefix)
-				assert.NoError(t, err)
-			}
-
-			v, _ := etcdKV.Load(test.testKey)
-			assert.Equal(t, test.expectedValue, v)
-		}
-
-		k, v, err := etcdKV.LoadWithPrefix("/")
-		assert.NoError(t, err)
-		assert.Zero(t, len(k))
-		assert.Zero(t, len(v))
 
 		// MultiSaveAndRemoveWithPrefix
 		err = etcdKV.MultiSave(prepareTests)
@@ -624,7 +585,7 @@ func TestEtcdKV_Load(te *testing.T) {
 		}
 
 		for _, test := range multiSaveAndRemoveWithPrefixTests {
-			k, _, err = etcdKV.LoadWithPrefix(test.loadPrefix)
+			k, _, err := etcdKV.LoadWithPrefix(test.loadPrefix)
 			assert.NoError(t, err)
 			assert.Equal(t, test.lengthBeforeRemove, len(k))
 

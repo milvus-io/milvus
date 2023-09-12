@@ -475,19 +475,6 @@ func (kv *EmbedEtcdKV) WatchWithRevision(key string, revision int64) clientv3.Wa
 	return rch
 }
 
-func (kv *EmbedEtcdKV) MultiRemoveWithPrefix(keys []string) error {
-	ops := make([]clientv3.Op, 0, len(keys))
-	for _, k := range keys {
-		op := clientv3.OpDelete(path.Join(kv.rootPath, k), clientv3.WithPrefix())
-		ops = append(ops, op)
-	}
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-
-	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
-	return err
-}
-
 // MultiSaveAndRemoveWithPrefix saves kv in @saves and removes the keys with given prefix in @removals.
 func (kv *EmbedEtcdKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error {
 	ops := make([]clientv3.Op, 0, len(saves)+len(removals))

@@ -243,7 +243,7 @@ func TestTiKVLoad(te *testing.T) {
 		assert.Empty(t, vs)
 	})
 
-	te.Run("kv MultiRemoveWithPrefix", func(t *testing.T) {
+	te.Run("kv MultiSaveAndRemoveWithPrefix", func(t *testing.T) {
 		rootPath := "/tikv/test/root/multi_remove_with_prefix"
 		kv := NewTiKV(txnClient, rootPath)
 		defer kv.Close()
@@ -258,47 +258,8 @@ func TestTiKVLoad(te *testing.T) {
 			"x/den/2": "200",
 		}
 
-		err := kv.MultiSave(prepareTests)
-		require.NoError(t, err)
-
-		multiRemoveWithPrefixTests := []struct {
-			prefix []string
-
-			testKey       string
-			expectedValue string
-		}{
-			{[]string{"x/abc"}, "x/abc/1", ""},
-			{[]string{}, "x/abc/2", ""},
-			{[]string{}, "x/def/1", "10"},
-			{[]string{}, "x/def/2", "20"},
-			{[]string{}, "x/den/1", "100"},
-			{[]string{}, "x/den/2", "200"},
-			{[]string{}, "not-exist", ""},
-			{[]string{"x/def", "x/den"}, "x/def/1", ""},
-			{[]string{}, "x/def/1", ""},
-			{[]string{}, "x/def/2", ""},
-			{[]string{}, "x/den/1", ""},
-			{[]string{}, "x/den/2", ""},
-			{[]string{}, "not-exist", ""},
-		}
-
-		for _, test := range multiRemoveWithPrefixTests {
-			if len(test.prefix) > 0 {
-				err = kv.MultiRemoveWithPrefix(test.prefix)
-				assert.NoError(t, err)
-			}
-
-			v, _ := kv.Load(test.testKey)
-			assert.Equal(t, test.expectedValue, v)
-		}
-
-		k, v, err := kv.LoadWithPrefix("/")
-		assert.NoError(t, err)
-		assert.Zero(t, len(k))
-		assert.Zero(t, len(v))
-
 		// MultiSaveAndRemoveWithPrefix
-		err = kv.MultiSave(prepareTests)
+		err := kv.MultiSave(prepareTests)
 		require.NoError(t, err)
 		multiSaveAndRemoveWithPrefixTests := []struct {
 			multiSave map[string]string
@@ -316,7 +277,7 @@ func TestTiKVLoad(te *testing.T) {
 		}
 
 		for _, test := range multiSaveAndRemoveWithPrefixTests {
-			k, _, err = kv.LoadWithPrefix(test.loadPrefix)
+			k, _, err := kv.LoadWithPrefix(test.loadPrefix)
 			assert.NoError(t, err)
 			assert.Equal(t, test.lengthBeforeRemove, len(k))
 
@@ -352,8 +313,6 @@ func TestTiKVLoad(te *testing.T) {
 		assert.Error(t, err)
 		err = kv.MultiSaveAndRemoveWithPrefix(map[string]string{"y/c": "vvv"}, []string{"/"})
 		assert.Error(t, err)
-		err = kv.MultiRemoveWithPrefix([]string{"x/def", "x/den"})
-		assert.Error(t, err)
 	})
 
 	te.Run("kv failed to commit txn", func(t *testing.T) {
@@ -379,8 +338,6 @@ func TestTiKVLoad(te *testing.T) {
 		err = kv.MultiSaveAndRemove(map[string]string{"key_1": "value_1"}, []string{})
 		assert.Error(t, err)
 		err = kv.MultiSaveAndRemoveWithPrefix(map[string]string{"y/c": "vvv"}, []string{"/"})
-		assert.Error(t, err)
-		err = kv.MultiRemoveWithPrefix([]string{"x/def", "x/den"})
 		assert.Error(t, err)
 	})
 }
