@@ -1,0 +1,48 @@
+name: Add Comment for issue
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  check_issue_title:
+    name: Check issue
+    runs-on: ubuntu-latest
+    env:
+      TITLE_PASSED: "T"
+    permissions:
+      issues: write
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Check Issue
+        shell: bash
+        run: |
+          echo Issue title: ${{ github.event.issue.title }}
+          cat >> check_title.py << EOF
+          import re
+          import sys
+          check_str = sys.argv[1]
+          pattern = re.compile(r'[\u4e00-\u9fa5]')
+          match = pattern.search(check_str)
+          if match:
+              print("TITLE_PASSED=F")
+          else:
+              print("TITLE_PASSED=T")
+          EOF
+          
+          python3 check_title.py "${{ github.event.issue.title }}" >> "$GITHUB_ENV"
+          cat $GITHUB_ENV
+
+      - name: Check env
+        shell: bash
+        run: |
+          echo ${{ env.TITLE_PASSED }}
+      - name: Add comment
+        if: ${{ env.TITLE_PASSED == 'F'}}
+        uses: peter-evans/create-or-update-comment@5f728c3dae25f329afbe34ee4d08eef25569d79f
+        with:
+          issue-number: ${{ github.event.issue.number }}
+          body: |
+            The title and description of this issue contains Chinese. Please use English to describe your issue.
