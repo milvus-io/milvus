@@ -2243,27 +2243,13 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 		metrics.TotalLabel).Inc()
 	dt := &deleteTask{
-		ctx:        ctx,
-		Condition:  NewTaskCondition(ctx),
-		deleteExpr: request.Expr,
-		deleteMsg: &BaseDeleteTask{
-			BaseMsg: msgstream.BaseMsg{
-				HashValues: request.HashKeys,
-			},
-			DeleteRequest: msgpb.DeleteRequest{
-				Base: commonpbutil.NewMsgBase(
-					commonpbutil.WithMsgType(commonpb.MsgType_Delete),
-					commonpbutil.WithMsgID(0),
-				),
-				DbName:         request.DbName,
-				CollectionName: request.CollectionName,
-				PartitionName:  request.PartitionName,
-				// RowData: transfer column based request to this
-			},
-		},
+		ctx:         ctx,
+		Condition:   NewTaskCondition(ctx),
+		req:         request,
 		idAllocator: node.rowIDAllocator,
 		chMgr:       node.chMgr,
 		chTicker:    node.chTicker,
+		lb:          node.lbPolicy,
 	}
 
 	log.Debug("Enqueue delete request in Proxy")
@@ -2290,7 +2276,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		}, nil
 	}
 
-	receiveSize := proto.Size(dt.deleteMsg)
+	receiveSize := proto.Size(dt.req)
 	rateCol.Add(internalpb.RateType_DMLDelete.String(), float64(receiveSize))
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,

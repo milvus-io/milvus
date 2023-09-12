@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util"
+	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -939,6 +940,63 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 	return result, nil
 }
 
+func (node *QueryNode) QueryStreamSegments(ctx context.Context, req *querypb.QueryRequest, streamer streamrpc.QueryStreamer) error {
+	failRet := WrapRetrieveResult(commonpb.ErrorCode_UnexpectedError, "")
+	msgID := req.Req.Base.GetMsgID()
+	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID()
+	channel := req.GetDmlChannels()[0]
+	srv := streamer.AsServer()
+
+	log := log.Ctx(ctx).With(
+		zap.Int64("msgID", msgID),
+		zap.Int64("collectionID", req.GetReq().GetCollectionID()),
+		zap.String("channel", channel),
+		zap.String("scope", req.GetScope().String()),
+	)
+
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.TotalLabel, metrics.FromLeader).Inc()
+	defer func() {
+		if failRet.Status.ErrorCode != commonpb.ErrorCode_Success {
+			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.FailLabel, metrics.FromLeader).Inc()
+		}
+	}()
+
+	if !node.lifetime.Add(commonpbutil.IsHealthy) {
+		failRet.Status = merr.Status(merr.WrapErrServiceUnavailable(fmt.Sprintf("node id: %d is unhealthy", paramtable.GetNodeID())))
+		srv.Send(failRet)
+		return nil
+	}
+	defer node.lifetime.Done()
+
+	log.Debug("start do query with channel",
+		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
+		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
+	)
+
+	tr := timerecord.NewTimeRecorder("queryChannel")
+
+	err := node.queryStreamSegments(ctx, req, srv)
+	if err != nil {
+		failRet.Status = merr.Status(err)
+		srv.Send(failRet)
+		return nil
+	}
+
+	tr.CtxElapse(ctx, fmt.Sprintf("do query done, traceID = %s, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
+		traceID,
+		req.GetFromShardLeader(),
+		channel,
+		req.GetSegmentIDs(),
+	))
+
+	failRet.Status.ErrorCode = commonpb.ErrorCode_Success
+	// TODO QueryNodeSQLatencyInQueue QueryNodeReduceLatency
+	latency := tr.ElapseSpan()
+	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.SuccessLabel, metrics.FromLeader).Inc()
+	return nil
+}
+
 // Query performs replica query tasks.
 func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
 	if req.FromShardLeader {
@@ -1028,6 +1086,72 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		ret.GetCostAggregation().ResponseTime = tr.ElapseSpan().Milliseconds()
 	}
 	return ret, nil
+}
+
+// QueryStream
+func (node *QueryNode) QueryStream(ctx context.Context, req *querypb.QueryRequest, streamer streamrpc.QueryStreamer) error {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.GetReq().GetCollectionID()),
+		zap.Strings("shards", req.GetDmlChannels()),
+	)
+	srv := streamer.AsServer()
+
+	log.Debug("received query stream request",
+		zap.Int64s("outputFields", req.GetReq().GetOutputFieldsId()),
+		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
+		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
+		zap.Uint64("mvccTimestamp", req.GetReq().GetMvccTimestamp()),
+		zap.Bool("isCount", req.GetReq().GetIsCount()),
+	)
+
+	if !node.lifetime.Add(commonpbutil.IsHealthy) {
+		msg := fmt.Sprintf("query node %d is not ready", paramtable.GetNodeID())
+		err := merr.WrapErrServiceNotReady(msg)
+		srv.Send(&internalpb.RetrieveResults{Status: merr.Status(err)})
+		return nil
+	}
+	defer node.lifetime.Done()
+
+	if !CheckTargetID(req.GetReq()) {
+		targetID := req.GetReq().GetBase().GetTargetID()
+		log.Warn("target ID not match",
+			zap.Int64("targetID", targetID),
+			zap.Int64("nodeID", paramtable.GetNodeID()),
+		)
+		srv.Send(WrapRetrieveResult(commonpb.ErrorCode_NodeIDNotMatch,
+			common.WrapNodeIDNotMatchMsg(targetID, paramtable.GetNodeID())))
+		return nil
+	}
+
+	runningGp, runningCtx := errgroup.WithContext(ctx)
+
+	for _, ch := range req.GetDmlChannels() {
+		ch := ch
+		req := &querypb.QueryRequest{
+			Req:             req.Req,
+			DmlChannels:     []string{ch},
+			SegmentIDs:      req.SegmentIDs,
+			FromShardLeader: req.FromShardLeader,
+			Scope:           req.Scope,
+		}
+
+		runningGp.Go(func() error {
+			err := node.queryChannelStream(runningCtx, req, ch, srv)
+			if err != nil {
+				return err
+			}
+			return nil
+		})
+	}
+
+	if err := runningGp.Wait(); err != nil {
+		srv.Send(WrapRetrieveResult(commonpb.ErrorCode_UnexpectedError, "failed to query channel", err))
+		return nil
+	}
+
+	collector.Rate.Add(metricsinfo.NQPerSecond, 1)
+	metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel).Add(float64(proto.Size(req)))
+	return nil
 }
 
 // SyncReplicaSegments syncs replica node & segments states

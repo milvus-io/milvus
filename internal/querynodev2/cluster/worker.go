@@ -20,6 +20,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"io"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -28,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -40,6 +42,7 @@ type Worker interface {
 	Delete(ctx context.Context, req *querypb.DeleteRequest) error
 	SearchSegments(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error)
 	QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error)
+	QueryStreamSegments(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error
 	GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) (*internalpb.GetStatisticsResponse, error)
 
 	IsHealthy() bool
@@ -137,6 +140,39 @@ func (w *remoteWorker) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 	}
 
 	return ret, err
+}
+
+func (w *remoteWorker) QueryStreamSegments(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error {
+	streamer := streamrpc.NewGrpcQueryStreamer()
+	err := w.client.QueryStreamSegments(ctx, req, streamer)
+	if err != nil {
+		return err
+	}
+
+	client := streamer.AsClient()
+	for {
+		result, err := client.Recv()
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return err
+		}
+
+		err = merr.Error(result.GetStatus())
+		if err != nil {
+			return err
+		}
+
+		err = srv.Send(result)
+		if err != nil {
+			log.Warn("send stream pks from remote woker failed",
+				zap.Int64("collectionID", req.Req.GetCollectionID()),
+				zap.Int64s("segmentIDs", req.GetSegmentIDs()),
+			)
+			return err
+		}
+	}
 }
 
 func (w *remoteWorker) GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) (*internalpb.GetStatisticsResponse, error) {

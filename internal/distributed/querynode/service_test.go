@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/types"
+	streamMocks "github.com/milvus-io/milvus/internal/util/streamrpc/mocks"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 
 	"github.com/stretchr/testify/assert"
@@ -222,6 +223,16 @@ func Test_NewServer(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
+	t.Run("QueryStream", func(t *testing.T) {
+		mockQN.EXPECT().QueryStream(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		req := &querypb.QueryRequest{}
+		streamer := streamMocks.NewMockQueryStreamServer(t)
+		streamer.EXPECT().Context().Return(ctx)
+
+		err := server.QueryStream(req, streamer)
+		assert.NoError(t, err)
+	})
+
 	t.Run("QuerySegments", func(t *testing.T) {
 		mockQN.EXPECT().QuerySegments(mock.Anything, mock.Anything).Return(&internalpb.RetrieveResults{
 			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil)
@@ -229,6 +240,16 @@ func Test_NewServer(t *testing.T) {
 		resp, err := server.QuerySegments(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("QueryStreamSegments", func(t *testing.T) {
+		mockQN.EXPECT().QueryStreamSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		req := &querypb.QueryRequest{}
+		streamer := streamMocks.NewMockQueryStreamSegmentsServer(t)
+		streamer.EXPECT().Context().Return(ctx)
+
+		err := server.QueryStreamSegments(req, streamer)
+		assert.NoError(t, err)
 	})
 
 	t.Run("SyncReplicaSegments", func(t *testing.T) {

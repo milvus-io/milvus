@@ -67,7 +67,9 @@ service QueryNode {
   rpc Search(SearchRequest) returns (internal.SearchResults) {}
   rpc SearchSegments(SearchRequest) returns (internal.SearchResults) {}
   rpc Query(QueryRequest) returns (internal.RetrieveResults) {}
+  rpc QueryStream(QueryRequest) returns (stream internal.RetrieveResults){}
   rpc QuerySegments(QueryRequest) returns (internal.RetrieveResults) {}
+  rpc QueryStreamSegments(QueryRequest) returns (stream internal.RetrieveResults){}
 
   rpc ShowConfigurations(internal.ShowConfigurationsRequest) returns (internal.ShowConfigurationsResponse){}
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy

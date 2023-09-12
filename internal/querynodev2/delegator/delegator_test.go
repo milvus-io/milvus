@@ -18,6 +18,7 @@ package delegator
 
 import (
 	"context"
+	"io"
 	"sync"
 	"testing"
 	"time"
@@ -38,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
+	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
@@ -205,12 +207,10 @@ func (s *DelegatorSuite) TestGetSegmentInfo() {
 	s.Equal(0, len(growing))
 }
 
-func (s *DelegatorSuite) TestSearch() {
-	s.delegator.Start()
-	// 1 => sealed segment 1000, 1001
-	// 1 => growing segment 1004
-	// 2 => sealed segment 1002, 1003
-	paramtable.SetNodeID(1)
+// nodeID 1 => sealed segment 1000, 1001
+// nodeID 1 => growing segment 1004
+// nodeID 2 => sealed segment 1002, 1003
+func (s *DelegatorSuite) initSegments() {
 	s.delegator.LoadGrowing(context.Background(), []*querypb.SegmentLoadInfo{
 		{
 			SegmentID:    1004,
@@ -245,6 +245,12 @@ func (s *DelegatorSuite) TestSearch() {
 		},
 	)
 	s.delegator.SyncTargetVersion(2001, []int64{1004}, []int64{1000, 1001, 1002, 1003}, []int64{})
+}
+
+func (s *DelegatorSuite) TestSearch() {
+	s.delegator.Start()
+	paramtable.SetNodeID(1)
+	s.initSegments()
 	s.Run("normal", func() {
 		defer func() {
 			s.workerManager.ExpectedCalls = nil
@@ -297,33 +303,19 @@ func (s *DelegatorSuite) TestSearch() {
 		defer func() {
 			s.workerManager.ExpectedCalls = nil
 		}()
-		workers := make(map[int64]*cluster.MockWorker)
-		worker1 := &cluster.MockWorker{}
-		worker2 := &cluster.MockWorker{}
-
-		workers[1] = worker1
-		workers[2] = worker2
-
-		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
-			Return(&internalpb.SearchResults{}, nil)
-		worker2.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
-			Return(&internalpb.SearchResults{}, nil)
-
-		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
-			return workers[nodeID]
-		}, nil)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		_, err := s.delegator.Search(ctx, &querypb.SearchRequest{
 			Req: &internalpb.SearchRequest{
-				Base:         commonpbutil.NewMsgBase(),
-				PartitionIDs: []int64{500},
+				Base: commonpbutil.NewMsgBase(),
+				//not load partation -1,will return error
+				PartitionIDs: []int64{-1},
 			},
 			DmlChannels: []string{s.vchannelName},
 		})
 
-		errors.Is(err, merr.ErrPartitionNotLoaded)
+		s.True(errors.Is(err, merr.ErrPartitionNotLoaded))
 	})
 
 	s.Run("worker_return_error", func() {
@@ -460,44 +452,8 @@ func (s *DelegatorSuite) TestSearch() {
 
 func (s *DelegatorSuite) TestQuery() {
 	s.delegator.Start()
-	// 1 => sealed segment 1000, 1001
-	// 1 => growing segment 1004
-	// 2 => sealed segment 1002, 1003
 	paramtable.SetNodeID(1)
-	s.delegator.LoadGrowing(context.Background(), []*querypb.SegmentLoadInfo{
-		{
-			SegmentID:    1004,
-			CollectionID: s.collectionID,
-			PartitionID:  500,
-		},
-	}, 0)
-	s.delegator.SyncDistribution(context.Background(),
-		SegmentEntry{
-			NodeID:      1,
-			SegmentID:   1000,
-			PartitionID: 500,
-			Version:     2001,
-		},
-		SegmentEntry{
-			NodeID:      1,
-			SegmentID:   1001,
-			PartitionID: 501,
-			Version:     2001,
-		},
-		SegmentEntry{
-			NodeID:      2,
-			SegmentID:   1002,
-			PartitionID: 500,
-			Version:     2001,
-		},
-		SegmentEntry{
-			NodeID:      2,
-			SegmentID:   1003,
-			PartitionID: 501,
-			Version:     2001,
-		},
-	)
-	s.delegator.SyncTargetVersion(2001, []int64{1004}, []int64{1000, 1001, 1002, 1003}, []int64{})
+	s.initSegments()
 	s.Run("normal", func() {
 		defer func() {
 			s.workerManager.ExpectedCalls = nil
@@ -550,33 +506,18 @@ func (s *DelegatorSuite) TestQuery() {
 		defer func() {
 			s.workerManager.ExpectedCalls = nil
 		}()
-		workers := make(map[int64]*cluster.MockWorker)
-		worker1 := &cluster.MockWorker{}
-		worker2 := &cluster.MockWorker{}
-
-		workers[1] = worker1
-		workers[2] = worker2
-
-		worker1.EXPECT().QuerySegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
-			Return(&internalpb.RetrieveResults{}, nil)
-		worker2.EXPECT().QuerySegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
-			Return(&internalpb.RetrieveResults{}, nil)
-
-		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
-			return workers[nodeID]
-		}, nil)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		_, err := s.delegator.Query(ctx, &querypb.QueryRequest{
 			Req: &internalpb.RetrieveRequest{
-				Base:         commonpbutil.NewMsgBase(),
-				PartitionIDs: []int64{500},
+				Base: commonpbutil.NewMsgBase(),
+				//not load partation -1,will return error
+				PartitionIDs: []int64{-1},
 			},
 			DmlChannels: []string{s.vchannelName},
 		})
-
-		errors.Is(err, merr.ErrPartitionNotLoaded)
+		s.True(errors.Is(err, merr.ErrPartitionNotLoaded))
 	})
 
 	s.Run("worker_return_error", func() {
@@ -678,47 +619,280 @@ func (s *DelegatorSuite) TestQuery() {
 	})
 }
 
+func (s *DelegatorSuite) TestQueryStream() {
+	s.delegator.Start()
+	paramtable.SetNodeID(1)
+	s.initSegments()
+
+	s.Run("normal", func() {
+		defer func() {
+			s.workerManager.AssertExpectations(s.T())
+			s.workerManager.ExpectedCalls = nil
+		}()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		client := streamrpc.NewLocalQueryClient(ctx)
+		server := client.CreateServer()
+
+		workers := make(map[int64]*cluster.MockWorker)
+		worker1 := &cluster.MockWorker{}
+		worker2 := &cluster.MockWorker{}
+
+		workers[1] = worker1
+		workers[2] = worker2
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
+			return workers[nodeID]
+		}, nil)
+
+		worker1.EXPECT().QueryStreamSegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest"), mock.Anything).
+			Run(func(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) {
+				s.EqualValues(1, req.Req.GetBase().GetTargetID())
+				s.True(req.GetFromShardLeader())
+				if req.GetScope() == querypb.DataScope_Streaming {
+					s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
+					s.ElementsMatch([]int64{1004}, req.GetSegmentIDs())
+				}
+				if req.GetScope() == querypb.DataScope_Historical {
+					s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
+					s.ElementsMatch([]int64{1000, 1001}, req.GetSegmentIDs())
+				}
+
+				srv.Send(&internalpb.RetrieveResults{
+					Status: merr.Status(nil),
+					Ids: &schemapb.IDs{
+						IdField: &schemapb.IDs_IntId{
+							IntId: &schemapb.LongArray{Data: req.GetSegmentIDs()},
+						},
+					},
+				})
+			}).Return(nil)
+
+		worker2.EXPECT().QueryStreamSegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest"), mock.Anything).
+			Run(func(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) {
+				s.EqualValues(2, req.Req.GetBase().GetTargetID())
+				s.True(req.GetFromShardLeader())
+				s.Equal(querypb.DataScope_Historical, req.GetScope())
+				s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
+				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
+				srv.Send(&internalpb.RetrieveResults{
+					Status: merr.Status(nil),
+					Ids: &schemapb.IDs{
+						IdField: &schemapb.IDs_IntId{
+							IntId: &schemapb.LongArray{Data: req.GetSegmentIDs()},
+						},
+					},
+				})
+			}).Return(nil)
+
+		// run stream function
+		go func() {
+			err := s.delegator.QueryStream(ctx, &querypb.QueryRequest{
+				Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+				DmlChannels: []string{s.vchannelName},
+			}, server)
+			s.NoError(err)
+			server.FinishSend(err)
+		}()
+
+		resultIDs := []int64{1000, 1001, 1002, 1003, 1004}
+		recNum := 0
+		for {
+			result, err := client.Recv()
+			if err == io.EOF {
+				s.Equal(recNum, len(resultIDs))
+				break
+			}
+			s.NoError(err)
+
+			err = merr.Error(result.GetStatus())
+			s.NoError(err)
+
+			for _, segmentID := range result.Ids.GetIntId().Data {
+				s.Less(recNum, len(resultIDs))
+				lo.Contains[int64](resultIDs, segmentID)
+				recNum++
+			}
+		}
+	})
+
+	s.Run("partition_not_loaded", func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		client := streamrpc.NewLocalQueryClient(ctx)
+		server := client.CreateServer()
+
+		err := s.delegator.QueryStream(ctx, &querypb.QueryRequest{
+			Req: &internalpb.RetrieveRequest{
+				Base: commonpbutil.NewMsgBase(),
+				//not load partation -1,will return error
+				PartitionIDs: []int64{-1},
+			},
+			DmlChannels: []string{s.vchannelName},
+		}, server)
+		s.True(errors.Is(err, merr.ErrPartitionNotLoaded))
+	})
+
+	s.Run("tsafe_behind_max_lag", func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		client := streamrpc.NewLocalQueryClient(ctx)
+		server := client.CreateServer()
+
+		err := s.delegator.QueryStream(ctx, &querypb.QueryRequest{
+			Req: &internalpb.RetrieveRequest{
+				Base:               commonpbutil.NewMsgBase(),
+				GuaranteeTimestamp: uint64(paramtable.Get().QueryNodeCfg.MaxTimestampLag.GetAsDuration(time.Second)),
+			},
+			DmlChannels: []string{s.vchannelName},
+		}, server)
+		s.Error(err)
+	})
+
+	s.Run("get_worker_failed", func() {
+		defer func() {
+			s.workerManager.AssertExpectations(s.T())
+			s.workerManager.ExpectedCalls = nil
+		}()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		client := streamrpc.NewLocalQueryClient(ctx)
+		server := client.CreateServer()
+
+		mockErr := errors.New("mock error")
+
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(nil, mockErr)
+
+		// run stream function
+		err := s.delegator.QueryStream(ctx, &querypb.QueryRequest{
+			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+			DmlChannels: []string{s.vchannelName},
+		}, server)
+		s.True(errors.Is(err, mockErr))
+	})
+
+	s.Run("worker_return_error", func() {
+		defer func() {
+			s.workerManager.AssertExpectations(s.T())
+			s.workerManager.ExpectedCalls = nil
+		}()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		client := streamrpc.NewLocalQueryClient(ctx)
+		server := client.CreateServer()
+
+		workers := make(map[int64]*cluster.MockWorker)
+		worker1 := &cluster.MockWorker{}
+		worker2 := &cluster.MockWorker{}
+		mockErr := errors.New("mock error")
+
+		workers[1] = worker1
+		workers[2] = worker2
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
+			return workers[nodeID]
+		}, nil)
+
+		worker1.EXPECT().QueryStreamSegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest"), mock.Anything).
+			Return(mockErr)
+
+		worker2.EXPECT().QueryStreamSegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest"), mock.Anything).
+			Run(func(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) {
+				s.EqualValues(2, req.Req.GetBase().GetTargetID())
+				s.True(req.GetFromShardLeader())
+				s.Equal(querypb.DataScope_Historical, req.GetScope())
+				s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
+				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
+				srv.Send(&internalpb.RetrieveResults{
+					Status: merr.Status(nil),
+					Ids: &schemapb.IDs{
+						IdField: &schemapb.IDs_IntId{
+							IntId: &schemapb.LongArray{Data: req.GetSegmentIDs()},
+						},
+					},
+				})
+			}).Return(nil)
+
+		// run stream function
+		go func() {
+			err := s.delegator.QueryStream(ctx, &querypb.QueryRequest{
+				Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+				DmlChannels: []string{s.vchannelName},
+			}, server)
+			server.Send(&internalpb.RetrieveResults{
+				Status: merr.Status(err),
+			})
+		}()
+
+		resultIDs := []int64{1002, 1003}
+		recNum := 0
+		for {
+			result, err := client.Recv()
+			s.NoError(err)
+
+			err = merr.Error(result.GetStatus())
+			if err != nil {
+				s.Equal(recNum, len(resultIDs))
+				s.Equal(err.Error(), mockErr.Error())
+				break
+			}
+
+			for _, segmentID := range result.Ids.GetIntId().GetData() {
+				s.Less(recNum, len(resultIDs))
+				lo.Contains[int64](resultIDs, segmentID)
+				recNum++
+			}
+		}
+	})
+
+	s.Run("wrong_channel", func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		client := streamrpc.NewLocalQueryClient(ctx)
+		server := client.CreateServer()
+
+		err := s.delegator.QueryStream(ctx, &querypb.QueryRequest{
+			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+			DmlChannels: []string{"non_exist_channel"},
+		}, server)
+
+		s.Error(err)
+	})
+
+	s.Run("cluster_not_serviceable", func() {
+		s.delegator.Close()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		client := streamrpc.NewLocalQueryClient(ctx)
+		server := client.CreateServer()
+
+		err := s.delegator.QueryStream(ctx, &querypb.QueryRequest{
+			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+			DmlChannels: []string{s.vchannelName},
+		}, server)
+
+		s.Error(err)
+	})
+
+}
+
 func (s *DelegatorSuite) TestGetStats() {
 	s.delegator.Start()
 	// 1 => sealed segment 1000, 1001
 	// 1 => growing segment 1004
 	// 2 => sealed segment 1002, 1003
 	paramtable.SetNodeID(1)
-	s.delegator.LoadGrowing(context.Background(), []*querypb.SegmentLoadInfo{
-		{
-			SegmentID:    1004,
-			CollectionID: s.collectionID,
-			PartitionID:  500,
-		},
-	}, 0)
-	s.delegator.SyncDistribution(context.Background(),
-		SegmentEntry{
-			NodeID:      1,
-			SegmentID:   1000,
-			PartitionID: 500,
-			Version:     2001,
-		},
-		SegmentEntry{
-			NodeID:      1,
-			SegmentID:   1001,
-			PartitionID: 501,
-			Version:     2001,
-		},
-		SegmentEntry{
-			NodeID:      2,
-			SegmentID:   1002,
-			PartitionID: 500,
-			Version:     2001,
-		},
-		SegmentEntry{
-			NodeID:      2,
-			SegmentID:   1003,
-			PartitionID: 501,
-			Version:     2001,
-		},
-	)
+	s.initSegments()
 
-	s.delegator.SyncTargetVersion(2001, []int64{1004}, []int64{1000, 1001, 1002, 1003}, []int64{})
 	s.Run("normal", func() {
 		defer func() {
 			s.workerManager.ExpectedCalls = nil

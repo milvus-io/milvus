@@ -887,6 +887,18 @@ func passwordVerify(ctx context.Context, username, rawPwd string, globalMetaCach
 	return true
 }
 
+func translatePkOutputFields(schema *schemapb.CollectionSchema) ([]string, []int64) {
+	pkNames := []string{}
+	fieldIDs := []int64{}
+	for _, field := range schema.Fields {
+		if field.IsPrimaryKey {
+			pkNames = append(pkNames, field.GetName())
+			fieldIDs = append(fieldIDs, field.GetFieldID())
+		}
+	}
+	return pkNames, fieldIDs
+}
+
 // Support wildcard in output fields:
 //
 //	"*" - all fields
