@@ -164,7 +164,7 @@ func (nc *Consumer) CheckTopicValid(topic string) error {
 	// check if topic valid or exist.
 	streamInfo, err := nc.js.StreamInfo(topic)
 	if errors.Is(err, nats.ErrStreamNotFound) {
-		return merr.WrapErrTopicNotFound(topic, err.Error())
+		return merr.WrapErrMqTopicNotFound(topic, err.Error())
 	} else if err != nil {
 		log.Warn("fail to get stream info of nats", zap.String("topic", nc.topic), zap.Error(err))
 		return errors.Wrap(err, "failed to get stream info of nats jetstream")
@@ -172,7 +172,7 @@ func (nc *Consumer) CheckTopicValid(topic string) error {
 
 	// check if topic stream is empty.
 	if streamInfo.State.Msgs > 0 {
-		return merr.WrapErrTopicNotEmpty(topic, "stream in nats is not empty")
+		return merr.WrapErrMqTopicNotEmpty(topic, "stream in nats is not empty")
 	}
 	return nil
 }

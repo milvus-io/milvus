@@ -48,9 +48,9 @@ var (
 	ErrCollectionNotFullyLoaded   = newMilvusError("collection not fully loaded", 103, true)
 
 	// Partition related
-	ErrPartitionNotFound       = newMilvusError("partition not found", 202, false)
-	ErrPartitionNotLoaded      = newMilvusError("partition not loaded", 203, false)
-	ErrPartitionNotFullyLoaded = newMilvusError("collection not fully loaded", 103, true)
+	ErrPartitionNotFound       = newMilvusError("partition not found", 200, false)
+	ErrPartitionNotLoaded      = newMilvusError("partition not loaded", 201, false)
+	ErrPartitionNotFullyLoaded = newMilvusError("partition not fully loaded", 202, true)
 
 	// ResourceGroup related
 	ErrResourceGroupNotFound = newMilvusError("resource group not found", 300, false)
@@ -75,9 +75,9 @@ var (
 	ErrIndexNotFound = newMilvusError("index not found", 700, false)
 
 	// Database related
-	ErrDatabaseNotfound         = newMilvusError("database not found", 800, false)
+	ErrDatabaseNotFound         = newMilvusError("database not found", 800, false)
 	ErrDatabaseNumLimitExceeded = newMilvusError("exceeded the limit number of database", 801, false)
-	ErrInvalidedDatabaseName    = newMilvusError("invalided database name", 802, false)
+	ErrDatabaseInvalidName      = newMilvusError("invalid database name", 802, false)
 
 	// Node related
 	ErrNodeNotFound     = newMilvusError("node not found", 901, false)
@@ -96,15 +96,16 @@ var (
 	// Metrics related
 	ErrMetricNotFound = newMilvusError("metric not found", 1200, false)
 
-	// Topic related
-	ErrTopicNotFound = newMilvusError("topic not found", 1300, false)
-	ErrTopicNotEmpty = newMilvusError("topic not empty", 1301, false)
+	// Message queue related
+	ErrMqTopicNotFound = newMilvusError("topic not found", 1300, false)
+	ErrMqTopicNotEmpty = newMilvusError("topic not empty", 1301, false)
+	ErrMqInternal      = newMilvusError("message queue internal error", 1302, false)
 
 	// field related
 	ErrFieldNotFound = newMilvusError("field not found", 1700, false)
 
 	// high-level restful api related
-	ErrNeedAuthenticate          = newMilvusError("user hasn't authenticate", 1800, false)
+	ErrNeedAuthenticate          = newMilvusError("user hasn't authenticated", 1800, false)
 	ErrIncorrectParameterFormat  = newMilvusError("can only accept json format request", 1801, false)
 	ErrMissingRequiredParameters = newMilvusError("missing required parameters", 1802, false)
 	ErrMarshalCollectionSchema   = newMilvusError("fail to marshal collection schema", 1803, false)
