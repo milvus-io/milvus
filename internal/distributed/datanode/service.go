@@ -400,3 +400,7 @@ func (s *Server) AddImportSegment(ctx context.Context, request *datapb.AddImport
 func (s *Server) SyncSegments(ctx context.Context, request *datapb.SyncSegmentsRequest) (*commonpb.Status, error) {
 	return s.datanode.SyncSegments(ctx, request)
 }
+
+func (s *Server) FlushChannels(ctx context.Context, req *datapb.FlushChannelsRequest) (*commonpb.Status, error) {
+	return s.datanode.FlushChannels(ctx, req)
+}

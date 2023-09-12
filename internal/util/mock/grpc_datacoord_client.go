@@ -136,7 +136,7 @@ func (m *GrpcDataCoordClient) WatchChannels(ctx context.Context, req *datapb.Wat
 	return &datapb.WatchChannelsResponse{}, m.Err
 }
 
-func (m *GrpcDataCoordClient) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest, opts ...grpc.CallOption) (*milvuspb.GetFlushStateResponse, error) {
+func (m *GrpcDataCoordClient) GetFlushState(ctx context.Context, req *datapb.GetFlushStateRequest, opts ...grpc.CallOption) (*milvuspb.GetFlushStateResponse, error) {
 	return &milvuspb.GetFlushStateResponse{}, m.Err
 }
 
