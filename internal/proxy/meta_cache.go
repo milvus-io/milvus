@@ -621,7 +621,7 @@ func (m *MetaCache) showPartitions(ctx context.Context, dbName string, collectio
 	if err != nil {
 		return nil, err
 	}
-	if partitions.Status.ErrorCode != commonpb.ErrorCode_Success {
+	if partitions.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		return nil, fmt.Errorf("%s", partitions.Status.Reason)
 	}
 
@@ -808,11 +808,11 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, col
 		if err != nil {
 			return retry.Unrecoverable(err)
 		}
-		if resp.Status.ErrorCode == commonpb.ErrorCode_Success {
+		if resp.GetStatus().GetErrorCode() == commonpb.ErrorCode_Success {
 			return nil
 		}
 		// do not retry unless got NoReplicaAvailable from querycoord
-		if resp.Status.ErrorCode != commonpb.ErrorCode_NoReplicaAvailable {
+		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_NoReplicaAvailable {
 			return retry.Unrecoverable(fmt.Errorf("fail to get shard leaders from QueryCoord: %s", resp.Status.Reason))
 		}
 		return fmt.Errorf("fail to get shard leaders from QueryCoord: %s", resp.Status.Reason)
@@ -820,7 +820,7 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, col
 	if err != nil {
 		return nil, err
 	}
-	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		return nil, fmt.Errorf("fail to get shard leaders from QueryCoord: %s", resp.Status.Reason)
 	}
 

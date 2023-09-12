@@ -112,16 +112,11 @@ func (node *QueryNode) GetStatistics(ctx context.Context, req *querypb.GetStatis
 	}
 	defer node.lifetime.Done()
 
-	if !CheckTargetID(req.GetReq()) {
-		targetID := req.GetReq().GetBase().GetTargetID()
-		log.Warn("target ID not match",
-			zap.Int64("targetID", targetID),
-			zap.Int64("nodeID", paramtable.GetNodeID()),
-		)
+	err := merr.CheckTargetID(req.GetReq().GetBase())
+	if err != nil {
+		log.Warn("target ID check failed", zap.Error(err))
 		return &internalpb.GetStatisticsResponse{
-			Status: util.WrapStatus(commonpb.ErrorCode_NodeIDNotMatch,
-				common.WrapNodeIDNotMatchMsg(targetID, paramtable.GetNodeID()),
-			),
+			Status: merr.Status(err),
 		}, nil
 	}
 	failRet := &internalpb.GetStatisticsResponse{
@@ -145,7 +140,7 @@ func (node *QueryNode) GetStatistics(ctx context.Context, req *querypb.GetStatis
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
-				failRet.Status.Reason = err.Error()
+				failRet.Status = merr.Status(err)
 				failRet.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 				return err
 			}
@@ -164,7 +159,7 @@ func (node *QueryNode) GetStatistics(ctx context.Context, req *querypb.GetStatis
 
 	ret, err := reduceStatisticResponse(toReduceResults)
 	if err != nil {
-		failRet.Status.Reason = err.Error()
+		failRet.Status = merr.Status(err)
 		return failRet, nil
 	}
 	log.Debug("reduce statistic result done")
@@ -486,10 +481,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		req.GetInfos()...,
 	)
 	if err != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	node.manager.Collection.Ref(req.GetCollectionID(), uint32(len(loaded)))
@@ -686,16 +678,16 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 		zap.String("scope", req.GetScope().String()),
 	)
 
-	failRet := WrapSearchResult(commonpb.ErrorCode_UnexpectedError, "")
+	resp := &internalpb.SearchResults{}
 	if !node.lifetime.Add(commonpbutil.IsHealthy) {
-		failRet.Status = merr.Status(merr.WrapErrServiceNotReady(fmt.Sprintf("node id: %d is unhealthy", paramtable.GetNodeID())))
-		return failRet, nil
+		resp.Status = merr.Status(merr.WrapErrServiceNotReady(fmt.Sprintf("node id: %d is unhealthy", paramtable.GetNodeID())))
+		return resp, nil
 	}
 	defer node.lifetime.Done()
 
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.TotalLabel, metrics.FromLeader).Inc()
 	defer func() {
-		if failRet.Status.ErrorCode != commonpb.ErrorCode_Success {
+		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.FailLabel, metrics.FromLeader).Inc()
 		}
 	}()
@@ -713,22 +705,22 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 	if collection == nil {
 		err := merr.WrapErrCollectionNotLoaded(req.GetReq().GetCollectionID())
 		log.Warn("failed to search segments", zap.Error(err))
-		failRet.Status = merr.Status(err)
-		return failRet, nil
+		resp.Status = merr.Status(err)
+		return resp, nil
 	}
 
 	task := tasks.NewSearchTask(searchCtx, collection, node.manager, req)
 	if err := node.scheduler.Add(task); err != nil {
 		log.Warn("failed to search channel", zap.Error(err))
-		failRet.Status.Reason = err.Error()
-		return failRet, nil
+		resp.Status = merr.Status(err)
+		return resp, nil
 	}
 
 	err := task.Wait()
 	if err != nil {
 		log.Warn("failed to search segments", zap.Error(err))
-		failRet.Status.Reason = err.Error()
-		return failRet, nil
+		resp.Status = merr.Status(err)
+		return resp, nil
 	}
 
 	tr.CtxElapse(ctx, fmt.Sprintf("search segments done, channel = %s, segmentIDs = %v",
@@ -736,16 +728,14 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 		req.GetSegmentIDs(),
 	))
 
-	// TODO QueryNodeSQLatencyInQueue QueryNodeReduceLatency
-	failRet.Status.ErrorCode = commonpb.ErrorCode_Success
 	latency := tr.ElapseSpan()
 	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.SuccessLabel, metrics.FromLeader).Inc()
 
-	result := task.Result()
-	result.GetCostAggregation().ResponseTime = tr.ElapseSpan().Milliseconds()
-	result.GetCostAggregation().TotalNQ = node.scheduler.GetWaitingTaskTotalNQ()
-	return result, nil
+	resp = task.Result()
+	resp.GetCostAggregation().ResponseTime = tr.ElapseSpan().Milliseconds()
+	resp.GetCostAggregation().TotalNQ = node.scheduler.GetWaitingTaskTotalNQ()
+	return resp, nil
 }
 
 // Search performs replica search tasks.
@@ -776,14 +766,12 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 	}
 	defer node.lifetime.Done()
 
-	if !CheckTargetID(req.GetReq()) {
-		targetID := req.GetReq().GetBase().GetTargetID()
-		log.Warn("target ID not match",
-			zap.Int64("targetID", targetID),
-			zap.Int64("nodeID", paramtable.GetNodeID()),
-		)
-		return WrapSearchResult(commonpb.ErrorCode_NodeIDNotMatch,
-			common.WrapNodeIDNotMatchMsg(targetID, paramtable.GetNodeID())), nil
+	err := merr.CheckTargetID(req.GetReq().GetBase())
+	if err != nil {
+		log.Warn("target ID check failed", zap.Error(err))
+		return &internalpb.SearchResults{
+			Status: merr.Status(err),
+		}, nil
 	}
 
 	failRet := &internalpb.SearchResults{
@@ -828,8 +816,7 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
-				failRet.Status.Reason = err.Error()
-				failRet.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+				failRet.Status = merr.Status(err)
 				return err
 			}
 			if ret.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
@@ -848,7 +835,7 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 	if err != nil {
 		log.Warn("failed to reduce search results", zap.Error(err))
 		failRet.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		failRet.Status.Reason = err.Error()
+		failRet.Status = merr.Status(err)
 		return failRet, nil
 	}
 	reduceLatency := tr.RecordSpan()
@@ -868,7 +855,11 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 
 // only used for delegator query segments from worker
 func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
-	failRet := WrapRetrieveResult(commonpb.ErrorCode_UnexpectedError, "")
+	failRet := &internalpb.RetrieveResults{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		},
+	}
 	msgID := req.Req.Base.GetMsgID()
 	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID()
 	channel := req.GetDmlChannels()[0]
@@ -888,7 +879,7 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.TotalLabel, metrics.FromLeader).Inc()
 	defer func() {
-		if failRet.Status.ErrorCode != commonpb.ErrorCode_Success {
+		if failRet.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.FailLabel, metrics.FromLeader).Inc()
 		}
 	}()
@@ -941,7 +932,6 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 }
 
 func (node *QueryNode) QueryStreamSegments(ctx context.Context, req *querypb.QueryRequest, streamer streamrpc.QueryStreamer) error {
-	failRet := WrapRetrieveResult(commonpb.ErrorCode_UnexpectedError, "")
 	msgID := req.Req.Base.GetMsgID()
 	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID()
 	channel := req.GetDmlChannels()[0]
@@ -954,16 +944,17 @@ func (node *QueryNode) QueryStreamSegments(ctx context.Context, req *querypb.Que
 		zap.String("scope", req.GetScope().String()),
 	)
 
+	resp := &internalpb.RetrieveResults{}
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.TotalLabel, metrics.FromLeader).Inc()
 	defer func() {
-		if failRet.Status.ErrorCode != commonpb.ErrorCode_Success {
+		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.FailLabel, metrics.FromLeader).Inc()
 		}
 	}()
 
 	if !node.lifetime.Add(commonpbutil.IsHealthy) {
-		failRet.Status = merr.Status(merr.WrapErrServiceUnavailable(fmt.Sprintf("node id: %d is unhealthy", paramtable.GetNodeID())))
-		srv.Send(failRet)
+		resp.Status = merr.Status(merr.WrapErrServiceUnavailable(fmt.Sprintf("node id: %d is unhealthy", paramtable.GetNodeID())))
+		srv.Send(resp)
 		return nil
 	}
 	defer node.lifetime.Done()
@@ -977,8 +968,8 @@ func (node *QueryNode) QueryStreamSegments(ctx context.Context, req *querypb.Que
 
 	err := node.queryStreamSegments(ctx, req, srv)
 	if err != nil {
-		failRet.Status = merr.Status(err)
-		srv.Send(failRet)
+		resp.Status = merr.Status(err)
+		srv.Send(resp)
 		return nil
 	}
 
@@ -989,7 +980,6 @@ func (node *QueryNode) QueryStreamSegments(ctx context.Context, req *querypb.Que
 		req.GetSegmentIDs(),
 	))
 
-	failRet.Status.ErrorCode = commonpb.ErrorCode_Success
 	// TODO QueryNodeSQLatencyInQueue QueryNodeReduceLatency
 	latency := tr.ElapseSpan()
 	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
@@ -1027,14 +1017,12 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 	}
 	defer node.lifetime.Done()
 
-	if !CheckTargetID(req.GetReq()) {
-		targetID := req.GetReq().GetBase().GetTargetID()
-		log.Warn("target ID not match",
-			zap.Int64("targetID", targetID),
-			zap.Int64("nodeID", paramtable.GetNodeID()),
-		)
-		return WrapRetrieveResult(commonpb.ErrorCode_NodeIDNotMatch,
-			common.WrapNodeIDNotMatchMsg(targetID, paramtable.GetNodeID())), nil
+	err := merr.CheckTargetID(req.GetReq().GetBase())
+	if err != nil {
+		log.Warn("target ID check failed", zap.Error(err))
+		return &internalpb.RetrieveResults{
+			Status: merr.Status(err),
+		}, nil
 	}
 
 	toMergeResults := make([]*internalpb.RetrieveResults, len(req.GetDmlChannels()))
@@ -1064,14 +1052,18 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		})
 	}
 	if err := runningGp.Wait(); err != nil {
-		return WrapRetrieveResult(commonpb.ErrorCode_UnexpectedError, "failed to query channel", err), nil
+		return &internalpb.RetrieveResults{
+			Status: merr.Status(err),
+		}, nil
 	}
 
 	tr.RecordSpan()
 	reducer := segments.CreateInternalReducer(req, node.manager.Collection.Get(req.GetReq().GetCollectionID()).Schema())
 	ret, err := reducer.Reduce(ctx, toMergeResults)
 	if err != nil {
-		return WrapRetrieveResult(commonpb.ErrorCode_UnexpectedError, "failed to query channel", err), nil
+		return &internalpb.RetrieveResults{
+			Status: merr.Status(err),
+		}, nil
 	}
 	reduceLatency := tr.RecordSpan()
 	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.ReduceShards).
@@ -1112,15 +1104,10 @@ func (node *QueryNode) QueryStream(ctx context.Context, req *querypb.QueryReques
 	}
 	defer node.lifetime.Done()
 
-	if !CheckTargetID(req.GetReq()) {
-		targetID := req.GetReq().GetBase().GetTargetID()
-		log.Warn("target ID not match",
-			zap.Int64("targetID", targetID),
-			zap.Int64("nodeID", paramtable.GetNodeID()),
-		)
-		srv.Send(WrapRetrieveResult(commonpb.ErrorCode_NodeIDNotMatch,
-			common.WrapNodeIDNotMatchMsg(targetID, paramtable.GetNodeID())))
-		return nil
+	err := merr.CheckTargetID(req.GetReq().GetBase())
+	if err != nil {
+		log.Warn("target ID check failed", zap.Error(err))
+		return err
 	}
 
 	runningGp, runningCtx := errgroup.WithContext(ctx)
@@ -1145,7 +1132,9 @@ func (node *QueryNode) QueryStream(ctx context.Context, req *querypb.QueryReques
 	}
 
 	if err := runningGp.Wait(); err != nil {
-		srv.Send(WrapRetrieveResult(commonpb.ErrorCode_UnexpectedError, "failed to query channel", err))
+		srv.Send(&internalpb.RetrieveResults{
+			Status: merr.Status(err),
+		})
 		return nil
 	}
 
@@ -1214,10 +1203,7 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 			zap.Error(err))
 
 		return &milvuspb.GetMetricsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -1230,10 +1216,7 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 				zap.String("metricType", metricType),
 				zap.Error(err))
 			return &milvuspb.GetMetricsResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    err.Error(),
-				},
+				Status: merr.Status(err),
 			}, nil
 		}
 		log.RatedDebug(50, "QueryNode.GetMetrics",
@@ -1251,11 +1234,7 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 		zap.String("metricType", metricType))
 
 	return &milvuspb.GetMetricsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    metricsinfo.MsgUnimplementedMetric,
-		},
-		Response: "",
+		Status: merr.Status(merr.WrapErrMetricNotFound(metricType)),
 	}, nil
 }
 
@@ -1378,11 +1357,9 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 	// get shard delegator
 	shardDelegator, ok := node.delegators.Get(req.GetChannel())
 	if !ok {
+		err := merr.WrapErrChannelNotFound(req.GetChannel())
 		log.Warn("failed to find shard cluster when sync")
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    "shard not exist",
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	// translate segment action
@@ -1416,10 +1393,7 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 			shardDelegator.SyncTargetVersion(action.GetTargetVersion(), action.GetGrowingInTarget(),
 				action.GetSealedInTarget(), action.GetDroppedInTarget())
 		default:
-			return &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    "unexpected action type",
-			}, nil
+			return merr.Status(merr.WrapErrServiceInternal("unknown action type", action.GetType().String())), nil
 		}
 	}
 
@@ -1503,10 +1477,7 @@ func (node *QueryNode) Delete(ctx context.Context, req *querypb.DeleteRequest) (
 		err := segment.Delete(pks, req.GetTimestamps())
 		if err != nil {
 			log.Warn("segment delete failed", zap.Error(err))
-			return &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    fmt.Sprintf("delete on segment %d failed, %s", req.GetSegmentId(), err.Error()),
-			}, nil
+			return merr.Status(err), nil
 		}
 	}
 

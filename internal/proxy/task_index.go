@@ -495,7 +495,7 @@ func (dit *describeIndexTask) Execute(ctx context.Context) error {
 	}
 	dit.result = &milvuspb.DescribeIndexResponse{}
 	dit.result.Status = resp.GetStatus()
-	if dit.result.Status.ErrorCode != commonpb.ErrorCode_Success {
+	if dit.result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		return errors.New(dit.result.Status.Reason)
 	}
 	for _, indexInfo := range resp.IndexInfos {
@@ -614,7 +614,7 @@ func (dit *getIndexStatisticsTask) Execute(ctx context.Context) error {
 	}
 	dit.result = &milvuspb.GetIndexStatisticsResponse{}
 	dit.result.Status = resp.GetStatus()
-	if dit.result.Status.ErrorCode != commonpb.ErrorCode_Success {
+	if dit.result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		return errors.New(dit.result.Status.Reason)
 	}
 	for _, indexInfo := range resp.IndexInfos {

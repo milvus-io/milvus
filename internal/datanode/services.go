@@ -466,7 +466,7 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 		Count: 1,
 	})
 
-	if rep.Status.ErrorCode != commonpb.ErrorCode_Success || err != nil {
+	if rep.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success || err != nil {
 		return returnFailFunc("DataNode alloc ts failed", err)
 	}
 
@@ -539,7 +539,7 @@ func (node *DataNode) getPartitions(ctx context.Context, dbName string, collecti
 		log.Warn("failed to get partitions of collection", logFields...)
 		return nil, err
 	}
-	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("failed to get partitions of collection", logFields...)
 		return nil, errors.New(resp.Status.Reason)
 	}
@@ -683,7 +683,7 @@ func assignSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest) importutil
 		if err != nil {
 			return 0, "", fmt.Errorf("syncSegmentID Failed:%w", err)
 		}
-		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 			return 0, "", fmt.Errorf("syncSegmentID Failed:%s", resp.Status.Reason)
 		}
 		if len(resp.SegIDAssignments) == 0 || resp.SegIDAssignments[0] == nil {

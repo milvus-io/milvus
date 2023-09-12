@@ -149,10 +149,10 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 		zap.String("scope", req.GetScope().String()),
 	)
 
-	failRet := WrapRetrieveResult(commonpb.ErrorCode_UnexpectedError, "")
+	var err error
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.TotalLabel, metrics.Leader).Inc()
 	defer func() {
-		if failRet.Status.ErrorCode != commonpb.ErrorCode_Success {
+		if err != nil {
 			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.FailLabel, metrics.Leader).Inc()
 		}
 	}()
@@ -170,18 +170,16 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 	// get delegator
 	sd, ok := node.delegators.Get(channel)
 	if !ok {
-		err := merr.WrapErrServiceUnavailable("failed to get shard delegator for query")
+		err := merr.WrapErrChannelNotFound(channel)
 		log.Warn("Query failed, failed to get shard delegator for query", zap.Error(err))
-		failRet.Status = merr.Status(err)
-		return failRet, nil
+		return nil, err
 	}
 
 	// do query
 	results, err := sd.Query(queryCtx, req)
 	if err != nil {
 		log.Warn("failed to query on delegator", zap.Error(err))
-		failRet.Status.Reason = err.Error()
-		return failRet, nil
+		return nil, err
 	}
 
 	// reduce result
@@ -196,16 +194,14 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 	if collection == nil {
 		err := merr.WrapErrCollectionNotFound(req.Req.GetCollectionID())
 		log.Warn("Query failed, failed to get collection", zap.Error(err))
-		failRet.Status = merr.Status(err)
-		return failRet, nil
+		return nil, err
 	}
 
 	reducer := segments.CreateInternalReducer(req, collection.Schema())
 
-	ret, err := reducer.Reduce(ctx, results)
+	resp, err := reducer.Reduce(ctx, results)
 	if err != nil {
-		failRet.Status.Reason = err.Error()
-		return failRet, nil
+		return nil, err
 	}
 
 	tr.CtxElapse(ctx, fmt.Sprintf("do query with channel done , vChannel = %s, segmentIDs = %v",
@@ -213,17 +209,14 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 		req.GetSegmentIDs(),
 	))
 
-	//
-	ret.Status = merr.Status(nil)
 	latency := tr.ElapseSpan()
 	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.Leader).Observe(float64(latency.Milliseconds()))
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.SuccessLabel, metrics.Leader).Inc()
-	return ret, nil
+	return resp, nil
 }
 
 func (node *QueryNode) queryChannelStream(ctx context.Context, req *querypb.QueryRequest, channel string, srv streamrpc.QueryStreamServer) error {
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.TotalLabel, metrics.Leader).Inc()
-	failRet := WrapRetrieveResult(commonpb.ErrorCode_UnexpectedError, "")
 	msgID := req.Req.Base.GetMsgID()
 	log := log.Ctx(ctx).With(
 		zap.Int64("msgID", msgID),
@@ -232,8 +225,9 @@ func (node *QueryNode) queryChannelStream(ctx context.Context, req *querypb.Quer
 		zap.String("scope", req.GetScope().String()),
 	)
 
+	var err error
 	defer func() {
-		if failRet.Status.ErrorCode != commonpb.ErrorCode_Success {
+		if err != nil {
 			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.FailLabel, metrics.Leader).Inc()
 		}
 	}()
@@ -252,13 +246,13 @@ func (node *QueryNode) queryChannelStream(ctx context.Context, req *querypb.Quer
 	// get delegator
 	sd, ok := node.delegators.Get(channel)
 	if !ok {
-		err := merr.WrapErrServiceUnavailable("failed to get query shard delegator")
+		err := merr.WrapErrChannelNotFound(channel)
 		log.Warn("Query failed, failed to get query shard delegator", zap.Error(err))
 		return err
 	}
 
 	// do query
-	err := sd.QueryStream(queryCtx, req, srv)
+	err = sd.QueryStream(queryCtx, req, srv)
 	if err != nil {
 		return err
 	}
@@ -373,10 +367,10 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 	}
 	defer node.lifetime.Done()
 
-	failRet := WrapSearchResult(commonpb.ErrorCode_UnexpectedError, "")
+	var err error
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.TotalLabel, metrics.Leader).Inc()
 	defer func() {
-		if failRet.Status.ErrorCode != commonpb.ErrorCode_Success {
+		if err != nil {
 			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.FailLabel, metrics.Leader).Inc()
 		}
 	}()
@@ -393,23 +387,20 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 	// get delegator
 	sd, ok := node.delegators.Get(channel)
 	if !ok {
-		err := merr.WrapErrServiceUnavailable("failed to get shard delegator for search")
+		err := merr.WrapErrChannelNotFound(channel)
 		log.Warn("Query failed, failed to get shard delegator for search", zap.Error(err))
-		failRet.Status.Reason = err.Error()
-		return failRet, err
+		return nil, err
 	}
-	req, err := node.optimizeSearchParams(ctx, req, sd)
+	req, err = node.optimizeSearchParams(ctx, req, sd)
 	if err != nil {
 		log.Warn("failed to optimize search params", zap.Error(err))
-		failRet.Status.Reason = err.Error()
-		return failRet, err
+		return nil, err
 	}
 	// do search
 	results, err := sd.Search(searchCtx, req)
 	if err != nil {
 		log.Warn("failed to search on delegator", zap.Error(err))
-		failRet.Status.Reason = err.Error()
-		return failRet, err
+		return nil, err
 	}
 
 	// reduce result
@@ -420,10 +411,9 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 		req.GetSegmentIDs(),
 	))
 
-	ret, err := segments.ReduceSearchResults(ctx, results, req.Req.GetNq(), req.Req.GetTopk(), req.Req.GetMetricType())
+	resp, err := segments.ReduceSearchResults(ctx, results, req.Req.GetNq(), req.Req.GetTopk(), req.Req.GetMetricType())
 	if err != nil {
-		failRet.Status.Reason = err.Error()
-		return failRet, err
+		return nil, err
 	}
 
 	tr.CtxElapse(ctx, fmt.Sprintf("do search with channel done , vChannel = %s, segmentIDs = %v",
@@ -432,14 +422,13 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 	))
 
 	// update metric to prometheus
-	failRet.Status.ErrorCode = commonpb.ErrorCode_Success
 	latency := tr.ElapseSpan()
 	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.Leader).Observe(float64(latency.Milliseconds()))
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.SuccessLabel, metrics.Leader).Inc()
 	metrics.QueryNodeSearchNQ.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(req.Req.GetNq()))
 	metrics.QueryNodeSearchTopK.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(req.Req.GetTopk()))
 
-	return ret, nil
+	return resp, nil
 }
 
 func (node *QueryNode) getChannelStatistics(ctx context.Context, req *querypb.GetStatisticsRequest, channel string) (*internalpb.GetStatisticsResponse, error) {
@@ -448,11 +437,8 @@ func (node *QueryNode) getChannelStatistics(ctx context.Context, req *querypb.Ge
 		zap.String("channel", channel),
 		zap.String("scope", req.GetScope().String()),
 	)
-	failRet := &internalpb.GetStatisticsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		},
-	}
+
+	resp := &internalpb.GetStatisticsResponse{}
 
 	if req.GetFromShardLeader() {
 		var (
@@ -478,23 +464,26 @@ func (node *QueryNode) getChannelStatistics(ctx context.Context, req *querypb.Ge
 
 	sd, ok := node.delegators.Get(channel)
 	if !ok {
-		log.Warn("GetStatistics failed, failed to get query shard delegator")
-		return failRet, nil
+		err := merr.WrapErrChannelNotFound(channel, "failed to get channel statistics")
+		log.Warn("GetStatistics failed, failed to get query shard delegator", zap.Error(err))
+		resp.Status = merr.Status(err)
+		return resp, nil
 	}
 
 	results, err := sd.GetStatistics(ctx, req)
 	if err != nil {
 		log.Warn("failed to get statistics from delegator", zap.Error(err))
-		failRet.Status.Reason = err.Error()
-		return failRet, nil
+		resp.Status = merr.Status(err)
+		return resp, nil
 	}
-	ret, err := reduceStatisticResponse(results)
+	resp, err = reduceStatisticResponse(results)
 	if err != nil {
-		failRet.Status.Reason = err.Error()
-		return failRet, nil
+		log.Warn("failed to reduce channel statistics", zap.Error(err))
+		resp.Status = merr.Status(err)
+		return resp, nil
 	}
 
-	return ret, nil
+	return resp, nil
 }
 
 func segmentStatsResponse(segStats []segments.SegmentStats) *internalpb.GetStatisticsResponse {

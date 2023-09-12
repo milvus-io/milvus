@@ -1189,8 +1189,7 @@ func (suite *ServiceSuite) TestSearch_Failed() {
 	// Delegator not found
 	resp, err = suite.node.Search(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-	suite.Contains(resp.GetStatus().GetReason(), merr.ErrServiceUnavailable.Error())
+	suite.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrChannelNotFound)
 
 	suite.TestWatchDmChannelsInt64()
 	suite.TestLoadSegments_Int64()
@@ -1335,8 +1334,7 @@ func (suite *ServiceSuite) TestQuery_Failed() {
 	// Delegator not found
 	resp, err := suite.node.Query(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-	suite.Contains(resp.GetStatus().GetReason(), merr.ErrServiceUnavailable.Error())
+	suite.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrChannelNotFound)
 
 	suite.TestWatchDmChannelsInt64()
 	suite.TestLoadSegments_Int64()
@@ -1467,8 +1465,7 @@ func (suite *ServiceSuite) TestQueryStream_Failed() {
 			err = merr.Error(result.GetStatus())
 			// Check result
 			if err != nil {
-				suite.Equal(commonpb.ErrorCode_UnexpectedError, result.GetStatus().GetErrorCode())
-				suite.Contains(err.Error(), merr.ErrServiceUnavailable.Error())
+				suite.ErrorIs(err, merr.ErrChannelNotFound)
 			}
 
 		}
@@ -1674,8 +1671,8 @@ func (suite *ServiceSuite) TestGetMetric_Failed() {
 
 	resp, err := suite.node.GetMetrics(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
-	suite.Equal(metricsinfo.MsgUnimplementedMetric, resp.Status.Reason)
+	err = merr.Error(resp.GetStatus())
+	suite.ErrorIs(err, merr.ErrMetricNotFound)
 
 	// metric parse failed
 	req.Request = "---"
