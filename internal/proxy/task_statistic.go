@@ -241,7 +241,7 @@ func (g *getStatisticsTask) getStatisticsFromDataCoord(ctx context.Context) erro
 	if err != nil {
 		return err
 	}
-	if result.Status.ErrorCode != commonpb.ErrorCode_Success {
+	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		return errors.New(result.Status.Reason)
 	}
 	if g.resultBuf == nil {
@@ -335,7 +335,7 @@ func checkFullLoaded(ctx context.Context, qc types.QueryCoord, dbName string, co
 		if err != nil {
 			return nil, nil, fmt.Errorf("showPartitions failed, collection = %d, partitionIDs = %v, err = %s", collectionID, searchPartitionIDs, err)
 		}
-		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 			return nil, nil, fmt.Errorf("showPartitions failed, collection = %d, partitionIDs = %v, reason = %s", collectionID, searchPartitionIDs, resp.GetStatus().GetReason())
 		}
 
@@ -360,7 +360,7 @@ func checkFullLoaded(ctx context.Context, qc types.QueryCoord, dbName string, co
 	if err != nil {
 		return nil, nil, fmt.Errorf("showPartitions failed, collection = %d, partitionIDs = %v, err = %s", collectionID, searchPartitionIDs, err)
 	}
-	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		return nil, nil, fmt.Errorf("showPartitions failed, collection = %d, partitionIDs = %v, reason = %s", collectionID, searchPartitionIDs, resp.GetStatus().GetReason())
 	}
 
@@ -462,7 +462,7 @@ func reduceStatisticResponse(results []map[string]string) ([]*commonpb.KeyValueP
 //		if err != nil {
 //			return err
 //		}
-//		if result.Status.ErrorCode != commonpb.ErrorCode_Success {
+//		if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 //			return errors.New(result.Status.Reason)
 //		}
 //		g.toReduceResults = append(g.toReduceResults, &internalpb.GetStatisticsResponse{
@@ -534,7 +534,7 @@ func reduceStatisticResponse(results []map[string]string) ([]*commonpb.KeyValueP
 //			if err != nil {
 //				return err
 //			}
-//			if result.Status.ErrorCode != commonpb.ErrorCode_Success {
+//			if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 //				return errors.New(result.Status.Reason)
 //			}
 //			g.toReduceResults = append(g.toReduceResults, &internalpb.GetStatisticsResponse{
@@ -557,7 +557,7 @@ func reduceStatisticResponse(results []map[string]string) ([]*commonpb.KeyValueP
 //			if err != nil {
 //				return err
 //			}
-//			if result.Status.ErrorCode != commonpb.ErrorCode_Success {
+//			if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 //				return errors.New(result.Status.Reason)
 //			}
 //			g.toReduceResults = append(g.toReduceResults, &internalpb.GetStatisticsResponse{
@@ -656,7 +656,7 @@ func (g *getCollectionStatisticsTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if result.Status.ErrorCode != commonpb.ErrorCode_Success {
+	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		return errors.New(result.Status.Reason)
 	}
 	g.result = &milvuspb.GetCollectionStatisticsResponse{
@@ -746,7 +746,7 @@ func (g *getPartitionStatisticsTask) Execute(ctx context.Context) error {
 	if result == nil {
 		return errors.New("get partition statistics resp is nil")
 	}
-	if result.Status.ErrorCode != commonpb.ErrorCode_Success {
+	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		return errors.New(result.Status.Reason)
 	}
 	g.result = &milvuspb.GetPartitionStatisticsResponse{

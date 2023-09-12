@@ -434,7 +434,7 @@ func (hct *hasCollectionTask) Execute(ctx context.Context) error {
 	if hct.result == nil {
 		return errors.New("has collection resp is nil")
 	}
-	if hct.result.Status.ErrorCode != commonpb.ErrorCode_Success {
+	if hct.result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		return errors.New(hct.result.Status.Reason)
 	}
 	return nil
@@ -522,7 +522,7 @@ func (dct *describeCollectionTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	if result.Status.ErrorCode != commonpb.ErrorCode_Success {
+	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		dct.result.Status = result.Status
 
 		// compatibility with PyMilvus existing implementation
@@ -645,7 +645,7 @@ func (sct *showCollectionsTask) Execute(ctx context.Context) error {
 		return errors.New("failed to show collections")
 	}
 
-	if respFromRootCoord.Status.ErrorCode != commonpb.ErrorCode_Success {
+	if respFromRootCoord.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		return errors.New(respFromRootCoord.Status.Reason)
 	}
 
@@ -683,7 +683,7 @@ func (sct *showCollectionsTask) Execute(ctx context.Context) error {
 			return errors.New("failed to show collections")
 		}
 
-		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 			// update collectionID to collection name, and return new error info to sdk
 			newErrorReason := resp.Status.Reason
 			for _, collectionID := range collectionIDs {
@@ -1059,7 +1059,7 @@ func (hpt *hasPartitionTask) Execute(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
-	if hpt.result.Status.ErrorCode != commonpb.ErrorCode_Success {
+	if hpt.result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		return errors.New(hpt.result.Status.Reason)
 	}
 	return err
@@ -1144,7 +1144,7 @@ func (spt *showPartitionsTask) Execute(ctx context.Context) error {
 		return errors.New("failed to show partitions")
 	}
 
-	if respFromRootCoord.Status.ErrorCode != commonpb.ErrorCode_Success {
+	if respFromRootCoord.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		return errors.New(respFromRootCoord.Status.Reason)
 	}
 
@@ -1188,7 +1188,7 @@ func (spt *showPartitionsTask) Execute(ctx context.Context) error {
 			return errors.New("failed to show partitions")
 		}
 
-		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 			return errors.New(resp.Status.Reason)
 		}
 
@@ -1303,7 +1303,7 @@ func (ft *flushTask) Execute(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("failed to call flush to data coordinator: %s", err.Error())
 		}
-		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 			return errors.New(resp.Status.Reason)
 		}
 		coll2Segments[collName] = &schemapb.LongArray{Data: resp.GetSegmentIDs()}
@@ -1417,7 +1417,7 @@ func (lct *loadCollectionTask) Execute(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
-	if indexResponse.Status.ErrorCode != commonpb.ErrorCode_Success {
+	if indexResponse.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		return errors.New(indexResponse.Status.Reason)
 	}
 
@@ -1645,7 +1645,7 @@ func (lpt *loadPartitionsTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if indexResponse.Status.ErrorCode != commonpb.ErrorCode_Success {
+	if indexResponse.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		return errors.New(indexResponse.Status.Reason)
 	}
 
@@ -2230,7 +2230,7 @@ func (t *DescribeResourceGroupTask) Execute(ctx context.Context) error {
 		return ret, nil
 	}
 
-	if resp.Status.ErrorCode == commonpb.ErrorCode_Success {
+	if resp.GetStatus().GetErrorCode() == commonpb.ErrorCode_Success {
 		rgInfo := resp.GetResourceGroup()
 
 		numLoadedReplica, err := getCollectionName(rgInfo.NumLoadedReplica)

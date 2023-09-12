@@ -512,7 +512,7 @@ func (node *DataNode) Start() error {
 			),
 			Count: 1,
 		})
-		if err != nil || rep.Status.ErrorCode != commonpb.ErrorCode_Success {
+		if err != nil || rep.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 			log.Warn("fail to alloc timestamp", zap.Any("rep", rep), zap.Error(err))
 			startErr = errors.New("DataNode fail to alloc timestamp")
 			return

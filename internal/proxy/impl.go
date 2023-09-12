@@ -2184,7 +2184,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		return constructFailedResponse(err), nil
 	}
 
-	if it.result.Status.ErrorCode != commonpb.ErrorCode_Success {
+	if it.result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		setErrorIndex := func() {
 			numRows := request.NumRows
 			errIndex := make([]uint32, numRows)
@@ -2379,13 +2379,13 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 			metrics.FailLabel).Inc()
 		// Not every error case changes the status internally
 		// change status there to handle it
-		if it.result.Status.ErrorCode == commonpb.ErrorCode_Success {
+		if it.result.GetStatus().GetErrorCode() == commonpb.ErrorCode_Success {
 			it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		}
 		return constructFailedResponse(err, it.result.Status.ErrorCode), nil
 	}
 
-	if it.result.Status.ErrorCode != commonpb.ErrorCode_Success {
+	if it.result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		setErrorIndex := func() {
 			numRows := request.NumRows
 			errIndex := make([]uint32, numRows)
@@ -3110,7 +3110,7 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 	log.Debug("GetPersistentSegmentInfo",
 		zap.Int("len(infos)", len(infoResp.Infos)),
 		zap.Any("status", infoResp.Status))
-	if infoResp.Status.ErrorCode != commonpb.ErrorCode_Success {
+	if infoResp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 			metrics.FailLabel).Inc()
 		resp.Status.Reason = infoResp.Status.Reason
@@ -3185,7 +3185,7 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 	log.Debug("GetQuerySegmentInfo",
 		zap.Any("infos", infoResp.Infos),
 		zap.Any("status", infoResp.Status))
-	if infoResp.Status.ErrorCode != commonpb.ErrorCode_Success {
+	if infoResp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
 		log.Error("Failed to get segment info from QueryCoord",
 			zap.String("errMsg", infoResp.Status.Reason))

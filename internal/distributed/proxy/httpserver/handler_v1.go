@@ -46,7 +46,7 @@ func (h *Handlers) checkDatabase(c *gin.Context, dbName string) bool {
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(err), HTTPReturnMessage: err.Error()})
 		return false
-	} else if response.Status.ErrorCode != commonpb.ErrorCode_Success {
+	} else if response.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.Status.ErrorCode), HTTPReturnMessage: response.Status.Reason})
 		return false
 	}
@@ -73,7 +73,7 @@ func (h *Handlers) describeCollection(c *gin.Context, dbName string, collectionN
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(err), HTTPReturnMessage: err.Error()})
 		return nil, err
-	} else if response.Status.ErrorCode != commonpb.ErrorCode_Success {
+	} else if response.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.Status.ErrorCode), HTTPReturnMessage: response.Status.Reason})
 		return nil, errors.New(response.Status.Reason)
 	}
@@ -94,7 +94,7 @@ func (h *Handlers) hasCollection(c *gin.Context, dbName string, collectionName s
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(err), HTTPReturnMessage: err.Error()})
 		return false, err
-	} else if response.Status.ErrorCode != commonpb.ErrorCode_Success {
+	} else if response.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.Status.ErrorCode), HTTPReturnMessage: response.Status.Reason})
 		return false, errors.New(response.Status.Reason)
 	} else {
@@ -128,7 +128,7 @@ func (h *Handlers) listCollections(c *gin.Context) {
 	response, err := h.proxy.ShowCollections(c, &req)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: Code(err), HTTPReturnMessage: err.Error()})
-	} else if response.Status.ErrorCode != commonpb.ErrorCode_Success {
+	} else if response.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.Status.ErrorCode), HTTPReturnMessage: response.Status.Reason})
 	} else {
 		var collections []string
@@ -262,7 +262,7 @@ func (h *Handlers) getCollectionDetails(c *gin.Context) {
 	collLoadState := ""
 	if stateErr != nil {
 		log.Warn("get collection load state fail", zap.String("collection", collectionName), zap.String("err", stateErr.Error()))
-	} else if stateResp.Status.ErrorCode != commonpb.ErrorCode_Success {
+	} else if stateResp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("get collection load state fail", zap.String("collection", collectionName), zap.String("err", stateResp.Status.Reason))
 	} else {
 		collLoadState = stateResp.State.String()
@@ -283,7 +283,7 @@ func (h *Handlers) getCollectionDetails(c *gin.Context) {
 	if indexErr != nil {
 		indexDesc = []gin.H{}
 		log.Warn("get indexes description fail", zap.String("collection", collectionName), zap.String("vectorField", vectorField), zap.String("err", indexErr.Error()))
-	} else if indexResp.Status.ErrorCode != commonpb.ErrorCode_Success {
+	} else if indexResp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		indexDesc = []gin.H{}
 		log.Warn("get indexes description fail", zap.String("collection", collectionName), zap.String("vectorField", vectorField), zap.String("err", indexResp.Status.Reason))
 	} else {
@@ -381,7 +381,7 @@ func (h *Handlers) query(c *gin.Context) {
 	response, err := h.proxy.Query(c, &req)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: Code(err), HTTPReturnMessage: err.Error()})
-	} else if response.Status.ErrorCode != commonpb.ErrorCode_Success {
+	} else if response.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.Status.ErrorCode), HTTPReturnMessage: response.Status.Reason})
 	} else {
 		outputData, err := buildQueryResp(int64(0), response.OutputFields, response.FieldsData, nil, nil)
@@ -435,7 +435,7 @@ func (h *Handlers) get(c *gin.Context) {
 	response, err := h.proxy.Query(c, &req)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: Code(err), HTTPReturnMessage: err.Error()})
-	} else if response.Status.ErrorCode != commonpb.ErrorCode_Success {
+	} else if response.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.Status.ErrorCode), HTTPReturnMessage: response.Status.Reason})
 	} else {
 		outputData, err := buildQueryResp(int64(0), response.OutputFields, response.FieldsData, nil, nil)
@@ -487,7 +487,7 @@ func (h *Handlers) delete(c *gin.Context) {
 	response, err := h.proxy.Delete(c, &req)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: Code(err), HTTPReturnMessage: err.Error()})
-	} else if response.Status.ErrorCode != commonpb.ErrorCode_Success {
+	} else if response.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.Status.ErrorCode), HTTPReturnMessage: response.Status.Reason})
 	} else {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{}})
@@ -548,7 +548,7 @@ func (h *Handlers) insert(c *gin.Context) {
 	response, err := h.proxy.Insert(c, &req)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: Code(err), HTTPReturnMessage: err.Error()})
-	} else if response.Status.ErrorCode != commonpb.ErrorCode_Success {
+	} else if response.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.Status.ErrorCode), HTTPReturnMessage: response.Status.Reason})
 	} else {
 		switch response.IDs.GetIdField().(type) {
@@ -607,7 +607,7 @@ func (h *Handlers) search(c *gin.Context) {
 	response, err := h.proxy.Search(c, &req)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: Code(err), HTTPReturnMessage: err.Error()})
-	} else if response.Status.ErrorCode != commonpb.ErrorCode_Success {
+	} else if response.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.Status.ErrorCode), HTTPReturnMessage: response.Status.Reason})
 	} else {
 		if response.Results.TopK == int64(0) {

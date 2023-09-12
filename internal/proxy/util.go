@@ -1011,7 +1011,7 @@ func isCollectionLoaded(ctx context.Context, qc types.QueryCoord, collID int64) 
 	if err != nil {
 		return false, err
 	}
-	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		return false, errors.New(resp.Status.Reason)
 	}
 
@@ -1032,7 +1032,7 @@ func isPartitionLoaded(ctx context.Context, qc types.QueryCoord, collID int64, p
 	if err != nil {
 		return false, err
 	}
-	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		return false, errors.New(resp.Status.Reason)
 	}
 
@@ -1203,13 +1203,13 @@ func getCollectionProgress(
 		return
 	}
 
-	if resp.Status.ErrorCode == commonpb.ErrorCode_InsufficientMemoryToLoad {
+	if resp.GetStatus().GetErrorCode() == commonpb.ErrorCode_InsufficientMemoryToLoad {
 		err = ErrInsufficientMemory
 		log.Warn("detected insufficientMemoryError when getCollectionProgress", zap.Int64("collection_id", collectionID), zap.String("reason", resp.GetStatus().GetReason()))
 		return
 	}
 
-	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		err = merr.Error(resp.GetStatus())
 		log.Warn("fail to show collections", zap.Int64("collection_id", collectionID),
 			zap.String("reason", resp.Status.Reason))
