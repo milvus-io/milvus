@@ -182,9 +182,8 @@ class ConcurrentVectorImpl : public VectorBase {
             return Span<TraitType>(chunk.data(), chunk.size());
         } else if constexpr (std::is_same_v<Type, int64_t> ||  // NOLINT
                              std::is_same_v<Type, int>) {
-            // TODO: where should the braces be placed?
             // only for testing
-            PanicInfo("unimplemented");
+            PanicCodeInfo(NotImplemented, "unimplemented");
         } else {
             static_assert(
                 std::is_same_v<typename TraitType::embedded_type, Type>);

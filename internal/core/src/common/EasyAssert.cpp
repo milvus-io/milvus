@@ -16,6 +16,7 @@
 
 #include <iostream>
 #include "EasyAssert.h"
+#include "fmt/core.h"
 #include <boost/stacktrace.hpp>
 #include <sstream>
 
@@ -39,13 +40,16 @@ EasyAssertInfo(bool value,
                std::string_view filename,
                int lineno,
                std::string_view extra_info,
-               ErrorCodeEnum error_code) {
+               ErrorCode error_code) {
     // enable error code
     if (!value) {
         std::string info;
-        info += "Assert \"" + std::string(expr_str) + "\"";
-        info += " at " + std::string(filename) + ":" + std::to_string(lineno) +
-                "\n";
+        if (!expr_str.empty()) {
+            info += fmt::format("Assert \"{}\" at {}:{}\n",
+                                expr_str,
+                                std::string(filename),
+                                std::to_string(lineno));
+        }
         if (!extra_info.empty()) {
             info += " => " + std::string(extra_info);
         }

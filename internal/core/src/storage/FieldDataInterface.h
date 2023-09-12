@@ -31,7 +31,6 @@
 #include "common/Utils.h"
 #include "common/VectorTrait.h"
 #include "common/EasyAssert.h"
-#include "storage/Exception.h"
 
 namespace milvus::storage {
 
@@ -104,8 +103,8 @@ class FieldDataImpl : public FieldDataBase {
                            DataType data_type,
                            int64_t buffered_num_rows = 0)
         : FieldDataBase(data_type),
-          dim_(is_scalar ? 1 : dim),
-          num_rows_(buffered_num_rows) {
+          num_rows_(buffered_num_rows),
+          dim_(is_scalar ? 1 : dim) {
         field_data_.resize(num_rows_ * dim_);
     }
 

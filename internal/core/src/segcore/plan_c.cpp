@@ -76,13 +76,13 @@ ParsePlaceholderGroup(CSearchPlan c_plan,
 int64_t
 GetNumOfQueries(CPlaceholderGroup placeholder_group) {
     auto res = milvus::query::GetNumOfQueries(
-        (milvus::query::PlaceholderGroup*)placeholder_group);
+        static_cast<milvus::query::PlaceholderGroup*>(placeholder_group));
     return res;
 }
 
 int64_t
 GetTopK(CSearchPlan plan) {
-    auto res = milvus::query::GetTopK((milvus::query::Plan*)plan);
+    auto res = milvus::query::GetTopK(static_cast<milvus::query::Plan*>(plan));
     return res;
 }
 
@@ -93,7 +93,7 @@ GetFieldID(CSearchPlan plan, int64_t* field_id) {
         *field_id = milvus::query::GetFieldID(p);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
+        return milvus::FailureCStatus(&e);
     }
 }
 
@@ -115,14 +115,14 @@ SetMetricType(CSearchPlan plan, const char* metric_type) {
 
 void
 DeleteSearchPlan(CSearchPlan cPlan) {
-    auto plan = (milvus::query::Plan*)cPlan;
+    auto plan = static_cast<milvus::query::Plan*>(cPlan);
     delete plan;
 }
 
 void
 DeletePlaceholderGroup(CPlaceholderGroup cPlaceholder_group) {
     auto placeHolder_group =
-        (milvus::query::PlaceholderGroup*)cPlaceholder_group;
+        static_cast<milvus::query::PlaceholderGroup*>(cPlaceholder_group);
     delete placeHolder_group;
 }
 
@@ -131,7 +131,7 @@ CreateRetrievePlanByExpr(CCollection c_col,
                          const void* serialized_expr_plan,
                          const int64_t size,
                          CRetrievePlan* res_plan) {
-    auto col = (milvus::segcore::Collection*)c_col;
+    auto col = static_cast<milvus::segcore::Collection*>(c_col);
 
     try {
         auto res = milvus::query::CreateRetrievePlanByExpr(
@@ -160,6 +160,6 @@ CreateRetrievePlanByExpr(CCollection c_col,
 
 void
 DeleteRetrievePlan(CRetrievePlan c_plan) {
-    auto plan = (milvus::query::RetrievePlan*)c_plan;
+    auto plan = static_cast<milvus::query::RetrievePlan*>(c_plan);
     delete plan;
 }

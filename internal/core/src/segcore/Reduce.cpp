@@ -318,7 +318,9 @@ ReduceHelper::GetSearchResultDataSlice(int slice_index) {
             break;
         }
         default: {
-            PanicInfo("unsupported primary key type");
+            PanicCodeInfo(DataTypeInvalid,
+                          fmt::format("unsupported primary key type {}",
+                                      fmt::underlying(pk_type)));
         }
     }
 
@@ -365,7 +367,10 @@ ReduceHelper::GetSearchResultDataSlice(int slice_index) {
                         break;
                     }
                     default: {
-                        PanicInfo("unsupported primary key type");
+                        PanicCodeInfo(
+                            DataTypeInvalid,
+                            fmt::format("unsupported primary key type {}",
+                                        fmt::underlying(pk_type)));
                     }
                 }
 

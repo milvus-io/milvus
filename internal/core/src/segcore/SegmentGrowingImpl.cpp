@@ -21,6 +21,7 @@
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/Types.h"
+#include "fmt/format.h"
 #include "nlohmann/json.hpp"
 #include "query/PlanNode.h"
 #include "query/SearchOnSealed.h"
@@ -328,7 +329,6 @@ std::unique_ptr<DataArray>
 SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                                    const int64_t* seg_offsets,
                                    int64_t count) const {
-    // TODO: support more types
     auto vec_ptr = insert_record_.get_field_data_base(field_id);
     auto& field_meta = schema_->operator[](field_id);
     if (field_meta.is_vector()) {
@@ -355,7 +355,7 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                                                count,
                                                output.data());
         } else {
-            PanicInfo("logical error");
+            PanicCodeInfo(DataTypeInvalid, "logical error");
         }
         return CreateVectorDataArrayFrom(output.data(), count, field_meta);
     }
@@ -418,7 +418,10 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
             return CreateScalarDataArrayFrom(output.data(), count, field_meta);
         }
         default: {
-            PanicInfo("unsupported type");
+            PanicCodeInfo(
+                DataTypeInvalid,
+                fmt::format("unsupported type {}",
+                            fmt::underlying(field_meta.get_data_type())));
         }
     }
 }
@@ -496,7 +499,7 @@ SegmentGrowingImpl::bulk_subscript(SystemFieldType system_type,
                 &this->insert_record_.row_ids_, seg_offsets, count, output);
             break;
         default:
-            PanicInfo("unknown subscript fields");
+            PanicCodeInfo(DataTypeInvalid, "unknown subscript fields");
     }
 }
 
@@ -529,7 +532,9 @@ SegmentGrowingImpl::search_ids(const IdArray& id_array,
                     break;
                 }
                 default: {
-                    PanicInfo("unsupported type");
+                    PanicCodeInfo(DataTypeInvalid,
+                                  fmt::format("unsupported type {}",
+                                              fmt::underlying(data_type)));
                 }
             }
             res_offsets.push_back(offset);

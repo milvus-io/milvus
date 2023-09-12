@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "storage/Event.h"
+#include "fmt/format.h"
 #include "nlohmann/json.hpp"
 #include "storage/PayloadReader.h"
 #include "storage/PayloadWriter.h"
@@ -46,8 +47,8 @@ GetEventHeaderSize(EventHeader& header) {
 }
 
 int
-GetEventFixPartSize(EventType EventTypeCode) {
-    switch (EventTypeCode) {
+GetEventFixPartSize(EventType event_type) {
+    switch (event_type) {
         case EventType::DescriptorEvent: {
             DescriptorEventData data;
             return GetFixPartSize(data);
@@ -63,7 +64,9 @@ GetEventFixPartSize(EventType EventTypeCode) {
             return GetFixPartSize(data);
         }
         default:
-            PanicInfo("unsupported event type");
+            PanicCodeInfo(DataFormatBroken,
+                          fmt::format("unsupported event type {}",
+                                      fmt::underlying(event_type)));
     }
 }
 

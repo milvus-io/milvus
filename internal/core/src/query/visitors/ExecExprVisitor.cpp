@@ -1649,7 +1649,9 @@ ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, Op op)
                     }
                 }
                 default:
-                    PanicInfo(fmt::format("unsupported data type: {}", type));
+                    PanicCodeInfo(
+                        DataTypeInvalid,
+                        fmt::format("unsupported data type {}", type));
             }
         };
         auto left = getChunkData(
@@ -1717,7 +1719,9 @@ ExecExprVisitor::visit(CompareExpr& expr) {
             // case OpType::PostfixMatch: {
             // }
         default: {
-            PanicInfo("unsupported optype");
+            PanicCodeInfo(OpTypeInvalid,
+                          fmt::format("unsupported optype {}",
+                                      fmt::underlying(expr.op_type_)));
         }
     }
     AssertInfo(res.size() == row_count_,
@@ -1761,7 +1765,9 @@ ExecExprVisitor::ExecTermVisitorImpl(TermExpr& expr_raw) -> BitsetType {
                 break;
             }
             default: {
-                PanicInfo("unsupported type");
+                PanicCodeInfo(
+                    DataTypeInvalid,
+                    fmt::format("unsupported data type {}", expr.val_case_));
             }
         }
 
@@ -2018,14 +2024,16 @@ ExecExprVisitor::visit(TermExpr& expr) {
                     res = ExecTermVisitorImplTemplateJson<bool>(expr);
                     break;
                 default:
-                    PanicInfo(
-                        fmt::format("unknown data type: {}", expr.val_case_));
+                    PanicCodeInfo(DataTypeInvalid,
+                                  fmt::format("unsupported data type {}",
+                                              expr.val_case_));
             }
             break;
         }
         default:
-            PanicInfo(fmt::format("unsupported data type: {}",
-                                  expr.column_.data_type));
+            PanicCodeInfo(DataTypeInvalid,
+                          fmt::format("unsupported data type {}",
+                                      expr.column_.data_type));
     }
     AssertInfo(res.size() == row_count_,
                "[ExecExprVisitor]Size of results not equal row count");
@@ -2052,8 +2060,9 @@ ExecExprVisitor::visit(ExistsExpr& expr) {
             break;
         }
         default:
-            PanicInfo(fmt::format("unsupported data type {}",
-                                  expr.column_.data_type));
+            PanicCodeInfo(DataTypeInvalid,
+                          fmt::format("unsupported data type {}",
+                                      expr.column_.data_type));
     }
     AssertInfo(res.size() == row_count_,
                "[ExecExprVisitor]Size of results not equal row count");
@@ -2116,8 +2125,9 @@ compareTwoJsonArray(T arr1, const proto::plan::Array& arr2) {
                 break;
             }
             default:
-                PanicInfo(fmt::format("unsupported data type {}",
-                                      arr2.array(i).val_case()));
+                PanicCodeInfo(DataTypeInvalid,
+                              fmt::format("unsupported data type {}",
+                                          arr2.array(i).val_case()));
         }
         i++;
     }
@@ -2270,8 +2280,9 @@ ExecExprVisitor::ExecJsonContainsWithDiffType(JsonContainsExpr& expr_raw)
                         break;
                     }
                     default:
-                        PanicInfo(fmt::format("unsupported data type {}",
-                                              element.val_case()));
+                        PanicCodeInfo(DataTypeInvalid,
+                                      fmt::format("unsupported data type {}",
+                                                  element.val_case()));
                 }
             }
         }
@@ -2384,83 +2395,84 @@ ExecExprVisitor::ExecJsonContainsAllWithDiffType(JsonContainsExpr& expr_raw)
         elements_index.insert(i);
         i++;
     }
-    auto elem_func =
-        [&elements, &elements_index, &pointer](const milvus::Json& json) {
-            auto doc = json.doc();
-            auto array = doc.at_pointer(pointer).get_array();
-            if (array.error()) {
-                return false;
-            }
-            std::unordered_set<int> tmp_elements_index(elements_index);
-            for (auto&& it : array) {
-                int i = -1;
-                for (auto& element : elements) {
-                    i++;
-                    switch (element.val_case()) {
-                        case proto::plan::GenericValue::kBoolVal: {
-                            auto val = it.template get<bool>();
-                            if (val.error()) {
-                                continue;
-                            }
-                            if (val.value() == element.bool_val()) {
-                                tmp_elements_index.erase(i);
-                            }
-                            break;
+    auto elem_func = [&elements, &elements_index, &pointer](
+                         const milvus::Json& json) {
+        auto doc = json.doc();
+        auto array = doc.at_pointer(pointer).get_array();
+        if (array.error()) {
+            return false;
+        }
+        std::unordered_set<int> tmp_elements_index(elements_index);
+        for (auto&& it : array) {
+            int i = -1;
+            for (auto& element : elements) {
+                i++;
+                switch (element.val_case()) {
+                    case proto::plan::GenericValue::kBoolVal: {
+                        auto val = it.template get<bool>();
+                        if (val.error()) {
+                            continue;
                         }
-                        case proto::plan::GenericValue::kInt64Val: {
-                            auto val = it.template get<int64_t>();
-                            if (val.error()) {
-                                continue;
-                            }
-                            if (val.value() == element.int64_val()) {
-                                tmp_elements_index.erase(i);
-                            }
-                            break;
+                        if (val.value() == element.bool_val()) {
+                            tmp_elements_index.erase(i);
                         }
-                        case proto::plan::GenericValue::kFloatVal: {
-                            auto val = it.template get<double>();
-                            if (val.error()) {
-                                continue;
-                            }
-                            if (val.value() == element.float_val()) {
-                                tmp_elements_index.erase(i);
-                            }
-                            break;
+                        break;
+                    }
+                    case proto::plan::GenericValue::kInt64Val: {
+                        auto val = it.template get<int64_t>();
+                        if (val.error()) {
+                            continue;
                         }
-                        case proto::plan::GenericValue::kStringVal: {
-                            auto val = it.template get<std::string_view>();
-                            if (val.error()) {
-                                continue;
-                            }
-                            if (val.value() == element.string_val()) {
-                                tmp_elements_index.erase(i);
-                            }
-                            break;
+                        if (val.value() == element.int64_val()) {
+                            tmp_elements_index.erase(i);
                         }
-                        case proto::plan::GenericValue::kArrayVal: {
-                            auto val = it.get_array();
-                            if (val.error()) {
-                                continue;
-                            }
-                            if (compareTwoJsonArray(val, element.array_val())) {
-                                tmp_elements_index.erase(i);
-                            }
-                            break;
+                        break;
+                    }
+                    case proto::plan::GenericValue::kFloatVal: {
+                        auto val = it.template get<double>();
+                        if (val.error()) {
+                            continue;
                         }
-                        default:
-                            PanicInfo(fmt::format("unsupported data type {}",
+                        if (val.value() == element.float_val()) {
+                            tmp_elements_index.erase(i);
+                        }
+                        break;
+                    }
+                    case proto::plan::GenericValue::kStringVal: {
+                        auto val = it.template get<std::string_view>();
+                        if (val.error()) {
+                            continue;
+                        }
+                        if (val.value() == element.string_val()) {
+                            tmp_elements_index.erase(i);
+                        }
+                        break;
+                    }
+                    case proto::plan::GenericValue::kArrayVal: {
+                        auto val = it.get_array();
+                        if (val.error()) {
+                            continue;
+                        }
+                        if (compareTwoJsonArray(val, element.array_val())) {
+                            tmp_elements_index.erase(i);
+                        }
+                        break;
+                    }
+                    default:
+                        PanicCodeInfo(DataTypeInvalid,
+                                      fmt::format("unsupported data type {}",
                                                   element.val_case()));
-                    }
-                    if (tmp_elements_index.size() == 0) {
-                        return true;
-                    }
                 }
                 if (tmp_elements_index.size() == 0) {
                     return true;
                 }
             }
-            return tmp_elements_index.size() == 0;
-        };
+            if (tmp_elements_index.size() == 0) {
+                return true;
+            }
+        }
+        return tmp_elements_index.size() == 0;
+    };
 
     return ExecRangeVisitorImpl<milvus::Json>(
         expr.column_.field_id, index_func, elem_func);
@@ -2499,7 +2511,9 @@ ExecExprVisitor::visit(JsonContainsExpr& expr) {
                         break;
                     }
                     default:
-                        PanicInfo(fmt::format("unsupported data type"));
+                        PanicCodeInfo(DataTypeInvalid,
+                                      fmt::format("unsupported data type {}",
+                                                  expr.val_case_));
                 }
                 break;
             }
@@ -2530,7 +2544,9 @@ ExecExprVisitor::visit(JsonContainsExpr& expr) {
                         break;
                     }
                     default:
-                        PanicInfo(fmt::format("unsupported data type"));
+                        PanicCodeInfo(DataTypeInvalid,
+                                      fmt::format("unsupported data type {}",
+                                                  expr.val_case_));
                 }
                 break;
             }
@@ -2538,7 +2554,9 @@ ExecExprVisitor::visit(JsonContainsExpr& expr) {
             break;
         }
         default:
-            PanicInfo(fmt::format("unsupported json contains type"));
+            PanicCodeInfo(DataTypeInvalid,
+                          fmt::format("unsupported json contains type {}",
+                                      expr.val_case_));
     }
     AssertInfo(res.size() == row_count_,
                "[ExecExprVisitor]Size of results not equal row count");

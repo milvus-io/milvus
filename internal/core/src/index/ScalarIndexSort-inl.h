@@ -55,9 +55,8 @@ ScalarIndexSort<T>::Build(const Config& config) {
         total_num_rows += data->get_num_rows();
     }
     if (total_num_rows == 0) {
-        // todo: throw an exception
-        throw std::invalid_argument(
-            "ScalarIndexSort cannot build null values!");
+        throw SegcoreError(DataIsEmpty,
+                           "ScalarIndexSort cannot build null values!");
     }
 
     data_.reserve(total_num_rows);
@@ -85,9 +84,8 @@ ScalarIndexSort<T>::Build(size_t n, const T* values) {
     if (is_built_)
         return;
     if (n == 0) {
-        // todo: throw an exception
-        throw std::invalid_argument(
-            "ScalarIndexSort cannot build null values!");
+        throw SegcoreError(DataIsEmpty,
+                           "ScalarIndexSort cannot build null values!");
     }
     data_.reserve(n);
     idx_to_offsets_.resize(n);
@@ -254,8 +252,9 @@ ScalarIndexSort<T>::Range(const T value, const OpType op) {
                 data_.begin(), data_.end(), IndexStructure<T>(value));
             break;
         default:
-            throw std::invalid_argument(std::string("Invalid OperatorType: ") +
-                                        std::to_string((int)op) + "!");
+            throw SegcoreError(
+                OpTypeInvalid,
+                fmt::format("Invalid OperatorType: {}", fmt::underlying(op)));
     }
     for (; lb < ub; ++lb) {
         bitset[lb->idx_] = true;

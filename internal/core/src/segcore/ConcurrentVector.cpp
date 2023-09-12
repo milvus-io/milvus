@@ -34,7 +34,7 @@ VectorBase::set_data_raw(ssize_t element_offset,
             return set_data_raw(
                 element_offset, VEC_FIELD_DATA(data, float16), element_count);
         } else {
-            PanicInfo("unsupported");
+            PanicCodeInfo(DataTypeInvalid, "unsupported");
         }
     }
 
@@ -88,8 +88,9 @@ VectorBase::set_data_raw(ssize_t element_offset,
             return set_data_raw(element_offset, data_raw.data(), element_count);
         }
         default: {
-            PanicInfo(fmt::format("unsupported datatype {}",
-                                  field_meta.get_data_type()));
+            PanicCodeInfo(DataTypeInvalid,
+                          fmt::format("unsupported datatype {}",
+                                      field_meta.get_data_type()));
         }
     }
 }

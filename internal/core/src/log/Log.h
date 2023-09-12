@@ -37,7 +37,6 @@
 #define VAR_CLIENT_TAG (context->client_tag())
 #define VAR_CLIENT_IPPORT (context->client_ipport())
 #define VAR_THREAD_ID (gettid())
-#define VAR_THREAD_START_TIMESTAMP (get_thread_start_timestamp())
 #define VAR_COMMAND_TAG (context->command_tag())
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
@@ -92,8 +91,5 @@ SetThreadName(const std::string_view name);
 
 std::string
 GetThreadName();
-
-int64_t
-get_thread_start_timestamp();
 
 // }  // namespace milvus

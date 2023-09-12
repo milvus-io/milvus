@@ -86,14 +86,16 @@ DeserializeRemoteFileData(BinlogReaderPtr reader) {
             return index_data;
         }
         default:
-            PanicInfo("unsupported event type");
+            PanicCodeInfo(DataFormatBroken,
+                          fmt::format("unsupported event type {}",
+                                      fmt::underlying(header.event_type_)));
     }
 }
 
 // For now, no file header in file data
 std::unique_ptr<DataCodec>
 DeserializeLocalFileData(BinlogReaderPtr reader) {
-    PanicInfo("not supported");
+    PanicCodeInfo(NotImplemented, "not supported");
 }
 
 std::unique_ptr<DataCodec>
@@ -109,7 +111,9 @@ DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
             return DeserializeLocalFileData(binlog_reader);
         }
         default:
-            PanicInfo("unsupported medium type");
+            PanicCodeInfo(DataFormatBroken,
+                          fmt::format("unsupported medium type {}",
+                                      fmt::underlying(medium_type)));
     }
 }
 

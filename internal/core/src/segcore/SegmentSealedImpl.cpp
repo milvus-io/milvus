@@ -157,7 +157,9 @@ SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
                 break;
             }
             default: {
-                PanicInfo("unsupported primary key type");
+                PanicCodeInfo(DataTypeInvalid,
+                              fmt::format("unsupported primary key type",
+                                          field_meta.get_data_type()));
             }
         }
     }

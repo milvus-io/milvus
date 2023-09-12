@@ -29,7 +29,7 @@ if ( MILVUS_GPU_VERSION )
     add_definitions(-DMILVUS_GPU_VERSION)
 endif ()
 
-if ( USE_DYNAMIC_SIMD ) 
+if ( USE_DYNAMIC_SIMD )
     add_definitions(-DUSE_DYNAMIC_SIMD)
 endif()
 
@@ -152,7 +152,7 @@ if ( APPLE )
 endif ()
 
 # Set SIMD to CMAKE_CXX_FLAGS
-if (OPEN_SIMD) 
+if (OPEN_SIMD)
     message(STATUS "open simd function, CPU_ARCH:${CPU_ARCH}")
     if (${CPU_ARCH} STREQUAL "avx")
       #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}  -ftree-vectorize -mavx2 -mfma -mavx -mf16c ")

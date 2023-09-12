@@ -81,7 +81,7 @@ VectorDiskAnnIndex<T>::Load(const Config& config) {
     auto stat = index_.Deserialize(knowhere::BinarySet(), load_config);
     if (stat != knowhere::Status::success)
         PanicCodeInfo(
-            ErrorCodeEnum::UnexpectedError,
+            ErrorCode::UnexpectedError,
             "failed to Deserialize index, " + KnowhereStatusString(stat));
 
     SetDim(index_.Dim());
@@ -177,7 +177,7 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     knowhere::DataSet* ds_ptr = nullptr;
     auto stat = index_.Build(*ds_ptr, build_config);
     if (stat != knowhere::Status::success)
-        PanicCodeInfo(ErrorCodeEnum::BuildIndexError,
+        PanicCodeInfo(ErrorCode::IndexBuildError,
                       "failed to build index, " + KnowhereStatusString(stat));
     local_chunk_manager->RemoveDir(
         storage::GetSegmentRawDataPathPrefix(local_chunk_manager, segment_id));
@@ -234,7 +234,7 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
             auto res = index_.RangeSearch(*dataset, search_config, bitset);
 
             if (!res.has_value()) {
-                PanicCodeInfo(ErrorCodeEnum::UnexpectedError,
+                PanicCodeInfo(ErrorCode::UnexpectedError,
                               fmt::format("failed to range search: {}: {}",
                                           KnowhereStatusString(res.error()),
                                           res.what()));
@@ -244,7 +244,7 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
         } else {
             auto res = index_.Search(*dataset, search_config, bitset);
             if (!res.has_value()) {
-                PanicCodeInfo(ErrorCodeEnum::UnexpectedError,
+                PanicCodeInfo(ErrorCode::UnexpectedError,
                               fmt::format("failed to search: {}: {}",
                                           KnowhereStatusString(res.error()),
                                           res.what()));
@@ -289,7 +289,7 @@ std::vector<uint8_t>
 VectorDiskAnnIndex<T>::GetVector(const DatasetPtr dataset) const {
     auto res = index_.GetVectorByIds(*dataset);
     if (!res.has_value()) {
-        PanicCodeInfo(ErrorCodeEnum::UnexpectedError,
+        PanicCodeInfo(ErrorCode::UnexpectedError,
                       fmt::format("failed to get vector: {}: {}",
                                   KnowhereStatusString(res.error()),
                                   res.what()));

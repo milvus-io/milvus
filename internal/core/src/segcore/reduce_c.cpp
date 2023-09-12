@@ -45,7 +45,7 @@ ReduceSearchResultsAndFillData(CSearchResultDataBlobs* cSearchResultDataBlobs,
         *cSearchResultDataBlobs = reduce_helper.GetSearchResultDataBlobs();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
+        return milvus::FailureCStatus(&e);
     }
 }
 
@@ -67,7 +67,7 @@ GetSearchResultDataBlob(CProto* searchResultDataBlob,
     } catch (std::exception& e) {
         searchResultDataBlob->proto_blob = nullptr;
         searchResultDataBlob->proto_size = 0;
-        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
+        return milvus::FailureCStatus(&e);
     }
 }
 

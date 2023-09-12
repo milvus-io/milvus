@@ -23,7 +23,7 @@
 #include "storage/PayloadWriter.h"
 
 namespace wrapper = milvus::storage;
-using ErrorCode = milvus::ErrorCodeEnum;
+using ErrorCode = milvus::ErrorCode;
 
 static void
 WriteToFile(CBuffer cb) {

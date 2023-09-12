@@ -18,19 +18,78 @@
 #include <string_view>
 #include <stdexcept>
 #include <exception>
-#include <stdio.h>
-#include <stdlib.h>
+#include <cstdio>
+#include <cstdlib>
 #include <string>
 #include "pb/common.pb.h"
 #include "common/type_c.h"
 
 /* Paste this on the file if you want to debug. */
 namespace milvus {
-enum ErrorCodeEnum {
+enum ErrorCode {
     Success = 0,
-    UnexpectedError = 1,
-    BuildIndexError = 2,
-    IllegalArgument = 5,
+    UnexpectedError = 2001,
+    NotImplemented = 2002,
+    Unsupported = 2003,
+    IndexBuildError = 2004,
+    IndexAlreadyBuild = 2005,
+    ConfigInvalid = 2006,
+    DataTypeInvalid = 2007,
+    PathInvalid = 2009,
+    PathAlreadyExist = 2010,
+    PathNotExist = 2011,
+    FileOpenFailed = 2012,
+    FileCreateFailed = 2013,
+    FileReadFailed = 2014,
+    FileWriteFailed = 2015,
+    BucketInvalid = 2016,
+    ObjectNotExist = 2017,
+    S3Error = 2018,
+    RetrieveError = 2019,
+    FieldIDInvalid = 2020,
+    FieldAlreadyExist = 2021,
+    OpTypeInvalid = 2022,
+    DataIsEmpty = 2023,
+    DataFormatBroken = 2024,
+    JsonKeyInvalid = 2025,
+    MetricTypeInvalid = 2026,
+    UnistdError = 2030,
+    KnowhereError = 2100,
+};
+namespace impl {
+void
+EasyAssertInfo(bool value,
+               std::string_view expr_str,
+               std::string_view filename,
+               int lineno,
+               std::string_view extra_info,
+               ErrorCode error_code = ErrorCode::UnexpectedError);
+
+}  // namespace impl
+
+class SegcoreError : public std::runtime_error {
+ public:
+    static SegcoreError
+    success() {
+        return SegcoreError(ErrorCode::Success, "");
+    }
+
+    SegcoreError(ErrorCode error_code, const std::string& error_msg)
+        : std::runtime_error(error_msg), error_code_(error_code) {
+    }
+
+    ErrorCode
+    get_error_code() {
+        return error_code_;
+    }
+
+    bool
+    ok() {
+        return error_code_ == ErrorCode::Success;
+    }
+
+ private:
+    ErrorCode error_code_;
 };
 
 inline CStatus
@@ -42,41 +101,16 @@ inline CStatus
 FailureCStatus(int code, const std::string& msg) {
     return CStatus{code, strdup(msg.data())};
 }
-namespace impl {
-void
-EasyAssertInfo(bool value,
-               std::string_view expr_str,
-               std::string_view filename,
-               int lineno,
-               std::string_view extra_info,
-               ErrorCodeEnum error_code = ErrorCodeEnum::UnexpectedError);
 
-}  // namespace impl
-
-class SegcoreError : public std::runtime_error {
- public:
-    static SegcoreError
-    success() {
-        return SegcoreError(ErrorCodeEnum::Success, "");
+inline CStatus
+FailureCStatus(std::exception* ex) {
+    if (dynamic_cast<SegcoreError*>(ex) != nullptr) {
+        auto segcore_error = dynamic_cast<SegcoreError*>(ex);
+        return CStatus{static_cast<int>(segcore_error->get_error_code()),
+                       strdup(ex->what())};
     }
-
-    SegcoreError(ErrorCodeEnum error_code, const std::string& error_msg)
-        : std::runtime_error(error_msg), error_code_(error_code) {
-    }
-
-    ErrorCodeEnum
-    get_error_code() {
-        return error_code_;
-    }
-
-    bool
-    ok() {
-        return error_code_ == ErrorCodeEnum::Success;
-    }
-
- private:
-    ErrorCodeEnum error_code_;
-};
+    return CStatus{static_cast<int>(UnexpectedError), strdup(ex->what())};
+}
 
 }  // namespace milvus
 
@@ -93,13 +127,13 @@ class SegcoreError : public std::runtime_error {
 #define Assert(expr) AssertInfo((expr), "")
 #define PanicInfo(info)                                                      \
     do {                                                                     \
-        milvus::impl::EasyAssertInfo(false, (info), __FILE__, __LINE__, ""); \
+        milvus::impl::EasyAssertInfo(false, "", __FILE__, __LINE__, (info)); \
         __builtin_unreachable();                                             \
     } while (0)
 
 #define PanicCodeInfo(errcode, info)                         \
     do {                                                     \
         milvus::impl::EasyAssertInfo(                        \
-            false, (info), __FILE__, __LINE__, "", errcode); \
+            false, "", __FILE__, __LINE__, (info), errcode); \
         __builtin_unreachable();                             \
     } while (0)

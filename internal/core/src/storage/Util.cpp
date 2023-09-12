@@ -20,6 +20,7 @@
 #include "arrow/type_fwd.h"
 #include "common/EasyAssert.h"
 #include "common/Consts.h"
+#include "fmt/format.h"
 #include "storage/FieldData.h"
 #include "storage/FieldDataInterface.h"
 #include "storage/ThreadPools.h"
@@ -128,7 +129,9 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
             break;
         }
         default: {
-            PanicInfo("unsupported data type");
+            PanicCodeInfo(DataTypeInvalid,
+                          fmt::format("unsupported data type {}",
+                                      fmt::underlying(data_type)));
         }
     }
 }
@@ -198,7 +201,9 @@ CreateArrowBuilder(DataType data_type) {
             return std::make_shared<arrow::BinaryBuilder>();
         }
         default: {
-            PanicInfo("unsupported numeric data type");
+            PanicCodeInfo(DataTypeInvalid,
+                          fmt::format("unsupported numeric data type {}",
+                                      fmt::underlying(data_type)));
         }
     }
 }
@@ -222,7 +227,9 @@ CreateArrowBuilder(DataType data_type, int dim) {
                 arrow::fixed_size_binary(dim * sizeof(float16)));
         }
         default: {
-            PanicInfo("unsupported vector data type");
+            PanicCodeInfo(DataTypeInvalid,
+                          fmt::format("unsupported vector data type {}",
+                                      fmt::underlying(data_type)));
         }
     }
 }
@@ -260,7 +267,9 @@ CreateArrowSchema(DataType data_type) {
             return arrow::schema({arrow::field("val", arrow::binary())});
         }
         default: {
-            PanicInfo("unsupported numeric data type");
+            PanicCodeInfo(DataTypeInvalid,
+                          fmt::format("unsupported numeric data type {}",
+                                      fmt::underlying(data_type)));
         }
     }
 }
@@ -284,7 +293,9 @@ CreateArrowSchema(DataType data_type, int dim) {
                 "val", arrow::fixed_size_binary(dim * sizeof(float16)))});
         }
         default: {
-            PanicInfo("unsupported vector data type");
+            PanicCodeInfo(DataTypeInvalid,
+                          fmt::format("unsupported vector data type {}",
+                                      fmt::underlying(data_type)));
         }
     }
 }
@@ -303,7 +314,9 @@ GetDimensionFromFileMetaData(const parquet::ColumnDescriptor* schema,
             return schema->type_length() / sizeof(float16);
         }
         default:
-            PanicInfo("unsupported data type");
+            PanicCodeInfo(DataTypeInvalid,
+                          fmt::format("unsupported data type {}",
+                                      fmt::underlying(data_type)));
     }
 }
 
@@ -328,7 +341,9 @@ GetDimensionFromArrowArray(std::shared_ptr<arrow::Array> data,
             return array->byte_width() * 8;
         }
         default:
-            PanicInfo("unsupported data type");
+            PanicCodeInfo(DataTypeInvalid,
+                          fmt::format("unsupported data type {}",
+                                      fmt::underlying(data_type)));
     }
 }
 
@@ -527,7 +542,10 @@ CreateChunkManager(const StorageConfig& storage_config) {
             return std::make_shared<MinioChunkManager>(storage_config);
         }
         default: {
-            PanicInfo("unsupported");
+            PanicCodeInfo(
+                ConfigInvalid,
+                fmt::format("unsupported storage_config.storage_type {}",
+                            fmt::underlying(storage_type)));
         }
     }
 }
@@ -578,7 +596,8 @@ CreateFieldData(const DataType& type, int64_t dim, int64_t total_num_rows) {
             return std::make_shared<FieldData<Float16Vector>>(
                 dim, type, total_num_rows);
         default:
-            throw NotSupportedDataTypeException(
+            throw SegcoreError(
+                DataTypeInvalid,
                 "CreateFieldData not support data type " + datatype_name(type));
     }
 }

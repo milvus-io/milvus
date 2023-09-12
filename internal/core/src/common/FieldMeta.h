@@ -52,7 +52,8 @@ datatype_sizeof(DataType data_type, int dim = 1) {
             return sizeof(float16) * dim;
         }
         default: {
-            throw std::invalid_argument("unsupported data type");
+            throw SegcoreError(DataTypeInvalid,
+                               fmt::format("invalid type is {}", data_type));
         }
     }
 }
@@ -90,9 +91,9 @@ datatype_name(DataType data_type) {
             return "vector_float16";
         }
         default: {
-            auto err_msg =
-                "Unsupported DataType(" + std::to_string((int)data_type) + ")";
-            PanicInfo(err_msg);
+            PanicCodeInfo(DataTypeInvalid,
+                          fmt::format("Unsupported DataType({})",
+                                      fmt::underlying(data_type)));
         }
     }
 }

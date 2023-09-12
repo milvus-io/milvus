@@ -25,7 +25,6 @@
 
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/LocalChunkManagerSingleton.h"
-#include "storage/Exception.h"
 #include "storage/IndexData.h"
 #include "storage/Util.h"
 #include "storage/ThreadPools.h"
@@ -350,10 +349,6 @@ DiskFileManagerImpl::IsExisted(const std::string& file) noexcept {
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     try {
         isExist = local_chunk_manager->Exist(file);
-    } catch (LocalChunkManagerException& e) {
-        // LOG_SEGCORE_DEBUG_ << "LocalChunkManagerException:"
-        //                   << e.what();
-        return std::nullopt;
     } catch (std::exception& e) {
         // LOG_SEGCORE_DEBUG_ << "Exception:" << e.what();
         return std::nullopt;

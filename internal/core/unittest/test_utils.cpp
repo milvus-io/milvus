@@ -15,11 +15,11 @@
 #include <boost/uuid/uuid_io.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 
+#include "common/EasyAssert.h"
 #include "common/Utils.h"
 #include "query/Utils.h"
 #include "test_utils/DataGen.h"
 #include "common/Types.h"
-#include "index/Exception.h"
 
 TEST(Util, StringMatch) {
     using namespace milvus;
@@ -162,5 +162,5 @@ TEST(Util, read_from_fd) {
     // On Linux, read() (and similar system calls) will transfer at most 0x7ffff000 (2,147,479,552) bytes once
     EXPECT_THROW(milvus::index::ReadDataFromFD(
                      fd, read_buf.get(), data_size * max_loop, INT_MAX),
-                 milvus::index::UnistdException);
+                 milvus::SegcoreError);
 }

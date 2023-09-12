@@ -16,6 +16,7 @@
 
 #include <mutex>
 
+#include "common/EasyAssert.h"
 #include "storage/parquet_c.h"
 #include "storage/PayloadReader.h"
 #include "storage/PayloadWriter.h"
@@ -49,8 +50,7 @@ AddValuesToPayload(CPayloadWriter payloadWriter, const Payload& info) {
         p->add_payload(info);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(milvus::ErrorCodeEnum::UnexpectedError,
-                                      e.what());
+        return milvus::FailureCStatus(&e);
     }
 }
 
@@ -117,8 +117,7 @@ AddOneStringToPayload(CPayloadWriter payloadWriter, char* cstr, int str_size) {
         p->add_one_string_payload(cstr, str_size);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(milvus::ErrorCodeEnum::UnexpectedError,
-                                      e.what());
+        return milvus::FailureCStatus(&e);
     }
 }
 
@@ -129,8 +128,7 @@ AddOneArrayToPayload(CPayloadWriter payloadWriter, uint8_t* data, int length) {
         p->add_one_binary_payload(data, length);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(milvus::ErrorCodeEnum::UnexpectedError,
-                                      e.what());
+        return milvus::FailureCStatus(&e);
     }
 }
 
@@ -141,8 +139,7 @@ AddOneJSONToPayload(CPayloadWriter payloadWriter, uint8_t* data, int length) {
         p->add_one_binary_payload(data, length);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(milvus::ErrorCodeEnum::UnexpectedError,
-                                      e.what());
+        return milvus::FailureCStatus(&e);
     }
 }
 
@@ -158,8 +155,7 @@ AddBinaryVectorToPayload(CPayloadWriter payloadWriter,
         p->add_payload(raw_data_info);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(milvus::ErrorCodeEnum::UnexpectedError,
-                                      e.what());
+        return milvus::FailureCStatus(&e);
     }
 }
 
@@ -177,8 +173,7 @@ AddFloatVectorToPayload(CPayloadWriter payloadWriter,
         p->add_payload(raw_data_info);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(milvus::ErrorCodeEnum::UnexpectedError,
-                                      e.what());
+        return milvus::FailureCStatus(&e);
     }
 }
 
@@ -189,8 +184,7 @@ FinishPayloadWriter(CPayloadWriter payloadWriter) {
         p->finish();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(milvus::ErrorCodeEnum::UnexpectedError,
-                                      e.what());
+        return milvus::FailureCStatus(&e);
     }
 }
 
@@ -246,9 +240,8 @@ NewPayloadReader(int columnType,
             break;
         }
         default: {
-            return milvus::FailureCStatus(
-                milvus::ErrorCodeEnum::UnexpectedError,
-                "unsupported data type");
+            return milvus::FailureCStatus(milvus::DataTypeInvalid,
+                                          "unsupported data type");
         }
     }
 
@@ -257,8 +250,7 @@ NewPayloadReader(int columnType,
         *c_reader = (CPayloadReader)(p.release());
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(milvus::ErrorCodeEnum::UnexpectedError,
-                                      e.what());
+        return milvus::FailureCStatus(&e);
     }
 }
 
@@ -270,8 +262,7 @@ GetBoolFromPayload(CPayloadReader payloadReader, int idx, bool* value) {
         *value = *reinterpret_cast<const bool*>(field_data->RawValue(idx));
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(milvus::ErrorCodeEnum::UnexpectedError,
-                                      e.what());
+        return milvus::FailureCStatus(&e);
     }
 }
 
@@ -285,8 +276,7 @@ GetInt8FromPayload(CPayloadReader payloadReader, int8_t** values, int* length) {
             reinterpret_cast<int8_t*>(const_cast<void*>(field_data->Data()));
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(milvus::ErrorCodeEnum::UnexpectedError,
-                                      e.what());
+        return milvus::FailureCStatus(&e);
     }
 }
 
@@ -302,8 +292,7 @@ GetInt16FromPayload(CPayloadReader payloadReader,
             reinterpret_cast<int16_t*>(const_cast<void*>(field_data->Data()));
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(milvus::ErrorCodeEnum::UnexpectedError,
-                                      e.what());
+        return milvus::FailureCStatus(&e);
     }
 }
 
@@ -319,8 +308,7 @@ GetInt32FromPayload(CPayloadReader payloadReader,
             reinterpret_cast<int32_t*>(const_cast<void*>(field_data->Data()));
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(milvus::ErrorCodeEnum::UnexpectedError,
-                                      e.what());
+        return milvus::FailureCStatus(&e);
     }
 }
 
@@ -336,8 +324,7 @@ GetInt64FromPayload(CPayloadReader payloadReader,
             reinterpret_cast<int64_t*>(const_cast<void*>(field_data->Data()));
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(milvus::ErrorCodeEnum::UnexpectedError,
-                                      e.what());
+        return milvus::FailureCStatus(&e);
     }
 }
 
@@ -351,8 +338,7 @@ GetFloatFromPayload(CPayloadReader payloadReader, float** values, int* length) {
             reinterpret_cast<float*>(const_cast<void*>(field_data->Data()));
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(milvus::ErrorCodeEnum::UnexpectedError,
-                                      e.what());
+        return milvus::FailureCStatus(&e);
     }
 }
 
@@ -368,8 +354,7 @@ GetDoubleFromPayload(CPayloadReader payloadReader,
             reinterpret_cast<double*>(const_cast<void*>(field_data->Data()));
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(milvus::ErrorCodeEnum::UnexpectedError,
-                                      e.what());
+        return milvus::FailureCStatus(&e);
     }
 }
 
@@ -386,8 +371,7 @@ GetOneStringFromPayload(CPayloadReader payloadReader,
         *str_size = field_data->Size(idx);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(milvus::ErrorCodeEnum::UnexpectedError,
-                                      e.what());
+        return milvus::FailureCStatus(&e);
     }
 }
 
@@ -404,8 +388,7 @@ GetBinaryVectorFromPayload(CPayloadReader payloadReader,
         *length = field_data->get_num_rows();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(milvus::ErrorCodeEnum::UnexpectedError,
-                                      e.what());
+        return milvus::FailureCStatus(&e);
     }
 }
 
@@ -422,8 +405,7 @@ GetFloatVectorFromPayload(CPayloadReader payloadReader,
         *length = field_data->get_num_rows();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(milvus::ErrorCodeEnum::UnexpectedError,
-                                      e.what());
+        return milvus::FailureCStatus(&e);
     }
 }
 
@@ -445,7 +427,6 @@ ReleasePayloadReader(CPayloadReader payloadReader) {
         milvus::storage::ReleaseArrowUnused();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(milvus::ErrorCodeEnum::UnexpectedError,
-                                      e.what());
+        return milvus::FailureCStatus(&e);
     }
 }

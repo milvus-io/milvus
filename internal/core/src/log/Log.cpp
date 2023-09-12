@@ -47,7 +47,7 @@ LogOut(const char* pattern, ...) {
     vsnprintf(str_p.get(), len, pattern, vl);  // NOLINT
     va_end(vl);
 
-    return std::string(str_p.get());
+    return {str_p.get()};
 }
 
 void
@@ -82,18 +82,6 @@ get_now_timestamp() {
 }
 
 #ifndef WIN32
-
-int64_t
-get_system_boottime() {
-    FILE* uptime = fopen("/proc/uptime", "r");
-    float since_sys_boot, _;
-    auto ret = fscanf(uptime, "%f %f", &since_sys_boot, &_);
-    fclose(uptime);
-    if (ret != 2) {
-        throw std::runtime_error("read /proc/uptime failed.");
-    }
-    return static_cast<int64_t>(since_sys_boot);
-}
 
 int64_t
 get_thread_starttime() {
@@ -133,33 +121,10 @@ get_thread_starttime() {
     return val / sysconf(_SC_CLK_TCK);
 }
 
-int64_t
-get_thread_start_timestamp() {
-    try {
-        return get_now_timestamp() - get_system_boottime() +
-               get_thread_starttime();
-    } catch (...) {
-        return 0;
-    }
-}
-
 #else
 
 #define WINDOWS_TICK 10000000
 #define SEC_TO_UNIX_EPOCH 11644473600LL
-
-int64_t
-get_thread_start_timestamp() {
-    FILETIME dummy;
-    FILETIME ret;
-
-    if (GetThreadTimes(GetCurrentThread(), &ret, &dummy, &dummy, &dummy)) {
-        auto ticks = Int64ShllMod32(ret.dwHighDateTime, 32) | ret.dwLowDateTime;
-        auto thread_started = ticks / WINDOWS_TICK - SEC_TO_UNIX_EPOCH;
-        return get_now_timestamp() - thread_started;
-    }
-    return 0;
-}
 
 #endif
 
