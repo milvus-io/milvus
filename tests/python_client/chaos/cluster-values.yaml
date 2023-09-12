@@ -8,6 +8,13 @@ image:
     tag: master-latest
     pullPolicy: IfNotPresent
 
+indexNode:
+  resources:
+    requests:
+      cpu: 4
+    limits:
+      cpu: 8
+
 etcd: 
   replicaCount: 3
   image:
