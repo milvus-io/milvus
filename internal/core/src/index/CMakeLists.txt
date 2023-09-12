@@ -14,7 +14,6 @@ set(INDEX_FILES
         Utils.cpp
         VectorMemIndex.cpp
         IndexFactory.cpp
-        VectorMemNMIndex.cpp
         )
 
 if ( BUILD_DISK_ANN STREQUAL "ON" )

@@ -22,7 +22,7 @@
 #include "common/Schema.h"
 #include "index/ScalarIndexSort.h"
 #include "index/StringIndexSort.h"
-#include "index/VectorMemNMIndex.h"
+#include "index/VectorMemIndex.h"
 #include "query/SearchOnIndex.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealedImpl.h"
@@ -793,7 +793,7 @@ GenVecIndexing(int64_t N, int64_t dim, const float* vec) {
                        {knowhere::indexparam::NLIST, "1024"},
                        {knowhere::meta::DEVICE_ID, 0}};
     auto database = knowhere::GenDataSet(N, dim, vec);
-    auto indexing = std::make_unique<index::VectorMemNMIndex>(
+    auto indexing = std::make_unique<index::VectorMemIndex>(
         knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, knowhere::metric::L2);
     indexing->BuildWithDataset(database, conf);
     return indexing;
