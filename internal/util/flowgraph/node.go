@@ -206,6 +206,11 @@ func (node *BaseNode) IsValidInMsg(in []Msg) bool {
 		return false
 	}
 
+	if len(in) == 0 {
+		// avoid printing too many logs.
+		return false
+	}
+
 	if len(in) != 1 {
 		return false
 	}
