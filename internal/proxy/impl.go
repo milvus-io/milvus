@@ -3600,7 +3600,7 @@ func (node *Proxy) GetCompactionStateWithPlans(ctx context.Context, req *milvusp
 	return resp, err
 }
 
-// GetFlushState gets the flush state of multiple segments
+// GetFlushState gets the flush state of the collection based on the provided flush ts and segment IDs.
 func (node *Proxy) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetFlushState")
 	defer sp.End()
@@ -3617,11 +3617,28 @@ func (node *Proxy) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStat
 		return resp, nil
 	}
 
-	resp, err = node.dataCoord.GetFlushState(ctx, req)
+	if err = validateCollectionName(req.GetCollectionName()); err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+	if err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+
+	stateReq := &datapb.GetFlushStateRequest{
+		SegmentIDs: req.GetSegmentIDs(),
+		FlushTs:    req.GetFlushTs(),
+	}
+	stateReq.CollectionID = collectionID
+
+	resp, err = node.dataCoord.GetFlushState(ctx, stateReq)
 	if err != nil {
 		log.Warn("failed to get flush state response",
 			zap.Error(err))
-		return nil, err
+		resp.Status = merr.Status(err)
+		return resp, nil
 	}
 	log.Debug("received get flush state response",
 		zap.Any("response", resp))

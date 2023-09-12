@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -116,24 +117,46 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 	flushSegmentIDs := make([]UniqueID, 0, len(segments))
 	for _, segment := range segments {
 		if segment != nil &&
-			(segment.GetState() == commonpb.SegmentState_Flushed ||
-				segment.GetState() == commonpb.SegmentState_Flushing) &&
+			(isFlushState(segment.GetState())) &&
 			!sealedSegmentsIDDict[segment.GetID()] {
 			flushSegmentIDs = append(flushSegmentIDs, segment.GetID())
 		}
+	}
+
+	err = retry.Do(ctx, func() error {
+		for _, channelInfo := range s.channelManager.GetChannels() {
+			nodeID := channelInfo.NodeID
+			channels := lo.Filter(channelInfo.Channels, func(channel *channel, _ int) bool {
+				return channel.CollectionID == req.GetCollectionID()
+			})
+			channelNames := lo.Map(channels, func(channel *channel, _ int) string {
+				return channel.Name
+			})
+			err = s.cluster.FlushChannels(ctx, nodeID, ts, channelNames)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
 	}
 
 	log.Info("flush response with segments",
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64s("sealSegments", sealedSegmentIDs),
 		zap.Int64s("flushSegments", flushSegmentIDs),
-		zap.Time("timeOfSeal", timeOfSeal))
+		zap.Time("timeOfSeal", timeOfSeal),
+		zap.Time("flushTs", tsoutil.PhysicalTime(ts)))
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	resp.DbID = req.GetDbID()
 	resp.CollectionID = req.GetCollectionID()
 	resp.SegmentIDs = sealedSegmentIDs
 	resp.TimeOfSeal = timeOfSeal.Unix()
 	resp.FlushSegmentIDs = flushSegmentIDs
+	resp.FlushTs = ts
 	return resp, nil
 }
 
@@ -1245,36 +1268,70 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 	return resp, nil
 }
 
-// GetFlushState gets the flush state of multiple segments
-func (s *Server) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
-	log := log.Ctx(ctx).WithRateGroup("dc.GetFlushState", 1, 60)
+// GetFlushState gets the flush state of the collection based on the provided flush ts and segment IDs.
+func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
+	log := log.Ctx(ctx).With(zap.Int64("collection", req.GetCollectionID()),
+		zap.Time("flushTs", tsoutil.PhysicalTime(req.GetFlushTs()))).
+		WithRateGroup("dc.GetFlushState", 1, 60)
 	resp := &milvuspb.GetFlushStateResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}}
 	if s.isClosed() {
-		log.Warn("DataCoord receive GetFlushState request, server closed",
-			zap.Int64s("segmentIDs", req.GetSegmentIDs()), zap.Int("len", len(req.GetSegmentIDs())))
+		log.Warn("DataCoord receive GetFlushState request, server closed")
 		resp.Status.Reason = msgDataCoordIsUnhealthy(paramtable.GetNodeID())
 		return resp, nil
 	}
 
-	var unflushed []UniqueID
-	for _, sid := range req.GetSegmentIDs() {
-		segment := s.meta.GetHealthySegment(sid)
-		// segment is nil if it was compacted or it's a empty segment and is set to dropped
-		if segment == nil || segment.GetState() == commonpb.SegmentState_Flushing ||
-			segment.GetState() == commonpb.SegmentState_Flushed {
-			continue
+	if len(req.GetSegmentIDs()) > 0 {
+		var unflushed []UniqueID
+		for _, sid := range req.GetSegmentIDs() {
+			segment := s.meta.GetHealthySegment(sid)
+			// segment is nil if it was compacted, or it's an empty segment and is set to dropped
+			if segment == nil || isFlushState(segment.GetState()) {
+				continue
+			}
+			unflushed = append(unflushed, sid)
 		}
-		unflushed = append(unflushed, sid)
+		if len(unflushed) != 0 {
+			log.RatedInfo(10, "DataCoord receive GetFlushState request, Flushed is false", zap.Int64s("unflushed", unflushed), zap.Int("len", len(unflushed)))
+			resp.Flushed = false
+			resp.Status.ErrorCode = commonpb.ErrorCode_Success
+			return resp, nil
+		}
 	}
 
-	if len(unflushed) != 0 {
-		log.RatedInfo(10, "DataCoord receive GetFlushState request, Flushed is false", zap.Int64s("unflushed", unflushed), zap.Int("len", len(unflushed)))
-		resp.Flushed = false
-	} else {
-		log.Info("DataCoord receive GetFlushState request, Flushed is true", zap.Int64s("segmentIDs", req.GetSegmentIDs()), zap.Int("len", len(req.GetSegmentIDs())))
-		resp.Flushed = true
+	channels := make([]string, 0)
+	for _, channelInfo := range s.channelManager.GetChannels() {
+		filtered := lo.Filter(channelInfo.Channels, func(channel *channel, _ int) bool {
+			return channel.CollectionID == req.GetCollectionID()
+		})
+		channelNames := lo.Map(filtered, func(channel *channel, _ int) string {
+			return channel.Name
+		})
+		channels = append(channels, channelNames...)
 	}
+
+	if len(channels) == 0 {
+		resp.Flushed = false
+		resp.Status.ErrorCode = commonpb.ErrorCode_Success
+		log.Warn("GetFlushState failed, no channels found")
+		return resp, nil
+	}
+
+	for _, channel := range channels {
+		cp := s.meta.GetChannelCheckpoint(channel)
+		if cp == nil || cp.GetTimestamp() < req.GetFlushTs() {
+			resp.Flushed = false
+			resp.Status.ErrorCode = commonpb.ErrorCode_Success
+			log.RatedInfo(10, "GetFlushState failed, channel unflushed", zap.String("channel", channel),
+				zap.Time("CP", tsoutil.PhysicalTime(cp.GetTimestamp())),
+				zap.Duration("lag", tsoutil.PhysicalTime(req.GetFlushTs()).Sub(tsoutil.PhysicalTime(cp.GetTimestamp()))))
+			return resp, nil
+		}
+	}
+
+	resp.Flushed = true
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
+	log.Info("GetFlushState all flushed")
+
 	return resp, nil
 }
 

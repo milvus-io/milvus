@@ -68,9 +68,11 @@ func (s *GetIndexStatisticsSuite) TestGetIndexStatistics() {
 	s.NoError(err)
 	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
 	ids := segmentIDs.GetData()
-	s.NotEmpty(segmentIDs)
+	s.Require().NotEmpty(segmentIDs)
+	s.Require().True(has)
+	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
 	s.Equal(true, has)
-	s.WaitForFlush(ctx, ids)
+	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
 
 	// create index
 	indexName := "_default"

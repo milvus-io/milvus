@@ -343,7 +343,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	channel := &ChannelMeta{
 		collectionID: collMeta.ID,
 		segments:     make(map[UniqueID]*Segment),
-		needToSync:   atomic.NewBool(false),
+		isHighMemory: atomic.NewBool(false),
 	}
 
 	channel.metaService = newMetaService(mockRootCoord, collMeta.ID)
@@ -590,7 +590,7 @@ func TestInsertBufferNodeRollBF(t *testing.T) {
 	channel := &ChannelMeta{
 		collectionID: collMeta.ID,
 		segments:     make(map[UniqueID]*Segment),
-		needToSync:   atomic.NewBool(false),
+		isHighMemory: atomic.NewBool(false),
 	}
 
 	channel.metaService = newMetaService(mockRootCoord, collMeta.ID)

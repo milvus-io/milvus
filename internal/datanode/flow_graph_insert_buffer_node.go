@@ -451,7 +451,7 @@ func (ibNode *insertBufferNode) FillInSyncTasks(fgMsg *flowGraphMsg, seg2Upload 
 func (ibNode *insertBufferNode) Sync(fgMsg *flowGraphMsg, seg2Upload []UniqueID, endPosition *msgpb.MsgPosition) []UniqueID {
 	syncTasks := ibNode.FillInSyncTasks(fgMsg, seg2Upload)
 	segmentsToSync := make([]UniqueID, 0, len(syncTasks))
-	ibNode.channel.(*ChannelMeta).needToSync.Store(false)
+	ibNode.channel.setIsHighMemory(false)
 
 	for _, task := range syncTasks {
 		log := log.With(zap.Int64("segmentID", task.segmentID),

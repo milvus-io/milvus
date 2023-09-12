@@ -303,6 +303,10 @@ func (c *mockDataNodeClient) SyncSegments(ctx context.Context, req *datapb.SyncS
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
 
+func (c *mockDataNodeClient) FlushChannels(ctx context.Context, req *datapb.FlushChannelsRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
+}
+
 func (c *mockDataNodeClient) Stop() error {
 	c.state = commonpb.StateCode_Abnormal
 	return nil

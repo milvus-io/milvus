@@ -26,10 +26,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
-func (s *MiniClusterSuite) WaitForFlush(ctx context.Context, segIDs []int64) {
+func (s *MiniClusterSuite) WaitForFlush(ctx context.Context, segIDs []int64, flushTs uint64, dbName, collectionName string) {
 	flushed := func() bool {
 		resp, err := s.Cluster.Proxy.GetFlushState(ctx, &milvuspb.GetFlushStateRequest{
-			SegmentIDs: segIDs,
+			SegmentIDs:     segIDs,
+			FlushTs:        flushTs,
+			DbName:         dbName,
+			CollectionName: collectionName,
 		})
 		if err != nil {
 			return false

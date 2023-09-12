@@ -4041,10 +4041,24 @@ func Test_GetCompactionStateWithPlans(t *testing.T) {
 
 func Test_GetFlushState(t *testing.T) {
 	t.Run("normal test", func(t *testing.T) {
+		originCache := globalMetaCache
+		m := NewMockCache(t)
+		m.On("GetCollectionID",
+			mock.Anything,
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(UniqueID(1), nil)
+		globalMetaCache = m
+		defer func() {
+			globalMetaCache = originCache
+		}()
+
 		datacoord := &DataCoordMock{}
 		proxy := &Proxy{dataCoord: datacoord}
 		proxy.stateCode.Store(commonpb.StateCode_Healthy)
-		resp, err := proxy.GetFlushState(context.TODO(), nil)
+		resp, err := proxy.GetFlushState(context.TODO(), &milvuspb.GetFlushStateRequest{
+			CollectionName: "coll",
+		})
 		assert.EqualValues(t, &milvuspb.GetFlushStateResponse{}, resp)
 		assert.NoError(t, err)
 	})
