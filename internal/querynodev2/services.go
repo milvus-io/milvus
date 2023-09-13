@@ -1376,6 +1376,10 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 		case querypb.SyncType_Remove:
 			removeActions = append(removeActions, action)
 		case querypb.SyncType_Set:
+			if action.GetInfo() == nil {
+				log.Warn("sync request from legacy querycoord without load info, skip")
+				continue
+			}
 			addSegments[action.GetNodeID()] = append(addSegments[action.GetNodeID()], action.GetInfo())
 		case querypb.SyncType_UpdateVersion:
 			pipeline := node.pipelineManager.Get(req.GetChannel())
