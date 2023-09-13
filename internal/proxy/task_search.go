@@ -828,6 +828,8 @@ func reduceSearchResultData(ctx context.Context, subSearchResultData []*schemapb
 		realTopK   int64 = -1
 	)
 
+	var retSize int64
+	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	// reducing nq * topk results
 	for i := int64(0); i < nq; i++ {
 
@@ -865,7 +867,7 @@ func reduceSearchResultData(ctx context.Context, subSearchResultData []*schemapb
 
 			// remove duplicates
 			if _, ok := idSet[id]; !ok {
-				typeutil.AppendFieldData(ret.Results.FieldsData, subSearchResultData[subSearchIdx].FieldsData, resultDataIdx)
+				retSize += typeutil.AppendFieldData(ret.Results.FieldsData, subSearchResultData[subSearchIdx].FieldsData, resultDataIdx)
 				typeutil.AppendPKs(ret.Results.Ids, id)
 				ret.Results.Scores = append(ret.Results.Scores, score)
 				idSet[id] = struct{}{}
@@ -884,8 +886,8 @@ func reduceSearchResultData(ctx context.Context, subSearchResultData []*schemapb
 		ret.Results.Topks = append(ret.Results.Topks, realTopK)
 
 		// limit search result to avoid oom
-		if int64(proto.Size(ret)) > paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64() {
-			return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64())
+		if retSize > maxOutputSize {
+			return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
 		}
 	}
 	log.Ctx(ctx).Debug("skip duplicated search result", zap.Int64("count", skipDupCnt))

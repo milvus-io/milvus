@@ -123,6 +123,8 @@ func ReduceSearchResultData(ctx context.Context, searchResultData []*schemapb.Se
 	}
 
 	var skipDupCnt int64
+	var retSize int64
+	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	for i := int64(0); i < nq; i++ {
 		offsets := make([]int64, len(searchResultData))
 
@@ -140,7 +142,7 @@ func ReduceSearchResultData(ctx context.Context, searchResultData []*schemapb.Se
 
 			// remove duplicates
 			if _, ok := idSet[id]; !ok {
-				typeutil.AppendFieldData(ret.FieldsData, searchResultData[sel].FieldsData, idx)
+				retSize += typeutil.AppendFieldData(ret.FieldsData, searchResultData[sel].FieldsData, idx)
 				typeutil.AppendPKs(ret.Ids, id)
 				ret.Scores = append(ret.Scores, score)
 				idSet[id] = struct{}{}
@@ -159,8 +161,8 @@ func ReduceSearchResultData(ctx context.Context, searchResultData []*schemapb.Se
 		ret.Topks = append(ret.Topks, j)
 
 		// limit search result to avoid oom
-		if int64(proto.Size(ret)) > paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64() {
-			return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64())
+		if retSize > maxOutputSize {
+			return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
 		}
 	}
 	log.Debug("skip duplicated search result", zap.Int64("count", skipDupCnt))
@@ -273,6 +275,9 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 	ret.FieldsData = make([]*schemapb.FieldData, len(validRetrieveResults[0].GetFieldsData()))
 	idTsMap := make(map[interface{}]uint64)
 	cursors := make([]int64, len(validRetrieveResults))
+
+	var retSize int64
+	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	for j := 0; j < loopEnd; j++ {
 		sel := typeutil.SelectMinPK(validRetrieveResults, cursors)
 		if sel == -1 {
@@ -283,7 +288,7 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 		ts := getTS(validRetrieveResults[sel], cursors[sel])
 		if _, ok := idTsMap[pk]; !ok {
 			typeutil.AppendPKs(ret.Ids, pk)
-			typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel])
+			retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel])
 			idTsMap[pk] = ts
 		} else {
 			// primary keys duplicate
@@ -291,13 +296,13 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 			if ts != 0 && ts > idTsMap[pk] {
 				idTsMap[pk] = ts
 				typeutil.DeleteFieldData(ret.FieldsData)
-				typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel])
+				retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel])
 			}
 		}
 
 		// limit retrieve result to avoid oom
-		if int64(proto.Size(ret)) > paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64() {
-			return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64())
+		if retSize > maxOutputSize {
+			return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", maxOutputSize)
 		}
 
 		cursors[sel]++
@@ -373,6 +378,9 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 	ret.FieldsData = make([]*schemapb.FieldData, len(validRetrieveResults[0].GetFieldsData()))
 	idSet := make(map[interface{}]struct{})
 	cursors := make([]int64, len(validRetrieveResults))
+
+	var retSize int64
+	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	for j := 0; j < loopEnd; j++ {
 		sel := typeutil.SelectMinPK(validRetrieveResults, cursors)
 		if sel == -1 {
@@ -382,7 +390,7 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 		pk := typeutil.GetPK(validRetrieveResults[sel].GetIds(), cursors[sel])
 		if _, ok := idSet[pk]; !ok {
 			typeutil.AppendPKs(ret.Ids, pk)
-			typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel])
+			retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel])
 			idSet[pk] = struct{}{}
 		} else {
 			// primary keys duplicate
@@ -390,8 +398,8 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 		}
 
 		// limit retrieve result to avoid oom
-		if int64(proto.Size(ret)) > paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64() {
-			return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64())
+		if retSize > maxOutputSize {
+			return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", maxOutputSize)
 		}
 
 		cursors[sel]++
