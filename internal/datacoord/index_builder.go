@@ -289,6 +289,7 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 				StorageType:     Params.CommonCfg.StorageType.GetValue(),
 				Region:          Params.MinioCfg.Region.GetValue(),
 				UseVirtualHost:  Params.MinioCfg.UseVirtualHost.GetAsBool(),
+				CloudProvider:   Params.MinioCfg.CloudProvider.GetValue(),
 			}
 		}
 		req := &indexpb.CreateJobRequest{
