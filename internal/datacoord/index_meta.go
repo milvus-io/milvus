@@ -521,16 +521,16 @@ func (m *meta) FinishTask(taskInfo *indexpb.IndexTaskInfo) error {
 	m.Lock()
 	defer m.Unlock()
 
-	segIdx, ok := m.buildID2SegmentIndex[taskInfo.BuildID]
+	segIdx, ok := m.buildID2SegmentIndex[taskInfo.GetBuildID()]
 	if !ok {
-		log.Warn("there is no index with buildID", zap.Int64("buildID", taskInfo.BuildID))
+		log.Warn("there is no index with buildID", zap.Int64("buildID", taskInfo.GetBuildID()))
 		return nil
 	}
 	updateFunc := func(segIdx *model.SegmentIndex) error {
-		segIdx.IndexState = taskInfo.State
-		segIdx.IndexFileKeys = common.CloneStringList(taskInfo.IndexFileKeys)
-		segIdx.FailReason = taskInfo.FailReason
-		segIdx.IndexSize = taskInfo.SerializedSize
+		segIdx.IndexState = taskInfo.GetState()
+		segIdx.IndexFileKeys = common.CloneStringList(taskInfo.GetIndexFileKeys())
+		segIdx.FailReason = taskInfo.GetFailReason()
+		segIdx.IndexSize = taskInfo.GetSerializedSize()
 		return m.alterSegmentIndexes([]*model.SegmentIndex{segIdx})
 	}
 
@@ -538,10 +538,10 @@ func (m *meta) FinishTask(taskInfo *indexpb.IndexTaskInfo) error {
 		return err
 	}
 
-	log.Info("finish index task success", zap.Int64("buildID", taskInfo.BuildID),
+	log.Info("finish index task success", zap.Int64("buildID", taskInfo.GetBuildID()),
 		zap.String("state", taskInfo.GetState().String()), zap.String("fail reason", taskInfo.GetFailReason()))
 	m.updateIndexTasksMetrics()
-	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(taskInfo.IndexFileKeys)))
+	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(taskInfo.GetIndexFileKeys())))
 	return nil
 }
 
