@@ -50,7 +50,8 @@ func NewClient(ctx context.Context, addr string, nodeID int64) (*Client, error) 
 		addr:       addr,
 		grpcClient: grpcclient.NewClientBase[proxypb.ProxyClient](config, "milvus.proto.proxy.Proxy"),
 	}
-	client.grpcClient.SetRole(typeutil.ProxyRole)
+	// node shall specify node id
+	client.grpcClient.SetRole(fmt.Sprintf("%s-%d", typeutil.ProxyRole, nodeID))
 	client.grpcClient.SetGetAddrFunc(client.getAddr)
 	client.grpcClient.SetNewGrpcClientFunc(client.newGrpcClient)
 	client.grpcClient.SetNodeID(nodeID)

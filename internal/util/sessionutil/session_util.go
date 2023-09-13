@@ -560,9 +560,10 @@ func (s *Session) GetSessions(prefix string) (map[string]*Session, int64, error)
 			return nil, 0, err
 		}
 		_, mapKey := path.Split(string(kv.Key))
-		log.Debug("SessionUtil GetSessions ", zap.Any("prefix", prefix),
+		log.Debug("SessionUtil GetSessions",
+			zap.String("prefix", prefix),
 			zap.String("key", mapKey),
-			zap.Any("address", session.Address))
+			zap.String("address", session.Address))
 		res[mapKey] = session
 	}
 	return res, resp.Header.Revision, nil
