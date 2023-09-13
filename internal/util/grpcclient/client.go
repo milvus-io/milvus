@@ -43,6 +43,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
@@ -91,24 +92,38 @@ type ClientBase[T interface {
 	MaxAttempts    int
 	InitialBackoff float64
 	MaxBackoff     float64
-	NodeID         atomic.Int64
-	sess           *sessionutil.Session
+	// resetInterval is the minimal duration to reset connection
+	minResetInterval time.Duration
+	lastReset        atomic.Time
+	// sessionCheckInterval is the minmal duration to check session, preventing too much etcd pulll
+	minSessionCheckInterval time.Duration
+	lastSessionCheck        atomic.Time
+
+	// counter for canceled or deadline exceeded
+	ctxCounter     atomic.Int32
+	maxCancelError int32
+
+	NodeID atomic.Int64
+	sess   *sessionutil.Session
 }
 
 func NewClientBase[T interface {
 	GetComponentStates(ctx context.Context, in *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error)
 }](config *paramtable.GrpcClientConfig, serviceName string) *ClientBase[T] {
 	return &ClientBase[T]{
-		ClientMaxRecvSize:      config.ClientMaxRecvSize.GetAsInt(),
-		ClientMaxSendSize:      config.ClientMaxSendSize.GetAsInt(),
-		DialTimeout:            config.DialTimeout.GetAsDuration(time.Millisecond),
-		KeepAliveTime:          config.KeepAliveTime.GetAsDuration(time.Millisecond),
-		KeepAliveTimeout:       config.KeepAliveTimeout.GetAsDuration(time.Millisecond),
-		RetryServiceNameConfig: serviceName,
-		MaxAttempts:            config.MaxAttempts.GetAsInt(),
-		InitialBackoff:         config.InitialBackoff.GetAsFloat(),
-		MaxBackoff:             config.MaxBackoff.GetAsFloat(),
-		CompressionEnabled:     config.CompressionEnabled.GetAsBool(),
+		ClientMaxRecvSize:       config.ClientMaxRecvSize.GetAsInt(),
+		ClientMaxSendSize:       config.ClientMaxSendSize.GetAsInt(),
+		DialTimeout:             config.DialTimeout.GetAsDuration(time.Millisecond),
+		KeepAliveTime:           config.KeepAliveTime.GetAsDuration(time.Millisecond),
+		KeepAliveTimeout:        config.KeepAliveTimeout.GetAsDuration(time.Millisecond),
+		RetryServiceNameConfig:  serviceName,
+		MaxAttempts:             config.MaxAttempts.GetAsInt(),
+		InitialBackoff:          config.InitialBackoff.GetAsFloat(),
+		MaxBackoff:              config.MaxBackoff.GetAsFloat(),
+		CompressionEnabled:      config.CompressionEnabled.GetAsBool(),
+		minResetInterval:        config.MinResetInterval.GetAsDuration(time.Millisecond),
+		minSessionCheckInterval: config.MinSessionCheckInterval.GetAsDuration(time.Millisecond),
+		maxCancelError:          config.MaxCancelError.GetAsInt32(),
 	}
 }
 
@@ -167,8 +182,14 @@ func (c *ClientBase[T]) GetGrpcClient(ctx context.Context) (T, error) {
 }
 
 func (c *ClientBase[T]) resetConnection(client T) {
+	if time.Since(c.lastReset.Load()) < c.minResetInterval {
+		return
+	}
 	c.grpcClientMtx.Lock()
 	defer c.grpcClientMtx.Unlock()
+	if time.Since(c.lastReset.Load()) < c.minResetInterval {
+		return
+	}
 	if generic.IsZero(c.grpcClient) {
 		return
 	}
@@ -181,6 +202,7 @@ func (c *ClientBase[T]) resetConnection(client T) {
 	c.conn = nil
 	c.addr.Store("")
 	c.grpcClient = generic.Zero[T]()
+	c.lastReset.Store(time.Now())
 }
 
 func (c *ClientBase[T]) connect(ctx context.Context) error {
@@ -291,8 +313,70 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 
 	c.conn = conn
 	c.addr.Store(addr)
+	c.ctxCounter.Store(0)
 	c.grpcClient = c.newGrpcClient(c.conn)
 	return nil
+}
+
+func (c *ClientBase[T]) verifySession(ctx context.Context) error {
+	if funcutil.CheckCtxValid(ctx) {
+		return nil
+	}
+	log := log.Ctx(ctx).With(zap.String("clientRole", c.GetRole()))
+	if time.Since(c.lastSessionCheck.Load()) < c.minSessionCheckInterval {
+		log.Debug("skip session check, verify too frequent")
+		return nil
+	}
+	c.lastSessionCheck.Store(time.Now())
+	if c.sess != nil {
+		sessions, _, getSessionErr := c.sess.GetSessions(c.GetRole())
+		if getSessionErr != nil {
+			// Only log but not handle this error as it is an auxiliary logic
+			log.Warn("fail to get session", zap.Error(getSessionErr))
+		}
+		if coordSess, exist := sessions[c.GetRole()]; exist {
+			if c.GetNodeID() != coordSess.ServerID {
+				log.Warn("server id mismatch, may connected to a old server, start to reset connection",
+					zap.Int64("client_node", c.GetNodeID()),
+					zap.Int64("current_node", coordSess.ServerID))
+				return merr.WrapErrNodeNotMatch(c.GetNodeID(), coordSess.ServerID)
+			}
+		} else {
+			return merr.WrapErrNodeNotFound(c.GetNodeID(), "session not found", c.GetRole())
+		}
+	}
+	return nil
+}
+
+func (c *ClientBase[T]) recordCtxError() (needReset bool) {
+	val := c.ctxCounter.Add(1)
+	if val > c.maxCancelError {
+		c.ctxCounter.Store(0)
+		return true
+	}
+	return false
+}
+
+func (c *ClientBase[T]) checkErr(ctx context.Context, err error) (needRetry, needReset bool) {
+	log := log.Ctx(ctx).With(zap.String("clientRole", c.GetRole()))
+	switch {
+	case funcutil.IsGrpcErr(err):
+		// grpc err
+		log.Warn("call received grpc error", zap.Error(err))
+		if funcutil.IsGrpcErr(err, codes.Canceled, codes.DeadlineExceeded) {
+			// canceled or deadline exceeded
+			return c.recordCtxError(), false
+		}
+		return true, true
+	case IsServerIDMismatchErr(err):
+		fallthrough
+	case IsCrossClusterRoutingErr(err):
+		return true, true
+	default:
+		log.Warn("fail to grpc call because of unknown error", zap.Error(err))
+		// Unknown err
+		return false, false
+	}
 }
 
 func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, error)) (any, error) {
@@ -328,33 +412,25 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 		}
 		ret, callErr = caller(client)
 		if callErr != nil {
-			if funcutil.IsGrpcErr(callErr) ||
-				IsCrossClusterRoutingErr(callErr) || IsServerIDMismatchErr(callErr) {
+			needRetry, needReset := c.checkErr(ctx, callErr)
+			if !needRetry {
+				// stop retry
+				callErr = retry.Unrecoverable(callErr)
+			}
+			if needReset {
 				log.Warn("start to reset connection because of specific reasons", zap.Error(callErr))
 				resetClientFunc()
-				return callErr
-			}
-			if !funcutil.CheckCtxValid(ctx) {
-				if c.sess != nil {
-					sessions, _, getSessionErr := c.sess.GetSessions(c.GetRole())
-					if getSessionErr != nil {
-						// Only log but not handle this error as it is an auxiliary logic
-						log.Warn("fail to get session", zap.Error(getSessionErr))
-					}
-					if coordSess, exist := sessions[c.GetRole()]; exist {
-						if c.GetNodeID() != coordSess.ServerID {
-							log.Warn("server id mismatch, may connected to a old server, start to reset connection",
-								zap.Int64("client_node", c.GetNodeID()), zap.Int64("current_node", coordSess.ServerID))
-							resetClientFunc()
-							return callErr
-						}
-					}
+			} else {
+				err := c.verifySession(ctx)
+				if err != nil {
+					log.Warn("failed to verify session, reset connection", zap.Error(err))
+					resetClientFunc()
 				}
 			}
-			log.Warn("fail to grpc call because of unknown error", zap.Error(callErr))
-			// not rpc error, it will stop to retry
-			return retry.Unrecoverable(callErr)
+			return callErr
 		}
+		// reset counter
+		c.ctxCounter.Store(0)
 
 		var status *commonpb.Status
 		switch res := ret.(type) {

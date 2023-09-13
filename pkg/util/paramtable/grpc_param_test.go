@@ -143,6 +143,24 @@ func TestGrpcClientParams(t *testing.T) {
 	base.Save("grpc.client.CompressionEnabled", "true")
 	assert.Equal(t, clientConfig.CompressionEnabled.GetAsBool(), true)
 
+	assert.Equal(t, clientConfig.MinResetInterval.GetValue(), "1000")
+	base.Save("grpc.client.minResetInterval", "abc")
+	assert.Equal(t, clientConfig.MinResetInterval.GetValue(), "1000")
+	base.Save("grpc.client.minResetInterval", "5000")
+	assert.Equal(t, clientConfig.MinResetInterval.GetValue(), "5000")
+
+	assert.Equal(t, clientConfig.MinSessionCheckInterval.GetValue(), "200")
+	base.Save("grpc.client.minSessionCheckInterval", "abc")
+	assert.Equal(t, clientConfig.MinSessionCheckInterval.GetValue(), "200")
+	base.Save("grpc.client.minSessionCheckInterval", "500")
+	assert.Equal(t, clientConfig.MinSessionCheckInterval.GetValue(), "500")
+
+	assert.Equal(t, clientConfig.MaxCancelError.GetValue(), "32")
+	base.Save("grpc.client.maxCancelError", "abc")
+	assert.Equal(t, clientConfig.MaxCancelError.GetValue(), "32")
+	base.Save("grpc.client.maxCancelError", "64")
+	assert.Equal(t, clientConfig.MaxCancelError.GetValue(), "64")
+
 	base.Save("common.security.tlsMode", "1")
 	base.Save("tls.serverPemPath", "/pem")
 	base.Save("tls.serverKeyPath", "/key")
