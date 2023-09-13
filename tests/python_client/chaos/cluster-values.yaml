@@ -152,6 +152,9 @@ pulsar:
 
 extraConfigFiles:
   user.yaml: |+
-    dataNode:
-      memory:
-        forceSyncEnable: false
+    dataCoord:
+      compaction:
+        indexBasedCompaction: false
+    indexCoord:
+      scheduler:
+        interval: 100        

@@ -39,3 +39,9 @@ extraConfigFiles:
   user.yaml: |+
     mq:
      type: natsmq
+    dataCoord:
+      compaction:
+        indexBasedCompaction: false
+    indexCoord:
+      scheduler:
+        interval: 100        

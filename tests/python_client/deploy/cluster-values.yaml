@@ -127,8 +127,11 @@ pulsar:
       backlogQuotaDefaultLimitGB: "8"
       backlogQuotaDefaultRetentionPolicy: producer_exception
 
-# extraConfigFiles:
-#   user.yaml: |+
-#     dataNode:
-#       memory:
-#         forceSyncEnable: false
+extraConfigFiles:
+  user.yaml: |+
+    dataCoord:
+      compaction:
+        indexBasedCompaction: false
+    indexCoord:
+      scheduler:
+        interval: 100        
