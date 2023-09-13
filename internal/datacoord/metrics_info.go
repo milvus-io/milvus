@@ -168,8 +168,8 @@ func (s *Server) getDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetric
 
 	if metrics.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("invalid metrics of DataNode was found",
-			zap.Any("error_code", metrics.Status.ErrorCode),
-			zap.Any("error_reason", metrics.Status.Reason))
+			zap.Any("error_code", metrics.GetStatus().GetErrorCode()),
+			zap.Any("error_reason", metrics.GetStatus().GetReason()))
 		infos.BaseComponentInfos.ErrorReason = metrics.GetStatus().GetReason()
 		return infos, nil
 	}
@@ -208,8 +208,8 @@ func (s *Server) getIndexNodeMetrics(ctx context.Context, req *milvuspb.GetMetri
 
 	if metrics.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("invalid metrics of DataNode was found",
-			zap.Any("error_code", metrics.Status.ErrorCode),
-			zap.Any("error_reason", metrics.Status.Reason))
+			zap.Any("error_code", metrics.GetStatus().GetErrorCode()),
+			zap.Any("error_reason", metrics.GetStatus().GetReason()))
 		infos.BaseComponentInfos.ErrorReason = metrics.GetStatus().GetReason()
 		return infos, nil
 	}

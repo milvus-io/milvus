@@ -404,20 +404,20 @@ import (
 //	t.Run("GetComponentStates", func(t *testing.T) {
 //		resp, err := in.GetComponentStates(ctx)
 //		assert.NoError(t, err)
-//		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+//		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 //		assert.Equal(t, commonpb.StateCode_Healthy, resp.State.StateCode)
 //	})
 //
 //	t.Run("GetTimeTickChannel", func(t *testing.T) {
 //		resp, err := in.GetTimeTickChannel(ctx)
 //		assert.NoError(t, err)
-//		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+//		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 //	})
 //
 //	t.Run("GetStatisticsChannel", func(t *testing.T) {
 //		resp, err := in.GetStatisticsChannel(ctx)
 //		assert.NoError(t, err)
-//		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+//		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 //	})
 //
 //	t.Run("ShowConfigurations", func(t *testing.T) {
@@ -432,7 +432,7 @@ import (
 //
 //		resp, err := in.ShowConfigurations(ctx, req)
 //		assert.NoError(t, err)
-//		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+//		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 //		assert.Equal(t, 1, len(resp.Configuations))
 //		assert.Equal(t, "indexnode.port", resp.Configuations[0].Key)
 //	})
@@ -466,26 +466,26 @@ func TestComponentState(t *testing.T) {
 	in.SetEtcdClient(getEtcdClient())
 	state, err := in.GetComponentStates(ctx)
 	assert.NoError(t, err)
-	assert.Equal(t, state.Status.ErrorCode, commonpb.ErrorCode_Success)
+	assert.Equal(t, state.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	assert.Equal(t, state.State.StateCode, commonpb.StateCode_Abnormal)
 
 	assert.Nil(t, in.Init())
 	state, err = in.GetComponentStates(ctx)
 	assert.NoError(t, err)
-	assert.Equal(t, state.Status.ErrorCode, commonpb.ErrorCode_Success)
+	assert.Equal(t, state.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	assert.Equal(t, state.State.StateCode, commonpb.StateCode_Initializing)
 
 	assert.Nil(t, in.Start())
 	state, err = in.GetComponentStates(ctx)
 	assert.NoError(t, err)
-	assert.Equal(t, state.Status.ErrorCode, commonpb.ErrorCode_Success)
+	assert.Equal(t, state.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	assert.Equal(t, state.State.StateCode, commonpb.StateCode_Healthy)
 
 	assert.Nil(t, in.Stop())
 	assert.Nil(t, in.Stop())
 	state, err = in.GetComponentStates(ctx)
 	assert.NoError(t, err)
-	assert.Equal(t, state.Status.ErrorCode, commonpb.ErrorCode_Success)
+	assert.Equal(t, state.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	assert.Equal(t, state.State.StateCode, commonpb.StateCode_Abnormal)
 }
 
@@ -500,7 +500,7 @@ func TestGetTimeTickChannel(t *testing.T) {
 	in := NewIndexNode(ctx, factory)
 	ret, err := in.GetTimeTickChannel(ctx)
 	assert.NoError(t, err)
-	assert.Equal(t, ret.Status.ErrorCode, commonpb.ErrorCode_Success)
+	assert.Equal(t, ret.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 }
 
 func TestGetStatisticChannel(t *testing.T) {
@@ -515,7 +515,7 @@ func TestGetStatisticChannel(t *testing.T) {
 
 	ret, err := in.GetStatisticsChannel(ctx)
 	assert.NoError(t, err)
-	assert.Equal(t, ret.Status.ErrorCode, commonpb.ErrorCode_Success)
+	assert.Equal(t, ret.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 }
 
 func TestIndexTaskWhenStoppingNode(t *testing.T) {

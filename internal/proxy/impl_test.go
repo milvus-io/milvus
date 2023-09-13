@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -279,7 +280,7 @@ func TestProxy_ResourceGroup(t *testing.T) {
 		qc.EXPECT().ListResourceGroups(mock.Anything, mock.Anything).Return(&milvuspb.ListResourceGroupsResponse{Status: successStatus}, nil)
 		resp, err := node.ListResourceGroups(ctx, &milvuspb.ListResourceGroupsRequest{})
 		assert.NoError(t, err)
-		assert.Equal(t, resp.Status.ErrorCode, commonpb.ErrorCode_Success)
+		assert.True(t, merr.Ok(resp.GetStatus()))
 	})
 
 	t.Run("describe resource group", func(t *testing.T) {
@@ -298,7 +299,7 @@ func TestProxy_ResourceGroup(t *testing.T) {
 			ResourceGroup: "rg",
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, resp.Status.ErrorCode, commonpb.ErrorCode_Success)
+		assert.True(t, merr.Ok(resp.GetStatus()))
 	})
 }
 
@@ -421,7 +422,7 @@ func TestProxy_FlushAll_DbCollection(t *testing.T) {
 			resp, err := node.FlushAll(ctx, test.FlushRequest)
 			assert.NoError(t, err)
 			if test.ExpectedSuccess {
-				assert.Equal(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+				assert.True(t, merr.Ok(resp.GetStatus()))
 			} else {
 				assert.NotEqual(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 			}
@@ -475,7 +476,7 @@ func TestProxy_FlushAll(t *testing.T) {
 	t.Run("FlushAll", func(t *testing.T) {
 		resp, err := node.FlushAll(ctx, &milvuspb.FlushAllRequest{})
 		assert.NoError(t, err)
-		assert.Equal(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+		assert.True(t, merr.Ok(resp.GetStatus()))
 	})
 
 	t.Run("FlushAll failed, server is abnormal", func(t *testing.T) {
@@ -568,14 +569,14 @@ func TestProxy_GetFlushAllState(t *testing.T) {
 	t.Run("GetFlushAllState success", func(t *testing.T) {
 		resp, err := node.GetFlushAllState(ctx, &milvuspb.GetFlushAllStateRequest{})
 		assert.NoError(t, err)
-		assert.Equal(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+		assert.True(t, merr.Ok(resp.GetStatus()))
 	})
 
 	t.Run("GetFlushAllState failed, server is abnormal", func(t *testing.T) {
 		node.stateCode.Store(commonpb.StateCode_Abnormal)
 		resp, err := node.GetFlushAllState(ctx, &milvuspb.GetFlushAllStateRequest{})
 		assert.NoError(t, err)
-		assert.Equal(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_UnexpectedError)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 		node.stateCode.Store(commonpb.StateCode_Healthy)
 	})
 
@@ -617,7 +618,7 @@ func TestProxy_GetReplicas(t *testing.T) {
 			CollectionID: 1000,
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+		assert.True(t, merr.Ok(resp.GetStatus()))
 	})
 
 	t.Run("proxy_not_healthy", func(t *testing.T) {
@@ -626,7 +627,7 @@ func TestProxy_GetReplicas(t *testing.T) {
 			CollectionID: 1000,
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_UnexpectedError)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 		node.stateCode.Store(commonpb.StateCode_Healthy)
 	})
 
@@ -926,7 +927,7 @@ func TestProxyListDatabase(t *testing.T) {
 		ctx := context.Background()
 		resp, err := node.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 	})
 
 	factory := dependency.NewDefaultFactory(true)

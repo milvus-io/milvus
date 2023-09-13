@@ -72,7 +72,7 @@ func TestIndexNodeServer(t *testing.T) {
 		req := &internalpb.GetStatisticsChannelRequest{}
 		resp, err := server.GetStatisticsChannel(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("CreateJob", func(t *testing.T) {
@@ -91,7 +91,7 @@ func TestIndexNodeServer(t *testing.T) {
 		req := &indexpb.QueryJobsRequest{}
 		resp, err := server.QueryJobs(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("DropJobs", func(t *testing.T) {
@@ -107,7 +107,7 @@ func TestIndexNodeServer(t *testing.T) {
 		}
 		resp, err := server.ShowConfigurations(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("GetMetrics", func(t *testing.T) {
@@ -115,14 +115,14 @@ func TestIndexNodeServer(t *testing.T) {
 		assert.NoError(t, err)
 		resp, err := server.GetMetrics(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("GetTaskSlots", func(t *testing.T) {
 		req := &indexpb.GetJobStatsRequest{}
 		resp, err := server.GetJobStats(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
 	err = server.Stop()

@@ -565,7 +565,7 @@ func (node *DataNode) getPartitions(ctx context.Context, dbName string, collecti
 	}
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("failed to get partitions of collection", logFields...)
-		return nil, errors.New(resp.Status.Reason)
+		return nil, errors.New(resp.GetStatus().GetReason())
 	}
 
 	partitionNames := resp.GetPartitionNames()
@@ -708,7 +708,7 @@ func assignSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest) importutil
 			return 0, "", fmt.Errorf("syncSegmentID Failed:%w", err)
 		}
 		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			return 0, "", fmt.Errorf("syncSegmentID Failed:%s", resp.Status.Reason)
+			return 0, "", fmt.Errorf("syncSegmentID Failed:%s", resp.GetStatus().GetReason())
 		}
 		if len(resp.SegIDAssignments) == 0 || resp.SegIDAssignments[0] == nil {
 			return 0, "", fmt.Errorf("syncSegmentID Failed: the collection was dropped")
@@ -992,7 +992,7 @@ func reportImportFunc(node *DataNode) importutil.ReportFunc {
 				log.Error("fail to report import state to RootCoord", zap.Error(err))
 				return err
 			}
-			if status != nil && status.ErrorCode != commonpb.ErrorCode_Success {
+			if status.GetErrorCode() != commonpb.ErrorCode_Success {
 				return errors.New(status.GetReason())
 			}
 			return nil

@@ -125,7 +125,7 @@ func (p *proxyManager) startWatchEtcd(ctx context.Context, eventCh clientv3.Watc
 					err2 := p.WatchProxy()
 					if err2 != nil {
 						log.Error("re watch proxy fails when etcd has a compaction error",
-							zap.String("etcd error", err.Error()), zap.Error(err2))
+							zap.Error(err), zap.Error(err2))
 						panic("failed to handle etcd request, exit..")
 					}
 					return

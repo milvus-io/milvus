@@ -112,7 +112,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		}
 		resp, err := svr.GetRecoveryInfoV2(context.TODO(), req)
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.EqualValues(t, 0, len(resp.GetSegments()))
 		assert.EqualValues(t, 1, len(resp.GetChannels()))
 		assert.Nil(t, resp.GetChannels()[0].SeekPosition)
@@ -235,7 +235,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		}
 		resp, err := svr.GetRecoveryInfoV2(context.TODO(), req)
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.EqualValues(t, 1, len(resp.GetChannels()))
 		assert.EqualValues(t, 0, len(resp.GetChannels()[0].GetUnflushedSegmentIds()))
 		assert.ElementsMatch(t, []int64{0, 1}, resp.GetChannels()[0].GetFlushedSegmentIds())
@@ -311,7 +311,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		}
 		resp, err := svr.GetRecoveryInfoV2(context.TODO(), req)
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.EqualValues(t, 0, len(resp.GetSegments()))
 		assert.EqualValues(t, 1, len(resp.GetChannels()))
 		assert.NotNil(t, resp.GetChannels()[0].SeekPosition)
@@ -410,7 +410,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		}
 		resp, err := svr.GetRecoveryInfoV2(context.TODO(), req)
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.EqualValues(t, 1, len(resp.GetSegments()))
 		assert.EqualValues(t, 0, resp.GetSegments()[0].GetID())
 		assert.EqualValues(t, 1, len(resp.GetSegments()[0].GetBinlogs()))
@@ -451,7 +451,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		}
 		resp, err := svr.GetRecoveryInfoV2(context.TODO(), req)
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.EqualValues(t, 0, len(resp.GetSegments()))
 		assert.EqualValues(t, 1, len(resp.GetChannels()))
 		assert.NotNil(t, resp.GetChannels()[0].SeekPosition)
@@ -493,7 +493,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		}
 		resp, err := svr.GetRecoveryInfoV2(context.TODO(), req)
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.EqualValues(t, 0, len(resp.GetSegments()))
 		assert.EqualValues(t, 1, len(resp.GetChannels()))
 		assert.NotNil(t, resp.GetChannels()[0].SeekPosition)
@@ -573,7 +573,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		}
 		resp, err := svr.GetRecoveryInfoV2(context.TODO(), req)
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.NotNil(t, resp.GetChannels()[0].SeekPosition)
 		assert.NotEqual(t, 0, resp.GetChannels()[0].GetSeekPosition().GetTimestamp())
 		assert.Len(t, resp.GetChannels()[0].GetDroppedSegmentIds(), 0)

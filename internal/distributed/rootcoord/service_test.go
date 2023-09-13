@@ -237,7 +237,7 @@ func TestRun(t *testing.T) {
 		t.Run("ListDatabases", func(t *testing.T) {
 			ret, err := svr.ListDatabases(ctx, nil)
 			assert.Nil(t, err)
-			assert.Equal(t, commonpb.ErrorCode_Success, ret.Status.ErrorCode)
+			assert.Equal(t, commonpb.ErrorCode_Success, ret.GetStatus().GetErrorCode())
 		})
 		err = svr.Stop()
 		assert.NoError(t, err)

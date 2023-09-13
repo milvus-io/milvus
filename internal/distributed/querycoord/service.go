@@ -231,7 +231,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	log.Debug("network", zap.String("port", strconv.Itoa(grpcPort)))
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
-		log.Debug("GrpcServer:failed to listen:", zap.String("error", err.Error()))
+		log.Debug("GrpcServer:failed to listen:", zap.Error(err))
 		s.grpcErrChan <- err
 		return
 	}

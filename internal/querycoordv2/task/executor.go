@@ -355,7 +355,7 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 		log.Warn("failed to release segment, it may be a false failure", zap.Error(err))
 		return
 	}
-	if status.ErrorCode != commonpb.ErrorCode_Success {
+	if status.GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("failed to release segment", zap.String("reason", status.GetReason()))
 		return
 	}

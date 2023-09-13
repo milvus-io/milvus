@@ -544,7 +544,7 @@ func TestImportManager_ImportJob(t *testing.T) {
 	// nil request
 	mgr := newImportManager(context.TODO(), mockKv, idAlloc, nil, callGetSegmentStates, nil, nil)
 	resp := mgr.importJob(context.TODO(), nil, colID, 0)
-	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 
 	rowReq := &milvuspb.ImportRequest{
 		CollectionName: "c1",
@@ -554,11 +554,11 @@ func TestImportManager_ImportJob(t *testing.T) {
 
 	// nil callImportService
 	resp = mgr.importJob(context.TODO(), rowReq, colID, 0)
-	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 
 	// row-based import not allow multiple files
 	resp = mgr.importJob(context.TODO(), rowReq, colID, 0)
-	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 
 	importServiceFunc := func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 		return &datapb.ImportTaskResponse{
@@ -641,9 +641,9 @@ func TestImportManager_ImportJob(t *testing.T) {
 	for i := 0; i <= Params.RootCoordCfg.ImportMaxPendingTaskCount.GetAsInt(); i++ {
 		resp = mgr.importJob(context.TODO(), rowReq, colID, 0)
 		if i < Params.RootCoordCfg.ImportMaxPendingTaskCount.GetAsInt()-1 {
-			assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		} else {
-			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		}
 	}
 }
@@ -709,7 +709,7 @@ func TestImportManager_AllDataNodesBusy(t *testing.T) {
 	mgr := newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callGetSegmentStates, nil, nil)
 	for i := 0; i < len(dnList); i++ {
 		resp := mgr.importJob(context.TODO(), rowReq, colID, 0)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, 0, len(mgr.pendingTasks))
 		assert.Equal(t, i+1, len(mgr.workingTasks))
 	}
@@ -717,7 +717,7 @@ func TestImportManager_AllDataNodesBusy(t *testing.T) {
 	// all data nodes are busy, new task waiting in pending list
 	mgr = newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callGetSegmentStates, nil, nil)
 	resp := mgr.importJob(context.TODO(), rowReq, colID, 0)
-	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	assert.Equal(t, len(rowReq.Files), len(mgr.pendingTasks))
 	assert.Equal(t, 0, len(mgr.workingTasks))
 
@@ -725,23 +725,23 @@ func TestImportManager_AllDataNodesBusy(t *testing.T) {
 	count = 0
 	mgr = newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callGetSegmentStates, nil, nil)
 	resp = mgr.importJob(context.TODO(), colReq, colID, 0)
-	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	assert.Equal(t, 0, len(mgr.pendingTasks))
 	assert.Equal(t, 1, len(mgr.workingTasks))
 
 	resp = mgr.importJob(context.TODO(), colReq, colID, 0)
-	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	assert.Equal(t, 0, len(mgr.pendingTasks))
 	assert.Equal(t, 2, len(mgr.workingTasks))
 
 	resp = mgr.importJob(context.TODO(), colReq, colID, 0)
-	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	assert.Equal(t, 0, len(mgr.pendingTasks))
 	assert.Equal(t, 3, len(mgr.workingTasks))
 
 	// all data nodes are busy now, new task is pending
 	resp = mgr.importJob(context.TODO(), colReq, colID, 0)
-	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	assert.Equal(t, 1, len(mgr.pendingTasks))
 	assert.Equal(t, 3, len(mgr.workingTasks))
 }
@@ -828,14 +828,14 @@ func TestImportManager_TaskState(t *testing.T) {
 	assert.Equal(t, int64(1000), ti.GetState().GetRowCount())
 
 	resp := mgr.getTaskState(10000)
-	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
 
 	resp = mgr.getTaskState(2)
-	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	assert.Equal(t, commonpb.ImportState_ImportPersisted, resp.State)
 
 	resp = mgr.getTaskState(1)
-	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	assert.Equal(t, commonpb.ImportState_ImportStarted, resp.State)
 
 	info = &rootcoordpb.ImportResult{
@@ -892,7 +892,7 @@ func TestImportManager_AllocFail(t *testing.T) {
 	}
 	mgr := newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callGetSegmentStates, nil, nil)
 	resp := mgr.importJob(context.TODO(), rowReq, colID, 0)
-	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	assert.Equal(t, 0, len(mgr.pendingTasks))
 }
 

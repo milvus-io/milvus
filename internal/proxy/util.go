@@ -1012,7 +1012,7 @@ func isCollectionLoaded(ctx context.Context, qc types.QueryCoord, collID int64) 
 		return false, err
 	}
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return false, errors.New(resp.Status.Reason)
+		return false, errors.New(resp.GetStatus().GetReason())
 	}
 
 	for _, loadedCollID := range resp.GetCollectionIDs() {
@@ -1033,7 +1033,7 @@ func isPartitionLoaded(ctx context.Context, qc types.QueryCoord, collID int64, p
 		return false, err
 	}
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return false, errors.New(resp.Status.Reason)
+		return false, errors.New(resp.GetStatus().GetReason())
 	}
 
 	for _, loadedPartID := range resp.GetPartitionIDs() {
@@ -1212,7 +1212,7 @@ func getCollectionProgress(
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		err = merr.Error(resp.GetStatus())
 		log.Warn("fail to show collections", zap.Int64("collection_id", collectionID),
-			zap.String("reason", resp.Status.Reason))
+			zap.String("reason", resp.GetStatus().GetReason()))
 		return
 	}
 
@@ -1285,7 +1285,7 @@ func getPartitionProgress(
 		log.Warn("fail to show partitions",
 			zap.String("collection_name", collectionName),
 			zap.Strings("partition_names", partitionNames),
-			zap.String("reason", resp.Status.Reason))
+			zap.String("reason", resp.GetStatus().GetReason()))
 		return
 	}
 

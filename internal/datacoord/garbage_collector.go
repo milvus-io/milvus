@@ -154,7 +154,7 @@ func (gc *garbageCollector) scan() {
 		if err != nil {
 			log.Error("failed to list files with prefix",
 				zap.String("prefix", prefix),
-				zap.String("error", err.Error()),
+				zap.Error(err),
 			)
 		}
 		log.Info("gc scan finish list object", zap.String("prefix", prefix), zap.Duration("time spent", time.Since(startTs)), zap.Int("keys", len(infoKeys)))

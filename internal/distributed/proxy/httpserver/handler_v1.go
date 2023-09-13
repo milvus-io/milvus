@@ -47,7 +47,7 @@ func (h *Handlers) checkDatabase(c *gin.Context, dbName string) bool {
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(err), HTTPReturnMessage: err.Error()})
 		return false
 	} else if response.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.Status.ErrorCode), HTTPReturnMessage: response.Status.Reason})
+		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.GetStatus().GetErrorCode()), HTTPReturnMessage: response.GetStatus().GetReason()})
 		return false
 	}
 	for _, db := range response.DbNames {
@@ -74,8 +74,8 @@ func (h *Handlers) describeCollection(c *gin.Context, dbName string, collectionN
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(err), HTTPReturnMessage: err.Error()})
 		return nil, err
 	} else if response.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.Status.ErrorCode), HTTPReturnMessage: response.Status.Reason})
-		return nil, errors.New(response.Status.Reason)
+		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.GetStatus().GetErrorCode()), HTTPReturnMessage: response.GetStatus().GetReason()})
+		return nil, errors.New(response.GetStatus().GetReason())
 	}
 	primaryField, ok := getPrimaryField(response.Schema)
 	if ok && primaryField.AutoID && !response.Schema.AutoID {
@@ -95,8 +95,8 @@ func (h *Handlers) hasCollection(c *gin.Context, dbName string, collectionName s
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(err), HTTPReturnMessage: err.Error()})
 		return false, err
 	} else if response.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.Status.ErrorCode), HTTPReturnMessage: response.Status.Reason})
-		return false, errors.New(response.Status.Reason)
+		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.GetStatus().GetErrorCode()), HTTPReturnMessage: response.GetStatus().GetReason()})
+		return false, errors.New(response.GetStatus().GetReason())
 	} else {
 		return response.Value, nil
 	}
@@ -129,7 +129,7 @@ func (h *Handlers) listCollections(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: Code(err), HTTPReturnMessage: err.Error()})
 	} else if response.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.Status.ErrorCode), HTTPReturnMessage: response.Status.Reason})
+		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.GetStatus().GetErrorCode()), HTTPReturnMessage: response.GetStatus().GetReason()})
 	} else {
 		var collections []string
 		if response.CollectionNames != nil {
@@ -261,9 +261,9 @@ func (h *Handlers) getCollectionDetails(c *gin.Context) {
 	})
 	collLoadState := ""
 	if stateErr != nil {
-		log.Warn("get collection load state fail", zap.String("collection", collectionName), zap.String("err", stateErr.Error()))
+		log.Warn("get collection load state fail", zap.Error(stateErr))
 	} else if stateResp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("get collection load state fail", zap.String("collection", collectionName), zap.String("err", stateResp.Status.Reason))
+		log.Warn("get collection load state fail", zap.String("collection", collectionName), zap.String("err", stateResp.GetStatus().GetReason()))
 	} else {
 		collLoadState = stateResp.State.String()
 	}
@@ -282,10 +282,10 @@ func (h *Handlers) getCollectionDetails(c *gin.Context) {
 	var indexDesc []gin.H
 	if indexErr != nil {
 		indexDesc = []gin.H{}
-		log.Warn("get indexes description fail", zap.String("collection", collectionName), zap.String("vectorField", vectorField), zap.String("err", indexErr.Error()))
+		log.Warn("get indexes description fail", zap.Error(indexErr))
 	} else if indexResp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		indexDesc = []gin.H{}
-		log.Warn("get indexes description fail", zap.String("collection", collectionName), zap.String("vectorField", vectorField), zap.String("err", indexResp.Status.Reason))
+		log.Warn("get indexes description fail", zap.String("collection", collectionName), zap.String("vectorField", vectorField), zap.String("err", indexResp.GetStatus().GetReason()))
 	} else {
 		indexDesc = printIndexes(indexResp.IndexDescriptions)
 	}
@@ -382,7 +382,7 @@ func (h *Handlers) query(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: Code(err), HTTPReturnMessage: err.Error()})
 	} else if response.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.Status.ErrorCode), HTTPReturnMessage: response.Status.Reason})
+		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.GetStatus().GetErrorCode()), HTTPReturnMessage: response.GetStatus().GetReason()})
 	} else {
 		outputData, err := buildQueryResp(int64(0), response.OutputFields, response.FieldsData, nil, nil)
 		if err != nil {
@@ -436,7 +436,7 @@ func (h *Handlers) get(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: Code(err), HTTPReturnMessage: err.Error()})
 	} else if response.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.Status.ErrorCode), HTTPReturnMessage: response.Status.Reason})
+		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.GetStatus().GetErrorCode()), HTTPReturnMessage: response.GetStatus().GetReason()})
 	} else {
 		outputData, err := buildQueryResp(int64(0), response.OutputFields, response.FieldsData, nil, nil)
 		if err != nil {
@@ -488,7 +488,7 @@ func (h *Handlers) delete(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: Code(err), HTTPReturnMessage: err.Error()})
 	} else if response.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.Status.ErrorCode), HTTPReturnMessage: response.Status.Reason})
+		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.GetStatus().GetErrorCode()), HTTPReturnMessage: response.GetStatus().GetReason()})
 	} else {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{}})
 	}
@@ -549,7 +549,7 @@ func (h *Handlers) insert(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: Code(err), HTTPReturnMessage: err.Error()})
 	} else if response.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.Status.ErrorCode), HTTPReturnMessage: response.Status.Reason})
+		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.GetStatus().GetErrorCode()), HTTPReturnMessage: response.GetStatus().GetReason()})
 	} else {
 		switch response.IDs.GetIdField().(type) {
 		case *schemapb.IDs_IntId:
@@ -608,7 +608,7 @@ func (h *Handlers) search(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: Code(err), HTTPReturnMessage: err.Error()})
 	} else if response.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.Status.ErrorCode), HTTPReturnMessage: response.Status.Reason})
+		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: int32(response.GetStatus().GetErrorCode()), HTTPReturnMessage: response.GetStatus().GetReason()})
 	} else {
 		if response.Results.TopK == int64(0) {
 			c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: []interface{}{}})

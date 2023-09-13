@@ -355,7 +355,7 @@ func (ib *indexBuilder) getTaskState(buildID, nodeID UniqueID) indexTaskState {
 		}
 		if response.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 			log.Ctx(ib.ctx).Warn("IndexCoord get jobs info from IndexNode fail", zap.Int64("nodeID", nodeID),
-				zap.Int64("buildID", buildID), zap.String("fail reason", response.Status.Reason))
+				zap.Int64("buildID", buildID), zap.String("fail reason", response.GetStatus().GetReason()))
 			return indexTaskInProgress
 		}
 
@@ -402,7 +402,7 @@ func (ib *indexBuilder) dropIndexTask(buildID, nodeID UniqueID) bool {
 				zap.Int64("nodeID", nodeID), zap.Error(err))
 			return false
 		}
-		if status.ErrorCode != commonpb.ErrorCode_Success {
+		if status.GetErrorCode() != commonpb.ErrorCode_Success {
 			log.Ctx(ib.ctx).Warn("IndexCoord notify IndexNode drop the index task fail", zap.Int64("buildID", buildID),
 				zap.Int64("nodeID", nodeID), zap.String("fail reason", status.Reason))
 			return false

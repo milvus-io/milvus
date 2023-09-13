@@ -96,7 +96,7 @@ func TestGetSegmentInfoChannel(t *testing.T) {
 	t.Run("get segment info channel", func(t *testing.T) {
 		resp, err := svr.GetSegmentInfoChannel(context.TODO())
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.EqualValues(t, Params.CommonCfg.DataCoordSegmentInfo.GetValue(), resp.Value)
 	})
 }
@@ -131,7 +131,7 @@ func TestAssignSegmentID(t *testing.T) {
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(resp.SegIDAssignments))
 		assign := resp.SegIDAssignments[0]
-		assert.EqualValues(t, commonpb.ErrorCode_Success, assign.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, assign.GetStatus().GetErrorCode())
 		assert.EqualValues(t, collID, assign.CollectionID)
 		assert.EqualValues(t, partID, assign.PartitionID)
 		assert.EqualValues(t, channel0, assign.ChannelName)
@@ -163,7 +163,7 @@ func TestAssignSegmentID(t *testing.T) {
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(resp.SegIDAssignments))
 		assign := resp.SegIDAssignments[0]
-		assert.EqualValues(t, commonpb.ErrorCode_Success, assign.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, assign.GetStatus().GetErrorCode())
 		assert.EqualValues(t, collID, assign.CollectionID)
 		assert.EqualValues(t, partID, assign.PartitionID)
 		assert.EqualValues(t, channel0, assign.ChannelName)
@@ -268,7 +268,7 @@ func TestFlush(t *testing.T) {
 
 		resp, err := svr.Flush(context.TODO(), req)
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 
 		svr.meta.SetCurrentRows(segID, 1)
 		ids, err := svr.segmentManager.GetFlushableSegments(context.TODO(), "channel-1", expireTs)
@@ -290,7 +290,7 @@ func TestFlush(t *testing.T) {
 
 		resp, err := svr.Flush(context.TODO(), req)
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.EqualValues(t, 0, len(resp.SegmentIDs))
 		// should not flush anything since this is a normal flush
 		svr.meta.SetCurrentRows(segID, 1)
@@ -312,7 +312,7 @@ func TestFlush(t *testing.T) {
 
 		resp, err = svr.Flush(context.TODO(), req)
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.EqualValues(t, 1, len(resp.SegmentIDs))
 
 		ids, err = svr.segmentManager.GetFlushableSegments(context.TODO(), "channel-1", expireTs)
@@ -356,7 +356,7 @@ func TestFlush(t *testing.T) {
 
 //resp, err := svr.GetComponentStates(context.TODO())
 //assert.NoError(t, err)
-//assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+//assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 //assert.EqualValues(t, commonpb.StateCode_Healthy, resp.State.StateCode)
 //assert.EqualValues(t, 1, len(resp.SubcomponentStates))
 //assert.EqualValues(t, commonpb.StateCode_Healthy, resp.SubcomponentStates[0].StateCode)
@@ -367,7 +367,7 @@ func TestGetTimeTickChannel(t *testing.T) {
 	defer closeTestServer(t, svr)
 	resp, err := svr.GetTimeTickChannel(context.TODO())
 	assert.NoError(t, err)
-	assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	assert.EqualValues(t, Params.CommonCfg.DataCoordTimeTick.GetValue(), resp.Value)
 }
 
@@ -414,7 +414,7 @@ func TestGetSegmentStates(t *testing.T) {
 					SegmentIDs: []int64{test.id},
 				})
 				assert.NoError(t, err)
-				assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+				assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 				assert.EqualValues(t, 1, len(resp.States))
 				if test.expected {
 					assert.EqualValues(t, test.expectedState, resp.States[0].State)
@@ -470,7 +470,7 @@ func TestGetInsertBinlogPaths(t *testing.T) {
 		}
 		resp, err := svr.GetInsertBinlogPaths(svr.ctx, req)
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("with invalid segmentID", func(t *testing.T) {
@@ -528,7 +528,7 @@ func TestGetCollectionStatistics(t *testing.T) {
 		}
 		resp, err := svr.GetCollectionStatistics(svr.ctx, req)
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 
 	})
 	t.Run("with closed server", func(t *testing.T) {
@@ -554,7 +554,7 @@ func TestGetPartitionStatistics(t *testing.T) {
 		}
 		resp, err := svr.GetPartitionStatistics(context.Background(), req)
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 	t.Run("with closed server", func(t *testing.T) {
 		svr := newTestServer(t, nil)
@@ -606,7 +606,7 @@ func TestGetSegmentInfo(t *testing.T) {
 		// Check that # of rows is corrected from 100 to 60.
 		assert.EqualValues(t, 60, resp.GetInfos()[0].GetNumOfRows())
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 	t.Run("with wrong segmentID", func(t *testing.T) {
 		svr := newTestServer(t, nil)
@@ -624,7 +624,7 @@ func TestGetSegmentInfo(t *testing.T) {
 		}
 		resp, err := svr.GetSegmentInfo(svr.ctx, req)
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
 	})
 	t.Run("with closed server", func(t *testing.T) {
 		svr := newTestServer(t, nil)
@@ -690,7 +690,7 @@ func TestGetSegmentInfo(t *testing.T) {
 		// no channel checkpoint
 		resp, err := svr.GetSegmentInfo(svr.ctx, req)
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, 0, len(resp.GetChannelCheckpoint()))
 
 		// with nil insert channel of segment
@@ -698,7 +698,7 @@ func TestGetSegmentInfo(t *testing.T) {
 		assert.NoError(t, err)
 		resp, err = svr.GetSegmentInfo(svr.ctx, req)
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, 0, len(resp.GetChannelCheckpoint()))
 
 		// normal test
@@ -709,7 +709,7 @@ func TestGetSegmentInfo(t *testing.T) {
 		assert.NoError(t, err)
 		resp, err = svr.GetSegmentInfo(svr.ctx, req)
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, 1, len(resp.GetChannelCheckpoint()))
 		assert.Equal(t, mockPChannel, resp.ChannelCheckpoint[mockVChannel].ChannelName)
 		assert.Equal(t, Timestamp(1000), resp.ChannelCheckpoint[mockVChannel].Timestamp)
@@ -1138,14 +1138,14 @@ func TestServer_ShowConfigurations(t *testing.T) {
 	svr.stateCode.Store(commonpb.StateCode_Initializing)
 	resp, err := svr.ShowConfigurations(svr.ctx, req)
 	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
 
 	// normal case
 	svr.stateCode.Store(stateSave)
 
 	resp, err = svr.ShowConfigurations(svr.ctx, req)
 	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	assert.Equal(t, 1, len(resp.Configuations))
 	assert.Equal(t, "datacoord.port", resp.Configuations[0].Key)
 }
@@ -1161,7 +1161,7 @@ func TestServer_GetMetrics(t *testing.T) {
 	svr.stateCode.Store(commonpb.StateCode_Initializing)
 	resp, err := svr.GetMetrics(svr.ctx, &milvuspb.GetMetricsRequest{})
 	assert.NoError(t, err)
-	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	svr.stateCode.Store(stateSave)
 
 	// failed to parse metric type
@@ -1170,7 +1170,7 @@ func TestServer_GetMetrics(t *testing.T) {
 		Request: invalidRequest,
 	})
 	assert.NoError(t, err)
-	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 
 	// unsupported metric type
 	unsupportedMetricType := "unsupported"
@@ -1178,14 +1178,14 @@ func TestServer_GetMetrics(t *testing.T) {
 	assert.NoError(t, err)
 	resp, err = svr.GetMetrics(svr.ctx, req)
 	assert.NoError(t, err)
-	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 
 	// normal case
 	req, err = metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
 	assert.NoError(t, err)
 	resp, err = svr.GetMetrics(svr.ctx, req)
 	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	log.Info("TestServer_GetMetrics",
 		zap.String("name", resp.ComponentName),
 		zap.String("response", resp.Response))
@@ -2524,7 +2524,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		}
 		resp, err := svr.GetRecoveryInfo(context.TODO(), req)
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.EqualValues(t, 0, len(resp.GetBinlogs()))
 		assert.EqualValues(t, 1, len(resp.GetChannels()))
 		assert.Nil(t, resp.GetChannels()[0].SeekPosition)
@@ -2648,7 +2648,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		}
 		resp, err := svr.GetRecoveryInfo(context.TODO(), req)
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.EqualValues(t, 1, len(resp.GetChannels()))
 		assert.EqualValues(t, 0, len(resp.GetChannels()[0].GetUnflushedSegmentIds()))
 		assert.ElementsMatch(t, []int64{0, 1}, resp.GetChannels()[0].GetFlushedSegmentIds())
@@ -2726,7 +2726,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		}
 		resp, err := svr.GetRecoveryInfo(context.TODO(), req)
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.EqualValues(t, 0, len(resp.GetBinlogs()))
 		assert.EqualValues(t, 1, len(resp.GetChannels()))
 		assert.NotNil(t, resp.GetChannels()[0].SeekPosition)
@@ -2825,7 +2825,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		}
 		resp, err := svr.GetRecoveryInfo(context.TODO(), req)
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.EqualValues(t, 1, len(resp.GetBinlogs()))
 		assert.EqualValues(t, 0, resp.GetBinlogs()[0].GetSegmentID())
 		assert.EqualValues(t, 1, len(resp.GetBinlogs()[0].GetFieldBinlogs()))
@@ -2867,7 +2867,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		}
 		resp, err := svr.GetRecoveryInfo(context.TODO(), req)
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.EqualValues(t, 0, len(resp.GetBinlogs()))
 		assert.EqualValues(t, 1, len(resp.GetChannels()))
 		assert.NotNil(t, resp.GetChannels()[0].SeekPosition)
@@ -2910,7 +2910,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		}
 		resp, err := svr.GetRecoveryInfo(context.TODO(), req)
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.EqualValues(t, 0, len(resp.GetBinlogs()))
 		assert.EqualValues(t, 1, len(resp.GetChannels()))
 		assert.NotNil(t, resp.GetChannels()[0].SeekPosition)
@@ -2991,7 +2991,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		}
 		resp, err := svr.GetRecoveryInfo(context.TODO(), req)
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.NotNil(t, resp.GetChannels()[0].SeekPosition)
 		assert.NotEqual(t, 0, resp.GetChannels()[0].GetSeekPosition().GetTimestamp())
 		assert.Len(t, resp.GetChannels()[0].GetDroppedSegmentIds(), 0)
@@ -3094,7 +3094,7 @@ func TestManualCompaction(t *testing.T) {
 			Timetravel:   1,
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("test manual compaction failure", func(t *testing.T) {
@@ -3113,7 +3113,7 @@ func TestManualCompaction(t *testing.T) {
 			Timetravel:   1,
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("test manual compaction with closed server", func(t *testing.T) {
@@ -3132,8 +3132,8 @@ func TestManualCompaction(t *testing.T) {
 			Timetravel:   1,
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
-		assert.Equal(t, msgDataCoordIsUnhealthy(paramtable.GetNodeID()), resp.Status.Reason)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, msgDataCoordIsUnhealthy(paramtable.GetNodeID()), resp.GetStatus().GetReason())
 	})
 }
 
@@ -3159,7 +3159,7 @@ func TestGetCompactionStateWithPlans(t *testing.T) {
 			CompactionID: 1,
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, commonpb.CompactionState_Executing, resp.State)
 	})
 
@@ -3183,8 +3183,8 @@ func TestGetCompactionStateWithPlans(t *testing.T) {
 			CompactionID: 1,
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
-		assert.Equal(t, msgDataCoordIsUnhealthy(paramtable.GetNodeID()), resp.Status.Reason)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, msgDataCoordIsUnhealthy(paramtable.GetNodeID()), resp.GetStatus().GetReason())
 	})
 }
 
@@ -3822,7 +3822,7 @@ func TestDataCoordServer_SetSegmentState(t *testing.T) {
 			SegmentIDs: []int64{1000},
 		})
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.EqualValues(t, 1, len(resp.States))
 		assert.EqualValues(t, commonpb.SegmentState_Flushed, resp.States[0].State)
 	})
@@ -3848,7 +3848,7 @@ func TestDataCoordServer_SetSegmentState(t *testing.T) {
 			SegmentIDs: []int64{1000},
 		})
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.EqualValues(t, 1, len(resp.States))
 		assert.EqualValues(t, commonpb.SegmentState_NotExist, resp.States[0].State)
 	})
@@ -4581,7 +4581,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 		})
 
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.EqualValues(t, 1, len(resp.SegIDAssignments))
 		assign := resp.SegIDAssignments[0]
 
@@ -4596,7 +4596,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 			CollectionID: 0,
 		})
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp2.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp2.GetStatus().GetErrorCode())
 
 		msgPack := msgstream.MsgPack{}
 		msg := genMsg(commonpb.MsgType_DataNodeTt, "ch-1", assign.ExpireTime)
@@ -4652,7 +4652,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 			},
 		})
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.EqualValues(t, 2, len(resp.SegIDAssignments))
 		var assign *datapb.SegmentIDAssignment
 		for _, segment := range resp.SegIDAssignments {
@@ -4673,7 +4673,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 			CollectionID: 0,
 		})
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp2.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp2.GetStatus().GetErrorCode())
 
 		msgPack := msgstream.MsgPack{}
 		msg := genMsg(commonpb.MsgType_DataNodeTt, "ch-1", assign.ExpireTime)
@@ -4728,7 +4728,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 			},
 		})
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.EqualValues(t, 1, len(resp.SegIDAssignments))
 
 		assignedSegmentID := resp.SegIDAssignments[0].SegID

@@ -85,7 +85,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	log.Debug("IndexNode", zap.String("network address", Params.GetAddress()), zap.Int("network port: ", grpcPort))
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
-		log.Warn("IndexNode", zap.String("GrpcServer:failed to listen", err.Error()))
+		log.Warn("IndexNode", zap.Error(err))
 		s.grpcErrChan <- err
 		return
 	}

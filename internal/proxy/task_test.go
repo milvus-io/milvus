@@ -1030,7 +1030,7 @@ func TestDescribeCollectionTask(t *testing.T) {
 	assert.NoError(t, err)
 	err = task.Execute(ctx)
 	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, task.result.Status.ErrorCode)
+	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, task.result.GetStatus().GetErrorCode())
 }
 
 func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
@@ -1092,7 +1092,7 @@ func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
 
 	err = task.Execute(ctx)
 	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_Success, task.result.Status.ErrorCode)
+	assert.Equal(t, commonpb.ErrorCode_Success, task.result.GetStatus().GetErrorCode())
 	assert.Equal(t, shardsNum, task.result.ShardsNum)
 	assert.Equal(t, collectionName, task.result.GetCollectionName())
 }
@@ -1156,7 +1156,7 @@ func TestDescribeCollectionTask_EnableDynamicSchema(t *testing.T) {
 
 	err = task.Execute(ctx)
 	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_Success, task.result.Status.ErrorCode)
+	assert.Equal(t, commonpb.ErrorCode_Success, task.result.GetStatus().GetErrorCode())
 	assert.Equal(t, shardsNum, task.result.ShardsNum)
 	assert.Equal(t, collectionName, task.result.GetCollectionName())
 	assert.Equal(t, 2, len(task.result.Schema.Fields))
@@ -1222,7 +1222,7 @@ func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
 
 	err = task.Execute(ctx)
 	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_Success, task.result.Status.ErrorCode)
+	assert.Equal(t, commonpb.ErrorCode_Success, task.result.GetStatus().GetErrorCode())
 	assert.Equal(t, common.DefaultShardsNum, task.result.ShardsNum)
 	assert.Equal(t, collectionName, task.result.GetCollectionName())
 	rc.Stop()
@@ -2970,7 +2970,7 @@ func TestListResourceGroupsTask(t *testing.T) {
 
 	err := task.Execute(ctx)
 	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_Success, task.result.Status.ErrorCode)
+	assert.Equal(t, commonpb.ErrorCode_Success, task.result.GetStatus().GetErrorCode())
 	groups := task.result.GetResourceGroups()
 	assert.Contains(t, groups, meta.DefaultResourceGroupName)
 	assert.Contains(t, groups, "rg")
@@ -3023,7 +3023,7 @@ func TestDescribeResourceGroupTask(t *testing.T) {
 
 	err := task.Execute(ctx)
 	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_Success, task.result.Status.ErrorCode)
+	assert.Equal(t, commonpb.ErrorCode_Success, task.result.GetStatus().GetErrorCode())
 	groupInfo := task.result.GetResourceGroup()
 	outgoingNodeNum := groupInfo.GetNumOutgoingNode()
 	incomingNodeNum := groupInfo.GetNumIncomingNode()
@@ -3071,7 +3071,7 @@ func TestDescribeResourceGroupTaskFailed(t *testing.T) {
 
 	err := task.Execute(ctx)
 	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, task.result.Status.ErrorCode)
+	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, task.result.GetStatus().GetErrorCode())
 
 	qc.ExpectedCalls = nil
 	qc.EXPECT().Stop().Return(nil)

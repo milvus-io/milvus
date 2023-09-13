@@ -172,7 +172,7 @@ func Test_NewServer(t *testing.T) {
 			)
 			resp, err := server.GetStatisticsChannel(ctx, req)
 			assert.NoError(t, err)
-			assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		})
 
 		t.Run("GetTimeTickChannel", func(t *testing.T) {
@@ -184,7 +184,7 @@ func Test_NewServer(t *testing.T) {
 			)
 			resp, err := server.GetTimeTickChannel(ctx, req)
 			assert.NoError(t, err)
-			assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		})
 
 		t.Run("ShowCollections", func(t *testing.T) {
@@ -196,7 +196,7 @@ func Test_NewServer(t *testing.T) {
 			resp, err := server.ShowCollections(ctx, nil)
 			assert.NoError(t, err)
 			assert.NotNil(t, resp)
-			assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		})
 
 		t.Run("LoadCollection", func(t *testing.T) {
@@ -252,7 +252,7 @@ func Test_NewServer(t *testing.T) {
 			mqc.EXPECT().GetSegmentInfo(mock.Anything, req).Return(&querypb.GetSegmentInfoResponse{Status: successStatus}, nil)
 			resp, err := server.GetSegmentInfo(ctx, req)
 			assert.NoError(t, err)
-			assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		})
 
 		t.Run("LoadBalance", func(t *testing.T) {
@@ -270,7 +270,7 @@ func Test_NewServer(t *testing.T) {
 			mqc.EXPECT().GetMetrics(mock.Anything, req).Return(&milvuspb.GetMetricsResponse{Status: successStatus}, nil)
 			resp, err := server.GetMetrics(ctx, req)
 			assert.NoError(t, err)
-			assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		})
 
 		t.Run("CheckHealth", func(t *testing.T) {
@@ -314,14 +314,14 @@ func Test_NewServer(t *testing.T) {
 			mqc.EXPECT().ListResourceGroups(mock.Anything, req).Return(&milvuspb.ListResourceGroupsResponse{Status: successStatus}, nil)
 			resp, err := server.ListResourceGroups(ctx, req)
 			assert.NoError(t, err)
-			assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		})
 
 		t.Run("DescribeResourceGroup", func(t *testing.T) {
 			mqc.EXPECT().DescribeResourceGroup(mock.Anything, mock.Anything).Return(&querypb.DescribeResourceGroupResponse{Status: successStatus}, nil)
 			resp, err := server.DescribeResourceGroup(ctx, nil)
 			assert.NoError(t, err)
-			assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		})
 
 		err = server.Stop()

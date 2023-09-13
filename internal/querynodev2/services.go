@@ -137,17 +137,15 @@ func (node *QueryNode) GetStatistics(ctx context.Context, req *querypb.GetStatis
 		}
 		runningGp.Go(func() error {
 			ret, err := node.getChannelStatistics(runningCtx, req, ch)
+			if err == nil {
+				err = merr.Error(ret.GetStatus())
+			}
+
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
 				failRet.Status = merr.Status(err)
-				failRet.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 				return err
-			}
-			if ret.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-				failRet.Status.Reason = ret.Status.Reason
-				failRet.Status.ErrorCode = ret.Status.ErrorCode
-				return fmt.Errorf("%s", ret.Status.Reason)
 			}
 			toReduceResults = append(toReduceResults, ret)
 			return nil
@@ -1041,11 +1039,11 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		idx := i
 		runningGp.Go(func() error {
 			ret, err := node.queryChannel(runningCtx, req, ch)
+			if err == nil {
+				err = merr.Error(ret.GetStatus())
+			}
 			if err != nil {
 				return err
-			}
-			if ret.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-				return fmt.Errorf("%s", ret.Status.Reason)
 			}
 			toMergeResults[idx] = ret
 			return nil
