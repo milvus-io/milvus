@@ -28,6 +28,38 @@ func (_m *MockFactory) EXPECT() *MockFactory_Expecter {
 	return &MockFactory_Expecter{mock: &_m.Mock}
 }
 
+// CloseKV provides a mock function with given fields:
+func (_m *MockFactory) CloseKV() {
+	_m.Called()
+}
+
+// MockFactory_CloseKV_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CloseKV'
+type MockFactory_CloseKV_Call struct {
+	*mock.Call
+}
+
+// CloseKV is a helper method to define mock.On call
+func (_e *MockFactory_Expecter) CloseKV() *MockFactory_CloseKV_Call {
+	return &MockFactory_CloseKV_Call{Call: _e.mock.On("CloseKV")}
+}
+
+func (_c *MockFactory_CloseKV_Call) Run(run func()) *MockFactory_CloseKV_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockFactory_CloseKV_Call) Return() *MockFactory_CloseKV_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockFactory_CloseKV_Call) RunAndReturn(run func()) *MockFactory_CloseKV_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Init provides a mock function with given fields: p
 func (_m *MockFactory) Init(p *paramtable.ComponentParam) {
 	_m.Called(p)
@@ -61,13 +93,13 @@ func (_c *MockFactory_Init_Call) RunAndReturn(run func(*paramtable.ComponentPara
 	return _c
 }
 
-// NewMetaKv provides a mock function with given fields: rootPath
-func (_m *MockFactory) NewMetaKv(rootPath string) kv.MetaKv {
-	ret := _m.Called(rootPath)
+// NewMetaKv provides a mock function with given fields:
+func (_m *MockFactory) NewMetaKv() kv.MetaKv {
+	ret := _m.Called()
 
 	var r0 kv.MetaKv
-	if rf, ok := ret.Get(0).(func(string) kv.MetaKv); ok {
-		r0 = rf(rootPath)
+	if rf, ok := ret.Get(0).(func() kv.MetaKv); ok {
+		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(kv.MetaKv)
@@ -83,14 +115,13 @@ type MockFactory_NewMetaKv_Call struct {
 }
 
 // NewMetaKv is a helper method to define mock.On call
-//   - rootPath string
-func (_e *MockFactory_Expecter) NewMetaKv(rootPath interface{}) *MockFactory_NewMetaKv_Call {
-	return &MockFactory_NewMetaKv_Call{Call: _e.mock.On("NewMetaKv", rootPath)}
+func (_e *MockFactory_Expecter) NewMetaKv() *MockFactory_NewMetaKv_Call {
+	return &MockFactory_NewMetaKv_Call{Call: _e.mock.On("NewMetaKv")}
 }
 
-func (_c *MockFactory_NewMetaKv_Call) Run(run func(rootPath string)) *MockFactory_NewMetaKv_Call {
+func (_c *MockFactory_NewMetaKv_Call) Run(run func()) *MockFactory_NewMetaKv_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		run()
 	})
 	return _c
 }
@@ -100,7 +131,7 @@ func (_c *MockFactory_NewMetaKv_Call) Return(_a0 kv.MetaKv) *MockFactory_NewMeta
 	return _c
 }
 
-func (_c *MockFactory_NewMetaKv_Call) RunAndReturn(run func(string) kv.MetaKv) *MockFactory_NewMetaKv_Call {
+func (_c *MockFactory_NewMetaKv_Call) RunAndReturn(run func() kv.MetaKv) *MockFactory_NewMetaKv_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -311,13 +342,13 @@ func (_c *MockFactory_NewTtMsgStream_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
-// NewTxnKV provides a mock function with given fields: rootPath
-func (_m *MockFactory) NewTxnKV(rootPath string) kv.TxnKV {
-	ret := _m.Called(rootPath)
+// NewTxnKV provides a mock function with given fields:
+func (_m *MockFactory) NewTxnKV() kv.TxnKV {
+	ret := _m.Called()
 
 	var r0 kv.TxnKV
-	if rf, ok := ret.Get(0).(func(string) kv.TxnKV); ok {
-		r0 = rf(rootPath)
+	if rf, ok := ret.Get(0).(func() kv.TxnKV); ok {
+		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(kv.TxnKV)
@@ -333,14 +364,13 @@ type MockFactory_NewTxnKV_Call struct {
 }
 
 // NewTxnKV is a helper method to define mock.On call
-//   - rootPath string
-func (_e *MockFactory_Expecter) NewTxnKV(rootPath interface{}) *MockFactory_NewTxnKV_Call {
-	return &MockFactory_NewTxnKV_Call{Call: _e.mock.On("NewTxnKV", rootPath)}
+func (_e *MockFactory_Expecter) NewTxnKV() *MockFactory_NewTxnKV_Call {
+	return &MockFactory_NewTxnKV_Call{Call: _e.mock.On("NewTxnKV")}
 }
 
-func (_c *MockFactory_NewTxnKV_Call) Run(run func(rootPath string)) *MockFactory_NewTxnKV_Call {
+func (_c *MockFactory_NewTxnKV_Call) Run(run func()) *MockFactory_NewTxnKV_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		run()
 	})
 	return _c
 }
@@ -350,7 +380,50 @@ func (_c *MockFactory_NewTxnKV_Call) Return(_a0 kv.TxnKV) *MockFactory_NewTxnKV_
 	return _c
 }
 
-func (_c *MockFactory_NewTxnKV_Call) RunAndReturn(run func(string) kv.TxnKV) *MockFactory_NewTxnKV_Call {
+func (_c *MockFactory_NewTxnKV_Call) RunAndReturn(run func() kv.TxnKV) *MockFactory_NewTxnKV_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// NewWatchKV provides a mock function with given fields:
+func (_m *MockFactory) NewWatchKV() kv.WatchKV {
+	ret := _m.Called()
+
+	var r0 kv.WatchKV
+	if rf, ok := ret.Get(0).(func() kv.WatchKV); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(kv.WatchKV)
+		}
+	}
+
+	return r0
+}
+
+// MockFactory_NewWatchKV_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'NewWatchKV'
+type MockFactory_NewWatchKV_Call struct {
+	*mock.Call
+}
+
+// NewWatchKV is a helper method to define mock.On call
+func (_e *MockFactory_Expecter) NewWatchKV() *MockFactory_NewWatchKV_Call {
+	return &MockFactory_NewWatchKV_Call{Call: _e.mock.On("NewWatchKV")}
+}
+
+func (_c *MockFactory_NewWatchKV_Call) Run(run func()) *MockFactory_NewWatchKV_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockFactory_NewWatchKV_Call) Return(_a0 kv.WatchKV) *MockFactory_NewWatchKV_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockFactory_NewWatchKV_Call) RunAndReturn(run func() kv.WatchKV) *MockFactory_NewWatchKV_Call {
 	_c.Call.Return(run)
 	return _c
 }

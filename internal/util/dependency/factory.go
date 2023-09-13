@@ -5,9 +5,9 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/internal/kv"
-	kvfactory "github.com/milvus-io/milvus/internal/kv/factory"
 	smsgstream "github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/storage"
+	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util"
@@ -62,8 +62,8 @@ func MockDefaultFactory(standAlone bool, params *paramtable.ComponentParam) *Def
 		standAlone:          standAlone,
 		msgStreamFactory:    smsgstream.NewRocksmqFactory("/tmp/milvus/rocksmq/", &paramtable.Get().ServiceParam),
 		chunkManagerFactory: storage.NewChunkManagerFactoryWithParam(params),
-		metaFactory:         kvfactory.NewETCDFactory(&paramtable.Get().ServiceParam, paramtable.Get().ServiceParam.TiKVCfg.MetaRootPath.GetValue()),
-		watchFactory:        kvfactory.NewETCDFactory(&paramtable.Get().ServiceParam, paramtable.Get().ServiceParam.TiKVCfg.MetaRootPath.GetValue()),
+		metaFactory:         kvfactory.NewETCDFactory(&paramtable.Get().ServiceParam, paramtable.Get().ServiceParam.EtcdCfg.MetaRootPath.GetValue()),
+		watchFactory:        kvfactory.NewETCDFactory(&paramtable.Get().ServiceParam, paramtable.Get().ServiceParam.EtcdCfg.MetaRootPath.GetValue()),
 	}
 }
 
@@ -169,15 +169,15 @@ func (f *DefaultFactory) NewPersistentStorageChunkManager(ctx context.Context) (
 func (f *DefaultFactory) initMeta(params *paramtable.ComponentParam) error {
 
 	// At the moment watch needs to be etcd only
-	f.watchFactory = kvfactory.NewETCDFactory(&paramtable.Get().ServiceParam)
+	f.watchFactory = kvfactory.NewETCDFactory(&paramtable.Get().ServiceParam, paramtable.Get().ServiceParam.EtcdCfg.MetaRootPath.GetValue())
 
 	metaType := params.MetaStoreCfg.MetaStoreType.GetValue()
 	log.Info("try to init metastore", zap.String("metaType", metaType))
 	switch metaType {
 	case metaTypeEtcd:
-		f.metaFactory = kvfactory.NewETCDFactory(&params.ServiceParam)
+		f.metaFactory = kvfactory.NewETCDFactory(&params.ServiceParam, paramtable.Get().ServiceParam.EtcdCfg.MetaRootPath.GetValue())
 	case metaTypeTikv:
-		f.metaFactory = kvfactory.NewTiKVFactory(&params.ServiceParam)
+		f.metaFactory = kvfactory.NewTiKVFactory(&params.ServiceParam, paramtable.Get().ServiceParam.TiKVCfg.MetaRootPath.GetValue())
 	default:
 		return errors.Newf("meta type %s is invalid", metaType)
 	}
