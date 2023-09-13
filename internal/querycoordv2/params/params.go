@@ -24,6 +24,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -39,6 +40,10 @@ func GenerateEtcdConfig() *paramtable.EtcdConfig {
 	suffix := "-test-querycoord" + strconv.FormatInt(rand.Int63(), 10)
 
 	Params.Save("etcd.rootPath", config.MetaRootPath.GetValue()+suffix)
+	// Due to switching etcd path mid test cases, we need to update the cached client
+	// that is used by default
+	kvfactory.CloseEtcdClient()
+
 	return &Params.EtcdCfg
 }
 

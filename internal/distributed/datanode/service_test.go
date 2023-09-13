@@ -216,11 +216,11 @@ func Test_NewServer(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, server)
 
-	server.newRootCoordClient = func(string, *clientv3.Client) (types.RootCoordClient, error) {
+	server.newRootCoordClient = func() (types.RootCoordClient, error) {
 		return &mockRootCoord{}, nil
 	}
 
-	server.newDataCoordClient = func(string, *clientv3.Client) (types.DataCoordClient, error) {
+	server.newDataCoordClient = func() (types.DataCoordClient, error) {
 		return &mockDataCoord{}, nil
 	}
 
@@ -355,11 +355,11 @@ func Test_Run(t *testing.T) {
 		regErr: errors.New("error"),
 	}
 
-	server.newRootCoordClient = func(string, *clientv3.Client) (types.RootCoordClient, error) {
+	server.newRootCoordClient = func() (types.RootCoordClient, error) {
 		return &mockRootCoord{}, nil
 	}
 
-	server.newDataCoordClient = func(string, *clientv3.Client) (types.DataCoordClient, error) {
+	server.newDataCoordClient = func() (types.DataCoordClient, error) {
 		return &mockDataCoord{}, nil
 	}
 

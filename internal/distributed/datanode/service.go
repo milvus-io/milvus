@@ -70,8 +70,8 @@ type Server struct {
 	rootCoord types.RootCoord
 	dataCoord types.DataCoord
 
-	newRootCoordClient func(string, *clientv3.Client) (types.RootCoordClient, error)
-	newDataCoordClient func(string, *clientv3.Client) (types.DataCoordClient, error)
+	newRootCoordClient func() (types.RootCoordClient, error)
+	newDataCoordClient func() (types.DataCoordClient, error)
 }
 
 // NewServer new DataNode grpc server
@@ -82,11 +82,11 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 		cancel:      cancel,
 		factory:     factory,
 		grpcErrChan: make(chan error),
-		newRootCoordClient: func(etcdMetaRoot string, client *clientv3.Client) (types.RootCoordClient, error) {
-			return rcc.NewClient(ctx1, etcdMetaRoot, client)
+		newRootCoordClient: func() (types.RootCoordClient, error) {
+			return rcc.NewClient(ctx1)
 		},
-		newDataCoordClient: func(etcdMetaRoot string, client *clientv3.Client) (types.DataCoordClient, error) {
-			return dcc.NewClient(ctx1, etcdMetaRoot, client)
+		newDataCoordClient: func() (types.DataCoordClient, error) {
+			return dcc.NewClient(ctx1)
 		},
 	}
 
@@ -253,7 +253,7 @@ func (s *Server) init() error {
 	// --- RootCoord Client ---
 	if s.newRootCoordClient != nil {
 		log.Info("initializing RootCoord client for DataNode")
-		rootCoordClient, err := s.newRootCoordClient(dn.Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli)
+		rootCoordClient, err := s.newRootCoordClient()
 		if err != nil {
 			log.Error("failed to create new RootCoord client", zap.Error(err))
 			panic(err)
@@ -272,7 +272,7 @@ func (s *Server) init() error {
 	// --- DataCoord Client ---
 	if s.newDataCoordClient != nil {
 		log.Debug("starting DataCoord client for DataNode")
-		dataCoordClient, err := s.newDataCoordClient(dn.Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli)
+		dataCoordClient, err := s.newDataCoordClient()
 		if err != nil {
 			log.Error("failed to create new DataCoord client", zap.Error(err))
 			panic(err)

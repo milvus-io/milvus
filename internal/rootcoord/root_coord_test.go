@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -1702,6 +1703,8 @@ func TestRootcoord_EnableActiveStandby(t *testing.T) {
 	randVal := rand.Int()
 	paramtable.Init()
 	Params.Save("etcd.rootPath", fmt.Sprintf("/%d", randVal))
+	// Need to reset global etcd to follow new path
+	kvfactory.CloseEtcdClient()
 	paramtable.Get().Save(Params.RootCoordCfg.EnableActiveStandby.Key, "true")
 	paramtable.Get().Save(Params.CommonCfg.RootCoordTimeTick.Key, fmt.Sprintf("rootcoord-time-tick-%d", randVal))
 	paramtable.Get().Save(Params.CommonCfg.RootCoordStatistics.Key, fmt.Sprintf("rootcoord-statistics-%d", randVal))
@@ -1753,6 +1756,9 @@ func TestRootcoord_DisableActiveStandby(t *testing.T) {
 	randVal := rand.Int()
 	paramtable.Init()
 	Params.Save("etcd.rootPath", fmt.Sprintf("/%d", randVal))
+	// Need to reset global etcd to follow new path
+	kvfactory.CloseEtcdClient()
+
 	paramtable.Get().Save(Params.RootCoordCfg.EnableActiveStandby.Key, "false")
 	paramtable.Get().Save(Params.CommonCfg.RootCoordTimeTick.Key, fmt.Sprintf("rootcoord-time-tick-%d", randVal))
 	paramtable.Get().Save(Params.CommonCfg.RootCoordStatistics.Key, fmt.Sprintf("rootcoord-statistics-%d", randVal))

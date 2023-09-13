@@ -291,6 +291,6 @@ func initSession(ctx context.Context) *sessionutil.Session {
 	if err != nil {
 		panic(err)
 	}
-	session := sessionutil.NewSession(ctx, metaRootPath, etcdCli)
+	session := sessionutil.NewSessionWithEtcd(ctx, metaRootPath, etcdCli)
 	return session
 }

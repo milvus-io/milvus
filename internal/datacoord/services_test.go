@@ -7,7 +7,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -102,7 +101,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
 			return newMockRootCoordClient(), nil
 		}
 
@@ -144,7 +143,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
 			return newMockRootCoordClient(), nil
 		}
 
@@ -252,7 +251,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
 			return newMockRootCoordClient(), nil
 		}
 
@@ -333,7 +332,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			Schema: newTestSchema(),
 		})
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
 			return newMockRootCoordClient(), nil
 		}
 
@@ -440,7 +439,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
 			return newMockRootCoordClient(), nil
 		}
 
@@ -485,7 +484,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
 			return newMockRootCoordClient(), nil
 		}
 
@@ -529,7 +528,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
 			return newMockRootCoordClient(), nil
 		}
 
@@ -720,7 +719,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
 			return newMockRootCoordClient(), nil
 		}
 

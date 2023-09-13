@@ -82,8 +82,7 @@ func (r *Runner) initEtcdCli() {
 
 func (r *Runner) init() {
 	r.initEtcdCli()
-
-	r.session = sessionutil.NewSession(
+	r.session = sessionutil.NewSessionWithEtcd(
 		r.ctx,
 		r.cfg.EtcdCfg.MetaRootPath.GetValue(),
 		r.etcdCli,

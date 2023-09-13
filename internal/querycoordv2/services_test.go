@@ -174,7 +174,7 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.server = &Server{
 		kv:                  suite.kv,
 		store:               suite.store,
-		session:             sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath.GetValue(), cli),
+		session:             sessionutil.NewSessionWithEtcd(context.Background(), Params.EtcdCfg.MetaRootPath.GetValue(), cli),
 		metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
 		dist:                suite.dist,
 		meta:                suite.meta,
