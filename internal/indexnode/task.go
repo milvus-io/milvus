@@ -228,7 +228,7 @@ func (it *indexBuildTask) LoadData(ctx context.Context) error {
 	}
 
 	loadFieldDataLatency := it.tr.CtxRecord(ctx, "load field data done")
-	metrics.IndexNodeLoadFieldLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(loadFieldDataLatency.Milliseconds()))
+	metrics.IndexNodeLoadFieldLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(loadFieldDataLatency.Seconds())
 
 	err = it.decodeBlobs(ctx, blobs)
 	if err != nil {
@@ -349,7 +349,7 @@ func (it *indexBuildTask) BuildIndex(ctx context.Context) error {
 	}
 
 	buildIndexLatency := it.tr.RecordSpan()
-	metrics.IndexNodeKnowhereBuildIndexLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(buildIndexLatency.Milliseconds()))
+	metrics.IndexNodeKnowhereBuildIndexLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(buildIndexLatency.Seconds())
 
 	log.Ctx(ctx).Info("Successfully build index", zap.Int64("buildID", it.BuildID), zap.Int64("Collection", it.collectionID), zap.Int64("SegmentID", it.segmentID))
 	return nil
@@ -369,7 +369,7 @@ func (it *indexBuildTask) SaveIndexFiles(ctx context.Context) error {
 		return err
 	}
 	encodeIndexFileDur := it.tr.Record("index serialize and upload done")
-	metrics.IndexNodeEncodeIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(encodeIndexFileDur.Milliseconds()))
+	metrics.IndexNodeEncodeIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(encodeIndexFileDur.Seconds())
 
 	// early release index for gc, and we can ensure that Delete is idempotent.
 	gcIndex()
@@ -388,7 +388,7 @@ func (it *indexBuildTask) SaveIndexFiles(ctx context.Context) error {
 	it.node.storeIndexFilesAndStatistic(it.ClusterID, it.BuildID, saveFileKeys, it.serializedSize, &it.statistic)
 	log.Ctx(ctx).Debug("save index files done", zap.Strings("IndexFiles", saveFileKeys))
 	saveIndexFileDur := it.tr.RecordSpan()
-	metrics.IndexNodeSaveIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(saveIndexFileDur.Milliseconds()))
+	metrics.IndexNodeSaveIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(saveIndexFileDur.Seconds())
 	it.tr.Elapse("index building all done")
 	log.Ctx(ctx).Info("Successfully save index files", zap.Int64("buildID", it.BuildID), zap.Int64("Collection", it.collectionID),
 		zap.Int64("partition", it.partitionID), zap.Int64("SegmentId", it.segmentID))
@@ -435,8 +435,7 @@ func (it *indexBuildTask) decodeBlobs(ctx context.Context, blobs []*storage.Blob
 	if err2 != nil {
 		return err2
 	}
-	decodeDuration := it.tr.RecordSpan().Milliseconds()
-	metrics.IndexNodeDecodeFieldLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(decodeDuration))
+	metrics.IndexNodeDecodeFieldLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(it.tr.RecordSpan().Seconds())
 
 	if len(insertData.Data) != 1 {
 		return errors.New("we expect only one field in deserialized insert data")
