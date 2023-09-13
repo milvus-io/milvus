@@ -23,6 +23,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 var (
@@ -143,6 +144,14 @@ func Error(status *commonpb.Status) error {
 func CheckHealthy(state commonpb.StateCode) error {
 	if state != commonpb.StateCode_Healthy {
 		return WrapErrServiceNotReady(state.String())
+	}
+
+	return nil
+}
+
+func CheckTargetID(msg *commonpb.MsgBase) error {
+	if msg.GetTargetID() != paramtable.GetNodeID() {
+		return WrapErrNodeNotMatch(paramtable.GetNodeID(), msg.GetTargetID())
 	}
 
 	return nil

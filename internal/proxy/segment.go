@@ -324,7 +324,7 @@ func (sa *segIDAssigner) syncSegments() (bool, error) {
 		return false, fmt.Errorf("syncSegmentID Failed:%w", err)
 	}
 
-	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		return false, fmt.Errorf("syncSegmentID Failed:%s", resp.Status.Reason)
 	}
 
