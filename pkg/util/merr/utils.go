@@ -214,7 +214,7 @@ func WrapErrServiceDiskLimitExceeded(predict, limit float32, msg ...string) erro
 }
 
 func WrapErrDatabaseNotFound(database any, msg ...string) error {
-	err := wrapWithField(ErrDatabaseNotfound, "database", database)
+	err := wrapWithField(ErrDatabaseNotFound, "database", database)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "; "))
 	}
@@ -230,7 +230,7 @@ func WrapErrDatabaseResourceLimitExceeded(msg ...string) error {
 }
 
 func WrapErrInvalidedDatabaseName(database any, msg ...string) error {
-	err := wrapWithField(ErrInvalidedDatabaseName, "database", database)
+	err := wrapWithField(ErrDatabaseInvalidName, "database", database)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "; "))
 	}
@@ -493,17 +493,25 @@ func WrapErrMetricNotFound(name string, msg ...string) error {
 	return err
 }
 
-// Topic related
-func WrapErrTopicNotFound(name string, msg ...string) error {
-	err := errors.Wrapf(ErrTopicNotFound, "topic=%s", name)
+// Message queue related
+func WrapErrMqTopicNotFound(name string, msg ...string) error {
+	err := errors.Wrapf(ErrMqTopicNotFound, "topic=%s", name)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "; "))
 	}
 	return err
 }
 
-func WrapErrTopicNotEmpty(name string, msg ...string) error {
-	err := errors.Wrapf(ErrTopicNotEmpty, "topic=%s", name)
+func WrapErrMqTopicNotEmpty(name string, msg ...string) error {
+	err := errors.Wrapf(ErrMqTopicNotEmpty, "topic=%s", name)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+func WrapErrMqInternal(err error, msg ...string) error {
+	err = errors.Wrapf(ErrMqInternal, "internal=%v", err)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "; "))
 	}

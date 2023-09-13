@@ -1168,7 +1168,7 @@ func TestDatabaseNotFound(t *testing.T) {
 		assert.Equal(t, w.Body.String(), "{\"code\":200,\"data\":[]}")
 	})
 
-	errorStr := PrintErr(merr.ErrDatabaseNotfound)
+	errorStr := PrintErr(merr.ErrDatabaseNotFound)
 	paths := map[string][]string{
 		errorStr: {
 			URIPrefix + VectorCollectionsPath + "?dbName=test",

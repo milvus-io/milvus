@@ -165,7 +165,7 @@ func (pc *Consumer) CheckTopicValid(topic string) error {
 	}
 
 	if !latestMsgID.AtEarliestPosition() {
-		return merr.WrapErrTopicNotEmpty(topic, "topic is not empty")
+		return merr.WrapErrMqTopicNotEmpty(topic, "topic is not empty")
 	}
 	log.Info("created topic is empty", zap.String("topic", topic))
 	return nil

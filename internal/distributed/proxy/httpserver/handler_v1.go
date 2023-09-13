@@ -55,7 +55,7 @@ func (h *Handlers) checkDatabase(c *gin.Context, dbName string) bool {
 			return true
 		}
 	}
-	c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(merr.ErrDatabaseNotfound), HTTPReturnMessage: merr.ErrDatabaseNotfound.Error()})
+	c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(merr.ErrDatabaseNotFound), HTTPReturnMessage: merr.ErrDatabaseNotFound.Error()})
 	return false
 }
 
