@@ -28,6 +28,7 @@ services:
       ETCD_ENDPOINTS: ${ETCD_ENDPOINTS}
       MINIO_ADDRESS: ${MINIO_ADDRESS}
       CONAN_USER_HOME: /home/milvus
+      AZURE_STORAGE_CONNECTION_STRING: ${AZURITE_CONNECTION_STRING}
     volumes: &builder-volumes
       - .:/go/src/github.com/milvus-io/milvus:delegated
       - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-ccache:/ccache:delegated
@@ -39,6 +40,7 @@ services:
       - etcd
       - minio
       - pulsar
+      - azurite
     # Command
     command: &builder-command >
       /bin/bash -c "
@@ -64,6 +66,7 @@ services:
       ETCD_ENDPOINTS: ${ETCD_ENDPOINTS}
       MINIO_ADDRESS: ${MINIO_ADDRESS}
       CONAN_USER_HOME: /home/milvus
+      AZURE_STORAGE_CONNECTION_STRING: ${AZURITE_CONNECTION_STRING}
     volumes: &builder-volumes-gpu
       - .:/go/src/github.com/milvus-io/milvus:delegated
       - ${DOCKER_VOLUME_DIRECTORY:-.docker-gpu}/${OS_NAME}-ccache:/ccache:delegated
@@ -75,6 +78,7 @@ services:
       - etcd
       - minio
       - pulsar
+      - azurite
     # Command
     command: &builder-command-gpu >
       /bin/bash -c "
@@ -109,6 +113,10 @@ services:
       interval: 30s
       timeout: 20s
       retries: 3
+
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite
+    command: azurite-blob --blobHost 0.0.0.0
 
   jaeger:
     image: jaegertracing/all-in-one:latest

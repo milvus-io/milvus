@@ -106,7 +106,7 @@ USE_ASAN="OFF"
 OPEN_SIMD="OFF"
 USE_DYNAMIC_SIMD="OFF"
 
-while getopts "p:d:t:s:f:n:i:y:a:ulrcghzmeb" arg; do
+while getopts "p:d:t:s:f:n:i:y:a:ulrcghzmebZ" arg; do
   case $arg in
   f)
     CUSTOM_THIRDPARTY_PATH=$OPTARG
@@ -167,6 +167,9 @@ while getopts "p:d:t:s:f:n:i:y:a:ulrcghzmeb" arg; do
   y)
     USE_DYNAMIC_SIMD=$OPTARG
     ;;
+  Z)
+    BUILD_WITHOUT_AZURE="on"
+    ;;
   h) # help
     echo "
 
@@ -185,6 +188,7 @@ parameter:
 -s: build with CUDA arch(default:DEFAULT), for example '-gencode=compute_61,code=sm_61;-gencode=compute_75,code=sm_75'
 -b: build embedded milvus(default: OFF)
 -a: build milvus with AddressSanitizer(default: false)
+-Z: build milvus without azure-sdk-for-cpp, so cannot use azure blob
 -h: help
 
 usage:
@@ -198,6 +202,28 @@ usage:
     ;;
   esac
 done
+
+if [ -z "$BUILD_WITHOUT_AZURE" ]; then
+  AZURE_BUILD_DIR="${ROOT_DIR}/cmake_build/azure"
+  if [ ! -d ${AZURE_BUILD_DIR} ]; then
+    mkdir -p ${AZURE_BUILD_DIR}
+  fi
+  pushd ${AZURE_BUILD_DIR}
+  env bash ${ROOT_DIR}/scripts/azure_build.sh ${ROOT_DIR}
+  cat vcpkg-bootstrap.log # need to remove
+  popd
+  SYSTEM_NAME=$(uname -s)
+  if [[ ${SYSTEM_NAME} == "Darwin" ]]; then
+    SYSTEM_NAME="osx"
+  elif [[ ${SYSTEM_NAME} == "Linux" ]]; then
+    SYSTEM_NAME="linux"
+  fi
+  ARCHITECTURE=$(uname -m)
+  if [[ ${ARCHITECTURE} == "x86_64" ]]; then
+    ARCHITECTURE="x64"
+  fi
+  VCPKG_TARGET_TRIPLET=${ARCHITECTURE}-${SYSTEM_NAME}
+fi
 
 if [[ ! -d ${BUILD_OUTPUT_DIR} ]]; then
   mkdir ${BUILD_OUTPUT_DIR}
@@ -265,8 +291,12 @@ ${CMAKE_EXTRA_ARGS} \
 -DUSE_ASAN=${USE_ASAN} \
 -DOPEN_SIMD=${OPEN_SIMD} \
 -DUSE_DYNAMIC_SIMD=${USE_DYNAMIC_SIMD}
--DCPU_ARCH=${CPU_ARCH} \
-${CPP_SRC_DIR}"
+-DCPU_ARCH=${CPU_ARCH} "
+if [ -z "$BUILD_WITHOUT_AZURE" ]; then
+CMAKE_CMD=${CMAKE_CMD}"-DAZURE_BUILD_DIR=${AZURE_BUILD_DIR} \
+-DVCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET} "
+fi
+CMAKE_CMD=${CMAKE_CMD}"${CPP_SRC_DIR}"
 
 echo "CC $CC"
 echo ${CMAKE_CMD}

@@ -37,13 +37,29 @@ set(STORAGE_FILES
     ThreadPool.cpp
     storage_c.cpp
     MinioChunkManager.cpp
+    ChunkManagers.cpp
     AliyunSTSClient.cpp
     AliyunCredentialsProvider.cpp
     MemFileManagerImpl.cpp
     LocalChunkManager.cpp
     DiskFileManagerImpl.cpp ThreadPools.cpp)
 
+if (DEFINED AZURE_BUILD_DIR)
+    set(STORAGE_FILES
+            ${STORAGE_FILES}
+            AzureChunkManager.cpp
+            )
+    include_directories(azure-blob-storage)
+    include_directories("${AZURE_BUILD_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/include")
+endif()
+
 add_library(milvus_storage SHARED ${STORAGE_FILES})
+
+if (DEFINED AZURE_BUILD_DIR)
+    target_link_libraries(milvus_storage PUBLIC
+            "-L${AZURE_BUILD_DIR} -lblob-chunk-manager"
+            )
+endif()
 
 find_package(Boost REQUIRED COMPONENTS filesystem)
 

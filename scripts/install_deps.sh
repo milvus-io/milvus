@@ -56,7 +56,7 @@ function install_linux_deps() {
 
 function install_mac_deps() {
   sudo xcode-select --install > /dev/null 2>&1
-  brew install libomp ninja cmake llvm@15 ccache grep pkg-config
+  brew install libomp ninja cmake llvm@15 ccache grep pkg-config zip unzip
   export PATH="/usr/local/opt/grep/libexec/gnubin:$PATH"
   brew update && brew upgrade && brew cleanup
 

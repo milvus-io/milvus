@@ -159,6 +159,33 @@ class S3ErrorException : public MinioException {
     }
 };
 
+class AzureBlobException : public std::runtime_error {
+ public:
+    explicit AzureBlobException(const std::string& msg)
+        : std::runtime_error(msg) {
+    }
+    virtual ~AzureBlobException() {
+    }
+};
+
+class InvalidContainerNameException : public AzureBlobException {
+ public:
+    explicit InvalidContainerNameException(const std::string& msg)
+        : AzureBlobException(msg) {
+    }
+    virtual ~InvalidContainerNameException() {
+    }
+};
+
+class InvalidObjectException : public AzureBlobException {
+ public:
+    explicit InvalidObjectException(const std::string& msg)
+        : AzureBlobException(msg) {
+    }
+    virtual ~InvalidObjectException() {
+    }
+};
+
 class DiskANNFileManagerException : public std::runtime_error {
  public:
     explicit DiskANNFileManagerException(const std::string& msg)

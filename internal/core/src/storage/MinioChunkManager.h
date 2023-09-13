@@ -69,6 +69,8 @@ class AwsLogger : public Aws::Utils::Logging::FormattedLogSystem {
  */
 class MinioChunkManager : public ChunkManager {
  public:
+    MinioChunkManager() {
+    }
     explicit MinioChunkManager(const StorageConfig& storage_config);
 
     MinioChunkManager(const MinioChunkManager&);
@@ -169,6 +171,8 @@ class MinioChunkManager : public ChunkManager {
     std::vector<std::string>
     ListObjects(const char* bucket_name, const char* prefix = nullptr);
     void
+    InitSDKAPIDefault(const std::string& log_level);
+    void
     InitSDKAPI(RemoteStorageType type,
                bool useIAM,
                const std::string& log_level);
@@ -184,7 +188,7 @@ class MinioChunkManager : public ChunkManager {
     BuildGoogleCloudClient(const StorageConfig& storage_config,
                            const Aws::Client::ClientConfiguration& config);
 
- private:
+ protected:
     void
     BuildAccessKeyClient(const StorageConfig& storage_config,
                          const Aws::Client::ClientConfiguration& config);
@@ -195,6 +199,21 @@ class MinioChunkManager : public ChunkManager {
     std::shared_ptr<Aws::S3::S3Client> client_;
     std::string default_bucket_name_;
     std::string remote_root_path_;
+};
+
+class AwsChunkManager : public MinioChunkManager {
+ public:
+    explicit AwsChunkManager(const StorageConfig& storage_config);
+};
+
+class GcpChunkManager : public MinioChunkManager {
+ public:
+    explicit GcpChunkManager(const StorageConfig& storage_config);
+};
+
+class AliyunChunkManager : public MinioChunkManager {
+ public:
+    explicit AliyunChunkManager(const StorageConfig& storage_config);
 };
 
 using MinioChunkManagerPtr = std::unique_ptr<MinioChunkManager>;

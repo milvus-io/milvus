@@ -39,6 +39,11 @@ namespace milvus::storage {
         LOG_SEGCORE_ERROR_ << "milvus::storage::MinioException:" << e.what(); \
         return false;                                                         \
     }                                                                         \
+    catch (AzureBlobException & e) {                                          \
+        LOG_SEGCORE_ERROR_ << "milvus::storage::AzureBlobException:"          \
+                           << e.what();                                       \
+        return false;                                                         \
+    }                                                                         \
     catch (DiskANNFileManagerException & e) {                                 \
         LOG_SEGCORE_ERROR_ << "milvus::storage::DiskANNFileManagerException:" \
                            << e.what();                                       \

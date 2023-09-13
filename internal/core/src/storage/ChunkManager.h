@@ -128,6 +128,7 @@ enum ChunkManagerType : int8_t {
     None_CM = 0,
     Local = 1,
     Minio = 2,
+    RemoteStore = 3,
 };
 
 extern std::map<std::string, ChunkManagerType> ChunkManagerType_Map;
