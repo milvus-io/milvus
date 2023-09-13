@@ -15,7 +15,7 @@ ARG TARGETARCH
 
 RUN yum install -y wget g++ gcc gdb libatomic libstdc++-static git make zip unzip tar which \
     autoconf automake golang python3 python3-pip perl-FindBin texinfo \
-    pkg-config libuuid-devel libaio && \
+    pkg-config libuuid-devel libaio perl-IPC-Cmd && \
     rm -rf /var/cache/yum/*
 
 RUN pip3 install conan==1.58.0
