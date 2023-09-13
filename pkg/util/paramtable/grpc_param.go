@@ -192,9 +192,12 @@ type GrpcClientConfig struct {
 	KeepAliveTime    ParamItem `refreshable:"false"`
 	KeepAliveTimeout ParamItem `refreshable:"false"`
 
-	MaxAttempts    ParamItem `refreshable:"false"`
-	InitialBackoff ParamItem `refreshable:"false"`
-	MaxBackoff     ParamItem `refreshable:"false"`
+	MaxAttempts             ParamItem `refreshable:"false"`
+	InitialBackoff          ParamItem `refreshable:"false"`
+	MaxBackoff              ParamItem `refreshable:"false"`
+	MinResetInterval        ParamItem `refreshable:"false"`
+	MaxCancelError          ParamItem `refreshable:"false"`
+	MinSessionCheckInterval ParamItem `refreshable:"false"`
 }
 
 func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
@@ -390,4 +393,64 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 		Export: true,
 	}
 	p.CompressionEnabled.Init(base.mgr)
+
+	p.MinResetInterval = ParamItem{
+		Key:          "grpc.client.minResetInterval",
+		DefaultValue: "1000",
+		Formatter: func(v string) string {
+			if v == "" {
+				return "1000"
+			}
+			_, err := strconv.Atoi(v)
+			if err != nil {
+				log.Warn("Failed to parse grpc.client.minResetInterval, set to default",
+					zap.String("role", p.Domain), zap.String("grpc.client.minResetInterval", v),
+					zap.Error(err))
+				return "1000"
+			}
+			return v
+		},
+		Export: true,
+	}
+	p.MinResetInterval.Init(base.mgr)
+
+	p.MinSessionCheckInterval = ParamItem{
+		Key:          "grpc.client.minSessionCheckInterval",
+		DefaultValue: "200",
+		Formatter: func(v string) string {
+			if v == "" {
+				return "200"
+			}
+			_, err := strconv.Atoi(v)
+			if err != nil {
+				log.Warn("Failed to parse grpc.client.minSessionCheckInterval, set to default",
+					zap.String("role", p.Domain), zap.String("grpc.client.minSessionCheckInterval", v),
+					zap.Error(err))
+				return "200"
+			}
+			return v
+		},
+		Export: true,
+	}
+	p.MinSessionCheckInterval.Init(base.mgr)
+
+	p.MaxCancelError = ParamItem{
+		Key:          "grpc.client.maxCancelError",
+		DefaultValue: "32",
+		Formatter: func(v string) string {
+			if v == "" {
+				return "32"
+			}
+			_, err := strconv.Atoi(v)
+			if err != nil {
+				log.Warn("Failed to parse grpc.client.maxCancelError, set to default",
+					zap.String("role", p.Domain), zap.String("grpc.client.maxCancelError", v),
+					zap.Error(err))
+				return "32"
+			}
+			return v
+		},
+		Export: true,
+	}
+	p.MaxCancelError.Init(base.mgr)
 }

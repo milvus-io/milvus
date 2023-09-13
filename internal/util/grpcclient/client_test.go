@@ -169,11 +169,11 @@ func testCall(t *testing.T, compressed bool) {
 		base.grpcClientMtx.RUnlock()
 	})
 
-	t.Run("Call returns grpc error", func(t *testing.T) {
+	t.Run("Call returns Unavailable grpc error", func(t *testing.T) {
 		initClient()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		errGrpc := status.Error(codes.Unknown, "mocked")
+		errGrpc := status.Error(codes.Unavailable, "mocked")
 		_, err := base.Call(ctx, func(client *mockClient) (any, error) {
 			return nil, errGrpc
 		})
@@ -184,7 +184,23 @@ func testCall(t *testing.T, compressed bool) {
 		// client shall not be reset
 		assert.Nil(t, base.grpcClient)
 		base.grpcClientMtx.RUnlock()
+	})
 
+	t.Run("Call returns canceled grpc error", func(t *testing.T) {
+		initClient()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		errGrpc := status.Error(codes.Canceled, "mocked")
+		_, err := base.Call(ctx, func(client *mockClient) (any, error) {
+			return nil, errGrpc
+		})
+
+		assert.Error(t, err)
+		assert.True(t, errors.Is(err, errGrpc))
+		base.grpcClientMtx.RLock()
+		// client shall not be reset
+		assert.NotNil(t, base.grpcClient)
+		base.grpcClientMtx.RUnlock()
 	})
 
 	base.grpcClientMtx.Lock()

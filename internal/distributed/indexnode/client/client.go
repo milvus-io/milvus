@@ -51,7 +51,8 @@ func NewClient(ctx context.Context, addr string, nodeID int64, encryption bool) 
 		addr:       addr,
 		grpcClient: grpcclient.NewClientBase[indexpb.IndexNodeClient](config, "milvus.proto.index.IndexNode"),
 	}
-	client.grpcClient.SetRole(typeutil.IndexNodeRole)
+	// node shall specify node id
+	client.grpcClient.SetRole(fmt.Sprintf("%s-%d", typeutil.IndexNodeRole, nodeID))
 	client.grpcClient.SetGetAddrFunc(client.getAddr)
 	client.grpcClient.SetNewGrpcClientFunc(client.newGrpcClient)
 	client.grpcClient.SetNodeID(nodeID)

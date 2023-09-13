@@ -50,7 +50,8 @@ func NewClient(ctx context.Context, addr string, nodeID int64) (*Client, error) 
 		addr:       addr,
 		grpcClient: grpcclient.NewClientBase[querypb.QueryNodeClient](config, "milvus.proto.query.QueryNode"),
 	}
-	client.grpcClient.SetRole(typeutil.QueryNodeRole)
+	// node shall specify node id
+	client.grpcClient.SetRole(fmt.Sprintf("%s-%d", typeutil.QueryNodeRole, nodeID))
 	client.grpcClient.SetGetAddrFunc(client.getAddr)
 	client.grpcClient.SetNewGrpcClientFunc(client.newGrpcClient)
 	client.grpcClient.SetNodeID(nodeID)
