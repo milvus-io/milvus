@@ -23,11 +23,13 @@ import (
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/cockroachdb/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/streamnative/pulsarctl/pkg/cli"
 	"github.com/streamnative/pulsarctl/pkg/pulsar/utils"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	kafkawrapper "github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper/kafka"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper/nmq"
@@ -49,11 +51,12 @@ type PmsFactory struct {
 	PulsarTenant     string
 	PulsarNameSpace  string
 	RequestTimeout   time.Duration
+	metricRegisterer prometheus.Registerer
 }
 
 func NewPmsFactory(serviceParam *paramtable.ServiceParam) *PmsFactory {
 	config := &serviceParam.PulsarCfg
-	return &PmsFactory{
+	f := &PmsFactory{
 		MQBufSize:        serviceParam.MQCfg.MQBufSize.GetAsInt64(),
 		ReceiveBufSize:   serviceParam.MQCfg.ReceiveBufSize.GetAsInt64(),
 		PulsarAddress:    config.Address.GetValue(),
@@ -64,6 +67,11 @@ func NewPmsFactory(serviceParam *paramtable.ServiceParam) *PmsFactory {
 		PulsarNameSpace:  config.Namespace.GetValue(),
 		RequestTimeout:   config.RequestTimeout.GetAsDuration(time.Second),
 	}
+	if config.EnableClientMetrics.GetAsBool() {
+		// Enable client metrics if config.EnableClientMetrics is true, use pkg-defined registerer.
+		f.metricRegisterer = metrics.GetRegisterer()
+	}
+	return f
 }
 
 // NewMsgStream is used to generate a new Msgstream object
@@ -82,9 +90,10 @@ func (f *PmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
 		return nil, err
 	}
 	clientOpts := pulsar.ClientOptions{
-		URL:              f.PulsarAddress,
-		Authentication:   auth,
-		OperationTimeout: timeout,
+		URL:               f.PulsarAddress,
+		Authentication:    auth,
+		OperationTimeout:  timeout,
+		MetricsRegisterer: f.metricRegisterer,
 	}
 
 	pulsarClient, err := pulsarmqwrapper.NewClient(f.PulsarTenant, f.PulsarNameSpace, clientOpts)
@@ -108,9 +117,10 @@ func (f *PmsFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
 		return nil, err
 	}
 	clientOpts := pulsar.ClientOptions{
-		URL:              f.PulsarAddress,
-		Authentication:   auth,
-		OperationTimeout: timeout,
+		URL:               f.PulsarAddress,
+		Authentication:    auth,
+		OperationTimeout:  timeout,
+		MetricsRegisterer: f.metricRegisterer,
 	}
 
 	pulsarClient, err := pulsarmqwrapper.NewClient(f.PulsarTenant, f.PulsarNameSpace, clientOpts)
