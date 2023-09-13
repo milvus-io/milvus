@@ -294,8 +294,14 @@ class IndexTest : public ::testing::TestWithParam<Param> {
         auto param = GetParam();
         index_type = param.first;
         metric_type = param.second;
-        NB = 10000;
-        if (index_type == knowhere::IndexEnum::INDEX_HNSW) {
+        NB = 3000;
+
+        // try to reduce the test time,
+        // but the large dataset is needed for the case below.
+        auto test_name = std::string(
+            testing::UnitTest::GetInstance()->current_test_info()->name());
+        if (test_name == "Mmap" &&
+            index_type == knowhere::IndexEnum::INDEX_HNSW) {
             NB = 270000;
         }
         build_conf = generate_build_conf(index_type, metric_type);
@@ -352,7 +358,7 @@ class IndexTest : public ::testing::TestWithParam<Param> {
     std::vector<uint8_t> xb_bin_data;
     knowhere::DataSetPtr xq_dataset;
     int64_t query_offset = 100;
-    int64_t NB = 10000;
+    int64_t NB = 3000;
     StorageConfig storage_config_;
 };
 
