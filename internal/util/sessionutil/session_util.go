@@ -33,6 +33,7 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
+	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -45,6 +46,10 @@ const (
 	// DefaultIDKey default id key for Session
 	DefaultIDKey = "id"
 )
+
+// Moving ETCD from server into session
+// TODO: Remove fully
+var etcdCLI, rootpath = kvfactory.NewETCDWithRootWithPanic()
 
 // SessionEventType session event type
 type SessionEventType int
@@ -200,10 +205,10 @@ func (s *Session) MarshalJSON() ([]byte, error) {
 // ServerID, ServerName, Address, Exclusive will be assigned after Init().
 // metaRoot is a path in etcd to save session information.
 // etcdEndpoints is to init etcdCli when NewSession
-func NewSession(ctx context.Context, metaRoot string, client *clientv3.Client, opts ...SessionOption) *Session {
+func NewSession(ctx context.Context, opts ...SessionOption) *Session {
 	session := &Session{
 		ctx:      ctx,
-		metaRoot: metaRoot,
+		metaRoot: rootpath,
 		Version:  common.Version,
 
 		// options
@@ -225,10 +230,10 @@ func NewSession(ctx context.Context, metaRoot string, client *clientv3.Client, o
 		log.Debug("Session try to connect to etcd")
 		ctx2, cancel2 := context.WithTimeout(session.ctx, 5*time.Second)
 		defer cancel2()
-		if _, err := client.Get(ctx2, "health"); err != nil {
+		if _, err := etcdCLI.Get(ctx2, "health"); err != nil {
 			return err
 		}
-		session.etcdCli = client
+		session.etcdCli = etcdCLI
 		return nil
 	}
 	err := retry.Do(ctx, connectEtcdFn, retry.Attempts(100))

@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/tikv"
 	"github.com/stretchr/testify/assert"
 	"github.com/tikv/client-go/v2/txnkv"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 type MockDataCoord struct {
@@ -102,12 +101,6 @@ func (m *MockDataCoord) Register() error {
 }
 
 func (*MockDataCoord) SetAddress(address string) {
-}
-
-func (m *MockDataCoord) SetEtcdClient(etcdClient *clientv3.Client) {
-}
-
-func (m *MockDataCoord) SetTiKVClient(client *txnkv.Client) {
 }
 
 func (m *MockDataCoord) SetRootCoord(rootCoord types.RootCoord) {

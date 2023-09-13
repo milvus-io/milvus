@@ -22,7 +22,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -51,8 +50,8 @@ type Client struct {
 }
 
 // NewClient creates a new client instance
-func NewClient(ctx context.Context, metaRoot string, etcdCli *clientv3.Client) (*Client, error) {
-	sess := sessionutil.NewSession(ctx, metaRoot, etcdCli)
+func NewClient(ctx context.Context) (*Client, error) {
+	sess := sessionutil.NewSession(ctx)
 	if sess == nil {
 		err := fmt.Errorf("new session error, maybe can not connect to etcd")
 		log.Debug("DataCoordClient NewClient failed", zap.Error(err))

@@ -21,7 +21,10 @@ type Factory interface {
 	CloseKV()
 }
 
-var FatalLogger = FatalLogFunc
+// Mockables
+var fatalLogger = defaultFatalLogFunc
+var etcdRootPathParser = defaultEtcdRootPathParser
+var tiKVRootPathParser = defaultTiKVRootPathParser
 
 // ETCD specific factory that stores only the client
 type ETCDFactory struct {
@@ -30,14 +33,23 @@ type ETCDFactory struct {
 }
 
 // Create a new ETCD specific factory
-func NewETCDFactory(cfg *paramtable.ServiceParam, metaRootPath string) *ETCDFactory {
-	client, err := NewETCDClient(cfg)
+func NewETCDFactory() *ETCDFactory {
+	rootPath := GetETCDRootPath()
+	client, err := NewETCDClient()
 	if err != nil {
-		FatalLogger("ETCDFactory failed to grab client", err)
+		fatalLogger("ETCDFactory failed to grab client", err)
 		// We need a return when testing and disabling os.exit
 		return nil
 	}
-	return &ETCDFactory{etcdClient: client, metaRootPath: metaRootPath}
+	return &ETCDFactory{etcdClient: client, metaRootPath: rootPath}
+}
+
+func GetETCDRootPath() string {
+	return etcdRootPathParser()
+}
+
+func defaultEtcdRootPathParser() string {
+	return paramtable.Get().ServiceParam.EtcdCfg.MetaRootPath.GetValue()
 }
 
 // Create a new Meta KV interface using ETCD
@@ -70,15 +82,23 @@ type TiKVFactory struct {
 }
 
 // Create a new TiKV specific factory
-func NewTiKVFactory(cfg *paramtable.ServiceParam, metaRootPath string) *TiKVFactory {
-	client, err := NewTiKVClient(cfg)
+func NewTiKVFactory() *TiKVFactory {
+	rootPath := GetTiKVRootPath()
+	client, err := NewTiKVClient()
 	if err != nil {
-		FatalLogger("TiKVFactory failed to grab client", err)
+		fatalLogger("TiKVFactory failed to grab client", err)
 		// We need a return when testing and disabling os.exit
 		return nil
 	}
-	return &TiKVFactory{tikvClient: client, metaRootPath: metaRootPath}
+	return &TiKVFactory{tikvClient: client, metaRootPath: rootPath}
+}
 
+func GetTiKVRootPath() string {
+	return etcdRootPathParser()
+}
+
+func defaultTiKVRootPathParser() string {
+	return paramtable.Get().ServiceParam.TiKVCfg.MetaRootPath.GetValue()
 }
 
 // Create a new Meta KV interface using TiKV
@@ -104,6 +124,6 @@ func (fact *TiKVFactory) CloseKV() {
 	fact.tikvClient.Close()
 }
 
-func FatalLogFunc(store string, err error) {
+func defaultFatalLogFunc(store string, err error) {
 	log.Fatal("Failed to create "+store, zap.Error(err))
 }

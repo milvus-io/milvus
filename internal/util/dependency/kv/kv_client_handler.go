@@ -16,17 +16,27 @@ import (
 var createETCD = createETCDClient
 var createTiKV = createTiKVClient
 
-func NewETCDClient(cfg *paramtable.ServiceParam) (*clientv3.Client, error) {
-	return createETCD(cfg)
+func NewETCDWithRootWithPanic() (*clientv3.Client, string) {
+	client, err := NewETCDClient()
+	if err != nil {
+		panic(err)
+	}
+	rootpath := GetETCDRootPath()
+	return client, rootpath
 }
 
-func NewTiKVClient(cfg *paramtable.ServiceParam) (*txnkv.Client, error) {
-	return createTiKV(cfg)
+func NewETCDClient() (*clientv3.Client, error) {
+	return createETCD()
+}
+
+func NewTiKVClient() (*txnkv.Client, error) {
+	return createTiKV()
 }
 
 // Function that calls the ETCD constructor
-func createETCDClient(cfg *paramtable.ServiceParam) (*clientv3.Client, error) {
-	client, err := etcd.GetEtcdClient(
+func createETCDClient() (*clientv3.Client, error) {
+	cfg := &paramtable.Get().ServiceParam
+	return etcd.GetEtcdClient(
 		cfg.EtcdCfg.UseEmbedEtcd.GetAsBool(),
 		cfg.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		cfg.EtcdCfg.Endpoints.GetAsStrings(),
@@ -34,14 +44,11 @@ func createETCDClient(cfg *paramtable.ServiceParam) (*clientv3.Client, error) {
 		cfg.EtcdCfg.EtcdTLSKey.GetValue(),
 		cfg.EtcdCfg.EtcdTLSCACert.GetValue(),
 		cfg.EtcdCfg.EtcdTLSMinVersion.GetValue())
-	if err != nil {
-		return nil, err
-	}
-	return client, nil
 }
 
 // Function that calls the TiKV constructor
-func createTiKVClient(cfg *paramtable.ServiceParam) (*txnkv.Client, error) {
+func createTiKVClient() (*txnkv.Client, error) {
+	cfg := paramtable.Get().ServiceParam
 	if cfg.TiKVCfg.TiKVUseSSL.GetAsBool() {
 		f := func(conf *config.Config) {
 			conf.Security = config.NewSecurity(cfg.TiKVCfg.TiKVTLSCACert.GetValue(), cfg.TiKVCfg.TiKVTLSCert.GetValue(), cfg.TiKVCfg.TiKVTLSKey.GetValue(), []string{})

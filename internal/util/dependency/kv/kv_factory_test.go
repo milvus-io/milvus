@@ -23,47 +23,71 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
-
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func TestKVFactory(te *testing.T) {
 	te.Run("Test factory no error", func(t *testing.T) {
-		createTiKV = func(cfg *paramtable.ServiceParam) (*txnkv.Client, error) {
+		createTiKV = func() (*txnkv.Client, error) {
 			return &txnkv.Client{}, nil
 		}
 		defer func() {
 			createTiKV = createTiKVClient
 		}()
-		createETCD = func(cfg *paramtable.ServiceParam) (*clientv3.Client, error) {
+		createETCD = func() (*clientv3.Client, error) {
 			return &clientv3.Client{}, nil
 		}
 		defer func() {
 			createETCD = createETCDClient
 		}()
-		etcd_factory := NewETCDFactory(nil, "test")
+
+		etcdRootPathParser = func() string {
+			return "test"
+		}
+		defer func() {
+			etcdRootPathParser = defaultEtcdRootPathParser
+		}()
+		tiKVRootPathParser = func() string {
+			return "test"
+		}
+		defer func() {
+			tiKVRootPathParser = defaultTiKVRootPathParser
+		}()
+
+		etcd_factory := NewETCDFactory()
 		assert.NotEqual(te, etcd_factory, nil)
-		tikv_factory := NewTiKVFactory(nil, "test")
+		tikv_factory := NewTiKVFactory()
 		assert.NotEqual(te, tikv_factory, nil)
 	})
 	te.Run("Test factory with client error", func(t *testing.T) {
-		createTiKV = func(cfg *paramtable.ServiceParam) (*txnkv.Client, error) {
+		createTiKV = func() (*txnkv.Client, error) {
 			return nil, fmt.Errorf("Failed to create client")
 		}
 		defer func() {
 			createTiKV = createTiKVClient
 		}()
-		createETCD = func(cfg *paramtable.ServiceParam) (*clientv3.Client, error) {
+		createETCD = func() (*clientv3.Client, error) {
 			return nil, fmt.Errorf("Failed to create client")
 		}
 		defer func() {
 			createETCD = createETCDClient
 		}()
-		FatalLogger = func(store string, err error) {}
-		defer func() { FatalLogger = FatalLogFunc }()
-		etcd_factory := NewETCDFactory(nil, "test")
+		etcdRootPathParser = func() string {
+			return "test"
+		}
+		defer func() {
+			etcdRootPathParser = defaultEtcdRootPathParser
+		}()
+		tiKVRootPathParser = func() string {
+			return "test"
+		}
+		defer func() {
+			tiKVRootPathParser = defaultTiKVRootPathParser
+		}()
+		fatalLogger = func(store string, err error) {}
+		defer func() { fatalLogger = defaultFatalLogFunc }()
+		etcd_factory := NewETCDFactory()
 		assert.Nil(te, etcd_factory)
-		tikv_factory := NewTiKVFactory(nil, "test")
+		tikv_factory := NewTiKVFactory()
 		assert.Nil(te, tikv_factory)
 	})
 }

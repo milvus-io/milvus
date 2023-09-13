@@ -28,7 +28,6 @@ import (
 
 	"github.com/blang/semver/v4"
 	"github.com/cockroachdb/errors"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -82,7 +81,7 @@ type dataNodeCreatorFunc func(ctx context.Context, addr string, nodeID int64) (t
 
 type indexNodeCreatorFunc func(ctx context.Context, addr string, nodeID int64) (types.IndexNode, error)
 
-type rootCoordCreatorFunc func(ctx context.Context, metaRootPath string, etcdClient *clientv3.Client) (types.RootCoord, error)
+type rootCoordCreatorFunc func(ctx context.Context) (types.RootCoord, error)
 
 // makes sure Server implements `DataCoord`
 var _ types.DataCoord = (*Server)(nil)
@@ -100,7 +99,6 @@ type Server struct {
 	stateCode        atomic.Value
 	helper           ServerHelper
 
-	etcdCli          *clientv3.Client
 	address          string
 	watchClient      kv.WatchKV
 	kv               kv.MetaKv
@@ -228,8 +226,8 @@ func defaultIndexNodeCreatorFunc(ctx context.Context, addr string, nodeID int64)
 	return indexnodeclient.NewClient(ctx, addr, nodeID, Params.DataCoordCfg.WithCredential.GetAsBool())
 }
 
-func defaultRootCoordCreatorFunc(ctx context.Context, metaRootPath string, client *clientv3.Client) (types.RootCoord, error) {
-	return rootcoordclient.NewClient(ctx, metaRootPath, client)
+func defaultRootCoordCreatorFunc(ctx context.Context, metaRootPath string) (types.RootCoord, error) {
+	return rootcoordclient.NewClient(ctx)
 }
 
 // QuitSignal returns signal when server quits
@@ -237,7 +235,7 @@ func (s *Server) QuitSignal() <-chan struct{} {
 	return s.quitCh
 }
 
-// Register registers data service at etcd
+// Register registers the Indexcood and datacoord in a session
 func (s *Server) Register() error {
 	// first register indexCoord
 	s.icSession.Register()
@@ -257,7 +255,7 @@ func (s *Server) Register() error {
 	log.Info("DataCoord Register Finished")
 
 	s.session.LivenessCheck(s.serverLoopCtx, func() {
-		logutil.Logger(s.ctx).Error("disconnected from etcd and exited", zap.Int64("serverID", s.session.ServerID))
+		logutil.Logger(s.ctx).Error("disconnected from metastore and exited", zap.Int64("serverID", s.session.ServerID))
 		if err := s.Stop(); err != nil {
 			logutil.Logger(s.ctx).Fatal("failed to stop server", zap.Error(err))
 		}
@@ -273,14 +271,14 @@ func (s *Server) Register() error {
 }
 
 func (s *Server) initSession() error {
-	s.icSession = sessionutil.NewSession(s.ctx, Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli)
+	s.icSession = sessionutil.NewSession(s.ctx)
 	if s.icSession == nil {
 		return errors.New("failed to initialize IndexCoord session")
 	}
 	s.icSession.Init(typeutil.IndexCoordRole, s.address, true, true)
 	s.icSession.SetEnableActiveStandBy(s.enableActiveStandBy)
 
-	s.session = sessionutil.NewSession(s.ctx, Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli)
+	s.session = sessionutil.NewSession(s.ctx)
 	if s.session == nil {
 		return errors.New("failed to initialize session")
 	}
@@ -372,7 +370,7 @@ func (s *Server) initDataCoord() error {
 //  2. initialize root coord client, meta, datanode cluster, segment info channel,
 //     allocator, segment manager
 //  3. start service discovery and server loops, which includes message stream handler (segment statistics,datanode tt)
-//     datanodes etcd watch, etcd alive check and flush completed status check
+//     datanodes metastore watch, metastore alive check and flush completed status check
 //  4. set server state to Healthy
 func (s *Server) Start() error {
 	if !s.enableActiveStandBy {
@@ -949,7 +947,7 @@ func (s *Server) handleFlushingSegments(ctx context.Context) {
 func (s *Server) initRootCoordClient() error {
 	var err error
 	if s.rootCoordClient == nil {
-		if s.rootCoordClient, err = s.rootCoordClientCreator(s.ctx, Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli); err != nil {
+		if s.rootCoordClient, err = s.rootCoordClientCreator(s.ctx); err != nil {
 			return err
 		}
 	}
@@ -961,7 +959,7 @@ func (s *Server) initRootCoordClient() error {
 
 // Stop do the Server finalize processes
 // it checks the server status is healthy, if not, just quit
-// if Server is healthy, set server state to stopped, release etcd session,
+// if Server is healthy, set server state to stopped, release session,
 //
 //	stop message stream client and stop server loops
 func (s *Server) Stop() error {
