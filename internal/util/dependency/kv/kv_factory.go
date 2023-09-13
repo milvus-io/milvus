@@ -30,14 +30,14 @@ type ETCDFactory struct {
 }
 
 // Create a new ETCD specific factory
-func NewETCDFactory(cfg *paramtable.ServiceParam) *ETCDFactory {
-	client, err := CreateETCDClient(cfg)
+func NewETCDFactory(cfg *paramtable.ServiceParam, metaRootPath string) *ETCDFactory {
+	client, err := NewETCDClient(cfg)
 	if err != nil {
 		FatalLogger("ETCDFactory failed to grab client", err)
 		// We need a return when testing and disabling os.exit
 		return nil
 	}
-	return &ETCDFactory{etcdClient: client, metaRootPath: cfg.EtcdCfg.MetaRootPath.GetValue()}
+	return &ETCDFactory{etcdClient: client, metaRootPath: metaRootPath}
 }
 
 // Create a new Meta KV interface using ETCD
@@ -70,14 +70,14 @@ type TiKVFactory struct {
 }
 
 // Create a new TiKV specific factory
-func NewTiKVFactory(cfg *paramtable.ServiceParam) *TiKVFactory {
-	client, err := CreateTiKVClient(cfg)
+func NewTiKVFactory(cfg *paramtable.ServiceParam, metaRootPath string) *TiKVFactory {
+	client, err := NewTiKVClient(cfg)
 	if err != nil {
 		FatalLogger("TiKVFactory failed to grab client", err)
 		// We need a return when testing and disabling os.exit
 		return nil
 	}
-	return &TiKVFactory{tikvClient: client, metaRootPath: cfg.TiKVCfg.MetaRootPath.GetValue()}
+	return &TiKVFactory{tikvClient: client, metaRootPath: metaRootPath}
 
 }
 

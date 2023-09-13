@@ -28,45 +28,42 @@ import (
 )
 
 func TestKVFactory(te *testing.T) {
-	te.Run("Test factoy no error", func(t *testing.T) {
-		ResetKVClientHandler()
-		generateTiKVClient = func(cfg *paramtable.ServiceParam) (*txnkv.Client, error) {
+	te.Run("Test factory no error", func(t *testing.T) {
+		createTiKV = func(cfg *paramtable.ServiceParam) (*txnkv.Client, error) {
 			return &txnkv.Client{}, nil
 		}
 		defer func() {
-			generateTiKVClient = createTiKVClient
+			createTiKV = createTiKVClient
 		}()
-		generateETCDClient = func(cfg *paramtable.ServiceParam) (*clientv3.Client, error) {
+		createETCD = func(cfg *paramtable.ServiceParam) (*clientv3.Client, error) {
 			return &clientv3.Client{}, nil
 		}
 		defer func() {
-			generateETCDClient = createETCDClient
+			createETCD = createETCDClient
 		}()
-		etcd_factory := NewETCDFactory(nil)
+		etcd_factory := NewETCDFactory(nil, "test")
 		assert.NotEqual(te, etcd_factory, nil)
-		tikv_factory := NewTiKVFactory(nil)
+		tikv_factory := NewTiKVFactory(nil, "test")
 		assert.NotEqual(te, tikv_factory, nil)
 	})
 	te.Run("Test factory with client error", func(t *testing.T) {
-		ResetKVClientHandler()
-		generateTiKVClient = func(cfg *paramtable.ServiceParam) (*txnkv.Client, error) {
+		createTiKV = func(cfg *paramtable.ServiceParam) (*txnkv.Client, error) {
 			return nil, fmt.Errorf("Failed to create client")
 		}
 		defer func() {
-			generateTiKVClient = createTiKVClient
+			createTiKV = createTiKVClient
 		}()
-		generateETCDClient = func(cfg *paramtable.ServiceParam) (*clientv3.Client, error) {
+		createETCD = func(cfg *paramtable.ServiceParam) (*clientv3.Client, error) {
 			return nil, fmt.Errorf("Failed to create client")
 		}
 		defer func() {
-			generateETCDClient = createETCDClient
+			createETCD = createETCDClient
 		}()
 		FatalLogger = func(store string, err error) {}
 		defer func() { FatalLogger = FatalLogFunc }()
-		ResetKVClientHandler()
-		etcd_factory := NewETCDFactory(nil)
+		etcd_factory := NewETCDFactory(nil, "test")
 		assert.Nil(te, etcd_factory)
-		tikv_factory := NewTiKVFactory(nil)
+		tikv_factory := NewTiKVFactory(nil, "test")
 		assert.Nil(te, tikv_factory)
 	})
 }

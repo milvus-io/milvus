@@ -51,8 +51,8 @@ func NewDefaultFactory(standAlone bool) *DefaultFactory {
 		msgStreamFactory: smsgstream.NewRocksmqFactory("/tmp/milvus/rocksmq/", &paramtable.Get().ServiceParam),
 		chunkManagerFactory: storage.NewChunkManagerFactory("local",
 			storage.RootPath("/tmp/milvus")),
-		metaFactory:  kvfactory.NewETCDFactory(&paramtable.Get().ServiceParam),
-		watchFactory: kvfactory.NewETCDFactory(&paramtable.Get().ServiceParam),
+		metaFactory:  kvfactory.NewETCDFactory(&paramtable.Get().ServiceParam, paramtable.Get().ServiceParam.EtcdCfg.MetaRootPath.GetValue()),
+		watchFactory: kvfactory.NewETCDFactory(&paramtable.Get().ServiceParam, paramtable.Get().ServiceParam.EtcdCfg.MetaRootPath.GetValue()),
 	}
 }
 
@@ -62,8 +62,8 @@ func MockDefaultFactory(standAlone bool, params *paramtable.ComponentParam) *Def
 		standAlone:          standAlone,
 		msgStreamFactory:    smsgstream.NewRocksmqFactory("/tmp/milvus/rocksmq/", &paramtable.Get().ServiceParam),
 		chunkManagerFactory: storage.NewChunkManagerFactoryWithParam(params),
-		metaFactory:         kvfactory.NewETCDFactory(&paramtable.Get().ServiceParam),
-		watchFactory:        kvfactory.NewETCDFactory(&paramtable.Get().ServiceParam),
+		metaFactory:         kvfactory.NewETCDFactory(&paramtable.Get().ServiceParam, paramtable.Get().ServiceParam.TiKVCfg.MetaRootPath.GetValue()),
+		watchFactory:        kvfactory.NewETCDFactory(&paramtable.Get().ServiceParam, paramtable.Get().ServiceParam.TiKVCfg.MetaRootPath.GetValue()),
 	}
 }
 
