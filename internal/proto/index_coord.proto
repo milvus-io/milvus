@@ -208,6 +208,7 @@ message StorageConfig {
   string storage_type = 9;
   bool use_virtual_host = 10;
   string region = 11;
+  string cloud_provider = 12;
 }
 
 message CreateJobRequest {
