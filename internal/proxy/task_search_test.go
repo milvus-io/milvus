@@ -74,7 +74,7 @@ func TestSearchTask_PostExecute(t *testing.T) {
 	})
 }
 
-func createColl(t *testing.T, name string, rc types.RootCoord) {
+func createColl(t *testing.T, name string, rc types.RootCoordClient) {
 	schema := constructCollectionSchema(testInt64Field, testFloatVecField, testVecDim, name)
 	marshaledSchema, err := proto.Marshal(schema)
 	require.NoError(t, err)
@@ -154,12 +154,11 @@ func TestSearchTask_PreExecute(t *testing.T) {
 
 	var (
 		rc  = NewRootCoordMock()
-		qc  = mocks.NewMockQueryCoord(t)
+		qc  = mocks.NewMockQueryCoordClient(t)
 		ctx = context.TODO()
 	)
 
-	err = rc.Start()
-	defer rc.Stop()
+	defer rc.Close()
 	require.NoError(t, err)
 	mgr := newShardClientMgr()
 	err = InitMetaCache(ctx, rc, qc, mgr)
@@ -267,8 +266,20 @@ func getQueryCoord() *mocks.MockQueryCoord {
 	return qc
 }
 
+func getQueryCoordClient() *mocks.MockQueryCoordClient {
+	qc := &mocks.MockQueryCoordClient{}
+	qc.EXPECT().Close().Return(nil)
+	return qc
+}
+
 func getQueryNode() *mocks.MockQueryNode {
 	qn := &mocks.MockQueryNode{}
+
+	return qn
+}
+
+func getQueryNodeClient() *mocks.MockQueryNodeClient {
+	qn := &mocks.MockQueryNodeClient{}
 
 	return qn
 }
@@ -278,22 +289,18 @@ func TestSearchTaskV2_Execute(t *testing.T) {
 		err error
 
 		rc  = NewRootCoordMock()
-		qc  = getQueryCoord()
+		qc  = getQueryCoordClient()
 		ctx = context.TODO()
 
 		collectionName = t.Name() + funcutil.GenRandomStr()
 	)
 
-	err = rc.Start()
-	require.NoError(t, err)
-	defer rc.Stop()
+	defer rc.Close()
 	mgr := newShardClientMgr()
 	err = InitMetaCache(ctx, rc, qc, mgr)
 	require.NoError(t, err)
 
-	err = qc.Start()
-	require.NoError(t, err)
-	defer qc.Stop()
+	defer qc.Close()
 
 	task := &searchTask{
 		ctx: ctx,
@@ -1588,24 +1595,21 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 		ctx = context.TODO()
 
 		rc = NewRootCoordMock()
-		qc = getQueryCoord()
-		qn = getQueryNode()
+		qc = getQueryCoordClient()
+		qn = getQueryNodeClient()
 
 		shardsNum      = int32(2)
 		collectionName = t.Name() + funcutil.GenRandomStr()
 	)
 
-	qn.EXPECT().GetComponentStates(mock.Anything).Return(nil, nil).Maybe()
+	qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 	mgr := NewMockShardClientManager(t)
 	mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(qn, nil).Maybe()
 	mgr.EXPECT().UpdateShardLeaders(mock.Anything, mock.Anything).Return(nil).Maybe()
 	lb := NewLBPolicyImpl(mgr)
 
-	rc.Start()
-	defer rc.Stop()
-	qc.Start()
-	defer qc.Stop()
+	defer qc.Close()
 
 	err = InitMetaCache(ctx, rc, qc, mgr)
 	assert.NoError(t, err)
@@ -1711,7 +1715,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 	assert.Error(t, task.Execute(ctx))
 
 	qn.ExpectedCalls = nil
-	qn.EXPECT().GetComponentStates(mock.Anything).Return(nil, nil).Maybe()
+	qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	qn.EXPECT().Search(mock.Anything, mock.Anything).Return(&internalpb.SearchResults{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_NotShardLeader,
@@ -1721,7 +1725,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 	assert.True(t, strings.Contains(err.Error(), errInvalidShardLeaders.Error()))
 
 	qn.ExpectedCalls = nil
-	qn.EXPECT().GetComponentStates(mock.Anything).Return(nil, nil).Maybe()
+	qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	qn.EXPECT().Search(mock.Anything, mock.Anything).Return(&internalpb.SearchResults{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1730,7 +1734,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 	assert.Error(t, task.Execute(ctx))
 
 	qn.ExpectedCalls = nil
-	qn.EXPECT().GetComponentStates(mock.Anything).Return(nil, nil).Maybe()
+	qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	qn.EXPECT().Search(mock.Anything, mock.Anything).Return(&internalpb.SearchResults{
 		Status: merr.Status(nil),
 	}, nil)

@@ -14,7 +14,7 @@ import (
 
 // type pickShardPolicy func(ctx context.Context, mgr shardClientMgr, query func(UniqueID, types.QueryNode) error, leaders []nodeInfo) error
 
-type queryFunc func(context.Context, UniqueID, types.QueryNode, ...string) error
+type queryFunc func(context.Context, UniqueID, types.QueryNodeClient, ...string) error
 
 type pickShardPolicy func(context.Context, shardClientMgr, queryFunc, map[string][]nodeInfo) error
 

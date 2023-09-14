@@ -36,12 +36,12 @@ import (
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -51,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	grpcmock "github.com/milvus-io/milvus/internal/util/mock"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -94,7 +95,7 @@ func TestGetSegmentInfoChannel(t *testing.T) {
 	svr := newTestServer(t, nil)
 	defer closeTestServer(t, svr)
 	t.Run("get segment info channel", func(t *testing.T) {
-		resp, err := svr.GetSegmentInfoChannel(context.TODO())
+		resp, err := svr.GetSegmentInfoChannel(context.TODO(), nil)
 		assert.NoError(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.EqualValues(t, Params.CommonCfg.DataCoordSegmentInfo.GetValue(), resp.Value)
@@ -193,8 +194,8 @@ func TestAssignSegmentID(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 		svr.rootCoordClient = &mockRootCoord{
-			RootCoord: svr.rootCoordClient,
-			collID:    collID,
+			RootCoordClient: svr.rootCoordClient,
+			collID:          collID,
 		}
 
 		schema := newTestSchema()
@@ -221,11 +222,11 @@ func TestAssignSegmentID(t *testing.T) {
 }
 
 type mockRootCoord struct {
-	types.RootCoord
+	types.RootCoordClient
 	collID UniqueID
 }
 
-func (r *mockRootCoord) DescribeCollectionInternal(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+func (r *mockRootCoord) DescribeCollectionInternal(ctx context.Context, req *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
 	if req.CollectionID != r.collID {
 		return &milvuspb.DescribeCollectionResponse{
 			Status: &commonpb.Status{
@@ -234,10 +235,10 @@ func (r *mockRootCoord) DescribeCollectionInternal(ctx context.Context, req *mil
 			},
 		}, nil
 	}
-	return r.RootCoord.DescribeCollection(ctx, req)
+	return r.RootCoordClient.DescribeCollection(ctx, req)
 }
 
-func (r *mockRootCoord) ReportImport(context.Context, *rootcoordpb.ImportResult) (*commonpb.Status, error) {
+func (r *mockRootCoord) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		Reason:    "something bad",
@@ -365,7 +366,7 @@ func TestFlush(t *testing.T) {
 func TestGetTimeTickChannel(t *testing.T) {
 	svr := newTestServer(t, nil)
 	defer closeTestServer(t, svr)
-	resp, err := svr.GetTimeTickChannel(context.TODO())
+	resp, err := svr.GetTimeTickChannel(context.TODO(), nil)
 	assert.NoError(t, err)
 	assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	assert.EqualValues(t, Params.CommonCfg.DataCoordTimeTick.GetValue(), resp.Value)
@@ -716,7 +717,7 @@ func TestGetSegmentInfo(t *testing.T) {
 
 func TestGetComponentStates(t *testing.T) {
 	svr := &Server{}
-	resp, err := svr.GetComponentStates(context.Background())
+	resp, err := svr.GetComponentStates(context.Background(), nil)
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	assert.Equal(t, common.NotRegisteredID, resp.State.NodeID)
@@ -733,7 +734,7 @@ func TestGetComponentStates(t *testing.T) {
 	}
 	for _, tc := range cases {
 		svr.stateCode.Store(tc.state)
-		resp, err := svr.GetComponentStates(context.Background())
+		resp, err := svr.GetComponentStates(context.Background(), nil)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, tc.code, resp.GetState().GetStateCode())
@@ -2421,11 +2422,9 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 
 func TestShouldDropChannel(t *testing.T) {
 	type myRootCoord struct {
-		mocks.RootCoord
+		mocks.MockRootCoordClient
 	}
 	myRoot := &myRootCoord{}
-	myRoot.EXPECT().Init().Return(nil)
-	myRoot.EXPECT().Start().Return(nil)
 	myRoot.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocTimestampResponse{
 		Status:    &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 		Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
@@ -2438,7 +2437,7 @@ func TestShouldDropChannel(t *testing.T) {
 		Count:  1,
 	}, nil)
 
-	var crt rootCoordCreatorFunc = func(ctx context.Context, metaRoot string, etcdClient *clientv3.Client) (types.RootCoord, error) {
+	var crt rootCoordCreatorFunc = func(ctx context.Context, metaRoot string, etcdClient *clientv3.Client) (types.RootCoordClient, error) {
 		return myRoot, nil
 	}
 
@@ -2521,8 +2520,8 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
-			return newMockRootCoordService(), nil
+		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+			return newMockRootCoordClient(), nil
 		}
 
 		req := &datapb.GetRecoveryInfoRequest{
@@ -2565,8 +2564,8 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
-			return newMockRootCoordService(), nil
+		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+			return newMockRootCoordClient(), nil
 		}
 
 		svr.meta.AddCollection(&collectionInfo{
@@ -2670,8 +2669,8 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
-			return newMockRootCoordService(), nil
+		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+			return newMockRootCoordClient(), nil
 		}
 
 		svr.meta.AddCollection(&collectionInfo{
@@ -2749,8 +2748,8 @@ func TestGetRecoveryInfo(t *testing.T) {
 			Schema: newTestSchema(),
 		})
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
-			return newMockRootCoordService(), nil
+		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+			return newMockRootCoordClient(), nil
 		}
 
 		binlogReq := &datapb.SaveBinlogPathsRequest{
@@ -2846,8 +2845,8 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
-			return newMockRootCoordService(), nil
+		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+			return newMockRootCoordClient(), nil
 		}
 
 		svr.meta.AddCollection(&collectionInfo{
@@ -2888,8 +2887,8 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
-			return newMockRootCoordService(), nil
+		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+			return newMockRootCoordClient(), nil
 		}
 
 		svr.meta.AddCollection(&collectionInfo{
@@ -2929,8 +2928,8 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
-			return newMockRootCoordService(), nil
+		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+			return newMockRootCoordClient(), nil
 		}
 
 		svr.meta.AddCollection(&collectionInfo{
@@ -3206,7 +3205,7 @@ func TestOptions(t *testing.T) {
 	t.Run("WithRootCoordCreator", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
-		var crt rootCoordCreatorFunc = func(ctx context.Context, metaRoot string, etcdClient *clientv3.Client) (types.RootCoord, error) {
+		var crt rootCoordCreatorFunc = func(ctx context.Context, metaRoot string, etcdClient *clientv3.Client) (types.RootCoordClient, error) {
 			return nil, errors.New("dummy")
 		}
 		opt := WithRootCoordCreator(crt)
@@ -3237,7 +3236,7 @@ func TestOptions(t *testing.T) {
 	t.Run("WithDataNodeCreator", func(t *testing.T) {
 		var target int64
 		val := rand.Int63()
-		opt := WithDataNodeCreator(func(context.Context, string, int64) (types.DataNode, error) {
+		opt := WithDataNodeCreator(func(context.Context, string, int64) (types.DataNodeClient, error) {
 			target = val
 			return nil, nil
 		})
@@ -3341,7 +3340,7 @@ func TestHandleSessionEvent(t *testing.T) {
 }
 
 type rootCoordSegFlushComplete struct {
-	mockRootCoordService
+	mockRootCoordClient
 	flag bool
 }
 
@@ -3670,15 +3669,15 @@ func TestGetFlushAllState(t *testing.T) {
 			}
 			var err error
 			svr.meta = &meta{}
-			svr.rootCoordClient = mocks.NewRootCoord(t)
+			svr.rootCoordClient = mocks.NewMockRootCoordClient(t)
 			svr.broker = NewCoordinatorBroker(svr.rootCoordClient)
 			if test.ListDatabaseFailed {
-				svr.rootCoordClient.(*mocks.RootCoord).EXPECT().ListDatabases(mock.Anything, mock.Anything).
+				svr.rootCoordClient.(*mocks.MockRootCoordClient).EXPECT().ListDatabases(mock.Anything, mock.Anything).
 					Return(&milvuspb.ListDatabasesResponse{
 						Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
 					}, nil).Maybe()
 			} else {
-				svr.rootCoordClient.(*mocks.RootCoord).EXPECT().ListDatabases(mock.Anything, mock.Anything).
+				svr.rootCoordClient.(*mocks.MockRootCoordClient).EXPECT().ListDatabases(mock.Anything, mock.Anything).
 					Return(&milvuspb.ListDatabasesResponse{
 						DbNames: []string{"db1"},
 						Status:  &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
@@ -3686,12 +3685,12 @@ func TestGetFlushAllState(t *testing.T) {
 			}
 
 			if test.ShowCollectionFailed {
-				svr.rootCoordClient.(*mocks.RootCoord).EXPECT().ShowCollections(mock.Anything, mock.Anything).
+				svr.rootCoordClient.(*mocks.MockRootCoordClient).EXPECT().ShowCollections(mock.Anything, mock.Anything).
 					Return(&milvuspb.ShowCollectionsResponse{
 						Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
 					}, nil).Maybe()
 			} else {
-				svr.rootCoordClient.(*mocks.RootCoord).EXPECT().ShowCollections(mock.Anything, mock.Anything).
+				svr.rootCoordClient.(*mocks.MockRootCoordClient).EXPECT().ShowCollections(mock.Anything, mock.Anything).
 					Return(&milvuspb.ShowCollectionsResponse{
 						Status:        &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 						CollectionIds: []int64{collection},
@@ -3699,12 +3698,12 @@ func TestGetFlushAllState(t *testing.T) {
 			}
 
 			if test.DescribeCollectionFailed {
-				svr.rootCoordClient.(*mocks.RootCoord).EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+				svr.rootCoordClient.(*mocks.MockRootCoordClient).EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
 					Return(&milvuspb.DescribeCollectionResponse{
 						Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
 					}, nil).Maybe()
 			} else {
-				svr.rootCoordClient.(*mocks.RootCoord).EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+				svr.rootCoordClient.(*mocks.MockRootCoordClient).EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
 					Return(&milvuspb.DescribeCollectionResponse{
 						Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 						VirtualChannelNames: vchannels,
@@ -3754,30 +3753,30 @@ func TestGetFlushAllStateWithDB(t *testing.T) {
 			svr.stateCode.Store(commonpb.StateCode_Healthy)
 			var err error
 			svr.meta = &meta{}
-			svr.rootCoordClient = mocks.NewRootCoord(t)
+			svr.rootCoordClient = mocks.NewMockRootCoordClient(t)
 			svr.broker = NewCoordinatorBroker(svr.rootCoordClient)
 
 			if test.DbExist {
-				svr.rootCoordClient.(*mocks.RootCoord).EXPECT().ListDatabases(mock.Anything, mock.Anything).
+				svr.rootCoordClient.(*mocks.MockRootCoordClient).EXPECT().ListDatabases(mock.Anything, mock.Anything).
 					Return(&milvuspb.ListDatabasesResponse{
 						DbNames: []string{dbName},
 						Status:  &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 					}, nil).Maybe()
 			} else {
-				svr.rootCoordClient.(*mocks.RootCoord).EXPECT().ListDatabases(mock.Anything, mock.Anything).
+				svr.rootCoordClient.(*mocks.MockRootCoordClient).EXPECT().ListDatabases(mock.Anything, mock.Anything).
 					Return(&milvuspb.ListDatabasesResponse{
 						DbNames: []string{},
 						Status:  &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 					}, nil).Maybe()
 			}
 
-			svr.rootCoordClient.(*mocks.RootCoord).EXPECT().ShowCollections(mock.Anything, mock.Anything).
+			svr.rootCoordClient.(*mocks.MockRootCoordClient).EXPECT().ShowCollections(mock.Anything, mock.Anything).
 				Return(&milvuspb.ShowCollectionsResponse{
 					Status:        &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 					CollectionIds: []int64{collectionID},
 				}, nil).Maybe()
 
-			svr.rootCoordClient.(*mocks.RootCoord).EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+			svr.rootCoordClient.(*mocks.MockRootCoordClient).EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
 				Return(&milvuspb.DescribeCollectionResponse{
 					Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 					VirtualChannelNames: vchannels,
@@ -4200,11 +4199,11 @@ func newTestServer(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 	svr.SetEtcdClient(etcdCli)
 	svr.SetTiKVClient(global_test_tikv)
 
-	svr.dataNodeCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNode, error) {
+	svr.dataNodeCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
 		return newMockDataNodeClient(0, receiveCh)
 	}
-	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
-		return newMockRootCoordService(), nil
+	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+		return newMockRootCoordClient(), nil
 	}
 
 	for _, opt := range opts {
@@ -4254,11 +4253,11 @@ func newTestServerWithMeta(t *testing.T, receiveCh chan any, meta *meta, opts ..
 	svr.SetEtcdClient(etcdCli)
 	svr.SetTiKVClient(global_test_tikv)
 
-	svr.dataNodeCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNode, error) {
+	svr.dataNodeCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
 		return newMockDataNodeClient(0, receiveCh)
 	}
-	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
-		return newMockRootCoordService(), nil
+	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+		return newMockRootCoordClient(), nil
 	}
 	// indexCoord := mocks.NewMockIndexCoord(t)
 	// indexCoord.EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
@@ -4311,11 +4310,11 @@ func newTestServer2(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 	svr.SetEtcdClient(etcdCli)
 	svr.SetTiKVClient(global_test_tikv)
 
-	svr.dataNodeCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNode, error) {
+	svr.dataNodeCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
 		return newMockDataNodeClient(0, receiveCh)
 	}
-	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
-		return newMockRootCoordService(), nil
+	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+		return newMockRootCoordClient(), nil
 	}
 
 	err = svr.Init()
@@ -4357,7 +4356,7 @@ func Test_CheckHealth(t *testing.T) {
 			data map[int64]*Session
 		}{data: map[int64]*Session{1: {
 			client: healthClient,
-			clientCreator: func(ctx context.Context, addr string, nodeID int64) (types.DataNode, error) {
+			clientCreator: func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
 				return healthClient, nil
 			},
 		}}}
@@ -4383,7 +4382,7 @@ func Test_CheckHealth(t *testing.T) {
 			data map[int64]*Session
 		}{data: map[int64]*Session{1: {
 			client: unhealthClient,
-			clientCreator: func(ctx context.Context, addr string, nodeID int64) (types.DataNode, error) {
+			clientCreator: func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
 				return unhealthClient, nil
 			},
 		}}}
@@ -4507,13 +4506,13 @@ func testDataCoordBase(t *testing.T, opts ...Option) *Server {
 	svr.SetEtcdClient(etcdCli)
 	svr.SetTiKVClient(global_test_tikv)
 
-	svr.SetDataNodeCreator(func(ctx context.Context, addr string, nodeID int64) (types.DataNode, error) {
+	svr.SetDataNodeCreator(func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
 		return newMockDataNodeClient(0, nil)
 	})
-	svr.SetIndexNodeCreator(func(ctx context.Context, addr string, nodeID int64) (types.IndexNode, error) {
-		return indexnode.NewMockIndexNodeComponent(ctx)
+	svr.SetIndexNodeCreator(func(ctx context.Context, addr string, nodeID int64) (types.IndexNodeClient, error) {
+		return &grpcmock.GrpcIndexNodeClient{Err: nil}, nil
 	})
-	svr.SetRootCoord(newMockRootCoordService())
+	svr.SetRootCoordClient(newMockRootCoordClient())
 
 	err = svr.Init()
 	assert.NoError(t, err)
@@ -4522,7 +4521,7 @@ func testDataCoordBase(t *testing.T, opts ...Option) *Server {
 	err = svr.Register()
 	assert.NoError(t, err)
 
-	resp, err := svr.GetComponentStates(context.Background())
+	resp, err := svr.GetComponentStates(context.Background(), nil)
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	assert.Equal(t, commonpb.StateCode_Healthy, resp.GetState().GetStateCode())

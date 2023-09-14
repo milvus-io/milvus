@@ -30,6 +30,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -570,8 +571,6 @@ func TestTranslateOutputFields(t *testing.T) {
 
 func TestCreateCollectionTask(t *testing.T) {
 	rc := NewRootCoordMock()
-	rc.Start()
-	defer rc.Stop()
 	ctx := context.Background()
 	shardsNum := common.DefaultShardsNum
 	prefix := "TestCreateCollectionTask"
@@ -884,11 +883,10 @@ func TestCreateCollectionTask(t *testing.T) {
 
 func TestHasCollectionTask(t *testing.T) {
 	rc := NewRootCoordMock()
-	rc.Start()
-	defer rc.Stop()
-	qc := getQueryCoord()
-	qc.Start()
-	defer qc.Stop()
+
+	defer rc.Close()
+	qc := getQueryCoordClient()
+
 	ctx := context.Background()
 	mgr := newShardClientMgr()
 	InitMetaCache(ctx, rc, qc, mgr)
@@ -968,11 +966,10 @@ func TestHasCollectionTask(t *testing.T) {
 
 func TestDescribeCollectionTask(t *testing.T) {
 	rc := NewRootCoordMock()
-	rc.Start()
-	defer rc.Stop()
-	qc := getQueryCoord()
-	qc.Start()
-	defer qc.Stop()
+
+	defer rc.Close()
+	qc := getQueryCoordClient()
+
 	ctx := context.Background()
 	mgr := newShardClientMgr()
 	InitMetaCache(ctx, rc, qc, mgr)
@@ -1018,7 +1015,7 @@ func TestDescribeCollectionTask(t *testing.T) {
 	err = task.PreExecute(ctx)
 	assert.NoError(t, err)
 
-	rc.Stop()
+	rc.Close()
 	task.CollectionID = 0
 	task.CollectionName = collectionName
 	err = task.PreExecute(ctx)
@@ -1030,11 +1027,10 @@ func TestDescribeCollectionTask(t *testing.T) {
 
 func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
 	rc := NewRootCoordMock()
-	rc.Start()
-	defer rc.Stop()
-	qc := getQueryCoord()
-	qc.Start()
-	defer qc.Stop()
+
+	defer rc.Close()
+	qc := getQueryCoordClient()
+
 	ctx := context.Background()
 	mgr := newShardClientMgr()
 	InitMetaCache(ctx, rc, qc, mgr)
@@ -1094,11 +1090,8 @@ func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
 
 func TestDescribeCollectionTask_EnableDynamicSchema(t *testing.T) {
 	rc := NewRootCoordMock()
-	rc.Start()
-	defer rc.Stop()
-	qc := getQueryCoord()
-	qc.Start()
-	defer qc.Stop()
+	defer rc.Close()
+	qc := getQueryCoordClient()
 	ctx := context.Background()
 	mgr := newShardClientMgr()
 	InitMetaCache(ctx, rc, qc, mgr)
@@ -1159,11 +1152,10 @@ func TestDescribeCollectionTask_EnableDynamicSchema(t *testing.T) {
 
 func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
 	rc := NewRootCoordMock()
-	rc.Start()
-	defer rc.Stop()
-	qc := getQueryCoord()
-	qc.Start()
-	defer qc.Stop()
+
+	defer rc.Close()
+	qc := getQueryCoordClient()
+
 	ctx := context.Background()
 	mgr := newShardClientMgr()
 	InitMetaCache(ctx, rc, qc, mgr)
@@ -1220,13 +1212,13 @@ func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
 	assert.Equal(t, commonpb.ErrorCode_Success, task.result.GetStatus().GetErrorCode())
 	assert.Equal(t, common.DefaultShardsNum, task.result.ShardsNum)
 	assert.Equal(t, collectionName, task.result.GetCollectionName())
-	rc.Stop()
+	rc.Close()
 }
 
 func TestCreatePartitionTask(t *testing.T) {
 	rc := NewRootCoordMock()
-	rc.Start()
-	defer rc.Stop()
+
+	defer rc.Close()
 	ctx := context.Background()
 	prefix := "TestCreatePartitionTask"
 	dbName := ""
@@ -1271,14 +1263,14 @@ func TestCreatePartitionTask(t *testing.T) {
 
 func TestDropPartitionTask(t *testing.T) {
 	rc := NewRootCoordMock()
-	rc.Start()
-	defer rc.Stop()
+
+	defer rc.Close()
 	ctx := context.Background()
 	prefix := "TestDropPartitionTask"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
 	partitionName := prefix + funcutil.GenRandomStr()
-	qc := getQueryCoord()
+	qc := getQueryCoordClient()
 	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
 		Status:       merr.Status(nil),
 		PartitionIDs: []int64{},
@@ -1417,8 +1409,8 @@ func TestDropPartitionTask(t *testing.T) {
 
 func TestHasPartitionTask(t *testing.T) {
 	rc := NewRootCoordMock()
-	rc.Start()
-	defer rc.Stop()
+
+	defer rc.Close()
 	ctx := context.Background()
 	prefix := "TestHasPartitionTask"
 	dbName := ""
@@ -1463,8 +1455,8 @@ func TestHasPartitionTask(t *testing.T) {
 
 func TestShowPartitionsTask(t *testing.T) {
 	rc := NewRootCoordMock()
-	rc.Start()
-	defer rc.Stop()
+
+	defer rc.Close()
 	ctx := context.Background()
 	prefix := "TestShowPartitionsTask"
 	dbName := ""
@@ -1519,11 +1511,9 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 	var err error
 
 	rc := NewRootCoordMock()
-	rc.Start()
-	defer rc.Stop()
-	qc := getQueryCoord()
-	qc.Start()
-	defer qc.Stop()
+
+	defer rc.Close()
+	qc := getQueryCoordClient()
 
 	ctx := context.Background()
 
@@ -1764,11 +1754,9 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 	var err error
 
 	rc := NewRootCoordMock()
-	rc.Start()
-	defer rc.Stop()
-	qc := getQueryCoord()
-	qc.Start()
-	defer qc.Stop()
+
+	defer rc.Close()
+	qc := getQueryCoordClient()
 
 	ctx := context.Background()
 
@@ -2051,8 +2039,8 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 
 func TestCreateAlias_all(t *testing.T) {
 	rc := NewRootCoordMock()
-	rc.Start()
-	defer rc.Stop()
+
+	defer rc.Close()
 	ctx := context.Background()
 	prefix := "TestCreateAlias_all"
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -2090,8 +2078,8 @@ func TestCreateAlias_all(t *testing.T) {
 
 func TestDropAlias_all(t *testing.T) {
 	rc := NewRootCoordMock()
-	rc.Start()
-	defer rc.Stop()
+
+	defer rc.Close()
 	ctx := context.Background()
 	task := &DropAliasTask{
 		Condition: NewTaskCondition(ctx),
@@ -2125,8 +2113,8 @@ func TestDropAlias_all(t *testing.T) {
 
 func TestAlterAlias_all(t *testing.T) {
 	rc := NewRootCoordMock()
-	rc.Start()
-	defer rc.Stop()
+
+	defer rc.Close()
 	ctx := context.Background()
 	prefix := "TestAlterAlias_all"
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -2484,11 +2472,12 @@ func Test_dropCollectionTask_PreExecute(t *testing.T) {
 }
 
 func Test_dropCollectionTask_Execute(t *testing.T) {
-	mockRC := mocks.NewRootCoord(t)
+	mockRC := mocks.NewMockRootCoordClient(t)
 	mockRC.On("DropCollection",
 		mock.Anything, // context.Context
 		mock.Anything, // *milvuspb.DropCollectionRequest
-	).Return(&commonpb.Status{}, func(ctx context.Context, request *milvuspb.DropCollectionRequest) error {
+		mock.Anything,
+	).Return(&commonpb.Status{}, func(ctx context.Context, request *milvuspb.DropCollectionRequest, opts ...grpc.CallOption) error {
 		switch request.GetCollectionName() {
 		case "c1":
 			return errors.New("error mock DropCollection")
@@ -2524,12 +2513,12 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 	rc := newMockRootCoord()
 	dc := NewDataCoordMock()
 
-	qc := getQueryCoord()
-	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
+	qc := getQueryCoordClient()
+	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
 		Status:       merr.Status(nil),
 		PartitionIDs: []int64{},
 	}, nil)
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 		Status: merr.Status(nil),
 	}, nil)
 
@@ -2545,7 +2534,7 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 	// failed to get collection id.
 	_ = InitMetaCache(ctx, rc, qc, shardMgr)
 
-	rc.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	rc.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
 		return &milvuspb.DescribeCollectionResponse{
 			Status:         merr.Status(nil),
 			Schema:         newTestSchema(),
@@ -2580,7 +2569,7 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 	})
 
 	t.Run("indexcoord describe index not success", func(t *testing.T) {
-		dc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
+		dc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
 			return &indexpb.DescribeIndexResponse{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -2594,7 +2583,7 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 	})
 
 	t.Run("no vector index", func(t *testing.T) {
-		dc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
+		dc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
 			return &indexpb.DescribeIndexResponse{
 				Status: merr.Status(nil),
 				IndexInfos: []*indexpb.IndexInfo{
@@ -2625,7 +2614,7 @@ func Test_loadPartitionTask_Execute(t *testing.T) {
 	rc := newMockRootCoord()
 	dc := NewDataCoordMock()
 
-	qc := getQueryCoord()
+	qc := getQueryCoordClient()
 	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
 		Status:       merr.Status(nil),
 		PartitionIDs: []int64{},
@@ -2646,7 +2635,7 @@ func Test_loadPartitionTask_Execute(t *testing.T) {
 	// failed to get collection id.
 	_ = InitMetaCache(ctx, rc, qc, shardMgr)
 
-	rc.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	rc.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
 		return &milvuspb.DescribeCollectionResponse{
 			Status:         merr.Status(nil),
 			Schema:         newTestSchema(),
@@ -2681,7 +2670,7 @@ func Test_loadPartitionTask_Execute(t *testing.T) {
 	})
 
 	t.Run("indexcoord describe index not success", func(t *testing.T) {
-		dc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
+		dc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
 			return &indexpb.DescribeIndexResponse{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -2695,7 +2684,7 @@ func Test_loadPartitionTask_Execute(t *testing.T) {
 	})
 
 	t.Run("no vector index", func(t *testing.T) {
-		dc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
+		dc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
 			return &indexpb.DescribeIndexResponse{
 				Status: merr.Status(nil),
 				IndexInfos: []*indexpb.IndexInfo{
@@ -2724,12 +2713,11 @@ func Test_loadPartitionTask_Execute(t *testing.T) {
 
 func TestCreateResourceGroupTask(t *testing.T) {
 	rc := NewRootCoordMock()
-	rc.Start()
-	defer rc.Stop()
-	qc := getQueryCoord()
-	qc.EXPECT().CreateResourceGroup(mock.Anything, mock.Anything).Return(merr.Status(nil), nil)
-	qc.Start()
-	defer qc.Stop()
+
+	defer rc.Close()
+	qc := getQueryCoordClient()
+	qc.EXPECT().CreateResourceGroup(mock.Anything, mock.Anything, mock.Anything).Return(merr.Status(nil), nil)
+
 	ctx := context.Background()
 	mgr := newShardClientMgr()
 	InitMetaCache(ctx, rc, qc, mgr)
@@ -2764,12 +2752,11 @@ func TestCreateResourceGroupTask(t *testing.T) {
 
 func TestDropResourceGroupTask(t *testing.T) {
 	rc := NewRootCoordMock()
-	rc.Start()
-	defer rc.Stop()
-	qc := getQueryCoord()
+
+	defer rc.Close()
+	qc := getQueryCoordClient()
 	qc.EXPECT().DropResourceGroup(mock.Anything, mock.Anything).Return(merr.Status(nil), nil)
-	qc.Start()
-	defer qc.Stop()
+
 	ctx := context.Background()
 	mgr := newShardClientMgr()
 	InitMetaCache(ctx, rc, qc, mgr)
@@ -2804,12 +2791,11 @@ func TestDropResourceGroupTask(t *testing.T) {
 
 func TestTransferNodeTask(t *testing.T) {
 	rc := NewRootCoordMock()
-	rc.Start()
-	defer rc.Stop()
-	qc := getQueryCoord()
+
+	defer rc.Close()
+	qc := getQueryCoordClient()
 	qc.EXPECT().TransferNode(mock.Anything, mock.Anything).Return(merr.Status(nil), nil)
-	qc.Start()
-	defer qc.Stop()
+
 	ctx := context.Background()
 	mgr := newShardClientMgr()
 	InitMetaCache(ctx, rc, qc, mgr)
@@ -2846,10 +2832,9 @@ func TestTransferNodeTask(t *testing.T) {
 
 func TestTransferReplicaTask(t *testing.T) {
 	rc := &MockRootCoordClientInterface{}
-	qc := getQueryCoord()
+	qc := getQueryCoordClient()
 	qc.EXPECT().TransferReplica(mock.Anything, mock.Anything).Return(merr.Status(nil), nil)
-	qc.Start()
-	defer qc.Stop()
+
 	ctx := context.Background()
 	mgr := newShardClientMgr()
 	InitMetaCache(ctx, rc, qc, mgr)
@@ -2889,13 +2874,12 @@ func TestTransferReplicaTask(t *testing.T) {
 
 func TestListResourceGroupsTask(t *testing.T) {
 	rc := &MockRootCoordClientInterface{}
-	qc := getQueryCoord()
+	qc := getQueryCoordClient()
 	qc.EXPECT().ListResourceGroups(mock.Anything, mock.Anything).Return(&milvuspb.ListResourceGroupsResponse{
 		Status:         merr.Status(nil),
 		ResourceGroups: []string{meta.DefaultResourceGroupName, "rg"},
 	}, nil)
-	qc.Start()
-	defer qc.Stop()
+
 	ctx := context.Background()
 	mgr := newShardClientMgr()
 	InitMetaCache(ctx, rc, qc, mgr)
@@ -2932,7 +2916,7 @@ func TestListResourceGroupsTask(t *testing.T) {
 
 func TestDescribeResourceGroupTask(t *testing.T) {
 	rc := &MockRootCoordClientInterface{}
-	qc := getQueryCoord()
+	qc := getQueryCoordClient()
 	qc.EXPECT().DescribeResourceGroup(mock.Anything, mock.Anything).Return(&querypb.DescribeResourceGroupResponse{
 		Status: merr.Status(nil),
 		ResourceGroup: &querypb.ResourceGroupInfo{
@@ -2943,8 +2927,7 @@ func TestDescribeResourceGroupTask(t *testing.T) {
 			NumIncomingNode:  map[int64]int32{2: 2},
 		},
 	}, nil)
-	qc.Start()
-	defer qc.Stop()
+
 	ctx := context.Background()
 	mgr := newShardClientMgr()
 	InitMetaCache(ctx, rc, qc, mgr)
@@ -2987,12 +2970,10 @@ func TestDescribeResourceGroupTask(t *testing.T) {
 
 func TestDescribeResourceGroupTaskFailed(t *testing.T) {
 	rc := &MockRootCoordClientInterface{}
-	qc := getQueryCoord()
+	qc := getQueryCoordClient()
 	qc.EXPECT().DescribeResourceGroup(mock.Anything, mock.Anything).Return(&querypb.DescribeResourceGroupResponse{
 		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
 	}, nil)
-	qc.Start()
-	defer qc.Stop()
 	ctx := context.Background()
 	mgr := newShardClientMgr()
 	InitMetaCache(ctx, rc, qc, mgr)
@@ -3028,7 +3009,6 @@ func TestDescribeResourceGroupTaskFailed(t *testing.T) {
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, task.result.GetStatus().GetErrorCode())
 
 	qc.ExpectedCalls = nil
-	qc.EXPECT().Stop().Return(nil)
 	qc.EXPECT().DescribeResourceGroup(mock.Anything, mock.Anything).Return(&querypb.DescribeResourceGroupResponse{
 		Status: merr.Status(nil),
 		ResourceGroup: &querypb.ResourceGroupInfo{
@@ -3047,8 +3027,8 @@ func TestDescribeResourceGroupTaskFailed(t *testing.T) {
 
 func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 	rc := NewRootCoordMock()
-	rc.Start()
-	defer rc.Stop()
+
+	defer rc.Close()
 	ctx := context.Background()
 	shardsNum := common.DefaultShardsNum
 	prefix := "TestCreateCollectionTaskWithPartitionKey"
@@ -3254,11 +3234,9 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 
 func TestPartitionKey(t *testing.T) {
 	rc := NewRootCoordMock()
-	rc.Start()
-	defer rc.Stop()
-	qc := getQueryCoord()
-	qc.Start()
-	defer qc.Stop()
+
+	defer rc.Close()
+	qc := getQueryCoordClient()
 
 	ctx := context.Background()
 

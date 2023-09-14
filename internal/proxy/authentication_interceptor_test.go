@@ -32,7 +32,7 @@ func TestValidAuth(t *testing.T) {
 	assert.False(t, res)
 	// normal metadata
 	rootCoord := &MockRootCoordClientInterface{}
-	queryCoord := &mocks.MockQueryCoord{}
+	queryCoord := &mocks.MockQueryCoordClient{}
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.NoError(t, err)
@@ -65,7 +65,7 @@ func TestAuthenticationInterceptor(t *testing.T) {
 	assert.Error(t, err)
 	// mock metacache
 	rootCoord := &MockRootCoordClientInterface{}
-	queryCoord := &mocks.MockQueryCoord{}
+	queryCoord := &mocks.MockQueryCoordClient{}
 	mgr := newShardClientMgr()
 	err = InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.NoError(t, err)

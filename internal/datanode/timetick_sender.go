@@ -39,7 +39,7 @@ import (
 // after send succeeds will clean the cache earlier than the sended timestamp
 type timeTickSender struct {
 	nodeID    int64
-	dataCoord types.DataCoord
+	dataCoord types.DataCoordClient
 
 	mu                  sync.Mutex
 	channelStatesCaches map[string]*segmentStatesSequence // string -> *segmentStatesSequence
@@ -50,7 +50,7 @@ type segmentStatesSequence struct {
 	data map[uint64][]*commonpb.SegmentStats // ts -> segmentStats
 }
 
-func newTimeTickSender(dataCoord types.DataCoord, nodeID int64) *timeTickSender {
+func newTimeTickSender(dataCoord types.DataCoordClient, nodeID int64) *timeTickSender {
 	return &timeTickSender{
 		nodeID:              nodeID,
 		dataCoord:           dataCoord,

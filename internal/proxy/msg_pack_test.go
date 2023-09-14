@@ -45,8 +45,7 @@ func TestRepackInsertData(t *testing.T) {
 	ctx := context.Background()
 
 	rc := NewRootCoordMock()
-	rc.Start()
-	defer rc.Stop()
+	defer rc.Close()
 
 	cache := NewMockCache(t)
 	cache.On("GetPartitionID",
@@ -152,8 +151,7 @@ func TestRepackInsertDataWithPartitionKey(t *testing.T) {
 	dbName := GetCurDBNameFromContextOrDefault(ctx)
 
 	rc := NewRootCoordMock()
-	rc.Start()
-	defer rc.Stop()
+	defer rc.Close()
 
 	err := InitMetaCache(ctx, rc, nil, nil)
 	assert.NoError(t, err)

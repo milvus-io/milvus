@@ -44,10 +44,10 @@ type Broker interface {
 }
 
 type CoordinatorBroker struct {
-	rootCoord types.RootCoord
+	rootCoord types.RootCoordClient
 }
 
-func NewCoordinatorBroker(rootCoord types.RootCoord) *CoordinatorBroker {
+func NewCoordinatorBroker(rootCoord types.RootCoordClient) *CoordinatorBroker {
 	return &CoordinatorBroker{
 		rootCoord: rootCoord,
 	}

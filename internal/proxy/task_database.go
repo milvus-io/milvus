@@ -14,7 +14,7 @@ type createDatabaseTask struct {
 	Condition
 	*milvuspb.CreateDatabaseRequest
 	ctx       context.Context
-	rootCoord types.RootCoord
+	rootCoord types.RootCoordClient
 	result    *commonpb.Status
 }
 
@@ -76,7 +76,7 @@ type dropDatabaseTask struct {
 	Condition
 	*milvuspb.DropDatabaseRequest
 	ctx       context.Context
-	rootCoord types.RootCoord
+	rootCoord types.RootCoordClient
 	result    *commonpb.Status
 }
 
@@ -142,7 +142,7 @@ type listDatabaseTask struct {
 	Condition
 	*milvuspb.ListDatabasesRequest
 	ctx       context.Context
-	rootCoord types.RootCoord
+	rootCoord types.RootCoordClient
 	result    *milvuspb.ListDatabasesResponse
 }
 

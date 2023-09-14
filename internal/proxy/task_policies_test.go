@@ -57,7 +57,7 @@ type mockQuery struct {
 	failset  map[UniqueID]error
 }
 
-func (m *mockQuery) query(_ context.Context, nodeID UniqueID, qn types.QueryNode, chs ...string) error {
+func (m *mockQuery) query(_ context.Context, nodeID UniqueID, qn types.QueryNodeClient, chs ...string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err, ok := m.failset[nodeID]; ok {

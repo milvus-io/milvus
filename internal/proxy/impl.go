@@ -69,7 +69,7 @@ func (node *Proxy) UpdateStateCode(code commonpb.StateCode) {
 }
 
 // GetComponentStates gets the state of Proxy.
-func (node *Proxy) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+func (node *Proxy) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	stats := &milvuspb.ComponentStates{
 		Status: merr.Status(nil),
 	}
@@ -97,7 +97,7 @@ func (node *Proxy) GetComponentStates(ctx context.Context) (*milvuspb.ComponentS
 }
 
 // GetStatisticsChannel gets statistics channel of Proxy.
-func (node *Proxy) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (node *Proxy) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: merr.Status(nil),
 		Value:  "",
@@ -1576,7 +1576,7 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 
 	// TODO(longjiquan): https://github.com/milvus-io/milvus/issues/21485, Remove `GetComponentStates` after error code
 	// 	is ready to distinguish case whether the querycoord is not healthy or the collection is not even loaded.
-	if statesResp, err := node.queryCoord.GetComponentStates(ctx); err != nil {
+	if statesResp, err := node.queryCoord.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{}); err != nil {
 		return getErrResponse(err), nil
 	} else if statesResp.State == nil || statesResp.State.StateCode != commonpb.StateCode_Healthy {
 		return getErrResponse(fmt.Errorf("the querycoord server isn't healthy, state: %v", statesResp.State)), nil
@@ -4983,5 +4983,12 @@ func (node *Proxy) AllocTimestamp(ctx context.Context, req *milvuspb.AllocTimest
 	return &milvuspb.AllocTimestampResponse{
 		Status:    merr.Status(nil),
 		Timestamp: ts,
+	}, nil
+}
+
+func (node *Proxy) GetVersion(ctx context.Context, request *milvuspb.GetVersionRequest) (*milvuspb.GetVersionResponse, error) {
+	// TODO implement me
+	return &milvuspb.GetVersionResponse{
+		Status: merr.Status(nil),
 	}, nil
 }

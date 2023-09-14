@@ -25,6 +25,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -41,7 +42,7 @@ const (
 
 // DataCoord is a narrowed interface of DataCoordinator which only provide AssignSegmentID method
 type DataCoord interface {
-	AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error)
+	AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest, opts ...grpc.CallOption) (*datapb.AssignSegmentIDResponse, error)
 }
 
 type segRequest struct {

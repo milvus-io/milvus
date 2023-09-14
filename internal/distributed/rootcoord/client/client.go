@@ -74,10 +74,6 @@ func NewClient(ctx context.Context, metaRoot string, etcdCli *clientv3.Client) (
 }
 
 // Init initialize grpc parameters
-func (c *Client) Init() error {
-	return nil
-}
-
 func (c *Client) newGrpcClient(cc *grpc.ClientConn) rootcoordpb.RootCoordClient {
 	return rootcoordpb.NewRootCoordClient(cc)
 }
@@ -102,19 +98,9 @@ func (c *Client) getRootCoordAddr() (string, error) {
 	return ms.Address, nil
 }
 
-// Start dummy
-func (c *Client) Start() error {
-	return nil
-}
-
-// Stop terminate grpc connection
-func (c *Client) Stop() error {
+// Close terminate grpc connection
+func (c *Client) Close() error {
 	return c.grpcClient.Close()
-}
-
-// Register dummy
-func (c *Client) Register() error {
-	return nil
 }
 
 func wrapGrpcCall[T any](ctx context.Context, c *Client, call func(grpcClient rootcoordpb.RootCoordClient) (*T, error)) (*T, error) {
@@ -131,28 +117,28 @@ func wrapGrpcCall[T any](ctx context.Context, c *Client, call func(grpcClient ro
 }
 
 // GetComponentStates TODO: timeout need to be propagated through ctx
-func (c *Client) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+func (c *Client) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error) {
 	return wrapGrpcCall(ctx, c, func(client rootcoordpb.RootCoordClient) (*milvuspb.ComponentStates, error) {
 		return client.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 	})
 }
 
 // GetTimeTickChannel get timetick channel name
-func (c *Client) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (c *Client) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
 	return wrapGrpcCall(ctx, c, func(client rootcoordpb.RootCoordClient) (*milvuspb.StringResponse, error) {
 		return client.GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
 	})
 }
 
 // GetStatisticsChannel just define a channel, not used currently
-func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (c *Client) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
 	return wrapGrpcCall(ctx, c, func(client rootcoordpb.RootCoordClient) (*milvuspb.StringResponse, error) {
 		return client.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
 	})
 }
 
 // CreateCollection create collection
-func (c *Client) CreateCollection(ctx context.Context, in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
+func (c *Client) CreateCollection(ctx context.Context, in *milvuspb.CreateCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	in = typeutil.Clone(in)
 	commonpbutil.UpdateMsgBase(
 		in.GetBase(),
@@ -164,7 +150,7 @@ func (c *Client) CreateCollection(ctx context.Context, in *milvuspb.CreateCollec
 }
 
 // DropCollection drop collection
-func (c *Client) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
+func (c *Client) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	in = typeutil.Clone(in)
 	commonpbutil.UpdateMsgBase(
 		in.GetBase(),
@@ -176,7 +162,7 @@ func (c *Client) DropCollection(ctx context.Context, in *milvuspb.DropCollection
 }
 
 // HasCollection check collection existence
-func (c *Client) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
+func (c *Client) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest, opts ...grpc.CallOption) (*milvuspb.BoolResponse, error) {
 	in = typeutil.Clone(in)
 	commonpbutil.UpdateMsgBase(
 		in.GetBase(),
@@ -188,7 +174,7 @@ func (c *Client) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRe
 }
 
 // DescribeCollection return collection info
-func (c *Client) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+func (c *Client) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
 	in = typeutil.Clone(in)
 	commonpbutil.UpdateMsgBase(
 		in.GetBase(),
@@ -200,7 +186,7 @@ func (c *Client) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCo
 }
 
 // describeCollectionInternal return collection info
-func (c *Client) describeCollectionInternal(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+func (c *Client) describeCollectionInternal(ctx context.Context, in *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
 	in = typeutil.Clone(in)
 	commonpbutil.UpdateMsgBase(
 		in.GetBase(),
@@ -211,7 +197,7 @@ func (c *Client) describeCollectionInternal(ctx context.Context, in *milvuspb.De
 	})
 }
 
-func (c *Client) DescribeCollectionInternal(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+func (c *Client) DescribeCollectionInternal(ctx context.Context, in *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
 	resp, err := c.describeCollectionInternal(ctx, in)
 	status, ok := grpcStatus.FromError(err)
 	if ok && status.Code() == grpcCodes.Unimplemented {
@@ -221,7 +207,7 @@ func (c *Client) DescribeCollectionInternal(ctx context.Context, in *milvuspb.De
 }
 
 // ShowCollections list all collection names
-func (c *Client) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
+func (c *Client) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowCollectionsResponse, error) {
 	in = typeutil.Clone(in)
 	commonpbutil.UpdateMsgBase(
 		in.GetBase(),
@@ -232,7 +218,7 @@ func (c *Client) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectio
 	})
 }
 
-func (c *Client) AlterCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+func (c *Client) AlterCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	request = typeutil.Clone(request)
 	commonpbutil.UpdateMsgBase(
 		request.GetBase(),
@@ -244,7 +230,7 @@ func (c *Client) AlterCollection(ctx context.Context, request *milvuspb.AlterCol
 }
 
 // CreatePartition create partition
-func (c *Client) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
+func (c *Client) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	in = typeutil.Clone(in)
 	commonpbutil.UpdateMsgBase(
 		in.GetBase(),
@@ -256,7 +242,7 @@ func (c *Client) CreatePartition(ctx context.Context, in *milvuspb.CreatePartiti
 }
 
 // DropPartition drop partition
-func (c *Client) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
+func (c *Client) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	in = typeutil.Clone(in)
 	commonpbutil.UpdateMsgBase(
 		in.GetBase(),
@@ -268,7 +254,7 @@ func (c *Client) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRe
 }
 
 // HasPartition check partition existence
-func (c *Client) HasPartition(ctx context.Context, in *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
+func (c *Client) HasPartition(ctx context.Context, in *milvuspb.HasPartitionRequest, opts ...grpc.CallOption) (*milvuspb.BoolResponse, error) {
 	in = typeutil.Clone(in)
 	commonpbutil.UpdateMsgBase(
 		in.GetBase(),
@@ -280,7 +266,7 @@ func (c *Client) HasPartition(ctx context.Context, in *milvuspb.HasPartitionRequ
 }
 
 // ShowPartitions list all partitions in collection
-func (c *Client) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+func (c *Client) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error) {
 	in = typeutil.Clone(in)
 	commonpbutil.UpdateMsgBase(
 		in.GetBase(),
@@ -292,7 +278,7 @@ func (c *Client) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitions
 }
 
 // showPartitionsInternal list all partitions in collection
-func (c *Client) showPartitionsInternal(ctx context.Context, in *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+func (c *Client) showPartitionsInternal(ctx context.Context, in *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error) {
 	in = typeutil.Clone(in)
 	commonpbutil.UpdateMsgBase(
 		in.GetBase(),
@@ -303,7 +289,7 @@ func (c *Client) showPartitionsInternal(ctx context.Context, in *milvuspb.ShowPa
 	})
 }
 
-func (c *Client) ShowPartitionsInternal(ctx context.Context, in *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+func (c *Client) ShowPartitionsInternal(ctx context.Context, in *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error) {
 	resp, err := c.showPartitionsInternal(ctx, in)
 	status, ok := grpcStatus.FromError(err)
 	if ok && status.Code() == grpcCodes.Unimplemented {
@@ -313,7 +299,7 @@ func (c *Client) ShowPartitionsInternal(ctx context.Context, in *milvuspb.ShowPa
 }
 
 // AllocTimestamp global timestamp allocator
-func (c *Client) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
+func (c *Client) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestampRequest, opts ...grpc.CallOption) (*rootcoordpb.AllocTimestampResponse, error) {
 	in = typeutil.Clone(in)
 	commonpbutil.UpdateMsgBase(
 		in.GetBase(),
@@ -325,7 +311,7 @@ func (c *Client) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimest
 }
 
 // AllocID global ID allocator
-func (c *Client) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
+func (c *Client) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest, opts ...grpc.CallOption) (*rootcoordpb.AllocIDResponse, error) {
 	in = typeutil.Clone(in)
 	commonpbutil.UpdateMsgBase(
 		in.GetBase(),
@@ -337,7 +323,7 @@ func (c *Client) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest) (*
 }
 
 // UpdateChannelTimeTick used to handle ChannelTimeTickMsg
-func (c *Client) UpdateChannelTimeTick(ctx context.Context, in *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error) {
+func (c *Client) UpdateChannelTimeTick(ctx context.Context, in *internalpb.ChannelTimeTickMsg, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	in = typeutil.Clone(in)
 	commonpbutil.UpdateMsgBase(
 		in.GetBase(),
@@ -349,7 +335,7 @@ func (c *Client) UpdateChannelTimeTick(ctx context.Context, in *internalpb.Chann
 }
 
 // ShowSegments list all segments
-func (c *Client) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error) {
+func (c *Client) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequest, opts ...grpc.CallOption) (*milvuspb.ShowSegmentsResponse, error) {
 	in = typeutil.Clone(in)
 	commonpbutil.UpdateMsgBase(
 		in.GetBase(),
@@ -361,7 +347,7 @@ func (c *Client) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequ
 }
 
 // InvalidateCollectionMetaCache notifies RootCoord to release the collection cache in Proxies.
-func (c *Client) InvalidateCollectionMetaCache(ctx context.Context, in *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+func (c *Client) InvalidateCollectionMetaCache(ctx context.Context, in *proxypb.InvalidateCollMetaCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	in = typeutil.Clone(in)
 	commonpbutil.UpdateMsgBase(
 		in.GetBase(),
@@ -373,7 +359,7 @@ func (c *Client) InvalidateCollectionMetaCache(ctx context.Context, in *proxypb.
 }
 
 // ShowConfigurations gets specified configurations para of RootCoord
-func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest, opts ...grpc.CallOption) (*internalpb.ShowConfigurationsResponse, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
@@ -385,7 +371,7 @@ func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 }
 
 // GetMetrics get metrics
-func (c *Client) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+func (c *Client) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
 	in = typeutil.Clone(in)
 	commonpbutil.UpdateMsgBase(
 		in.GetBase(),
@@ -397,7 +383,7 @@ func (c *Client) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest)
 }
 
 // CreateAlias create collection alias
-func (c *Client) CreateAlias(ctx context.Context, req *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
+func (c *Client) CreateAlias(ctx context.Context, req *milvuspb.CreateAliasRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
@@ -409,7 +395,7 @@ func (c *Client) CreateAlias(ctx context.Context, req *milvuspb.CreateAliasReque
 }
 
 // DropAlias drop collection alias
-func (c *Client) DropAlias(ctx context.Context, req *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
+func (c *Client) DropAlias(ctx context.Context, req *milvuspb.DropAliasRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
@@ -421,7 +407,7 @@ func (c *Client) DropAlias(ctx context.Context, req *milvuspb.DropAliasRequest) 
 }
 
 // AlterAlias alter collection alias
-func (c *Client) AlterAlias(ctx context.Context, req *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
+func (c *Client) AlterAlias(ctx context.Context, req *milvuspb.AlterAliasRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
@@ -433,40 +419,40 @@ func (c *Client) AlterAlias(ctx context.Context, req *milvuspb.AlterAliasRequest
 }
 
 // Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
-func (c *Client) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
+func (c *Client) Import(ctx context.Context, req *milvuspb.ImportRequest, opts ...grpc.CallOption) (*milvuspb.ImportResponse, error) {
 	return wrapGrpcCall(ctx, c, func(client rootcoordpb.RootCoordClient) (*milvuspb.ImportResponse, error) {
 		return client.Import(ctx, req)
 	})
 }
 
 // Check import task state from datanode
-func (c *Client) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
+func (c *Client) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest, opts ...grpc.CallOption) (*milvuspb.GetImportStateResponse, error) {
 	return wrapGrpcCall(ctx, c, func(client rootcoordpb.RootCoordClient) (*milvuspb.GetImportStateResponse, error) {
 		return client.GetImportState(ctx, req)
 	})
 }
 
 // List id array of all import tasks
-func (c *Client) ListImportTasks(ctx context.Context, req *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
+func (c *Client) ListImportTasks(ctx context.Context, req *milvuspb.ListImportTasksRequest, opts ...grpc.CallOption) (*milvuspb.ListImportTasksResponse, error) {
 	return wrapGrpcCall(ctx, c, func(client rootcoordpb.RootCoordClient) (*milvuspb.ListImportTasksResponse, error) {
 		return client.ListImportTasks(ctx, req)
 	})
 }
 
 // Report impot task state to rootcoord
-func (c *Client) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult) (*commonpb.Status, error) {
+func (c *Client) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return wrapGrpcCall(ctx, c, func(client rootcoordpb.RootCoordClient) (*commonpb.Status, error) {
 		return client.ReportImport(ctx, req)
 	})
 }
 
-func (c *Client) CreateCredential(ctx context.Context, req *internalpb.CredentialInfo) (*commonpb.Status, error) {
+func (c *Client) CreateCredential(ctx context.Context, req *internalpb.CredentialInfo, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return wrapGrpcCall(ctx, c, func(client rootcoordpb.RootCoordClient) (*commonpb.Status, error) {
 		return client.CreateCredential(ctx, req)
 	})
 }
 
-func (c *Client) GetCredential(ctx context.Context, req *rootcoordpb.GetCredentialRequest) (*rootcoordpb.GetCredentialResponse, error) {
+func (c *Client) GetCredential(ctx context.Context, req *rootcoordpb.GetCredentialRequest, opts ...grpc.CallOption) (*rootcoordpb.GetCredentialResponse, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
@@ -477,13 +463,13 @@ func (c *Client) GetCredential(ctx context.Context, req *rootcoordpb.GetCredenti
 	})
 }
 
-func (c *Client) UpdateCredential(ctx context.Context, req *internalpb.CredentialInfo) (*commonpb.Status, error) {
+func (c *Client) UpdateCredential(ctx context.Context, req *internalpb.CredentialInfo, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return wrapGrpcCall(ctx, c, func(client rootcoordpb.RootCoordClient) (*commonpb.Status, error) {
 		return client.UpdateCredential(ctx, req)
 	})
 }
 
-func (c *Client) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCredentialRequest) (*commonpb.Status, error) {
+func (c *Client) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCredentialRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
@@ -494,7 +480,7 @@ func (c *Client) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCrede
 	})
 }
 
-func (c *Client) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error) {
+func (c *Client) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUsersRequest, opts ...grpc.CallOption) (*milvuspb.ListCredUsersResponse, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
@@ -505,7 +491,7 @@ func (c *Client) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUsersR
 	})
 }
 
-func (c *Client) CreateRole(ctx context.Context, req *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
+func (c *Client) CreateRole(ctx context.Context, req *milvuspb.CreateRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
@@ -516,7 +502,7 @@ func (c *Client) CreateRole(ctx context.Context, req *milvuspb.CreateRoleRequest
 	})
 }
 
-func (c *Client) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) (*commonpb.Status, error) {
+func (c *Client) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
@@ -527,7 +513,7 @@ func (c *Client) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) (*
 	})
 }
 
-func (c *Client) OperateUserRole(ctx context.Context, req *milvuspb.OperateUserRoleRequest) (*commonpb.Status, error) {
+func (c *Client) OperateUserRole(ctx context.Context, req *milvuspb.OperateUserRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
@@ -538,7 +524,7 @@ func (c *Client) OperateUserRole(ctx context.Context, req *milvuspb.OperateUserR
 	})
 }
 
-func (c *Client) SelectRole(ctx context.Context, req *milvuspb.SelectRoleRequest) (*milvuspb.SelectRoleResponse, error) {
+func (c *Client) SelectRole(ctx context.Context, req *milvuspb.SelectRoleRequest, opts ...grpc.CallOption) (*milvuspb.SelectRoleResponse, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
@@ -549,7 +535,7 @@ func (c *Client) SelectRole(ctx context.Context, req *milvuspb.SelectRoleRequest
 	})
 }
 
-func (c *Client) SelectUser(ctx context.Context, req *milvuspb.SelectUserRequest) (*milvuspb.SelectUserResponse, error) {
+func (c *Client) SelectUser(ctx context.Context, req *milvuspb.SelectUserRequest, opts ...grpc.CallOption) (*milvuspb.SelectUserResponse, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
@@ -560,7 +546,7 @@ func (c *Client) SelectUser(ctx context.Context, req *milvuspb.SelectUserRequest
 	})
 }
 
-func (c *Client) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error) {
+func (c *Client) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePrivilegeRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
@@ -571,7 +557,7 @@ func (c *Client) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePriv
 	})
 }
 
-func (c *Client) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantRequest) (*milvuspb.SelectGrantResponse, error) {
+func (c *Client) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantRequest, opts ...grpc.CallOption) (*milvuspb.SelectGrantResponse, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
@@ -582,7 +568,7 @@ func (c *Client) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantReque
 	})
 }
 
-func (c *Client) ListPolicy(ctx context.Context, req *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+func (c *Client) ListPolicy(ctx context.Context, req *internalpb.ListPolicyRequest, opts ...grpc.CallOption) (*internalpb.ListPolicyResponse, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
@@ -593,13 +579,13 @@ func (c *Client) ListPolicy(ctx context.Context, req *internalpb.ListPolicyReque
 	})
 }
 
-func (c *Client) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+func (c *Client) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest, opts ...grpc.CallOption) (*milvuspb.CheckHealthResponse, error) {
 	return wrapGrpcCall(ctx, c, func(client rootcoordpb.RootCoordClient) (*milvuspb.CheckHealthResponse, error) {
 		return client.CheckHealth(ctx, req)
 	})
 }
 
-func (c *Client) RenameCollection(ctx context.Context, req *milvuspb.RenameCollectionRequest) (*commonpb.Status, error) {
+func (c *Client) RenameCollection(ctx context.Context, req *milvuspb.RenameCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
@@ -610,7 +596,7 @@ func (c *Client) RenameCollection(ctx context.Context, req *milvuspb.RenameColle
 	})
 }
 
-func (c *Client) CreateDatabase(ctx context.Context, in *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
+func (c *Client) CreateDatabase(ctx context.Context, in *milvuspb.CreateDatabaseRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	in = typeutil.Clone(in)
 	commonpbutil.UpdateMsgBase(
 		in.GetBase(),
@@ -629,7 +615,7 @@ func (c *Client) CreateDatabase(ctx context.Context, in *milvuspb.CreateDatabase
 	return ret.(*commonpb.Status), err
 }
 
-func (c *Client) DropDatabase(ctx context.Context, in *milvuspb.DropDatabaseRequest) (*commonpb.Status, error) {
+func (c *Client) DropDatabase(ctx context.Context, in *milvuspb.DropDatabaseRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	in = typeutil.Clone(in)
 	commonpbutil.UpdateMsgBase(
 		in.GetBase(),
@@ -648,7 +634,7 @@ func (c *Client) DropDatabase(ctx context.Context, in *milvuspb.DropDatabaseRequ
 	return ret.(*commonpb.Status), err
 }
 
-func (c *Client) ListDatabases(ctx context.Context, in *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error) {
+func (c *Client) ListDatabases(ctx context.Context, in *milvuspb.ListDatabasesRequest, opts ...grpc.CallOption) (*milvuspb.ListDatabasesResponse, error) {
 	in = typeutil.Clone(in)
 	commonpbutil.UpdateMsgBase(
 		in.GetBase(),

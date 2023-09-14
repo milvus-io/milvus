@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
@@ -196,7 +197,7 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 }
 
 func Test_compactionPlanHandler_execWithParallels(t *testing.T) {
-	mockDataNode := &mocks.MockDataNode{}
+	mockDataNode := &mocks.MockDataNodeClient{}
 	paramtable.Get().Save(Params.DataCoordCfg.CompactionCheckIntervalInSeconds.Key, "1")
 	defer paramtable.Get().Reset(Params.DataCoordCfg.CompactionCheckIntervalInSeconds.Key)
 	c := &compactionPlanHandler{
@@ -232,11 +233,12 @@ func Test_compactionPlanHandler_execWithParallels(t *testing.T) {
 	var mut sync.RWMutex
 	called := 0
 
-	mockDataNode.EXPECT().Compaction(mock.Anything, mock.Anything).Run(func(ctx context.Context, req *datapb.CompactionPlan) {
-		mut.Lock()
-		defer mut.Unlock()
-		called++
-	}).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil).Times(3)
+	mockDataNode.EXPECT().Compaction(mock.Anything, mock.Anything, mock.Anything).
+		Run(func(ctx context.Context, req *datapb.CompactionPlan, opts ...grpc.CallOption) {
+			mut.Lock()
+			defer mut.Unlock()
+			called++
+		}).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil).Times(3)
 	go func() {
 		c.execCompactionPlan(signal, plan1)
 		c.execCompactionPlan(signal, plan2)
@@ -283,8 +285,10 @@ func getDeltaLogPath(rootPath string, segmentID typeutil.UniqueID) string {
 }
 
 func TestCompactionPlanHandler_handleMergeCompactionResult(t *testing.T) {
-	mockDataNode := &mocks.MockDataNode{}
-	call := mockDataNode.EXPECT().SyncSegments(mock.Anything, mock.Anything).Run(func(ctx context.Context, req *datapb.SyncSegmentsRequest) {}).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
+	mockDataNode := &mocks.MockDataNodeClient{}
+	call := mockDataNode.EXPECT().SyncSegments(mock.Anything, mock.Anything, mock.Anything).
+		Run(func(ctx context.Context, req *datapb.SyncSegmentsRequest, opts ...grpc.CallOption) {}).
+		Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
 
 	dataNodeID := UniqueID(111)
 
@@ -417,7 +421,8 @@ func TestCompactionPlanHandler_handleMergeCompactionResult(t *testing.T) {
 	require.True(t, has)
 
 	call.Unset()
-	mockDataNode.EXPECT().SyncSegments(mock.Anything, mock.Anything).Run(func(ctx context.Context, req *datapb.SyncSegmentsRequest) {}).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}, nil)
+	mockDataNode.EXPECT().SyncSegments(mock.Anything, mock.Anything, mock.Anything).
+		Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}, nil)
 	err = c.handleMergeCompactionResult(plan, compactionResult2)
 	assert.Error(t, err)
 }
@@ -439,8 +444,10 @@ func TestCompactionPlanHandler_completeCompaction(t *testing.T) {
 	})
 
 	t.Run("test complete merge compaction task", func(t *testing.T) {
-		mockDataNode := &mocks.MockDataNode{}
-		mockDataNode.EXPECT().SyncSegments(mock.Anything, mock.Anything).Run(func(ctx context.Context, req *datapb.SyncSegmentsRequest) {}).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
+		mockDataNode := &mocks.MockDataNodeClient{}
+		mockDataNode.EXPECT().SyncSegments(mock.Anything, mock.Anything, mock.Anything).
+			Run(func(ctx context.Context, req *datapb.SyncSegmentsRequest, opts ...grpc.CallOption) {}).
+			Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
 
 		dataNodeID := UniqueID(111)
 
@@ -532,8 +539,10 @@ func TestCompactionPlanHandler_completeCompaction(t *testing.T) {
 	})
 
 	t.Run("test empty result merge compaction task", func(t *testing.T) {
-		mockDataNode := &mocks.MockDataNode{}
-		mockDataNode.EXPECT().SyncSegments(mock.Anything, mock.Anything).Run(func(ctx context.Context, req *datapb.SyncSegmentsRequest) {}).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
+		mockDataNode := &mocks.MockDataNodeClient{}
+		mockDataNode.EXPECT().SyncSegments(mock.Anything, mock.Anything, mock.Anything).
+			Run(func(ctx context.Context, req *datapb.SyncSegmentsRequest, opts ...grpc.CallOption) {}).
+			Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
 
 		dataNodeID := UniqueID(111)
 

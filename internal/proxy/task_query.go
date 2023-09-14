@@ -48,7 +48,7 @@ type queryTask struct {
 	ctx            context.Context
 	result         *milvuspb.QueryResults
 	request        *milvuspb.QueryRequest
-	qc             types.QueryCoord
+	qc             types.QueryCoordClient
 	ids            *schemapb.IDs
 	collectionName string
 	queryParams    *queryParams
@@ -464,7 +464,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.QueryNode, channelIDs ...string) error {
+func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channelIDs ...string) error {
 	retrieveReq := typeutil.Clone(t.RetrieveRequest)
 	retrieveReq.GetBase().TargetID = nodeID
 	req := &querypb.QueryRequest{

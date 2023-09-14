@@ -28,12 +28,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
-
-var ParamsGlobal paramtable.ComponentParam
 
 func TestIndexNodeServer(t *testing.T) {
 	paramtable.Init()
@@ -44,18 +41,7 @@ func TestIndexNodeServer(t *testing.T) {
 	assert.NotNil(t, server)
 
 	inm := indexnode.NewIndexNodeMock()
-	ParamsGlobal.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
-	etcdCli, err := etcd.GetEtcdClient(
-		ParamsGlobal.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		ParamsGlobal.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		ParamsGlobal.EtcdCfg.Endpoints.GetAsStrings(),
-		ParamsGlobal.EtcdCfg.EtcdTLSCert.GetValue(),
-		ParamsGlobal.EtcdCfg.EtcdTLSKey.GetValue(),
-		ParamsGlobal.EtcdCfg.EtcdTLSCACert.GetValue(),
-		ParamsGlobal.EtcdCfg.EtcdTLSMinVersion.GetValue())
-	assert.NoError(t, err)
-	inm.SetEtcdClient(etcdCli)
-	err = server.SetClient(inm)
+	err = server.setServer(inm)
 	assert.NoError(t, err)
 
 	err = server.Run()

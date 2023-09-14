@@ -28,6 +28,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -908,7 +909,7 @@ func TestPasswordVerify(t *testing.T) {
 	invokedCount := 0
 
 	mockedRootCoord := newMockRootCoord()
-	mockedRootCoord.GetGetCredentialFunc = func(ctx context.Context, req *rootcoordpb.GetCredentialRequest) (*rootcoordpb.GetCredentialResponse, error) {
+	mockedRootCoord.GetGetCredentialFunc = func(ctx context.Context, req *rootcoordpb.GetCredentialRequest, opts ...grpc.CallOption) (*rootcoordpb.GetCredentialResponse, error) {
 		invokedCount++
 		return nil, fmt.Errorf("get cred not found credential")
 	}
@@ -947,7 +948,7 @@ func Test_isCollectionIsLoaded(t *testing.T) {
 	ctx := context.Background()
 	t.Run("normal", func(t *testing.T) {
 		collID := int64(1)
-		qc := &mocks.MockQueryCoord{}
+		qc := &mocks.MockQueryCoordClient{}
 		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
 		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
 		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
@@ -971,7 +972,7 @@ func Test_isCollectionIsLoaded(t *testing.T) {
 
 	t.Run("error", func(t *testing.T) {
 		collID := int64(1)
-		qc := &mocks.MockQueryCoord{}
+		qc := &mocks.MockQueryCoordClient{}
 		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
 		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
 		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
@@ -995,7 +996,7 @@ func Test_isCollectionIsLoaded(t *testing.T) {
 
 	t.Run("fail", func(t *testing.T) {
 		collID := int64(1)
-		qc := &mocks.MockQueryCoord{}
+		qc := &mocks.MockQueryCoordClient{}
 		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
 		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
 		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
@@ -1026,7 +1027,7 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 	t.Run("normal", func(t *testing.T) {
 		collID := int64(1)
 		partID := int64(2)
-		qc := &mocks.MockQueryCoord{}
+		qc := &mocks.MockQueryCoordClient{}
 		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
 		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
 		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
@@ -1051,7 +1052,7 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 	t.Run("error", func(t *testing.T) {
 		collID := int64(1)
 		partID := int64(2)
-		qc := &mocks.MockQueryCoord{}
+		qc := &mocks.MockQueryCoordClient{}
 		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
 		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
 		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
@@ -1076,7 +1077,7 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 	t.Run("fail", func(t *testing.T) {
 		collID := int64(1)
 		partID := int64(2)
-		qc := &mocks.MockQueryCoord{}
+		qc := &mocks.MockQueryCoordClient{}
 		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
 		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
 		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
@@ -1854,7 +1855,7 @@ func Test_MaxQueryResultWindow(t *testing.T) {
 }
 
 func Test_GetPartitionProgressFailed(t *testing.T) {
-	qc := mocks.NewMockQueryCoord(t)
+	qc := mocks.NewMockQueryCoordClient(t)
 	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,

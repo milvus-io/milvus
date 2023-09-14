@@ -6,8 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/mock"
 )
 
 func genShardLeaderInfo(channel string, leaderIDs []UniqueID) map[string][]nodeInfo {
@@ -32,8 +32,8 @@ func TestShardClientMgr_UpdateShardLeaders_CreatorNil(t *testing.T) {
 }
 
 func TestShardClientMgr_UpdateShardLeaders_Empty(t *testing.T) {
-	mockCreator := func(ctx context.Context, addr string, nodeID int64) (types.QueryNode, error) {
-		return &mock.QueryNodeClient{}, nil
+	mockCreator := func(ctx context.Context, addr string, nodeID int64) (types.QueryNodeClient, error) {
+		return &mocks.MockQueryNodeClient{}, nil
 	}
 	mgr := newShardClientMgr(withShardClientCreator(mockCreator))
 

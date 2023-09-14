@@ -46,9 +46,9 @@ func (suite *LookAsideBalancerSuite) SetupTest() {
 	suite.balancer = NewLookAsideBalancer(suite.clientMgr)
 	suite.balancer.Start(context.Background())
 
-	qn := mocks.NewMockQueryNode(suite.T())
+	qn := mocks.NewMockQueryNodeClient(suite.T())
 	suite.clientMgr.EXPECT().GetClient(mock.Anything, int64(1)).Return(qn, nil).Maybe()
-	qn.EXPECT().GetComponentStates(mock.Anything).Return(nil, errors.New("fake error")).Maybe()
+	qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, errors.New("fake error")).Maybe()
 }
 
 func (suite *LookAsideBalancerSuite) TearDownTest() {
@@ -306,9 +306,9 @@ func (suite *LookAsideBalancerSuite) TestCancelWorkload() {
 }
 
 func (suite *LookAsideBalancerSuite) TestCheckHealthLoop() {
-	qn2 := mocks.NewMockQueryNode(suite.T())
+	qn2 := mocks.NewMockQueryNodeClient(suite.T())
 	suite.clientMgr.EXPECT().GetClient(mock.Anything, int64(2)).Return(qn2, nil)
-	qn2.EXPECT().GetComponentStates(mock.Anything).Return(&milvuspb.ComponentStates{
+	qn2.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
 		State: &milvuspb.ComponentInfo{
 			StateCode: commonpb.StateCode_Healthy,
 		},
@@ -336,15 +336,15 @@ func (suite *LookAsideBalancerSuite) TestCheckHealthLoop() {
 
 func (suite *LookAsideBalancerSuite) TestNodeRecover() {
 	// mock qn down for a while and then recover
-	qn3 := mocks.NewMockQueryNode(suite.T())
+	qn3 := mocks.NewMockQueryNodeClient(suite.T())
 	suite.clientMgr.EXPECT().GetClient(mock.Anything, int64(3)).Return(qn3, nil)
-	qn3.EXPECT().GetComponentStates(mock.Anything).Return(&milvuspb.ComponentStates{
+	qn3.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
 		State: &milvuspb.ComponentInfo{
 			StateCode: commonpb.StateCode_Abnormal,
 		},
 	}, nil).Times(3)
 
-	qn3.EXPECT().GetComponentStates(mock.Anything).Return(&milvuspb.ComponentStates{
+	qn3.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
 		State: &milvuspb.ComponentInfo{
 			StateCode: commonpb.StateCode_Healthy,
 		},
@@ -364,9 +364,9 @@ func (suite *LookAsideBalancerSuite) TestNodeOffline() {
 	Params.Save(Params.CommonCfg.SessionTTL.Key, "10")
 	Params.Save(Params.ProxyCfg.HealthCheckTimeout.Key, "1000")
 	// mock qn down for a while and then recover
-	qn3 := mocks.NewMockQueryNode(suite.T())
+	qn3 := mocks.NewMockQueryNodeClient(suite.T())
 	suite.clientMgr.EXPECT().GetClient(mock.Anything, int64(3)).Return(qn3, nil)
-	qn3.EXPECT().GetComponentStates(mock.Anything).Return(&milvuspb.ComponentStates{
+	qn3.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
 		State: &milvuspb.ComponentInfo{
 			StateCode: commonpb.StateCode_Abnormal,
 		},

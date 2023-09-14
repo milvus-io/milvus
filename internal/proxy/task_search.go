@@ -63,7 +63,7 @@ type searchTask struct {
 	offset    int64
 	resultBuf *typeutil.ConcurrentSet[*internalpb.SearchResults]
 
-	qc   types.QueryCoord
+	qc   types.QueryCoordClient
 	node types.ProxyComponent
 	lb   LBPolicy
 }
@@ -507,7 +507,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.QueryNode, channelIDs ...string) error {
+func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channelIDs ...string) error {
 	searchReq := typeutil.Clone(t.SearchRequest)
 	searchReq.GetBase().TargetID = nodeID
 	req := &querypb.SearchRequest{

@@ -111,24 +111,24 @@ func (m *MockDataCoord) SetEtcdClient(etcdClient *clientv3.Client) {
 func (m *MockDataCoord) SetTiKVClient(client *txnkv.Client) {
 }
 
-func (m *MockDataCoord) SetRootCoord(rootCoord types.RootCoord) {
+func (m *MockDataCoord) SetRootCoordClient(rootCoord types.RootCoordClient) {
 }
 
-func (m *MockDataCoord) SetDataNodeCreator(func(context.Context, string, int64) (types.DataNode, error)) {
+func (m *MockDataCoord) SetDataNodeCreator(func(context.Context, string, int64) (types.DataNodeClient, error)) {
 }
 
-func (m *MockDataCoord) SetIndexNodeCreator(func(context.Context, string, int64) (types.IndexNode, error)) {
+func (m *MockDataCoord) SetIndexNodeCreator(func(context.Context, string, int64) (types.IndexNodeClient, error)) {
 }
 
-func (m *MockDataCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+func (m *MockDataCoord) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	return m.states, m.err
 }
 
-func (m *MockDataCoord) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (m *MockDataCoord) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
 	return m.strResp, m.err
 }
 
-func (m *MockDataCoord) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (m *MockDataCoord) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return m.strResp, m.err
 }
 
@@ -160,7 +160,7 @@ func (m *MockDataCoord) GetPartitionStatistics(ctx context.Context, req *datapb.
 	return m.partStatResp, m.err
 }
 
-func (m *MockDataCoord) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (m *MockDataCoord) GetSegmentInfoChannel(ctx context.Context, req *datapb.GetSegmentInfoChannelRequest) (*milvuspb.StringResponse, error) {
 	return m.strResp, m.err
 }
 

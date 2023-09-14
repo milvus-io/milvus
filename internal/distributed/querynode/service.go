@@ -39,7 +39,6 @@ import (
 	qn "github.com/milvus-io/milvus/internal/querynodev2"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
@@ -259,18 +258,18 @@ func (s *Server) SetEtcdClient(etcdCli *clientv3.Client) {
 
 // GetTimeTickChannel gets the time tick channel of QueryNode.
 func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.querynode.GetTimeTickChannel(ctx)
+	return s.querynode.GetTimeTickChannel(ctx, req)
 }
 
 // GetStatisticsChannel gets the statistics channel of QueryNode.
 func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.querynode.GetStatisticsChannel(ctx)
+	return s.querynode.GetStatisticsChannel(ctx, req)
 }
 
 // GetComponentStates gets the component states of QueryNode.
 func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	// ignore ctx and in
-	return s.querynode.GetComponentStates(ctx)
+	return s.querynode.GetComponentStates(ctx, req)
 }
 
 // WatchDmChannels watches the channels about data manipulation.
@@ -332,15 +331,11 @@ func (s *Server) Query(ctx context.Context, req *querypb.QueryRequest) (*interna
 }
 
 func (s *Server) QueryStream(req *querypb.QueryRequest, srv querypb.QueryNode_QueryStreamServer) error {
-	streamer := streamrpc.NewGrpcQueryStreamer()
-	streamer.SetServer(streamrpc.NewConcurrentQueryStreamServer(srv))
-	return s.querynode.QueryStream(srv.Context(), req, streamer)
+	return s.querynode.QueryStream(req, srv)
 }
 
 func (s *Server) QueryStreamSegments(req *querypb.QueryRequest, srv querypb.QueryNode_QueryStreamSegmentsServer) error {
-	streamer := streamrpc.NewGrpcQueryStreamer()
-	streamer.SetServer(streamrpc.NewConcurrentQueryStreamServer(srv))
-	return s.querynode.QueryStreamSegments(srv.Context(), req, streamer)
+	return s.querynode.QueryStreamSegments(req, srv)
 }
 
 func (s *Server) QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {

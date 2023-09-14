@@ -259,17 +259,17 @@ func (s *Server) Run() error {
 
 // GetComponentStates gets states of datacoord and datanodes
 func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
-	return s.dataCoord.GetComponentStates(ctx)
+	return s.dataCoord.GetComponentStates(ctx, req)
 }
 
 // GetTimeTickChannel gets timetick channel
 func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.dataCoord.GetTimeTickChannel(ctx)
+	return s.dataCoord.GetTimeTickChannel(ctx, req)
 }
 
 // GetStatisticsChannel gets statistics channel
 func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.dataCoord.GetStatisticsChannel(ctx)
+	return s.dataCoord.GetStatisticsChannel(ctx, req)
 }
 
 // GetSegmentInfo gets segment information according to segment id
@@ -309,7 +309,7 @@ func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPart
 
 // GetSegmentInfoChannel gets channel to which datacoord sends segment information
 func (s *Server) GetSegmentInfoChannel(ctx context.Context, req *datapb.GetSegmentInfoChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.dataCoord.GetSegmentInfoChannel(ctx)
+	return s.dataCoord.GetSegmentInfoChannel(ctx, req)
 }
 
 // SaveBinlogPaths implement DataCoordServer, saves segment, collection binlog according to datanode request

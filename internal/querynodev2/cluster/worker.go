@@ -51,11 +51,11 @@ type Worker interface {
 
 // remoteWorker wraps grpc QueryNode client as Worker.
 type remoteWorker struct {
-	client types.QueryNode
+	client types.QueryNodeClient
 }
 
 // NewRemoteWorker creates a grpcWorker.
-func NewRemoteWorker(client types.QueryNode) Worker {
+func NewRemoteWorker(client types.QueryNodeClient) Worker {
 	return &remoteWorker{
 		client: client,
 	}
@@ -143,13 +143,11 @@ func (w *remoteWorker) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 }
 
 func (w *remoteWorker) QueryStreamSegments(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error {
-	streamer := streamrpc.NewGrpcQueryStreamer()
-	err := w.client.QueryStreamSegments(ctx, req, streamer)
+	client, err := w.client.QueryStreamSegments(ctx, req)
 	if err != nil {
 		return err
 	}
 
-	client := streamer.AsClient()
 	for {
 		result, err := client.Recv()
 		if err != nil {
@@ -184,5 +182,7 @@ func (w *remoteWorker) IsHealthy() bool {
 }
 
 func (w *remoteWorker) Stop() {
-	w.client.Stop()
+	if err := w.client.Close(); err != nil {
+		log.Warn("failed to call Close via grpc worker", zap.Error(err))
+	}
 }

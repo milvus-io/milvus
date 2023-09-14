@@ -20,7 +20,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -262,9 +261,8 @@ func (dt *deleteTask) PostExecute(ctx context.Context) error {
 }
 
 func (dt *deleteTask) getStreamingQueryAndDelteFunc(stream msgstream.MsgStream, plan *planpb.PlanNode) executeFunc {
-	return func(ctx context.Context, nodeID int64, qn types.QueryNode, channelIDs ...string) error {
+	return func(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channelIDs ...string) error {
 		// outputField := translateOutputFields(, dt.schema, true)
-		streamer := streamrpc.NewGrpcQueryStreamer()
 
 		partationIDs := []int64{}
 		if dt.partitionID != common.InvalidFieldID {
@@ -302,13 +300,12 @@ func (dt *deleteTask) getStreamingQueryAndDelteFunc(stream msgstream.MsgStream, 
 			Scope:       querypb.DataScope_All,
 		}
 
-		err = qn.QueryStream(ctx, queryReq, streamer)
+		client, err := qn.QueryStream(ctx, queryReq)
 		if err != nil {
 			log.Warn("query for delete return error", zap.Error(err))
 			return err
 		}
 
-		client := streamer.AsClient()
 		for {
 			result, err := client.Recv()
 			if err != nil {

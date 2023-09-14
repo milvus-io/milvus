@@ -61,7 +61,7 @@ func withSessionCreator(creator dataNodeCreatorFunc) SessionOpt {
 }
 
 func defaultSessionCreator() dataNodeCreatorFunc {
-	return func(ctx context.Context, addr string, nodeID int64) (types.DataNode, error) {
+	return func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
 		return grpcdatanodeclient.NewClient(ctx, addr, nodeID)
 	}
 }
@@ -323,7 +323,7 @@ func (c *SessionManager) FlushChannels(ctx context.Context, nodeID int64, req *d
 	return nil
 }
 
-func (c *SessionManager) getClient(ctx context.Context, nodeID int64) (types.DataNode, error) {
+func (c *SessionManager) getClient(ctx context.Context, nodeID int64) (types.DataNodeClient, error) {
 	c.sessions.RLock()
 	session, ok := c.sessions.data[nodeID]
 	c.sessions.RUnlock()

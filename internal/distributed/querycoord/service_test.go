@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/tikv/client-go/v2/txnkv"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -39,31 +40,16 @@ import (
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockRootCoord struct {
-	types.RootCoord
-	initErr  error
-	startErr error
-	regErr   error
+	types.RootCoordClient
 	stopErr  error
 	stateErr commonpb.ErrorCode
 }
 
-func (m *MockRootCoord) Init() error {
-	return m.initErr
-}
-
-func (m *MockRootCoord) Start() error {
-	return m.startErr
-}
-
-func (m *MockRootCoord) Stop() error {
+func (m *MockRootCoord) Close() error {
 	return m.stopErr
 }
 
-func (m *MockRootCoord) Register() error {
-	return m.regErr
-}
-
-func (m *MockRootCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+func (m *MockRootCoord) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest, opt ...grpc.CallOption) (*milvuspb.ComponentStates, error) {
 	return &milvuspb.ComponentStates{
 		State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
 		Status: &commonpb.Status{ErrorCode: m.stateErr},
@@ -72,31 +58,16 @@ func (m *MockRootCoord) GetComponentStates(ctx context.Context) (*milvuspb.Compo
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockDataCoord struct {
-	types.DataCoord
-	initErr  error
-	startErr error
+	types.DataCoordClient
 	stopErr  error
-	regErr   error
 	stateErr commonpb.ErrorCode
 }
 
-func (m *MockDataCoord) Init() error {
-	return m.initErr
-}
-
-func (m *MockDataCoord) Start() error {
-	return m.startErr
-}
-
-func (m *MockDataCoord) Stop() error {
+func (m *MockDataCoord) Close() error {
 	return m.stopErr
 }
 
-func (m *MockDataCoord) Register() error {
-	return m.regErr
-}
-
-func (m *MockDataCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+func (m *MockDataCoord) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error) {
 	return &milvuspb.ComponentStates{
 		State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
 		Status: &commonpb.Status{ErrorCode: m.stateErr},
@@ -146,7 +117,7 @@ func Test_NewServer(t *testing.T) {
 		})
 
 		t.Run("GetComponentStates", func(t *testing.T) {
-			mqc.EXPECT().GetComponentStates(mock.Anything).Return(&milvuspb.ComponentStates{
+			mqc.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
 				State: &milvuspb.ComponentInfo{
 					NodeID:    0,
 					Role:      "MockQueryCoord",
@@ -163,7 +134,7 @@ func Test_NewServer(t *testing.T) {
 
 		t.Run("GetStatisticsChannel", func(t *testing.T) {
 			req := &internalpb.GetStatisticsChannelRequest{}
-			mqc.EXPECT().GetStatisticsChannel(mock.Anything).Return(
+			mqc.EXPECT().GetStatisticsChannel(mock.Anything, mock.Anything).Return(
 				&milvuspb.StringResponse{
 					Status: successStatus,
 				}, nil,
@@ -175,7 +146,7 @@ func Test_NewServer(t *testing.T) {
 
 		t.Run("GetTimeTickChannel", func(t *testing.T) {
 			req := &internalpb.GetTimeTickChannelRequest{}
-			mqc.EXPECT().GetTimeTickChannel(mock.Anything).Return(
+			mqc.EXPECT().GetTimeTickChannel(mock.Anything, mock.Anything).Return(
 				&milvuspb.StringResponse{
 					Status: successStatus,
 				}, nil,
@@ -239,7 +210,7 @@ func Test_NewServer(t *testing.T) {
 		})
 
 		t.Run("GetTimeTickChannel", func(t *testing.T) {
-			mqc.EXPECT().GetTimeTickChannel(mock.Anything).Return(&milvuspb.StringResponse{Status: successStatus}, nil)
+			mqc.EXPECT().GetTimeTickChannel(mock.Anything, mock.Anything).Return(&milvuspb.StringResponse{Status: successStatus}, nil)
 			resp, err := server.GetTimeTickChannel(ctx, nil)
 			assert.NoError(t, err)
 			assert.NotNil(t, resp)
@@ -355,118 +326,17 @@ func TestServer_Run1(t *testing.T) {
 	}
 }
 
-func TestServer_Run2(t *testing.T) {
-	parameters := []string{"tikv", "etcd"}
-	for _, v := range parameters {
-		paramtable.Get().Save(paramtable.Get().MetaStoreCfg.MetaStoreType.Key, v)
-		ctx := context.Background()
-		getTiKVClient = func(cfg *paramtable.TiKVConfig) (*txnkv.Client, error) {
-			return tikv.SetupLocalTxn(), nil
-		}
-		defer func() {
-			getTiKVClient = tikv.GetTiKVClient
-		}()
-		server, err := NewServer(ctx, nil)
-		assert.NoError(t, err)
-		assert.NotNil(t, server)
-
-		server.queryCoord = getQueryCoord()
-		server.rootCoord = &MockRootCoord{
-			initErr: errors.New("error"),
-		}
-		assert.Panics(t, func() { server.Run() })
-		err = server.Stop()
-		assert.NoError(t, err)
-	}
-}
-
 func getQueryCoord() *mocks.MockQueryCoord {
 	mqc := &mocks.MockQueryCoord{}
 	mqc.EXPECT().Init().Return(nil)
 	mqc.EXPECT().SetEtcdClient(mock.Anything)
 	mqc.EXPECT().SetTiKVClient(mock.Anything)
 	mqc.EXPECT().SetAddress(mock.Anything)
-	mqc.EXPECT().SetRootCoord(mock.Anything).Return(nil)
-	mqc.EXPECT().SetDataCoord(mock.Anything).Return(nil)
+	mqc.EXPECT().SetRootCoordClient(mock.Anything).Return(nil)
+	mqc.EXPECT().SetDataCoordClient(mock.Anything).Return(nil)
 	mqc.EXPECT().UpdateStateCode(mock.Anything)
 	mqc.EXPECT().Register().Return(nil)
 	mqc.EXPECT().Start().Return(nil)
 	mqc.EXPECT().Stop().Return(nil)
 	return mqc
-}
-
-func TestServer_Run3(t *testing.T) {
-	parameters := []string{"tikv", "etcd"}
-	for _, v := range parameters {
-		paramtable.Get().Save(paramtable.Get().MetaStoreCfg.MetaStoreType.Key, v)
-		ctx := context.Background()
-		getTiKVClient = func(cfg *paramtable.TiKVConfig) (*txnkv.Client, error) {
-			return tikv.SetupLocalTxn(), nil
-		}
-		defer func() {
-			getTiKVClient = tikv.GetTiKVClient
-		}()
-		server, err := NewServer(ctx, nil)
-		assert.NoError(t, err)
-		assert.NotNil(t, server)
-		server.queryCoord = getQueryCoord()
-		server.rootCoord = &MockRootCoord{
-			startErr: errors.New("error"),
-		}
-		assert.Panics(t, func() { server.Run() })
-		err = server.Stop()
-		assert.NoError(t, err)
-	}
-}
-
-func TestServer_Run4(t *testing.T) {
-	parameters := []string{"tikv", "etcd"}
-	for _, v := range parameters {
-		paramtable.Get().Save(paramtable.Get().MetaStoreCfg.MetaStoreType.Key, v)
-		ctx := context.Background()
-		getTiKVClient = func(cfg *paramtable.TiKVConfig) (*txnkv.Client, error) {
-			return tikv.SetupLocalTxn(), nil
-		}
-		defer func() {
-			getTiKVClient = tikv.GetTiKVClient
-		}()
-		server, err := NewServer(ctx, nil)
-		assert.NoError(t, err)
-		assert.NotNil(t, server)
-
-		server.queryCoord = getQueryCoord()
-		server.rootCoord = &MockRootCoord{}
-		server.dataCoord = &MockDataCoord{
-			initErr: errors.New("error"),
-		}
-		assert.Panics(t, func() { server.Run() })
-		err = server.Stop()
-		assert.NoError(t, err)
-	}
-}
-
-func TestServer_Run5(t *testing.T) {
-	parameters := []string{"tikv", "etcd"}
-	for _, v := range parameters {
-		paramtable.Get().Save(paramtable.Get().MetaStoreCfg.MetaStoreType.Key, v)
-		ctx := context.Background()
-		getTiKVClient = func(cfg *paramtable.TiKVConfig) (*txnkv.Client, error) {
-			return tikv.SetupLocalTxn(), nil
-		}
-		defer func() {
-			getTiKVClient = tikv.GetTiKVClient
-		}()
-		server, err := NewServer(ctx, nil)
-		assert.NoError(t, err)
-		assert.NotNil(t, server)
-
-		server.queryCoord = getQueryCoord()
-		server.rootCoord = &MockRootCoord{}
-		server.dataCoord = &MockDataCoord{
-			startErr: errors.New("error"),
-		}
-		assert.Panics(t, func() { server.Run() })
-		err = server.Stop()
-		assert.NoError(t, err)
-	}
 }

@@ -32,17 +32,17 @@ func (_m *MockDataNode) EXPECT() *MockDataNode_Expecter {
 	return &MockDataNode_Expecter{mock: &_m.Mock}
 }
 
-// AddImportSegment provides a mock function with given fields: ctx, req
-func (_m *MockDataNode) AddImportSegment(ctx context.Context, req *datapb.AddImportSegmentRequest) (*datapb.AddImportSegmentResponse, error) {
-	ret := _m.Called(ctx, req)
+// AddImportSegment provides a mock function with given fields: _a0, _a1
+func (_m *MockDataNode) AddImportSegment(_a0 context.Context, _a1 *datapb.AddImportSegmentRequest) (*datapb.AddImportSegmentResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *datapb.AddImportSegmentResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *datapb.AddImportSegmentRequest) (*datapb.AddImportSegmentResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *datapb.AddImportSegmentRequest) *datapb.AddImportSegmentResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*datapb.AddImportSegmentResponse)
@@ -50,7 +50,7 @@ func (_m *MockDataNode) AddImportSegment(ctx context.Context, req *datapb.AddImp
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *datapb.AddImportSegmentRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -64,13 +64,13 @@ type MockDataNode_AddImportSegment_Call struct {
 }
 
 // AddImportSegment is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.AddImportSegmentRequest
-func (_e *MockDataNode_Expecter) AddImportSegment(ctx interface{}, req interface{}) *MockDataNode_AddImportSegment_Call {
-	return &MockDataNode_AddImportSegment_Call{Call: _e.mock.On("AddImportSegment", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *datapb.AddImportSegmentRequest
+func (_e *MockDataNode_Expecter) AddImportSegment(_a0 interface{}, _a1 interface{}) *MockDataNode_AddImportSegment_Call {
+	return &MockDataNode_AddImportSegment_Call{Call: _e.mock.On("AddImportSegment", _a0, _a1)}
 }
 
-func (_c *MockDataNode_AddImportSegment_Call) Run(run func(ctx context.Context, req *datapb.AddImportSegmentRequest)) *MockDataNode_AddImportSegment_Call {
+func (_c *MockDataNode_AddImportSegment_Call) Run(run func(_a0 context.Context, _a1 *datapb.AddImportSegmentRequest)) *MockDataNode_AddImportSegment_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*datapb.AddImportSegmentRequest))
 	})
@@ -87,17 +87,17 @@ func (_c *MockDataNode_AddImportSegment_Call) RunAndReturn(run func(context.Cont
 	return _c
 }
 
-// CheckChannelOperationProgress provides a mock function with given fields: ctx, req
-func (_m *MockDataNode) CheckChannelOperationProgress(ctx context.Context, req *datapb.ChannelWatchInfo) (*datapb.ChannelOperationProgressResponse, error) {
-	ret := _m.Called(ctx, req)
+// CheckChannelOperationProgress provides a mock function with given fields: _a0, _a1
+func (_m *MockDataNode) CheckChannelOperationProgress(_a0 context.Context, _a1 *datapb.ChannelWatchInfo) (*datapb.ChannelOperationProgressResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *datapb.ChannelOperationProgressResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ChannelWatchInfo) (*datapb.ChannelOperationProgressResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ChannelWatchInfo) *datapb.ChannelOperationProgressResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*datapb.ChannelOperationProgressResponse)
@@ -105,7 +105,7 @@ func (_m *MockDataNode) CheckChannelOperationProgress(ctx context.Context, req *
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *datapb.ChannelWatchInfo) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -119,13 +119,13 @@ type MockDataNode_CheckChannelOperationProgress_Call struct {
 }
 
 // CheckChannelOperationProgress is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.ChannelWatchInfo
-func (_e *MockDataNode_Expecter) CheckChannelOperationProgress(ctx interface{}, req interface{}) *MockDataNode_CheckChannelOperationProgress_Call {
-	return &MockDataNode_CheckChannelOperationProgress_Call{Call: _e.mock.On("CheckChannelOperationProgress", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *datapb.ChannelWatchInfo
+func (_e *MockDataNode_Expecter) CheckChannelOperationProgress(_a0 interface{}, _a1 interface{}) *MockDataNode_CheckChannelOperationProgress_Call {
+	return &MockDataNode_CheckChannelOperationProgress_Call{Call: _e.mock.On("CheckChannelOperationProgress", _a0, _a1)}
 }
 
-func (_c *MockDataNode_CheckChannelOperationProgress_Call) Run(run func(ctx context.Context, req *datapb.ChannelWatchInfo)) *MockDataNode_CheckChannelOperationProgress_Call {
+func (_c *MockDataNode_CheckChannelOperationProgress_Call) Run(run func(_a0 context.Context, _a1 *datapb.ChannelWatchInfo)) *MockDataNode_CheckChannelOperationProgress_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*datapb.ChannelWatchInfo))
 	})
@@ -142,17 +142,17 @@ func (_c *MockDataNode_CheckChannelOperationProgress_Call) RunAndReturn(run func
 	return _c
 }
 
-// Compaction provides a mock function with given fields: ctx, req
-func (_m *MockDataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// Compaction provides a mock function with given fields: _a0, _a1
+func (_m *MockDataNode) Compaction(_a0 context.Context, _a1 *datapb.CompactionPlan) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionPlan) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionPlan) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -160,7 +160,7 @@ func (_m *MockDataNode) Compaction(ctx context.Context, req *datapb.CompactionPl
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *datapb.CompactionPlan) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -174,13 +174,13 @@ type MockDataNode_Compaction_Call struct {
 }
 
 // Compaction is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.CompactionPlan
-func (_e *MockDataNode_Expecter) Compaction(ctx interface{}, req interface{}) *MockDataNode_Compaction_Call {
-	return &MockDataNode_Compaction_Call{Call: _e.mock.On("Compaction", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *datapb.CompactionPlan
+func (_e *MockDataNode_Expecter) Compaction(_a0 interface{}, _a1 interface{}) *MockDataNode_Compaction_Call {
+	return &MockDataNode_Compaction_Call{Call: _e.mock.On("Compaction", _a0, _a1)}
 }
 
-func (_c *MockDataNode_Compaction_Call) Run(run func(ctx context.Context, req *datapb.CompactionPlan)) *MockDataNode_Compaction_Call {
+func (_c *MockDataNode_Compaction_Call) Run(run func(_a0 context.Context, _a1 *datapb.CompactionPlan)) *MockDataNode_Compaction_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*datapb.CompactionPlan))
 	})
@@ -197,17 +197,17 @@ func (_c *MockDataNode_Compaction_Call) RunAndReturn(run func(context.Context, *
 	return _c
 }
 
-// FlushChannels provides a mock function with given fields: ctx, req
-func (_m *MockDataNode) FlushChannels(ctx context.Context, req *datapb.FlushChannelsRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// FlushChannels provides a mock function with given fields: _a0, _a1
+func (_m *MockDataNode) FlushChannels(_a0 context.Context, _a1 *datapb.FlushChannelsRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *datapb.FlushChannelsRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *datapb.FlushChannelsRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -215,7 +215,7 @@ func (_m *MockDataNode) FlushChannels(ctx context.Context, req *datapb.FlushChan
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *datapb.FlushChannelsRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -229,13 +229,13 @@ type MockDataNode_FlushChannels_Call struct {
 }
 
 // FlushChannels is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.FlushChannelsRequest
-func (_e *MockDataNode_Expecter) FlushChannels(ctx interface{}, req interface{}) *MockDataNode_FlushChannels_Call {
-	return &MockDataNode_FlushChannels_Call{Call: _e.mock.On("FlushChannels", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *datapb.FlushChannelsRequest
+func (_e *MockDataNode_Expecter) FlushChannels(_a0 interface{}, _a1 interface{}) *MockDataNode_FlushChannels_Call {
+	return &MockDataNode_FlushChannels_Call{Call: _e.mock.On("FlushChannels", _a0, _a1)}
 }
 
-func (_c *MockDataNode_FlushChannels_Call) Run(run func(ctx context.Context, req *datapb.FlushChannelsRequest)) *MockDataNode_FlushChannels_Call {
+func (_c *MockDataNode_FlushChannels_Call) Run(run func(_a0 context.Context, _a1 *datapb.FlushChannelsRequest)) *MockDataNode_FlushChannels_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*datapb.FlushChannelsRequest))
 	})
@@ -252,17 +252,17 @@ func (_c *MockDataNode_FlushChannels_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
-// FlushSegments provides a mock function with given fields: ctx, req
-func (_m *MockDataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// FlushSegments provides a mock function with given fields: _a0, _a1
+func (_m *MockDataNode) FlushSegments(_a0 context.Context, _a1 *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *datapb.FlushSegmentsRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *datapb.FlushSegmentsRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -270,7 +270,7 @@ func (_m *MockDataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegm
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *datapb.FlushSegmentsRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -284,13 +284,13 @@ type MockDataNode_FlushSegments_Call struct {
 }
 
 // FlushSegments is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.FlushSegmentsRequest
-func (_e *MockDataNode_Expecter) FlushSegments(ctx interface{}, req interface{}) *MockDataNode_FlushSegments_Call {
-	return &MockDataNode_FlushSegments_Call{Call: _e.mock.On("FlushSegments", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *datapb.FlushSegmentsRequest
+func (_e *MockDataNode_Expecter) FlushSegments(_a0 interface{}, _a1 interface{}) *MockDataNode_FlushSegments_Call {
+	return &MockDataNode_FlushSegments_Call{Call: _e.mock.On("FlushSegments", _a0, _a1)}
 }
 
-func (_c *MockDataNode_FlushSegments_Call) Run(run func(ctx context.Context, req *datapb.FlushSegmentsRequest)) *MockDataNode_FlushSegments_Call {
+func (_c *MockDataNode_FlushSegments_Call) Run(run func(_a0 context.Context, _a1 *datapb.FlushSegmentsRequest)) *MockDataNode_FlushSegments_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*datapb.FlushSegmentsRequest))
 	})
@@ -348,17 +348,17 @@ func (_c *MockDataNode_GetAddress_Call) RunAndReturn(run func() string) *MockDat
 	return _c
 }
 
-// GetCompactionState provides a mock function with given fields: ctx, req
-func (_m *MockDataNode) GetCompactionState(ctx context.Context, req *datapb.CompactionStateRequest) (*datapb.CompactionStateResponse, error) {
-	ret := _m.Called(ctx, req)
+// GetCompactionState provides a mock function with given fields: _a0, _a1
+func (_m *MockDataNode) GetCompactionState(_a0 context.Context, _a1 *datapb.CompactionStateRequest) (*datapb.CompactionStateResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *datapb.CompactionStateResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionStateRequest) (*datapb.CompactionStateResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionStateRequest) *datapb.CompactionStateResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*datapb.CompactionStateResponse)
@@ -366,7 +366,7 @@ func (_m *MockDataNode) GetCompactionState(ctx context.Context, req *datapb.Comp
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *datapb.CompactionStateRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -380,13 +380,13 @@ type MockDataNode_GetCompactionState_Call struct {
 }
 
 // GetCompactionState is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.CompactionStateRequest
-func (_e *MockDataNode_Expecter) GetCompactionState(ctx interface{}, req interface{}) *MockDataNode_GetCompactionState_Call {
-	return &MockDataNode_GetCompactionState_Call{Call: _e.mock.On("GetCompactionState", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *datapb.CompactionStateRequest
+func (_e *MockDataNode_Expecter) GetCompactionState(_a0 interface{}, _a1 interface{}) *MockDataNode_GetCompactionState_Call {
+	return &MockDataNode_GetCompactionState_Call{Call: _e.mock.On("GetCompactionState", _a0, _a1)}
 }
 
-func (_c *MockDataNode_GetCompactionState_Call) Run(run func(ctx context.Context, req *datapb.CompactionStateRequest)) *MockDataNode_GetCompactionState_Call {
+func (_c *MockDataNode_GetCompactionState_Call) Run(run func(_a0 context.Context, _a1 *datapb.CompactionStateRequest)) *MockDataNode_GetCompactionState_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*datapb.CompactionStateRequest))
 	})
@@ -403,25 +403,25 @@ func (_c *MockDataNode_GetCompactionState_Call) RunAndReturn(run func(context.Co
 	return _c
 }
 
-// GetComponentStates provides a mock function with given fields: ctx
-func (_m *MockDataNode) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
-	ret := _m.Called(ctx)
+// GetComponentStates provides a mock function with given fields: _a0, _a1
+func (_m *MockDataNode) GetComponentStates(_a0 context.Context, _a1 *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.ComponentStates
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) (*milvuspb.ComponentStates, error)); ok {
-		return rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error)); ok {
+		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context) *milvuspb.ComponentStates); ok {
-		r0 = rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetComponentStatesRequest) *milvuspb.ComponentStates); ok {
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.ComponentStates)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = rf(ctx)
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetComponentStatesRequest) error); ok {
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -435,14 +435,15 @@ type MockDataNode_GetComponentStates_Call struct {
 }
 
 // GetComponentStates is a helper method to define mock.On call
-//   - ctx context.Context
-func (_e *MockDataNode_Expecter) GetComponentStates(ctx interface{}) *MockDataNode_GetComponentStates_Call {
-	return &MockDataNode_GetComponentStates_Call{Call: _e.mock.On("GetComponentStates", ctx)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetComponentStatesRequest
+func (_e *MockDataNode_Expecter) GetComponentStates(_a0 interface{}, _a1 interface{}) *MockDataNode_GetComponentStates_Call {
+	return &MockDataNode_GetComponentStates_Call{Call: _e.mock.On("GetComponentStates", _a0, _a1)}
 }
 
-func (_c *MockDataNode_GetComponentStates_Call) Run(run func(ctx context.Context)) *MockDataNode_GetComponentStates_Call {
+func (_c *MockDataNode_GetComponentStates_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetComponentStatesRequest)) *MockDataNode_GetComponentStates_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
+		run(args[0].(context.Context), args[1].(*milvuspb.GetComponentStatesRequest))
 	})
 	return _c
 }
@@ -452,22 +453,22 @@ func (_c *MockDataNode_GetComponentStates_Call) Return(_a0 *milvuspb.ComponentSt
 	return _c
 }
 
-func (_c *MockDataNode_GetComponentStates_Call) RunAndReturn(run func(context.Context) (*milvuspb.ComponentStates, error)) *MockDataNode_GetComponentStates_Call {
+func (_c *MockDataNode_GetComponentStates_Call) RunAndReturn(run func(context.Context, *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error)) *MockDataNode_GetComponentStates_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// GetMetrics provides a mock function with given fields: ctx, req
-func (_m *MockDataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	ret := _m.Called(ctx, req)
+// GetMetrics provides a mock function with given fields: _a0, _a1
+func (_m *MockDataNode) GetMetrics(_a0 context.Context, _a1 *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.GetMetricsResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetMetricsRequest) *milvuspb.GetMetricsResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.GetMetricsResponse)
@@ -475,7 +476,7 @@ func (_m *MockDataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetrics
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetMetricsRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -489,13 +490,13 @@ type MockDataNode_GetMetrics_Call struct {
 }
 
 // GetMetrics is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.GetMetricsRequest
-func (_e *MockDataNode_Expecter) GetMetrics(ctx interface{}, req interface{}) *MockDataNode_GetMetrics_Call {
-	return &MockDataNode_GetMetrics_Call{Call: _e.mock.On("GetMetrics", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetMetricsRequest
+func (_e *MockDataNode_Expecter) GetMetrics(_a0 interface{}, _a1 interface{}) *MockDataNode_GetMetrics_Call {
+	return &MockDataNode_GetMetrics_Call{Call: _e.mock.On("GetMetrics", _a0, _a1)}
 }
 
-func (_c *MockDataNode_GetMetrics_Call) Run(run func(ctx context.Context, req *milvuspb.GetMetricsRequest)) *MockDataNode_GetMetrics_Call {
+func (_c *MockDataNode_GetMetrics_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetMetricsRequest)) *MockDataNode_GetMetrics_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.GetMetricsRequest))
 	})
@@ -553,25 +554,25 @@ func (_c *MockDataNode_GetStateCode_Call) RunAndReturn(run func() commonpb.State
 	return _c
 }
 
-// GetStatisticsChannel provides a mock function with given fields: ctx
-func (_m *MockDataNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	ret := _m.Called(ctx)
+// GetStatisticsChannel provides a mock function with given fields: _a0, _a1
+func (_m *MockDataNode) GetStatisticsChannel(_a0 context.Context, _a1 *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.StringResponse
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) (*milvuspb.StringResponse, error)); ok {
-		return rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error)); ok {
+		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context) *milvuspb.StringResponse); ok {
-		r0 = rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetStatisticsChannelRequest) *milvuspb.StringResponse); ok {
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.StringResponse)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = rf(ctx)
+	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.GetStatisticsChannelRequest) error); ok {
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -585,14 +586,15 @@ type MockDataNode_GetStatisticsChannel_Call struct {
 }
 
 // GetStatisticsChannel is a helper method to define mock.On call
-//   - ctx context.Context
-func (_e *MockDataNode_Expecter) GetStatisticsChannel(ctx interface{}) *MockDataNode_GetStatisticsChannel_Call {
-	return &MockDataNode_GetStatisticsChannel_Call{Call: _e.mock.On("GetStatisticsChannel", ctx)}
+//   - _a0 context.Context
+//   - _a1 *internalpb.GetStatisticsChannelRequest
+func (_e *MockDataNode_Expecter) GetStatisticsChannel(_a0 interface{}, _a1 interface{}) *MockDataNode_GetStatisticsChannel_Call {
+	return &MockDataNode_GetStatisticsChannel_Call{Call: _e.mock.On("GetStatisticsChannel", _a0, _a1)}
 }
 
-func (_c *MockDataNode_GetStatisticsChannel_Call) Run(run func(ctx context.Context)) *MockDataNode_GetStatisticsChannel_Call {
+func (_c *MockDataNode_GetStatisticsChannel_Call) Run(run func(_a0 context.Context, _a1 *internalpb.GetStatisticsChannelRequest)) *MockDataNode_GetStatisticsChannel_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
+		run(args[0].(context.Context), args[1].(*internalpb.GetStatisticsChannelRequest))
 	})
 	return _c
 }
@@ -602,22 +604,22 @@ func (_c *MockDataNode_GetStatisticsChannel_Call) Return(_a0 *milvuspb.StringRes
 	return _c
 }
 
-func (_c *MockDataNode_GetStatisticsChannel_Call) RunAndReturn(run func(context.Context) (*milvuspb.StringResponse, error)) *MockDataNode_GetStatisticsChannel_Call {
+func (_c *MockDataNode_GetStatisticsChannel_Call) RunAndReturn(run func(context.Context, *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error)) *MockDataNode_GetStatisticsChannel_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// Import provides a mock function with given fields: ctx, req
-func (_m *MockDataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// Import provides a mock function with given fields: _a0, _a1
+func (_m *MockDataNode) Import(_a0 context.Context, _a1 *datapb.ImportTaskRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ImportTaskRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ImportTaskRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -625,7 +627,7 @@ func (_m *MockDataNode) Import(ctx context.Context, req *datapb.ImportTaskReques
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *datapb.ImportTaskRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -639,13 +641,13 @@ type MockDataNode_Import_Call struct {
 }
 
 // Import is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.ImportTaskRequest
-func (_e *MockDataNode_Expecter) Import(ctx interface{}, req interface{}) *MockDataNode_Import_Call {
-	return &MockDataNode_Import_Call{Call: _e.mock.On("Import", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *datapb.ImportTaskRequest
+func (_e *MockDataNode_Expecter) Import(_a0 interface{}, _a1 interface{}) *MockDataNode_Import_Call {
+	return &MockDataNode_Import_Call{Call: _e.mock.On("Import", _a0, _a1)}
 }
 
-func (_c *MockDataNode_Import_Call) Run(run func(ctx context.Context, req *datapb.ImportTaskRequest)) *MockDataNode_Import_Call {
+func (_c *MockDataNode_Import_Call) Run(run func(_a0 context.Context, _a1 *datapb.ImportTaskRequest)) *MockDataNode_Import_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*datapb.ImportTaskRequest))
 	})
@@ -703,17 +705,17 @@ func (_c *MockDataNode_Init_Call) RunAndReturn(run func() error) *MockDataNode_I
 	return _c
 }
 
-// NotifyChannelOperation provides a mock function with given fields: ctx, req
-func (_m *MockDataNode) NotifyChannelOperation(ctx context.Context, req *datapb.ChannelOperationsRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// NotifyChannelOperation provides a mock function with given fields: _a0, _a1
+func (_m *MockDataNode) NotifyChannelOperation(_a0 context.Context, _a1 *datapb.ChannelOperationsRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ChannelOperationsRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ChannelOperationsRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -721,7 +723,7 @@ func (_m *MockDataNode) NotifyChannelOperation(ctx context.Context, req *datapb.
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *datapb.ChannelOperationsRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -735,13 +737,13 @@ type MockDataNode_NotifyChannelOperation_Call struct {
 }
 
 // NotifyChannelOperation is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.ChannelOperationsRequest
-func (_e *MockDataNode_Expecter) NotifyChannelOperation(ctx interface{}, req interface{}) *MockDataNode_NotifyChannelOperation_Call {
-	return &MockDataNode_NotifyChannelOperation_Call{Call: _e.mock.On("NotifyChannelOperation", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *datapb.ChannelOperationsRequest
+func (_e *MockDataNode_Expecter) NotifyChannelOperation(_a0 interface{}, _a1 interface{}) *MockDataNode_NotifyChannelOperation_Call {
+	return &MockDataNode_NotifyChannelOperation_Call{Call: _e.mock.On("NotifyChannelOperation", _a0, _a1)}
 }
 
-func (_c *MockDataNode_NotifyChannelOperation_Call) Run(run func(ctx context.Context, req *datapb.ChannelOperationsRequest)) *MockDataNode_NotifyChannelOperation_Call {
+func (_c *MockDataNode_NotifyChannelOperation_Call) Run(run func(_a0 context.Context, _a1 *datapb.ChannelOperationsRequest)) *MockDataNode_NotifyChannelOperation_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*datapb.ChannelOperationsRequest))
 	})
@@ -799,17 +801,17 @@ func (_c *MockDataNode_Register_Call) RunAndReturn(run func() error) *MockDataNo
 	return _c
 }
 
-// ResendSegmentStats provides a mock function with given fields: ctx, req
-func (_m *MockDataNode) ResendSegmentStats(ctx context.Context, req *datapb.ResendSegmentStatsRequest) (*datapb.ResendSegmentStatsResponse, error) {
-	ret := _m.Called(ctx, req)
+// ResendSegmentStats provides a mock function with given fields: _a0, _a1
+func (_m *MockDataNode) ResendSegmentStats(_a0 context.Context, _a1 *datapb.ResendSegmentStatsRequest) (*datapb.ResendSegmentStatsResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *datapb.ResendSegmentStatsResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ResendSegmentStatsRequest) (*datapb.ResendSegmentStatsResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ResendSegmentStatsRequest) *datapb.ResendSegmentStatsResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*datapb.ResendSegmentStatsResponse)
@@ -817,7 +819,7 @@ func (_m *MockDataNode) ResendSegmentStats(ctx context.Context, req *datapb.Rese
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *datapb.ResendSegmentStatsRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -831,13 +833,13 @@ type MockDataNode_ResendSegmentStats_Call struct {
 }
 
 // ResendSegmentStats is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.ResendSegmentStatsRequest
-func (_e *MockDataNode_Expecter) ResendSegmentStats(ctx interface{}, req interface{}) *MockDataNode_ResendSegmentStats_Call {
-	return &MockDataNode_ResendSegmentStats_Call{Call: _e.mock.On("ResendSegmentStats", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *datapb.ResendSegmentStatsRequest
+func (_e *MockDataNode_Expecter) ResendSegmentStats(_a0 interface{}, _a1 interface{}) *MockDataNode_ResendSegmentStats_Call {
+	return &MockDataNode_ResendSegmentStats_Call{Call: _e.mock.On("ResendSegmentStats", _a0, _a1)}
 }
 
-func (_c *MockDataNode_ResendSegmentStats_Call) Run(run func(ctx context.Context, req *datapb.ResendSegmentStatsRequest)) *MockDataNode_ResendSegmentStats_Call {
+func (_c *MockDataNode_ResendSegmentStats_Call) Run(run func(_a0 context.Context, _a1 *datapb.ResendSegmentStatsRequest)) *MockDataNode_ResendSegmentStats_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*datapb.ResendSegmentStatsRequest))
 	})
@@ -887,12 +889,12 @@ func (_c *MockDataNode_SetAddress_Call) RunAndReturn(run func(string)) *MockData
 	return _c
 }
 
-// SetDataCoord provides a mock function with given fields: dataCoord
-func (_m *MockDataNode) SetDataCoord(dataCoord types.DataCoord) error {
+// SetDataCoordClient provides a mock function with given fields: dataCoord
+func (_m *MockDataNode) SetDataCoordClient(dataCoord types.DataCoordClient) error {
 	ret := _m.Called(dataCoord)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(types.DataCoord) error); ok {
+	if rf, ok := ret.Get(0).(func(types.DataCoordClient) error); ok {
 		r0 = rf(dataCoord)
 	} else {
 		r0 = ret.Error(0)
@@ -901,30 +903,30 @@ func (_m *MockDataNode) SetDataCoord(dataCoord types.DataCoord) error {
 	return r0
 }
 
-// MockDataNode_SetDataCoord_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetDataCoord'
-type MockDataNode_SetDataCoord_Call struct {
+// MockDataNode_SetDataCoordClient_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetDataCoordClient'
+type MockDataNode_SetDataCoordClient_Call struct {
 	*mock.Call
 }
 
-// SetDataCoord is a helper method to define mock.On call
-//   - dataCoord types.DataCoord
-func (_e *MockDataNode_Expecter) SetDataCoord(dataCoord interface{}) *MockDataNode_SetDataCoord_Call {
-	return &MockDataNode_SetDataCoord_Call{Call: _e.mock.On("SetDataCoord", dataCoord)}
+// SetDataCoordClient is a helper method to define mock.On call
+//   - dataCoord types.DataCoordClient
+func (_e *MockDataNode_Expecter) SetDataCoordClient(dataCoord interface{}) *MockDataNode_SetDataCoordClient_Call {
+	return &MockDataNode_SetDataCoordClient_Call{Call: _e.mock.On("SetDataCoordClient", dataCoord)}
 }
 
-func (_c *MockDataNode_SetDataCoord_Call) Run(run func(dataCoord types.DataCoord)) *MockDataNode_SetDataCoord_Call {
+func (_c *MockDataNode_SetDataCoordClient_Call) Run(run func(dataCoord types.DataCoordClient)) *MockDataNode_SetDataCoordClient_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(types.DataCoord))
+		run(args[0].(types.DataCoordClient))
 	})
 	return _c
 }
 
-func (_c *MockDataNode_SetDataCoord_Call) Return(_a0 error) *MockDataNode_SetDataCoord_Call {
+func (_c *MockDataNode_SetDataCoordClient_Call) Return(_a0 error) *MockDataNode_SetDataCoordClient_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockDataNode_SetDataCoord_Call) RunAndReturn(run func(types.DataCoord) error) *MockDataNode_SetDataCoord_Call {
+func (_c *MockDataNode_SetDataCoordClient_Call) RunAndReturn(run func(types.DataCoordClient) error) *MockDataNode_SetDataCoordClient_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -962,12 +964,12 @@ func (_c *MockDataNode_SetEtcdClient_Call) RunAndReturn(run func(*clientv3.Clien
 	return _c
 }
 
-// SetRootCoord provides a mock function with given fields: rootCoord
-func (_m *MockDataNode) SetRootCoord(rootCoord types.RootCoord) error {
+// SetRootCoordClient provides a mock function with given fields: rootCoord
+func (_m *MockDataNode) SetRootCoordClient(rootCoord types.RootCoordClient) error {
 	ret := _m.Called(rootCoord)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(types.RootCoord) error); ok {
+	if rf, ok := ret.Get(0).(func(types.RootCoordClient) error); ok {
 		r0 = rf(rootCoord)
 	} else {
 		r0 = ret.Error(0)
@@ -976,45 +978,45 @@ func (_m *MockDataNode) SetRootCoord(rootCoord types.RootCoord) error {
 	return r0
 }
 
-// MockDataNode_SetRootCoord_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetRootCoord'
-type MockDataNode_SetRootCoord_Call struct {
+// MockDataNode_SetRootCoordClient_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetRootCoordClient'
+type MockDataNode_SetRootCoordClient_Call struct {
 	*mock.Call
 }
 
-// SetRootCoord is a helper method to define mock.On call
-//   - rootCoord types.RootCoord
-func (_e *MockDataNode_Expecter) SetRootCoord(rootCoord interface{}) *MockDataNode_SetRootCoord_Call {
-	return &MockDataNode_SetRootCoord_Call{Call: _e.mock.On("SetRootCoord", rootCoord)}
+// SetRootCoordClient is a helper method to define mock.On call
+//   - rootCoord types.RootCoordClient
+func (_e *MockDataNode_Expecter) SetRootCoordClient(rootCoord interface{}) *MockDataNode_SetRootCoordClient_Call {
+	return &MockDataNode_SetRootCoordClient_Call{Call: _e.mock.On("SetRootCoordClient", rootCoord)}
 }
 
-func (_c *MockDataNode_SetRootCoord_Call) Run(run func(rootCoord types.RootCoord)) *MockDataNode_SetRootCoord_Call {
+func (_c *MockDataNode_SetRootCoordClient_Call) Run(run func(rootCoord types.RootCoordClient)) *MockDataNode_SetRootCoordClient_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(types.RootCoord))
+		run(args[0].(types.RootCoordClient))
 	})
 	return _c
 }
 
-func (_c *MockDataNode_SetRootCoord_Call) Return(_a0 error) *MockDataNode_SetRootCoord_Call {
+func (_c *MockDataNode_SetRootCoordClient_Call) Return(_a0 error) *MockDataNode_SetRootCoordClient_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockDataNode_SetRootCoord_Call) RunAndReturn(run func(types.RootCoord) error) *MockDataNode_SetRootCoord_Call {
+func (_c *MockDataNode_SetRootCoordClient_Call) RunAndReturn(run func(types.RootCoordClient) error) *MockDataNode_SetRootCoordClient_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// ShowConfigurations provides a mock function with given fields: ctx, req
-func (_m *MockDataNode) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
-	ret := _m.Called(ctx, req)
+// ShowConfigurations provides a mock function with given fields: _a0, _a1
+func (_m *MockDataNode) ShowConfigurations(_a0 context.Context, _a1 *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *internalpb.ShowConfigurationsResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ShowConfigurationsRequest) *internalpb.ShowConfigurationsResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*internalpb.ShowConfigurationsResponse)
@@ -1022,7 +1024,7 @@ func (_m *MockDataNode) ShowConfigurations(ctx context.Context, req *internalpb.
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.ShowConfigurationsRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1036,13 +1038,13 @@ type MockDataNode_ShowConfigurations_Call struct {
 }
 
 // ShowConfigurations is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *internalpb.ShowConfigurationsRequest
-func (_e *MockDataNode_Expecter) ShowConfigurations(ctx interface{}, req interface{}) *MockDataNode_ShowConfigurations_Call {
-	return &MockDataNode_ShowConfigurations_Call{Call: _e.mock.On("ShowConfigurations", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *internalpb.ShowConfigurationsRequest
+func (_e *MockDataNode_Expecter) ShowConfigurations(_a0 interface{}, _a1 interface{}) *MockDataNode_ShowConfigurations_Call {
+	return &MockDataNode_ShowConfigurations_Call{Call: _e.mock.On("ShowConfigurations", _a0, _a1)}
 }
 
-func (_c *MockDataNode_ShowConfigurations_Call) Run(run func(ctx context.Context, req *internalpb.ShowConfigurationsRequest)) *MockDataNode_ShowConfigurations_Call {
+func (_c *MockDataNode_ShowConfigurations_Call) Run(run func(_a0 context.Context, _a1 *internalpb.ShowConfigurationsRequest)) *MockDataNode_ShowConfigurations_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*internalpb.ShowConfigurationsRequest))
 	})
@@ -1141,17 +1143,17 @@ func (_c *MockDataNode_Stop_Call) RunAndReturn(run func() error) *MockDataNode_S
 	return _c
 }
 
-// SyncSegments provides a mock function with given fields: ctx, req
-func (_m *MockDataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegmentsRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// SyncSegments provides a mock function with given fields: _a0, _a1
+func (_m *MockDataNode) SyncSegments(_a0 context.Context, _a1 *datapb.SyncSegmentsRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *datapb.SyncSegmentsRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *datapb.SyncSegmentsRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -1159,7 +1161,7 @@ func (_m *MockDataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegmen
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *datapb.SyncSegmentsRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1173,13 +1175,13 @@ type MockDataNode_SyncSegments_Call struct {
 }
 
 // SyncSegments is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.SyncSegmentsRequest
-func (_e *MockDataNode_Expecter) SyncSegments(ctx interface{}, req interface{}) *MockDataNode_SyncSegments_Call {
-	return &MockDataNode_SyncSegments_Call{Call: _e.mock.On("SyncSegments", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *datapb.SyncSegmentsRequest
+func (_e *MockDataNode_Expecter) SyncSegments(_a0 interface{}, _a1 interface{}) *MockDataNode_SyncSegments_Call {
+	return &MockDataNode_SyncSegments_Call{Call: _e.mock.On("SyncSegments", _a0, _a1)}
 }
 
-func (_c *MockDataNode_SyncSegments_Call) Run(run func(ctx context.Context, req *datapb.SyncSegmentsRequest)) *MockDataNode_SyncSegments_Call {
+func (_c *MockDataNode_SyncSegments_Call) Run(run func(_a0 context.Context, _a1 *datapb.SyncSegmentsRequest)) *MockDataNode_SyncSegments_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*datapb.SyncSegmentsRequest))
 	})
@@ -1229,17 +1231,17 @@ func (_c *MockDataNode_UpdateStateCode_Call) RunAndReturn(run func(commonpb.Stat
 	return _c
 }
 
-// WatchDmChannels provides a mock function with given fields: ctx, req
-func (_m *MockDataNode) WatchDmChannels(ctx context.Context, req *datapb.WatchDmChannelsRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// WatchDmChannels provides a mock function with given fields: _a0, _a1
+func (_m *MockDataNode) WatchDmChannels(_a0 context.Context, _a1 *datapb.WatchDmChannelsRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *datapb.WatchDmChannelsRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *datapb.WatchDmChannelsRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -1247,7 +1249,7 @@ func (_m *MockDataNode) WatchDmChannels(ctx context.Context, req *datapb.WatchDm
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *datapb.WatchDmChannelsRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1261,13 +1263,13 @@ type MockDataNode_WatchDmChannels_Call struct {
 }
 
 // WatchDmChannels is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.WatchDmChannelsRequest
-func (_e *MockDataNode_Expecter) WatchDmChannels(ctx interface{}, req interface{}) *MockDataNode_WatchDmChannels_Call {
-	return &MockDataNode_WatchDmChannels_Call{Call: _e.mock.On("WatchDmChannels", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *datapb.WatchDmChannelsRequest
+func (_e *MockDataNode_Expecter) WatchDmChannels(_a0 interface{}, _a1 interface{}) *MockDataNode_WatchDmChannels_Call {
+	return &MockDataNode_WatchDmChannels_Call{Call: _e.mock.On("WatchDmChannels", _a0, _a1)}
 }
 
-func (_c *MockDataNode_WatchDmChannels_Call) Run(run func(ctx context.Context, req *datapb.WatchDmChannelsRequest)) *MockDataNode_WatchDmChannels_Call {
+func (_c *MockDataNode_WatchDmChannels_Call) Run(run func(_a0 context.Context, _a1 *datapb.WatchDmChannelsRequest)) *MockDataNode_WatchDmChannels_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*datapb.WatchDmChannelsRequest))
 	})
@@ -1289,8 +1291,7 @@ func (_c *MockDataNode_WatchDmChannels_Call) RunAndReturn(run func(context.Conte
 func NewMockDataNode(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockDataNode {
+}) *MockDataNode {
 	mock := &MockDataNode{}
 	mock.Mock.Test(t)
 

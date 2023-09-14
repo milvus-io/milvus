@@ -80,9 +80,9 @@ type Proxy struct {
 
 	etcdCli    *clientv3.Client
 	address    string
-	rootCoord  types.RootCoord
-	dataCoord  types.DataCoord
-	queryCoord types.QueryCoord
+	rootCoord  types.RootCoordClient
+	dataCoord  types.DataCoordClient
+	queryCoord types.QueryCoordClient
 
 	multiRateLimiter *MultiRateLimiter
 
@@ -469,21 +469,21 @@ func (node *Proxy) SetEtcdClient(client *clientv3.Client) {
 }
 
 // SetRootCoordClient sets RootCoord client for proxy.
-func (node *Proxy) SetRootCoordClient(cli types.RootCoord) {
+func (node *Proxy) SetRootCoordClient(cli types.RootCoordClient) {
 	node.rootCoord = cli
 }
 
 // SetDataCoordClient sets DataCoord client for proxy.
-func (node *Proxy) SetDataCoordClient(cli types.DataCoord) {
+func (node *Proxy) SetDataCoordClient(cli types.DataCoordClient) {
 	node.dataCoord = cli
 }
 
 // SetQueryCoordClient sets QueryCoord client for proxy.
-func (node *Proxy) SetQueryCoordClient(cli types.QueryCoord) {
+func (node *Proxy) SetQueryCoordClient(cli types.QueryCoordClient) {
 	node.queryCoord = cli
 }
 
-func (node *Proxy) SetQueryNodeCreator(f func(ctx context.Context, addr string, nodeID int64) (types.QueryNode, error)) {
+func (node *Proxy) SetQueryNodeCreator(f func(ctx context.Context, addr string, nodeID int64) (types.QueryNodeClient, error)) {
 	node.shardMgr.SetClientCreatorFunc(f)
 }
 

@@ -49,8 +49,8 @@ func TestQueryTask_all(t *testing.T) {
 		ctx = context.TODO()
 
 		rc = NewRootCoordMock()
-		qc = mocks.NewMockQueryCoord(t)
-		qn = getQueryNode()
+		qc = mocks.NewMockQueryCoordClient(t)
+		qn = getQueryNodeClient()
 
 		shardsNum      = common.DefaultShardsNum
 		collectionName = t.Name() + funcutil.GenRandomStr()
@@ -59,11 +59,9 @@ func TestQueryTask_all(t *testing.T) {
 		hitNum = 10
 	)
 
-	qn.EXPECT().GetComponentStates(mock.Anything).Return(nil, nil).Maybe()
+	qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 	successStatus := commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
-	qc.EXPECT().Start().Return(nil)
-	qc.EXPECT().Stop().Return(nil)
 	qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(&successStatus, nil)
 	qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
 		Status: &successStatus,
@@ -81,11 +79,7 @@ func TestQueryTask_all(t *testing.T) {
 	mgr.EXPECT().UpdateShardLeaders(mock.Anything, mock.Anything).Return(nil).Maybe()
 	lb := NewLBPolicyImpl(mgr)
 
-	rc.Start()
-	defer rc.Stop()
-	qc.Start()
-	defer qc.Stop()
-
+	defer rc.Close()
 	err = InitMetaCache(ctx, rc, qc, mgr)
 	assert.NoError(t, err)
 
@@ -210,12 +204,12 @@ func TestQueryTask_all(t *testing.T) {
 	task.RetrieveRequest.OutputFieldsId = append(task.RetrieveRequest.OutputFieldsId, common.TimeStampField)
 	task.ctx = ctx
 	qn.ExpectedCalls = nil
-	qn.EXPECT().GetComponentStates(mock.Anything).Return(nil, nil).Maybe()
+	qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	qn.EXPECT().Query(mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
 	assert.Error(t, task.Execute(ctx))
 
 	qn.ExpectedCalls = nil
-	qn.EXPECT().GetComponentStates(mock.Anything).Return(nil, nil).Maybe()
+	qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	qn.EXPECT().Query(mock.Anything, mock.Anything).Return(&internalpb.RetrieveResults{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_NotShardLeader,
@@ -225,7 +219,7 @@ func TestQueryTask_all(t *testing.T) {
 	assert.True(t, strings.Contains(err.Error(), errInvalidShardLeaders.Error()))
 
 	qn.ExpectedCalls = nil
-	qn.EXPECT().GetComponentStates(mock.Anything).Return(nil, nil).Maybe()
+	qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	qn.EXPECT().Query(mock.Anything, mock.Anything).Return(&internalpb.RetrieveResults{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -234,7 +228,7 @@ func TestQueryTask_all(t *testing.T) {
 	assert.Error(t, task.Execute(ctx))
 
 	qn.ExpectedCalls = nil
-	qn.EXPECT().GetComponentStates(mock.Anything).Return(nil, nil).Maybe()
+	qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	qn.EXPECT().Query(mock.Anything, mock.Anything).Return(result1, nil)
 	assert.NoError(t, task.Execute(ctx))
 

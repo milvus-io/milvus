@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/atomic"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/mocks"
@@ -167,11 +168,11 @@ func TestTimetickManagerSendNotSuccess(t *testing.T) {
 func TestTimetickManagerSendReport(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	mockDataCoord := mocks.NewMockDataCoord(t)
+	mockDataCoord := mocks.NewMockDataCoordClient(t)
 	tsInMill := time.Now().UnixMilli()
 
 	validTs := atomic.NewBool(false)
-	mockDataCoord.EXPECT().ReportDataNodeTtMsgs(mock.Anything, mock.Anything).Run(func(ctx context.Context, req *datapb.ReportDataNodeTtMsgsRequest) {
+	mockDataCoord.EXPECT().ReportDataNodeTtMsgs(mock.Anything, mock.Anything).Run(func(ctx context.Context, req *datapb.ReportDataNodeTtMsgsRequest, opt ...grpc.CallOption) {
 		if req.GetBase().Timestamp > uint64(tsInMill) {
 			validTs.Store(true)
 		}

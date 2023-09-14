@@ -23,9 +23,11 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 )
 
@@ -55,11 +57,11 @@ func (mc *MockComponent) Stop() error {
 	return nil
 }
 
-func (mc *MockComponent) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+func (mc *MockComponent) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error) {
 	return mc.compState, mc.compErr
 }
 
-func (mc *MockComponent) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (mc *MockComponent) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
 	return mc.strResp, nil
 }
 

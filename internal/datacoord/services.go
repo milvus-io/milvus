@@ -53,7 +53,7 @@ func (s *Server) isClosed() bool {
 }
 
 // GetTimeTickChannel legacy API, returns time tick channel name
-func (s *Server) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: merr.Status(nil),
 		Value:  Params.CommonCfg.DataCoordTimeTick.GetValue(),
@@ -61,7 +61,7 @@ func (s *Server) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRespon
 }
 
 // GetStatisticsChannel legacy API, returns statistics channel name
-func (s *Server) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -357,7 +357,7 @@ func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPart
 }
 
 // GetSegmentInfoChannel legacy API, returns segment info statistics channel
-func (s *Server) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (s *Server) GetSegmentInfoChannel(ctx context.Context, req *datapb.GetSegmentInfoChannelRequest) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: merr.Status(nil),
 		Value:  Params.CommonCfg.DataCoordSegmentInfo.GetValue(),
@@ -618,7 +618,7 @@ func (s *Server) GetStateCode() commonpb.StateCode {
 }
 
 // GetComponentStates returns DataCoord's current state
-func (s *Server) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	code := s.GetStateCode()
 	nodeID := common.NotRegisteredID
 	if s.session != nil && s.session.Registered() {
@@ -1726,7 +1726,7 @@ func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthReque
 				return err
 			}
 
-			sta, err := cli.GetComponentStates(ctx)
+			sta, err := cli.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 			isHealthy, reason := errorutil.UnHealthReasonWithComponentStatesOrErr("datanode", nodeID, sta, err)
 			if !isHealthy {
 				mu.Lock()

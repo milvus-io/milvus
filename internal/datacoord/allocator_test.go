@@ -27,7 +27,7 @@ import (
 
 func TestAllocator_Basic(t *testing.T) {
 	paramtable.Init()
-	ms := newMockRootCoordService()
+	ms := newMockRootCoordClient()
 	allocator := newRootCoordAllocator(ms)
 	ctx := context.Background()
 
@@ -42,7 +42,7 @@ func TestAllocator_Basic(t *testing.T) {
 	})
 
 	t.Run("Test Unhealthy Root", func(t *testing.T) {
-		ms := newMockRootCoordService()
+		ms := newMockRootCoordClient()
 		allocator := newRootCoordAllocator(ms)
 		err := ms.Stop()
 		assert.NoError(t, err)

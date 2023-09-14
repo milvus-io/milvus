@@ -19,7 +19,7 @@
 package cluster
 
 import (
-	context "context"
+	"context"
 	"io"
 	"testing"
 
@@ -27,14 +27,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
-	internalpb "github.com/milvus-io/milvus/internal/proto/internalpb"
-	querypb "github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
@@ -42,12 +43,12 @@ import (
 type RemoteWorkerSuite struct {
 	suite.Suite
 
-	mockClient *mocks.MockQueryNode
+	mockClient *mocks.MockQueryNodeClient
 	worker     *remoteWorker
 }
 
 func (s *RemoteWorkerSuite) SetupTest() {
-	s.mockClient = &mocks.MockQueryNode{}
+	s.mockClient = &mocks.MockQueryNodeClient{}
 	s.worker = &remoteWorker{client: s.mockClient}
 }
 
@@ -346,18 +347,15 @@ func (s *RemoteWorkerSuite) TestQueryStream() {
 		server := client.CreateServer()
 
 		ids := []int64{10, 11, 12}
-
 		s.mockClient.EXPECT().QueryStreamSegments(
 			mock.Anything,
 			mock.AnythingOfType("*querypb.QueryRequest"),
-			mock.AnythingOfType("*streamrpc.GrpcQueryStreamer"),
-		).Run(func(ctx context.Context, req *querypb.QueryRequest, streamer streamrpc.QueryStreamer) {
+		).RunAndReturn(func(ctx context.Context, request *querypb.QueryRequest, option ...grpc.CallOption) (querypb.QueryNode_QueryStreamSegmentsClient, error) {
 			client := streamrpc.NewLocalQueryClient(ctx)
-			streamer.SetClient(client)
-
 			server := client.CreateServer()
+
 			for _, id := range ids {
-				server.Send(&internalpb.RetrieveResults{
+				err := server.Send(&internalpb.RetrieveResults{
 					Status: merr.Status(nil),
 					Ids: &schemapb.IDs{
 						IdField: &schemapb.IDs_IntId{
@@ -365,9 +363,12 @@ func (s *RemoteWorkerSuite) TestQueryStream() {
 						},
 					},
 				})
+				s.NoError(err)
 			}
-			server.FinishSend(nil)
-		}).Return(nil)
+			err := server.FinishSend(nil)
+			s.NoError(err)
+			return client, nil
+		})
 
 		go func() {
 			err := s.worker.QueryStreamSegments(ctx, &querypb.QueryRequest{}, server)
@@ -411,13 +412,11 @@ func (s *RemoteWorkerSuite) TestQueryStream() {
 		s.mockClient.EXPECT().QueryStreamSegments(
 			mock.Anything,
 			mock.AnythingOfType("*querypb.QueryRequest"),
-			mock.AnythingOfType("*streamrpc.GrpcQueryStreamer"),
-		).Run(func(ctx context.Context, req *querypb.QueryRequest, streamer streamrpc.QueryStreamer) {
-			client := streamrpc.NewLocalQueryClient(ctx)
-			streamer.SetClient(client)
-
-			server := client.CreateServer()
+		).RunAndReturn(func(ctx context.Context, request *querypb.QueryRequest, option ...grpc.CallOption) (querypb.QueryNode_QueryStreamSegmentsClient, error) {
 			for _, id := range ids {
+				client := streamrpc.NewLocalQueryClient(ctx)
+				server := client.CreateServer()
+
 				err := server.Send(&internalpb.RetrieveResults{
 					Status: merr.Status(nil),
 					Ids: &schemapb.IDs{
@@ -428,8 +427,10 @@ func (s *RemoteWorkerSuite) TestQueryStream() {
 				})
 				s.NoError(err)
 			}
-			server.FinishSend(nil)
-		}).Return(nil)
+			err := server.FinishSend(nil)
+			s.NoError(err)
+			return client, nil
+		})
 
 		err := s.worker.QueryStreamSegments(ctx, &querypb.QueryRequest{}, server)
 		s.Error(err)
@@ -446,8 +447,7 @@ func (s *RemoteWorkerSuite) TestQueryStream() {
 		s.mockClient.EXPECT().QueryStreamSegments(
 			mock.Anything,
 			mock.AnythingOfType("*querypb.QueryRequest"),
-			mock.AnythingOfType("*streamrpc.GrpcQueryStreamer"),
-		).Return(errors.New("mocked error"))
+		).Return(nil, errors.New("mocked error"))
 
 		go func() {
 			err := s.worker.QueryStreamSegments(ctx, &querypb.QueryRequest{}, server)
@@ -470,23 +470,24 @@ func (s *RemoteWorkerSuite) TestQueryStream() {
 		defer cancel()
 
 		client := streamrpc.NewLocalQueryClient(ctx)
-		server := streamrpc.NewConcurrentQueryStreamServer(client.CreateServer())
+		server := client.CreateServer()
 
 		s.mockClient.EXPECT().QueryStreamSegments(
 			mock.Anything,
 			mock.AnythingOfType("*querypb.QueryRequest"),
-			mock.AnythingOfType("*streamrpc.GrpcQueryStreamer"),
-		).Run(func(ctx context.Context, req *querypb.QueryRequest, streamer streamrpc.QueryStreamer) {
+		).RunAndReturn(func(ctx context.Context, request *querypb.QueryRequest, option ...grpc.CallOption) (querypb.QueryNode_QueryStreamSegmentsClient, error) {
 			client := streamrpc.NewLocalQueryClient(ctx)
-			streamer.SetClient(client)
-
 			server := client.CreateServer()
 
-			server.Send(&internalpb.RetrieveResults{
+			err := server.Send(&internalpb.RetrieveResults{
 				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
 			})
-			server.FinishSend(nil)
-		}).Return(nil)
+			s.NoError(err)
+
+			err = server.FinishSend(nil)
+			s.NoError(err)
+			return client, nil
+		})
 
 		go func() {
 			err := s.worker.QueryStreamSegments(ctx, &querypb.QueryRequest{}, server)
@@ -566,9 +567,9 @@ func (s *RemoteWorkerSuite) TestGetStatistics() {
 func (s *RemoteWorkerSuite) TestBasic() {
 	s.True(s.worker.IsHealthy())
 
-	s.mockClient.EXPECT().Stop().Return(nil)
+	s.mockClient.EXPECT().Close().Return(nil)
 	s.worker.Stop()
-	s.mockClient.AssertCalled(s.T(), "Stop")
+	s.mockClient.AssertCalled(s.T(), "Close")
 }
 
 func TestRemoteWorker(t *testing.T) {
@@ -576,8 +577,7 @@ func TestRemoteWorker(t *testing.T) {
 }
 
 func TestNewRemoteWorker(t *testing.T) {
-	client := &mocks.MockQueryNode{}
-
+	client := mocks.NewMockQueryNodeClient(t)
 	w := NewRemoteWorker(client)
 
 	rw, ok := w.(*remoteWorker)

@@ -55,8 +55,8 @@ type createIndexTask struct {
 	Condition
 	req       *milvuspb.CreateIndexRequest
 	ctx       context.Context
-	rootCoord types.RootCoord
-	datacoord types.DataCoord
+	rootCoord types.RootCoordClient
+	datacoord types.DataCoordClient
 	result    *commonpb.Status
 
 	isAutoIndex    bool
@@ -418,7 +418,7 @@ type describeIndexTask struct {
 	Condition
 	*milvuspb.DescribeIndexRequest
 	ctx       context.Context
-	datacoord types.DataCoord
+	datacoord types.DataCoordClient
 	result    *milvuspb.DescribeIndexResponse
 
 	collectionID UniqueID
@@ -535,7 +535,7 @@ type getIndexStatisticsTask struct {
 	Condition
 	*milvuspb.GetIndexStatisticsRequest
 	ctx       context.Context
-	datacoord types.DataCoord
+	datacoord types.DataCoordClient
 	result    *milvuspb.GetIndexStatisticsResponse
 
 	nodeID       int64
@@ -651,8 +651,8 @@ type dropIndexTask struct {
 	Condition
 	ctx context.Context
 	*milvuspb.DropIndexRequest
-	dataCoord  types.DataCoord
-	queryCoord types.QueryCoord
+	dataCoord  types.DataCoordClient
+	queryCoord types.QueryCoordClient
 	result     *commonpb.Status
 
 	collectionID UniqueID
@@ -755,8 +755,8 @@ type getIndexBuildProgressTask struct {
 	Condition
 	*milvuspb.GetIndexBuildProgressRequest
 	ctx       context.Context
-	rootCoord types.RootCoord
-	dataCoord types.DataCoord
+	rootCoord types.RootCoordClient
+	dataCoord types.DataCoordClient
 	result    *milvuspb.GetIndexBuildProgressResponse
 
 	collectionID UniqueID
@@ -848,8 +848,8 @@ type getIndexStateTask struct {
 	Condition
 	*milvuspb.GetIndexStateRequest
 	ctx       context.Context
-	dataCoord types.DataCoord
-	rootCoord types.RootCoord
+	dataCoord types.DataCoordClient
+	rootCoord types.RootCoordClient
 	result    *milvuspb.GetIndexStateResponse
 
 	collectionID UniqueID

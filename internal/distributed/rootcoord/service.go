@@ -68,11 +68,11 @@ type Server struct {
 
 	etcdCli    *clientv3.Client
 	tikvCli    *txnkv.Client
-	dataCoord  types.DataCoord
-	queryCoord types.QueryCoord
+	dataCoord  types.DataCoordClient
+	queryCoord types.QueryCoordClient
 
-	newDataCoordClient  func(string, *clientv3.Client) types.DataCoord
-	newQueryCoordClient func(string, *clientv3.Client) types.QueryCoord
+	newDataCoordClient  func(string, *clientv3.Client) types.DataCoordClient
+	newQueryCoordClient func(string, *clientv3.Client) types.QueryCoordClient
 }
 
 func (s *Server) CreateDatabase(ctx context.Context, request *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
@@ -124,7 +124,7 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 }
 
 func (s *Server) setClient() {
-	s.newDataCoordClient = func(etcdMetaRoot string, etcdCli *clientv3.Client) types.DataCoord {
+	s.newDataCoordClient = func(etcdMetaRoot string, etcdCli *clientv3.Client) types.DataCoordClient {
 		dsClient, err := dcc.NewClient(s.ctx, etcdMetaRoot, etcdCli)
 		if err != nil {
 			panic(err)
@@ -132,7 +132,7 @@ func (s *Server) setClient() {
 		return dsClient
 	}
 
-	s.newQueryCoordClient = func(metaRootPath string, etcdCli *clientv3.Client) types.QueryCoord {
+	s.newQueryCoordClient = func(metaRootPath string, etcdCli *clientv3.Client) types.QueryCoordClient {
 		qsClient, err := qcc.NewClient(s.ctx, metaRootPath, etcdCli)
 		if err != nil {
 			panic(err)
@@ -201,15 +201,7 @@ func (s *Server) init() error {
 		log.Debug("RootCoord start to create DataCoord client")
 		dataCoord := s.newDataCoordClient(rootcoord.Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli)
 		s.dataCoord = dataCoord
-		if err = s.dataCoord.Init(); err != nil {
-			log.Error("RootCoord DataCoordClient Init failed", zap.Error(err))
-			panic(err)
-		}
-		if err = s.dataCoord.Start(); err != nil {
-			log.Error("RootCoord DataCoordClient Start failed", zap.Error(err))
-			panic(err)
-		}
-		if err := s.rootCoord.SetDataCoord(dataCoord); err != nil {
+		if err := s.rootCoord.SetDataCoordClient(dataCoord); err != nil {
 			panic(err)
 		}
 	}
@@ -218,15 +210,7 @@ func (s *Server) init() error {
 		log.Debug("RootCoord start to create QueryCoord client")
 		queryCoord := s.newQueryCoordClient(rootcoord.Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli)
 		s.queryCoord = queryCoord
-		if err := s.queryCoord.Init(); err != nil {
-			log.Error("RootCoord QueryCoordClient Init failed", zap.Error(err))
-			panic(err)
-		}
-		if err := s.queryCoord.Start(); err != nil {
-			log.Error("RootCoord QueryCoordClient Start failed", zap.Error(err))
-			panic(err)
-		}
-		if err := s.rootCoord.SetQueryCoord(queryCoord); err != nil {
+		if err := s.rootCoord.SetQueryCoordClient(queryCoord); err != nil {
 			panic(err)
 		}
 	}
@@ -326,12 +310,12 @@ func (s *Server) Stop() error {
 		defer s.tikvCli.Close()
 	}
 	if s.dataCoord != nil {
-		if err := s.dataCoord.Stop(); err != nil {
+		if err := s.dataCoord.Close(); err != nil {
 			log.Error("Failed to close dataCoord client", zap.Error(err))
 		}
 	}
 	if s.queryCoord != nil {
-		if err := s.queryCoord.Stop(); err != nil {
+		if err := s.queryCoord.Close(); err != nil {
 			log.Error("Failed to close queryCoord client", zap.Error(err))
 		}
 	}
@@ -352,17 +336,17 @@ func (s *Server) Stop() error {
 
 // GetComponentStates gets the component states of RootCoord.
 func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
-	return s.rootCoord.GetComponentStates(ctx)
+	return s.rootCoord.GetComponentStates(ctx, req)
 }
 
 // GetTimeTickChannel receiver time tick from proxy service, and put it into this channel
 func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.rootCoord.GetTimeTickChannel(ctx)
+	return s.rootCoord.GetTimeTickChannel(ctx, req)
 }
 
 // GetStatisticsChannel just define a channel, not used currently
 func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.rootCoord.GetStatisticsChannel(ctx)
+	return s.rootCoord.GetStatisticsChannel(ctx, req)
 }
 
 // CreateCollection creates a collection

@@ -16,6 +16,8 @@
 
 package integration
 
+import "C"
+
 import (
 	"context"
 	"fmt"
@@ -30,6 +32,13 @@ import (
 
 	"github.com/milvus-io/milvus/internal/datacoord"
 	"github.com/milvus-io/milvus/internal/datanode"
+	datacoordclient "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
+	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
+	indexnodeclient "github.com/milvus-io/milvus/internal/distributed/indexnode/client"
+	proxyclient "github.com/milvus-io/milvus/internal/distributed/proxy/client"
+	querycoordclient "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
+	querynodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
+	rootcoordclient "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/indexnode"
 	proxy2 "github.com/milvus-io/milvus/internal/proxy"
 	querycoord "github.com/milvus-io/milvus/internal/querycoordv2"
@@ -109,6 +118,10 @@ type MiniCluster struct {
 	DataCoord  types.DataCoordComponent
 	RootCoord  types.RootCoordComponent
 	QueryCoord types.QueryCoordComponent
+
+	DataCoordClient  types.DataCoordClient
+	RootCoordClient  types.RootCoordClient
+	QueryCoordClient types.QueryCoordClient
 
 	QueryNodes []types.QueryNodeComponent
 	DataNodes  []types.DataNodeComponent
@@ -256,40 +269,59 @@ func StartMiniCluster(ctx context.Context, opts ...Option) (cluster *MiniCluster
 		cluster.Proxy = proxy
 	}
 
-	cluster.DataCoord.SetRootCoord(cluster.RootCoord)
-	err = cluster.RootCoord.SetDataCoord(cluster.DataCoord)
+	// cluster.dataCoord.SetIndexCoord(cluster.indexCoord)
+	cluster.DataCoord.SetRootCoordClient(cluster.GetRootCoordClient())
+
+	err = cluster.RootCoord.SetDataCoordClient(cluster.GetDataCoordClient())
+	if err != nil {
+		return nil, err
+	}
+	//err = cluster.rootCoord.SetIndexCoord(cluster.indexCoord)
+	//if err != nil {
+	//	return
+	//}
+	err = cluster.RootCoord.SetQueryCoordClient(cluster.GetQueryCoordClient())
 	if err != nil {
 		return nil, err
 	}
 
-	err = cluster.RootCoord.SetQueryCoord(cluster.QueryCoord)
+	// err = cluster.queryCoord.SetIndexCoord(cluster.indexCoord)
+	//if err != nil {
+	//	return
+	//}
+	err = cluster.QueryCoord.SetDataCoordClient(cluster.GetDataCoordClient())
+	if err != nil {
+		return nil, err
+	}
+	err = cluster.QueryCoord.SetRootCoordClient(cluster.GetRootCoordClient())
 	if err != nil {
 		return nil, err
 	}
 
-	err = cluster.QueryCoord.SetDataCoord(cluster.DataCoord)
-	if err != nil {
-		return nil, err
-	}
-	err = cluster.QueryCoord.SetRootCoord(cluster.RootCoord)
-	if err != nil {
-		return nil, err
-	}
+	//err = cluster.indexCoord.SetDataCoordClient(cluster.GetDataCoordClient())
+	//if err != nil {
+	//	return
+	//}
+	//err = cluster.indexCoord.SetRootCoordClient(cluster.GetRootCoordClient())
+	//if err != nil {
+	//	return
+	//}
 
 	for _, dataNode := range cluster.DataNodes {
-		err = dataNode.SetDataCoord(cluster.DataCoord)
+		err = dataNode.SetDataCoordClient(cluster.GetDataCoordClient())
 		if err != nil {
 			return nil, err
 		}
-		err = dataNode.SetRootCoord(cluster.RootCoord)
+		err = dataNode.SetRootCoordClient(cluster.GetRootCoordClient())
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	cluster.Proxy.SetDataCoordClient(cluster.DataCoord)
-	cluster.Proxy.SetQueryCoordClient(cluster.QueryCoord)
-	cluster.Proxy.SetRootCoordClient(cluster.RootCoord)
+	cluster.Proxy.SetDataCoordClient(cluster.GetDataCoordClient())
+	// cluster.proxy.SetIndexCoordClient(cluster.indexCoord)
+	cluster.Proxy.SetQueryCoordClient(cluster.GetQueryCoordClient())
+	cluster.Proxy.SetRootCoordClient(cluster.GetRootCoordClient())
 
 	return cluster, nil
 }
@@ -453,6 +485,10 @@ func (cluster *MiniCluster) Stop() error {
 	}
 	cluster.ChunkManager.RemoveWithPrefix(cluster.ctx, cluster.ChunkManager.RootPath())
 	return nil
+}
+
+func GetMetaRootPath(rootPath string) string {
+	return fmt.Sprintf("%s/%s", rootPath, params.EtcdCfg.MetaSubPath.GetValue())
 }
 
 func DefaultParams() map[string]string {
@@ -653,15 +689,15 @@ func (cluster *MiniCluster) AddRootCoord(rootCoord types.RootCoordComponent) err
 	}
 
 	// link
-	rootCoord.SetDataCoord(cluster.DataCoord)
-	rootCoord.SetQueryCoord(cluster.QueryCoord)
+	rootCoord.SetDataCoordClient(cluster.GetDataCoordClient())
+	rootCoord.SetQueryCoordClient(cluster.GetQueryCoordClient())
 	// rootCoord.SetIndexCoord(cluster.indexCoord)
-	cluster.DataCoord.SetRootCoord(rootCoord)
-	cluster.QueryCoord.SetRootCoord(rootCoord)
-	// cluster.indexCoord.SetRootCoord(rootCoord)
-	cluster.Proxy.SetRootCoordClient(rootCoord)
+	cluster.DataCoord.SetRootCoordClient(cluster.GetRootCoordClient())
+	cluster.QueryCoord.SetRootCoordClient(cluster.GetRootCoordClient())
+	// cluster.indexCoord.SetRootCoordClient(rootCoord)
+	cluster.Proxy.SetRootCoordClient(cluster.GetRootCoordClient())
 	for _, dataNode := range cluster.DataNodes {
-		err = dataNode.SetRootCoord(rootCoord)
+		err = dataNode.SetRootCoordClient(cluster.GetRootCoordClient())
 		if err != nil {
 			return err
 		}
@@ -722,22 +758,22 @@ func (cluster *MiniCluster) AddDataCoord(dataCoord types.DataCoordComponent) err
 
 	// link
 	// dataCoord.SetIndexCoord(cluster.indexCoord)
-	dataCoord.SetRootCoord(cluster.RootCoord)
-	err = cluster.RootCoord.SetDataCoord(cluster.DataCoord)
+	dataCoord.SetRootCoordClient(cluster.GetRootCoordClient())
+	err = cluster.RootCoord.SetDataCoordClient(cluster.GetDataCoordClient())
 	if err != nil {
 		return err
 	}
-	err = cluster.QueryCoord.SetDataCoord(cluster.DataCoord)
+	err = cluster.QueryCoord.SetDataCoordClient(cluster.GetDataCoordClient())
 	if err != nil {
 		return err
 	}
-	//err = cluster.indexCoord.SetDataCoord(cluster.dataCoord)
+	//err = cluster.indexCoord.SetDataCoordClient(cluster.GetDataCoordClient())
 	//if err != nil {
 	//	return err
 	//}
-	cluster.Proxy.SetDataCoordClient(dataCoord)
+	cluster.Proxy.SetDataCoordClient(cluster.GetDataCoordClient())
 	for _, dataNode := range cluster.DataNodes {
-		err = dataNode.SetDataCoord(dataCoord)
+		err = dataNode.SetDataCoordClient(cluster.GetDataCoordClient())
 		if err != nil {
 			return err
 		}
@@ -797,11 +833,11 @@ func (cluster *MiniCluster) AddQueryCoord(queryCoord types.QueryCoordComponent) 
 	}
 
 	// link
-	queryCoord.SetRootCoord(cluster.RootCoord)
-	queryCoord.SetDataCoord(cluster.DataCoord)
+	queryCoord.SetRootCoordClient(cluster.GetRootCoordClient())
+	queryCoord.SetDataCoordClient(cluster.GetDataCoordClient())
 	// queryCoord.SetIndexCoord(cluster.indexCoord)
-	cluster.RootCoord.SetQueryCoord(queryCoord)
-	cluster.Proxy.SetQueryCoordClient(queryCoord)
+	cluster.RootCoord.SetQueryCoordClient(cluster.GetQueryCoordClient())
+	cluster.Proxy.SetQueryCoordClient(cluster.GetQueryCoordClient())
 
 	// start
 	err = queryCoord.Init()
@@ -857,8 +893,8 @@ func (cluster *MiniCluster) RemoveQueryCoord(queryCoord types.QueryCoordComponen
 //	}
 //
 //	// link
-//	indexCoord.SetDataCoord(cluster.dataCoord)
-//	indexCoord.SetRootCoord(cluster.rootCoord)
+//	indexCoord.SetDataCoordClient(cluster.GetDataCoordClient())
+//	indexCoord.SetRootCoordClient(cluster.GetRootCoordClient())
 //	//cluster.dataCoord.SetIndexCoord(indexCoord)
 //	cluster.queryCoord.SetIndexCoord(indexCoord)
 //	//cluster.rootCoord.SetIndexCoord(indexCoord)
@@ -913,11 +949,11 @@ func (cluster *MiniCluster) AddDataNode(dataNode types.DataNodeComponent) error 
 			return err
 		}
 	}
-	err = dataNode.SetDataCoord(cluster.DataCoord)
+	err = dataNode.SetDataCoordClient(cluster.GetDataCoordClient())
 	if err != nil {
 		return err
 	}
-	err = dataNode.SetRootCoord(cluster.RootCoord)
+	err = dataNode.SetRootCoordClient(cluster.GetRootCoordClient())
 	if err != nil {
 		return err
 	}
@@ -1161,43 +1197,88 @@ func (cluster *MiniCluster) UpdateClusterSize(clusterConfig ClusterConfig) error
 	return nil
 }
 
-func (cluster *MiniCluster) GetProxy(ctx context.Context, addr string, nodeID int64) (types.Proxy, error) {
+func (cluster *MiniCluster) GetRootCoordClient() types.RootCoordClient {
+	cluster.mu.Lock()
+	defer cluster.mu.Unlock()
+	if cluster.RootCoordClient != nil {
+		return cluster.RootCoordClient
+	}
+
+	client, err := rootcoordclient.NewClient(cluster.ctx, GetMetaRootPath(cluster.params[EtcdRootPath]), cluster.EtcdCli)
+	if err != nil {
+		panic(err)
+	}
+	cluster.RootCoordClient = client
+	return client
+}
+
+func (cluster *MiniCluster) GetDataCoordClient() types.DataCoordClient {
+	cluster.mu.Lock()
+	defer cluster.mu.Unlock()
+	if cluster.DataCoordClient != nil {
+		return cluster.DataCoordClient
+	}
+
+	client, err := datacoordclient.NewClient(cluster.ctx, GetMetaRootPath(cluster.params[EtcdRootPath]), cluster.EtcdCli)
+	if err != nil {
+		panic(err)
+	}
+	cluster.DataCoordClient = client
+	return client
+}
+
+func (cluster *MiniCluster) GetQueryCoordClient() types.QueryCoordClient {
+	cluster.mu.Lock()
+	defer cluster.mu.Unlock()
+	if cluster.QueryCoordClient != nil {
+		return cluster.QueryCoordClient
+	}
+
+	client, err := querycoordclient.NewClient(cluster.ctx, GetMetaRootPath(cluster.params[EtcdRootPath]), cluster.EtcdCli)
+	if err != nil {
+		panic(err)
+	}
+	cluster.QueryCoordClient = client
+	return client
+}
+
+func (cluster *MiniCluster) GetProxy(ctx context.Context, addr string, nodeID int64) (types.ProxyClient, error) {
 	cluster.mu.RLock()
 	defer cluster.mu.RUnlock()
 	if cluster.Proxy.GetAddress() == addr {
-		return cluster.Proxy, nil
+		return proxyclient.NewClient(ctx, addr, nodeID)
 	}
 	return nil, nil
 }
 
-func (cluster *MiniCluster) GetQueryNode(ctx context.Context, addr string, nodeID int64) (types.QueryNode, error) {
+func (cluster *MiniCluster) GetQueryNode(ctx context.Context, addr string, nodeID int64) (types.QueryNodeClient, error) {
 	cluster.mu.RLock()
 	defer cluster.mu.RUnlock()
 	for _, queryNode := range cluster.QueryNodes {
 		if queryNode.GetAddress() == addr {
-			return queryNode, nil
+			return querynodeclient.NewClient(ctx, addr, nodeID)
 		}
 	}
 	return nil, errors.New("no related queryNode found")
 }
 
-func (cluster *MiniCluster) GetDataNode(ctx context.Context, addr string, nodeID int64) (types.DataNode, error) {
+func (cluster *MiniCluster) GetDataNode(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
 	cluster.mu.RLock()
 	defer cluster.mu.RUnlock()
 	for _, dataNode := range cluster.DataNodes {
 		if dataNode.GetAddress() == addr {
-			return dataNode, nil
+			return datanodeclient.NewClient(ctx, addr, nodeID)
 		}
 	}
 	return nil, errors.New("no related dataNode found")
 }
 
-func (cluster *MiniCluster) GetIndexNode(ctx context.Context, addr string, nodeID int64) (types.IndexNode, error) {
+func (cluster *MiniCluster) GetIndexNode(ctx context.Context, addr string, nodeID int64) (types.IndexNodeClient, error) {
 	cluster.mu.RLock()
 	defer cluster.mu.RUnlock()
 	for _, indexNode := range cluster.IndexNodes {
 		if indexNode.GetAddress() == addr {
-			return indexNode, nil
+			return indexnodeclient.NewClient(ctx, addr, nodeID, false)
 		}
 	}
 	return nil, errors.New("no related indexNode found")

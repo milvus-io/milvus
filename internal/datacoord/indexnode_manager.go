@@ -33,7 +33,7 @@ import (
 
 // IndexNodeManager is used to manage the client of IndexNode.
 type IndexNodeManager struct {
-	nodeClients      map[UniqueID]types.IndexNode
+	nodeClients      map[UniqueID]types.IndexNodeClient
 	stoppingNodes    map[UniqueID]struct{}
 	lock             sync.RWMutex
 	ctx              context.Context
@@ -43,7 +43,7 @@ type IndexNodeManager struct {
 // NewNodeManager is used to create a new IndexNodeManager.
 func NewNodeManager(ctx context.Context, indexNodeCreator indexNodeCreatorFunc) *IndexNodeManager {
 	return &IndexNodeManager{
-		nodeClients:      make(map[UniqueID]types.IndexNode),
+		nodeClients:      make(map[UniqueID]types.IndexNodeClient),
 		stoppingNodes:    make(map[UniqueID]struct{}),
 		lock:             sync.RWMutex{},
 		ctx:              ctx,
@@ -52,7 +52,7 @@ func NewNodeManager(ctx context.Context, indexNodeCreator indexNodeCreatorFunc) 
 }
 
 // setClient sets IndexNode client to node manager.
-func (nm *IndexNodeManager) setClient(nodeID UniqueID, client types.IndexNode) {
+func (nm *IndexNodeManager) setClient(nodeID UniqueID, client types.IndexNodeClient) {
 	log.Debug("set IndexNode client", zap.Int64("nodeID", nodeID))
 	nm.lock.Lock()
 	defer nm.lock.Unlock()
@@ -82,7 +82,7 @@ func (nm *IndexNodeManager) StoppingNode(nodeID UniqueID) {
 func (nm *IndexNodeManager) AddNode(nodeID UniqueID, address string) error {
 	log.Debug("add IndexNode", zap.Int64("nodeID", nodeID), zap.String("node address", address))
 	var (
-		nodeClient types.IndexNode
+		nodeClient types.IndexNodeClient
 		err        error
 	)
 
@@ -97,7 +97,7 @@ func (nm *IndexNodeManager) AddNode(nodeID UniqueID, address string) error {
 }
 
 // PeekClient peeks the client with the least load.
-func (nm *IndexNodeManager) PeekClient(meta *model.SegmentIndex) (UniqueID, types.IndexNode) {
+func (nm *IndexNodeManager) PeekClient(meta *model.SegmentIndex) (UniqueID, types.IndexNodeClient) {
 	allClients := nm.GetAllClients()
 	if len(allClients) == 0 {
 		log.Error("there is no IndexNode online")
@@ -207,11 +207,11 @@ func (nm *IndexNodeManager) ClientSupportDisk() bool {
 	return false
 }
 
-func (nm *IndexNodeManager) GetAllClients() map[UniqueID]types.IndexNode {
+func (nm *IndexNodeManager) GetAllClients() map[UniqueID]types.IndexNodeClient {
 	nm.lock.RLock()
 	defer nm.lock.RUnlock()
 
-	allClients := make(map[UniqueID]types.IndexNode, len(nm.nodeClients))
+	allClients := make(map[UniqueID]types.IndexNodeClient, len(nm.nodeClients))
 	for nodeID, client := range nm.nodeClients {
 		if _, ok := nm.stoppingNodes[nodeID]; !ok {
 			allClients[nodeID] = client
@@ -221,7 +221,7 @@ func (nm *IndexNodeManager) GetAllClients() map[UniqueID]types.IndexNode {
 	return allClients
 }
 
-func (nm *IndexNodeManager) GetClientByID(nodeID UniqueID) (types.IndexNode, bool) {
+func (nm *IndexNodeManager) GetClientByID(nodeID UniqueID) (types.IndexNodeClient, bool) {
 	nm.lock.RLock()
 	defer nm.lock.RUnlock()
 
@@ -237,7 +237,7 @@ type indexNodeGetMetricsResponse struct {
 
 // getMetrics get metrics information of all IndexNode.
 func (nm *IndexNodeManager) getMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) []indexNodeGetMetricsResponse {
-	var clients []types.IndexNode
+	var clients []types.IndexNodeClient
 	nm.lock.RLock()
 	for _, node := range nm.nodeClients {
 		clients = append(clients, node)

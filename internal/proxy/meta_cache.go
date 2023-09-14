@@ -192,8 +192,8 @@ var _ Cache = (*MetaCache)(nil)
 
 // MetaCache implements Cache, provides collection meta cache based on internal RootCoord
 type MetaCache struct {
-	rootCoord  types.RootCoord
-	queryCoord types.QueryCoord
+	rootCoord  types.RootCoordClient
+	queryCoord types.QueryCoordClient
 
 	collInfo       map[string]map[string]*collectionInfo // database -> collection -> collection_info
 	credMap        map[string]*internalpb.CredentialInfo // cache for credential, lazy load
@@ -209,7 +209,7 @@ type MetaCache struct {
 var globalMetaCache Cache
 
 // InitMetaCache initializes globalMetaCache
-func InitMetaCache(ctx context.Context, rootCoord types.RootCoord, queryCoord types.QueryCoord, shardMgr shardClientMgr) error {
+func InitMetaCache(ctx context.Context, rootCoord types.RootCoordClient, queryCoord types.QueryCoordClient, shardMgr shardClientMgr) error {
 	var err error
 	globalMetaCache, err = NewMetaCache(rootCoord, queryCoord, shardMgr)
 	if err != nil {
@@ -229,7 +229,7 @@ func InitMetaCache(ctx context.Context, rootCoord types.RootCoord, queryCoord ty
 }
 
 // NewMetaCache creates a MetaCache with provided RootCoord and QueryNode
-func NewMetaCache(rootCoord types.RootCoord, queryCoord types.QueryCoord, shardMgr shardClientMgr) (*MetaCache, error) {
+func NewMetaCache(rootCoord types.RootCoordClient, queryCoord types.QueryCoordClient, shardMgr shardClientMgr) (*MetaCache, error) {
 	return &MetaCache{
 		rootCoord:      rootCoord,
 		queryCoord:     queryCoord,

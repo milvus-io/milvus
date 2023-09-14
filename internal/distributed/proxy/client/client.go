@@ -59,11 +59,6 @@ func NewClient(ctx context.Context, addr string, nodeID int64) (*Client, error) 
 	return client, nil
 }
 
-// Init initializes Proxy's grpc client.
-func (c *Client) Init() error {
-	return nil
-}
-
 func (c *Client) newGrpcClient(cc *grpc.ClientConn) proxypb.ProxyClient {
 	return proxypb.NewProxyClient(cc)
 }
@@ -72,19 +67,9 @@ func (c *Client) getAddr() (string, error) {
 	return c.addr, nil
 }
 
-// Start dummy
-func (c *Client) Start() error {
-	return nil
-}
-
-// Stop stops the client, closes the connection
-func (c *Client) Stop() error {
+// Close stops the client, closes the connection
+func (c *Client) Close() error {
 	return c.grpcClient.Close()
-}
-
-// Register dummy
-func (c *Client) Register() error {
-	return nil
 }
 
 func wrapGrpcCall[T any](ctx context.Context, c *Client, call func(proxyClient proxypb.ProxyClient) (*T, error)) (*T, error) {
@@ -101,21 +86,21 @@ func wrapGrpcCall[T any](ctx context.Context, c *Client, call func(proxyClient p
 }
 
 // GetComponentStates get the component state.
-func (c *Client) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+func (c *Client) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error) {
 	return wrapGrpcCall(ctx, c, func(client proxypb.ProxyClient) (*milvuspb.ComponentStates, error) {
 		return client.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 	})
 }
 
 // GetStatisticsChannel return the statistics channel in string
-func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (c *Client) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
 	return wrapGrpcCall(ctx, c, func(client proxypb.ProxyClient) (*milvuspb.StringResponse, error) {
 		return client.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
 	})
 }
 
 // InvalidateCollectionMetaCache invalidate collection meta cache
-func (c *Client) InvalidateCollectionMetaCache(ctx context.Context, req *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+func (c *Client) InvalidateCollectionMetaCache(ctx context.Context, req *proxypb.InvalidateCollMetaCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
@@ -126,7 +111,7 @@ func (c *Client) InvalidateCollectionMetaCache(ctx context.Context, req *proxypb
 	})
 }
 
-func (c *Client) InvalidateCredentialCache(ctx context.Context, req *proxypb.InvalidateCredCacheRequest) (*commonpb.Status, error) {
+func (c *Client) InvalidateCredentialCache(ctx context.Context, req *proxypb.InvalidateCredCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
@@ -137,7 +122,7 @@ func (c *Client) InvalidateCredentialCache(ctx context.Context, req *proxypb.Inv
 	})
 }
 
-func (c *Client) UpdateCredentialCache(ctx context.Context, req *proxypb.UpdateCredCacheRequest) (*commonpb.Status, error) {
+func (c *Client) UpdateCredentialCache(ctx context.Context, req *proxypb.UpdateCredCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
@@ -148,7 +133,7 @@ func (c *Client) UpdateCredentialCache(ctx context.Context, req *proxypb.UpdateC
 	})
 }
 
-func (c *Client) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
+func (c *Client) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
@@ -161,7 +146,7 @@ func (c *Client) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.Refres
 
 // GetProxyMetrics gets the metrics of proxy, it's an internal interface which is different from GetMetrics interface,
 // because it only obtains the metrics of Proxy, not including the topological metrics of Query cluster and Data cluster.
-func (c *Client) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+func (c *Client) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
@@ -173,7 +158,7 @@ func (c *Client) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 }
 
 // SetRates notifies Proxy to limit rates of requests.
-func (c *Client) SetRates(ctx context.Context, req *proxypb.SetRatesRequest) (*commonpb.Status, error) {
+func (c *Client) SetRates(ctx context.Context, req *proxypb.SetRatesRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
@@ -184,7 +169,7 @@ func (c *Client) SetRates(ctx context.Context, req *proxypb.SetRatesRequest) (*c
 	})
 }
 
-func (c *Client) ListClientInfos(ctx context.Context, req *proxypb.ListClientInfosRequest) (*proxypb.ListClientInfosResponse, error) {
+func (c *Client) ListClientInfos(ctx context.Context, req *proxypb.ListClientInfosRequest, opts ...grpc.CallOption) (*proxypb.ListClientInfosResponse, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
@@ -192,5 +177,11 @@ func (c *Client) ListClientInfos(ctx context.Context, req *proxypb.ListClientInf
 	)
 	return wrapGrpcCall(ctx, c, func(client proxypb.ProxyClient) (*proxypb.ListClientInfosResponse, error) {
 		return client.ListClientInfos(ctx, req)
+	})
+}
+
+func (c *Client) GetDdChannel(ctx context.Context, req *internalpb.GetDdChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client proxypb.ProxyClient) (*milvuspb.StringResponse, error) {
+		return client.GetDdChannel(ctx, req)
 	})
 }

@@ -121,25 +121,25 @@ func (s *DataNodeServicesSuite) TestNotInUseAPIs() {
 		s.Assert().True(merr.Ok(status))
 	})
 	s.Run("GetTimeTickChannel", func() {
-		_, err := s.node.GetTimeTickChannel(s.ctx)
+		_, err := s.node.GetTimeTickChannel(s.ctx, nil)
 		s.Assert().NoError(err)
 	})
 
 	s.Run("GetStatisticsChannel", func() {
-		_, err := s.node.GetStatisticsChannel(s.ctx)
+		_, err := s.node.GetStatisticsChannel(s.ctx, nil)
 		s.Assert().NoError(err)
 	})
 }
 
 func (s *DataNodeServicesSuite) TestGetComponentStates() {
-	resp, err := s.node.GetComponentStates(s.ctx)
+	resp, err := s.node.GetComponentStates(s.ctx, nil)
 	s.Assert().NoError(err)
 	s.Assert().True(merr.Ok(resp.GetStatus()))
 	s.Assert().Equal(common.NotRegisteredID, resp.State.NodeID)
 
 	s.node.SetSession(&sessionutil.Session{})
 	s.node.session.UpdateRegistered(true)
-	resp, err = s.node.GetComponentStates(context.Background())
+	resp, err = s.node.GetComponentStates(context.Background(), nil)
 	s.Assert().NoError(err)
 	s.Assert().True(merr.Ok(resp.GetStatus()))
 }

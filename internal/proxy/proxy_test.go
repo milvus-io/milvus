@@ -263,11 +263,11 @@ func (s *proxyTestServer) RenameCollection(ctx context.Context, request *milvusp
 }
 
 func (s *proxyTestServer) GetComponentStates(ctx context.Context, request *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
-	return s.Proxy.GetComponentStates(ctx)
+	return s.Proxy.GetComponentStates(ctx, request)
 }
 
 func (s *proxyTestServer) GetStatisticsChannel(ctx context.Context, request *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.Proxy.GetStatisticsChannel(ctx)
+	return s.Proxy.GetStatisticsChannel(ctx, request)
 }
 
 func (s *proxyTestServer) startGrpc(ctx context.Context, wg *sync.WaitGroup, p *paramtable.GrpcServerConfig) {
@@ -453,8 +453,6 @@ func TestProxy(t *testing.T) {
 
 	rootCoordClient, err := rcc.NewClient(ctx, Params.EtcdCfg.MetaRootPath.GetValue(), etcdcli)
 	assert.NoError(t, err)
-	err = rootCoordClient.Init()
-	assert.NoError(t, err)
 	err = componentutil.WaitForComponentHealthy(ctx, rootCoordClient, typeutil.RootCoordRole, attempts, sleepDuration)
 	assert.NoError(t, err)
 	proxy.SetRootCoordClient(rootCoordClient)
@@ -462,16 +460,12 @@ func TestProxy(t *testing.T) {
 
 	dataCoordClient, err := grpcdatacoordclient2.NewClient(ctx, Params.EtcdCfg.MetaRootPath.GetValue(), etcdcli)
 	assert.NoError(t, err)
-	err = dataCoordClient.Init()
-	assert.NoError(t, err)
 	err = componentutil.WaitForComponentHealthy(ctx, dataCoordClient, typeutil.DataCoordRole, attempts, sleepDuration)
 	assert.NoError(t, err)
 	proxy.SetDataCoordClient(dataCoordClient)
 	log.Info("Proxy set data coordinator client")
 
 	queryCoordClient, err := grpcquerycoordclient.NewClient(ctx, Params.EtcdCfg.MetaRootPath.GetValue(), etcdcli)
-	assert.NoError(t, err)
-	err = queryCoordClient.Init()
 	assert.NoError(t, err)
 	err = componentutil.WaitForComponentHealthy(ctx, queryCoordClient, typeutil.QueryCoordRole, attempts, sleepDuration)
 	assert.NoError(t, err)
@@ -497,7 +491,7 @@ func TestProxy(t *testing.T) {
 	}()
 
 	t.Run("get component states", func(t *testing.T) {
-		states, err := proxy.GetComponentStates(ctx)
+		states, err := proxy.GetComponentStates(ctx, nil)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, states.GetStatus().GetErrorCode())
 		assert.Equal(t, paramtable.GetNodeID(), states.State.NodeID)
@@ -506,7 +500,7 @@ func TestProxy(t *testing.T) {
 	})
 
 	t.Run("get statistics channel", func(t *testing.T) {
-		resp, err := proxy.GetStatisticsChannel(ctx)
+		resp, err := proxy.GetStatisticsChannel(ctx, nil)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, "", resp.Value)
@@ -4073,13 +4067,13 @@ func Test_GetFlushState(t *testing.T) {
 func TestProxy_GetComponentStates(t *testing.T) {
 	n := &Proxy{}
 	n.stateCode.Store(commonpb.StateCode_Healthy)
-	resp, err := n.GetComponentStates(context.Background())
+	resp, err := n.GetComponentStates(context.Background(), nil)
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	assert.Equal(t, common.NotRegisteredID, resp.State.NodeID)
 	n.session = &sessionutil.Session{}
 	n.session.UpdateRegistered(true)
-	resp, err = n.GetComponentStates(context.Background())
+	resp, err = n.GetComponentStates(context.Background(), nil)
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 }
@@ -4087,7 +4081,7 @@ func TestProxy_GetComponentStates(t *testing.T) {
 func TestProxy_GetComponentStates_state_code(t *testing.T) {
 	p := &Proxy{}
 	p.stateCode.Store("not commonpb.StateCode")
-	states, err := p.GetComponentStates(context.Background())
+	states, err := p.GetComponentStates(context.Background(), nil)
 	assert.NoError(t, err)
 	assert.NotEqual(t, commonpb.ErrorCode_Success, states.GetStatus().GetErrorCode())
 }
@@ -4116,7 +4110,7 @@ func TestProxy_Import(t *testing.T) {
 		chMgr := NewMockChannelsMgr(t)
 		proxy.chMgr = chMgr
 		rc := newMockRootCoord()
-		rc.ImportFunc = func(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
+		rc.ImportFunc = func(ctx context.Context, req *milvuspb.ImportRequest, opts ...grpc.CallOption) (*milvuspb.ImportResponse, error) {
 			return nil, errors.New("mock")
 		}
 		proxy.rootCoord = rc
@@ -4136,7 +4130,7 @@ func TestProxy_Import(t *testing.T) {
 		chMgr := NewMockChannelsMgr(t)
 		proxy.chMgr = chMgr
 		rc := newMockRootCoord()
-		rc.ImportFunc = func(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
+		rc.ImportFunc = func(ctx context.Context, req *milvuspb.ImportRequest, opts ...grpc.CallOption) (*milvuspb.ImportResponse, error) {
 			return &milvuspb.ImportResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil
 		}
 		proxy.rootCoord = rc
@@ -4156,7 +4150,7 @@ func TestProxy_Import(t *testing.T) {
 		chMgr := NewMockChannelsMgr(t)
 		proxy.chMgr = chMgr
 		rc := newMockRootCoord()
-		rc.ImportFunc = func(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
+		rc.ImportFunc = func(ctx context.Context, req *milvuspb.ImportRequest, opts ...grpc.CallOption) (*milvuspb.ImportResponse, error) {
 			return &milvuspb.ImportResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil
 		}
 		proxy.rootCoord = rc
@@ -4247,8 +4241,8 @@ func TestProxy_GetLoadState(t *testing.T) {
 	}()
 
 	{
-		qc := getQueryCoord()
-		qc.EXPECT().GetComponentStates(mock.Anything).Return(&milvuspb.ComponentStates{
+		qc := getQueryCoordClient()
+		qc.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
 			State: &milvuspb.ComponentInfo{
 				NodeID:    0,
 				Role:      typeutil.QueryCoordRole,
@@ -4275,8 +4269,8 @@ func TestProxy_GetLoadState(t *testing.T) {
 	}
 
 	{
-		qc := getQueryCoord()
-		qc.EXPECT().GetComponentStates(mock.Anything).Return(&milvuspb.ComponentStates{
+		qc := getQueryCoordClient()
+		qc.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
 			State: &milvuspb.ComponentInfo{
 				NodeID:    0,
 				Role:      typeutil.QueryCoordRole,
@@ -4313,8 +4307,8 @@ func TestProxy_GetLoadState(t *testing.T) {
 	}
 
 	{
-		qc := getQueryCoord()
-		qc.EXPECT().GetComponentStates(mock.Anything).Return(&milvuspb.ComponentStates{
+		qc := getQueryCoordClient()
+		qc.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
 			State: &milvuspb.ComponentInfo{
 				NodeID:    0,
 				Role:      typeutil.QueryCoordRole,
@@ -4344,8 +4338,8 @@ func TestProxy_GetLoadState(t *testing.T) {
 	}
 
 	{
-		qc := getQueryCoord()
-		qc.EXPECT().GetComponentStates(mock.Anything).Return(&milvuspb.ComponentStates{
+		qc := getQueryCoordClient()
+		qc.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
 			State: &milvuspb.ComponentInfo{
 				NodeID:    0,
 				Role:      typeutil.QueryCoordRole,
@@ -4379,8 +4373,8 @@ func TestProxy_GetLoadState(t *testing.T) {
 	}
 
 	{
-		qc := getQueryCoord()
-		qc.EXPECT().GetComponentStates(mock.Anything).Return(&milvuspb.ComponentStates{
+		qc := getQueryCoordClient()
+		qc.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
 			State: &milvuspb.ComponentInfo{
 				NodeID:    0,
 				Role:      typeutil.QueryCoordRole,
@@ -4410,8 +4404,8 @@ func TestProxy_GetLoadState(t *testing.T) {
 	}
 
 	t.Run("test insufficient memory", func(t *testing.T) {
-		qc := getQueryCoord()
-		qc.EXPECT().GetComponentStates(mock.Anything).Return(&milvuspb.ComponentStates{
+		qc := getQueryCoordClient()
+		qc.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
 			State: &milvuspb.ComponentInfo{
 				NodeID:    0,
 				Role:      typeutil.QueryCoordRole,

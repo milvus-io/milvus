@@ -108,10 +108,10 @@ func TestDataNode(t *testing.T) {
 	paramtable.SetNodeID(1)
 
 	defer cancel()
-	t.Run("Test SetRootCoord", func(t *testing.T) {
+	t.Run("Test SetRootCoordClient", func(t *testing.T) {
 		emptyDN := &DataNode{}
 		tests := []struct {
-			inrc        types.RootCoord
+			inrc        types.RootCoordClient
 			isvalid     bool
 			description string
 		}{
@@ -121,7 +121,7 @@ func TestDataNode(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				err := emptyDN.SetRootCoord(test.inrc)
+				err := emptyDN.SetRootCoordClient(test.inrc)
 				if test.isvalid {
 					assert.NoError(t, err)
 				} else {
@@ -131,10 +131,10 @@ func TestDataNode(t *testing.T) {
 		}
 	})
 
-	t.Run("Test SetDataCoord", func(t *testing.T) {
+	t.Run("Test SetDataCoordClient", func(t *testing.T) {
 		emptyDN := &DataNode{}
 		tests := []struct {
-			inrc        types.DataCoord
+			inrc        types.DataCoordClient
 			isvalid     bool
 			description string
 		}{
@@ -144,7 +144,7 @@ func TestDataNode(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				err := emptyDN.SetDataCoord(test.inrc)
+				err := emptyDN.SetDataCoordClient(test.inrc)
 				if test.isvalid {
 					assert.NoError(t, err)
 				} else {

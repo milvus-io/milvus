@@ -364,48 +364,6 @@ func (_c *TxnKV_MultiRemove_Call) RunAndReturn(run func([]string) error) *TxnKV_
 	return _c
 }
 
-// MultiRemoveWithPrefix provides a mock function with given fields: keys
-func (_m *TxnKV) MultiRemoveWithPrefix(keys []string) error {
-	ret := _m.Called(keys)
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func([]string) error); ok {
-		r0 = rf(keys)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// TxnKV_MultiRemoveWithPrefix_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MultiRemoveWithPrefix'
-type TxnKV_MultiRemoveWithPrefix_Call struct {
-	*mock.Call
-}
-
-// MultiRemoveWithPrefix is a helper method to define mock.On call
-//   - keys []string
-func (_e *TxnKV_Expecter) MultiRemoveWithPrefix(keys interface{}) *TxnKV_MultiRemoveWithPrefix_Call {
-	return &TxnKV_MultiRemoveWithPrefix_Call{Call: _e.mock.On("MultiRemoveWithPrefix", keys)}
-}
-
-func (_c *TxnKV_MultiRemoveWithPrefix_Call) Run(run func(keys []string)) *TxnKV_MultiRemoveWithPrefix_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].([]string))
-	})
-	return _c
-}
-
-func (_c *TxnKV_MultiRemoveWithPrefix_Call) Return(_a0 error) *TxnKV_MultiRemoveWithPrefix_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *TxnKV_MultiRemoveWithPrefix_Call) RunAndReturn(run func([]string) error) *TxnKV_MultiRemoveWithPrefix_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // MultiSave provides a mock function with given fields: kvs
 func (_m *TxnKV) MultiSave(kvs map[string]string) error {
 	ret := _m.Called(kvs)

@@ -5,8 +5,9 @@ import (
 	"io"
 	"sync"
 
+	"google.golang.org/grpc"
+
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
 type QueryStreamServer interface {
@@ -19,16 +20,6 @@ type QueryStreamClient interface {
 	CloseSend() error
 }
 
-type QueryFunc func(ctx context.Context, req *querypb.QueryRequest) (QueryStreamClient, error)
-
-type QueryStreamer interface {
-	AsServer() QueryStreamServer
-	SetServer(svr QueryStreamServer)
-
-	AsClient() QueryStreamClient
-	SetClient(cli QueryStreamClient)
-}
-
 type ConcurrentQueryStreamServer struct {
 	server QueryStreamServer
 	mu     sync.Mutex
@@ -37,7 +28,6 @@ type ConcurrentQueryStreamServer struct {
 func (s *ConcurrentQueryStreamServer) Send(result *internalpb.RetrieveResults) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
 	return s.server.Send(result)
 }
 
@@ -52,35 +42,11 @@ func NewConcurrentQueryStreamServer(srv QueryStreamServer) *ConcurrentQueryStrea
 	}
 }
 
-// for streaming query rpc
-type GrpcQueryStreamer struct {
-	server QueryStreamServer
-	client QueryStreamClient
-}
-
-func (c *GrpcQueryStreamer) AsServer() QueryStreamServer {
-	return c.server
-}
-
-func (c *GrpcQueryStreamer) AsClient() QueryStreamClient {
-	return c.client
-}
-
-func (c *GrpcQueryStreamer) SetClient(cli QueryStreamClient) {
-	c.client = cli
-}
-
-func (c *GrpcQueryStreamer) SetServer(svr QueryStreamServer) {
-	c.server = svr
-}
-
-func NewGrpcQueryStreamer() QueryStreamer {
-	return &GrpcQueryStreamer{}
-}
-
 // TODO LOCAL SERVER AND CLIENT FOR STANDALONE
 // ONLY FOR TEST
 type LocalQueryServer struct {
+	grpc.ServerStream
+
 	resultCh chan *internalpb.RetrieveResults
 	ctx      context.Context
 
@@ -120,9 +86,16 @@ func (s *LocalQueryServer) FinishSend(err error) error {
 }
 
 type LocalQueryClient struct {
+	grpc.ClientStream
+
 	server   *LocalQueryServer
 	resultCh chan *internalpb.RetrieveResults
 	ctx      context.Context
+}
+
+func (s *LocalQueryClient) RecvMsg(m interface{}) error {
+	// TODO implement me
+	panic("implement me")
 }
 
 func (s *LocalQueryClient) Recv() (*internalpb.RetrieveResults, error) {

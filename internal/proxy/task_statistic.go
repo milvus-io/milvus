@@ -43,7 +43,7 @@ type getStatisticsTask struct {
 	unloadedPartitionIDs []UniqueID
 
 	ctx context.Context
-	dc  types.DataCoord
+	dc  types.DataCoordClient
 	tr  *timerecord.TimeRecorder
 
 	fromDataCoord bool
@@ -51,7 +51,7 @@ type getStatisticsTask struct {
 
 	// if query from shard
 	*internalpb.GetStatisticsRequest
-	qc        types.QueryCoord
+	qc        types.QueryCoordClient
 	resultBuf *typeutil.ConcurrentSet[*internalpb.GetStatisticsResponse]
 
 	lb LBPolicy
@@ -273,7 +273,7 @@ func (g *getStatisticsTask) getStatisticsFromQueryNode(ctx context.Context) erro
 	return nil
 }
 
-func (g *getStatisticsTask) getStatisticsShard(ctx context.Context, nodeID int64, qn types.QueryNode, channelIDs ...string) error {
+func (g *getStatisticsTask) getStatisticsShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channelIDs ...string) error {
 	nodeReq := proto.Clone(g.GetStatisticsRequest).(*internalpb.GetStatisticsRequest)
 	nodeReq.Base.TargetID = nodeID
 	req := &querypb.GetStatisticsRequest{
@@ -311,7 +311,7 @@ func (g *getStatisticsTask) getStatisticsShard(ctx context.Context, nodeID int64
 
 // checkFullLoaded check if collection / partition was fully loaded into QueryNode
 // return loaded partitions, unloaded partitions and error
-func checkFullLoaded(ctx context.Context, qc types.QueryCoord, dbName string, collectionName string, collectionID int64, searchPartitionIDs []UniqueID) ([]UniqueID, []UniqueID, error) {
+func checkFullLoaded(ctx context.Context, qc types.QueryCoordClient, dbName string, collectionName string, collectionID int64, searchPartitionIDs []UniqueID) ([]UniqueID, []UniqueID, error) {
 	var loadedPartitionIDs []UniqueID
 	var unloadPartitionIDs []UniqueID
 
@@ -588,7 +588,7 @@ type getCollectionStatisticsTask struct {
 	Condition
 	*milvuspb.GetCollectionStatisticsRequest
 	ctx       context.Context
-	dataCoord types.DataCoord
+	dataCoord types.DataCoordClient
 	result    *milvuspb.GetCollectionStatisticsResponse
 
 	collectionID UniqueID
@@ -673,7 +673,7 @@ type getPartitionStatisticsTask struct {
 	Condition
 	*milvuspb.GetPartitionStatisticsRequest
 	ctx       context.Context
-	dataCoord types.DataCoord
+	dataCoord types.DataCoordClient
 	result    *milvuspb.GetPartitionStatisticsResponse
 
 	collectionID UniqueID

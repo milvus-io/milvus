@@ -102,8 +102,8 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
-			return newMockRootCoordService(), nil
+		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+			return newMockRootCoordClient(), nil
 		}
 
 		req := &datapb.GetRecoveryInfoRequestV2{
@@ -145,8 +145,8 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
-			return newMockRootCoordService(), nil
+		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+			return newMockRootCoordClient(), nil
 		}
 
 		svr.meta.AddCollection(&collectionInfo{
@@ -249,8 +249,8 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
-			return newMockRootCoordService(), nil
+		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+			return newMockRootCoordClient(), nil
 		}
 
 		svr.meta.AddCollection(&collectionInfo{
@@ -326,8 +326,8 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			Schema: newTestSchema(),
 		})
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
-			return newMockRootCoordService(), nil
+		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+			return newMockRootCoordClient(), nil
 		}
 
 		binlogReq := &datapb.SaveBinlogPathsRequest{
@@ -423,8 +423,8 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
-			return newMockRootCoordService(), nil
+		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+			return newMockRootCoordClient(), nil
 		}
 
 		svr.meta.AddCollection(&collectionInfo{
@@ -464,8 +464,8 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
-			return newMockRootCoordService(), nil
+		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+			return newMockRootCoordClient(), nil
 		}
 
 		svr.meta.AddCollection(&collectionInfo{
@@ -504,8 +504,8 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
-			return newMockRootCoordService(), nil
+		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+			return newMockRootCoordClient(), nil
 		}
 
 		svr.meta.AddCollection(&collectionInfo{

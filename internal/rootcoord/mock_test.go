@@ -24,6 +24,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -260,7 +261,7 @@ func newMockMetaTable() *mockMetaTable {
 //}
 
 type mockDataCoord struct {
-	types.DataCoord
+	types.DataCoordClient
 	GetComponentStatesFunc         func(ctx context.Context) (*milvuspb.ComponentStates, error)
 	WatchChannelsFunc              func(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error)
 	FlushFunc                      func(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error)
@@ -275,60 +276,60 @@ func newMockDataCoord() *mockDataCoord {
 	return &mockDataCoord{}
 }
 
-func (m *mockDataCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+func (m *mockDataCoord) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error) {
 	return m.GetComponentStatesFunc(ctx)
 }
 
-func (m *mockDataCoord) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error) {
+func (m *mockDataCoord) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest, opts ...grpc.CallOption) (*datapb.WatchChannelsResponse, error) {
 	return m.WatchChannelsFunc(ctx, req)
 }
 
-func (m *mockDataCoord) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
+func (m *mockDataCoord) Flush(ctx context.Context, req *datapb.FlushRequest, opts ...grpc.CallOption) (*datapb.FlushResponse, error) {
 	return m.FlushFunc(ctx, req)
 }
 
-func (m *mockDataCoord) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
+func (m *mockDataCoord) Import(ctx context.Context, req *datapb.ImportTaskRequest, opts ...grpc.CallOption) (*datapb.ImportTaskResponse, error) {
 	return m.ImportFunc(ctx, req)
 }
 
-func (m *mockDataCoord) UnsetIsImportingState(ctx context.Context, req *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
+func (m *mockDataCoord) UnsetIsImportingState(ctx context.Context, req *datapb.UnsetIsImportingStateRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return m.UnsetIsImportingStateFunc(ctx, req)
 }
 
-func (m *mockDataCoord) BroadcastAlteredCollection(ctx context.Context, req *datapb.AlterCollectionRequest) (*commonpb.Status, error) {
+func (m *mockDataCoord) BroadcastAlteredCollection(ctx context.Context, req *datapb.AlterCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return m.broadCastAlteredCollectionFunc(ctx, req)
 }
 
-func (m *mockDataCoord) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+func (m *mockDataCoord) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest, opts ...grpc.CallOption) (*milvuspb.CheckHealthResponse, error) {
 	return &milvuspb.CheckHealthResponse{
 		IsHealthy: true,
 	}, nil
 }
 
-func (m *mockDataCoord) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
+func (m *mockDataCoord) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest, opts ...grpc.CallOption) (*indexpb.GetSegmentIndexStateResponse, error) {
 	return m.GetSegmentIndexStateFunc(ctx, req)
 }
 
-func (m *mockDataCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
+func (m *mockDataCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return m.DropIndexFunc(ctx, req)
 }
 
 type mockQueryCoord struct {
-	types.QueryCoord
+	types.QueryCoordClient
 	GetSegmentInfoFunc     func(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error)
 	GetComponentStatesFunc func(ctx context.Context) (*milvuspb.ComponentStates, error)
 	ReleaseCollectionFunc  func(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error)
 }
 
-func (m mockQueryCoord) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
+func (m mockQueryCoord) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest, opts ...grpc.CallOption) (*querypb.GetSegmentInfoResponse, error) {
 	return m.GetSegmentInfoFunc(ctx, req)
 }
 
-func (m mockQueryCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+func (m mockQueryCoord) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error) {
 	return m.GetComponentStatesFunc(ctx)
 }
 
-func (m mockQueryCoord) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
+func (m mockQueryCoord) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return m.ReleaseCollectionFunc(ctx, req)
 }
 
@@ -356,26 +357,26 @@ func newMockTsoAllocator() *tso.MockAllocator {
 }
 
 type mockProxy struct {
-	types.Proxy
+	types.ProxyClient
 	InvalidateCollectionMetaCacheFunc func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
 	InvalidateCredentialCacheFunc     func(ctx context.Context, request *proxypb.InvalidateCredCacheRequest) (*commonpb.Status, error)
 	RefreshPolicyInfoCacheFunc        func(ctx context.Context, request *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error)
 	GetComponentStatesFunc            func(ctx context.Context) (*milvuspb.ComponentStates, error)
 }
 
-func (m mockProxy) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+func (m mockProxy) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return m.InvalidateCollectionMetaCacheFunc(ctx, request)
 }
 
-func (m mockProxy) InvalidateCredentialCache(ctx context.Context, request *proxypb.InvalidateCredCacheRequest) (*commonpb.Status, error) {
+func (m mockProxy) InvalidateCredentialCache(ctx context.Context, request *proxypb.InvalidateCredCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return m.InvalidateCredentialCacheFunc(ctx, request)
 }
 
-func (m mockProxy) RefreshPolicyInfoCache(ctx context.Context, request *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
+func (m mockProxy) RefreshPolicyInfoCache(ctx context.Context, request *proxypb.RefreshPolicyInfoCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return m.RefreshPolicyInfoCacheFunc(ctx, request)
 }
 
-func (m mockProxy) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+func (m mockProxy) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error) {
 	return m.GetComponentStatesFunc(ctx)
 }
 
@@ -407,7 +408,7 @@ func newTestCore(opts ...Opt) *Core {
 func withValidProxyManager() Opt {
 	return func(c *Core) {
 		c.proxyClientManager = &proxyClientManager{
-			proxyClient: make(map[UniqueID]types.Proxy),
+			proxyClient: make(map[UniqueID]types.ProxyClient),
 		}
 		p := newMockProxy()
 		p.InvalidateCollectionMetaCacheFunc = func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
@@ -426,7 +427,7 @@ func withValidProxyManager() Opt {
 func withInvalidProxyManager() Opt {
 	return func(c *Core) {
 		c.proxyClientManager = &proxyClientManager{
-			proxyClient: make(map[UniqueID]types.Proxy),
+			proxyClient: make(map[UniqueID]types.ProxyClient),
 		}
 		p := newMockProxy()
 		p.InvalidateCollectionMetaCacheFunc = func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
@@ -560,15 +561,15 @@ func withInvalidIDAllocator() Opt {
 	return withIDAllocator(idAllocator)
 }
 
-func withQueryCoord(qc types.QueryCoord) Opt {
+func withQueryCoord(qc types.QueryCoordClient) Opt {
 	return func(c *Core) {
 		c.queryCoord = qc
 	}
 }
 
 func withUnhealthyQueryCoord() Opt {
-	qc := &mocks.MockQueryCoord{}
-	qc.EXPECT().GetComponentStates(mock.Anything).Return(
+	qc := &mocks.MockQueryCoordClient{}
+	qc.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(
 		&milvuspb.ComponentStates{
 			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Abnormal},
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "error mock GetComponentStates"),
@@ -578,8 +579,8 @@ func withUnhealthyQueryCoord() Opt {
 }
 
 func withInvalidQueryCoord() Opt {
-	qc := &mocks.MockQueryCoord{}
-	qc.EXPECT().GetComponentStates(mock.Anything).Return(
+	qc := &mocks.MockQueryCoordClient{}
+	qc.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(
 		&milvuspb.ComponentStates{
 			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
 			Status: succStatus(),
@@ -597,8 +598,8 @@ func withInvalidQueryCoord() Opt {
 }
 
 func withFailedQueryCoord() Opt {
-	qc := &mocks.MockQueryCoord{}
-	qc.EXPECT().GetComponentStates(mock.Anything).Return(
+	qc := &mocks.MockQueryCoordClient{}
+	qc.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(
 		&milvuspb.ComponentStates{
 			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
 			Status: succStatus(),
@@ -618,8 +619,8 @@ func withFailedQueryCoord() Opt {
 }
 
 func withValidQueryCoord() Opt {
-	qc := &mocks.MockQueryCoord{}
-	qc.EXPECT().GetComponentStates(mock.Anything).Return(
+	qc := &mocks.MockQueryCoordClient{}
+	qc.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(
 		&milvuspb.ComponentStates{
 			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
 			Status: succStatus(),
@@ -677,7 +678,7 @@ func withRocksMqTtSynchronizer() Opt {
 	return withTtSynchronizer(ticker)
 }
 
-func withDataCoord(dc types.DataCoord) Opt {
+func withDataCoord(dc types.DataCoordClient) Opt {
 	return func(c *Core) {
 		c.dataCoord = dc
 	}
