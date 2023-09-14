@@ -82,6 +82,9 @@ class TestChaosApply:
             if etcd_followers is None:
                 raise Exception("no etcd followers")
             target_pod_list.extend(etcd_followers)
+            if len(target_pod_list) >=2:
+                # only choose one follower to apply chaos
+                target_pod_list = target_pod_list[0]
         log.info(f"target_pod_list: {target_pod_list}")
         chaos_type = chaos_type.replace('_', '-')
         chaos_config = cc.gen_experiment_config(f"{str(Path(__file__).absolute().parent)}/chaos_objects/template/{chaos_type}-by-pod-list.yaml")
