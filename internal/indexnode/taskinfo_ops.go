@@ -67,7 +67,7 @@ func (i *IndexNode) storeIndexFilesAndStatistic(ClusterID string, buildID Unique
 	}
 }
 
-func (i *IndexNode) deleteTaskInfos(keys []taskKey) []*taskInfo {
+func (i *IndexNode) deleteTaskInfos(ctx context.Context, keys []taskKey) []*taskInfo {
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
 	deleted := make([]*taskInfo, 0, len(keys))
@@ -76,6 +76,8 @@ func (i *IndexNode) deleteTaskInfos(keys []taskKey) []*taskInfo {
 		if ok {
 			deleted = append(deleted, info)
 			delete(i.tasks, key)
+			log.Ctx(ctx).Info("delete task infos",
+				zap.String("cluster_id", key.ClusterID), zap.Int64("build_id", key.BuildID))
 		}
 	}
 	return deleted
