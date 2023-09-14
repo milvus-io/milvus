@@ -384,7 +384,6 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 	var (
 		ret       any
 		clientErr error
-		callErr   error
 		client    T
 	)
 
@@ -401,24 +400,25 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 		}
 	}
 
-	innerCtx, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	_ = retry.Do(innerCtx, func() error {
+	err := retry.Do(ctx, func() error {
 		if generic.IsZero(client) {
-			callErr = errors.Wrap(clientErr, "empty grpc client")
-			log.Warn("grpc client is nil, maybe fail to get client in the retry state")
+			err := errors.Wrap(clientErr, "empty grpc client")
+			log.Warn("grpc client is nil, maybe fail to get client in the retry state", zap.Error(err))
 			resetClientFunc()
-			return callErr
+			return err
 		}
-		ret, callErr = caller(client)
-		if callErr != nil {
-			needRetry, needReset := c.checkErr(ctx, callErr)
+		var err error
+		ret, err = caller(client)
+		if err != nil {
+			needRetry, needReset := c.checkErr(ctx, err)
 			if !needRetry {
 				// stop retry
-				callErr = retry.Unrecoverable(callErr)
+				err = retry.Unrecoverable(err)
 			}
 			if needReset {
-				log.Warn("start to reset connection because of specific reasons", zap.Error(callErr))
+				log.Warn("start to reset connection because of specific reasons", zap.Error(err))
 				resetClientFunc()
 			} else {
 				err := c.verifySession(ctx)
@@ -427,7 +427,7 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 					resetClientFunc()
 				}
 			}
-			return callErr
+			return err
 		}
 		// reset counter
 		c.ctxCounter.Store(0)
@@ -449,11 +449,11 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 			return nil
 		}
 
-		if merr.Ok(status) || !merr.IsRetryableCode(status.GetCode()) {
-			return nil
+		err = merr.Error(status)
+		if err != nil && merr.IsRetryableErr(err) {
+			return err
 		}
-
-		return errors.Newf("error code: %d, reason: %s", status.GetCode(), status.GetReason())
+		return nil
 	}, retry.Attempts(uint(c.MaxAttempts)),
 		// Because the previous InitialBackoff and MaxBackoff were float, and the unit was s.
 		// For compatibility, this is multiplied by 1000.
@@ -462,14 +462,15 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 	// default value list: MaxAttempts 10, InitialBackoff 0.2s, MaxBackoff 10s
 	// and consume 52.8s if all retry failed
 
-	if callErr != nil {
+	if err != nil {
 		// make the error more friendly to user
-		if IsCrossClusterRoutingErr(callErr) {
-			callErr = merr.ErrServiceUnavailable
+		if IsCrossClusterRoutingErr(err) {
+			err = merr.ErrServiceUnavailable
 		}
 
-		return generic.Zero[T](), callErr
+		return generic.Zero[T](), err
 	}
+
 	return ret, nil
 }
 
