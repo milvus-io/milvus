@@ -205,9 +205,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 				},
 			},
 		}
-		err = svr.meta.AddSegment(NewSegmentInfo(seg1))
+		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg1))
 		assert.NoError(t, err)
-		err = svr.meta.AddSegment(NewSegmentInfo(seg2))
+		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
 		assert.NoError(t, err)
 		err = svr.meta.AddSegmentIndex(&model.SegmentIndex{
 			SegmentID: seg1.ID,
@@ -301,9 +301,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 				},
 			},
 		}
-		err = svr.meta.AddSegment(NewSegmentInfo(seg1))
+		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg1))
 		assert.NoError(t, err)
-		err = svr.meta.AddSegment(NewSegmentInfo(seg2))
+		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
 		assert.NoError(t, err)
 
 		req := &datapb.GetRecoveryInfoRequestV2{
@@ -373,7 +373,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			},
 		}
 		segment := createSegment(0, 0, 1, 100, 10, "vchan1", commonpb.SegmentState_Flushed)
-		err := svr.meta.AddSegment(NewSegmentInfo(segment))
+		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment))
 		assert.NoError(t, err)
 
 		err = svr.meta.CreateIndex(&model.Index{
@@ -441,9 +441,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 
 		seg1 := createSegment(7, 0, 0, 100, 30, "vchan1", commonpb.SegmentState_Growing)
 		seg2 := createSegment(8, 0, 0, 100, 40, "vchan1", commonpb.SegmentState_Dropped)
-		err = svr.meta.AddSegment(NewSegmentInfo(seg1))
+		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg1))
 		assert.NoError(t, err)
-		err = svr.meta.AddSegment(NewSegmentInfo(seg2))
+		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
 		assert.NoError(t, err)
 
 		req := &datapb.GetRecoveryInfoRequestV2{
@@ -483,9 +483,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		seg1 := createSegment(7, 0, 0, 100, 30, "vchan1", commonpb.SegmentState_Growing)
 		seg2 := createSegment(8, 0, 0, 100, 40, "vchan1", commonpb.SegmentState_Flushed)
 		seg2.IsFake = true
-		err = svr.meta.AddSegment(NewSegmentInfo(seg1))
+		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg1))
 		assert.NoError(t, err)
-		err = svr.meta.AddSegment(NewSegmentInfo(seg2))
+		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
 		assert.NoError(t, err)
 
 		req := &datapb.GetRecoveryInfoRequestV2{
@@ -527,15 +527,15 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		seg4 := createSegment(12, 0, 0, 2048, 40, "vchan1", commonpb.SegmentState_Dropped)
 		seg5 := createSegment(13, 0, 0, 2048, 40, "vchan1", commonpb.SegmentState_Flushed)
 		seg5.CompactionFrom = []int64{11, 12}
-		err = svr.meta.AddSegment(NewSegmentInfo(seg1))
+		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg1))
 		assert.NoError(t, err)
-		err = svr.meta.AddSegment(NewSegmentInfo(seg2))
+		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
 		assert.NoError(t, err)
-		err = svr.meta.AddSegment(NewSegmentInfo(seg3))
+		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg3))
 		assert.NoError(t, err)
-		err = svr.meta.AddSegment(NewSegmentInfo(seg4))
+		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg4))
 		assert.NoError(t, err)
-		err = svr.meta.AddSegment(NewSegmentInfo(seg5))
+		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg5))
 		assert.NoError(t, err)
 		err = svr.meta.CreateIndex(&model.Index{
 			TenantID:        "",

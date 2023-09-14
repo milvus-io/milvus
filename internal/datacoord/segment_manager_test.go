@@ -170,10 +170,20 @@ func TestLastExpireReset(t *testing.T) {
 	collID, err := mockAllocator.allocID(ctx)
 	assert.Nil(t, err)
 	meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
+	initSegment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            1,
+			InsertChannel: "ch1",
+			State:         commonpb.SegmentState_Growing,
+		},
+	}
+	meta.AddSegment(context.TODO(), initSegment)
 
 	//assign segments, set max segment to only 1MB, equalling to 10485 rows
 	var bigRows, smallRows int64 = 10000, 1000
 	segmentManager, _ := newSegmentManager(meta, mockAllocator)
+	initSegment.SegmentInfo.State = commonpb.SegmentState_Dropped
+	meta.segments.SetSegment(1, initSegment)
 	allocs, _ := segmentManager.AllocSegment(context.Background(), collID, 0, channelName, bigRows)
 	segmentID1, expire1 := allocs[0].SegmentID, allocs[0].ExpireTime
 	time.Sleep(100 * time.Millisecond)
@@ -308,11 +318,11 @@ func TestLoadSegmentsFromMeta(t *testing.T) {
 		MaxRowNum:      100,
 		LastExpireTime: 1000,
 	}
-	err = meta.AddSegment(NewSegmentInfo(sealedSegment))
+	err = meta.AddSegment(context.TODO(), NewSegmentInfo(sealedSegment))
 	assert.NoError(t, err)
-	err = meta.AddSegment(NewSegmentInfo(growingSegment))
+	err = meta.AddSegment(context.TODO(), NewSegmentInfo(growingSegment))
 	assert.NoError(t, err)
-	err = meta.AddSegment(NewSegmentInfo(flushedSegment))
+	err = meta.AddSegment(context.TODO(), NewSegmentInfo(flushedSegment))
 	assert.NoError(t, err)
 
 	segmentManager, _ := newSegmentManager(meta, mockAllocator)

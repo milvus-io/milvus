@@ -600,8 +600,8 @@ func TestCompactionPlanHandler_completeCompaction(t *testing.T) {
 			},
 		}
 
-		meta.AddSegment(NewSegmentInfo(seg1))
-		meta.AddSegment(NewSegmentInfo(seg2))
+		meta.AddSegment(context.TODO(), NewSegmentInfo(seg1))
+		meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
 
 		segments := meta.GetAllSegmentsUnsafe()
 		assert.Equal(t, len(segments), 2)
