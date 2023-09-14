@@ -405,7 +405,7 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 	defer cancel()
 	_ = retry.Do(innerCtx, func() error {
 		if generic.IsZero(client) {
-			callErr = errors.Wrap(clientErr, "empty grpc client")
+			callErr = errors.Wrap(ErrConnect, "empty grpc client")
 			log.Warn("grpc client is nil, maybe fail to get client in the retry state")
 			resetClientFunc()
 			return callErr
