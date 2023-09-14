@@ -19,7 +19,8 @@ package generic
 import "reflect"
 
 func Zero[T any]() T {
-	return *new(T)
+	var zero T
+	return zero
 }
 
 func IsZero[T any](v T) bool {
