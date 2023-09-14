@@ -104,7 +104,10 @@ func TestClientBase_CompressCall(t *testing.T) {
 
 func testCall(t *testing.T, compressed bool) {
 	// mock client with nothing
-	base := ClientBase[*mockClient]{}
+	base := ClientBase[*mockClient]{
+		maxCancelError: 10,
+		MaxAttempts:    3,
+	}
 	base.CompressionEnabled = compressed
 	initClient := func() {
 		base.grpcClientMtx.Lock()
@@ -156,6 +159,7 @@ func testCall(t *testing.T, compressed bool) {
 		initClient()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
+
 		errMock := errors.New("mocked")
 		_, err := base.Call(ctx, func(client *mockClient) (any, error) {
 			return nil, errMock
@@ -186,10 +190,13 @@ func testCall(t *testing.T, compressed bool) {
 		base.grpcClientMtx.RUnlock()
 	})
 
-	t.Run("Call returns canceled grpc error", func(t *testing.T) {
+	t.Run("Call returns canceled grpc error within limit", func(t *testing.T) {
 		initClient()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
+		defer func() {
+			base.ctxCounter.Store(0)
+		}()
 		errGrpc := status.Error(codes.Canceled, "mocked")
 		_, err := base.Call(ctx, func(client *mockClient) (any, error) {
 			return nil, errGrpc
@@ -200,6 +207,26 @@ func testCall(t *testing.T, compressed bool) {
 		base.grpcClientMtx.RLock()
 		// client shall not be reset
 		assert.NotNil(t, base.grpcClient)
+		base.grpcClientMtx.RUnlock()
+	})
+	t.Run("Call returns canceled grpc error exceed limit", func(t *testing.T) {
+		initClient()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		base.ctxCounter.Store(10)
+		defer func() {
+			base.ctxCounter.Store(0)
+		}()
+		errGrpc := status.Error(codes.Canceled, "mocked")
+		_, err := base.Call(ctx, func(client *mockClient) (any, error) {
+			return nil, errGrpc
+		})
+
+		assert.Error(t, err)
+		assert.True(t, errors.Is(err, errGrpc))
+		base.grpcClientMtx.RLock()
+		// client shall not be reset
+		assert.Nil(t, base.grpcClient)
 		base.grpcClientMtx.RUnlock()
 	})
 
