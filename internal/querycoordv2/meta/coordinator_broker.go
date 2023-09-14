@@ -108,7 +108,7 @@ func (broker *CoordinatorBroker) GetPartitions(ctx context.Context, collectionID
 		return nil, err
 	}
 
-	return resp.PartitionIDs, nil
+	return resp.GetPartitionIDs(), nil
 }
 
 func (broker *CoordinatorBroker) GetRecoveryInfo(ctx context.Context, collectionID UniqueID, partitionID UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentBinlogs, error) {
@@ -179,7 +179,7 @@ func (broker *CoordinatorBroker) GetSegmentInfo(ctx context.Context, ids ...Uniq
 		return nil, err
 	}
 
-	if len(resp.Infos) == 0 {
+	if len(resp.GetInfos()) == 0 {
 		log.Warn("No such segment in DataCoord",
 			zap.Int64s("segments", ids))
 		return nil, fmt.Errorf("no such segment in DataCoord")
@@ -255,5 +255,5 @@ func (broker *CoordinatorBroker) DescribeIndex(ctx context.Context, collectionID
 			zap.Error(err))
 		return nil, err
 	}
-	return resp.IndexInfos, nil
+	return resp.GetIndexInfos(), nil
 }

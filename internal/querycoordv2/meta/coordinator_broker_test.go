@@ -29,10 +29,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func TestCoordinatorBroker_GetCollectionSchema(t *testing.T) {
+	paramtable.Init()
 	t.Run("got error on DescribeCollection", func(t *testing.T) {
 		rootCoord := mocks.NewRootCoord(t)
 		rootCoord.On("DescribeCollection",
@@ -76,7 +79,47 @@ func TestCoordinatorBroker_GetCollectionSchema(t *testing.T) {
 	})
 }
 
-func TestCoordinatorBroker_GetRecoveryInfo(t *testing.T) {
+func TestCoordinatorBroker_GetRecoveryInfoV1(t *testing.T) {
+	t.Run("normal case", func(t *testing.T) {
+		dc := mocks.NewMockDataCoord(t)
+		dc.EXPECT().GetRecoveryInfo(mock.Anything, mock.Anything).Return(&datapb.GetRecoveryInfoResponse{}, nil)
+
+		ctx := context.Background()
+		broker := &CoordinatorBroker{dataCoord: dc}
+
+		_, _, err := broker.GetRecoveryInfo(ctx, 1, 1)
+		assert.NoError(t, err)
+	})
+
+	t.Run("get error", func(t *testing.T) {
+		dc := mocks.NewMockDataCoord(t)
+		fakeErr := errors.New("fake error")
+		dc.EXPECT().GetRecoveryInfo(mock.Anything, mock.Anything).Return(nil, fakeErr)
+
+		ctx := context.Background()
+		broker := &CoordinatorBroker{dataCoord: dc}
+
+		_, _, err := broker.GetRecoveryInfo(ctx, 1, 1)
+		assert.ErrorIs(t, err, fakeErr)
+	})
+
+	t.Run("return non-success code", func(t *testing.T) {
+		dc := mocks.NewMockDataCoord(t)
+		dc.EXPECT().GetRecoveryInfo(mock.Anything, mock.Anything).Return(&datapb.GetRecoveryInfoResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			},
+		}, nil)
+
+		ctx := context.Background()
+		broker := &CoordinatorBroker{dataCoord: dc}
+
+		_, _, err := broker.GetRecoveryInfo(ctx, 1, 1)
+		assert.Error(t, err)
+	})
+}
+
+func TestCoordinatorBroker_GetRecoveryInfoV2(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
 		dc := mocks.NewMockDataCoord(t)
 		dc.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return(&datapb.GetRecoveryInfoResponseV2{}, nil)
@@ -145,5 +188,159 @@ func TestCoordinatorBroker_GetPartitions(t *testing.T) {
 		broker := &CoordinatorBroker{rootCoord: rc}
 		_, err := broker.GetPartitions(ctx, collection)
 		assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
+	})
+}
+
+func TestCoordinatorBroker_GetSegmentInfo(t *testing.T) {
+	paramtable.Init()
+	t.Run("normal case", func(t *testing.T) {
+		dc := mocks.NewMockDataCoord(t)
+		dc.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return(&datapb.GetSegmentInfoResponse{
+			Status: merr.Status(nil),
+			Infos: []*datapb.SegmentInfo{
+				{
+					ID: 1,
+				},
+				{
+					ID: 2,
+				},
+			},
+		}, nil)
+
+		ctx := context.Background()
+		broker := &CoordinatorBroker{dataCoord: dc}
+
+		resp, err := broker.GetSegmentInfo(ctx, 1)
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+		assert.Len(t, resp.GetInfos(), 2)
+	})
+
+	t.Run("return error", func(t *testing.T) {
+		dc := mocks.NewMockDataCoord(t)
+		fakeErr := errors.New("fake err")
+		dc.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return(&datapb.GetSegmentInfoResponse{
+			Status: merr.Status(nil),
+			Infos:  []*datapb.SegmentInfo{},
+		}, fakeErr)
+
+		ctx := context.Background()
+		broker := &CoordinatorBroker{dataCoord: dc}
+
+		_, err := broker.GetSegmentInfo(ctx, 1)
+		assert.ErrorIs(t, err, fakeErr)
+	})
+
+	t.Run("return empty segment list", func(t *testing.T) {
+		dc := mocks.NewMockDataCoord(t)
+		dc.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return(&datapb.GetSegmentInfoResponse{
+			Status: merr.Status(nil),
+			Infos:  []*datapb.SegmentInfo{},
+		}, nil)
+
+		ctx := context.Background()
+		broker := &CoordinatorBroker{dataCoord: dc}
+
+		_, err := broker.GetSegmentInfo(ctx, 1)
+		assert.Error(t, err)
+	})
+}
+
+func TestCoordinatorBroker_GetIndexInfo(t *testing.T) {
+	paramtable.Init()
+	t.Run("normal case", func(t *testing.T) {
+		dc := mocks.NewMockDataCoord(t)
+		dc.EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(&indexpb.GetIndexInfoResponse{
+			Status: merr.Status(nil),
+			SegmentInfo: map[int64]*indexpb.SegmentInfo{
+				1: {
+					SegmentID: 1,
+					IndexInfos: []*indexpb.IndexFilePathInfo{
+						{
+							SegmentID: 1,
+						},
+					},
+				},
+			},
+		}, nil)
+
+		ctx := context.Background()
+		broker := &CoordinatorBroker{dataCoord: dc}
+
+		infos, err := broker.GetIndexInfo(ctx, 1, 1)
+		assert.NoError(t, err)
+		assert.Len(t, infos, 1)
+	})
+
+	t.Run("return empty list", func(t *testing.T) {
+		dc := mocks.NewMockDataCoord(t)
+		dc.EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(&indexpb.GetIndexInfoResponse{
+			Status: merr.Status(nil),
+			SegmentInfo: map[int64]*indexpb.SegmentInfo{
+				1: {
+					SegmentID:  1,
+					IndexInfos: []*indexpb.IndexFilePathInfo{},
+				},
+			},
+		}, nil)
+
+		ctx := context.Background()
+		broker := &CoordinatorBroker{dataCoord: dc}
+
+		_, err := broker.GetIndexInfo(ctx, 1, 1)
+		assert.ErrorIs(t, err, merr.ErrIndexNotFound)
+	})
+
+	t.Run("return error", func(t *testing.T) {
+		dc := mocks.NewMockDataCoord(t)
+		fakeErr := errors.New("fake error")
+		dc.EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(&indexpb.GetIndexInfoResponse{
+			Status: merr.Status(merr.ErrIndexNotFound),
+		}, fakeErr)
+
+		ctx := context.Background()
+		broker := &CoordinatorBroker{dataCoord: dc}
+
+		_, err := broker.GetIndexInfo(ctx, 1, 1)
+		assert.Error(t, err)
+	})
+}
+
+func TestCoordinatorBroker_DescribeIndex(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("normal case", func(t *testing.T) {
+		dc := mocks.NewMockDataCoord(t)
+		dc.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&indexpb.DescribeIndexResponse{
+			Status: merr.Status(nil),
+			IndexInfos: []*indexpb.IndexInfo{
+				{
+					FieldID: 1,
+				},
+				{
+					FieldID: 2,
+				},
+			},
+		}, nil)
+
+		ctx := context.Background()
+		broker := &CoordinatorBroker{dataCoord: dc}
+		infos, err := broker.DescribeIndex(ctx, 1)
+		assert.NoError(t, err)
+		assert.Len(t, infos, 2)
+	})
+
+	t.Run("return err", func(t *testing.T) {
+		dc := mocks.NewMockDataCoord(t)
+		dc.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&indexpb.DescribeIndexResponse{
+			Status:     merr.Status(merr.ErrIndexNotFound),
+			IndexInfos: []*indexpb.IndexInfo{},
+		}, nil)
+
+		ctx := context.Background()
+		broker := &CoordinatorBroker{dataCoord: dc}
+		infos, err := broker.DescribeIndex(ctx, 1)
+		assert.NoError(t, err)
+		assert.Len(t, infos, 0)
 	})
 }
