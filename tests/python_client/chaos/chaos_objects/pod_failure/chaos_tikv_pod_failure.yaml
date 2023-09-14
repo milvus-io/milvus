@@ -1,0 +1,17 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: test-tikv-pod-failure
+  namespace: chaos-testing
+spec:
+  selector:
+    namespaces:
+      - chaos-testing
+    labelSelectors:
+      app.kubernetes.io/instance: milvus-chaos-tikv
+      app.kubernetes.io/component: tikv
+  mode: fixed
+  value: "1"
+  action: pod-failure
+  duration: 2m
+  gracePeriod: 0
