@@ -54,7 +54,7 @@ service DataCoord {
   rpc GetCompactionStateWithPlans(milvus.GetCompactionPlansRequest) returns (milvus.GetCompactionPlansResponse) {}
 
   rpc WatchChannels(WatchChannelsRequest) returns (WatchChannelsResponse) {}
-  rpc GetFlushState(milvus.GetFlushStateRequest) returns (milvus.GetFlushStateResponse) {}
+  rpc GetFlushState(GetFlushStateRequest) returns (milvus.GetFlushStateResponse) {}
   rpc DropVirtualChannel(DropVirtualChannelRequest) returns (DropVirtualChannelResponse) {}
 
   rpc SetSegmentState(SetSegmentStateRequest) returns (SetSegmentStateResponse) {}
@@ -108,6 +108,8 @@ service DataNode {
   rpc ResendSegmentStats(ResendSegmentStatsRequest) returns(ResendSegmentStatsResponse) {}
 
   rpc AddImportSegment(AddImportSegmentRequest) returns(AddImportSegmentResponse) {}
+
+  rpc FlushChannels(FlushChannelsRequest) returns(common.Status) {}
 }
 
 message FlushRequest {
@@ -125,6 +127,13 @@ message FlushResponse {
   repeated int64 segmentIDs = 4; // newly sealed segments
   repeated int64 flushSegmentIDs = 5; // old flushed segment
   int64 timeOfSeal = 6;
+  uint64 flush_ts = 7;
+}
+
+message FlushChannelsRequest {
+  common.MsgBase base = 1;
+  uint64 flush_ts = 2;
+  repeated string channels = 3;
 }
 
 message SegmentIDRequest {
@@ -676,4 +685,12 @@ message GcConfirmResponse {
 message ReportDataNodeTtMsgsRequest {
   common.MsgBase base = 1;
   repeated msg.DataNodeTtMsg msgs = 2; // -1 means whole collection.
+}
+
+message GetFlushStateRequest {
+  repeated int64 segmentIDs = 1;
+  uint64 flush_ts = 2;
+  string db_name = 3;
+  string collection_name = 4;
+  int64 collectionID = 5;
 }

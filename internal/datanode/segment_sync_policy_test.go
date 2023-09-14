@@ -18,14 +18,13 @@ package datanode
 
 import (
 	"fmt"
+	"math"
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-	"go.uber.org/atomic"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestSyncPeriodically(t *testing.T) {
@@ -55,7 +54,7 @@ func TestSyncPeriodically(t *testing.T) {
 			if test.isBufferEmpty {
 				segment.curInsertBuf = nil
 			}
-			res := policy([]*Segment{segment}, tsoutil.ComposeTSByTime(test.endPosTs, 0), nil)
+			res := policy([]*Segment{segment}, nil, tsoutil.ComposeTSByTime(test.endPosTs, 0))
 			assert.Equal(t, test.shouldSyncNum, len(res))
 		})
 	}
@@ -65,7 +64,7 @@ func TestSyncMemoryTooHigh(t *testing.T) {
 	tests := []struct {
 		testName        string
 		syncSegmentNum  int
-		needToSync      bool
+		isHighMemory    bool
 		memorySizesInMB []float64
 		shouldSyncSegs  []UniqueID
 	}{
@@ -75,7 +74,7 @@ func TestSyncMemoryTooHigh(t *testing.T) {
 			[]float64{1, 2, 3, 4, 5}, []UniqueID{5, 4}},
 		{"test normal 3", 5, true,
 			[]float64{1, 2, 3, 4, 5}, []UniqueID{5, 4, 3, 2, 1}},
-		{"test needToSync false", 3, false,
+		{"test isHighMemory false", 3, false,
 			[]float64{1, 2, 3, 4, 5}, []UniqueID{}},
 		{"test syncSegmentNum 1", 1, true,
 			[]float64{1, 2, 3, 4, 5}, []UniqueID{5}},
@@ -85,6 +84,8 @@ func TestSyncMemoryTooHigh(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.testName, func(t *testing.T) {
+			channel := newChannel("channel", 0, nil, nil, nil)
+			channel.setIsHighMemory(test.isHighMemory)
 			Params.Save(Params.DataNodeCfg.MemoryForceSyncSegmentNum.Key, fmt.Sprintf("%d", test.syncSegmentNum))
 			policy := syncMemoryTooHigh()
 			segments := make([]*Segment, len(test.memorySizesInMB))
@@ -93,8 +94,39 @@ func TestSyncMemoryTooHigh(t *testing.T) {
 					segmentID: UniqueID(i + 1), memorySize: int64(test.memorySizesInMB[i] * 1024 * 1024),
 				}
 			}
-			segs := policy(segments, 0, atomic.NewBool(test.needToSync))
+			segs := policy(segments, channel, 0)
 			assert.ElementsMatch(t, segs, test.shouldSyncSegs)
+		})
+	}
+}
+
+func TestSyncSegmentsAtTs(t *testing.T) {
+	tests := []struct {
+		testName      string
+		ts            Timestamp
+		flushTs       Timestamp
+		shouldSyncNum int
+	}{
+		{"test ts < flushTs", 100, 200, 0},
+		{"test ts > flushTs", 300, 200, 1},
+		{"test ts = flushTs", 100, 100, 1},
+		{"test flushTs = 0", 100, 0, 0},
+		{"test flushTs = maxUint64", 100, math.MaxUint64, 0},
+	}
+
+	for _, test := range tests {
+		t.Run(test.testName, func(t *testing.T) {
+			channel := newChannel("channel", 0, nil, nil, nil)
+			channel.setFlushTs(test.flushTs)
+
+			segment := &Segment{}
+			segment.setInsertBuffer(&BufferData{
+				startPos: &msgpb.MsgPosition{},
+			})
+
+			policy := syncSegmentsAtTs()
+			res := policy([]*Segment{segment}, channel, test.ts)
+			assert.Equal(t, test.shouldSyncNum, len(res))
 		})
 	}
 }

@@ -20,7 +20,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"math"
+	"math/rand"
 	"os"
 	"testing"
 	"time"
@@ -203,7 +205,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	defer cancel()
 
 	// init data node
-	insertChannelName := "by-dev-rootcoord-dml"
+	insertChannelName := fmt.Sprintf("by-dev-rootcoord-dml-%d", rand.Int())
 
 	Factory := &MetaFactory{}
 	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1", schemapb.DataType_Int64)
@@ -288,7 +290,7 @@ func TestDataSyncService_Start(t *testing.T) {
 
 	timeRange := TimeRange{
 		timestampMin: 0,
-		timestampMax: math.MaxUint64,
+		timestampMax: math.MaxUint64 - 1,
 	}
 	dataFactory := NewDataFactory()
 	insertMessages := dataFactory.GetMsgStreamTsInsertMsgs(2, insertChannelName, tsoutil.GetCurrentTime())
@@ -318,7 +320,7 @@ func TestDataSyncService_Start(t *testing.T) {
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_TimeTick,
 				MsgID:     UniqueID(0),
-				Timestamp: math.MaxUint64,
+				Timestamp: math.MaxUint64 - 1,
 				SourceID:  0,
 			},
 		},

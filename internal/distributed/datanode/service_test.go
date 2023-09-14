@@ -148,6 +148,10 @@ func (m *MockDataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegment
 	return m.status, m.err
 }
 
+func (m *MockDataNode) FlushChannels(ctx context.Context, req *datapb.FlushChannelsRequest) (*commonpb.Status, error) {
+	return m.status, m.err
+}
+
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type mockDataCoord struct {
 	types.DataCoord

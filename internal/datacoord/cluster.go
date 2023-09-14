@@ -106,6 +106,29 @@ func (c *Cluster) Flush(ctx context.Context, nodeID int64, channel string,
 	return nil
 }
 
+func (c *Cluster) FlushChannels(ctx context.Context, nodeID int64, flushTs Timestamp, channels []string) error {
+	if len(channels) == 0 {
+		return nil
+	}
+
+	for _, channel := range channels {
+		if !c.channelManager.Match(nodeID, channel) {
+			return fmt.Errorf("channel %s is not watched on node %d", channel, nodeID)
+		}
+	}
+
+	req := &datapb.FlushChannelsRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+			commonpbutil.WithTargetID(nodeID),
+		),
+		FlushTs:  flushTs,
+		Channels: channels,
+	}
+
+	return c.sessionManager.FlushChannels(ctx, nodeID, req)
+}
+
 // Import sends import requests to DataNodes whose ID==nodeID.
 func (c *Cluster) Import(ctx context.Context, nodeID int64, it *datapb.ImportTaskRequest) {
 	c.sessionManager.Import(ctx, nodeID, it)

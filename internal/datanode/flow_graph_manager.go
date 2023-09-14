@@ -108,7 +108,7 @@ func (fm *flowgraphManager) execute(totalMemory uint64) {
 		return channels[i].bufferSize > channels[j].bufferSize
 	})
 	if fg, ok := fm.flowgraphs.Get(channels[0].channel); ok { // sync the first channel with the largest memory usage
-		fg.channel.forceToSync()
+		fg.channel.setIsHighMemory(true)
 		log.Info("notify flowgraph to sync",
 			zap.String("channel", channels[0].channel), zap.Int64("bufferSize", channels[0].bufferSize))
 	}
