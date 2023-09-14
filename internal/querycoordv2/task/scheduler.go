@@ -258,7 +258,7 @@ func (scheduler *taskScheduler) Add(task Task) error {
 	}
 
 	scheduler.updateTaskMetrics()
-	log.Info("task added", zap.String("task", task.String()))
+	log.Ctx(task.Context()).Info("task added", zap.String("task", task.String()))
 	return nil
 }
 
@@ -688,7 +688,7 @@ func (scheduler *taskScheduler) recordSegmentTaskError(task *SegmentTask) {
 }
 
 func (scheduler *taskScheduler) remove(task Task) {
-	log := log.With(
+	log := log.Ctx(task.Context()).With(
 		zap.Int64("taskID", task.ID()),
 		zap.Int64("collectionID", task.CollectionID()),
 		zap.Int64("replicaID", task.ReplicaID()),

@@ -26,6 +26,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/atomic"
 )
 
@@ -108,10 +110,14 @@ type baseTask struct {
 	actions  []Action
 	step     int
 	reason   string
+
+	// span for tracing
+	span trace.Span
 }
 
 func newBaseTask(ctx context.Context, sourceID, collectionID, replicaID UniqueID, shard string) *baseTask {
 	ctx, cancel := context.WithCancel(ctx)
+	ctx, span := otel.Tracer("QueryCoord").Start(ctx, "QueryCoord-BaseTask")
 
 	return &baseTask{
 		sourceID:     sourceID,
@@ -125,6 +131,7 @@ func newBaseTask(ctx context.Context, sourceID, collectionID, replicaID UniqueID
 		cancel:   cancel,
 		doneCh:   make(chan struct{}),
 		canceled: atomic.NewBool(false),
+		span:     span,
 	}
 }
 
@@ -193,6 +200,9 @@ func (task *baseTask) Cancel(err error) {
 		}
 		task.err = err
 		close(task.doneCh)
+		if task.span != nil {
+			task.span.End()
+		}
 	}
 }
 

@@ -223,7 +223,8 @@ func (ex *Executor) executeSegmentAction(task *SegmentTask, step int) {
 func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	action := task.Actions()[step].(*SegmentAction)
 	defer action.rpcReturned.Store(true)
-	log := log.With(
+	ctx := task.Context()
+	log := log.Ctx(ctx).With(
 		zap.Int64("taskID", task.ID()),
 		zap.Int64("collectionID", task.CollectionID()),
 		zap.Int64("replicaID", task.ReplicaID()),
@@ -240,7 +241,6 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		}
 	}()
 
-	ctx := task.Context()
 	schema, err := ex.broker.GetCollectionSchema(ctx, task.CollectionID())
 	if err != nil {
 		log.Warn("failed to get schema of collection", zap.Error(err))
