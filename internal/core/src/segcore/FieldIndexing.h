@@ -337,11 +337,11 @@ class IndexingRecord {
 
     bool
     HasRawData(FieldId fieldId) const {
-        if (is_in(fieldId)) {
+        if (is_in(fieldId) && SyncDataWithIndex(fieldId)) {
             const FieldIndexing& indexing = get_field_indexing(fieldId);
             return indexing.has_raw_data();
         }
-        return false;
+        return true;
     }
 
     // concurrent
