@@ -326,44 +326,39 @@ func (mr *MilvusRoles) Run(alias string) {
 
 	http.ServeHTTP()
 
-	var rc *components.RootCoord
+	var (
+		rc, pn, qs, qn, ds, dn, is, in component
+	)
 	var wg sync.WaitGroup
 	local := mr.Local
 	if mr.EnableRootCoord {
 		rc = mr.runRootCoord(ctx, local, &wg)
 	}
 
-	var pn *components.Proxy
 	if mr.EnableProxy {
 		pn = mr.runProxy(ctx, local, &wg)
 	}
 
-	var qs *components.QueryCoord
 	if mr.EnableQueryCoord {
 		qs = mr.runQueryCoord(ctx, local, &wg)
 	}
 
-	var qn *components.QueryNode
 	if mr.EnableQueryNode {
 		qn = mr.runQueryNode(ctx, local, &wg)
 	}
 
-	var ds *components.DataCoord
 	if mr.EnableDataCoord {
 		ds = mr.runDataCoord(ctx, local, &wg)
 	}
 
-	var dn *components.DataNode
 	if mr.EnableDataNode {
 		dn = mr.runDataNode(ctx, local, &wg)
 	}
 
-	var is *components.IndexCoord
 	if mr.EnableIndexCoord {
 		is = mr.runIndexCoord(ctx, local, &wg)
 	}
 
-	var in *components.IndexNode
 	if mr.EnableIndexNode {
 		in = mr.runIndexNode(ctx, local, &wg)
 	}
