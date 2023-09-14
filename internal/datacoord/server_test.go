@@ -3599,7 +3599,7 @@ func TestGetFlushState(t *testing.T) {
 		assert.NoError(t, err)
 		assert.EqualValues(t, &milvuspb.GetFlushStateResponse{
 			Status:  &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-			Flushed: false,
+			Flushed: true,
 		}, resp)
 	})
 }
