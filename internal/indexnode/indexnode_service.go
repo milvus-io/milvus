@@ -87,6 +87,7 @@ func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest
 			zap.String("ClusterID", req.ClusterID), zap.Int64("IndexBuildID", req.BuildID),
 			zap.Error(err),
 		)
+		i.deleteTaskInfos(ctx, []taskKey{{ClusterID: req.GetClusterID(), BuildID: req.GetBuildID()}})
 		metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.FailLabel).Inc()
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_BuildIndexError,
@@ -185,7 +186,7 @@ func (i *IndexNode) DropJobs(ctx context.Context, req *indexpb.DropJobsRequest) 
 	for _, buildID := range req.BuildIDs {
 		keys = append(keys, taskKey{ClusterID: req.ClusterID, BuildID: buildID})
 	}
-	infos := i.deleteTaskInfos(keys)
+	infos := i.deleteTaskInfos(ctx, keys)
 	for _, info := range infos {
 		if info.cancel != nil {
 			info.cancel()
