@@ -3617,21 +3617,23 @@ func (node *Proxy) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStat
 		return resp, nil
 	}
 
-	if err = validateCollectionName(req.GetCollectionName()); err != nil {
-		resp.Status = merr.Status(err)
-		return resp, nil
-	}
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
-	if err != nil {
-		resp.Status = merr.Status(err)
-		return resp, nil
-	}
-
 	stateReq := &datapb.GetFlushStateRequest{
 		SegmentIDs: req.GetSegmentIDs(),
 		FlushTs:    req.GetFlushTs(),
 	}
-	stateReq.CollectionID = collectionID
+
+	if len(req.GetCollectionName()) > 0 { // For compatibility with old client
+		if err = validateCollectionName(req.GetCollectionName()); err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
+		collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+		if err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
+		stateReq.CollectionID = collectionID
+	}
 
 	resp, err = node.dataCoord.GetFlushState(ctx, stateReq)
 	if err != nil {

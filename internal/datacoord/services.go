@@ -1309,10 +1309,10 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 		channels = append(channels, channelNames...)
 	}
 
-	if len(channels) == 0 {
-		resp.Flushed = false
+	if len(channels) == 0 { // For compatibility with old client
+		resp.Flushed = true
 		resp.Status.ErrorCode = commonpb.ErrorCode_Success
-		log.Warn("GetFlushState failed, no channels found")
+		log.Info("GetFlushState all flushed without checking flush ts")
 		return resp, nil
 	}
 
