@@ -348,7 +348,7 @@ func (c *ClientBase[T]) verifySession(ctx context.Context) error {
 	return nil
 }
 
-func (c *ClientBase[T]) recordCtxError() (needReset bool) {
+func (c *ClientBase[T]) needResetCancel() (needReset bool) {
 	val := c.ctxCounter.Add(1)
 	if val > c.maxCancelError {
 		c.ctxCounter.Store(0)
@@ -365,7 +365,7 @@ func (c *ClientBase[T]) checkErr(ctx context.Context, err error) (needRetry, nee
 		log.Warn("call received grpc error", zap.Error(err))
 		if funcutil.IsGrpcErr(err, codes.Canceled, codes.DeadlineExceeded) {
 			// canceled or deadline exceeded
-			return c.recordCtxError(), false
+			return true, c.needResetCancel()
 		}
 		return true, true
 	case IsServerIDMismatchErr(err):
