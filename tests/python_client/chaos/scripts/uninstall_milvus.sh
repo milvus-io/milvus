@@ -6,3 +6,5 @@ ns=${2:-"chaos-testing"}
 helm uninstall ${release} -n=${ns}
 kubectl delete pvc -l release=${release} -n=${ns}
 kubectl delete pvc -l app.kubernetes.io/instance=${release} -n=${ns}
+kubectl delete pvc -l app.kubernetes.io/instance=${release}-tikv -n=${ns} || echo "no pvc found"
+kubectl delete pvc -l app.kubernetes.io/instance=${release}-log -n=${ns} || echo "no pvc found"
