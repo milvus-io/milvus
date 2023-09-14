@@ -1,6 +1,8 @@
 import requests
 import argparse
+from tenacity import retry, stop_after_attempt
 
+@retry(stop=stop_after_attempt(7))
 def get_image_tag_by_short_name(repository, tag):
 
     # Send API request to get all tags start with prefix
