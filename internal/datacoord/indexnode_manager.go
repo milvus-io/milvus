@@ -125,10 +125,10 @@ func (nm *IndexNodeManager) PeekClient(meta *model.SegmentIndex) (UniqueID, type
 			}
 			if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 				log.Warn("get IndexNode slots failed", zap.Int64("nodeID", nodeID),
-					zap.String("reason", resp.Status.Reason))
+					zap.String("reason", resp.GetStatus().GetReason()))
 				return
 			}
-			if resp.TaskSlots > 0 {
+			if resp.GetTaskSlots() > 0 {
 				nodeMutex.Lock()
 				defer nodeMutex.Unlock()
 				log.Info("peek client success", zap.Int64("nodeID", nodeID))
@@ -181,11 +181,11 @@ func (nm *IndexNodeManager) ClientSupportDisk() bool {
 			}
 			if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 				log.Warn("get IndexNode slots failed", zap.Int64("nodeID", nodeID),
-					zap.String("reason", resp.Status.Reason))
+					zap.String("reason", resp.GetStatus().GetReason()))
 				return
 			}
-			log.Debug("get job stats success", zap.Int64("nodeID", nodeID), zap.Bool("enable disk", resp.EnableDisk))
-			if resp.EnableDisk {
+			log.Debug("get job stats success", zap.Int64("nodeID", nodeID), zap.Bool("enable disk", resp.GetEnableDisk()))
+			if resp.GetEnableDisk() {
 				nodeMutex.Lock()
 				defer nodeMutex.Unlock()
 				cancel()

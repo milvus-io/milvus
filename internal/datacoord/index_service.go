@@ -138,7 +138,7 @@ func (s *Server) createIndexForSegmentLoop(ctx context.Context) {
 // indexBuilder will find this task and assign it to IndexNode for execution.
 func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", req.CollectionID),
+		zap.Int64("collectionID", req.GetCollectionID()),
 	)
 	log.Info("receive CreateIndex request",
 		zap.String("IndexName", req.GetIndexName()), zap.Int64("fieldID", req.GetFieldID()),
@@ -221,10 +221,10 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 // Deprecated
 func (s *Server) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error) {
 	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", req.CollectionID),
+		zap.Int64("collectionID", req.GetCollectionID()),
 	)
 	log.Info("receive GetIndexState request",
-		zap.String("indexName", req.IndexName))
+		zap.String("indexName", req.GetIndexName()))
 
 	errResp := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -244,7 +244,7 @@ func (s *Server) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRe
 		errResp.ErrorCode = commonpb.ErrorCode_IndexNotExist
 		errResp.Reason = fmt.Sprintf("there is no index on collection: %d with the index name: %s", req.CollectionID, req.IndexName)
 		log.Error("GetIndexState fail",
-			zap.String("indexName", req.IndexName), zap.String("fail reason", errResp.Reason))
+			zap.String("indexName", req.GetIndexName()), zap.String("fail reason", errResp.Reason))
 		return &indexpb.GetIndexStateResponse{
 			Status: errResp,
 		}, nil
@@ -281,7 +281,7 @@ func (s *Server) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRe
 
 func (s *Server) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
 	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", req.CollectionID),
+		zap.Int64("collectionID", req.GetCollectionID()),
 	)
 	log.Info("receive GetSegmentIndexState",
 		zap.String("IndexName", req.GetIndexName()), zap.Int64s("fieldID", req.GetSegmentIDs()))
@@ -313,7 +313,7 @@ func (s *Server) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegme
 			},
 		}, nil
 	}
-	for _, segID := range req.SegmentIDs {
+	for _, segID := range req.GetSegmentIDs() {
 		state := s.meta.GetSegmentIndexState(req.GetCollectionID(), segID)
 		ret.States = append(ret.States, &indexpb.SegmentIndexState{
 			SegmentID:  segID,
@@ -456,7 +456,7 @@ func (s *Server) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.In
 // Deprecated
 func (s *Server) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error) {
 	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", req.CollectionID),
+		zap.Int64("collectionID", req.GetCollectionID()),
 	)
 	log.Info("receive GetIndexBuildProgress request", zap.String("indexName", req.GetIndexName()))
 	errResp := &commonpb.Status{
@@ -493,7 +493,7 @@ func (s *Server) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetInde
 		}, nil
 	}
 	indexInfo := &indexpb.IndexInfo{
-		CollectionID:     req.CollectionID,
+		CollectionID:     req.GetCollectionID(),
 		IndexID:          indexes[0].IndexID,
 		IndexedRows:      0,
 		TotalRows:        0,
@@ -516,7 +516,7 @@ func (s *Server) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetInde
 // DescribeIndex describe the index info of the collection.
 func (s *Server) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
 	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", req.CollectionID),
+		zap.Int64("collectionID", req.GetCollectionID()),
 	)
 	log.Info("receive DescribeIndex request", zap.String("indexName", req.GetIndexName()),
 		zap.Uint64("timestamp", req.GetTimestamp()))
@@ -536,11 +536,11 @@ func (s *Server) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRe
 	indexes := s.meta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
 	if len(indexes) == 0 {
 		errMsg := fmt.Sprintf("there is no index on collection: %d with the index name: %s", req.CollectionID, req.IndexName)
-		log.Warn("DescribeIndex fail", zap.String("indexName", req.IndexName), zap.String("fail reason", errMsg))
+		log.Warn("DescribeIndex fail", zap.String("indexName", req.GetIndexName()), zap.String("fail reason", errMsg))
 		return &indexpb.DescribeIndexResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_IndexNotExist,
-				Reason:    fmt.Sprint("index doesn't exist, collectionID ", req.CollectionID),
+				Reason:    fmt.Sprint("index doesn't exist, collectionID ", req.GetCollectionID()),
 			},
 		}, nil
 	}
@@ -582,7 +582,7 @@ func (s *Server) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRe
 // GetIndexStatistics get the statistics of the index. DescribeIndex doesn't contain statistics.
 func (s *Server) GetIndexStatistics(ctx context.Context, req *indexpb.GetIndexStatisticsRequest) (*indexpb.GetIndexStatisticsResponse, error) {
 	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", req.CollectionID),
+		zap.Int64("collectionID", req.GetCollectionID()),
 	)
 	log.Info("receive GetIndexStatistics request", zap.String("indexName", req.GetIndexName()))
 	if s.isClosed() {
@@ -596,12 +596,12 @@ func (s *Server) GetIndexStatistics(ctx context.Context, req *indexpb.GetIndexSt
 	if len(indexes) == 0 {
 		errMsg := fmt.Sprintf("there is no index on collection: %d with the index name: %s", req.CollectionID, req.IndexName)
 		log.Warn("GetIndexStatistics fail",
-			zap.String("indexName", req.IndexName),
+			zap.String("indexName", req.GetIndexName()),
 			zap.String("fail reason", errMsg))
 		return &indexpb.GetIndexStatisticsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_IndexNotExist,
-				Reason:    fmt.Sprint("index doesn't exist, collectionID ", req.CollectionID),
+				Reason:    fmt.Sprint("index doesn't exist, collectionID ", req.GetCollectionID()),
 			},
 		}, nil
 	}
@@ -642,7 +642,7 @@ func (s *Server) GetIndexStatistics(ctx context.Context, req *indexpb.GetIndexSt
 // index tasks.
 func (s *Server) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", req.CollectionID),
+		zap.Int64("collectionID", req.GetCollectionID()),
 	)
 	log.Info("receive DropIndex request",
 		zap.Int64s("partitionIDs", req.GetPartitionIDs()), zap.String("indexName", req.GetIndexName()),
@@ -678,7 +678,7 @@ func (s *Server) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 	}
 	if len(req.GetPartitionIDs()) == 0 {
 		// drop collection index
-		err := s.meta.MarkIndexAsDeleted(req.CollectionID, indexIDs)
+		err := s.meta.MarkIndexAsDeleted(req.GetCollectionID(), indexIDs)
 		if err != nil {
 			log.Warn("DropIndex fail", zap.String("indexName", req.IndexName), zap.Error(err))
 			ret.ErrorCode = commonpb.ErrorCode_UnexpectedError
@@ -687,15 +687,15 @@ func (s *Server) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 		}
 	}
 
-	log.Debug("DropIndex success", zap.Int64s("partitionIDs", req.PartitionIDs), zap.String("indexName", req.IndexName),
-		zap.Int64s("indexIDs", indexIDs))
+	log.Debug("DropIndex success", zap.Int64s("partitionIDs", req.GetPartitionIDs()),
+		zap.String("indexName", req.GetIndexName()), zap.Int64s("indexIDs", indexIDs))
 	return ret, nil
 }
 
 // GetIndexInfos gets the index file paths for segment from DataCoord.
 func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoRequest) (*indexpb.GetIndexInfoResponse, error) {
 	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", req.CollectionID),
+		zap.Int64("collectionID", req.GetCollectionID()),
 	)
 	errResp := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -714,10 +714,10 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 		SegmentInfo: map[int64]*indexpb.SegmentInfo{},
 	}
 
-	for _, segID := range req.SegmentIDs {
+	for _, segID := range req.GetSegmentIDs() {
 		segIdxes := s.meta.GetSegmentIndexes(segID)
 		ret.SegmentInfo[segID] = &indexpb.SegmentInfo{
-			CollectionID: req.CollectionID,
+			CollectionID: req.GetCollectionID(),
 			SegmentID:    segID,
 			EnableIndex:  false,
 			IndexInfos:   make([]*indexpb.IndexFilePathInfo, 0),
