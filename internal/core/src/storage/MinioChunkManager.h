@@ -37,8 +37,8 @@
 #include <string>
 #include <vector>
 
+#include "common/EasyAssert.h"
 #include "storage/ChunkManager.h"
-#include "storage/Exception.h"
 #include "storage/Types.h"
 
 namespace milvus::storage {
@@ -89,8 +89,8 @@ class MinioChunkManager : public ChunkManager {
          uint64_t offset,
          void* buf,
          uint64_t len) {
-        throw NotImplementedException(GetName() +
-                                      "Read with offset not implement");
+        throw SegcoreError(NotImplemented,
+                           GetName() + "Read with offset not implement");
     }
 
     virtual void
@@ -98,8 +98,8 @@ class MinioChunkManager : public ChunkManager {
           uint64_t offset,
           void* buf,
           uint64_t len) {
-        throw NotImplementedException(GetName() +
-                                      "Write with offset not implement");
+        throw SegcoreError(NotImplemented,
+                           GetName() + "Write with offset not implement");
     }
 
     virtual uint64_t
@@ -242,9 +242,10 @@ class GoogleHttpClientFactory : public Aws::Http::HttpClientFactory {
         request->SetResponseStreamFactory(streamFactory);
         auto auth_header = credentials_->AuthorizationHeader();
         if (!auth_header.ok()) {
-            throw std::runtime_error(
-                "get authorization failed, errcode:" +
-                StatusCodeToString(auth_header.status().code()));
+            throw SegcoreError(
+                S3Error,
+                fmt::format("get authorization failed, errcode: {}",
+                            StatusCodeToString(auth_header.status().code())));
         }
         request->SetHeaderValue(auth_header->first.c_str(),
                                 auth_header->second.c_str());

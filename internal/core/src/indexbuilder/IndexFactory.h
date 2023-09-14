@@ -16,6 +16,7 @@
 #include <memory>
 #include <string>
 
+#include "common/EasyAssert.h"
 #include "indexbuilder/IndexCreatorBase.h"
 #include "indexbuilder/ScalarIndexCreator.h"
 #include "indexbuilder/VecIndexCreator.h"
@@ -65,7 +66,9 @@ class IndexFactory {
                 return std::make_unique<VecIndexCreator>(
                     type, config, file_manager);
             default:
-                throw std::invalid_argument(invalid_dtype_msg);
+                throw SegcoreError(
+                    DataTypeInvalid,
+                    fmt::format("invalid type is {}", invalid_dtype_msg));
         }
     }
 };

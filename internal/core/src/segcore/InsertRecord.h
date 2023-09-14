@@ -21,8 +21,10 @@
 #include <queue>
 
 #include "TimestampIndex.h"
+#include "common/EasyAssert.h"
 #include "common/Schema.h"
 #include "common/Types.h"
+#include "fmt/format.h"
 #include "mmap/Column.h"
 #include "segcore/AckResponder.h"
 #include "segcore/ConcurrentVector.h"
@@ -77,7 +79,8 @@ class OffsetOrderedMap : public OffsetMap {
 
     void
     seal() override {
-        PanicInfo(
+        PanicCodeInfo(
+            NotImplemented,
             "OffsetOrderedMap used for growing segment could not be sealed.");
     }
 
@@ -157,8 +160,10 @@ class OffsetOrderedArray : public OffsetMap {
 
     void
     insert(const PkType& pk, int64_t offset) override {
-        if (is_sealed)
-            PanicInfo("OffsetOrderedArray could not insert after seal");
+        if (is_sealed) {
+            PanicCodeInfo(Unsupported,
+                          "OffsetOrderedArray could not insert after seal");
+        }
         array_.push_back(std::make_pair(std::get<T>(pk), offset));
     }
 
@@ -248,25 +253,31 @@ struct InsertRecord {
                 pk_field_id.value() == field_id) {
                 switch (field_meta.get_data_type()) {
                     case DataType::INT64: {
-                        if (is_sealed)
+                        if (is_sealed) {
                             pk2offset_ =
                                 std::make_unique<OffsetOrderedArray<int64_t>>();
-                        else
+                        } else {
                             pk2offset_ =
                                 std::make_unique<OffsetOrderedMap<int64_t>>();
+                        }
                         break;
                     }
                     case DataType::VARCHAR: {
-                        if (is_sealed)
+                        if (is_sealed) {
                             pk2offset_ = std::make_unique<
                                 OffsetOrderedArray<std::string>>();
-                        else
+                        } else {
                             pk2offset_ = std::make_unique<
                                 OffsetOrderedMap<std::string>>();
+                        }
                         break;
                     }
                     default: {
-                        PanicInfo("unsupported pk type");
+                        PanicCodeInfo(
+                            DataTypeInvalid,
+                            fmt::format(
+                                "unsupported pk type",
+                                fmt::underlying(field_meta.get_data_type())));
                     }
                 }
             }
@@ -286,7 +297,10 @@ struct InsertRecord {
                         field_id, field_meta.get_dim(), size_per_chunk);
                     continue;
                 } else {
-                    PanicInfo("unsupported");
+                    PanicCodeInfo(DataTypeInvalid,
+                                  fmt::format("unsupported vector type",
+                                              fmt::underlying(
+                                                  field_meta.get_data_type())));
                 }
             }
             switch (field_meta.get_data_type()) {
@@ -333,7 +347,10 @@ struct InsertRecord {
                 //     break;
                 // }
                 default: {
-                    PanicInfo("unsupported");
+                    PanicCodeInfo(DataTypeInvalid,
+                                  fmt::format("unsupported scalar type",
+                                              fmt::underlying(
+                                                  field_meta.get_data_type())));
                 }
             }
         }
@@ -378,7 +395,9 @@ struct InsertRecord {
                 break;
             }
             default: {
-                PanicInfo("unsupported primary key data type");
+                PanicCodeInfo(DataTypeInvalid,
+                              fmt::format("unsupported primary key data type",
+                                          fmt::underlying(data_type)));
             }
         }
     }
@@ -408,7 +427,10 @@ struct InsertRecord {
                     break;
                 }
                 default: {
-                    PanicInfo("unsupported primary key data type");
+                    PanicCodeInfo(
+                        DataTypeInvalid,
+                        fmt::format("unsupported primary key data type",
+                                    fmt::underlying(data_type)));
                 }
             }
         }

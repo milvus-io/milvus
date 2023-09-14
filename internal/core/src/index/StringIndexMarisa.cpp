@@ -21,10 +21,10 @@
 #include <stdio.h>
 #include <fcntl.h>
 
+#include "common/EasyAssert.h"
 #include "index/StringIndexMarisa.h"
 #include "index/Utils.h"
 #include "index/Index.h"
-#include "index/Exception.h"
 #include "common/Utils.h"
 #include "common/Slice.h"
 
@@ -50,7 +50,7 @@ valid_str_id(size_t str_id) {
 void
 StringIndexMarisa::Build(const Config& config) {
     if (built_) {
-        throw std::runtime_error("index has been built");
+        throw SegcoreError(IndexAlreadyBuild, "index has been built");
     }
 
     auto insert_files =
@@ -63,7 +63,7 @@ StringIndexMarisa::Build(const Config& config) {
 
     // fill key set.
     marisa::Keyset keyset;
-    for (auto data : field_datas) {
+    for (const auto& data : field_datas) {
         auto slice_num = data->get_num_rows();
         for (int64_t i = 0; i < slice_num; ++i) {
             keyset.push_back(
@@ -76,7 +76,7 @@ StringIndexMarisa::Build(const Config& config) {
     // fill str_ids_
     str_ids_.resize(total_num_rows);
     int64_t offset = 0;
-    for (auto data : field_datas) {
+    for (const auto& data : field_datas) {
         auto slice_num = data->get_num_rows();
         for (int64_t i = 0; i < slice_num; ++i) {
             auto str_id =
@@ -95,7 +95,7 @@ StringIndexMarisa::Build(const Config& config) {
 void
 StringIndexMarisa::Build(size_t n, const std::string* values) {
     if (built_) {
-        throw std::runtime_error("index has been built");
+        throw SegcoreError(IndexAlreadyBuild, "index has been built");
     }
 
     marisa::Keyset keyset;
@@ -176,8 +176,9 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
     if (status != len) {
         close(fd);
         remove(file.c_str());
-        throw UnistdException("write index to fd error, errorCode is " +
-                              std::to_string(status));
+        throw SegcoreError(
+            ErrorCode::UnistdError,
+            "write index to fd error, errorCode is " + std::to_string(status));
     }
 
     lseek(fd, 0, SEEK_SET);
@@ -275,9 +276,9 @@ StringIndexMarisa::Range(std::string value, OpType op) {
                 set = raw_data.compare(value) >= 0;
                 break;
             default:
-                throw std::invalid_argument(
-                    std::string("Invalid OperatorType: ") +
-                    std::to_string((int)op) + "!");
+                throw SegcoreError(OpTypeInvalid,
+                                   fmt::format("Invalid OperatorType: {}",
+                                               static_cast<int>(op)));
         }
         if (set) {
             bitset[offset] = true;

@@ -63,21 +63,21 @@ IndexFactory::CreateScalarIndex(const CreateIndexInfo& create_index_info,
         case DataType::VARCHAR:
             return CreateScalarIndex<std::string>(index_type, file_manager);
         default:
-            throw std::invalid_argument(
-                std::string("invalid data type to build index: ") +
-                std::to_string(int(data_type)));
+            throw SegcoreError(
+                DataTypeInvalid,
+                fmt::format("invalid data type to build index: {}", data_type));
     }
 }
 
 IndexBasePtr
 IndexFactory::CreateVectorIndex(const CreateIndexInfo& create_index_info,
                                 storage::FileManagerImplPtr file_manager) {
-    auto data_type = create_index_info.field_type;
     auto index_type = create_index_info.index_type;
     auto metric_type = create_index_info.metric_type;
 
 #ifdef BUILD_DISK_ANN
     // create disk index
+    auto data_type = create_index_info.field_type;
     if (is_in_disk_list(index_type)) {
         switch (data_type) {
             case DataType::VECTOR_FLOAT: {
@@ -85,9 +85,10 @@ IndexFactory::CreateVectorIndex(const CreateIndexInfo& create_index_info,
                     index_type, metric_type, file_manager);
             }
             default:
-                throw std::invalid_argument(
-                    std::string("invalid data type to build disk index: ") +
-                    std::to_string(int(data_type)));
+                throw SegcoreError(
+                    DataTypeInvalid,
+                    fmt::format("invalid data type to build disk index: {}",
+                                data_type));
         }
     }
 #endif

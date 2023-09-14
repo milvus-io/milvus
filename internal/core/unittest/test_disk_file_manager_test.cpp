@@ -163,7 +163,7 @@ TEST_F(DiskAnnFileManagerTest, TestThreadPool) {
 int
 test_exception(string s) {
     if (s == "test_id60") {
-        throw std::runtime_error("run time error");
+        throw SegcoreError(ErrorCode::UnexpectedError, "run time error");
     }
     return 1;
 }

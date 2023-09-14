@@ -14,6 +14,7 @@
 #include <cstdint>
 
 #include "Utils.h"
+#include "common/EasyAssert.h"
 #include "common/SystemProperty.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
@@ -93,8 +94,9 @@ SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan,
         output_data_size += get_field_avg_size(field_id) * result_rows;
     }
     if (output_data_size > limit_size) {
-        throw std::runtime_error("query results exceed the limit size " +
-                                 std::to_string(limit_size));
+        throw SegcoreError(
+            RetrieveError,
+            fmt::format("query results exceed the limit size ", limit_size));
     }
 
     if (plan->plan_node_->is_count_) {
@@ -159,7 +161,9 @@ SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan,
                     break;
                 }
                 default: {
-                    PanicInfo("unsupported data type");
+                    PanicCodeInfo(DataTypeInvalid,
+                                  fmt::format("unsupported datatype {}",
+                                              field_meta.get_data_type()));
                 }
             }
         }
@@ -200,7 +204,7 @@ SegmentInternalInterface::get_field_avg_size(FieldId field_id) const {
             return sizeof(int64_t);
         }
 
-        throw std::runtime_error("unsupported system field id");
+        throw SegcoreError(FieldIDInvalid, "unsupported system field id");
     }
 
     auto schema = get_schema();

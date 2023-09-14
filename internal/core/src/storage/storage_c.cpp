@@ -32,8 +32,7 @@ GetLocalUsedSize(const char* c_dir, int64_t* size) {
         }
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(milvus::ErrorCodeEnum::UnexpectedError,
-                                      e.what());
+        return milvus::FailureCStatus(&e);
     }
 }
 
@@ -45,8 +44,7 @@ InitLocalChunkManagerSingleton(const char* c_path) {
 
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(milvus::ErrorCodeEnum::UnexpectedError,
-                                      e.what());
+        return milvus::FailureCStatus(&e);
     }
 }
 
@@ -75,8 +73,7 @@ InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config) {
 
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(milvus::ErrorCodeEnum::UnexpectedError,
-                                      e.what());
+        return milvus::FailureCStatus(&e);
     }
 }
 

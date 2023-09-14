@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "common/Consts.h"
+#include "common/EasyAssert.h"
 #include "common/RangeSearchHelper.h"
 #include "common/Utils.h"
 #include "common/Tracer.h"
@@ -48,96 +49,88 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
                                dataset.topk,
                                dataset.metric_type,
                                dataset.round_decimal);
-    try {
-        auto nq = dataset.num_queries;
-        auto dim = dataset.dim;
-        auto topk = dataset.topk;
+    auto nq = dataset.num_queries;
+    auto dim = dataset.dim;
+    auto topk = dataset.topk;
 
-        auto base_dataset =
-            knowhere::GenDataSet(chunk_rows, dim, chunk_data_raw);
-        auto query_dataset = knowhere::GenDataSet(nq, dim, dataset.query_data);
+    auto base_dataset = knowhere::GenDataSet(chunk_rows, dim, chunk_data_raw);
+    auto query_dataset = knowhere::GenDataSet(nq, dim, dataset.query_data);
 
-        if (data_type == DataType::VECTOR_FLOAT16) {
-            // Todo: Temporarily use cast to float32 to achieve, need to optimize
-            // first, First, transfer the cast to knowhere part
-            // second, knowhere partially supports float16 and removes the forced conversion to float32
-            auto xb = base_dataset->GetTensor();
-            std::vector<float> float_xb(base_dataset->GetRows() *
-                                        base_dataset->GetDim());
+    if (data_type == DataType::VECTOR_FLOAT16) {
+        // Todo: Temporarily use cast to float32 to achieve, need to optimize
+        // first, First, transfer the cast to knowhere part
+        // second, knowhere partially supports float16 and removes the forced conversion to float32
+        auto xb = base_dataset->GetTensor();
+        std::vector<float> float_xb(base_dataset->GetRows() *
+                                    base_dataset->GetDim());
 
-            auto xq = query_dataset->GetTensor();
-            std::vector<float> float_xq(query_dataset->GetRows() *
-                                        query_dataset->GetDim());
+        auto xq = query_dataset->GetTensor();
+        std::vector<float> float_xq(query_dataset->GetRows() *
+                                    query_dataset->GetDim());
 
-            auto fp16_xb = (const float16*)xb;
-            for (int i = 0;
-                 i < base_dataset->GetRows() * base_dataset->GetDim();
-                 i++) {
-                float_xb[i] = (float)fp16_xb[i];
-            }
-
-            auto fp16_xq = (const float16*)xq;
-            for (int i = 0;
-                 i < query_dataset->GetRows() * query_dataset->GetDim();
-                 i++) {
-                float_xq[i] = (float)fp16_xq[i];
-            }
-            void* void_ptr_xb = static_cast<void*>(float_xb.data());
-            void* void_ptr_xq = static_cast<void*>(float_xq.data());
-            base_dataset = knowhere::GenDataSet(chunk_rows, dim, void_ptr_xb);
-            query_dataset = knowhere::GenDataSet(nq, dim, void_ptr_xq);
+        auto fp16_xb = static_cast<const float16*>(xb);
+        for (int i = 0; i < base_dataset->GetRows() * base_dataset->GetDim();
+             i++) {
+            float_xb[i] = (float)fp16_xb[i];
         }
 
-        auto config = knowhere::Json{
-            {knowhere::meta::METRIC_TYPE, dataset.metric_type},
-            {knowhere::meta::DIM, dim},
-            {knowhere::meta::TOPK, topk},
-        };
-
-        sub_result.mutable_seg_offsets().resize(nq * topk);
-        sub_result.mutable_distances().resize(nq * topk);
-
-        if (conf.contains(RADIUS)) {
-            config[RADIUS] = conf[RADIUS].get<float>();
-            if (conf.contains(RANGE_FILTER)) {
-                config[RANGE_FILTER] = conf[RANGE_FILTER].get<float>();
-                CheckRangeSearchParam(
-                    config[RADIUS], config[RANGE_FILTER], dataset.metric_type);
-            }
-            auto res = knowhere::BruteForce::RangeSearch(
-                base_dataset, query_dataset, config, bitset);
-            milvus::tracer::AddEvent("knowhere_finish_BruteForce_RangeSearch");
-            if (!res.has_value()) {
-                PanicCodeInfo(ErrorCodeEnum::UnexpectedError,
-                              fmt::format("failed to range search: {}: {}",
-                                          KnowhereStatusString(res.error()),
-                                          res.what()));
-            }
-            auto result = ReGenRangeSearchResult(
-                res.value(), topk, nq, dataset.metric_type);
-            milvus::tracer::AddEvent("ReGenRangeSearchResult");
-            std::copy_n(
-                GetDatasetIDs(result), nq * topk, sub_result.get_seg_offsets());
-            std::copy_n(GetDatasetDistance(result),
-                        nq * topk,
-                        sub_result.get_distances());
-        } else {
-            auto stat = knowhere::BruteForce::SearchWithBuf(
-                base_dataset,
-                query_dataset,
-                sub_result.mutable_seg_offsets().data(),
-                sub_result.mutable_distances().data(),
-                config,
-                bitset);
-            milvus::tracer::AddEvent(
-                "knowhere_finish_BruteForce_SearchWithBuf");
-            if (stat != knowhere::Status::success) {
-                throw std::invalid_argument("invalid metric type, " +
-                                            KnowhereStatusString(stat));
-            }
+        auto fp16_xq = static_cast<const float16*>(xq);
+        for (int i = 0; i < query_dataset->GetRows() * query_dataset->GetDim();
+             i++) {
+            float_xq[i] = (float)fp16_xq[i];
         }
-    } catch (std::exception& e) {
-        PanicInfo(e.what());
+        void* void_ptr_xb = static_cast<void*>(float_xb.data());
+        void* void_ptr_xq = static_cast<void*>(float_xq.data());
+        base_dataset = knowhere::GenDataSet(chunk_rows, dim, void_ptr_xb);
+        query_dataset = knowhere::GenDataSet(nq, dim, void_ptr_xq);
+    }
+
+    auto config = knowhere::Json{
+        {knowhere::meta::METRIC_TYPE, dataset.metric_type},
+        {knowhere::meta::DIM, dim},
+        {knowhere::meta::TOPK, topk},
+    };
+
+    sub_result.mutable_seg_offsets().resize(nq * topk);
+    sub_result.mutable_distances().resize(nq * topk);
+
+    if (conf.contains(RADIUS)) {
+        config[RADIUS] = conf[RADIUS].get<float>();
+        if (conf.contains(RANGE_FILTER)) {
+            config[RANGE_FILTER] = conf[RANGE_FILTER].get<float>();
+            CheckRangeSearchParam(
+                config[RADIUS], config[RANGE_FILTER], dataset.metric_type);
+        }
+        auto res = knowhere::BruteForce::RangeSearch(
+            base_dataset, query_dataset, config, bitset);
+        milvus::tracer::AddEvent("knowhere_finish_BruteForce_RangeSearch");
+        if (!res.has_value()) {
+            PanicCodeInfo(KnowhereError,
+                          fmt::format("failed to range search: {}: {}",
+                                      KnowhereStatusString(res.error()),
+                                      res.what()));
+        }
+        auto result =
+            ReGenRangeSearchResult(res.value(), topk, nq, dataset.metric_type);
+        milvus::tracer::AddEvent("ReGenRangeSearchResult");
+        std::copy_n(
+            GetDatasetIDs(result), nq * topk, sub_result.get_seg_offsets());
+        std::copy_n(
+            GetDatasetDistance(result), nq * topk, sub_result.get_distances());
+    } else {
+        auto stat = knowhere::BruteForce::SearchWithBuf(
+            base_dataset,
+            query_dataset,
+            sub_result.mutable_seg_offsets().data(),
+            sub_result.mutable_distances().data(),
+            config,
+            bitset);
+        milvus::tracer::AddEvent("knowhere_finish_BruteForce_SearchWithBuf");
+        if (stat != knowhere::Status::success) {
+            throw SegcoreError(
+                KnowhereError,
+                "invalid metric type, " + KnowhereStatusString(stat));
+        }
     }
     sub_result.round_values();
     return sub_result;

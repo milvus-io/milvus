@@ -29,27 +29,15 @@
 namespace milvus::storage {
 
 #define FILEMANAGER_TRY try {
-#define FILEMANAGER_CATCH                                                     \
-    }                                                                         \
-    catch (LocalChunkManagerException & e) {                                  \
-        LOG_SEGCORE_ERROR_ << "LocalChunkManagerException:" << e.what();      \
-        return false;                                                         \
-    }                                                                         \
-    catch (MinioException & e) {                                              \
-        LOG_SEGCORE_ERROR_ << "milvus::storage::MinioException:" << e.what(); \
-        return false;                                                         \
-    }                                                                         \
-    catch (DiskANNFileManagerException & e) {                                 \
-        LOG_SEGCORE_ERROR_ << "milvus::storage::DiskANNFileManagerException:" \
-                           << e.what();                                       \
-        return false;                                                         \
-    }                                                                         \
-    catch (ArrowException & e) {                                              \
-        LOG_SEGCORE_ERROR_ << "milvus::storage::ArrowException:" << e.what(); \
-        return false;                                                         \
-    }                                                                         \
-    catch (std::exception & e) {                                              \
-        LOG_SEGCORE_ERROR_ << "Exception:" << e.what();                       \
+#define FILEMANAGER_CATCH                                                 \
+    }                                                                     \
+    catch (SegcoreError & e) {                                            \
+        LOG_SEGCORE_ERROR_ << "SegcoreError: code " << e.get_error_code() \
+                           << ", " << e.what();                           \
+        return false;                                                     \
+    }                                                                     \
+    catch (std::exception & e) {                                          \
+        LOG_SEGCORE_ERROR_ << "Exception:" << e.what();                   \
         return false;
 #define FILEMANAGER_END }
 

@@ -762,7 +762,7 @@ TEST(Expr, TestUnaryRangeJson) {
                     break;
                 }
                 default: {
-                    PanicInfo("unsupported range node");
+                    PanicCodeInfo(Unsupported, "unsupported range node");
                 }
             }
 
@@ -4017,7 +4017,8 @@ TEST(Expr, TestJsonContainsArray) {
     proto::plan::GenericValue int_val22;
     int_val22.set_int64_val(int64_t(4));
     sub_arr2.add_array()->CopyFrom(int_val22);
-    std::vector<Testcase<proto::plan::Array>> diff_testcases2{{{sub_arr1, sub_arr2}, {"array2"}}};
+    std::vector<Testcase<proto::plan::Array>> diff_testcases2{
+        {{sub_arr1, sub_arr2}, {"array2"}}};
 
     for (auto& testcase : diff_testcases2) {
         auto check = [&](const std::vector<bool>& values, int i) {
@@ -4096,7 +4097,8 @@ TEST(Expr, TestJsonContainsArray) {
     proto::plan::GenericValue int_val42;
     int_val42.set_int64_val(int64_t(8));
     sub_arr4.add_array()->CopyFrom(int_val42);
-    std::vector<Testcase<proto::plan::Array>> diff_testcases3{{{sub_arr3, sub_arr4}, {"array2"}}};
+    std::vector<Testcase<proto::plan::Array>> diff_testcases3{
+        {{sub_arr3, sub_arr4}, {"array2"}}};
 
     for (auto& testcase : diff_testcases2) {
         auto check = [&](const std::vector<bool>& values, int i) {

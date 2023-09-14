@@ -19,6 +19,7 @@
 #include <google/protobuf/text_format.h>
 
 #include "Constants.h"
+#include "common/EasyAssert.h"
 #include "common/Schema.h"
 #include "index/ScalarIndexSort.h"
 #include "index/StringIndexSort.h"
@@ -114,7 +115,7 @@ struct GeneratedData {
                         target_field_data.vectors().float16_vector().data());
                     std::copy_n(src_data, len, ret.data());
                 } else {
-                    PanicInfo("unsupported");
+                    PanicCodeInfo(Unsupported, "unsupported");
                 }
 
                 return std::move(ret);
@@ -171,7 +172,7 @@ struct GeneratedData {
                     break;
                 }
                 default: {
-                    PanicInfo("unsupported");
+                    PanicCodeInfo(Unsupported, "unsupported");
                 }
             }
         }
@@ -180,13 +181,13 @@ struct GeneratedData {
 
     std::unique_ptr<DataArray>
     get_col(FieldId field_id) const {
-        for (auto target_field_data : raw_->fields_data()) {
+        for (const auto& target_field_data : raw_->fields_data()) {
             if (field_id.get() == target_field_data.field_id()) {
                 return std::make_unique<DataArray>(target_field_data);
             }
         }
 
-        PanicInfo("field id not find");
+        PanicCodeInfo(FieldIDInvalid, "field id not find");
     }
 
  private:
@@ -357,7 +358,7 @@ DataGen(SchemaPtr schema,
                 break;
             }
             default: {
-                throw std::runtime_error("unimplemented");
+                throw SegcoreError(ErrorCode::NotImplemented, "unimplemented");
             }
         }
         ++offset;
@@ -447,7 +448,7 @@ DataGenForJsonArray(SchemaPtr schema,
                 break;
             }
             default: {
-                throw std::runtime_error("unimplemented");
+                throw SegcoreError(ErrorCode::NotImplemented, "unimplemented");
             }
         }
     }
@@ -650,7 +651,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 break;
             }
             default: {
-                PanicInfo("unsupported");
+                PanicCodeInfo(Unsupported, "unsupported");
             }
         }
     } else {
@@ -712,7 +713,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 break;
             }
             default: {
-                PanicInfo("unsupported");
+                PanicCodeInfo(Unsupported, "unsupported");
             }
         }
     }

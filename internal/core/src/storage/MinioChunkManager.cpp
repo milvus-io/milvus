@@ -43,7 +43,7 @@
                 << "[errcode:" << int(err.GetResponseCode())   \
                 << ", exception:" << err.GetExceptionName()    \
                 << ", errmessage:" << err.GetMessage() << "]"; \
-        throw S3ErrorException(err_msg.str());                 \
+        throw SegcoreError(S3Error, err_msg.str());            \
     } while (0)
 
 #define S3NoSuchBucket "NoSuchBucket"
@@ -319,7 +319,7 @@ MinioChunkManager::Read(const std::string& filepath, void* buf, uint64_t size) {
         std::stringstream err_msg;
         err_msg << "object('" << default_bucket_name_ << "', " << filepath
                 << "') not exists";
-        throw ObjectNotExistException(err_msg.str());
+        throw SegcoreError(ObjectNotExist, err_msg.str());
     }
     return GetObjectBuffer(default_bucket_name_, filepath, buf, size);
 }
@@ -354,7 +354,7 @@ MinioChunkManager::BucketExists(const std::string& bucket_name) {
             std::stringstream err_msg;
             err_msg << "Error: BucketExists: "
                     << error.GetExceptionName() + " - " + error.GetMessage();
-            throw S3ErrorException(err_msg.str());
+            throw SegcoreError(S3Error, err_msg.str());
         }
         return false;
     }
@@ -421,7 +421,7 @@ MinioChunkManager::ObjectExists(const std::string& bucket_name,
         if (!err.GetExceptionName().empty()) {
             std::stringstream err_msg;
             err_msg << "Error: ObjectExists: " << err.GetMessage();
-            throw S3ErrorException(err_msg.str());
+            throw SegcoreError(S3Error, err_msg.str());
         }
         return false;
     }

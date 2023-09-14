@@ -16,6 +16,7 @@
 
 #include "storage/FieldData.h"
 #include "arrow/array/array_binary.h"
+#include "common/EasyAssert.h"
 #include "common/Json.h"
 #include "simdjson/padded_string.h"
 
@@ -140,9 +141,10 @@ FieldDataImpl<Type, is_scalar>::FillFieldData(
             return FillFieldData(array_info.first, array_info.second);
         }
         default: {
-            throw NotSupportedDataTypeException(GetName() + "::FillFieldData" +
-                                                " not support data type " +
-                                                datatype_name(data_type_));
+            throw SegcoreError(DataTypeInvalid,
+                               GetName() + "::FillFieldData" +
+                                   " not support data type " +
+                                   datatype_name(data_type_));
         }
     }
 }
