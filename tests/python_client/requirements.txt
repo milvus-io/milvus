@@ -45,7 +45,7 @@ loguru==0.7.0
 psutil==5.9.4
 pandas==1.5.3
 # for standby test
-etcd-sdk-python==0.0.2
+etcd-sdk-python==0.0.4
 
 # for test result anaylszer
 prettytable==3.8.0
