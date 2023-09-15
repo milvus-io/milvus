@@ -82,7 +82,11 @@ class TestChaosApply:
         if target_component in ['logbookie', 'logproxy', 'logstore', 'logzk']:
             update_key_value(chaos_config, "app.kubernetes.io/instance", f"{release_name}-log")
         if target_component in ['tikv', 'pd']:
-            update_key_value(chaos_config, "app.kubernetes.io/instance", f"{release_name}-tikv")        
+            if "tikv" in release_name:
+                update_key_value(chaos_config, "app.kubernetes.io/instance", f"{release_name}")
+            else:
+                update_key_value(chaos_config, "app.kubernetes.io/instance", f"{release_name}-tikv")
+            
         self.chaos_config = chaos_config
         if "s" in chaos_interval:
             schedule = f"*/{chaos_interval[:-1]} * * * * *"
