@@ -399,18 +399,18 @@ func (m *importManager) isRowbased(files []string) (bool, error) {
 	isRowBased := false
 	for _, filePath := range files {
 		_, fileType := importutil.GetFileNameAndExt(filePath)
-		if fileType == importutil.JSONFileExt {
+		if fileType == importutil.JSONFileExt || fileType == importutil.CSVFileExt {
 			isRowBased = true
 		} else if isRowBased {
-			log.Error("row-based data file type must be JSON, mixed file types is not allowed", zap.Strings("files", files))
-			return isRowBased, fmt.Errorf("row-based data file type must be JSON, file type '%s' is not allowed", fileType)
+			log.Error("row-based data file type must be JSON or CSV, mixed file types is not allowed", zap.Strings("files", files))
+			return isRowBased, fmt.Errorf("row-based data file type must be JSON or CSV, file type '%s' is not allowed", fileType)
 		}
 	}
 
 	// for row_based, we only allow one file so that each invocation only generate a task
 	if isRowBased && len(files) > 1 {
-		log.Error("row-based import, only allow one JSON file each time", zap.Strings("files", files))
-		return isRowBased, fmt.Errorf("row-based import, only allow one JSON file each time")
+		log.Error("row-based import, only allow one JSON or CSV file each time", zap.Strings("files", files))
+		return isRowBased, fmt.Errorf("row-based import, only allow one JSON or CSV file each time")
 	}
 
 	return isRowBased, nil

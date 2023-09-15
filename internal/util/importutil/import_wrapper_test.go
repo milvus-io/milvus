@@ -326,6 +326,93 @@ func Test_ImportWrapperRowBased(t *testing.T) {
 	})
 }
 
+func Test_ImportWrapperRowBased_CSV(t *testing.T) {
+	err := os.MkdirAll(TempFilesPath, os.ModePerm)
+	assert.NoError(t, err)
+	defer os.RemoveAll(TempFilesPath)
+	paramtable.Init()
+
+	// NewDefaultFactory() use "/tmp/milvus" as default root path, and cannot specify root path
+	// NewChunkManagerFactory() can specify the root path
+	f := storage.NewChunkManagerFactory("local", storage.RootPath(TempFilesPath))
+	ctx := context.Background()
+	cm, err := f.NewPersistentStorageChunkManager(ctx)
+	assert.NoError(t, err)
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
+
+	idAllocator := newIDAllocator(ctx, t, nil)
+	content := []byte(
+		`FieldBool,FieldInt8,FieldInt16,FieldInt32,FieldInt64,FieldFloat,FieldDouble,FieldString,FieldJSON,FieldBinaryVector,FieldFloatVector
+	true,10,101,1001,10001,3.14,1.56,No.0,"{""x"": 0}","[200,0]","[0.1,0.2,0.3,0.4]"
+	false,11,102,1002,10002,3.15,1.57,No.1,"{""x"": 1}","[201,0]","[0.1,0.2,0.3,0.4]"
+	true,12,103,1003,10003,3.16,1.58,No.2,"{""x"": 2}","[202,0]","[0.1,0.2,0.3,0.4]"`)
+
+	filePath := TempFilesPath + "rows_1.csv"
+	err = cm.Write(ctx, filePath, content)
+	assert.NoError(t, err)
+	rowCounter := &rowCounterTest{}
+	assignSegmentFunc, flushFunc, saveSegmentFunc := createMockCallbackFunctions(t, rowCounter)
+	importResult := &rootcoordpb.ImportResult{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		TaskId:     1,
+		DatanodeId: 1,
+		State:      commonpb.ImportState_ImportStarted,
+		Segments:   make([]int64, 0),
+		AutoIds:    make([]int64, 0),
+		RowCount:   0,
+	}
+
+	reportFunc := func(res *rootcoordpb.ImportResult) error {
+		return nil
+	}
+	collectionInfo, err := NewCollectionInfo(sampleSchema(), 2, []int64{1})
+	assert.NoError(t, err)
+
+	t.Run("success case", func(t *testing.T) {
+		wrapper := NewImportWrapper(ctx, collectionInfo, 1, idAllocator, cm, importResult, reportFunc)
+		wrapper.SetCallbackFunctions(assignSegmentFunc, flushFunc, saveSegmentFunc)
+		files := make([]string, 0)
+		files = append(files, filePath)
+		err = wrapper.Import(files, ImportOptions{OnlyValidate: true})
+		assert.NoError(t, err)
+		assert.Equal(t, 0, rowCounter.rowCount)
+
+		err = wrapper.Import(files, DefaultImportOptions())
+		assert.NoError(t, err)
+		assert.Equal(t, 3, rowCounter.rowCount)
+		assert.Equal(t, commonpb.ImportState_ImportPersisted, importResult.State)
+	})
+
+	t.Run("parse error", func(t *testing.T) {
+		content := []byte(
+			`FieldBool,FieldInt8,FieldInt16,FieldInt32,FieldInt64,FieldFloat,FieldDouble,FieldString,FieldJSON,FieldBinaryVector,FieldFloatVector
+		true,false,103,1003,10003,3.16,1.58,No.2,"{""x"": 2}","[202,0]","[0.1,0.2,0.3,0.4]"`)
+
+		filePath = TempFilesPath + "rows_2.csv"
+		err = cm.Write(ctx, filePath, content)
+		assert.NoError(t, err)
+
+		importResult.State = commonpb.ImportState_ImportStarted
+		wrapper := NewImportWrapper(ctx, collectionInfo, 1, idAllocator, cm, importResult, reportFunc)
+		wrapper.SetCallbackFunctions(assignSegmentFunc, flushFunc, saveSegmentFunc)
+		files := make([]string, 0)
+		files = append(files, filePath)
+		err = wrapper.Import(files, ImportOptions{OnlyValidate: true})
+		assert.Error(t, err)
+		assert.NotEqual(t, commonpb.ImportState_ImportPersisted, importResult.State)
+	})
+
+	t.Run("file doesn't exist", func(t *testing.T) {
+		files := make([]string, 0)
+		files = append(files, "/dummy/dummy.csv")
+		wrapper := NewImportWrapper(ctx, collectionInfo, 1, idAllocator, cm, importResult, reportFunc)
+		err = wrapper.Import(files, ImportOptions{OnlyValidate: true})
+		assert.Error(t, err)
+	})
+}
+
 func Test_ImportWrapperColumnBased_numpy(t *testing.T) {
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
 	assert.NoError(t, err)

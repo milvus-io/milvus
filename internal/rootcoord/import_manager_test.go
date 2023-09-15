@@ -1137,4 +1137,24 @@ func TestImportManager_isRowbased(t *testing.T) {
 	rb, err = mgr.isRowbased(files)
 	assert.NoError(t, err)
 	assert.False(t, rb)
+
+	files = []string{"1.csv"}
+	rb, err = mgr.isRowbased(files)
+	assert.NoError(t, err)
+	assert.True(t, rb)
+
+	files = []string{"1.csv", "2.csv"}
+	rb, err = mgr.isRowbased(files)
+	assert.Error(t, err)
+	assert.True(t, rb)
+
+	files = []string{"1.csv", "2.json"}
+	rb, err = mgr.isRowbased(files)
+	assert.Error(t, err)
+	assert.True(t, rb)
+
+	files = []string{"1.csv", "2.npy"}
+	rb, err = mgr.isRowbased(files)
+	assert.Error(t, err)
+	assert.True(t, rb)
 }
