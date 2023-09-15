@@ -84,8 +84,7 @@ InitChunkCacheSingleton(const char* c_dir_path) {
         milvus::storage::ChunkCacheSingleton::GetInstance().Init(c_dir_path);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(milvus::ErrorCodeEnum::UnexpectedError,
-                                      e.what());
+        return milvus::FailureCStatus(&e);
     }
 }
 
