@@ -1020,7 +1020,7 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 	}
 
 	s.updateStandby(false)
-	log.Info(fmt.Sprintf("serverName: %v quit STANDBY mode, this node will become ACTIVE", s.ServerName))
+	log.Info(fmt.Sprintf("serverName: %v quit STANDBY mode, this node will become ACTIVE, ID: %d", s.ServerName, s.ServerID))
 	if activateFunc != nil {
 		return activateFunc()
 	}
@@ -1087,7 +1087,7 @@ func (s *Session) ForceActiveStandby(activateFunc func() error) error {
 		return err
 	}
 	s.updateStandby(false)
-	log.Info(fmt.Sprintf("serverName: %v quit STANDBY mode, this node will become ACTIVE", s.ServerName))
+	log.Info(fmt.Sprintf("serverName: %v quit STANDBY mode, this node will become ACTIVE, ID: %d", s.ServerName, s.ServerID))
 	if activateFunc != nil {
 		return activateFunc()
 	}
