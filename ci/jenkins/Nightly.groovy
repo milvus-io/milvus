@@ -3,7 +3,7 @@
 // When scheduling a job that gets automatically triggered by changes,
 // you need to include a [cronjob] tag within the commit message.
 String cron_timezone = 'TZ=Asia/Shanghai'
-String cron_string = BRANCH_NAME == "master" ? "50 1 * * * " : ""
+String cron_string = BRANCH_NAME == "2.3.0" ? "50 3 * * * " : ""
 
 // Make timeout 4 hours so that we can run two nightly during the ci
 int total_timeout_minutes = 7 * 60
@@ -154,9 +154,6 @@ pipeline {
                                                     --set queryNode.profiling.enabled=true \
                                                     --set indexCoordinator.profiling.enabled=true \
                                                     --set indexNode.profiling.enabled=true \
-                                                    --set indexNode.disk.enabled=true \
-                                                    --set queryNode.disk.enabled=true \
-                                                    --set standalone.disk.enabled=true \
                                                     --set log.level=debug \
                                                     --set common.security.authorizationEnabled=${authenticationEnabled} \
                                                     --version ${chart_version} \
