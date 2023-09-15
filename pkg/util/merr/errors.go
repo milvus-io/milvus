@@ -113,6 +113,9 @@ var (
 	ErrInvalidSearchResult       = newMilvusError("fail to parse search result", 1805, false)
 	ErrCheckPrimaryKey           = newMilvusError("please check the primary key and its' type can only in [int, string]", 1806, false)
 
+	// Segcore related
+	ErrSegcore = newMilvusError("segcore error", 2000, false)
+
 	// Do NOT export this,
 	// never allow programmer using this, keep only for converting unknown error to milvusError
 	errUnexpected = newMilvusError("unexpected error", (1<<16)-1, false)
