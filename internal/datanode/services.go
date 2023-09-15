@@ -523,7 +523,7 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 func (node *DataNode) FlushChannels(ctx context.Context, req *datapb.FlushChannelsRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(zap.Int64("nodeId", paramtable.GetNodeID()),
 		zap.Time("flushTs", tsoutil.PhysicalTime(req.GetFlushTs())),
-		zap.Int("len(channels)", len(req.GetChannels())))
+		zap.Strings("channels", req.GetChannels()))
 
 	log.Info("DataNode receives FlushChannels request")
 
