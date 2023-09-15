@@ -74,12 +74,6 @@ then
     exit
 fi
 
-if ! command -v cmake &> /dev/null
-then
-    echo "cmake could not be found, please install it"
-    exit
-fi
-
 unameOut="$(uname -s)"
 case "${unameOut}" in
     Linux*)     install_linux_deps;;
