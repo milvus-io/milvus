@@ -857,7 +857,7 @@ func (q *QuotaCenter) recordMetrics() {
 
 func (q *QuotaCenter) diskAllowance(collection UniqueID) float64 {
 	q.diskMu.Lock()
-	q.diskMu.Unlock()
+	defer q.diskMu.Unlock()
 	if !Params.QuotaConfig.DiskProtectionEnabled.GetAsBool() {
 		return math.MaxInt64
 	}
