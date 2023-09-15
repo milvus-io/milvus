@@ -46,7 +46,7 @@ func Test_ListDBTask(t *testing.T) {
 
 		err = task.Execute(context.Background())
 		assert.Error(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, task.Resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, task.Resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("ok", func(t *testing.T) {
@@ -75,6 +75,6 @@ func Test_ListDBTask(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(task.Resp.GetDbNames()))
 		assert.Equal(t, ret[0].Name, task.Resp.GetDbNames()[0])
-		assert.Equal(t, commonpb.ErrorCode_Success, task.Resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_Success, task.Resp.GetStatus().GetErrorCode())
 	})
 }

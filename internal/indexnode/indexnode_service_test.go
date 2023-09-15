@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 )
 
@@ -40,7 +41,7 @@ func TestAbnormalIndexNode(t *testing.T) {
 
 	qresp, err := in.QueryJobs(ctx, &indexpb.QueryJobsRequest{})
 	assert.NoError(t, err)
-	assert.Equal(t, qresp.Status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
+	assert.Equal(t, qresp.GetStatus().GetErrorCode(), commonpb.ErrorCode_UnexpectedError)
 
 	status, err = in.DropJobs(ctx, &indexpb.DropJobsRequest{})
 	assert.NoError(t, err)
@@ -48,15 +49,15 @@ func TestAbnormalIndexNode(t *testing.T) {
 
 	jobNumRsp, err := in.GetJobStats(ctx, &indexpb.GetJobStatsRequest{})
 	assert.NoError(t, err)
-	assert.Equal(t, jobNumRsp.Status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
+	assert.Equal(t, jobNumRsp.GetStatus().GetErrorCode(), commonpb.ErrorCode_UnexpectedError)
 
 	metricsResp, err := in.GetMetrics(ctx, &milvuspb.GetMetricsRequest{})
 	assert.NoError(t, err)
-	assert.Equal(t, metricsResp.Status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
+	assert.Equal(t, metricsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_UnexpectedError)
 
 	configurationResp, err := in.ShowConfigurations(ctx, &internalpb.ShowConfigurationsRequest{})
 	assert.NoError(t, err)
-	assert.Equal(t, configurationResp.Status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
+	assert.Equal(t, configurationResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_UnexpectedError)
 }
 
 func TestGetMetrics(t *testing.T) {
@@ -69,7 +70,7 @@ func TestGetMetrics(t *testing.T) {
 	defer in.Stop()
 	resp, err := in.GetMetrics(ctx, metricReq)
 	assert.NoError(t, err)
-	assert.Equal(t, resp.Status.ErrorCode, commonpb.ErrorCode_Success)
+	assert.True(t, merr.Ok(resp.GetStatus()))
 	t.Logf("Component: %s, Metrics: %s", resp.ComponentName, resp.Response)
 }
 
@@ -86,15 +87,15 @@ func TestGetMetricsError(t *testing.T) {
 	}
 	resp, err := in.GetMetrics(ctx, errReq)
 	assert.NoError(t, err)
-	assert.Equal(t, resp.Status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
+	assert.Equal(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_UnexpectedError)
 
 	unsupportedReq := &milvuspb.GetMetricsRequest{
 		Request: `{"metric_type": "application_info"}`,
 	}
 	resp, err = in.GetMetrics(ctx, unsupportedReq)
 	assert.NoError(t, err)
-	assert.Equal(t, resp.Status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
-	assert.Equal(t, resp.Status.Reason, metricsinfo.MsgUnimplementedMetric)
+	assert.Equal(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_UnexpectedError)
+	assert.Equal(t, resp.GetStatus().GetReason(), metricsinfo.MsgUnimplementedMetric)
 }
 
 func TestMockFieldData(t *testing.T) {

@@ -192,19 +192,32 @@ func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID 
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", collectionID),
+		zap.Int64("segmentID", segmentID),
+	)
+
 	resp, err := broker.dataCoord.GetIndexInfos(ctx, &indexpb.GetIndexInfoRequest{
 		CollectionID: collectionID,
 		SegmentIDs:   []int64{segmentID},
 	})
-	if err != nil || resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+	if err == nil {
+		err = merr.Error(resp.GetStatus())
+	}
+
+	if err != nil {
 		log.Warn("failed to get segment index info",
-			zap.Int64("collection", collectionID),
-			zap.Int64("segment", segmentID),
+			zap.Error(err))
+		return nil, err
+	}
+	if resp.GetSegmentInfo() == nil {
+		err = merr.WrapErrCollectionNotFound(segmentID)
+		log.Warn("failed to get segment index info",
 			zap.Error(err))
 		return nil, err
 	}
 
-	segmentInfo, ok := resp.SegmentInfo[segmentID]
+	segmentInfo, ok := resp.GetSegmentInfo()[segmentID]
 	if !ok || len(segmentInfo.GetIndexInfos()) == 0 {
 		return nil, merr.WrapErrIndexNotFound()
 	}

@@ -242,7 +242,7 @@ func (g *getStatisticsTask) getStatisticsFromDataCoord(ctx context.Context) erro
 		return err
 	}
 	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return errors.New(result.Status.Reason)
+		return merr.Error(result.GetStatus())
 	}
 	if g.resultBuf == nil {
 		g.resultBuf = typeutil.NewConcurrentSet[*internalpb.GetStatisticsResponse]()
@@ -463,7 +463,7 @@ func reduceStatisticResponse(results []map[string]string) ([]*commonpb.KeyValueP
 //			return err
 //		}
 //		if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-//			return errors.New(result.Status.Reason)
+//			return merr.Error(result.GetStatus())
 //		}
 //		g.toReduceResults = append(g.toReduceResults, &internalpb.GetStatisticsResponse{
 //			Status: merr.Status(nil),
@@ -535,7 +535,7 @@ func reduceStatisticResponse(results []map[string]string) ([]*commonpb.KeyValueP
 //				return err
 //			}
 //			if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-//				return errors.New(result.Status.Reason)
+//				return merr.Error(result.GetStatus())
 //			}
 //			g.toReduceResults = append(g.toReduceResults, &internalpb.GetStatisticsResponse{
 //				Status: merr.Status(nil),
@@ -558,7 +558,7 @@ func reduceStatisticResponse(results []map[string]string) ([]*commonpb.KeyValueP
 //				return err
 //			}
 //			if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-//				return errors.New(result.Status.Reason)
+//				return merr.Error(result.GetStatus())
 //			}
 //			g.toReduceResults = append(g.toReduceResults, &internalpb.GetStatisticsResponse{
 //				Status: merr.Status(nil),
@@ -657,7 +657,7 @@ func (g *getCollectionStatisticsTask) Execute(ctx context.Context) error {
 		return err
 	}
 	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return errors.New(result.Status.Reason)
+		return merr.Error(result.GetStatus())
 	}
 	g.result = &milvuspb.GetCollectionStatisticsResponse{
 		Status: merr.Status(nil),
@@ -747,7 +747,7 @@ func (g *getPartitionStatisticsTask) Execute(ctx context.Context) error {
 		return errors.New("get partition statistics resp is nil")
 	}
 	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return errors.New(result.Status.Reason)
+		return merr.Error(result.GetStatus())
 	}
 	g.result = &milvuspb.GetPartitionStatisticsResponse{
 		Status: merr.Status(nil),

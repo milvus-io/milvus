@@ -958,7 +958,7 @@ func TestRootCoord_GetMetrics(t *testing.T) {
 			withMetricsCacheManager())
 		resp, err := c.GetMetrics(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("get system info metrics from cache", func(t *testing.T) {
@@ -975,7 +975,7 @@ func TestRootCoord_GetMetrics(t *testing.T) {
 		})
 		resp, err := c.GetMetrics(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("get system info metrics, cache miss", func(t *testing.T) {
@@ -988,7 +988,7 @@ func TestRootCoord_GetMetrics(t *testing.T) {
 		c.metricsCacheManager.InvalidateSystemInfoMetrics()
 		resp, err := c.GetMetrics(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("get system info metrics", func(t *testing.T) {
@@ -1000,7 +1000,7 @@ func TestRootCoord_GetMetrics(t *testing.T) {
 			withMetricsCacheManager())
 		resp, err := c.getSystemInfoMetrics(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 }
 
@@ -1520,13 +1520,13 @@ func TestCore_Rbac(t *testing.T) {
 	{
 		resp, err := c.GetCredential(ctx, &rootcoordpb.GetCredentialRequest{})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 	}
 
 	{
 		resp, err := c.ListCredUsers(ctx, &milvuspb.ListCredUsersRequest{})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 	}
 
 	{
@@ -1550,13 +1550,13 @@ func TestCore_Rbac(t *testing.T) {
 	{
 		resp, err := c.SelectRole(ctx, &milvuspb.SelectRoleRequest{})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	}
 
 	{
 		resp, err := c.SelectUser(ctx, &milvuspb.SelectUserRequest{})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	}
 
 	{
@@ -1568,13 +1568,13 @@ func TestCore_Rbac(t *testing.T) {
 	{
 		resp, err := c.SelectGrant(ctx, &milvuspb.SelectGrantRequest{})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	}
 
 	{
 		resp, err := c.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	}
 }
 
@@ -1822,7 +1822,7 @@ func TestRootCoord_RBACError(t *testing.T) {
 	t.Run("get credential failed", func(t *testing.T) {
 		resp, err := c.GetCredential(ctx, &rootcoordpb.GetCredentialRequest{Username: "foo"})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 	t.Run("update credential failed", func(t *testing.T) {
 		resp, err := c.UpdateCredential(ctx, &internalpb.CredentialInfo{})
@@ -1837,7 +1837,7 @@ func TestRootCoord_RBACError(t *testing.T) {
 	t.Run("list credential failed", func(t *testing.T) {
 		resp, err := c.ListCredUsers(ctx, &milvuspb.ListCredUsersRequest{})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 	t.Run("create role failed", func(t *testing.T) {
 		resp, err := c.CreateRole(ctx, &milvuspb.CreateRoleRequest{Entity: &milvuspb.RoleEntity{Name: "foo"}})
@@ -1871,24 +1871,24 @@ func TestRootCoord_RBACError(t *testing.T) {
 		{
 			resp, err := c.SelectRole(ctx, &milvuspb.SelectRoleRequest{Role: &milvuspb.RoleEntity{Name: "foo"}})
 			assert.NoError(t, err)
-			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		}
 		{
 			resp, err := c.SelectRole(ctx, &milvuspb.SelectRoleRequest{})
 			assert.NoError(t, err)
-			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		}
 	})
 	t.Run("select user failed", func(t *testing.T) {
 		{
 			resp, err := c.SelectUser(ctx, &milvuspb.SelectUserRequest{User: &milvuspb.UserEntity{Name: "foo"}})
 			assert.NoError(t, err)
-			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		}
 		{
 			resp, err := c.SelectUser(ctx, &milvuspb.SelectUserRequest{})
 			assert.NoError(t, err)
-			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		}
 	})
 	t.Run("operate privilege failed", func(t *testing.T) {
@@ -1957,12 +1957,12 @@ func TestRootCoord_RBACError(t *testing.T) {
 		{
 			resp, err := c.SelectGrant(ctx, &milvuspb.SelectGrantRequest{})
 			assert.NoError(t, err)
-			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		}
 		{
 			resp, err := c.SelectGrant(ctx, &milvuspb.SelectGrantRequest{Entity: &milvuspb.GrantEntity{Role: &milvuspb.RoleEntity{Name: "foo"}}})
 			assert.NoError(t, err)
-			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		}
 		mockMeta := c.meta.(*mockMetaTable)
 		mockMeta.SelectRoleFunc = func(tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
@@ -1971,12 +1971,12 @@ func TestRootCoord_RBACError(t *testing.T) {
 		{
 			resp, err := c.SelectGrant(ctx, &milvuspb.SelectGrantRequest{Entity: &milvuspb.GrantEntity{Role: &milvuspb.RoleEntity{Name: "foo"}, Object: &milvuspb.ObjectEntity{Name: "CollectionFoo"}}})
 			assert.NoError(t, err)
-			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		}
 		{
 			resp, err := c.SelectGrant(ctx, &milvuspb.SelectGrantRequest{Entity: &milvuspb.GrantEntity{Role: &milvuspb.RoleEntity{Name: "foo"}, Object: &milvuspb.ObjectEntity{Name: "Collection"}}})
 			assert.NoError(t, err)
-			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		}
 		mockMeta.SelectRoleFunc = func(tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
 			return nil, errors.New("mock error")
@@ -1986,7 +1986,7 @@ func TestRootCoord_RBACError(t *testing.T) {
 	t.Run("list policy failed", func(t *testing.T) {
 		resp, err := c.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 
 		mockMeta := c.meta.(*mockMetaTable)
 		mockMeta.ListPolicyFunc = func(tenant string) ([]string, error) {
@@ -1994,7 +1994,7 @@ func TestRootCoord_RBACError(t *testing.T) {
 		}
 		resp, err = c.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		mockMeta.ListPolicyFunc = func(tenant string) ([]string, error) {
 			return []string{}, errors.New("mock error")
 		}

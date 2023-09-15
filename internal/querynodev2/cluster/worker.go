@@ -72,7 +72,7 @@ func (w *remoteWorker) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 			zap.Error(err),
 		)
 		return err
-	} else if status.ErrorCode != commonpb.ErrorCode_Success {
+	} else if status.GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("failed to call LoadSegments, worker return error",
 			zap.String("errorCode", status.GetErrorCode().String()),
 			zap.String("reason", status.GetReason()),
@@ -92,7 +92,7 @@ func (w *remoteWorker) ReleaseSegments(ctx context.Context, req *querypb.Release
 			zap.Error(err),
 		)
 		return err
-	} else if status.ErrorCode != commonpb.ErrorCode_Success {
+	} else if status.GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("failed to call ReleaseSegments, worker return error",
 			zap.String("errorCode", status.GetErrorCode().String()),
 			zap.String("reason", status.GetReason()),

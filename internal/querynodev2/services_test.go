@@ -168,14 +168,14 @@ func (suite *ServiceSuite) TestGetComponentStatesNormal() {
 	suite.node.session.UpdateRegistered(true)
 	rsp, err := suite.node.GetComponentStates(ctx)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
+	suite.Equal(commonpb.ErrorCode_Success, rsp.GetStatus().GetErrorCode())
 	suite.Equal(commonpb.StateCode_Healthy, rsp.State.StateCode)
 
 	// after update
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	rsp, err = suite.node.GetComponentStates(ctx)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
+	suite.Equal(commonpb.ErrorCode_Success, rsp.GetStatus().GetErrorCode())
 	suite.Equal(commonpb.StateCode_Abnormal, rsp.State.StateCode)
 }
 
@@ -183,14 +183,14 @@ func (suite *ServiceSuite) TestGetTimeTiclChannel_Normal() {
 	ctx := context.Background()
 	rsp, err := suite.node.GetTimeTickChannel(ctx)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
+	suite.Equal(commonpb.ErrorCode_Success, rsp.GetStatus().GetErrorCode())
 }
 
 func (suite *ServiceSuite) TestGetStatisChannel_Normal() {
 	ctx := context.Background()
 	rsp, err := suite.node.GetStatisticsChannel(ctx)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
+	suite.Equal(commonpb.ErrorCode_Success, rsp.GetStatus().GetErrorCode())
 }
 
 func (suite *ServiceSuite) TestGetStatistics_Normal() {
@@ -214,7 +214,7 @@ func (suite *ServiceSuite) TestGetStatistics_Normal() {
 
 	rsp, err := suite.node.GetStatistics(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
+	suite.Equal(commonpb.ErrorCode_Success, rsp.GetStatus().GetErrorCode())
 }
 
 func (suite *ServiceSuite) TestGetStatistics_Failed() {
@@ -1612,7 +1612,7 @@ func (suite *ServiceSuite) TestShowConfigurations_Normal() {
 
 	resp, err := suite.node.ShowConfigurations(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	suite.Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	suite.Equal(1, len(resp.Configuations))
 }
 
@@ -1650,7 +1650,7 @@ func (suite *ServiceSuite) TestGetMetric_Normal() {
 
 	resp, err := suite.node.GetMetrics(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	suite.Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 }
 
 func (suite *ServiceSuite) TestGetMetric_Failed() {
@@ -1678,13 +1678,13 @@ func (suite *ServiceSuite) TestGetMetric_Failed() {
 	req.Request = "---"
 	resp, err = suite.node.GetMetrics(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
 
 	// node unhealthy
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	resp, err = suite.node.GetMetrics(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_NotReadyServe, resp.Status.ErrorCode)
+	suite.Equal(commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 }
 
 func (suite *ServiceSuite) TestGetDataDistribution_Normal() {
@@ -1701,7 +1701,7 @@ func (suite *ServiceSuite) TestGetDataDistribution_Normal() {
 
 	resp, err := suite.node.GetDataDistribution(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	suite.Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 }
 
 func (suite *ServiceSuite) TestGetDataDistribution_Failed() {

@@ -117,7 +117,7 @@ func Test_NewServer(t *testing.T) {
 		req := &internalpb.GetStatisticsChannelRequest{}
 		resp, err := server.GetStatisticsChannel(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("GetTimeTickChannel", func(t *testing.T) {
@@ -125,7 +125,7 @@ func Test_NewServer(t *testing.T) {
 		req := &internalpb.GetTimeTickChannelRequest{}
 		resp, err := server.GetTimeTickChannel(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("WatchDmChannels", func(t *testing.T) {
@@ -182,7 +182,7 @@ func Test_NewServer(t *testing.T) {
 		req := &querypb.GetSegmentInfoRequest{}
 		resp, err := server.GetSegmentInfo(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("GetMetrics", func(t *testing.T) {
@@ -193,7 +193,7 @@ func Test_NewServer(t *testing.T) {
 		}
 		resp, err := server.GetMetrics(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("Search", func(t *testing.T) {

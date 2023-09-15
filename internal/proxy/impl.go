@@ -106,7 +106,7 @@ func (node *Proxy) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringRe
 
 // InvalidateCollectionMetaCache invalidate the meta cache of specific collection.
 func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return unhealthyStatus(), nil
 	}
 	ctx = logutil.WithModule(ctx, moduleName)
@@ -148,7 +148,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 }
 
 func (node *Proxy) CreateDatabase(ctx context.Context, request *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return unhealthyStatus(), nil
 	}
 
@@ -194,7 +194,7 @@ func (node *Proxy) CreateDatabase(ctx context.Context, request *milvuspb.CreateD
 }
 
 func (node *Proxy) DropDatabase(ctx context.Context, request *milvuspb.DropDatabaseRequest) (*commonpb.Status, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return unhealthyStatus(), nil
 	}
 
@@ -238,8 +238,8 @@ func (node *Proxy) DropDatabase(ctx context.Context, request *milvuspb.DropDatab
 
 func (node *Proxy) ListDatabases(ctx context.Context, request *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error) {
 	resp := &milvuspb.ListDatabasesResponse{}
-	if !node.checkHealthy() {
-		resp.Status = unhealthyStatus()
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
@@ -286,7 +286,7 @@ func (node *Proxy) ListDatabases(ctx context.Context, request *milvuspb.ListData
 // CreateCollection create a collection by the schema.
 // TODO(dragondriver): add more detailed ut for ConsistencyLevel, should we support multiple consistency level in Proxy?
 func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return unhealthyStatus(), nil
 	}
 
@@ -355,7 +355,7 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 
 // DropCollection drop a collection.
 func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return unhealthyStatus(), nil
 	}
 
@@ -414,7 +414,7 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 
 // HasCollection check if the specific collection exists in Milvus.
 func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return &milvuspb.BoolResponse{
 			Status: unhealthyStatus(),
 		}, nil
@@ -481,7 +481,7 @@ func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasColle
 
 // LoadCollection load a collection into query nodes.
 func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCollectionRequest) (*commonpb.Status, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return unhealthyStatus(), nil
 	}
 
@@ -542,7 +542,7 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 
 // ReleaseCollection remove the loaded collection from query nodes.
 func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.ReleaseCollectionRequest) (*commonpb.Status, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return unhealthyStatus(), nil
 	}
 
@@ -607,7 +607,7 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 
 // DescribeCollection get the meta information of specific collection, such as schema, created timestamp and etc.
 func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return &milvuspb.DescribeCollectionResponse{
 			Status: unhealthyStatus(),
 		}, nil
@@ -679,7 +679,7 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 // GetStatistics get the statistics, such as `num_rows`.
 // WARNING: It is an experimental API
 func (node *Proxy) GetStatistics(ctx context.Context, request *milvuspb.GetStatisticsRequest) (*milvuspb.GetStatisticsResponse, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return &milvuspb.GetStatisticsResponse{
 			Status: unhealthyStatus(),
 		}, nil
@@ -759,7 +759,7 @@ func (node *Proxy) GetStatistics(ctx context.Context, request *milvuspb.GetStati
 
 // GetCollectionStatistics get the collection statistics, such as `num_rows`.
 func (node *Proxy) GetCollectionStatistics(ctx context.Context, request *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return &milvuspb.GetCollectionStatisticsResponse{
 			Status: unhealthyStatus(),
 		}, nil
@@ -831,7 +831,7 @@ func (node *Proxy) GetCollectionStatistics(ctx context.Context, request *milvusp
 
 // ShowCollections list all collections in Milvus.
 func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return &milvuspb.ShowCollectionsResponse{
 			Status: unhealthyStatus(),
 		}, nil
@@ -897,7 +897,7 @@ func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCo
 }
 
 func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return unhealthyStatus(), nil
 	}
 
@@ -961,7 +961,7 @@ func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterC
 
 // CreatePartition create a partition in specific collection.
 func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return unhealthyStatus(), nil
 	}
 
@@ -1026,7 +1026,7 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 
 // DropPartition drop a partition in specific collection.
 func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return unhealthyStatus(), nil
 	}
 
@@ -1092,7 +1092,7 @@ func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPart
 
 // HasPartition check if partition exist.
 func (node *Proxy) HasPartition(ctx context.Context, request *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return &milvuspb.BoolResponse{
 			Status: unhealthyStatus(),
 		}, nil
@@ -1170,7 +1170,7 @@ func (node *Proxy) HasPartition(ctx context.Context, request *milvuspb.HasPartit
 
 // LoadPartitions load specific partitions into query nodes.
 func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPartitionsRequest) (*commonpb.Status, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return unhealthyStatus(), nil
 	}
 
@@ -1239,7 +1239,7 @@ func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPar
 
 // ReleasePartitions release specific partitions from query nodes.
 func (node *Proxy) ReleasePartitions(ctx context.Context, request *milvuspb.ReleasePartitionsRequest) (*commonpb.Status, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return unhealthyStatus(), nil
 	}
 
@@ -1308,7 +1308,7 @@ func (node *Proxy) ReleasePartitions(ctx context.Context, request *milvuspb.Rele
 
 // GetPartitionStatistics get the statistics of partition, such as num_rows.
 func (node *Proxy) GetPartitionStatistics(ctx context.Context, request *milvuspb.GetPartitionStatisticsRequest) (*milvuspb.GetPartitionStatisticsResponse, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return &milvuspb.GetPartitionStatisticsResponse{
 			Status: unhealthyStatus(),
 		}, nil
@@ -1382,7 +1382,7 @@ func (node *Proxy) GetPartitionStatistics(ctx context.Context, request *milvuspb
 
 // ShowPartitions list all partitions in the specific collection.
 func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return &milvuspb.ShowPartitionsResponse{
 			Status: unhealthyStatus(),
 		}, nil
@@ -1467,7 +1467,7 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 }
 
 func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.GetLoadingProgressRequest) (*milvuspb.GetLoadingProgressResponse, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return &milvuspb.GetLoadingProgressResponse{Status: unhealthyStatus()}, nil
 	}
 	method := "GetLoadingProgress"
@@ -1545,7 +1545,7 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 }
 
 func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadStateRequest) (*milvuspb.GetLoadStateResponse, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return &milvuspb.GetLoadStateResponse{Status: unhealthyStatus()}, nil
 	}
 	method := "GetLoadState"
@@ -1645,7 +1645,7 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 
 // CreateIndex create index for collection.
 func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return unhealthyStatus(), nil
 	}
 
@@ -1716,7 +1716,7 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 
 // DescribeIndex get the meta information of index, such as index state, index id and etc.
 func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return &milvuspb.DescribeIndexResponse{
 			Status: unhealthyStatus(),
 		}, nil
@@ -1800,7 +1800,7 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 
 // GetIndexStatistics get the information of index.
 func (node *Proxy) GetIndexStatistics(ctx context.Context, request *milvuspb.GetIndexStatisticsRequest) (*milvuspb.GetIndexStatisticsResponse, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		err := merr.WrapErrServiceNotReady(fmt.Sprintf("proxy %d is unhealthy", paramtable.GetNodeID()))
 		return &milvuspb.GetIndexStatisticsResponse{
 			Status: merr.Status(err),
@@ -1878,7 +1878,7 @@ func (node *Proxy) GetIndexStatistics(ctx context.Context, request *milvuspb.Get
 
 // DropIndex drop the index of collection.
 func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return unhealthyStatus(), nil
 	}
 
@@ -1950,7 +1950,7 @@ func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexReq
 // IndexRows is the num of indexed rows. And TotalRows is the total number of segment rows.
 // Deprecated: use DescribeIndex instead
 func (node *Proxy) GetIndexBuildProgress(ctx context.Context, request *milvuspb.GetIndexBuildProgressRequest) (*milvuspb.GetIndexBuildProgressResponse, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return &milvuspb.GetIndexBuildProgressResponse{
 			Status: unhealthyStatus(),
 		}, nil
@@ -2026,7 +2026,7 @@ func (node *Proxy) GetIndexBuildProgress(ctx context.Context, request *milvuspb.
 // GetIndexState get the build-state of index.
 // Deprecated: use DescribeIndex instead
 func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndexStateRequest) (*milvuspb.GetIndexStateResponse, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return &milvuspb.GetIndexStateResponse{
 			Status: unhealthyStatus(),
 		}, nil
@@ -2105,7 +2105,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Insert")
 	defer sp.End()
 
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return &milvuspb.MutationResult{
 			Status: unhealthyStatus(),
 		}, nil
@@ -2231,7 +2231,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
 		metrics.DeleteLabel, request.GetCollectionName()).Add(float64(proto.Size(request)))
 
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return &milvuspb.MutationResult{
 			Status: unhealthyStatus(),
 		}, nil
@@ -2300,7 +2300,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	)
 	log.Debug("Start processing upsert request in Proxy")
 
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return &milvuspb.MutationResult{
 			Status: unhealthyStatus(),
 		}, nil
@@ -2382,7 +2382,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		if it.result.GetStatus().GetErrorCode() == commonpb.ErrorCode_Success {
 			it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		}
-		return constructFailedResponse(err, it.result.Status.ErrorCode), nil
+		return constructFailedResponse(err, it.result.GetStatus().GetErrorCode()), nil
 	}
 
 	if it.result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
@@ -2424,7 +2424,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 
 	rateCol.Add(internalpb.RateType_DQLSearch.String(), float64(request.GetNq()))
 
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return &milvuspb.SearchResults{
 			Status: unhealthyStatus(),
 		}, nil
@@ -2537,7 +2537,7 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 			Reason:    "",
 		},
 	}
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		resp.Status.Reason = "proxy is not healthy"
 		return resp, nil
 	}
@@ -2570,7 +2570,7 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel).Inc()
 
-		resp.Status.Reason = err.Error()
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
@@ -2589,7 +2589,7 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
 
 		resp.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		resp.Status.Reason = err.Error()
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
@@ -2616,7 +2616,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 
 	rateCol.Add(internalpb.RateType_DQLQuery.String(), 1)
 
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return &milvuspb.QueryResults{
 			Status: unhealthyStatus(),
 		}, nil
@@ -2721,7 +2721,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 
 // CreateAlias create alias for collection, then you can search the collection with alias.
 func (node *Proxy) CreateAlias(ctx context.Context, request *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return unhealthyStatus(), nil
 	}
 
@@ -2803,7 +2803,7 @@ func (node *Proxy) ListAliases(ctx context.Context, request *milvuspb.ListAliase
 
 // DropAlias alter the alias of collection.
 func (node *Proxy) DropAlias(ctx context.Context, request *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return unhealthyStatus(), nil
 	}
 
@@ -2866,7 +2866,7 @@ func (node *Proxy) DropAlias(ctx context.Context, request *milvuspb.DropAliasReq
 
 // AlterAlias alter alias of collection.
 func (node *Proxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return unhealthyStatus(), nil
 	}
 
@@ -2947,7 +2947,7 @@ func (node *Proxy) FlushAll(ctx context.Context, req *milvuspb.FlushAllRequest) 
 	resp := &milvuspb.FlushAllResponse{
 		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
 	}
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		resp.Status.Reason = "proxy is not healthy"
 		return resp, nil
 	}
@@ -2956,10 +2956,10 @@ func (node *Proxy) FlushAll(ctx context.Context, req *milvuspb.FlushAllRequest) 
 	hasError := func(status *commonpb.Status, err error) bool {
 		if err != nil {
 			resp.Status = merr.Status(err)
-			log.Warn("FlushAll failed", zap.String("err", err.Error()))
+			log.Warn("FlushAll failed", zap.Error(err))
 			return true
 		}
-		if status != nil && status.ErrorCode != commonpb.ErrorCode_Success {
+		if status.GetErrorCode() != commonpb.ErrorCode_Success {
 			log.Warn("FlushAll failed", zap.String("err", status.GetReason()))
 			resp.Status = status
 			return true
@@ -3022,7 +3022,7 @@ func (node *Proxy) FlushAll(ctx context.Context, req *milvuspb.FlushAllRequest) 
 	ts, err := node.tsoAllocator.AllocOne(ctx)
 	if err != nil {
 		log.Warn("FlushAll failed", zap.Error(err))
-		resp.Status.Reason = err.Error()
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
@@ -3061,8 +3061,8 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
 	}
-	if !node.checkHealthy() {
-		resp.Status = unhealthyStatus()
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 	method := "GetPersistentSegmentInfo"
@@ -3107,15 +3107,16 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 		resp.Status.Reason = fmt.Errorf("dataCoord:GetSegmentInfo, err:%w", err).Error()
 		return resp, nil
 	}
+	err = merr.Error(infoResp.GetStatus())
+	if err != nil {
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
+			metrics.FailLabel).Inc()
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
 	log.Debug("GetPersistentSegmentInfo",
 		zap.Int("len(infos)", len(infoResp.Infos)),
 		zap.Any("status", infoResp.Status))
-	if infoResp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
-			metrics.FailLabel).Inc()
-		resp.Status.Reason = infoResp.Status.Reason
-		return resp, nil
-	}
 	persistentInfos := make([]*milvuspb.PersistentSegmentInfo, len(infoResp.Infos))
 	for i, info := range infoResp.Infos {
 		persistentInfos[i] = &milvuspb.PersistentSegmentInfo{
@@ -3151,8 +3152,8 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
 	}
-	if !node.checkHealthy() {
-		resp.Status = unhealthyStatus()
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
@@ -3164,7 +3165,7 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 	collID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.CollectionName)
 	if err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
-		resp.Status.Reason = err.Error()
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 	infoResp, err := node.queryCoord.GetSegmentInfo(ctx, &querypb.GetSegmentInfoRequest{
@@ -3175,23 +3176,19 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 		),
 		CollectionID: collID,
 	})
+	if err == nil {
+		err = merr.Error(infoResp.GetStatus())
+	}
 	if err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
 		log.Error("Failed to get segment info from QueryCoord",
 			zap.Error(err))
-		resp.Status.Reason = err.Error()
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 	log.Debug("GetQuerySegmentInfo",
 		zap.Any("infos", infoResp.Infos),
 		zap.Any("status", infoResp.Status))
-	if infoResp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
-		log.Error("Failed to get segment info from QueryCoord",
-			zap.String("errMsg", infoResp.Status.Reason))
-		resp.Status.Reason = infoResp.Status.Reason
-		return resp, nil
-	}
 	queryInfos := make([]*milvuspb.QuerySegmentInfo, len(infoResp.Infos))
 	for i, info := range infoResp.Infos {
 		queryInfos[i] = &milvuspb.QuerySegmentInfo{
@@ -3309,7 +3306,7 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 		zap.Int64("nodeID", paramtable.GetNodeID()),
 		zap.String("req", req.Request))
 
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		err := merr.WrapErrServiceNotReady(fmt.Sprintf("proxy %d is unhealthy", paramtable.GetNodeID()))
 		log.Warn("Proxy.GetMetrics failed",
 			zap.Int64("nodeID", paramtable.GetNodeID()),
@@ -3382,7 +3379,7 @@ func (node *Proxy) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetrics
 		zap.Int64("nodeID", paramtable.GetNodeID()),
 		zap.String("req", req.Request))
 
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		err := merr.WrapErrServiceNotReady(fmt.Sprintf("proxy %d is unhealthy", paramtable.GetNodeID()))
 		log.Warn("Proxy.GetProxyMetrics failed",
 			zap.Error(err))
@@ -3450,7 +3447,7 @@ func (node *Proxy) LoadBalance(ctx context.Context, req *milvuspb.LoadBalanceReq
 		zap.Int64("proxy_id", paramtable.GetNodeID()),
 		zap.Any("req", req))
 
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return unhealthyStatus(), nil
 	}
 
@@ -3509,8 +3506,8 @@ func (node *Proxy) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReq
 		zap.Int64("collection", req.GetCollectionID()),
 		zap.Bool("with shard nodes", req.GetWithShardNodes()))
 	resp := &milvuspb.GetReplicasResponse{}
-	if !node.checkHealthy() {
-		resp.Status = unhealthyStatus()
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
@@ -3544,8 +3541,8 @@ func (node *Proxy) GetCompactionState(ctx context.Context, req *milvuspb.GetComp
 
 	log.Debug("received GetCompactionState request")
 	resp := &milvuspb.GetCompactionStateResponse{}
-	if !node.checkHealthy() {
-		resp.Status = unhealthyStatus()
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
@@ -3566,8 +3563,8 @@ func (node *Proxy) ManualCompaction(ctx context.Context, req *milvuspb.ManualCom
 
 	log.Info("received ManualCompaction request")
 	resp := &milvuspb.ManualCompactionResponse{}
-	if !node.checkHealthy() {
-		resp.Status = unhealthyStatus()
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
@@ -3588,8 +3585,8 @@ func (node *Proxy) GetCompactionStateWithPlans(ctx context.Context, req *milvusp
 
 	log.Debug("received GetCompactionStateWithPlans request")
 	resp := &milvuspb.GetCompactionPlansResponse{}
-	if !node.checkHealthy() {
-		resp.Status = unhealthyStatus()
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
@@ -3611,8 +3608,8 @@ func (node *Proxy) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStat
 		zap.Any("request", req))
 	var err error
 	resp := &milvuspb.GetFlushStateResponse{}
-	if !node.checkHealthy() {
-		resp.Status = unhealthyStatus()
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
+		resp.Status = merr.Status(err)
 		log.Warn("unable to get flush state because of closed server")
 		return resp, nil
 	}
@@ -3658,8 +3655,8 @@ func (node *Proxy) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushA
 
 	var err error
 	resp := &milvuspb.GetFlushAllStateResponse{}
-	if !node.checkHealthy() {
-		resp.Status = unhealthyStatus()
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
+		resp.Status = merr.Status(err)
 		log.Warn("GetFlushAllState failed, closed server")
 		return resp, nil
 	}
@@ -3667,7 +3664,7 @@ func (node *Proxy) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushA
 	resp, err = node.dataCoord.GetFlushAllState(ctx, req)
 	if err != nil {
 		resp.Status = merr.Status(err)
-		log.Warn("GetFlushAllState failed", zap.String("err", err.Error()))
+		log.Warn("GetFlushAllState failed", zap.Error(err))
 		return resp, nil
 	}
 	log.Debug("GetFlushAllState done", zap.Bool("flushed", resp.GetFlushed()))
@@ -3707,8 +3704,8 @@ func (node *Proxy) Import(ctx context.Context, req *milvuspb.ImportRequest) (*mi
 	resp := &milvuspb.ImportResponse{
 		Status: merr.Status(nil),
 	}
-	if !node.checkHealthy() {
-		resp.Status = unhealthyStatus()
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
@@ -3733,7 +3730,7 @@ func (node *Proxy) Import(ctx context.Context, req *milvuspb.ImportRequest) (*mi
 		log.Error("failed to execute bulk insert request",
 			zap.Error(err))
 		resp.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		resp.Status.Reason = err.Error()
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
@@ -3752,8 +3749,8 @@ func (node *Proxy) GetImportState(ctx context.Context, req *milvuspb.GetImportSt
 	log.Debug("received get import state request",
 		zap.Int64("taskID", req.GetTask()))
 	resp := &milvuspb.GetImportStateResponse{}
-	if !node.checkHealthy() {
-		resp.Status = unhealthyStatus()
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 	method := "GetImportState"
@@ -3767,7 +3764,7 @@ func (node *Proxy) GetImportState(ctx context.Context, req *milvuspb.GetImportSt
 		log.Error("failed to execute get import state",
 			zap.Error(err))
 		resp.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		resp.Status.Reason = err.Error()
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
@@ -3788,8 +3785,8 @@ func (node *Proxy) ListImportTasks(ctx context.Context, req *milvuspb.ListImport
 
 	log.Debug("received list import tasks request")
 	resp := &milvuspb.ListImportTasksResponse{}
-	if !node.checkHealthy() {
-		resp.Status = unhealthyStatus()
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 	method := "ListImportTasks"
@@ -3802,7 +3799,7 @@ func (node *Proxy) ListImportTasks(ctx context.Context, req *milvuspb.ListImport
 		log.Error("failed to execute list import tasks",
 			zap.Error(err))
 		resp.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		resp.Status.Reason = err.Error()
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
@@ -3824,7 +3821,7 @@ func (node *Proxy) InvalidateCredentialCache(ctx context.Context, request *proxy
 		zap.String("username", request.Username))
 
 	log.Debug("received request to invalidate credential cache")
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return unhealthyStatus(), nil
 	}
 
@@ -3847,7 +3844,7 @@ func (node *Proxy) UpdateCredentialCache(ctx context.Context, request *proxypb.U
 		zap.String("username", request.Username))
 
 	log.Debug("received request to update credential cache")
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return unhealthyStatus(), nil
 	}
 
@@ -3872,7 +3869,7 @@ func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCre
 
 	log.Debug("CreateCredential",
 		zap.String("role", typeutil.ProxyRole))
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return unhealthyStatus(), nil
 	}
 	// validate params
@@ -3933,7 +3930,7 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 
 	log.Debug("UpdateCredential",
 		zap.String("role", typeutil.ProxyRole))
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return unhealthyStatus(), nil
 	}
 	rawOldPassword, err := crypto.Base64Decode(req.OldPassword)
@@ -4012,7 +4009,7 @@ func (node *Proxy) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCre
 
 	log.Debug("DeleteCredential",
 		zap.String("role", typeutil.ProxyRole))
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return unhealthyStatus(), nil
 	}
 
@@ -4039,7 +4036,7 @@ func (node *Proxy) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUser
 		zap.String("role", typeutil.ProxyRole))
 
 	log.Debug("ListCredUsers")
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return &milvuspb.ListCredUsersResponse{Status: unhealthyStatus()}, nil
 	}
 	rootCoordReq := &milvuspb.ListCredUsersRequest{
@@ -4372,7 +4369,7 @@ func (node *Proxy) SetRates(ctx context.Context, request *proxypb.SetRatesReques
 	resp := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 	}
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		resp = unhealthyStatus()
 		return resp, nil
 	}
@@ -4388,7 +4385,7 @@ func (node *Proxy) SetRates(ctx context.Context, request *proxypb.SetRatesReques
 }
 
 func (node *Proxy) CheckHealth(ctx context.Context, request *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		reason := errorutil.UnHealthReason("proxy", node.session.ServerID, "proxy is unhealthy")
 		return &milvuspb.CheckHealthResponse{
 			Status:    unhealthyStatus(),
@@ -4468,7 +4465,7 @@ func (node *Proxy) RenameCollection(ctx context.Context, req *milvuspb.RenameCol
 	log.Info("received rename collection request")
 	var err error
 
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return unhealthyStatus(), nil
 	}
 
@@ -4498,7 +4495,7 @@ func (node *Proxy) RenameCollection(ctx context.Context, req *milvuspb.RenameCol
 }
 
 func (node *Proxy) CreateResourceGroup(ctx context.Context, request *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return unhealthyStatus(), nil
 	}
 
@@ -4566,7 +4563,7 @@ func getErrResponse(err error, method string) *commonpb.Status {
 }
 
 func (node *Proxy) DropResourceGroup(ctx context.Context, request *milvuspb.DropResourceGroupRequest) (*commonpb.Status, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return unhealthyStatus(), nil
 	}
 
@@ -4619,7 +4616,7 @@ func (node *Proxy) DropResourceGroup(ctx context.Context, request *milvuspb.Drop
 }
 
 func (node *Proxy) TransferNode(ctx context.Context, request *milvuspb.TransferNodeRequest) (*commonpb.Status, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return unhealthyStatus(), nil
 	}
 
@@ -4686,7 +4683,7 @@ func (node *Proxy) TransferNode(ctx context.Context, request *milvuspb.TransferN
 }
 
 func (node *Proxy) TransferReplica(ctx context.Context, request *milvuspb.TransferReplicaRequest) (*commonpb.Status, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return unhealthyStatus(), nil
 	}
 
@@ -4753,7 +4750,7 @@ func (node *Proxy) TransferReplica(ctx context.Context, request *milvuspb.Transf
 }
 
 func (node *Proxy) ListResourceGroups(ctx context.Context, request *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return &milvuspb.ListResourceGroupsResponse{
 			Status: unhealthyStatus(),
 		}, nil
@@ -4816,7 +4813,7 @@ func (node *Proxy) ListResourceGroups(ctx context.Context, request *milvuspb.Lis
 }
 
 func (node *Proxy) DescribeResourceGroup(ctx context.Context, request *milvuspb.DescribeResourceGroupRequest) (*milvuspb.DescribeResourceGroupResponse, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return &milvuspb.DescribeResourceGroupResponse{
 			Status: unhealthyStatus(),
 		}, nil
@@ -4897,7 +4894,7 @@ func (node *Proxy) DescribeSegmentIndexData(ctx context.Context, request *federp
 }
 
 func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest) (*milvuspb.ConnectResponse, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return &milvuspb.ConnectResponse{Status: unhealthyStatus()}, nil
 	}
 
@@ -4912,20 +4909,14 @@ func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest
 			commonpbutil.WithMsgType(commonpb.MsgType_ListDatabases),
 		),
 	})
+	if err == nil {
+		err = merr.Error(resp.GetStatus())
+	}
 
 	if err != nil {
 		log.Info("connect failed, failed to list databases", zap.Error(err))
 		return &milvuspb.ConnectResponse{
 			Status: merr.Status(err),
-		}, nil
-	}
-
-	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Info("connect failed, failed to list databases",
-			zap.String("code", resp.GetStatus().GetErrorCode().String()),
-			zap.String("reason", resp.GetStatus().GetReason()))
-		return &milvuspb.ConnectResponse{
-			Status: proto.Clone(resp.GetStatus()).(*commonpb.Status),
 		}, nil
 	}
 
@@ -4966,7 +4957,7 @@ func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest
 }
 
 func (node *Proxy) ListClientInfos(ctx context.Context, req *proxypb.ListClientInfosRequest) (*proxypb.ListClientInfosResponse, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return &proxypb.ListClientInfosResponse{Status: unhealthyStatus()}, nil
 	}
 
@@ -4979,7 +4970,7 @@ func (node *Proxy) ListClientInfos(ctx context.Context, req *proxypb.ListClientI
 }
 
 func (node *Proxy) AllocTimestamp(ctx context.Context, req *milvuspb.AllocTimestampRequest) (*milvuspb.AllocTimestampResponse, error) {
-	if !node.checkHealthy() {
+	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		return &milvuspb.AllocTimestampResponse{Status: unhealthyStatus()}, nil
 	}
 

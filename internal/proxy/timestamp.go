@@ -67,7 +67,7 @@ func (ta *timestampAllocator) alloc(ctx context.Context, count uint32) ([]Timest
 		return nil, fmt.Errorf("syncTimestamp Failed:%w", err)
 	}
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return nil, fmt.Errorf("syncTimeStamp Failed:%s", resp.Status.Reason)
+		return nil, fmt.Errorf("syncTimeStamp Failed:%s", resp.GetStatus().GetReason())
 	}
 	if resp == nil {
 		return nil, fmt.Errorf("empty AllocTimestampResponse")

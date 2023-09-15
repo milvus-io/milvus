@@ -202,7 +202,7 @@ func (b *ServerBroker) Flush(ctx context.Context, cID int64, segIDs []int64) err
 		return errors.New("failed to call flush to data coordinator: " + err.Error())
 	}
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return errors.New(resp.Status.Reason)
+		return errors.New(resp.GetStatus().GetReason())
 	}
 	log.Info("flush on collection succeed", zap.Int64("collectionID", cID))
 	return nil
@@ -251,7 +251,7 @@ func (b *ServerBroker) GetSegmentIndexState(ctx context.Context, collID UniqueID
 		return nil, err
 	}
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return nil, errors.New(resp.Status.Reason)
+		return nil, errors.New(resp.GetStatus().GetReason())
 	}
 
 	return resp.GetStates(), nil

@@ -69,7 +69,7 @@ func TestSearchTask_PostExecute(t *testing.T) {
 
 		err := qt.PostExecute(context.TODO())
 		assert.NoError(t, err)
-		assert.Equal(t, qt.result.Status.ErrorCode, commonpb.ErrorCode_Success)
+		assert.Equal(t, qt.result.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	})
 }
 

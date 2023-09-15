@@ -435,7 +435,7 @@ func (hct *hasCollectionTask) Execute(ctx context.Context) error {
 		return errors.New("has collection resp is nil")
 	}
 	if hct.result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return errors.New(hct.result.Status.Reason)
+		return errors.New(hct.result.GetStatus().GetReason())
 	}
 	return nil
 }
@@ -529,7 +529,7 @@ func (dct *describeCollectionTask) Execute(ctx context.Context) error {
 		err := merr.Error(dct.result.GetStatus())
 		if errors.Is(err, merr.ErrCollectionNotFound) {
 			dct.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			dct.result.Status.Reason = "can't find collection " + dct.result.Status.Reason
+			dct.result.Status.Reason = "can't find collection " + dct.result.GetStatus().GetReason()
 		}
 	} else {
 		dct.result.Schema.Name = result.Schema.Name
@@ -646,7 +646,7 @@ func (sct *showCollectionsTask) Execute(ctx context.Context) error {
 	}
 
 	if respFromRootCoord.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return errors.New(respFromRootCoord.Status.Reason)
+		return errors.New(respFromRootCoord.GetStatus().GetReason())
 	}
 
 	if sct.GetType() == milvuspb.ShowType_InMemory {
@@ -685,7 +685,7 @@ func (sct *showCollectionsTask) Execute(ctx context.Context) error {
 
 		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 			// update collectionID to collection name, and return new error info to sdk
-			newErrorReason := resp.Status.Reason
+			newErrorReason := resp.GetStatus().GetReason()
 			for _, collectionID := range collectionIDs {
 				newErrorReason = ReplaceID2Name(newErrorReason, collectionID, IDs2Names[collectionID])
 			}
@@ -1060,7 +1060,7 @@ func (hpt *hasPartitionTask) Execute(ctx context.Context) (err error) {
 		return err
 	}
 	if hpt.result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return errors.New(hpt.result.Status.Reason)
+		return errors.New(hpt.result.GetStatus().GetReason())
 	}
 	return err
 }
@@ -1145,7 +1145,7 @@ func (spt *showPartitionsTask) Execute(ctx context.Context) error {
 	}
 
 	if respFromRootCoord.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return errors.New(respFromRootCoord.Status.Reason)
+		return errors.New(respFromRootCoord.GetStatus().GetReason())
 	}
 
 	if spt.GetType() == milvuspb.ShowType_InMemory {
@@ -1189,7 +1189,7 @@ func (spt *showPartitionsTask) Execute(ctx context.Context) error {
 		}
 
 		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			return errors.New(resp.Status.Reason)
+			return errors.New(resp.GetStatus().GetReason())
 		}
 
 		spt.result = &milvuspb.ShowPartitionsResponse{
@@ -1305,7 +1305,7 @@ func (ft *flushTask) Execute(ctx context.Context) error {
 			return fmt.Errorf("failed to call flush to data coordinator: %s", err.Error())
 		}
 		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			return errors.New(resp.Status.Reason)
+			return errors.New(resp.GetStatus().GetReason())
 		}
 		coll2Segments[collName] = &schemapb.LongArray{Data: resp.GetSegmentIDs()}
 		flushColl2Segments[collName] = &schemapb.LongArray{Data: resp.GetFlushSegmentIDs()}
@@ -1421,7 +1421,7 @@ func (lct *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		return err
 	}
 	if indexResponse.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return errors.New(indexResponse.Status.Reason)
+		return errors.New(indexResponse.GetStatus().GetReason())
 	}
 
 	hasVecIndex := false
@@ -1649,7 +1649,7 @@ func (lpt *loadPartitionsTask) Execute(ctx context.Context) error {
 		return err
 	}
 	if indexResponse.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return errors.New(indexResponse.Status.Reason)
+		return errors.New(indexResponse.GetStatus().GetReason())
 	}
 
 	hasVecIndex := false

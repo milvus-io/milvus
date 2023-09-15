@@ -334,7 +334,7 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 					log.Warn("sendChannelsTimeTickLoop.UpdateChannelTimeTick", zap.Error(err))
 					continue
 				}
-				if status.ErrorCode != 0 {
+				if status.GetErrorCode() != 0 {
 					log.Warn("sendChannelsTimeTickLoop.UpdateChannelTimeTick",
 						zap.Any("ErrorCode", status.ErrorCode),
 						zap.Any("Reason", status.Reason))

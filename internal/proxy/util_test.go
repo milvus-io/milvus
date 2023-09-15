@@ -1647,7 +1647,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 	case4.schema.Fields[0].IsPrimaryKey = true
 	case4.schema.Fields[0].AutoID = true
 	_, err = checkPrimaryFieldData(case4.schema, case4.result, case4.insertMsg, false)
-	assert.Equal(t, commonpb.ErrorCode_UpsertAutoIDTrue, case4.result.Status.ErrorCode)
+	assert.Equal(t, commonpb.ErrorCode_UpsertAutoIDTrue, case4.result.GetStatus().GetErrorCode())
 	assert.NotEqual(t, nil, err)
 
 	// primary field data is nil, GetPrimaryFieldData fail
