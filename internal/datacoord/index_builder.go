@@ -356,24 +356,24 @@ func (ib *indexBuilder) getTaskState(buildID, nodeID UniqueID) indexTaskState {
 		}
 		if response.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 			log.Ctx(ib.ctx).Warn("IndexCoord get jobs info from IndexNode fail", zap.Int64("nodeID", nodeID),
-				zap.Int64("buildID", buildID), zap.String("fail reason", response.Status.Reason))
+				zap.Int64("buildID", buildID), zap.String("fail reason", response.GetStatus().GetReason()))
 			return indexTaskInProgress
 		}
 
 		// indexInfos length is always one.
-		for _, info := range response.IndexInfos {
-			if info.BuildID == buildID {
-				if info.State == commonpb.IndexState_Failed || info.State == commonpb.IndexState_Finished {
-					log.Ctx(ib.ctx).Info("this task has been finished", zap.Int64("buildID", info.BuildID),
-						zap.String("index state", info.State.String()))
+		for _, info := range response.GetIndexInfos() {
+			if info.GetBuildID() == buildID {
+				if info.GetState() == commonpb.IndexState_Failed || info.GetState() == commonpb.IndexState_Finished {
+					log.Ctx(ib.ctx).Info("this task has been finished", zap.Int64("buildID", info.GetBuildID()),
+						zap.String("index state", info.GetState().String()))
 					if err := ib.meta.FinishTask(info); err != nil {
-						log.Ctx(ib.ctx).Warn("IndexCoord update index state fail", zap.Int64("buildID", info.BuildID),
-							zap.String("index state", info.State.String()), zap.Error(err))
+						log.Ctx(ib.ctx).Warn("IndexCoord update index state fail", zap.Int64("buildID", info.GetBuildID()),
+							zap.String("index state", info.GetState().String()), zap.Error(err))
 						return indexTaskInProgress
 					}
 					return indexTaskDone
-				} else if info.State == commonpb.IndexState_Retry || info.State == commonpb.IndexState_IndexStateNone {
-					log.Ctx(ib.ctx).Info("this task should be retry", zap.Int64("buildID", buildID), zap.String("fail reason", info.FailReason))
+				} else if info.GetState() == commonpb.IndexState_Retry || info.GetState() == commonpb.IndexState_IndexStateNone {
+					log.Ctx(ib.ctx).Info("this task should be retry", zap.Int64("buildID", buildID), zap.String("fail reason", info.GetFailReason()))
 					return indexTaskRetry
 				}
 				return indexTaskInProgress
@@ -403,9 +403,9 @@ func (ib *indexBuilder) dropIndexTask(buildID, nodeID UniqueID) bool {
 				zap.Int64("nodeID", nodeID), zap.Error(err))
 			return false
 		}
-		if status.ErrorCode != commonpb.ErrorCode_Success {
+		if status.GetErrorCode() != commonpb.ErrorCode_Success {
 			log.Ctx(ib.ctx).Warn("IndexCoord notify IndexNode drop the index task fail", zap.Int64("buildID", buildID),
-				zap.Int64("nodeID", nodeID), zap.String("fail reason", status.Reason))
+				zap.Int64("nodeID", nodeID), zap.String("fail reason", status.GetReason()))
 			return false
 		}
 		log.Ctx(ib.ctx).Info("IndexCoord notify IndexNode drop the index task success",
@@ -428,9 +428,9 @@ func (ib *indexBuilder) assignTask(builderClient types.IndexNode, req *indexpb.C
 		return err
 	}
 
-	if resp.ErrorCode != commonpb.ErrorCode_Success {
-		log.Error("IndexCoord assignmentTasksLoop builderClient.CreateIndex failed", zap.String("Reason", resp.Reason))
-		return errors.New(resp.Reason)
+	if resp.GetErrorCode() != commonpb.ErrorCode_Success {
+		log.Error("IndexCoord assignmentTasksLoop builderClient.CreateIndex failed", zap.String("Reason", resp.GetReason()))
+		return errors.New(resp.GetReason())
 	}
 	return nil
 }
