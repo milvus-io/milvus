@@ -74,6 +74,7 @@ func TestDatabaseInterceptor(t *testing.T) {
 			&milvuspb.DeleteRequest{},
 			&milvuspb.SearchRequest{},
 			&milvuspb.FlushRequest{},
+			&milvuspb.GetFlushStateRequest{},
 			&milvuspb.QueryRequest{},
 			&milvuspb.CreateAliasRequest{},
 			&milvuspb.DropAliasRequest{},
@@ -113,7 +114,6 @@ func TestDatabaseInterceptor(t *testing.T) {
 			&milvuspb.GetCompactionStateRequest{},
 			&milvuspb.ManualCompactionRequest{},
 			&milvuspb.GetCompactionPlansRequest{},
-			&milvuspb.GetFlushStateRequest{},
 			&milvuspb.GetFlushAllStateRequest{},
 			&milvuspb.GetImportStateRequest{},
 		}
