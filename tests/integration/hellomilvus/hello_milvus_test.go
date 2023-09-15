@@ -94,9 +94,7 @@ func (s *HelloMilvusSuite) TestHelloMilvus() {
 	s.NoError(err)
 	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
 	ids := segmentIDs.GetData()
-	s.Require().NotEmpty(segmentIDs)
-	s.Require().True(has)
-	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
+	s.NotEmpty(segmentIDs)
 	s.True(has)
 
 	segments, err := c.MetaWatcher.ShowSegments()
@@ -105,7 +103,7 @@ func (s *HelloMilvusSuite) TestHelloMilvus() {
 	for _, segment := range segments {
 		log.Info("ShowSegments result", zap.String("segment", segment.String()))
 	}
-	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
+	s.WaitForFlush(ctx, ids)
 
 	// create index
 	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
