@@ -149,14 +149,12 @@ func (s *TestGetVectorSuite) run() {
 	ids := segmentIDs.GetData()
 	s.Require().NotEmpty(segmentIDs)
 	s.Require().True(has)
-	flushTs, has := flushResp.GetCollFlushTs()[collection]
-	s.Require().True(has)
 
 	segments, err := s.Cluster.MetaWatcher.ShowSegments()
 	s.Require().NoError(err)
 	s.Require().NotEmpty(segments)
 
-	s.WaitForFlush(ctx, ids, flushTs, s.dbName, collection)
+	s.WaitForFlush(ctx, ids)
 
 	// create index
 	_, err = s.Cluster.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{

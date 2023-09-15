@@ -99,11 +99,7 @@ type Channel interface {
 
 	// getTotalMemorySize returns the sum of memory sizes of segments.
 	getTotalMemorySize() int64
-	setIsHighMemory(b bool)
-	getIsHighMemory() bool
-
-	getFlushTs() Timestamp
-	setFlushTs(ts Timestamp)
+	forceToSync()
 
 	close()
 }
@@ -118,15 +114,7 @@ type ChannelMeta struct {
 	segMu    sync.RWMutex
 	segments map[UniqueID]*Segment
 
-	// isHighMemory is intended to trigger the syncing of segments
-	// when segment's buffer consumes a significant amount of memory.
-	isHighMemory *atomic.Bool
-
-	// flushTs is intended to trigger:
-	// 1. the syncing of segments when consumed ts exceeds flushTs;
-	// 2. the updating of channelCP when channelCP exceeds flushTs.
-	flushTs *atomic.Uint64
-
+	needToSync   *atomic.Bool
 	syncPolicies []segmentSyncPolicy
 
 	metaService  *metaService
@@ -159,12 +147,10 @@ func newChannel(channelName string, collID UniqueID, schema *schemapb.Collection
 
 		segments: make(map[UniqueID]*Segment),
 
-		isHighMemory: atomic.NewBool(false),
-		flushTs:      atomic.NewUint64(math.MaxUint64),
+		needToSync: atomic.NewBool(false),
 		syncPolicies: []segmentSyncPolicy{
 			syncPeriodically(),
 			syncMemoryTooHigh(),
-			syncSegmentsAtTs(),
 		},
 
 		metaService:  metaService,
@@ -293,7 +279,7 @@ func (c *ChannelMeta) listSegmentIDsToSync(ts Timestamp) []UniqueID {
 
 	segIDsToSync := typeutil.NewUniqueSet()
 	for _, policy := range c.syncPolicies {
-		segments := policy(validSegs, c, ts)
+		segments := policy(validSegs, ts, c.needToSync)
 		for _, segID := range segments {
 			segIDsToSync.Insert(segID)
 		}
@@ -811,7 +797,6 @@ func (c *ChannelMeta) listNotFlushedSegmentIDs() []UniqueID {
 }
 
 func (c *ChannelMeta) getChannelCheckpoint(ttPos *msgpb.MsgPosition) *msgpb.MsgPosition {
-	log := log.With().WithRateGroup("ChannelMeta", 1, 60)
 	c.segMu.RLock()
 	defer c.segMu.RUnlock()
 	channelCP := &msgpb.MsgPosition{Timestamp: math.MaxUint64}
@@ -833,7 +818,8 @@ func (c *ChannelMeta) getChannelCheckpoint(ttPos *msgpb.MsgPosition) *msgpb.MsgP
 				channelCP = db.startPos
 			}
 		}
-		log.RatedDebug(10, "getChannelCheckpoint for segment", zap.Int64("segmentID", seg.segmentID),
+		// TODO: maybe too many logs would print
+		log.Debug("getChannelCheckpoint for segment", zap.Int64("segmentID", seg.segmentID),
 			zap.Bool("isCurIBEmpty", seg.curInsertBuf == nil),
 			zap.Bool("isCurDBEmpty", seg.curDeleteBuf == nil),
 			zap.Int("len(hisIB)", len(seg.historyInsertBuf)),
@@ -940,12 +926,8 @@ func (c *ChannelMeta) evictHistoryDeleteBuffer(segmentID UniqueID, endPos *msgpb
 	log.Warn("cannot find segment when evictHistoryDeleteBuffer", zap.Int64("segmentID", segmentID))
 }
 
-func (c *ChannelMeta) setIsHighMemory(b bool) {
-	c.isHighMemory.Store(b)
-}
-
-func (c *ChannelMeta) getIsHighMemory() bool {
-	return c.isHighMemory.Load()
+func (c *ChannelMeta) forceToSync() {
+	c.needToSync.Store(true)
 }
 
 func (c *ChannelMeta) getTotalMemorySize() int64 {
@@ -956,14 +938,6 @@ func (c *ChannelMeta) getTotalMemorySize() int64 {
 		res += segment.memorySize
 	}
 	return res
-}
-
-func (c *ChannelMeta) getFlushTs() Timestamp {
-	return c.flushTs.Load()
-}
-
-func (c *ChannelMeta) setFlushTs(ts Timestamp) {
-	c.flushTs.Store(ts)
 }
 
 func (c *ChannelMeta) close() {
