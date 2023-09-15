@@ -22,6 +22,7 @@
 #include "common/Consts.h"
 #include "fmt/format.h"
 #include "storage/FieldData.h"
+#include "storage/InsertData.h"
 #include "storage/FieldDataInterface.h"
 #include "storage/ThreadPools.h"
 #include "storage/LocalChunkManager.h"
@@ -398,6 +399,25 @@ EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
     indexData->set_index_meta(index_meta);
     indexData->SetFieldDataMeta(field_meta);
     auto serialized_index_data = indexData->serialize_to_remote_file();
+    auto serialized_index_size = serialized_index_data.size();
+    chunk_manager->Write(
+        object_key, serialized_index_data.data(), serialized_index_size);
+    return std::make_pair(std::move(object_key), serialized_index_size);
+}
+
+std::pair<std::string, size_t>
+EncodeAndUploadFieldSlice(ChunkManager* chunk_manager,
+                          uint8_t* buf,
+                          int64_t element_count,
+                          FieldDataMeta field_data_meta,
+                          const FieldMeta& field_meta,
+                          std::string object_key) {
+    auto field_data =
+        CreateFieldData(field_meta.get_data_type(), field_meta.get_dim(), 0);
+    field_data->FillFieldData(buf, element_count);
+    auto insertData = std::make_shared<InsertData>(field_data);
+    insertData->SetFieldDataMeta(field_data_meta);
+    auto serialized_index_data = insertData->serialize_to_remote_file();
     auto serialized_index_size = serialized_index_data.size();
     chunk_manager->Write(
         object_key, serialized_index_data.data(), serialized_index_size);

@@ -39,6 +39,7 @@ AppendLoadFieldInfo(CLoadFieldDataInfo c_load_field_data_info,
 CStatus
 AppendLoadFieldDataPath(CLoadFieldDataInfo c_load_field_data_info,
                         int64_t field_id,
+                        int64_t entries_num,
                         const char* file_path);
 
 void

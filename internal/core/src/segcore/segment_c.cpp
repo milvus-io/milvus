@@ -366,3 +366,21 @@ DropSealedSegmentIndex(CSegmentInterface c_segment, int64_t field_id) {
         return milvus::FailureCStatus(&e);
     }
 }
+
+CStatus
+AddFieldDataInfoForSealed(CSegmentInterface c_segment,
+                          CLoadFieldDataInfo c_load_field_data_info) {
+    try {
+        auto segment_interface =
+            reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        auto segment =
+            dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
+        AssertInfo(segment != nullptr, "segment conversion failed");
+        auto load_info =
+            static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
+        segment->AddFieldDataInfoForSealed(*load_info);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
+    }
+}

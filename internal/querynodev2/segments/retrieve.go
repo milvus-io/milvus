@@ -56,10 +56,6 @@ func retrieveOnSegments(ctx context.Context, segments []Segment, segType Segment
 				errs[i] = err
 				return
 			}
-			if err = seg.ValidateIndexedFieldsData(ctx, result); err != nil {
-				errs[i] = err
-				return
-			}
 			errs[i] = nil
 			resultCh <- result
 			metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),

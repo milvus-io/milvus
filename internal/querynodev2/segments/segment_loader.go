@@ -584,6 +584,9 @@ func (loader *segmentLoader) loadSegment(ctx context.Context,
 		if err := loader.loadSealedSegmentFields(ctx, segment, fieldBinlogs, loadInfo.GetNumOfRows()); err != nil {
 			return err
 		}
+		if err := segment.AddFieldDataInfo(loadInfo.GetNumOfRows(), loadInfo.GetBinlogPaths()); err != nil {
+			return err
+		}
 		// https://github.com/milvus-io/milvus/23654
 		// legacy entry num = 0
 		if err := loader.patchEntryNumber(ctx, segment, loadInfo); err != nil {

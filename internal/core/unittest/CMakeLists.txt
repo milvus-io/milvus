@@ -55,7 +55,9 @@ set(MILVUS_TEST_FILES
         test_offset_ordered_map.cpp
         test_offset_ordered_array.cpp
         test_always_true_expr.cpp
-        test_plan_proto.cpp)
+        test_plan_proto.cpp
+        test_chunk_cache.cpp
+        )
 
 if ( BUILD_DISK_ANN STREQUAL "ON" )
     set(MILVUS_TEST_FILES

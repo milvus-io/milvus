@@ -16,45 +16,44 @@
 
 #pragma once
 
-#include <memory>
-#include <mutex>
 #include <shared_mutex>
-
-#include "storage/ChunkManager.h"
-#include "storage/LocalChunkManager.h"
+#include "ChunkCache.h"
+#include "RemoteChunkManagerSingleton.h"
 
 namespace milvus::storage {
 
-class LocalChunkManagerSingleton {
+class ChunkCacheSingleton {
  private:
-    LocalChunkManagerSingleton() {
+    ChunkCacheSingleton() {
     }
 
  public:
-    LocalChunkManagerSingleton(const LocalChunkManagerSingleton&) = delete;
-    LocalChunkManagerSingleton&
-    operator=(const LocalChunkManagerSingleton&) = delete;
+    ChunkCacheSingleton(const ChunkCacheSingleton&) = delete;
+    ChunkCacheSingleton&
+    operator=(const ChunkCacheSingleton&) = delete;
 
-    static LocalChunkManagerSingleton&
+    static ChunkCacheSingleton&
     GetInstance() {
-        static LocalChunkManagerSingleton instance;
+        static ChunkCacheSingleton instance;
         return instance;
     }
 
     void
-    Init(std::string root_path) {
-        if (lcm_ == nullptr) {
-            lcm_ = std::make_shared<LocalChunkManager>(root_path);
+    Init(const std::string& root_path) {
+        if (cc_ == nullptr) {
+            auto rcm = RemoteChunkManagerSingleton::GetInstance()
+                           .GetRemoteChunkManager();
+            cc_ = std::make_shared<ChunkCache>(root_path, rcm);
         }
     }
 
-    LocalChunkManagerSPtr
-    GetChunkManager() {
-        return lcm_;
+    ChunkCachePtr
+    GetChunkCache() {
+        return cc_;
     }
 
  private:
-    LocalChunkManagerSPtr lcm_ = nullptr;
+    ChunkCachePtr cc_ = nullptr;
 };
 
 }  // namespace milvus::storage

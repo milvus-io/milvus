@@ -36,6 +36,7 @@
 #include "storage/FieldData.h"
 #include "storage/Util.h"
 #include "storage/ThreadPools.h"
+#include "storage/ChunkCacheSingleton.h"
 #include "common/File.h"
 #include "common/Tracer.h"
 
@@ -460,6 +461,13 @@ SegmentSealedImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     deleted_record_.push(pks, timestamps);
 }
 
+void
+SegmentSealedImpl::AddFieldDataInfoForSealed(
+    const LoadFieldDataInfo& field_data_info) {
+    // copy assignment
+    field_data_info_ = field_data_info;
+}
+
 // internal API: support scalar index only
 int64_t
 SegmentSealedImpl::num_chunk_index(FieldId field_id) const {
@@ -600,12 +608,34 @@ SegmentSealedImpl::vector_search(SearchInfo& search_info,
     }
 }
 
+std::tuple<std::string, int64_t>
+SegmentSealedImpl::GetFieldDataPath(FieldId field_id, int64_t offset) const {
+    auto offset_in_binlog = offset;
+    auto data_path = std::string();
+    auto it = field_data_info_.field_infos.find(field_id.get());
+    AssertInfo(it != field_data_info_.field_infos.end(),
+               fmt::format("cannot find binlog file for field: {}, seg: {}",
+                           field_id.get(),
+                           id_));
+    auto field_info = it->second;
+
+    for (auto i = 0; i < field_info.insert_files.size(); i++) {
+        if (offset_in_binlog < field_info.entries_nums[i]) {
+            data_path = field_info.insert_files[i];
+            break;
+        } else {
+            offset_in_binlog -= field_info.entries_nums[i];
+        }
+    }
+    return {data_path, offset_in_binlog};
+}
+
 std::unique_ptr<DataArray>
 SegmentSealedImpl::get_vector(FieldId field_id,
                               const int64_t* ids,
                               int64_t count) const {
-    auto& filed_meta = schema_->operator[](field_id);
-    AssertInfo(filed_meta.is_vector(), "vector field is not vector type");
+    auto& field_meta = schema_->operator[](field_id);
+    AssertInfo(field_meta.is_vector(), "vector field is not vector type");
 
     if (get_bit(index_ready_bitset_, field_id)) {
         AssertInfo(vector_indexings_.is_ready(field_id),
@@ -619,10 +649,57 @@ SegmentSealedImpl::get_vector(FieldId field_id,
         auto has_raw_data = vec_index->HasRawData();
 
         if (has_raw_data) {
+            // If index has raw data, get vector from memory.
             auto ids_ds = GenIdsDataset(count, ids);
             auto vector = vec_index->GetVector(ids_ds);
             return segcore::CreateVectorDataArrayFrom(
-                vector.data(), count, filed_meta);
+                vector.data(), count, field_meta);
+        } else {
+            // If index doesn't have raw data, get vector from chunk cache.
+            auto cc =
+                storage::ChunkCacheSingleton::GetInstance().GetChunkCache();
+
+            // group by data_path
+            auto id_to_data_path =
+                std::unordered_map<std::int64_t,
+                                   std::tuple<std::string, int64_t>>{};
+            auto path_to_column =
+                std::unordered_map<std::string, std::shared_ptr<ColumnBase>>{};
+            for (auto i = 0; i < count; i++) {
+                const auto& tuple = GetFieldDataPath(field_id, ids[i]);
+                id_to_data_path.emplace(ids[i], tuple);
+                path_to_column.emplace(std::get<0>(tuple), nullptr);
+            }
+
+            // read and prefetch
+            for (const auto& iter : path_to_column) {
+                auto data_path = iter.first;
+                const auto& column = cc->Read(data_path);
+                cc->Prefetch(data_path);
+                path_to_column[data_path] = column;
+            }
+
+            // assign to data array
+            auto dim = field_meta.get_dim();
+            auto row_bytes = field_meta.is_vector() ? dim * 4 : dim / 8;
+            auto buf = std::vector<char>(count * row_bytes);
+            for (auto i = 0; i < count; i++) {
+                AssertInfo(id_to_data_path.count(ids[i]) != 0, "id not found");
+                const auto& [data_path, offset_in_binlog] =
+                    id_to_data_path.at(ids[i]);
+                AssertInfo(path_to_column.count(data_path) != 0,
+                           "column not found");
+                const auto& column = path_to_column.at(data_path);
+                AssertInfo(
+                    offset_in_binlog * row_bytes < column->ByteSize(),
+                    fmt::format("column idx out of range, idx: {}, size: {}",
+                                offset_in_binlog * row_bytes,
+                                column->ByteSize()));
+                auto vector = &column->Data()[offset_in_binlog * row_bytes];
+                std::memcpy(buf.data() + i * row_bytes, vector, row_bytes);
+            }
+            return segcore::CreateVectorDataArrayFrom(
+                buf.data(), count, field_meta);
         }
     }
 
@@ -703,6 +780,19 @@ SegmentSealedImpl::SegmentSealedImpl(SchemaPtr schema, int64_t segment_id)
       index_ready_bitset_(schema->size()),
       scalar_indexings_(schema->size()),
       id_(segment_id) {
+}
+
+SegmentSealedImpl::~SegmentSealedImpl() {
+    auto cc = storage::ChunkCacheSingleton::GetInstance().GetChunkCache();
+    if (cc == nullptr) {
+        return;
+    }
+    // munmap and remove binlog from chunk cache
+    for (const auto& iter : field_data_info_.field_infos) {
+        for (const auto& binlog : iter.second.insert_files) {
+            cc->Remove(binlog);
+        }
+    }
 }
 
 void

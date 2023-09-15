@@ -182,9 +182,15 @@ func (mr *MilvusRoles) runQueryCoord(ctx context.Context, localMsg bool, wg *syn
 
 func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool, wg *sync.WaitGroup) component {
 	wg.Add(1)
+	// clear local storage
 	rootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
 	queryDataLocalPath := filepath.Join(rootPath, typeutil.QueryNodeRole)
 	cleanLocalDir(queryDataLocalPath)
+	// clear mmap dir
+	mmapDir := paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue()
+	if len(mmapDir) > 0 {
+		cleanLocalDir(mmapDir)
+	}
 
 	return runComponent(ctx, localMsg, wg, components.NewQueryNode, metrics.RegisterQueryNode)
 }
