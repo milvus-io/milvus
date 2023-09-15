@@ -67,7 +67,14 @@ type grpcConfig struct {
 
 func (p *grpcConfig) init(domain string, base *BaseTable) {
 	p.Domain = domain
-	p.IP = funcutil.GetLocalIP()
+	ipItem := ParamItem{
+		Key:          p.Domain + ".ip",
+		Version:      "2.3.3",
+		DefaultValue: "",
+		Export:       true,
+	}
+	ipItem.Init(base.mgr)
+	p.IP = funcutil.GetIP(ipItem.GetValue())
 
 	p.Port = ParamItem{
 		Key:          p.Domain + ".port",

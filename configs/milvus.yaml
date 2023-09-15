@@ -168,6 +168,9 @@ rootCoord:
   importTaskExpiration: 900 # (in seconds) Duration after which an import task will expire (be killed). Default 900 seconds (15 minutes).
   importTaskRetention: 86400 # (in seconds) Milvus will keep the record of import tasks for at least `importTaskRetention` seconds. Default 86400, seconds (24 hours).
   enableActiveStandby: false
+  # can specify ip for example
+  # ip: 127.0.0.1
+  ip: # if not specify address, will use the first unicastable address as local ip
   port: 53100
   grpc:
     serverMaxSendSize: 536870912
@@ -199,6 +202,9 @@ proxy:
   http:
     enabled: true # Whether to enable the http server
     debug_mode: false # Whether to enable http server debug mode
+  # can specify ip for example
+  # ip: 127.0.0.1
+  ip: # if not specify address, will use the first unicastable address as local ip
   port: 19530
   internalPort: 19529
   grpc:
@@ -225,6 +231,9 @@ queryCoord:
   heartbeatAvailableInterval: 10000 # 10s, Only QueryNodes which fetched heartbeats within the duration are available
   loadTimeoutSeconds: 600
   checkHandoffInterval: 5000
+  # can specify ip for example
+  # ip: 127.0.0.1
+  ip: # if not specify address, will use the first unicastable address as local ip
   port: 19531
   grpc:
     serverMaxSendSize: 536870912
@@ -292,6 +301,9 @@ queryNode:
       enableCrossUserGrouping: false # false by default Enable Cross user grouping when using user-task-polling policy. (close it if task of any user can not merge others).
       maxPendingTaskPerUser: 1024 # 50 by default, max pending task in scheduler per user.
 
+  # can specify ip for example
+  # ip: 127.0.0.1
+  ip: # if not specify address, will use the first unicastable address as local ip
   port: 21123
   grpc:
     serverMaxSendSize: 536870912
@@ -313,6 +325,9 @@ indexNode:
     buildParallel: 1
   enableDisk: true # enable index node build disk vector index
   maxDiskUsagePercentage: 95
+  # can specify ip for example
+  # ip: 127.0.0.1
+  ip: # if not specify address, will use the first unicastable address as local ip
   port: 21121
   grpc:
     serverMaxSendSize: 536870912
@@ -365,6 +380,9 @@ dataCoord:
     missingTolerance: 3600 # file meta missing tolerance duration in seconds, 3600
     dropTolerance: 10800 # file belongs to dropped entity tolerance duration in seconds. 10800
   enableActiveStandby: false
+  # can specify ip for example
+  # ip: 127.0.0.1
+  ip: # if not specify address, will use the first unicastable address as local ip
   port: 13333
   grpc:
     serverMaxSendSize: 536870912
@@ -382,6 +400,9 @@ dataNode:
     insertBufSize: 16777216 # Max buffer size to flush for a single segment.
     deleteBufBytes: 67108864 # Max buffer size to flush del for a single channel
     syncPeriod: 600 # The period to sync segments if buffer is not empty.
+  # can specify ip for example
+  # ip: 127.0.0.1
+  ip: # if not specify address, will use the first unicastable address as local ip
   port: 21124
   grpc:
     serverMaxSendSize: 536870912

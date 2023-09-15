@@ -49,6 +49,14 @@ func CheckGrpcReady(ctx context.Context, targetCh chan error) {
 	}
 }
 
+// GetIP return the ip address
+func GetIP(ip string) string {
+	if len(ip) == 0 {
+		return GetLocalIP()
+	}
+	return ip
+}
+
 // GetLocalIP return the local ip address
 func GetLocalIP() string {
 	addrs, err := net.InterfaceAddrs()
