@@ -19,7 +19,6 @@ package indexnode
 import (
 	"context"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -64,10 +63,7 @@ func getSystemInfoMetrics(
 	resp, err := metricsinfo.MarshalComponentInfos(nodeInfos)
 	if err != nil {
 		return &milvuspb.GetMetricsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status:        merr.Status(err),
 			Response:      "",
 			ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, paramtable.GetNodeID()),
 		}, nil

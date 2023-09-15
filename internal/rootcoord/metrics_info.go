@@ -21,7 +21,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
@@ -69,10 +68,7 @@ func (c *Core) getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetric
 			zap.Error(err))
 
 		return &milvuspb.GetMetricsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status:        merr.Status(err),
 			Response:      "",
 			ComponentName: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, c.session.ServerID),
 		}, nil

@@ -596,12 +596,9 @@ func (s *Server) SetSegmentState(ctx context.Context, req *datapb.SetSegmentStat
 	if err != nil {
 		log.Error("failed to updated segment state in dataCoord meta",
 			zap.Int64("segmentID", req.SegmentId),
-			zap.String("to state", req.GetNewState().String()))
+			zap.String("newState", req.GetNewState().String()))
 		return &datapb.SetSegmentStateResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 	return &datapb.SetSegmentStateResponse{
@@ -1013,15 +1010,12 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 		log.Warn("DataCoord.GetMetrics failed to parse metric type",
 			zap.Int64("nodeID", paramtable.GetNodeID()),
 			zap.String("req", req.Request),
-			zap.Error(err))
+			zap.Error(err),
+		)
 
 		return &milvuspb.GetMetricsResponse{
 			ComponentName: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, paramtable.GetNodeID()),
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
-			Response: "",
+			Status:        merr.Status(err),
 		}, nil
 	}
 
@@ -1030,10 +1024,7 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 		if err != nil {
 			log.Warn("DataCoord GetMetrics failed", zap.Int64("nodeID", paramtable.GetNodeID()), zap.Error(err))
 			return &milvuspb.GetMetricsResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    err.Error(),
-				},
+				Status: merr.Status(err),
 			}, nil
 		}
 
@@ -1598,10 +1589,7 @@ func (s *Server) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSe
 		log.Error("failed to get DataNode client for SaveImportSegment",
 			zap.Int64("DataNode ID", nodeID),
 			zap.Error(err))
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 	resp, err := cli.AddImportSegment(ctx,
 		&datapb.AddImportSegmentRequest{
@@ -1618,10 +1606,7 @@ func (s *Server) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSe
 		})
 	if err := VerifyResponse(resp.GetStatus(), err); err != nil {
 		log.Error("failed to add segment", zap.Int64("DataNode ID", nodeID), zap.Error(err))
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 	log.Info("succeed to add segment", zap.Int64("DataNode ID", nodeID), zap.Any("add segment req", req))
 	// Fill in start position message ID.
@@ -1631,10 +1616,7 @@ func (s *Server) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSe
 	rsp, err := s.SaveBinlogPaths(context.Background(), req.GetSaveBinlogPathReq())
 	if err := VerifyResponse(rsp, err); err != nil {
 		log.Error("failed to SaveBinlogPaths", zap.Error(err))
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 	return merr.Status(nil), nil
 }
@@ -1649,17 +1631,14 @@ func (s *Server) UnsetIsImportingState(ctx context.Context, req *datapb.UnsetIsI
 	for _, segID := range req.GetSegmentIds() {
 		if err := s.meta.UnsetIsImporting(segID); err != nil {
 			// Fail-open.
-			log.Error("failed to unset segment is importing state", zap.Int64("segmentID", segID))
+			log.Error("failed to unset segment is importing state",
+				zap.Int64("segmentID", segID),
+			)
 			reportErr = err
 		}
 	}
-	if reportErr != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    reportErr.Error(),
-		}, nil
-	}
-	return merr.Status(nil), nil
+
+	return merr.Status(reportErr), nil
 }
 
 // MarkSegmentsDropped marks the given segments as `Dropped`.

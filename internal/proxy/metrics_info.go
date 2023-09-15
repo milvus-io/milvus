@@ -20,7 +20,6 @@ import (
 	"context"
 	"sync"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
@@ -418,10 +417,7 @@ func getSystemInfoMetrics(
 	resp, err := metricsinfo.MarshalTopology(systemTopology)
 	if err != nil {
 		return &milvuspb.GetMetricsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status:        merr.Status(err),
 			Response:      "",
 			ComponentName: metricsinfo.ConstructComponentName(typeutil.ProxyRole, paramtable.GetNodeID()),
 		}, nil

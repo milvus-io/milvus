@@ -3412,10 +3412,7 @@ func (node *Proxy) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetrics
 				zap.Error(err))
 
 			return &milvuspb.GetMetricsResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    err.Error(),
-				},
+				Status: merr.Status(err),
 			}, nil
 		}
 
@@ -4485,10 +4482,7 @@ func (node *Proxy) RenameCollection(ctx context.Context, req *milvuspb.RenameCol
 	resp, err := node.rootCoord.RenameCollection(ctx, req)
 	if err != nil {
 		log.Warn("failed to rename collection", zap.Error(err))
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, err
+		return merr.Status(err), err
 	}
 
 	return resp, nil
