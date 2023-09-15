@@ -32,13 +32,11 @@ spec:
     image: milvusdb/milvus:2.2.0-20230208-2e4d64ec
     disableMetric: false
     dataNode:
-      replicas: 2
+      replicas: 3
     indexNode:
-      replicas: 2
+      replicas: 3
     queryNode:
-      replicas: 2
-    mixCoord:
-      replicas: 1
+      replicas: 3
   dependencies:
     msgStreamType: kafka
     etcd:
