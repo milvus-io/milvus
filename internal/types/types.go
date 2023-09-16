@@ -99,9 +99,6 @@ type DataNode interface {
 
 	// AddImportSegment puts the given import segment to current DataNode's flow graph.
 	AddImportSegment(ctx context.Context, req *datapb.AddImportSegmentRequest) (*datapb.AddImportSegmentResponse, error)
-
-	// FlushChannels notifies DataNode to sync all the segments belongs to the target channels.
-	FlushChannels(ctx context.Context, req *datapb.FlushChannelsRequest) (*commonpb.Status, error)
 }
 
 // DataNodeComponent is used by grpc server of DataNode
@@ -147,8 +144,7 @@ type DataCoord interface {
 	Component
 	TimeTickProvider
 
-	// Flush notifies DataCoord to flush all current growing segments of specified Collection,
-	// and flush all the buffers in DataNode and MsgStream into storage.
+	// Flush notifies DataCoord to flush all current growing segments of specified Collection
 	// ctx is the context to control request deadline and cancellation
 	// req contains the request params, which are database name(not used for now) and collection id
 	//
@@ -303,8 +299,8 @@ type DataCoord interface {
 
 	// WatchChannels notifies DataCoord to watch vchannels of a collection
 	WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error)
-	// GetFlushState gets the flush state of the collection based on the provided flush ts and segment IDs.
-	GetFlushState(ctx context.Context, req *datapb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error)
+	// GetFlushState gets the flush state of multiple segments
+	GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error)
 	// GetFlushAllState checks if all DML messages before `FlushAllTs` have been flushed.
 	GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error)
 	// SetSegmentState updates a segment's state explicitly.
@@ -1355,7 +1351,7 @@ type ProxyComponent interface {
 	GetCompactionState(ctx context.Context, req *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error)
 	ManualCompaction(ctx context.Context, req *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error)
 	GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error)
-	// GetFlushState gets the flush state of the collection based on the provided flush ts and segment IDs.
+	// GetFlushState gets the flush state of multiple segments
 	GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error)
 	// GetFlushAllState checks if all DML messages before `FlushAllTs` have been flushed.
 	GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error)

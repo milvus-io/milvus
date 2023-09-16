@@ -118,13 +118,11 @@ func (s *RefreshConfigSuite) TestRefreshDefaultIndexName() {
 	})
 	s.NoError(err)
 	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
-	ids := segmentIDs.GetData()
-	s.Require().NotEmpty(segmentIDs)
-	s.Require().True(has)
-	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
 	s.True(has)
+	ids := segmentIDs.GetData()
+	s.NotEmpty(segmentIDs)
 
-	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
+	s.WaitForFlush(ctx, ids)
 
 	_, err = c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,

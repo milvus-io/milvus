@@ -19,7 +19,6 @@ package datanode
 import (
 	"context"
 	"fmt"
-	"math"
 	"reflect"
 	"time"
 
@@ -74,40 +73,30 @@ func (ttn *ttNode) Operate(in []Msg) []Msg {
 	fgMsg := in[0].(*flowGraphMsg)
 	if fgMsg.IsCloseMsg() {
 		if len(fgMsg.endPositions) > 0 {
-			channelPos := ttn.channel.getChannelCheckpoint(fgMsg.endPositions[0])
 			log.Info("flowgraph is closing, force update channel CP",
-				zap.Time("cpTs", tsoutil.PhysicalTime(channelPos.GetTimestamp())),
-				zap.String("channel", channelPos.GetChannelName()))
-			ttn.updateChannelCP(channelPos)
+				zap.Uint64("endTs", fgMsg.endPositions[0].GetTimestamp()),
+				zap.String("channel", fgMsg.endPositions[0].GetChannelName()))
+			ttn.updateChannelCP(fgMsg.endPositions[0])
 		}
 		return in
 	}
 
 	curTs, _ := tsoutil.ParseTS(fgMsg.timeRange.timestampMax)
-	channelPos := ttn.channel.getChannelCheckpoint(fgMsg.endPositions[0])
-	log := log.With(zap.String("channel", ttn.vChannelName),
-		zap.Time("cpTs", tsoutil.PhysicalTime(channelPos.GetTimestamp())))
 	if curTs.Sub(ttn.lastUpdateTime) >= updateChanCPInterval {
-		if err := ttn.updateChannelCP(channelPos); err == nil {
-			ttn.lastUpdateTime = curTs
-			log.Info("update channel cp periodically")
-			return []Msg{}
-		}
-	}
-
-	if channelPos.GetTimestamp() >= ttn.channel.getFlushTs() {
-		if err := ttn.updateChannelCP(channelPos); err == nil {
-			ttn.lastUpdateTime = curTs
-			log.Info("update channel cp at updateTs", zap.Time("updateTs", tsoutil.PhysicalTime(ttn.channel.getFlushTs())))
-			ttn.channel.setFlushTs(math.MaxUint64)
-		}
+		ttn.updateChannelCP(fgMsg.endPositions[0])
+		ttn.lastUpdateTime = curTs
 	}
 
 	return []Msg{}
 }
 
-func (ttn *ttNode) updateChannelCP(channelPos *msgpb.MsgPosition) error {
-	channelCPTs, _ := tsoutil.ParseTS(channelPos.GetTimestamp())
+func (ttn *ttNode) updateChannelCP(ttPos *msgpb.MsgPosition) {
+	channelPos := ttn.channel.getChannelCheckpoint(ttPos)
+	if channelPos == nil || channelPos.MsgID == nil {
+		log.Warn("updateChannelCP failed, get nil check point", zap.String("vChannel", ttn.vChannelName))
+		return
+	}
+	channelCPTs, _ := tsoutil.ParseTS(channelPos.Timestamp)
 
 	ctx, cancel := context.WithTimeout(context.Background(), updateChanCPTimeout)
 	defer cancel()
@@ -121,14 +110,13 @@ func (ttn *ttNode) updateChannelCP(channelPos *msgpb.MsgPosition) error {
 	if err = funcutil.VerifyResponse(resp, err); err != nil {
 		log.Warn("UpdateChannelCheckpoint failed", zap.String("channel", ttn.vChannelName),
 			zap.Time("channelCPTs", channelCPTs), zap.Error(err))
-		return err
+		return
 	}
 
 	log.Info("UpdateChannelCheckpoint success",
 		zap.String("channel", ttn.vChannelName),
-		zap.Uint64("cpTs", channelPos.GetTimestamp()),
+		zap.Uint64("cpTs", channelPos.Timestamp),
 		zap.Time("cpTime", channelCPTs))
-	return nil
 }
 
 func newTTNode(config *nodeConfig, dc types.DataCoord) (*ttNode, error) {
