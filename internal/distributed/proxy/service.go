@@ -925,7 +925,7 @@ func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 	return s.proxy.GetCompactionStateWithPlans(ctx, req)
 }
 
-// GetFlushState gets the flush state of the collection based on the provided flush ts and segment IDs.
+// GetFlushState gets the flush state of multiple segments
 func (s *Server) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
 	return s.proxy.GetFlushState(ctx, req)
 }
