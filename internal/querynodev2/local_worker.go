@@ -87,7 +87,7 @@ func (w *LocalWorker) Delete(ctx context.Context, req *querypb.DeleteRequest) er
 		zap.Int64("collectionID", req.GetCollectionId()),
 		zap.Int64("segmentID", req.GetSegmentId()),
 	)
-	log.Info("start to process segment delete")
+	log.Debug("start to process segment delete")
 	status, err := w.node.Delete(ctx, req)
 	if err != nil {
 		return err

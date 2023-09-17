@@ -355,7 +355,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	}
 
 	req.Base.TargetID = req.GetDstNodeID()
-	log.Info("worker loads segments...")
+	log.Debug("worker loads segments...")
 
 	sLoad := func(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
 		segmentID := req.GetInfos()[0].GetSegmentID()
@@ -392,7 +392,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		log.Warn("worker failed to load segments", zap.Error(err))
 		return err
 	}
-	log.Info("work loads segments done")
+	log.Debug("work loads segments done")
 
 	// load index need no stream delete and distribution change
 	if req.GetLoadScope() == querypb.LoadScope_Index {
@@ -407,7 +407,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 			Version:     req.GetVersion(),
 		}
 	})
-	log.Info("load delete...")
+	log.Debug("load delete...")
 	err = sd.loadStreamDelete(ctx, candidates, infos, req.GetDeltaPositions(), targetNodeID, worker, entries)
 	if err != nil {
 		log.Warn("load stream delete failed", zap.Error(err))
