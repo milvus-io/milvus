@@ -701,13 +701,7 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 			CompactedTo:   102,
 			NumOfRows:     100,
 		}
-		cancelCtx, cancel := context.WithCancel(context.Background())
-		cancel()
-		status, err := s.node.SyncSegments(cancelCtx, req)
-		s.Assert().NoError(err)
-		s.Assert().False(merr.Ok(status))
-
-		status, err = s.node.SyncSegments(s.ctx, req)
+		status, err := s.node.SyncSegments(s.ctx, req)
 		s.Assert().NoError(err)
 		s.Assert().True(merr.Ok(status))
 

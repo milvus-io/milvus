@@ -60,15 +60,8 @@ import (
 )
 
 const (
-	// RPCConnectionTimeout is used to set the timeout for rpc request
-	RPCConnectionTimeout = 30 * time.Second
-
 	// ConnectEtcdMaxRetryTime is used to limit the max retry time for connection etcd
 	ConnectEtcdMaxRetryTime = 100
-
-	// ImportCallTimeout is the timeout used in Import() method calls
-	// This value is equal to RootCoord's task expire time
-	ImportCallTimeout = 15 * 60 * time.Second
 )
 
 var getFlowGraphServiceAttempts = uint(50)
