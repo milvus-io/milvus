@@ -76,7 +76,7 @@ type Channel interface {
 	listNewSegmentsStartPositions() []*datapb.SegmentStartPosition
 	transferNewSegments(segmentIDs []UniqueID)
 	updateSegmentPKRange(segID UniqueID, ids storage.FieldData)
-	mergeFlushedSegments(ctx context.Context, seg *Segment, planID UniqueID, compactedFrom []UniqueID) error
+	mergeFlushedSegments(ctx context.Context, seg *Segment, planID UniqueID, compactedFrom []UniqueID)
 	listCompactedSegmentIDs() map[UniqueID][]UniqueID
 	listSegmentIDsToSync(ts Timestamp) []UniqueID
 
@@ -678,7 +678,7 @@ func (c *ChannelMeta) getCollectionSchema(collID UniqueID, ts Timestamp) (*schem
 	return c.collSchema, nil
 }
 
-func (c *ChannelMeta) mergeFlushedSegments(ctx context.Context, seg *Segment, planID UniqueID, compactedFrom []UniqueID) error {
+func (c *ChannelMeta) mergeFlushedSegments(ctx context.Context, seg *Segment, planID UniqueID, compactedFrom []UniqueID) {
 	log := log.Ctx(ctx).With(
 		zap.Int64("segmentID", seg.segmentID),
 		zap.Int64("collectionID", seg.collectionID),
@@ -686,13 +686,6 @@ func (c *ChannelMeta) mergeFlushedSegments(ctx context.Context, seg *Segment, pl
 		zap.Int64s("compacted from", compactedFrom),
 		zap.Int64("planID", planID),
 		zap.String("channelName", c.channelName))
-
-	if seg.collectionID != c.collectionID {
-		log.Warn("failed to mergeFlushedSegments, collection mismatch",
-			zap.Int64("current collection ID", seg.collectionID),
-			zap.Int64("expected collection ID", c.collectionID))
-		return merr.WrapErrParameterInvalid(c.collectionID, seg.collectionID, "collection not match")
-	}
 
 	var inValidSegments []UniqueID
 	for _, ID := range compactedFrom {
@@ -711,12 +704,6 @@ func (c *ChannelMeta) mergeFlushedSegments(ctx context.Context, seg *Segment, pl
 	log.Info("merge flushed segments")
 	c.segMu.Lock()
 	defer c.segMu.Unlock()
-	select {
-	case <-ctx.Done():
-		log.Warn("the context has been closed", zap.Error(ctx.Err()))
-		return errors.New("invalid context")
-	default:
-	}
 
 	for _, ID := range compactedFrom {
 		// the existent of the segments are already checked
@@ -733,8 +720,6 @@ func (c *ChannelMeta) mergeFlushedSegments(ctx context.Context, seg *Segment, pl
 		seg.setType(datapb.SegmentType_Flushed)
 		c.segments[seg.segmentID] = seg
 	}
-
-	return nil
 }
 
 // for tests only

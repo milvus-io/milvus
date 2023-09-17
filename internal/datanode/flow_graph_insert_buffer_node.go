@@ -18,6 +18,7 @@ package datanode
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"reflect"
@@ -485,6 +486,9 @@ func (ibNode *insertBufferNode) Sync(fgMsg *flowGraphMsg, seg2Upload []UniqueID,
 				task.dropped,
 				endPosition)
 			if err != nil {
+				if errors.Is(err, merr.ErrSegmentNotFound) {
+					return retry.Unrecoverable(err)
+				}
 				return err
 			}
 			return nil
@@ -496,7 +500,14 @@ func (ibNode *insertBufferNode) Sync(fgMsg *flowGraphMsg, seg2Upload []UniqueID,
 				metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.FailLabel).Inc()
 				metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.TotalLabel).Inc()
 			}
-
+			if errors.Is(err, merr.ErrSegmentNotFound) {
+				if !segment.isValid() {
+					log.Info("try to flush a compacted segment, ignore..",
+						zap.Int64("segmentID", task.segmentID),
+						zap.Error(err))
+				}
+				continue
+			}
 			if merr.IsCanceledOrTimeout(err) {
 				log.Warn("skip syncing buffer data for context done",
 					zap.Int64("segmentID", task.segmentID),

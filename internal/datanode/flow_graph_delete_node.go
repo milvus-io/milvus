@@ -100,6 +100,7 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 		log.Debug("Buffer delete request in DataNode", zap.String("traceID", traceID))
 		tmpSegIDs, err := dn.bufferDeleteMsg(msg, fgMsg.timeRange, fgMsg.startPositions[0], fgMsg.endPositions[0])
 		if err != nil {
+			// should not happen
 			// error occurs only when deleteMsg is misaligned, should not happen
 			log.Fatal("failed to buffer delete msg", zap.String("traceID", traceID), zap.Error(err))
 		}

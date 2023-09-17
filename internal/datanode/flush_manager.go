@@ -578,7 +578,7 @@ func (m *rendezvousFlushManager) injectFlush(injection *taskInjection, segments 
 // fetch meta info for segment
 func (m *rendezvousFlushManager) getSegmentMeta(segmentID UniqueID, pos *msgpb.MsgPosition) (UniqueID, UniqueID, *etcdpb.CollectionMeta, error) {
 	if !m.hasSegment(segmentID, true) {
-		return -1, -1, nil, fmt.Errorf("no such segment %d in the channel", segmentID)
+		return -1, -1, nil, merr.WrapErrSegmentNotFound(segmentID, "segment not found during flush")
 	}
 
 	// fetch meta information of segment
