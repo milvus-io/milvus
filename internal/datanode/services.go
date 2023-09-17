@@ -362,12 +362,19 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		oneSegment int64
 		channel    Channel
 		err        error
+		ds         *dataSyncService
+		ok         bool
 	)
 
 	for _, fromSegment := range req.GetCompactedFrom() {
 		channel, err = node.flowgraphManager.getChannel(fromSegment)
 		if err != nil {
 			log.Ctx(ctx).Warn("fail to get the channel", zap.Int64("segment", fromSegment), zap.Error(err))
+			continue
+		}
+		ds, ok = node.flowgraphManager.getFlowgraphService(channel.getChannelName(fromSegment))
+		if !ok {
+			log.Ctx(ctx).Warn("fail to find flow graph service", zap.Int64("segment", fromSegment))
 			continue
 		}
 		oneSegment = fromSegment
@@ -392,9 +399,9 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		return merr.Status(err), nil
 	}
 
-	if err := channel.mergeFlushedSegments(ctx, targetSeg, req.GetPlanID(), req.GetCompactedFrom()); err != nil {
-		return merr.Status(err), nil
-	}
+	ds.fg.Blockall()
+	defer ds.fg.Unblock()
+	channel.mergeFlushedSegments(ctx, targetSeg, req.GetPlanID(), req.GetCompactedFrom())
 	node.compactionExecutor.injectDone(req.GetPlanID(), true)
 	return merr.Status(nil), nil
 }
