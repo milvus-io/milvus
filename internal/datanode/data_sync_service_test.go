@@ -121,7 +121,7 @@ type testInfo struct {
 	description string
 }
 
-func TestDataSyncService_getDataSyncService(t *testing.T) {
+func TestDataSyncService_newDataSyncService(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []*testInfo{
@@ -714,4 +714,52 @@ func TestGetChannelLatestMsgID(t *testing.T) {
 	id, err := node.getChannelLatestMsgID(ctx, dmlChannelName, 0)
 	assert.NoError(t, err)
 	assert.NotNil(t, id)
+}
+
+func TestGetChannelWithTickler(t *testing.T) {
+	channelName := "by-dev-rootcoord-dml-0"
+	info := getWatchInfoByOpID(100, channelName, datapb.ChannelWatchState_ToWatch)
+	node := newIDLEDataNodeMock(context.Background(), schemapb.DataType_Int64)
+	node.chunkManager = storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
+	defer node.chunkManager.RemoveWithPrefix(context.Background(), node.chunkManager.RootPath())
+
+	unflushed := []*datapb.SegmentInfo{
+		{
+			ID:           100,
+			CollectionID: 1,
+			PartitionID:  10,
+			NumOfRows:    20,
+		},
+		{
+			ID:           101,
+			CollectionID: 1,
+			PartitionID:  10,
+			NumOfRows:    20,
+		},
+	}
+
+	flushed := []*datapb.SegmentInfo{
+		{
+			ID:           200,
+			CollectionID: 1,
+			PartitionID:  10,
+			NumOfRows:    20,
+		},
+		{
+			ID:           201,
+			CollectionID: 1,
+			PartitionID:  10,
+			NumOfRows:    20,
+		},
+	}
+
+	channel, err := getChannelWithTickler(context.TODO(), node, info, newTickler(), unflushed, flushed)
+	assert.NoError(t, err)
+	assert.NotNil(t, channel)
+	assert.Equal(t, channelName, channel.getChannelName(100))
+	assert.Equal(t, int64(1), channel.getCollectionID())
+	assert.True(t, channel.hasSegment(100, true))
+	assert.True(t, channel.hasSegment(101, true))
+	assert.True(t, channel.hasSegment(200, true))
+	assert.True(t, channel.hasSegment(201, true))
 }

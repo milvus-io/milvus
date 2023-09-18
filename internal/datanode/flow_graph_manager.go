@@ -49,7 +49,8 @@ func newFlowgraphManager() *flowgraphManager {
 	}
 }
 
-func (fm *flowgraphManager) start() {
+func (fm *flowgraphManager) start(waiter *sync.WaitGroup) {
+	defer waiter.Done()
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -113,6 +114,11 @@ func (fm *flowgraphManager) execute(totalMemory uint64) {
 		log.Info("notify flowgraph to sync",
 			zap.String("channel", channels[0].channel), zap.Int64("bufferSize", channels[0].bufferSize))
 	}
+}
+
+func (fm *flowgraphManager) Add(ds *dataSyncService) {
+	fm.flowgraphs.Insert(ds.vchannelName, ds)
+	metrics.DataNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
 }
 
 func (fm *flowgraphManager) addAndStartWithEtcdTickler(dn *DataNode, vchan *datapb.VchannelInfo, schema *schemapb.CollectionSchema, tickler *etcdTickler) error {
@@ -213,6 +219,11 @@ func (fm *flowgraphManager) getFlowgraphService(vchan string) (*dataSyncService,
 func (fm *flowgraphManager) exist(vchan string) bool {
 	_, exist := fm.getFlowgraphService(vchan)
 	return exist
+}
+
+func (fm *flowgraphManager) existWithOpID(vchan string, opID UniqueID) bool {
+	ds, exist := fm.getFlowgraphService(vchan)
+	return exist && ds.opID == opID
 }
 
 // getFlowGraphNum returns number of flow graphs.

@@ -1950,6 +1950,7 @@ type dataCoordConfig struct {
 	WatchTimeoutInterval         ParamItem `refreshable:"false"`
 	ChannelBalanceSilentDuration ParamItem `refreshable:"true"`
 	ChannelBalanceInterval       ParamItem `refreshable:"true"`
+	ChannelOperationRPCTimeout   ParamItem `refreshable:"true"`
 
 	// --- SEGMENTS ---
 	SegmentMaxSize                 ParamItem `refreshable:"false"`
@@ -2026,6 +2027,15 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.ChannelBalanceInterval.Init(base.mgr)
+
+	p.ChannelOperationRPCTimeout = ParamItem{
+		Key:          "dataCoord.channel.notifyChannelOperationTimeout",
+		Version:      "2.2.3",
+		DefaultValue: "5",
+		Doc:          "Timeout notifing channel operations (in seconds).",
+		Export:       true,
+	}
+	p.ChannelOperationRPCTimeout.Init(base.mgr)
 
 	p.SegmentMaxSize = ParamItem{
 		Key:          "dataCoord.segment.maxSize",
