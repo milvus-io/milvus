@@ -518,6 +518,15 @@ func WrapErrMqInternal(err error, msg ...string) error {
 	return err
 }
 
+// Segcore related
+func WrapErrSegcore(code int32, msg ...string) error {
+	err := errors.Wrapf(ErrSegcore, "internal code=%v", code)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
 // field related
 func WrapErrFieldNotFound[T any](field T, msg ...string) error {
 	err := errors.Wrapf(ErrFieldNotFound, "field=%v", field)
