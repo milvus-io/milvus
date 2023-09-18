@@ -22,6 +22,7 @@ import (
 	"math"
 	"reflect"
 
+	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/atomic"
@@ -38,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -484,6 +486,9 @@ func (ibNode *insertBufferNode) Sync(fgMsg *flowGraphMsg, seg2Upload []UniqueID,
 				task.dropped,
 				endPosition)
 			if err != nil {
+				if errors.Is(err, merr.ErrSegmentNotFound) {
+					return retry.Unrecoverable(err)
+				}
 				return err
 			}
 			return nil
@@ -494,6 +499,14 @@ func (ibNode *insertBufferNode) Sync(fgMsg *flowGraphMsg, seg2Upload []UniqueID,
 			if task.auto {
 				metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.FailLabel).Inc()
 				metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.TotalLabel).Inc()
+			}
+			if errors.Is(err, merr.ErrSegmentNotFound) {
+				if !segment.isValid() {
+					log.Info("try to flush a compacted segment, ignore..",
+						zap.Int64("segmentID", task.segmentID),
+						zap.Error(err))
+				}
+				continue
 			}
 			log.Fatal("insertBufferNode failed to flushBufferData",
 				zap.Int64("segmentID", task.segmentID),

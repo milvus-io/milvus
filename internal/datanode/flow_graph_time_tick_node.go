@@ -21,8 +21,10 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"sync"
 	"time"
 
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -48,8 +50,17 @@ type ttNode struct {
 	BaseNode
 	vChannelName   string
 	channel        Channel
-	lastUpdateTime time.Time
+	lastUpdateTime *atomic.Time
 	dataCoord      types.DataCoord
+
+	updateCPLock  sync.Mutex
+	notifyChannel chan checkPoint
+	closeChannel  chan struct{}
+}
+
+type checkPoint struct {
+	curTs time.Time
+	pos   *msgpb.MsgPosition
 }
 
 // Name returns node name, implementing flowgraph.Node
@@ -72,43 +83,45 @@ func (ttn *ttNode) IsValidInMsg(in []Msg) bool {
 // Operate handles input messages, implementing flowgraph.Node
 func (ttn *ttNode) Operate(in []Msg) []Msg {
 	fgMsg := in[0].(*flowGraphMsg)
+	curTs, _ := tsoutil.ParseTS(fgMsg.timeRange.timestampMax)
 	if fgMsg.IsCloseMsg() {
 		if len(fgMsg.endPositions) > 0 {
+			close(ttn.closeChannel)
 			channelPos := ttn.channel.getChannelCheckpoint(fgMsg.endPositions[0])
 			log.Info("flowgraph is closing, force update channel CP",
 				zap.Time("cpTs", tsoutil.PhysicalTime(channelPos.GetTimestamp())),
 				zap.String("channel", channelPos.GetChannelName()))
-			ttn.updateChannelCP(channelPos)
+			ttn.updateChannelCP(channelPos, curTs)
 		}
 		return in
 	}
 
-	curTs, _ := tsoutil.ParseTS(fgMsg.timeRange.timestampMax)
+	// Do not block and async updateCheckPoint
 	channelPos := ttn.channel.getChannelCheckpoint(fgMsg.endPositions[0])
-	log := log.With(zap.String("channel", ttn.vChannelName),
-		zap.Time("cpTs", tsoutil.PhysicalTime(channelPos.GetTimestamp())))
-	if curTs.Sub(ttn.lastUpdateTime) >= updateChanCPInterval {
-		if err := ttn.updateChannelCP(channelPos); err == nil {
-			ttn.lastUpdateTime = curTs
-			log.Info("update channel cp periodically")
-			return []Msg{}
+	nonBlockingNotify := func() {
+		select {
+		case ttn.notifyChannel <- checkPoint{curTs, channelPos}:
+		default:
 		}
+	}
+
+	if curTs.Sub(ttn.lastUpdateTime.Load()) >= updateChanCPInterval {
+		nonBlockingNotify()
+		return []Msg{}
 	}
 
 	if channelPos.GetTimestamp() >= ttn.channel.getFlushTs() {
-		if err := ttn.updateChannelCP(channelPos); err == nil {
-			ttn.lastUpdateTime = curTs
-			log.Info("update channel cp at updateTs", zap.Time("updateTs", tsoutil.PhysicalTime(ttn.channel.getFlushTs())))
-			ttn.channel.setFlushTs(math.MaxUint64)
-		}
+		nonBlockingNotify()
 	}
-
 	return []Msg{}
 }
 
-func (ttn *ttNode) updateChannelCP(channelPos *msgpb.MsgPosition) error {
-	channelCPTs, _ := tsoutil.ParseTS(channelPos.GetTimestamp())
+func (ttn *ttNode) updateChannelCP(channelPos *msgpb.MsgPosition, curTs time.Time) error {
+	ttn.updateCPLock.Lock()
+	defer ttn.updateCPLock.Unlock()
 
+	channelCPTs, _ := tsoutil.ParseTS(channelPos.GetTimestamp())
+	// TODO, change to ETCD operation, avoid datacoord operation
 	ctx, cancel := context.WithTimeout(context.Background(), updateChanCPTimeout)
 	defer cancel()
 	resp, err := ttn.dataCoord.UpdateChannelCheckpoint(ctx, &datapb.UpdateChannelCheckpointRequest{
@@ -124,6 +137,11 @@ func (ttn *ttNode) updateChannelCP(channelPos *msgpb.MsgPosition) error {
 		return err
 	}
 
+	ttn.lastUpdateTime.Store(curTs)
+	// channelPos ts > flushTs means we could stop flush.
+	if channelPos.GetTimestamp() >= ttn.channel.getFlushTs() {
+		ttn.channel.setFlushTs(math.MaxUint64)
+	}
 	log.Info("UpdateChannelCheckpoint success",
 		zap.String("channel", ttn.vChannelName),
 		zap.Uint64("cpTs", channelPos.GetTimestamp()),
@@ -140,9 +158,23 @@ func newTTNode(config *nodeConfig, dc types.DataCoord) (*ttNode, error) {
 		BaseNode:       baseNode,
 		vChannelName:   config.vChannelName,
 		channel:        config.channel,
-		lastUpdateTime: time.Time{}, // set to Zero to update channel checkpoint immediately after fg started
+		lastUpdateTime: atomic.NewTime(time.Time{}), // set to Zero to update channel checkpoint immediately after fg started
 		dataCoord:      dc,
+		notifyChannel:  make(chan checkPoint, 1),
+		closeChannel:   make(chan struct{}),
 	}
+
+	// check point updater
+	go func() {
+		for {
+			select {
+			case <-tt.closeChannel:
+				return
+			case cp := <-tt.notifyChannel:
+				tt.updateChannelCP(cp.pos, cp.curTs)
+			}
+		}
+	}()
 
 	return tt, nil
 }
