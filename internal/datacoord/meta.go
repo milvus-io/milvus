@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/samber/lo"
@@ -297,8 +298,9 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64) {
 }
 
 // AddSegment records segment info, persisting info into kv store
-func (m *meta) AddSegment(segment *SegmentInfo) error {
-	log.Debug("meta update: adding segment", zap.Int64("segmentID", segment.GetID()))
+func (m *meta) AddSegment(ctx context.Context, segment *SegmentInfo) error {
+	log := log.Ctx(ctx)
+	log.Info("meta update: adding segment - Start", zap.Int64("segmentID", segment.GetID()))
 	m.Lock()
 	defer m.Unlock()
 	if err := m.catalog.AddSegment(m.ctx, segment.SegmentInfo); err != nil {
@@ -923,8 +925,8 @@ func (m *meta) AddAllocation(segmentID UniqueID, allocation *Allocation) error {
 	curSegInfo := m.segments.GetSegment(segmentID)
 	if curSegInfo == nil {
 		// TODO: Error handling.
-		log.Warn("meta update: add allocation failed - segment not found", zap.Int64("segmentID", segmentID))
-		return nil
+		log.Error("meta update: add allocation failed - segment not found", zap.Int64("segmentID", segmentID))
+		return errors.New("meta update: add allocation failed - segment not found")
 	}
 	// As we use global segment lastExpire to guarantee data correctness after restart
 	// there is no need to persist allocation to meta store, only update allocation in-memory meta.
