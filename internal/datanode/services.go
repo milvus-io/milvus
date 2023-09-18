@@ -433,18 +433,15 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 	// function to report import state to RootCoord.
 	// retry 10 times, if the rootcoord is down, the report function will cost 20+ seconds
 	reportFunc := reportImportFunc(node)
-	returnFailFunc := func(msg string, inputErr error) (*commonpb.Status, error) {
-		logFields = append(logFields, zap.Error(inputErr))
+	returnFailFunc := func(msg string, err error) (*commonpb.Status, error) {
+		logFields = append(logFields, zap.Error(err))
 		log.Warn(msg, logFields...)
 		importResult.State = commonpb.ImportState_ImportFailed
-		importResult.Infos = append(importResult.Infos, &commonpb.KeyValuePair{Key: importutil.FailedReason, Value: inputErr.Error()})
+		importResult.Infos = append(importResult.Infos, &commonpb.KeyValuePair{Key: importutil.FailedReason, Value: err.Error()})
 
 		reportFunc(importResult)
 
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    inputErr.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	if !node.isHealthy() {
