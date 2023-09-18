@@ -101,20 +101,64 @@ func oldCode(code int32) commonpb.ErrorCode {
 	switch code {
 	case ErrServiceNotReady.code():
 		return commonpb.ErrorCode_NotReadyServe
+
 	case ErrCollectionNotFound.code():
 		return commonpb.ErrorCode_CollectionNotExists
+
 	case ErrParameterInvalid.code():
 		return commonpb.ErrorCode_IllegalArgument
+
 	case ErrNodeNotMatch.code():
 		return commonpb.ErrorCode_NodeIDNotMatch
+
 	case ErrCollectionNotFound.code(), ErrPartitionNotFound.code(), ErrReplicaNotFound.code():
 		return commonpb.ErrorCode_MetaFailed
+
 	case ErrReplicaNotAvailable.code(), ErrChannelNotAvailable.code(), ErrNodeNotAvailable.code():
 		return commonpb.ErrorCode_NoReplicaAvailable
+
 	case ErrServiceMemoryLimitExceeded.code():
 		return commonpb.ErrorCode_InsufficientMemoryToLoad
+
+	case ErrServiceRateLimit.code():
+		return commonpb.ErrorCode_RateLimit
+
+	case ErrServiceForceDeny.code():
+		return commonpb.ErrorCode_ForceDeny
+
 	default:
 		return commonpb.ErrorCode_UnexpectedError
+	}
+}
+
+func OldCodeToMerr(code commonpb.ErrorCode) error {
+	switch code {
+	case commonpb.ErrorCode_NotReadyServe:
+		return ErrServiceNotReady
+
+	case commonpb.ErrorCode_CollectionNotExists:
+		return ErrCollectionNotFound
+
+	case commonpb.ErrorCode_IllegalArgument:
+		return ErrParameterInvalid
+
+	case commonpb.ErrorCode_NodeIDNotMatch:
+		return ErrNodeNotMatch
+
+	case commonpb.ErrorCode_InsufficientMemoryToLoad, commonpb.ErrorCode_MemoryQuotaExhausted:
+		return ErrServiceMemoryLimitExceeded
+
+	case commonpb.ErrorCode_DiskQuotaExhausted:
+		return ErrServiceDiskLimitExceeded
+
+	case commonpb.ErrorCode_RateLimit:
+		return ErrServiceRateLimit
+
+	case commonpb.ErrorCode_ForceDeny:
+		return ErrServiceForceDeny
+
+	default:
+		return errUnexpected
 	}
 }
 
@@ -213,6 +257,17 @@ func WrapErrServiceDiskLimitExceeded(predict, limit float32, msg ...string) erro
 	return err
 }
 
+func WrapErrServiceRateLimit(rate float64) error {
+	err := errors.Wrapf(ErrServiceRateLimit, "rate=%v", rate)
+	return err
+}
+
+func WrapErrServiceForceDeny(op string, reason error, method string) error {
+	err := errors.Wrapf(ErrServiceForceDeny, "deny to %s, reason: %s, req: %s", op, reason.Error(), method)
+	return err
+}
+
+// database related
 func WrapErrDatabaseNotFound(database any, msg ...string) error {
 	err := wrapWithField(ErrDatabaseNotFound, "database", database)
 	if len(msg) > 0 {

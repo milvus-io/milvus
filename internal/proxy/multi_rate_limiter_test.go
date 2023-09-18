@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
 	"github.com/stretchr/testify/assert"
@@ -50,19 +51,19 @@ func TestMultiRateLimiter(t *testing.T) {
 		}
 		for _, rt := range internalpb.RateType_value {
 			if IsDDLRequest(internalpb.RateType(rt)) {
-				errCode := multiLimiter.Check(collectionID, internalpb.RateType(rt), 1)
-				assert.Equal(t, commonpb.ErrorCode_Success, errCode)
-				errCode = multiLimiter.Check(collectionID, internalpb.RateType(rt), 5)
-				assert.Equal(t, commonpb.ErrorCode_Success, errCode)
-				errCode = multiLimiter.Check(collectionID, internalpb.RateType(rt), 5)
-				assert.Equal(t, commonpb.ErrorCode_RateLimit, errCode)
+				err := multiLimiter.Check(collectionID, internalpb.RateType(rt), 1)
+				assert.NoError(t, err)
+				err = multiLimiter.Check(collectionID, internalpb.RateType(rt), 5)
+				assert.NoError(t, err)
+				err = multiLimiter.Check(collectionID, internalpb.RateType(rt), 5)
+				assert.ErrorIs(t, err, merr.ErrServiceRateLimit)
 			} else {
-				errCode := multiLimiter.Check(collectionID, internalpb.RateType(rt), 1)
-				assert.Equal(t, commonpb.ErrorCode_Success, errCode)
-				errCode = multiLimiter.Check(collectionID, internalpb.RateType(rt), math.MaxInt)
-				assert.Equal(t, commonpb.ErrorCode_Success, errCode)
-				errCode = multiLimiter.Check(collectionID, internalpb.RateType(rt), math.MaxInt)
-				assert.Equal(t, commonpb.ErrorCode_RateLimit, errCode)
+				err := multiLimiter.Check(collectionID, internalpb.RateType(rt), 1)
+				assert.NoError(t, err)
+				err = multiLimiter.Check(collectionID, internalpb.RateType(rt), math.MaxInt)
+				assert.NoError(t, err)
+				err = multiLimiter.Check(collectionID, internalpb.RateType(rt), math.MaxInt)
+				assert.ErrorIs(t, err, merr.ErrServiceRateLimit)
 			}
 
 		}
@@ -88,19 +89,19 @@ func TestMultiRateLimiter(t *testing.T) {
 		}
 		for _, rt := range internalpb.RateType_value {
 			if IsDDLRequest(internalpb.RateType(rt)) {
-				errCode := multiLimiter.Check(1, internalpb.RateType(rt), 1)
-				assert.Equal(t, commonpb.ErrorCode_Success, errCode)
-				errCode = multiLimiter.Check(1, internalpb.RateType(rt), 5)
-				assert.Equal(t, commonpb.ErrorCode_Success, errCode)
-				errCode = multiLimiter.Check(1, internalpb.RateType(rt), 5)
-				assert.Equal(t, commonpb.ErrorCode_RateLimit, errCode)
+				err := multiLimiter.Check(1, internalpb.RateType(rt), 1)
+				assert.NoError(t, err)
+				err = multiLimiter.Check(1, internalpb.RateType(rt), 5)
+				assert.NoError(t, err)
+				err = multiLimiter.Check(1, internalpb.RateType(rt), 5)
+				assert.ErrorIs(t, err, merr.ErrServiceRateLimit)
 			} else {
-				errCode := multiLimiter.Check(1, internalpb.RateType(rt), 1)
-				assert.Equal(t, commonpb.ErrorCode_Success, errCode)
-				errCode = multiLimiter.Check(2, internalpb.RateType(rt), 1)
-				assert.Equal(t, commonpb.ErrorCode_Success, errCode)
-				errCode = multiLimiter.Check(3, internalpb.RateType(rt), 1)
-				assert.Equal(t, commonpb.ErrorCode_RateLimit, errCode)
+				err := multiLimiter.Check(1, internalpb.RateType(rt), 1)
+				assert.NoError(t, err)
+				err = multiLimiter.Check(2, internalpb.RateType(rt), 1)
+				assert.NoError(t, err)
+				err = multiLimiter.Check(3, internalpb.RateType(rt), 1)
+				assert.ErrorIs(t, err, merr.ErrServiceRateLimit)
 			}
 		}
 		Params.Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, bak)
@@ -112,8 +113,8 @@ func TestMultiRateLimiter(t *testing.T) {
 		bak := Params.QuotaConfig.QuotaAndLimitsEnabled.GetValue()
 		paramtable.Get().Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
 		for _, rt := range internalpb.RateType_value {
-			errCode := multiLimiter.Check(collectionID, internalpb.RateType(rt), 1)
-			assert.Equal(t, commonpb.ErrorCode_Success, errCode)
+			err := multiLimiter.Check(collectionID, internalpb.RateType(rt), 1)
+			assert.NoError(t, err)
 		}
 		Params.Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, bak)
 	})
@@ -125,8 +126,8 @@ func TestMultiRateLimiter(t *testing.T) {
 			multiLimiter := NewMultiRateLimiter()
 			bak := Params.QuotaConfig.QuotaAndLimitsEnabled.GetValue()
 			paramtable.Get().Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
-			errCode := multiLimiter.Check(collectionID, internalpb.RateType_DMLInsert, 1*1024*1024)
-			assert.Equal(t, commonpb.ErrorCode_Success, errCode)
+			err := multiLimiter.Check(collectionID, internalpb.RateType_DMLInsert, 1*1024*1024)
+			assert.NoError(t, err)
 			Params.Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, bak)
 			Params.Save(Params.QuotaConfig.DMLMaxInsertRate.Key, bakInsertRate)
 		}
@@ -282,8 +283,8 @@ func TestRateLimiter(t *testing.T) {
 			},
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_ForceDeny, limiter.getErrorCode(internalpb.RateType_DQLQuery))
-		assert.Equal(t, commonpb.ErrorCode_DiskQuotaExhausted, limiter.getErrorCode(internalpb.RateType_DMLInsert))
+		assert.ErrorIs(t, limiter.getError(internalpb.RateType_DQLQuery), merr.ErrServiceForceDeny)
+		assert.Equal(t, limiter.getError(internalpb.RateType_DMLInsert), merr.ErrServiceDiskLimitExceeded)
 	})
 
 	t.Run("tests refresh rate by config", func(t *testing.T) {

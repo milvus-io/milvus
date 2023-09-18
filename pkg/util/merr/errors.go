@@ -40,6 +40,8 @@ var (
 	ErrServiceInternal             = newMilvusError("service internal error", 5, false) // Never return this error out of Milvus
 	ErrCrossClusterRouting         = newMilvusError("cross cluster routing", 6, false)
 	ErrServiceDiskLimitExceeded    = newMilvusError("disk limit exceeded", 7, false)
+	ErrServiceRateLimit            = newMilvusError("rate limit exceeded", 8, true)
+	ErrServiceForceDeny            = newMilvusError("force deny", 9, false)
 
 	// Collection related
 	ErrCollectionNotFound         = newMilvusError("collection not found", 100, false)
