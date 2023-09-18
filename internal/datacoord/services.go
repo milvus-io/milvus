@@ -138,7 +138,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 			}
 		}
 		return nil
-	}, retry.Attempts(20)) // about 60s
+	}, retry.Attempts(60)) // about 3min
 	if err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil
