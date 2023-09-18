@@ -82,6 +82,7 @@ class ColumnBase {
         AssertInfo(data_ != MAP_FAILED,
                    fmt::format("failed to create file-backed map, err: {}",
                                strerror(errno)));
+        madvise(data_, cap_size_ + padding_, MADV_WILLNEED);
     }
 
     // mmap mode ctor
