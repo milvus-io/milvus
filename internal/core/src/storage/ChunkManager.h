@@ -124,10 +124,11 @@ class ChunkManager {
 
 using ChunkManagerPtr = std::shared_ptr<ChunkManager>;
 
-enum ChunkManagerType : int8_t {
-    None_CM = 0,
+enum class ChunkManagerType : int8_t {
+    None = 0,
     Local = 1,
     Minio = 2,
+    Remote = 3,
 };
 
 extern std::map<std::string, ChunkManagerType> ChunkManagerType_Map;

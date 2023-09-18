@@ -123,6 +123,12 @@ jobs:
           path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-conan
           key: ubuntu${{ matrix.ubuntu }}-conan-${{ hashFiles('internal/core/conanfile.*') }}
           restore-keys: ubuntu${{ matrix.ubuntu }}-conan-
+      - name: Start Service
+        shell: bash
+        run: |
+          docker-compose up -d azurite
+#      - name: 'Setup upterm session'
+#        uses: lhotari/action-upterm@v1
       - name: UT
         run: |
           chmod +x build/builder.sh
@@ -166,7 +172,9 @@ jobs:
       - name: Start Service
         shell: bash
         run: |
-          docker-compose up -d pulsar etcd minio
+          docker-compose up -d pulsar etcd minio azurite
+#      - name: 'Setup upterm session'
+#        uses: lhotari/action-upterm@v1
       - name: UT
         run: |
           chmod +x build/builder.sh

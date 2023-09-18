@@ -17,7 +17,7 @@ func NewChunkManagerFactoryWithParam(params *paramtable.ComponentParam) *ChunkMa
 	if params.CommonCfg.StorageType.GetValue() == "local" {
 		return NewChunkManagerFactory("local", RootPath(params.LocalStorageCfg.Path.GetValue()))
 	}
-	return NewChunkManagerFactory("minio",
+	return NewChunkManagerFactory(params.CommonCfg.StorageType.GetValue(),
 		RootPath(params.MinioCfg.RootPath.GetValue()),
 		Address(params.MinioCfg.Address.GetValue()),
 		AccessKeyID(params.MinioCfg.AccessKeyID.GetValue()),
@@ -49,6 +49,8 @@ func (f *ChunkManagerFactory) newChunkManager(ctx context.Context, engine string
 		return NewLocalChunkManager(RootPath(f.config.rootPath)), nil
 	case "minio":
 		return newMinioChunkManagerWithConfig(ctx, f.config)
+	case "remote":
+		return NewRemoteChunkManager(ctx, f.config)
 	default:
 		return nil, errors.New("no chunk manager implemented with engine: " + engine)
 	}

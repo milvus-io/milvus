@@ -151,6 +151,49 @@ MinioChunkManager::InitSDKAPI(RemoteStorageType type,
 }
 
 void
+MinioChunkManager::InitSDKAPIDefault(const std::string& log_level_str) {
+    std::scoped_lock lock{client_mutex_};
+    const size_t initCount = init_count_++;
+    if (initCount == 0) {
+        // sdk_options_.httpOptions.installSigPipeHandler = true;
+        struct sigaction psa;
+        memset(&psa, 0, sizeof psa);
+        psa.sa_handler = SwallowHandler;
+        psa.sa_flags = psa.sa_flags | SA_ONSTACK;
+        sigaction(SIGPIPE, &psa, 0);
+        // block multiple SIGPIPE concurrently processing
+        sigemptyset(&psa.sa_mask);
+        sigaddset(&psa.sa_mask, SIGPIPE);
+        sigaction(SIGPIPE, &psa, 0);
+        LOG_SEGCORE_INFO_ << "init aws with log level:" << log_level_str;
+        auto get_aws_log_level = [](const std::string& level_str) {
+            Aws::Utils::Logging::LogLevel level =
+                Aws::Utils::Logging::LogLevel::Off;
+            if (level_str == "fatal") {
+                level = Aws::Utils::Logging::LogLevel::Fatal;
+            } else if (level_str == "error") {
+                level = Aws::Utils::Logging::LogLevel::Error;
+            } else if (level_str == "warn") {
+                level = Aws::Utils::Logging::LogLevel::Warn;
+            } else if (level_str == "info") {
+                level = Aws::Utils::Logging::LogLevel::Info;
+            } else if (level_str == "debug") {
+                level = Aws::Utils::Logging::LogLevel::Debug;
+            } else if (level_str == "trace") {
+                level = Aws::Utils::Logging::LogLevel::Trace;
+            }
+            return level;
+        };
+        auto log_level = get_aws_log_level(log_level_str);
+        sdk_options_.loggingOptions.logLevel = log_level;
+        sdk_options_.loggingOptions.logger_create_fn = [log_level]() {
+            return std::make_shared<AwsLogger>(log_level);
+        };
+        Aws::InitAPI(sdk_options_);
+    }
+}
+
+void
 MinioChunkManager::ShutdownSDKAPI() {
     std::scoped_lock lock{client_mutex_};
     const size_t initCount = --init_count_;

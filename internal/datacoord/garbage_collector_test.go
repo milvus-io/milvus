@@ -26,6 +26,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/pkg/common"
+
 	"github.com/cockroachdb/errors"
 	minio "github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -122,9 +124,9 @@ func Test_garbageCollector_scan(t *testing.T) {
 		})
 		gc.scan()
 
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, insertLogPrefix), inserts)
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, statsLogPrefix), stats)
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, deltaLogPrefix), delta)
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentInsertLogPath), inserts)
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentStatslogPath), stats)
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentDeltaLogPath), delta)
 		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, `indexes`), others)
 		gc.close()
 	})
@@ -139,9 +141,9 @@ func Test_garbageCollector_scan(t *testing.T) {
 		})
 		gc.scan()
 
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, insertLogPrefix), inserts)
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, statsLogPrefix), stats)
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, deltaLogPrefix), delta)
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentInsertLogPath), inserts)
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentStatslogPath), stats)
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentDeltaLogPath), delta)
 		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, `indexes`), others)
 
 		gc.close()
@@ -164,9 +166,9 @@ func Test_garbageCollector_scan(t *testing.T) {
 		})
 		gc.start()
 		gc.scan()
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, insertLogPrefix), inserts)
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, statsLogPrefix), stats)
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, deltaLogPrefix), delta)
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentInsertLogPath), inserts)
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentStatslogPath), stats)
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentDeltaLogPath), delta)
 		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, `indexes`), others)
 
 		gc.close()
@@ -191,9 +193,9 @@ func Test_garbageCollector_scan(t *testing.T) {
 			dropTolerance:    0,
 		})
 		gc.clearEtcd()
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, insertLogPrefix), inserts[1:])
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, statsLogPrefix), stats[1:])
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, deltaLogPrefix), delta[1:])
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentInsertLogPath), inserts[1:])
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentStatslogPath), stats[1:])
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentDeltaLogPath), delta[1:])
 		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, `indexes`), others)
 
 		gc.close()
@@ -211,9 +213,9 @@ func Test_garbageCollector_scan(t *testing.T) {
 		gc.clearEtcd()
 
 		// bad path shall remains since datacoord cannot determine file is garbage or not if path is not valid
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, insertLogPrefix), inserts[1:2])
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, statsLogPrefix), stats[1:2])
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, deltaLogPrefix), delta[1:2])
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentInsertLogPath), inserts[1:2])
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentStatslogPath), stats[1:2])
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentDeltaLogPath), delta[1:2])
 		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, `indexes`), others)
 
 		gc.close()
@@ -231,9 +233,9 @@ func Test_garbageCollector_scan(t *testing.T) {
 		gc.scan()
 
 		// bad path shall remains since datacoord cannot determine file is garbage or not if path is not valid
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, insertLogPrefix), inserts[1:2])
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, statsLogPrefix), stats[1:2])
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, deltaLogPrefix), delta[1:2])
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentInsertLogPath), inserts[1:2])
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentStatslogPath), stats[1:2])
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentDeltaLogPath), delta[1:2])
 		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, `indexes`), others)
 
 		gc.close()
@@ -280,14 +282,14 @@ func initUtOSSEnv(bucket, root string, n int) (mcm *storage.MinioChunkManager, i
 			token = path.Join(strconv.Itoa(1+i), strconv.Itoa(10+i), strconv.Itoa(100+i), funcutil.RandomString(8), funcutil.RandomString(8))
 		}
 		// insert
-		filePath := path.Join(root, insertLogPrefix, token)
+		filePath := path.Join(root, common.SegmentInsertLogPath, token)
 		info, err := cli.PutObject(context.TODO(), bucket, filePath, reader, int64(len(content)), minio.PutObjectOptions{})
 		if err != nil {
 			return nil, nil, nil, nil, nil, err
 		}
 		inserts = append(inserts, info.Key)
 		// stats
-		filePath = path.Join(root, statsLogPrefix, token)
+		filePath = path.Join(root, common.SegmentStatslogPath, token)
 		info, err = cli.PutObject(context.TODO(), bucket, filePath, reader, int64(len(content)), minio.PutObjectOptions{})
 		if err != nil {
 			return nil, nil, nil, nil, nil, err
@@ -300,7 +302,7 @@ func initUtOSSEnv(bucket, root string, n int) (mcm *storage.MinioChunkManager, i
 		} else {
 			token = path.Join(strconv.Itoa(1+i), strconv.Itoa(10+i), strconv.Itoa(100+i), funcutil.RandomString(8))
 		}
-		filePath = path.Join(root, deltaLogPrefix, token)
+		filePath = path.Join(root, common.SegmentDeltaLogPath, token)
 		info, err = cli.PutObject(context.TODO(), bucket, filePath, reader, int64(len(content)), minio.PutObjectOptions{})
 		if err != nil {
 			return nil, nil, nil, nil, nil, err

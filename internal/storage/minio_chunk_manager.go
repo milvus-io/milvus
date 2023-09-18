@@ -40,18 +40,18 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-var (
-	ErrNoSuchKey = errors.New("NoSuchKey")
-)
+const NoSuchKey = "NoSuchKey"
 
-const (
-	CloudProviderGCP    = "gcp"
-	CloudProviderAWS    = "aws"
-	CloudProviderAliyun = "aliyun"
+var (
+	ErrNoSuchKey = errors.New(NoSuchKey)
 )
 
 func WrapErrNoSuchKey(key string) error {
 	return fmt.Errorf("%w(key=%s)", ErrNoSuchKey, key)
+}
+
+func IsErrNoSuchKey(err error) bool {
+	return strings.HasPrefix(err.Error(), NoSuchKey)
 }
 
 var CheckBucketRetryAttempts uint = 20

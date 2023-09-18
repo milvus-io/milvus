@@ -22,7 +22,18 @@ endif()
 
 milvus_add_pkg_config("milvus_storage")
 
+if (DEFINED AZURE_BUILD_DIR)
+    add_definitions(-DAZURE_BUILD_DIR)
+    include_directories(azure-blob-storage)
+    include_directories("${AZURE_BUILD_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/include")
+    set(STORAGE_FILES
+        ${STORAGE_FILES}
+        AzureChunkManager.cpp
+        )
+endif()
+
 set(STORAGE_FILES
+    ${STORAGE_FILES}
     parquet_c.cpp
     PayloadStream.cpp
     DataCodec.cpp
@@ -37,6 +48,7 @@ set(STORAGE_FILES
     ThreadPool.cpp
     storage_c.cpp
     MinioChunkManager.cpp
+    ChunkManagers.cpp
     AliyunSTSClient.cpp
     AliyunCredentialsProvider.cpp
     MemFileManagerImpl.cpp
@@ -47,10 +59,19 @@ set(STORAGE_FILES
 
 add_library(milvus_storage SHARED ${STORAGE_FILES})
 
-target_link_libraries(milvus_storage PUBLIC
-        milvus_common
-        pthread
-        ${CONAN_LIBS}
-        )
+if (DEFINED AZURE_BUILD_DIR)
+    target_link_libraries(milvus_storage PUBLIC
+            "-L${AZURE_BUILD_DIR} -lblob-chunk-manager"
+            milvus_common
+            pthread
+            ${CONAN_LIBS}
+            )
+else ()
+    target_link_libraries(milvus_storage PUBLIC
+            milvus_common
+            pthread
+            ${CONAN_LIBS}
+            )
+endif()
 
 install(TARGETS milvus_storage DESTINATION "${CMAKE_INSTALL_LIBDIR}")

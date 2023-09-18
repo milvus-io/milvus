@@ -88,6 +88,7 @@ struct StorageConfig {
     std::string access_key_value = "minioadmin";
     std::string root_path = "files";
     std::string storage_type = "minio";
+    std::string cloud_provider = "aws";
     std::string iam_endpoint = "";
     std::string log_level = "error";
     std::string region = "";

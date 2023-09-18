@@ -294,6 +294,8 @@ NewBuildIndexInfo(CBuildIndexInfo* c_build_index_info,
         storage_config.root_path = std::string(c_storage_config.root_path);
         storage_config.storage_type =
             std::string(c_storage_config.storage_type);
+        storage_config.cloud_provider =
+            std::string(c_storage_config.cloud_provider);
         storage_config.iam_endpoint =
             std::string(c_storage_config.iam_endpoint);
         storage_config.useSSL = c_storage_config.useSSL;

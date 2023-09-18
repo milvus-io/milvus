@@ -27,7 +27,7 @@ func (p *httpConfig) init(base *BaseTable) {
 
 	p.Port = ParamItem{
 		Key:          "proxy.http.port",
-		Version:      "2.1.0",
+		Version:      "2.3.0",
 		Doc:          "high-level restful api",
 		PanicIfEmpty: false,
 		Export:       true,
