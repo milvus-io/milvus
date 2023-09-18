@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 )
 
@@ -36,19 +37,19 @@ func TestAbnormalIndexNode(t *testing.T) {
 	ctx := context.TODO()
 	status, err := in.CreateJob(ctx, &indexpb.CreateJobRequest{})
 	assert.NoError(t, err)
-	assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
+	assert.ErrorIs(t, merr.Error(status), merr.ErrServiceNotReady)
 
 	qresp, err := in.QueryJobs(ctx, &indexpb.QueryJobsRequest{})
 	assert.NoError(t, err)
-	assert.Equal(t, qresp.Status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
+	assert.ErrorIs(t, merr.Error(qresp.GetStatus()), merr.ErrServiceNotReady)
 
 	status, err = in.DropJobs(ctx, &indexpb.DropJobsRequest{})
 	assert.NoError(t, err)
-	assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
+	assert.ErrorIs(t, merr.Error(status), merr.ErrServiceNotReady)
 
 	jobNumRsp, err := in.GetJobStats(ctx, &indexpb.GetJobStatsRequest{})
 	assert.NoError(t, err)
-	assert.Equal(t, jobNumRsp.Status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
+	assert.ErrorIs(t, merr.Error(jobNumRsp.GetStatus()), merr.ErrServiceNotReady)
 
 	metricsResp, err := in.GetMetrics(ctx, &milvuspb.GetMetricsRequest{})
 	assert.NoError(t, err)
