@@ -257,7 +257,7 @@ func (mgr *singleTypeChannelsMgr) lockGetStream(collectionID UniqueID) (msgstrea
 }
 
 // getOrCreateStream get message stream of specified collection.
-// If stream don't exists, call createMsgStream to create for it.
+// If stream doesn't exist, call createMsgStream to create for it.
 func (mgr *singleTypeChannelsMgr) getOrCreateStream(collectionID UniqueID) (msgstream.MsgStream, error) {
 	if stream, err := mgr.lockGetStream(collectionID); err == nil {
 		return stream, nil

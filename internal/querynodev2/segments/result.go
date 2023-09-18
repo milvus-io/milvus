@@ -240,9 +240,9 @@ func EncodeSearchResultData(searchResultData *schemapb.SearchResultData, nq int6
 	return
 }
 
-func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*internalpb.RetrieveResults, limit int64) (*internalpb.RetrieveResults, error) {
+func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*internalpb.RetrieveResults, param *mergeParam) (*internalpb.RetrieveResults, error) {
 	log.Ctx(ctx).Debug("mergeInternelRetrieveResults",
-		zap.Int64("limit", limit),
+		zap.Int64("limit", param.limit),
 		zap.Int("resultNum", len(retrieveResults)),
 	)
 	var (
@@ -268,8 +268,8 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 		return ret, nil
 	}
 
-	if limit != typeutil.Unlimited {
-		loopEnd = int(limit)
+	if param.limit != typeutil.Unlimited && !param.mergeStopForBest {
+		loopEnd = int(param.limit)
 	}
 
 	ret.FieldsData = make([]*schemapb.FieldData, len(validRetrieveResults[0].GetFieldsData()))
@@ -278,8 +278,8 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
-	for j := 0; j < loopEnd; j++ {
-		sel := typeutil.SelectMinPK(validRetrieveResults, cursors)
+	for j := 0; j < loopEnd; {
+		sel := typeutil.SelectMinPK(validRetrieveResults, cursors, param.mergeStopForBest, param.limit)
 		if sel == -1 {
 			break
 		}
@@ -290,6 +290,7 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 			typeutil.AppendPKs(ret.Ids, pk)
 			retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel])
 			idTsMap[pk] = ts
+			j++
 		} else {
 			// primary keys duplicate
 			skipDupCnt++
@@ -342,9 +343,9 @@ func getTS(i *internalpb.RetrieveResults, idx int64) uint64 {
 	return 0
 }
 
-func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcorepb.RetrieveResults, limit int64) (*segcorepb.RetrieveResults, error) {
+func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcorepb.RetrieveResults, param *mergeParam) (*segcorepb.RetrieveResults, error) {
 	log.Ctx(ctx).Debug("mergeSegcoreRetrieveResults",
-		zap.Int64("limit", limit),
+		zap.Int64("limit", param.limit),
 		zap.Int("resultNum", len(retrieveResults)),
 	)
 	var (
@@ -371,8 +372,8 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 		return ret, nil
 	}
 
-	if limit != typeutil.Unlimited {
-		loopEnd = int(limit)
+	if param.limit != typeutil.Unlimited && !param.mergeStopForBest {
+		loopEnd = int(param.limit)
 	}
 
 	ret.FieldsData = make([]*schemapb.FieldData, len(validRetrieveResults[0].GetFieldsData()))
@@ -382,7 +383,7 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	for j := 0; j < loopEnd; j++ {
-		sel := typeutil.SelectMinPK(validRetrieveResults, cursors)
+		sel := typeutil.SelectMinPK(validRetrieveResults, cursors, param.mergeStopForBest, param.limit)
 		if sel == -1 {
 			break
 		}
@@ -415,17 +416,15 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 func mergeInternalRetrieveResultsAndFillIfEmpty(
 	ctx context.Context,
 	retrieveResults []*internalpb.RetrieveResults,
-	limit int64,
-	outputFieldsID []int64,
-	schema *schemapb.CollectionSchema,
+	param *mergeParam,
 ) (*internalpb.RetrieveResults, error) {
 
-	mergedResult, err := MergeInternalRetrieveResult(ctx, retrieveResults, limit)
+	mergedResult, err := MergeInternalRetrieveResult(ctx, retrieveResults, param)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := typeutil2.FillRetrieveResultIfEmpty(typeutil2.NewInternalResult(mergedResult), outputFieldsID, schema); err != nil {
+	if err := typeutil2.FillRetrieveResultIfEmpty(typeutil2.NewInternalResult(mergedResult), param.outputFieldsId, param.schema); err != nil {
 		return nil, fmt.Errorf("failed to fill internal retrieve results: %s", err.Error())
 	}
 
@@ -435,17 +434,15 @@ func mergeInternalRetrieveResultsAndFillIfEmpty(
 func mergeSegcoreRetrieveResultsAndFillIfEmpty(
 	ctx context.Context,
 	retrieveResults []*segcorepb.RetrieveResults,
-	limit int64,
-	outputFieldsID []int64,
-	schema *schemapb.CollectionSchema,
+	param *mergeParam,
 ) (*segcorepb.RetrieveResults, error) {
 
-	mergedResult, err := MergeSegcoreRetrieveResults(ctx, retrieveResults, limit)
+	mergedResult, err := MergeSegcoreRetrieveResults(ctx, retrieveResults, param)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := typeutil2.FillRetrieveResultIfEmpty(typeutil2.NewSegcoreResults(mergedResult), outputFieldsID, schema); err != nil {
+	if err := typeutil2.FillRetrieveResultIfEmpty(typeutil2.NewSegcoreResults(mergedResult), param.outputFieldsId, param.schema); err != nil {
 		return nil, fmt.Errorf("failed to fill segcore retrieve results: %s", err.Error())
 	}
 
