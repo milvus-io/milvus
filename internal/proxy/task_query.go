@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -63,8 +64,9 @@ type queryTask struct {
 }
 
 type queryParams struct {
-	limit  int64
-	offset int64
+	limit             int64
+	offset            int64
+	reduceStopForBest bool
 }
 
 // translateToOutputFieldIDs translates output fields name to output fields id.
@@ -127,15 +129,25 @@ func filterSystemFields(outputFieldIDs []UniqueID) []UniqueID {
 // parseQueryParams get limit and offset from queryParamsPair, both are optional.
 func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, error) {
 	var (
-		limit  int64
-		offset int64
-		err    error
+		limit             int64
+		offset            int64
+		reduceStopForBest bool
+		err               error
 	)
+	reduceStopForBestStr, err := funcutil.GetAttrByKeyFromRepeatedKV(ReduceStopForBestKey, queryParamsPair)
+	// if reduce_stop_for_best is provided
+	if err == nil {
+		reduceStopForBest, err = strconv.ParseBool(reduceStopForBestStr)
+		if err != nil {
+			return nil, merr.WrapErrParameterInvalid("true or false", reduceStopForBestStr,
+				"value for reduce_stop_for_best is invalid")
+		}
+	}
 
 	limitStr, err := funcutil.GetAttrByKeyFromRepeatedKV(LimitKey, queryParamsPair)
 	// if limit is not provided
 	if err != nil {
-		return &queryParams{limit: typeutil.Unlimited}, nil
+		return &queryParams{limit: typeutil.Unlimited, reduceStopForBest: reduceStopForBest}, nil
 	}
 	limit, err = strconv.ParseInt(limitStr, 0, 64)
 	if err != nil {
@@ -157,8 +169,9 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 	}
 
 	return &queryParams{
-		limit:  limit,
-		offset: offset,
+		limit:             limit,
+		offset:            offset,
+		reduceStopForBest: reduceStopForBest,
 	}, nil
 }
 
@@ -279,24 +292,12 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	t.RetrieveRequest.IgnoreGrowing = ignoreGrowing
 
-	// fetch iteration_extension_reduce_rate from query param
-	var iterationExtensionReduceRate int64
-	for i, kv := range t.request.GetQueryParams() {
-		if kv.GetKey() == IterationExtensionReduceRateKey {
-			iterationExtensionReduceRate, err = strconv.ParseInt(kv.Value, 0, 64)
-			if err != nil {
-				return errors.New("parse query iteration_extension_reduce_rate failed")
-			}
-			t.request.QueryParams = append(t.request.GetQueryParams()[:i], t.request.GetQueryParams()[i+1:]...)
-			break
-		}
-	}
-	t.RetrieveRequest.IterationExtensionReduceRate = iterationExtensionReduceRate
-
 	queryParams, err := parseQueryParams(t.request.GetQueryParams())
 	if err != nil {
 		return err
 	}
+	t.RetrieveRequest.ReduceStopForBest = queryParams.reduceStopForBest
+
 	t.queryParams = queryParams
 	t.RetrieveRequest.Limit = queryParams.limit + queryParams.offset
 
@@ -517,7 +518,7 @@ func IDs2Expr(fieldName string, ids *schemapb.IDs) string {
 }
 
 func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.RetrieveResults, queryParams *queryParams) (*milvuspb.QueryResults, error) {
-	log.Ctx(ctx).Debug("reduceInternelRetrieveResults", zap.Int("len(retrieveResults)", len(retrieveResults)))
+	log.Ctx(ctx).Debug("reduceInternalRetrieveResults", zap.Int("len(retrieveResults)", len(retrieveResults)))
 	var (
 		ret = &milvuspb.QueryResults{}
 
@@ -543,12 +544,15 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 	idSet := make(map[interface{}]struct{})
 	cursors := make([]int64, len(validRetrieveResults))
 
+	realLimit := typeutil.Unlimited
 	if queryParams != nil && queryParams.limit != typeutil.Unlimited {
-		loopEnd = int(queryParams.limit)
-
+		realLimit = queryParams.limit
+		if !queryParams.reduceStopForBest {
+			loopEnd = int(queryParams.limit)
+		}
 		if queryParams.offset > 0 {
 			for i := int64(0); i < queryParams.offset; i++ {
-				sel := typeutil.SelectMinPK(validRetrieveResults, cursors)
+				sel := typeutil.SelectMinPK(validRetrieveResults, cursors, queryParams.reduceStopForBest, realLimit)
 				if sel == -1 {
 					return ret, nil
 				}
@@ -556,11 +560,15 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 			}
 		}
 	}
+	reduceStopForBest := false
+	if queryParams != nil {
+		reduceStopForBest = queryParams.reduceStopForBest
+	}
 
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	for j := 0; j < loopEnd; j++ {
-		sel := typeutil.SelectMinPK(validRetrieveResults, cursors)
+		sel := typeutil.SelectMinPK(validRetrieveResults, cursors, reduceStopForBest, realLimit)
 		if sel == -1 {
 			break
 		}

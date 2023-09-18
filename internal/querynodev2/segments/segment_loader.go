@@ -188,6 +188,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	// Check memory & storage limit
 	resource, concurrencyLevel, err := loader.requestResource(ctx, infos...)
 	if err != nil {
+		log.Error("request resource failed", zap.Error(err))
 		return nil, err
 	}
 	defer loader.freeRequest(resource)

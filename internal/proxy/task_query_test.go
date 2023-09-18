@@ -163,10 +163,6 @@ func TestQueryTask_all(t *testing.T) {
 					Key:   IgnoreGrowingKey,
 					Value: "false",
 				},
-				{
-					Key:   IterationExtensionReduceRateKey,
-					Value: "10",
-				},
 			},
 		},
 		qc: qc,
@@ -185,11 +181,11 @@ func TestQueryTask_all(t *testing.T) {
 	// after preExecute
 	assert.Greater(t, task.TimeoutTimestamp, typeutil.ZeroTimestamp)
 
-	// check iteration extension reduce
-	assert.Equal(t, int64(10), task.RetrieveRequest.IterationExtensionReduceRate)
+	// check reduce_stop_for_best
+	assert.Equal(t, false, task.RetrieveRequest.GetReduceStopForBest())
 	task.request.QueryParams = append(task.request.QueryParams, &commonpb.KeyValuePair{
-		Key:   IterationExtensionReduceRateKey,
-		Value: "10XXX",
+		Key:   ReduceStopForBestKey,
+		Value: "trxxxx",
 	})
 	assert.Error(t, task.PreExecute(ctx))
 
@@ -598,6 +594,28 @@ func TestTaskQuery_functions(t *testing.T) {
 						assert.InDeltaSlice(t, resultFloat[test.offset*Dim:(test.offset+1)*Dim], result.FieldsData[1].GetVectors().GetFloatVector().Data, 10e-10)
 					})
 				}
+			})
+
+			t.Run("test stop reduce for best for limit", func(t *testing.T) {
+				result, err := reduceRetrieveResults(context.Background(),
+					[]*internalpb.RetrieveResults{r1, r2},
+					&queryParams{limit: 2, reduceStopForBest: true})
+				assert.NoError(t, err)
+				assert.Equal(t, 2, len(result.GetFieldsData()))
+				assert.Equal(t, []int64{11, 11, 22}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
+				len := len(result.GetFieldsData()[0].GetScalars().GetLongData().Data)
+				assert.InDeltaSlice(t, resultFloat[0:(len)*Dim], result.FieldsData[1].GetVectors().GetFloatVector().Data, 10e-10)
+			})
+
+			t.Run("test stop reduce for best for unlimited set", func(t *testing.T) {
+				result, err := reduceRetrieveResults(context.Background(),
+					[]*internalpb.RetrieveResults{r1, r2},
+					&queryParams{limit: typeutil.Unlimited, reduceStopForBest: true})
+				assert.NoError(t, err)
+				assert.Equal(t, 2, len(result.GetFieldsData()))
+				assert.Equal(t, []int64{11, 11, 22, 22}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
+				len := len(result.GetFieldsData()[0].GetScalars().GetLongData().Data)
+				assert.InDeltaSlice(t, resultFloat[0:(len)*Dim], result.FieldsData[1].GetVectors().GetFloatVector().Data, 10e-10)
 			})
 		})
 	})

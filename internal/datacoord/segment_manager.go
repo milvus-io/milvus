@@ -258,7 +258,11 @@ func (s *SegmentManager) maybeResetLastExpireForSegments() error {
 // AllocSegment allocate segment per request collcation, partication, channel and rows
 func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID,
 	partitionID UniqueID, channelName string, requestRows int64) ([]*Allocation, error) {
-
+	log := log.Ctx(ctx).
+		With(zap.Int64("collectionID", collectionID)).
+		With(zap.Int64("partitionID", partitionID)).
+		With(zap.String("channelName", channelName)).
+		With(zap.Int64("requestRows", requestRows))
 	_, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "Alloc-Segment")
 	defer sp.End()
 	s.mu.Lock()
@@ -269,7 +273,7 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 	for _, segmentID := range s.segments {
 		segment := s.meta.GetHealthySegment(segmentID)
 		if segment == nil {
-			log.Warn("Failed to get seginfo from meta", zap.Int64("id", segmentID))
+			log.Warn("Failed to get segment info from meta", zap.Int64("id", segmentID))
 			continue
 		}
 		if !satisfy(segment, collectionID, partitionID, channelName) || !isGrowing(segment) {
@@ -294,6 +298,7 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 	for _, allocation := range newSegmentAllocations {
 		segment, err := s.openNewSegment(ctx, collectionID, partitionID, channelName, commonpb.SegmentState_Growing)
 		if err != nil {
+			log.Error("Failed to open new segment for segment allocation")
 			return nil, err
 		}
 		allocation.ExpireTime = expireTs
@@ -306,6 +311,7 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 	for _, allocation := range existedSegmentAllocations {
 		allocation.ExpireTime = expireTs
 		if err := s.meta.AddAllocation(allocation.SegmentID, allocation); err != nil {
+			log.Error("Failed to add allocation to existed segment", zap.Int64("segmentID", allocation.SegmentID))
 			return nil, err
 		}
 	}
@@ -370,6 +376,7 @@ func (s *SegmentManager) genExpireTs(ctx context.Context, isImported bool) (Time
 
 func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID,
 	channelName string, segmentState commonpb.SegmentState) (*SegmentInfo, error) {
+	log := log.Ctx(ctx)
 	ctx, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "open-Segment")
 	defer sp.End()
 	id, err := s.allocator.allocID(ctx)
@@ -397,7 +404,7 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 		segmentInfo.IsImporting = true
 	}
 	segment := NewSegmentInfo(segmentInfo)
-	if err := s.meta.AddSegment(segment); err != nil {
+	if err := s.meta.AddSegment(ctx, segment); err != nil {
 		log.Error("failed to add segment to DataCoord", zap.Error(err))
 		return nil, err
 	}

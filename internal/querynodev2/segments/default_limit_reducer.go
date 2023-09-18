@@ -14,8 +14,26 @@ type defaultLimitReducer struct {
 	schema *schemapb.CollectionSchema
 }
 
+type mergeParam struct {
+	limit            int64
+	outputFieldsId   []int64
+	schema           *schemapb.CollectionSchema
+	mergeStopForBest bool
+}
+
+func NewMergeParam(limit int64, outputFieldsId []int64, schema *schemapb.CollectionSchema, reduceStopForBest bool) *mergeParam {
+	return &mergeParam{
+		limit:            limit,
+		outputFieldsId:   outputFieldsId,
+		schema:           schema,
+		mergeStopForBest: reduceStopForBest,
+	}
+}
+
 func (r *defaultLimitReducer) Reduce(ctx context.Context, results []*internalpb.RetrieveResults) (*internalpb.RetrieveResults, error) {
-	return mergeInternalRetrieveResultsAndFillIfEmpty(ctx, results, r.req.GetReq().GetLimit(), r.req.GetReq().GetOutputFieldsId(), r.schema)
+	reduceParam := NewMergeParam(r.req.GetReq().GetLimit(), r.req.GetReq().GetOutputFieldsId(),
+		r.schema, r.req.GetReq().GetReduceStopForBest())
+	return mergeInternalRetrieveResultsAndFillIfEmpty(ctx, results, reduceParam)
 }
 
 func newDefaultLimitReducer(req *querypb.QueryRequest, schema *schemapb.CollectionSchema) *defaultLimitReducer {
@@ -25,54 +43,19 @@ func newDefaultLimitReducer(req *querypb.QueryRequest, schema *schemapb.Collecti
 	}
 }
 
-type extensionLimitReducer struct {
-	req           *querypb.QueryRequest
-	schema        *schemapb.CollectionSchema
-	extendedLimit int64
-}
-
-func (r *extensionLimitReducer) Reduce(ctx context.Context, results []*internalpb.RetrieveResults) (*internalpb.RetrieveResults, error) {
-	return mergeInternalRetrieveResultsAndFillIfEmpty(ctx, results, r.extendedLimit, r.req.GetReq().GetOutputFieldsId(), r.schema)
-}
-
-func newExtensionLimitReducer(req *querypb.QueryRequest, schema *schemapb.CollectionSchema, extLimit int64) *extensionLimitReducer {
-	return &extensionLimitReducer{
-		req:           req,
-		schema:        schema,
-		extendedLimit: extLimit,
-	}
-}
-
 type defaultLimitReducerSegcore struct {
 	req    *querypb.QueryRequest
 	schema *schemapb.CollectionSchema
 }
 
 func (r *defaultLimitReducerSegcore) Reduce(ctx context.Context, results []*segcorepb.RetrieveResults) (*segcorepb.RetrieveResults, error) {
-	return mergeSegcoreRetrieveResultsAndFillIfEmpty(ctx, results, r.req.GetReq().GetLimit(), r.req.GetReq().GetOutputFieldsId(), r.schema)
+	mergeParam := NewMergeParam(r.req.GetReq().GetLimit(), r.req.GetReq().GetOutputFieldsId(), r.schema, r.req.GetReq().GetReduceStopForBest())
+	return mergeSegcoreRetrieveResultsAndFillIfEmpty(ctx, results, mergeParam)
 }
 
 func newDefaultLimitReducerSegcore(req *querypb.QueryRequest, schema *schemapb.CollectionSchema) *defaultLimitReducerSegcore {
 	return &defaultLimitReducerSegcore{
 		req:    req,
 		schema: schema,
-	}
-}
-
-type extensionLimitSegcoreReducer struct {
-	req           *querypb.QueryRequest
-	schema        *schemapb.CollectionSchema
-	extendedLimit int64
-}
-
-func (r *extensionLimitSegcoreReducer) Reduce(ctx context.Context, results []*segcorepb.RetrieveResults) (*segcorepb.RetrieveResults, error) {
-	return mergeSegcoreRetrieveResultsAndFillIfEmpty(ctx, results, r.extendedLimit, r.req.GetReq().GetOutputFieldsId(), r.schema)
-}
-
-func newExtensionLimitSegcoreReducer(req *querypb.QueryRequest, schema *schemapb.CollectionSchema, extLimit int64) *extensionLimitSegcoreReducer {
-	return &extensionLimitSegcoreReducer{
-		req:           req,
-		schema:        schema,
-		extendedLimit: extLimit,
 	}
 }

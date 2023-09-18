@@ -16,11 +16,6 @@ type milvusReducer interface {
 func createMilvusReducer(ctx context.Context, params *queryParams, req *internalpb.RetrieveRequest, schema *schemapb.CollectionSchema, plan *planpb.PlanNode, collectionName string) milvusReducer {
 	if plan.GetQuery().GetIsCount() {
 		return &cntReducer{}
-	} else if req.GetIterationExtensionReduceRate() > 0 {
-		params.limit = params.limit * req.GetIterationExtensionReduceRate()
-		if params.limit > Params.QuotaConfig.TopKLimit.GetAsInt64() {
-			params.limit = Params.QuotaConfig.TopKLimit.GetAsInt64()
-		}
 	}
 	return newDefaultLimitReducer(ctx, params, req, schema, collectionName)
 }
