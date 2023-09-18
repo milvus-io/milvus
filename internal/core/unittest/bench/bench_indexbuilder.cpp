@@ -60,6 +60,8 @@ IndexBuilder_build(benchmark::State& state) {
         const auto& param = index_params.params(i);
         config[param.key()] = param.value();
     }
+    config[milvus::index::INDEX_ENGINE_VERSION] =
+        knowhere::Version::GetCurrentVersion().VersionCode();
 
     auto is_binary = state.range(2);
     auto dataset = GenDataset(NB, metric_type, is_binary);
@@ -68,7 +70,7 @@ IndexBuilder_build(benchmark::State& state) {
 
     for (auto _ : state) {
         auto index = std::make_unique<milvus::indexbuilder::VecIndexCreator>(
-            milvus::DataType::VECTOR_FLOAT, config, nullptr);
+            milvus::DataType::VECTOR_FLOAT, config);
         index->Build(xb_dataset);
     }
 }
@@ -102,7 +104,7 @@ IndexBuilder_build_and_codec(benchmark::State& state) {
 
     for (auto _ : state) {
         auto index = std::make_unique<milvus::indexbuilder::VecIndexCreator>(
-            milvus::DataType::VECTOR_FLOAT, config, nullptr);
+            milvus::DataType::VECTOR_FLOAT, config);
 
         index->Build(xb_dataset);
         index->Serialize();

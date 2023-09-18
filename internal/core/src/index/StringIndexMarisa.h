@@ -29,7 +29,8 @@ namespace milvus::index {
 class StringIndexMarisa : public StringIndex {
  public:
     explicit StringIndexMarisa(
-        storage::FileManagerImplPtr file_manager = nullptr);
+        const storage::FileManagerContext& file_manager_context =
+            storage::FileManagerContext());
 
     int64_t
     Size() override;
@@ -107,8 +108,10 @@ class StringIndexMarisa : public StringIndex {
 using StringIndexMarisaPtr = std::unique_ptr<StringIndexMarisa>;
 
 inline StringIndexPtr
-CreateStringIndexMarisa(storage::FileManagerImplPtr file_manager = nullptr) {
-    return std::make_unique<StringIndexMarisa>(file_manager);
+CreateStringIndexMarisa(
+    const storage::FileManagerContext& file_manager_context =
+        storage::FileManagerContext()) {
+    return std::make_unique<StringIndexMarisa>(file_manager_context);
 }
 
 }  // namespace milvus::index

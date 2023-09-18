@@ -29,9 +29,12 @@ namespace milvus::index {
 
 class VectorMemIndex : public VectorIndex {
  public:
-    explicit VectorMemIndex(const IndexType& index_type,
-                            const MetricType& metric_type,
-                            storage::FileManagerImplPtr file_manager = nullptr);
+    explicit VectorMemIndex(
+        const IndexType& index_type,
+        const MetricType& metric_type,
+        const std::string& version,
+        const storage::FileManagerContext& file_manager_context =
+            storage::FileManagerContext());
 
     BinarySet
     Serialize(const Config& config) override;

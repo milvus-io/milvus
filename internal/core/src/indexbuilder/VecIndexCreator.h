@@ -26,9 +26,11 @@ namespace milvus::indexbuilder {
 // TODO: better to distinguish binary vec & float vec.
 class VecIndexCreator : public IndexCreatorBase {
  public:
-    explicit VecIndexCreator(DataType data_type,
-                             Config& config,
-                             storage::FileManagerImplPtr file_manager);
+    explicit VecIndexCreator(
+        DataType data_type,
+        Config& config,
+        const storage::FileManagerContext& file_manager_context =
+            storage::FileManagerContext());
 
     void
     Build(const milvus::DatasetPtr& dataset) override;

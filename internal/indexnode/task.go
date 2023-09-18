@@ -337,6 +337,11 @@ func (it *indexBuildTask) BuildIndex(ctx context.Context) error {
 		}
 	}
 
+	if err := buildIndexInfo.AppendIndexEngineVersion(it.req.GetIndexEngineVersion()); err != nil {
+		log.Ctx(ctx).Warn("append index engine version failed", zap.Error(err))
+		return err
+	}
+
 	it.index, err = indexcgowrapper.CreateIndex(ctx, buildIndexInfo)
 	if err != nil {
 		if it.index != nil && it.index.CleanLocalData() != nil {

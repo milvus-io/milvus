@@ -24,11 +24,11 @@
 
 namespace milvus::storage {
 
-MemFileManagerImpl::MemFileManagerImpl(const FieldDataMeta& field_mata,
-                                       IndexMeta index_meta,
-                                       ChunkManagerPtr remote_chunk_manager)
-    : FileManagerImpl(field_mata, index_meta) {
-    rcm_ = remote_chunk_manager;
+MemFileManagerImpl::MemFileManagerImpl(
+    const FileManagerContext& fileManagerContext)
+    : FileManagerImpl(fileManagerContext.fieldDataMeta,
+                      fileManagerContext.indexMeta) {
+    rcm_ = fileManagerContext.chunkManagerPtr;
 }
 
 bool

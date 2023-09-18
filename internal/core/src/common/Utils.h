@@ -166,46 +166,7 @@ PositivelyRelated(const knowhere::MetricType& metric_type) {
 
 inline std::string
 KnowhereStatusString(knowhere::Status status) {
-    switch (status) {
-        case knowhere::Status::invalid_args:
-            return "invalid args";
-        case knowhere::Status::invalid_param_in_json:
-            return "invalid param in json";
-        case knowhere::Status::out_of_range_in_json:
-            return "out of range in json";
-        case knowhere::Status::type_conflict_in_json:
-            return "type conflict in json";
-        case knowhere::Status::invalid_metric_type:
-            return "invalid metric type";
-        case knowhere::Status::empty_index:
-            return "empty index";
-        case knowhere::Status::not_implemented:
-            return "not implemented";
-        case knowhere::Status::index_not_trained:
-            return "index not trained";
-        case knowhere::Status::index_already_trained:
-            return "index already trained";
-        case knowhere::Status::faiss_inner_error:
-            return "faiss inner error";
-        case knowhere::Status::hnsw_inner_error:
-            return "hnsw inner error";
-        case knowhere::Status::malloc_error:
-            return "malloc error";
-        case knowhere::Status::diskann_inner_error:
-            return "diskann inner error";
-        case knowhere::Status::diskann_file_error:
-            return "diskann file error";
-        case knowhere::Status::invalid_value_in_json:
-            return "invalid value in json";
-        case knowhere::Status::arithmetic_overflow:
-            return "arithmetic overflow";
-        case knowhere::Status::raft_inner_error:
-            return "raft inner error";
-        case knowhere::Status::invalid_binary_set:
-            return "invalid binary set";
-        default:
-            return "unexpected status";
-    }
+    return knowhere::Status2String(status);
 }
 
 inline std::vector<IndexType>

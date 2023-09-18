@@ -20,15 +20,16 @@
 
 namespace milvus::indexbuilder {
 
-ScalarIndexCreator::ScalarIndexCreator(DataType dtype,
-                                       Config& config,
-                                       storage::FileManagerImplPtr file_manager)
+ScalarIndexCreator::ScalarIndexCreator(
+    DataType dtype,
+    Config& config,
+    const storage::FileManagerContext& file_manager_context)
     : dtype_(dtype), config_(config) {
     milvus::index::CreateIndexInfo index_info;
     index_info.field_type = dtype_;
     index_info.index_type = index_type();
-    index_ = index::IndexFactory::GetInstance().CreateIndex(index_info,
-                                                            file_manager);
+    index_ = index::IndexFactory::GetInstance().CreateIndex(
+        index_info, file_manager_context);
 }
 
 void

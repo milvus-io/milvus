@@ -292,15 +292,16 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 			}
 		}
 		req := &indexpb.CreateJobRequest{
-			ClusterID:       Params.CommonCfg.ClusterPrefix.GetValue(),
-			IndexFilePrefix: path.Join(ib.chunkManager.RootPath(), common.SegmentIndexPath),
-			BuildID:         buildID,
-			DataPaths:       binLogs,
-			IndexVersion:    meta.IndexVersion + 1,
-			StorageConfig:   storageConfig,
-			IndexParams:     indexParams,
-			TypeParams:      typeParams,
-			NumRows:         meta.NumRows,
+			ClusterID:          Params.CommonCfg.ClusterPrefix.GetValue(),
+			IndexFilePrefix:    path.Join(ib.chunkManager.RootPath(), common.SegmentIndexPath),
+			BuildID:            buildID,
+			DataPaths:          binLogs,
+			IndexVersion:       meta.IndexVersion + 1,
+			StorageConfig:      storageConfig,
+			IndexParams:        indexParams,
+			TypeParams:         typeParams,
+			NumRows:            meta.NumRows,
+			IndexEngineVersion: meta.IndexEngineVersion,
 		}
 		if err := ib.assignTask(client, req); err != nil {
 			// need to release lock then reassign, so set task state to retry

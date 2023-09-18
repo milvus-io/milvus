@@ -614,19 +614,6 @@ CreateChunkManager(const StorageConfig& storage_config) {
     }
 }
 
-FileManagerImplPtr
-CreateFileManager(IndexType index_type,
-                  const FieldDataMeta& field_meta,
-                  const IndexMeta& index_meta,
-                  ChunkManagerPtr cm) {
-    if (is_in_disk_list(index_type)) {
-        return std::make_shared<DiskFileManagerImpl>(
-            field_meta, index_meta, cm);
-    }
-
-    return std::make_shared<MemFileManagerImpl>(field_meta, index_meta, cm);
-}
-
 FieldDataPtr
 CreateFieldData(const DataType& type, int64_t dim, int64_t total_num_rows) {
     switch (type) {

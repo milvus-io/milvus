@@ -18,6 +18,7 @@
 #include "index/Meta.h"
 #include "index/Utils.h"
 #include "log/Log.h"
+#include "storage/FileManager.h"
 #include "segcore/Types.h"
 #include "storage/Util.h"
 #include "storage/RemoteChunkManagerSingleton.h"
@@ -111,6 +112,7 @@ appendVecIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
 
         milvus::index::CreateIndexInfo index_info;
         index_info.field_type = load_index_info->field_type;
+        index_info.index_engine_version = load_index_info->index_engine_version;
 
         // get index type
         AssertInfo(index_params.find("index_type") != index_params.end(),
@@ -135,20 +137,16 @@ appendVecIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
         auto remote_chunk_manager =
             milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                 .GetRemoteChunkManager();
-        auto file_manager =
-            milvus::storage::CreateFileManager(index_info.index_type,
-                                               field_meta,
-                                               index_meta,
-                                               remote_chunk_manager);
-        AssertInfo(file_manager != nullptr, "create file manager failed!");
 
         auto config = milvus::index::ParseConfigFromIndexParams(
             load_index_info->index_params);
         config["index_files"] = load_index_info->index_files;
 
+        milvus::storage::FileManagerContext fileManagerContext(
+            field_meta, index_meta, remote_chunk_manager);
         load_index_info->index =
             milvus::index::IndexFactory::GetInstance().CreateIndex(
-                index_info, file_manager);
+                index_info, fileManagerContext);
         load_index_info->index->Load(*binary_set, config);
         auto status = CStatus();
         status.error_code = milvus::Success;
@@ -180,8 +178,8 @@ appendScalarIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
         index_info.index_type = index_params["index_type"];
 
         load_index_info->index =
-            milvus::index::IndexFactory::GetInstance().CreateIndex(index_info,
-                                                                   nullptr);
+            milvus::index::IndexFactory::GetInstance().CreateIndex(
+                index_info, milvus::storage::FileManagerContext());
         load_index_info->index->Load(*binary_set);
         auto status = CStatus();
         status.error_code = milvus::Success;
@@ -213,8 +211,14 @@ AppendIndexV2(CLoadIndexInfo c_load_index_info) {
         auto& index_params = load_index_info->index_params;
         auto field_type = load_index_info->field_type;
 
+        auto engine_version =
+            load_index_info->index_engine_version.empty()
+                ? knowhere::Version::GetDefaultVersion().VersionCode()
+                : load_index_info->index_engine_version;
+
         milvus::index::CreateIndexInfo index_info;
         index_info.field_type = load_index_info->field_type;
+        index_info.index_engine_version = engine_version;
 
         // get index type
         AssertInfo(index_params.find("index_type") != index_params.end(),
@@ -241,20 +245,16 @@ AppendIndexV2(CLoadIndexInfo c_load_index_info) {
         auto remote_chunk_manager =
             milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                 .GetRemoteChunkManager();
-        auto file_manager =
-            milvus::storage::CreateFileManager(index_info.index_type,
-                                               field_meta,
-                                               index_meta,
-                                               remote_chunk_manager);
-        AssertInfo(file_manager != nullptr, "create file manager failed!");
 
         auto config = milvus::index::ParseConfigFromIndexParams(
             load_index_info->index_params);
         config["index_files"] = load_index_info->index_files;
 
+        milvus::storage::FileManagerContext fileManagerContext(
+            field_meta, index_meta, remote_chunk_manager);
         load_index_info->index =
             milvus::index::IndexFactory::GetInstance().CreateIndex(
-                index_info, file_manager);
+                index_info, fileManagerContext);
 
         if (!load_index_info->mmap_dir_path.empty() &&
             load_index_info->index->IsMmapSupported()) {
@@ -311,6 +311,27 @@ AppendIndexInfo(CLoadIndexInfo c_load_index_info,
         load_index_info->index_id = index_id;
         load_index_info->index_build_id = build_id;
         load_index_info->index_version = version;
+
+        auto status = CStatus();
+        status.error_code = milvus::Success;
+        status.error_msg = "";
+        return status;
+    } catch (std::exception& e) {
+        auto status = CStatus();
+        status.error_code = milvus::UnexpectedError;
+        status.error_msg = strdup(e.what());
+        return status;
+    }
+}
+
+CStatus
+AppendIndexEngineVersionToLoadInfo(CLoadIndexInfo c_load_index_info,
+                                   const char* c_index_engine_version) {
+    try {
+        auto load_index_info =
+            (milvus::segcore::LoadIndexInfo*)c_load_index_info;
+        std::string index_engine_version(c_index_engine_version);
+        load_index_info->index_engine_version = index_engine_version;
 
         auto status = CStatus();
         status.error_code = milvus::Success;

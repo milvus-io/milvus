@@ -105,8 +105,9 @@ BUILD_DISK_ANN="OFF"
 USE_ASAN="OFF"
 OPEN_SIMD="OFF"
 USE_DYNAMIC_SIMD="OFF"
+INDEX_ENGINE="KNOWHERE"
 
-while getopts "p:d:t:s:f:n:i:y:a:ulrcghzmebZ" arg; do
+while getopts "p:d:t:s:f:n:i:y:a:x:ulrcghzmebZ" arg; do
   case $arg in
   f)
     CUSTOM_THIRDPARTY_PATH=$OPTARG
@@ -169,6 +170,9 @@ while getopts "p:d:t:s:f:n:i:y:a:ulrcghzmebZ" arg; do
     ;;
   Z)
     BUILD_WITHOUT_AZURE="on"
+    ;;
+  x)
+    INDEX_ENGINE=$OPTARG
     ;;
   h) # help
     echo "
@@ -290,8 +294,9 @@ ${CMAKE_EXTRA_ARGS} \
 -DBUILD_DISK_ANN=${BUILD_DISK_ANN} \
 -DUSE_ASAN=${USE_ASAN} \
 -DOPEN_SIMD=${OPEN_SIMD} \
--DUSE_DYNAMIC_SIMD=${USE_DYNAMIC_SIMD}
--DCPU_ARCH=${CPU_ARCH} "
+-DUSE_DYNAMIC_SIMD=${USE_DYNAMIC_SIMD} \
+-DCPU_ARCH=${CPU_ARCH} \
+-DINDEX_ENGINE=${INDEX_ENGINE} "
 if [ -z "$BUILD_WITHOUT_AZURE" ]; then
 CMAKE_CMD=${CMAKE_CMD}"-DAZURE_BUILD_DIR=${AZURE_BUILD_DIR} \
 -DVCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET} "

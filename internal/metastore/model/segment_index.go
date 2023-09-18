@@ -22,7 +22,8 @@ type SegmentIndex struct {
 	IndexFileKeys []string
 	IndexSize     uint64
 	// deprecated
-	WriteHandoff bool
+	WriteHandoff       bool
+	IndexEngineVersion string
 }
 
 func UnmarshalSegmentIndexModel(segIndex *indexpb.SegmentIndex) *SegmentIndex {
@@ -31,21 +32,22 @@ func UnmarshalSegmentIndexModel(segIndex *indexpb.SegmentIndex) *SegmentIndex {
 	}
 
 	return &SegmentIndex{
-		SegmentID:     segIndex.SegmentID,
-		CollectionID:  segIndex.CollectionID,
-		PartitionID:   segIndex.PartitionID,
-		NumRows:       segIndex.NumRows,
-		IndexID:       segIndex.IndexID,
-		BuildID:       segIndex.BuildID,
-		NodeID:        segIndex.NodeID,
-		IndexState:    segIndex.State,
-		FailReason:    segIndex.FailReason,
-		IndexVersion:  segIndex.IndexVersion,
-		IsDeleted:     segIndex.Deleted,
-		CreateTime:    segIndex.CreateTime,
-		IndexFileKeys: common.CloneStringList(segIndex.IndexFileKeys),
-		IndexSize:     segIndex.SerializeSize,
-		WriteHandoff:  segIndex.WriteHandoff,
+		SegmentID:          segIndex.SegmentID,
+		CollectionID:       segIndex.CollectionID,
+		PartitionID:        segIndex.PartitionID,
+		NumRows:            segIndex.NumRows,
+		IndexID:            segIndex.IndexID,
+		BuildID:            segIndex.BuildID,
+		NodeID:             segIndex.NodeID,
+		IndexState:         segIndex.State,
+		FailReason:         segIndex.FailReason,
+		IndexVersion:       segIndex.IndexVersion,
+		IsDeleted:          segIndex.Deleted,
+		CreateTime:         segIndex.CreateTime,
+		IndexFileKeys:      common.CloneStringList(segIndex.IndexFileKeys),
+		IndexSize:          segIndex.SerializeSize,
+		WriteHandoff:       segIndex.WriteHandoff,
+		IndexEngineVersion: segIndex.GetIndexEngineVersion(),
 	}
 }
 
@@ -55,40 +57,42 @@ func MarshalSegmentIndexModel(segIdx *SegmentIndex) *indexpb.SegmentIndex {
 	}
 
 	return &indexpb.SegmentIndex{
-		CollectionID:  segIdx.CollectionID,
-		PartitionID:   segIdx.PartitionID,
-		SegmentID:     segIdx.SegmentID,
-		NumRows:       segIdx.NumRows,
-		IndexID:       segIdx.IndexID,
-		BuildID:       segIdx.BuildID,
-		NodeID:        segIdx.NodeID,
-		State:         segIdx.IndexState,
-		FailReason:    segIdx.FailReason,
-		IndexVersion:  segIdx.IndexVersion,
-		IndexFileKeys: common.CloneStringList(segIdx.IndexFileKeys),
-		Deleted:       segIdx.IsDeleted,
-		CreateTime:    segIdx.CreateTime,
-		SerializeSize: segIdx.IndexSize,
-		WriteHandoff:  segIdx.WriteHandoff,
+		CollectionID:       segIdx.CollectionID,
+		PartitionID:        segIdx.PartitionID,
+		SegmentID:          segIdx.SegmentID,
+		NumRows:            segIdx.NumRows,
+		IndexID:            segIdx.IndexID,
+		BuildID:            segIdx.BuildID,
+		NodeID:             segIdx.NodeID,
+		State:              segIdx.IndexState,
+		FailReason:         segIdx.FailReason,
+		IndexVersion:       segIdx.IndexVersion,
+		IndexFileKeys:      common.CloneStringList(segIdx.IndexFileKeys),
+		Deleted:            segIdx.IsDeleted,
+		CreateTime:         segIdx.CreateTime,
+		SerializeSize:      segIdx.IndexSize,
+		WriteHandoff:       segIdx.WriteHandoff,
+		IndexEngineVersion: segIdx.IndexEngineVersion,
 	}
 }
 
 func CloneSegmentIndex(segIndex *SegmentIndex) *SegmentIndex {
 	return &SegmentIndex{
-		SegmentID:     segIndex.SegmentID,
-		CollectionID:  segIndex.CollectionID,
-		PartitionID:   segIndex.PartitionID,
-		NumRows:       segIndex.NumRows,
-		IndexID:       segIndex.IndexID,
-		BuildID:       segIndex.BuildID,
-		NodeID:        segIndex.NodeID,
-		IndexState:    segIndex.IndexState,
-		FailReason:    segIndex.FailReason,
-		IndexVersion:  segIndex.IndexVersion,
-		IsDeleted:     segIndex.IsDeleted,
-		CreateTime:    segIndex.CreateTime,
-		IndexFileKeys: common.CloneStringList(segIndex.IndexFileKeys),
-		IndexSize:     segIndex.IndexSize,
-		WriteHandoff:  segIndex.WriteHandoff,
+		SegmentID:          segIndex.SegmentID,
+		CollectionID:       segIndex.CollectionID,
+		PartitionID:        segIndex.PartitionID,
+		NumRows:            segIndex.NumRows,
+		IndexID:            segIndex.IndexID,
+		BuildID:            segIndex.BuildID,
+		NodeID:             segIndex.NodeID,
+		IndexState:         segIndex.IndexState,
+		FailReason:         segIndex.FailReason,
+		IndexVersion:       segIndex.IndexVersion,
+		IsDeleted:          segIndex.IsDeleted,
+		CreateTime:         segIndex.CreateTime,
+		IndexFileKeys:      common.CloneStringList(segIndex.IndexFileKeys),
+		IndexSize:          segIndex.IndexSize,
+		WriteHandoff:       segIndex.WriteHandoff,
+		IndexEngineVersion: segIndex.IndexEngineVersion,
 	}
 }

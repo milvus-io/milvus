@@ -25,7 +25,8 @@ namespace milvus::index {
 using BoolIndexPtr = std::shared_ptr<ScalarIndexSort<bool>>;
 
 inline BoolIndexPtr
-CreateBoolIndex(storage::FileManagerImplPtr file_manager = nullptr) {
-    return std::make_unique<ScalarIndexSort<bool>>(file_manager);
+CreateBoolIndex(const storage::FileManagerContext& file_manager_context =
+                    storage::FileManagerContext()) {
+    return std::make_unique<ScalarIndexSort<bool>>(file_manager_context);
 }
 }  // namespace milvus::index

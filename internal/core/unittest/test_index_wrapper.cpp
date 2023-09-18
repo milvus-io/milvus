@@ -70,10 +70,9 @@ class IndexWrapperTest : public ::testing::TestWithParam<Param> {
 
         is_binary = is_binary_map[index_type];
         if (is_binary) {
-            vec_field_data_type = DataType::VECTOR_FLOAT;
-            ;
-        } else {
             vec_field_data_type = DataType::VECTOR_BINARY;
+        } else {
+            vec_field_data_type = DataType::VECTOR_FLOAT;
         }
 
         auto dataset = GenDataset(NB, metric_type, is_binary);
@@ -129,8 +128,15 @@ INSTANTIATE_TEST_CASE_P(
         std::pair(knowhere::IndexEnum::INDEX_HNSW, knowhere::metric::L2)));
 
 TEST_P(IndexWrapperTest, BuildAndQuery) {
+    milvus::storage::FieldDataMeta field_data_meta{1, 2, 3, 100};
+    milvus::storage::IndexMeta index_meta{3, 100, 1000, 1};
+    auto chunk_manager = milvus::storage::CreateChunkManager(storage_config_);
+
+    storage::FileManagerContext file_manager_context(
+        field_data_meta, index_meta, chunk_manager);
+    config[milvus::index::INDEX_ENGINE_VERSION] = knowhere::Version::GetCurrentVersion().VersionCode();
     auto index = milvus::indexbuilder::IndexFactory::GetInstance().CreateIndex(
-        vec_field_data_type, config, nullptr);
+        vec_field_data_type, config, file_manager_context);
 
     auto dataset = GenDataset(NB, metric_type, is_binary);
     knowhere::DataSetPtr xb_dataset;
@@ -146,12 +152,18 @@ TEST_P(IndexWrapperTest, BuildAndQuery) {
 
     ASSERT_NO_THROW(index->Build(xb_dataset));
     auto binary_set = index->Serialize();
+    std::vector<std::string> index_files;
+    for (auto& binary : binary_set.binary_map_) {
+        index_files.emplace_back(binary.first);
+    }
+    config["index_files"] = index_files;
     auto copy_index =
         milvus::indexbuilder::IndexFactory::GetInstance().CreateIndex(
-            vec_field_data_type, config, nullptr);
+            vec_field_data_type, config, file_manager_context);
     auto vec_index =
         static_cast<milvus::indexbuilder::VecIndexCreator*>(copy_index.get());
     ASSERT_EQ(vec_index->dim(), DIM);
+
     ASSERT_NO_THROW(vec_index->Load(binary_set));
 
     milvus::SearchInfo search_info;

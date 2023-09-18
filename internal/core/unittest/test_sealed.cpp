@@ -18,6 +18,7 @@
 #include "test_utils/storage_test_utils.h"
 #include "index/IndexFactory.h"
 #include "storage/Util.h"
+#include "knowhere/version.h"
 #include "storage/ChunkCacheSingleton.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/MinioChunkManager.h"
@@ -88,9 +89,11 @@ TEST(Sealed, without_predicate) {
     create_index_info.field_type = DataType::VECTOR_FLOAT;
     create_index_info.metric_type = knowhere::metric::L2;
     create_index_info.index_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionCode();
 
     auto indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
-        create_index_info, nullptr);
+        create_index_info, milvus::storage::FileManagerContext());
 
     auto build_conf =
         knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
@@ -201,8 +204,10 @@ TEST(Sealed, with_predicate) {
     create_index_info.field_type = DataType::VECTOR_FLOAT;
     create_index_info.metric_type = knowhere::metric::L2;
     create_index_info.index_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionCode();
     auto indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
-        create_index_info, nullptr);
+        create_index_info, milvus::storage::FileManagerContext());
 
     auto build_conf =
         knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
@@ -305,8 +310,10 @@ TEST(Sealed, with_predicate_filter_all) {
     create_index_info.field_type = DataType::VECTOR_FLOAT;
     create_index_info.metric_type = knowhere::metric::L2;
     create_index_info.index_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionCode();
     auto ivf_indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
-        create_index_info, nullptr);
+        create_index_info, milvus::storage::FileManagerContext());
 
     auto ivf_build_conf =
         knowhere::Json{{knowhere::meta::DIM, std::to_string(dim)},
@@ -343,8 +350,10 @@ TEST(Sealed, with_predicate_filter_all) {
     create_index_info.field_type = DataType::VECTOR_FLOAT;
     create_index_info.metric_type = knowhere::metric::L2;
     create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
+    create_index_info.index_engine_version =
+            knowhere::Version::GetCurrentVersion().VersionCode();
     auto hnsw_indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
-        create_index_info, nullptr);
+        create_index_info, milvus::storage::FileManagerContext());
     hnsw_indexing->BuildWithDataset(database, hnsw_conf);
 
     auto hnsw_vec_index =
@@ -1212,8 +1221,10 @@ TEST(Sealed, GetVectorFromChunkCache) {
     auto fakevec = dataset.get_col<float>(fakevec_id);
     auto conf = generate_build_conf(index_type, metric_type);
     auto ds = knowhere::GenDataSet(N, dim, fakevec.data());
-    auto indexing =
-        std::make_unique<index::VectorMemIndex>(index_type, metric_type);
+    auto indexing = std::make_unique<index::VectorMemIndex>(
+        index_type,
+        metric_type,
+        knowhere::Version::GetCurrentVersion().VersionCode());
     indexing->BuildWithDataset(ds, conf);
     auto segment_sealed = CreateSealedSegment(schema);
 

@@ -31,11 +31,11 @@
 
 namespace milvus::storage {
 
-DiskFileManagerImpl::DiskFileManagerImpl(const FieldDataMeta& field_mata,
-                                         IndexMeta index_meta,
-                                         ChunkManagerPtr remote_chunk_manager)
-    : FileManagerImpl(field_mata, index_meta) {
-    rcm_ = remote_chunk_manager;
+DiskFileManagerImpl::DiskFileManagerImpl(
+    const FileManagerContext& fileManagerContext)
+    : FileManagerImpl(fileManagerContext.fieldDataMeta,
+                      fileManagerContext.indexMeta) {
+    rcm_ = fileManagerContext.chunkManagerPtr;
 }
 
 DiskFileManagerImpl::~DiskFileManagerImpl() {

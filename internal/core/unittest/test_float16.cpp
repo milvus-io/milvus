@@ -11,7 +11,6 @@
 
 #include <gtest/gtest.h>
 
-
 #include "common/LoadInfo.h"
 #include "common/Types.h"
 #include "index/IndexFactory.h"
@@ -80,8 +79,8 @@ TEST(Float16, Insert) {
     auto row_count = interface.get_row_count();
     ASSERT_EQ(N, row_count);
     for (auto chunk_id = 0; chunk_id < num_chunk; ++chunk_id) {
-        auto float16_span =
-            interface.chunk_data<milvus::Float16Vector>(float16_vec_fid, chunk_id);
+        auto float16_span = interface.chunk_data<milvus::Float16Vector>(
+            float16_vec_fid, chunk_id);
         auto begin = chunk_id * size_per_chunk;
         auto end = std::min((chunk_id + 1) * size_per_chunk, N);
         auto size_of_chunk = end - begin;
@@ -150,8 +149,7 @@ TEST(Float16, ExecWithoutPredicateFlat) {
     auto vec_ptr = dataset.get_col<float16>(vec_fid);
 
     auto num_queries = 5;
-    auto ph_group_raw = CreateFloat16PlaceholderGroup(
-        num_queries, 32, 1024);
+    auto ph_group_raw = CreateFloat16PlaceholderGroup(num_queries, 32, 1024);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
@@ -204,7 +202,7 @@ TEST(Float16, GetVector) {
             segment->bulk_subscript(vec, ids_ds->GetIds(), num_inserted);
 
         auto vector = result.get()->mutable_vectors()->float16_vector();
-        EXPECT_TRUE(vector.size() == num_inserted * dim * sizeof(float16));   
+        EXPECT_TRUE(vector.size() == num_inserted * dim * sizeof(float16));
         // EXPECT_TRUE(vector.size() == num_inserted * dim);
         // for (size_t i = 0; i < num_inserted; ++i) {
         //     auto id = ids_ds->GetIds()[i];
@@ -286,7 +284,8 @@ TEST(Float16, CApiCPlan) {
 
     milvus::proto::plan::PlanNode plan_node;
     auto vector_anns = plan_node.mutable_vector_anns();
-    vector_anns->set_vector_type(milvus::proto::plan::VectorType::Float16Vector);
+    vector_anns->set_vector_type(
+        milvus::proto::plan::VectorType::Float16Vector);
     vector_anns->set_placeholder_tag("$0");
     vector_anns->set_field_id(100);
     auto query_info = vector_anns->mutable_query_info();

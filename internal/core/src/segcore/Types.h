@@ -42,6 +42,7 @@ struct LoadIndexInfo {
     std::map<std::string, std::string> index_params;
     std::vector<std::string> index_files;
     index::IndexBasePtr index;
+    std::string index_engine_version;
 };
 
 }  // namespace milvus::segcore

@@ -199,7 +199,7 @@ TEST(CBoolIndexTest, All) {
         { DeleteBinarySet(binary_set); }
     }
 
-    delete[] (char*)(half_ds->GetTensor());
+    delete[](char*)(half_ds->GetTensor());
 }
 
 // TODO: more scalar type.
@@ -316,6 +316,6 @@ TEST(CStringIndexTest, All) {
         { DeleteBinarySet(binary_set); }
     }
 
-    delete[] (char*)(str_ds->GetTensor());
+    delete[](char*)(str_ds->GetTensor());
 }
 #endif

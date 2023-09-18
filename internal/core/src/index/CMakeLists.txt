@@ -14,14 +14,8 @@ set(INDEX_FILES
         Utils.cpp
         VectorMemIndex.cpp
         IndexFactory.cpp
+        VectorDiskIndex.cpp
         )
-
-if ( BUILD_DISK_ANN STREQUAL "ON" )
-    set(INDEX_FILES
-            ${INDEX_FILES}
-            VectorDiskIndex.cpp
-            )
-endif ()
 
 milvus_add_pkg_config("milvus_index")
 add_library(milvus_index SHARED ${INDEX_FILES})

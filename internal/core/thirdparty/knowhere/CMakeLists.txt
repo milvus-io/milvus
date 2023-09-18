@@ -11,7 +11,14 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-set( KNOWHERE_VERSION 7b63839 )
+set( KNOWHERE_VERSION 1dcd84b4 )
+set( GIT_REPOSITORY  "https://github.com/zilliztech/knowhere.git")
+if ( INDEX_ENGINE STREQUAL "cardinal" )
+    set( KNOWHERE_VERSION main)
+    set( GIT_REPOSITORY  "https://github.com/zilliztech/knowhere-cloud.git")
+endif()
+message(STATUS "Knowhere repo: ${GIT_REPOSITORY}")
+message(STATUS "Knowhere version: ${KNOWHERE_VERSION}")
 
 message(STATUS "Building knowhere-${KNOWHERE_SOURCE_VER} from source")
 message(STATUS ${CMAKE_BUILD_TYPE})
@@ -26,11 +33,10 @@ if ( MILVUS_GPU_VERSION STREQUAL "ON" )
     set(WITH_RAFT ON CACHE BOOL "" FORCE )
 endif ()
 
-
 set( CMAKE_PREFIX_PATH ${CONAN_BOOST_ROOT} )
 FetchContent_Declare(
         knowhere
-        GIT_REPOSITORY  "https://github.com/zilliztech/knowhere.git"
+        GIT_REPOSITORY  ${GIT_REPOSITORY}
         GIT_TAG         ${KNOWHERE_VERSION}
         SOURCE_DIR      ${CMAKE_CURRENT_BINARY_DIR}/knowhere-src
         BINARY_DIR      ${CMAKE_CURRENT_BINARY_DIR}/knowhere-build
