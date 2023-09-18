@@ -207,6 +207,8 @@ func newMockDmlTask(ctx context.Context) *mockDmlTask {
 
 	return &mockDmlTask{
 		mockTask: newMockTask(ctx),
+		vchans:   vchans,
+		pchans:   pchans,
 	}
 }
 

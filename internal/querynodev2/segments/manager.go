@@ -152,7 +152,7 @@ func (mgr *segmentManager) Put(segmentType SegmentType, segments ...Segment) {
 	var replacedSegment []Segment
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
-	targetMap := mgr.growingSegments
+	var targetMap map[int64]Segment
 	switch segmentType {
 	case SegmentTypeGrowing:
 		targetMap = mgr.growingSegments

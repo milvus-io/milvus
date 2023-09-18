@@ -1107,21 +1107,18 @@ func newMockStepExecutor() *mockStepExecutor {
 func (m mockStepExecutor) Start() {
 	if m.StartFunc != nil {
 		m.StartFunc()
-	} else {
 	}
 }
 
 func (m mockStepExecutor) Stop() {
 	if m.StopFunc != nil {
 		m.StopFunc()
-	} else {
 	}
 }
 
 func (m mockStepExecutor) AddSteps(s *stepStack) {
 	if m.AddStepsFunc != nil {
 		m.AddStepsFunc(s)
-	} else {
 	}
 }
 

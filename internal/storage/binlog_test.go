@@ -1101,7 +1101,7 @@ func TestIndexFileBinlog(t *testing.T) {
 
 	//descriptor data fix, field id
 	fID := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, fieldID, fieldID)
+	assert.Equal(t, fieldID, fID)
 	pos += int(unsafe.Sizeof(fID))
 
 	//descriptor data fix, start time stamp
@@ -1230,7 +1230,7 @@ func TestIndexFileBinlogV2(t *testing.T) {
 
 	//descriptor data fix, field id
 	fID := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, fieldID, fieldID)
+	assert.Equal(t, fieldID, fID)
 	pos += int(unsafe.Sizeof(fID))
 
 	//descriptor data fix, start time stamp

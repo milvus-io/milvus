@@ -573,6 +573,7 @@ func TestImportManager_ImportJob(t *testing.T) {
 	rowReq.Files = []string{"f1.json"}
 	mgr = newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callGetSegmentStates, nil, nil)
 	resp = mgr.importJob(context.TODO(), rowReq, colID, 0)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	assert.Equal(t, len(rowReq.Files), len(mgr.pendingTasks))
 	assert.Equal(t, 0, len(mgr.workingTasks))
 
@@ -586,6 +587,7 @@ func TestImportManager_ImportJob(t *testing.T) {
 	// since the importServiceFunc return error, tasks will be kept in pending list
 	mgr = newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callGetSegmentStates, nil, nil)
 	resp = mgr.importJob(context.TODO(), colReq, colID, 0)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	assert.Equal(t, 1, len(mgr.pendingTasks))
 	assert.Equal(t, 0, len(mgr.workingTasks))
 
@@ -600,12 +602,14 @@ func TestImportManager_ImportJob(t *testing.T) {
 	// row-based case, since the importServiceFunc return success, tasks will be sent to working list
 	mgr = newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callGetSegmentStates, nil, nil)
 	resp = mgr.importJob(context.TODO(), rowReq, colID, 0)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	assert.Equal(t, 0, len(mgr.pendingTasks))
 	assert.Equal(t, len(rowReq.Files), len(mgr.workingTasks))
 
 	// column-based case, since the importServiceFunc return success, tasks will be sent to working list
 	mgr = newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callGetSegmentStates, nil, nil)
 	resp = mgr.importJob(context.TODO(), colReq, colID, 0)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	assert.Equal(t, 0, len(mgr.pendingTasks))
 	assert.Equal(t, 1, len(mgr.workingTasks))
 
@@ -630,9 +634,11 @@ func TestImportManager_ImportJob(t *testing.T) {
 	// the first task is sent to working list, and 1 task left in pending list
 	mgr = newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callGetSegmentStates, nil, nil)
 	resp = mgr.importJob(context.TODO(), rowReq, colID, 0)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	assert.Equal(t, 0, len(mgr.pendingTasks))
 	assert.Equal(t, 1, len(mgr.workingTasks))
 	resp = mgr.importJob(context.TODO(), rowReq, colID, 0)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	assert.Equal(t, 1, len(mgr.pendingTasks))
 	assert.Equal(t, 1, len(mgr.workingTasks))
 

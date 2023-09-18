@@ -353,12 +353,12 @@ func TestGetIfPresentExpired(t *testing.T) {
 	c := NewCache(WithExpireAfterWrite[int, string](1*time.Second), WithInsertionListener(insFunc))
 	defer c.Close()
 
-	v, ok := c.GetIfPresent(0)
+	_, ok := c.GetIfPresent(0)
 	assert.False(t, ok)
 
 	wg.Add(1)
 	c.Put(0, "0")
-	v, ok = c.GetIfPresent(0)
+	v, ok := c.GetIfPresent(0)
 	assert.True(t, ok)
 	assert.Equal(t, "0", v)
 

@@ -860,7 +860,6 @@ func (ms *MqTtMsgStream) Seek(ctx context.Context, msgPositions []*msgpb.MsgPosi
 				}
 				if tsMsg.Type() == commonpb.MsgType_TimeTick && tsMsg.BeginTs() >= mp.Timestamp {
 					runLoop = false
-					break
 				} else if tsMsg.BeginTs() > mp.Timestamp {
 					ctx, _ := ExtractCtx(tsMsg, msg.Properties())
 					tsMsg.SetTraceCtx(ctx)

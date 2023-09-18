@@ -11,6 +11,7 @@ run:
 linters:
   disable-all: true
   enable:
+    - staticcheck
     - typecheck
     - goimports
     - misspell
@@ -82,6 +83,11 @@ issues:
     - G402
     # Use of weak random number generator math/rand
     - G404
+    # Unused parameters
+    - SA1019
+    # defer return errors
+    - SA5001
+
   # Maximum issues count per one linter. Set to 0 to disable. Default is 50.
   max-issues-per-linter: 0
   # Maximum count of issues with the same text. Set to 0 to disable. Default is 3.

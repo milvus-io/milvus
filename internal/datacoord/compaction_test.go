@@ -419,7 +419,7 @@ func TestCompactionPlanHandler_handleMergeCompactionResult(t *testing.T) {
 	require.True(t, has)
 
 	call.Unset()
-	call = mockDataNode.EXPECT().SyncSegments(mock.Anything, mock.Anything).Run(func(ctx context.Context, req *datapb.SyncSegmentsRequest) {}).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}, nil)
+	mockDataNode.EXPECT().SyncSegments(mock.Anything, mock.Anything).Run(func(ctx context.Context, req *datapb.SyncSegmentsRequest) {}).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}, nil)
 	err = c.handleMergeCompactionResult(plan, compactionResult2)
 	assert.Error(t, err)
 }

@@ -465,9 +465,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 		})
 
 		t.Run(tt.name+" with DiskANN index", func(t *testing.T) {
-			segmentIDs := make([]int64, 0)
 			for _, segment := range tt.fields.meta.segments.GetSegments() {
-				segmentIDs = append(segmentIDs, segment.GetID())
 				// Collection 1000 means it has DiskANN index
 				segment.CollectionID = 1000
 			}

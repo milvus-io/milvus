@@ -322,6 +322,7 @@ func (p *JSONParser) ParseRows(reader *IOReader, handler JSONRowHandler) error {
 			return errors.New("import task was canceled")
 		}
 
+		// nolint
 		// this break means we require the first node must be RowRootNode
 		// once the RowRootNode is parsed, just finish
 		break
