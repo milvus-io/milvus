@@ -92,6 +92,12 @@ func Test_NewClient(t *testing.T) {
 
 		r11, err := client.GetCompactionState(ctx, nil)
 		retCheck(retNotNil, r11, err)
+
+		r12, err := client.NotifyChannelOperation(ctx, nil)
+		retCheck(retNotNil, r12, err)
+
+		r13, err := client.CheckChannelOperationProgress(ctx, nil)
+		retCheck(retNotNil, r13, err)
 	}
 
 	client.grpcClient = &mock.GRPCClientBase[datapb.DataNodeClient]{

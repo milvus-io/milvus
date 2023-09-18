@@ -84,3 +84,11 @@ func (m *GrpcDataNodeClient) SyncSegments(ctx context.Context, in *datapb.SyncSe
 func (m *GrpcDataNodeClient) FlushChannels(ctx context.Context, in *datapb.FlushChannelsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }
+
+func (m *GrpcDataNodeClient) NotifyChannelOperation(ctx context.Context, in *datapb.ChannelOperationsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcDataNodeClient) CheckChannelOperationProgress(ctx context.Context, req *datapb.ChannelWatchInfo, opts ...grpc.CallOption) (*datapb.ChannelOperationProgressResponse, error) {
+	return &datapb.ChannelOperationProgressResponse{}, m.Err
+}

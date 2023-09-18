@@ -87,6 +87,61 @@ func (_c *MockDataNode_AddImportSegment_Call) RunAndReturn(run func(context.Cont
 	return _c
 }
 
+// CheckChannelOperationProgress provides a mock function with given fields: ctx, req
+func (_m *MockDataNode) CheckChannelOperationProgress(ctx context.Context, req *datapb.ChannelWatchInfo) (*datapb.ChannelOperationProgressResponse, error) {
+	ret := _m.Called(ctx, req)
+
+	var r0 *datapb.ChannelOperationProgressResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ChannelWatchInfo) (*datapb.ChannelOperationProgressResponse, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ChannelWatchInfo) *datapb.ChannelOperationProgressResponse); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.ChannelOperationProgressResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.ChannelWatchInfo) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataNode_CheckChannelOperationProgress_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckChannelOperationProgress'
+type MockDataNode_CheckChannelOperationProgress_Call struct {
+	*mock.Call
+}
+
+// CheckChannelOperationProgress is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *datapb.ChannelWatchInfo
+func (_e *MockDataNode_Expecter) CheckChannelOperationProgress(ctx interface{}, req interface{}) *MockDataNode_CheckChannelOperationProgress_Call {
+	return &MockDataNode_CheckChannelOperationProgress_Call{Call: _e.mock.On("CheckChannelOperationProgress", ctx, req)}
+}
+
+func (_c *MockDataNode_CheckChannelOperationProgress_Call) Run(run func(ctx context.Context, req *datapb.ChannelWatchInfo)) *MockDataNode_CheckChannelOperationProgress_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.ChannelWatchInfo))
+	})
+	return _c
+}
+
+func (_c *MockDataNode_CheckChannelOperationProgress_Call) Return(_a0 *datapb.ChannelOperationProgressResponse, _a1 error) *MockDataNode_CheckChannelOperationProgress_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataNode_CheckChannelOperationProgress_Call) RunAndReturn(run func(context.Context, *datapb.ChannelWatchInfo) (*datapb.ChannelOperationProgressResponse, error)) *MockDataNode_CheckChannelOperationProgress_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Compaction provides a mock function with given fields: ctx, req
 func (_m *MockDataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan) (*commonpb.Status, error) {
 	ret := _m.Called(ctx, req)
@@ -644,6 +699,61 @@ func (_c *MockDataNode_Init_Call) Return(_a0 error) *MockDataNode_Init_Call {
 }
 
 func (_c *MockDataNode_Init_Call) RunAndReturn(run func() error) *MockDataNode_Init_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// NotifyChannelOperation provides a mock function with given fields: ctx, req
+func (_m *MockDataNode) NotifyChannelOperation(ctx context.Context, req *datapb.ChannelOperationsRequest) (*commonpb.Status, error) {
+	ret := _m.Called(ctx, req)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ChannelOperationsRequest) (*commonpb.Status, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ChannelOperationsRequest) *commonpb.Status); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.ChannelOperationsRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataNode_NotifyChannelOperation_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'NotifyChannelOperation'
+type MockDataNode_NotifyChannelOperation_Call struct {
+	*mock.Call
+}
+
+// NotifyChannelOperation is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *datapb.ChannelOperationsRequest
+func (_e *MockDataNode_Expecter) NotifyChannelOperation(ctx interface{}, req interface{}) *MockDataNode_NotifyChannelOperation_Call {
+	return &MockDataNode_NotifyChannelOperation_Call{Call: _e.mock.On("NotifyChannelOperation", ctx, req)}
+}
+
+func (_c *MockDataNode_NotifyChannelOperation_Call) Run(run func(ctx context.Context, req *datapb.ChannelOperationsRequest)) *MockDataNode_NotifyChannelOperation_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.ChannelOperationsRequest))
+	})
+	return _c
+}
+
+func (_c *MockDataNode_NotifyChannelOperation_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataNode_NotifyChannelOperation_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataNode_NotifyChannelOperation_Call) RunAndReturn(run func(context.Context, *datapb.ChannelOperationsRequest) (*commonpb.Status, error)) *MockDataNode_NotifyChannelOperation_Call {
 	_c.Call.Return(run)
 	return _c
 }

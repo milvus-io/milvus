@@ -295,6 +295,14 @@ func (c *mockDataNodeClient) FlushChannels(ctx context.Context, req *datapb.Flus
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
 
+func (c *mockDataNodeClient) NotifyChannelOperation(ctx context.Context, req *datapb.ChannelOperationsRequest) (*commonpb.Status, error) {
+	return merr.Status(nil), nil
+}
+
+func (c *mockDataNodeClient) CheckChannelOperationProgress(ctx context.Context, req *datapb.ChannelWatchInfo) (*datapb.ChannelOperationProgressResponse, error) {
+	return &datapb.ChannelOperationProgressResponse{Status: merr.Status(nil)}, nil
+}
+
 func (c *mockDataNodeClient) Stop() error {
 	c.state = commonpb.StateCode_Abnormal
 	return nil
