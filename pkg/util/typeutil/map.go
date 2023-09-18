@@ -101,6 +101,14 @@ func (m *ConcurrentMap[K, V]) GetAndRemove(key K) (V, bool) {
 	return value.(V), true
 }
 
+// Remove removes the `key`, `value` set if `key` is in the map,
+// does nothing if `key` not in the map.
+func (m *ConcurrentMap[K, V]) Remove(key K) {
+	if _, loaded := m.inner.LoadAndDelete(key); loaded {
+		m.len.Dec()
+	}
+}
+
 func (m *ConcurrentMap[K, V]) Len() int {
 	return int(m.len.Load())
 }
