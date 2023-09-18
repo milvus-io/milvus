@@ -644,6 +644,7 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 		// Add segment as a flushed segment, but set `importing` to true to add extra information of the segment.
 		// By 'extra information' we mean segment info while adding a `SegmentType_Flushed` typed segment.
 		if err := ds.channel.addSegment(
+			context.TODO(),
 			addSegmentReq{
 				segType:      datapb.SegmentType_Flushed,
 				segID:        req.GetSegmentId(),

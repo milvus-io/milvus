@@ -551,6 +551,7 @@ func (ibNode *insertBufferNode) addSegmentAndUpdateRowNum(insertMsgs []*msgstrea
 
 		if !ibNode.channel.hasSegment(currentSegID, true) {
 			err = ibNode.channel.addSegment(
+				context.TODO(),
 				addSegmentReq{
 					segType:     datapb.SegmentType_New,
 					segID:       currentSegID,

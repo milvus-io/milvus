@@ -129,6 +129,7 @@ func TestChannelMeta_InnerFunction(t *testing.T) {
 	startPos := &msgpb.MsgPosition{ChannelName: "insert-01", Timestamp: Timestamp(100)}
 	endPos := &msgpb.MsgPosition{ChannelName: "insert-01", Timestamp: Timestamp(200)}
 	err = channel.addSegment(
+		context.TODO(),
 		addSegmentReq{
 			segType:     datapb.SegmentType_New,
 			segID:       0,
@@ -226,6 +227,7 @@ func TestChannelMeta_segmentFlushed(t *testing.T) {
 	t.Run("Test coll mot match", func(t *testing.T) {
 		channel := newChannel("channel", collID, nil, rc, cm)
 		err := channel.addSegment(
+			context.TODO(),
 			addSegmentReq{
 				segType:     datapb.SegmentType_New,
 				segID:       1,
@@ -345,6 +347,7 @@ func TestChannelMeta_InterfaceMethod(t *testing.T) {
 				channel := newChannel("a", test.channelCollID, nil, rc, cm)
 				require.False(t, channel.hasSegment(test.inSegID, true))
 				err := channel.addSegment(
+					context.TODO(),
 					addSegmentReq{
 						segType:     datapb.SegmentType_New,
 						segID:       test.inSegID,
@@ -388,6 +391,7 @@ func TestChannelMeta_InterfaceMethod(t *testing.T) {
 				channel := newChannel("a", test.channelCollID, nil, rc, &mockDataCM{})
 				require.False(t, channel.hasSegment(test.inSegID, true))
 				err := channel.addSegment(
+					context.TODO(),
 					addSegmentReq{
 						segType:      datapb.SegmentType_Normal,
 						segID:        test.inSegID,
@@ -418,6 +422,7 @@ func TestChannelMeta_InterfaceMethod(t *testing.T) {
 		require.False(t, channel.hasSegment(segID, true))
 		assert.NotPanics(t, func() {
 			err := channel.addSegment(
+				context.TODO(),
 				addSegmentReq{
 					segType:      datapb.SegmentType_Normal,
 					segID:        segID,
@@ -523,6 +528,7 @@ func TestChannelMeta_InterfaceMethod(t *testing.T) {
 		channel.chunkManager = &mockDataCMError{}
 
 		err := channel.addSegment(
+			context.TODO(),
 			addSegmentReq{
 				segType:      datapb.SegmentType_Normal,
 				segID:        1,
@@ -534,6 +540,7 @@ func TestChannelMeta_InterfaceMethod(t *testing.T) {
 			})
 		assert.Error(t, err)
 		err = channel.addSegment(
+			context.TODO(),
 			addSegmentReq{
 				segType:      datapb.SegmentType_Flushed,
 				segID:        1,
@@ -552,6 +559,7 @@ func TestChannelMeta_InterfaceMethod(t *testing.T) {
 		var err error
 
 		err = channel.addSegment(
+			context.TODO(),
 			addSegmentReq{
 				segType:      datapb.SegmentType_Normal,
 				segID:        1,
@@ -563,6 +571,7 @@ func TestChannelMeta_InterfaceMethod(t *testing.T) {
 			})
 		assert.Error(t, err)
 		err = channel.addSegment(
+			context.TODO(),
 			addSegmentReq{
 				segType:      datapb.SegmentType_Flushed,
 				segID:        1,
@@ -581,6 +590,7 @@ func TestChannelMeta_InterfaceMethod(t *testing.T) {
 		var err error
 
 		err = channel.addSegment(
+			context.TODO(),
 			addSegmentReq{
 				segType:      datapb.SegmentType_Normal,
 				segID:        1,
@@ -592,6 +602,7 @@ func TestChannelMeta_InterfaceMethod(t *testing.T) {
 			})
 		assert.Error(t, err)
 		err = channel.addSegment(
+			context.TODO(),
 			addSegmentReq{
 				segType:      datapb.SegmentType_Flushed,
 				segID:        1,
@@ -658,12 +669,14 @@ func TestChannelMeta_InterfaceMethod(t *testing.T) {
 
 				if !channel.hasSegment(4, false) {
 					channel.removeSegments(4)
-					channel.addSegment(addSegmentReq{
-						segType:     datapb.SegmentType_Normal,
-						segID:       4,
-						collID:      1,
-						partitionID: 0,
-					})
+					channel.addSegment(
+						context.TODO(),
+						addSegmentReq{
+							segType:     datapb.SegmentType_Normal,
+							segID:       4,
+							collID:      1,
+							partitionID: 0,
+						})
 				}
 
 				if channel.hasSegment(3, true) {
@@ -777,6 +790,7 @@ func TestChannelMeta_UpdatePKRange(t *testing.T) {
 	channel.chunkManager = &mockDataCM{}
 
 	err := channel.addSegment(
+		context.TODO(),
 		addSegmentReq{
 			segType:     datapb.SegmentType_New,
 			segID:       1,
@@ -787,6 +801,7 @@ func TestChannelMeta_UpdatePKRange(t *testing.T) {
 		})
 	assert.NoError(t, err)
 	err = channel.addSegment(
+		context.TODO(),
 		addSegmentReq{
 			segType:      datapb.SegmentType_Normal,
 			segID:        2,
@@ -856,6 +871,7 @@ func TestChannelMeta_ChannelCP(t *testing.T) {
 			channel := newChannel(mockVChannel, collID, nil, rc, cm)
 			channel.chunkManager = &mockDataCM{}
 			err := channel.addSegment(
+				context.TODO(),
 				addSegmentReq{
 					segType: datapb.SegmentType_New,
 					segID:   segmentID,
@@ -950,34 +966,40 @@ func (s *ChannelMetaSuite) TearDownSuite() {
 
 func (s *ChannelMetaSuite) SetupTest() {
 	var err error
-	err = s.channel.addSegment(addSegmentReq{
-		segType:     datapb.SegmentType_New,
-		segID:       1,
-		collID:      s.collID,
-		partitionID: s.partID,
-		startPos:    &msgpb.MsgPosition{},
-		endPos:      nil,
-	})
+	err = s.channel.addSegment(
+		context.TODO(),
+		addSegmentReq{
+			segType:     datapb.SegmentType_New,
+			segID:       1,
+			collID:      s.collID,
+			partitionID: s.partID,
+			startPos:    &msgpb.MsgPosition{},
+			endPos:      nil,
+		})
 	s.Require().NoError(err)
-	err = s.channel.addSegment(addSegmentReq{
-		segType:      datapb.SegmentType_Normal,
-		segID:        2,
-		collID:       s.collID,
-		partitionID:  s.partID,
-		numOfRows:    10,
-		statsBinLogs: nil,
-		recoverTs:    0,
-	})
+	err = s.channel.addSegment(
+		context.TODO(),
+		addSegmentReq{
+			segType:      datapb.SegmentType_Normal,
+			segID:        2,
+			collID:       s.collID,
+			partitionID:  s.partID,
+			numOfRows:    10,
+			statsBinLogs: nil,
+			recoverTs:    0,
+		})
 	s.Require().NoError(err)
-	err = s.channel.addSegment(addSegmentReq{
-		segType:      datapb.SegmentType_Flushed,
-		segID:        3,
-		collID:       s.collID,
-		partitionID:  s.partID,
-		numOfRows:    10,
-		statsBinLogs: nil,
-		recoverTs:    0,
-	})
+	err = s.channel.addSegment(
+		context.TODO(),
+		addSegmentReq{
+			segType:      datapb.SegmentType_Flushed,
+			segID:        3,
+			collID:       s.collID,
+			partitionID:  s.partID,
+			numOfRows:    10,
+			statsBinLogs: nil,
+			recoverTs:    0,
+		})
 	s.Require().NoError(err)
 }
 
@@ -1076,20 +1098,22 @@ func (s *ChannelMetaMockSuite) TestAddSegment_SkipBFLoad() {
 				<-ch
 			}).Return([][]byte{}, nil)
 
-		err := s.channel.addSegment(addSegmentReq{
-			segType:     datapb.SegmentType_Flushed,
-			segID:       100,
-			collID:      s.collID,
-			partitionID: s.partID,
-			statsBinLogs: []*datapb.FieldBinlog{
-				{
-					FieldID: 106,
-					Binlogs: []*datapb.Binlog{
-						{LogPath: "rootPath/stats/1/0/100/10001"},
+		err := s.channel.addSegment(
+			context.TODO(),
+			addSegmentReq{
+				segType:     datapb.SegmentType_Flushed,
+				segID:       100,
+				collID:      s.collID,
+				partitionID: s.partID,
+				statsBinLogs: []*datapb.FieldBinlog{
+					{
+						FieldID: 106,
+						Binlogs: []*datapb.Binlog{
+							{LogPath: "rootPath/stats/1/0/100/10001"},
+						},
 					},
 				},
-			},
-		})
+			})
 
 		s.NoError(err)
 
@@ -1112,20 +1136,22 @@ func (s *ChannelMetaMockSuite) TestAddSegment_SkipBFLoad() {
 				<-ch
 			}).Return(nil, storage.WrapErrNoSuchKey("rootPath/stats/1/0/100/10001"))
 
-		err := s.channel.addSegment(addSegmentReq{
-			segType:     datapb.SegmentType_Flushed,
-			segID:       100,
-			collID:      s.collID,
-			partitionID: s.partID,
-			statsBinLogs: []*datapb.FieldBinlog{
-				{
-					FieldID: 106,
-					Binlogs: []*datapb.Binlog{
-						{LogPath: "rootPath/stats/1/0/100/10001"},
+		err := s.channel.addSegment(
+			context.TODO(),
+			addSegmentReq{
+				segType:     datapb.SegmentType_Flushed,
+				segID:       100,
+				collID:      s.collID,
+				partitionID: s.partID,
+				statsBinLogs: []*datapb.FieldBinlog{
+					{
+						FieldID: 106,
+						Binlogs: []*datapb.Binlog{
+							{LogPath: "rootPath/stats/1/0/100/10001"},
+						},
 					},
 				},
-			},
-		})
+			})
 
 		s.NoError(err)
 
@@ -1158,20 +1184,22 @@ func (s *ChannelMetaMockSuite) TestAddSegment_SkipBFLoad() {
 			[]byte("ABC"),
 		}, nil)
 
-		err := s.channel.addSegment(addSegmentReq{
-			segType:     datapb.SegmentType_Flushed,
-			segID:       100,
-			collID:      s.collID,
-			partitionID: s.partID,
-			statsBinLogs: []*datapb.FieldBinlog{
-				{
-					FieldID: 106,
-					Binlogs: []*datapb.Binlog{
-						{LogPath: "rootPath/stats/1/0/100/10001"},
+		err := s.channel.addSegment(
+			context.TODO(),
+			addSegmentReq{
+				segType:     datapb.SegmentType_Flushed,
+				segID:       100,
+				collID:      s.collID,
+				partitionID: s.partID,
+				statsBinLogs: []*datapb.FieldBinlog{
+					{
+						FieldID: 106,
+						Binlogs: []*datapb.Binlog{
+							{LogPath: "rootPath/stats/1/0/100/10001"},
+						},
 					},
 				},
-			},
-		})
+			})
 
 		s.NoError(err)
 
@@ -1224,20 +1252,22 @@ func (s *ChannelMetaMockSuite) TestAddSegment_SkipBFLoad2() {
 				return nil
 			})
 
-		err := s.channel.addSegment(addSegmentReq{
-			segType:     datapb.SegmentType_Flushed,
-			segID:       100,
-			collID:      s.collID,
-			partitionID: s.partID,
-			statsBinLogs: []*datapb.FieldBinlog{
-				{
-					FieldID: 106,
-					Binlogs: []*datapb.Binlog{
-						{LogPath: "rootPath/stats/1/0/100/10001"},
+		err := s.channel.addSegment(
+			context.TODO(),
+			addSegmentReq{
+				segType:     datapb.SegmentType_Flushed,
+				segID:       100,
+				collID:      s.collID,
+				partitionID: s.partID,
+				statsBinLogs: []*datapb.FieldBinlog{
+					{
+						FieldID: 106,
+						Binlogs: []*datapb.Binlog{
+							{LogPath: "rootPath/stats/1/0/100/10001"},
+						},
 					},
 				},
-			},
-		})
+			})
 
 		s.NoError(err)
 

@@ -66,14 +66,16 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 		_, _, _, err = task.getSegmentMeta(100)
 		assert.Error(t, err)
 
-		err = channel.addSegment(addSegmentReq{
-			segType:     datapb.SegmentType_New,
-			segID:       100,
-			collID:      1,
-			partitionID: 10,
-			startPos:    new(msgpb.MsgPosition),
-			endPos:      nil,
-		})
+		err = channel.addSegment(
+			context.TODO(),
+			addSegmentReq{
+				segType:     datapb.SegmentType_New,
+				segID:       100,
+				collID:      1,
+				partitionID: 10,
+				startPos:    new(msgpb.MsgPosition),
+				endPos:      nil,
+			})
 		require.NoError(t, err)
 
 		collID, partID, meta, err := task.getSegmentMeta(100)
