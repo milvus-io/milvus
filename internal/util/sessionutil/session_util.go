@@ -800,6 +800,7 @@ func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
 	go func() {
 		defer s.wg.Done()
 		for {
+			defer s.SetDisconnected(true)
 			select {
 			case _, ok := <-s.liveCh:
 				// ok, still alive
@@ -808,7 +809,6 @@ func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
 				}
 				// not ok, connection lost
 				log.Warn("connection lost detected, shuting down")
-				s.SetDisconnected(true)
 				if callback != nil {
 					go callback()
 				}
