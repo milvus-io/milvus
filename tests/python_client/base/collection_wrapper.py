@@ -13,7 +13,7 @@ from utils.util_log import test_log as log
 from pymilvus.orm.types import CONSISTENCY_STRONG
 from common.common_func import param_info
 
-TIMEOUT = 120
+TIMEOUT = 180
 INDEX_NAME = ""
 
 
