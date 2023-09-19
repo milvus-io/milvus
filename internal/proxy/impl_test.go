@@ -195,9 +195,7 @@ func TestProxyRenameCollection(t *testing.T) {
 	t.Run("rename ok", func(t *testing.T) {
 		rc := mocks.NewRootCoord(t)
 		rc.On("RenameCollection", mock.Anything, mock.Anything).
-			Return(&commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			}, nil)
+			Return(merr.Status(nil), nil)
 		node := &Proxy{
 			session:   &sessionutil.Session{ServerID: 1},
 			rootCoord: rc,
@@ -696,9 +694,7 @@ func TestProxy_Connect(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(&milvuspb.ListDatabasesResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
+			Status:  merr.Status(nil),
 			DbNames: []string{},
 		}, nil)
 
@@ -721,9 +717,7 @@ func TestProxy_Connect(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(&milvuspb.ListDatabasesResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
+			Status:  merr.Status(nil),
 			DbNames: []string{"20230525"},
 		}, nil)
 
@@ -754,9 +748,7 @@ func TestProxy_Connect(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(&milvuspb.ListDatabasesResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
+			Status:  merr.Status(nil),
 			DbNames: []string{"20230525"},
 		}, nil)
 
@@ -765,9 +757,7 @@ func TestProxy_Connect(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(&rootcoordpb.AllocTimestampResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
+			Status:    merr.Status(nil),
 			Timestamp: 20230518,
 			Count:     1,
 		}, nil)
@@ -849,9 +839,7 @@ func TestProxyCreateDatabase(t *testing.T) {
 	t.Run("create database ok", func(t *testing.T) {
 		rc := mocks.NewRootCoord(t)
 		rc.On("CreateDatabase", mock.Anything, mock.Anything).
-			Return(&commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			}, nil)
+			Return(merr.Status(nil), nil)
 		node.rootCoord = rc
 		node.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()
@@ -905,9 +893,7 @@ func TestProxyDropDatabase(t *testing.T) {
 	t.Run("drop database ok", func(t *testing.T) {
 		rc := mocks.NewRootCoord(t)
 		rc.On("DropDatabase", mock.Anything, mock.Anything).
-			Return(&commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			}, nil)
+			Return(merr.Status(nil), nil)
 		node.rootCoord = rc
 		node.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()
@@ -962,9 +948,7 @@ func TestProxyListDatabase(t *testing.T) {
 		rc := mocks.NewRootCoord(t)
 		rc.On("ListDatabases", mock.Anything, mock.Anything).
 			Return(&milvuspb.ListDatabasesResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				}}, nil)
+				Status: merr.Status(nil)}, nil)
 		node.rootCoord = rc
 		node.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()

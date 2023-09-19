@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 func TestTimetickManagerNormal(t *testing.T) {
@@ -174,9 +175,7 @@ func TestTimetickManagerSendReport(t *testing.T) {
 		if req.GetBase().Timestamp > uint64(tsInMill) {
 			validTs.Store(true)
 		}
-	}).Return(&commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil)
+	}).Return(merr.Status(nil), nil)
 	manager := newTimeTickSender(mockDataCoord, 0)
 	go manager.start(ctx)
 

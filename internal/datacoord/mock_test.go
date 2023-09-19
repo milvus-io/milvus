@@ -167,9 +167,7 @@ func newMockDataNodeClient(id int64, ch chan interface{}) (*mockDataNodeClient, 
 		state: commonpb.StateCode_Initializing,
 		ch:    ch,
 		addImportSegmentResp: &datapb.AddImportSegmentResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
+			Status: merr.Status(nil),
 		},
 	}, nil
 }
@@ -225,19 +223,13 @@ func (c *mockDataNodeClient) FlushSegments(ctx context.Context, in *datapb.Flush
 
 func (c *mockDataNodeClient) ResendSegmentStats(ctx context.Context, req *datapb.ResendSegmentStatsRequest) (*datapb.ResendSegmentStatsResponse, error) {
 	return &datapb.ResendSegmentStatsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
+		Status: merr.Status(nil),
 	}, nil
 }
 
 func (c *mockDataNodeClient) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	return &internalpb.ShowConfigurationsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
+		Status: merr.Status(nil),
 	}, nil
 }
 
@@ -264,10 +256,7 @@ func (c *mockDataNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMe
 	}
 
 	return &milvuspb.GetMetricsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
+		Status:        merr.Status(nil),
 		Response:      resp,
 		ComponentName: metricsinfo.ConstructComponentName(typeutil.DataNodeRole, nodeID),
 	}, nil
@@ -372,10 +361,7 @@ func (m *mockRootCoordService) GetComponentStates(ctx context.Context) (*milvusp
 			ExtraInfo: []*commonpb.KeyValuePair{},
 		},
 		SubcomponentStates: []*milvuspb.ComponentInfo{},
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
+		Status:             merr.Status(nil),
 	}, nil
 }
 
@@ -405,10 +391,7 @@ func (m *mockRootCoordService) DescribeCollection(ctx context.Context, req *milv
 		}, nil
 	}
 	return &milvuspb.DescribeCollectionResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
+		Status: merr.Status(nil),
 		Schema: &schemapb.CollectionSchema{
 			Name: "test",
 		},
@@ -423,10 +406,7 @@ func (m *mockRootCoordService) DescribeCollectionInternal(ctx context.Context, r
 
 func (m *mockRootCoordService) ShowCollections(ctx context.Context, req *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
 	return &milvuspb.ShowCollectionsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
+		Status:          merr.Status(nil),
 		CollectionNames: []string{"test"},
 	}, nil
 }
@@ -461,10 +441,7 @@ func (m *mockRootCoordService) HasPartition(ctx context.Context, req *milvuspb.H
 
 func (m *mockRootCoordService) ShowPartitions(ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
 	return &milvuspb.ShowPartitionsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
+		Status:         merr.Status(nil),
 		PartitionNames: []string{"_default"},
 		PartitionIDs:   []int64{0},
 	}, nil
@@ -484,10 +461,7 @@ func (m *mockRootCoordService) AllocTimestamp(ctx context.Context, req *rootcoor
 	phy := time.Now().UnixNano() / int64(time.Millisecond)
 	ts := tsoutil.ComposeTS(phy, val)
 	return &rootcoordpb.AllocTimestampResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
+		Status:    merr.Status(nil),
 		Timestamp: ts,
 		Count:     req.Count,
 	}, nil
@@ -499,12 +473,9 @@ func (m *mockRootCoordService) AllocID(ctx context.Context, req *rootcoordpb.All
 	}
 	val := atomic.AddInt64(&m.cnt, int64(req.Count))
 	return &rootcoordpb.AllocIDResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
-		ID:    val,
-		Count: req.Count,
+		Status: merr.Status(nil),
+		ID:     val,
+		Count:  req.Count,
 	}, nil
 }
 
@@ -523,11 +494,8 @@ func (m *mockRootCoordService) DescribeSegments(ctx context.Context, req *rootco
 
 func (m *mockRootCoordService) GetDdChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
-		Value: "ddchannel",
+		Status: merr.Status(nil),
+		Value:  "ddchannel",
 	}, nil
 }
 
@@ -549,10 +517,7 @@ func (m *mockRootCoordService) AddNewSegment(ctx context.Context, in *datapb.Seg
 
 func (m *mockRootCoordService) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	return &internalpb.ShowConfigurationsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
+		Status: merr.Status(nil),
 	}, nil
 }
 
@@ -587,10 +552,7 @@ func (m *mockRootCoordService) GetMetrics(ctx context.Context, req *milvuspb.Get
 	}
 
 	return &milvuspb.GetMetricsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
+		Status:        merr.Status(nil),
 		Response:      resp,
 		ComponentName: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, nodeID),
 	}, nil
@@ -611,9 +573,7 @@ func (m *mockRootCoordService) ListImportTasks(ctx context.Context, in *milvuspb
 }
 
 func (m *mockRootCoordService) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult) (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
+	return merr.Status(nil), nil
 }
 
 type mockCompactionHandler struct {

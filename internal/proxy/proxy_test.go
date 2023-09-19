@@ -4261,10 +4261,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 				ExtraInfo: nil,
 			},
 			SubcomponentStates: nil,
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-				Reason:    "",
-			},
+			Status:             merr.Status(nil),
 		}, nil)
 		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 			Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
@@ -4292,10 +4289,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 				ExtraInfo: nil,
 			},
 			SubcomponentStates: nil,
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-				Reason:    "",
-			},
+			Status:             merr.Status(nil),
 		}, nil)
 		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(nil, errors.New("test"))
 		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(nil, errors.New("test"))
@@ -4333,10 +4327,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 				ExtraInfo: nil,
 			},
 			SubcomponentStates: nil,
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-				Reason:    "",
-			},
+			Status:             merr.Status(nil),
 		}, nil)
 		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 			Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
@@ -4367,10 +4358,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 				ExtraInfo: nil,
 			},
 			SubcomponentStates: nil,
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-				Reason:    "",
-			},
+			Status:             merr.Status(nil),
 		}, nil)
 		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 			Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
@@ -4405,10 +4393,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 				ExtraInfo: nil,
 			},
 			SubcomponentStates: nil,
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-				Reason:    "",
-			},
+			Status:             merr.Status(nil),
 		}, nil)
 		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 			Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
@@ -4439,10 +4424,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 				ExtraInfo: nil,
 			},
 			SubcomponentStates: nil,
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-				Reason:    "",
-			},
+			Status:             merr.Status(nil),
 		}, nil)
 		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_InsufficientMemoryToLoad},

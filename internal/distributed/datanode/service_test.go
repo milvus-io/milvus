@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/stretchr/testify/assert"
@@ -168,9 +169,7 @@ func (m *mockDataCoord) GetComponentStates(ctx context.Context) (*milvuspb.Compo
 		State: &milvuspb.ComponentInfo{
 			StateCode: commonpb.StateCode_Healthy,
 		},
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status: merr.Status(nil),
 		SubcomponentStates: []*milvuspb.ComponentInfo{
 			{
 				StateCode: commonpb.StateCode_Healthy,
@@ -198,9 +197,7 @@ func (m *mockRootCoord) GetComponentStates(ctx context.Context) (*milvuspb.Compo
 		State: &milvuspb.ComponentInfo{
 			StateCode: commonpb.StateCode_Healthy,
 		},
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status: merr.Status(nil),
 		SubcomponentStates: []*milvuspb.ComponentInfo{
 			{
 				StateCode: commonpb.StateCode_Healthy,
@@ -319,9 +316,7 @@ func Test_NewServer(t *testing.T) {
 		server.datanode = &MockDataNode{
 			status: &commonpb.Status{},
 			addImportSegmentResp: &datapb.AddImportSegmentResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
+				Status: merr.Status(nil),
 			},
 		}
 		resp, err := server.AddImportSegment(ctx, nil)

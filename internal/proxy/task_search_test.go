@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
@@ -1646,9 +1647,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 		},
 		ctx: ctx,
 		result: &milvuspb.SearchResults{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
+			Status: merr.Status(nil),
 		},
 		request: &milvuspb.SearchRequest{
 			Base: &commonpb.MsgBase{
@@ -1695,9 +1694,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 	qn.ExpectedCalls = nil
 	qn.EXPECT().GetComponentStates(mock.Anything).Return(nil, nil).Maybe()
 	qn.EXPECT().Search(mock.Anything, mock.Anything).Return(&internalpb.SearchResults{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status: merr.Status(nil),
 	}, nil)
 	assert.NoError(t, task.Execute(ctx))
 }

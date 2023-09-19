@@ -84,9 +84,7 @@ func (s *LBPolicySuite) SetupTest() {
 		},
 	}, nil).Maybe()
 	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status:       merr.Status(nil),
 		PartitionIDs: []int64{1, 2, 3},
 	}, nil).Maybe()
 

@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	importutil2 "github.com/milvus-io/milvus/internal/util/importutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -91,22 +92,16 @@ func TestImportManager_NewImportManager(t *testing.T) {
 	callImportServiceFn := func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 		if mockCallImportServiceErr {
 			return &datapb.ImportTaskResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
+				Status: merr.Status(nil),
 			}, errors.New("mock err")
 		}
 		return &datapb.ImportTaskResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
+			Status: merr.Status(nil),
 		}, nil
 	}
 	callGetSegmentStates := func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
 		return &datapb.GetSegmentStatesResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
+			Status: merr.Status(nil),
 		}, nil
 	}
 	var wg sync.WaitGroup
@@ -351,23 +346,17 @@ func TestImportManager_TestEtcdCleanUp(t *testing.T) {
 	callImportServiceFn := func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 		if mockCallImportServiceErr {
 			return &datapb.ImportTaskResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
+				Status: merr.Status(nil),
 			}, errors.New("mock err")
 		}
 		return &datapb.ImportTaskResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
+			Status: merr.Status(nil),
 		}, nil
 	}
 
 	callGetSegmentStates := func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
 		return &datapb.GetSegmentStatesResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
+			Status: merr.Status(nil),
 		}, nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -443,30 +432,22 @@ func TestImportManager_TestFlipTaskStateLoop(t *testing.T) {
 	callImportServiceFn := func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 		if mockCallImportServiceErr {
 			return &datapb.ImportTaskResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
+				Status: merr.Status(nil),
 			}, errors.New("mock err")
 		}
 		return &datapb.ImportTaskResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
+			Status: merr.Status(nil),
 		}, nil
 	}
 
 	callGetSegmentStates := func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
 		return &datapb.GetSegmentStatesResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
+			Status: merr.Status(nil),
 		}, nil
 	}
 
 	callUnsetIsImportingState := func(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		}, nil
+		return merr.Status(nil), nil
 	}
 
 	flipPersistedTaskInterval = 20
@@ -536,9 +517,7 @@ func TestImportManager_ImportJob(t *testing.T) {
 	mockKv := memkv.NewMemoryKV()
 	callGetSegmentStates := func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
 		return &datapb.GetSegmentStatesResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
+			Status: merr.Status(nil),
 		}, nil
 	}
 	// nil request
@@ -593,9 +572,7 @@ func TestImportManager_ImportJob(t *testing.T) {
 
 	importServiceFunc = func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 		return &datapb.ImportTaskResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
+			Status: merr.Status(nil),
 		}, nil
 	}
 
@@ -624,9 +601,7 @@ func TestImportManager_ImportJob(t *testing.T) {
 		}
 		count++
 		return &datapb.ImportTaskResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
+			Status: merr.Status(nil),
 		}, nil
 	}
 
@@ -690,9 +665,7 @@ func TestImportManager_AllDataNodesBusy(t *testing.T) {
 		if count < len(dnList) {
 			count++
 			return &datapb.ImportTaskResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
+				Status:     merr.Status(nil),
 				DatanodeId: dnList[count-1],
 			}, nil
 		}
@@ -705,9 +678,7 @@ func TestImportManager_AllDataNodesBusy(t *testing.T) {
 
 	callGetSegmentStates := func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
 		return &datapb.GetSegmentStatesResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
+			Status: merr.Status(nil),
 		}, nil
 	}
 
@@ -767,9 +738,7 @@ func TestImportManager_TaskState(t *testing.T) {
 	mockKv := memkv.NewMemoryKV()
 	importServiceFunc := func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 		return &datapb.ImportTaskResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
+			Status: merr.Status(nil),
 		}, nil
 	}
 
@@ -780,9 +749,7 @@ func TestImportManager_TaskState(t *testing.T) {
 	}
 	callGetSegmentStates := func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
 		return &datapb.GetSegmentStatesResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
+			Status: merr.Status(nil),
 		}, nil
 	}
 
@@ -818,9 +785,7 @@ func TestImportManager_TaskState(t *testing.T) {
 	}
 
 	mgr.callUnsetIsImportingState = func(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		}, nil
+		return merr.Status(nil), nil
 	}
 	// index doesn't exist, the persist task will be set to completed
 	ti, err := mgr.updateTaskInfo(info)
@@ -877,9 +842,7 @@ func TestImportManager_AllocFail(t *testing.T) {
 	mockKv := memkv.NewMemoryKV()
 	importServiceFunc := func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 		return &datapb.ImportTaskResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
+			Status: merr.Status(nil),
 		}, nil
 	}
 
@@ -891,9 +854,7 @@ func TestImportManager_AllocFail(t *testing.T) {
 
 	callGetSegmentStates := func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
 		return &datapb.GetSegmentStatesResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
+			Status: merr.Status(nil),
 		}, nil
 	}
 	mgr := newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callGetSegmentStates, nil, nil)
@@ -926,9 +887,7 @@ func TestImportManager_ListAllTasks(t *testing.T) {
 
 	callGetSegmentStates := func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
 		return &datapb.GetSegmentStatesResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
+			Status: merr.Status(nil),
 		}, nil
 	}
 
@@ -1037,9 +996,7 @@ func TestImportManager_ListAllTasks(t *testing.T) {
 	// accept tasks to working list
 	mgr.callImportService = func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 		return &datapb.ImportTaskResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
+			Status: merr.Status(nil),
 		}, nil
 	}
 

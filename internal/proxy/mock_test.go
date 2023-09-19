@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/uniquegenerator"
 )
@@ -49,10 +50,7 @@ func (tso *mockTimestampAllocatorInterface) AllocTimestamp(ctx context.Context, 
 
 	tso.lastTs = ts
 	return &rootcoordpb.AllocTimestampResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
+		Status:    merr.Status(nil),
 		Timestamp: ts,
 		Count:     req.Count,
 	}, nil

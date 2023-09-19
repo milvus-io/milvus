@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/util/uniquegenerator"
 	"go.uber.org/atomic"
@@ -86,20 +87,14 @@ func (coord *DataCoordMock) GetComponentStates(ctx context.Context) (*milvuspb.C
 			ExtraInfo: nil,
 		},
 		SubcomponentStates: nil,
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
+		Status:             merr.Status(nil),
 	}, nil
 }
 
 func (coord *DataCoordMock) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
-		Value: coord.statisticsChannel,
+		Status: merr.Status(nil),
+		Value:  coord.statisticsChannel,
 	}, nil
 }
 
@@ -109,11 +104,8 @@ func (coord *DataCoordMock) Register() error {
 
 func (coord *DataCoordMock) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
-		Value: coord.timeTickChannel,
+		Status: merr.Status(nil),
+		Value:  coord.timeTickChannel,
 	}, nil
 }
 
@@ -275,39 +267,24 @@ func (coord *DataCoordMock) Import(ctx context.Context, req *datapb.ImportTaskRe
 }
 
 func (coord *DataCoordMock) UpdateSegmentStatistics(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest) (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-		Reason:    "",
-	}, nil
+	return merr.Status(nil), nil
 }
 
 func (coord *DataCoordMock) UpdateChannelCheckpoint(ctx context.Context, req *datapb.UpdateChannelCheckpointRequest) (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-		Reason:    "",
-	}, nil
+	return merr.Status(nil), nil
 }
 
 func (coord *DataCoordMock) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-		Reason:    "",
-	}, nil
+	return merr.Status(nil), nil
 }
 
 func (coord *DataCoordMock) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-		Reason:    "",
-	}, nil
+	return merr.Status(nil), nil
 }
 
 func (coord *DataCoordMock) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error) {
 	return &indexpb.GetIndexStateResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
+		Status:     merr.Status(nil),
 		State:      commonpb.IndexState_Finished,
 		FailReason: "",
 	}, nil
@@ -316,29 +293,21 @@ func (coord *DataCoordMock) GetIndexState(ctx context.Context, req *indexpb.GetI
 // GetSegmentIndexState gets the index state of the segments in the request from RootCoord.
 func (coord *DataCoordMock) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
 	return &indexpb.GetSegmentIndexStateResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
+		Status: merr.Status(nil),
 	}, nil
 }
 
 // GetIndexInfos gets the index files of the IndexBuildIDs in the request from RootCoordinator.
 func (coord *DataCoordMock) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoRequest) (*indexpb.GetIndexInfoResponse, error) {
 	return &indexpb.GetIndexInfoResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
+		Status: merr.Status(nil),
 	}, nil
 }
 
 // DescribeIndex describe the index info of the collection.
 func (coord *DataCoordMock) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
 	return &indexpb.DescribeIndexResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status:     merr.Status(nil),
 		IndexInfos: nil,
 	}, nil
 }
@@ -346,9 +315,7 @@ func (coord *DataCoordMock) DescribeIndex(ctx context.Context, req *indexpb.Desc
 // GetIndexStatistics get the statistics of the index.
 func (coord *DataCoordMock) GetIndexStatistics(ctx context.Context, req *indexpb.GetIndexStatisticsRequest) (*indexpb.GetIndexStatisticsResponse, error) {
 	return &indexpb.GetIndexStatisticsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status:     merr.Status(nil),
 		IndexInfos: nil,
 	}, nil
 }
@@ -356,9 +323,7 @@ func (coord *DataCoordMock) GetIndexStatistics(ctx context.Context, req *indexpb
 // GetIndexBuildProgress get the index building progress by num rows.
 func (coord *DataCoordMock) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error) {
 	return &indexpb.GetIndexBuildProgressResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status: merr.Status(nil),
 	}, nil
 }
 

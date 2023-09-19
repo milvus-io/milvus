@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 type mockDataCoord struct {
@@ -53,19 +54,14 @@ func (mockD *mockDataCoord) AssignSegmentID(ctx context.Context, req *datapb.Ass
 				PartitionID:  r.PartitionID,
 				ExpireTime:   mockD.expireTime,
 
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-					Reason:    "",
-				},
+				Status: merr.Status(nil),
 			}
 			assigns = append(assigns, result)
 		}
 	}
 
 	return &datapb.AssignSegmentIDResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status:           merr.Status(nil),
 		SegIDAssignments: assigns,
 	}, nil
 }
@@ -214,9 +210,7 @@ func (mockD *mockDataCoord3) AssignSegmentID(ctx context.Context, req *datapb.As
 	}
 
 	return &datapb.AssignSegmentIDResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status:           merr.Status(nil),
 		SegIDAssignments: assigns,
 	}, nil
 }

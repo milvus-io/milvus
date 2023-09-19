@@ -1285,10 +1285,7 @@ func TestDropPartitionTask(t *testing.T) {
 	partitionName := prefix + funcutil.GenRandomStr()
 	qc := getQueryCoord()
 	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
+		Status:       merr.Status(nil),
 		PartitionIDs: []int64{},
 	}, nil)
 	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
@@ -1650,10 +1647,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 			Condition: NewTaskCondition(ctx),
 			ctx:       ctx,
 			result: &milvuspb.MutationResult{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-					Reason:    "",
-				},
+				Status:       merr.Status(nil),
 				IDs:          nil,
 				SuccIndex:    nil,
 				ErrIndex:     nil,
@@ -1693,10 +1687,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 			idAllocator: idAllocator,
 			ctx:         ctx,
 			result: &milvuspb.MutationResult{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-					Reason:    "",
-				},
+				Status:       merr.Status(nil),
 				IDs:          nil,
 				SuccIndex:    nil,
 				ErrIndex:     nil,
@@ -1741,10 +1732,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 			idAllocator: idAllocator,
 			ctx:         ctx,
 			result: &milvuspb.MutationResult{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-					Reason:    "",
-				},
+				Status:       merr.Status(nil),
 				IDs:          nil,
 				SuccIndex:    nil,
 				ErrIndex:     nil,
@@ -1905,10 +1893,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 			Condition: NewTaskCondition(ctx),
 			ctx:       ctx,
 			result: &milvuspb.MutationResult{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-					Reason:    "",
-				},
+				Status:       merr.Status(nil),
 				IDs:          nil,
 				SuccIndex:    nil,
 				ErrIndex:     nil,
@@ -1993,10 +1978,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 			},
 			ctx: ctx,
 			result: &milvuspb.MutationResult{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-					Reason:    "",
-				},
+				Status:       merr.Status(nil),
 				IDs:          nil,
 				SuccIndex:    nil,
 				ErrIndex:     nil,
@@ -2038,10 +2020,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 			idAllocator: idAllocator,
 			ctx:         ctx,
 			result: &milvuspb.MutationResult{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-					Reason:    "",
-				},
+				Status:       merr.Status(nil),
 				IDs:          nil,
 				SuccIndex:    nil,
 				ErrIndex:     nil,
@@ -2088,10 +2067,8 @@ func TestCreateAlias_all(t *testing.T) {
 			CollectionName: collectionName,
 			Alias:          "alias1",
 		},
-		ctx: ctx,
-		result: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		ctx:       ctx,
+		result:    merr.Status(nil),
 		rootCoord: rc,
 	}
 
@@ -2126,10 +2103,8 @@ func TestDropAlias_all(t *testing.T) {
 			Base:  nil,
 			Alias: "alias1",
 		},
-		ctx: ctx,
-		result: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		ctx:       ctx,
+		result:    merr.Status(nil),
 		rootCoord: rc,
 	}
 
@@ -2167,10 +2142,8 @@ func TestAlterAlias_all(t *testing.T) {
 			CollectionName: collectionName,
 			Alias:          "alias1",
 		},
-		ctx: ctx,
-		result: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		ctx:       ctx,
+		result:    merr.Status(nil),
 		rootCoord: rc,
 	}
 
@@ -2558,10 +2531,7 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 
 	qc := getQueryCoord()
 	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
+		Status:       merr.Status(nil),
 		PartitionIDs: []int64{},
 	}, nil)
 	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
@@ -2582,9 +2552,7 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 
 	rc.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 		return &milvuspb.DescribeCollectionResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
+			Status:         merr.Status(nil),
 			Schema:         newTestSchema(),
 			CollectionID:   collectionID,
 			CollectionName: request.CollectionName,
@@ -2633,9 +2601,7 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 	t.Run("no vector index", func(t *testing.T) {
 		dc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
 			return &indexpb.DescribeIndexResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
+				Status: merr.Status(nil),
 				IndexInfos: []*indexpb.IndexInfo{
 					{
 						CollectionID:         collectionID,
@@ -2666,10 +2632,7 @@ func Test_loadPartitionTask_Execute(t *testing.T) {
 
 	qc := getQueryCoord()
 	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
+		Status:       merr.Status(nil),
 		PartitionIDs: []int64{},
 	}, nil)
 	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
@@ -2690,9 +2653,7 @@ func Test_loadPartitionTask_Execute(t *testing.T) {
 
 	rc.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 		return &milvuspb.DescribeCollectionResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
+			Status:         merr.Status(nil),
 			Schema:         newTestSchema(),
 			CollectionID:   collectionID,
 			CollectionName: request.CollectionName,
@@ -2741,9 +2702,7 @@ func Test_loadPartitionTask_Execute(t *testing.T) {
 	t.Run("no vector index", func(t *testing.T) {
 		dc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
 			return &indexpb.DescribeIndexResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
+				Status: merr.Status(nil),
 				IndexInfos: []*indexpb.IndexInfo{
 					{
 						CollectionID:         collectionID,
@@ -3421,10 +3380,7 @@ func TestPartitionKey(t *testing.T) {
 			Condition: NewTaskCondition(ctx),
 			ctx:       ctx,
 			result: &milvuspb.MutationResult{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-					Reason:    "",
-				},
+				Status:       merr.Status(nil),
 				IDs:          nil,
 				SuccIndex:    nil,
 				ErrIndex:     nil,
@@ -3473,9 +3429,7 @@ func TestPartitionKey(t *testing.T) {
 			},
 
 			result: &milvuspb.MutationResult{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
+				Status: merr.Status(nil),
 				IDs: &schemapb.IDs{
 					IdField: nil,
 				},
@@ -3506,10 +3460,7 @@ func TestPartitionKey(t *testing.T) {
 			},
 			ctx: ctx,
 			result: &milvuspb.MutationResult{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-					Reason:    "",
-				},
+				Status:       merr.Status(nil),
 				IDs:          nil,
 				SuccIndex:    nil,
 				ErrIndex:     nil,

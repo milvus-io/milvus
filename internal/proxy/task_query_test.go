@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -146,9 +147,7 @@ func TestQueryTask_all(t *testing.T) {
 		},
 		ctx: ctx,
 		result: &milvuspb.QueryResults{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
+			Status:     merr.Status(nil),
 			FieldsData: []*schemapb.FieldData{},
 		},
 		request: &milvuspb.QueryRequest{
@@ -190,10 +189,8 @@ func TestQueryTask_all(t *testing.T) {
 	assert.Error(t, task.PreExecute(ctx))
 
 	result1 := &internalpb.RetrieveResults{
-		Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_RetrieveResult},
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Base:   &commonpb.MsgBase{MsgType: commonpb.MsgType_RetrieveResult},
+		Status: merr.Status(nil),
 		Ids: &schemapb.IDs{
 			IdField: &schemapb.IDs_IntId{
 				IntId: &schemapb.LongArray{Data: generateInt64Array(hitNum)},

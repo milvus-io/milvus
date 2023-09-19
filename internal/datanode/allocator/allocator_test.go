@@ -23,9 +23,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 func TestGetGenerator(t *testing.T) {
@@ -83,10 +83,8 @@ type RootCoordFactory struct {
 
 func (m *RootCoordFactory) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
 	resp := &rootcoordpb.AllocIDResponse{
-		ID:    m.ID,
-		Count: in.GetCount(),
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		}}
+		ID:     m.ID,
+		Count:  in.GetCount(),
+		Status: merr.Status(nil)}
 	return resp, nil
 }

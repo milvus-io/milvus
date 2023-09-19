@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -387,9 +386,7 @@ func TestDeleteTask_Execute(t *testing.T) {
 			vChannels:    channels,
 			lb:           lb,
 			result: &milvuspb.MutationResult{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
+				Status: merr.Status(nil),
 				IDs: &schemapb.IDs{
 					IdField: nil,
 				},
@@ -439,9 +436,7 @@ func TestDeleteTask_Execute(t *testing.T) {
 			idAllocator:  allocator,
 			lb:           lb,
 			result: &milvuspb.MutationResult{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
+				Status: merr.Status(nil),
 				IDs: &schemapb.IDs{
 					IdField: nil,
 				},
@@ -514,9 +509,7 @@ func TestDeleteTask_Execute(t *testing.T) {
 			idAllocator:  allocator,
 			lb:           lb,
 			result: &milvuspb.MutationResult{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
+				Status: merr.Status(nil),
 				IDs: &schemapb.IDs{
 					IdField: nil,
 				},
@@ -585,9 +578,7 @@ func TestDeleteTask_Execute(t *testing.T) {
 			idAllocator:  allocator,
 			lb:           lb,
 			result: &milvuspb.MutationResult{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
+				Status: merr.Status(nil),
 				IDs: &schemapb.IDs{
 					IdField: nil,
 				},
