@@ -9,7 +9,7 @@ from utils.api_request import api_request
 from common.common_func import param_info
 
 
-TIMEOUT = 20
+TIMEOUT = 180
 
 
 class ApiPartitionWrapper:
