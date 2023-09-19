@@ -122,16 +122,18 @@ func (gc *garbageCollector) scan() {
 		total   = 0
 		valid   = 0
 		missing = 0
-
-		segmentMap = typeutil.NewUniqueSet()
-		filesMap   = typeutil.NewSet[string]()
 	)
-	segments := gc.meta.GetAllSegmentsUnsafe()
-	for _, segment := range segments {
-		segmentMap.Insert(segment.GetID())
-		for _, log := range getLogs(segment) {
-			filesMap.Insert(log.GetLogPath())
+	getMetaMap := func() (typeutil.UniqueSet, typeutil.Set[string]) {
+		segmentMap := typeutil.NewUniqueSet()
+		filesMap := typeutil.NewSet[string]()
+		segments := gc.meta.GetAllSegmentsUnsafe()
+		for _, segment := range segments {
+			segmentMap.Insert(segment.GetID())
+			for _, log := range getLogs(segment) {
+				filesMap.Insert(log.GetLogPath())
+			}
 		}
+		return segmentMap, filesMap
 	}
 
 	// walk only data cluster related prefixes
@@ -150,6 +152,7 @@ func (gc *garbageCollector) scan() {
 				zap.Error(err),
 			)
 		}
+		segmentMap, filesMap := getMetaMap()
 		log.Info("gc scan finish list object", zap.String("prefix", prefix), zap.Duration("time spent", time.Since(startTs)), zap.Int("keys", len(infoKeys)))
 		for i, infoKey := range infoKeys {
 			total++
