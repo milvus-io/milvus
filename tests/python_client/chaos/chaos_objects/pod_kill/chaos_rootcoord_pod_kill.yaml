@@ -4,7 +4,7 @@ metadata:
   name: test-rootcoord-pod-kill
   namespace: chaos-testing
 spec:
-  schedule: '*/5 * * * * *'
+  schedule: '*/60 * * * * *'
   startingDeadlineSeconds: 60
   concurrencyPolicy: Forbid
   historyLimit: 1
