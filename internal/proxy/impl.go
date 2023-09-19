@@ -3604,11 +3604,11 @@ func (node *Proxy) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStat
 	log.Debug("received get flush state request",
 		zap.Any("request", req))
 	var err error
-	resp := &milvuspb.GetFlushStateResponse{}
+	failResp := &milvuspb.GetFlushStateResponse{}
 	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
-		resp.Status = merr.Status(err)
+		failResp.Status = merr.Status(err)
 		log.Warn("unable to get flush state because of closed server")
-		return resp, nil
+		return failResp, nil
 	}
 
 	stateReq := &datapb.GetFlushStateRequest{
@@ -3618,23 +3618,23 @@ func (node *Proxy) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStat
 
 	if len(req.GetCollectionName()) > 0 { // For compatibility with old client
 		if err = validateCollectionName(req.GetCollectionName()); err != nil {
-			resp.Status = merr.Status(err)
-			return resp, nil
+			failResp.Status = merr.Status(err)
+			return failResp, nil
 		}
 		collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 		if err != nil {
-			resp.Status = merr.Status(err)
-			return resp, nil
+			failResp.Status = merr.Status(err)
+			return failResp, nil
 		}
 		stateReq.CollectionID = collectionID
 	}
 
-	resp, err = node.dataCoord.GetFlushState(ctx, stateReq)
+	resp, err := node.dataCoord.GetFlushState(ctx, stateReq)
 	if err != nil {
 		log.Warn("failed to get flush state response",
 			zap.Error(err))
-		resp.Status = merr.Status(err)
-		return resp, nil
+		failResp.Status = merr.Status(err)
+		return failResp, nil
 	}
 	log.Debug("received get flush state response",
 		zap.Any("response", resp))
