@@ -2339,8 +2339,11 @@ type dataNodeConfig struct {
 	// watchEvent
 	WatchEventTicklerInterval ParamItem `refreshable:"false"`
 
-	// io concurrency to fetch stats logs
+	// io concurrency to add segment
 	IOConcurrency ParamItem `refreshable:"false"`
+
+	// Concurrency to handle compaction file read
+	FileReadConcurrency ParamItem `refreshable:"false"`
 
 	// memory management
 	MemoryForceSyncEnable     ParamItem `refreshable:"true"`
@@ -2468,9 +2471,16 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.IOConcurrency = ParamItem{
 		Key:          "dataNode.dataSync.ioConcurrency",
 		Version:      "2.0.0",
-		DefaultValue: "10",
+		DefaultValue: "16",
 	}
 	p.IOConcurrency.Init(base.mgr)
+
+	p.FileReadConcurrency = ParamItem{
+		Key:          "dataNode.multiRead.concurrency",
+		Version:      "2.0.0",
+		DefaultValue: "16",
+	}
+	p.FileReadConcurrency.Init(base.mgr)
 
 	p.DataNodeTimeTickByRPC = ParamItem{
 		Key:          "datanode.timetick.byRPC",

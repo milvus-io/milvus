@@ -35,3 +35,17 @@ func getOrCreateStatsPool() *conc.Pool[any] {
 	statsPoolInitOnce.Do(initStatsPool)
 	return statsPool
 }
+
+func initMultiReadPool() {
+	capacity := Params.DataNodeCfg.FileReadConcurrency.GetAsInt()
+	if capacity > runtime.GOMAXPROCS(0) {
+		capacity = runtime.GOMAXPROCS(0)
+	}
+	// error only happens with negative expiry duration or with negative pre-alloc size.
+	ioPool = conc.NewPool[any](capacity)
+}
+
+func getMultiReadPool() *conc.Pool[any] {
+	ioPoolInitOnce.Do(initMultiReadPool)
+	return ioPool
+}
