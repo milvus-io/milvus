@@ -417,6 +417,12 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                 vec_ptr, seg_offsets, count, output.data());
             return CreateScalarDataArrayFrom(output.data(), count, field_meta);
         }
+        case DataType::ARRAY: {
+            // element
+            FixedVector<ScalarArray> output(count);
+            bulk_subscript_impl(*vec_ptr, seg_offsets, count, output.data());
+            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
+        }
         default: {
             PanicCodeInfo(
                 DataTypeInvalid,
@@ -481,6 +487,23 @@ SegmentGrowingImpl::bulk_subscript_impl(const VectorBase* vec_raw,
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
         output[i] = vec[offset];
+    }
+}
+
+void
+SegmentGrowingImpl::bulk_subscript_impl(const VectorBase& vec_raw,
+                                        const int64_t* seg_offsets,
+                                        int64_t count,
+                                        void* output_raw) const {
+    auto vec_ptr = dynamic_cast<const ConcurrentVector<Array>*>(&vec_raw);
+    AssertInfo(vec_ptr, "Pointer of vec_raw is nullptr");
+    auto& vec = *vec_ptr;
+    auto output = reinterpret_cast<ScalarArray*>(output_raw);
+    for (int64_t i = 0; i < count; ++i) {
+        auto offset = seg_offsets[i];
+        if (offset != INVALID_SEG_OFFSET) {
+            output[i] = vec[offset].output_data();
+        }
     }
 }
 

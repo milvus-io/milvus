@@ -18,6 +18,7 @@ type validateUtil struct {
 	checkNAN      bool
 	checkMaxLen   bool
 	checkOverflow bool
+	checkMaxCap   bool
 }
 
 type validateOption func(*validateUtil)
@@ -37,6 +38,12 @@ func withMaxLenCheck() validateOption {
 func withOverflowCheck() validateOption {
 	return func(v *validateUtil) {
 		v.checkOverflow = true
+	}
+}
+
+func withMaxCapCheck() validateOption {
+	return func(v *validateUtil) {
+		v.checkMaxCap = true
 	}
 }
 
@@ -83,6 +90,11 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, schema *schemapb.Col
 			if err := v.checkIntegerFieldData(field, fieldSchema); err != nil {
 				return err
 			}
+		case schemapb.DataType_Array:
+			if err := v.checkArrayFieldData(field, fieldSchema); err != nil {
+				return err
+			}
+
 		default:
 		}
 	}
@@ -351,12 +363,79 @@ func (v *validateUtil) checkIntegerFieldData(field *schemapb.FieldData, fieldSch
 	return nil
 }
 
+func (v *validateUtil) checkArrayFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+	data := field.GetScalars().GetArrayData()
+	if data == nil {
+		msg := fmt.Sprintf("array field '%v' is illegal, array type mismatch", field.GetFieldName())
+		return merr.WrapErrParameterInvalid("need string array", "got nil", msg)
+	}
+	if v.checkMaxCap {
+		maxCapacity, err := parameterutil.GetMaxCapacity(fieldSchema)
+		if err != nil {
+			return err
+		}
+		if err := verifyCapacityPerRow(data.GetData(), maxCapacity, fieldSchema.GetElementType()); err != nil {
+			return err
+		}
+	}
+	if typeutil.IsStringType(data.GetElementType()) && v.checkMaxLen {
+		maxLength, err := parameterutil.GetMaxLength(fieldSchema)
+		if err != nil {
+			return err
+		}
+		for _, row := range data.GetData() {
+			if err := verifyLengthPerRow(row.GetStringData().GetData(), maxLength); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func verifyLengthPerRow[E interface{ ~string | ~[]byte }](strArr []E, maxLength int64) error {
 	for i, s := range strArr {
 		if int64(len(s)) > maxLength {
 			msg := fmt.Sprintf("the length (%d) of %dth string exceeds max length (%d)", len(s), i, maxLength)
 			return merr.WrapErrParameterInvalid("valid length string", "string length exceeds max length", msg)
 		}
+	}
+
+	return nil
+}
+
+func verifyCapacityPerRow(arrayArray []*schemapb.ScalarField, maxCapacity int64, elementType schemapb.DataType) error {
+	for i, array := range arrayArray {
+		switch elementType {
+		case schemapb.DataType_Bool:
+			if int64(len(array.GetBoolData().GetData())) <= maxCapacity {
+				continue
+			}
+		case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+			if int64(len(array.GetIntData().GetData())) <= maxCapacity {
+				continue
+			}
+		case schemapb.DataType_Int64:
+			if int64(len(array.GetLongData().GetData())) <= maxCapacity {
+				continue
+			}
+		case schemapb.DataType_String, schemapb.DataType_VarChar:
+			if int64(len(array.GetStringData().GetData())) <= maxCapacity {
+				continue
+			}
+		case schemapb.DataType_Float:
+			if int64(len(array.GetFloatData().GetData())) <= maxCapacity {
+				continue
+			}
+		case schemapb.DataType_Double:
+			if int64(len(array.GetDoubleData().GetData())) <= maxCapacity {
+				continue
+			}
+		default:
+			msg := fmt.Sprintf("array element type: %s is not supported", elementType.String())
+			return merr.WrapErrParameterInvalid("valid array element type", "array element type is not supported", msg)
+		}
+		msg := fmt.Sprintf("the length (%d) of %dth array exceeds max capacity (%d)", len(arrayArray), i, maxCapacity)
+		return merr.WrapErrParameterInvalid("valid length array", "array length exceeds max capacity", msg)
 	}
 
 	return nil

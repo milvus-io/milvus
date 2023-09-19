@@ -27,6 +27,7 @@ enum ArithOpType {
   Mul = 3;
   Div = 4;
   Mod = 5;
+  ArrayLength = 6;
 };
 
 enum VectorType {
@@ -48,6 +49,7 @@ message GenericValue {
 message Array {
   repeated GenericValue array = 1;
   bool same_type = 2;
+  schema.DataType element_type = 3;
 }
 
 message QueryInfo {
@@ -64,6 +66,7 @@ message ColumnInfo {
   bool is_autoID = 4;
   repeated string nested_path = 5;
   bool is_partition_key = 6;
+  schema.DataType element_type = 7;
 }
 
 message ColumnExpr {
@@ -108,9 +111,9 @@ message JSONContainsExpr {
   ColumnInfo column_info = 1;
   repeated GenericValue elements = 2;
   // 0: invalid
-  // 1: json_contains
-  // 2: json_contains_all
-  // 3: json_contains_any
+  // 1: json_contains | array_contains
+  // 2: json_contains_all | array_contains_all
+  // 3: json_contains_any | array_contains_any
   enum JSONOp {
     Invalid = 0;
     Contains = 1;

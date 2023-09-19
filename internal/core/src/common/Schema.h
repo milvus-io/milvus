@@ -41,6 +41,16 @@ class Schema {
         return field_id;
     }
 
+    FieldId
+    AddDebugField(const std::string& name,
+                  DataType data_type,
+                  DataType element_type) {
+        auto field_id = FieldId(debug_id);
+        debug_id++;
+        this->AddField(FieldName(name), field_id, data_type, element_type);
+        return field_id;
+    }
+
     // auto gen field_id for convenience
     FieldId
     AddDebugField(const std::string& name,
@@ -59,6 +69,16 @@ class Schema {
     void
     AddField(const FieldName& name, const FieldId id, DataType data_type) {
         auto field_meta = FieldMeta(name, id, data_type);
+        this->AddField(std::move(field_meta));
+    }
+
+    // array type
+    void
+    AddField(const FieldName& name,
+             const FieldId id,
+             DataType data_type,
+             DataType element_type) {
+        auto field_meta = FieldMeta(name, id, data_type, element_type);
         this->AddField(std::move(field_meta));
     }
 

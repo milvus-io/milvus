@@ -273,9 +273,17 @@ func (cct *createCollectionTask) PreExecute(ctx context.Context) error {
 		}
 		// valid max length per row parameters
 		// if max_length not specified, return error
-		if field.DataType == schemapb.DataType_VarChar {
+		if field.DataType == schemapb.DataType_VarChar ||
+			(field.GetDataType() == schemapb.DataType_Array && field.GetElementType() == schemapb.DataType_VarChar) {
 			err = validateMaxLengthPerRow(cct.schema.Name, field)
 			if err != nil {
+				return err
+			}
+		}
+		// valid max capacity for array per row parameters
+		// if max_capacity not specified, return error
+		if field.DataType == schemapb.DataType_Array {
+			if err = validateMaxCapacityPerRow(cct.schema.Name, field); err != nil {
 				return err
 			}
 		}

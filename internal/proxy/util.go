@@ -59,6 +59,8 @@ const (
 
 	defaultMaxVarCharLength = 65535
 
+	defaultMaxArrayCapacity = 4096
+
 	// DefaultIndexType name of default index type for scalar field
 	DefaultIndexType = "STL_SORT"
 
@@ -324,6 +326,30 @@ func validateMaxLengthPerRow(collectionName string, field *schemapb.FieldSchema)
 	return nil
 }
 
+func validateMaxCapacityPerRow(collectionName string, field *schemapb.FieldSchema) error {
+	exist := false
+	for _, param := range field.TypeParams {
+		if param.Key != common.MaxCapacityKey {
+			continue
+		}
+
+		maxCapacityPerRow, err := strconv.ParseInt(param.Value, 10, 64)
+		if err != nil {
+			return fmt.Errorf("the value of %s must be an integer", common.MaxCapacityKey)
+		}
+		if maxCapacityPerRow > defaultMaxArrayCapacity || maxCapacityPerRow <= 0 {
+			return fmt.Errorf("the maximum capacity specified for a Array shoule be in (0, 4096]")
+		}
+		exist = true
+	}
+	// if not exist type params max_length, return error
+	if !exist {
+		return fmt.Errorf("type param(max_capacity) should be specified for array field of collection %s", collectionName)
+	}
+
+	return nil
+}
+
 func validateVectorFieldMetricType(field *schemapb.FieldSchema) error {
 	if !isVectorType(field.DataType) {
 		return nil
@@ -348,6 +374,19 @@ func validateDuplicatedFieldName(fields []*schemapb.FieldSchema) error {
 	return nil
 }
 
+func validateElementType(dataType schemapb.DataType) error {
+	switch dataType {
+	case schemapb.DataType_Bool, schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32,
+		schemapb.DataType_Int64, schemapb.DataType_Float, schemapb.DataType_Double, schemapb.DataType_VarChar:
+		return nil
+	case schemapb.DataType_String:
+		return errors.New("string data type not supported yet, please use VarChar type instead")
+	case schemapb.DataType_None:
+		return errors.New("element data type None is not valid")
+	}
+	return fmt.Errorf("element type %s is not supported", dataType.String())
+}
+
 func validateFieldType(schema *schemapb.CollectionSchema) error {
 	for _, field := range schema.GetFields() {
 		switch field.GetDataType() {
@@ -355,6 +394,10 @@ func validateFieldType(schema *schemapb.CollectionSchema) error {
 			return errors.New("string data type not supported yet, please use VarChar type instead")
 		case schemapb.DataType_None:
 			return errors.New("data type None is not valid")
+		case schemapb.DataType_Array:
+			if err := validateElementType(field.GetElementType()); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

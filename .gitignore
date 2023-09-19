@@ -5,11 +5,13 @@
 #   proxy/cmake-build-debug/
 #   a/b/c/cmake-build-debug/
 **/cmake-build-debug/*
+**/cmake-build-debug-coverage/*
 **/cmake-build-release/*
 **/cmake_build_release/*
 **/cmake_build/*
 **/CmakeFiles/*
 .cache
+coverage_report/
 
 internal/core/output/*
 internal/core/build/*

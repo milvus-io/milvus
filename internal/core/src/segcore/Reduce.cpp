@@ -396,6 +396,12 @@ ReduceHelper::GetSearchResultDataSlice(int slice_index) {
         auto& field_meta = plan_->schema_[field_id];
         auto field_data =
             milvus::segcore::MergeDataArray(result_pairs, field_meta);
+        if (field_meta.get_data_type() == DataType::ARRAY) {
+            field_data->mutable_scalars()
+                ->mutable_array_data()
+                ->set_element_type(
+                    proto::schema::DataType(field_meta.get_element_type()));
+        }
         search_result_data->mutable_fields_data()->AddAllocated(
             field_data.release());
     }

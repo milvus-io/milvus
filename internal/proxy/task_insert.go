@@ -198,7 +198,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	if err := newValidateUtil(withNANCheck(), withOverflowCheck(), withMaxLenCheck()).
+	if err := newValidateUtil(withNANCheck(), withOverflowCheck(), withMaxLenCheck(), withMaxCapCheck()).
 		Validate(it.insertMsg.GetFieldsData(), schema, it.insertMsg.NRows()); err != nil {
 		return err
 	}

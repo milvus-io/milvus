@@ -18,9 +18,10 @@ expr:
 	| expr op = (SHL | SHR) expr							                     # Shift
 	| expr op = (IN | NIN) ('[' expr (',' expr)* ','? ']')                       # Term
 	| expr op = (IN | NIN) EmptyTerm                                             # EmptyTerm
-	| JSONContains'('expr',' expr')'                                             # JSONContains
-	| JSONContainsAll'('expr',' expr')'                                          # JSONContainsAll
-	| JSONContainsAny'('expr',' expr')'                                          # JSONContainsAny
+	| (JSONContains | ArrayContains)'('expr',' expr')'                           # JSONContains
+	| (JSONContainsAll | ArrayContainsAll)'('expr',' expr')'                     # JSONContainsAll
+	| (JSONContainsAny | ArrayContainsAny)'('expr',' expr')'                     # JSONContainsAny
+	| ArrayLength'('(Identifier | JSONIdentifier)')'                             # ArrayLength
 	| expr op1 = (LT | LE) (Identifier | JSONIdentifier) op2 = (LT | LE) expr	 # Range
 	| expr op1 = (GT | GE) (Identifier | JSONIdentifier) op2 = (GT | GE) expr    # ReverseRange
 	| expr op = (LT | LE | GT | GE) expr					                     # Relational
@@ -77,6 +78,11 @@ EmptyTerm: '[' (Whitespace | Newline)* ']';
 JSONContains: 'json_contains' | 'JSON_CONTAINS';
 JSONContainsAll: 'json_contains_all' | 'JSON_CONTAINS_ALL';
 JSONContainsAny: 'json_contains_any' | 'JSON_CONTAINS_ANY';
+
+ArrayContains: 'array_contains' | 'ARRAY_CONTAINS';
+ArrayContainsAll: 'array_contains_all' | 'ARRAY_CONTAINS_ALL';
+ArrayContainsAny: 'array_contains_any' | 'ARRAY_CONTAINS_ANY';
+ArrayLength: 'array_length' | 'ARRAY_LENGTH';
 
 BooleanConstant: 'true' | 'True' | 'TRUE' | 'false' | 'False' | 'FALSE';
 

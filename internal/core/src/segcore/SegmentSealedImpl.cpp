@@ -25,6 +25,7 @@
 #include "Types.h"
 #include "common/Json.h"
 #include "common/EasyAssert.h"
+#include "common/Array.h"
 #include "mmap/Column.h"
 #include "common/Consts.h"
 #include "common/FieldMeta.h"
@@ -311,7 +312,24 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                     column = std::move(var_column);
                     break;
                 }
+                case milvus::DataType::ARRAY: {
+                    auto var_column =
+                        std::make_shared<ArrayColumn>(num_rows, field_meta);
+                    storage::FieldDataPtr field_data;
+                    while (data.channel->pop(field_data)) {
+                        for (auto i = 0; i < field_data->get_num_rows(); i++) {
+                            auto rawValue = field_data->RawValue(i);
+                            auto array =
+                                static_cast<const milvus::Array*>(rawValue);
+                            var_column->Append(*array);
+                        }
+                    }
+                    var_column->Seal();
+                    column = std::move(var_column);
+                    break;
+                }
                 default: {
+                    PanicInfo("unsupported data type");
                 }
             }
 
@@ -370,10 +388,12 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
     size_t total_written{0};
     auto data_size = 0;
     std::vector<uint64_t> indices{};
+    std::vector<std::vector<uint64_t>> element_indices{};
     storage::FieldDataPtr field_data;
     while (data.channel->pop(field_data)) {
         data_size += field_data->Size();
-        auto written = WriteFieldData(file, data_type, field_data);
+        auto written =
+            WriteFieldData(file, data_type, field_data, element_indices);
         if (written != field_data->Size()) {
             break;
         }
@@ -413,7 +433,16 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
                 column = std::move(var_column);
                 break;
             }
+            case milvus::DataType::ARRAY: {
+                auto arr_column = std::make_shared<ArrayColumn>(
+                    file, total_written, field_meta);
+                arr_column->Seal(std::move(indices),
+                                 std::move(element_indices));
+                column = std::move(arr_column);
+                break;
+            }
             default: {
+                PanicInfo(fmt::format("unsupported data type {}", data_type));
             }
         }
     } else {
@@ -857,6 +886,21 @@ SegmentSealedImpl::bulk_subscript_impl(const ColumnBase* column,
     }
 }
 
+void
+SegmentSealedImpl::bulk_subscript_impl(const ColumnBase* column,
+                                       const int64_t* seg_offsets,
+                                       int64_t count,
+                                       void* dst_raw) {
+    auto field = reinterpret_cast<const ArrayColumn*>(column);
+    auto dst = reinterpret_cast<ScalarArray*>(dst_raw);
+    for (int64_t i = 0; i < count; ++i) {
+        auto offset = seg_offsets[i];
+        if (offset != INVALID_SEG_OFFSET) {
+            dst[i] = std::move(field->RawAt(offset));
+        }
+    }
+}
+
 // for vector
 void
 SegmentSealedImpl::bulk_subscript_impl(int64_t element_sizeof,
@@ -926,6 +970,14 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id,
             case DataType::JSON: {
                 FixedVector<std::string> output(count);
                 bulk_subscript_impl<Json, std::string>(
+                    column.get(), seg_offsets, count, output.data());
+                return CreateScalarDataArrayFrom(
+                    output.data(), count, field_meta);
+            }
+
+            case DataType::ARRAY: {
+                FixedVector<ScalarArray> output(count);
+                bulk_subscript_impl(
                     column.get(), seg_offsets, count, output.data());
                 return CreateScalarDataArrayFrom(
                     output.data(), count, field_meta);

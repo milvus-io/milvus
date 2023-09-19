@@ -71,7 +71,7 @@ if (LINUX OR APPLE)
             ${MILVUS_TEST_FILES}
             test_scalar_index_creator.cpp
             test_string_index.cpp
-            )
+            test_array.cpp test_array_expr.cpp)
 endif()
 
 if (DEFINED AZURE_BUILD_DIR)

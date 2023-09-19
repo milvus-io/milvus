@@ -87,6 +87,9 @@ ExtractUnaryRangeExprImpl(FieldId field_id,
         } else if constexpr (std::is_same_v<T, std::string>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kStringVal);
             return static_cast<T>(value_proto.string_val());
+        } else if constexpr (std::is_same_v<T, proto::plan::Array>) {
+            Assert(value_proto.val_case() == planpb::GenericValue::kArrayVal);
+            return static_cast<proto::plan::Array>(value_proto.array_val());
         } else {
             static_assert(always_false<T>);
         }
@@ -151,6 +154,15 @@ ExtractBinaryArithOpEvalRangeExprImpl(
             static_assert(always_false<T>);
         }
     };
+    if (expr_proto.arith_op() == proto::plan::ArrayLength) {
+        return std::make_unique<BinaryArithOpEvalRangeExprImpl<T>>(
+            expr_proto.column_info(),
+            expr_proto.value().val_case(),
+            expr_proto.arith_op(),
+            0,
+            expr_proto.op(),
+            getValue(expr_proto.value()));
+    }
     return std::make_unique<BinaryArithOpEvalRangeExprImpl<T>>(
         expr_proto.column_info(),
         expr_proto.value().val_case(),
@@ -307,7 +319,8 @@ ProtoParser::ParseUnaryRangeExpr(const proto::plan::UnaryRangeExpr& expr_pb) {
                 return ExtractUnaryRangeExprImpl<std::string>(
                     field_id, data_type, expr_pb);
             }
-            case DataType::JSON: {
+            case DataType::JSON:
+            case DataType::ARRAY: {
                 switch (expr_pb.value().val_case()) {
                     case proto::plan::GenericValue::ValCase::kBoolVal:
                         return ExtractUnaryRangeExprImpl<bool>(
@@ -320,6 +333,9 @@ ProtoParser::ParseUnaryRangeExpr(const proto::plan::UnaryRangeExpr& expr_pb) {
                             field_id, data_type, expr_pb);
                     case proto::plan::GenericValue::ValCase::kStringVal:
                         return ExtractUnaryRangeExprImpl<std::string>(
+                            field_id, data_type, expr_pb);
+                    case proto::plan::GenericValue::ValCase::kArrayVal:
+                        return ExtractUnaryRangeExprImpl<proto::plan::Array>(
                             field_id, data_type, expr_pb);
                     default:
                         PanicInfo(
@@ -375,6 +391,21 @@ ProtoParser::ParseBinaryRangeExpr(const proto::plan::BinaryRangeExpr& expr_pb) {
                     case proto::plan::GenericValue::ValCase::kBoolVal:
                         return ExtractBinaryRangeExprImpl<bool>(
                             field_id, data_type, expr_pb);
+                    case proto::plan::GenericValue::ValCase::kInt64Val:
+                        return ExtractBinaryRangeExprImpl<int64_t>(
+                            field_id, data_type, expr_pb);
+                    case proto::plan::GenericValue::ValCase::kFloatVal:
+                        return ExtractBinaryRangeExprImpl<double>(
+                            field_id, data_type, expr_pb);
+                    case proto::plan::GenericValue::ValCase::kStringVal:
+                        return ExtractBinaryRangeExprImpl<std::string>(
+                            field_id, data_type, expr_pb);
+                    default:
+                        PanicInfo("unknown data type in expression");
+                }
+            }
+            case DataType::ARRAY: {
+                switch (expr_pb.lower_value().val_case()) {
                     case proto::plan::GenericValue::ValCase::kInt64Val:
                         return ExtractBinaryRangeExprImpl<int64_t>(
                             field_id, data_type, expr_pb);
@@ -486,6 +517,30 @@ ProtoParser::ParseTermExpr(const proto::plan::TermExpr& expr_pb) {
                                         expr_pb.values()[0].val_case()));
                 }
             }
+            case DataType::ARRAY: {
+                if (expr_pb.values().size() == 0) {
+                    return ExtractTermExprImpl<bool>(
+                        field_id, data_type, expr_pb);
+                }
+                switch (expr_pb.values()[0].val_case()) {
+                    case proto::plan::GenericValue::ValCase::kBoolVal:
+                        return ExtractTermExprImpl<bool>(
+                            field_id, data_type, expr_pb);
+                    case proto::plan::GenericValue::ValCase::kFloatVal:
+                        return ExtractTermExprImpl<double>(
+                            field_id, data_type, expr_pb);
+                    case proto::plan::GenericValue::ValCase::kInt64Val:
+                        return ExtractTermExprImpl<int64_t>(
+                            field_id, data_type, expr_pb);
+                    case proto::plan::GenericValue::ValCase::kStringVal:
+                        return ExtractTermExprImpl<std::string>(
+                            field_id, data_type, expr_pb);
+                    default:
+                        PanicInfo(
+                            fmt::format("unknown data type: {} in expression",
+                                        expr_pb.values()[0].val_case()));
+                }
+            }
             default: {
                 PanicInfo("unsupported data type");
             }
@@ -538,6 +593,20 @@ ProtoParser::ParseBinaryArithOpEvalRangeExpr(
                     field_id, data_type, expr_pb);
             }
             case DataType::JSON: {
+                switch (expr_pb.value().val_case()) {
+                    case proto::plan::GenericValue::ValCase::kInt64Val:
+                        return ExtractBinaryArithOpEvalRangeExprImpl<int64_t>(
+                            field_id, data_type, expr_pb);
+                    case proto::plan::GenericValue::ValCase::kFloatVal:
+                        return ExtractBinaryArithOpEvalRangeExprImpl<double>(
+                            field_id, data_type, expr_pb);
+                    default:
+                        PanicInfo(fmt::format(
+                            "unsupported data type {} in expression",
+                            expr_pb.value().val_case()));
+                }
+            }
+            case DataType::ARRAY: {
                 switch (expr_pb.value().val_case()) {
                     case proto::plan::GenericValue::ValCase::kInt64Val:
                         return ExtractBinaryArithOpEvalRangeExprImpl<int64_t>(

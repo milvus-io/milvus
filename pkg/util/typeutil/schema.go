@@ -476,7 +476,8 @@ func AppendFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData, idx i
 				if dstScalar.GetArrayData() == nil {
 					dstScalar.Data = &schemapb.ScalarField_ArrayData{
 						ArrayData: &schemapb.ArrayArray{
-							Data: []*schemapb.ScalarField{srcScalar.ArrayData.Data[idx]},
+							Data:        []*schemapb.ScalarField{srcScalar.ArrayData.Data[idx]},
+							ElementType: srcScalar.ArrayData.ElementType,
 						},
 					}
 				} else {

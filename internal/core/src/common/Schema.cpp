@@ -69,6 +69,9 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
             auto max_len =
                 boost::lexical_cast<int64_t>(type_map.at(MAX_LENGTH));
             schema->AddField(name, field_id, data_type, max_len);
+        } else if (datatype_is_array(data_type)) {
+            schema->AddField(
+                name, field_id, data_type, DataType(child.element_type()));
         } else {
             schema->AddField(name, field_id, data_type);
         }

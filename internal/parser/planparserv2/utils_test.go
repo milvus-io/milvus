@@ -209,3 +209,115 @@ func Test_convertEscapeSingle(t *testing.T) {
 		assert.Equal(t, c.expected, actual)
 	}
 }
+
+func Test_canBeComparedDataType(t *testing.T) {
+	type testCases struct {
+		left     schemapb.DataType
+		right    schemapb.DataType
+		expected bool
+	}
+
+	cases := []testCases{
+		{schemapb.DataType_Bool, schemapb.DataType_Bool, true},
+		{schemapb.DataType_Bool, schemapb.DataType_JSON, true},
+		{schemapb.DataType_Bool, schemapb.DataType_Int8, false},
+		{schemapb.DataType_Bool, schemapb.DataType_Int16, false},
+		{schemapb.DataType_Bool, schemapb.DataType_Int32, false},
+		{schemapb.DataType_Bool, schemapb.DataType_Int64, false},
+		{schemapb.DataType_Bool, schemapb.DataType_Float, false},
+		{schemapb.DataType_Bool, schemapb.DataType_Double, false},
+		{schemapb.DataType_Bool, schemapb.DataType_String, false},
+		{schemapb.DataType_Int8, schemapb.DataType_Int16, true},
+		{schemapb.DataType_Int16, schemapb.DataType_Int32, true},
+		{schemapb.DataType_Int32, schemapb.DataType_Int64, true},
+		{schemapb.DataType_Int64, schemapb.DataType_Float, true},
+		{schemapb.DataType_Float, schemapb.DataType_Double, true},
+		{schemapb.DataType_Double, schemapb.DataType_Int32, true},
+		{schemapb.DataType_Double, schemapb.DataType_String, false},
+		{schemapb.DataType_Int64, schemapb.DataType_String, false},
+		{schemapb.DataType_Int64, schemapb.DataType_JSON, true},
+		{schemapb.DataType_Double, schemapb.DataType_JSON, true},
+		{schemapb.DataType_String, schemapb.DataType_Double, false},
+		{schemapb.DataType_String, schemapb.DataType_Int64, false},
+		{schemapb.DataType_String, schemapb.DataType_JSON, true},
+		{schemapb.DataType_String, schemapb.DataType_String, true},
+		{schemapb.DataType_String, schemapb.DataType_VarChar, true},
+		{schemapb.DataType_VarChar, schemapb.DataType_VarChar, true},
+		{schemapb.DataType_VarChar, schemapb.DataType_JSON, true},
+		{schemapb.DataType_VarChar, schemapb.DataType_Int64, false},
+		{schemapb.DataType_Array, schemapb.DataType_Int64, false},
+		{schemapb.DataType_Array, schemapb.DataType_Array, false},
+	}
+
+	for _, c := range cases {
+		assert.Equal(t, c.expected, canBeComparedDataType(c.left, c.right))
+	}
+}
+
+func Test_getArrayElementType(t *testing.T) {
+	t.Run("array element", func(t *testing.T) {
+		expr := &ExprWithType{
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_ValueExpr{
+					ValueExpr: &planpb.ValueExpr{
+						Value: &planpb.GenericValue{
+							Val: &planpb.GenericValue_ArrayVal{
+								ArrayVal: &planpb.Array{
+									Array:       nil,
+									ElementType: schemapb.DataType_Int64,
+								},
+							},
+						},
+					},
+				},
+			},
+			dataType:      schemapb.DataType_Array,
+			nodeDependent: true,
+		}
+
+		assert.Equal(t, schemapb.DataType_Int64, getArrayElementType(expr))
+	})
+
+	t.Run("array field", func(t *testing.T) {
+		expr := &ExprWithType{
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_ColumnExpr{
+					ColumnExpr: &planpb.ColumnExpr{
+						Info: &planpb.ColumnInfo{
+							FieldId:        101,
+							DataType:       schemapb.DataType_Array,
+							IsPrimaryKey:   false,
+							IsAutoID:       false,
+							NestedPath:     nil,
+							IsPartitionKey: false,
+							ElementType:    schemapb.DataType_Int64,
+						},
+					},
+				},
+			},
+			dataType:      schemapb.DataType_Array,
+			nodeDependent: true,
+		}
+
+		assert.Equal(t, schemapb.DataType_Int64, getArrayElementType(expr))
+	})
+
+	t.Run("not array", func(t *testing.T) {
+		expr := &ExprWithType{
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_ColumnExpr{
+					ColumnExpr: &planpb.ColumnExpr{
+						Info: &planpb.ColumnInfo{
+							FieldId:  102,
+							DataType: schemapb.DataType_String,
+						},
+					},
+				},
+			},
+			dataType:      schemapb.DataType_String,
+			nodeDependent: true,
+		}
+
+		assert.Equal(t, schemapb.DataType_None, getArrayElementType(expr))
+	})
+}

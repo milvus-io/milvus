@@ -120,59 +120,78 @@ struct GeneratedData {
 
                 return std::move(ret);
             }
-            switch (field_meta.get_data_type()) {
-                case DataType::BOOL: {
-                    auto src_data = reinterpret_cast<const T*>(
-                        target_field_data.scalars().bool_data().data().data());
-                    std::copy_n(src_data, raw_->num_rows(), ret.data());
-                    break;
-                }
-                case DataType::INT8:
-                case DataType::INT16:
-                case DataType::INT32: {
-                    auto src_data = reinterpret_cast<const int32_t*>(
-                        target_field_data.scalars().int_data().data().data());
-                    std::copy_n(src_data, raw_->num_rows(), ret.data());
-                    break;
-                }
-                case DataType::INT64: {
-                    auto src_data = reinterpret_cast<const T*>(
-                        target_field_data.scalars().long_data().data().data());
-                    std::copy_n(src_data, raw_->num_rows(), ret.data());
-                    break;
-                }
-                case DataType::FLOAT: {
-                    auto src_data = reinterpret_cast<const T*>(
-                        target_field_data.scalars().float_data().data().data());
-                    std::copy_n(src_data, raw_->num_rows(), ret.data());
-                    break;
-                }
-                case DataType::DOUBLE: {
-                    auto src_data =
-                        reinterpret_cast<const T*>(target_field_data.scalars()
-                                                       .double_data()
-                                                       .data()
-                                                       .data());
-                    std::copy_n(src_data, raw_->num_rows(), ret.data());
-                    break;
-                }
-                case DataType::VARCHAR: {
-                    auto ret_data = reinterpret_cast<std::string*>(ret.data());
-                    auto src_data =
-                        target_field_data.scalars().string_data().data();
-                    std::copy(src_data.begin(), src_data.end(), ret_data);
-
-                    break;
-                }
-                case DataType::JSON: {
-                    auto ret_data = reinterpret_cast<std::string*>(ret.data());
-                    auto src_data =
-                        target_field_data.scalars().json_data().data();
-                    std::copy(src_data.begin(), src_data.end(), ret_data);
-                    break;
-                }
-                default: {
-                    PanicCodeInfo(Unsupported, "unsupported");
+            if constexpr (std::is_same_v<T, ScalarArray>) {
+                auto ret_data = reinterpret_cast<ScalarArray*>(ret.data());
+                auto src_data = target_field_data.scalars().array_data().data();
+                std::copy(src_data.begin(), src_data.end(), ret_data);
+            } else {
+                switch (field_meta.get_data_type()) {
+                    case DataType::BOOL: {
+                        auto src_data = reinterpret_cast<const T*>(
+                            target_field_data.scalars()
+                                .bool_data()
+                                .data()
+                                .data());
+                        std::copy_n(src_data, raw_->num_rows(), ret.data());
+                        break;
+                    }
+                    case DataType::INT8:
+                    case DataType::INT16:
+                    case DataType::INT32: {
+                        auto src_data = reinterpret_cast<const int32_t*>(
+                            target_field_data.scalars()
+                                .int_data()
+                                .data()
+                                .data());
+                        std::copy_n(src_data, raw_->num_rows(), ret.data());
+                        break;
+                    }
+                    case DataType::INT64: {
+                        auto src_data = reinterpret_cast<const T*>(
+                            target_field_data.scalars()
+                                .long_data()
+                                .data()
+                                .data());
+                        std::copy_n(src_data, raw_->num_rows(), ret.data());
+                        break;
+                    }
+                    case DataType::FLOAT: {
+                        auto src_data = reinterpret_cast<const T*>(
+                            target_field_data.scalars()
+                                .float_data()
+                                .data()
+                                .data());
+                        std::copy_n(src_data, raw_->num_rows(), ret.data());
+                        break;
+                    }
+                    case DataType::DOUBLE: {
+                        auto src_data = reinterpret_cast<const T*>(
+                            target_field_data.scalars()
+                                .double_data()
+                                .data()
+                                .data());
+                        std::copy_n(src_data, raw_->num_rows(), ret.data());
+                        break;
+                    }
+                    case DataType::VARCHAR: {
+                        auto ret_data =
+                            reinterpret_cast<std::string*>(ret.data());
+                        auto src_data =
+                            target_field_data.scalars().string_data().data();
+                        std::copy(src_data.begin(), src_data.end(), ret_data);
+                        break;
+                    }
+                    case DataType::JSON: {
+                        auto ret_data =
+                            reinterpret_cast<std::string*>(ret.data());
+                        auto src_data =
+                            target_field_data.scalars().json_data().data();
+                        std::copy(src_data.begin(), src_data.end(), ret_data);
+                        break;
+                    }
+                    default: {
+                        PanicCodeInfo(Unsupported, "unsupported");
+                    }
                 }
             }
         }
@@ -197,7 +216,8 @@ struct GeneratedData {
             int64_t N,
             uint64_t seed,
             uint64_t ts_offset,
-            int repeat_count);
+            int repeat_count,
+            int array_len);
     friend GeneratedData
     DataGenForJsonArray(SchemaPtr schema,
                         int64_t N,
@@ -212,7 +232,8 @@ DataGen(SchemaPtr schema,
         int64_t N,
         uint64_t seed = 42,
         uint64_t ts_offset = 0,
-        int repeat_count = 1) {
+        int repeat_count = 1,
+        int array_len = 10) {
     using std::vector;
     std::default_random_engine er(seed);
     std::normal_distribution<> distr(0, 1);
@@ -347,12 +368,96 @@ DataGen(SchemaPtr schema,
             case DataType::JSON: {
                 vector<std::string> data(N);
                 for (int i = 0; i < N / repeat_count; i++) {
-                    auto str = R"({"int":)" + std::to_string(er()) +
-                               R"(,"double":)" +
-                               std::to_string(static_cast<double>(er())) +
-                               R"(,"string":")" + std::to_string(er()) +
-                               R"(","bool": true)" + "}";
+                    auto str =
+                        R"({"int":)" + std::to_string(er()) + R"(,"double":)" +
+                        std::to_string(static_cast<double>(er())) +
+                        R"(,"string":")" + std::to_string(er()) +
+                        R"(","bool": true)" + R"(, "array": [1,2,3])" + "}";
                     data[i] = str;
+                }
+                insert_cols(data, N, field_meta);
+                break;
+            }
+            case DataType::ARRAY: {
+                vector<ScalarArray> data(N);
+                switch (field_meta.get_element_type()) {
+                    case DataType::BOOL: {
+                        for (int i = 0; i < N / repeat_count; i++) {
+                            milvus::proto::schema::ScalarField field_data;
+
+                            for (int j = 0; j < array_len; j++) {
+                                field_data.mutable_bool_data()->add_data(
+                                    static_cast<bool>(er()));
+                            }
+                            data[i] = field_data;
+                        }
+                        break;
+                    }
+                    case DataType::INT8:
+                    case DataType::INT16:
+                    case DataType::INT32: {
+                        for (int i = 0; i < N / repeat_count; i++) {
+                            milvus::proto::schema::ScalarField field_data;
+
+                            for (int j = 0; j < array_len; j++) {
+                                field_data.mutable_int_data()->add_data(
+                                    static_cast<int>(er()));
+                            }
+                            data[i] = field_data;
+                        }
+                        break;
+                    }
+                    case DataType::INT64: {
+                        for (int i = 0; i < N / repeat_count; i++) {
+                            milvus::proto::schema::ScalarField field_data;
+                            for (int j = 0; j < array_len; j++) {
+                                field_data.mutable_long_data()->add_data(
+                                    static_cast<int64_t>(er()));
+                            }
+                            data[i] = field_data;
+                        }
+                        break;
+                    }
+                    case DataType::STRING:
+                    case DataType::VARCHAR: {
+                        for (int i = 0; i < N / repeat_count; i++) {
+                            milvus::proto::schema::ScalarField field_data;
+
+                            for (int j = 0; j < array_len; j++) {
+                                field_data.mutable_string_data()->add_data(
+                                    std::to_string(er()));
+                            }
+                            data[i] = field_data;
+                        }
+                        break;
+                    }
+                    case DataType::FLOAT: {
+                        for (int i = 0; i < N / repeat_count; i++) {
+                            milvus::proto::schema::ScalarField field_data;
+
+                            for (int j = 0; j < array_len; j++) {
+                                field_data.mutable_float_data()->add_data(
+                                    static_cast<float>(er()));
+                            }
+                            data[i] = field_data;
+                        }
+                        break;
+                    }
+                    case DataType::DOUBLE: {
+                        for (int i = 0; i < N / repeat_count; i++) {
+                            milvus::proto::schema::ScalarField field_data;
+
+                            for (int j = 0; j < array_len; j++) {
+                                field_data.mutable_double_data()->add_data(
+                                    static_cast<double>(er()));
+                            }
+                            data[i] = field_data;
+                        }
+                        break;
+                    }
+                    default: {
+                        throw std::runtime_error("unsupported data type");
+                    }
                 }
                 insert_cols(data, N, field_meta);
                 break;
@@ -435,13 +540,14 @@ DataGenForJsonArray(SchemaPtr schema,
                         arrayVec.push_back(
                             fmt::format("[{}, {}, {}]", i, i + 1, i + 2));
                     }
-                    auto str = R"({"int":[)" + join(intVec, ",") +
-                               R"(],"double":[)" + join(doubleVec, ",") +
-                               R"(],"string":[)" + join(stringVec, ",") +
-                               R"(],"bool": [)" + join(boolVec, ",") +
-                               R"(],"array": [)" + join(arrayVec, ",") +
-                               R"(],"array2": [[1,2], [3,4]])" + "}";
-                    //std::cout << str << std::endl;
+                    auto str =
+                        R"({"int":[)" + join(intVec, ",") + R"(],"double":[)" +
+                        join(doubleVec, ",") + R"(],"string":[)" +
+                        join(stringVec, ",") + R"(],"bool": [)" +
+                        join(boolVec, ",") + R"(],"array": [)" +
+                        join(arrayVec, ",") + R"(],"array2": [[1,2], [3,4]])" +
+                        R"(,"array3": [[1,2.2,false,"abc"]])" +
+                        R"(,"diff_type_array": [1,2.2,true,"abc"])" + "}";
                     data[i] = str;
                 }
                 insert_cols(data, N, field_meta);
@@ -710,6 +816,15 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                     data_raw[i] = Json(simdjson::padded_string(str));
                 }
                 createFieldData(data_raw.data(), DataType::JSON, dim);
+                break;
+            }
+            case DataType::ARRAY: {
+                auto src_data = data->scalars().array_data().data();
+                std::vector<Array> data_raw(src_data.size());
+                for (int i = 0; i < src_data.size(); i++) {
+                    data_raw[i] = Array(src_data.at(i));
+                }
+                createFieldData(data_raw.data(), DataType::ARRAY, dim);
                 break;
             }
             default: {

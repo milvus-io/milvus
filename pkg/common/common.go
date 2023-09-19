@@ -94,6 +94,7 @@ const (
 	MetricTypeKey  = "metric_type"
 	DimKey         = "dim"
 	MaxLengthKey   = "max_length"
+	MaxCapacityKey = "max_capacity"
 )
 
 //  Collection properties key

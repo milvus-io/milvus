@@ -152,6 +152,13 @@ class SegmentGrowingImpl : public SegmentGrowing {
                         int64_t count,
                         void* output_raw) const;
 
+    // for scalar array vectors
+    void
+    bulk_subscript_impl(const VectorBase& vec_raw,
+                        const int64_t* seg_offsets,
+                        int64_t count,
+                        void* output_raw) const;
+
     template <typename T>
     void
     bulk_subscript_impl(FieldId field_id,

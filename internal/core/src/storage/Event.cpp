@@ -23,6 +23,7 @@
 #include "common/Json.h"
 #include "common/Consts.h"
 #include "common/FieldMeta.h"
+#include "common/Array.h"
 
 namespace milvus::storage {
 
@@ -233,7 +234,19 @@ BaseEventData::Serialize() {
             }
             break;
         }
-        case DataType::ARRAY:
+        case DataType::ARRAY: {
+            for (size_t offset = 0; offset < field_data->get_num_rows();
+                 ++offset) {
+                auto array =
+                    static_cast<const Array*>(field_data->RawValue(offset));
+                auto array_string = array->output_data().SerializeAsString();
+
+                payload_writer->add_one_binary_payload(
+                    reinterpret_cast<const uint8_t*>(array_string.c_str()),
+                    array_string.size());
+            }
+            break;
+        }
         case DataType::JSON: {
             for (size_t offset = 0; offset < field_data->get_num_rows();
                  ++offset) {

@@ -1071,6 +1071,236 @@ func Test_validateUtil_Validate(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("array data nil", func(t *testing.T) {
+		data := []*schemapb.FieldData{
+			{
+				FieldName: "test",
+				Type:      schemapb.DataType_Array,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_ArrayData{
+							ArrayData: nil,
+						},
+					},
+				},
+			},
+		}
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:        "test",
+					DataType:    schemapb.DataType_Array,
+					ElementType: schemapb.DataType_Int64,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.MaxCapacityKey,
+							Value: "8",
+						},
+					},
+				},
+			},
+		}
+
+		v := newValidateUtil()
+
+		err := v.Validate(data, schema, 100)
+
+		assert.Error(t, err)
+	})
+
+	t.Run("exceed max capacity", func(t *testing.T) {
+		data := []*schemapb.FieldData{
+			{
+				FieldName: "test",
+				Type:      schemapb.DataType_Array,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_ArrayData{
+							ArrayData: &schemapb.ArrayArray{
+								Data: []*schemapb.ScalarField{
+									{
+										Data: &schemapb.ScalarField_LongData{
+											LongData: &schemapb.LongArray{
+												Data: []int64{1, 2, 3, 4, 5, 6, 7, 8, 9},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:        "test",
+					DataType:    schemapb.DataType_Array,
+					ElementType: schemapb.DataType_Int64,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.MaxCapacityKey,
+							Value: "2",
+						},
+					},
+				},
+			},
+		}
+
+		v := newValidateUtil(withMaxCapCheck())
+
+		err := v.Validate(data, schema, 1)
+
+		assert.Error(t, err)
+	})
+
+	t.Run("string element exceed max length", func(t *testing.T) {
+		data := []*schemapb.FieldData{
+			{
+				FieldName: "test",
+				Type:      schemapb.DataType_Array,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_ArrayData{
+							ArrayData: &schemapb.ArrayArray{
+								Data: []*schemapb.ScalarField{
+									{
+										Data: &schemapb.ScalarField_StringData{
+											StringData: &schemapb.StringArray{
+												Data: []string{"abcdefghijkl", "ajsgfuioabaxyaefilagskjfhgka"},
+											},
+										},
+									},
+								},
+								ElementType: schemapb.DataType_VarChar,
+							},
+						},
+					},
+				},
+			},
+		}
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:        "test",
+					DataType:    schemapb.DataType_Array,
+					ElementType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.MaxCapacityKey,
+							Value: "10",
+						},
+						{
+							Key:   common.MaxLengthKey,
+							Value: "5",
+						},
+					},
+				},
+			},
+		}
+
+		v := newValidateUtil(withMaxCapCheck(), withMaxLenCheck())
+
+		err := v.Validate(data, schema, 1)
+
+		assert.Error(t, err)
+	})
+
+	t.Run("no max capacity", func(t *testing.T) {
+		data := []*schemapb.FieldData{
+			{
+				FieldName: "test",
+				Type:      schemapb.DataType_Array,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_ArrayData{
+							ArrayData: &schemapb.ArrayArray{
+								Data: []*schemapb.ScalarField{
+									{
+										Data: &schemapb.ScalarField_LongData{
+											LongData: &schemapb.LongArray{
+												Data: []int64{1, 2, 3, 4, 5, 6, 7, 8, 9},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:        "test",
+					DataType:    schemapb.DataType_Array,
+					ElementType: schemapb.DataType_Int64,
+					TypeParams:  []*commonpb.KeyValuePair{},
+				},
+			},
+		}
+
+		v := newValidateUtil(withMaxCapCheck())
+
+		err := v.Validate(data, schema, 1)
+
+		assert.Error(t, err)
+	})
+
+	t.Run("unsupported element type", func(t *testing.T) {
+		data := []*schemapb.FieldData{
+			{
+				FieldName: "test",
+				Type:      schemapb.DataType_Array,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_ArrayData{
+							ArrayData: &schemapb.ArrayArray{
+								Data: []*schemapb.ScalarField{
+									{
+										Data: &schemapb.ScalarField_LongData{
+											LongData: &schemapb.LongArray{
+												Data: []int64{1, 2, 3, 4, 5, 6, 7, 8, 9},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:        "test",
+					DataType:    schemapb.DataType_Array,
+					ElementType: schemapb.DataType_JSON,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.MaxCapacityKey,
+							Value: "8",
+						},
+					},
+				},
+			},
+		}
+
+		v := newValidateUtil(withMaxCapCheck())
+
+		err := v.Validate(data, schema, 1)
+
+		assert.Error(t, err)
+	})
+
 	t.Run("normal case", func(t *testing.T) {
 		data := []*schemapb.FieldData{
 			{
@@ -1136,6 +1366,174 @@ func Test_validateUtil_Validate(t *testing.T) {
 					},
 				},
 			},
+			{
+				FieldName: "bool_array",
+				Type:      schemapb.DataType_Array,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_ArrayData{
+							ArrayData: &schemapb.ArrayArray{
+								Data: []*schemapb.ScalarField{
+									{
+										Data: &schemapb.ScalarField_BoolData{
+											BoolData: &schemapb.BoolArray{
+												Data: []bool{true, true},
+											},
+										},
+									},
+									{
+										Data: &schemapb.ScalarField_BoolData{
+											BoolData: &schemapb.BoolArray{
+												Data: []bool{false, false},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			{
+				FieldName: "int_array",
+				Type:      schemapb.DataType_Array,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_ArrayData{
+							ArrayData: &schemapb.ArrayArray{
+								Data: []*schemapb.ScalarField{
+									{
+										Data: &schemapb.ScalarField_IntData{
+											IntData: &schemapb.IntArray{
+												Data: []int32{1, 2, 3},
+											},
+										},
+									},
+									{
+										Data: &schemapb.ScalarField_IntData{
+											IntData: &schemapb.IntArray{
+												Data: []int32{4, 5, 6},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			{
+				FieldName: "long_array",
+				Type:      schemapb.DataType_Array,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_ArrayData{
+							ArrayData: &schemapb.ArrayArray{
+								Data: []*schemapb.ScalarField{
+									{
+										Data: &schemapb.ScalarField_LongData{
+											LongData: &schemapb.LongArray{
+												Data: []int64{1, 2, 3},
+											},
+										},
+									},
+									{
+										Data: &schemapb.ScalarField_LongData{
+											LongData: &schemapb.LongArray{
+												Data: []int64{4, 5, 6},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			{
+				FieldName: "string_array",
+				Type:      schemapb.DataType_Array,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_ArrayData{
+							ArrayData: &schemapb.ArrayArray{
+								Data: []*schemapb.ScalarField{
+									{
+										Data: &schemapb.ScalarField_StringData{
+											StringData: &schemapb.StringArray{
+												Data: []string{"abc", "def"},
+											},
+										},
+									},
+									{
+										Data: &schemapb.ScalarField_StringData{
+											StringData: &schemapb.StringArray{
+												Data: []string{"hij", "jkl"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			{
+				FieldName: "float_array",
+				Type:      schemapb.DataType_Array,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_ArrayData{
+							ArrayData: &schemapb.ArrayArray{
+								Data: []*schemapb.ScalarField{
+									{
+										Data: &schemapb.ScalarField_FloatData{
+											FloatData: &schemapb.FloatArray{
+												Data: []float32{1.1, 2.2, 3.3},
+											},
+										},
+									},
+									{
+										Data: &schemapb.ScalarField_FloatData{
+											FloatData: &schemapb.FloatArray{
+												Data: []float32{4.4, 5.5, 6.6},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			{
+				FieldName: "double_array",
+				Type:      schemapb.DataType_Array,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_ArrayData{
+							ArrayData: &schemapb.ArrayArray{
+								Data: []*schemapb.ScalarField{
+									{
+										Data: &schemapb.ScalarField_DoubleData{
+											DoubleData: &schemapb.DoubleArray{
+												Data: []float64{1.2, 2.3, 3.4},
+											},
+										},
+									},
+									{
+										Data: &schemapb.ScalarField_DoubleData{
+											DoubleData: &schemapb.DoubleArray{
+												Data: []float64{4.5, 5.6, 6.7},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
 		}
 
 		schema := &schemapb.CollectionSchema{
@@ -1183,10 +1581,86 @@ func Test_validateUtil_Validate(t *testing.T) {
 					FieldID:  105,
 					DataType: schemapb.DataType_Int8,
 				},
+				{
+					Name:        "bool_array",
+					FieldID:     106,
+					DataType:    schemapb.DataType_Array,
+					ElementType: schemapb.DataType_Bool,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.MaxCapacityKey,
+							Value: "10",
+						},
+					},
+				},
+				{
+					Name:        "int_array",
+					FieldID:     107,
+					DataType:    schemapb.DataType_Array,
+					ElementType: schemapb.DataType_Int16,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.MaxCapacityKey,
+							Value: "10",
+						},
+					},
+				},
+				{
+					Name:        "long_array",
+					FieldID:     108,
+					DataType:    schemapb.DataType_Array,
+					ElementType: schemapb.DataType_Int64,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.MaxCapacityKey,
+							Value: "10",
+						},
+					},
+				},
+				{
+					Name:        "string_array",
+					FieldID:     109,
+					DataType:    schemapb.DataType_Array,
+					ElementType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.MaxCapacityKey,
+							Value: "10",
+						},
+						{
+							Key:   common.MaxLengthKey,
+							Value: "10",
+						},
+					},
+				},
+				{
+					Name:        "float_array",
+					FieldID:     110,
+					DataType:    schemapb.DataType_Array,
+					ElementType: schemapb.DataType_Float,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.MaxCapacityKey,
+							Value: "10",
+						},
+					},
+				},
+				{
+					Name:        "double_array",
+					FieldID:     111,
+					DataType:    schemapb.DataType_Array,
+					ElementType: schemapb.DataType_Double,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.MaxCapacityKey,
+							Value: "10",
+						},
+					},
+				},
 			},
 		}
 
-		v := newValidateUtil(withNANCheck(), withMaxLenCheck(), withOverflowCheck())
+		v := newValidateUtil(withNANCheck(), withMaxLenCheck(), withOverflowCheck(), withMaxCapCheck())
 
 		err := v.Validate(data, schema, 2)
 

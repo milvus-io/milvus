@@ -268,12 +268,13 @@ enum ArithOpType : int {
   Mul = 3,
   Div = 4,
   Mod = 5,
+  ArrayLength = 6,
   ArithOpType_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::min(),
   ArithOpType_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::max()
 };
 bool ArithOpType_IsValid(int value);
 constexpr ArithOpType ArithOpType_MIN = Unknown;
-constexpr ArithOpType ArithOpType_MAX = Mod;
+constexpr ArithOpType ArithOpType_MAX = ArrayLength;
 constexpr int ArithOpType_ARRAYSIZE = ArithOpType_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* ArithOpType_descriptor();
@@ -688,6 +689,7 @@ class Array final :
   enum : int {
     kArrayFieldNumber = 1,
     kSameTypeFieldNumber = 2,
+    kElementTypeFieldNumber = 3,
   };
   // repeated .milvus.proto.plan.GenericValue array = 1;
   int array_size() const;
@@ -716,6 +718,15 @@ class Array final :
   void _internal_set_same_type(bool value);
   public:
 
+  // .milvus.proto.schema.DataType element_type = 3;
+  void clear_element_type();
+  ::milvus::proto::schema::DataType element_type() const;
+  void set_element_type(::milvus::proto::schema::DataType value);
+  private:
+  ::milvus::proto::schema::DataType _internal_element_type() const;
+  void _internal_set_element_type(::milvus::proto::schema::DataType value);
+  public:
+
   // @@protoc_insertion_point(class_scope:milvus.proto.plan.Array)
  private:
   class _Internal;
@@ -726,6 +737,7 @@ class Array final :
   struct Impl_ {
     ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::plan::GenericValue > array_;
     bool same_type_;
+    int element_type_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   };
   union { Impl_ _impl_; };
@@ -1051,6 +1063,7 @@ class ColumnInfo final :
     kIsPrimaryKeyFieldNumber = 3,
     kIsAutoIDFieldNumber = 4,
     kIsPartitionKeyFieldNumber = 6,
+    kElementTypeFieldNumber = 7,
   };
   // repeated string nested_path = 5;
   int nested_path_size() const;
@@ -1121,6 +1134,15 @@ class ColumnInfo final :
   void _internal_set_is_partition_key(bool value);
   public:
 
+  // .milvus.proto.schema.DataType element_type = 7;
+  void clear_element_type();
+  ::milvus::proto::schema::DataType element_type() const;
+  void set_element_type(::milvus::proto::schema::DataType value);
+  private:
+  ::milvus::proto::schema::DataType _internal_element_type() const;
+  void _internal_set_element_type(::milvus::proto::schema::DataType value);
+  public:
+
   // @@protoc_insertion_point(class_scope:milvus.proto.plan.ColumnInfo)
  private:
   class _Internal;
@@ -1135,6 +1157,7 @@ class ColumnInfo final :
     bool is_primary_key_;
     bool is_autoid_;
     bool is_partition_key_;
+    int element_type_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   };
   union { Impl_ _impl_; };
@@ -5182,6 +5205,26 @@ inline void Array::set_same_type(bool value) {
   // @@protoc_insertion_point(field_set:milvus.proto.plan.Array.same_type)
 }
 
+// .milvus.proto.schema.DataType element_type = 3;
+inline void Array::clear_element_type() {
+  _impl_.element_type_ = 0;
+}
+inline ::milvus::proto::schema::DataType Array::_internal_element_type() const {
+  return static_cast< ::milvus::proto::schema::DataType >(_impl_.element_type_);
+}
+inline ::milvus::proto::schema::DataType Array::element_type() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.plan.Array.element_type)
+  return _internal_element_type();
+}
+inline void Array::_internal_set_element_type(::milvus::proto::schema::DataType value) {
+  
+  _impl_.element_type_ = value;
+}
+inline void Array::set_element_type(::milvus::proto::schema::DataType value) {
+  _internal_set_element_type(value);
+  // @@protoc_insertion_point(field_set:milvus.proto.plan.Array.element_type)
+}
+
 // -------------------------------------------------------------------
 
 // QueryInfo
@@ -5503,6 +5546,26 @@ inline void ColumnInfo::_internal_set_is_partition_key(bool value) {
 inline void ColumnInfo::set_is_partition_key(bool value) {
   _internal_set_is_partition_key(value);
   // @@protoc_insertion_point(field_set:milvus.proto.plan.ColumnInfo.is_partition_key)
+}
+
+// .milvus.proto.schema.DataType element_type = 7;
+inline void ColumnInfo::clear_element_type() {
+  _impl_.element_type_ = 0;
+}
+inline ::milvus::proto::schema::DataType ColumnInfo::_internal_element_type() const {
+  return static_cast< ::milvus::proto::schema::DataType >(_impl_.element_type_);
+}
+inline ::milvus::proto::schema::DataType ColumnInfo::element_type() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.plan.ColumnInfo.element_type)
+  return _internal_element_type();
+}
+inline void ColumnInfo::_internal_set_element_type(::milvus::proto::schema::DataType value) {
+  
+  _impl_.element_type_ = value;
+}
+inline void ColumnInfo::set_element_type(::milvus::proto::schema::DataType value) {
+  _internal_set_element_type(value);
+  // @@protoc_insertion_point(field_set:milvus.proto.plan.ColumnInfo.element_type)
 }
 
 // -------------------------------------------------------------------

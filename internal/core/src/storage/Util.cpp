@@ -650,6 +650,8 @@ CreateFieldData(const DataType& type, int64_t dim, int64_t total_num_rows) {
                                                             total_num_rows);
         case DataType::JSON:
             return std::make_shared<FieldData<Json>>(type, total_num_rows);
+        case DataType::ARRAY:
+            return std::make_shared<FieldData<Array>>(type, total_num_rows);
         case DataType::VECTOR_FLOAT:
             return std::make_shared<FieldData<FloatVector>>(
                 dim, type, total_num_rows);
