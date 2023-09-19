@@ -2,7 +2,9 @@ package tasks
 
 import (
 	"context"
+	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -87,9 +89,8 @@ func (t *QueryTask) Execute() error {
 		return err
 	}
 	defer retrievePlan.Delete()
-
-	results, searchedSegments, err := segments.Retrieve(t.ctx, t.segmentManager, retrievePlan, t.req)
-	defer t.segmentManager.Segment.Unpin(searchedSegments)
+	results, querySegments, err := segments.Retrieve(t.ctx, t.segmentManager, retrievePlan, t.req)
+	defer t.segmentManager.Segment.Unpin(querySegments)
 	if err != nil {
 		return err
 	}
@@ -98,8 +99,13 @@ func (t *QueryTask) Execute() error {
 		t.req,
 		t.collection.Schema(),
 	)
-
+	beforeReduce := time.Now()
 	reducedResult, err := reducer.Reduce(t.ctx, results)
+
+	metrics.QueryNodeReduceLatency.WithLabelValues(
+		fmt.Sprint(paramtable.GetNodeID()),
+		metrics.QueryLabel,
+		metrics.ReduceSegments).Observe(float64(time.Since(beforeReduce).Milliseconds()))
 	if err != nil {
 		return err
 	}
