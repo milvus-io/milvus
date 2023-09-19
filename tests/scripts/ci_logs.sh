@@ -86,28 +86,34 @@ if [[ ! -d ${RELEASE_LOG_DIR} ]] ;then
   mkdir -p ${RELEASE_LOG_DIR}
 fi 
 # Try to found logs file from mount disk /volume1/ci-logs
-log_files=$(find ${LOG_DIR} -type f  -name "*${RELEASE_NAME}*" )
-
-if [ -z "${log_files:-}" ]; then
+# log_files=$(find ${LOG_DIR} -type f  -name "*${RELEASE_NAME}*" )
+log_files=$(ls ${LOG_DIR} | grep ${RELEASE_NAME} || echo nonexistment)
+if [ "${log_files}"="nonexistment" ]; then
   echo "No log files find"
 else
   for log_file in ${log_files}
   do 
    file_name=$(basename ${log_file})
-    mv  ${log_file} ${RELEASE_LOG_DIR}/`echo ${file_name} | sed 's/ci.var.log.containers.//g' `
+    mv  ${LOG_DIR}/${log_file} ${RELEASE_LOG_DIR}/`echo ${file_name} | sed 's/ci.var.log.containers.//g' `
   done 
-
   tar -zcvf ${ARTIFACTS_NAME:-artifacts}.tar.gz ${RELEASE_LOG_DIR}/*
   rm -rf ${RELEASE_LOG_DIR}
 fi
 
-remain_log_files=$(find ${LOG_DIR} -type f  -name "*${RELEASE_NAME}*")
+# remain_log_files=$(find ${LOG_DIR} -type f  -name "*${RELEASE_NAME}*")
 
-if [ -z "${remain_log_files:-}" ]; then
+ls ${LOG_DIR} | grep ${RELEASE_NAME}
+
+remain_log_files=$(ls ${LOG_DIR} | grep ${RELEASE_NAME} || echo nonexistment)
+
+if [ "${remain_log_files}"="nonexistment" ]; then
   echo "No remain log files"
 else
   echo "Still have log files & Remove again"
-  find ${LOG_DIR} -type f  -name "*${RELEASE_NAME}*" -exec rm -rf {} +
+  for log_file in ${remain_log_files}
+  do
+    rm -rf ${LOG_DIR}/${log_file}
+  done
   echo "Check if any remain log files  after using rm to delete again "
-  find ${LOG_DIR} -type f  -name "*${RELEASE_NAME}*"
+  ls ${LOG_DIR} | grep ${RELEASE_NAME}
 fi
