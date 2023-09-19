@@ -194,8 +194,11 @@ func (t *SearchTask) Execute() error {
 		return err
 	}
 	defer segments.DeleteSearchResultDataBlobs(blobs)
-	reduceLatency := tr.RecordSpan()
-
+	metrics.QueryNodeReduceLatency.WithLabelValues(
+		fmt.Sprint(paramtable.GetNodeID()),
+		metrics.SearchLabel,
+		metrics.ReduceSegments).
+		Observe(float64(tr.RecordSpan().Milliseconds()))
 	for i := range t.originNqs {
 		blob, err := segments.GetSearchResultDataBlob(blobs, i)
 		if err != nil {
@@ -213,12 +216,6 @@ func (t *SearchTask) Execute() error {
 		bs := make([]byte, len(blob))
 		copy(bs, blob)
 
-		metrics.QueryNodeReduceLatency.WithLabelValues(
-			fmt.Sprint(paramtable.GetNodeID()),
-			metrics.SearchLabel,
-			metrics.ReduceSegments).
-			Observe(float64(reduceLatency.Milliseconds()))
-
 		task.result = &internalpb.SearchResults{
 			Base: &commonpb.MsgBase{
 				SourceID: paramtable.GetNodeID(),
@@ -235,6 +232,7 @@ func (t *SearchTask) Execute() error {
 			},
 		}
 	}
+
 	return nil
 }
 
