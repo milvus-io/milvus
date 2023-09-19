@@ -55,6 +55,7 @@ func TestFlowGraphManager(t *testing.T) {
 	defer func() {
 		fm.dropAll()
 	}()
+
 	t.Run("Test addAndStart", func(t *testing.T) {
 		vchanName := "by-dev-rootcoord-dml-test-flowgraphmanager-addAndStart"
 		vchan := &datapb.VchannelInfo{

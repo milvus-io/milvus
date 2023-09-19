@@ -137,11 +137,13 @@ func (fm *flowgraphManager) addAndStart(dn *DataNode, vchan *datapb.VchannelInfo
 }
 
 func (fm *flowgraphManager) release(vchanName string) {
-	if fg, loaded := fm.flowgraphs.GetAndRemove(vchanName); loaded {
+	if fg, loaded := fm.flowgraphs.Get(vchanName); loaded {
 		fg.close()
+		fm.flowgraphs.Remove(vchanName)
+
 		metrics.DataNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Dec()
+		rateCol.removeFlowGraphChannel(vchanName)
 	}
-	rateCol.removeFlowGraphChannel(vchanName)
 }
 
 func (fm *flowgraphManager) getFlushCh(segID UniqueID) (chan<- flushMsg, error) {
@@ -226,4 +228,14 @@ func (fm *flowgraphManager) dropAll() {
 		log.Info("successfully dropped flowgraph", zap.String("vChannelName", key))
 		return true
 	})
+}
+
+func (fm *flowgraphManager) collections() []int64 {
+	collectionSet := typeutil.UniqueSet{}
+	fm.flowgraphs.Range(func(key string, value *dataSyncService) bool {
+		collectionSet.Insert(value.channel.getCollectionID())
+		return true
+	})
+
+	return collectionSet.Collect()
 }
