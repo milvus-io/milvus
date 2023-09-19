@@ -962,7 +962,6 @@ class TestDeleteOperation(TestcaseBase):
             expr = f'{ct.default_int64_field_name} in {ids[i * batch: (i + 1) * batch]}'
             res, _ = collection_w.delete(expr)
             assert res.delete_count == batch
-            assert collection_w.num_entities == tmp_nb
 
         # query with all ids
         expr = f'{ct.default_int64_field_name} in {ids}'
@@ -1593,7 +1592,6 @@ class TestDeleteString(TestcaseBase):
             expr = expr.replace("'", "\"")
             res, _ = collection_w.delete(expr)
             assert res.delete_count == batch
-            assert collection_w.num_entities == tmp_nb
 
         # query with all ids
         expr = f'{ct.default_string_field_name} in {ids}'

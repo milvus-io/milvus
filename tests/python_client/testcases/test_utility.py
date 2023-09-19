@@ -2760,7 +2760,7 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.init_role("public")
         self.utility_wrap.role_grant("Collection", c_name, "Insert")
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_revoke_user_after_delete_user(self, host, port):
         """
         target: test revoke user with deleted user
