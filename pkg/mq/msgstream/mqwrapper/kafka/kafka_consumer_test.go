@@ -268,3 +268,31 @@ func TestKafkaConsumer_CheckPreTopicValid(t *testing.T) {
 	err = consumer.CheckTopicValid(topic)
 	assert.NoError(t, err)
 }
+
+func TestKafkaConsumer_Close(t *testing.T) {
+	rand.Seed(time.Now().UnixNano())
+	topic := fmt.Sprintf("test-topicName-%d", rand.Int())
+
+	data1 := []int{111, 222, 333}
+	data2 := []string{"111", "222", "333"}
+	testKafkaConsumerProduceData(t, topic, data1, data2)
+
+	t.Run("close after only get latest msgID", func(t *testing.T) {
+		groupID := fmt.Sprintf("test-groupid-%d", rand.Int())
+		config := createConfig(groupID)
+		consumer, err := newKafkaConsumer(config, 16, topic, groupID, mqwrapper.SubscriptionPositionEarliest)
+		assert.NoError(t, err)
+		_, err = consumer.GetLatestMsgID()
+		assert.NoError(t, err)
+		consumer.Close()
+	})
+
+	t.Run("close after only Chan method is invoked", func(t *testing.T) {
+		groupID := fmt.Sprintf("test-groupid-%d", rand.Int())
+		config := createConfig(groupID)
+		consumer, err := newKafkaConsumer(config, 16, topic, groupID, mqwrapper.SubscriptionPositionEarliest)
+		assert.NoError(t, err)
+		<-consumer.Chan()
+		consumer.Close()
+	})
+}
