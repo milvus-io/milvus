@@ -43,7 +43,7 @@ func ClusterValidationUnaryServerInterceptor() grpc.UnaryServerInterceptor {
 		}
 		cluster := clusters[0]
 		if cluster != "" && cluster != paramtable.Get().CommonCfg.ClusterPrefix.GetValue() {
-			return nil, merr.WrapErrCrossClusterRouting(paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), cluster)
+			return nil, merr.WrapErrServiceCrossClusterRouting(paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), cluster)
 		}
 		return handler(ctx, req)
 	}
@@ -64,7 +64,7 @@ func ClusterValidationStreamServerInterceptor() grpc.StreamServerInterceptor {
 		}
 		cluster := clusters[0]
 		if cluster != "" && cluster != paramtable.Get().CommonCfg.ClusterPrefix.GetValue() {
-			return merr.WrapErrCrossClusterRouting(paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), cluster)
+			return merr.WrapErrServiceCrossClusterRouting(paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), cluster)
 		}
 		return handler(srv, ss)
 	}

@@ -241,8 +241,8 @@ func WrapErrServiceInternal(msg string, others ...string) error {
 	return err
 }
 
-func WrapErrCrossClusterRouting(expectedCluster, actualCluster string, msg ...string) error {
-	err := errors.Wrapf(ErrCrossClusterRouting, "expectedCluster=%s, actualCluster=%s", expectedCluster, actualCluster)
+func WrapErrServiceCrossClusterRouting(expectedCluster, actualCluster string, msg ...string) error {
+	err := errors.Wrapf(ErrServiceCrossClusterRouting, "expectedCluster=%s, actualCluster=%s", expectedCluster, actualCluster)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "; "))
 	}

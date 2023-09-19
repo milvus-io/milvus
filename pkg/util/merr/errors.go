@@ -38,7 +38,7 @@ var (
 	ErrServiceMemoryLimitExceeded  = newMilvusError("memory limit exceeded", 3, false)
 	ErrServiceRequestLimitExceeded = newMilvusError("request limit exceeded", 4, true)
 	ErrServiceInternal             = newMilvusError("service internal error", 5, false) // Never return this error out of Milvus
-	ErrCrossClusterRouting         = newMilvusError("cross cluster routing", 6, false)
+	ErrServiceCrossClusterRouting  = newMilvusError("cross cluster routing", 6, false)
 	ErrServiceDiskLimitExceeded    = newMilvusError("disk limit exceeded", 7, false)
 	ErrServiceRateLimit            = newMilvusError("rate limit exceeded", 8, true)
 	ErrServiceForceDeny            = newMilvusError("force deny", 9, false)
