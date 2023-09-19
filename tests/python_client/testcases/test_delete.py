@@ -19,7 +19,7 @@ exp_res = "exp_res"
 default_string_expr = "varchar in [ \"0\"]"
 default_invaild_string_exp = "varchar >= 0"
 index_name1 = cf.gen_unique_str("float")
-index_name2 = cf.gen_unique_str("varhar")
+index_name2 = cf.gen_unique_str("varchar")
 default_search_params = ct.default_search_params
 
 
@@ -1851,3 +1851,115 @@ class TestDeleteString(TestcaseBase):
         # load and query with id
         collection_w.load()
         collection_w.query(string_expr, check_task=CheckTasks.check_query_empty)
+
+
+class TestDeleteComplexExpr(TestcaseBase):
+    """
+    Test case of delete interface with complex expr
+    """
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("expression", cf.gen_normal_expressions()[1:])
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    def test_delete_normal_expressions(self, expression, enable_dynamic_field):
+        """
+        target: test delete entities using normal expression
+        method: delete using normal expression
+        expected: delete successfully
+        """
+        # init collection with nb default data
+        collection_w, _vectors, _, insert_ids = \
+            self.init_collection_general(prefix, True, enable_dynamic_field=enable_dynamic_field)[0:4]
+
+        # filter result with expression in collection
+        _vectors = _vectors[0]
+        expression = expression.replace("&&", "and").replace("||", "or")
+        filter_ids = []
+        for i, _id in enumerate(insert_ids):
+            if enable_dynamic_field:
+                int64 = _vectors[i][ct.default_int64_field_name]
+                float = _vectors[i][ct.default_float_field_name]
+            else:
+                int64 = _vectors.int64[i]
+                float = _vectors.float[i]
+            if not expression or eval(expression):
+                filter_ids.append(_id)
+
+        # delete with expressions
+        res = collection_w.delete(expression)[0]
+        assert res.delete_count == len(filter_ids)
+
+        # query to check
+        collection_w.query(f"int64 in {filter_ids}", check_task=CheckTasks.check_query_empty)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("field_name", ["varchar", "json_field['string']", "NewStr"])
+    @pytest.mark.parametrize("like", ["like", "LIKE"])
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    def test_delete_string_expressions_like(self, field_name, like, enable_dynamic_field):
+        """
+        target: test delete expr like
+        method: delete using expression like
+        expected: delete successfully
+        """
+        if field_name == "NewStr" and enable_dynamic_field is False:
+            pytest.skip("only support when enable_dynamic_filed == True")
+        # init collection with nb default data
+        nb = 1000
+        collection_w, _vectors, _, insert_ids = \
+            self.init_collection_general(prefix, False, enable_dynamic_field=enable_dynamic_field)[0:4]
+
+        # insert
+        string_list = [cf.gen_str_by_length() for _ in range(nb)]
+        if enable_dynamic_field:
+            data = cf.gen_default_rows_data(nb)
+            for i in range(nb):
+                data[i][ct.default_json_field_name] = {"string": string_list[i]}
+                data[i]['NewStr'] = string_list[i]
+                data[i][ct.default_string_field_name] = string_list[i]
+        else:
+            data = cf.gen_default_dataframe_data(nb)
+            data[ct.default_json_field_name] = [{"string": string_list[i]} for i in range(nb)]
+            data[ct.default_string_field_name] = string_list
+        collection_w.insert(data)
+        collection_w.load()
+
+        # delete with expressions
+        deleted_str = [s for s in string_list if s.startswith('a')]
+        expression = f"{field_name} {like} 'a%'"
+        res = collection_w.delete(expression)[0]
+        assert res.delete_count == len(deleted_str)
+
+        # query to check
+        collection_w.load()
+        collection_w.query("int64 >= 0", output_fields=['count(*)'],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={'count(*)': nb - len(deleted_str)})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_expr_empty_string(self):
+        """
+        target: test delete with expr empty
+        method: delete with expr=""
+        expected: raise exception
+        """
+        # init collection with nb default data
+        collection_w = self.init_collection_general(prefix, True)[0]
+
+        # delete
+        error = {ct.err_code: 1, ct.err_msg: "expr cannot be empty"}
+        collection_w.delete(expr="", check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_complex_expr_before_load(self):
+        """
+        target: test delete before load
+        method: delete with any complex expr
+        expected: raise exception
+        """
+        # init collection with nb default data
+        collection_w = self.init_collection_general(prefix, False)[0]
+
+        # delete
+        error = {ct.err_code: 1, ct.err_msg: "collection not loaded: unrecoverable error"}
+        collection_w.delete(expr="int64 >= 0", check_task=CheckTasks.err_res, check_items=error)
