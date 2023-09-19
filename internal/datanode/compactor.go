@@ -22,15 +22,9 @@ import (
 	"path"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -40,10 +34,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"go.uber.org/zap"
 )
 
 var (
@@ -627,16 +624,10 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 	<-ti.Injected()
 	log.Info("compact inject elapse", zap.Duration("elapse", time.Since(injectStart)))
 
-	var (
-		// SegmentID to deltaBlobs
-		dblobs = make(map[UniqueID][]*Blob)
-		dmu    sync.Mutex
-	)
-
+	var dblobs = make(map[UniqueID][]*Blob)
 	allPath := make([][]string, 0)
 
 	downloadStart := time.Now()
-	g, gCtx := errgroup.WithContext(ctxTimeout)
 	for _, s := range t.plan.GetSegmentBinlogs() {
 
 		// Get the number of field binlog files from non-empty segment
@@ -662,27 +653,24 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 		}
 
 		segID := s.GetSegmentID()
+		paths := make([]string, 0)
 		for _, d := range s.GetDeltalogs() {
 			for _, l := range d.GetBinlogs() {
 				path := l.GetLogPath()
-				g.Go(func() error {
-					bs, err := t.download(gCtx, []string{path})
-					if err != nil {
-						log.Warn("compact download deltalogs wrong", zap.String("path", path), zap.Error(err))
-						return err
-					}
-
-					dmu.Lock()
-					dblobs[segID] = append(dblobs[segID], bs...)
-					dmu.Unlock()
-
-					return nil
-				})
+				paths = append(paths, path)
 			}
+		}
+
+		if len(paths) != 0 {
+			bs, err := t.download(ctxTimeout, paths)
+			if err != nil {
+				log.Warn("compact download deltalogs wrong", zap.Int64("segment", segID), zap.Strings("path", paths), zap.Error(err))
+				return nil, err
+			}
+			dblobs[segID] = append(dblobs[segID], bs...)
 		}
 	}
 
-	err = g.Wait()
 	log.Info("compact download deltalogs elapse", zap.Duration("elapse", time.Since(downloadStart)))
 
 	if err != nil {

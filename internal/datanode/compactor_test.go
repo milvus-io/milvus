@@ -667,7 +667,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			stats := storage.NewPrimaryKeyStats(106, int64(schemapb.DataType_Int64), 10)
 
 			ct := &compactionTask{
-				uploader: &binlogIO{&mockCm{errMultiSave: true}, alloc},
+				uploader: &binlogIO{&mockCm{errSave: true}, alloc},
 				done:     make(chan struct{}, 1),
 			}
 
