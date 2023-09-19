@@ -299,13 +299,11 @@ class TestInsertParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         nb = 10
         df = cf.gen_default_dataframe_data(nb)
-        new_float_value = pd.Series(
-            data=[float(i) for i in range(nb)], dtype="float64")
+        new_float_value = pd.Series(data=[float(i) for i in range(nb)], dtype="float64")
         df[df.columns[1]] = new_float_value
         error = {ct.err_code: 1,
-                 ct.err_code: "The data type of field float doesn't match, expected: FLOAT, got DOUBLE"}
-        collection_w.insert(
-            data=df, check_task=CheckTasks.err_res, check_items=error)
+                 ct.err_msg: "The data type of field float doesn't match, expected: FLOAT, got DOUBLE"}
+        collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_value_less(self):
