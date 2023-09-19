@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -68,37 +69,37 @@ func NewMultiRateLimiter() *MultiRateLimiter {
 }
 
 // Check checks if request would be limited or denied.
-func (m *MultiRateLimiter) Check(collectionID int64, rt internalpb.RateType, n int) commonpb.ErrorCode {
+func (m *MultiRateLimiter) Check(collectionID int64, rt internalpb.RateType, n int) error {
 	if !Params.QuotaConfig.QuotaAndLimitsEnabled.GetAsBool() {
-		return commonpb.ErrorCode_Success
+		return nil
 	}
 
 	m.quotaStatesMu.RLock()
 	defer m.quotaStatesMu.RUnlock()
 
-	checkFunc := func(limiter *rateLimiter) commonpb.ErrorCode {
+	checkFunc := func(limiter *rateLimiter) error {
 		if limiter == nil {
-			return commonpb.ErrorCode_Success
+			return nil
 		}
 
 		limit, rate := limiter.limit(rt, n)
 		if rate == 0 {
-			return limiter.getErrorCode(rt)
+			return limiter.getError(rt)
 		}
 		if limit {
-			return commonpb.ErrorCode_RateLimit
+			return merr.WrapErrServiceRateLimit(rate)
 		}
-		return commonpb.ErrorCode_Success
+		return nil
 	}
 
 	// first, check global level rate limits
 	ret := checkFunc(m.globalDDLLimiter)
 
 	// second check collection level rate limits
-	if ret == commonpb.ErrorCode_Success && !IsDDLRequest(rt) {
+	if ret == nil && !IsDDLRequest(rt) {
 		// only dml and dql have collection level rate limits
 		ret = checkFunc(m.collectionLimiters[collectionID])
-		if ret != commonpb.ErrorCode_Success {
+		if ret != nil {
 			m.globalDDLLimiter.cancel(rt, n)
 		}
 	}
@@ -237,18 +238,18 @@ func (rl *rateLimiter) setRates(collectionRate *proxypb.CollectionRate) error {
 	return nil
 }
 
-func (rl *rateLimiter) getErrorCode(rt internalpb.RateType) commonpb.ErrorCode {
+func (rl *rateLimiter) getError(rt internalpb.RateType) error {
 	switch rt {
 	case internalpb.RateType_DMLInsert, internalpb.RateType_DMLUpsert, internalpb.RateType_DMLDelete, internalpb.RateType_DMLBulkLoad:
 		if errCode, ok := rl.quotaStates.Get(milvuspb.QuotaState_DenyToWrite); ok {
-			return errCode
+			return merr.OldCodeToMerr(errCode)
 		}
 	case internalpb.RateType_DQLSearch, internalpb.RateType_DQLQuery:
 		if errCode, ok := rl.quotaStates.Get(milvuspb.QuotaState_DenyToRead); ok {
-			return errCode
+			return merr.OldCodeToMerr(errCode)
 		}
 	}
-	return commonpb.ErrorCode_Success
+	return nil
 }
 
 // setRateGaugeByRateType sets ProxyLimiterRate metrics.

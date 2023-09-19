@@ -21,13 +21,14 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 // RateLimitInterceptor returns a new unary server interceptors that performs request rate limiting.
@@ -38,9 +39,9 @@ func RateLimitInterceptor(limiter types.Limiter) grpc.UnaryServerInterceptor {
 			return handler(ctx, req)
 		}
 
-		code := limiter.Check(collectionID, rt, n)
-		if code != commonpb.ErrorCode_Success {
-			rsp := getFailedResponse(req, rt, code, info.FullMethod)
+		err = limiter.Check(collectionID, rt, n)
+		if err != nil {
+			rsp := getFailedResponse(req, rt, err, info.FullMethod)
 			if rsp != nil {
 				return rsp, nil
 			}
@@ -113,31 +114,16 @@ func getRequestInfo(req interface{}) (int64, internalpb.RateType, int, error) {
 	}
 }
 
-// failedStatus returns failed status.
-func failedStatus(code commonpb.ErrorCode, reason string) *commonpb.Status {
-	return &commonpb.Status{
-		ErrorCode: code,
-		Reason:    reason,
-	}
-}
-
 // failedMutationResult returns failed mutation result.
-func failedMutationResult(code commonpb.ErrorCode, reason string) *milvuspb.MutationResult {
+func failedMutationResult(err error) *milvuspb.MutationResult {
 	return &milvuspb.MutationResult{
-		Status: failedStatus(code, reason),
+		Status: merr.Status(err),
 	}
 }
 
-// failedBoolResponse returns failed boolean response.
-func failedBoolResponse(code commonpb.ErrorCode, reason string) *milvuspb.BoolResponse {
-	return &milvuspb.BoolResponse{
-		Status: failedStatus(code, reason),
-	}
-}
-
-func wrapQuotaError(rt internalpb.RateType, errCode commonpb.ErrorCode, fullMethod string) error {
-	if errCode == commonpb.ErrorCode_RateLimit {
-		return fmt.Errorf("request is rejected by grpc RateLimiter middleware, please retry later, req: %s", fullMethod)
+func wrapQuotaError(rt internalpb.RateType, err error, fullMethod string) error {
+	if errors.Is(err, merr.ErrServiceRateLimit) {
+		return errors.Wrapf(err, "request %s is rejected by grpc RateLimiter middleware, please retry later", fullMethod)
 	}
 
 	// deny to write/read
@@ -148,40 +134,41 @@ func wrapQuotaError(rt internalpb.RateType, errCode commonpb.ErrorCode, fullMeth
 	case internalpb.RateType_DQLSearch, internalpb.RateType_DQLQuery:
 		op = "read"
 	}
-	return fmt.Errorf("deny to %s, reason: %s, req: %s", op, GetQuotaErrorString(errCode), fullMethod)
+
+	return merr.WrapErrServiceForceDeny(op, err, fullMethod)
 }
 
 // getFailedResponse returns failed response.
-func getFailedResponse(req interface{}, rt internalpb.RateType, errCode commonpb.ErrorCode, fullMethod string) interface{} {
-	err := wrapQuotaError(rt, errCode, fullMethod)
+func getFailedResponse(req any, rt internalpb.RateType, err error, fullMethod string) any {
+	err = wrapQuotaError(rt, err, fullMethod)
 	switch req.(type) {
 	case *milvuspb.InsertRequest, *milvuspb.DeleteRequest, *milvuspb.UpsertRequest:
-		return failedMutationResult(errCode, err.Error())
+		return failedMutationResult(err)
 	case *milvuspb.ImportRequest:
 		return &milvuspb.ImportResponse{
-			Status: failedStatus(errCode, err.Error()),
+			Status: merr.Status(err),
 		}
 	case *milvuspb.SearchRequest:
 		return &milvuspb.SearchResults{
-			Status: failedStatus(errCode, err.Error()),
+			Status: merr.Status(err),
 		}
 	case *milvuspb.QueryRequest:
 		return &milvuspb.QueryResults{
-			Status: failedStatus(errCode, err.Error()),
+			Status: merr.Status(err),
 		}
 	case *milvuspb.CreateCollectionRequest, *milvuspb.DropCollectionRequest,
 		*milvuspb.LoadCollectionRequest, *milvuspb.ReleaseCollectionRequest,
 		*milvuspb.CreatePartitionRequest, *milvuspb.DropPartitionRequest,
 		*milvuspb.LoadPartitionsRequest, *milvuspb.ReleasePartitionsRequest,
 		*milvuspb.CreateIndexRequest, *milvuspb.DropIndexRequest:
-		return failedStatus(errCode, err.Error())
+		return merr.Status(err)
 	case *milvuspb.FlushRequest:
 		return &milvuspb.FlushResponse{
-			Status: failedStatus(errCode, err.Error()),
+			Status: merr.Status(err),
 		}
 	case *milvuspb.ManualCompactionRequest:
 		return &milvuspb.ManualCompactionResponse{
-			Status: failedStatus(errCode, err.Error()),
+			Status: merr.Status(err),
 		}
 	}
 	return nil
