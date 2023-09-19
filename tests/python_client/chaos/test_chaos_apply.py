@@ -80,10 +80,7 @@ class TestChaosApply:
         update_key_value(chaos_config, "value", target_number)
         update_key_value(chaos_config, "mode", target_scope)
         if target_component in ['logbookie', 'logproxy', 'logstore', 'logzk']:
-            if "log" in release_name:
-                update_key_value(chaos_config, "app.kubernetes.io/instance", f"{release_name}")
-            else:
-                update_key_value(chaos_config, "app.kubernetes.io/instance", f"{release_name}-log")
+            update_key_value(chaos_config, "app.kubernetes.io/instance", f"{release_name}-log")
         if target_component in ['tikv', 'pd']:
             if "tikv" in release_name:
                 update_key_value(chaos_config, "app.kubernetes.io/instance", f"{release_name}")
