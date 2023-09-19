@@ -501,6 +501,7 @@ type KafkaConfig struct {
 	SecurityProtocol    ParamItem  `refreshable:"false"`
 	ConsumerExtraConfig ParamGroup `refreshable:"false"`
 	ProducerExtraConfig ParamGroup `refreshable:"false"`
+	ReadTimeout         ParamItem  `refreshable:"true"`
 }
 
 func (k *KafkaConfig) Init(base *BaseTable) {
@@ -556,6 +557,14 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 		Version:   "2.2.0",
 	}
 	k.ProducerExtraConfig.Init(base.mgr)
+
+	k.ReadTimeout = ParamItem{
+		Key:          "kafka.readTimeout",
+		DefaultValue: "10",
+		Version:      "2.3.1",
+		Export:       true,
+	}
+	k.ReadTimeout.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
