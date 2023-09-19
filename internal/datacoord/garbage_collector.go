@@ -37,13 +37,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-const (
-	//TODO silverxia change to configuration
-	insertLogPrefix = `insert_log`
-	statsLogPrefix  = `stats_log`
-	deltaLogPrefix  = `delta_log`
-)
-
 // GcOption garbage collection options
 type GcOption struct {
 	cli              storage.ChunkManager // client
@@ -143,9 +136,9 @@ func (gc *garbageCollector) scan() {
 
 	// walk only data cluster related prefixes
 	prefixes := make([]string, 0, 3)
-	prefixes = append(prefixes, path.Join(gc.option.cli.RootPath(), insertLogPrefix))
-	prefixes = append(prefixes, path.Join(gc.option.cli.RootPath(), statsLogPrefix))
-	prefixes = append(prefixes, path.Join(gc.option.cli.RootPath(), deltaLogPrefix))
+	prefixes = append(prefixes, path.Join(gc.option.cli.RootPath(), common.SegmentInsertLogPath))
+	prefixes = append(prefixes, path.Join(gc.option.cli.RootPath(), common.SegmentStatslogPath))
+	prefixes = append(prefixes, path.Join(gc.option.cli.RootPath(), common.SegmentDeltaLogPath))
 	var removedKeys []string
 
 	for _, prefix := range prefixes {
@@ -175,7 +168,7 @@ func (gc *garbageCollector) scan() {
 				continue
 			}
 
-			if strings.Contains(prefix, statsLogPrefix) &&
+			if strings.Contains(prefix, common.SegmentInsertLogPath) &&
 				segmentMap.Contain(segmentID) {
 				valid++
 				continue

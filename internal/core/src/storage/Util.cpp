@@ -1,3 +1,4 @@
+
 // Licensed to the LF AI & Data foundation under one
 // or more contributor license agreements. See the NOTICE file
 // distributed with this work for additional information
@@ -21,6 +22,9 @@
 #include "common/EasyAssert.h"
 #include "common/Consts.h"
 #include "fmt/format.h"
+#ifdef AZURE_BUILD_DIR
+#include "storage/AzureChunkManager.h"
+#endif
 #include "storage/FieldData.h"
 #include "storage/InsertData.h"
 #include "storage/FieldDataInterface.h"
@@ -33,7 +37,23 @@
 namespace milvus::storage {
 
 std::map<std::string, ChunkManagerType> ChunkManagerType_Map = {
-    {"local", ChunkManagerType::Local}, {"minio", ChunkManagerType::Minio}};
+    {"local", ChunkManagerType::Local},
+    {"minio", ChunkManagerType::Minio},
+    {"remote", ChunkManagerType::Remote}};
+
+enum class CloudProviderType : int8_t {
+    UNKNOWN = 0,
+    AWS = 1,
+    GCP = 2,
+    ALIYUN = 3,
+    AZURE = 4,
+};
+
+std::map<std::string, CloudProviderType> CloudProviderType_Map = {
+    {"aws", CloudProviderType::AWS},
+    {"gcp", CloudProviderType::GCP},
+    {"aliyun", CloudProviderType::ALIYUN},
+    {"azure", CloudProviderType::AZURE}};
 
 StorageType
 ReadMediumType(BinlogReaderPtr reader) {
@@ -561,6 +581,30 @@ CreateChunkManager(const StorageConfig& storage_config) {
         case ChunkManagerType::Minio: {
             return std::make_shared<MinioChunkManager>(storage_config);
         }
+        case ChunkManagerType::Remote: {
+            auto cloud_provider_type =
+                CloudProviderType_Map[storage_config.cloud_provider];
+            switch (cloud_provider_type) {
+                case CloudProviderType::AWS: {
+                    return std::make_shared<AwsChunkManager>(storage_config);
+                }
+                case CloudProviderType::GCP: {
+                    return std::make_shared<GcpChunkManager>(storage_config);
+                }
+                case CloudProviderType::ALIYUN: {
+                    return std::make_shared<AliyunChunkManager>(storage_config);
+                }
+#ifdef AZURE_BUILD_DIR
+                case CloudProviderType::AZURE: {
+                    return std::make_shared<AzureChunkManager>(storage_config);
+                }
+#endif
+                default: {
+                    return std::make_shared<MinioChunkManager>(storage_config);
+                }
+            }
+        }
+
         default: {
             PanicCodeInfo(
                 ConfigInvalid,

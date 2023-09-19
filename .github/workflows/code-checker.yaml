@@ -53,7 +53,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: .docker/amd64-ubuntu20.04-go-mod
-          key: ubuntu20.04-go-mod-${{ hashFiles('**/go.sum') }}
+          key: ubuntu20.04-go-mod-${{ hashFiles('go.sum, */go.sum') }}
           restore-keys: ubuntu20.04-go-mod-
       - name: Cache Conan Packages
         uses: pat-s/always-upload-cache@v3
@@ -98,7 +98,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: .docker/amd64-amazonlinux2023-go-mod
-          key: amazonlinux2023-go-mod-${{ hashFiles('**/go.sum') }}
+          key: amazonlinux2023-go-mod-${{ hashFiles('go.sum, */go.sum') }}
           restore-keys: amazonlinux2023-go-mod-
       - name: Cache Conan Packages
         uses: pat-s/always-upload-cache@v3

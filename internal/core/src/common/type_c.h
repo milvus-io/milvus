@@ -78,6 +78,7 @@ typedef struct CStorageConfig {
     const char* access_key_value;
     const char* root_path;
     const char* storage_type;
+    const char* cloud_provider;
     const char* iam_endpoint;
     const char* log_level;
     const char* region;
