@@ -525,10 +525,9 @@ func validateSchema(coll *schemapb.CollectionSchema) error {
 				if err4 != nil {
 					return err4
 				}
-			} else {
-				// in C++, default type will be specified
-				// do nothing
 			}
+			// in C++, default type will be specified
+			// do nothing
 		} else {
 			if len(field.IndexParams) != 0 {
 				return fmt.Errorf("index params is not empty for scalar field: %s(%d)", field.Name, field.FieldID)

@@ -1771,6 +1771,7 @@ func (suite *ServiceSuite) TestSyncDistribution_Normal() {
 	req.Actions = []*querypb.SyncAction{syncVersionAction}
 	status, err = suite.node.SyncDistribution(ctx, req)
 	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
 }
 
 func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {

@@ -28,6 +28,7 @@ func TestExporterV2(t *testing.T) {
 	ts.assertMessagesContains("traceID=mock-trace")
 
 	ts.CleanBuffer()
+	// nolint
 	Ctx(nil).Info("empty context")
 	ts.assertMessagesNotContains("traceID")
 

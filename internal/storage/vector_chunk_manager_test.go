@@ -465,7 +465,7 @@ func TestVectorChunkManager_Read(t *testing.T) {
 
 			r, err = vcm.Mmap(ctx, "not exist")
 			assert.Error(t, err)
-			assert.Nil(t, nil)
+			assert.Nil(t, r)
 		}
 
 		content, err = vcm.ReadAt(ctx, "109", 9999, 8*4)

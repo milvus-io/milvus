@@ -321,7 +321,7 @@ func TestPrimaryField(t *testing.T) {
 }
 
 func TestInsertWithDynamicFields(t *testing.T) {
-	body := "{\"data\": {\"id\": 0, \"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2}}"
+	body := "{\"data\": {\"id\": 0, \"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"classified\": false, \"databaseID\": null}}"
 	req := InsertReq{}
 	coll := generateCollectionSchema(false)
 	err := checkAndSetData(body, &milvuspb.DescribeCollectionResponse{
@@ -336,7 +336,7 @@ func TestInsertWithDynamicFields(t *testing.T) {
 	assert.Equal(t, err, nil)
 	assert.Equal(t, fieldsData[len(fieldsData)-1].IsDynamic, true)
 	assert.Equal(t, fieldsData[len(fieldsData)-1].Type, schemapb.DataType_JSON)
-	assert.Equal(t, string(fieldsData[len(fieldsData)-1].GetScalars().GetJsonData().GetData()[0]), "{\"id\":0}")
+	assert.Equal(t, string(fieldsData[len(fieldsData)-1].GetScalars().GetJsonData().GetData()[0]), "{\"classified\":false,\"id\":0}")
 }
 
 func TestSerialize(t *testing.T) {

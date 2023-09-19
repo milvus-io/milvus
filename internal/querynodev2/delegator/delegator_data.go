@@ -575,7 +575,6 @@ func (sd *shardDelegator) readDeleteFromMsgstream(ctx context.Context, position 
 			// reach safe ts
 			if safeTs <= msgPack.EndPositions[0].GetTimestamp() {
 				hasMore = false
-				break
 			}
 		}
 	}

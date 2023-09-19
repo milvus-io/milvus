@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/milvus-io/milvus/pkg/util/parameterutil.go"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/util/merr"
 
@@ -274,20 +275,23 @@ func checkAndSetData(body string, collDescResp *milvuspb.DescribeCollectionRespo
 				for mapKey, mapValue := range data.Map() {
 					if !containsString(fieldNames, mapKey) {
 						mapValueStr := mapValue.String()
-						if mapValue.Type == gjson.True || mapValue.Type == gjson.False {
+						switch mapValue.Type {
+						case gjson.True, gjson.False:
 							reallyData[mapKey] = cast.ToBool(mapValueStr)
-						} else if mapValue.Type == gjson.String {
+						case gjson.String:
 							reallyData[mapKey] = mapValueStr
-						} else if mapValue.Type == gjson.Number {
+						case gjson.Number:
 							if strings.Contains(mapValue.Raw, ".") {
 								reallyData[mapKey] = cast.ToFloat64(mapValue.Raw)
 							} else {
 								reallyData[mapKey] = cast.ToInt64(mapValueStr)
 							}
-						} else if mapValue.Type == gjson.JSON {
+						case gjson.JSON:
 							reallyData[mapKey] = mapValue.Value()
-						} else {
-
+						case gjson.Null:
+							// skip null
+						default:
+							log.Warn("unknown json type found", zap.Int("mapValue.Type", int(mapValue.Type)))
 						}
 					}
 				}

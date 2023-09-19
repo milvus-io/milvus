@@ -372,10 +372,6 @@ func Test_AlterSegments(t *testing.T) {
 		opGroupCount := 0
 		metakv := mocks.NewMetaKv(t)
 		metakv.EXPECT().MultiSave(mock.Anything).RunAndReturn(func(m map[string]string) error {
-			var ks []string
-			for k := range m {
-				ks = append(ks, k)
-			}
 			maps.Copy(savedKvs, m)
 			opGroupCount++
 			return nil

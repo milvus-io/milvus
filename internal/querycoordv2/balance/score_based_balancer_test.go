@@ -397,10 +397,8 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceMultiRound() {
 	balancer := suite.balancer
 
 	//1. set up target for multi collections
-	collections := make([]*meta.Collection, 0, len(balanceCase.collectionIDs))
 	for i := range balanceCase.collectionIDs {
 		collection := utils.CreateTestCollection(balanceCase.collectionIDs[i], int32(balanceCase.replicaIDs[i]))
-		collections = append(collections, collection)
 		suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, balanceCase.collectionIDs[i]).Return(
 			nil, balanceCase.collectionsSegments[i], nil)
 

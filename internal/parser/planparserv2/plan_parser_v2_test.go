@@ -1794,7 +1794,7 @@ func Test_JSONContainsAny(t *testing.T) {
 	assert.False(t, plan.GetVectorAnns().GetPredicates().GetJsonContainsExpr().GetElementsSameType())
 
 	expr = `JSON_CONTAINS_ANY(A, 1)`
-	plan, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
 		Topk:         0,
 		MetricType:   "",
 		SearchParams: "",

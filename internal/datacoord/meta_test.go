@@ -351,6 +351,7 @@ func TestMeta_Basic(t *testing.T) {
 		catalog = datacoord.NewCatalog(metakv, "", "")
 		meta, err = newMeta(context.TODO(), catalog, nil)
 		assert.NoError(t, err)
+		assert.NotNil(t, meta)
 	})
 
 	t.Run("Test GetCount", func(t *testing.T) {
