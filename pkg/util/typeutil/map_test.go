@@ -127,6 +127,23 @@ func (suite *MapUtilSuite) TestConcurrentMap() {
 		suite.FailNow("empty map range")
 		return false
 	})
+
+	suite.Run("TestRemove", func() {
+		currMap := NewConcurrentMap[int64, string]()
+		suite.Equal(0, currMap.Len())
+
+		currMap.Remove(100)
+		suite.Equal(0, currMap.Len())
+
+		suite.Equal(currMap.Len(), 0)
+		v, loaded := currMap.GetOrInsert(100, "v-100")
+		suite.Equal("v-100", v)
+		suite.Equal(false, loaded)
+		suite.Equal(1, currMap.Len())
+
+		currMap.Remove(100)
+		suite.Equal(0, currMap.Len())
+	})
 }
 
 func TestMapUtil(t *testing.T) {
