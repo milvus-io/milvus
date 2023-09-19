@@ -56,7 +56,7 @@ type mqMsgStream struct {
 	closeRWMutex *sync.RWMutex
 	streamCancel func()
 	bufSize      int64
-	producerLock *sync.Mutex
+	producerLock *sync.RWMutex
 	consumerLock *sync.Mutex
 	closed       int32
 	onceChan     sync.Once
@@ -88,7 +88,7 @@ func NewMqMsgStream(ctx context.Context,
 		bufSize:      bufSize,
 		receiveBuf:   receiveBuf,
 		streamCancel: streamCancel,
-		producerLock: &sync.Mutex{},
+		producerLock: &sync.RWMutex{},
 		consumerLock: &sync.Mutex{},
 		closeRWMutex: &sync.RWMutex{},
 		closed:       0,
@@ -253,6 +253,7 @@ func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {
 	reBucketValues := ms.ComputeProduceChannelIndexes(msgPack.Msgs)
 	var result map[int32]*MsgPack
 	var err error
+	log.Info("zcccc before repackFunc")
 	if ms.repackFunc != nil {
 		result, err = ms.repackFunc(tsMsgs, reBucketValues)
 	} else {
@@ -269,32 +270,40 @@ func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {
 	if err != nil {
 		return err
 	}
+	log.Info("zcccc after repackFunc", zap.Int("result num", len(result)))
+
 	for k, v := range result {
 		channel := ms.producerChannels[k]
 		for i := 0; i < len(v.Msgs); i++ {
 			spanCtx, sp := MsgSpanFromCtx(v.Msgs[i].TraceCtx(), v.Msgs[i])
 			defer sp.End()
 
+			log.Info("zcccc before Marshal")
+
 			mb, err := v.Msgs[i].Marshal(v.Msgs[i])
 			if err != nil {
 				return err
 			}
+			log.Info("zcccc before convertToByteArray")
 
 			m, err := convertToByteArray(mb)
 			if err != nil {
 				return err
 			}
+			log.Info("zcccc before InjectCtx")
 
 			msg := &mqwrapper.ProducerMessage{Payload: m, Properties: map[string]string{}}
 			InjectCtx(spanCtx, msg.Properties)
+			log.Info("zcccc before Send")
 
-			ms.producerLock.Lock()
+			ms.producerLock.RLock()
 			if _, err := ms.producers[channel].Send(spanCtx, msg); err != nil {
-				ms.producerLock.Unlock()
+				ms.producerLock.RUnlock()
 				sp.RecordError(err)
 				return err
 			}
-			ms.producerLock.Unlock()
+			ms.producerLock.RUnlock()
+			log.Info("zcccc after Send")
 		}
 	}
 	return nil

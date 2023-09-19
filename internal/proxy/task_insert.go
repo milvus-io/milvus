@@ -263,6 +263,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 
 	log.Debug("assign segmentID for insert data success",
 		zap.Duration("assign segmentID duration", assignSegmentIDDur))
+	log.Info("zcccc before Produce")
 	err = stream.Produce(msgPack)
 	if err != nil {
 		log.Warn("fail to produce insert msg", zap.Error(err))
