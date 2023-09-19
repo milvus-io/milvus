@@ -8,8 +8,9 @@ import (
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
-	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 )
 
 func TestKafkaConsumer_Subscription(t *testing.T) {
@@ -185,6 +186,33 @@ func TestKafkaConsumer_ConsumeFromLatest(t *testing.T) {
 	assert.Equal(t, 444, BytesToInt(msg.Payload()))
 	msg = <-consumer.Chan()
 	assert.Equal(t, 555, BytesToInt(msg.Payload()))
+}
+
+func TestKafkaConsumer_Close(t *testing.T) {
+	rand.Seed(time.Now().UnixNano())
+	topic := fmt.Sprintf("test-topicName-%d", rand.Int())
+
+	data := []int{111, 222, 333}
+	testKafkaConsumerProduceData(t, topic, data)
+
+	t.Run("close after only get latest msgID", func(t *testing.T) {
+		groupID := fmt.Sprintf("test-groupid-%d", rand.Int())
+		config := createConfig(groupID)
+		consumer, err := newKafkaConsumer(config, topic, groupID, mqwrapper.SubscriptionPositionEarliest)
+		assert.NoError(t, err)
+		_, err = consumer.GetLatestMsgID()
+		assert.NoError(t, err)
+		consumer.Close()
+	})
+
+	t.Run("close after only Chan method is invoked", func(t *testing.T) {
+		groupID := fmt.Sprintf("test-groupid-%d", rand.Int())
+		config := createConfig(groupID)
+		consumer, err := newKafkaConsumer(config, topic, groupID, mqwrapper.SubscriptionPositionEarliest)
+		assert.NoError(t, err)
+		<-consumer.Chan()
+		consumer.Close()
+	})
 }
 
 func TestKafkaConsumer_ConsumeFromEarliest(t *testing.T) {

@@ -11,13 +11,13 @@ import (
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
 )
 
 var Params paramtable.BaseTable
@@ -33,6 +33,7 @@ func TestMain(m *testing.M) {
 
 	broker := mockCluster.BootstrapServers()
 	Params.Save("kafka.brokerList", broker)
+	log.Info("start testing kafka broker", zap.String("address", broker))
 
 	exitCode := m.Run()
 	os.Exit(exitCode)
@@ -50,6 +51,7 @@ func IntToBytes(n int) []byte {
 	binary.Write(bytesBuffer, common.Endian, tmp)
 	return bytesBuffer.Bytes()
 }
+
 func BytesToInt(b []byte) int {
 	bytesBuffer := bytes.NewBuffer(b)
 	var tmp int32
