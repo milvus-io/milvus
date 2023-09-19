@@ -4,7 +4,7 @@ metadata:
   name: test-tikv-pod-kill
   namespace: chaos-testing
 spec:
-  schedule: '*/60 * * * * *'
+  schedule: '*/90 * * * * *'
   startingDeadlineSeconds: 60
   concurrencyPolicy: Forbid
   historyLimit: 1

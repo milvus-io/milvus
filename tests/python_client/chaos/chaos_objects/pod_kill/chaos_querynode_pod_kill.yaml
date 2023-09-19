@@ -6,7 +6,7 @@ metadata:
   annotations:
     experiment.chaos-mesh.org/pause: 'false'
 spec:
-  schedule: '*/60 * * * * *'
+  schedule: '*/90 * * * * *'
   startingDeadlineSeconds: 60
   concurrencyPolicy: Forbid
   historyLimit: 1

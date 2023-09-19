@@ -15,7 +15,7 @@ spec:
       templateType: Schedule
       deadline: 3m
       schedule:
-        schedule: '*/60 * * * * *'
+        schedule: '*/90 * * * * *'
         startingDeadlineSeconds: 60
         concurrencyPolicy: Forbid
         historyLimit: 1
@@ -33,7 +33,7 @@ spec:
       templateType: Schedule
       deadline: 3m
       schedule:
-        schedule: '*/60 * * * * *'
+        schedule: '*/90 * * * * *'
         startingDeadlineSeconds: 60
         concurrencyPolicy: Forbid
         historyLimit: 1
