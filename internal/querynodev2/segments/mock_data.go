@@ -879,7 +879,11 @@ func SaveDeltaLog(collectionID int64,
 	kvs[keyPath] = blob.Value[:]
 	fieldBinlog = append(fieldBinlog, &datapb.FieldBinlog{
 		FieldID: pkFieldID,
-		Binlogs: []*datapb.Binlog{{LogPath: keyPath}},
+		Binlogs: []*datapb.Binlog{{
+			LogPath:       keyPath,
+			TimestampFrom: 100,
+			TimestampTo:   200,
+		}},
 	})
 	log.Debug("[query node unittest] save delta log file to MinIO/S3")
 

@@ -769,6 +769,11 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment *LocalSe
 	var blobs []*storage.Blob
 	for _, deltaLog := range deltaLogs {
 		for _, bLog := range deltaLog.GetBinlogs() {
+			// the segment has applied the delta logs, skip it
+			if bLog.GetTimestampTo() > 0 && // this field may be missed in legacy versions
+				bLog.GetTimestampTo() < segment.LastDeltaTimestamp() {
+				continue
+			}
 			value, err := loader.cm.Read(ctx, bLog.GetLogPath())
 			if err != nil {
 				return err
