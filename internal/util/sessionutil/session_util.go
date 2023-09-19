@@ -372,10 +372,10 @@ func (s *Session) initWatchSessionCh(ctx context.Context) error {
 
 	err = retry.Do(ctx, func() error {
 		getResp, err = s.etcdCli.Get(ctx, s.getSessionKey())
-		log.Warn("fail to get the session key from the etcd", zap.Error(err))
 		return err
 	}, retry.Attempts(uint(s.sessionRetryTimes)))
 	if err != nil {
+		log.Warn("fail to get the session key from the etcd", zap.Error(err))
 		return err
 	}
 	s.watchSessionKeyCh = s.etcdCli.Watch(ctx, s.getSessionKey(), clientv3.WithRev(getResp.Header.Revision))
@@ -785,18 +785,31 @@ func (w *sessionWatcher) handleWatchErr(err error) error {
 // LivenessCheck performs liveness check with provided context and channel
 // ctx controls the liveness check loop
 // ch is the liveness signal channel, ch is closed only when the session is expired
-// callback is the function to call when ch is closed, note that callback will not be invoked when loop exits due to context
+// callback must be called before liveness check exit, to close the session's owner component
 func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
 	err := s.initWatchSessionCh(ctx)
 	if err != nil {
 		log.Error("failed to get session for liveness check", zap.Error(err))
 		s.cancelKeepAlive()
+		if callback != nil {
+			go callback()
+		}
+		return
 	}
+
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+		if callback != nil {
+			// before exit liveness check, callback to exit the session owner
+			defer func() {
+				if ctx.Err() == nil {
+					go callback()
+				}
+			}()
+		}
+		defer s.SetDisconnected(true)
 		for {
-			defer s.SetDisconnected(true)
 			select {
 			case _, ok := <-s.liveCh:
 				// ok, still alive
@@ -805,9 +818,6 @@ func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
 				}
 				// not ok, connection lost
 				log.Warn("connection lost detected, shuting down")
-				if callback != nil {
-					go callback()
-				}
 				return
 			case <-ctx.Done():
 				log.Warn("liveness exits due to context done")
