@@ -6,9 +6,10 @@ import (
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
-	"go.uber.org/zap"
 )
 
 type Consumer struct {
@@ -123,16 +124,6 @@ func (kc *Consumer) Chan() <-chan mqwrapper.Message {
 			for {
 				select {
 				case <-kc.closeCh:
-					log.Info("close consumer ", zap.String("topic", kc.topic), zap.String("groupID", kc.groupID))
-					start := time.Now()
-					err := kc.c.Close()
-					if err != nil {
-						log.Warn("failed to close ", zap.String("topic", kc.topic), zap.Error(err))
-					}
-					cost := time.Since(start).Milliseconds()
-					if cost > 200 {
-						log.Warn("close consumer costs too long time", zap.Any("topic", kc.topic), zap.String("groupID", kc.groupID), zap.Int64("time(ms)", cost))
-					}
 					if kc.msgChannel != nil {
 						close(kc.msgChannel)
 					}
@@ -226,9 +217,25 @@ func (kc *Consumer) GetLatestMsgID() (mqwrapper.MessageID, error) {
 	return &kafkaID{messageID: high}, nil
 }
 
+func (kc *Consumer) closeInternal() {
+	log.Info("close consumer ", zap.String("topic", kc.topic), zap.String("groupID", kc.groupID))
+	start := time.Now()
+	err := kc.c.Close()
+	if err != nil {
+		log.Warn("failed to close ", zap.String("topic", kc.topic), zap.Error(err))
+	}
+	cost := time.Since(start).Milliseconds()
+	if cost > 200 {
+		log.Warn("close consumer costs too long time", zap.Any("topic", kc.topic), zap.String("groupID", kc.groupID), zap.Int64("time(ms)", cost))
+	}
+}
+
 func (kc *Consumer) Close() {
 	kc.closeOnce.Do(func() {
 		close(kc.closeCh)
-		kc.wg.Wait() // wait work goroutine exit, wait worker close the client
+		// wait work goroutine exit
+		kc.wg.Wait()
+		// close the client
+		kc.closeInternal()
 	})
 }
