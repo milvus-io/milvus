@@ -668,26 +668,20 @@ func TestIndexBuilder(t *testing.T) {
 
 	ib := newIndexBuilder(ctx, mt, nodeManager, chunkManager, newIndexEngineVersionManager())
 
-	assert.Equal(t, 6, len(ib.tasks))
-	assert.Equal(t, indexTaskInit, ib.tasks[buildID])
-	assert.Equal(t, indexTaskInProgress, ib.tasks[buildID+1])
-	// buildID+2 will be filter by isDeleted
-	assert.Equal(t, indexTaskInit, ib.tasks[buildID+3])
-	assert.Equal(t, indexTaskInProgress, ib.tasks[buildID+8])
-	assert.Equal(t, indexTaskInit, ib.tasks[buildID+9])
-	assert.Equal(t, indexTaskInit, ib.tasks[buildID+10])
+	assert.Equal(t, 4, ib.tasksScheduler.TaskCount())
+	assert.Equal(t, 2, ib.runningTasksQueue.taskCount())
 
 	ib.scheduleDuration = time.Millisecond * 500
 	ib.Start()
 
 	t.Run("enqueue", func(t *testing.T) {
 		segIdx := &model.SegmentIndex{
-			SegmentID:     segID + 10,
+			SegmentID:     segID + 11,
 			CollectionID:  collID,
 			PartitionID:   partID,
 			NumRows:       1026,
 			IndexID:       indexID,
-			BuildID:       buildID + 10,
+			BuildID:       buildID + 11,
 			NodeID:        0,
 			IndexVersion:  0,
 			IndexState:    0,
@@ -699,7 +693,7 @@ func TestIndexBuilder(t *testing.T) {
 		}
 		err := ib.meta.AddSegmentIndex(segIdx)
 		assert.NoError(t, err)
-		ib.enqueue(buildID + 10)
+		ib.enqueue(collID, buildID+11)
 	})
 
 	t.Run("node down", func(t *testing.T) {
@@ -707,11 +701,9 @@ func TestIndexBuilder(t *testing.T) {
 	})
 
 	for {
-		ib.taskMutex.RLock()
-		if len(ib.tasks) == 0 {
+		if ib.tasksScheduler.TaskCount() == 0 && ib.runningTasksQueue.taskCount() == 0 {
 			break
 		}
-		ib.taskMutex.RUnlock()
 	}
 	ib.Stop()
 }
@@ -733,40 +725,43 @@ func TestIndexBuilder_Error(t *testing.T) {
 	chunkManager := &mocks.ChunkManager{}
 	chunkManager.EXPECT().RootPath().Return("root")
 	ib := &indexBuilder{
-		ctx: context.Background(),
-		tasks: map[int64]indexTaskState{
-			buildID: indexTaskInit,
-		},
+		ctx:                       context.Background(),
 		meta:                      createMetaTable(ec),
 		chunkManager:              chunkManager,
+		tasksScheduler:            newFairQueuePolicy(),
+		runningTasksQueue:         newRunningTasksQueue(),
 		indexEngineVersionManager: newIndexEngineVersionManager(),
 	}
 
 	t.Run("meta not exist", func(t *testing.T) {
-		ib.tasks[buildID+100] = indexTaskInit
-		ib.process(buildID + 100)
-
-		_, ok := ib.tasks[buildID+100]
-		assert.False(t, ok)
+		ib.enqueue(collID, buildID+100)
+		ok := ib.scheduleTask()
+		assert.True(t, ok)
+		assert.Equal(t, 0, ib.tasksScheduler.TaskCount())
 	})
 
 	t.Run("finish few rows task fail", func(t *testing.T) {
-		ib.tasks[buildID+9] = indexTaskInit
-		ib.process(buildID + 9)
-
-		state, ok := ib.tasks[buildID+9]
-		assert.True(t, ok)
-		assert.Equal(t, indexTaskInit, state)
+		ib.enqueue(collID, buildID+9)
+		ok := ib.scheduleTask()
+		assert.False(t, ok)
+		assert.Equal(t, 1, ib.tasksScheduler.TaskCount())
+		ib.tasksScheduler.Pop()
 	})
 
 	t.Run("peek client fail", func(t *testing.T) {
-		ib.tasks[buildID] = indexTaskInit
+		ib.enqueue(collID, buildID)
 		ib.nodeManager = &IndexNodeManager{nodeClients: map[UniqueID]types.IndexNodeClient{}}
-		ib.process(buildID)
+		ok := ib.scheduleTask()
+		assert.False(t, ok)
+		assert.Equal(t, 1, ib.tasksScheduler.TaskCount())
+		ib.tasksScheduler.Pop()
+	})
 
-		state, ok := ib.tasks[buildID]
-		assert.True(t, ok)
-		assert.Equal(t, indexTaskInit, state)
+	t.Run("enqueue exist task", func(t *testing.T) {
+		ib.enqueue(collID, buildID)
+		ib.enqueue(collID, buildID)
+		assert.Equal(t, 1, ib.tasksScheduler.TaskCount())
+		ib.tasksScheduler.Pop()
 	})
 
 	t.Run("update version fail", func(t *testing.T) {
@@ -774,38 +769,35 @@ func TestIndexBuilder_Error(t *testing.T) {
 			ctx:         context.Background(),
 			nodeClients: map[UniqueID]types.IndexNodeClient{1: &mclient.GrpcIndexNodeClient{Err: nil}},
 		}
-		ib.process(buildID)
-
-		state, ok := ib.tasks[buildID]
-		assert.True(t, ok)
-		assert.Equal(t, indexTaskInit, state)
+		ib.enqueue(collID, buildID)
+		ok := ib.scheduleTask()
+		assert.False(t, ok)
+		assert.Equal(t, 1, ib.tasksScheduler.TaskCount())
+		ib.tasksScheduler.Pop()
 	})
 
 	t.Run("no need to build index but update catalog failed", func(t *testing.T) {
 		ib.meta.catalog = ec
 		ib.meta.indexes[collID][indexID].IsDeleted = true
-		ib.tasks[buildID] = indexTaskInit
-		ok := ib.process(buildID)
+		ib.enqueue(collID, buildID)
+		ok := ib.scheduleTask()
 		assert.False(t, ok)
-
-		_, ok = ib.tasks[buildID]
-		assert.True(t, ok)
+		assert.Equal(t, 1, ib.tasksScheduler.TaskCount())
+		ib.tasksScheduler.Pop()
 	})
 
 	t.Run("init no need to build index", func(t *testing.T) {
 		ib.meta.catalog = sc
 		ib.meta.indexes[collID][indexID].IsDeleted = true
-		ib.tasks[buildID] = indexTaskInit
-		ib.process(buildID)
-
-		_, ok := ib.tasks[buildID]
-		assert.False(t, ok)
+		ib.enqueue(collID, buildID)
+		ok := ib.scheduleTask()
+		assert.True(t, ok)
+		assert.Equal(t, 0, ib.tasksScheduler.TaskCount())
 		ib.meta.indexes[collID][indexID].IsDeleted = false
 	})
 
 	t.Run("assign task error", func(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.StorageType.Key, "local")
-		ib.tasks[buildID] = indexTaskInit
 		ib.meta.catalog = sc
 
 		ic := mocks.NewMockIndexNodeClient(t)
@@ -821,11 +813,13 @@ func TestIndexBuilder_Error(t *testing.T) {
 				1: ic,
 			},
 		}
-		ib.process(buildID)
-
-		state, ok := ib.tasks[buildID]
-		assert.True(t, ok)
-		assert.Equal(t, indexTaskRetry, state)
+		ib.enqueue(collID, buildID)
+		ok := ib.scheduleTask()
+		assert.False(t, ok)
+		assert.Equal(t, 0, ib.tasksScheduler.TaskCount())
+		// ib.tasksScheduler.Pop()
+		assert.Equal(t, 1, ib.runningTasksQueue.taskCount())
+		ib.runningTasksQueue.pop(collID, buildID)
 	})
 	t.Run("assign task fail", func(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.StorageType.Key, "local")
@@ -846,12 +840,12 @@ func TestIndexBuilder_Error(t *testing.T) {
 				1: ic,
 			},
 		}
-		ib.tasks[buildID] = indexTaskInit
-		ib.process(buildID)
-
-		state, ok := ib.tasks[buildID]
-		assert.True(t, ok)
-		assert.Equal(t, indexTaskRetry, state)
+		ib.enqueue(collID, buildID)
+		ok := ib.scheduleTask()
+		assert.False(t, ok)
+		assert.Equal(t, 0, ib.tasksScheduler.TaskCount())
+		assert.Equal(t, 1, ib.runningTasksQueue.taskCount())
+		ib.runningTasksQueue.pop(collID, buildID)
 	})
 
 	t.Run("drop job error", func(t *testing.T) {
@@ -868,19 +862,8 @@ func TestIndexBuilder_Error(t *testing.T) {
 				nodeID: ic,
 			},
 		}
-		ib.tasks[buildID] = indexTaskDone
-		ib.process(buildID)
-
-		state, ok := ib.tasks[buildID]
-		assert.True(t, ok)
-		assert.Equal(t, indexTaskDone, state)
-
-		ib.tasks[buildID] = indexTaskRetry
-		ib.process(buildID)
-
-		state, ok = ib.tasks[buildID]
-		assert.True(t, ok)
-		assert.Equal(t, indexTaskRetry, state)
+		task := &indexBuildTask{collectionID: collID, buildID: buildID, state: indexTaskDone}
+		ib.checkProcessingTask(task)
 	})
 
 	t.Run("drop job fail", func(t *testing.T) {
@@ -898,19 +881,8 @@ func TestIndexBuilder_Error(t *testing.T) {
 				nodeID: ic,
 			},
 		}
-		ib.tasks[buildID] = indexTaskDone
-		ib.process(buildID)
-
-		state, ok := ib.tasks[buildID]
-		assert.True(t, ok)
-		assert.Equal(t, indexTaskDone, state)
-
-		ib.tasks[buildID] = indexTaskRetry
-		ib.process(buildID)
-
-		state, ok = ib.tasks[buildID]
-		assert.True(t, ok)
-		assert.Equal(t, indexTaskRetry, state)
+		task := &indexBuildTask{collectionID: collID, buildID: buildID, state: indexTaskDone}
+		ib.checkProcessingTask(task)
 	})
 
 	t.Run("get state error", func(t *testing.T) {
@@ -925,12 +897,8 @@ func TestIndexBuilder_Error(t *testing.T) {
 			},
 		}
 
-		ib.tasks[buildID] = indexTaskInProgress
-		ib.process(buildID)
-
-		state, ok := ib.tasks[buildID]
-		assert.True(t, ok)
-		assert.Equal(t, indexTaskInProgress, state)
+		task := &indexBuildTask{collectionID: collID, buildID: buildID, state: indexTaskInProgress}
+		ib.checkProcessingTask(task)
 	})
 
 	t.Run("get state fail", func(t *testing.T) {
@@ -950,12 +918,8 @@ func TestIndexBuilder_Error(t *testing.T) {
 			},
 		}
 
-		ib.tasks[buildID] = indexTaskInProgress
-		ib.process(buildID)
-
-		state, ok := ib.tasks[buildID]
-		assert.True(t, ok)
-		assert.Equal(t, indexTaskInProgress, state)
+		task := &indexBuildTask{collectionID: collID, buildID: buildID, state: indexTaskInProgress}
+		ib.checkProcessingTask(task)
 	})
 
 	t.Run("finish task fail", func(t *testing.T) {
@@ -982,12 +946,8 @@ func TestIndexBuilder_Error(t *testing.T) {
 			},
 		}
 
-		ib.tasks[buildID] = indexTaskInProgress
-		ib.process(buildID)
-
-		state, ok := ib.tasks[buildID]
-		assert.True(t, ok)
-		assert.Equal(t, indexTaskInProgress, state)
+		task := &indexBuildTask{collectionID: collID, buildID: buildID, state: indexTaskInProgress}
+		ib.checkProcessingTask(task)
 	})
 
 	t.Run("task still in progress", func(t *testing.T) {
@@ -1014,12 +974,8 @@ func TestIndexBuilder_Error(t *testing.T) {
 			},
 		}
 
-		ib.tasks[buildID] = indexTaskInProgress
-		ib.process(buildID)
-
-		state, ok := ib.tasks[buildID]
-		assert.True(t, ok)
-		assert.Equal(t, indexTaskInProgress, state)
+		task := &indexBuildTask{collectionID: collID, buildID: buildID, state: indexTaskInProgress}
+		ib.checkProcessingTask(task)
 	})
 
 	t.Run("indexNode has no task", func(t *testing.T) {
@@ -1037,12 +993,8 @@ func TestIndexBuilder_Error(t *testing.T) {
 			},
 		}
 
-		ib.tasks[buildID] = indexTaskInProgress
-		ib.process(buildID)
-
-		state, ok := ib.tasks[buildID]
-		assert.True(t, ok)
-		assert.Equal(t, indexTaskRetry, state)
+		task := &indexBuildTask{collectionID: collID, buildID: buildID, state: indexTaskInProgress}
+		ib.checkProcessingTask(task)
 	})
 
 	t.Run("node not exist", func(t *testing.T) {
@@ -1053,11 +1005,11 @@ func TestIndexBuilder_Error(t *testing.T) {
 			nodeClients: map[UniqueID]types.IndexNodeClient{},
 		}
 
-		ib.tasks[buildID] = indexTaskInProgress
-		ib.process(buildID)
+		task := &indexBuildTask{collectionID: collID, buildID: buildID, state: indexTaskInProgress}
+		ib.checkProcessingTask(task)
+	})
 
-		state, ok := ib.tasks[buildID]
-		assert.True(t, ok)
-		assert.Equal(t, indexTaskRetry, state)
+	t.Run("nil task", func(t *testing.T) {
+		ib.checkProcessingTask(nil)
 	})
 }

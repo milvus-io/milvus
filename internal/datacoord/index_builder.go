@@ -68,14 +68,14 @@ type indexBuilder struct {
 	cancel context.CancelFunc
 
 	wg               sync.WaitGroup
-	taskMutex        sync.RWMutex
 	scheduleDuration time.Duration
 
-	// TODO @xiaocai2333: use priority queue
-	tasks      map[int64]indexTaskState
 	notifyChan chan struct{}
 
 	meta *meta
+
+	tasksScheduler    schedulePolicy
+	runningTasksQueue *runningTasksQueue
 
 	policy                    buildIndexPolicy
 	nodeManager               *IndexNodeManager
@@ -83,9 +83,16 @@ type indexBuilder struct {
 	indexEngineVersionManager *IndexEngineVersionManager
 }
 
-func newIndexBuilder(
-	ctx context.Context,
-	metaTable *meta, nodeManager *IndexNodeManager,
+type indexBuildTask struct {
+	collectionID UniqueID
+	buildID      UniqueID
+	state        indexTaskState
+	failReason   string
+}
+
+func newIndexBuilder(ctx context.Context,
+	metaTable *meta,
+	nodeManager *IndexNodeManager,
 	chunkManager storage.ChunkManager,
 	indexEngineVersionManager *IndexEngineVersionManager,
 ) *indexBuilder {
@@ -95,12 +102,13 @@ func newIndexBuilder(
 		ctx:                       ctx,
 		cancel:                    cancel,
 		meta:                      metaTable,
-		tasks:                     make(map[int64]indexTaskState),
 		notifyChan:                make(chan struct{}, 1),
 		scheduleDuration:          Params.DataCoordCfg.IndexTaskSchedulerInterval.GetAsDuration(time.Millisecond),
 		policy:                    defaultBuildIndexPolicy,
 		nodeManager:               nodeManager,
 		chunkManager:              chunkManager,
+		tasksScheduler:            newFairQueuePolicy(),
+		runningTasksQueue:         newRunningTasksQueue(),
 		indexEngineVersionManager: indexEngineVersionManager,
 	}
 	ib.reloadFromKV()
@@ -109,12 +117,19 @@ func newIndexBuilder(
 
 func (ib *indexBuilder) Start() {
 	ib.wg.Add(1)
-	go ib.schedule()
+	go ib.schedulerLoop()
 }
 
 func (ib *indexBuilder) Stop() {
 	ib.cancel()
 	ib.wg.Wait()
+}
+
+func (ib *indexBuilder) notify() {
+	select {
+	case ib.notifyChan <- struct{}{}:
+	default:
+	}
 }
 
 func (ib *indexBuilder) reloadFromKV() {
@@ -125,50 +140,61 @@ func (ib *indexBuilder) reloadFromKV() {
 				continue
 			}
 			if segIndex.IndexState == commonpb.IndexState_Unissued {
-				ib.tasks[segIndex.BuildID] = indexTaskInit
+				ib.tasksScheduler.Push(&indexBuildTask{
+					collectionID: segment.GetCollectionID(),
+					buildID:      segIndex.BuildID,
+					state:        indexTaskInit,
+					failReason:   "",
+				})
 			} else if segIndex.IndexState == commonpb.IndexState_InProgress {
-				ib.tasks[segIndex.BuildID] = indexTaskInProgress
+				ib.runningTasksQueue.push(&indexBuildTask{
+					collectionID: segment.GetCollectionID(),
+					buildID:      segIndex.BuildID,
+					state:        indexTaskInProgress,
+					failReason:   "",
+				})
 			}
 		}
 	}
 }
 
-// notify is an unblocked notify function
-func (ib *indexBuilder) notify() {
-	select {
-	case ib.notifyChan <- struct{}{}:
-	default:
-	}
-}
-
-func (ib *indexBuilder) enqueue(buildID UniqueID) {
+func (ib *indexBuilder) enqueue(collectionID, buildID UniqueID) {
 	defer ib.notify()
 
-	ib.taskMutex.Lock()
-	defer ib.taskMutex.Unlock()
-	if _, ok := ib.tasks[buildID]; !ok {
-		ib.tasks[buildID] = indexTaskInit
+	task := &indexBuildTask{
+		collectionID: collectionID,
+		buildID:      buildID,
+		state:        indexTaskInit,
+		failReason:   "",
 	}
-	log.Info("indexBuilder enqueue task", zap.Int64("buildID", buildID))
+	if ib.tasksScheduler.Exist(task) {
+		log.Warn("index task already exist, check it", zap.Int64("collectionID", collectionID),
+			zap.Int64("buildID", buildID))
+		return
+	}
+	ib.tasksScheduler.Push(task)
+	log.Info("task enqueue success", zap.Int64("collectionID", collectionID),
+		zap.Int64("buildID", buildID))
 }
 
-func (ib *indexBuilder) schedule() {
-	// receive notifyChan
+func (ib *indexBuilder) schedulerLoop() {
+	// receive notify
 	// time ticker
-	log.Ctx(ib.ctx).Info("index builder schedule loop start")
+	log.Info("index builder schedule loop start")
 	defer ib.wg.Done()
 	ticker := time.NewTicker(ib.scheduleDuration)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ib.ctx.Done():
-			log.Ctx(ib.ctx).Warn("index builder ctx done")
+			log.Warn("index builder ctx done")
 			return
 		case _, ok := <-ib.notifyChan:
-			if ok {
-				ib.run()
+			if !ok {
+				return
 			}
-			// !ok means indexBuild is closed.
+			ib.run()
+		// !ok means indexBuilder is closed.
 		case <-ticker.C:
 			ib.run()
 		}
@@ -176,176 +202,224 @@ func (ib *indexBuilder) schedule() {
 }
 
 func (ib *indexBuilder) run() {
-	ib.taskMutex.RLock()
-	buildIDs := make([]UniqueID, 0, len(ib.tasks))
-	for tID := range ib.tasks {
-		buildIDs = append(buildIDs, tID)
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+
+		if ib.tasksScheduler.TaskCount() > 0 {
+			log.Info("schedule index tasks", zap.Int("collection num", ib.tasksScheduler.NumRequesters()),
+				zap.Int("task num", ib.tasksScheduler.TaskCount()))
+			for {
+				if ok := ib.scheduleTask(); !ok {
+					break
+				}
+			}
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		if ib.runningTasksQueue.taskCount() > 0 {
+			log.Info("schedule running index tasks", zap.Int("task num", ib.runningTasksQueue.taskCount()))
+			tasks := ib.runningTasksQueue.getAllTasks()
+			for _, task := range tasks {
+				ib.checkProcessingTask(task)
+			}
+		}
+	}()
+	wg.Wait()
+}
+
+func (ib *indexBuilder) scheduleTask() bool {
+	t := ib.tasksScheduler.Pop()
+	if t == nil {
+		return false
 	}
-	ib.taskMutex.RUnlock()
-	if len(buildIDs) > 0 {
-		log.Ctx(ib.ctx).Info("index builder task schedule", zap.Int("task num", len(buildIDs)))
+	log.Info("index task will be assigned", zap.Int64("collectionID", t.collectionID),
+		zap.Int64("buildID", t.buildID))
+	meta, exist := ib.meta.GetIndexJob(t.buildID)
+	if !exist {
+		log.Ctx(ib.ctx).Debug("index task has not exist in meta table, remove task", zap.Int64("buildID", t.buildID))
+		return true
+	}
+	segment := ib.meta.GetSegment(meta.SegmentID)
+	if !isSegmentHealthy(segment) || !ib.meta.IsIndexExist(meta.CollectionID, meta.IndexID) {
+		log.Ctx(ib.ctx).Info("task is no need to build index, remove it", zap.Int64("buildID", t.buildID))
+		if err := ib.meta.DeleteTask(t.buildID); err != nil {
+			log.Ctx(ib.ctx).Warn("IndexCoord delete index task fail, reEnqueue it", zap.Int64("buildID", t.buildID), zap.Error(err))
+			ib.enqueue(t.collectionID, t.buildID)
+			return false
+		}
+		return true
+	}
+	indexParams := ib.meta.GetIndexParams(meta.CollectionID, meta.IndexID)
+	if isFlatIndex(getIndexType(indexParams)) || meta.NumRows < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64() {
+		log.Ctx(ib.ctx).Debug("segment does not need index really", zap.Int64("buildID", t.buildID),
+			zap.Int64("segmentID", meta.SegmentID), zap.Int64("num rows", meta.NumRows))
+		if err := ib.meta.FinishTask(&indexpb.IndexTaskInfo{
+			BuildID:        t.buildID,
+			State:          commonpb.IndexState_Finished,
+			IndexFileKeys:  nil,
+			SerializedSize: 0,
+			FailReason:     "",
+		}); err != nil {
+			log.Ctx(ib.ctx).Warn("IndexCoord update index state fail, reEnqueue it", zap.Int64("buildID", t.buildID), zap.Error(err))
+			ib.enqueue(t.collectionID, t.buildID)
+			return false
+		}
+		return true
+	}
+	// peek client
+	// if all IndexNodes are executing task, wait for one of them to finish the task.
+	nodeID, client := ib.nodeManager.PeekClient()
+	if client == nil {
+		log.Ctx(ib.ctx).WithRateGroup("dc.indexBuilder", 1, 60).RatedInfo(5, "index builder peek client error, there is no available. reEnqueue it")
+		ib.enqueue(t.collectionID, t.buildID)
+		return false
+	}
+	// update version and set nodeID
+	if err := ib.meta.UpdateVersion(t.buildID, nodeID); err != nil {
+		log.Ctx(ib.ctx).Warn("index builder update index version fail, reEnqueue it", zap.Int64("build", t.buildID), zap.Error(err))
+		ib.enqueue(t.collectionID, t.buildID)
+		return false
 	}
 
-	ib.policy(buildIDs)
-
-	for _, buildID := range buildIDs {
-		ok := ib.process(buildID)
-		if !ok {
-			log.Ctx(ib.ctx).Info("there is no IndexNode available or etcd is not serviceable, wait a minute...")
+	binLogs := make([]string, 0)
+	fieldID := ib.meta.GetFieldIDByIndexID(meta.CollectionID, meta.IndexID)
+	for _, fieldBinLog := range segment.GetBinlogs() {
+		if fieldBinLog.GetFieldID() == fieldID {
+			for _, binLog := range fieldBinLog.GetBinlogs() {
+				binLogs = append(binLogs, binLog.LogPath)
+			}
 			break
 		}
 	}
+
+	typeParams := ib.meta.GetTypeParams(meta.CollectionID, meta.IndexID)
+
+	var storageConfig *indexpb.StorageConfig
+	if Params.CommonCfg.StorageType.GetValue() == "local" {
+		storageConfig = &indexpb.StorageConfig{
+			RootPath:    Params.LocalStorageCfg.Path.GetValue(),
+			StorageType: Params.CommonCfg.StorageType.GetValue(),
+		}
+	} else {
+		storageConfig = &indexpb.StorageConfig{
+			Address:          Params.MinioCfg.Address.GetValue(),
+			AccessKeyID:      Params.MinioCfg.AccessKeyID.GetValue(),
+			SecretAccessKey:  Params.MinioCfg.SecretAccessKey.GetValue(),
+			UseSSL:           Params.MinioCfg.UseSSL.GetAsBool(),
+			BucketName:       Params.MinioCfg.BucketName.GetValue(),
+			RootPath:         Params.MinioCfg.RootPath.GetValue(),
+			UseIAM:           Params.MinioCfg.UseIAM.GetAsBool(),
+			IAMEndpoint:      Params.MinioCfg.IAMEndpoint.GetValue(),
+			StorageType:      Params.CommonCfg.StorageType.GetValue(),
+			Region:           Params.MinioCfg.Region.GetValue(),
+			UseVirtualHost:   Params.MinioCfg.UseVirtualHost.GetAsBool(),
+			CloudProvider:    Params.MinioCfg.CloudProvider.GetValue(),
+			RequestTimeoutMs: Params.MinioCfg.RequestTimeoutMs.GetAsInt64(),
+		}
+	}
+	req := &indexpb.CreateJobRequest{
+		ClusterID:           Params.CommonCfg.ClusterPrefix.GetValue(),
+		IndexFilePrefix:     path.Join(ib.chunkManager.RootPath(), common.SegmentIndexPath),
+		BuildID:             t.buildID,
+		DataPaths:           binLogs,
+		IndexVersion:        meta.IndexVersion + 1,
+		StorageConfig:       storageConfig,
+		IndexParams:         indexParams,
+		TypeParams:          typeParams,
+		NumRows:             meta.NumRows,
+		CurrentIndexVersion: ib.indexEngineVersionManager.GetCurrentIndexEngineVersion(),
+	}
+	if err := ib.assignTask(client, req); err != nil {
+		// need to release lock then reassign, so set task state to retry
+		log.Ctx(ib.ctx).Warn("index builder assign task to IndexNode failed", zap.Int64("buildID", t.buildID),
+			zap.Int64("nodeID", nodeID), zap.Error(err))
+		ib.runningTasksQueue.push(&indexBuildTask{
+			collectionID: t.collectionID,
+			buildID:      t.buildID,
+			state:        indexTaskRetry,
+			failReason:   err.Error(),
+		})
+		return false
+	}
+	log.Ctx(ib.ctx).Info("index task assigned successfully", zap.Int64("buildID", t.buildID),
+		zap.Int64("segmentID", meta.SegmentID), zap.Int64("nodeID", nodeID))
+	// update index meta state to InProgress
+	if err := ib.meta.BuildIndex(t.buildID); err != nil {
+		// need to release lock then reassign, so set task state to retry
+		log.Ctx(ib.ctx).Warn("index builder update index meta to InProgress failed", zap.Int64("buildID", t.buildID),
+			zap.Int64("nodeID", nodeID), zap.Error(err))
+		ib.runningTasksQueue.push(&indexBuildTask{
+			collectionID: t.collectionID,
+			buildID:      t.buildID,
+			state:        indexTaskRetry,
+			failReason:   err.Error(),
+		})
+		return false
+	}
+	ib.runningTasksQueue.push(&indexBuildTask{
+		collectionID: t.collectionID,
+		buildID:      t.buildID,
+		state:        indexTaskInProgress,
+		failReason:   "",
+	})
+	return true
 }
 
-func (ib *indexBuilder) process(buildID UniqueID) bool {
-	ib.taskMutex.RLock()
-	state := ib.tasks[buildID]
-	ib.taskMutex.RUnlock()
-
-	updateStateFunc := func(buildID UniqueID, state indexTaskState) {
-		ib.taskMutex.Lock()
-		defer ib.taskMutex.Unlock()
-		ib.tasks[buildID] = state
+func (ib *indexBuilder) checkProcessingTask(t *indexBuildTask) {
+	if t == nil {
+		log.Ctx(ib.ctx).Warn("get invalid index task")
+		return
 	}
-
-	deleteFunc := func(buildID UniqueID) {
-		ib.taskMutex.Lock()
-		defer ib.taskMutex.Unlock()
-		delete(ib.tasks, buildID)
-	}
-
-	meta, exist := ib.meta.GetIndexJob(buildID)
+	meta, exist := ib.meta.GetIndexJob(t.buildID)
 	if !exist {
-		log.Ctx(ib.ctx).Debug("index task has not exist in meta table, remove task", zap.Int64("buildID", buildID))
-		deleteFunc(buildID)
-		return true
+		log.Ctx(ib.ctx).Info("index task has not exist in meta table, remove task", zap.Int64("buildID", t.buildID))
+		ib.runningTasksQueue.pop(t.collectionID, t.buildID)
+		return
 	}
+	log.Ctx(ib.ctx).Info("check processing index task", zap.Int64("ClusterID", t.collectionID),
+		zap.Int64("buildID", t.buildID), zap.String("task state", t.state.String()))
 
-	switch state {
-	case indexTaskInit:
-		segment := ib.meta.GetSegment(meta.SegmentID)
-		if !isSegmentHealthy(segment) || !ib.meta.IsIndexExist(meta.CollectionID, meta.IndexID) {
-			log.Ctx(ib.ctx).Info("task is no need to build index, remove it", zap.Int64("buildID", buildID))
-			if err := ib.meta.DeleteTask(buildID); err != nil {
-				log.Ctx(ib.ctx).Warn("IndexCoord delete index failed", zap.Int64("buildID", buildID), zap.Error(err))
-				return false
-			}
-			deleteFunc(buildID)
-			return true
-		}
-		indexParams := ib.meta.GetIndexParams(meta.CollectionID, meta.IndexID)
-		if isFlatIndex(getIndexType(indexParams)) || meta.NumRows < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64() {
-			log.Ctx(ib.ctx).Info("segment does not need index really", zap.Int64("buildID", buildID),
-				zap.Int64("segmentID", meta.SegmentID), zap.Int64("num rows", meta.NumRows))
-			if err := ib.meta.FinishTask(&indexpb.IndexTaskInfo{
-				BuildID:        buildID,
-				State:          commonpb.IndexState_Finished,
-				IndexFileKeys:  nil,
-				SerializedSize: 0,
-				FailReason:     "",
-			}); err != nil {
-				log.Ctx(ib.ctx).Warn("IndexCoord update index state fail", zap.Int64("buildID", buildID), zap.Error(err))
-				return false
-			}
-			updateStateFunc(buildID, indexTaskDone)
-			return true
-		}
-		// peek client
-		// if all IndexNodes are executing task, wait for one of them to finish the task.
-		nodeID, client := ib.nodeManager.PeekClient(meta)
-		if client == nil {
-			log.Ctx(ib.ctx).WithRateGroup("dc.indexBuilder", 1, 60).RatedInfo(5, "index builder peek client error, there is no available")
-			return false
-		}
-		// update version and set nodeID
-		if err := ib.meta.UpdateVersion(buildID, nodeID); err != nil {
-			log.Ctx(ib.ctx).Warn("index builder update index version failed", zap.Int64("build", buildID), zap.Error(err))
-			return false
-		}
-
-		binLogs := make([]string, 0)
-		fieldID := ib.meta.GetFieldIDByIndexID(meta.CollectionID, meta.IndexID)
-		for _, fieldBinLog := range segment.GetBinlogs() {
-			if fieldBinLog.GetFieldID() == fieldID {
-				for _, binLog := range fieldBinLog.GetBinlogs() {
-					binLogs = append(binLogs, binLog.LogPath)
-				}
-				break
-			}
-		}
-
-		typeParams := ib.meta.GetTypeParams(meta.CollectionID, meta.IndexID)
-
-		var storageConfig *indexpb.StorageConfig
-		if Params.CommonCfg.StorageType.GetValue() == "local" {
-			storageConfig = &indexpb.StorageConfig{
-				RootPath:    Params.LocalStorageCfg.Path.GetValue(),
-				StorageType: Params.CommonCfg.StorageType.GetValue(),
-			}
-		} else {
-			storageConfig = &indexpb.StorageConfig{
-				Address:          Params.MinioCfg.Address.GetValue(),
-				AccessKeyID:      Params.MinioCfg.AccessKeyID.GetValue(),
-				SecretAccessKey:  Params.MinioCfg.SecretAccessKey.GetValue(),
-				UseSSL:           Params.MinioCfg.UseSSL.GetAsBool(),
-				BucketName:       Params.MinioCfg.BucketName.GetValue(),
-				RootPath:         Params.MinioCfg.RootPath.GetValue(),
-				UseIAM:           Params.MinioCfg.UseIAM.GetAsBool(),
-				IAMEndpoint:      Params.MinioCfg.IAMEndpoint.GetValue(),
-				StorageType:      Params.CommonCfg.StorageType.GetValue(),
-				Region:           Params.MinioCfg.Region.GetValue(),
-				UseVirtualHost:   Params.MinioCfg.UseVirtualHost.GetAsBool(),
-				CloudProvider:    Params.MinioCfg.CloudProvider.GetValue(),
-				RequestTimeoutMs: Params.MinioCfg.RequestTimeoutMs.GetAsInt64(),
-			}
-		}
-		req := &indexpb.CreateJobRequest{
-			ClusterID:           Params.CommonCfg.ClusterPrefix.GetValue(),
-			IndexFilePrefix:     path.Join(ib.chunkManager.RootPath(), common.SegmentIndexPath),
-			BuildID:             buildID,
-			DataPaths:           binLogs,
-			IndexVersion:        meta.IndexVersion + 1,
-			StorageConfig:       storageConfig,
-			IndexParams:         indexParams,
-			TypeParams:          typeParams,
-			NumRows:             meta.NumRows,
-			CurrentIndexVersion: ib.indexEngineVersionManager.GetCurrentIndexEngineVersion(),
-		}
-		if err := ib.assignTask(client, req); err != nil {
-			// need to release lock then reassign, so set task state to retry
-			log.Ctx(ib.ctx).Warn("index builder assign task to IndexNode failed", zap.Int64("buildID", buildID),
-				zap.Int64("nodeID", nodeID), zap.Error(err))
-			updateStateFunc(buildID, indexTaskRetry)
-			return false
-		}
-		log.Ctx(ib.ctx).Info("index task assigned successfully", zap.Int64("buildID", buildID),
-			zap.Int64("segmentID", meta.SegmentID), zap.Int64("nodeID", nodeID))
-		// update index meta state to InProgress
-		if err := ib.meta.BuildIndex(buildID); err != nil {
-			// need to release lock then reassign, so set task state to retry
-			log.Ctx(ib.ctx).Warn("index builder update index meta to InProgress failed", zap.Int64("buildID", buildID),
-				zap.Int64("nodeID", nodeID), zap.Error(err))
-			updateStateFunc(buildID, indexTaskRetry)
-			return false
-		}
-		updateStateFunc(buildID, indexTaskInProgress)
-
+	switch t.state {
 	case indexTaskDone:
-		if !ib.dropIndexTask(buildID, meta.NodeID) {
-			return true
+		if !ib.dropIndexTask(t.buildID, meta.NodeID) {
+			return
 		}
-		deleteFunc(buildID)
+		ib.runningTasksQueue.pop(t.collectionID, t.buildID)
 	case indexTaskRetry:
-		if !ib.dropIndexTask(buildID, meta.NodeID) {
-			return true
+		if !ib.dropIndexTask(t.buildID, meta.NodeID) {
+			return
 		}
-		updateStateFunc(buildID, indexTaskInit)
+		ib.runningTasksQueue.pop(t.collectionID, t.buildID)
+		ib.enqueue(t.collectionID, t.buildID)
 
+	case indexTaskInProgress:
+		ib.runningTasksQueue.updateTaskState(t.collectionID, t.buildID, ib.getTaskState(t.buildID, meta.NodeID))
 	default:
-		// state: in_progress
-		updateStateFunc(buildID, ib.getTaskState(buildID, meta.NodeID))
+		log.Ctx(ib.ctx).Warn("index task state invalid", zap.Int64("ClusterID", t.collectionID),
+			zap.Int64("buildID", t.buildID), zap.String("task state", t.state.String()))
+		ib.runningTasksQueue.pop(t.collectionID, t.buildID)
 	}
-	return true
+}
+
+// assignTask sends the index task to the IndexNode, it has a timeout interval, if the IndexNode doesn't respond within
+// the interval, it is considered that the task sending failed.
+func (ib *indexBuilder) assignTask(builderClient types.IndexNodeClient, req *indexpb.CreateJobRequest) error {
+	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
+	defer cancel()
+	resp, err := builderClient.CreateJob(ctx, req)
+	if err == nil {
+		err = merr.Error(resp)
+	}
+	if err != nil {
+		log.Error("IndexCoord assignmentTasksLoop builderClient.CreateIndex failed", zap.Error(err))
+		return err
+	}
+	return nil
 }
 
 func (ib *indexBuilder) getTaskState(buildID, nodeID UniqueID) indexTaskState {
@@ -425,34 +499,14 @@ func (ib *indexBuilder) dropIndexTask(buildID, nodeID UniqueID) bool {
 	return true
 }
 
-// assignTask sends the index task to the IndexNode, it has a timeout interval, if the IndexNode doesn't respond within
-// the interval, it is considered that the task sending failed.
-func (ib *indexBuilder) assignTask(builderClient types.IndexNodeClient, req *indexpb.CreateJobRequest) error {
-	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
-	defer cancel()
-	resp, err := builderClient.CreateJob(ctx, req)
-	if err == nil {
-		err = merr.Error(resp)
-	}
-	if err != nil {
-		log.Error("IndexCoord assignmentTasksLoop builderClient.CreateIndex failed", zap.Error(err))
-		return err
-	}
-
-	return nil
-}
-
 func (ib *indexBuilder) nodeDown(nodeID UniqueID) {
 	defer ib.notify()
 
 	metas := ib.meta.GetMetasByNodeID(nodeID)
 
-	ib.taskMutex.Lock()
-	defer ib.taskMutex.Unlock()
-
 	for _, meta := range metas {
-		if ib.tasks[meta.BuildID] != indexTaskDone {
-			ib.tasks[meta.BuildID] = indexTaskRetry
+		if ib.runningTasksQueue.getTaskState(meta.CollectionID, meta.BuildID) != indexTaskDone {
+			ib.runningTasksQueue.updateTaskState(meta.CollectionID, meta.BuildID, indexTaskRetry)
 		}
 	}
 }

@@ -25,7 +25,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -34,7 +33,7 @@ import (
 
 func TestIndexNodeManager_AddNode(t *testing.T) {
 	nm := NewNodeManager(context.Background(), defaultIndexNodeCreatorFunc)
-	nodeID, client := nm.PeekClient(&model.SegmentIndex{})
+	nodeID, client := nm.PeekClient()
 	assert.Equal(t, int64(-1), nodeID)
 	assert.Nil(t, client)
 
@@ -94,7 +93,7 @@ func TestIndexNodeManager_PeekClient(t *testing.T) {
 			},
 		}
 
-		nodeID, client := nm.PeekClient(&model.SegmentIndex{})
+		nodeID, client := nm.PeekClient()
 		assert.NotNil(t, client)
 		assert.Contains(t, []UniqueID{8, 9}, nodeID)
 	})

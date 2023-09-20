@@ -24,7 +24,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -97,7 +96,7 @@ func (nm *IndexNodeManager) AddNode(nodeID UniqueID, address string) error {
 }
 
 // PeekClient peeks the client with the least load.
-func (nm *IndexNodeManager) PeekClient(meta *model.SegmentIndex) (UniqueID, types.IndexNodeClient) {
+func (nm *IndexNodeManager) PeekClient() (UniqueID, types.IndexNodeClient) {
 	allClients := nm.GetAllClients()
 	if len(allClients) == 0 {
 		log.Error("there is no IndexNode online")

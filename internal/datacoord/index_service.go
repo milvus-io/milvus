@@ -69,7 +69,7 @@ func (s *Server) createIndexForSegment(segment *SegmentInfo, indexID UniqueID) e
 	if err = s.meta.AddSegmentIndex(segIndex); err != nil {
 		return err
 	}
-	s.indexBuilder.enqueue(buildID)
+	s.indexBuilder.enqueue(segment.CollectionID, buildID)
 	return nil
 }
 

@@ -58,7 +58,7 @@ func (m *GrpcIndexNodeClient) DropJobs(ctx context.Context, in *indexpb.DropJobs
 }
 
 func (m *GrpcIndexNodeClient) GetJobStats(ctx context.Context, in *indexpb.GetJobStatsRequest, opts ...grpc.CallOption) (*indexpb.GetJobStatsResponse, error) {
-	return &indexpb.GetJobStatsResponse{}, m.Err
+	return &indexpb.GetJobStatsResponse{TaskSlots: 1}, m.Err
 }
 
 func (m *GrpcIndexNodeClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
