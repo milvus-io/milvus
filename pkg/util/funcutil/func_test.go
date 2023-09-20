@@ -55,6 +55,14 @@ func Test_GetLocalIP(t *testing.T) {
 	assert.NotZero(t, len(ip))
 }
 
+func Test_GetIP(t *testing.T) {
+	ip := GetIP("")
+	assert.NotNil(t, ip)
+	assert.NotZero(t, len(ip))
+	ip = GetIP("127.0.0")
+	assert.Equal(t, ip, "127.0.0")
+}
+
 func Test_ParseIndexParamsMap(t *testing.T) {
 	num := 10
 	keys := make([]string, 0)
