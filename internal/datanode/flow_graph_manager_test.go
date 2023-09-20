@@ -102,14 +102,16 @@ func TestFlowGraphManager(t *testing.T) {
 		assert.True(t, fm.exist(vchanName))
 		fg, ok := fm.getFlowgraphService(vchanName)
 		require.True(t, ok)
-		err = fg.channel.addSegment(addSegmentReq{
-			segType:     datapb.SegmentType_New,
-			segID:       100,
-			collID:      1,
-			partitionID: 10,
-			startPos:    &msgpb.MsgPosition{},
-			endPos:      &msgpb.MsgPosition{},
-		})
+		err = fg.channel.addSegment(
+			context.TODO(),
+			addSegmentReq{
+				segType:     datapb.SegmentType_New,
+				segID:       100,
+				collID:      1,
+				partitionID: 10,
+				startPos:    &msgpb.MsgPosition{},
+				endPos:      &msgpb.MsgPosition{},
+			})
 		require.NoError(t, err)
 
 		tests := []struct {
@@ -151,14 +153,16 @@ func TestFlowGraphManager(t *testing.T) {
 
 		fg, ok := fm.getFlowgraphService(vchanName)
 		require.True(t, ok)
-		err = fg.channel.addSegment(addSegmentReq{
-			segType:     datapb.SegmentType_New,
-			segID:       100,
-			collID:      1,
-			partitionID: 10,
-			startPos:    &msgpb.MsgPosition{},
-			endPos:      &msgpb.MsgPosition{},
-		})
+		err = fg.channel.addSegment(
+			context.TODO(),
+			addSegmentReq{
+				segType:     datapb.SegmentType_New,
+				segID:       100,
+				collID:      1,
+				partitionID: 10,
+				startPos:    &msgpb.MsgPosition{},
+				endPos:      &msgpb.MsgPosition{},
+			})
 		require.NoError(t, err)
 
 		tests := []struct {
@@ -220,7 +224,7 @@ func TestFlowGraphManager(t *testing.T) {
 				assert.NoError(t, err)
 				fg, ok := fm.flowgraphs.Get(vchannel)
 				assert.True(t, ok)
-				err = fg.channel.addSegment(addSegmentReq{segID: 0})
+				err = fg.channel.addSegment(context.TODO(), addSegmentReq{segID: 0})
 				assert.NoError(t, err)
 				fg.channel.getSegment(0).memorySize = memorySize
 				fg.channel.setIsHighMemory(false)

@@ -103,7 +103,7 @@ func (mtm *mockTtMsgStream) CheckTopicValid(channel string) error {
 
 func TestNewDmInputNode(t *testing.T) {
 	client := msgdispatcher.NewClient(&mockMsgStreamFactory{}, typeutil.DataNodeRole, paramtable.GetNodeID())
-	_, err := newDmInputNode(client, new(msgpb.MsgPosition), &nodeConfig{
+	_, err := newDmInputNode(context.Background(), client, new(msgpb.MsgPosition), &nodeConfig{
 		msFactory:    &mockMsgStreamFactory{},
 		vChannelName: "mock_vchannel_0",
 	})

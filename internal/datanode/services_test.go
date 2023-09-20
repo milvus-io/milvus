@@ -196,14 +196,16 @@ func (s *DataNodeServicesSuite) TestFlushSegments() {
 	fgservice, ok := s.node.flowgraphManager.getFlowgraphService(dmChannelName)
 	s.Require().True(ok)
 
-	err = fgservice.channel.addSegment(addSegmentReq{
-		segType:     datapb.SegmentType_New,
-		segID:       0,
-		collID:      1,
-		partitionID: 1,
-		startPos:    &msgpb.MsgPosition{},
-		endPos:      &msgpb.MsgPosition{},
-	})
+	err = fgservice.channel.addSegment(
+		context.TODO(),
+		addSegmentReq{
+			segType:     datapb.SegmentType_New,
+			segID:       0,
+			collID:      1,
+			partitionID: 1,
+			startPos:    &msgpb.MsgPosition{},
+			endPos:      &msgpb.MsgPosition{},
+		})
 	s.Require().NoError(err)
 
 	req := &datapb.FlushSegmentsRequest{
@@ -755,32 +757,38 @@ func (s *DataNodeServicesSuite) TestResendSegmentStats() {
 	fgService, ok := s.node.flowgraphManager.getFlowgraphService(dmChannelName)
 	s.Assert().True(ok)
 
-	err = fgService.channel.addSegment(addSegmentReq{
-		segType:     datapb.SegmentType_New,
-		segID:       0,
-		collID:      1,
-		partitionID: 1,
-		startPos:    &msgpb.MsgPosition{},
-		endPos:      &msgpb.MsgPosition{},
-	})
+	err = fgService.channel.addSegment(
+		context.TODO(),
+		addSegmentReq{
+			segType:     datapb.SegmentType_New,
+			segID:       0,
+			collID:      1,
+			partitionID: 1,
+			startPos:    &msgpb.MsgPosition{},
+			endPos:      &msgpb.MsgPosition{},
+		})
 	s.Assert().Nil(err)
-	err = fgService.channel.addSegment(addSegmentReq{
-		segType:     datapb.SegmentType_New,
-		segID:       1,
-		collID:      1,
-		partitionID: 2,
-		startPos:    &msgpb.MsgPosition{},
-		endPos:      &msgpb.MsgPosition{},
-	})
+	err = fgService.channel.addSegment(
+		context.TODO(),
+		addSegmentReq{
+			segType:     datapb.SegmentType_New,
+			segID:       1,
+			collID:      1,
+			partitionID: 2,
+			startPos:    &msgpb.MsgPosition{},
+			endPos:      &msgpb.MsgPosition{},
+		})
 	s.Assert().Nil(err)
-	err = fgService.channel.addSegment(addSegmentReq{
-		segType:     datapb.SegmentType_New,
-		segID:       2,
-		collID:      1,
-		partitionID: 3,
-		startPos:    &msgpb.MsgPosition{},
-		endPos:      &msgpb.MsgPosition{},
-	})
+	err = fgService.channel.addSegment(
+		context.TODO(),
+		addSegmentReq{
+			segType:     datapb.SegmentType_New,
+			segID:       2,
+			collID:      1,
+			partitionID: 3,
+			startPos:    &msgpb.MsgPosition{},
+			endPos:      &msgpb.MsgPosition{},
+		})
 	s.Assert().Nil(err)
 
 	req := &datapb.ResendSegmentStatsRequest{

@@ -61,7 +61,7 @@ type Channel interface {
 	getCollectionAndPartitionID(segID UniqueID) (collID, partitionID UniqueID, err error)
 	getChannelName(segID UniqueID) string
 
-	addSegment(req addSegmentReq) error
+	addSegment(ctx context.Context, req addSegmentReq) error
 	getSegment(segID UniqueID) *Segment
 	removeSegments(segID ...UniqueID)
 	hasSegment(segID UniqueID, countFlushed bool) bool
@@ -210,7 +210,7 @@ func (c *ChannelMeta) getChannelName(segID UniqueID) string {
 
 // addSegment adds the segment to current channel. Segments can be added as *new*, *normal* or *flushed*.
 // Make sure to verify `channel.hasSegment(segID)` == false before calling `channel.addSegment()`.
-func (c *ChannelMeta) addSegment(req addSegmentReq) error {
+func (c *ChannelMeta) addSegment(ctx context.Context, req addSegmentReq) error {
 	if req.collID != c.collectionID {
 		log.Warn("failed to addSegment, collection mismatch",
 			zap.Int64("current collection ID", req.collID),
@@ -239,7 +239,7 @@ func (c *ChannelMeta) addSegment(req addSegmentReq) error {
 	}
 	seg.setType(req.segType)
 	// Set up pk stats
-	err := c.InitPKstats(context.TODO(), seg, req.statsBinLogs, req.recoverTs)
+	err := c.InitPKstats(ctx, seg, req.statsBinLogs, req.recoverTs)
 	if err != nil {
 		log.Error("failed to init bloom filter",
 			zap.Int64("segmentID", req.segID),

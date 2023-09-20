@@ -748,6 +748,7 @@ func TestDropVirtualChannelFunc(t *testing.T) {
 	dropFunc := dropVirtualChannelFunc(dsService, retry.Attempts(1))
 	t.Run("normal run", func(t *testing.T) {
 		channel.addSegment(
+			context.TODO(),
 			addSegmentReq{
 				segType:     datapb.SegmentType_New,
 				segID:       2,

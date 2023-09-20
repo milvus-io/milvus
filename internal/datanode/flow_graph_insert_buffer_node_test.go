@@ -87,6 +87,7 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 
 	channel := newChannel(insertChannelName, collMeta.ID, collMeta.Schema, mockRootCoord, cm)
 	err = channel.addSegment(
+		context.TODO(),
 		addSegmentReq{
 			segType:     datapb.SegmentType_New,
 			segID:       1,
@@ -178,6 +179,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	channel := newChannel(insertChannelName, collMeta.ID, collMeta.Schema, mockRootCoord, cm)
 
 	err = channel.addSegment(
+		context.TODO(),
 		addSegmentReq{
 			segType:     datapb.SegmentType_New,
 			segID:       1,
@@ -763,14 +765,16 @@ func (s *InsertBufferNodeSuite) SetupTest() {
 	}
 
 	for _, seg := range segs {
-		err := s.channel.addSegment(addSegmentReq{
-			segType:     seg.sType,
-			segID:       seg.segID,
-			collID:      s.collID,
-			partitionID: s.partID,
-			startPos:    new(msgpb.MsgPosition),
-			endPos:      new(msgpb.MsgPosition),
-		})
+		err := s.channel.addSegment(
+			context.TODO(),
+			addSegmentReq{
+				segType:     seg.sType,
+				segID:       seg.segID,
+				collID:      s.collID,
+				partitionID: s.partID,
+				startPos:    new(msgpb.MsgPosition),
+				endPos:      new(msgpb.MsgPosition),
+			})
 		s.Require().NoError(err)
 	}
 }
@@ -985,6 +989,7 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 
 		channel := newChannel(insertChannelName, collMeta.ID, collMeta.Schema, mockRootCoord, cm)
 		err = channel.addSegment(
+			context.TODO(),
 			addSegmentReq{
 				segType:     datapb.SegmentType_New,
 				segID:       1,
@@ -1161,13 +1166,15 @@ func TestInsertBufferNode_task_pool_is_full(t *testing.T) {
 	segmentID := UniqueID(100)
 
 	channel := newChannel(channelName, collection, nil, &RootCoordFactory{pkType: schemapb.DataType_Int64}, cm)
-	err := channel.addSegment(addSegmentReq{
-		segType:  datapb.SegmentType_New,
-		segID:    segmentID,
-		collID:   collection,
-		startPos: new(msgpb.MsgPosition),
-		endPos:   new(msgpb.MsgPosition),
-	})
+	err := channel.addSegment(
+		context.TODO(),
+		addSegmentReq{
+			segType:  datapb.SegmentType_New,
+			segID:    segmentID,
+			collID:   collection,
+			startPos: new(msgpb.MsgPosition),
+			endPos:   new(msgpb.MsgPosition),
+		})
 	assert.NoError(t, err)
 	channel.setCurInsertBuffer(segmentID, &BufferData{size: 100})
 

@@ -163,6 +163,7 @@ func TestDataSyncService_newDataSyncService(t *testing.T) {
 			dispClient := msgdispatcher.NewClient(test.inMsgFactory, typeutil.DataNodeRole, paramtable.GetNodeID())
 
 			ds, err := newDataSyncService(ctx,
+				ctx,
 				make(chan flushMsg),
 				make(chan resendTTMsg),
 				channel,
@@ -280,7 +281,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	}
 
 	atimeTickSender := newTimeTickSender(dataCoord, 0)
-	sync, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, alloc, dispClient, factory, vchan, signalCh, dataCoord, newCache(), cm, newCompactionExecutor(), genTestTickler(), 0, atimeTickSender)
+	sync, err := newDataSyncService(ctx, ctx, flushChan, resendTTChan, channel, alloc, dispClient, factory, vchan, signalCh, dataCoord, newCache(), cm, newCompactionExecutor(), genTestTickler(), 0, atimeTickSender)
 	assert.Nil(t, err)
 
 	sync.flushListener = make(chan *segmentFlushPack)
@@ -441,7 +442,7 @@ func TestDataSyncService_Close(t *testing.T) {
 		syncMemoryTooHigh(),
 	}
 	atimeTickSender := newTimeTickSender(mockDataCoord, 0)
-	syncService, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, alloc, dispClient, factory, vchan, signalCh, mockDataCoord, newCache(), cm, newCompactionExecutor(), genTestTickler(), 0, atimeTickSender)
+	syncService, err := newDataSyncService(ctx, ctx, flushChan, resendTTChan, channel, alloc, dispClient, factory, vchan, signalCh, mockDataCoord, newCache(), cm, newCompactionExecutor(), genTestTickler(), 0, atimeTickSender)
 	assert.NoError(t, err)
 
 	syncService.flushListener = make(chan *segmentFlushPack, 10)
@@ -622,18 +623,19 @@ func TestGetSegmentInfos(t *testing.T) {
 	dsService := &dataSyncService{
 		dataCoord: dataCoord,
 	}
-	segmentInfos, err := dsService.getSegmentInfos([]int64{1})
+	var ctx = context.Background()
+	segmentInfos, err := dsService.getSegmentInfos(ctx, []int64{1})
 	assert.NoError(t, err)
 	assert.Equal(t, 1, len(segmentInfos))
 
 	dataCoord.GetSegmentInfosError = true
-	segmentInfos2, err := dsService.getSegmentInfos([]int64{1})
+	segmentInfos2, err := dsService.getSegmentInfos(ctx, []int64{1})
 	assert.Error(t, err)
 	assert.Empty(t, segmentInfos2)
 
 	dataCoord.GetSegmentInfosError = false
 	dataCoord.GetSegmentInfosNotSuccess = true
-	segmentInfos3, err := dsService.getSegmentInfos([]int64{1})
+	segmentInfos3, err := dsService.getSegmentInfos(ctx, []int64{1})
 	assert.Error(t, err)
 	assert.Empty(t, segmentInfos3)
 
@@ -648,7 +650,7 @@ func TestGetSegmentInfos(t *testing.T) {
 		},
 	}
 
-	segmentInfos, err = dsService.getSegmentInfos([]int64{5})
+	segmentInfos, err = dsService.getSegmentInfos(ctx, []int64{5})
 	assert.NoError(t, err)
 	assert.Equal(t, 1, len(segmentInfos))
 	assert.Equal(t, int64(100), segmentInfos[0].ID)
@@ -671,6 +673,7 @@ func TestClearGlobalFlushingCache(t *testing.T) {
 	}
 
 	err = channel.addSegment(
+		context.TODO(),
 		addSegmentReq{
 			segType:     datapb.SegmentType_New,
 			segID:       1,
@@ -681,6 +684,7 @@ func TestClearGlobalFlushingCache(t *testing.T) {
 	assert.NoError(t, err)
 
 	err = channel.addSegment(
+		context.TODO(),
 		addSegmentReq{
 			segType:      datapb.SegmentType_Flushed,
 			segID:        2,
@@ -693,6 +697,7 @@ func TestClearGlobalFlushingCache(t *testing.T) {
 	assert.NoError(t, err)
 
 	err = channel.addSegment(
+		context.TODO(),
 		addSegmentReq{
 			segType:      datapb.SegmentType_Normal,
 			segID:        3,

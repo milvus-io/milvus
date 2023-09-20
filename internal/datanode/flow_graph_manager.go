@@ -17,6 +17,7 @@
 package datanode
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"sync"
@@ -121,12 +122,11 @@ func (fm *flowgraphManager) addAndStart(dn *DataNode, vchan *datapb.VchannelInfo
 		return nil
 	}
 
-	channel := newChannel(vchan.GetChannelName(), vchan.GetCollectionID(), schema, dn.rootCoord, dn.chunkManager)
-
-	dataSyncService, err := newDataSyncService(dn.ctx, make(chan flushMsg, 100), make(chan resendTTMsg, 100), channel,
-		dn.allocator, dn.dispClient, dn.factory, vchan, dn.clearSignal, dn.dataCoord, dn.segmentCache, dn.chunkManager, dn.compactionExecutor, tickler, dn.GetSession().ServerID, dn.timeTickSender)
+	dataSyncService, err := getDataSyncService(context.TODO(), dn, &datapb.ChannelWatchInfo{
+		Schema: schema,
+		Vchan:  vchan}, tickler)
 	if err != nil {
-		log.Warn("fail to create new datasyncservice", zap.Error(err))
+		log.Warn("fail to create new DataSyncService", zap.Error(err))
 		return err
 	}
 	dataSyncService.start()
@@ -238,4 +238,46 @@ func (fm *flowgraphManager) collections() []int64 {
 	})
 
 	return collectionSet.Collect()
+}
+
+// getDataSyncService gets and init the dataSyncService
+// initCtx is used to init the dataSyncService only, if initCtx.Canceled or initCtx.Timeout
+// getDataSyncService stops and returns the initCtx.Err()
+func getDataSyncService(initCtx context.Context, node *DataNode, info *datapb.ChannelWatchInfo, tickler *tickler) (*dataSyncService, error) {
+	channelName := info.GetVchan().GetChannelName()
+	log := log.With(zap.String("channel", channelName))
+
+	channel := newChannel(
+		info.GetVchan().GetChannelName(),
+		info.GetVchan().GetCollectionID(),
+		info.GetSchema(),
+		node.rootCoord,
+		node.chunkManager,
+	)
+
+	dataSyncService, err := newDataSyncService(
+		node.ctx,
+		initCtx,
+		make(chan flushMsg, 100),
+		make(chan resendTTMsg, 100),
+		channel,
+		node.allocator,
+		node.dispClient,
+		node.factory,
+		info.GetVchan(),
+		node.clearSignal,
+		node.dataCoord,
+		node.segmentCache,
+		node.chunkManager,
+		node.compactionExecutor,
+		tickler,
+		node.GetSession().ServerID,
+		node.timeTickSender,
+	)
+	if err != nil {
+		log.Warn("fail to create new datasyncservice", zap.Error(err))
+		return nil, err
+	}
+
+	return dataSyncService, nil
 }

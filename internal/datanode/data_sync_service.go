@@ -69,7 +69,8 @@ type dataSyncService struct {
 	timetickSender *timeTickSender        // reference to timeTickSender
 }
 
-func newDataSyncService(ctx context.Context,
+func newDataSyncService(
+	fgCtx, initCtx context.Context,
 	flushCh chan flushMsg,
 	resendTTCh chan resendTTMsg,
 	channel Channel,
@@ -91,7 +92,7 @@ func newDataSyncService(ctx context.Context,
 		return nil, errors.New("Nil input")
 	}
 
-	ctx1, cancel := context.WithCancel(ctx)
+	childCtx, cancel := context.WithCancel(fgCtx)
 
 	delBufferManager := &DeltaBufferManager{
 		channel:    channel,
@@ -99,7 +100,7 @@ func newDataSyncService(ctx context.Context,
 	}
 
 	service := &dataSyncService{
-		ctx:              ctx1,
+		ctx:              childCtx,
 		cancelFn:         cancel,
 		fg:               nil,
 		flushCh:          flushCh,
@@ -120,7 +121,7 @@ func newDataSyncService(ctx context.Context,
 		timetickSender:   timetickSender,
 	}
 
-	if err := service.initNodes(vchan, tickler); err != nil {
+	if err := service.initNodes(initCtx, vchan, tickler); err != nil {
 		return nil, err
 	}
 	if tickler.isWatchFailed.Load() {
@@ -171,7 +172,7 @@ func (dsService *dataSyncService) GracefullyClose() {
 
 func (dsService *dataSyncService) close() {
 	dsService.stopOnce.Do(func() {
-		log := log.Ctx(context.Background()).With(
+		log := log.Ctx(dsService.ctx).With(
 			zap.Int64("collectionID", dsService.collectionID),
 			zap.String("vChanName", dsService.vchannelName),
 		)
@@ -199,7 +200,8 @@ func (dsService *dataSyncService) clearGlobalFlushingCache() {
 }
 
 // initNodes inits a TimetickedFlowGraph
-func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo, tickler *tickler) error {
+// initCtx are used to init only.
+func (dsService *dataSyncService) initNodes(initCtx context.Context, vchanInfo *datapb.VchannelInfo, tickler *tickler) error {
 	dsService.fg = flowgraph.NewTimeTickedFlowGraph(dsService.ctx)
 	// initialize flush manager for DataSync Service
 	dsService.flushManager = NewRendezvousFlushManager(dsService.idAllocator, dsService.chunkManager, dsService.channel,
@@ -212,11 +214,11 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo, tick
 	)
 	var err error
 	// recover segment checkpoints
-	unflushedSegmentInfos, err := dsService.getSegmentInfos(vchanInfo.GetUnflushedSegmentIds())
+	unflushedSegmentInfos, err := dsService.getSegmentInfos(initCtx, vchanInfo.GetUnflushedSegmentIds())
 	if err != nil {
 		return err
 	}
-	flushedSegmentInfos, err := dsService.getSegmentInfos(vchanInfo.GetFlushedSegmentIds())
+	flushedSegmentInfos, err := dsService.getSegmentInfos(initCtx, vchanInfo.GetFlushedSegmentIds())
 	if err != nil {
 		return err
 	}
@@ -247,7 +249,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo, tick
 		// avoid closure capture iteration variable
 		segment := us
 		future := getOrCreateIOPool().Submit(func() (interface{}, error) {
-			if err := dsService.channel.addSegment(addSegmentReq{
+			if err := dsService.channel.addSegment(initCtx, addSegmentReq{
 				segType:      datapb.SegmentType_Normal,
 				segID:        segment.GetID(),
 				collID:       segment.CollectionID,
@@ -284,7 +286,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo, tick
 		// avoid closure capture iteration variable
 		segment := fs
 		future := getOrCreateIOPool().Submit(func() (interface{}, error) {
-			if err := dsService.channel.addSegment(addSegmentReq{
+			if err := dsService.channel.addSegment(initCtx, addSegmentReq{
 				segType:      datapb.SegmentType_Flushed,
 				segID:        segment.GetID(),
 				collID:       segment.GetCollectionID(),
@@ -319,7 +321,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo, tick
 	}
 
 	var dmStreamNode Node
-	dmStreamNode, err = newDmInputNode(dsService.dispClient, vchanInfo.GetSeekPosition(), c)
+	dmStreamNode, err = newDmInputNode(initCtx, dsService.dispClient, vchanInfo.GetSeekPosition(), c)
 	if err != nil {
 		return err
 	}
@@ -419,8 +421,8 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo, tick
 }
 
 // getSegmentInfos return the SegmentInfo details according to the given ids through RPC to datacoord
-func (dsService *dataSyncService) getSegmentInfos(segmentIDs []int64) ([]*datapb.SegmentInfo, error) {
-	infoResp, err := dsService.dataCoord.GetSegmentInfo(dsService.ctx, &datapb.GetSegmentInfoRequest{
+func (dsService *dataSyncService) getSegmentInfos(ctx context.Context, segmentIDs []int64) ([]*datapb.SegmentInfo, error) {
+	infoResp, err := dsService.dataCoord.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_SegmentInfo),
 			commonpbutil.WithMsgID(0),
