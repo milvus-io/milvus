@@ -486,7 +486,7 @@ func TestProxy_FlushAll(t *testing.T) {
 		node.stateCode.Store(commonpb.StateCode_Abnormal)
 		resp, err := node.FlushAll(ctx, &milvuspb.FlushAllRequest{})
 		assert.NoError(t, err)
-		assert.Equal(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_UnexpectedError)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 		node.stateCode.Store(commonpb.StateCode_Healthy)
 	})
 

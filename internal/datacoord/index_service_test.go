@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 func TestServerId(t *testing.T) {
@@ -100,7 +101,7 @@ func TestServer_CreateIndex(t *testing.T) {
 		s.stateCode.Store(commonpb.StateCode_Abnormal)
 		resp, err := s.CreateIndex(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_DataCoordNA, resp.GetErrorCode())
+		assert.ErrorIs(t, merr.Error(resp), merr.ErrServiceNotReady)
 	})
 
 	t.Run("index not consistent", func(t *testing.T) {
@@ -192,7 +193,7 @@ func TestServer_GetIndexState(t *testing.T) {
 		s.stateCode.Store(commonpb.StateCode_Initializing)
 		resp, err := s.GetIndexState(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_DataCoordNA, resp.GetStatus().GetErrorCode())
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 	})
 
 	s.stateCode.Store(commonpb.StateCode_Healthy)
@@ -384,7 +385,7 @@ func TestServer_GetSegmentIndexState(t *testing.T) {
 		s.stateCode.Store(commonpb.StateCode_Abnormal)
 		resp, err := s.GetSegmentIndexState(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_DataCoordNA, resp.GetStatus().GetErrorCode())
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 	})
 
 	t.Run("no indexes", func(t *testing.T) {
@@ -518,7 +519,7 @@ func TestServer_GetIndexBuildProgress(t *testing.T) {
 		s.stateCode.Store(commonpb.StateCode_Initializing)
 		resp, err := s.GetIndexBuildProgress(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_DataCoordNA, resp.GetStatus().GetErrorCode())
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 	})
 
 	t.Run("no indexes", func(t *testing.T) {
@@ -998,7 +999,7 @@ func TestServer_DescribeIndex(t *testing.T) {
 		s.stateCode.Store(commonpb.StateCode_Initializing)
 		resp, err := s.DescribeIndex(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_DataCoordNA, resp.GetStatus().GetErrorCode())
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 	})
 
 	s.stateCode.Store(commonpb.StateCode_Healthy)
@@ -1442,7 +1443,7 @@ func TestServer_DropIndex(t *testing.T) {
 		s.stateCode.Store(commonpb.StateCode_Initializing)
 		resp, err := s.DropIndex(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_DataCoordNA, resp.GetErrorCode())
+		assert.ErrorIs(t, merr.Error(resp), merr.ErrServiceNotReady)
 	})
 
 	s.stateCode.Store(commonpb.StateCode_Healthy)
@@ -1602,7 +1603,7 @@ func TestServer_GetIndexInfos(t *testing.T) {
 		s.stateCode.Store(commonpb.StateCode_Initializing)
 		resp, err := s.GetIndexInfos(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_DataCoordNA, resp.GetStatus().GetErrorCode())
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 	})
 
 	s.stateCode.Store(commonpb.StateCode_Healthy)

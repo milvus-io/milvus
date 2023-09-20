@@ -3,8 +3,9 @@ package utils
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"google.golang.org/grpc"
+
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func TestGracefulStopGrpcServer(t *testing.T) {

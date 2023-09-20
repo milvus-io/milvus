@@ -1924,7 +1924,7 @@ class TestUtilityAdvanced(TestcaseBase):
         # load balance
         self.utility_wrap.load_balance(collection_w.name, src_node_id, dst_node_ids, sealed_segment_ids,
                                        check_task=CheckTasks.err_res,
-                                       check_items={ct.err_code: 1, ct.err_msg: "no available queryNode to allocate"})
+                                       check_items={ct.err_code: 1, ct.err_msg: "destination node not found in the same replica"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/19441")

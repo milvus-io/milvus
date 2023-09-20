@@ -27,12 +27,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
-// For compatibility
-var oldErrCodes = map[int32]commonpb.ErrorCode{
-	ErrServiceNotReady.code():    commonpb.ErrorCode_NotReadyServe,
-	ErrCollectionNotFound.code(): commonpb.ErrorCode_CollectionNotExists,
-}
-
 // Code returns the error code of the given error,
 // WARN: DO NOT use this for now
 func Code(err error) int32 {
@@ -125,6 +119,12 @@ func oldCode(code int32) commonpb.ErrorCode {
 	case ErrServiceForceDeny.code():
 		return commonpb.ErrorCode_ForceDeny
 
+	case ErrIndexNotFound.code():
+		return commonpb.ErrorCode_IndexNotExist
+
+	case ErrSegmentNotFound.code():
+		return commonpb.ErrorCode_SegmentNotFound
+
 	default:
 		return commonpb.ErrorCode_UnexpectedError
 	}
@@ -155,6 +155,12 @@ func OldCodeToMerr(code commonpb.ErrorCode) error {
 
 	case commonpb.ErrorCode_ForceDeny:
 		return ErrServiceForceDeny
+
+	case commonpb.ErrorCode_IndexNotExist:
+		return ErrIndexNotFound
+
+	case commonpb.ErrorCode_SegmentNotFound:
+		return ErrSegmentNotFound
 
 	default:
 		return errUnexpected
@@ -450,8 +456,32 @@ func WrapErrSegmentReduplicate(id int64, msg ...string) error {
 }
 
 // Index related
-func WrapErrIndexNotFound(msg ...string) error {
-	err := error(ErrIndexNotFound)
+func WrapErrIndexNotFound(indexName string, msg ...string) error {
+	err := wrapWithField(ErrIndexNotFound, "indexName", indexName)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+func WrapErrIndexNotFoundForSegment(segmentID int64, msg ...string) error {
+	err := wrapWithField(ErrIndexNotFound, "segmentID", segmentID)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+func WrapErrIndexNotSupported(indexType string, msg ...string) error {
+	err := wrapWithField(ErrIndexNotSupported, "indexType", indexType)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+func WrapErrIndexDuplicate(indexName string, msg ...string) error {
+	err := wrapWithField(ErrIndexDuplicate, "indexName", indexName)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "; "))
 	}
@@ -477,6 +507,14 @@ func WrapErrNodeOffline(id int64, msg ...string) error {
 
 func WrapErrNodeLack(expectedNum, actualNum int64, msg ...string) error {
 	err := errors.Wrapf(ErrNodeLack, "expectedNum=%d, actualNum=%d", expectedNum, actualNum)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+func WrapErrNodeLackAny(msg ...string) error {
+	err := error(ErrNodeLack)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "; "))
 	}

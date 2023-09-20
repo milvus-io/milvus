@@ -1518,7 +1518,7 @@ func TestProxy(t *testing.T) {
 			Base: nil,
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
+		assert.ErrorIs(t, merr.Error(resp), merr.ErrCollectionNotFound)
 	})
 
 	// TODO(dragondriver): dummy
@@ -2047,7 +2047,7 @@ func TestProxy(t *testing.T) {
 
 		resp, err := proxy.Upsert(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UpsertAutoIDTrue, resp.GetStatus().GetErrorCode())
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
 		assert.Equal(t, 0, len(resp.SuccIndex))
 		assert.Equal(t, rowNum, len(resp.ErrIndex))
 		assert.Equal(t, int64(0), resp.UpsertCnt)

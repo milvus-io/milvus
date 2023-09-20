@@ -389,8 +389,7 @@ func (it *upsertTask) insertExecute(ctx context.Context, msgPack *msgstream.MsgP
 	if err != nil {
 		log.Warn("get vChannels failed when insertExecute",
 			zap.Error(err))
-		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		it.result.Status.Reason = err.Error()
+		it.result.Status = merr.Status(err)
 		return err
 	}
 
@@ -413,8 +412,7 @@ func (it *upsertTask) insertExecute(ctx context.Context, msgPack *msgstream.MsgP
 	if err != nil {
 		log.Warn("assign segmentID and repack insert data failed when insertExecute",
 			zap.Error(err))
-		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		it.result.Status.Reason = err.Error()
+		it.result.Status = merr.Status(err)
 		return err
 	}
 	assignSegmentIDDur := tr.RecordSpan()
@@ -438,8 +436,7 @@ func (it *upsertTask) deleteExecute(ctx context.Context, msgPack *msgstream.MsgP
 	channelNames, err := it.chMgr.getVChannels(collID)
 	if err != nil {
 		log.Warn("get vChannels failed when deleteExecute", zap.Error(err))
-		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		it.result.Status.Reason = err.Error()
+		it.result.Status = merr.Status(err)
 		return err
 	}
 	it.upsertMsg.DeleteMsg.PrimaryKeys = it.result.IDs
@@ -539,8 +536,7 @@ func (it *upsertTask) Execute(ctx context.Context) (err error) {
 	tr.RecordSpan()
 	err = stream.Produce(msgPack)
 	if err != nil {
-		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		it.result.Status.Reason = err.Error()
+		it.result.Status = merr.Status(err)
 		return err
 	}
 	sendMsgDur := tr.RecordSpan()

@@ -1941,7 +1941,6 @@ func (c *Core) ListImportTasks(ctx context.Context, req *milvuspb.ListImportTask
 			err = fmt.Errorf("failed to find collection ID from its name: '%s', error: %w", req.GetCollectionName(), err)
 			log.Error("ListImportTasks failed", zap.Error(err))
 			status := merr.Status(err)
-			status.ErrorCode = commonpb.ErrorCode_IllegalCollectionName
 			return &milvuspb.ListImportTasksResponse{
 				Status: status,
 			}, nil
@@ -2231,7 +2230,6 @@ func (c *Core) ListCredUsers(ctx context.Context, in *milvuspb.ListCredUsersRequ
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 
 		status := merr.Status(err)
-		status.ErrorCode = commonpb.ErrorCode_ListCredUsersFailure
 		return &milvuspb.ListCredUsersResponse{Status: status}, nil
 	}
 	ctxLog.Debug("ListCredUsers success")

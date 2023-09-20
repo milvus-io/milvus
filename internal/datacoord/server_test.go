@@ -186,8 +186,7 @@ func TestAssignSegmentID(t *testing.T) {
 			SegmentIDRequests: []*datapb.SegmentIDRequest{req},
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 	})
 
 	t.Run("assign segment with invalid collection", func(t *testing.T) {
@@ -327,8 +326,7 @@ func TestFlush(t *testing.T) {
 		closeTestServer(t, svr)
 		resp, err := svr.Flush(context.Background(), req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 	})
 }
 
@@ -437,8 +435,7 @@ func TestGetSegmentStates(t *testing.T) {
 			SegmentIDs: []int64{0},
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 	})
 }
 
@@ -503,7 +500,7 @@ func TestGetInsertBinlogPaths(t *testing.T) {
 		}
 		resp, err := svr.GetInsertBinlogPaths(svr.ctx, req)
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrSegmentNotFound)
 	})
 
 	t.Run("with closed server", func(t *testing.T) {
@@ -513,8 +510,7 @@ func TestGetInsertBinlogPaths(t *testing.T) {
 			SegmentID: 0,
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 	})
 }
 
@@ -537,8 +533,7 @@ func TestGetCollectionStatistics(t *testing.T) {
 			CollectionID: 0,
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 	})
 }
 
@@ -560,8 +555,7 @@ func TestGetPartitionStatistics(t *testing.T) {
 		closeTestServer(t, svr)
 		resp, err := svr.GetPartitionStatistics(context.Background(), &datapb.GetPartitionStatisticsRequest{})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 	})
 }
 
@@ -623,7 +617,7 @@ func TestGetSegmentInfo(t *testing.T) {
 		}
 		resp, err := svr.GetSegmentInfo(svr.ctx, req)
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrSegmentNotFound)
 	})
 	t.Run("with closed server", func(t *testing.T) {
 		svr := newTestServer(t, nil)
@@ -632,8 +626,7 @@ func TestGetSegmentInfo(t *testing.T) {
 			SegmentIDs: []int64{},
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 	})
 	t.Run("with dropped segment", func(t *testing.T) {
 		svr := newTestServer(t, nil)
@@ -826,8 +819,7 @@ func TestGetFlushedSegments(t *testing.T) {
 			closeTestServer(t, svr)
 			resp, err := svr.GetFlushedSegments(context.Background(), &datapb.GetFlushedSegmentsRequest{})
 			assert.NoError(t, err)
-			assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-			assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+			assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 		})
 	})
 }
@@ -931,8 +923,7 @@ func TestGetSegmentsByStates(t *testing.T) {
 			closeTestServer(t, svr)
 			resp, err := svr.GetSegmentsByStates(context.Background(), &datapb.GetSegmentsByStatesRequest{})
 			assert.NoError(t, err)
-			assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-			assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+			assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 		})
 	})
 }
@@ -1137,7 +1128,7 @@ func TestServer_ShowConfigurations(t *testing.T) {
 	svr.stateCode.Store(commonpb.StateCode_Initializing)
 	resp, err := svr.ShowConfigurations(svr.ctx, req)
 	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+	assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 
 	// normal case
 	svr.stateCode.Store(stateSave)
@@ -1486,7 +1477,7 @@ func TestSaveBinlogPaths(t *testing.T) {
 			Flushed: false,
 		})
 		assert.NoError(t, err)
-		assert.EqualValues(t, resp.ErrorCode, commonpb.ErrorCode_SegmentNotFound)
+		assert.ErrorIs(t, merr.Error(resp), merr.ErrSegmentNotFound)
 	})
 
 	t.Run("SaveNotExistSegment", func(t *testing.T) {
@@ -1540,7 +1531,7 @@ func TestSaveBinlogPaths(t *testing.T) {
 			Flushed: false,
 		})
 		assert.NoError(t, err)
-		assert.EqualValues(t, resp.ErrorCode, commonpb.ErrorCode_SegmentNotFound)
+		assert.ErrorIs(t, merr.Error(resp), merr.ErrSegmentNotFound)
 	})
 
 	t.Run("with channel not matched", func(t *testing.T) {
@@ -1562,7 +1553,7 @@ func TestSaveBinlogPaths(t *testing.T) {
 			Channel:   "test",
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_MetaFailed, resp.GetErrorCode())
+		assert.ErrorIs(t, merr.Error(resp), merr.ErrChannelNotFound)
 	})
 
 	t.Run("with closed server", func(t *testing.T) {
@@ -1570,8 +1561,7 @@ func TestSaveBinlogPaths(t *testing.T) {
 		closeTestServer(t, svr)
 		resp, err := svr.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetReason())
+		assert.ErrorIs(t, merr.Error(resp), merr.ErrServiceNotReady)
 	})
 	/*
 		t.Run("test save dropped segment and remove channel", func(t *testing.T) {
@@ -1760,7 +1750,7 @@ func TestDropVirtualChannel(t *testing.T) {
 			ChannelName: "ch2",
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_MetaFailed, resp.GetStatus().GetErrorCode())
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrChannelNotFound)
 	})
 
 	t.Run("with closed server", func(t *testing.T) {
@@ -1768,8 +1758,7 @@ func TestDropVirtualChannel(t *testing.T) {
 		closeTestServer(t, svr)
 		resp, err := svr.DropVirtualChannel(context.Background(), &datapb.DropVirtualChannelRequest{})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 	})
 }
 
@@ -2426,13 +2415,13 @@ func TestShouldDropChannel(t *testing.T) {
 	}
 	myRoot := &myRootCoord{}
 	myRoot.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocTimestampResponse{
-		Status:    &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		Status:    merr.Status(nil),
 		Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
 		Count:     1,
 	}, nil)
 
 	myRoot.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
-		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		Status: merr.Status(nil),
 		ID:     int64(tsoutil.ComposeTSByTime(time.Now(), 0)),
 		Count:  1,
 	}, nil)
@@ -2479,7 +2468,7 @@ func TestShouldDropChannel(t *testing.T) {
 	t.Run("channel name not in kv, collection exist", func(t *testing.T) {
 		myRoot.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
 			Return(&milvuspb.DescribeCollectionResponse{
-				Status:       &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+				Status:       merr.Status(nil),
 				CollectionID: 0,
 			}, nil).Once()
 		assert.False(t, svr.handler.CheckShouldDropChannel("ch99", 0))
@@ -2488,7 +2477,7 @@ func TestShouldDropChannel(t *testing.T) {
 	t.Run("collection name in kv, collection exist", func(t *testing.T) {
 		myRoot.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
 			Return(&milvuspb.DescribeCollectionResponse{
-				Status:       &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+				Status:       merr.Status(nil),
 				CollectionID: 0,
 			}, nil).Once()
 		assert.False(t, svr.handler.CheckShouldDropChannel("ch1", 0))
@@ -2508,7 +2497,7 @@ func TestShouldDropChannel(t *testing.T) {
 		require.NoError(t, err)
 		myRoot.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
 			Return(&milvuspb.DescribeCollectionResponse{
-				Status:       &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+				Status:       merr.Status(nil),
 				CollectionID: 0,
 			}, nil).Once()
 		assert.True(t, svr.handler.CheckShouldDropChannel("ch1", 0))
@@ -3011,8 +3000,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		closeTestServer(t, svr)
 		resp, err := svr.GetRecoveryInfo(context.TODO(), &datapb.GetRecoveryInfoRequest{})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 	})
 }
 
@@ -3077,8 +3065,7 @@ func TestGetCompactionState(t *testing.T) {
 
 		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, msgDataCoordIsUnhealthy(paramtable.GetNodeID()), resp.GetStatus().GetReason())
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 	})
 }
 
@@ -3139,8 +3126,7 @@ func TestManualCompaction(t *testing.T) {
 			Timetravel:   1,
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, msgDataCoordIsUnhealthy(paramtable.GetNodeID()), resp.GetStatus().GetReason())
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 	})
 }
 
@@ -3190,8 +3176,7 @@ func TestGetCompactionStateWithPlans(t *testing.T) {
 			CompactionID: 1,
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, msgDataCoordIsUnhealthy(paramtable.GetNodeID()), resp.GetStatus().GetReason())
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 	})
 }
 
@@ -3347,7 +3332,7 @@ type rootCoordSegFlushComplete struct {
 // SegmentFlushCompleted, override default behavior
 func (rc *rootCoordSegFlushComplete) SegmentFlushCompleted(ctx context.Context, req *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
 	if rc.flag {
-		return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
+		return merr.Status(nil), nil
 	}
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}, nil
 }
@@ -3424,7 +3409,7 @@ func TestGetFlushState(t *testing.T) {
 		resp, err := svr.GetFlushState(context.TODO(), &datapb.GetFlushStateRequest{SegmentIDs: []int64{1, 2}})
 		assert.NoError(t, err)
 		assert.EqualValues(t, &milvuspb.GetFlushStateResponse{
-			Status:  &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			Status:  merr.Status(nil),
 			Flushed: true,
 		}, resp)
 	})
@@ -3472,7 +3457,7 @@ func TestGetFlushState(t *testing.T) {
 		resp, err := svr.GetFlushState(context.TODO(), &datapb.GetFlushStateRequest{SegmentIDs: []int64{1, 2}})
 		assert.NoError(t, err)
 		assert.EqualValues(t, &milvuspb.GetFlushStateResponse{
-			Status:  &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			Status:  merr.Status(nil),
 			Flushed: false,
 		}, resp)
 	})
@@ -3520,7 +3505,7 @@ func TestGetFlushState(t *testing.T) {
 		resp, err := svr.GetFlushState(context.TODO(), &datapb.GetFlushStateRequest{SegmentIDs: []int64{1, 2}})
 		assert.NoError(t, err)
 		assert.EqualValues(t, &milvuspb.GetFlushStateResponse{
-			Status:  &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			Status:  merr.Status(nil),
 			Flushed: true,
 		}, resp)
 	})
@@ -3556,7 +3541,7 @@ func TestGetFlushState(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.EqualValues(t, &milvuspb.GetFlushStateResponse{
-			Status:  &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			Status:  merr.Status(nil),
 			Flushed: true,
 		}, resp)
 	})
@@ -3592,7 +3577,7 @@ func TestGetFlushState(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.EqualValues(t, &milvuspb.GetFlushStateResponse{
-			Status:  &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			Status:  merr.Status(nil),
 			Flushed: false,
 		}, resp)
 	})
@@ -3611,7 +3596,7 @@ func TestGetFlushState(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.EqualValues(t, &milvuspb.GetFlushStateResponse{
-			Status:  &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			Status:  merr.Status(nil),
 			Flushed: true,
 		}, resp)
 	})
@@ -3680,7 +3665,7 @@ func TestGetFlushAllState(t *testing.T) {
 				svr.rootCoordClient.(*mocks.MockRootCoordClient).EXPECT().ListDatabases(mock.Anything, mock.Anything).
 					Return(&milvuspb.ListDatabasesResponse{
 						DbNames: []string{"db1"},
-						Status:  &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+						Status:  merr.Status(nil),
 					}, nil).Maybe()
 			}
 
@@ -3692,7 +3677,7 @@ func TestGetFlushAllState(t *testing.T) {
 			} else {
 				svr.rootCoordClient.(*mocks.MockRootCoordClient).EXPECT().ShowCollections(mock.Anything, mock.Anything).
 					Return(&milvuspb.ShowCollectionsResponse{
-						Status:        &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+						Status:        merr.Status(nil),
 						CollectionIds: []int64{collection},
 					}, nil).Maybe()
 			}
@@ -3705,7 +3690,7 @@ func TestGetFlushAllState(t *testing.T) {
 			} else {
 				svr.rootCoordClient.(*mocks.MockRootCoordClient).EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
 					Return(&milvuspb.DescribeCollectionResponse{
-						Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+						Status:              merr.Status(nil),
 						VirtualChannelNames: vchannels,
 					}, nil).Maybe()
 			}
@@ -3723,8 +3708,10 @@ func TestGetFlushAllState(t *testing.T) {
 			assert.NoError(t, err)
 			if test.ExpectedSuccess {
 				assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-			} else {
+			} else if test.ServerIsHealthy {
 				assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+			} else {
+				assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 			}
 			assert.Equal(t, test.ExpectedFlushed, resp.GetFlushed())
 		})
@@ -3760,25 +3747,25 @@ func TestGetFlushAllStateWithDB(t *testing.T) {
 				svr.rootCoordClient.(*mocks.MockRootCoordClient).EXPECT().ListDatabases(mock.Anything, mock.Anything).
 					Return(&milvuspb.ListDatabasesResponse{
 						DbNames: []string{dbName},
-						Status:  &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+						Status:  merr.Status(nil),
 					}, nil).Maybe()
 			} else {
 				svr.rootCoordClient.(*mocks.MockRootCoordClient).EXPECT().ListDatabases(mock.Anything, mock.Anything).
 					Return(&milvuspb.ListDatabasesResponse{
 						DbNames: []string{},
-						Status:  &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+						Status:  merr.Status(nil),
 					}, nil).Maybe()
 			}
 
 			svr.rootCoordClient.(*mocks.MockRootCoordClient).EXPECT().ShowCollections(mock.Anything, mock.Anything).
 				Return(&milvuspb.ShowCollectionsResponse{
-					Status:        &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+					Status:        merr.Status(nil),
 					CollectionIds: []int64{collectionID},
 				}, nil).Maybe()
 
 			svr.rootCoordClient.(*mocks.MockRootCoordClient).EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
 				Return(&milvuspb.DescribeCollectionResponse{
-					Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+					Status:              merr.Status(nil),
 					VirtualChannelNames: vchannels,
 					CollectionID:        collectionID,
 					CollectionName:      collectionName,
@@ -3882,8 +3869,7 @@ func TestDataCoordServer_SetSegmentState(t *testing.T) {
 			NewState:  commonpb.SegmentState_Flushed,
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 	})
 }
 
@@ -3958,8 +3944,7 @@ func TestDataCoord_Import(t *testing.T) {
 			},
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.GetErrorCode())
-		assert.Equal(t, msgDataCoordIsUnhealthy(paramtable.GetNodeID()), resp.Status.GetReason())
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 	})
 
 	t.Run("test update segment stat", func(t *testing.T) {
@@ -3987,7 +3972,7 @@ func TestDataCoord_Import(t *testing.T) {
 			}},
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+		assert.ErrorIs(t, merr.Error(status), merr.ErrServiceNotReady)
 	})
 }
 
@@ -4119,7 +4104,7 @@ func TestDataCoord_SaveImportSegment(t *testing.T) {
 
 		status, err := svr.SaveImportSegment(context.TODO(), &datapb.SaveImportSegmentRequest{})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_DataCoordNA, status.GetErrorCode())
+		assert.ErrorIs(t, merr.Error(status), merr.ErrServiceNotReady)
 	})
 }
 
