@@ -53,7 +53,7 @@ func (c *ivfPQChecker) checkPQParams(params map[string]string) error {
 
 func (c *ivfPQChecker) checkCPUPQParams(dimension, m int) error {
 	if (dimension % m) != 0 {
-		return fmt.Errorf("dimension must be abled to be divided by `m`, dimension: %d, m: %d", dimension, m)
+		return fmt.Errorf("dimension must be able to be divided by `m`, dimension: %d, m: %d", dimension, m)
 	}
 	return nil
 }
