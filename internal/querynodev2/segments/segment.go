@@ -459,7 +459,11 @@ func (s *LocalSegment) ValidateIndexedFieldsData(ctx context.Context, result *se
 			if err != nil {
 				return err
 			}
-			err = fmt.Errorf("vector output fields for %s index is not allowed", indexType)
+			metricType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.MetricTypeKey, index.IndexInfo.GetIndexParams())
+			if err != nil {
+				return err
+			}
+			err = fmt.Errorf("vector output fields for %s index with %s metric is not allowed", indexType, metricType)
 			log.Warn("validate fields failed", zap.Error(err))
 			return err
 		}
