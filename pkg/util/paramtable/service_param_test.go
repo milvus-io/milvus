@@ -13,6 +13,7 @@ package paramtable
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -151,6 +152,7 @@ func TestServiceParam(t *testing.T) {
 			assert.Empty(t, kc.Address.GetValue())
 			assert.Equal(t, kc.SaslMechanisms.GetValue(), "PLAIN")
 			assert.Equal(t, kc.SecurityProtocol.GetValue(), "SASL_SSL")
+			assert.Equal(t, kc.ReadTimeout.GetAsDuration(time.Second), 10*time.Second)
 		}
 	})
 
