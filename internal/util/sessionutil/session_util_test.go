@@ -919,17 +919,15 @@ func (s *SessionSuite) TestKeepAliveRetryActiveCancel() {
 
 	// Register
 	ch, err := session.registerService()
-	if err != nil {
-		panic(err)
-	}
+	s.Require().NoError(err)
 	session.liveCh = make(chan struct{})
 	session.processKeepAliveResponse(ch)
 	session.LivenessCheck(ctx, nil)
 	// active cancel, should not retry connect
 	session.cancelKeepAlive()
 
-	// sleep a while wait goroutine process
-	time.Sleep(time.Millisecond * 100)
+	// wait workers exit
+	session.wg.Wait()
 	// expected Disconnected = true, means session is closed
 	assert.Equal(s.T(), true, session.Disconnected())
 }
