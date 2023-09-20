@@ -38,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/storage"
-	s "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -52,8 +51,6 @@ import (
 )
 
 const ctxTimeInMillisecond = 5000
-
-const debug = false
 
 // As used in data_sync_service_test.go
 var segID2SegInfo = map[int64]*datapb.SegmentInfo{
@@ -95,45 +92,6 @@ func newIDLEDataNodeMock(ctx context.Context, pkType schemapb.DataType) *DataNod
 	node.dataCoord = ds
 
 	return node
-}
-
-func newHEALTHDataNodeMock(dmChannelName string) *DataNode {
-	var ctx context.Context
-
-	if debug {
-		ctx = context.Background()
-	} else {
-		var cancel context.CancelFunc
-		d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-		ctx, cancel = context.WithDeadline(context.Background(), d)
-		go func() {
-			<-ctx.Done()
-			cancel()
-		}()
-	}
-
-	factory := dependency.NewDefaultFactory(true)
-	node := NewDataNode(ctx, factory)
-
-	ms := &RootCoordFactory{
-		ID:             0,
-		collectionID:   1,
-		collectionName: "collection-1",
-	}
-	node.rootCoord = ms
-
-	ds := &DataCoordFactory{}
-	node.dataCoord = ds
-
-	return node
-}
-
-func makeNewChannelNames(names []string, suffix string) []string {
-	var ret []string
-	for _, name := range names {
-		ret = append(ret, name+suffix)
-	}
-	return ret
 }
 
 func newTestEtcdKV() (kv.WatchKV, error) {
@@ -546,7 +504,6 @@ func NewDataFactory() *DataFactory {
 
 func GenRowData() (rawData []byte) {
 	const DIM = 2
-	const N = 1
 
 	// Float vector
 	var fvector = [DIM]float32{1, 2}
@@ -904,7 +861,7 @@ func (df *DataFactory) GenMsgStreamDeleteMsg(pks []primaryKey, chanName string) 
 			PartitionName:  "default",
 			PartitionID:    1,
 			ShardName:      chanName,
-			PrimaryKeys:    s.ParsePrimaryKeys2IDs(pks),
+			PrimaryKeys:    storage.ParsePrimaryKeys2IDs(pks),
 			Timestamps:     timestamps,
 			NumRows:        int64(len(pks)),
 		},
@@ -931,7 +888,7 @@ func (df *DataFactory) GenMsgStreamDeleteMsgWithTs(idx int, pks []primaryKey, ch
 			PartitionID:    1,
 			CollectionID:   UniqueID(0),
 			ShardName:      chanName,
-			PrimaryKeys:    s.ParsePrimaryKeys2IDs(pks),
+			PrimaryKeys:    storage.ParsePrimaryKeys2IDs(pks),
 			Timestamps:     []Timestamp{ts},
 			NumRows:        int64(len(pks)),
 		},
@@ -997,12 +954,6 @@ func genFlowGraphDeleteMsg(pks []primaryKey, chanName string) flowGraphMsg {
 	fgMsg.deleteMessages = append(fgMsg.deleteMessages, dataFactory.GenMsgStreamDeleteMsg(pks, chanName))
 
 	return *fgMsg
-}
-
-// If id == 0, AllocID will return not successful status
-// If id == -1, AllocID will return err
-func (m *RootCoordFactory) setID(id UniqueID) {
-	m.ID = id // GOOSE TODO: random ID generator
 }
 
 func (m *RootCoordFactory) setCollectionID(id UniqueID) {
@@ -1169,13 +1120,13 @@ func genInsertDataWithPKs(PKs [2]primaryKey, dataType schemapb.DataType) *Insert
 		for index, pk := range PKs {
 			values[index] = pk.(*int64PrimaryKey).Value
 		}
-		iD.Data[106].(*s.Int64FieldData).Data = values
+		iD.Data[106].(*storage.Int64FieldData).Data = values
 	case schemapb.DataType_VarChar:
 		values := make([]string, len(PKs))
 		for index, pk := range PKs {
 			values[index] = pk.(*varCharPrimaryKey).Value
 		}
-		iD.Data[109].(*s.StringFieldData).Data = values
+		iD.Data[109].(*storage.StringFieldData).Data = values
 	default:
 		//TODO::
 	}
@@ -1195,43 +1146,43 @@ func genTestStat(meta *etcdpb.CollectionMeta) *storage.PrimaryKeyStats {
 
 func genInsertData() *InsertData {
 	return &InsertData{
-		Data: map[int64]s.FieldData{
-			0: &s.Int64FieldData{
+		Data: map[int64]storage.FieldData{
+			0: &storage.Int64FieldData{
 				Data: []int64{1, 2},
 			},
-			1: &s.Int64FieldData{
+			1: &storage.Int64FieldData{
 				Data: []int64{3, 4},
 			},
-			100: &s.FloatVectorFieldData{
+			100: &storage.FloatVectorFieldData{
 				Data: []float32{1.0, 6.0, 7.0, 8.0},
 				Dim:  2,
 			},
-			101: &s.BinaryVectorFieldData{
+			101: &storage.BinaryVectorFieldData{
 				Data: []byte{0, 255, 255, 255, 128, 128, 128, 0},
 				Dim:  32,
 			},
-			102: &s.BoolFieldData{
+			102: &storage.BoolFieldData{
 				Data: []bool{true, false},
 			},
-			103: &s.Int8FieldData{
+			103: &storage.Int8FieldData{
 				Data: []int8{5, 6},
 			},
-			104: &s.Int16FieldData{
+			104: &storage.Int16FieldData{
 				Data: []int16{7, 8},
 			},
-			105: &s.Int32FieldData{
+			105: &storage.Int32FieldData{
 				Data: []int32{9, 10},
 			},
-			106: &s.Int64FieldData{
+			106: &storage.Int64FieldData{
 				Data: []int64{1, 2},
 			},
-			107: &s.FloatFieldData{
+			107: &storage.FloatFieldData{
 				Data: []float32{2.333, 2.334},
 			},
-			108: &s.DoubleFieldData{
+			108: &storage.DoubleFieldData{
 				Data: []float64{3.333, 3.334},
 			},
-			109: &s.StringFieldData{
+			109: &storage.StringFieldData{
 				Data: []string{"test1", "test2"},
 			},
 		}}
@@ -1239,43 +1190,43 @@ func genInsertData() *InsertData {
 
 func genEmptyInsertData() *InsertData {
 	return &InsertData{
-		Data: map[int64]s.FieldData{
-			0: &s.Int64FieldData{
+		Data: map[int64]storage.FieldData{
+			0: &storage.Int64FieldData{
 				Data: []int64{},
 			},
-			1: &s.Int64FieldData{
+			1: &storage.Int64FieldData{
 				Data: []int64{},
 			},
-			100: &s.FloatVectorFieldData{
+			100: &storage.FloatVectorFieldData{
 				Data: []float32{},
 				Dim:  2,
 			},
-			101: &s.BinaryVectorFieldData{
+			101: &storage.BinaryVectorFieldData{
 				Data: []byte{},
 				Dim:  32,
 			},
-			102: &s.BoolFieldData{
+			102: &storage.BoolFieldData{
 				Data: []bool{},
 			},
-			103: &s.Int8FieldData{
+			103: &storage.Int8FieldData{
 				Data: []int8{},
 			},
-			104: &s.Int16FieldData{
+			104: &storage.Int16FieldData{
 				Data: []int16{},
 			},
-			105: &s.Int32FieldData{
+			105: &storage.Int32FieldData{
 				Data: []int32{},
 			},
-			106: &s.Int64FieldData{
+			106: &storage.Int64FieldData{
 				Data: []int64{},
 			},
-			107: &s.FloatFieldData{
+			107: &storage.FloatFieldData{
 				Data: []float32{},
 			},
-			108: &s.DoubleFieldData{
+			108: &storage.DoubleFieldData{
 				Data: []float64{},
 			},
-			109: &s.StringFieldData{
+			109: &storage.StringFieldData{
 				Data: []string{},
 			},
 		}}
@@ -1283,43 +1234,43 @@ func genEmptyInsertData() *InsertData {
 
 func genInsertDataWithExpiredTS() *InsertData {
 	return &InsertData{
-		Data: map[int64]s.FieldData{
-			0: &s.Int64FieldData{
+		Data: map[int64]storage.FieldData{
+			0: &storage.Int64FieldData{
 				Data: []int64{11, 22},
 			},
-			1: &s.Int64FieldData{
+			1: &storage.Int64FieldData{
 				Data: []int64{329749364736000000, 329500223078400000}, // 2009-11-10 23:00:00 +0000 UTC, 2009-10-31 23:00:00 +0000 UTC
 			},
-			100: &s.FloatVectorFieldData{
+			100: &storage.FloatVectorFieldData{
 				Data: []float32{1.0, 6.0, 7.0, 8.0},
 				Dim:  2,
 			},
-			101: &s.BinaryVectorFieldData{
+			101: &storage.BinaryVectorFieldData{
 				Data: []byte{0, 255, 255, 255, 128, 128, 128, 0},
 				Dim:  32,
 			},
-			102: &s.BoolFieldData{
+			102: &storage.BoolFieldData{
 				Data: []bool{true, false},
 			},
-			103: &s.Int8FieldData{
+			103: &storage.Int8FieldData{
 				Data: []int8{5, 6},
 			},
-			104: &s.Int16FieldData{
+			104: &storage.Int16FieldData{
 				Data: []int16{7, 8},
 			},
-			105: &s.Int32FieldData{
+			105: &storage.Int32FieldData{
 				Data: []int32{9, 10},
 			},
-			106: &s.Int64FieldData{
+			106: &storage.Int64FieldData{
 				Data: []int64{1, 2},
 			},
-			107: &s.FloatFieldData{
+			107: &storage.FloatFieldData{
 				Data: []float32{2.333, 2.334},
 			},
-			108: &s.DoubleFieldData{
+			108: &storage.DoubleFieldData{
 				Data: []float64{3.333, 3.334},
 			},
-			109: &s.StringFieldData{
+			109: &storage.StringFieldData{
 				Data: []string{"test1", "test2"},
 			},
 		}}
