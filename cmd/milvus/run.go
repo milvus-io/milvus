@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/cmd/roles"
+	. "github.com/milvus-io/milvus/cmd/utils"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -98,17 +99,16 @@ func (c *run) execute(args []string, flags *flag.FlagSet) {
 		os.Exit(-1)
 	}
 
-	runtimeDir := createRuntimeDir(c.serverType)
-	filename := getPidFileName(c.serverType, c.svrAlias)
-
 	c.printBanner(flags.Output())
 	c.injectVariablesToEnv()
-	lock, err := createPidFile(flags.Output(), filename, runtimeDir)
+	InitRuntimeDir(flags.Output(), c.serverType)
+	filename := GetPidFileName(c.serverType, c.svrAlias)
+	lock, err := CreateFileWithContent(GlobalRuntimeDir.GetOperationLogger(), GlobalRuntimeDir.GetDir(), filename, fmt.Sprintf("%d", os.Getgid()))
 	if err != nil {
 		panic(err)
 	}
-	defer removePidFile(lock)
-	role.Run(c.svrAlias)
+	defer RemoveFile(lock)
+	role.Run(c.serverType, c.svrAlias)
 }
 
 func (c *run) formatFlags(args []string, flags *flag.FlagSet) {

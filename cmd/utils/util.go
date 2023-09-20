@@ -1,4 +1,4 @@
-package milvus
+package utils
 
 import (
 	"fmt"
@@ -12,6 +12,41 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
+
+type RuntimeDir interface {
+	GetDir() string
+	GetOperationLogger() io.Writer
+}
+
+type RuntimeDirImpl struct {
+	// runtime dir for pid file and sid file
+	dir string
+
+	// logger for pid/sid file operation
+	outputWriter io.Writer
+}
+
+func (r *RuntimeDirImpl) GetDir() string {
+	return r.dir
+}
+
+func (r *RuntimeDirImpl) GetOperationLogger() io.Writer {
+	return r.outputWriter
+}
+
+var GlobalRuntimeDir RuntimeDir
+
+// InitRuntimeDir create the runtime dir
+func InitRuntimeDir(writer io.Writer, sType string) {
+	if GlobalRuntimeDir != nil {
+		return
+	}
+
+	GlobalRuntimeDir = &RuntimeDirImpl{
+		dir:          createRuntimeDir(sType),
+		outputWriter: writer,
+	}
+}
 
 func makeRuntimeDir(dir string) error {
 	perm := os.FileMode(0o755)
@@ -60,19 +95,39 @@ func createRuntimeDir(sType string) string {
 	return runtimeDir
 }
 
-func createPidFile(w io.Writer, filename string, runtimeDir string) (*flock.Flock, error) {
-	fileFullName := path.Join(runtimeDir, filename)
+func GetPidFileName(serverType string, alias string) string {
+	var filename string
+	if len(alias) != 0 {
+		filename = fmt.Sprintf("%s-%s.pid", serverType, alias)
+	} else {
+		filename = serverType + ".pid"
+	}
+	return filename
+}
+
+func CloseFile(fd *os.File) {
+	fd.Close()
+}
+
+func RemoveFile(lock *flock.Flock) {
+	filename := lock.Path()
+	lock.Close()
+	os.Remove(filename)
+}
+
+func CreateFileWithContent(outputWriter io.Writer, dir string, filename string, content string) (*flock.Flock, error) {
+	fileFullName := path.Join(dir, filename)
 
 	fd, err := os.OpenFile(fileFullName, os.O_CREATE|os.O_RDWR, 0o664)
 	if err != nil {
 		return nil, fmt.Errorf("file %s is locked, error = %w", filename, err)
 	}
-	fmt.Fprintln(w, "open pid file:", fileFullName)
+	fmt.Fprintln(outputWriter, "open file:", fileFullName)
 
 	defer fd.Close()
 
 	fd.Truncate(0)
-	_, err = fd.WriteString(fmt.Sprintf("%d", os.Getpid()))
+	_, err = fd.WriteString(content)
 	if err != nil {
 		return nil, fmt.Errorf("file %s write fail, error = %w", filename, err)
 	}
@@ -83,26 +138,21 @@ func createPidFile(w io.Writer, filename string, runtimeDir string) (*flock.Floc
 		return nil, fmt.Errorf("file %s is locked, error = %w", filename, err)
 	}
 
-	fmt.Fprintln(w, "lock pid file:", fileFullName)
+	fmt.Fprintln(outputWriter, "lock file:", fileFullName)
 	return lock, nil
 }
 
-func getPidFileName(serverType string, alias string) string {
+func GetServerIDFileName(serverType string, alias string) string {
 	var filename string
 	if len(alias) != 0 {
-		filename = fmt.Sprintf("%s-%s.pid", serverType, alias)
+		filename = fmt.Sprintf("%s-%s.sid", serverType, alias)
 	} else {
-		filename = serverType + ".pid"
+		filename = serverType + ".sid"
 	}
 	return filename
 }
 
-func closePidFile(fd *os.File) {
-	fd.Close()
-}
-
-func removePidFile(lock *flock.Flock) {
-	filename := lock.Path()
-	lock.Close()
-	os.Remove(filename)
+func OpenFile(dir string, filename string) (*os.File, error) {
+	filepath := path.Join(dir, filename)
+	return os.OpenFile(filepath, os.O_RDONLY, 0o664)
 }

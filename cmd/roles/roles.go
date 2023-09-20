@@ -32,6 +32,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/cmd/components"
+	. "github.com/milvus-io/milvus/cmd/utils"
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/http/healthz"
 	rocksmqimpl "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
@@ -293,7 +294,7 @@ func (mr *MilvusRoles) handleSignals() func() {
 }
 
 // Run Milvus components.
-func (mr *MilvusRoles) Run(alias string) {
+func (mr *MilvusRoles) Run(sType string, alias string) {
 	// start signal handler, defer close func
 	closeFn := mr.handleSignals()
 	defer closeFn()
@@ -382,6 +383,13 @@ func (mr *MilvusRoles) Run(alias string) {
 
 	paramtable.SetCreateTime(time.Now())
 	paramtable.SetUpdateTime(time.Now())
+
+	filename := GetServerIDFileName(sType, alias)
+	lock, err := CreateFileWithContent(GlobalRuntimeDir.GetOperationLogger(), GlobalRuntimeDir.GetDir(), filename, fmt.Sprintf("%d", paramtable.GetNodeID()))
+	if err != nil {
+		panic(err)
+	}
+	defer RemoveFile(lock)
 
 	<-mr.closed
 

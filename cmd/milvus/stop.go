@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path"
 	"syscall"
 
+	. "github.com/milvus-io/milvus/cmd/utils"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -40,9 +40,9 @@ func (c *stop) execute(args []string, flags *flag.FlagSet) {
 	}
 	c.formatFlags(args, flags)
 
-	runtimeDir := createRuntimeDir(c.serverType)
-	filename := getPidFileName(c.serverType, c.svrAlias)
-	if err := c.stopPid(filename, runtimeDir); err != nil {
+	InitRuntimeDir(flags.Output(), c.serverType)
+	filename := GetPidFileName(c.serverType, c.svrAlias)
+	if err := c.stopPid(GlobalRuntimeDir.GetDir(), filename); err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n\n", err.Error())
 	}
 }
@@ -58,14 +58,14 @@ func (c *stop) formatFlags(args []string, flags *flag.FlagSet) {
 	}
 }
 
-func (c *stop) stopPid(filename string, runtimeDir string) error {
+func (c *stop) stopPid(dir string, filename string) error {
 	var pid int
 
-	fd, err := os.OpenFile(path.Join(runtimeDir, filename), os.O_RDONLY, 0o664)
+	fd, err := OpenFile(dir, filename)
 	if err != nil {
 		return err
 	}
-	defer closePidFile(fd)
+	defer CloseFile(fd)
 
 	if _, err = fmt.Fscanf(fd, "%d", &pid); err != nil {
 		return err
