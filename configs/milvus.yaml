@@ -123,6 +123,7 @@ pulsar:
 #   saslPassword:
 #   saslMechanisms: PLAIN
 #   securityProtocol: SASL_SSL
+#   readTimeout: 10 # read message timeout in seconds
 
 rocksmq:
   # The path where the message is stored in rocksmq
