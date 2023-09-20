@@ -99,6 +99,9 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 	ts, err := s.allocator.allocTimestamp(ctx)
 	if err != nil {
 		log.Warn("unable to alloc timestamp", zap.Error(err))
+		return &datapb.FlushResponse{
+			Status: merr.Status(err),
+		}, nil
 	}
 	timeOfSeal, _ := tsoutil.ParseTS(ts)
 
