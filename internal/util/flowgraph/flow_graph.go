@@ -18,6 +18,7 @@ package flowgraph
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/cockroachdb/errors"
@@ -124,4 +125,22 @@ func NewTimeTickedFlowGraph(ctx context.Context) *TimeTickedFlowGraph {
 	}
 
 	return &flowGraph
+}
+
+func (fg *TimeTickedFlowGraph) AssembleNodes(orderedNodes ...Node) error {
+	for _, node := range orderedNodes {
+		fg.AddNode(node)
+	}
+
+	for i, node := range orderedNodes {
+		// Set edge to the next node
+		if i < len(orderedNodes)-1 {
+			err := fg.SetEdges(node.Name(), []string{orderedNodes[i+1].Name()})
+			if err != nil {
+				errMsg := fmt.Sprintf("set edges failed for flow graph, node=%s", node.Name())
+				return errors.New(errMsg)
+			}
+		}
+	}
+	return nil
 }

@@ -75,8 +75,7 @@ var Params *paramtable.ComponentParam = paramtable.Get()
 //	`etcdCli`   is a connection of etcd
 //	`rootCoord` is a grpc client of root coordinator.
 //	`dataCoord` is a grpc client of data service.
-//	`NodeID` is unique to each datanode.
-//	`State` is current statement of this data node, indicating whether it's healthy.
+//	`stateCode` is current statement of this data node, indicating whether it's healthy.
 //
 //	`clearSignal` is a signal channel for releasing the flowgraph resources.
 //	`segmentCache` stores all flushing and flushed segments.

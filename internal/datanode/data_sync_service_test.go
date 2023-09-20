@@ -41,17 +41,21 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 var dataSyncServiceTestDir = "/tmp/milvus_test/data_sync_service"
 
 func init() {
 	paramtable.Init()
+}
+
+func getWatchInfo(info *testInfo) *datapb.ChannelWatchInfo {
+	return &datapb.ChannelWatchInfo{
+		Vchan: getVchanInfo(info),
+	}
 }
 
 func getVchanInfo(info *testInfo) *datapb.VchannelInfo {
@@ -99,7 +103,7 @@ func getVchanInfo(info *testInfo) *datapb.VchannelInfo {
 type testInfo struct {
 	isValidCase  bool
 	channelNil   bool
-	inMsgFactory msgstream.Factory
+	inMsgFactory dependency.Factory
 
 	collID   UniqueID
 	chanName string
@@ -117,30 +121,16 @@ type testInfo struct {
 	description string
 }
 
-func TestDataSyncService_newDataSyncService(t *testing.T) {
+func TestDataSyncService_getDataSyncService(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []*testInfo{
 		{
 			true, false, &mockMsgStreamFactory{false, true},
-			0, "by-dev-rootcoord-dml-test_v0",
-			0, 0, "", 0,
-			0, 0, "", 0,
-			"SetParamsReturnError",
-		},
-		{
-			true, false, &mockMsgStreamFactory{true, true},
-			0, "by-dev-rootcoord-dml-test_v0",
+			1, "by-dev-rootcoord-dml-test_v0",
 			1, 0, "", 0,
-			1, 1, "", 0,
-			"CollID 0 mismach with seginfo collID 1",
-		},
-		{
-			true, false, &mockMsgStreamFactory{true, true},
-			1, "by-dev-rootcoord-dml-test_v1",
-			1, 0, "by-dev-rootcoord-dml-test_v2", 0,
-			1, 1, "by-dev-rootcoord-dml-test_v3", 0,
-			"chanName c1 mismach with seginfo chanName c2",
+			1, 0, "", 0,
+			"SetParamsReturnError",
 		},
 		{
 			true, false, &mockMsgStreamFactory{true, true},
@@ -160,34 +150,16 @@ func TestDataSyncService_newDataSyncService(t *testing.T) {
 	cm := storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
+	node := newIDLEDataNodeMock(ctx, schemapb.DataType_Int64)
+
 	for _, test := range tests {
 		t.Run(test.description, func(t *testing.T) {
-			df := &DataCoordFactory{}
-			rc := &RootCoordFactory{pkType: schemapb.DataType_Int64}
-
-			channel := newChannel("channel", test.collID, nil, rc, cm)
-			if test.channelNil {
-				channel = nil
-			}
-			dispClient := msgdispatcher.NewClient(test.inMsgFactory, typeutil.DataNodeRole, paramtable.GetNodeID())
-
-			ds, err := newDataSyncService(ctx,
+			node.factory = test.inMsgFactory
+			ds, err := newServiceWithEtcdTickler(
 				ctx,
-				make(chan flushMsg),
-				make(chan resendTTMsg),
-				channel,
-				allocator.NewMockAllocator(t),
-				dispClient,
-				test.inMsgFactory,
-				getVchanInfo(test),
-				make(chan string),
-				df,
-				newCache(),
-				cm,
-				newCompactionExecutor(),
+				node,
+				getWatchInfo(test),
 				genTestTickler(),
-				0,
-				nil,
 			)
 
 			if !test.isValidCase {
@@ -208,34 +180,31 @@ func TestDataSyncService_newDataSyncService(t *testing.T) {
 // NOTE: start pulsar before test
 func TestDataSyncService_Start(t *testing.T) {
 	const ctxTimeInMillisecond = 10000
+	os.RemoveAll("/tmp/milvus")
+	defer os.RemoveAll("/tmp/milvus")
 
 	delay := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
 	ctx, cancel := context.WithDeadline(context.Background(), delay)
 	defer cancel()
 
-	// init data node
-	insertChannelName := fmt.Sprintf("by-dev-rootcoord-dml-%d", rand.Int())
-
-	Factory := &MetaFactory{}
-	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1", schemapb.DataType_Int64)
-	mockRootCoord := &RootCoordFactory{
-		pkType: schemapb.DataType_Int64,
-	}
-
-	flushChan := make(chan flushMsg, 100)
-	resendTTChan := make(chan resendTTMsg, 100)
-	cm := storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
-	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
-	channel := newChannel(insertChannelName, collMeta.ID, collMeta.GetSchema(), mockRootCoord, cm)
+	node := newIDLEDataNodeMock(context.Background(), schemapb.DataType_Int64)
+	node.chunkManager = storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
+	defer node.chunkManager.RemoveWithPrefix(ctx, node.chunkManager.RootPath())
 
 	alloc := allocator.NewMockAllocator(t)
 	alloc.EXPECT().Alloc(mock.Anything).Call.Return(int64(22222),
 		func(count uint32) int64 {
 			return int64(22222 + count)
 		}, nil)
-	factory := dependency.NewDefaultFactory(true)
-	dispClient := msgdispatcher.NewClient(factory, typeutil.DataNodeRole, paramtable.GetNodeID())
-	defer os.RemoveAll("/tmp/milvus")
+	node.allocator = alloc
+
+	var (
+		insertChannelName = fmt.Sprintf("by-dev-rootcoord-dml-%d", rand.Int())
+
+		Factory  = &MetaFactory{}
+		collMeta = Factory.GetCollectionMeta(UniqueID(0), "coll1", schemapb.DataType_Int64)
+	)
+
 	paramtable.Get().Save(Params.DataNodeCfg.FlushInsertBufferSize.Key, "1")
 
 	ufs := []*datapb.SegmentInfo{{
@@ -262,17 +231,18 @@ func TestDataSyncService_Start(t *testing.T) {
 	for _, segmentInfo := range fs {
 		fsIds = append(fsIds, segmentInfo.ID)
 	}
-	vchan := &datapb.VchannelInfo{
-		CollectionID:        collMeta.ID,
-		ChannelName:         insertChannelName,
-		UnflushedSegmentIds: ufsIds,
-		FlushedSegmentIds:   fsIds,
+
+	watchInfo := &datapb.ChannelWatchInfo{
+		Schema: collMeta.GetSchema(),
+		Vchan: &datapb.VchannelInfo{
+			CollectionID:        collMeta.ID,
+			ChannelName:         insertChannelName,
+			UnflushedSegmentIds: ufsIds,
+			FlushedSegmentIds:   fsIds,
+		},
 	}
 
-	signalCh := make(chan string, 100)
-
-	dataCoord := &DataCoordFactory{}
-	dataCoord.UserSegmentInfo = map[int64]*datapb.SegmentInfo{
+	node.dataCoord.(*DataCoordFactory).UserSegmentInfo = map[int64]*datapb.SegmentInfo{
 		0: {
 			ID:            0,
 			CollectionID:  collMeta.ID,
@@ -288,9 +258,14 @@ func TestDataSyncService_Start(t *testing.T) {
 		},
 	}
 
-	atimeTickSender := newTimeTickSender(dataCoord, 0)
-	sync, err := newDataSyncService(ctx, ctx, flushChan, resendTTChan, channel, alloc, dispClient, factory, vchan, signalCh, dataCoord, newCache(), cm, newCompactionExecutor(), genTestTickler(), 0, atimeTickSender)
-	assert.Nil(t, err)
+	sync, err := newServiceWithEtcdTickler(
+		ctx,
+		node,
+		watchInfo,
+		genTestTickler(),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, sync)
 
 	sync.flushListener = make(chan *segmentFlushPack)
 	defer close(sync.flushListener)
@@ -338,7 +313,7 @@ func TestDataSyncService_Start(t *testing.T) {
 
 	// pulsar produce
 	assert.NoError(t, err)
-	insertStream, _ := factory.NewMsgStream(ctx)
+	insertStream, _ := node.factory.NewMsgStream(ctx)
 	insertStream.AsProducer([]string{insertChannelName})
 
 	var insertMsgStream msgstream.MsgStream = insertStream
@@ -372,13 +347,12 @@ func TestDataSyncService_Close(t *testing.T) {
 	var (
 		insertChannelName = "by-dev-rootcoord-dml2"
 
-		metaFactory   = &MetaFactory{}
-		mockRootCoord = &RootCoordFactory{pkType: schemapb.DataType_Int64}
-
-		collMeta = metaFactory.GetCollectionMeta(UniqueID(0), "coll1", schemapb.DataType_Int64)
-		cm       = storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
+		metaFactory = &MetaFactory{}
+		collMeta    = metaFactory.GetCollectionMeta(UniqueID(0), "coll1", schemapb.DataType_Int64)
+		node        = newIDLEDataNodeMock(context.Background(), schemapb.DataType_Int64)
 	)
-	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
+	node.chunkManager = storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
+	defer node.chunkManager.RemoveWithPrefix(ctx, node.chunkManager.RootPath())
 
 	ufs := []*datapb.SegmentInfo{{
 		CollectionID:  collMeta.ID,
@@ -404,29 +378,25 @@ func TestDataSyncService_Close(t *testing.T) {
 	for _, segmentInfo := range fs {
 		fsIds = append(fsIds, segmentInfo.ID)
 	}
-	vchan := &datapb.VchannelInfo{
-		CollectionID:        collMeta.ID,
-		ChannelName:         insertChannelName,
-		UnflushedSegmentIds: ufsIds,
-		FlushedSegmentIds:   fsIds,
+	watchInfo := &datapb.ChannelWatchInfo{
+		Schema: collMeta.GetSchema(),
+		Vchan: &datapb.VchannelInfo{
+			CollectionID:        collMeta.ID,
+			ChannelName:         insertChannelName,
+			UnflushedSegmentIds: ufsIds,
+			FlushedSegmentIds:   fsIds,
+		},
 	}
+
 	alloc := allocator.NewMockAllocator(t)
 	alloc.EXPECT().AllocOne().Call.Return(int64(11111), nil)
 	alloc.EXPECT().Alloc(mock.Anything).Call.Return(int64(22222),
 		func(count uint32) int64 {
 			return int64(22222 + count)
 		}, nil)
+	node.allocator = alloc
 
-	var (
-		flushChan    = make(chan flushMsg, 100)
-		resendTTChan = make(chan resendTTMsg, 100)
-		signalCh     = make(chan string, 100)
-
-		factory       = dependency.NewDefaultFactory(true)
-		dispClient    = msgdispatcher.NewClient(factory, typeutil.DataNodeRole, paramtable.GetNodeID())
-		mockDataCoord = &DataCoordFactory{}
-	)
-	mockDataCoord.UserSegmentInfo = map[int64]*datapb.SegmentInfo{
+	node.dataCoord.(*DataCoordFactory).UserSegmentInfo = map[int64]*datapb.SegmentInfo{
 		0: {
 			ID:            0,
 			CollectionID:  collMeta.ID,
@@ -445,13 +415,17 @@ func TestDataSyncService_Close(t *testing.T) {
 	// No Auto flush
 	paramtable.Get().Reset(Params.DataNodeCfg.FlushInsertBufferSize.Key)
 
-	channel := newChannel(insertChannelName, collMeta.ID, collMeta.GetSchema(), mockRootCoord, cm)
-	channel.syncPolicies = []segmentSyncPolicy{
+	syncService, err := newServiceWithEtcdTickler(
+		context.Background(),
+		node,
+		watchInfo,
+		genTestTickler(),
+	)
+	assert.NoError(t, err)
+	assert.NotNil(t, syncService)
+	syncService.channel.(*ChannelMeta).syncPolicies = []segmentSyncPolicy{
 		syncMemoryTooHigh(),
 	}
-	atimeTickSender := newTimeTickSender(mockDataCoord, 0)
-	syncService, err := newDataSyncService(ctx, ctx, flushChan, resendTTChan, channel, alloc, dispClient, factory, vchan, signalCh, mockDataCoord, newCache(), cm, newCompactionExecutor(), genTestTickler(), 0, atimeTickSender)
-	assert.NoError(t, err)
 
 	syncService.flushListener = make(chan *segmentFlushPack, 10)
 	defer close(syncService.flushListener)
@@ -524,7 +498,7 @@ func TestDataSyncService_Close(t *testing.T) {
 
 	// pulsar produce
 	assert.NoError(t, err)
-	insertStream, _ := factory.NewMsgStream(ctx)
+	insertStream, _ := node.factory.NewMsgStream(ctx)
 	insertStream.AsProducer([]string{insertChannelName})
 
 	var insertMsgStream msgstream.MsgStream = insertStream
@@ -628,22 +602,19 @@ func TestBytesReader(t *testing.T) {
 
 func TestGetSegmentInfos(t *testing.T) {
 	dataCoord := &DataCoordFactory{}
-	dsService := &dataSyncService{
-		dataCoord: dataCoord,
-	}
 	ctx := context.Background()
-	segmentInfos, err := dsService.getSegmentInfos(ctx, []int64{1})
+	segmentInfos, err := getSegmentInfos(ctx, dataCoord, []int64{1})
 	assert.NoError(t, err)
 	assert.Equal(t, 1, len(segmentInfos))
 
 	dataCoord.GetSegmentInfosError = true
-	segmentInfos2, err := dsService.getSegmentInfos(ctx, []int64{1})
+	segmentInfos2, err := getSegmentInfos(ctx, dataCoord, []int64{1})
 	assert.Error(t, err)
 	assert.Empty(t, segmentInfos2)
 
 	dataCoord.GetSegmentInfosError = false
 	dataCoord.GetSegmentInfosNotSuccess = true
-	segmentInfos3, err := dsService.getSegmentInfos(ctx, []int64{1})
+	segmentInfos3, err := getSegmentInfos(ctx, dataCoord, []int64{1})
 	assert.Error(t, err)
 	assert.Empty(t, segmentInfos3)
 
@@ -658,7 +629,7 @@ func TestGetSegmentInfos(t *testing.T) {
 		},
 	}
 
-	segmentInfos, err = dsService.getSegmentInfos(ctx, []int64{5})
+	segmentInfos, err = getSegmentInfos(ctx, dataCoord, []int64{5})
 	assert.NoError(t, err)
 	assert.Equal(t, 1, len(segmentInfos))
 	assert.Equal(t, int64(100), segmentInfos[0].ID)
@@ -734,19 +705,13 @@ func TestGetChannelLatestMsgID(t *testing.T) {
 	delay := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
 	ctx, cancel := context.WithDeadline(context.Background(), delay)
 	defer cancel()
-	factory := dependency.NewDefaultFactory(true)
-
-	dataCoord := &DataCoordFactory{}
-	dsService := &dataSyncService{
-		dataCoord: dataCoord,
-		msFactory: factory,
-	}
+	node := newIDLEDataNodeMock(ctx, schemapb.DataType_Int64)
 
 	dmlChannelName := "fake-by-dev-rootcoord-dml-channel_12345v0"
 
-	insertStream, _ := factory.NewMsgStream(ctx)
+	insertStream, _ := node.factory.NewMsgStream(ctx)
 	insertStream.AsProducer([]string{dmlChannelName})
-	id, err := dsService.getChannelLatestMsgID(ctx, dmlChannelName, 0)
+	id, err := node.getChannelLatestMsgID(ctx, dmlChannelName, 0)
 	assert.NoError(t, err)
 	assert.NotNil(t, id)
 }

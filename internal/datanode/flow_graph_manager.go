@@ -115,14 +115,14 @@ func (fm *flowgraphManager) execute(totalMemory uint64) {
 	}
 }
 
-func (fm *flowgraphManager) addAndStart(dn *DataNode, vchan *datapb.VchannelInfo, schema *schemapb.CollectionSchema, tickler *tickler) error {
+func (fm *flowgraphManager) addAndStartWithEtcdTickler(dn *DataNode, vchan *datapb.VchannelInfo, schema *schemapb.CollectionSchema, tickler *etcdTickler) error {
 	log := log.With(zap.String("channel", vchan.GetChannelName()))
 	if fm.flowgraphs.Contain(vchan.GetChannelName()) {
 		log.Warn("try to add an existed DataSyncService")
 		return nil
 	}
 
-	dataSyncService, err := getDataSyncService(context.TODO(), dn, &datapb.ChannelWatchInfo{
+	dataSyncService, err := newServiceWithEtcdTickler(context.TODO(), dn, &datapb.ChannelWatchInfo{
 		Schema: schema,
 		Vchan:  vchan,
 	}, tickler)
@@ -239,46 +239,4 @@ func (fm *flowgraphManager) collections() []int64 {
 	})
 
 	return collectionSet.Collect()
-}
-
-// getDataSyncService gets and init the dataSyncService
-// initCtx is used to init the dataSyncService only, if initCtx.Canceled or initCtx.Timeout
-// getDataSyncService stops and returns the initCtx.Err()
-func getDataSyncService(initCtx context.Context, node *DataNode, info *datapb.ChannelWatchInfo, tickler *tickler) (*dataSyncService, error) {
-	channelName := info.GetVchan().GetChannelName()
-	log := log.With(zap.String("channel", channelName))
-
-	channel := newChannel(
-		info.GetVchan().GetChannelName(),
-		info.GetVchan().GetCollectionID(),
-		info.GetSchema(),
-		node.rootCoord,
-		node.chunkManager,
-	)
-
-	dataSyncService, err := newDataSyncService(
-		node.ctx,
-		initCtx,
-		make(chan flushMsg, 100),
-		make(chan resendTTMsg, 100),
-		channel,
-		node.allocator,
-		node.dispClient,
-		node.factory,
-		info.GetVchan(),
-		node.clearSignal,
-		node.dataCoord,
-		node.segmentCache,
-		node.chunkManager,
-		node.compactionExecutor,
-		tickler,
-		node.GetSession().ServerID,
-		node.timeTickSender,
-	)
-	if err != nil {
-		log.Warn("fail to create new datasyncservice", zap.Error(err))
-		return nil, err
-	}
-
-	return dataSyncService, nil
 }

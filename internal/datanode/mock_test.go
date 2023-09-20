@@ -92,6 +92,7 @@ func newIDLEDataNodeMock(ctx context.Context, pkType schemapb.DataType) *DataNod
 
 	ds := &DataCoordFactory{}
 	node.dataCoord = ds
+	node.timeTickSender = newTimeTickSender(node.dataCoord, 0)
 
 	return node
 }
@@ -312,7 +313,8 @@ func (ds *DataCoordFactory) GetSegmentInfo(ctx context.Context, req *datapb.GetS
 			segmentInfos = append(segmentInfos, segInfo)
 		} else {
 			segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
-				ID: segmentID,
+				ID:           segmentID,
+				CollectionID: 1,
 			})
 		}
 	}
@@ -1257,6 +1259,6 @@ func genTimestamp() typeutil.Timestamp {
 	return tsoutil.ComposeTSByTime(gb, 0)
 }
 
-func genTestTickler() *tickler {
-	return newTickler(0, "", nil, nil, 0)
+func genTestTickler() *etcdTickler {
+	return newEtcdTickler(0, "", nil, nil, 0)
 }
