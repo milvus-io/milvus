@@ -90,7 +90,7 @@ func TestClusterInterceptor(t *testing.T) {
 		md := metadata.Pairs(ClusterKey, "ins-1")
 		ctx = metadata.NewIncomingContext(context.Background(), md)
 		_, err = interceptor(ctx, req, serverInfo, handler)
-		assert.ErrorIs(t, err, merr.ErrCrossClusterRouting)
+		assert.ErrorIs(t, err, merr.ErrServiceCrossClusterRouting)
 
 		// with same cluster
 		md = metadata.Pairs(ClusterKey, paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
@@ -118,7 +118,7 @@ func TestClusterInterceptor(t *testing.T) {
 		md := metadata.Pairs(ClusterKey, "ins-1")
 		ctx = metadata.NewIncomingContext(context.Background(), md)
 		err = interceptor(nil, newMockSS(ctx), nil, handler)
-		assert.ErrorIs(t, err, merr.ErrCrossClusterRouting)
+		assert.ErrorIs(t, err, merr.ErrServiceCrossClusterRouting)
 
 		// with same cluster
 		md = metadata.Pairs(ClusterKey, paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
