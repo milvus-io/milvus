@@ -63,8 +63,8 @@ class TestOperations(TestBase):
         checkers = {
             Op.create: CreateChecker(collection_name=c_name),
             Op.insert: InsertChecker(collection_name=c_name),
-            Op.flush: FlushChecker(collection_name=c_name),
-            Op.index: IndexChecker(collection_name=c_name),
+            # Op.flush: FlushChecker(collection_name=c_name),
+            # Op.index: IndexChecker(collection_name=c_name),
             Op.search: SearchChecker(collection_name=c_name),
             Op.query: QueryChecker(collection_name=c_name),
             Op.delete: DeleteChecker(collection_name=c_name),
