@@ -39,6 +39,12 @@ INSTALL_MOCKERY := $(findstring $(MOCKERY_VERSION),$(MOCKERY_OUTPUT))
 
 export GIT_BRANCH=master
 
+ENABLE_AZURE = false
+AZURE_OPTION := ""
+ifeq (${ENABLE_AZURE}, false)
+	AZURE_OPTION := -Z
+endif
+
 milvus: build-cpp print-build-info
 	@echo "Building Milvus ..."
 	@source $(PWD)/scripts/setenv.sh && \
@@ -168,20 +174,20 @@ generated-proto: download-milvus-proto build-3rdparty
 	@(env bash $(PWD)/scripts/generate_proto.sh)
 
 build-cpp: generated-proto
-	@echo "Building Milvus cpp library ..."
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index} -y ${use_dynamic_simd})
+	@echo "Building Milvus cpp library ... ${AZURE_OPTION}"
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION})
 
 build-cpp-gpu: generated-proto
-	@echo "Building Milvus cpp gpu library ..."
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -g -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index} -y ${use_dynamic_simd})
+	@echo "Building Milvus cpp gpu library ... "
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -g -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION})
 
 build-cpp-with-unittest: generated-proto
-	@echo "Building Milvus cpp library with unittest ..."
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -u -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index} -y ${use_dynamic_simd})
+	@echo "Building Milvus cpp library with unittest ... "
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -u -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION})
 
 build-cpp-with-coverage: generated-proto
 	@echo "Building Milvus cpp library with coverage and unittest ..."
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${useasan} -u -c -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index} -y ${use_dynamic_simd})
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${useasan} -u -c -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION})
 
 check-proto-product: generated-proto
 	 @(env bash $(PWD)/scripts/check_proto_product.sh)
