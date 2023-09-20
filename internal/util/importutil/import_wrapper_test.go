@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
@@ -265,9 +266,7 @@ func Test_ImportWrapperRowBased(t *testing.T) {
 	assignSegmentFunc, flushFunc, saveSegmentFunc := createMockCallbackFunctions(t, rowCounter)
 
 	importResult := &rootcoordpb.ImportResult{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status:     merr.Status(nil),
 		TaskId:     1,
 		DatanodeId: 1,
 		State:      commonpb.ImportState_ImportStarted,
@@ -345,9 +344,7 @@ func Test_ImportWrapperColumnBased_numpy(t *testing.T) {
 	assignSegmentFunc, flushFunc, saveSegmentFunc := createMockCallbackFunctions(t, rowCounter)
 
 	importResult := &rootcoordpb.ImportResult{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status:     merr.Status(nil),
 		TaskId:     1,
 		DatanodeId: 1,
 		State:      commonpb.ImportState_ImportStarted,
@@ -500,9 +497,7 @@ func Test_ImportWrapperRowBased_perf(t *testing.T) {
 	schema := perfSchema(dim)
 
 	importResult := &rootcoordpb.ImportResult{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status:     merr.Status(nil),
 		TaskId:     1,
 		DatanodeId: 1,
 		State:      commonpb.ImportState_ImportStarted,
@@ -676,9 +671,7 @@ func Test_ImportWrapperReportFailRowBased(t *testing.T) {
 
 	// success case
 	importResult := &rootcoordpb.ImportResult{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status:     merr.Status(nil),
 		TaskId:     1,
 		DatanodeId: 1,
 		State:      commonpb.ImportState_ImportStarted,
@@ -725,9 +718,7 @@ func Test_ImportWrapperReportFailColumnBased_numpy(t *testing.T) {
 
 	// success case
 	importResult := &rootcoordpb.ImportResult{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status:     merr.Status(nil),
 		TaskId:     1,
 		DatanodeId: 1,
 		State:      commonpb.ImportState_ImportStarted,
@@ -870,9 +861,7 @@ func Test_ImportWrapperDoBinlogImport(t *testing.T) {
 		return nil
 	}
 	wrapper.importResult = &rootcoordpb.ImportResult{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status:     merr.Status(nil),
 		TaskId:     1,
 		DatanodeId: 1,
 		State:      commonpb.ImportState_ImportStarted,
@@ -891,9 +880,7 @@ func Test_ImportWrapperReportPersisted(t *testing.T) {
 	tr := timerecord.NewTimeRecorder("test")
 
 	importResult := &rootcoordpb.ImportResult{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status:     merr.Status(nil),
 		TaskId:     1,
 		DatanodeId: 1,
 		State:      commonpb.ImportState_ImportStarted,
@@ -971,9 +958,7 @@ func Test_ImportWrapperFlushFunc(t *testing.T) {
 	assignSegmentFunc, flushFunc, saveSegmentFunc := createMockCallbackFunctions(t, rowCounter)
 
 	importResult := &rootcoordpb.ImportResult{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status:     merr.Status(nil),
 		TaskId:     1,
 		DatanodeId: 1,
 		State:      commonpb.ImportState_ImportStarted,

@@ -443,9 +443,7 @@ func (suite *ServerSuite) expectGetRecoverInfoByMockDataCoord(collection int64, 
 		}
 	}
 	dataCoord.EXPECT().GetRecoveryInfoV2(mock.Anything, getRecoveryInfoRequest).Return(&datapb.GetRecoveryInfoResponseV2{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status:   merr.Status(nil),
 		Channels: vChannels,
 		Segments: segmentInfos,
 	}, nil).Maybe()

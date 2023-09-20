@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tikv"
 	"github.com/stretchr/testify/assert"
@@ -543,9 +544,7 @@ func Test_NewServer(t *testing.T) {
 
 		t.Run("update seg stat", func(t *testing.T) {
 			server.dataCoord = &MockDataCoord{
-				updateSegStatResp: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
+				updateSegStatResp: merr.Status(nil),
 			}
 			resp, err := server.UpdateSegmentStatistics(ctx, nil)
 			assert.NoError(t, err)
@@ -554,9 +553,7 @@ func Test_NewServer(t *testing.T) {
 
 		t.Run("UpdateChannelCheckpoint", func(t *testing.T) {
 			server.dataCoord = &MockDataCoord{
-				updateChanPos: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
+				updateChanPos: merr.Status(nil),
 			}
 			resp, err := server.UpdateChannelCheckpoint(ctx, nil)
 			assert.NoError(t, err)
@@ -565,9 +562,7 @@ func Test_NewServer(t *testing.T) {
 
 		t.Run("save import segment", func(t *testing.T) {
 			server.dataCoord = &MockDataCoord{
-				addSegmentResp: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
+				addSegmentResp: merr.Status(nil),
 			}
 			resp, err := server.SaveImportSegment(ctx, nil)
 			assert.NoError(t, err)
@@ -576,9 +571,7 @@ func Test_NewServer(t *testing.T) {
 
 		t.Run("unset isImporting state", func(t *testing.T) {
 			server.dataCoord = &MockDataCoord{
-				unsetIsImportingStateResp: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
+				unsetIsImportingStateResp: merr.Status(nil),
 			}
 			resp, err := server.UnsetIsImportingState(ctx, nil)
 			assert.NoError(t, err)
@@ -587,9 +580,7 @@ func Test_NewServer(t *testing.T) {
 
 		t.Run("mark segments dropped", func(t *testing.T) {
 			server.dataCoord = &MockDataCoord{
-				markSegmentsDroppedResp: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
+				markSegmentsDroppedResp: merr.Status(nil),
 			}
 			resp, err := server.MarkSegmentsDropped(ctx, nil)
 			assert.NoError(t, err)

@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -134,9 +135,7 @@ func Test_NewServer(t *testing.T) {
 		}
 
 		mqc := getQueryCoord()
-		successStatus := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		}
+		successStatus := merr.Status(nil)
 
 		t.Run("Run", func(t *testing.T) {
 			server.queryCoord = mqc

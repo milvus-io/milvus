@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/stretchr/testify/assert"
@@ -113,9 +114,7 @@ func TestGetDataNodeMetrics(t *testing.T) {
 	// mock parse error
 	mockFailClientCreator = getMockFailedClientCreator(func() (*milvuspb.GetMetricsResponse, error) {
 		return &milvuspb.GetMetricsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
+			Status:   merr.Status(nil),
 			Response: `{"error_reason": 1}`,
 		}, nil
 	})
@@ -164,10 +163,7 @@ func TestGetIndexNodeMetrics(t *testing.T) {
 	info, err = svr.getIndexNodeMetrics(ctx, req, &mockMetricIndexNodeClient{
 		mock: func() (*milvuspb.GetMetricsResponse, error) {
 			return &milvuspb.GetMetricsResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-					Reason:    "",
-				},
+				Status:        merr.Status(nil),
 				Response:      "XXXXXXXXXXXXX",
 				ComponentName: "indexnode100",
 			}, nil
@@ -201,10 +197,7 @@ func TestGetIndexNodeMetrics(t *testing.T) {
 			}
 
 			return &milvuspb.GetMetricsResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-					Reason:    "",
-				},
+				Status:        merr.Status(nil),
 				Response:      resp,
 				ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, nodeID),
 			}, nil

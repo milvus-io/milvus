@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -774,10 +775,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 					},
 					CallGetJobStats: func(ctx context.Context, in *indexpb.GetJobStatsRequest) (*indexpb.GetJobStatsResponse, error) {
 						return &indexpb.GetJobStatsResponse{
-							Status: &commonpb.Status{
-								ErrorCode: commonpb.ErrorCode_Success,
-								Reason:    "",
-							},
+							Status:    merr.Status(nil),
 							TaskSlots: 1,
 						}, nil
 					},
@@ -805,10 +803,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 					},
 					CallGetJobStats: func(ctx context.Context, in *indexpb.GetJobStatsRequest) (*indexpb.GetJobStatsResponse, error) {
 						return &indexpb.GetJobStatsResponse{
-							Status: &commonpb.Status{
-								ErrorCode: commonpb.ErrorCode_Success,
-								Reason:    "",
-							},
+							Status:    merr.Status(nil),
 							TaskSlots: 1,
 						}, nil
 					},
@@ -942,10 +937,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 				nodeID: &indexnode.Mock{
 					CallQueryJobs: func(ctx context.Context, in *indexpb.QueryJobsRequest) (*indexpb.QueryJobsResponse, error) {
 						return &indexpb.QueryJobsResponse{
-							Status: &commonpb.Status{
-								ErrorCode: commonpb.ErrorCode_Success,
-								Reason:    "",
-							},
+							Status: merr.Status(nil),
 							IndexInfos: []*indexpb.IndexTaskInfo{
 								{
 									BuildID:        buildID,
@@ -978,10 +970,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 				nodeID: &indexnode.Mock{
 					CallQueryJobs: func(ctx context.Context, in *indexpb.QueryJobsRequest) (*indexpb.QueryJobsResponse, error) {
 						return &indexpb.QueryJobsResponse{
-							Status: &commonpb.Status{
-								ErrorCode: commonpb.ErrorCode_Success,
-								Reason:    "",
-							},
+							Status: merr.Status(nil),
 							IndexInfos: []*indexpb.IndexTaskInfo{
 								{
 									BuildID:        buildID,
@@ -1014,10 +1003,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 				nodeID: &indexnode.Mock{
 					CallQueryJobs: func(ctx context.Context, in *indexpb.QueryJobsRequest) (*indexpb.QueryJobsResponse, error) {
 						return &indexpb.QueryJobsResponse{
-							Status: &commonpb.Status{
-								ErrorCode: commonpb.ErrorCode_Success,
-								Reason:    "",
-							},
+							Status:     merr.Status(nil),
 							IndexInfos: nil,
 						}, nil
 					},

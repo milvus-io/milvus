@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"go.uber.org/zap"
 
@@ -204,9 +205,7 @@ func (ds *DataCoordFactory) AssignSegmentID(ctx context.Context, req *datapb.Ass
 		return nil, errors.New("Error")
 	}
 	res := &datapb.AssignSegmentIDResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status: merr.Status(nil),
 		SegIDAssignments: []*datapb.SegmentIDAssignment{
 			{
 				SegID: 666,
@@ -253,15 +252,11 @@ func (ds *DataCoordFactory) DropVirtualChannel(ctx context.Context, req *datapb.
 }
 
 func (ds *DataCoordFactory) UpdateSegmentStatistics(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest) (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
+	return merr.Status(nil), nil
 }
 
 func (ds *DataCoordFactory) UpdateChannelCheckpoint(ctx context.Context, req *datapb.UpdateChannelCheckpointRequest) (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
+	return merr.Status(nil), nil
 }
 
 func (ds *DataCoordFactory) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDataNodeTtMsgsRequest) (*commonpb.Status, error) {
@@ -273,33 +268,23 @@ func (ds *DataCoordFactory) ReportDataNodeTtMsgs(ctx context.Context, req *datap
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		}, nil
 	}
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
+	return merr.Status(nil), nil
 }
 
 func (ds *DataCoordFactory) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSegmentRequest) (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
+	return merr.Status(nil), nil
 }
 
 func (ds *DataCoordFactory) UnsetIsImportingState(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
+	return merr.Status(nil), nil
 }
 
 func (ds *DataCoordFactory) MarkSegmentsDropped(context.Context, *datapb.MarkSegmentsDroppedRequest) (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
+	return merr.Status(nil), nil
 }
 
 func (ds *DataCoordFactory) BroadcastAlteredCollection(ctx context.Context, req *datapb.AlterCollectionRequest) (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
+	return merr.Status(nil), nil
 }
 
 func (ds *DataCoordFactory) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
@@ -333,10 +318,8 @@ func (ds *DataCoordFactory) GetSegmentInfo(ctx context.Context, req *datapb.GetS
 		}
 	}
 	return &datapb.GetSegmentInfoResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		Infos: segmentInfos,
+		Status: merr.Status(nil),
+		Infos:  segmentInfos,
 	}, nil
 }
 
@@ -1044,9 +1027,7 @@ func (m *RootCoordFactory) DescribeCollectionInternal(ctx context.Context, in *m
 func (m *RootCoordFactory) ShowPartitions(ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
 	if m.ShowPartitionsErr {
 		return &milvuspb.ShowPartitionsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
+			Status: merr.Status(nil),
 		}, fmt.Errorf("mock show partitions error")
 	}
 
@@ -1060,9 +1041,7 @@ func (m *RootCoordFactory) ShowPartitions(ctx context.Context, req *milvuspb.Sho
 	}
 
 	return &milvuspb.ShowPartitionsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status:         merr.Status(nil),
 		PartitionNames: m.ShowPartitionsNames,
 		PartitionIDs:   m.ShowPartitionsIDs,
 	}, nil
@@ -1072,9 +1051,7 @@ func (m *RootCoordFactory) GetComponentStates(ctx context.Context) (*milvuspb.Co
 	return &milvuspb.ComponentStates{
 		State:              &milvuspb.ComponentInfo{},
 		SubcomponentStates: make([]*milvuspb.ComponentInfo, 0),
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status:             merr.Status(nil),
 	}, nil
 }
 
@@ -1085,18 +1062,14 @@ func (m *RootCoordFactory) ReportImport(ctx context.Context, req *rootcoordpb.Im
 		}
 	}
 	if m.ReportImportErr {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		}, fmt.Errorf("mock report import error")
+		return merr.Status(nil), fmt.Errorf("mock report import error")
 	}
 	if m.ReportImportNotSuccess {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		}, nil
 	}
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
+	return merr.Status(nil), nil
 }
 
 // FailMessageStreamFactory mock MessageStreamFactory failure

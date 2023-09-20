@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -123,10 +124,7 @@ func TestIndexNodeManager_PeekClient(t *testing.T) {
 					CallGetJobStats: func(ctx context.Context, req *indexpb.GetJobStatsRequest) (*indexpb.GetJobStatsResponse, error) {
 						return &indexpb.GetJobStatsResponse{
 							TaskSlots: 1,
-							Status: &commonpb.Status{
-								ErrorCode: commonpb.ErrorCode_Success,
-								Reason:    "",
-							},
+							Status:    merr.Status(nil),
 						}, nil
 					},
 				},
@@ -134,10 +132,7 @@ func TestIndexNodeManager_PeekClient(t *testing.T) {
 					CallGetJobStats: func(ctx context.Context, req *indexpb.GetJobStatsRequest) (*indexpb.GetJobStatsResponse, error) {
 						return &indexpb.GetJobStatsResponse{
 							TaskSlots: 10,
-							Status: &commonpb.Status{
-								ErrorCode: commonpb.ErrorCode_Success,
-								Reason:    "",
-							},
+							Status:    merr.Status(nil),
 						}, nil
 					},
 				},
@@ -159,10 +154,7 @@ func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
 				1: &indexnode.Mock{
 					CallGetJobStats: func(ctx context.Context, in *indexpb.GetJobStatsRequest) (*indexpb.GetJobStatsResponse, error) {
 						return &indexpb.GetJobStatsResponse{
-							Status: &commonpb.Status{
-								ErrorCode: commonpb.ErrorCode_Success,
-								Reason:    "",
-							},
+							Status:     merr.Status(nil),
 							TaskSlots:  1,
 							JobInfos:   nil,
 							EnableDisk: true,
@@ -184,10 +176,7 @@ func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
 				1: &indexnode.Mock{
 					CallGetJobStats: func(ctx context.Context, in *indexpb.GetJobStatsRequest) (*indexpb.GetJobStatsResponse, error) {
 						return &indexpb.GetJobStatsResponse{
-							Status: &commonpb.Status{
-								ErrorCode: commonpb.ErrorCode_Success,
-								Reason:    "",
-							},
+							Status:     merr.Status(nil),
 							TaskSlots:  1,
 							JobInfos:   nil,
 							EnableDisk: false,

@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -60,9 +61,7 @@ func (p *proxyMock) InvalidateCollectionMetaCache(ctx context.Context, request *
 	}
 	p.collArray = append(p.collArray, request.CollectionName)
 	p.collIDs = append(p.collIDs, request.CollectionID)
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
+	return merr.Status(nil), nil
 }
 
 func (p *proxyMock) GetCollArray() []string {
@@ -89,16 +88,11 @@ func (p *proxyMock) InvalidateCredentialCache(ctx context.Context, request *prox
 	if p.returnGrpcError {
 		return nil, fmt.Errorf("grpc error")
 	}
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-		Reason:    "",
-	}, nil
+	return merr.Status(nil), nil
 }
 
 func (p *proxyMock) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
+	return merr.Status(nil), nil
 }
 
 func TestProxyClientManager_GetProxyClients(t *testing.T) {

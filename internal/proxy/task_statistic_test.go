@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -68,9 +69,7 @@ func (s *StatisticTaskSuite) SetupTest() {
 		},
 	}, nil).Maybe()
 	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
+		Status:       merr.Status(nil),
 		PartitionIDs: []int64{1, 2, 3},
 	}, nil).Maybe()
 
@@ -168,9 +167,7 @@ func (s *StatisticTaskSuite) getStatisticsTask(ctx context.Context) *getStatisti
 		ctx:            ctx,
 		collectionName: s.collectionName,
 		result: &milvuspb.GetStatisticsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
+			Status: merr.Status(nil),
 		},
 		request: &milvuspb.GetStatisticsRequest{
 			Base: &commonpb.MsgBase{

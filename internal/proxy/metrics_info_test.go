@@ -22,9 +22,9 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/uniquegenerator"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 
@@ -90,10 +90,7 @@ func TestProxy_metrics(t *testing.T) {
 		resp, _ := metricsinfo.MarshalTopology(rootCoordTopology)
 
 		return &milvuspb.GetMetricsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-				Reason:    "",
-			},
+			Status:        merr.Status(nil),
 			Response:      resp,
 			ComponentName: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, id),
 		}, nil
@@ -142,10 +139,7 @@ func TestProxy_metrics(t *testing.T) {
 		resp, _ := metricsinfo.MarshalTopology(coordTopology)
 
 		return &milvuspb.GetMetricsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-				Reason:    "",
-			},
+			Status:        merr.Status(nil),
 			Response:      resp,
 			ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, id),
 		}, nil
@@ -202,10 +196,7 @@ func TestProxy_metrics(t *testing.T) {
 		resp, _ := metricsinfo.MarshalTopology(coordTopology)
 
 		return &milvuspb.GetMetricsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-				Reason:    "",
-			},
+			Status:        merr.Status(nil),
 			Response:      resp,
 			ComponentName: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, id),
 		}, nil
