@@ -144,7 +144,8 @@ func (suite *ResultSuite) TestResult_MergeSegcoreRetrieveResults() {
 			1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
 			1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
 			11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 88.0,
-			11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 88.0}
+			11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 88.0,
+		}
 
 		suite.Run("test limited", func() {
 			tests := []struct {
@@ -217,13 +218,17 @@ func (suite *ResultSuite) TestResult_MergeSegcoreRetrieveResults() {
 				IdField: &schemapb.IDs_StrId{
 					StrId: &schemapb.StringArray{
 						Data: []string{"a", "c"},
-					}}}
+					},
+				},
+			}
 
 			r2.Ids = &schemapb.IDs{
 				IdField: &schemapb.IDs_StrId{
 					StrId: &schemapb.StringArray{
 						Data: []string{"b", "d"},
-					}}}
+					},
+				},
+			}
 
 			result, err := MergeSegcoreRetrieveResults(context.Background(), []*segcorepb.RetrieveResults{r1, r2},
 				NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, false))
@@ -301,7 +306,8 @@ func (suite *ResultSuite) TestResult_MergeInternalRetrieveResults() {
 				IdField: &schemapb.IDs_IntId{
 					IntId: &schemapb.LongArray{
 						Data: []int64{0, 1},
-					}},
+					},
+				},
 			},
 			FieldsData: []*schemapb.FieldData{
 				genFieldData(common.TimeStampFieldName, common.TimeStampField, schemapb.DataType_Int64,
@@ -315,7 +321,8 @@ func (suite *ResultSuite) TestResult_MergeInternalRetrieveResults() {
 				IdField: &schemapb.IDs_IntId{
 					IntId: &schemapb.LongArray{
 						Data: []int64{0, 1},
-					}},
+					},
+				},
 			},
 			FieldsData: []*schemapb.FieldData{
 				genFieldData(common.TimeStampFieldName, common.TimeStampField, schemapb.DataType_Int64,
@@ -358,7 +365,8 @@ func (suite *ResultSuite) TestResult_MergeInternalRetrieveResults() {
 			1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
 			1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
 			11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 88.0,
-			11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 88.0}
+			11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 88.0,
+		}
 
 		suite.Run("test limited", func() {
 			tests := []struct {
@@ -450,7 +458,6 @@ func (suite *ResultSuite) TestResult_MergeInternalRetrieveResults() {
 			suite.InDeltaSlice(resultFloat, result.FieldsData[1].GetVectors().GetFloatVector().Data, 10e-10)
 			suite.NoError(err)
 		})
-
 	})
 }
 
@@ -506,8 +513,8 @@ func (suite *ResultSuite) TestResult_MergeStopForBestResult() {
 			suite.NoError(err)
 			suite.Equal(2, len(result.GetFieldsData()))
 			suite.Equal([]int64{0, 1, 2, 3, 4}, result.GetIds().GetIntId().GetData())
-			//here, we can only get best result from 0 to 4 without 6, because we can never know whether there is
-			//one potential 5 in following result1
+			// here, we can only get best result from 0 to 4 without 6, because we can never know whether there is
+			// one potential 5 in following result1
 			suite.Equal([]int64{11, 22, 11, 22, 33}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
 			suite.InDeltaSlice([]float32{1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 11, 22, 33, 44},
 				result.FieldsData[1].GetVectors().GetFloatVector().Data, 10e-10)
@@ -518,8 +525,8 @@ func (suite *ResultSuite) TestResult_MergeStopForBestResult() {
 			suite.NoError(err)
 			suite.Equal(2, len(result.GetFieldsData()))
 			suite.Equal([]int64{0, 1, 2, 3, 4, 6}, result.GetIds().GetIntId().GetData())
-			//here, we can only get best result from 0 to 4 without 6, because we can never know whether there is
-			//one potential 5 in following result1
+			// here, we can only get best result from 0 to 4 without 6, because we can never know whether there is
+			// one potential 5 in following result1
 			suite.Equal([]int64{11, 22, 11, 22, 33, 33}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
 			suite.InDeltaSlice([]float32{1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 11, 22, 33, 44, 11, 22, 33, 44},
 				result.FieldsData[1].GetVectors().GetFloatVector().Data, 10e-10)
@@ -712,7 +719,8 @@ func (suite *ResultSuite) TestSort() {
 			IdField: &schemapb.IDs_IntId{
 				IntId: &schemapb.LongArray{
 					Data: []int64{5, 4, 3, 2, 9, 8, 7, 6},
-				}},
+				},
+			},
 		},
 		Offset: []int64{5, 4, 3, 2, 9, 8, 7, 6},
 		FieldsData: []*schemapb.FieldData{
@@ -733,8 +741,10 @@ func (suite *ResultSuite) TestSort() {
 			genFieldData("binary vector field", 107, schemapb.DataType_BinaryVector,
 				[]byte{5, 4, 3, 2, 9, 8, 7, 6}, 8),
 			genFieldData("json field", 108, schemapb.DataType_JSON,
-				[][]byte{[]byte("{\"5\": 5}"), []byte("{\"4\": 4}"), []byte("{\"3\": 3}"), []byte("{\"2\": 2}"),
-					[]byte("{\"9\": 9}"), []byte("{\"8\": 8}"), []byte("{\"7\": 7}"), []byte("{\"6\": 6}")}, 1),
+				[][]byte{
+					[]byte("{\"5\": 5}"), []byte("{\"4\": 4}"), []byte("{\"3\": 3}"), []byte("{\"2\": 2}"),
+					[]byte("{\"9\": 9}"), []byte("{\"8\": 8}"), []byte("{\"7\": 7}"), []byte("{\"6\": 6}"),
+				}, 1),
 			genFieldData("json field", 108, schemapb.DataType_Array,
 				[]*schemapb.ScalarField{
 					{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{5, 6, 7}}}},
@@ -761,8 +771,10 @@ func (suite *ResultSuite) TestSort() {
 	suite.Equal([]int32{2, 3, 4, 5, 6, 7, 8, 9}, result.FieldsData[5].GetScalars().GetIntData().Data)
 	suite.InDeltaSlice([]float32{2, 3, 4, 5, 6, 7, 8, 9}, result.FieldsData[6].GetVectors().GetFloatVector().GetData(), 10e-10)
 	suite.Equal([]byte{2, 3, 4, 5, 6, 7, 8, 9}, result.FieldsData[7].GetVectors().GetBinaryVector())
-	suite.Equal([][]byte{[]byte("{\"2\": 2}"), []byte("{\"3\": 3}"), []byte("{\"4\": 4}"), []byte("{\"5\": 5}"),
-		[]byte("{\"6\": 6}"), []byte("{\"7\": 7}"), []byte("{\"8\": 8}"), []byte("{\"9\": 9}")}, result.FieldsData[8].GetScalars().GetJsonData().GetData())
+	suite.Equal([][]byte{
+		[]byte("{\"2\": 2}"), []byte("{\"3\": 3}"), []byte("{\"4\": 4}"), []byte("{\"5\": 5}"),
+		[]byte("{\"6\": 6}"), []byte("{\"7\": 7}"), []byte("{\"8\": 8}"), []byte("{\"9\": 9}"),
+	}, result.FieldsData[8].GetScalars().GetJsonData().GetData())
 	suite.Equal([]*schemapb.ScalarField{
 		{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{2, 3, 4}}}},
 		{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{3, 4, 5}}}},

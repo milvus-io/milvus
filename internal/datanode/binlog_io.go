@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -32,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
-	"go.uber.org/zap"
 )
 
 var (
@@ -64,8 +64,10 @@ type binlogIO struct {
 	allocator.Allocator
 }
 
-var _ downloader = (*binlogIO)(nil)
-var _ uploader = (*binlogIO)(nil)
+var (
+	_ downloader = (*binlogIO)(nil)
+	_ uploader   = (*binlogIO)(nil)
+)
 
 func (b *binlogIO) download(ctx context.Context, paths []string) ([]*Blob, error) {
 	log.Debug("down load", zap.Strings("path", paths))
@@ -78,7 +80,7 @@ func (b *binlogIO) download(ctx context.Context, paths []string) ([]*Blob, error
 		localPath := path
 		future := getMultiReadPool().Submit(func() (any, error) {
 			var vs []byte
-			var err = errStart
+			err := errStart
 			for err != nil {
 				select {
 				case <-ctx.Done():
@@ -111,7 +113,8 @@ func (b *binlogIO) uploadSegmentFiles(
 	ctx context.Context,
 	CollectionID UniqueID,
 	segID UniqueID,
-	kvs map[string][]byte) error {
+	kvs map[string][]byte,
+) error {
 	log.Debug("update", zap.Int64("collectionID", CollectionID), zap.Int64("segmentID", segID))
 	if len(kvs) == 0 {
 		return nil
@@ -121,7 +124,7 @@ func (b *binlogIO) uploadSegmentFiles(
 		localPath := key
 		localVal := val
 		future := getMultiReadPool().Submit(func() (any, error) {
-			var err = errStart
+			err := errStart
 			for err != nil {
 				select {
 				case <-ctx.Done():
@@ -242,7 +245,8 @@ func (b *binlogIO) uploadStatsLog(
 	iData *InsertData,
 	stats *storage.PrimaryKeyStats,
 	totRows int64,
-	meta *etcdpb.CollectionMeta) (map[UniqueID]*datapb.FieldBinlog, map[UniqueID]*datapb.FieldBinlog, error) {
+	meta *etcdpb.CollectionMeta,
+) (map[UniqueID]*datapb.FieldBinlog, map[UniqueID]*datapb.FieldBinlog, error) {
 	var inPaths map[int64]*datapb.FieldBinlog
 	var err error
 
@@ -278,8 +282,8 @@ func (b *binlogIO) uploadInsertLog(
 	segID UniqueID,
 	partID UniqueID,
 	iData *InsertData,
-	meta *etcdpb.CollectionMeta) (map[UniqueID]*datapb.FieldBinlog, error) {
-
+	meta *etcdpb.CollectionMeta,
+) (map[UniqueID]*datapb.FieldBinlog, error) {
 	iCodec := storage.NewInsertCodecWithSchema(meta)
 	kvs := make(map[string][]byte)
 
@@ -309,7 +313,8 @@ func (b *binlogIO) uploadDeltaLog(
 	segID UniqueID,
 	partID UniqueID,
 	dData *DeleteData,
-	meta *etcdpb.CollectionMeta) ([]*datapb.FieldBinlog, error) {
+	meta *etcdpb.CollectionMeta,
+) ([]*datapb.FieldBinlog, error) {
 	var (
 		deltaInfo = make([]*datapb.FieldBinlog, 0)
 		kvs       = make(map[string][]byte)

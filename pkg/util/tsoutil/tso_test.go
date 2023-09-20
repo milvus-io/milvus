@@ -62,11 +62,11 @@ func TestAddPhysicalDurationOnTs(t *testing.T) {
 	duration := time.Millisecond * (20 * 1000)
 	ts2 := AddPhysicalDurationOnTs(ts1, duration)
 	ts3 := ComposeTSByTime(now.Add(duration), 0)
-	//diff := CalculateDuration(ts2, ts1)
+	// diff := CalculateDuration(ts2, ts1)
 	assert.Equal(t, ts3, ts2)
 
 	ts2 = AddPhysicalDurationOnTs(ts1, -duration)
 	ts3 = ComposeTSByTime(now.Add(-duration), 0)
-	//diff := CalculateDuration(ts2, ts1)
+	// diff := CalculateDuration(ts2, ts1)
 	assert.Equal(t, ts3, ts2)
 }

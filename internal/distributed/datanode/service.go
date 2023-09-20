@@ -25,11 +25,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/internal/util/componentutil"
-	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/pkg/tracer"
-	"github.com/milvus-io/milvus/pkg/util/interceptor"
-
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
@@ -46,9 +41,13 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/componentutil"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
@@ -76,7 +75,7 @@ type Server struct {
 // NewServer new DataNode grpc server
 func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)
-	var s = &Server{
+	s := &Server{
 		ctx:         ctx1,
 		cancel:      cancel,
 		factory:     factory,
@@ -107,12 +106,12 @@ func (s *Server) startGrpc() error {
 func (s *Server) startGrpcLoop(grpcPort int) {
 	defer s.wg.Done()
 	Params := &paramtable.Get().DataNodeGrpcServerCfg
-	var kaep = keepalive.EnforcementPolicy{
+	kaep := keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
 		PermitWithoutStream: true,            // Allow pings even when there are no active streams
 	}
 
-	var kasp = keepalive.ServerParameters{
+	kasp := keepalive.ServerParameters{
 		Time:    60 * time.Second, // Ping the client if it is idle for 60 seconds to ensure the connection is still active
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
@@ -124,7 +123,6 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 		lis, err = net.Listen("tcp", addr)
 		return err
 	}, retry.Attempts(10))
-
 	if err != nil {
 		log.Error("DataNode GrpcServer:failed to listen", zap.Error(err))
 		s.grpcErrChan <- err
@@ -169,7 +167,6 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 		log.Warn("DataNode failed to start gRPC")
 		s.grpcErrChan <- err
 	}
-
 }
 
 func (s *Server) SetEtcdClient(client *clientv3.Client) {

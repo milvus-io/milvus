@@ -20,8 +20,9 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/milvus-io/milvus/pkg/log"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 const (
@@ -34,8 +35,7 @@ const (
 )
 
 // eventLogHandler is the event log http handler
-type eventLogHandler struct {
-}
+type eventLogHandler struct{}
 
 func Handler() http.Handler {
 	return &eventLogHandler{}

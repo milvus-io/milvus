@@ -4,8 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/proto/planpb"
 )
 
 func Test_createMilvusReducer(t *testing.T) {

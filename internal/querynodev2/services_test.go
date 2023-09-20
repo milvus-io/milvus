@@ -113,7 +113,7 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.factory = dependency.NewMockFactory(suite.T())
 	suite.msgStream = msgstream.NewMockMsgStream(suite.T())
 	// TODO:: cpp chunk manager not support local chunk manager
-	//suite.chunkManagerFactory = storage.NewChunkManagerFactory("local", storage.RootPath("/tmp/milvus-test"))
+	// suite.chunkManagerFactory = storage.NewChunkManagerFactory("local", storage.RootPath("/tmp/milvus-test"))
 	suite.chunkManagerFactory = segments.NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
 	suite.factory.EXPECT().Init(mock.Anything).Return()
 	suite.factory.EXPECT().NewPersistentStorageChunkManager(mock.Anything).Return(suite.chunkManagerFactory.NewPersistentStorageChunkManager(ctx))
@@ -1467,7 +1467,6 @@ func (suite *ServiceSuite) TestQueryStream_Failed() {
 			if err != nil {
 				suite.ErrorIs(err, merr.ErrChannelNotFound)
 			}
-
 		}
 		wg.Wait()
 	})
@@ -1597,7 +1596,6 @@ func (suite *ServiceSuite) TestSyncReplicaSegments_Normal() {
 	status, err := suite.node.SyncReplicaSegments(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
-
 }
 
 func (suite *ServiceSuite) TestShowConfigurations_Normal() {

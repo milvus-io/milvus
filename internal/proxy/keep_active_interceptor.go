@@ -5,13 +5,11 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/milvus-io/milvus/pkg/util"
-
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
-	"google.golang.org/grpc"
+	"github.com/milvus-io/milvus/pkg/util"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 )
 
 func getIdentifierFromContext(ctx context.Context) (int64, error) {

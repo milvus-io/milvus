@@ -289,7 +289,8 @@ func TestQuotaCenter(t *testing.T) {
 			1: {Rms: []metricsinfo.RateMetric{
 				{Label: internalpb.RateType_DQLSearch.String(), Rate: 100},
 				{Label: internalpb.RateType_DQLQuery.String(), Rate: 100},
-			}}}
+			}},
+		}
 
 		paramtable.Get().Save(Params.QuotaConfig.ForceDenyReading.Key, "false")
 		paramtable.Get().Save(Params.QuotaConfig.QueueProtectionEnabled.Key, "true")
@@ -304,7 +305,8 @@ func TestQuotaCenter(t *testing.T) {
 			}, Effect: metricsinfo.NodeEffect{
 				NodeID:        1,
 				CollectionIDs: []int64{1, 2, 3},
-			}}}
+			}},
+		}
 		quotaCenter.calculateReadRates()
 		for _, collection := range quotaCenter.readableCollections {
 			assert.Equal(t, Limit(100.0*0.9), quotaCenter.currentRates[collection][internalpb.RateType_DQLSearch])
@@ -315,7 +317,8 @@ func TestQuotaCenter(t *testing.T) {
 		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
 			1: {SearchQueue: metricsinfo.ReadInfoInQueue{
 				UnsolvedQueue: Params.QuotaConfig.NQInQueueThreshold.GetAsInt64(),
-			}}}
+			}},
+		}
 		quotaCenter.calculateReadRates()
 		for _, collection := range quotaCenter.readableCollections {
 			assert.Equal(t, Limit(100.0*0.9), quotaCenter.currentRates[collection][internalpb.RateType_DQLSearch])
@@ -329,7 +332,8 @@ func TestQuotaCenter(t *testing.T) {
 				{Label: internalpb.RateType_DQLSearch.String(), Rate: 100},
 				{Label: internalpb.RateType_DQLQuery.String(), Rate: 100},
 				{Label: metricsinfo.ReadResultThroughput, Rate: 1.2},
-			}}}
+			}},
+		}
 		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{1: {SearchQueue: metricsinfo.ReadInfoInQueue{}}}
 		quotaCenter.calculateReadRates()
 		for _, collection := range quotaCenter.readableCollections {
@@ -500,7 +504,8 @@ func TestQuotaCenter(t *testing.T) {
 		paramtable.Get().Save(Params.QuotaConfig.DiskQuota.Key, "99")
 		quotaCenter.dataCoordMetrics = &metricsinfo.DataCoordQuotaMetrics{
 			TotalBinlogSize:      200 * 1024 * 1024,
-			CollectionBinlogSize: map[int64]int64{1: 100 * 1024 * 1024}}
+			CollectionBinlogSize: map[int64]int64{1: 100 * 1024 * 1024},
+		}
 		quotaCenter.writableCollections = []int64{1, 2, 3}
 		quotaCenter.resetAllCurrentRates()
 		quotaCenter.checkDiskQuota()
@@ -515,7 +520,8 @@ func TestQuotaCenter(t *testing.T) {
 		colQuotaBackup := Params.QuotaConfig.DiskQuotaPerCollection.GetValue()
 		paramtable.Get().Save(Params.QuotaConfig.DiskQuotaPerCollection.Key, "30")
 		quotaCenter.dataCoordMetrics = &metricsinfo.DataCoordQuotaMetrics{CollectionBinlogSize: map[int64]int64{
-			1: 20 * 1024 * 1024, 2: 30 * 1024 * 1024, 3: 60 * 1024 * 1024}}
+			1: 20 * 1024 * 1024, 2: 30 * 1024 * 1024, 3: 60 * 1024 * 1024,
+		}}
 		quotaCenter.writableCollections = []int64{1, 2, 3}
 		quotaCenter.resetAllCurrentRates()
 		quotaCenter.checkDiskQuota()

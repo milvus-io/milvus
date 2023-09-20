@@ -72,7 +72,6 @@ func FillMsgBaseFromClient(sourceID int64, options ...MsgBaseOptions) MsgBaseOpt
 			op(msgBase)
 		}
 	}
-
 }
 
 func newMsgBaseDefault() *commonpb.MsgBase {

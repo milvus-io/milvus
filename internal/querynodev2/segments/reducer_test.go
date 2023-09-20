@@ -43,7 +43,6 @@ func (suite *ReducerFactorySuite) TestCreateInternalReducer() {
 }
 
 func (suite *ReducerFactorySuite) TestCreateSegCoreReducer() {
-
 	req := &querypb.QueryRequest{
 		Req: &internalpb.RetrieveRequest{
 			IsCount: false,

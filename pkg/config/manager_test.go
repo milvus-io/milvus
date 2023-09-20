@@ -38,8 +38,8 @@ func TestAllConfigFromManager(t *testing.T) {
 
 func TestConfigChangeEvent(t *testing.T) {
 	dir, _ := os.MkdirTemp("", "milvus")
-	os.WriteFile(path.Join(dir, "milvus.yaml"), []byte("a.b: 1\nc.d: 2"), 0600)
-	os.WriteFile(path.Join(dir, "user.yaml"), []byte("a.b: 3"), 0600)
+	os.WriteFile(path.Join(dir, "milvus.yaml"), []byte("a.b: 1\nc.d: 2"), 0o600)
+	os.WriteFile(path.Join(dir, "user.yaml"), []byte("a.b: 3"), 0o600)
 
 	fs := NewFileSource(&FileInfo{[]string{path.Join(dir, "milvus.yaml"), path.Join(dir, "user.yaml")}, 1})
 	mgr, _ := Init()
@@ -48,7 +48,7 @@ func TestConfigChangeEvent(t *testing.T) {
 	res, err := mgr.GetConfig("a.b")
 	assert.NoError(t, err)
 	assert.Equal(t, res, "3")
-	os.WriteFile(path.Join(dir, "user.yaml"), []byte("a.b: 6"), 0600)
+	os.WriteFile(path.Join(dir, "user.yaml"), []byte("a.b: 6"), 0o600)
 	time.Sleep(3 * time.Second)
 	res, err = mgr.GetConfig("a.b")
 	assert.NoError(t, err)
@@ -69,8 +69,7 @@ func TestAllDupliateSource(t *testing.T) {
 	assert.Error(t, err, "invalid source or source not added")
 }
 
-type ErrSource struct {
-}
+type ErrSource struct{}
 
 func (e ErrSource) Close() {
 }
@@ -95,7 +94,6 @@ func (ErrSource) GetSourceName() string {
 }
 
 func (e ErrSource) SetEventHandler(eh EventHandler) {
-
 }
 
 func (e ErrSource) UpdateOptions(opt Options) {

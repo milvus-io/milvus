@@ -34,11 +34,11 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/kv"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -139,7 +139,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (uint64, error) {
 
 // Alloc allocates a batch of timestamps. What is returned is the starting timestamp.
 func (gta *GlobalTSOAllocator) Alloc(count uint32) (typeutil.Timestamp, error) {
-	//return gta.tso.SyncTimestamp()
+	// return gta.tso.SyncTimestamp()
 	start, err := gta.GenerateTSO(count)
 	if err != nil {
 		return typeutil.ZeroTimestamp, err

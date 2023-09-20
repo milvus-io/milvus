@@ -233,7 +233,6 @@ func (dh *distHandler) getDistribution(ctx context.Context) (*querypb.GetDataDis
 		),
 		Checkpoints: channels,
 	})
-
 	if err != nil {
 		return nil, err
 	}

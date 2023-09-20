@@ -61,7 +61,7 @@ type ShardDelegator interface {
 	QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error
 	GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) ([]*internalpb.GetStatisticsResponse, error)
 
-	//data
+	// data
 	ProcessInsert(insertRecords map[int64]*InsertData)
 	ProcessDelete(deleteData []*DeleteData, ts uint64)
 	LoadGrowing(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error
@@ -113,7 +113,7 @@ type shardDelegator struct {
 	// L0 delete buffer
 	deleteMut    sync.Mutex
 	deleteBuffer deletebuffer.DeleteBuffer[*deletebuffer.Item]
-	//dispatcherClient msgdispatcher.Client
+	// dispatcherClient msgdispatcher.Client
 	factory msgstream.Factory
 
 	sf          conc.Singleflight[struct{}]
@@ -634,7 +634,8 @@ func (sd *shardDelegator) Close() {
 // NewShardDelegator creates a new ShardDelegator instance with all fields initialized.
 func NewShardDelegator(collectionID UniqueID, replicaID UniqueID, channel string, version int64,
 	workerManager cluster.Manager, manager *segments.Manager, tsafeManager tsafe.Manager, loader segments.Loader,
-	factory msgstream.Factory, startTs uint64) (ShardDelegator, error) {
+	factory msgstream.Factory, startTs uint64,
+) (ShardDelegator, error) {
 	log := log.With(zap.Int64("collectionID", collectionID),
 		zap.Int64("replicaID", replicaID),
 		zap.String("channel", channel),

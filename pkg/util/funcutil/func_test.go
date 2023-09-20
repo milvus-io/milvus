@@ -27,11 +27,12 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/stretchr/testify/assert"
 	grpcCodes "google.golang.org/grpc/codes"
 	grpcStatus "google.golang.org/grpc/status"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 )
 
 func Test_CheckGrpcReady(t *testing.T) {
@@ -346,7 +347,7 @@ func Test_ReadBinary(t *testing.T) {
 
 	// float vector
 	bs = []byte{0, 0, 0, 0, 0, 0, 0, 0}
-	var fs = make([]float32, 2)
+	fs := make([]float32, 2)
 	assert.NoError(t, ReadBinary(endian, bs, &fs))
 	assert.ElementsMatch(t, []float32{0, 0}, fs)
 }

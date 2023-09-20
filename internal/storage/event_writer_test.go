@@ -21,9 +21,10 @@ import (
 	"encoding/binary"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestEventTypeCode_String(t *testing.T) {

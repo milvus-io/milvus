@@ -71,7 +71,6 @@ func (s *DelegatorSuite) SetupSuite() {
 }
 
 func (s *DelegatorSuite) TearDownSuite() {
-
 }
 
 func (s *DelegatorSuite) SetupTest() {
@@ -309,7 +308,7 @@ func (s *DelegatorSuite) TestSearch() {
 		_, err := s.delegator.Search(ctx, &querypb.SearchRequest{
 			Req: &internalpb.SearchRequest{
 				Base: commonpbutil.NewMsgBase(),
-				//not load partation -1,will return error
+				// not load partation -1,will return error
 				PartitionIDs: []int64{-1},
 			},
 			DmlChannels: []string{s.vchannelName},
@@ -512,7 +511,7 @@ func (s *DelegatorSuite) TestQuery() {
 		_, err := s.delegator.Query(ctx, &querypb.QueryRequest{
 			Req: &internalpb.RetrieveRequest{
 				Base: commonpbutil.NewMsgBase(),
-				//not load partation -1,will return error
+				// not load partation -1,will return error
 				PartitionIDs: []int64{-1},
 			},
 			DmlChannels: []string{s.vchannelName},
@@ -727,7 +726,7 @@ func (s *DelegatorSuite) TestQueryStream() {
 		err := s.delegator.QueryStream(ctx, &querypb.QueryRequest{
 			Req: &internalpb.RetrieveRequest{
 				Base: commonpbutil.NewMsgBase(),
-				//not load partation -1,will return error
+				// not load partation -1,will return error
 				PartitionIDs: []int64{-1},
 			},
 			DmlChannels: []string{s.vchannelName},
@@ -882,7 +881,6 @@ func (s *DelegatorSuite) TestQueryStream() {
 
 		s.Error(err)
 	})
-
 }
 
 func (s *DelegatorSuite) TestGetStats() {

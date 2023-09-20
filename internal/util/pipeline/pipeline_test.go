@@ -19,8 +19,9 @@ package pipeline
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 )
 
 type testNode struct {

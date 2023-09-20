@@ -69,7 +69,7 @@ type MockClient_Deregister_Call struct {
 }
 
 // Deregister is a helper method to define mock.On call
-//  - vchannel string
+//   - vchannel string
 func (_e *MockClient_Expecter) Deregister(vchannel interface{}) *MockClient_Deregister_Call {
 	return &MockClient_Deregister_Call{Call: _e.mock.On("Deregister", vchannel)}
 }
@@ -123,10 +123,10 @@ type MockClient_Register_Call struct {
 }
 
 // Register is a helper method to define mock.On call
-//  - ctx context.Context
-//  - vchannel string
-//  - pos *msgpb.MsgPosition
-//  - subPos mqwrapper.SubscriptionInitialPosition
+//   - ctx context.Context
+//   - vchannel string
+//   - pos *msgpb.MsgPosition
+//   - subPos mqwrapper.SubscriptionInitialPosition
 func (_e *MockClient_Expecter) Register(ctx interface{}, vchannel interface{}, pos interface{}, subPos interface{}) *MockClient_Register_Call {
 	return &MockClient_Register_Call{Call: _e.mock.On("Register", ctx, vchannel, pos, subPos)}
 }
@@ -153,7 +153,8 @@ func (_c *MockClient_Register_Call) RunAndReturn(run func(context.Context, strin
 func NewMockClient(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockClient {
+},
+) *MockClient {
 	mock := &MockClient{}
 	mock.Mock.Test(t)
 

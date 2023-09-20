@@ -25,12 +25,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/internal/http/healthz"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/http/healthz"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -54,7 +54,6 @@ type HTTPServerTestSuite struct {
 func (suite *HTTPServerTestSuite) SetupSuite() {
 	suite.server = httptest.NewServer(nil)
 	registerDefaults()
-
 }
 
 func (suite *HTTPServerTestSuite) TearDownSuite() {

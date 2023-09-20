@@ -69,7 +69,7 @@ type MockLogger_Record_Call struct {
 }
 
 // Record is a helper method to define mock.On call
-//  - _a0 Evt
+//   - _a0 Evt
 func (_e *MockLogger_Expecter) Record(_a0 interface{}) *MockLogger_Record_Call {
 	return &MockLogger_Record_Call{Call: _e.mock.On("Record", _a0)}
 }
@@ -102,8 +102,8 @@ type MockLogger_RecordFunc_Call struct {
 }
 
 // RecordFunc is a helper method to define mock.On call
-//  - _a0 Level
-//  - _a1 func() Evt
+//   - _a0 Level
+//   - _a1 func() Evt
 func (_e *MockLogger_Expecter) RecordFunc(_a0 interface{}, _a1 interface{}) *MockLogger_RecordFunc_Call {
 	return &MockLogger_RecordFunc_Call{Call: _e.mock.On("RecordFunc", _a0, _a1)}
 }
@@ -130,7 +130,8 @@ func (_c *MockLogger_RecordFunc_Call) RunAndReturn(run func(Level, func() Evt)) 
 func NewMockLogger(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockLogger {
+},
+) *MockLogger {
 	mock := &MockLogger{}
 	mock.Mock.Test(t)
 

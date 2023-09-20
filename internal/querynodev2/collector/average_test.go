@@ -34,17 +34,17 @@ func (suite *AverageCollectorTestSuite) SetupSuite() {
 }
 
 func (suite *AverageCollectorTestSuite) TestBasic() {
-	//Get average not register
+	// Get average not register
 	_, err := suite.average.Average(suite.label)
 	suite.Error(err)
 
-	//register and get
+	// register and get
 	suite.average.Register(suite.label)
 	value, err := suite.average.Average(suite.label)
 	suite.Equal(float64(0), value)
 	suite.NoError(err)
 
-	//add and get
+	// add and get
 	sum := 4
 	for i := 0; i <= sum; i++ {
 		suite.average.Add(suite.label, float64(i))

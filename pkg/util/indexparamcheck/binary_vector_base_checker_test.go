@@ -3,12 +3,12 @@ package indexparamcheck
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
 func Test_binaryVectorBaseChecker_CheckValidDataType(t *testing.T) {
-
 	cases := []struct {
 		dType    schemapb.DataType
 		errIsNil bool

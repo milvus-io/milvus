@@ -328,7 +328,7 @@ func (suite *ServerSuite) TestEnableActiveStandby() {
 	suite.NoError(err)
 	err = suite.server.SetDataCoord(mockDataCoord)
 	suite.NoError(err)
-	//suite.hackServer()
+	// suite.hackServer()
 	states1, err := suite.server.GetComponentStates(context.Background())
 	suite.NoError(err)
 	suite.Equal(commonpb.StateCode_StandBy, states1.GetState().GetStateCode())

@@ -37,7 +37,6 @@ func Init(opts ...Option) (*Manager, error) {
 	if o.FileInfo != nil {
 		s := NewFileSource(o.FileInfo)
 		sourceManager.AddSource(s)
-
 	}
 	if o.EnvKeyFormatter != nil {
 		sourceManager.AddSource(NewEnvSource(o.EnvKeyFormatter))
@@ -50,7 +49,6 @@ func Init(opts ...Option) (*Manager, error) {
 		sourceManager.AddSource(s)
 	}
 	return sourceManager, nil
-
 }
 
 func formatKey(key string) string {

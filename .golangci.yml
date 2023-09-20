@@ -7,26 +7,43 @@ run:
     - docs
     - scripts
     - internal/core
+    - cmake_build
 
 linters:
   disable-all: true
   enable:
-    - staticcheck
-    - typecheck
-    - goimports
-    - misspell
+    - gosimple
     - govet
     - ineffassign
-    - gosimple
+    - staticcheck
+    - decorder
+    - depguard
+    - gofmt
+    - goimports
     - gosec
     - revive
-    - durationcheck
     - unconvert
+    - misspell
+    - typecheck
+    - durationcheck
     - forbidigo
-    - depguard
+    - gci
+    - whitespace
+    - gofumpt
       #    - gocritic
 
 linters-settings:
+  gci:
+    sections:
+      - standard
+      - default
+      - prefix(github.com/milvus-io)
+    custom-order: true
+  gofumpt:
+    lang-version: "1.18"
+    module-path: github.com/milvus-io
+  goimports:
+    local-prefixes: github.com/milvus-io
   revive:
     rules:
       - name: unused-parameter
@@ -92,6 +109,3 @@ issues:
   max-issues-per-linter: 0
   # Maximum count of issues with the same text. Set to 0 to disable. Default is 3.
   max-same-issues: 0
-
-service:
-  golangci-lint-version: 1.27.0 # use the fixed version to not introduce new linters unexpectedly

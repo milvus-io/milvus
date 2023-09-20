@@ -19,13 +19,12 @@ package mock
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 )
 
@@ -178,7 +177,6 @@ func (m *GrpcDataCoordClient) MarkSegmentsDropped(context.Context, *datapb.MarkS
 
 func (m *GrpcDataCoordClient) BroadcastAlteredCollection(ctx context.Context, in *datapb.AlterCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
-
 }
 
 func (m *GrpcDataCoordClient) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {

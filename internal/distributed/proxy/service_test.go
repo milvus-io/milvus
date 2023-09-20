@@ -28,10 +28,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	milvusmock "github.com/milvus-io/milvus/internal/util/mock"
-
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -46,11 +42,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
+	milvusmock "github.com/milvus-io/milvus/internal/util/mock"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -730,19 +728,15 @@ func (m *MockProxy) GetProxyMetrics(ctx context.Context, request *milvuspb.GetMe
 }
 
 func (m *MockProxy) SetRootCoordClient(rootCoord types.RootCoord) {
-
 }
 
 func (m *MockProxy) SetDataCoordClient(dataCoord types.DataCoord) {
-
 }
 
 func (m *MockProxy) SetQueryCoordClient(queryCoord types.QueryCoord) {
-
 }
 
 func (m *MockProxy) SetQueryNodeCreator(func(ctx context.Context, addr string, nodeID int64) (types.QueryNode, error)) {
-
 }
 
 func (m *MockProxy) GetRateLimiter() (types.Limiter, error) {
@@ -750,7 +744,6 @@ func (m *MockProxy) GetRateLimiter() (types.Limiter, error) {
 }
 
 func (m *MockProxy) UpdateStateCode(stateCode commonpb.StateCode) {
-
 }
 
 func (m *MockProxy) SetAddress(address string) {
@@ -997,9 +990,11 @@ func waitForGrpcReady(opt *WaitOption) {
 }
 
 // TODO: should tls-related configurations be hard code here?
-var waitDuration = time.Second * 1
-var clientPemPath = "../../../configs/cert/client.pem"
-var clientKeyPath = "../../../configs/cert/client.key"
+var (
+	waitDuration  = time.Second * 1
+	clientPemPath = "../../../configs/cert/client.pem"
+	clientKeyPath = "../../../configs/cert/client.key"
+)
 
 // waitForServerReady wait for internal grpc service and external service to be ready, according to the params.
 func waitForServerReady() {
@@ -1461,7 +1456,7 @@ func TestServer_Watch(t *testing.T) {
 	watchServer := milvusmock.NewGrpcHealthWatchServer()
 	resultChan := watchServer.Chan()
 	req := &grpc_health_v1.HealthCheckRequest{Service: ""}
-	//var ret *grpc_health_v1.HealthCheckResponse
+	// var ret *grpc_health_v1.HealthCheckResponse
 	err := server.Watch(req, watchServer)
 	ret := <-resultChan
 

@@ -4,9 +4,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/cmd/tools/migration/configs"
-
 	"github.com/milvus-io/milvus/cmd/tools/migration/console"
-
 	"github.com/milvus-io/milvus/cmd/tools/migration/migration"
 )
 

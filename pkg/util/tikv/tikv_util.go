@@ -17,9 +17,10 @@
 package tikv
 
 import (
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/tikv/client-go/v2/config"
 	"github.com/tikv/client-go/v2/txnkv"
+
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func GetTiKVClient(cfg *paramtable.TiKVConfig) (*txnkv.Client, error) {

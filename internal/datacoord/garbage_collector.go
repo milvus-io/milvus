@@ -201,7 +201,8 @@ func (gc *garbageCollector) scan() {
 func (gc *garbageCollector) checkDroppedSegmentGC(segment *SegmentInfo,
 	childSegment *SegmentInfo,
 	indexSet typeutil.UniqueSet,
-	cpTimestamp Timestamp) bool {
+	cpTimestamp Timestamp,
+) bool {
 	log := log.With(zap.Int64("segmentID", segment.ID))
 
 	isCompacted := childSegment != nil || segment.GetCompacted()
@@ -246,7 +247,7 @@ func (gc *garbageCollector) clearEtcd() {
 		if segment.GetState() == commonpb.SegmentState_Dropped {
 			drops[segment.GetID()] = segment
 			channels.Insert(segment.GetInsertChannel())
-			//continue
+			// continue
 			// A(indexed), B(indexed) -> C(no indexed), D(no indexed) -> E(no indexed), A, B can not be GC
 		}
 		for _, from := range segment.GetCompactionFrom() {

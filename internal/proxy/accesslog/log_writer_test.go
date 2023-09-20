@@ -22,20 +22,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func getText(size int) []byte {
-	var text = make([]byte, size)
+	text := make([]byte, size)
 
 	for i := 0; i < size; i++ {
 		text[i] = byte('-')
 	}
 	return text
 }
+
 func TestRotateLogger_Basic(t *testing.T) {
 	var Params paramtable.ComponentParam
 	Params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
@@ -145,7 +147,6 @@ func TestRotateLogger_LocalRetention(t *testing.T) {
 	logFiles, err := logger.oldLogFiles()
 	assert.NoError(t, err)
 	assert.Equal(t, 1, len(logFiles))
-
 }
 
 func TestRotateLogger_BasicError(t *testing.T) {
@@ -161,7 +162,7 @@ func TestRotateLogger_BasicError(t *testing.T) {
 
 	logger.openFileExistingOrNew()
 
-	os.Mkdir(path.Join(logger.dir(), "test"), 0744)
+	os.Mkdir(path.Join(logger.dir(), "test"), 0o744)
 	logfile, err := logger.oldLogFiles()
 	assert.NoError(t, err)
 	assert.Equal(t, 0, len(logfile))
@@ -179,7 +180,7 @@ func TestRotateLogger_InitError(t *testing.T) {
 	params.Save(params.ProxyCfg.AccessLog.LocalPath.Key, testPath)
 	params.Save(params.ProxyCfg.AccessLog.MinioEnable.Key, "true")
 	params.Save(params.MinioCfg.Address.Key, "")
-	//init err with invalid minio address
+	// init err with invalid minio address
 	_, err := NewRotateLogger(&params.ProxyCfg.AccessLog, &params.MinioCfg)
 	assert.Error(t, err)
 }

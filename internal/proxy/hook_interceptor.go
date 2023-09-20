@@ -7,17 +7,17 @@ import (
 	"strconv"
 	"strings"
 
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
 	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
 )
 
-type defaultHook struct {
-}
+type defaultHook struct{}
 
 func (d defaultHook) Init(params map[string]string) error {
 	return nil

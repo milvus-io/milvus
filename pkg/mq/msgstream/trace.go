@@ -19,11 +19,12 @@ package msgstream
 import (
 	"context"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 )
 
 // ExtractCtx extracts trace span from msg.properties.

@@ -118,7 +118,6 @@ func (s *InsertSuite) TestInsert() {
 	log.Info("TestInsert succeed")
 	log.Info("==================")
 	log.Info("==================")
-
 }
 
 func TestInsert(t *testing.T) {

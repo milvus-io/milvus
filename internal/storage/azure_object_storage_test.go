@@ -49,7 +49,6 @@ func TestAzureObjectStorage(t *testing.T) {
 	})
 
 	t.Run("test load", func(t *testing.T) {
-
 		testCM, err := newAzureObjectStorageWithConfig(ctx, &config)
 		assert.Equal(t, err, nil)
 		defer testCM.DeleteContainer(ctx, config.bucketName, &azblob.DeleteContainerOptions{})
@@ -137,7 +136,6 @@ func TestAzureObjectStorage(t *testing.T) {
 				}
 			})
 		}
-
 	})
 
 	t.Run("test useIAM", func(t *testing.T) {

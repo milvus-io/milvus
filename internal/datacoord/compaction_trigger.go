@@ -23,7 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -32,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
 type compactTime struct {
@@ -72,8 +72,8 @@ type compactionTrigger struct {
 	forceMu           sync.Mutex
 	quit              chan struct{}
 	wg                sync.WaitGroup
-	//segRefer                     *SegmentReferenceManager
-	//indexCoord                   types.IndexCoord
+	// segRefer                     *SegmentReferenceManager
+	// indexCoord                   types.IndexCoord
 	estimateNonDiskSegmentPolicy calUpperLimitPolicy
 	estimateDiskSegmentPolicy    calUpperLimitPolicy
 	// A sloopy hack, so we can test with different segment row count without worrying that
@@ -85,8 +85,8 @@ func newCompactionTrigger(
 	meta *meta,
 	compactionHandler compactionPlanContext,
 	allocator allocator,
-	//segRefer *SegmentReferenceManager,
-	//indexCoord types.IndexCoord,
+	// segRefer *SegmentReferenceManager,
+	// indexCoord types.IndexCoord,
 	handler Handler,
 ) *compactionTrigger {
 	return &compactionTrigger{
@@ -94,8 +94,8 @@ func newCompactionTrigger(
 		allocator:         allocator,
 		signals:           make(chan *compactionSignal, 100),
 		compactionHandler: compactionHandler,
-		//segRefer:                     segRefer,
-		//indexCoord:                   indexCoord,
+		// segRefer:                     segRefer,
+		// indexCoord:                   indexCoord,
 		estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
 		estimateNonDiskSegmentPolicy: calBySchemaPolicy,
 		handler:                      handler,
@@ -211,7 +211,6 @@ func (t *compactionTrigger) getCompactTime(ts Timestamp, coll *collectionInfo) (
 
 // triggerCompaction trigger a compaction if any compaction condition satisfy.
 func (t *compactionTrigger) triggerCompaction() error {
-
 	id, err := t.allocSignalID()
 	if err != nil {
 		return err
@@ -585,7 +584,7 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, i
 	}
 	// greedy pick from large segment to small, the goal is to fill each segment to reach 512M
 	// we must ensure all prioritized candidates is in a plan
-	//TODO the compaction selection policy should consider if compaction workload is high
+	// TODO the compaction selection policy should consider if compaction workload is high
 	for len(prioritizedCandidates) > 0 {
 		var bucket []*SegmentInfo
 		// pop out the first element

@@ -87,7 +87,6 @@ func newDataSyncService(
 	serverID int64,
 	timetickSender *timeTickSender,
 ) (*dataSyncService, error) {
-
 	if channel == nil {
 		return nil, errors.New("Nil input")
 	}
@@ -223,7 +222,7 @@ func (dsService *dataSyncService) initNodes(initCtx context.Context, vchanInfo *
 		return err
 	}
 
-	//tickler will update addSegment progress to watchInfo
+	// tickler will update addSegment progress to watchInfo
 	tickler.watch()
 	defer tickler.stop()
 	futures := make([]*conc.Future[any], 0, len(unflushedSegmentInfos)+len(flushedSegmentInfos))
@@ -258,7 +257,8 @@ func (dsService *dataSyncService) initNodes(initCtx context.Context, vchanInfo *
 				statsBinLogs: segment.Statslogs,
 				binLogs:      segment.GetBinlogs(),
 				endPos:       segment.GetDmlPosition(),
-				recoverTs:    vchanInfo.GetSeekPosition().GetTimestamp()}); err != nil {
+				recoverTs:    vchanInfo.GetSeekPosition().GetTimestamp(),
+			}); err != nil {
 				return nil, err
 			}
 			tickler.inc()
@@ -400,7 +400,7 @@ func (dsService *dataSyncService) initNodes(initCtx context.Context, vchanInfo *
 		return err
 	}
 
-	//deleteNode
+	// deleteNode
 	err = dsService.fg.SetEdges(deleteNode.Name(),
 		[]string{ttNode.Name()},
 	)

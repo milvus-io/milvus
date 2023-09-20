@@ -41,6 +41,7 @@ const (
 	// StatsBinlog BinlogType for stats data
 	StatsBinlog
 )
+
 const (
 	// MagicNumber used in binlog
 	MagicNumber int32 = 0xfffabc

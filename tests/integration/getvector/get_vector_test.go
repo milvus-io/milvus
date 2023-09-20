@@ -201,7 +201,7 @@ func (s *TestGetVectorSuite) run() {
 	}
 	s.Require().Len(result.GetScores(), nq*topk)
 	s.Require().GreaterOrEqual(len(result.GetFieldsData()), 1)
-	var vecFieldIndex = -1
+	vecFieldIndex := -1
 	for i, fieldData := range result.GetFieldsData() {
 		if typeutil.IsVectorType(fieldData.GetType()) {
 			vecFieldIndex = i

@@ -7,7 +7,6 @@ import (
 )
 
 func TestParseSegmentIDByBinlog(t *testing.T) {
-
 	type testCase struct {
 		name             string
 		input            string

@@ -220,6 +220,5 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 			Key:   common.CollectionAutoCompactionKey,
 			Value: "true",
 		})
-
 	})
 }

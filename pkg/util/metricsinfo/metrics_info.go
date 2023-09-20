@@ -16,8 +16,7 @@ import (
 )
 
 // ComponentInfos defines the interface of all component infos
-type ComponentInfos interface {
-}
+type ComponentInfos interface{}
 
 // MarshalComponentInfos returns the json string of ComponentInfos
 func MarshalComponentInfos(infos ComponentInfos) (string, error) {

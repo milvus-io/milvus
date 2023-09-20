@@ -81,9 +81,11 @@ func tiTxnSnapshot(txn *txnkv.Client, paginationSize int) *txnsnapshot.KVSnapsho
 	return ss
 }
 
-var beginTxn = tiTxnBegin
-var commitTxn = tiTxnCommit
-var getSnapshot = tiTxnSnapshot
+var (
+	beginTxn    = tiTxnBegin
+	commitTxn   = tiTxnCommit
+	getSnapshot = tiTxnSnapshot
+)
 
 // implementation assertion
 var _ kv.MetaKv = (*txnTiKV)(nil)
@@ -621,7 +623,6 @@ func (kv *txnTiKV) getTiKVMeta(ctx context.Context, key string) (string, error) 
 		if err == tikverr.ErrNotExist {
 			// If key is missing
 			return "", common.NewKeyNotExistError(key)
-
 		} else {
 			// If call to tikv fails
 			return "", errors.Wrap(err, fmt.Sprintf("Failed to get value for key %s in getTiKVMeta", key))

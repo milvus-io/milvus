@@ -27,8 +27,7 @@ func ConstructComponentName(role string, id typeutil.UniqueID) string {
 }
 
 // Topology defines the interface of topology graph between different components
-type Topology interface {
-}
+type Topology interface{}
 
 // MarshalTopology returns the json string of Topology
 func MarshalTopology(topology Topology) (string, error) {

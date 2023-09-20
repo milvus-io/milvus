@@ -4,13 +4,12 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/util/metric"
-
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/util/metric"
 )
 
 func Test_flatChecker_CheckTrain(t *testing.T) {
-
 	p1 := map[string]string{
 		DIM:    strconv.Itoa(128),
 		Metric: metric.L2,

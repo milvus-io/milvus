@@ -77,7 +77,6 @@ func (r *refresher) refreshPeriodically(name string) {
 			return
 		}
 	}
-
 }
 
 func (r *refresher) fireEvents(name string, source, target map[string]string) error {

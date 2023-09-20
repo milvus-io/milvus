@@ -1,7 +1,9 @@
 package proxy
 
-type getVChannelsFuncType = func(collectionID UniqueID) ([]vChan, error)
-type removeDMLStreamFuncType = func(collectionID UniqueID) error
+type (
+	getVChannelsFuncType    = func(collectionID UniqueID) ([]vChan, error)
+	removeDMLStreamFuncType = func(collectionID UniqueID) error
+)
 
 type mockChannelsMgr struct {
 	channelsMgr

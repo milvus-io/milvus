@@ -22,8 +22,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -36,7 +34,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -103,8 +103,7 @@ func (m *MockAllocator) allocID(ctx context.Context) (UniqueID, error) {
 	return val, nil
 }
 
-type MockAllocator0 struct {
-}
+type MockAllocator0 struct{}
 
 func (m *MockAllocator0) allocTimestamp(ctx context.Context) (Timestamp, error) {
 	return Timestamp(0), nil
@@ -307,7 +306,7 @@ type mockRootCoordService struct {
 }
 
 func (m *mockRootCoordService) RenameCollection(ctx context.Context, req *milvuspb.RenameCollectionRequest) (*commonpb.Status, error) {
-	//TODO implement me
+	// TODO implement me
 	panic("implement me")
 }
 

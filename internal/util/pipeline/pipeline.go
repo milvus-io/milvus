@@ -19,9 +19,10 @@ package pipeline
 import (
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
-	"go.uber.org/zap"
 )
 
 type Pipeline interface {

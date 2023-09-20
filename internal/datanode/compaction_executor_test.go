@@ -20,8 +20,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
 
 func TestCompactionExecutor(t *testing.T) {
@@ -114,7 +115,6 @@ func TestCompactionExecutor(t *testing.T) {
 			t.FailNow()
 		}
 	})
-
 }
 
 func newMockCompactor(isvalid bool) *mockCompactor {
@@ -143,7 +143,6 @@ func (mc *mockCompactor) complete() {
 }
 
 func (mc *mockCompactor) injectDone(success bool) {
-
 }
 
 func (mc *mockCompactor) compact() (*datapb.CompactionResult, error) {

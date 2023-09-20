@@ -319,7 +319,7 @@ func (s *DataNodeServicesSuite) TestShowConfigurations() {
 		Pattern: pattern,
 	}
 
-	//test closed server
+	// test closed server
 	node := &DataNode{}
 	node.SetSession(&sessionutil.Session{ServerID: 1})
 	node.stateCode.Store(commonpb.StateCode_Abnormal)
@@ -653,7 +653,6 @@ func (s *DataNodeServicesSuite) TestAddImportSegment() {
 		s.Assert().False(merr.Ok(resp.GetStatus()))
 		// s.Assert().Equal(merr.Code(merr.ErrChannelNotFound), stat.GetStatus().GetCode())
 	})
-
 }
 
 func (s *DataNodeServicesSuite) TestSyncSegments() {

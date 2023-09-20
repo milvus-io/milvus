@@ -3,11 +3,11 @@ package funcutil
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/stretchr/testify/assert"
+	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 )
 
 func TestCntOfInternalResult(t *testing.T) {
@@ -20,7 +20,6 @@ func TestCntOfInternalResult(t *testing.T) {
 	})
 
 	t.Run("normal case", func(t *testing.T) {
-
 		res := WrapCntToInternalResult(5)
 		cnt, err := CntOfInternalResult(res)
 		assert.NoError(t, err)
@@ -38,7 +37,6 @@ func TestCntOfSegCoreResult(t *testing.T) {
 	})
 
 	t.Run("normal case", func(t *testing.T) {
-
 		res := WrapCntToSegCoreResult(5)
 		cnt, err := CntOfSegCoreResult(res)
 		assert.NoError(t, err)
@@ -56,7 +54,6 @@ func TestCntOfFieldData(t *testing.T) {
 	})
 
 	t.Run("not long data", func(t *testing.T) {
-
 		f := &schemapb.FieldData{
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
@@ -69,7 +66,6 @@ func TestCntOfFieldData(t *testing.T) {
 	})
 
 	t.Run("more than one row", func(t *testing.T) {
-
 		f := &schemapb.FieldData{
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
@@ -86,7 +82,6 @@ func TestCntOfFieldData(t *testing.T) {
 	})
 
 	t.Run("more than one row", func(t *testing.T) {
-
 		f := WrapCntToFieldData(1000)
 		cnt, err := CntOfFieldData(f)
 		assert.NoError(t, err)

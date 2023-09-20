@@ -68,11 +68,13 @@ const (
 // ReportImportAttempts is the maximum # of attempts to retry when import fails.
 var ReportImportAttempts uint = 10
 
-type ImportFlushFunc func(fields BlockData, shardID int, partID int64) error
-type AssignSegmentFunc func(shardID int, partID int64) (int64, string, error)
-type CreateBinlogsFunc func(fields BlockData, segmentID int64, partID int64) ([]*datapb.FieldBinlog, []*datapb.FieldBinlog, error)
-type SaveSegmentFunc func(fieldsInsert []*datapb.FieldBinlog, fieldsStats []*datapb.FieldBinlog, segmentID int64, targetChName string, rowCount int64, partID int64) error
-type ReportFunc func(res *rootcoordpb.ImportResult) error
+type (
+	ImportFlushFunc   func(fields BlockData, shardID int, partID int64) error
+	AssignSegmentFunc func(shardID int, partID int64) (int64, string, error)
+	CreateBinlogsFunc func(fields BlockData, segmentID int64, partID int64) ([]*datapb.FieldBinlog, []*datapb.FieldBinlog, error)
+	SaveSegmentFunc   func(fieldsInsert []*datapb.FieldBinlog, fieldsStats []*datapb.FieldBinlog, segmentID int64, targetChName string, rowCount int64, partID int64) error
+	ReportFunc        func(res *rootcoordpb.ImportResult) error
+)
 
 type WorkingSegment struct {
 	segmentID    int64                 // segment ID
@@ -107,7 +109,8 @@ type ImportWrapper struct {
 
 func NewImportWrapper(ctx context.Context, collectionInfo *CollectionInfo, segmentSize int64,
 	idAlloc *allocator.IDAllocator, cm storage.ChunkManager, importResult *rootcoordpb.ImportResult,
-	reportFunc func(res *rootcoordpb.ImportResult) error) *ImportWrapper {
+	reportFunc func(res *rootcoordpb.ImportResult) error,
+) *ImportWrapper {
 	if collectionInfo == nil || collectionInfo.Schema == nil {
 		log.Warn("import wrapper: collection schema is nil")
 		return nil
@@ -424,7 +427,7 @@ func (p *ImportWrapper) parseRowBasedJSON(filePath string, onlyValidate bool) er
 		}
 	} else {
 		flushFunc = func(fields BlockData, shardID int, partitionID int64) error {
-			var filePaths = []string{filePath}
+			filePaths := []string{filePath}
 			printFieldsDataInfo(fields, "import wrapper: prepare to flush binlogs", filePaths)
 			return p.flushFunc(fields, shardID, partitionID)
 		}

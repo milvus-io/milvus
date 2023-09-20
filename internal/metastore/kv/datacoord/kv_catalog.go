@@ -78,7 +78,7 @@ func (kc *Catalog) ListSegments(ctx context.Context) ([]*datapb.SegmentInfo, err
 		})
 	}
 
-	//execute list segment meta
+	// execute list segment meta
 	executeFn(storage.InsertBinlog, insertLogs)
 	executeFn(storage.DeleteBinlog, deltaLogs)
 	executeFn(storage.StatsBinlog, statsLogs)
@@ -211,7 +211,8 @@ func (kc *Catalog) listBinlogs(binlogType storage.BinlogType) (map[typeutil.Uniq
 }
 
 func (kc *Catalog) applyBinlogInfo(segments []*datapb.SegmentInfo, insertLogs, deltaLogs,
-	statsLogs map[typeutil.UniqueID][]*datapb.FieldBinlog) {
+	statsLogs map[typeutil.UniqueID][]*datapb.FieldBinlog,
+) {
 	for _, segmentInfo := range segments {
 		if len(segmentInfo.Binlogs) == 0 {
 			segmentInfo.Binlogs = insertLogs[segmentInfo.ID]
@@ -529,7 +530,8 @@ func (kc *Catalog) DropChannelCheckpoint(ctx context.Context, vChannel string) e
 }
 
 func (kc *Catalog) getBinlogsWithPrefix(binlogType storage.BinlogType, collectionID, partitionID,
-	segmentID typeutil.UniqueID) ([]string, []string, error) {
+	segmentID typeutil.UniqueID,
+) ([]string, []string, error) {
 	var binlogPrefix string
 	switch binlogType {
 	case storage.InsertBinlog:
@@ -727,7 +729,8 @@ func (kc *Catalog) GcConfirm(ctx context.Context, collectionID, partitionID type
 }
 
 func fillLogPathByLogID(chunkManagerRootPath string, binlogType storage.BinlogType, collectionID, partitionID,
-	segmentID typeutil.UniqueID, fieldBinlog *datapb.FieldBinlog) error {
+	segmentID typeutil.UniqueID, fieldBinlog *datapb.FieldBinlog,
+) error {
 	for _, binlog := range fieldBinlog.Binlogs {
 		path, err := buildLogPath(chunkManagerRootPath, binlogType, collectionID, partitionID,
 			segmentID, fieldBinlog.GetFieldID(), binlog.GetLogID())
@@ -815,8 +818,8 @@ func hasSepcialStatslog(logs *datapb.FieldBinlog) bool {
 }
 
 func buildBinlogKvsWithLogID(collectionID, partitionID, segmentID typeutil.UniqueID,
-	binlogs, deltalogs, statslogs []*datapb.FieldBinlog, ignoreNumberCheck bool) (map[string]string, error) {
-
+	binlogs, deltalogs, statslogs []*datapb.FieldBinlog, ignoreNumberCheck bool,
+) (map[string]string, error) {
 	checkBinlogs(storage.InsertBinlog, segmentID, binlogs)
 	checkBinlogs(storage.DeleteBinlog, segmentID, deltalogs)
 	checkBinlogs(storage.StatsBinlog, segmentID, statslogs)

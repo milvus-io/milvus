@@ -23,10 +23,10 @@ import (
 	"testing"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	kafkawrapper "github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper/kafka"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -392,7 +392,6 @@ func TestStream_KafkaTtMsgStream_2(t *testing.T) {
 	cnt1 := (len(msgPacks1)/2 - 1) * len(msgPacks1[0].Msgs)
 	cnt2 := (len(msgPacks2)/2 - 1) * len(msgPacks2[0].Msgs)
 	assert.Equal(t, (cnt1 + cnt2), msgCount)
-
 }
 
 func TestStream_KafkaTtMsgStream_DataNodeTimetickMsgstream(t *testing.T) {

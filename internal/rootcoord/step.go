@@ -382,8 +382,7 @@ func (s *removePartitionMetaStep) Weight() stepPriority {
 	return stepPriorityNormal
 }
 
-type nullStep struct {
-}
+type nullStep struct{}
 
 func (s *nullStep) Execute(ctx context.Context) ([]nestedStep, error) {
 	return nil, nil

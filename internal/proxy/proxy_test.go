@@ -273,12 +273,12 @@ func (s *proxyTestServer) GetStatisticsChannel(ctx context.Context, request *int
 func (s *proxyTestServer) startGrpc(ctx context.Context, wg *sync.WaitGroup, p *paramtable.GrpcServerConfig) {
 	defer wg.Done()
 
-	var kaep = keepalive.EnforcementPolicy{
+	kaep := keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
 		PermitWithoutStream: true,            // Allow pings even when there are no active streams
 	}
 
-	var kasp = keepalive.ServerParameters{
+	kasp := keepalive.ServerParameters{
 		Time:    60 * time.Second, // Ping the client if it is idle for 60 seconds to ensure the connection is still active
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
@@ -678,7 +678,6 @@ func TestProxy(t *testing.T) {
 		resp, err = proxy.CreateCollection(ctx, reqInvalidField)
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-
 	})
 
 	wg.Add(1)
@@ -765,7 +764,6 @@ func TestProxy(t *testing.T) {
 			DbName:         dbName,
 			CollectionName: collectionName,
 		})
-
 	})
 
 	wg.Add(1)
@@ -1026,7 +1024,7 @@ func TestProxy(t *testing.T) {
 		assert.Equal(t, int64(rowNum), resp.InsertCnt)
 	})
 
-	//TODO(dragondriver): proxy.Delete()
+	// TODO(dragondriver): proxy.Delete()
 
 	flushed := true
 	wg.Add(1)
@@ -1471,7 +1469,7 @@ func TestProxy(t *testing.T) {
 			},
 		}
 
-		//resp, err := proxy.CalcDistance(ctx, &milvuspb.CalcDistanceRequest{
+		// resp, err := proxy.CalcDistance(ctx, &milvuspb.CalcDistanceRequest{
 		_, err := proxy.CalcDistance(ctx, &milvuspb.CalcDistanceRequest{
 			Base:    nil,
 			OpLeft:  opLeft,
@@ -3370,7 +3368,6 @@ func TestProxy(t *testing.T) {
 		resp, err = proxy.CreateCollection(ctx, reqInvalidField)
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-
 	})
 
 	wg.Add(1)
@@ -3633,7 +3630,6 @@ func testProxyRole(ctx context.Context, t *testing.T, proxy *Proxy) {
 			resp, err := proxy.OperateUserRole(ctx, &milvuspb.OperateUserRoleRequest{Username: username, RoleName: roleName})
 			assert.NoError(t, err)
 			assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-
 		}
 		{
 			resp, err := proxy.OperateUserRole(ctx, &milvuspb.OperateUserRoleRequest{Username: username, RoleName: "admin"})
@@ -4229,7 +4225,6 @@ func TestProxy_ListImportTasks(t *testing.T) {
 }
 
 func TestProxy_GetStatistics(t *testing.T) {
-
 }
 
 func TestProxy_GetLoadState(t *testing.T) {

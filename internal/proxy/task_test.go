@@ -75,7 +75,6 @@ func constructCollectionSchema(
 	dim int,
 	collectionName string,
 ) *schemapb.CollectionSchema {
-
 	pk := &schemapb.FieldSchema{
 		FieldID:      0,
 		Name:         int64Field,
@@ -117,7 +116,6 @@ func constructCollectionSchemaEnableDynamicSchema(
 	dim int,
 	collectionName string,
 ) *schemapb.CollectionSchema {
-
 	pk := &schemapb.FieldSchema{
 		FieldID:      0,
 		Name:         int64Field,
@@ -210,7 +208,6 @@ func constructCollectionSchemaWithAllType(
 	dim int,
 	collectionName string,
 ) *schemapb.CollectionSchema {
-
 	b := &schemapb.FieldSchema{
 		FieldID:      0,
 		Name:         boolField,
@@ -572,7 +569,6 @@ func TestTranslateOutputFields(t *testing.T) {
 }
 
 func TestCreateCollectionTask(t *testing.T) {
-
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
@@ -921,7 +917,7 @@ func TestHasCollectionTask(t *testing.T) {
 		ShardsNum:      shardsNum,
 	}
 
-	//CreateCollection
+	// CreateCollection
 	task := &hasCollectionTask{
 		Condition: NewTaskCondition(ctx),
 		HasCollectionRequest: &milvuspb.HasCollectionRequest{
@@ -968,7 +964,6 @@ func TestHasCollectionTask(t *testing.T) {
 	assert.NoError(t, err)
 	err = task.Execute(ctx)
 	assert.Error(t, err)
-
 }
 
 func TestDescribeCollectionTask(t *testing.T) {
@@ -985,7 +980,7 @@ func TestDescribeCollectionTask(t *testing.T) {
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
 
-	//CreateCollection
+	// CreateCollection
 	task := &describeCollectionTask{
 		Condition: NewTaskCondition(ctx),
 		DescribeCollectionRequest: &milvuspb.DescribeCollectionRequest{
@@ -1071,7 +1066,7 @@ func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
 	rc.CreateCollection(ctx, createColReq)
 	globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
 
-	//CreateCollection
+	// CreateCollection
 	task := &describeCollectionTask{
 		Condition: NewTaskCondition(ctx),
 		DescribeCollectionRequest: &milvuspb.DescribeCollectionRequest{
@@ -1135,7 +1130,7 @@ func TestDescribeCollectionTask_EnableDynamicSchema(t *testing.T) {
 	rc.CreateCollection(ctx, createColReq)
 	globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
 
-	//CreateCollection
+	// CreateCollection
 	task := &describeCollectionTask{
 		Condition: NewTaskCondition(ctx),
 		DescribeCollectionRequest: &milvuspb.DescribeCollectionRequest{
@@ -1198,7 +1193,7 @@ func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
 	rc.CreateCollection(ctx, createColReq)
 	globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
 
-	//CreateCollection
+	// CreateCollection
 	task := &describeCollectionTask{
 		Condition: NewTaskCondition(ctx),
 		DescribeCollectionRequest: &milvuspb.DescribeCollectionRequest{
@@ -1518,7 +1513,6 @@ func TestShowPartitionsTask(t *testing.T) {
 	task.ShowPartitionsRequest.Type = milvuspb.ShowType_InMemory
 	err = task.Execute(ctx)
 	assert.Error(t, err)
-
 }
 
 func TestTask_Int64PrimaryKey(t *testing.T) {
@@ -1549,7 +1543,8 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 		testInt64Field:    schemapb.DataType_Int64,
 		testFloatField:    schemapb.DataType_Float,
 		testDoubleField:   schemapb.DataType_Double,
-		testFloatVecField: schemapb.DataType_FloatVector}
+		testFloatVecField: schemapb.DataType_FloatVector,
+	}
 	if enableMultipleVectorFields {
 		fieldName2Types[testBinaryVecField] = schemapb.DataType_BinaryVector
 	}
@@ -1794,7 +1789,8 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 		testFloatField:    schemapb.DataType_Float,
 		testDoubleField:   schemapb.DataType_Double,
 		testVarCharField:  schemapb.DataType_VarChar,
-		testFloatVecField: schemapb.DataType_FloatVector}
+		testFloatVecField: schemapb.DataType_FloatVector,
+	}
 	if enableMultipleVectorFields {
 		fieldName2Types[testBinaryVecField] = schemapb.DataType_BinaryVector
 	}
@@ -2125,7 +2121,6 @@ func TestDropAlias_all(t *testing.T) {
 	assert.NoError(t, task.PreExecute(ctx))
 	assert.NoError(t, task.Execute(ctx))
 	assert.NoError(t, task.PostExecute(ctx))
-
 }
 
 func TestAlterAlias_all(t *testing.T) {
@@ -2541,7 +2536,7 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 	dbName := funcutil.GenRandomStr()
 	collectionName := funcutil.GenRandomStr()
 	collectionID := UniqueID(1)
-	//fieldName := funcutil.GenRandomStr()
+	// fieldName := funcutil.GenRandomStr()
 	indexName := funcutil.GenRandomStr()
 	ctx := context.Background()
 	indexID := int64(1000)
@@ -2642,7 +2637,7 @@ func Test_loadPartitionTask_Execute(t *testing.T) {
 	dbName := funcutil.GenRandomStr()
 	collectionName := funcutil.GenRandomStr()
 	collectionID := UniqueID(1)
-	//fieldName := funcutil.GenRandomStr()
+	// fieldName := funcutil.GenRandomStr()
 	indexName := funcutil.GenRandomStr()
 	ctx := context.Background()
 	indexID := int64(1000)

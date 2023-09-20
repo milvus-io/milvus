@@ -427,7 +427,6 @@ func TestMinioChunkManager(t *testing.T) {
 		r, err := testCM.Mmap(ctx, key)
 		assert.Error(t, err)
 		assert.Nil(t, r)
-
 	})
 
 	t.Run("test Prefix", func(t *testing.T) {
@@ -882,7 +881,6 @@ func TestAzureChunkManager(t *testing.T) {
 		r, err := testCM.Mmap(ctx, key)
 		assert.Error(t, err)
 		assert.Nil(t, r)
-
 	})
 
 	t.Run("test Prefix", func(t *testing.T) {

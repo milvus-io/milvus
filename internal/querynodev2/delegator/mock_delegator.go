@@ -120,7 +120,7 @@ type MockShardDelegator_GetSegmentInfo_Call struct {
 }
 
 // GetSegmentInfo is a helper method to define mock.On call
-//  - readable bool
+//   - readable bool
 func (_e *MockShardDelegator_Expecter) GetSegmentInfo(readable interface{}) *MockShardDelegator_GetSegmentInfo_Call {
 	return &MockShardDelegator_GetSegmentInfo_Call{Call: _e.mock.On("GetSegmentInfo", readable)}
 }
@@ -166,8 +166,8 @@ type MockShardDelegator_GetStatistics_Call struct {
 }
 
 // GetStatistics is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *querypb.GetStatisticsRequest
+//   - ctx context.Context
+//   - req *querypb.GetStatisticsRequest
 func (_e *MockShardDelegator_Expecter) GetStatistics(ctx interface{}, req interface{}) *MockShardDelegator_GetStatistics_Call {
 	return &MockShardDelegator_GetStatistics_Call{Call: _e.mock.On("GetStatistics", ctx, req)}
 }
@@ -240,9 +240,9 @@ type MockShardDelegator_LoadGrowing_Call struct {
 }
 
 // LoadGrowing is a helper method to define mock.On call
-//  - ctx context.Context
-//  - infos []*querypb.SegmentLoadInfo
-//  - version int64
+//   - ctx context.Context
+//   - infos []*querypb.SegmentLoadInfo
+//   - version int64
 func (_e *MockShardDelegator_Expecter) LoadGrowing(ctx interface{}, infos interface{}, version interface{}) *MockShardDelegator_LoadGrowing_Call {
 	return &MockShardDelegator_LoadGrowing_Call{Call: _e.mock.On("LoadGrowing", ctx, infos, version)}
 }
@@ -279,8 +279,8 @@ type MockShardDelegator_LoadSegments_Call struct {
 }
 
 // LoadSegments is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *querypb.LoadSegmentsRequest
+//   - ctx context.Context
+//   - req *querypb.LoadSegmentsRequest
 func (_e *MockShardDelegator_Expecter) LoadSegments(ctx interface{}, req interface{}) *MockShardDelegator_LoadSegments_Call {
 	return &MockShardDelegator_LoadSegments_Call{Call: _e.mock.On("LoadSegments", ctx, req)}
 }
@@ -308,8 +308,8 @@ type MockShardDelegator_ProcessDelete_Call struct {
 }
 
 // ProcessDelete is a helper method to define mock.On call
-//  - deleteData []*DeleteData
-//  - ts uint64
+//   - deleteData []*DeleteData
+//   - ts uint64
 func (_e *MockShardDelegator_Expecter) ProcessDelete(deleteData interface{}, ts interface{}) *MockShardDelegator_ProcessDelete_Call {
 	return &MockShardDelegator_ProcessDelete_Call{Call: _e.mock.On("ProcessDelete", deleteData, ts)}
 }
@@ -337,7 +337,7 @@ type MockShardDelegator_ProcessInsert_Call struct {
 }
 
 // ProcessInsert is a helper method to define mock.On call
-//  - insertRecords map[int64]*InsertData
+//   - insertRecords map[int64]*InsertData
 func (_e *MockShardDelegator_Expecter) ProcessInsert(insertRecords interface{}) *MockShardDelegator_ProcessInsert_Call {
 	return &MockShardDelegator_ProcessInsert_Call{Call: _e.mock.On("ProcessInsert", insertRecords)}
 }
@@ -383,8 +383,8 @@ type MockShardDelegator_Query_Call struct {
 }
 
 // Query is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *querypb.QueryRequest
+//   - ctx context.Context
+//   - req *querypb.QueryRequest
 func (_e *MockShardDelegator_Expecter) Query(ctx interface{}, req interface{}) *MockShardDelegator_Query_Call {
 	return &MockShardDelegator_Query_Call{Call: _e.mock.On("Query", ctx, req)}
 }
@@ -421,9 +421,9 @@ type MockShardDelegator_QueryStream_Call struct {
 }
 
 // QueryStream is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *querypb.QueryRequest
-//  - srv streamrpc.QueryStreamServer
+//   - ctx context.Context
+//   - req *querypb.QueryRequest
+//   - srv streamrpc.QueryStreamServer
 func (_e *MockShardDelegator_Expecter) QueryStream(ctx interface{}, req interface{}, srv interface{}) *MockShardDelegator_QueryStream_Call {
 	return &MockShardDelegator_QueryStream_Call{Call: _e.mock.On("QueryStream", ctx, req, srv)}
 }
@@ -460,9 +460,9 @@ type MockShardDelegator_ReleaseSegments_Call struct {
 }
 
 // ReleaseSegments is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *querypb.ReleaseSegmentsRequest
-//  - force bool
+//   - ctx context.Context
+//   - req *querypb.ReleaseSegmentsRequest
+//   - force bool
 func (_e *MockShardDelegator_Expecter) ReleaseSegments(ctx interface{}, req interface{}, force interface{}) *MockShardDelegator_ReleaseSegments_Call {
 	return &MockShardDelegator_ReleaseSegments_Call{Call: _e.mock.On("ReleaseSegments", ctx, req, force)}
 }
@@ -508,8 +508,8 @@ type MockShardDelegator_Search_Call struct {
 }
 
 // Search is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *querypb.SearchRequest
+//   - ctx context.Context
+//   - req *querypb.SearchRequest
 func (_e *MockShardDelegator_Expecter) Search(ctx interface{}, req interface{}) *MockShardDelegator_Search_Call {
 	return &MockShardDelegator_Search_Call{Call: _e.mock.On("Search", ctx, req)}
 }
@@ -607,8 +607,8 @@ type MockShardDelegator_SyncDistribution_Call struct {
 }
 
 // SyncDistribution is a helper method to define mock.On call
-//  - ctx context.Context
-//  - entries ...SegmentEntry
+//   - ctx context.Context
+//   - entries ...SegmentEntry
 func (_e *MockShardDelegator_Expecter) SyncDistribution(ctx interface{}, entries ...interface{}) *MockShardDelegator_SyncDistribution_Call {
 	return &MockShardDelegator_SyncDistribution_Call{Call: _e.mock.On("SyncDistribution",
 		append([]interface{}{ctx}, entries...)...)}
@@ -719,7 +719,8 @@ func (_c *MockShardDelegator_Version_Call) RunAndReturn(run func() int64) *MockS
 func NewMockShardDelegator(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockShardDelegator {
+},
+) *MockShardDelegator {
 	mock := &MockShardDelegator{}
 	mock.Mock.Test(t)
 

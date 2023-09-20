@@ -3,8 +3,9 @@ package deletebuffer
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/storage"
 )
 
 func TestDeleteBufferItem(t *testing.T) {

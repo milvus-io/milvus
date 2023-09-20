@@ -19,12 +19,13 @@ package nmq
 import (
 	"context"
 
+	"github.com/nats-io/nats.go"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
-	"github.com/nats-io/nats.go"
-	"go.uber.org/zap"
 )
 
 var _ mqwrapper.Producer = (*nmqProducer)(nil)

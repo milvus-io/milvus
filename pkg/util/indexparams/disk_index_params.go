@@ -260,7 +260,6 @@ func SetDiskIndexLoadParams(params *paramtable.ComponentParam, indexParams map[s
 		if err != nil {
 			return err
 		}
-
 	}
 
 	indexParams[SearchCacheBudgetKey] = fmt.Sprintf("%f",

@@ -324,7 +324,6 @@ func (m *Manager) updateEvent(e *Event) error {
 				m.keySourceMap[e.Key] = source.GetSourceName()
 			}
 		}
-
 	}
 
 	log.Info("receive update event", zap.Any("event", e))
@@ -387,7 +386,7 @@ func (m *Manager) getHighPrioritySource(srcNameA, srcNameB string) Source {
 		return sourceA
 	}
 
-	if sourceA.GetPriority() < sourceB.GetPriority() { //less value has high priority
+	if sourceA.GetPriority() < sourceB.GetPriority() { // less value has high priority
 		return sourceA
 	}
 

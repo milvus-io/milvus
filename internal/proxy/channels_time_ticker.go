@@ -219,7 +219,6 @@ func newChannelsTimeTicker(
 	getStatisticsFunc getPChanStatisticsFuncType,
 	tso tsoAllocator,
 ) *channelsTimeTickerImpl {
-
 	ctx1, cancel := context.WithCancel(ctx)
 
 	ticker := &channelsTimeTickerImpl{

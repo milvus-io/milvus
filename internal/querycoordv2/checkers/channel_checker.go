@@ -110,7 +110,8 @@ func (c *ChannelChecker) checkReplica(ctx context.Context, replica *meta.Replica
 
 // GetDmChannelDiff get channel diff between target and dist
 func (c *ChannelChecker) getDmChannelDiff(collectionID int64,
-	replicaID int64) (toLoad, toRelease []*meta.DmChannel) {
+	replicaID int64,
+) (toLoad, toRelease []*meta.DmChannel) {
 	replica := c.meta.Get(replicaID)
 	if replica == nil {
 		log.Info("replica does not exist, skip it")
@@ -135,7 +136,7 @@ func (c *ChannelChecker) getDmChannelDiff(collectionID int64,
 		}
 	}
 
-	//get channels which exists on next target, but not on dist
+	// get channels which exists on next target, but not on dist
 	for name, channel := range nextTargetMap {
 		_, existOnDist := distMap[name]
 		if !existOnDist {

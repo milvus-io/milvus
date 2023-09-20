@@ -108,7 +108,7 @@ func genPlaceHolderGroup(nq int64) ([]byte, error) {
 		Values: make([][]byte, 0),
 	}
 	for i := int64(0); i < nq; i++ {
-		var vec = make([]float32, defaultDim)
+		vec := make([]float32, defaultDim)
 		for j := 0; j < defaultDim; j++ {
 			vec[j] = rand.Float32()
 		}

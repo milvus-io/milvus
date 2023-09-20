@@ -39,8 +39,8 @@ func TestLoadFromFileSource(t *testing.T) {
 
 	t.Run("multiple files", func(t *testing.T) {
 		dir, _ := os.MkdirTemp("", "milvus")
-		os.WriteFile(path.Join(dir, "milvus.yaml"), []byte("a.b: 1\nc.d: 2"), 0600)
-		os.WriteFile(path.Join(dir, "user.yaml"), []byte("a.b: 3"), 0600)
+		os.WriteFile(path.Join(dir, "milvus.yaml"), []byte("a.b: 1\nc.d: 2"), 0o600)
+		os.WriteFile(path.Join(dir, "user.yaml"), []byte("a.b: 3"), 0o600)
 
 		fs := NewFileSource(&FileInfo{[]string{path.Join(dir, "milvus.yaml"), path.Join(dir, "user.yaml")}, -1})
 		fs.loadFromFile()

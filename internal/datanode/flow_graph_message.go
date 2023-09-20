@@ -49,7 +49,7 @@ type flowGraphMsg struct {
 	timeRange      TimeRange
 	startPositions []*msgpb.MsgPosition
 	endPositions   []*msgpb.MsgPosition
-	//segmentsToSync is the signal used by insertBufferNode to notify deleteNode to flush
+	// segmentsToSync is the signal used by insertBufferNode to notify deleteNode to flush
 	segmentsToSync []UniqueID
 	dropCollection bool
 	dropPartitions []UniqueID
@@ -69,7 +69,7 @@ type flushMsg struct {
 	timestamp    Timestamp
 	segmentID    UniqueID
 	collectionID UniqueID
-	//isFlush illustrates if this is a flush or normal sync
+	// isFlush illustrates if this is a flush or normal sync
 	isFlush bool
 }
 

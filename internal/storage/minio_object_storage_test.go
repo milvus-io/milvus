@@ -23,7 +23,6 @@ import (
 	"testing"
 
 	"github.com/minio/minio-go/v7"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -54,7 +53,6 @@ func TestMinioObjectStorage(t *testing.T) {
 	})
 
 	t.Run("test load", func(t *testing.T) {
-
 		testCM, err := newMinioObjectStorageWithConfig(ctx, &config)
 		assert.Equal(t, err, nil)
 		defer testCM.RemoveBucket(ctx, config.bucketName)
@@ -142,7 +140,6 @@ func TestMinioObjectStorage(t *testing.T) {
 				}
 			})
 		}
-
 	})
 
 	t.Run("test useIAM", func(t *testing.T) {

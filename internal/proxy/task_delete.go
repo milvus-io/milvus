@@ -113,7 +113,7 @@ func (dt *deleteTask) getChannels() []pChan {
 }
 
 func getExpr(plan *planpb.PlanNode) (bool, *planpb.Expr_TermExpr) {
-	//simple delete request need expr with "pk in [a, b]"
+	// simple delete request need expr with "pk in [a, b]"
 	termExpr, ok := plan.Node.(*planpb.PlanNode_Query).Query.Predicates.Expr.(*planpb.Expr_TermExpr)
 	if !ok {
 		return false, nil
@@ -339,7 +339,6 @@ func (dt *deleteTask) complexDelete(ctx context.Context, plan *planpb.PlanNode, 
 		nq:             1,
 		exec:           dt.getStreamingQueryAndDelteFunc(stream, plan),
 	})
-
 	if err != nil {
 		log.Warn("fail to get or create dml stream", zap.Error(err))
 		return err

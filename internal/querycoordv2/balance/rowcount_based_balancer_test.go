@@ -397,7 +397,6 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 			suite.ElementsMatch(c.expectPlans, segmentPlans)
 		})
 	}
-
 }
 
 func (suite *RowCountBasedBalancerTestSuite) TestBalanceOnPartStopping() {
@@ -596,7 +595,6 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOnPartStopping() {
 			suite.ElementsMatch(c.expectPlans, segmentPlans)
 		})
 	}
-
 }
 
 func (suite *RowCountBasedBalancerTestSuite) TestBalanceOutboundNodes() {
@@ -752,11 +750,11 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOnLoadingCollection() {
 			suite.ElementsMatch(c.expectPlans, segmentPlans)
 		})
 	}
-
 }
 
 func (suite *RowCountBasedBalancerTestSuite) getCollectionBalancePlans(balancer *RowCountBasedBalancer,
-	collectionID int64) ([]SegmentAssignPlan, []ChannelAssignPlan) {
+	collectionID int64,
+) ([]SegmentAssignPlan, []ChannelAssignPlan) {
 	replicas := balancer.meta.ReplicaManager.GetByCollection(collectionID)
 	segmentPlans, channelPlans := make([]SegmentAssignPlan, 0), make([]ChannelAssignPlan, 0)
 	for _, replica := range replicas {

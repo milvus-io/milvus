@@ -22,20 +22,18 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/types"
-	streamMocks "github.com/milvus-io/milvus/internal/util/streamrpc/mocks"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/types"
+	streamMocks "github.com/milvus-io/milvus/internal/util/streamrpc/mocks"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type MockRootCoord struct {
@@ -105,7 +103,8 @@ func Test_NewServer(t *testing.T) {
 		mockQN.EXPECT().GetComponentStates(mock.Anything).Return(&milvuspb.ComponentStates{
 			State: &milvuspb.ComponentInfo{
 				StateCode: commonpb.StateCode_Healthy,
-			}}, nil)
+			},
+		}, nil)
 		req := &milvuspb.GetComponentStatesRequest{}
 		states, err := server.GetComponentStates(ctx, req)
 		assert.NoError(t, err)
@@ -178,7 +177,8 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("GetSegmentInfo", func(t *testing.T) {
 		mockQN.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return(&querypb.GetSegmentInfoResponse{
-			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil)
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		}, nil)
 		req := &querypb.GetSegmentInfoRequest{}
 		resp, err := server.GetSegmentInfo(ctx, req)
 		assert.NoError(t, err)
@@ -198,7 +198,8 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("Search", func(t *testing.T) {
 		mockQN.EXPECT().Search(mock.Anything, mock.Anything).Return(&internalpb.SearchResults{
-			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil)
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		}, nil)
 		req := &querypb.SearchRequest{}
 		resp, err := server.Search(ctx, req)
 		assert.NoError(t, err)
@@ -207,7 +208,8 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("SearchSegments", func(t *testing.T) {
 		mockQN.EXPECT().SearchSegments(mock.Anything, mock.Anything).Return(&internalpb.SearchResults{
-			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil)
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		}, nil)
 		req := &querypb.SearchRequest{}
 		resp, err := server.SearchSegments(ctx, req)
 		assert.NoError(t, err)
@@ -216,7 +218,8 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("Query", func(t *testing.T) {
 		mockQN.EXPECT().Query(mock.Anything, mock.Anything).Return(&internalpb.RetrieveResults{
-			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil)
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		}, nil)
 		req := &querypb.QueryRequest{}
 		resp, err := server.Query(ctx, req)
 		assert.NoError(t, err)
@@ -235,7 +238,8 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("QuerySegments", func(t *testing.T) {
 		mockQN.EXPECT().QuerySegments(mock.Anything, mock.Anything).Return(&internalpb.RetrieveResults{
-			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil)
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		}, nil)
 		req := &querypb.QueryRequest{}
 		resp, err := server.QuerySegments(ctx, req)
 		assert.NoError(t, err)

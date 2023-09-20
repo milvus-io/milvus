@@ -3,10 +3,10 @@ package planparserv2
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/proto/planpb"
-
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestCheckIdentical(t *testing.T) {
@@ -122,37 +122,45 @@ func TestCheckVectorANNSIdentical(t *testing.T) {
 		},
 		{
 			args: args{
-				node1: &planpb.VectorANNS{VectorType: planpb.VectorType_FloatVector, FieldId: 100, PlaceholderTag: "$0", QueryInfo: &planpb.QueryInfo{Topk: 1, MetricType: "L2", SearchParams: `{"nprobe": 10}`, RoundDecimal: 6},
+				node1: &planpb.VectorANNS{
+					VectorType: planpb.VectorType_FloatVector, FieldId: 100, PlaceholderTag: "$0", QueryInfo: &planpb.QueryInfo{Topk: 1, MetricType: "L2", SearchParams: `{"nprobe": 10}`, RoundDecimal: 6},
 					Predicates: &planpb.Expr{
 						Expr: &planpb.Expr_ColumnExpr{
 							ColumnExpr: &planpb.ColumnExpr{
 								Info: &planpb.ColumnInfo{},
 							},
 						},
-					}},
-				node2: &planpb.VectorANNS{VectorType: planpb.VectorType_FloatVector, FieldId: 100, PlaceholderTag: "$0", QueryInfo: &planpb.QueryInfo{Topk: 1, MetricType: "L2", SearchParams: `{"nprobe": 10}`, RoundDecimal: 6},
+					},
+				},
+				node2: &planpb.VectorANNS{
+					VectorType: planpb.VectorType_FloatVector, FieldId: 100, PlaceholderTag: "$0", QueryInfo: &planpb.QueryInfo{Topk: 1, MetricType: "L2", SearchParams: `{"nprobe": 10}`, RoundDecimal: 6},
 					Predicates: &planpb.Expr{
 						Expr: &planpb.Expr_ValueExpr{
 							ValueExpr: &planpb.ValueExpr{Value: NewInt(100)},
 						},
-					}},
+					},
+				},
 			},
 			want: false,
 		},
 		{
 			args: args{
-				node1: &planpb.VectorANNS{VectorType: planpb.VectorType_FloatVector, FieldId: 100, PlaceholderTag: "$0", QueryInfo: &planpb.QueryInfo{Topk: 1, MetricType: "L2", SearchParams: `{"nprobe": 10}`, RoundDecimal: 6},
+				node1: &planpb.VectorANNS{
+					VectorType: planpb.VectorType_FloatVector, FieldId: 100, PlaceholderTag: "$0", QueryInfo: &planpb.QueryInfo{Topk: 1, MetricType: "L2", SearchParams: `{"nprobe": 10}`, RoundDecimal: 6},
 					Predicates: &planpb.Expr{
 						Expr: &planpb.Expr_ValueExpr{
 							ValueExpr: &planpb.ValueExpr{Value: NewInt(100)},
 						},
-					}},
-				node2: &planpb.VectorANNS{VectorType: planpb.VectorType_FloatVector, FieldId: 100, PlaceholderTag: "$0", QueryInfo: &planpb.QueryInfo{Topk: 1, MetricType: "L2", SearchParams: `{"nprobe": 10}`, RoundDecimal: 6},
+					},
+				},
+				node2: &planpb.VectorANNS{
+					VectorType: planpb.VectorType_FloatVector, FieldId: 100, PlaceholderTag: "$0", QueryInfo: &planpb.QueryInfo{Topk: 1, MetricType: "L2", SearchParams: `{"nprobe": 10}`, RoundDecimal: 6},
 					Predicates: &planpb.Expr{
 						Expr: &planpb.Expr_ValueExpr{
 							ValueExpr: &planpb.ValueExpr{Value: NewInt(100)},
 						},
-					}},
+					},
+				},
 			},
 			want: true,
 		},
@@ -214,23 +222,27 @@ func TestCheckPlanNodeIdentical(t *testing.T) {
 			args: args{
 				node1: &planpb.PlanNode{
 					Node: &planpb.PlanNode_VectorAnns{
-						VectorAnns: &planpb.VectorANNS{VectorType: planpb.VectorType_FloatVector, FieldId: 100, PlaceholderTag: "$0", QueryInfo: &planpb.QueryInfo{Topk: 1, MetricType: "L2", SearchParams: `{"nprobe": 10}`, RoundDecimal: 6},
+						VectorAnns: &planpb.VectorANNS{
+							VectorType: planpb.VectorType_FloatVector, FieldId: 100, PlaceholderTag: "$0", QueryInfo: &planpb.QueryInfo{Topk: 1, MetricType: "L2", SearchParams: `{"nprobe": 10}`, RoundDecimal: 6},
 							Predicates: &planpb.Expr{
 								Expr: &planpb.Expr_ValueExpr{
 									ValueExpr: &planpb.ValueExpr{Value: NewInt(100)},
 								},
-							}},
+							},
+						},
 					},
 					OutputFieldIds: []int64{100},
 				},
 				node2: &planpb.PlanNode{
 					Node: &planpb.PlanNode_VectorAnns{
-						VectorAnns: &planpb.VectorANNS{VectorType: planpb.VectorType_FloatVector, FieldId: 100, PlaceholderTag: "$0", QueryInfo: &planpb.QueryInfo{Topk: 1, MetricType: "L2", SearchParams: `{"nprobe": 10}`, RoundDecimal: 6},
+						VectorAnns: &planpb.VectorANNS{
+							VectorType: planpb.VectorType_FloatVector, FieldId: 100, PlaceholderTag: "$0", QueryInfo: &planpb.QueryInfo{Topk: 1, MetricType: "L2", SearchParams: `{"nprobe": 10}`, RoundDecimal: 6},
 							Predicates: &planpb.Expr{
 								Expr: &planpb.Expr_ValueExpr{
 									ValueExpr: &planpb.ValueExpr{Value: NewInt(100)},
 								},
-							}},
+							},
+						},
 					},
 					OutputFieldIds: []int64{100},
 				},

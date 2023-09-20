@@ -21,11 +21,12 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/atomic"
+	"google.golang.org/grpc"
+
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"go.uber.org/atomic"
-	"google.golang.org/grpc"
 )
 
 var (

@@ -20,9 +20,10 @@ import (
 	"testing"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/stretchr/testify/assert"
 )
 
 func Test_ProtoUnmarshalDispatcher(t *testing.T) {

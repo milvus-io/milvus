@@ -182,9 +182,11 @@ func (data *JSONFieldData) GetRow(i int) any   { return data.Data[i] }
 func (data *BinaryVectorFieldData) GetRow(i int) any {
 	return data.Data[i*data.Dim/8 : (i+1)*data.Dim/8]
 }
+
 func (data *FloatVectorFieldData) GetRow(i int) any {
 	return data.Data[i*data.Dim : (i+1)*data.Dim]
 }
+
 func (data *Float16VectorFieldData) GetRow(i int) any {
 	return data.Data[i*data.Dim*2 : (i+1)*data.Dim*2]
 }
@@ -331,7 +333,7 @@ func (insertCodec *InsertCodec) SerializePkStats(stats *PrimaryKeyStats, rowNum 
 		return nil, fmt.Errorf("sericalize empty pk stats")
 	}
 
-	//Serialize by pk stats
+	// Serialize by pk stats
 	blobKey := fmt.Sprintf("%d", stats.FieldID)
 	statsWriter := &StatsWriter{}
 	err := statsWriter.Generate(stats)
@@ -1055,8 +1057,7 @@ func (data *DeleteData) Append(pk PrimaryKey, ts Timestamp) {
 }
 
 // DeleteCodec serializes and deserializes the delete data
-type DeleteCodec struct {
-}
+type DeleteCodec struct{}
 
 // NewDeleteCodec returns a DeleteCodec
 func NewDeleteCodec() *DeleteCodec {
@@ -1187,7 +1188,6 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 		}
 		eventReader.Close()
 		binlogReader.Close()
-
 	}
 	result.RowCount = int64(len(result.Pks))
 
@@ -1377,7 +1377,6 @@ func (dataDefinitionCodec *DataDefinitionCodec) Deserialize(blobs []*Blob) (ts [
 			eventReader.Close()
 		}
 		binlogReader.Close()
-
 	}
 
 	return resultTs, requestsStrings, nil

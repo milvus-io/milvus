@@ -510,8 +510,8 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 		kvs[key] = pkStatsBlob.Value
 		field2Stats[fieldID] = &datapb.Binlog{
 			EntriesNum:    0,
-			TimestampFrom: 0, //TODO
-			TimestampTo:   0, //TODO,
+			TimestampFrom: 0, // TODO
+			TimestampTo:   0, // TODO,
 			LogPath:       key,
 			LogSize:       int64(len(pkStatsBlob.Value)),
 		}
@@ -528,8 +528,8 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 
 // notify flush manager del buffer data
 func (m *rendezvousFlushManager) flushDelData(data *DelDataBuf, segmentID UniqueID,
-	pos *msgpb.MsgPosition) error {
-
+	pos *msgpb.MsgPosition,
+) error {
 	// del signal with empty data
 	if data == nil || data.delData == nil {
 		m.handleDeleteTask(segmentID, &flushBufferDeleteTask{}, nil, pos)
@@ -648,7 +648,7 @@ func getSyncTaskID(pos *msgpb.MsgPosition) string {
 // close cleans up all the left members
 func (m *rendezvousFlushManager) close() {
 	m.dispatcher.Range(func(segmentID int64, queue *orderFlushQueue) bool {
-		//assertion ok
+		// assertion ok
 		queue.injectMut.Lock()
 		for i := 0; i < len(queue.injectCh); i++ {
 			go queue.handleInject(<-queue.injectCh)
@@ -744,8 +744,8 @@ func dropVirtualChannelFunc(dsService *dataSyncService, opts ...retry.Option) fl
 	return func(packs []*segmentFlushPack) {
 		req := &datapb.DropVirtualChannelRequest{
 			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(0), //TODO msg type
-				commonpbutil.WithMsgID(0),   //TODO msg id
+				commonpbutil.WithMsgType(0), // TODO msg type
+				commonpbutil.WithMsgID(0),   // TODO msg id
 				commonpbutil.WithSourceID(paramtable.GetNodeID()),
 			),
 			ChannelName: dsService.vchannelName,

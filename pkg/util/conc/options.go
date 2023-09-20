@@ -19,9 +19,10 @@ package conc
 import (
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/panjf2000/ants/v2"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 type poolOption struct {

@@ -48,19 +48,19 @@ func (suite *TSafeTestSuite) TestBasic() {
 	suite.NoError(err)
 	suite.Equal(ZeroTimestamp, t)
 
-	//Add listener
+	// Add listener
 	globalWatcher := suite.tSafeReplica.WatchChannel(suite.channel)
 	channelWatcher := suite.tSafeReplica.Watch()
 	defer globalWatcher.Close()
 	defer channelWatcher.Close()
 
-	//Test Set tSafe
+	// Test Set tSafe
 	suite.tSafeReplica.Set(suite.channel, suite.time)
 	t, err = suite.tSafeReplica.Get(suite.channel)
 	suite.NoError(err)
 	suite.Equal(suite.time, t)
 
-	//Test listener
+	// Test listener
 	select {
 	case <-globalWatcher.On():
 	default:

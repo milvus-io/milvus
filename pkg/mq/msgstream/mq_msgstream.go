@@ -26,11 +26,11 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -67,8 +67,8 @@ func NewMqMsgStream(ctx context.Context,
 	receiveBufSize int64,
 	bufSize int64,
 	client mqwrapper.Client,
-	unmarshal UnmarshalDispatcher) (*mqMsgStream, error) {
-
+	unmarshal UnmarshalDispatcher,
+) (*mqMsgStream, error) {
 	streamCtx, streamCancel := context.WithCancel(ctx)
 	producers := make(map[string]mqwrapper.Producer)
 	consumers := make(map[string]mqwrapper.Consumer)
@@ -214,7 +214,6 @@ func (ms *mqMsgStream) Close() {
 
 	ms.client.Close()
 	close(ms.receiveBuf)
-
 }
 
 func (ms *mqMsgStream) ComputeProduceChannelIndexes(tsMsgs []TsMsg) [][]int32 {
@@ -474,7 +473,8 @@ func NewMqTtMsgStream(ctx context.Context,
 	receiveBufSize int64,
 	bufSize int64,
 	client mqwrapper.Client,
-	unmarshal UnmarshalDispatcher) (*MqTtMsgStream, error) {
+	unmarshal UnmarshalDispatcher,
+) (*MqTtMsgStream, error) {
 	msgStream, err := NewMqMsgStream(ctx, receiveBufSize, bufSize, client, unmarshal)
 	if err != nil {
 		return nil, err

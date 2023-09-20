@@ -165,7 +165,6 @@ func TestRbacOperateRole(t *testing.T) {
 			assert.Error(t, err)
 		})
 	}
-
 }
 
 func TestRbacSelect(t *testing.T) {
@@ -263,7 +262,6 @@ func TestRbacSelect(t *testing.T) {
 			if test.isValid {
 				assert.NoError(t, err)
 				assert.Equal(t, test.expectedOutLength, len(res))
-
 			} else {
 				assert.Error(t, err)
 			}
@@ -283,57 +281,71 @@ func TestRbacOperatePrivilege(t *testing.T) {
 		{"empty objectName", &milvuspb.GrantEntity{ObjectName: ""}, milvuspb.OperatePrivilegeType_Grant},
 		{"nil Object", &milvuspb.GrantEntity{
 			Object:     nil,
-			ObjectName: "obj_name"}, milvuspb.OperatePrivilegeType_Grant},
+			ObjectName: "obj_name",
+		}, milvuspb.OperatePrivilegeType_Grant},
 		{"empty Object name", &milvuspb.GrantEntity{
 			Object:     &milvuspb.ObjectEntity{Name: ""},
-			ObjectName: "obj_name"}, milvuspb.OperatePrivilegeType_Grant},
+			ObjectName: "obj_name",
+		}, milvuspb.OperatePrivilegeType_Grant},
 		{"nil Role", &milvuspb.GrantEntity{
 			Role:       nil,
 			Object:     &milvuspb.ObjectEntity{Name: "obj_name"},
-			ObjectName: "obj_name"}, milvuspb.OperatePrivilegeType_Grant},
+			ObjectName: "obj_name",
+		}, milvuspb.OperatePrivilegeType_Grant},
 		{"empty Role name", &milvuspb.GrantEntity{
 			Role:       &milvuspb.RoleEntity{Name: ""},
 			Object:     &milvuspb.ObjectEntity{Name: "obj_name"},
-			ObjectName: "obj_name"}, milvuspb.OperatePrivilegeType_Grant},
+			ObjectName: "obj_name",
+		}, milvuspb.OperatePrivilegeType_Grant},
 		{"nil grantor", &milvuspb.GrantEntity{
 			Grantor:    nil,
 			Role:       &milvuspb.RoleEntity{Name: "role_name"},
 			Object:     &milvuspb.ObjectEntity{Name: "obj_name"},
-			ObjectName: "obj_name"}, milvuspb.OperatePrivilegeType_Grant},
+			ObjectName: "obj_name",
+		}, milvuspb.OperatePrivilegeType_Grant},
 		{"nil grantor privilege", &milvuspb.GrantEntity{
 			Grantor: &milvuspb.GrantorEntity{
 				Privilege: nil,
 			},
 			Role:       &milvuspb.RoleEntity{Name: "role_name"},
 			Object:     &milvuspb.ObjectEntity{Name: "obj_name"},
-			ObjectName: "obj_name"}, milvuspb.OperatePrivilegeType_Grant},
+			ObjectName: "obj_name",
+		}, milvuspb.OperatePrivilegeType_Grant},
 		{"empty grantor privilege name", &milvuspb.GrantEntity{
 			Grantor: &milvuspb.GrantorEntity{
-				Privilege: &milvuspb.PrivilegeEntity{Name: ""}},
+				Privilege: &milvuspb.PrivilegeEntity{Name: ""},
+			},
 			Role:       &milvuspb.RoleEntity{Name: "role_name"},
 			Object:     &milvuspb.ObjectEntity{Name: "obj_name"},
-			ObjectName: "obj_name"}, milvuspb.OperatePrivilegeType_Grant},
+			ObjectName: "obj_name",
+		}, milvuspb.OperatePrivilegeType_Grant},
 		{"nil grantor user", &milvuspb.GrantEntity{
 			Grantor: &milvuspb.GrantorEntity{
 				User:      nil,
-				Privilege: &milvuspb.PrivilegeEntity{Name: "privilege_name"}},
+				Privilege: &milvuspb.PrivilegeEntity{Name: "privilege_name"},
+			},
 			Role:       &milvuspb.RoleEntity{Name: "role_name"},
 			Object:     &milvuspb.ObjectEntity{Name: "obj_name"},
-			ObjectName: "obj_name"}, milvuspb.OperatePrivilegeType_Grant},
+			ObjectName: "obj_name",
+		}, milvuspb.OperatePrivilegeType_Grant},
 		{"empty grantor user name", &milvuspb.GrantEntity{
 			Grantor: &milvuspb.GrantorEntity{
 				User:      &milvuspb.UserEntity{Name: ""},
-				Privilege: &milvuspb.PrivilegeEntity{Name: "privilege_name"}},
+				Privilege: &milvuspb.PrivilegeEntity{Name: "privilege_name"},
+			},
 			Role:       &milvuspb.RoleEntity{Name: "role_name"},
 			Object:     &milvuspb.ObjectEntity{Name: "obj_name"},
-			ObjectName: "obj_name"}, milvuspb.OperatePrivilegeType_Grant},
+			ObjectName: "obj_name",
+		}, milvuspb.OperatePrivilegeType_Grant},
 		{"invalid operateType", &milvuspb.GrantEntity{
 			Grantor: &milvuspb.GrantorEntity{
 				User:      &milvuspb.UserEntity{Name: "user_name"},
-				Privilege: &milvuspb.PrivilegeEntity{Name: "privilege_name"}},
+				Privilege: &milvuspb.PrivilegeEntity{Name: "privilege_name"},
+			},
 			Role:       &milvuspb.RoleEntity{Name: "role_name"},
 			Object:     &milvuspb.ObjectEntity{Name: "obj_name"},
-			ObjectName: "obj_name"}, milvuspb.OperatePrivilegeType(-1)},
+			ObjectName: "obj_name",
+		}, milvuspb.OperatePrivilegeType(-1)},
 	}
 
 	for _, test := range tests {
@@ -346,10 +358,12 @@ func TestRbacOperatePrivilege(t *testing.T) {
 	validEntity := milvuspb.GrantEntity{
 		Grantor: &milvuspb.GrantorEntity{
 			User:      &milvuspb.UserEntity{Name: "user_name"},
-			Privilege: &milvuspb.PrivilegeEntity{Name: "privilege_name"}},
+			Privilege: &milvuspb.PrivilegeEntity{Name: "privilege_name"},
+		},
 		Role:       &milvuspb.RoleEntity{Name: "role_name"},
 		Object:     &milvuspb.ObjectEntity{Name: "obj_name"},
-		ObjectName: "obj_name"}
+		ObjectName: "obj_name",
+	}
 
 	err := mt.OperatePrivilege(util.DefaultTenant, &validEntity, milvuspb.OperatePrivilegeType_Grant)
 	assert.NoError(t, err)
@@ -366,11 +380,14 @@ func TestRbacSelectGrant(t *testing.T) {
 	}{
 		{"nil Entity", false, nil},
 		{"nil entity Role", false, &milvuspb.GrantEntity{
-			Role: nil}},
+			Role: nil,
+		}},
 		{"empty entity Role name", false, &milvuspb.GrantEntity{
-			Role: &milvuspb.RoleEntity{Name: ""}}},
+			Role: &milvuspb.RoleEntity{Name: ""},
+		}},
 		{"valid", true, &milvuspb.GrantEntity{
-			Role: &milvuspb.RoleEntity{Name: "role"}}},
+			Role: &milvuspb.RoleEntity{Name: "role"},
+		}},
 	}
 
 	for _, test := range tests {

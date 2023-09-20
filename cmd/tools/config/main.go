@@ -36,5 +36,4 @@ func main() {
 	default:
 		log.Error(fmt.Sprintf("unknown argument %s", args[1]))
 	}
-
 }

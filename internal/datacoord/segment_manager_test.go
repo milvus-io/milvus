@@ -56,7 +56,7 @@ func TestManagerOptions(t *testing.T) {
 		opt := withCalUpperLimitPolicy(defaultCalUpperLimitPolicy())
 		assert.NotNil(t, opt)
 
-		//manual set nil``
+		// manual set nil``
 		segmentManager.estimatePolicy = nil
 		opt.apply(segmentManager)
 		assert.True(t, segmentManager.estimatePolicy != nil)
@@ -144,7 +144,7 @@ func TestAllocSegment(t *testing.T) {
 }
 
 func TestLastExpireReset(t *testing.T) {
-	//set up meta on dc
+	// set up meta on dc
 	ctx := context.Background()
 	paramtable.Init()
 	Params.Save(Params.DataCoordCfg.AllocLatestExpireAttempt.Key, "1")
@@ -179,7 +179,7 @@ func TestLastExpireReset(t *testing.T) {
 	}
 	meta.AddSegment(context.TODO(), initSegment)
 
-	//assign segments, set max segment to only 1MB, equalling to 10485 rows
+	// assign segments, set max segment to only 1MB, equalling to 10485 rows
 	var bigRows, smallRows int64 = 10000, 1000
 	segmentManager, _ := newSegmentManager(meta, mockAllocator)
 	initSegment.SegmentInfo.State = commonpb.SegmentState_Dropped
@@ -193,7 +193,7 @@ func TestLastExpireReset(t *testing.T) {
 	allocs, _ = segmentManager.AllocSegment(context.Background(), collID, 0, channelName, smallRows)
 	segmentID3, expire3 := allocs[0].SegmentID, allocs[0].ExpireTime
 
-	//simulate handleTimeTick op on dataCoord
+	// simulate handleTimeTick op on dataCoord
 	meta.SetCurrentRows(segmentID1, bigRows)
 	meta.SetCurrentRows(segmentID2, bigRows)
 	meta.SetCurrentRows(segmentID3, smallRows)
@@ -202,11 +202,11 @@ func TestLastExpireReset(t *testing.T) {
 	assert.Equal(t, commonpb.SegmentState_Sealed, meta.GetSegment(segmentID2).GetState())
 	assert.Equal(t, commonpb.SegmentState_Growing, meta.GetSegment(segmentID3).GetState())
 
-	//pretend that dataCoord break down
+	// pretend that dataCoord break down
 	metaKV.Close()
 	etcdCli.Close()
 
-	//dataCoord restart
+	// dataCoord restart
 	newEtcdCli, _ := etcd.GetEtcdClient(Params.EtcdCfg.UseEmbedEtcd.GetAsBool(), Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		Params.EtcdCfg.Endpoints.GetAsStrings(), Params.EtcdCfg.EtcdTLSCert.GetValue(),
 		Params.EtcdCfg.EtcdTLSKey.GetValue(), Params.EtcdCfg.EtcdTLSCACert.GetValue(), Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
@@ -217,14 +217,14 @@ func TestLastExpireReset(t *testing.T) {
 	restartedMeta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
 	assert.Nil(t, err)
 	newSegmentManager, _ := newSegmentManager(restartedMeta, mockAllocator)
-	//reset row number to avoid being cleaned by empty segment
+	// reset row number to avoid being cleaned by empty segment
 	restartedMeta.SetCurrentRows(segmentID1, bigRows)
 	restartedMeta.SetCurrentRows(segmentID2, bigRows)
 	restartedMeta.SetCurrentRows(segmentID3, smallRows)
 
-	//verify lastExpire of growing and sealed segments
+	// verify lastExpire of growing and sealed segments
 	segment1, segment2, segment3 := restartedMeta.GetSegment(segmentID1), restartedMeta.GetSegment(segmentID2), restartedMeta.GetSegment(segmentID3)
-	//segmentState should not be altered but growing segment's lastExpire has been reset to the latest
+	// segmentState should not be altered but growing segment's lastExpire has been reset to the latest
 	assert.Equal(t, commonpb.SegmentState_Sealed, segment1.GetState())
 	assert.Equal(t, commonpb.SegmentState_Sealed, segment2.GetState())
 	assert.Equal(t, commonpb.SegmentState_Growing, segment3.GetState())
@@ -408,7 +408,7 @@ func TestAllocRowsLargerThanOneSegment(t *testing.T) {
 	assert.NoError(t, err)
 	meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
 
-	var mockPolicy = func(schema *schemapb.CollectionSchema) (int, error) {
+	mockPolicy := func(schema *schemapb.CollectionSchema) (int, error) {
 		return 1, nil
 	}
 	segmentManager, _ := newSegmentManager(meta, mockAllocator, withCalUpperLimitPolicy(mockPolicy))
@@ -430,7 +430,7 @@ func TestExpireAllocation(t *testing.T) {
 	assert.NoError(t, err)
 	meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
 
-	var mockPolicy = func(schema *schemapb.CollectionSchema) (int, error) {
+	mockPolicy := func(schema *schemapb.CollectionSchema) (int, error) {
 		return 10000000, nil
 	}
 	segmentManager, _ := newSegmentManager(meta, mockAllocator, withCalUpperLimitPolicy(mockPolicy))
@@ -548,7 +548,7 @@ func TestTryToSealSegment(t *testing.T) {
 		collID, err := mockAllocator.allocID(context.Background())
 		assert.NoError(t, err)
 		meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
-		segmentManager, _ := newSegmentManager(meta, mockAllocator, withSegmentSealPolices(sealByLifetimePolicy(math.MinInt64))) //always seal
+		segmentManager, _ := newSegmentManager(meta, mockAllocator, withSegmentSealPolices(sealByLifetimePolicy(math.MinInt64))) // always seal
 		allocations, err := segmentManager.AllocSegment(context.TODO(), collID, 0, "c1", 2)
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(allocations))
@@ -573,7 +573,7 @@ func TestTryToSealSegment(t *testing.T) {
 		collID, err := mockAllocator.allocID(context.Background())
 		assert.NoError(t, err)
 		meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
-		segmentManager, _ := newSegmentManager(meta, mockAllocator, withChannelSealPolices(getChannelOpenSegCapacityPolicy(-1))) //always seal
+		segmentManager, _ := newSegmentManager(meta, mockAllocator, withChannelSealPolices(getChannelOpenSegCapacityPolicy(-1))) // always seal
 		allocations, err := segmentManager.AllocSegment(context.TODO(), collID, 0, "c1", 2)
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(allocations))
@@ -600,7 +600,7 @@ func TestTryToSealSegment(t *testing.T) {
 		meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
 		segmentManager, _ := newSegmentManager(meta, mockAllocator,
 			withSegmentSealPolices(sealByLifetimePolicy(math.MinInt64)),
-			withChannelSealPolices(getChannelOpenSegCapacityPolicy(-1))) //always seal
+			withChannelSealPolices(getChannelOpenSegCapacityPolicy(-1))) // always seal
 		allocations, err := segmentManager.AllocSegment(context.TODO(), collID, 0, "c1", 2)
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(allocations))
@@ -712,7 +712,7 @@ func TestTryToSealSegment(t *testing.T) {
 		collID, err := mockAllocator.allocID(context.Background())
 		assert.NoError(t, err)
 		meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
-		segmentManager, _ := newSegmentManager(meta, mockAllocator, withSegmentSealPolices(sealByLifetimePolicy(math.MinInt64))) //always seal
+		segmentManager, _ := newSegmentManager(meta, mockAllocator, withSegmentSealPolices(sealByLifetimePolicy(math.MinInt64))) // always seal
 		allocations, err := segmentManager.AllocSegment(context.TODO(), collID, 0, "c1", 2)
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(allocations))
@@ -741,7 +741,7 @@ func TestTryToSealSegment(t *testing.T) {
 		collID, err := mockAllocator.allocID(context.Background())
 		assert.NoError(t, err)
 		meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
-		segmentManager, _ := newSegmentManager(meta, mockAllocator, withChannelSealPolices(getChannelOpenSegCapacityPolicy(-1))) //always seal
+		segmentManager, _ := newSegmentManager(meta, mockAllocator, withChannelSealPolices(getChannelOpenSegCapacityPolicy(-1))) // always seal
 		allocations, err := segmentManager.AllocSegment(context.TODO(), collID, 0, "c1", 2)
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(allocations))
@@ -800,7 +800,6 @@ func TestAllocationPool(t *testing.T) {
 		assert.EqualValues(t, 100, allo.NumOfRows)
 		assert.EqualValues(t, 0, allo.ExpireTime)
 		assert.EqualValues(t, 0, allo.SegmentID)
-
 	})
 }
 

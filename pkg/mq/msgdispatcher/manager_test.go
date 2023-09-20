@@ -25,10 +25,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -256,7 +256,7 @@ func (suite *SimulationSuite) consumeMsg(ctx context.Context, wg *sync.WaitGroup
 }
 
 func (suite *SimulationSuite) produceTimeTickOnly(ctx context.Context) {
-	var tt = 1
+	tt := 1
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -369,7 +369,6 @@ func (suite *SimulationSuite) TearDownTest() {
 }
 
 func (suite *SimulationSuite) TearDownSuite() {
-
 }
 
 func TestSimulation(t *testing.T) {

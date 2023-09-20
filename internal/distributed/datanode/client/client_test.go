@@ -21,13 +21,12 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/internal/util/mock"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-
-	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/util/mock"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func Test_NewClient(t *testing.T) {

@@ -139,7 +139,6 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 				}
 			})
 		}
-
 	})
 
 	t.Run("Test mergeDeltalogs", func(t *testing.T) {
@@ -219,14 +218,24 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			}{
 				{
 					0, nil, nil,
-					100, []UniqueID{1, 2, 3}, []Timestamp{20000, 30000, 20005},
-					200, []UniqueID{4, 5, 6}, []Timestamp{50000, 50001, 50002},
+					100,
+					[]UniqueID{1, 2, 3},
+					[]Timestamp{20000, 30000, 20005},
+					200,
+					[]UniqueID{4, 5, 6},
+					[]Timestamp{50000, 50001, 50002},
 					6, "2 segments",
 				},
 				{
-					300, []UniqueID{10, 20}, []Timestamp{20001, 40001},
-					100, []UniqueID{1, 2, 3}, []Timestamp{20000, 30000, 20005},
-					200, []UniqueID{4, 5, 6}, []Timestamp{50000, 50001, 50002},
+					300,
+					[]UniqueID{10, 20},
+					[]Timestamp{20001, 40001},
+					100,
+					[]UniqueID{1, 2, 3},
+					[]Timestamp{20000, 30000, 20005},
+					200,
+					[]UniqueID{4, 5, 6},
+					[]Timestamp{50000, 50001, 50002},
 					8, "3 segments",
 				},
 			}
@@ -259,7 +268,6 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 				})
 			}
 		})
-
 	})
 
 	t.Run("Test merge", func(t *testing.T) {
@@ -278,7 +286,6 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 		alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Call.Return(validGeneratorFn, nil)
 		alloc.EXPECT().AllocOne().Return(0, nil)
 		t.Run("Merge without expiration", func(t *testing.T) {
-
 			mockbIO := &binlogIO{cm, alloc}
 			paramtable.Get().Save(Params.CommonCfg.EntityExpirationTTL.Key, "0")
 			iData := genInsertDataWithExpiredTS()
@@ -306,8 +313,10 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 				Channel: channel, downloader: mockbIO, uploader: mockbIO, done: make(chan struct{}, 1),
 				plan: &datapb.CompactionPlan{
 					SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-						{SegmentID: 1}},
-				}}
+						{SegmentID: 1},
+					},
+				},
+			}
 			inPaths, statsPaths, numOfRow, err := ct.merge(context.Background(), allPaths, 2, 0, meta, dm)
 			assert.NoError(t, err)
 			assert.Equal(t, int64(2), numOfRow)
@@ -348,8 +357,10 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 				Channel: channel, downloader: mockbIO, uploader: mockbIO, done: make(chan struct{}, 1),
 				plan: &datapb.CompactionPlan{
 					SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-						{SegmentID: 1}},
-				}}
+						{SegmentID: 1},
+					},
+				},
+			}
 			inPaths, statsPaths, numOfRow, err := ct.merge(context.Background(), allPaths, 2, 0, meta, dm)
 			assert.NoError(t, err)
 			assert.Equal(t, int64(2), numOfRow)
@@ -361,7 +372,6 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 		})
 		// set Params.DataNodeCfg.BinLogMaxSize.Key = 1 to generate multi binlogs, each has only one row
 		t.Run("Merge without expiration3", func(t *testing.T) {
-
 			mockbIO := &binlogIO{cm, alloc}
 			paramtable.Get().Save(Params.CommonCfg.EntityExpirationTTL.Key, "0")
 			BinLogMaxSize := Params.DataNodeCfg.BinLogMaxSize.GetAsInt()
@@ -394,8 +404,10 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 				Channel: channel, downloader: mockbIO, uploader: mockbIO, done: make(chan struct{}, 1),
 				plan: &datapb.CompactionPlan{
 					SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-						{SegmentID: 1}},
-				}}
+						{SegmentID: 1},
+					},
+				},
+			}
 			inPaths, statsPaths, numOfRow, err := ct.merge(context.Background(), allPaths, 2, 0, meta, dm)
 			assert.NoError(t, err)
 			assert.Equal(t, int64(2), numOfRow)
@@ -442,7 +454,8 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 				plan: &datapb.CompactionPlan{
 					CollectionTtl: 864000,
 					SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-						{SegmentID: 1}},
+						{SegmentID: 1},
+					},
 				},
 				done: make(chan struct{}, 1),
 			}
@@ -482,8 +495,10 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 				Channel: channel, downloader: mockbIO, uploader: mockbIO, done: make(chan struct{}, 1),
 				plan: &datapb.CompactionPlan{
 					SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-						{SegmentID: 1}},
-				}}
+						{SegmentID: 1},
+					},
+				},
+			}
 			_, _, _, err = ct.merge(context.Background(), allPaths, 2, 0, &etcdpb.CollectionMeta{
 				Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 					{DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
@@ -526,7 +541,8 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 					{DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
 						{Key: common.DimKey, Value: "bad_dim"},
 					}},
-				}}}, dm)
+				}},
+			}, dm)
 			assert.Error(t, err)
 		})
 	})
@@ -615,12 +631,13 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 				SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
 					{
 						SegmentID: 1,
-					}},
+					},
+				},
 			},
 			done: make(chan struct{}, 1),
 		}
 
-		//segment not in channel
+		// segment not in channel
 		_, err := ct.getNumRows()
 		assert.Error(t, err)
 	})
@@ -1019,7 +1036,7 @@ func (mfm *mockFlushManager) isFull() bool {
 func (mfm *mockFlushManager) injectFlush(injection *taskInjection, segments ...UniqueID) {
 	go func() {
 		time.Sleep(time.Second * time.Duration(mfm.sleepSeconds))
-		//injection.injected <- struct{}{}
+		// injection.injected <- struct{}{}
 		close(injection.injected)
 		<-injection.injectOver
 		mfm.injectOverCount.Lock()

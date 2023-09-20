@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -51,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -784,7 +784,8 @@ func createBinLogsFunc(node *DataNode, req *datapb.ImportTaskRequest, schema *sc
 func saveSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest, res *rootcoordpb.ImportResult, ts Timestamp) importutil.SaveSegmentFunc {
 	importTaskID := req.GetImportTask().GetTaskId()
 	return func(fieldsInsert []*datapb.FieldBinlog, fieldsStats []*datapb.FieldBinlog, segmentID int64,
-		targetChName string, rowCount int64, partID int64) error {
+		targetChName string, rowCount int64, partID int64,
+	) error {
 		logFields := []zap.Field{
 			zap.Int64("task ID", importTaskID),
 			zap.Int64("partitionID", partID),
@@ -854,7 +855,8 @@ func saveSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest, res *rootcoo
 }
 
 func composeAssignSegmentIDRequest(rowNum int, shardID int, chNames []string,
-	collID int64, partID int64) *datapb.AssignSegmentIDRequest {
+	collID int64, partID int64,
+) *datapb.AssignSegmentIDRequest {
 	// use the first field's row count as segment row count
 	// all the fields row count are same, checked by ImportWrapper
 	// ask DataCoord to alloc a new segment
@@ -876,8 +878,8 @@ func composeAssignSegmentIDRequest(rowNum int, shardID int, chNames []string,
 }
 
 func createBinLogs(rowNum int, schema *schemapb.CollectionSchema, ts Timestamp,
-	fields map[storage.FieldID]storage.FieldData, node *DataNode, segmentID, colID, partID UniqueID) ([]*datapb.FieldBinlog, []*datapb.FieldBinlog, error) {
-
+	fields map[storage.FieldID]storage.FieldData, node *DataNode, segmentID, colID, partID UniqueID,
+) ([]*datapb.FieldBinlog, []*datapb.FieldBinlog, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

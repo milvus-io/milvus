@@ -4,14 +4,13 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/util/metric"
-
-	"github.com/stretchr/testify/assert"
 )
 
 func Test_raftIVFPQChecker_CheckTrain(t *testing.T) {
-
 	validParams := map[string]string{
 		DIM:    strconv.Itoa(128),
 		NLIST:  strconv.Itoa(1024),

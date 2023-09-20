@@ -25,8 +25,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -47,7 +45,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -145,11 +145,9 @@ func clearEtcd(rootPath string) error {
 	}
 	log.Debug("Clear ETCD with prefix writer/ddl")
 	return nil
-
 }
 
-type MetaFactory struct {
-}
+type MetaFactory struct{}
 
 func NewMetaFactory() *MetaFactory {
 	return &MetaFactory{}
@@ -489,7 +487,7 @@ func GenRowData() (rawData []byte) {
 	const DIM = 2
 
 	// Float vector
-	var fvector = [DIM]float32{1, 2}
+	fvector := [DIM]float32{1, 2}
 	for _, ele := range fvector {
 		buf := make([]byte, 4)
 		common.Endian.PutUint32(buf, math.Float32bits(ele))
@@ -499,11 +497,11 @@ func GenRowData() (rawData []byte) {
 	// Binary vector
 	// Dimension of binary vector is 32
 	// size := 4,  = 32 / 8
-	var bvector = []byte{255, 255, 255, 0}
+	bvector := []byte{255, 255, 255, 0}
 	rawData = append(rawData, bvector...)
 
 	// Bool
-	var fieldBool = true
+	fieldBool := true
 	buf := new(bytes.Buffer)
 	if err := binary.Write(buf, common.Endian, fieldBool); err != nil {
 		panic(err)
@@ -552,7 +550,7 @@ func GenRowData() (rawData []byte) {
 	rawData = append(rawData, bfloat32.Bytes()...)
 
 	// float64
-	var datafloat64 = 2.2
+	datafloat64 := 2.2
 	bfloat64 := new(bytes.Buffer)
 	if err := binary.Write(bfloat64, common.Endian, datafloat64); err != nil {
 		panic(err)
@@ -564,7 +562,7 @@ func GenRowData() (rawData []byte) {
 
 func GenColumnData() (fieldsData []*schemapb.FieldData) {
 	// Float vector
-	var fVector = []float32{1, 2}
+	fVector := []float32{1, 2}
 	floatVectorData := &schemapb.FieldData{
 		Type:      schemapb.DataType_FloatVector,
 		FieldName: "float_vector_field",
@@ -709,7 +707,7 @@ func GenColumnData() (fieldsData []*schemapb.FieldData) {
 	}
 	fieldsData = append(fieldsData, floatFieldData)
 
-	//double
+	// double
 	doubleData := []float64{2.2}
 	doubleFieldData := &schemapb.FieldData{
 		Type:      schemapb.DataType_Double,
@@ -727,7 +725,7 @@ func GenColumnData() (fieldsData []*schemapb.FieldData) {
 	}
 	fieldsData = append(fieldsData, doubleFieldData)
 
-	//var char
+	// var char
 	varCharData := []string{"test"}
 	varCharFieldData := &schemapb.FieldData{
 		Type:      schemapb.DataType_VarChar,
@@ -749,7 +747,7 @@ func GenColumnData() (fieldsData []*schemapb.FieldData) {
 }
 
 func (df *DataFactory) GenMsgStreamInsertMsg(idx int, chanName string) *msgstream.InsertMsg {
-	var msg = &msgstream.InsertMsg{
+	msg := &msgstream.InsertMsg{
 		BaseMsg: msgstream.BaseMsg{
 			HashValues: []uint32{uint32(idx)},
 		},
@@ -777,7 +775,7 @@ func (df *DataFactory) GenMsgStreamInsertMsg(idx int, chanName string) *msgstrea
 }
 
 func (df *DataFactory) GenMsgStreamInsertMsgWithTs(idx int, chanName string, ts Timestamp) *msgstream.InsertMsg {
-	var msg = &msgstream.InsertMsg{
+	msg := &msgstream.InsertMsg{
 		BaseMsg: msgstream.BaseMsg{
 			HashValues:     []uint32{uint32(idx)},
 			BeginTimestamp: ts,
@@ -808,7 +806,7 @@ func (df *DataFactory) GenMsgStreamInsertMsgWithTs(idx int, chanName string, ts 
 
 func (df *DataFactory) GetMsgStreamTsInsertMsgs(n int, chanName string, ts Timestamp) (inMsgs []msgstream.TsMsg) {
 	for i := 0; i < n; i++ {
-		var msg = df.GenMsgStreamInsertMsgWithTs(i, chanName, ts)
+		msg := df.GenMsgStreamInsertMsgWithTs(i, chanName, ts)
 		var tsMsg msgstream.TsMsg = msg
 		inMsgs = append(inMsgs, tsMsg)
 	}
@@ -817,7 +815,7 @@ func (df *DataFactory) GetMsgStreamTsInsertMsgs(n int, chanName string, ts Times
 
 func (df *DataFactory) GetMsgStreamInsertMsgs(n int) (msgs []*msgstream.InsertMsg) {
 	for i := 0; i < n; i++ {
-		var msg = df.GenMsgStreamInsertMsg(i, "")
+		msg := df.GenMsgStreamInsertMsg(i, "")
 		msgs = append(msgs, msg)
 	}
 	return
@@ -829,7 +827,7 @@ func (df *DataFactory) GenMsgStreamDeleteMsg(pks []primaryKey, chanName string) 
 	for i := 0; i < len(pks); i++ {
 		timestamps[i] = Timestamp(i) + 1000
 	}
-	var msg = &msgstream.DeleteMsg{
+	msg := &msgstream.DeleteMsg{
 		BaseMsg: msgstream.BaseMsg{
 			HashValues: []uint32{uint32(idx)},
 		},
@@ -853,7 +851,7 @@ func (df *DataFactory) GenMsgStreamDeleteMsg(pks []primaryKey, chanName string) 
 }
 
 func (df *DataFactory) GenMsgStreamDeleteMsgWithTs(idx int, pks []primaryKey, chanName string, ts Timestamp) *msgstream.DeleteMsg {
-	var msg = &msgstream.DeleteMsg{
+	msg := &msgstream.DeleteMsg{
 		BaseMsg: msgstream.BaseMsg{
 			HashValues:     []uint32{uint32(idx)},
 			BeginTimestamp: ts,
@@ -893,7 +891,7 @@ func genFlowGraphInsertMsg(chanName string) flowGraphMsg {
 		},
 	}
 
-	var fgMsg = &flowGraphMsg{
+	fgMsg := &flowGraphMsg{
 		insertMessages: make([]*msgstream.InsertMsg, 0),
 		timeRange: TimeRange{
 			timestampMin: timeRange.timestampMin,
@@ -923,7 +921,7 @@ func genFlowGraphDeleteMsg(pks []primaryKey, chanName string) flowGraphMsg {
 		},
 	}
 
-	var fgMsg = &flowGraphMsg{
+	fgMsg := &flowGraphMsg{
 		insertMessages: make([]*msgstream.InsertMsg, 0),
 		timeRange: TimeRange{
 			timestampMin: timeRange.timestampMin,
@@ -951,7 +949,8 @@ func (m *RootCoordFactory) AllocID(ctx context.Context, in *rootcoordpb.AllocIDR
 	resp := &rootcoordpb.AllocIDResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		}}
+		},
+	}
 
 	if in.Count == 12 {
 		resp.Status.ErrorCode = commonpb.ErrorCode_Success
@@ -995,7 +994,6 @@ func (m *RootCoordFactory) ShowCollections(ctx context.Context, in *milvuspb.Sho
 		CollectionNames: []string{m.collectionName},
 	}
 	return resp, nil
-
 }
 
 func (m *RootCoordFactory) DescribeCollectionInternal(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
@@ -1101,7 +1099,7 @@ func genInsertDataWithPKs(PKs [2]primaryKey, dataType schemapb.DataType) *Insert
 		}
 		iD.Data[109].(*storage.StringFieldData).Data = values
 	default:
-		//TODO::
+		// TODO::
 	}
 	return iD
 }
@@ -1158,7 +1156,8 @@ func genInsertData() *InsertData {
 			109: &storage.StringFieldData{
 				Data: []string{"test1", "test2"},
 			},
-		}}
+		},
+	}
 }
 
 func genEmptyInsertData() *InsertData {
@@ -1202,7 +1201,8 @@ func genEmptyInsertData() *InsertData {
 			109: &storage.StringFieldData{
 				Data: []string{},
 			},
-		}}
+		},
+	}
 }
 
 func genInsertDataWithExpiredTS() *InsertData {
@@ -1246,7 +1246,8 @@ func genInsertDataWithExpiredTS() *InsertData {
 			109: &storage.StringFieldData{
 				Data: []string{"test1", "test2"},
 			},
-		}}
+		},
+	}
 }
 
 func genTimestamp() typeutil.Timestamp {

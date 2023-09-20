@@ -54,7 +54,7 @@ func TestGetServerIDConcurrently(t *testing.T) {
 	defer etcdKV.RemoveWithPrefix("")
 
 	var wg sync.WaitGroup
-	var muList = sync.Mutex{}
+	muList := sync.Mutex{}
 
 	s := NewSession(ctx, metaRoot, etcdCli)
 	res := make([]int64, 0)
@@ -122,7 +122,7 @@ func TestUpdateSessions(t *testing.T) {
 	defer etcdKV.RemoveWithPrefix("")
 
 	var wg sync.WaitGroup
-	var muList = sync.Mutex{}
+	muList := sync.Mutex{}
 
 	s := NewSession(ctx, metaRoot, etcdCli, WithResueNodeID(false))
 
@@ -365,9 +365,7 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 		assert.Panics(t, func() {
 			w.handleWatchResponse(wresp)
 		})
-
 	})
-
 }
 
 func TestSession_Registered(t *testing.T) {
@@ -491,7 +489,6 @@ func (suite *SessionWithVersionSuite) SetupTest() {
 	s3.Register()
 
 	suite.sessions = append(suite.sessions, s3)
-
 }
 
 func (suite *SessionWithVersionSuite) TearDownTest() {
@@ -640,7 +637,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	})
 	assert.True(t, s2.isStandby.Load().(bool))
 
-	//assert.True(t, s2.watchingPrimaryKeyLock)
+	// assert.True(t, s2.watchingPrimaryKeyLock)
 	// stop session 1, session 2 will take over primary service
 	log.Debug("Stop session 1, session 2 will take over primary service")
 	assert.False(t, flag)

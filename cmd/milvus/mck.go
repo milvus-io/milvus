@@ -364,7 +364,6 @@ func getTrashKey(taskType, key string) string {
 }
 
 func (c *mck) extractTask(prefix string, keys []string, values []string) {
-
 	for i := range keys {
 		taskID, err := strconv.ParseInt(filepath.Base(keys[i]), 10, 64)
 		if err != nil {
@@ -520,7 +519,6 @@ func (c *mck) extractVecFieldIndexInfo(taskID int64, infos []*querypb.FieldIndex
 func (c *mck) unmarshalTask(taskID int64, t string) (string, []int64, []int64, error) {
 	header := commonpb.MsgHeader{}
 	err := proto.Unmarshal([]byte(t), &header)
-
 	if err != nil {
 		return errReturn(taskID, "MsgHeader", err)
 	}

@@ -19,11 +19,12 @@ package balance
 import (
 	"testing"
 
+	"github.com/stretchr/testify/suite"
+
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"github.com/stretchr/testify/suite"
 )
 
 type BalanceTestSuite struct {

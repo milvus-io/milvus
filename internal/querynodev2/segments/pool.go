@@ -21,9 +21,10 @@ import (
 	"runtime"
 	"sync"
 
+	"go.uber.org/atomic"
+
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"go.uber.org/atomic"
 )
 
 var (

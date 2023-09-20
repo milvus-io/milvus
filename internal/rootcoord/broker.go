@@ -307,7 +307,6 @@ func (b *ServerBroker) GcConfirm(ctx context.Context, collectionID, partitionID 
 
 	req := &datapb.GcConfirmRequest{CollectionId: collectionID, PartitionId: partitionID}
 	resp, err := b.s.dataCoord.GcConfirm(ctx, req)
-
 	if err != nil {
 		log.Warn("gc is not finished", zap.Error(err))
 		return false

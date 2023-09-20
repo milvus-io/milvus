@@ -3,11 +3,11 @@ package proxy
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
 func Test_cntReducer_Reduce(t *testing.T) {

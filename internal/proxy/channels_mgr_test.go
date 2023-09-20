@@ -21,14 +21,12 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-
-	"github.com/stretchr/testify/assert"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func Test_removeDuplicate(t *testing.T) {
@@ -82,7 +80,8 @@ func Test_getDmlChannelsFunc(t *testing.T) {
 			return &milvuspb.DescribeCollectionResponse{
 				VirtualChannelNames:  []string{"111", "222"},
 				PhysicalChannelNames: []string{"111", "111"},
-				Status:               &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil
+				Status:               &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			}, nil
 		}
 		f := getDmlChannelsFunc(ctx, rc)
 		got, err := f(100)

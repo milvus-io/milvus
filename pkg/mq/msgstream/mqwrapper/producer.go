@@ -40,7 +40,7 @@ type ProducerMessage struct {
 // Producer is the interface that provides operations of producer
 type Producer interface {
 	// return the topic which producer is publishing to
-	//Topic() string
+	// Topic() string
 
 	// publish a message
 	Send(ctx context.Context, message *ProducerMessage) (MessageID, error)

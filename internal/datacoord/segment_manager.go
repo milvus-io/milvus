@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
@@ -31,17 +30,16 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/retry"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-var (
-	// allocPool pool of Allocation, to reduce allocation of Allocation
-	allocPool = sync.Pool{
-		New: func() interface{} {
-			return &Allocation{}
-		},
-	}
-)
+// allocPool pool of Allocation, to reduce allocation of Allocation
+var allocPool = sync.Pool{
+	New: func() interface{} {
+		return &Allocation{}
+	},
+}
 
 // getAllocation unifies way to retrieve allocation struct
 func getAllocation(numOfRows int64) *Allocation {
@@ -230,7 +228,7 @@ func (s *SegmentManager) loadSegmentsFromMeta() {
 }
 
 func (s *SegmentManager) maybeResetLastExpireForSegments() error {
-	//for all sealed and growing segments, need to reset last expire
+	// for all sealed and growing segments, need to reset last expire
 	if len(s.segments) > 0 {
 		var latestTs uint64
 		allocateErr := retry.Do(context.Background(), func() error {
@@ -257,7 +255,8 @@ func (s *SegmentManager) maybeResetLastExpireForSegments() error {
 
 // AllocSegment allocate segment per request collcation, partication, channel and rows
 func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID,
-	partitionID UniqueID, channelName string, requestRows int64) ([]*Allocation, error) {
+	partitionID UniqueID, channelName string, requestRows int64,
+) ([]*Allocation, error) {
 	log := log.Ctx(ctx).
 		With(zap.Int64("collectionID", collectionID)).
 		With(zap.Int64("partitionID", partitionID)).
@@ -322,7 +321,8 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 
 // allocSegmentForImport allocates one segment allocation for bulk insert.
 func (s *SegmentManager) allocSegmentForImport(ctx context.Context, collectionID UniqueID,
-	partitionID UniqueID, channelName string, requestRows int64, importTaskID int64) (*Allocation, error) {
+	partitionID UniqueID, channelName string, requestRows int64, importTaskID int64,
+) (*Allocation, error) {
 	_, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "Alloc-ImportSegment")
 	defer sp.End()
 	s.mu.Lock()
@@ -375,7 +375,8 @@ func (s *SegmentManager) genExpireTs(ctx context.Context, isImported bool) (Time
 }
 
 func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID,
-	channelName string, segmentState commonpb.SegmentState) (*SegmentInfo, error) {
+	channelName string, segmentState commonpb.SegmentState,
+) (*SegmentInfo, error) {
 	log := log.Ctx(ctx)
 	ctx, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "open-Segment")
 	defer sp.End()

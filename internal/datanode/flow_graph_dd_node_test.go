@@ -48,9 +48,11 @@ func TestFlowGraph_DDNode_newDDNode(t *testing.T) {
 			[]*datapb.SegmentInfo{
 				getSegmentInfo(100, 10000),
 				getSegmentInfo(101, 10000),
-				getSegmentInfo(102, 10000)},
+				getSegmentInfo(102, 10000),
+			},
 			[]*datapb.SegmentInfo{
-				getSegmentInfo(200, 10000)},
+				getSegmentInfo(200, 10000),
+			},
 		},
 		{
 			"0 sealed segments and 0 growing segment",
@@ -94,12 +96,18 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 			in          []Msg
 			description string
 		}{
-			{[]Msg{},
-				"Invalid input length == 0"},
-			{[]Msg{&flowGraphMsg{}, &flowGraphMsg{}, &flowGraphMsg{}},
-				"Invalid input length == 3"},
-			{[]Msg{&flowGraphMsg{}},
-				"Invalid input length == 1 but input message is not msgStreamMsg"},
+			{
+				[]Msg{},
+				"Invalid input length == 0",
+			},
+			{
+				[]Msg{&flowGraphMsg{}, &flowGraphMsg{}, &flowGraphMsg{}},
+				"Invalid input length == 3",
+			},
+			{
+				[]Msg{&flowGraphMsg{}},
+				"Invalid input length == 1 but input message is not msgStreamMsg",
+			},
 		}
 
 		for _, test := range invalidInTests {
@@ -117,10 +125,14 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 
 			description string
 		}{
-			{1, 1, 1,
-				"DropCollectionMsg collID == ddNode collID"},
-			{1, 2, 0,
-				"DropCollectionMsg collID != ddNode collID"},
+			{
+				1, 1, 1,
+				"DropCollectionMsg collID == ddNode collID",
+			},
+			{
+				1, 2, 0,
+				"DropCollectionMsg collID != ddNode collID",
+			},
 		}
 
 		for _, test := range tests {
@@ -164,10 +176,16 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 
 			description string
 		}{
-			{1, 1, 101, []UniqueID{101},
-				"DropCollectionMsg collID == ddNode collID"},
-			{1, 2, 101, []UniqueID{},
-				"DropCollectionMsg collID != ddNode collID"},
+			{
+				1, 1, 101,
+				[]UniqueID{101},
+				"DropCollectionMsg collID == ddNode collID",
+			},
+			{
+				1, 2, 101,
+				[]UniqueID{},
+				"DropCollectionMsg collID != ddNode collID",
+			},
 		}
 
 		for _, test := range tests {
@@ -195,15 +213,12 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 				fgMsg, ok := rt[0].(*flowGraphMsg)
 				assert.True(t, ok)
 				assert.ElementsMatch(t, test.expectOutput, fgMsg.dropPartitions)
-
 			})
 		}
 	})
 
 	t.Run("Test DDNode Operate and filter insert msg", func(t *testing.T) {
-		var (
-			collectionID UniqueID = 1
-		)
+		var collectionID UniqueID = 1
 		// Prepare ddNode states
 		ddn := ddNode{
 			ctx:               context.Background(),
@@ -260,7 +275,6 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 			})
 		}
 	})
-
 }
 
 func TestFlowGraph_DDNode_filterMessages(t *testing.T) {
@@ -274,19 +288,24 @@ func TestFlowGraph_DDNode_filterMessages(t *testing.T) {
 		inMsg    *msgstream.InsertMsg
 		expected bool
 	}{
-		{"test dropped segments true",
+		{
+			"test dropped segments true",
 			[]UniqueID{100},
 			nil,
 			nil,
 			getInsertMsg(100, 10000),
-			true},
-		{"test dropped segments true 2",
+			true,
+		},
+		{
+			"test dropped segments true 2",
 			[]UniqueID{100, 101, 102},
 			nil,
 			nil,
 			getInsertMsg(102, 10000),
-			true},
-		{"test sealed segments msgTs <= segmentTs true",
+			true,
+		},
+		{
+			"test sealed segments msgTs <= segmentTs true",
 			[]UniqueID{},
 			map[UniqueID]*datapb.SegmentInfo{
 				200: getSegmentInfo(200, 50000),
@@ -294,8 +313,10 @@ func TestFlowGraph_DDNode_filterMessages(t *testing.T) {
 			},
 			nil,
 			getInsertMsg(200, 10000),
-			true},
-		{"test sealed segments msgTs <= segmentTs true",
+			true,
+		},
+		{
+			"test sealed segments msgTs <= segmentTs true",
 			[]UniqueID{},
 			map[UniqueID]*datapb.SegmentInfo{
 				200: getSegmentInfo(200, 50000),
@@ -303,8 +324,10 @@ func TestFlowGraph_DDNode_filterMessages(t *testing.T) {
 			},
 			nil,
 			getInsertMsg(200, 50000),
-			true},
-		{"test sealed segments msgTs > segmentTs false",
+			true,
+		},
+		{
+			"test sealed segments msgTs > segmentTs false",
 			[]UniqueID{},
 			map[UniqueID]*datapb.SegmentInfo{
 				200: getSegmentInfo(200, 50000),
@@ -312,8 +335,10 @@ func TestFlowGraph_DDNode_filterMessages(t *testing.T) {
 			},
 			nil,
 			getInsertMsg(222, 70000),
-			false},
-		{"test growing segments msgTs <= segmentTs true",
+			false,
+		},
+		{
+			"test growing segments msgTs <= segmentTs true",
 			[]UniqueID{},
 			nil,
 			map[UniqueID]*datapb.SegmentInfo{
@@ -321,8 +346,10 @@ func TestFlowGraph_DDNode_filterMessages(t *testing.T) {
 				300: getSegmentInfo(300, 50000),
 			},
 			getInsertMsg(200, 10000),
-			true},
-		{"test growing segments msgTs > segmentTs false",
+			true,
+		},
+		{
+			"test growing segments msgTs > segmentTs false",
 			[]UniqueID{},
 			nil,
 			map[UniqueID]*datapb.SegmentInfo{
@@ -330,8 +357,10 @@ func TestFlowGraph_DDNode_filterMessages(t *testing.T) {
 				300: getSegmentInfo(300, 50000),
 			},
 			getInsertMsg(200, 70000),
-			false},
-		{"test not exist",
+			false,
+		},
+		{
+			"test not exist",
 			[]UniqueID{},
 			map[UniqueID]*datapb.SegmentInfo{
 				400: getSegmentInfo(500, 50000),
@@ -342,14 +371,17 @@ func TestFlowGraph_DDNode_filterMessages(t *testing.T) {
 				300: getSegmentInfo(300, 50000),
 			},
 			getInsertMsg(111, 70000),
-			false},
+			false,
+		},
 		// for pChannel reuse on same collection
-		{"test insert msg with different channelName",
+		{
+			"test insert msg with different channelName",
 			[]UniqueID{100},
 			nil,
 			nil,
 			getInsertMsgWithChannel(100, 10000, anotherChannelName),
-			true},
+			true,
+		},
 	}
 
 	for _, test := range tests {
@@ -364,7 +396,6 @@ func TestFlowGraph_DDNode_filterMessages(t *testing.T) {
 			// Test
 			got := ddn.tryToFilterSegmentInsertMessages(test.inMsg)
 			assert.Equal(t, test.expected, got)
-
 		})
 	}
 
@@ -380,33 +411,39 @@ func TestFlowGraph_DDNode_filterMessages(t *testing.T) {
 			inMsg         *msgstream.InsertMsg
 			msgFiltered   bool
 		}{
-			{"msgTs<segTs",
+			{
+				"msgTs<segTs",
 				true,
 				50000,
 				10000,
 				map[UniqueID]*datapb.SegmentInfo{
 					100: getSegmentInfo(100, 50000),
-					101: getSegmentInfo(101, 50000)},
+					101: getSegmentInfo(101, 50000),
+				},
 				getInsertMsg(100, 10000),
 				true,
 			},
-			{"msgTs==segTs",
+			{
+				"msgTs==segTs",
 				true,
 				50000,
 				10000,
 				map[UniqueID]*datapb.SegmentInfo{
 					100: getSegmentInfo(100, 50000),
-					101: getSegmentInfo(101, 50000)},
+					101: getSegmentInfo(101, 50000),
+				},
 				getInsertMsg(100, 50000),
 				true,
 			},
-			{"msgTs>segTs",
+			{
+				"msgTs>segTs",
 				false,
 				50000,
 				10000,
 				map[UniqueID]*datapb.SegmentInfo{
 					100: getSegmentInfo(100, 70000),
-					101: getSegmentInfo(101, 50000)},
+					101: getSegmentInfo(101, 50000),
+				},
 				getInsertMsg(300, 60000),
 				false,
 			},
@@ -440,27 +477,33 @@ func TestFlowGraph_DDNode_filterMessages(t *testing.T) {
 			inMsg          *msgstream.InsertMsg
 			msgFiltered    bool
 		}{
-			{"msgTs<segTs",
+			{
+				"msgTs<segTs",
 				true,
 				map[UniqueID]*datapb.SegmentInfo{
 					100: getSegmentInfo(100, 50000),
-					101: getSegmentInfo(101, 50000)},
+					101: getSegmentInfo(101, 50000),
+				},
 				getInsertMsg(100, 10000),
 				true,
 			},
-			{"msgTs==segTs",
+			{
+				"msgTs==segTs",
 				true,
 				map[UniqueID]*datapb.SegmentInfo{
 					100: getSegmentInfo(100, 50000),
-					101: getSegmentInfo(101, 50000)},
+					101: getSegmentInfo(101, 50000),
+				},
 				getInsertMsg(100, 50000),
 				true,
 			},
-			{"msgTs>segTs",
+			{
+				"msgTs>segTs",
 				false,
 				map[UniqueID]*datapb.SegmentInfo{
 					100: getSegmentInfo(100, 50000),
-					101: getSegmentInfo(101, 50000)},
+					101: getSegmentInfo(101, 50000),
+				},
 				getInsertMsg(100, 60000),
 				false,
 			},
@@ -497,16 +540,31 @@ func TestFlowGraph_DDNode_isDropped(t *testing.T) {
 
 		description string
 	}{
-		{[]*datapb.SegmentInfo{getSegmentInfo(1, 0), getSegmentInfo(2, 0), getSegmentInfo(3, 0)}, 1, true,
-			"Input seg 1 in droppedSegs{1,2,3}"},
-		{[]*datapb.SegmentInfo{getSegmentInfo(1, 0), getSegmentInfo(2, 0), getSegmentInfo(3, 0)}, 2, true,
-			"Input seg 2 in droppedSegs{1,2,3}"},
-		{[]*datapb.SegmentInfo{getSegmentInfo(1, 0), getSegmentInfo(2, 0), getSegmentInfo(3, 0)}, 3, true,
-			"Input seg 3 in droppedSegs{1,2,3}"},
-		{[]*datapb.SegmentInfo{getSegmentInfo(1, 0), getSegmentInfo(2, 0), getSegmentInfo(3, 0)}, 4, false,
-			"Input seg 4 not in droppedSegs{1,2,3}"},
-		{[]*datapb.SegmentInfo{}, 5, false,
-			"Input seg 5, no droppedSegs {}"},
+		{
+			[]*datapb.SegmentInfo{getSegmentInfo(1, 0), getSegmentInfo(2, 0), getSegmentInfo(3, 0)},
+			1, true,
+			"Input seg 1 in droppedSegs{1,2,3}",
+		},
+		{
+			[]*datapb.SegmentInfo{getSegmentInfo(1, 0), getSegmentInfo(2, 0), getSegmentInfo(3, 0)},
+			2, true,
+			"Input seg 2 in droppedSegs{1,2,3}",
+		},
+		{
+			[]*datapb.SegmentInfo{getSegmentInfo(1, 0), getSegmentInfo(2, 0), getSegmentInfo(3, 0)},
+			3, true,
+			"Input seg 3 in droppedSegs{1,2,3}",
+		},
+		{
+			[]*datapb.SegmentInfo{getSegmentInfo(1, 0), getSegmentInfo(2, 0), getSegmentInfo(3, 0)},
+			4, false,
+			"Input seg 4 not in droppedSegs{1,2,3}",
+		},
+		{
+			[]*datapb.SegmentInfo{},
+			5, false,
+			"Input seg 5, no droppedSegs {}",
+		},
 	}
 
 	for _, test := range tests {

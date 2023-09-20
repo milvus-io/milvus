@@ -99,7 +99,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 	}
 
 	if msMsg.IsCloseMsg() {
-		var fgMsg = flowGraphMsg{
+		fgMsg := flowGraphMsg{
 			BaseMsg:        flowgraph.NewBaseMsg(true),
 			insertMessages: make([]*msgstream.InsertMsg, 0),
 			timeRange: TimeRange{
@@ -133,7 +133,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 		}
 	}()
 
-	var fgMsg = flowGraphMsg{
+	fgMsg := flowGraphMsg{
 		insertMessages: make([]*msgstream.InsertMsg, 0),
 		timeRange: TimeRange{
 			timestampMin: msMsg.TimestampMin(),
@@ -279,8 +279,8 @@ func (ddn *ddNode) isDropped(segID UniqueID) bool {
 func (ddn *ddNode) Close() {}
 
 func newDDNode(ctx context.Context, collID UniqueID, vChannelName string, droppedSegmentIDs []UniqueID,
-	sealedSegments []*datapb.SegmentInfo, growingSegments []*datapb.SegmentInfo, compactor *compactionExecutor) (*ddNode, error) {
-
+	sealedSegments []*datapb.SegmentInfo, growingSegments []*datapb.SegmentInfo, compactor *compactionExecutor,
+) (*ddNode, error) {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(Params.DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
 	baseNode.SetMaxParallelism(Params.DataNodeCfg.FlowGraphMaxParallelism.GetAsInt32())

@@ -94,5 +94,4 @@ func TestConversion(t *testing.T) {
 		ret1 := SliceRemoveDuplicate(arr)
 		assert.Equal(t, 3, len(ret1))
 	})
-
 }

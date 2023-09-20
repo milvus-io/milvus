@@ -101,7 +101,7 @@ func (iNode *insertNode) Operate(in Msg) Msg {
 		panic("insertNode with collection not exist")
 	}
 
-	//get InsertData and merge datas of same segment
+	// get InsertData and merge datas of same segment
 	for _, msg := range nodeMsg.insertMsgs {
 		iNode.addInsertData(insertDatas, msg, collection)
 	}

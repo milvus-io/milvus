@@ -19,6 +19,8 @@ package proxy
 import (
 	"context"
 
+	"go.uber.org/atomic"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -29,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/util/uniquegenerator"
-	"go.uber.org/atomic"
 )
 
 type DataCoordMock struct {

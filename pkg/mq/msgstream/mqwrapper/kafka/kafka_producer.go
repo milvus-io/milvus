@@ -7,12 +7,13 @@ import (
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
-	"go.uber.org/zap"
 )
 
 type kafkaProducer struct {
@@ -47,7 +48,6 @@ func (kp *kafkaProducer) Send(ctx context.Context, message *mqwrapper.ProducerMe
 		Value:          message.Payload,
 		Headers:        headers,
 	}, kp.deliveryChan)
-
 	if err != nil {
 		metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.FailLabel).Inc()
 		return nil, err
@@ -78,7 +78,7 @@ func (kp *kafkaProducer) Close() {
 		kp.isClosed = true
 
 		start := time.Now()
-		//flush in-flight msg within queue.
+		// flush in-flight msg within queue.
 		i := kp.p.Flush(10000)
 		if i > 0 {
 			log.Warn("There are still un-flushed outstanding events", zap.Int("event_num", i), zap.Any("topic", kp.topic))

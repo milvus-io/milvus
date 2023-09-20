@@ -23,10 +23,11 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/log"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"stathat.com/c/consistent"
+
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 // RegisterPolicy decides the channels mapping after registering the nodeID
@@ -443,7 +444,6 @@ func RoundRobinReassignPolicy(store ROChannelStore, reassigns []*NodeChannelInfo
 			} else {
 				addUpdates[targetID].Channels = append(addUpdates[targetID].Channels, ch)
 			}
-
 		}
 	}
 	for _, update := range addUpdates {

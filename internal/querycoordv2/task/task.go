@@ -22,17 +22,20 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/atomic"
+
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/atomic"
 )
 
-type Status = int32
-type Priority int32
+type (
+	Status   = int32
+	Priority int32
+)
 
 const (
 	TaskStatusCreated Status = iota + 1
@@ -58,10 +61,8 @@ func (p Priority) String() string {
 	return TaskPriorityName[p]
 }
 
-var (
-	// All task priorities from low to high
-	TaskPriorities = []Priority{TaskPriorityLow, TaskPriorityNormal, TaskPriorityHigh}
-)
+// All task priorities from low to high
+var TaskPriorities = []Priority{TaskPriorityLow, TaskPriorityNormal, TaskPriorityHigh}
 
 type Task interface {
 	Context() context.Context
@@ -286,7 +287,8 @@ func NewSegmentTask(ctx context.Context,
 	sourceID,
 	collectionID,
 	replicaID UniqueID,
-	actions ...Action) (*SegmentTask, error) {
+	actions ...Action,
+) (*SegmentTask, error) {
 	if len(actions) == 0 {
 		return nil, errors.WithStack(merr.WrapErrParameterInvalid("non-empty actions", "no action"))
 	}
@@ -342,7 +344,8 @@ func NewChannelTask(ctx context.Context,
 	sourceID,
 	collectionID,
 	replicaID UniqueID,
-	actions ...Action) (*ChannelTask, error) {
+	actions ...Action,
+) (*ChannelTask, error) {
 	if len(actions) == 0 {
 		return nil, errors.WithStack(merr.WrapErrParameterInvalid("non-empty actions", "no action"))
 	}

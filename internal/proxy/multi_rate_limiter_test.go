@@ -24,6 +24,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -32,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestMultiRateLimiter(t *testing.T) {
@@ -65,7 +66,6 @@ func TestMultiRateLimiter(t *testing.T) {
 				err = multiLimiter.Check(collectionID, internalpb.RateType(rt), math.MaxInt)
 				assert.ErrorIs(t, err, merr.ErrServiceRateLimit)
 			}
-
 		}
 		Params.Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, bak)
 	})

@@ -20,12 +20,12 @@ import (
 	"math"
 	"testing"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 )
 
 func Test_ValidateOptions(t *testing.T) {
-
 	assert.NoError(t, ValidateOptions([]*commonpb.KeyValuePair{}))
 	assert.NoError(t, ValidateOptions([]*commonpb.KeyValuePair{
 		{Key: "start_ts", Value: "1666007457"},

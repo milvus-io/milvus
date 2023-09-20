@@ -18,10 +18,11 @@ package proxy
 import (
 	"context"
 
+	"go.uber.org/atomic"
+
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"go.uber.org/atomic"
 )
 
 type RoundRobinBalancer struct {

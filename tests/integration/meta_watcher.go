@@ -25,13 +25,13 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/log"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 // MetaWatcher to observe meta data of milvus cluster
@@ -117,7 +117,6 @@ func listReplicas(cli *clientv3.Client, prefix string) ([]*querypb.Replica, erro
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
 	defer cancel()
 	resp, err := cli.Get(ctx, prefix, clientv3.WithPrefix())
-
 	if err != nil {
 		return nil, err
 	}

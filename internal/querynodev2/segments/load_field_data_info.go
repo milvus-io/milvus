@@ -21,6 +21,7 @@ package segments
 #include "segcore/load_field_data_c.h"
 */
 import "C"
+
 import (
 	"unsafe"
 

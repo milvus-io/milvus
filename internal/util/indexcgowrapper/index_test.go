@@ -185,9 +185,9 @@ func TestCIndex_Codec(t *testing.T) {
 		err = copyIndex.Load(blobs)
 		assert.Equal(t, err, nil)
 		// IVF_FLAT_NM index don't support load and serialize
-		//copyBlobs, err := copyIndex.Serialize()
-		//assert.Equal(t, err, nil)
-		//assert.Equal(t, len(blobs), len(copyBlobs))
+		// copyBlobs, err := copyIndex.Serialize()
+		// assert.Equal(t, err, nil)
+		// assert.Equal(t, len(blobs), len(copyBlobs))
 		// TODO: check key, value and more
 
 		err = index.Delete()
@@ -224,10 +224,11 @@ func TestCIndex_Error(t *testing.T) {
 	})
 
 	t.Run("Load error", func(t *testing.T) {
-		blobs := []*Blob{{
-			Key:   "test",
-			Value: []byte("value"),
-		},
+		blobs := []*Blob{
+			{
+				Key:   "test",
+				Value: []byte("value"),
+			},
 		}
 		err = indexPtr.Load(blobs)
 		assert.Error(t, err)

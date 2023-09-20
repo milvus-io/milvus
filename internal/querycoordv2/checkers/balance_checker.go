@@ -21,6 +21,9 @@ import (
 	"sort"
 	"time"
 
+	"github.com/samber/lo"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -29,9 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-
-	"github.com/samber/lo"
-	"go.uber.org/zap"
 )
 
 // BalanceChecker checks the cluster distribution and generates balance tasks.
@@ -84,12 +84,12 @@ func (b *BalanceChecker) replicasToBalance() []int64 {
 			}
 		}
 	}
-	//do stopping balance only in this round
+	// do stopping balance only in this round
 	if len(stoppingReplicas) > 0 {
 		return stoppingReplicas
 	}
 
-	//no stopping balance and auto balance is disabled, return empty collections for balance
+	// no stopping balance and auto balance is disabled, return empty collections for balance
 	if !Params.QueryCoordCfg.AutoBalance.GetAsBool() {
 		return nil
 	}
@@ -98,7 +98,7 @@ func (b *BalanceChecker) replicasToBalance() []int64 {
 		return nil
 	}
 
-	//iterator one normal collection in one round
+	// iterator one normal collection in one round
 	normalReplicasToBalance := make([]int64, 0)
 	hasUnbalancedCollection := false
 	for _, cid := range loadedCollections {

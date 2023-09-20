@@ -20,9 +20,9 @@ import (
 	"context"
 	"sync"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"

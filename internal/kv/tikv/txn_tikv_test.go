@@ -87,17 +87,20 @@ func TestTiKVLoad(te *testing.T) {
 				kv.GetPath("test1"),
 				kv.GetPath("test2"),
 				kv.GetPath("test1/a"),
-				kv.GetPath("test1/b")}, []string{"value1", "value2", "value_a", "value_b"}, nil},
+				kv.GetPath("test1/b"),
+			}, []string{"value1", "value2", "value_a", "value_b"}, nil},
 			{"test1", []string{
 				kv.GetPath("test1"),
 				kv.GetPath("test1/a"),
-				kv.GetPath("test1/b")}, []string{"value1", "value_a", "value_b"}, nil},
+				kv.GetPath("test1/b"),
+			}, []string{"value1", "value_a", "value_b"}, nil},
 			{"test2", []string{kv.GetPath("test2")}, []string{"value2"}, nil},
 			{"", []string{
 				kv.GetPath("test1"),
 				kv.GetPath("test2"),
 				kv.GetPath("test1/a"),
-				kv.GetPath("test1/b")}, []string{"value1", "value2", "value_a", "value_b"}, nil},
+				kv.GetPath("test1/b"),
+			}, []string{"value1", "value2", "value_a", "value_b"}, nil},
 			{"test1/a", []string{kv.GetPath("test1/a")}, []string{"value_a"}, nil},
 			{"a", []string{}, []string{}, nil},
 			{"root", []string{}, []string{}, nil},
@@ -553,11 +556,10 @@ func TestEmptyKey(t *testing.T) {
 	val, err = kv.Load("key3")
 	assert.NoError(t, err)
 	assert.Equal(t, val, "")
-
 }
 
 func TestScanSize(t *testing.T) {
-	var scan_size = SnapshotScanSize
+	scan_size := SnapshotScanSize
 	kv := NewTiKV(txnClient, "/")
 	err := kv.RemoveWithPrefix("")
 	require.NoError(t, err)

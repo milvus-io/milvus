@@ -239,7 +239,8 @@ const (
 )
 
 func newChannelEventManager(handlePut func(*datapb.ChannelWatchInfo, int64) error,
-	handleDel func(string), retryInterval time.Duration) *channelEventManager {
+	handleDel func(string), retryInterval time.Duration,
+) *channelEventManager {
 	return &channelEventManager{
 		eventChan:         make(chan event, 10),
 		closeChan:         make(chan struct{}),

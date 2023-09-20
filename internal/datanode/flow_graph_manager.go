@@ -124,7 +124,8 @@ func (fm *flowgraphManager) addAndStart(dn *DataNode, vchan *datapb.VchannelInfo
 
 	dataSyncService, err := getDataSyncService(context.TODO(), dn, &datapb.ChannelWatchInfo{
 		Schema: schema,
-		Vchan:  vchan}, tickler)
+		Vchan:  vchan,
+	}, tickler)
 	if err != nil {
 		log.Warn("fail to create new DataSyncService", zap.Error(err))
 		return err

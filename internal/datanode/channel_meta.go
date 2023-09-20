@@ -693,7 +693,6 @@ func (c *ChannelMeta) mergeFlushedSegments(ctx context.Context, seg *Segment, pl
 		if !c.hasSegment(ID, true) || c.hasSegment(ID, false) {
 			inValidSegments = append(inValidSegments, ID)
 		}
-
 	}
 
 	if len(inValidSegments) > 0 {

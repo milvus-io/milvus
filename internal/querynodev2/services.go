@@ -352,7 +352,6 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 
 	// check node healthy
 	if !node.lifetime.Add(commonpbutil.IsHealthy) {
-
 		msg := fmt.Sprintf("query node %d is not ready", paramtable.GetNodeID())
 		err := merr.WrapErrServiceNotReady(msg)
 		return merr.Status(err), nil

@@ -21,10 +21,10 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -68,7 +68,8 @@ type AllocatePolicy func(segments []*SegmentInfo, count int64,
 
 // AllocatePolicyV1 v1 policy simple allocation policy using Greedy Algorithm
 func AllocatePolicyV1(segments []*SegmentInfo, count int64,
-	maxCountPerSegment int64) ([]*Allocation, []*Allocation) {
+	maxCountPerSegment int64,
+) ([]*Allocation, []*Allocation) {
 	newSegmentAllocations := make([]*Allocation, 0)
 	existedSegmentAllocations := make([]*Allocation, 0)
 	// create new segment if count >= max num

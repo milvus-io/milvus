@@ -31,10 +31,6 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
 	"go.opentelemetry.io/otel/trace"
@@ -49,8 +45,11 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	pkoracle "github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -63,9 +62,7 @@ const (
 	SegmentTypeSealed  = commonpb.SegmentState_Sealed
 )
 
-var (
-	ErrSegmentUnhealthy = errors.New("segment unhealthy")
-)
+var ErrSegmentUnhealthy = errors.New("segment unhealthy")
 
 // IndexedFieldInfo contains binlog info of vector field
 type IndexedFieldInfo struct {
@@ -185,7 +182,7 @@ func NewSegment(collection *Collection,
 		zap.Int64("segmentID", segmentID),
 		zap.String("segmentType", segmentType.String()))
 
-	var segment = &LocalSegment{
+	segment := &LocalSegment{
 		baseSegment:        newBaseSegment(segmentID, partitionID, collectionID, shard, segmentType, version, startPosition),
 		ptr:                segmentPtr,
 		lastDeltaTimestamp: atomic.NewUint64(0),
@@ -510,11 +507,11 @@ func (s *LocalSegment) Insert(rowIDs []int64, timestamps []typeutil.Timestamp, r
 		return fmt.Errorf("failed to marshal insert record: %s", err)
 	}
 
-	var numOfRow = len(rowIDs)
-	var cOffset = C.int64_t(offset)
-	var cNumOfRows = C.int64_t(numOfRow)
-	var cEntityIdsPtr = (*C.int64_t)(&(rowIDs)[0])
-	var cTimestampsPtr = (*C.uint64_t)(&(timestamps)[0])
+	numOfRow := len(rowIDs)
+	cOffset := C.int64_t(offset)
+	cNumOfRows := C.int64_t(numOfRow)
+	cEntityIdsPtr := (*C.int64_t)(&(rowIDs)[0])
+	cTimestampsPtr := (*C.uint64_t)(&(timestamps)[0])
 
 	var status C.CStatus
 
@@ -559,9 +556,9 @@ func (s *LocalSegment) Delete(primaryKeys []storage.PrimaryKey, timestamps []typ
 		return merr.WrapErrSegmentNotLoaded(s.segmentID, "segment released")
 	}
 
-	var cOffset = C.int64_t(0) // depre
-	var cSize = C.int64_t(len(primaryKeys))
-	var cTimestampsPtr = (*C.uint64_t)(&(timestamps)[0])
+	cOffset := C.int64_t(0) // depre
+	cSize := C.int64_t(len(primaryKeys))
+	cTimestampsPtr := (*C.uint64_t)(&(timestamps)[0])
 
 	ids := &schemapb.IDs{}
 	pkType := primaryKeys[0].Type()

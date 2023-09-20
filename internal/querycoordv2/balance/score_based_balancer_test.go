@@ -106,14 +106,20 @@ func (suite *ScoreBasedBalancerTestSuite) TestAssignSegment() {
 			segmentCnts:   []int{0, 0, 0},
 			expectPlans: [][]SegmentAssignPlan{
 				{
-					//as assign segments is used while loading collection,
-					//all assignPlan should have weight equal to 1(HIGH PRIORITY)
-					{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 3, NumOfRows: 15,
-						CollectionID: 1}}, From: -1, To: 1},
-					{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 2, NumOfRows: 10,
-						CollectionID: 1}}, From: -1, To: 3},
-					{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 1, NumOfRows: 5,
-						CollectionID: 1}}, From: -1, To: 2},
+					// as assign segments is used while loading collection,
+					// all assignPlan should have weight equal to 1(HIGH PRIORITY)
+					{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{
+						ID: 3, NumOfRows: 15,
+						CollectionID: 1,
+					}}, From: -1, To: 1},
+					{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{
+						ID: 2, NumOfRows: 10,
+						CollectionID: 1,
+					}}, From: -1, To: 3},
+					{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{
+						ID: 1, NumOfRows: 5,
+						CollectionID: 1,
+					}}, From: -1, To: 2},
 				},
 			},
 		},
@@ -125,20 +131,20 @@ func (suite *ScoreBasedBalancerTestSuite) TestAssignSegment() {
 				1: {
 					{SegmentInfo: &datapb.SegmentInfo{ID: 1, NumOfRows: 10, CollectionID: 1}, Node: 1},
 					{SegmentInfo: &datapb.SegmentInfo{ID: 2, NumOfRows: 300, CollectionID: 2}, Node: 1},
-					//base: collection1-node1-priority is 10 + 0.1 * 310 = 41
-					//assign3: collection1-node1-priority is 15 + 0.1 * 315 = 46.5
+					// base: collection1-node1-priority is 10 + 0.1 * 310 = 41
+					// assign3: collection1-node1-priority is 15 + 0.1 * 315 = 46.5
 				},
 				2: {
 					{SegmentInfo: &datapb.SegmentInfo{ID: 3, NumOfRows: 20, CollectionID: 1}, Node: 2},
 					{SegmentInfo: &datapb.SegmentInfo{ID: 4, NumOfRows: 180, CollectionID: 2}, Node: 2},
-					//base: collection1-node2-priority is 20 + 0.1 * 200 = 40
-					//assign2: collection1-node2-priority is 30 + 0.1 * 210 = 51
+					// base: collection1-node2-priority is 20 + 0.1 * 200 = 40
+					// assign2: collection1-node2-priority is 30 + 0.1 * 210 = 51
 				},
 				3: {
 					{SegmentInfo: &datapb.SegmentInfo{ID: 5, NumOfRows: 30, CollectionID: 1}, Node: 3},
 					{SegmentInfo: &datapb.SegmentInfo{ID: 6, NumOfRows: 20, CollectionID: 2}, Node: 3},
-					//base: collection1-node2-priority is 30 + 0.1 * 50 = 35
-					//assign1: collection1-node2-priority is 45 + 0.1 * 65 = 51.5
+					// base: collection1-node2-priority is 30 + 0.1 * 50 = 35
+					// assign1: collection1-node2-priority is 45 + 0.1 * 65 = 51.5
 				},
 			},
 			assignments: [][]*meta.Segment{
@@ -190,10 +196,10 @@ func (suite *ScoreBasedBalancerTestSuite) TestAssignSegment() {
 			states:        []session.State{session.NodeStateNormal, session.NodeStateNormal, session.NodeStateNormal},
 			segmentCnts:   []int{0, 0, 0},
 			expectPlans: [][]SegmentAssignPlan{
-				//note that these two segments plans are absolutely unbalanced globally,
-				//as if the assignment for collection1 could succeed, node1 and node2 will both have 70 rows
-				//much more than node3, but following assignment will still assign segment based on [10,20,40]
-				//rather than [70,70,40], this flaw will be mitigated by balance process and maybe fixed in the later versions
+				// note that these two segments plans are absolutely unbalanced globally,
+				// as if the assignment for collection1 could succeed, node1 and node2 will both have 70 rows
+				// much more than node3, but following assignment will still assign segment based on [10,20,40]
+				// rather than [70,70,40], this flaw will be mitigated by balance process and maybe fixed in the later versions
 				{
 					{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 4, NumOfRows: 60, CollectionID: 1}}, From: -1, To: 1},
 					{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 5, NumOfRows: 50, CollectionID: 1}}, From: -1, To: 2},
@@ -292,7 +298,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceOneRound() {
 			defer suite.TearDownTest()
 			balancer := suite.balancer
 
-			//1. set up target for multi collections
+			// 1. set up target for multi collections
 			collection := utils.CreateTestCollection(c.collectionID, int32(c.replicaID))
 			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, c.collectionID).Return(
 				nil, c.collectionsSegments, nil)
@@ -305,7 +311,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceOneRound() {
 			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
 			balancer.targetMgr.UpdateCollectionCurrentTarget(c.collectionID)
 
-			//2. set up target for distribution for multi collections
+			// 2. set up target for distribution for multi collections
 			for node, s := range c.distributions {
 				balancer.dist.SegmentDistManager.Update(node, s...)
 			}
@@ -313,7 +319,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceOneRound() {
 				balancer.dist.ChannelDistManager.Update(node, v...)
 			}
 
-			//3. set up nodes info and resourceManager for balancer
+			// 3. set up nodes info and resourceManager for balancer
 			for i := range c.nodes {
 				nodeInfo := session.NewNodeInfo(c.nodes[i], "127.0.0.1:0")
 				nodeInfo.UpdateStats(session.WithChannelCnt(len(c.distributionChannels[c.nodes[i]])))
@@ -322,7 +328,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceOneRound() {
 				suite.balancer.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, c.nodes[i])
 			}
 
-			//4. balance and verify result
+			// 4. balance and verify result
 			segmentPlans, channelPlans := suite.getCollectionBalancePlans(balancer, c.collectionID)
 			suite.ElementsMatch(c.expectChannelPlans, channelPlans)
 			suite.ElementsMatch(c.expectPlans, segmentPlans)
@@ -384,8 +390,11 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceMultiRound() {
 		},
 		expectPlans: [][]SegmentAssignPlan{
 			{
-				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 3, CollectionID: 1, NumOfRows: 20},
-					Node: 2}, From: 2, To: 3, ReplicaID: 1,
+				{
+					Segment: &meta.Segment{
+						SegmentInfo: &datapb.SegmentInfo{ID: 3, CollectionID: 1, NumOfRows: 20},
+						Node:        2,
+					}, From: 2, To: 3, ReplicaID: 1,
 				},
 			},
 			{},
@@ -396,7 +405,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceMultiRound() {
 	defer suite.TearDownTest()
 	balancer := suite.balancer
 
-	//1. set up target for multi collections
+	// 1. set up target for multi collections
 	for i := range balanceCase.collectionIDs {
 		collection := utils.CreateTestCollection(balanceCase.collectionIDs[i], int32(balanceCase.replicaIDs[i]))
 		suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, balanceCase.collectionIDs[i]).Return(
@@ -413,12 +422,12 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceMultiRound() {
 		balancer.targetMgr.UpdateCollectionCurrentTarget(balanceCase.collectionIDs[i])
 	}
 
-	//2. set up target for distribution for multi collections
+	// 2. set up target for distribution for multi collections
 	for node, s := range balanceCase.distributions[0] {
 		balancer.dist.SegmentDistManager.Update(node, s...)
 	}
 
-	//3. set up nodes info and resourceManager for balancer
+	// 3. set up nodes info and resourceManager for balancer
 	for i := range balanceCase.nodes {
 		nodeInfo := session.NewNodeInfo(balanceCase.nodes[i], "127.0.0.1:0")
 		nodeInfo.SetState(balanceCase.states[i])
@@ -426,16 +435,16 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceMultiRound() {
 		suite.balancer.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, balanceCase.nodes[i])
 	}
 
-	//4. first round balance
+	// 4. first round balance
 	segmentPlans, _ := suite.getCollectionBalancePlans(balancer, balanceCase.collectionIDs[0])
 	suite.ElementsMatch(balanceCase.expectPlans[0], segmentPlans)
 
-	//5. update segment distribution to simulate balance effect
+	// 5. update segment distribution to simulate balance effect
 	for node, s := range balanceCase.distributions[1] {
 		balancer.dist.SegmentDistManager.Update(node, s...)
 	}
 
-	//6. balance again
+	// 6. balance again
 	segmentPlans, _ = suite.getCollectionBalancePlans(balancer, balanceCase.collectionIDs[1])
 	suite.ElementsMatch(balanceCase.expectPlans[1], segmentPlans)
 }
@@ -475,10 +484,14 @@ func (suite *ScoreBasedBalancerTestSuite) TestStoppedBalance() {
 				},
 			},
 			expectPlans: []SegmentAssignPlan{
-				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 2, CollectionID: 1, NumOfRows: 20},
-					Node: 1}, From: 1, To: 3, ReplicaID: 1},
-				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 1, CollectionID: 1, NumOfRows: 10},
-					Node: 1}, From: 1, To: 3, ReplicaID: 1},
+				{Segment: &meta.Segment{
+					SegmentInfo: &datapb.SegmentInfo{ID: 2, CollectionID: 1, NumOfRows: 20},
+					Node:        1,
+				}, From: 1, To: 3, ReplicaID: 1},
+				{Segment: &meta.Segment{
+					SegmentInfo: &datapb.SegmentInfo{ID: 1, CollectionID: 1, NumOfRows: 10},
+					Node:        1,
+				}, From: 1, To: 3, ReplicaID: 1},
 			},
 			expectChannelPlans: []ChannelAssignPlan{},
 		},
@@ -536,7 +549,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestStoppedBalance() {
 			defer suite.TearDownTest()
 			balancer := suite.balancer
 
-			//1. set up target for multi collections
+			// 1. set up target for multi collections
 			collection := utils.CreateTestCollection(c.collectionID, int32(c.replicaID))
 			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, c.collectionID).Return(
 				nil, c.collectionsSegments, nil)
@@ -549,7 +562,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestStoppedBalance() {
 			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
 			balancer.targetMgr.UpdateCollectionCurrentTarget(c.collectionID)
 
-			//2. set up target for distribution for multi collections
+			// 2. set up target for distribution for multi collections
 			for node, s := range c.distributions {
 				balancer.dist.SegmentDistManager.Update(node, s...)
 			}
@@ -557,7 +570,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestStoppedBalance() {
 				balancer.dist.ChannelDistManager.Update(node, v...)
 			}
 
-			//3. set up nodes info and resourceManager for balancer
+			// 3. set up nodes info and resourceManager for balancer
 			for i := range c.nodes {
 				nodeInfo := session.NewNodeInfo(c.nodes[i], "127.0.0.1:0")
 				nodeInfo.UpdateStats(session.WithChannelCnt(len(c.distributionChannels[c.nodes[i]])))
@@ -570,7 +583,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestStoppedBalance() {
 				suite.balancer.meta.ResourceManager.UnassignNode(meta.DefaultResourceGroupName, c.outBoundNodes[i])
 			}
 
-			//4. balance and verify result
+			// 4. balance and verify result
 			segmentPlans, channelPlans := suite.getCollectionBalancePlans(suite.balancer, c.collectionID)
 			suite.ElementsMatch(c.expectChannelPlans, channelPlans)
 			suite.ElementsMatch(c.expectPlans, segmentPlans)
@@ -583,7 +596,8 @@ func TestScoreBasedBalancerSuite(t *testing.T) {
 }
 
 func (suite *ScoreBasedBalancerTestSuite) getCollectionBalancePlans(balancer *ScoreBasedBalancer,
-	collectionID int64) ([]SegmentAssignPlan, []ChannelAssignPlan) {
+	collectionID int64,
+) ([]SegmentAssignPlan, []ChannelAssignPlan) {
 	replicas := balancer.meta.ReplicaManager.GetByCollection(collectionID)
 	segmentPlans, channelPlans := make([]SegmentAssignPlan, 0), make([]ChannelAssignPlan, 0)
 	for _, replica := range replicas {

@@ -212,7 +212,7 @@ type commonConfig struct {
 
 	MetricsPort ParamItem `refreshable:"false"`
 
-	//lock related params
+	// lock related params
 	EnableLockMetrics        ParamItem `refreshable:"false"`
 	LockSlowLogInfoThreshold ParamItem `refreshable:"true"`
 	LockSlowLogWarnThreshold ParamItem `refreshable:"true"`
@@ -2601,12 +2601,15 @@ func (p *integrationTestConfig) init(base *BaseTable) {
 func (params *ComponentParam) Save(key string, value string) error {
 	return params.baseTable.Save(key, value)
 }
+
 func (params *ComponentParam) Remove(key string) error {
 	return params.baseTable.Remove(key)
 }
+
 func (params *ComponentParam) Reset(key string) error {
 	return params.baseTable.Reset(key)
 }
+
 func (params *ComponentParam) GetWithDefault(key string, dft string) string {
 	return params.baseTable.GetWithDefault(key, dft)
 }

@@ -832,7 +832,6 @@ func reduceSearchResultData(ctx context.Context, subSearchResultData []*schemapb
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	// reducing nq * topk results
 	for i := int64(0); i < nq; i++ {
-
 		var (
 			// cursor of current data of each subSearch for merging the j-th data of TopK.
 			// sum(cursors) == j
