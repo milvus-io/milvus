@@ -31,10 +31,18 @@ TEST(Growing, DeleteCount) {
     int64_t c = 10;
     auto offset = 0;
 
+    auto dataset = DataGen(schema, c);
+    auto pks = dataset.get_col<int64_t>(pk);
+    segment->Insert(offset,
+                    c,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
     Timestamp begin_ts = 100;
     auto tss = GenTss(c, begin_ts);
-    auto pks = GenPKs(c, 0);
-    auto status = segment->Delete(offset, c, pks.get(), tss.data());
+    auto del_pks = GenPKs(pks.begin(), pks.end());
+    auto status = segment->Delete(offset, c, del_pks.get(), tss.data());
     ASSERT_TRUE(status.ok());
 
     auto cnt = segment->get_deleted_count();
