@@ -101,10 +101,6 @@ func retrieveOnSegmentsWithStream(ctx context.Context, segments []Segment, segTy
 				errs[i] = err
 				return
 			}
-			if err = seg.ValidateIndexedFieldsData(ctx, result); err != nil {
-				errs[i] = err
-				return
-			}
 
 			if err = svr.Send(&internalpb.RetrieveResults{
 				Status:     merr.Status(nil),
