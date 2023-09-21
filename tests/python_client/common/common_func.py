@@ -850,6 +850,12 @@ def gen_invalid_search_params_type():
                     continue
                 annoy_search_param = {"index_type": index_type, "search_params": {"search_k": search_k}}
                 search_params.append(annoy_search_param)
+        elif index_type == "SCANN":
+            for reorder_k in ct.get_invalid_ints:
+                if isinstance(reorder_k, int):
+                    continue
+                scann_search_param = {"index_type": index_type, "search_params": {"nprobe": 8, "reorder_k": reorder_k}}
+                search_params.append(scann_search_param)
         elif index_type == "DISKANN":
             for search_list in ct.get_invalid_ints:
                 diskann_search_param = {"index_type": index_type, "search_params": {"search_list": search_list}}
@@ -883,6 +889,10 @@ def gen_search_param(index_type, metric_type="L2"):
         for search_k in [1000, 5000]:
             annoy_search_param = {"metric_type": metric_type, "params": {"search_k": search_k}}
             search_params.append(annoy_search_param)
+    elif index_type == "SCANN":
+        for reorder_k in [1200, 3000]:
+            scann_search_param = {"metric_type": metric_type, "params": {"nprobe": 64, "reorder_k": reorder_k}}
+            search_params.append(scann_search_param)
     elif index_type == "DISKANN":
         for search_list in [20, 300, 1500]:
             diskann_search_param = {"metric_type": metric_type, "params": {"search_list": search_list}}
