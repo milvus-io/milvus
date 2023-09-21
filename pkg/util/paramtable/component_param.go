@@ -1174,14 +1174,15 @@ type queryCoordConfig struct {
 	// Deprecated: Since 2.2.2, use different interval for different checker
 	CheckInterval ParamItem `refreshable:"true"`
 
-	NextTargetSurviveTime      ParamItem `refreshable:"true"`
-	UpdateNextTargetInterval   ParamItem `refreshable:"false"`
-	CheckNodeInReplicaInterval ParamItem `refreshable:"false"`
-	CheckResourceGroupInterval ParamItem `refreshable:"false"`
-	EnableRGAutoRecover        ParamItem `refreshable:"true"`
-	CheckHealthInterval        ParamItem `refreshable:"false"`
-	CheckHealthRPCTimeout      ParamItem `refreshable:"true"`
-	BrokerTimeout              ParamItem `refreshable:"false"`
+	NextTargetSurviveTime       ParamItem `refreshable:"true"`
+	UpdateNextTargetInterval    ParamItem `refreshable:"false"`
+	CheckNodeInReplicaInterval  ParamItem `refreshable:"false"`
+	CheckResourceGroupInterval  ParamItem `refreshable:"false"`
+	EnableRGAutoRecover         ParamItem `refreshable:"true"`
+	CheckHealthInterval         ParamItem `refreshable:"false"`
+	CheckHealthRPCTimeout       ParamItem `refreshable:"true"`
+	BrokerTimeout               ParamItem `refreshable:"false"`
+	CollectionRecoverTimesLimit ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -1483,6 +1484,16 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.BrokerTimeout.Init(base.mgr)
+
+	p.CollectionRecoverTimesLimit = ParamItem{
+		Key:          "queryCoord.collectionRecoverTimes",
+		Version:      "2.3.3",
+		DefaultValue: "3",
+		PanicIfEmpty: true,
+		Doc:          "if collection recover times reach the limit during loading state, release it",
+		Export:       true,
+	}
+	p.CollectionRecoverTimesLimit.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
