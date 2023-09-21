@@ -309,6 +309,9 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 10.0, Params.CPURatio.GetAsFloat())
 		assert.Equal(t, uint32(runtime.GOMAXPROCS(0)), Params.KnowhereThreadPoolSize.GetAsUint32())
 
+		// chunk cache
+		assert.Equal(t, "willneed", Params.ReadAheadPolicy.GetValue())
+
 		// test small indexNlist/NProbe default
 		params.Remove("queryNode.segcore.smallIndex.nlist")
 		params.Remove("queryNode.segcore.smallIndex.nprobe")

@@ -55,6 +55,13 @@ std::map<std::string, CloudProviderType> CloudProviderType_Map = {
     {"aliyun", CloudProviderType::ALIYUN},
     {"azure", CloudProviderType::AZURE}};
 
+std::map<std::string, int> ReadAheadPolicy_Map = {
+    {"normal", MADV_NORMAL},
+    {"random", MADV_RANDOM},
+    {"sequential", MADV_SEQUENTIAL},
+    {"willneed", MADV_WILLNEED},
+    {"dontneed", MADV_DONTNEED}};
+
 StorageType
 ReadMediumType(BinlogReaderPtr reader) {
     AssertInfo(reader->Tell() == 0,

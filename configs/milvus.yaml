@@ -269,8 +269,9 @@ queryNode:
   enableDisk: false # enable querynode load disk index, and search on disk index
   maxDiskUsagePercentage: 95
   cache:
-    enabled: true
-    memoryLimit: 2147483648 # 2 GB, 2 * 1024 *1024 *1024
+    enabled: true # deprecated, TODO: remove it
+    memoryLimit: 2147483648 # 2 GB, 2 * 1024 *1024 *1024 # deprecated, TODO: remove it
+    readAheadPolicy: willneed # The read ahead policy of chunk cache, options: `normal, random, sequential, willneed, dontneed`
   grouping:
     enabled: true
     maxNQ: 1000

@@ -96,10 +96,12 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	return HandleCStatus(&status, "InitRemoteChunkManagerSingleton failed")
 }
 
-func InitChunkCache(mmapDirPath string) error {
+func InitChunkCache(mmapDirPath string, readAheadPolicy string) error {
 	cMmapDirPath := C.CString(mmapDirPath)
 	defer C.free(unsafe.Pointer(cMmapDirPath))
-	status := C.InitChunkCacheSingleton(cMmapDirPath)
+	cReadAheadPolicy := C.CString(readAheadPolicy)
+	defer C.free(unsafe.Pointer(cReadAheadPolicy))
+	status := C.InitChunkCacheSingleton(cMmapDirPath, cReadAheadPolicy)
 	return HandleCStatus(&status, "InitChunkCacheSingleton failed")
 }
 
