@@ -21,12 +21,12 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/stretchr/testify/assert"
 )
 
 const (
@@ -683,5 +683,4 @@ func TestMemorySize(t *testing.T) {
 	assert.Equal(t, insertDataEmpty.Data[StringField].GetMemorySize(), 0)
 	assert.Equal(t, insertDataEmpty.Data[BinaryVectorField].GetMemorySize(), 4)
 	assert.Equal(t, insertDataEmpty.Data[FloatVectorField].GetMemorySize(), 4)
-
 }

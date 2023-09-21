@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
 )
@@ -79,7 +80,6 @@ func (h *Handlers) RegisterRoutesTo(router gin.IRouter) {
 	router.PATCH("/credential", wrapHandler(h.handleUpdateCredential))
 	router.DELETE("/credential", wrapHandler(h.handleDeleteCredential))
 	router.GET("/credential/users", wrapHandler(h.handleListCredUsers))
-
 }
 
 func (h *Handlers) handleGetHealth(c *gin.Context) (interface{}, error) {

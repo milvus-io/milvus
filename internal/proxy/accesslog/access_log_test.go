@@ -23,13 +23,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func TestAccessLogger_NotEnable(t *testing.T) {
@@ -126,6 +127,7 @@ func TestAccessLogger_Stdout(t *testing.T) {
 	ok := PrintAccessInfo(ctx, resp, nil, rpcInfo, 0)
 	assert.True(t, ok)
 }
+
 func TestAccessLogger_WithMinio(t *testing.T) {
 	var Params paramtable.ComponentParam
 

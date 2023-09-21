@@ -22,9 +22,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestSyncPeriodically(t *testing.T) {
@@ -68,18 +69,36 @@ func TestSyncMemoryTooHigh(t *testing.T) {
 		memorySizesInMB []float64
 		shouldSyncSegs  []UniqueID
 	}{
-		{"test normal 1", 3, true,
-			[]float64{1, 2, 3, 4, 5}, []UniqueID{5, 4, 3}},
-		{"test normal 2", 2, true,
-			[]float64{1, 2, 3, 4, 5}, []UniqueID{5, 4}},
-		{"test normal 3", 5, true,
-			[]float64{1, 2, 3, 4, 5}, []UniqueID{5, 4, 3, 2, 1}},
-		{"test isHighMemory false", 3, false,
-			[]float64{1, 2, 3, 4, 5}, []UniqueID{}},
-		{"test syncSegmentNum 1", 1, true,
-			[]float64{1, 2, 3, 4, 5}, []UniqueID{5}},
-		{"test with small segment", 3, true,
-			[]float64{0.1, 0.1, 0.1, 4, 5}, []UniqueID{5, 4}},
+		{
+			"test normal 1", 3, true,
+			[]float64{1, 2, 3, 4, 5},
+			[]UniqueID{5, 4, 3},
+		},
+		{
+			"test normal 2", 2, true,
+			[]float64{1, 2, 3, 4, 5},
+			[]UniqueID{5, 4},
+		},
+		{
+			"test normal 3", 5, true,
+			[]float64{1, 2, 3, 4, 5},
+			[]UniqueID{5, 4, 3, 2, 1},
+		},
+		{
+			"test isHighMemory false", 3, false,
+			[]float64{1, 2, 3, 4, 5},
+			[]UniqueID{},
+		},
+		{
+			"test syncSegmentNum 1", 1, true,
+			[]float64{1, 2, 3, 4, 5},
+			[]UniqueID{5},
+		},
+		{
+			"test with small segment", 3, true,
+			[]float64{0.1, 0.1, 0.1, 4, 5},
+			[]UniqueID{5, 4},
+		},
 	}
 
 	for _, test := range tests {

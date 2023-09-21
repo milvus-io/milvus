@@ -113,7 +113,7 @@ func (b *RoundRobinBalancer) AssignChannel(channels []*meta.DmChannel, nodes []i
 }
 
 func (b *RoundRobinBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan) {
-	//TODO by chun.han
+	// TODO by chun.han
 	return nil, nil
 }
 

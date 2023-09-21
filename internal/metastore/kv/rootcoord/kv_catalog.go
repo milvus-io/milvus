@@ -6,6 +6,8 @@ import (
 	"fmt"
 
 	"github.com/golang/protobuf/proto"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/kv"
@@ -21,7 +23,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"go.uber.org/zap"
 )
 
 const (
@@ -341,8 +342,8 @@ func (kc *Catalog) listFieldsAfter210(ctx context.Context, collectionID typeutil
 }
 
 func (kc *Catalog) appendPartitionAndFieldsInfo(ctx context.Context, collMeta *pb.CollectionInfo,
-	ts typeutil.Timestamp) (*model.Collection, error) {
-
+	ts typeutil.Timestamp,
+) (*model.Collection, error) {
 	collection := model.UnmarshalCollectionModel(collMeta)
 
 	if !partitionVersionAfter210(collMeta) && !fieldVersionAfter210(collMeta) {

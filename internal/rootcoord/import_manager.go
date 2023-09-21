@@ -91,7 +91,8 @@ func newImportManager(ctx context.Context, client kv.TxnKV,
 	importService func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error),
 	getSegmentStates func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error),
 	getCollectionName func(dbName string, collID, partitionID typeutil.UniqueID) (string, string, error),
-	unsetIsImportingState func(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error)) *importManager {
+	unsetIsImportingState func(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error),
+) *importManager {
 	mgr := &importManager{
 		ctx:                       ctx,
 		taskStore:                 client,
@@ -334,7 +335,6 @@ func (m *importManager) flipTaskFlushedState(ctx context.Context, importTask *mi
 			log.Info("a DataNode is no longer busy after processing task",
 				zap.Int64("dataNode ID", dataNodeID),
 				zap.Int64("task ID", importTask.GetId()))
-
 		}()
 		// Unset isImporting flag.
 		if m.callUnsetIsImportingState == nil {
@@ -625,7 +625,6 @@ func (m *importManager) updateTaskInfo(ir *rootcoordpb.ImportResult) (*datapb.Im
 
 		return toPersistImportTaskInfo, nil
 	}()
-
 	if err != nil {
 		return nil, err
 	}
@@ -1070,10 +1069,9 @@ func tryUpdateErrMsg(errReason string, toPersistImportTaskInfo *datapb.ImportTas
 		if toPersistImportTaskInfo.GetState().GetErrorMessage() == "" {
 			toPersistImportTaskInfo.State.ErrorMessage = errReason
 		} else {
-			toPersistImportTaskInfo.State.ErrorMessage =
-				fmt.Sprintf("%s; %s",
-					toPersistImportTaskInfo.GetState().GetErrorMessage(),
-					errReason)
+			toPersistImportTaskInfo.State.ErrorMessage = fmt.Sprintf("%s; %s",
+				toPersistImportTaskInfo.GetState().GetErrorMessage(),
+				errReason)
 		}
 	}
 }

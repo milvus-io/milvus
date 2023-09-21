@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -31,8 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-type IndexFileBinlogCodec struct {
-}
+type IndexFileBinlogCodec struct{}
 
 // NewIndexFileBinlogCodec is constructor for IndexFileBinlogCodec
 func NewIndexFileBinlogCodec() *IndexFileBinlogCodec {
@@ -85,7 +83,7 @@ func (codec *IndexFileBinlogCodec) serializeImpl(
 
 	return &Blob{
 		Key: key,
-		//Key:   strconv.Itoa(len(datas)),
+		// Key:   strconv.Itoa(len(datas)),
 		Value: buffer,
 	}, nil
 }
@@ -100,7 +98,8 @@ func (codec *IndexFileBinlogCodec) SerializeIndexParams(
 	fieldID UniqueID,
 	indexParams map[string]string,
 	indexName string,
-	indexID UniqueID) (*Blob, error) {
+	indexID UniqueID,
+) (*Blob, error) {
 	ts := Timestamp(time.Now().UnixNano())
 
 	// save index params.
@@ -126,7 +125,6 @@ func (codec *IndexFileBinlogCodec) Serialize(
 	indexID UniqueID,
 	datas []*Blob,
 ) ([]*Blob, error) {
-
 	var err error
 
 	var blobs []*Blob
@@ -268,7 +266,6 @@ func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 			eventReader.Close()
 		}
 		binlogReader.Close()
-
 	}
 
 	return indexBuildID, version, collectionID, partitionID, segmentID, fieldID, indexParams, indexName, indexID, datas, nil
@@ -286,8 +283,7 @@ func (codec *IndexFileBinlogCodec) Deserialize(blobs []*Blob) (
 }
 
 // IndexCodec can serialize and deserialize index
-type IndexCodec struct {
-}
+type IndexCodec struct{}
 
 // NewIndexCodec creates IndexCodec
 func NewIndexCodec() *IndexCodec {

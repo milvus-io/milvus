@@ -128,7 +128,7 @@ func ReduceSearchResultData(ctx context.Context, searchResultData []*schemapb.Se
 	for i := int64(0); i < nq; i++ {
 		offsets := make([]int64, len(searchResultData))
 
-		var idSet = make(map[interface{}]struct{})
+		idSet := make(map[interface{}]struct{})
 		var j int64
 		for j = 0; j < topk; {
 			sel := SelectSearchResultData(searchResultData, resultOffsets, offsets, i)
@@ -418,7 +418,6 @@ func mergeInternalRetrieveResultsAndFillIfEmpty(
 	retrieveResults []*internalpb.RetrieveResults,
 	param *mergeParam,
 ) (*internalpb.RetrieveResults, error) {
-
 	mergedResult, err := MergeInternalRetrieveResult(ctx, retrieveResults, param)
 	if err != nil {
 		return nil, err
@@ -436,7 +435,6 @@ func mergeSegcoreRetrieveResultsAndFillIfEmpty(
 	retrieveResults []*segcorepb.RetrieveResults,
 	param *mergeParam,
 ) (*segcorepb.RetrieveResults, error) {
-
 	mergedResult, err := MergeSegcoreRetrieveResults(ctx, retrieveResults, param)
 	if err != nil {
 		return nil, err

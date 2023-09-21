@@ -79,11 +79,10 @@ func (es EnvSource) GetSourceName() string {
 }
 
 func (es EnvSource) SetEventHandler(eh EventHandler) {
-
 }
+
 func (es EnvSource) UpdateOptions(opts Options) {
 }
 
 func (es EnvSource) Close() {
-
 }

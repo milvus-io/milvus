@@ -391,7 +391,6 @@ func TestRmqRetention_MultipleTopic(t *testing.T) {
 	newRes, err = rmq.Consume(topicName, groupName, 1)
 	assert.NoError(t, err)
 	assert.Equal(t, len(newRes), 0)
-
 }
 
 func TestRetentionInfo_InitRetentionInfo(t *testing.T) {

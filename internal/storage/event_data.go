@@ -65,7 +65,6 @@ func (data *descriptorEventData) GetEventDataFixPartSize() int32 {
 // GetMemoryUsageInBytes returns the memory size of DescriptorEventDataFixPart.
 func (data *descriptorEventData) GetMemoryUsageInBytes() int32 {
 	return data.GetEventDataFixPartSize() + int32(binary.Size(data.PostHeaderLengths)) + int32(binary.Size(data.ExtraLength)) + data.ExtraLength
-
 }
 
 // AddExtra add extra params to description event.
@@ -368,36 +367,42 @@ func newInsertEventData() *insertEventData {
 		EndTimestamp:   0,
 	}
 }
+
 func newDeleteEventData() *deleteEventData {
 	return &deleteEventData{
 		StartTimestamp: 0,
 		EndTimestamp:   0,
 	}
 }
+
 func newCreateCollectionEventData() *createCollectionEventData {
 	return &createCollectionEventData{
 		StartTimestamp: 0,
 		EndTimestamp:   0,
 	}
 }
+
 func newDropCollectionEventData() *dropCollectionEventData {
 	return &dropCollectionEventData{
 		StartTimestamp: 0,
 		EndTimestamp:   0,
 	}
 }
+
 func newCreatePartitionEventData() *createPartitionEventData {
 	return &createPartitionEventData{
 		StartTimestamp: 0,
 		EndTimestamp:   0,
 	}
 }
+
 func newDropPartitionEventData() *dropPartitionEventData {
 	return &dropPartitionEventData{
 		StartTimestamp: 0,
 		EndTimestamp:   0,
 	}
 }
+
 func newIndexFileEventData() *indexFileEventData {
 	return &indexFileEventData{
 		StartTimestamp: 0,

@@ -15,8 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 )
 
 func Test_NewMetricsCacheManager(t *testing.T) {

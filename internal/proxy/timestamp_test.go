@@ -21,9 +21,9 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/util/uniquegenerator"
-
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/util/uniquegenerator"
 )
 
 func TestNewTimestampAllocator(t *testing.T) {

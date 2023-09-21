@@ -21,8 +21,9 @@ package commonpbutil
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 )
 
 func TestIsHealthy(t *testing.T) {

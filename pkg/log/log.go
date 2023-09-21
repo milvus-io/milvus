@@ -64,7 +64,6 @@ func init() {
 
 	r := utils.NewRateLimiter(1.0, 60.0)
 	_globalR.Store(r)
-
 }
 
 // InitLogger initializes a zap logger.
@@ -218,8 +217,10 @@ func ReplaceGlobals(logger *zap.Logger, props *ZapProperties) {
 }
 
 func replaceLeveledLoggers(debugLogger *zap.Logger) {
-	levels := []zapcore.Level{zapcore.DebugLevel, zapcore.InfoLevel, zapcore.WarnLevel, zapcore.ErrorLevel,
-		zapcore.DPanicLevel, zapcore.PanicLevel, zapcore.FatalLevel}
+	levels := []zapcore.Level{
+		zapcore.DebugLevel, zapcore.InfoLevel, zapcore.WarnLevel, zapcore.ErrorLevel,
+		zapcore.DPanicLevel, zapcore.PanicLevel, zapcore.FatalLevel,
+	}
 	for _, level := range levels {
 		levelL := debugLogger.WithOptions(zap.IncreaseLevel(level))
 		_globalLevelLogger.Store(level, levelL)

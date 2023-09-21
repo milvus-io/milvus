@@ -23,11 +23,11 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"golang.org/x/exp/mmap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
 // PrintBinlogFiles call printBinlogFile in turn for the file list specified by parameter fileList.
@@ -43,7 +43,7 @@ func PrintBinlogFiles(fileList []string) error {
 
 // nolint
 func printBinlogFile(filename string) error {
-	fd, err := os.OpenFile(filename, os.O_RDONLY, 0400)
+	fd, err := os.OpenFile(filename, os.O_RDONLY, 0o400)
 	if err != nil {
 		return err
 	}

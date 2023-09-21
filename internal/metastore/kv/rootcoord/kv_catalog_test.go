@@ -10,6 +10,12 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/atomic"
+	"golang.org/x/exp/maps"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -24,11 +30,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
-	"go.uber.org/atomic"
-	"golang.org/x/exp/maps"
 )
 
 var (
@@ -1423,7 +1424,6 @@ func TestRBAC_Credential(t *testing.T) {
 						fmt.Sprintf("%s/%s", CredentialPrefix, "user3"),
 						"random",
 					}
-
 				}
 				return nil
 			},
@@ -1717,9 +1717,7 @@ func TestRBAC_Role(t *testing.T) {
 	})
 
 	t.Run("test ListRole", func(t *testing.T) {
-		var (
-			loadWithPrefixReturn atomic.Bool
-		)
+		var loadWithPrefixReturn atomic.Bool
 
 		t.Run("test entity!=nil", func(t *testing.T) {
 			var (
@@ -1984,10 +1982,8 @@ func TestRBAC_Role(t *testing.T) {
 						assert.Error(t, err)
 						assert.Empty(t, res)
 					}
-
 				})
 			}
-
 		})
 	})
 	t.Run("test ListUserRole", func(t *testing.T) {
@@ -2176,7 +2172,8 @@ func TestRBAC_Grant(t *testing.T) {
 						DbName:     util.DefaultDBName,
 						Grantor: &milvuspb.GrantorEntity{
 							User:      &milvuspb.UserEntity{Name: test.userName},
-							Privilege: &milvuspb.PrivilegeEntity{Name: test.privilegeName}},
+							Privilege: &milvuspb.PrivilegeEntity{Name: test.privilegeName},
+						},
 					}, milvuspb.OperatePrivilegeType_Grant)
 
 					if test.isValid {
@@ -2195,7 +2192,7 @@ func TestRBAC_Grant(t *testing.T) {
 		})
 
 		t.Run("test Revoke", func(t *testing.T) {
-			var invalidPrivilegeRemove = "p-remove"
+			invalidPrivilegeRemove := "p-remove"
 			invalidPrivilegeRemoveKey := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, fmt.Sprintf("%s/%s", validRoleValue, invalidPrivilegeRemove))
 
 			kvmock.EXPECT().Load(invalidPrivilegeRemoveKey).Call.Return("", nil)
@@ -2233,7 +2230,8 @@ func TestRBAC_Grant(t *testing.T) {
 						DbName:     util.DefaultDBName,
 						Grantor: &milvuspb.GrantorEntity{
 							User:      &milvuspb.UserEntity{Name: test.userName},
-							Privilege: &milvuspb.PrivilegeEntity{Name: test.privilegeName}},
+							Privilege: &milvuspb.PrivilegeEntity{Name: test.privilegeName},
+						},
 					}, milvuspb.OperatePrivilegeType_Revoke)
 
 					if test.isValid {
@@ -2306,7 +2304,6 @@ func TestRBAC_Grant(t *testing.T) {
 		kvmock.EXPECT().LoadWithPrefix(invalidRoleKey).Call.Return(nil, nil, errors.New("mock loadWithPrefix error"))
 		kvmock.EXPECT().LoadWithPrefix(mock.Anything).Call.Return(
 			func(key string) []string {
-
 				// Mock kv_catalog.go:ListGrant:L871
 				if strings.Contains(key, GranteeIDPrefix) {
 					return []string{
@@ -2344,21 +2341,25 @@ func TestRBAC_Grant(t *testing.T) {
 			{false, &milvuspb.GrantEntity{
 				Object:     &milvuspb.ObjectEntity{Name: "random"},
 				ObjectName: "random2",
-				Role:       &milvuspb.RoleEntity{Name: "role1"}}, "valid role with not exist entity"},
+				Role:       &milvuspb.RoleEntity{Name: "role1"},
+			}, "valid role with not exist entity"},
 			{true, &milvuspb.GrantEntity{
 				Object:     &milvuspb.ObjectEntity{Name: "obj1"},
 				ObjectName: "obj_name1",
-				Role:       &milvuspb.RoleEntity{Name: "role1"}}, "valid role with valid entity"},
+				Role:       &milvuspb.RoleEntity{Name: "role1"},
+			}, "valid role with valid entity"},
 			{true, &milvuspb.GrantEntity{
 				Object:     &milvuspb.ObjectEntity{Name: "obj1"},
 				ObjectName: "obj_name2",
 				DbName:     "foo",
-				Role:       &milvuspb.RoleEntity{Name: "role1"}}, "valid role and dbName with valid entity"},
+				Role:       &milvuspb.RoleEntity{Name: "role1"},
+			}, "valid role and dbName with valid entity"},
 			{false, &milvuspb.GrantEntity{
 				Object:     &milvuspb.ObjectEntity{Name: "obj1"},
 				ObjectName: "obj_name2",
 				DbName:     "foo2",
-				Role:       &milvuspb.RoleEntity{Name: "role1"}}, "valid role and invalid dbName with valid entity"},
+				Role:       &milvuspb.RoleEntity{Name: "role1"},
+			}, "valid role and invalid dbName with valid entity"},
 		}
 
 		for _, test := range tests {
@@ -2375,7 +2376,6 @@ func TestRBAC_Grant(t *testing.T) {
 				} else {
 					assert.Error(t, err)
 				}
-
 			})
 		}
 	})

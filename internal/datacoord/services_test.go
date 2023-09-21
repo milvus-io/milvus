@@ -98,7 +98,6 @@ func TestServer_GcConfirm(t *testing.T) {
 }
 
 func TestGetRecoveryInfoV2(t *testing.T) {
-
 	t.Run("test get recovery info with no segments", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
@@ -119,7 +118,8 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 	})
 
 	createSegment := func(id, collectionID, partitionID, numOfRows int64, posTs uint64,
-		channel string, state commonpb.SegmentState) *datapb.SegmentInfo {
+		channel string, state commonpb.SegmentState,
+	) *datapb.SegmentInfo {
 		return &datapb.SegmentInfo{
 			ID:            id,
 			CollectionID:  collectionID,

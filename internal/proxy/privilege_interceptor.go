@@ -92,6 +92,7 @@ func PrivilegeInterceptorWithUsername(ctx context.Context, username string, req 
 	}
 	return privilegeInterceptor(ctx, privilegeExt, username, req)
 }
+
 func privilegeInterceptor(ctx context.Context, privilegeExt commonpb.PrivilegeExt, username string, req interface{}) (context.Context, error) {
 	if username == util.UserRoot {
 		return ctx, nil

@@ -22,14 +22,14 @@ import (
 	"io"
 	"time"
 
+	minio "github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/storage/aliyun"
 	"github.com/milvus-io/milvus/internal/storage/gcp"
-	"github.com/milvus-io/milvus/pkg/util/retry"
-	"github.com/minio/minio-go/v7/pkg/credentials"
-
 	"github.com/milvus-io/milvus/pkg/log"
-	minio "github.com/minio/minio-go/v7"
-	"go.uber.org/zap"
+	"github.com/milvus-io/milvus/pkg/util/retry"
 )
 
 type MinioObjectStorage struct {
@@ -38,8 +38,8 @@ type MinioObjectStorage struct {
 
 func newMinioObjectStorageWithConfig(ctx context.Context, c *config) (*MinioObjectStorage, error) {
 	var creds *credentials.Credentials
-	var newMinioFn = minio.New
-	var bucketLookupType = minio.BucketLookupAuto
+	newMinioFn := minio.New
+	bucketLookupType := minio.BucketLookupAuto
 
 	switch c.cloudProvider {
 	case CloudProviderAliyun:

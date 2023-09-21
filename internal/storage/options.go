@@ -40,6 +40,7 @@ func AccessKeyID(accessKeyID string) Option {
 		c.accessKeyID = accessKeyID
 	}
 }
+
 func SecretAccessKeyID(secretAccessKeyID string) Option {
 	return func(c *config) {
 		c.secretAccessKeyID = secretAccessKeyID

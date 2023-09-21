@@ -204,10 +204,16 @@ func TestFlowGraphManager(t *testing.T) {
 			memorySizes      []int64
 			expectNeedToSync []bool
 		}{
-			{"test over the watermark", 100, 0.5,
-				[]int64{15, 16, 17, 18}, []bool{false, false, false, true}},
-			{"test below the watermark", 100, 0.5,
-				[]int64{1, 2, 3, 4}, []bool{false, false, false, false}},
+			{
+				"test over the watermark", 100, 0.5,
+				[]int64{15, 16, 17, 18},
+				[]bool{false, false, false, true},
+			},
+			{
+				"test below the watermark", 100, 0.5,
+				[]int64{1, 2, 3, 4},
+				[]bool{false, false, false, false},
+			},
 		}
 
 		fm.dropAll()

@@ -8,13 +8,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/util/merr"
-
 	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -22,8 +20,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/util"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
+	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 const (
@@ -55,7 +53,8 @@ var DefaultDescCollectionResp = milvuspb.DescribeCollectionResponse{
 	CollectionName: DefaultCollectionName,
 	Schema:         generateCollectionSchema(false),
 	ShardsNum:      ShardNumDefault,
-	Status:         &StatusSuccess}
+	Status:         &StatusSuccess,
+}
 
 var DefaultLoadStateResp = milvuspb.GetLoadStateResponse{
 	Status: &StatusSuccess,
@@ -1112,7 +1111,6 @@ func TestAuthorization(t *testing.T) {
 			})
 		}
 	}
-
 }
 
 func TestDatabaseNotFound(t *testing.T) {
@@ -1390,7 +1388,8 @@ func Test_Handles_VectorCollectionsDescribe(t *testing.T) {
 		mp.EXPECT().
 			DescribeCollection(mock.Anything, mock.Anything).
 			Return(&milvuspb.DescribeCollectionResponse{
-				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}}, nil).
+				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
+			}, nil).
 			Once()
 		req := httptest.NewRequest(http.MethodGet, "/vector/collections/describe?collectionName=book", nil)
 		req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
@@ -1405,7 +1404,8 @@ func Test_Handles_VectorCollectionsDescribe(t *testing.T) {
 			DescribeCollection(mock.Anything, mock.Anything).
 			Return(&milvuspb.DescribeCollectionResponse{
 				Schema: getCollectionSchema("collectionName"),
-				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil).
+				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			}, nil).
 			Once()
 		mp.EXPECT().
 			GetLoadState(mock.Anything, mock.Anything).
@@ -1428,17 +1428,20 @@ func Test_Handles_VectorCollectionsDescribe(t *testing.T) {
 			DescribeCollection(mock.Anything, mock.Anything).
 			Return(&milvuspb.DescribeCollectionResponse{
 				Schema: getCollectionSchema("collectionName"),
-				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil).
+				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			}, nil).
 			Once()
 		mp.EXPECT().
 			GetLoadState(mock.Anything, mock.Anything).
 			Return(&milvuspb.GetLoadStateResponse{
-				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}}, nil).
+				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
+			}, nil).
 			Once()
 		mp.EXPECT().
 			DescribeIndex(mock.Anything, mock.Anything).
 			Return(&milvuspb.DescribeIndexResponse{
-				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}}, nil).
+				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
+			}, nil).
 			Once()
 		req := httptest.NewRequest(http.MethodGet, "/vector/collections/describe?collectionName=book", nil)
 		req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
@@ -1453,7 +1456,8 @@ func Test_Handles_VectorCollectionsDescribe(t *testing.T) {
 			DescribeCollection(mock.Anything, mock.Anything).
 			Return(&milvuspb.DescribeCollectionResponse{
 				Schema: getCollectionSchema("collectionName"),
-				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil).
+				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			}, nil).
 			Once()
 		mp.EXPECT().
 			GetLoadState(mock.Anything, mock.Anything).
@@ -1477,7 +1481,8 @@ func Test_Handles_VectorCollectionsDescribe(t *testing.T) {
 						},
 					},
 				},
-				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}}, nil).
+				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
+			}, nil).
 			Once()
 		req := httptest.NewRequest(http.MethodGet, "/vector/collections/describe?collectionName=book", nil)
 		req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)

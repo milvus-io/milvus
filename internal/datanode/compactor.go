@@ -25,6 +25,8 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -40,7 +42,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"go.uber.org/zap"
 )
 
 var (
@@ -96,8 +97,8 @@ func newCompactionTask(
 	fm flushManager,
 	alloc allocator.Allocator,
 	plan *datapb.CompactionPlan,
-	chunkManager storage.ChunkManager) *compactionTask {
-
+	chunkManager storage.ChunkManager,
+) *compactionTask {
 	ctx1, cancel := context.WithCancel(ctx)
 	return &compactionTask{
 		ctx:    ctx1,
@@ -152,7 +153,7 @@ func (t *compactionTask) mergeDeltalogs(dBlobs map[UniqueID][]*Blob) (map[interf
 	mergeStart := time.Now()
 	dCodec := storage.NewDeleteCodec()
 
-	var pk2ts = make(map[interface{}]Timestamp)
+	pk2ts := make(map[interface{}]Timestamp)
 
 	for _, blobs := range dBlobs {
 		_, _, dData, err := dCodec.Deserialize(blobs)
@@ -184,7 +185,8 @@ func (t *compactionTask) uploadRemainLog(
 	stats *storage.PrimaryKeyStats,
 	totRows int64,
 	fID2Content map[UniqueID][]interface{},
-	fID2Type map[UniqueID]schemapb.DataType) (map[UniqueID]*datapb.FieldBinlog, map[UniqueID]*datapb.FieldBinlog, error) {
+	fID2Type map[UniqueID]schemapb.DataType,
+) (map[UniqueID]*datapb.FieldBinlog, map[UniqueID]*datapb.FieldBinlog, error) {
 	var iData *InsertData
 
 	// remain insert data
@@ -220,9 +222,11 @@ func (t *compactionTask) uploadSingleInsertLog(
 	partID UniqueID,
 	meta *etcdpb.CollectionMeta,
 	fID2Content map[UniqueID][]interface{},
-	fID2Type map[UniqueID]schemapb.DataType) (map[UniqueID]*datapb.FieldBinlog, error) {
+	fID2Type map[UniqueID]schemapb.DataType,
+) (map[UniqueID]*datapb.FieldBinlog, error) {
 	iData := &InsertData{
-		Data: make(map[storage.FieldID]storage.FieldData)}
+		Data: make(map[storage.FieldID]storage.FieldData),
+	}
 
 	for fID, content := range fID2Content {
 		tp, ok := fID2Type[fID]
@@ -253,7 +257,8 @@ func (t *compactionTask) merge(
 	targetSegID UniqueID,
 	partID UniqueID,
 	meta *etcdpb.CollectionMeta,
-	delta map[interface{}]Timestamp) ([]*datapb.FieldBinlog, []*datapb.FieldBinlog, int64, error) {
+	delta map[interface{}]Timestamp,
+) ([]*datapb.FieldBinlog, []*datapb.FieldBinlog, int64, error) {
 	log := log.With(zap.Int64("planID", t.getPlanID()))
 	mergeStart := time.Now()
 
@@ -416,7 +421,7 @@ func (t *compactionTask) merge(
 				}
 				fID2Content[fID] = append(fID2Content[fID], vInter)
 			}
-			//update pk to new stats log
+			// update pk to new stats log
 			stats.Update(v.PK)
 
 			currentRows++
@@ -490,7 +495,6 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 	var targetSegID UniqueID
 	var err error
 	switch {
-
 	case t.plan.GetType() == datapb.CompactionType_UndefinedCompaction:
 		log.Warn("compact wrong, compaction type undefined")
 		return nil, errCompactionTypeUndifined
@@ -624,12 +628,11 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 	<-ti.Injected()
 	log.Info("compact inject elapse", zap.Duration("elapse", time.Since(injectStart)))
 
-	var dblobs = make(map[UniqueID][]*Blob)
+	dblobs := make(map[UniqueID][]*Blob)
 	allPath := make([][]string, 0)
 
 	downloadStart := time.Now()
 	for _, s := range t.plan.GetSegmentBinlogs() {
-
 		// Get the number of field binlog files from non-empty segment
 		var binlogNum int
 		for _, b := range s.GetFieldBinlogs() {
@@ -728,7 +731,7 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 	var rst storage.FieldData
 	switch schemaDataType {
 	case schemapb.DataType_Bool:
-		var data = &storage.BoolFieldData{
+		data := &storage.BoolFieldData{
 			Data: make([]bool, 0, len(content)),
 		}
 
@@ -742,7 +745,7 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 		rst = data
 
 	case schemapb.DataType_Int8:
-		var data = &storage.Int8FieldData{
+		data := &storage.Int8FieldData{
 			Data: make([]int8, 0, len(content)),
 		}
 
@@ -756,7 +759,7 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 		rst = data
 
 	case schemapb.DataType_Int16:
-		var data = &storage.Int16FieldData{
+		data := &storage.Int16FieldData{
 			Data: make([]int16, 0, len(content)),
 		}
 
@@ -770,7 +773,7 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 		rst = data
 
 	case schemapb.DataType_Int32:
-		var data = &storage.Int32FieldData{
+		data := &storage.Int32FieldData{
 			Data: make([]int32, 0, len(content)),
 		}
 
@@ -784,7 +787,7 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 		rst = data
 
 	case schemapb.DataType_Int64:
-		var data = &storage.Int64FieldData{
+		data := &storage.Int64FieldData{
 			Data: make([]int64, 0, len(content)),
 		}
 
@@ -798,7 +801,7 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 		rst = data
 
 	case schemapb.DataType_Float:
-		var data = &storage.FloatFieldData{
+		data := &storage.FloatFieldData{
 			Data: make([]float32, 0, len(content)),
 		}
 
@@ -812,7 +815,7 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 		rst = data
 
 	case schemapb.DataType_Double:
-		var data = &storage.DoubleFieldData{
+		data := &storage.DoubleFieldData{
 			Data: make([]float64, 0, len(content)),
 		}
 
@@ -826,7 +829,7 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 		rst = data
 
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
-		var data = &storage.StringFieldData{
+		data := &storage.StringFieldData{
 			Data: make([]string, 0, len(content)),
 		}
 
@@ -840,7 +843,7 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 		rst = data
 
 	case schemapb.DataType_JSON:
-		var data = &storage.JSONFieldData{
+		data := &storage.JSONFieldData{
 			Data: make([][]byte, 0, len(content)),
 		}
 
@@ -854,7 +857,7 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 		rst = data
 
 	case schemapb.DataType_FloatVector:
-		var data = &storage.FloatVectorFieldData{
+		data := &storage.FloatVectorFieldData{
 			Data: []float32{},
 		}
 
@@ -870,7 +873,7 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 		rst = data
 
 	case schemapb.DataType_Float16Vector:
-		var data = &storage.Float16VectorFieldData{
+		data := &storage.Float16VectorFieldData{
 			Data: []byte{},
 		}
 
@@ -886,7 +889,7 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 		rst = data
 
 	case schemapb.DataType_BinaryVector:
-		var data = &storage.BinaryVectorFieldData{
+		data := &storage.BinaryVectorFieldData{
 			Data: []byte{},
 		}
 

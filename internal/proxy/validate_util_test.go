@@ -2543,7 +2543,6 @@ func Test_validateUtil_fillWithDefaultValue(t *testing.T) {
 		flag := checkFillWithDefaultValueData(data[0].GetScalars().GetStringData().Data, stringData[0], 1)
 		assert.True(t, flag)
 	})
-
 }
 
 func Test_verifyOverflowByRange(t *testing.T) {
@@ -2617,7 +2616,6 @@ func Test_validateUtil_checkIntegerFieldData(t *testing.T) {
 	})
 
 	t.Run("tiny int, overflow", func(t *testing.T) {
-
 		v := newValidateUtil(withOverflowCheck())
 
 		f := &schemapb.FieldSchema{
@@ -2640,7 +2638,6 @@ func Test_validateUtil_checkIntegerFieldData(t *testing.T) {
 	})
 
 	t.Run("tiny int, normal case", func(t *testing.T) {
-
 		v := newValidateUtil(withOverflowCheck())
 
 		f := &schemapb.FieldSchema{
@@ -2663,7 +2660,6 @@ func Test_validateUtil_checkIntegerFieldData(t *testing.T) {
 	})
 
 	t.Run("small int, overflow", func(t *testing.T) {
-
 		v := newValidateUtil(withOverflowCheck())
 
 		f := &schemapb.FieldSchema{
@@ -2686,7 +2682,6 @@ func Test_validateUtil_checkIntegerFieldData(t *testing.T) {
 	})
 
 	t.Run("small int, normal case", func(t *testing.T) {
-
 		v := newValidateUtil(withOverflowCheck())
 
 		f := &schemapb.FieldSchema{
@@ -2707,7 +2702,6 @@ func Test_validateUtil_checkIntegerFieldData(t *testing.T) {
 		err := v.checkIntegerFieldData(data, f)
 		assert.NoError(t, err)
 	})
-
 }
 
 func Test_validateUtil_checkJSONData(t *testing.T) {

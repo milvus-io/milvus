@@ -26,6 +26,12 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	minio "github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
+	"go.uber.org/zap"
+	"golang.org/x/exp/mmap"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/milvus-io/milvus/internal/storage/aliyun"
 	"github.com/milvus-io/milvus/internal/storage/gcp"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -33,18 +39,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
-	minio "github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
-	"go.uber.org/zap"
-	"golang.org/x/exp/mmap"
-	"golang.org/x/sync/errgroup"
 )
 
 const NoSuchKey = "NoSuchKey"
 
-var (
-	ErrNoSuchKey = errors.New(NoSuchKey)
-)
+var ErrNoSuchKey = errors.New(NoSuchKey)
 
 func WrapErrNoSuchKey(key string) error {
 	return fmt.Errorf("%w(key=%s)", ErrNoSuchKey, key)
@@ -80,8 +79,8 @@ func NewMinioChunkManager(ctx context.Context, opts ...Option) (*MinioChunkManag
 
 func newMinioChunkManagerWithConfig(ctx context.Context, c *config) (*MinioChunkManager, error) {
 	var creds *credentials.Credentials
-	var newMinioFn = minio.New
-	var bucketLookupType = minio.BucketLookupAuto
+	newMinioFn := minio.New
+	bucketLookupType := minio.BucketLookupAuto
 
 	if c.useVirtualHost {
 		bucketLookupType = minio.BucketLookupDNS
@@ -208,7 +207,6 @@ func (mcm *MinioChunkManager) Size(ctx context.Context, filePath string) (int64,
 // Write writes the data to minio storage.
 func (mcm *MinioChunkManager) Write(ctx context.Context, filePath string, content []byte) error {
 	_, err := mcm.putMinioObject(ctx, mcm.bucketName, filePath, bytes.NewReader(content), int64(len(content)), minio.PutObjectOptions{})
-
 	if err != nil {
 		log.Warn("failed to put object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
 		return err
@@ -414,7 +412,6 @@ func (mcm *MinioChunkManager) RemoveWithPrefix(ctx context.Context, prefix strin
 // calling `ListWithPrefix` with `prefix` = a && `recursive` = false will only returns [a, ab]
 // If caller needs all objects without level limitation, `recursive` shall be true.
 func (mcm *MinioChunkManager) ListWithPrefix(ctx context.Context, prefix string, recursive bool) ([]string, []time.Time, error) {
-
 	// cannot use ListObjects(ctx, bucketName, Opt{Prefix:prefix, Recursive:true})
 	// if minio has lots of objects under the provided path
 	// recursive = true may timeout during the recursive browsing the objects.
@@ -475,7 +472,8 @@ func Read(r io.Reader, size int64) ([]byte, error) {
 }
 
 func (mcm *MinioChunkManager) getMinioObject(ctx context.Context, bucketName, objectName string,
-	opts minio.GetObjectOptions) (*minio.Object, error) {
+	opts minio.GetObjectOptions,
+) (*minio.Object, error) {
 	start := timerecord.NewTimeRecorder("getMinioObject")
 
 	reader, err := mcm.Client.GetObject(ctx, bucketName, objectName, opts)
@@ -491,7 +489,8 @@ func (mcm *MinioChunkManager) getMinioObject(ctx context.Context, bucketName, ob
 }
 
 func (mcm *MinioChunkManager) putMinioObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64,
-	opts minio.PutObjectOptions) (minio.UploadInfo, error) {
+	opts minio.PutObjectOptions,
+) (minio.UploadInfo, error) {
 	start := timerecord.NewTimeRecorder("putMinioObject")
 
 	info, err := mcm.Client.PutObject(ctx, bucketName, objectName, reader, objectSize, opts)
@@ -507,7 +506,8 @@ func (mcm *MinioChunkManager) putMinioObject(ctx context.Context, bucketName, ob
 }
 
 func (mcm *MinioChunkManager) statMinioObject(ctx context.Context, bucketName, objectName string,
-	opts minio.StatObjectOptions) (minio.ObjectInfo, error) {
+	opts minio.StatObjectOptions,
+) (minio.ObjectInfo, error) {
 	start := timerecord.NewTimeRecorder("statMinioObject")
 
 	info, err := mcm.Client.StatObject(ctx, bucketName, objectName, opts)
@@ -523,7 +523,8 @@ func (mcm *MinioChunkManager) statMinioObject(ctx context.Context, bucketName, o
 }
 
 func (mcm *MinioChunkManager) listMinioObjects(ctx context.Context, bucketName string,
-	opts minio.ListObjectsOptions) <-chan minio.ObjectInfo {
+	opts minio.ListObjectsOptions,
+) <-chan minio.ObjectInfo {
 	start := timerecord.NewTimeRecorder("listMinioObjects")
 
 	res := mcm.Client.ListObjects(ctx, bucketName, opts)
@@ -535,7 +536,8 @@ func (mcm *MinioChunkManager) listMinioObjects(ctx context.Context, bucketName s
 }
 
 func (mcm *MinioChunkManager) removeMinioObject(ctx context.Context, bucketName, objectName string,
-	opts minio.RemoveObjectOptions) error {
+	opts minio.RemoveObjectOptions,
+) error {
 	start := timerecord.NewTimeRecorder("removeMinioObject")
 
 	err := mcm.Client.RemoveObject(ctx, bucketName, objectName, opts)

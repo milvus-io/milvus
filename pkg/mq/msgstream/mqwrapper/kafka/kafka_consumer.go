@@ -197,7 +197,8 @@ func (kc *Consumer) internalSeek(offset kafka.Offset, inclusive bool) error {
 	if err := kc.c.Seek(kafka.TopicPartition{
 		Topic:     &kc.topic,
 		Partition: mqwrapper.DefaultPartitionIdx,
-		Offset:    offset}, timeout); err != nil {
+		Offset:    offset,
+	}, timeout); err != nil {
 		return err
 	}
 	cost = time.Since(start).Milliseconds()

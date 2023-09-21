@@ -41,8 +41,8 @@ type channelStateTimer struct {
 
 	etcdWatcher    clientv3.WatchChan
 	timeoutWatcher chan *ackEvent
-	//Modifies afterwards must guarantee that runningTimerCount is updated synchronized with runningTimers
-	//in order to keep consistency
+	// Modifies afterwards must guarantee that runningTimerCount is updated synchronized with runningTimers
+	// in order to keep consistency
 	runningTimerCount atomic.Int32
 }
 
@@ -185,7 +185,6 @@ func parseWatchInfo(key string, data []byte) (*datapb.ChannelWatchInfo, error) {
 	watchInfo := datapb.ChannelWatchInfo{}
 	if err := proto.Unmarshal(data, &watchInfo); err != nil {
 		return nil, fmt.Errorf("invalid event data: fail to parse ChannelWatchInfo, key: %s, err: %v", key, err)
-
 	}
 
 	if watchInfo.Vchan == nil {

@@ -55,7 +55,8 @@ func DeduceTargetPartitions(partitions map[string]int64, collectionSchema *schem
 
 func NewCollectionInfo(collectionSchema *schemapb.CollectionSchema,
 	shardNum int32,
-	partitionIDs []int64) (*CollectionInfo, error) {
+	partitionIDs []int64,
+) (*CollectionInfo, error) {
 	if shardNum <= 0 {
 		return nil, fmt.Errorf("illegal shard number %d", shardNum)
 	}

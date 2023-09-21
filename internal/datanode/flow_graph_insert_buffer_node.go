@@ -310,7 +310,7 @@ type syncTask struct {
 }
 
 func (ibNode *insertBufferNode) FillInSyncTasks(fgMsg *flowGraphMsg, seg2Upload []UniqueID) map[UniqueID]*syncTask {
-	var syncTasks = make(map[UniqueID]*syncTask)
+	syncTasks := make(map[UniqueID]*syncTask)
 
 	if fgMsg.dropCollection {
 		// All segments in the collection will be synced, not matter empty buffer or not
@@ -378,10 +378,10 @@ func (ibNode *insertBufferNode) FillInSyncTasks(fgMsg *flowGraphMsg, seg2Upload 
 	}
 
 	// sync delete
-	//here we adopt a quite radical strategy:
-	//every time we make sure that the N biggest delDataBuf can be flushed
-	//when memsize usage reaches a certain level
-	//the aim for taking all these actions is to guarantee that the memory consumed by delBuf will not exceed a limit
+	// here we adopt a quite radical strategy:
+	// every time we make sure that the N biggest delDataBuf can be flushed
+	// when memsize usage reaches a certain level
+	// the aim for taking all these actions is to guarantee that the memory consumed by delBuf will not exceed a limit
 	segmentsToFlush := ibNode.delBufferManager.ShouldFlushSegments()
 	for _, segID := range segmentsToFlush {
 		syncTasks[segID] = &syncTask{
@@ -544,7 +544,6 @@ func (ibNode *insertBufferNode) Sync(fgMsg *flowGraphMsg, seg2Upload []UniqueID,
 func (ibNode *insertBufferNode) addSegmentAndUpdateRowNum(insertMsgs []*msgstream.InsertMsg, startPos, endPos *msgpb.MsgPosition) (seg2Upload []UniqueID, err error) {
 	uniqueSeg := make(map[UniqueID]int64)
 	for _, msg := range insertMsgs {
-
 		currentSegID := msg.GetSegmentID()
 		collID := msg.GetCollectionID()
 		partitionID := msg.GetPartitionID()
@@ -669,7 +668,6 @@ func (ibNode *insertBufferNode) getTimestampRange(tsData *storage.Int64FieldData
 
 // WriteTimeTick writes timetick once insertBufferNode operates.
 func (ibNode *insertBufferNode) WriteTimeTick(ts Timestamp, segmentIDs []int64) {
-
 	select {
 	case resendTTMsg := <-ibNode.resendTTChan:
 		log.Info("resend TT msg received in insertBufferNode",
@@ -702,8 +700,8 @@ func (ibNode *insertBufferNode) getCollectionandPartitionIDbySegID(segmentID Uni
 }
 
 func newInsertBufferNode(ctx context.Context, collID UniqueID, delBufManager *DeltaBufferManager, flushCh <-chan flushMsg, resendTTCh <-chan resendTTMsg,
-	fm flushManager, flushingSegCache *Cache, config *nodeConfig, timeTickManager *timeTickSender) (*insertBufferNode, error) {
-
+	fm flushManager, flushingSegCache *Cache, config *nodeConfig, timeTickManager *timeTickSender,
+) (*insertBufferNode, error) {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(config.maxQueueLength)
 	baseNode.SetMaxParallelism(config.maxParallelism)
@@ -726,7 +724,7 @@ func newInsertBufferNode(ctx context.Context, collID UniqueID, delBufManager *De
 		}, nil
 	}
 
-	//input stream, data node time tick
+	// input stream, data node time tick
 	wTt, err := config.msFactory.NewMsgStream(ctx)
 	if err != nil {
 		return nil, err

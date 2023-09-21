@@ -85,6 +85,7 @@ func (m *RootCoordFactory) AllocID(ctx context.Context, in *rootcoordpb.AllocIDR
 	resp := &rootcoordpb.AllocIDResponse{
 		ID:     m.ID,
 		Count:  in.GetCount(),
-		Status: merr.Status(nil)}
+		Status: merr.Status(nil),
+	}
 	return resp, nil
 }

@@ -36,6 +36,14 @@ INSTALL_GOLANGCI_LINT := $(findstring $(GOLANGCI_LINT_VERSION), $(GOLANGCI_LINT_
 MOCKERY_VERSION := 2.32.4
 MOCKERY_OUTPUT := $(shell $(INSTALL_PATH)/mockery --version 2>/dev/null)
 INSTALL_MOCKERY := $(findstring $(MOCKERY_VERSION),$(MOCKERY_OUTPUT))
+# gci
+GCI_VERSION := 0.11.2
+GCI_OUTPUT := $(shell $(INSTALL_PATH)/gci --version 2>/dev/null)
+INSTALL_GCI := $(findstring $(GCI_VERSION),$(GCI_OUTPUT))
+# gofumpt
+GOFUMPT_VERSION := 0.5.0
+GOFUMPT_OUTPUT := $(shell $(INSTALL_PATH)/gofumpt --version 2>/dev/null)
+INSTALL_GOFUMPT := $(findstring $(GOFUMPT_VERSION),$(GOFUMPT_OUTPUT))
 
 export GIT_BRANCH=master
 
@@ -97,18 +105,32 @@ else
 	@GO111MODULE=on env bash $(PWD)/scripts/gofmt.sh pkg/
 endif
 
-lint: tools/bin/revive
-	@echo "Running $@ check"
-	@tools/bin/revive -formatter friendly -config tools/check/revive.toml ./...
+lint-fix: getdeps
+	@mkdir -p $(INSTALL_PATH)
+	@if [ -z "$(INSTALL_GCI)" ]; then \
+		echo "Installing gci v$(GCI_VERSION) to ./bin/" && GOBIN=$(INSTALL_PATH) go install github.com/daixiang0/gci@v$(GCI_VERSION); \
+	else \
+		echo "gci v$(GCI_VERSION) already installed"; \
+	fi
+	@if [ -z "$(INSTALL_GOFUMPT)" ]; then \
+		echo "Installing gofumpt v$(GOFUMPT_VERSION) to ./bin/" && GOBIN=$(INSTALL_PATH) go install mvdan.cc/gofumpt@v$(GOFUMPT_VERSION); \
+	else \
+		echo "gofumpt v$(GOFUMPT_VERSION) already installed"; \
+	fi
+	@echo "Running gofumpt fix"
+	@$(INSTALL_PATH)/gofumpt -l -w .
+	@echo "Running gci fix"
+	@$(INSTALL_PATH)/gci write cmd/ --skip-generated -s standard -s default -s "prefix(github.com/milvus-io)" --custom-order
+	@$(INSTALL_PATH)/gci write internal/ --skip-generated -s standard -s default -s "prefix(github.com/milvus-io)" --custom-order
+	@$(INSTALL_PATH)/gci write pkg/ --skip-generated -s standard -s default -s "prefix(github.com/milvus-io)" --custom-order
+	@$(INSTALL_PATH)/gci write tests/ --skip-generated -s standard -s default -s "prefix(github.com/milvus-io)" --custom-order
+	@echo "Running golangci-lint auto-fix"
+	@source $(PWD)/scripts/setenv.sh && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --fix --timeout=30m --config $(PWD)/.golangci.yml; cd pkg && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --fix --timeout=30m --config $(PWD)/.golangci.yml
 
 #TODO: Check code specifications by golangci-lint
 static-check: getdeps
 	@echo "Running $@ check"
-	@GO111MODULE=on $(INSTALL_PATH)/golangci-lint cache clean
-	@source $(PWD)/scripts/setenv.sh && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --timeout=30m --config ./.golangci.yml ./internal/...
-	@source $(PWD)/scripts/setenv.sh && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --timeout=30m --config ./.golangci.yml ./cmd/...
-	@source $(PWD)/scripts/setenv.sh && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --timeout=30m --config ./.golangci.yml ./tests/integration/...
-	@source $(PWD)/scripts/setenv.sh && cd pkg && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --timeout=30m --config ../.golangci.yml ./...
+	@source $(PWD)/scripts/setenv.sh && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --timeout=30m --config $(PWD)/.golangci.yml; cd pkg && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --timeout=30m --config $(PWD)/.golangci.yml
 
 verifiers: build-cpp getdeps cppcheck fmt static-check
 

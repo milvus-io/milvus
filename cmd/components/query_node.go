@@ -46,7 +46,6 @@ func NewQueryNode(ctx context.Context, factory dependency.Factory) (*QueryNode, 
 		ctx: ctx,
 		svr: svr,
 	}, nil
-
 }
 
 // Run starts service

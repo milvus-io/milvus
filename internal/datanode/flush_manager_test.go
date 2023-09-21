@@ -329,7 +329,6 @@ func TestRendezvousFlushManager_Inject(t *testing.T) {
 	})
 	assert.Eventually(t, func() bool { return counter.Load() == int64(size+3) }, 3*time.Second, 100*time.Millisecond)
 	assert.EqualValues(t, 4, packs[size+1].segmentID)
-
 }
 
 func TestRendezvousFlushManager_getSegmentMeta(t *testing.T) {
@@ -455,7 +454,7 @@ func TestRendezvousFlushManager_dropMode(t *testing.T) {
 
 		channel := newTestChannel()
 		targets := make(map[int64]struct{})
-		//init failed segment
+		// init failed segment
 		testSeg := &Segment{
 			collectionID: 1,
 			segmentID:    -1,
@@ -463,7 +462,7 @@ func TestRendezvousFlushManager_dropMode(t *testing.T) {
 		testSeg.setType(datapb.SegmentType_New)
 		channel.segments[testSeg.segmentID] = testSeg
 
-		//init target segment
+		// init target segment
 		for i := 1; i < 11; i++ {
 			targets[int64(i)] = struct{}{}
 			testSeg := &Segment{
@@ -474,7 +473,7 @@ func TestRendezvousFlushManager_dropMode(t *testing.T) {
 			channel.segments[testSeg.segmentID] = testSeg
 		}
 
-		//init flush manager
+		// init flush manager
 		m := NewRendezvousFlushManager(allocator.NewMockAllocator(t), cm, channel, func(pack *segmentFlushPack) {
 		}, func(packs []*segmentFlushPack) {
 			mut.Lock()
@@ -532,7 +531,7 @@ func TestRendezvousFlushManager_dropMode(t *testing.T) {
 		var result []*segmentFlushPack
 		signal := make(chan struct{})
 		channel := newTestChannel()
-		//init failed segment
+		// init failed segment
 		testSeg := &Segment{
 			collectionID: 1,
 			segmentID:    -1,
@@ -540,7 +539,7 @@ func TestRendezvousFlushManager_dropMode(t *testing.T) {
 		testSeg.setType(datapb.SegmentType_New)
 		channel.segments[testSeg.segmentID] = testSeg
 
-		//init target segment
+		// init target segment
 		for i := 1; i < 11; i++ {
 			seg := &Segment{
 				collectionID: 1,
@@ -558,14 +557,14 @@ func TestRendezvousFlushManager_dropMode(t *testing.T) {
 			close(signal)
 		})
 
-		//flush failed segment before start drop mode
+		// flush failed segment before start drop mode
 		halfMsgID := []byte{1, 1, 1}
 		_, err := m.flushBufferData(nil, -1, true, false, &msgpb.MsgPosition{
 			MsgID: halfMsgID,
 		})
 		assert.NoError(t, err)
 
-		//inject target segment
+		// inject target segment
 		injFunc := func(pack *segmentFlushPack) {
 			pack.segmentID = 100
 		}
@@ -617,7 +616,7 @@ func TestRendezvousFlushManager_close(t *testing.T) {
 
 	channel := newTestChannel()
 
-	//init test segment
+	// init test segment
 	testSeg := &Segment{
 		collectionID: 1,
 		segmentID:    1,
@@ -758,7 +757,8 @@ func TestDropVirtualChannelFunc(t *testing.T) {
 					ChannelName: vchanName,
 					MsgID:       []byte{1, 2, 3},
 					Timestamp:   10,
-				}, endPos: nil})
+				}, endPos: nil,
+			})
 		assert.NotPanics(t, func() {
 			dropFunc([]*segmentFlushPack{
 				{
@@ -794,7 +794,6 @@ func TestDropVirtualChannelFunc(t *testing.T) {
 	})
 
 	t.Run("datacoord call error", func(t *testing.T) {
-
 		dataCoord.DropVirtualChannelStatus = commonpb.ErrorCode_UnexpectedError
 		dataCoord.DropVirtualChannelError = true
 		assert.Panics(t, func() {
@@ -811,5 +810,4 @@ func TestDropVirtualChannelFunc(t *testing.T) {
 			dropFunc(nil)
 		})
 	})
-
 }

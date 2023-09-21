@@ -75,9 +75,7 @@ func TestGetMetrics(t *testing.T) {
 }
 
 func TestGetMetricsError(t *testing.T) {
-	var (
-		ctx = context.TODO()
-	)
+	ctx := context.TODO()
 
 	in, err := NewMockIndexNodeComponent(ctx)
 	assert.NoError(t, err)

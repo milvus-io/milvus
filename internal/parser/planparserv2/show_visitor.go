@@ -9,8 +9,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
-type ShowExprVisitor struct {
-}
+type ShowExprVisitor struct{}
 
 func extractColumnInfo(info *planpb.ColumnInfo) interface{} {
 	js := make(map[string]interface{})

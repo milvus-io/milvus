@@ -60,8 +60,7 @@ func (mm *mockMsgStreamFactory) NewMsgStreamDisposer(ctx context.Context) func([
 	return nil
 }
 
-type mockTtMsgStream struct {
-}
+type mockTtMsgStream struct{}
 
 func (mtm *mockTtMsgStream) Close() {}
 

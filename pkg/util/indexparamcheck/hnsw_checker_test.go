@@ -4,14 +4,13 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/util/metric"
-
-	"github.com/stretchr/testify/assert"
 )
 
 func Test_hnswChecker_CheckTrain(t *testing.T) {
-
 	validParams := map[string]string{
 		DIM:            strconv.Itoa(128),
 		HNSWM:          strconv.Itoa(16),
@@ -105,7 +104,6 @@ func Test_hnswChecker_CheckTrain(t *testing.T) {
 }
 
 func Test_hnswChecker_CheckValidDataType(t *testing.T) {
-
 	cases := []struct {
 		dType    schemapb.DataType
 		errIsNil bool

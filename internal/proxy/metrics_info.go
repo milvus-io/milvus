@@ -30,8 +30,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-type getMetricsFuncType func(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
-type showConfigurationsFuncType func(ctx context.Context, request *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error)
+type (
+	getMetricsFuncType         func(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
+	showConfigurationsFuncType func(ctx context.Context, request *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error)
+)
 
 // getQuotaMetrics returns ProxyQuotaMetrics.
 func getQuotaMetrics() (*metricsinfo.ProxyQuotaMetrics, error) {

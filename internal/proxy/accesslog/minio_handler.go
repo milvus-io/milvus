@@ -24,12 +24,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/retry"
 )
 
 type config struct {
@@ -43,14 +44,16 @@ type config struct {
 	iamEndpoint       string
 }
 
-//minIO client for upload access log
-//TODO file retention on minio
+// minIO client for upload access log
+// TODO file retention on minio
+type (
+	RetentionFunc func(object minio.ObjectInfo) bool
+	task          struct {
+		objectName string
+		filePath   string
+	}
+)
 
-type RetentionFunc func(object minio.ObjectInfo) bool
-type task struct {
-	objectName string
-	filePath   string
-}
 type minioHandler struct {
 	bucketName string
 	rootPath   string
@@ -152,7 +155,6 @@ func (c *minioHandler) scheduler() {
 			log.Warn("close minio logger handler")
 			return
 		}
-
 	}
 }
 

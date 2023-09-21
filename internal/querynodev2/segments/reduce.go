@@ -23,6 +23,7 @@ package segments
 #include "segcore/reduce_c.h"
 */
 import "C"
+
 import (
 	"fmt"
 )
@@ -70,7 +71,8 @@ func ParseSliceInfo(originNQs []int64, originTopKs []int64, nqPerSlice int64) *S
 }
 
 func ReduceSearchResultsAndFillData(plan *SearchPlan, searchResults []*SearchResult,
-	numSegments int64, sliceNQs []int64, sliceTopKs []int64) (searchResultDataBlobs, error) {
+	numSegments int64, sliceNQs []int64, sliceTopKs []int64,
+) (searchResultDataBlobs, error) {
 	if plan.cSearchPlan == nil {
 		return nil, fmt.Errorf("nil search plan")
 	}
@@ -92,9 +94,9 @@ func ReduceSearchResultsAndFillData(plan *SearchPlan, searchResults []*SearchRes
 	}
 	cSearchResultPtr := &cSearchResults[0]
 	cNumSegments := C.int64_t(numSegments)
-	var cSliceNQSPtr = (*C.int64_t)(&sliceNQs[0])
-	var cSliceTopKSPtr = (*C.int64_t)(&sliceTopKs[0])
-	var cNumSlices = C.int64_t(len(sliceNQs))
+	cSliceNQSPtr := (*C.int64_t)(&sliceNQs[0])
+	cSliceTopKSPtr := (*C.int64_t)(&sliceTopKs[0])
+	cNumSlices := C.int64_t(len(sliceNQs))
 	var cSearchResultDataBlobs searchResultDataBlobs
 	status := C.ReduceSearchResultsAndFillData(&cSearchResultDataBlobs, plan.cSearchPlan, cSearchResultPtr,
 		cNumSegments, cSliceNQSPtr, cSliceTopKSPtr, cNumSlices)

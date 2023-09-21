@@ -66,7 +66,6 @@ func NewInsertBinlogIterator(blobs []*Blob, PKfieldID UniqueID, pkType schemapb.
 	reader := NewInsertCodecWithSchema(nil)
 
 	_, _, serData, err := reader.Deserialize(blobs)
-
 	if err != nil {
 		return nil, err
 	}

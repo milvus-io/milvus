@@ -52,6 +52,6 @@ func (rp *rmqProducer) Send(ctx context.Context, message *mqwrapper.ProducerMess
 
 // Close does nothing currently
 func (rp *rmqProducer) Close() {
-	//TODO: close producer. Now it has bug
-	//rp.p.Close()
+	// TODO: close producer. Now it has bug
+	// rp.p.Close()
 }

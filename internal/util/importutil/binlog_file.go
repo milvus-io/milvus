@@ -21,11 +21,11 @@ import (
 	"fmt"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
-	"go.uber.org/zap"
 )
 
 // BinlogFile class is a wrapper of storage.BinlogReader, to read binlog file, block by block.

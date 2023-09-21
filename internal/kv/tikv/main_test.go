@@ -29,14 +29,17 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
-var txnClient *txnkv.Client
-var rawClient *rawkv.Client
+var (
+	txnClient *txnkv.Client
+	rawClient *rawkv.Client
+)
 
 // creates a local TiKV Store for testing purpose.
 func setupLocalTiKV() {
 	setupLocalTxn()
 	setupLocalRaw()
 }
+
 func setupLocalTxn() {
 	client, cluster, pdClient, err := testutils.NewMockTiKV("", nil)
 	if err != nil {

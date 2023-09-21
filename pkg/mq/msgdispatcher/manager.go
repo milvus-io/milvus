@@ -22,7 +22,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 
@@ -31,12 +30,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/retry"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-var (
-	CheckPeriod = 1 * time.Second // TODO: dyh, move to config
-)
+var CheckPeriod = 1 * time.Second // TODO: dyh, move to config
 
 type DispatcherManager interface {
 	Add(ctx context.Context, vchannel string, pos *Pos, subPos SubPos) (<-chan *MsgPack, error)

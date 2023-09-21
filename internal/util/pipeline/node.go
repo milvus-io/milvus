@@ -20,9 +20,10 @@ import (
 	"fmt"
 	"sync"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
-	"go.uber.org/zap"
 )
 
 type Node interface {
@@ -66,7 +67,7 @@ func (c *nodeCtx) work() {
 
 	for {
 		select {
-		//close
+		// close
 		case <-c.closeCh:
 			c.node.Close()
 			close(c.inputChannel)

@@ -108,17 +108,20 @@ func TestEtcdKV_Load(te *testing.T) {
 				etcdKV.GetPath("test1"),
 				etcdKV.GetPath("test2"),
 				etcdKV.GetPath("test1/a"),
-				etcdKV.GetPath("test1/b")}, []string{"value1", "value2", "value_a", "value_b"}, nil},
+				etcdKV.GetPath("test1/b"),
+			}, []string{"value1", "value2", "value_a", "value_b"}, nil},
 			{"test1", []string{
 				etcdKV.GetPath("test1"),
 				etcdKV.GetPath("test1/a"),
-				etcdKV.GetPath("test1/b")}, []string{"value1", "value_a", "value_b"}, nil},
+				etcdKV.GetPath("test1/b"),
+			}, []string{"value1", "value_a", "value_b"}, nil},
 			{"test2", []string{etcdKV.GetPath("test2")}, []string{"value2"}, nil},
 			{"", []string{
 				etcdKV.GetPath("test1"),
 				etcdKV.GetPath("test2"),
 				etcdKV.GetPath("test1/a"),
-				etcdKV.GetPath("test1/b")}, []string{"value1", "value2", "value_a", "value_b"}, nil},
+				etcdKV.GetPath("test1/b"),
+			}, []string{"value1", "value2", "value_a", "value_b"}, nil},
 			{"test1/a", []string{etcdKV.GetPath("test1/a")}, []string{"value_a"}, nil},
 			{"a", []string{}, []string{}, nil},
 			{"root", []string{}, []string{}, nil},
@@ -211,17 +214,20 @@ func TestEtcdKV_Load(te *testing.T) {
 				etcdKV.GetPath("test1"),
 				etcdKV.GetPath("test2"),
 				etcdKV.GetPath("test1/a"),
-				etcdKV.GetPath("test1/b")}, []string{"value1", "value2", "value_a", "value_b"}, nil},
+				etcdKV.GetPath("test1/b"),
+			}, []string{"value1", "value2", "value_a", "value_b"}, nil},
 			{"test1", []string{
 				etcdKV.GetPath("test1"),
 				etcdKV.GetPath("test1/a"),
-				etcdKV.GetPath("test1/b")}, []string{"value1", "value_a", "value_b"}, nil},
+				etcdKV.GetPath("test1/b"),
+			}, []string{"value1", "value_a", "value_b"}, nil},
 			{"test2", []string{etcdKV.GetPath("test2")}, []string{"value2"}, nil},
 			{"", []string{
 				etcdKV.GetPath("test1"),
 				etcdKV.GetPath("test2"),
 				etcdKV.GetPath("test1/a"),
-				etcdKV.GetPath("test1/b")}, []string{"value1", "value2", "value_a", "value_b"}, nil},
+				etcdKV.GetPath("test1/b"),
+			}, []string{"value1", "value2", "value_a", "value_b"}, nil},
 			{"test1/a", []string{etcdKV.GetPath("test1/a")}, []string{"value_a"}, nil},
 			{"a", []string{}, []string{}, nil},
 			{"root", []string{}, []string{}, nil},
@@ -318,7 +324,6 @@ func TestEtcdKV_Load(te *testing.T) {
 			assert.ElementsMatch(t, test.expectedValues, stringValues)
 			assert.NotZero(t, revision)
 		}
-
 	})
 
 	te.Run("etcdKV MultiSaveAndMultiLoad", func(t *testing.T) {

@@ -467,7 +467,7 @@ func (c *ChannelManager) fillChannelWatchInfo(op *ChannelOp) {
 
 // fillChannelWatchInfoWithState updates the channel op by filling in channel watch info.
 func (c *ChannelManager) fillChannelWatchInfoWithState(op *ChannelOp, state datapb.ChannelWatchState) []string {
-	var channelsWithTimer = []string{}
+	channelsWithTimer := []string{}
 	startTs := time.Now().Unix()
 	checkInterval := Params.DataCoordCfg.WatchTimeoutInterval.GetAsDuration(time.Second)
 	for _, ch := range op.Channels {
@@ -607,7 +607,7 @@ type ackEvent struct {
 }
 
 func (c *ChannelManager) updateWithTimer(updates ChannelOpSet, state datapb.ChannelWatchState) error {
-	var channelsWithTimer = []string{}
+	channelsWithTimer := []string{}
 	for _, op := range updates {
 		if op.Type == Add {
 			channelsWithTimer = append(channelsWithTimer, c.fillChannelWatchInfoWithState(op, state)...)

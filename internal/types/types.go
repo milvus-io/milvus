@@ -19,9 +19,7 @@ package types
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/tikv/client-go/v2/txnkv"
-
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -32,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/util/streamrpc"
 )
 
 // TimeTickProvider is the interface all services implement
@@ -54,8 +53,8 @@ type Component interface {
 	GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error)
 	GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error)
 	Register() error
-	//SetAddress(address string)
-	//GetAddress() string
+	// SetAddress(address string)
+	// GetAddress() string
 }
 
 // DataNode is the interface `datanode` package implements
@@ -408,14 +407,14 @@ type DataCoordComponent interface {
 	// SetDataNodeCreator set DataNode client creator func for DataCoord
 	SetDataNodeCreator(func(context.Context, string, int64) (DataNode, error))
 
-	//SetIndexNodeCreator set Index client creator func for DataCoord
+	// SetIndexNodeCreator set Index client creator func for DataCoord
 	SetIndexNodeCreator(func(context.Context, string, int64) (IndexNode, error))
 }
 
 // IndexNode is the interface `indexnode` package implements
 type IndexNode interface {
 	Component
-	//TimeTickProvider
+	// TimeTickProvider
 
 	// BuildIndex receives request from IndexCoordinator to build an index.
 	// Index building is asynchronous, so when an index building request comes, IndexNode records the task and returns.
@@ -631,7 +630,7 @@ type RootCoord interface {
 	// error is always nil
 	//DescribeIndex(ctx context.Context, req *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)
 
-	//GetIndexState(ctx context.Context, req *milvuspb.GetIndexStateRequest) (*milvuspb.GetIndexStateResponse, error)
+	// GetIndexState(ctx context.Context, req *milvuspb.GetIndexStateRequest) (*milvuspb.GetIndexStateResponse, error)
 
 	// DropIndex notifies RootCoord to drop the specified index for the specified field
 	//
@@ -913,7 +912,7 @@ type ProxyComponent interface {
 	// `etcdClient` is a client of etcd
 	SetEtcdClient(etcdClient *clientv3.Client)
 
-	//SetRootCoordClient set RootCoord for Proxy
+	// SetRootCoordClient set RootCoord for Proxy
 	// `rootCoord` is a client of root coordinator.
 	SetRootCoordClient(rootCoord RootCoord)
 
@@ -923,7 +922,7 @@ type ProxyComponent interface {
 
 	// SetIndexCoordClient set IndexCoord for Proxy
 	//  `indexCoord` is a client of index coordinator.
-	//SetIndexCoordClient(indexCoord IndexCoord)
+	// SetIndexCoordClient(indexCoord IndexCoord)
 
 	// SetQueryCoordClient set QueryCoord for Proxy
 	//  `queryCoord` is a client of query coordinator.

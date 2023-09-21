@@ -6,13 +6,12 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestWrapHandler(t *testing.T) {
-	var testWrapFunc = func(c *gin.Context) (interface{}, error) {
+	testWrapFunc := func(c *gin.Context) (interface{}, error) {
 		Case := c.Param("case")
 		switch Case {
 		case "0":
@@ -55,5 +54,4 @@ func TestWrapHandler(t *testing.T) {
 		testEngine.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
-
 }

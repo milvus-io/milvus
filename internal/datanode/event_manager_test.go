@@ -161,12 +161,11 @@ func TestWatchChannel(t *testing.T) {
 
 		err = kv.RemoveWithPrefix(fmt.Sprintf("%s/%d", Params.CommonCfg.DataCoordWatchSubPath.GetValue(), paramtable.GetNodeID()))
 		assert.NoError(t, err)
-		//TODO there is not way to sync Release done, use sleep for now
+		// TODO there is not way to sync Release done, use sleep for now
 		time.Sleep(100 * time.Millisecond)
 
 		exist = node.flowgraphManager.exist(ch)
 		assert.False(t, exist)
-
 	})
 
 	t.Run("handle watch info failed", func(t *testing.T) {
@@ -414,7 +413,6 @@ func parseWatchInfo(key string, data []byte) (*datapb.ChannelWatchInfo, error) {
 	watchInfo := datapb.ChannelWatchInfo{}
 	if err := proto.Unmarshal(data, &watchInfo); err != nil {
 		return nil, fmt.Errorf("invalid event data: fail to parse ChannelWatchInfo, key: %s, err: %v", key, err)
-
 	}
 
 	if watchInfo.Vchan == nil {
@@ -457,7 +455,6 @@ func TestEventTickler(t *testing.T) {
 				}
 			}
 		}
-
 	}()
 
 	tickler.inc()

@@ -98,17 +98,20 @@ func TestEmbedEtcd(te *testing.T) {
 				metaKv.GetPath("test1"),
 				metaKv.GetPath("test2"),
 				metaKv.GetPath("test1/a"),
-				metaKv.GetPath("test1/b")}, []string{"value1", "value2", "value_a", "value_b"}, nil},
+				metaKv.GetPath("test1/b"),
+			}, []string{"value1", "value2", "value_a", "value_b"}, nil},
 			{"test1", []string{
 				metaKv.GetPath("test1"),
 				metaKv.GetPath("test1/a"),
-				metaKv.GetPath("test1/b")}, []string{"value1", "value_a", "value_b"}, nil},
+				metaKv.GetPath("test1/b"),
+			}, []string{"value1", "value_a", "value_b"}, nil},
 			{"test2", []string{metaKv.GetPath("test2")}, []string{"value2"}, nil},
 			{"", []string{
 				metaKv.GetPath("test1"),
 				metaKv.GetPath("test2"),
 				metaKv.GetPath("test1/a"),
-				metaKv.GetPath("test1/b")}, []string{"value1", "value2", "value_a", "value_b"}, nil},
+				metaKv.GetPath("test1/b"),
+			}, []string{"value1", "value2", "value_a", "value_b"}, nil},
 			{"test1/a", []string{metaKv.GetPath("test1/a")}, []string{"value_a"}, nil},
 			{"a", []string{}, []string{}, nil},
 			{"root", []string{}, []string{}, nil},
@@ -203,17 +206,20 @@ func TestEmbedEtcd(te *testing.T) {
 				metaKv.GetPath("test1"),
 				metaKv.GetPath("test2"),
 				metaKv.GetPath("test1/a"),
-				metaKv.GetPath("test1/b")}, [][]byte{[]byte("value1"), []byte("value2"), []byte("value_a"), []byte("value_b")}, nil},
+				metaKv.GetPath("test1/b"),
+			}, [][]byte{[]byte("value1"), []byte("value2"), []byte("value_a"), []byte("value_b")}, nil},
 			{"test1", []string{
 				metaKv.GetPath("test1"),
 				metaKv.GetPath("test1/a"),
-				metaKv.GetPath("test1/b")}, [][]byte{[]byte("value1"), []byte("value_a"), []byte("value_b")}, nil},
+				metaKv.GetPath("test1/b"),
+			}, [][]byte{[]byte("value1"), []byte("value_a"), []byte("value_b")}, nil},
 			{"test2", []string{metaKv.GetPath("test2")}, [][]byte{[]byte("value2")}, nil},
 			{"", []string{
 				metaKv.GetPath("test1"),
 				metaKv.GetPath("test2"),
 				metaKv.GetPath("test1/a"),
-				metaKv.GetPath("test1/b")}, [][]byte{[]byte("value1"), []byte("value2"), []byte("value_a"), []byte("value_b")}, nil},
+				metaKv.GetPath("test1/b"),
+			}, [][]byte{[]byte("value1"), []byte("value2"), []byte("value_a"), []byte("value_b")}, nil},
 			{"test1/a", []string{metaKv.GetPath("test1/a")}, [][]byte{[]byte("value_a")}, nil},
 			{"a", []string{}, [][]byte{}, nil},
 			{"root", []string{}, [][]byte{}, nil},
@@ -300,7 +306,6 @@ func TestEmbedEtcd(te *testing.T) {
 			assert.ElementsMatch(t, test.expectedValues, values)
 			assert.NotZero(t, revision)
 		}
-
 	})
 
 	te.Run("etcdKV MultiSaveAndMultiLoad", func(t *testing.T) {

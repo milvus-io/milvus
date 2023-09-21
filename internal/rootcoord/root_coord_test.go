@@ -1340,8 +1340,8 @@ func TestCore_ListImportTasks(t *testing.T) {
 func TestCore_ReportImport(t *testing.T) {
 	paramtable.Get().Save(Params.RootCoordCfg.ImportTaskSubPath.Key, "importtask")
 	var countLock sync.RWMutex
-	var globalCount = typeutil.UniqueID(0)
-	var idAlloc = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+	globalCount := typeutil.UniqueID(0)
+	idAlloc := func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 		countLock.Lock()
 		defer countLock.Unlock()
 		globalCount++
@@ -1674,7 +1674,8 @@ func TestRootcoord_EnableActiveStandby(t *testing.T) {
 			Timestamp: 0,
 			SourceID:  paramtable.GetNodeID(),
 		},
-		CollectionName: "unexist"})
+		CollectionName: "unexist",
+	})
 	assert.NoError(t, err)
 	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	err = core.Stop()
@@ -1724,7 +1725,8 @@ func TestRootcoord_DisableActiveStandby(t *testing.T) {
 			Timestamp: 0,
 			SourceID:  paramtable.GetNodeID(),
 		},
-		CollectionName: "unexist"})
+		CollectionName: "unexist",
+	})
 	assert.NoError(t, err)
 	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	err = core.Stop()
@@ -2045,7 +2047,8 @@ func (s *RootCoordSuite) TestRestore() {
 	meta.EXPECT().ListDatabases(mock.Anything, mock.Anything).
 		Return([]*model.Database{
 			{Name: "available_colls_db"},
-			{Name: "not_available_colls_db"}}, nil)
+			{Name: "not_available_colls_db"},
+		}, nil)
 
 	meta.EXPECT().ListCollections(mock.Anything, "available_colls_db", mock.Anything, false).
 		Return([]*model.Collection{

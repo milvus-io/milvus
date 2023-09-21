@@ -367,7 +367,7 @@ func (suite *ClusterSuite) TestUnregister() {
 		ctx, cancel := context.WithCancel(context.TODO())
 		defer cancel()
 
-		var mockSessionCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNode, error) {
+		mockSessionCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNode, error) {
 			return newMockDataNodeClient(1, nil)
 		}
 		sessionManager := NewSessionManager(withSessionCreator(mockSessionCreator))
@@ -414,7 +414,7 @@ func TestWatchIfNeeded(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.TODO())
 		defer cancel()
 
-		var mockSessionCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNode, error) {
+		mockSessionCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNode, error) {
 			return newMockDataNodeClient(1, nil)
 		}
 		sessionManager := NewSessionManager(withSessionCreator(mockSessionCreator))
@@ -584,7 +584,7 @@ func TestCluster_Flush(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	//TODO add a method to verify datanode has flush request after client injection is available
+	// TODO add a method to verify datanode has flush request after client injection is available
 }
 
 func TestCluster_Import(t *testing.T) {
@@ -629,7 +629,7 @@ func TestCluster_ReCollectSegmentStats(t *testing.T) {
 	t.Run("recollect succeed", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.TODO())
 		defer cancel()
-		var mockSessionCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNode, error) {
+		mockSessionCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNode, error) {
 			return newMockDataNodeClient(1, nil)
 		}
 		sessionManager := NewSessionManager(withSessionCreator(mockSessionCreator))

@@ -23,9 +23,7 @@ import (
 	"github.com/cockroachdb/errors"
 )
 
-var (
-	errBufferFull = errors.New("buffer full")
-)
+var errBufferFull = errors.New("buffer full")
 
 type timed interface {
 	Timestamp() uint64

@@ -14,7 +14,7 @@ import (
 )
 
 func makeRuntimeDir(dir string) error {
-	perm := os.FileMode(0755)
+	perm := os.FileMode(0o755)
 	// os.MkdirAll equal to `mkdir -p`
 	err := os.MkdirAll(dir, perm)
 	if err != nil {
@@ -63,7 +63,7 @@ func createRuntimeDir(sType string) string {
 func createPidFile(w io.Writer, filename string, runtimeDir string) (*flock.Flock, error) {
 	fileFullName := path.Join(runtimeDir, filename)
 
-	fd, err := os.OpenFile(fileFullName, os.O_CREATE|os.O_RDWR, 0664)
+	fd, err := os.OpenFile(fileFullName, os.O_CREATE|os.O_RDWR, 0o664)
 	if err != nil {
 		return nil, fmt.Errorf("file %s is locked, error = %w", filename, err)
 	}

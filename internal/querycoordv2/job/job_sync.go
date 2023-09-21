@@ -20,9 +20,9 @@ import (
 	"context"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"

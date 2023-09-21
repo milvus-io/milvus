@@ -53,7 +53,7 @@ func createSearchPlanByExpr(col *Collection, expr []byte, metricType string) (*S
 		return nil, err1
 	}
 
-	var newPlan = &SearchPlan{cSearchPlan: cPlan}
+	newPlan := &SearchPlan{cSearchPlan: cPlan}
 	if len(metricType) != 0 {
 		newPlan.setMetricType(metricType)
 	} else {
@@ -106,7 +106,7 @@ func NewSearchRequest(collection *Collection, req *querypb.SearchRequest, placeh
 		return nil, errors.New("empty search request")
 	}
 
-	var blobPtr = unsafe.Pointer(&placeholderGrp[0])
+	blobPtr := unsafe.Pointer(&placeholderGrp[0])
 	blobSize := C.int64_t(len(placeholderGrp))
 	var cPlaceholderGroup C.CPlaceholderGroup
 	status := C.ParsePlaceholderGroup(plan.cSearchPlan, blobPtr, blobSize, &cPlaceholderGroup)
@@ -153,7 +153,7 @@ func parseSearchRequest(plan *SearchPlan, searchRequestBlob []byte) (*SearchRequ
 	if len(searchRequestBlob) == 0 {
 		return nil, fmt.Errorf("empty search request")
 	}
-	var blobPtr = unsafe.Pointer(&searchRequestBlob[0])
+	blobPtr := unsafe.Pointer(&searchRequestBlob[0])
 	blobSize := C.int64_t(len(searchRequestBlob))
 	var cPlaceholderGroup C.CPlaceholderGroup
 	status := C.ParsePlaceholderGroup(plan.cSearchPlan, blobPtr, blobSize, &cPlaceholderGroup)
@@ -162,7 +162,7 @@ func parseSearchRequest(plan *SearchPlan, searchRequestBlob []byte) (*SearchRequ
 		return nil, err
 	}
 
-	var ret = &SearchRequest{cPlaceholderGroup: cPlaceholderGroup, plan: plan}
+	ret := &SearchRequest{cPlaceholderGroup: cPlaceholderGroup, plan: plan}
 	return ret, nil
 }
 
@@ -189,7 +189,7 @@ func NewRetrievePlan(col *Collection, expr []byte, timestamp Timestamp, msgID Un
 		return nil, err
 	}
 
-	var newPlan = &RetrievePlan{
+	newPlan := &RetrievePlan{
 		cRetrievePlan: cPlan,
 		Timestamp:     timestamp,
 		msgID:         msgID,

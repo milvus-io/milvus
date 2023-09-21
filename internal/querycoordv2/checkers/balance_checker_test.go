@@ -20,6 +20,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
+
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
@@ -32,9 +35,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/suite"
 )
 
 type BalanceCheckerTestSuite struct {
@@ -83,7 +83,7 @@ func (suite *BalanceCheckerTestSuite) TearDownTest() {
 }
 
 func (suite *BalanceCheckerTestSuite) TestAutoBalanceConf() {
-	//set up nodes info
+	// set up nodes info
 	nodeID1, nodeID2 := 1, 2
 	suite.nodeMgr.Add(session.NewNodeInfo(int64(nodeID1), "localhost"))
 	suite.nodeMgr.Add(session.NewNodeInfo(int64(nodeID2), "localhost"))
@@ -105,7 +105,7 @@ func (suite *BalanceCheckerTestSuite) TestAutoBalanceConf() {
 	suite.checker.meta.CollectionManager.PutCollection(collection2)
 	suite.checker.meta.ReplicaManager.Put(replica2)
 
-	//test disable auto balance
+	// test disable auto balance
 	paramtable.Get().Save(Params.QueryCoordCfg.AutoBalance.Key, "false")
 	suite.scheduler.EXPECT().GetSegmentTaskNum().Maybe().Return(func() int {
 		return 0
@@ -115,22 +115,22 @@ func (suite *BalanceCheckerTestSuite) TestAutoBalanceConf() {
 	segPlans, _ := suite.checker.balanceReplicas(replicasToBalance)
 	suite.Empty(segPlans)
 
-	//test enable auto balance
+	// test enable auto balance
 	paramtable.Get().Save(Params.QueryCoordCfg.AutoBalance.Key, "true")
 	idsToBalance := []int64{int64(replicaID1)}
 	replicasToBalance = suite.checker.replicasToBalance()
 	suite.ElementsMatch(idsToBalance, replicasToBalance)
-	//next round
+	// next round
 	idsToBalance = []int64{int64(replicaID2)}
 	replicasToBalance = suite.checker.replicasToBalance()
 	suite.ElementsMatch(idsToBalance, replicasToBalance)
-	//final round
+	// final round
 	replicasToBalance = suite.checker.replicasToBalance()
 	suite.Empty(replicasToBalance)
 }
 
 func (suite *BalanceCheckerTestSuite) TestBusyScheduler() {
-	//set up nodes info
+	// set up nodes info
 	nodeID1, nodeID2 := 1, 2
 	suite.nodeMgr.Add(session.NewNodeInfo(int64(nodeID1), "localhost"))
 	suite.nodeMgr.Add(session.NewNodeInfo(int64(nodeID2), "localhost"))
@@ -152,7 +152,7 @@ func (suite *BalanceCheckerTestSuite) TestBusyScheduler() {
 	suite.checker.meta.CollectionManager.PutCollection(collection2)
 	suite.checker.meta.ReplicaManager.Put(replica2)
 
-	//test scheduler busy
+	// test scheduler busy
 	paramtable.Get().Save(Params.QueryCoordCfg.AutoBalance.Key, "true")
 	suite.scheduler.EXPECT().GetSegmentTaskNum().Maybe().Return(func() int {
 		return 1
@@ -164,7 +164,7 @@ func (suite *BalanceCheckerTestSuite) TestBusyScheduler() {
 }
 
 func (suite *BalanceCheckerTestSuite) TestStoppingBalance() {
-	//set up nodes info, stopping node1
+	// set up nodes info, stopping node1
 	nodeID1, nodeID2 := 1, 2
 	suite.nodeMgr.Add(session.NewNodeInfo(int64(nodeID1), "localhost"))
 	suite.nodeMgr.Add(session.NewNodeInfo(int64(nodeID2), "localhost"))
@@ -187,12 +187,12 @@ func (suite *BalanceCheckerTestSuite) TestStoppingBalance() {
 	suite.checker.meta.CollectionManager.PutCollection(collection2)
 	suite.checker.meta.ReplicaManager.Put(replica2)
 
-	//test stopping balance
+	// test stopping balance
 	idsToBalance := []int64{int64(replicaID1), int64(replicaID2)}
 	replicasToBalance := suite.checker.replicasToBalance()
 	suite.ElementsMatch(idsToBalance, replicasToBalance)
 
-	//checker check
+	// checker check
 	segPlans, chanPlans := make([]balance.SegmentAssignPlan, 0), make([]balance.ChannelAssignPlan, 0)
 	mockPlan := balance.SegmentAssignPlan{
 		Segment:   utils.CreateTestSegment(1, 1, 1, 1, 1, "1"),

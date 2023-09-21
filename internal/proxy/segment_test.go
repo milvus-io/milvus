@@ -71,7 +71,6 @@ type mockDataCoord2 struct {
 }
 
 func (mockD *mockDataCoord2) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
-
 	return &datapb.AssignSegmentIDResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -116,7 +115,6 @@ func TestSegmentAllocator1(t *testing.T) {
 	_, err = segAllocator.GetSegmentID(1, 1, "abc", 10, 1001)
 	assert.Error(t, err)
 	wg.Wait()
-
 }
 
 var curLastTick2 = Timestamp(200)
@@ -156,7 +154,6 @@ func TestSegmentAllocator2(t *testing.T) {
 	_, err = segAllocator.GetSegmentID(1, 1, "abc", segCountPerRPC-10, getLastTick2())
 	assert.Error(t, err)
 	wg.Wait()
-
 }
 
 func TestSegmentAllocator3(t *testing.T) {
@@ -241,7 +238,6 @@ type mockDataCoord5 struct {
 }
 
 func (mockD *mockDataCoord5) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
-
 	return &datapb.AssignSegmentIDResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -314,5 +310,4 @@ func TestSegmentAllocator6(t *testing.T) {
 	}
 	wg.Wait()
 	assert.True(t, success)
-
 }

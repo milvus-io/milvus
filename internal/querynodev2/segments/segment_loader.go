@@ -54,9 +54,7 @@ const (
 	UsedDiskMemoryRatio = 4
 )
 
-var (
-	ErrReadDeltaMsgFailed = errors.New("ReadDeltaMsgFailed")
-)
+var ErrReadDeltaMsgFailed = errors.New("ReadDeltaMsgFailed")
 
 type Loader interface {
 	// Load loads binlogs, and spawn segments,
@@ -319,7 +317,6 @@ func (loader *segmentLoader) unregister(segments ...*querypb.SegmentLoadInfo) {
 }
 
 func (loader *segmentLoader) notifyLoadFinish(segments ...*querypb.SegmentLoadInfo) {
-
 	for _, loadInfo := range segments {
 		result, ok := loader.loadingSegments.Get(loadInfo.GetSegmentID())
 		if ok {
@@ -660,7 +657,8 @@ func (loader *segmentLoader) loadFieldsIndex(ctx context.Context,
 	schema *schemapb.CollectionSchema,
 	segment *LocalSegment,
 	numRows int64,
-	vecFieldInfos map[int64]*IndexedFieldInfo) error {
+	vecFieldInfos map[int64]*IndexedFieldInfo,
+) error {
 	schemaHelper, _ := typeutil.CreateSchemaHelper(schema)
 
 	for fieldID, fieldInfo := range vecFieldInfos {
@@ -715,8 +713,8 @@ func (loader *segmentLoader) loadFieldIndex(ctx context.Context, segment *LocalS
 }
 
 func (loader *segmentLoader) loadBloomFilter(ctx context.Context, segmentID int64, bfs *pkoracle.BloomFilterSet,
-	binlogPaths []string, logType storage.StatsLogType) error {
-
+	binlogPaths []string, logType storage.StatsLogType,
+) error {
 	log := log.Ctx(ctx).With(
 		zap.Int64("segmentID", segmentID),
 	)

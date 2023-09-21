@@ -4,9 +4,10 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/mock"
-	"github.com/stretchr/testify/assert"
 )
 
 func genShardLeaderInfo(channel string, leaderIDs []UniqueID) map[string][]nodeInfo {

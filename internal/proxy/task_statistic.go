@@ -266,7 +266,6 @@ func (g *getStatisticsTask) getStatisticsFromQueryNode(ctx context.Context) erro
 		nq:             1,
 		exec:           g.getStatisticsShard,
 	})
-
 	if err != nil {
 		return errors.Wrap(err, "failed to statistic")
 	}

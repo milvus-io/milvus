@@ -53,7 +53,7 @@ type Cluster interface {
 	AddRootCoord(types.RootCoordComponent) error
 	AddDataCoord(types.DataCoordComponent) error
 	AddQueryCoord(types.QueryCoordComponent) error
-	//AddIndexCoord(types.IndexCoordComponent) error
+	// AddIndexCoord(types.IndexCoordComponent) error
 	AddDataNode(types.DataNodeComponent) error
 	AddQueryNode(types.QueryNodeComponent) error
 	AddIndexNode(types.IndexNodeComponent) error
@@ -61,7 +61,7 @@ type Cluster interface {
 	RemoveRootCoord(types.RootCoordComponent) error
 	RemoveDataCoord(types.DataCoordComponent) error
 	RemoveQueryCoord(types.QueryCoordComponent) error
-	//RemoveIndexCoord(types.IndexCoordComponent) error
+	// RemoveIndexCoord(types.IndexCoordComponent) error
 	RemoveDataNode(types.DataNodeComponent) error
 	RemoveQueryNode(types.QueryNodeComponent) error
 	RemoveIndexNode(types.IndexNodeComponent) error
@@ -76,12 +76,12 @@ type Cluster interface {
 }
 
 type ClusterConfig struct {
-	//ProxyNum int
+	// ProxyNum int
 	// todo coord num can be more than 1 if enable Active-Standby
-	//RootCoordNum int
-	//DataCoordNum int
-	//IndexCoordNum int
-	//QueryCoordNum int
+	// RootCoordNum int
+	// DataCoordNum int
+	// IndexCoordNum int
+	// QueryCoordNum int
 	QueryNodeNum int
 	DataNodeNum  int
 	IndexNodeNum int
@@ -256,7 +256,7 @@ func StartMiniCluster(ctx context.Context, opts ...Option) (cluster *MiniCluster
 		cluster.Proxy = proxy
 	}
 
-	//cluster.dataCoord.SetIndexCoord(cluster.indexCoord)
+	// cluster.dataCoord.SetIndexCoord(cluster.indexCoord)
 	cluster.DataCoord.SetRootCoord(cluster.RootCoord)
 
 	err = cluster.RootCoord.SetDataCoord(cluster.DataCoord)
@@ -272,7 +272,7 @@ func StartMiniCluster(ctx context.Context, opts ...Option) (cluster *MiniCluster
 		return
 	}
 
-	//err = cluster.queryCoord.SetIndexCoord(cluster.indexCoord)
+	// err = cluster.queryCoord.SetIndexCoord(cluster.indexCoord)
 	if err != nil {
 		return
 	}
@@ -306,7 +306,7 @@ func StartMiniCluster(ctx context.Context, opts ...Option) (cluster *MiniCluster
 	}
 
 	cluster.Proxy.SetDataCoordClient(cluster.DataCoord)
-	//cluster.proxy.SetIndexCoordClient(cluster.indexCoord)
+	// cluster.proxy.SetIndexCoordClient(cluster.indexCoord)
 	cluster.Proxy.SetQueryCoordClient(cluster.QueryCoord)
 	cluster.Proxy.SetRootCoordClient(cluster.RootCoord)
 
@@ -438,7 +438,7 @@ func (cluster *MiniCluster) Stop() error {
 	log.Info("mini cluster rootCoord stopped")
 	cluster.DataCoord.Stop()
 	log.Info("mini cluster dataCoord stopped")
-	//cluster.indexCoord.Stop()
+	// cluster.indexCoord.Stop()
 	cluster.QueryCoord.Stop()
 	log.Info("mini cluster queryCoord stopped")
 	cluster.Proxy.Stop()
@@ -674,10 +674,10 @@ func (cluster *MiniCluster) AddRootCoord(rootCoord types.RootCoordComponent) err
 	// link
 	rootCoord.SetDataCoord(cluster.DataCoord)
 	rootCoord.SetQueryCoord(cluster.QueryCoord)
-	//rootCoord.SetIndexCoord(cluster.indexCoord)
+	// rootCoord.SetIndexCoord(cluster.indexCoord)
 	cluster.DataCoord.SetRootCoord(rootCoord)
 	cluster.QueryCoord.SetRootCoord(rootCoord)
-	//cluster.indexCoord.SetRootCoord(rootCoord)
+	// cluster.indexCoord.SetRootCoord(rootCoord)
 	cluster.Proxy.SetRootCoordClient(rootCoord)
 	for _, dataNode := range cluster.DataNodes {
 		err = dataNode.SetRootCoord(rootCoord)
@@ -740,7 +740,7 @@ func (cluster *MiniCluster) AddDataCoord(dataCoord types.DataCoordComponent) err
 	}
 
 	// link
-	//dataCoord.SetIndexCoord(cluster.indexCoord)
+	// dataCoord.SetIndexCoord(cluster.indexCoord)
 	dataCoord.SetRootCoord(cluster.RootCoord)
 	err = cluster.RootCoord.SetDataCoord(cluster.DataCoord)
 	if err != nil {
@@ -818,7 +818,7 @@ func (cluster *MiniCluster) AddQueryCoord(queryCoord types.QueryCoordComponent) 
 	// link
 	queryCoord.SetRootCoord(cluster.RootCoord)
 	queryCoord.SetDataCoord(cluster.DataCoord)
-	//queryCoord.SetIndexCoord(cluster.indexCoord)
+	// queryCoord.SetIndexCoord(cluster.indexCoord)
 	cluster.RootCoord.SetQueryCoord(queryCoord)
 	cluster.Proxy.SetQueryCoordClient(queryCoord)
 
@@ -1131,8 +1131,8 @@ func (cluster *MiniCluster) UpdateClusterSize(clusterConfig ClusterConfig) error
 		return errors.New("Illegal cluster size config")
 	}
 	// todo concurrent concerns
-	//cluster.mu.Lock()
-	//defer cluster.mu.Unlock()
+	// cluster.mu.Lock()
+	// defer cluster.mu.Unlock()
 	if clusterConfig.DataNodeNum > len(cluster.DataNodes) {
 		needAdd := clusterConfig.DataNodeNum - len(cluster.DataNodes)
 		for i := 0; i < needAdd; i++ {

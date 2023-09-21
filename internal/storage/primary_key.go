@@ -372,7 +372,7 @@ func ParseIDs2PrimaryKeys(ids *schemapb.IDs) []PrimaryKey {
 			ret = append(ret, pk)
 		}
 	default:
-		//TODO::
+		// TODO::
 	}
 
 	return ret
@@ -405,7 +405,7 @@ func ParsePrimaryKeys2IDs(pks []PrimaryKey) *schemapb.IDs {
 			},
 		}
 	default:
-		//TODO::
+		// TODO::
 	}
 
 	return ret

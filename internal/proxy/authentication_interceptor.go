@@ -21,7 +21,7 @@ func parseMD(authorization []string) (username, password string) {
 		return
 	}
 	// token format: base64<username:password>
-	//token := strings.TrimPrefix(authorization[0], "Bearer ")
+	// token := strings.TrimPrefix(authorization[0], "Bearer ")
 	token := authorization[0]
 	rawToken, err := crypto.Base64Decode(token)
 	if err != nil {
@@ -40,7 +40,7 @@ func parseMD(authorization []string) (username, password string) {
 
 func validSourceID(ctx context.Context, authorization []string) bool {
 	if len(authorization) < 1 {
-		//log.Warn("key not found in header", zap.String("key", util.HeaderSourceID))
+		// log.Warn("key not found in header", zap.String("key", util.HeaderSourceID))
 		return false
 	}
 	// token format: base64<sourceID>

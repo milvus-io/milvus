@@ -387,7 +387,7 @@ func TestBgCheckForChannelBalance(t *testing.T) {
 				},
 				time.Now(),
 			},
-			//there should be no reallocate
+			// there should be no reallocate
 			[]*NodeChannelInfo{},
 			nil,
 		},
@@ -409,8 +409,11 @@ func TestBgCheckForChannelBalance(t *testing.T) {
 			"test uneven with zero",
 			args{
 				[]*NodeChannelInfo{
-					{1, []*channel{{Name: "chan1", CollectionID: 1}, {Name: "chan2", CollectionID: 1},
-						{Name: "chan3", CollectionID: 1}}},
+					{1, []*channel{
+						{Name: "chan1", CollectionID: 1},
+						{Name: "chan2", CollectionID: 1},
+						{Name: "chan3", CollectionID: 1},
+					}},
 					{2, []*channel{}},
 				},
 				time.Now(),
@@ -450,7 +453,7 @@ func TestAvgReassignPolicy(t *testing.T) {
 				},
 				[]*NodeChannelInfo{{1, []*channel{{Name: "chan1", CollectionID: 1}}}},
 			},
-			//as there's no available nodes except the input node, there's no reassign plan generated
+			// as there's no available nodes except the input node, there's no reassign plan generated
 			[]*ChannelOp{},
 		},
 		{
@@ -468,10 +471,11 @@ func TestAvgReassignPolicy(t *testing.T) {
 				[]*NodeChannelInfo{{1, []*channel{{Name: "chan1", CollectionID: 1}}}},
 			},
 			[]*ChannelOp{
-				//as we use ceil to calculate the wanted average number, there should be one reassign
-				//though the average num less than 1
+				// as we use ceil to calculate the wanted average number, there should be one reassign
+				// though the average num less than 1
 				{Delete, 1, []*channel{{Name: "chan1", CollectionID: 1}}, nil},
-				{Add, 2, []*channel{{Name: "chan1", CollectionID: 1}}, nil}},
+				{Add, 2, []*channel{{Name: "chan1", CollectionID: 1}}, nil},
+			},
 		},
 		{
 			"test_normal_reassigning_for_one_available_nodes",
@@ -487,7 +491,8 @@ func TestAvgReassignPolicy(t *testing.T) {
 			},
 			[]*ChannelOp{
 				{Delete, 1, []*channel{{Name: "chan1", CollectionID: 1}, {Name: "chan2", CollectionID: 1}}, nil},
-				{Add, 2, []*channel{{Name: "chan1", CollectionID: 1}, {Name: "chan2", CollectionID: 1}}, nil}},
+				{Add, 2, []*channel{{Name: "chan1", CollectionID: 1}, {Name: "chan2", CollectionID: 1}}, nil},
+			},
 		},
 		{
 			"test_normal_reassigning_for_multiple_available_nodes",
@@ -499,7 +504,8 @@ func TestAvgReassignPolicy(t *testing.T) {
 							{Name: "chan1", CollectionID: 1},
 							{Name: "chan2", CollectionID: 1},
 							{Name: "chan3", CollectionID: 1},
-							{Name: "chan4", CollectionID: 1}}},
+							{Name: "chan4", CollectionID: 1},
+						}},
 						2: {2, []*channel{}},
 						3: {3, []*channel{}},
 						4: {4, []*channel{}},
@@ -512,11 +518,15 @@ func TestAvgReassignPolicy(t *testing.T) {
 				}}},
 			},
 			[]*ChannelOp{
-				{Delete, 1, []*channel{
-					{Name: "chan1", CollectionID: 1},
-					{Name: "chan2", CollectionID: 1},
-					{Name: "chan3", CollectionID: 1}},
-					nil},
+				{
+					Delete, 1,
+					[]*channel{
+						{Name: "chan1", CollectionID: 1},
+						{Name: "chan2", CollectionID: 1},
+						{Name: "chan3", CollectionID: 1},
+					},
+					nil,
+				},
 				{Add, 2, []*channel{{Name: "chan1", CollectionID: 1}}, nil},
 				{Add, 3, []*channel{{Name: "chan2", CollectionID: 1}}, nil},
 				{Add, 4, []*channel{{Name: "chan3", CollectionID: 1}}, nil},
@@ -529,12 +539,18 @@ func TestAvgReassignPolicy(t *testing.T) {
 					memkv.NewMemoryKV(),
 					map[int64]*NodeChannelInfo{
 						1: {1, []*channel{
-							{Name: "chan1", CollectionID: 1}, {Name: "chan2", CollectionID: 1},
-							{Name: "chan3", CollectionID: 1}, {Name: "chan4", CollectionID: 1},
-							{Name: "chan5", CollectionID: 1}, {Name: "chan6", CollectionID: 1},
-							{Name: "chan7", CollectionID: 1}, {Name: "chan8", CollectionID: 1},
-							{Name: "chan9", CollectionID: 1}, {Name: "chan10", CollectionID: 1},
-							{Name: "chan11", CollectionID: 1}, {Name: "chan12", CollectionID: 1},
+							{Name: "chan1", CollectionID: 1},
+							{Name: "chan2", CollectionID: 1},
+							{Name: "chan3", CollectionID: 1},
+							{Name: "chan4", CollectionID: 1},
+							{Name: "chan5", CollectionID: 1},
+							{Name: "chan6", CollectionID: 1},
+							{Name: "chan7", CollectionID: 1},
+							{Name: "chan8", CollectionID: 1},
+							{Name: "chan9", CollectionID: 1},
+							{Name: "chan10", CollectionID: 1},
+							{Name: "chan11", CollectionID: 1},
+							{Name: "chan12", CollectionID: 1},
 						}},
 						2: {2, []*channel{
 							{Name: "chan13", CollectionID: 1}, {Name: "chan14", CollectionID: 1},
@@ -544,33 +560,51 @@ func TestAvgReassignPolicy(t *testing.T) {
 					},
 				},
 				[]*NodeChannelInfo{{1, []*channel{
-					{Name: "chan1", CollectionID: 1}, {Name: "chan2", CollectionID: 1},
-					{Name: "chan3", CollectionID: 1}, {Name: "chan4", CollectionID: 1},
-					{Name: "chan5", CollectionID: 1}, {Name: "chan6", CollectionID: 1},
-					{Name: "chan7", CollectionID: 1}, {Name: "chan8", CollectionID: 1},
-					{Name: "chan9", CollectionID: 1}, {Name: "chan10", CollectionID: 1},
-					{Name: "chan11", CollectionID: 1}, {Name: "chan12", CollectionID: 1},
+					{Name: "chan1", CollectionID: 1},
+					{Name: "chan2", CollectionID: 1},
+					{Name: "chan3", CollectionID: 1},
+					{Name: "chan4", CollectionID: 1},
+					{Name: "chan5", CollectionID: 1},
+					{Name: "chan6", CollectionID: 1},
+					{Name: "chan7", CollectionID: 1},
+					{Name: "chan8", CollectionID: 1},
+					{Name: "chan9", CollectionID: 1},
+					{Name: "chan10", CollectionID: 1},
+					{Name: "chan11", CollectionID: 1},
+					{Name: "chan12", CollectionID: 1},
 				}}},
 			},
 			[]*ChannelOp{
 				{Delete, 1, []*channel{
-					{Name: "chan1", CollectionID: 1}, {Name: "chan2", CollectionID: 1},
-					{Name: "chan3", CollectionID: 1}, {Name: "chan4", CollectionID: 1},
-					{Name: "chan5", CollectionID: 1}, {Name: "chan6", CollectionID: 1},
-					{Name: "chan7", CollectionID: 1}, {Name: "chan8", CollectionID: 1},
-					{Name: "chan9", CollectionID: 1}, {Name: "chan10", CollectionID: 1},
-					{Name: "chan11", CollectionID: 1}, {Name: "chan12", CollectionID: 1},
+					{Name: "chan1", CollectionID: 1},
+					{Name: "chan2", CollectionID: 1},
+					{Name: "chan3", CollectionID: 1},
+					{Name: "chan4", CollectionID: 1},
+					{Name: "chan5", CollectionID: 1},
+					{Name: "chan6", CollectionID: 1},
+					{Name: "chan7", CollectionID: 1},
+					{Name: "chan8", CollectionID: 1},
+					{Name: "chan9", CollectionID: 1},
+					{Name: "chan10", CollectionID: 1},
+					{Name: "chan11", CollectionID: 1},
+					{Name: "chan12", CollectionID: 1},
 				}, nil},
 				{Add, 4, []*channel{
-					{Name: "chan1", CollectionID: 1}, {Name: "chan2", CollectionID: 1},
-					{Name: "chan3", CollectionID: 1}, {Name: "chan4", CollectionID: 1},
-					{Name: "chan5", CollectionID: 1}}, nil},
+					{Name: "chan1", CollectionID: 1},
+					{Name: "chan2", CollectionID: 1},
+					{Name: "chan3", CollectionID: 1},
+					{Name: "chan4", CollectionID: 1},
+					{Name: "chan5", CollectionID: 1},
+				}, nil},
 				{Add, 3, []*channel{
-					{Name: "chan6", CollectionID: 1}, {Name: "chan7", CollectionID: 1},
-					{Name: "chan8", CollectionID: 1}, {Name: "chan9", CollectionID: 1},
+					{Name: "chan6", CollectionID: 1},
+					{Name: "chan7", CollectionID: 1},
+					{Name: "chan8", CollectionID: 1},
+					{Name: "chan9", CollectionID: 1},
 				}, nil},
 				{Add, 2, []*channel{
-					{Name: "chan10", CollectionID: 1}, {Name: "chan11", CollectionID: 1},
+					{Name: "chan10", CollectionID: 1},
+					{Name: "chan11", CollectionID: 1},
 					{Name: "chan12", CollectionID: 1},
 				}, nil},
 			},

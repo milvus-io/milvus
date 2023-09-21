@@ -74,7 +74,8 @@ func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest
 	taskCtx, taskCancel := context.WithCancel(i.loopCtx)
 	if oldInfo := i.loadOrStoreTask(req.GetClusterID(), req.GetBuildID(), &taskInfo{
 		cancel: taskCancel,
-		state:  commonpb.IndexState_InProgress}); oldInfo != nil {
+		state:  commonpb.IndexState_InProgress,
+	}); oldInfo != nil {
 		log.Ctx(ctx).Warn("duplicated index build task", zap.String("clusterID", req.GetClusterID()), zap.Int64("buildID", req.GetBuildID()))
 		metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.FailLabel).Inc()
 		return &commonpb.Status{

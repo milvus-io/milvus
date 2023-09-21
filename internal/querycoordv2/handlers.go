@@ -67,12 +67,12 @@ func (s *Server) getCollectionSegmentInfo(collection int64) []*querypb.SegmentIn
 	infos := make(map[int64]*querypb.SegmentInfo)
 	for _, segment := range segments {
 		if _, existCurrentTarget := currentTargetSegmentsMap[segment.GetID()]; !existCurrentTarget {
-			//if one segment exists in distMap but doesn't exist in currentTargetMap
-			//in order to guarantee that get segment request launched by sdk could get
-			//consistent result, for example
-			//sdk insert three segments:A, B, D, then A + B----compact--> C
-			//In this scenario, we promise that clients see either 2 segments(C,D) or 3 segments(A, B, D)
-			//rather than 4 segments(A, B, C, D), in which query nodes are loading C but have completed loading process
+			// if one segment exists in distMap but doesn't exist in currentTargetMap
+			// in order to guarantee that get segment request launched by sdk could get
+			// consistent result, for example
+			// sdk insert three segments:A, B, D, then A + B----compact--> C
+			// In this scenario, we promise that clients see either 2 segments(C,D) or 3 segments(A, B, D)
+			// rather than 4 segments(A, B, C, D), in which query nodes are loading C but have completed loading process
 			log.Info("filtered segment being in the intermediate status",
 				zap.Int64("segmentID", segment.GetID()))
 			continue
@@ -149,7 +149,6 @@ func (s *Server) balanceSegments(ctx context.Context, req *querypb.LoadBalanceRe
 			task.NewSegmentActionWithScope(plan.To, task.ActionTypeGrow, plan.Segment.GetInsertChannel(), plan.Segment.GetID(), querypb.DataScope_Historical),
 			task.NewSegmentActionWithScope(srcNode, task.ActionTypeReduce, plan.Segment.GetInsertChannel(), plan.Segment.GetID(), querypb.DataScope_Historical),
 		)
-
 		if err != nil {
 			log.Warn("create segment task for balance failed",
 				zap.Int64("collection", req.GetCollectionID()),
@@ -174,8 +173,8 @@ func (s *Server) balanceSegments(ctx context.Context, req *querypb.LoadBalanceRe
 // TODO(dragondriver): add more detail metrics
 func (s *Server) getSystemInfoMetrics(
 	ctx context.Context,
-	req *milvuspb.GetMetricsRequest) (string, error) {
-
+	req *milvuspb.GetMetricsRequest,
+) (string, error) {
 	clusterTopology := metricsinfo.QueryClusterTopology{
 		Self: metricsinfo.QueryCoordInfos{
 			BaseComponentInfos: metricsinfo.BaseComponentInfos{

@@ -58,7 +58,6 @@ func (a *Impl) GetIDAlloactor() *gAllocator.IDAllocator {
 }
 
 func (a *Impl) GetGenerator(count int, done <-chan struct{}) (<-chan UniqueID, error) {
-
 	idStart, _, err := a.Alloc(uint32(count))
 	if err != nil {
 		return nil, err

@@ -170,7 +170,7 @@ func Test_CompactSegBuff(t *testing.T) {
 		},
 		delBufHeap: &PriorityQueue{},
 	}
-	//1. set compactTo and compactFrom
+	// 1. set compactTo and compactFrom
 	targetSeg := &Segment{segmentID: 3333}
 	targetSeg.setType(datapb.SegmentType_Flushed)
 
@@ -190,7 +190,7 @@ func Test_CompactSegBuff(t *testing.T) {
 	channelSegments[seg2.segmentID] = seg2
 	channelSegments[targetSeg.segmentID] = targetSeg
 
-	//2. set up deleteDataBuf for seg1 and seg2
+	// 2. set up deleteDataBuf for seg1 and seg2
 	delDataBuf1 := newDelDataBuf(seg1.segmentID)
 	delDataBuf1.EntriesNum++
 	delDataBuf1.updateStartAndEndPosition(nil, &msgpb.MsgPosition{Timestamp: 50})
@@ -203,12 +203,12 @@ func Test_CompactSegBuff(t *testing.T) {
 	delBufferManager.updateMeta(seg2.segmentID, delDataBuf2)
 	heap.Push(delBufferManager.delBufHeap, delDataBuf2.item)
 
-	//3. test compact
+	// 3. test compact
 	delBufferManager.UpdateCompactedSegments()
 
-	//4. expect results in two aspects:
-	//4.1 compactedFrom segments are removed from delBufferManager
-	//4.2 compactedTo seg is set properly with correct entriesNum
+	// 4. expect results in two aspects:
+	// 4.1 compactedFrom segments are removed from delBufferManager
+	// 4.2 compactedTo seg is set properly with correct entriesNum
 	_, seg1Exist := delBufferManager.Load(seg1.segmentID)
 	_, seg2Exist := delBufferManager.Load(seg2.segmentID)
 	assert.False(t, seg1Exist)
@@ -221,7 +221,7 @@ func Test_CompactSegBuff(t *testing.T) {
 	assert.NotNil(t, targetSegBuf.item)
 	assert.Equal(t, targetSeg.segmentID, targetSegBuf.item.segmentID)
 
-	//5. test roll and evict (https://github.com/milvus-io/milvus/issues/20501)
+	// 5. test roll and evict (https://github.com/milvus-io/milvus/issues/20501)
 	delBufferManager.channel.rollDeleteBuffer(targetSeg.segmentID)
 	_, segCompactedToExist := delBufferManager.Load(targetSeg.segmentID)
 	assert.False(t, segCompactedToExist)
@@ -271,25 +271,61 @@ func TestUpdateCompactedSegments(t *testing.T) {
 
 		expectedSegsRemain []UniqueID
 	}{
-		{"zero segments", false,
-			[]UniqueID{}, []UniqueID{}, []UniqueID{}},
-		{"segment no compaction", false,
-			[]UniqueID{}, []UniqueID{}, []UniqueID{100, 101}},
-		{"segment compacted", true,
-			[]UniqueID{200}, []UniqueID{103}, []UniqueID{100, 101}},
-		{"segment compacted 100>201", true,
-			[]UniqueID{201}, []UniqueID{100}, []UniqueID{101, 201}},
-		{"segment compacted 100+101>201", true,
-			[]UniqueID{201, 201}, []UniqueID{100, 101}, []UniqueID{201}},
-		{"segment compacted 100>201, 101>202", true,
-			[]UniqueID{201, 202}, []UniqueID{100, 101}, []UniqueID{201, 202}},
+		{
+			"zero segments", false,
+			[]UniqueID{},
+			[]UniqueID{},
+			[]UniqueID{},
+		},
+		{
+			"segment no compaction", false,
+			[]UniqueID{},
+			[]UniqueID{},
+			[]UniqueID{100, 101},
+		},
+		{
+			"segment compacted", true,
+			[]UniqueID{200},
+			[]UniqueID{103},
+			[]UniqueID{100, 101},
+		},
+		{
+			"segment compacted 100>201", true,
+			[]UniqueID{201},
+			[]UniqueID{100},
+			[]UniqueID{101, 201},
+		},
+		{
+			"segment compacted 100+101>201", true,
+			[]UniqueID{201, 201},
+			[]UniqueID{100, 101},
+			[]UniqueID{201},
+		},
+		{
+			"segment compacted 100>201, 101>202", true,
+			[]UniqueID{201, 202},
+			[]UniqueID{100, 101},
+			[]UniqueID{201, 202},
+		},
 		// false
-		{"segment compacted 100>201", false,
-			[]UniqueID{201}, []UniqueID{100}, []UniqueID{101}},
-		{"segment compacted 100+101>201", false,
-			[]UniqueID{201, 201}, []UniqueID{100, 101}, []UniqueID{}},
-		{"segment compacted 100>201, 101>202", false,
-			[]UniqueID{201, 202}, []UniqueID{100, 101}, []UniqueID{}},
+		{
+			"segment compacted 100>201", false,
+			[]UniqueID{201},
+			[]UniqueID{100},
+			[]UniqueID{101},
+		},
+		{
+			"segment compacted 100+101>201", false,
+			[]UniqueID{201, 201},
+			[]UniqueID{100, 101},
+			[]UniqueID{},
+		},
+		{
+			"segment compacted 100>201, 101>202", false,
+			[]UniqueID{201, 202},
+			[]UniqueID{100, 101},
+			[]UniqueID{},
+		},
 	}
 
 	for _, test := range tests {

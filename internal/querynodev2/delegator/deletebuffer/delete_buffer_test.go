@@ -19,9 +19,10 @@ package deletebuffer
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/milvus-io/milvus/internal/storage"
 )
 
 func TestSkipListDeleteBuffer(t *testing.T) {

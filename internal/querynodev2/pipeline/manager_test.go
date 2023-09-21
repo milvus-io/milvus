@@ -35,14 +35,14 @@ import (
 
 type PipelineManagerTestSuite struct {
 	suite.Suite
-	//data
+	// data
 	collectionID int64
 	channel      string
-	//dependencies
+	// dependencies
 	tSafeManager TSafeManager
 	delegators   *typeutil.ConcurrentMap[string, delegator.ShardDelegator]
 
-	//mocks
+	// mocks
 	segmentManager    *segments.MockSegmentManager
 	collectionManager *segments.MockCollectionManager
 	delegator         *delegator.MockShardDelegator
@@ -57,13 +57,13 @@ func (suite *PipelineManagerTestSuite) SetupSuite() {
 
 func (suite *PipelineManagerTestSuite) SetupTest() {
 	paramtable.Init()
-	//init dependency
+	// init dependency
 	//	init tsafeManager
 	suite.tSafeManager = tsafe.NewTSafeReplica()
 	suite.tSafeManager.Add(suite.channel, 0)
 	suite.delegators = typeutil.NewConcurrentMap[string, delegator.ShardDelegator]()
 
-	//init mock
+	// init mock
 	//	init manager
 	suite.collectionManager = segments.NewMockCollectionManager(suite.T())
 	suite.segmentManager = segments.NewMockSegmentManager(suite.T())
@@ -75,14 +75,14 @@ func (suite *PipelineManagerTestSuite) SetupTest() {
 }
 
 func (suite *PipelineManagerTestSuite) TestBasic() {
-	//init mock
+	// init mock
 	//  mock collection manager
 	suite.collectionManager.EXPECT().Get(suite.collectionID).Return(&segments.Collection{})
 	//  mock mq factory
 	suite.msgDispatcher.EXPECT().Register(mock.Anything, suite.channel, mock.Anything, mqwrapper.SubscriptionPositionUnknown).Return(suite.msgChan, nil)
 	suite.msgDispatcher.EXPECT().Deregister(suite.channel)
 
-	//build manager
+	// build manager
 	manager := &segments.Manager{
 		Collection: suite.collectionManager,
 		Segment:    suite.segmentManager,
@@ -90,24 +90,24 @@ func (suite *PipelineManagerTestSuite) TestBasic() {
 	pipelineManager := NewManager(manager, suite.tSafeManager, suite.msgDispatcher, suite.delegators)
 	defer pipelineManager.Close()
 
-	//Add pipeline
+	// Add pipeline
 	_, err := pipelineManager.Add(suite.collectionID, suite.channel)
 	suite.NoError(err)
 	suite.Equal(1, pipelineManager.Num())
 
-	//Get pipeline
+	// Get pipeline
 	pipeline := pipelineManager.Get(suite.channel)
 	suite.NotNil(pipeline)
 
-	//Init Consumer
+	// Init Consumer
 	err = pipeline.ConsumeMsgStream(&msgpb.MsgPosition{})
 	suite.NoError(err)
 
-	//Start pipeline
+	// Start pipeline
 	err = pipelineManager.Start(suite.channel)
 	suite.NoError(err)
 
-	//Remove pipeline
+	// Remove pipeline
 	pipelineManager.Remove(suite.channel)
 	suite.Equal(0, pipelineManager.Num())
 }

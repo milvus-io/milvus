@@ -62,7 +62,6 @@ func (m *DeltaBufferManager) GetEntriesNum(segID UniqueID) int64 {
 func (m *DeltaBufferManager) UpdateCompactedSegments() {
 	compactedTo2From := m.channel.listCompactedSegmentIDs()
 	for compactedTo, compactedFrom := range compactedTo2From {
-
 		// if the compactedTo segment has 0 numRows, there'll be no segments
 		// in the channel meta, so remove all compacted from segments related
 		if !m.channel.hasSegment(compactedTo, true) {
@@ -87,7 +86,6 @@ func (m *DeltaBufferManager) UpdateCompactedSegments() {
 
 		// only store delBuf if EntriesNum > 0
 		if compactToDelBuff.EntriesNum > 0 {
-
 			m.pushOrFixHeap(compactedTo, compactToDelBuff)
 			// We need to re-add the memorySize because m.Delete(segID) sub them all.
 			m.usedMemory.Add(compactToDelBuff.GetMemorySize())
@@ -129,7 +127,8 @@ func (m *DeltaBufferManager) deleteFromHeap(buffer *DelDataBuf) {
 }
 
 func (m *DeltaBufferManager) StoreNewDeletes(segID UniqueID, pks []primaryKey,
-	tss []Timestamp, tr TimeRange, startPos, endPos *msgpb.MsgPosition) {
+	tss []Timestamp, tr TimeRange, startPos, endPos *msgpb.MsgPosition,
+) {
 	buffer, loaded := m.Load(segID)
 	if !loaded {
 		buffer = newDelDataBuf(segID)
@@ -154,7 +153,6 @@ func (m *DeltaBufferManager) Delete(segID UniqueID) {
 		m.usedMemory.Sub(buffer.GetMemorySize())
 		m.deleteFromHeap(buffer)
 		m.channel.rollDeleteBuffer(segID)
-
 	}
 }
 
@@ -165,7 +163,7 @@ func (m *DeltaBufferManager) popHeapItem() *Item {
 }
 
 func (m *DeltaBufferManager) ShouldFlushSegments() []UniqueID {
-	var memUsage = m.usedMemory.Load()
+	memUsage := m.usedMemory.Load()
 	if memUsage < Params.DataNodeCfg.FlushDeleteBufferBytes.GetAsInt64() {
 		return nil
 	}
@@ -181,12 +179,11 @@ func (m *DeltaBufferManager) ShouldFlushSegments() []UniqueID {
 		memUsage -= segItem.memorySize
 		if memUsage < Params.DataNodeCfg.FlushDeleteBufferBytes.GetAsInt64() {
 			break
-
 		}
 	}
 
-	//here we push all selected segment back into the heap
-	//in order to keep the heap semantically correct
+	// here we push all selected segment back into the heap
+	// in order to keep the heap semantically correct
 	m.heapGuard.Lock()
 	for _, segMem := range poppedItems {
 		heap.Push(m.delBufHeap, segMem)
@@ -334,7 +331,7 @@ func (ddb *DelDataBuf) Buffer(pks []primaryKey, tss []Timestamp, tr TimeRange, s
 			varCharPk := pks[i].(*varCharPrimaryKey)
 			bufSize += int64(len(varCharPk.Value))
 		}
-		//accumulate buf size for timestamp, which is 8 bytes
+		// accumulate buf size for timestamp, which is 8 bytes
 		bufSize += 8
 	}
 
@@ -430,13 +427,14 @@ func newBufferData(collSchema *schemapb.CollectionSchema) (*BufferData, error) {
 		limit++
 	}
 
-	//TODO::xige-16 eval vec and string field
+	// TODO::xige-16 eval vec and string field
 	return &BufferData{
 		buffer: &InsertData{Data: make(map[UniqueID]storage.FieldData)},
 		size:   0,
 		limit:  limit,
 		tsFrom: math.MaxUint64,
-		tsTo:   0}, nil
+		tsTo:   0,
+	}, nil
 }
 
 func newDelDataBuf(segmentID UniqueID) *DelDataBuf {

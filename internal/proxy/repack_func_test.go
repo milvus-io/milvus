@@ -20,9 +20,9 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 )
 
 func Test_insertRepackFunc(t *testing.T) {

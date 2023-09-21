@@ -17,9 +17,10 @@
 package eventlog
 
 import (
+	"go.uber.org/atomic"
+
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"go.uber.org/atomic"
 )
 
 var (

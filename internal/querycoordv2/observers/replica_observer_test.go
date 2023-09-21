@@ -39,7 +39,7 @@ type ReplicaObserverSuite struct {
 	suite.Suite
 
 	kv kv.MetaKv
-	//dependency
+	// dependency
 	meta    *meta.Meta
 	distMgr *meta.DistributionManager
 

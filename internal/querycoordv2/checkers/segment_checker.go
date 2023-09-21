@@ -139,7 +139,8 @@ func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica
 
 // GetStreamingSegmentDiff get streaming segment diff between leader view and target
 func (c *SegmentChecker) getStreamingSegmentDiff(collectionID int64,
-	replicaID int64) (toLoad []*datapb.SegmentInfo, toRelease []*meta.Segment) {
+	replicaID int64,
+) (toLoad []*datapb.SegmentInfo, toRelease []*meta.Segment) {
 	replica := c.meta.Get(replicaID)
 	if replica == nil {
 		log.Info("replica does not exist, skip it")
@@ -198,7 +199,8 @@ func (c *SegmentChecker) getStreamingSegmentDiff(collectionID int64,
 // GetHistoricalSegmentDiff get historical segment diff between target and dist
 func (c *SegmentChecker) getHistoricalSegmentDiff(
 	collectionID int64,
-	replicaID int64) (toLoad []*datapb.SegmentInfo, toRelease []*meta.Segment) {
+	replicaID int64,
+) (toLoad []*datapb.SegmentInfo, toRelease []*meta.Segment) {
 	replica := c.meta.Get(replicaID)
 	if replica == nil {
 		log.Info("replica does not exist, skip it")
@@ -344,7 +346,6 @@ func (c *SegmentChecker) createSegmentReduceTasks(ctx context.Context, segments 
 			replicaID,
 			action,
 		)
-
 		if err != nil {
 			log.Warn("create segment reduce task failed",
 				zap.Int64("collection", s.GetCollectionID()),

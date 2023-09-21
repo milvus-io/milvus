@@ -25,10 +25,10 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
-	"go.uber.org/zap"
 )
 
 type BinlogParser struct {
@@ -60,7 +60,8 @@ func NewBinlogParser(ctx context.Context,
 	flushFunc ImportFlushFunc,
 	updateProgressFunc func(percent int64),
 	tsStartPoint uint64,
-	tsEndPoint uint64) (*BinlogParser, error) {
+	tsEndPoint uint64,
+) (*BinlogParser, error) {
 	if collectionInfo == nil {
 		log.Warn("Binlog parser: collection schema is nil")
 		return nil, errors.New("collection schema is nil")

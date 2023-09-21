@@ -188,7 +188,6 @@ func TestRocksdbKV_Prefix(t *testing.T) {
 	val, err = rocksdbKV.Load("abcd")
 	assert.NoError(t, err)
 	assert.Equal(t, val, "123")
-
 }
 
 func TestRocksdbKV_Txn(t *testing.T) {

@@ -25,17 +25,15 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
-
+	"github.com/stretchr/testify/assert"
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
-
-	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -118,9 +116,11 @@ type mockDataCoord struct {
 func (m *mockDataCoord) Init() error {
 	return m.initErr
 }
+
 func (m *mockDataCoord) Start() error {
 	return m.startErr
 }
+
 func (m *mockDataCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
 	return &milvuspb.ComponentStates{
 		State: &milvuspb.ComponentInfo{
@@ -134,6 +134,7 @@ func (m *mockDataCoord) GetComponentStates(ctx context.Context) (*milvuspb.Compo
 		},
 	}, nil
 }
+
 func (m *mockDataCoord) Stop() error {
 	return fmt.Errorf("stop error")
 }

@@ -25,30 +25,33 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"go.uber.org/zap"
 )
 
 const megabyte = 1024 * 1024
 
-var CheckBucketRetryAttempts uint = 20
-var timeFormat = ".2006-01-02T15-04-05.000"
+var (
+	CheckBucketRetryAttempts uint = 20
+	timeFormat                    = ".2006-01-02T15-04-05.000"
+)
 
 // a rotated file logger for zap.log and could upload sealed log file to minIO
 type RotateLogger struct {
-	//local path is the path to save log before update to minIO
-	//use os.TempDir()/accesslog if empty
+	// local path is the path to save log before update to minIO
+	// use os.TempDir()/accesslog if empty
 	localPath string
 	fileName  string
-	//the interval time of update log to minIO
+	// the interval time of update log to minIO
 	rotatedTime int64
-	//the max size(Mb) of log file
-	//if local file large than maxSize will update immediately
-	//close if empty(zero)
+	// the max size(Mb) of log file
+	// if local file large than maxSize will update immediately
+	// close if empty(zero)
 	maxSize int
-	//MaxBackups is the maximum number of old log files to retain
-	//close retention limit if empty(zero)
+	// MaxBackups is the maximum number of old log files to retain
+	// close retention limit if empty(zero)
 	maxBackups int
 
 	handler *minioHandler
@@ -162,7 +165,7 @@ func (l *RotateLogger) openFileExistingOrNew() error {
 		return fmt.Errorf("file to get log file info: %s", err)
 	}
 
-	file, err := os.OpenFile(filename, os.O_APPEND|os.O_WRONLY, 0644)
+	file, err := os.OpenFile(filename, os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return l.openNewFile()
 	}
@@ -173,13 +176,13 @@ func (l *RotateLogger) openFileExistingOrNew() error {
 }
 
 func (l *RotateLogger) openNewFile() error {
-	err := os.MkdirAll(l.dir(), 0744)
+	err := os.MkdirAll(l.dir(), 0o744)
 	if err != nil {
 		return fmt.Errorf("make directories for new log file filed: %s", err)
 	}
 
 	name := l.filename()
-	mode := os.FileMode(0644)
+	mode := os.FileMode(0o644)
 	info, err := os.Stat(name)
 	if err == nil {
 		mode = info.Mode()
@@ -269,7 +272,6 @@ func (l *RotateLogger) timeRotating() {
 		case <-ticker.C:
 			l.Rotate()
 		}
-
 	}
 }
 

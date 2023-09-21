@@ -334,26 +334,48 @@ func RegisterProxy(registry *prometheus.Registry) {
 }
 
 func CleanupCollectionMetrics(nodeID int64, collection string) {
-	ProxyCollectionSQLatency.Delete(prometheus.Labels{nodeIDLabelName: strconv.FormatInt(nodeID, 10),
-		queryTypeLabelName: SearchLabel, collectionName: collection})
-	ProxyCollectionSQLatency.Delete(prometheus.Labels{nodeIDLabelName: strconv.FormatInt(nodeID, 10),
-		queryTypeLabelName: QueryLabel, collectionName: collection})
-	ProxyCollectionMutationLatency.Delete(prometheus.Labels{nodeIDLabelName: strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName: InsertLabel, collectionName: collection})
-	ProxyCollectionMutationLatency.Delete(prometheus.Labels{nodeIDLabelName: strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName: DeleteLabel, collectionName: collection})
-	ProxyReceivedNQ.Delete(prometheus.Labels{nodeIDLabelName: strconv.FormatInt(nodeID, 10),
-		queryTypeLabelName: SearchLabel, collectionName: collection})
-	ProxyReceivedNQ.Delete(prometheus.Labels{nodeIDLabelName: strconv.FormatInt(nodeID, 10),
-		queryTypeLabelName: QueryLabel, collectionName: collection})
-	ProxyReceiveBytes.Delete(prometheus.Labels{nodeIDLabelName: strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName: SearchLabel, collectionName: collection})
-	ProxyReceiveBytes.Delete(prometheus.Labels{nodeIDLabelName: strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName: QueryLabel, collectionName: collection})
-	ProxyReceiveBytes.Delete(prometheus.Labels{nodeIDLabelName: strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName: InsertLabel, collectionName: collection})
-	ProxyReceiveBytes.Delete(prometheus.Labels{nodeIDLabelName: strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName: DeleteLabel, collectionName: collection})
-	ProxyReceiveBytes.Delete(prometheus.Labels{nodeIDLabelName: strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName: UpsertLabel, collectionName: collection})
+	ProxyCollectionSQLatency.Delete(prometheus.Labels{
+		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
+		queryTypeLabelName: SearchLabel, collectionName: collection,
+	})
+	ProxyCollectionSQLatency.Delete(prometheus.Labels{
+		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
+		queryTypeLabelName: QueryLabel, collectionName: collection,
+	})
+	ProxyCollectionMutationLatency.Delete(prometheus.Labels{
+		nodeIDLabelName:  strconv.FormatInt(nodeID, 10),
+		msgTypeLabelName: InsertLabel, collectionName: collection,
+	})
+	ProxyCollectionMutationLatency.Delete(prometheus.Labels{
+		nodeIDLabelName:  strconv.FormatInt(nodeID, 10),
+		msgTypeLabelName: DeleteLabel, collectionName: collection,
+	})
+	ProxyReceivedNQ.Delete(prometheus.Labels{
+		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
+		queryTypeLabelName: SearchLabel, collectionName: collection,
+	})
+	ProxyReceivedNQ.Delete(prometheus.Labels{
+		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
+		queryTypeLabelName: QueryLabel, collectionName: collection,
+	})
+	ProxyReceiveBytes.Delete(prometheus.Labels{
+		nodeIDLabelName:  strconv.FormatInt(nodeID, 10),
+		msgTypeLabelName: SearchLabel, collectionName: collection,
+	})
+	ProxyReceiveBytes.Delete(prometheus.Labels{
+		nodeIDLabelName:  strconv.FormatInt(nodeID, 10),
+		msgTypeLabelName: QueryLabel, collectionName: collection,
+	})
+	ProxyReceiveBytes.Delete(prometheus.Labels{
+		nodeIDLabelName:  strconv.FormatInt(nodeID, 10),
+		msgTypeLabelName: InsertLabel, collectionName: collection,
+	})
+	ProxyReceiveBytes.Delete(prometheus.Labels{
+		nodeIDLabelName:  strconv.FormatInt(nodeID, 10),
+		msgTypeLabelName: DeleteLabel, collectionName: collection,
+	})
+	ProxyReceiveBytes.Delete(prometheus.Labels{
+		nodeIDLabelName:  strconv.FormatInt(nodeID, 10),
+		msgTypeLabelName: UpsertLabel, collectionName: collection,
+	})
 }

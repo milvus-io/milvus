@@ -20,9 +20,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 )
 

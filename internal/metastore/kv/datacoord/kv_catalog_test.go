@@ -122,7 +122,8 @@ var (
 				{
 					EntriesNum: 5,
 					LogPath:    deltalogPath,
-				}},
+				},
+			},
 		},
 	}
 	statslogs = []*datapb.FieldBinlog{
@@ -258,7 +259,6 @@ func Test_ListSegments(t *testing.T) {
 			}
 			if strings.HasPrefix(k3, s) {
 				return f([]byte(k3), []byte(savedKvs[k3]))
-
 			}
 			return errors.New("should not reach here")
 		})
@@ -1136,7 +1136,8 @@ func addSegment(rootPath string, collectionID, partitionID, segmentID, fieldID i
 				{
 					EntriesNum: 5,
 					LogPath:    metautil.BuildDeltaLogPath(rootPath, collectionID, partitionID, segmentID, int64(rand.Int())),
-				}},
+				},
+			},
 		},
 	}
 	statslogs = []*datapb.FieldBinlog{

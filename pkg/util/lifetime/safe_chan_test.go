@@ -3,8 +3,9 @@ package lifetime
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type SafeChanSuite struct {

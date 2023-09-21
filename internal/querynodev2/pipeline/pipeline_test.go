@@ -37,7 +37,7 @@ import (
 
 type PipelineTestSuite struct {
 	suite.Suite
-	//datas
+	// datas
 	collectionName   string
 	collectionID     int64
 	partitionIDs     []int64
@@ -45,10 +45,10 @@ type PipelineTestSuite struct {
 	insertSegmentIDs []int64
 	deletePKs        []int64
 
-	//dependencies
+	// dependencies
 	tSafeManager TSafeManager
 
-	//mocks
+	// mocks
 	segmentManager    *segments.MockSegmentManager
 	collectionManager *segments.MockCollectionManager
 	delegator         *delegator.MockShardDelegator
@@ -89,7 +89,7 @@ func (suite *PipelineTestSuite) buildMsgPack(schema *schemapb.CollectionSchema) 
 
 func (suite *PipelineTestSuite) SetupTest() {
 	paramtable.Init()
-	//init mock
+	// init mock
 	//	init manager
 	suite.collectionManager = segments.NewMockCollectionManager(suite.T())
 	suite.segmentManager = segments.NewMockSegmentManager(suite.T())
@@ -98,14 +98,14 @@ func (suite *PipelineTestSuite) SetupTest() {
 	//	init mq dispatcher
 	suite.msgDispatcher = msgdispatcher.NewMockClient(suite.T())
 
-	//init dependency
+	// init dependency
 	//	init tsafeManager
 	suite.tSafeManager = tsafe.NewTSafeReplica()
 	suite.tSafeManager.Add(suite.channel, 0)
 }
 
 func (suite *PipelineTestSuite) TestBasic() {
-	//init mock
+	// init mock
 	//	mock collection manager
 	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
 	collection := segments.NewCollection(suite.collectionID, schema, segments.GenTestIndexMeta(suite.collectionID, schema), querypb.LoadType_LoadCollection)
@@ -131,7 +131,7 @@ func (suite *PipelineTestSuite) TestBasic() {
 				}
 			}
 		})
-	//build pipleine
+	// build pipleine
 	manager := &segments.Manager{
 		Collection: suite.collectionManager,
 		Segment:    suite.segmentManager,
@@ -139,7 +139,7 @@ func (suite *PipelineTestSuite) TestBasic() {
 	pipeline, err := NewPipeLine(suite.collectionID, suite.channel, manager, suite.tSafeManager, suite.msgDispatcher, suite.delegator)
 	suite.NoError(err)
 
-	//Init Consumer
+	// Init Consumer
 	err = pipeline.ConsumeMsgStream(&msgpb.MsgPosition{})
 	suite.NoError(err)
 
@@ -157,7 +157,7 @@ func (suite *PipelineTestSuite) TestBasic() {
 	// wait pipeline work
 	<-listener.On()
 
-	//check tsafe
+	// check tsafe
 	tsafe, err := suite.tSafeManager.Get(suite.channel)
 	suite.NoError(err)
 	suite.Equal(in.EndTs, tsafe)

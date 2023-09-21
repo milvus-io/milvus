@@ -111,7 +111,6 @@ func translateToOutputFieldIDs(outputFields []string, schema *schemapb.Collectio
 		if !pkFound {
 			outputFieldIDs = append(outputFieldIDs, pkFieldID)
 		}
-
 	}
 	return outputFieldIDs, nil
 }

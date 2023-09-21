@@ -23,15 +23,15 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
 	"github.com/golang/protobuf/proto"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	grpcquerynodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
-	"go.uber.org/zap"
 )
 
 const (
@@ -40,9 +40,7 @@ const (
 	bufferFlushPeriod    = 500 * time.Millisecond
 )
 
-var (
-	ErrNodeNotFound = errors.New("NodeNotFound")
-)
+var ErrNodeNotFound = errors.New("NodeNotFound")
 
 func WrapErrNodeNotFound(nodeID int64) error {
 	return fmt.Errorf("%w(%v)", ErrNodeNotFound, nodeID)

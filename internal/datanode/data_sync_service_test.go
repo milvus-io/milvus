@@ -27,7 +27,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -45,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -118,35 +118,44 @@ type testInfo struct {
 }
 
 func TestDataSyncService_newDataSyncService(t *testing.T) {
-
 	ctx := context.Background()
 
 	tests := []*testInfo{
-		{true, false, &mockMsgStreamFactory{false, true},
+		{
+			true, false, &mockMsgStreamFactory{false, true},
 			0, "by-dev-rootcoord-dml-test_v0",
 			0, 0, "", 0,
 			0, 0, "", 0,
-			"SetParamsReturnError"},
-		{true, false, &mockMsgStreamFactory{true, true},
+			"SetParamsReturnError",
+		},
+		{
+			true, false, &mockMsgStreamFactory{true, true},
 			0, "by-dev-rootcoord-dml-test_v0",
 			1, 0, "", 0,
 			1, 1, "", 0,
-			"CollID 0 mismach with seginfo collID 1"},
-		{true, false, &mockMsgStreamFactory{true, true},
+			"CollID 0 mismach with seginfo collID 1",
+		},
+		{
+			true, false, &mockMsgStreamFactory{true, true},
 			1, "by-dev-rootcoord-dml-test_v1",
 			1, 0, "by-dev-rootcoord-dml-test_v2", 0,
 			1, 1, "by-dev-rootcoord-dml-test_v3", 0,
-			"chanName c1 mismach with seginfo chanName c2"},
-		{true, false, &mockMsgStreamFactory{true, true},
+			"chanName c1 mismach with seginfo chanName c2",
+		},
+		{
+			true, false, &mockMsgStreamFactory{true, true},
 			1, "by-dev-rootcoord-dml-test_v1",
 			1, 0, "by-dev-rootcoord-dml-test_v1", 0,
 			1, 1, "by-dev-rootcoord-dml-test_v2", 0,
-			"add normal segments"},
-		{true, false, &mockMsgStreamFactory{true, true},
+			"add normal segments",
+		},
+		{
+			true, false, &mockMsgStreamFactory{true, true},
 			1, "by-dev-rootcoord-dml-test_v1",
 			1, 1, "by-dev-rootcoord-dml-test_v1", 0,
 			1, 2, "by-dev-rootcoord-dml-test_v1", 0,
-			"add un-flushed and flushed segments"},
+			"add un-flushed and flushed segments",
+		},
 	}
 	cm := storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
@@ -194,7 +203,6 @@ func TestDataSyncService_newDataSyncService(t *testing.T) {
 			}
 		})
 	}
-
 }
 
 // NOTE: start pulsar before test
@@ -558,7 +566,7 @@ func genBytes() (rawData []byte) {
 	const N = 1
 
 	// Float vector
-	var fvector = [DIM]float32{1, 2}
+	fvector := [DIM]float32{1, 2}
 	for _, ele := range fvector {
 		buf := make([]byte, 4)
 		common.Endian.PutUint32(buf, math.Float32bits(ele))
@@ -568,11 +576,11 @@ func genBytes() (rawData []byte) {
 	// Binary vector
 	// Dimension of binary vector is 32
 	// size := 4,  = 32 / 8
-	var bvector = []byte{255, 255, 255, 0}
+	bvector := []byte{255, 255, 255, 0}
 	rawData = append(rawData, bvector...)
 
 	// Bool
-	var fieldBool = true
+	fieldBool := true
 	buf := new(bytes.Buffer)
 	if err := binary.Write(buf, common.Endian, fieldBool); err != nil {
 		panic(err)
@@ -597,12 +605,12 @@ func TestBytesReader(t *testing.T) {
 	// Bytes Reader is able to recording the position
 	rawDataReader := bytes.NewReader(rawData)
 
-	var fvector = make([]float32, 2)
+	fvector := make([]float32, 2)
 	err := binary.Read(rawDataReader, common.Endian, &fvector)
 	assert.NoError(t, err)
 	assert.ElementsMatch(t, fvector, []float32{1, 2})
 
-	var bvector = make([]byte, 4)
+	bvector := make([]byte, 4)
 	err = binary.Read(rawDataReader, common.Endian, &bvector)
 	assert.NoError(t, err)
 	assert.ElementsMatch(t, bvector, []byte{255, 255, 255, 0})
@@ -623,7 +631,7 @@ func TestGetSegmentInfos(t *testing.T) {
 	dsService := &dataSyncService{
 		dataCoord: dataCoord,
 	}
-	var ctx = context.Background()
+	ctx := context.Background()
 	segmentInfos, err := dsService.getSegmentInfos(ctx, []int64{1})
 	assert.NoError(t, err)
 	assert.Equal(t, 1, len(segmentInfos))
@@ -680,7 +688,8 @@ func TestClearGlobalFlushingCache(t *testing.T) {
 			collID:      1,
 			partitionID: 1,
 			startPos:    &msgpb.MsgPosition{},
-			endPos:      &msgpb.MsgPosition{}})
+			endPos:      &msgpb.MsgPosition{},
+		})
 	assert.NoError(t, err)
 
 	err = channel.addSegment(

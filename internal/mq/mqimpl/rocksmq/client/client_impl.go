@@ -32,7 +32,6 @@ type client struct {
 }
 
 func newClient(options Options) (*client, error) {
-
 	if options.Server == nil {
 		return nil, newError(InvalidConfiguration, "options.Server is nil")
 	}
@@ -50,7 +49,6 @@ func newClient(options Options) (*client, error) {
 func (c *client) CreateProducer(options ProducerOptions) (Producer, error) {
 	// Create a producer
 	producer, err := newProducer(c, options)
-
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +169,8 @@ func (c *client) deliver(consumer *consumer) {
 				MsgID:      msg.MsgID,
 				Payload:    msg.Payload,
 				Properties: msg.Properties,
-				Topic:      consumer.Topic()}:
+				Topic:      consumer.Topic(),
+			}:
 			case <-c.closeCh:
 				return
 			}

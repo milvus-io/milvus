@@ -5,9 +5,10 @@ import (
 	"os"
 	"sort"
 
-	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 func ShowYaml(filepath string) {

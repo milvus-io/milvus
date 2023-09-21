@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
@@ -137,7 +136,8 @@ func TestDeleteTask_PreExecute(t *testing.T) {
 		dt := deleteTask{
 			req: &milvuspb.DeleteRequest{
 				CollectionName: "foo",
-			}}
+			},
+		}
 		cache := NewMockCache(t)
 		cache.On("GetCollectionID",
 			mock.Anything, // context.Context
@@ -205,7 +205,6 @@ func TestDeleteTask_PreExecute(t *testing.T) {
 	})
 
 	t.Run("invalie partition", func(t *testing.T) {
-
 		dt := deleteTask{
 			req: &milvuspb.DeleteRequest{
 				CollectionName: "foo",
@@ -666,7 +665,9 @@ func TestDeleteTask_SimpleDelete(t *testing.T) {
 			TermExpr: &planpb.TermExpr{
 				ColumnInfo: &planpb.ColumnInfo{
 					DataType: schemapb.DataType_BinaryVector,
-				}}}
+				},
+			},
+		}
 		stream := msgstream.NewMockMsgStream(t)
 		err := task.simpleDelete(ctx, expr, stream)
 		assert.Error(t, err)

@@ -20,13 +20,14 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/samber/lo"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/samber/lo"
-	"go.uber.org/zap"
 )
 
 // Cluster provides interfaces to interact with datanode cluster
@@ -77,7 +78,8 @@ func (c *Cluster) Watch(ch string, collectionID UniqueID) error {
 // Flush sends flush requests to dataNodes specified
 // which also according to channels where segments are assigned to.
 func (c *Cluster) Flush(ctx context.Context, nodeID int64, channel string,
-	segments []*datapb.SegmentInfo) error {
+	segments []*datapb.SegmentInfo,
+) error {
 	if !c.channelManager.Match(nodeID, channel) {
 		log.Warn("node is not matched with channel",
 			zap.String("channel", channel),

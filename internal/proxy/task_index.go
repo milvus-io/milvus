@@ -250,7 +250,7 @@ func (cit *createIndexTask) parseIndexParams() error {
 	}
 
 	for k, v := range indexParamsMap {
-		//Currently, it is required that type_params and index_params do not have same keys.
+		// Currently, it is required that type_params and index_params do not have same keys.
 		if k == DimKey || k == common.MaxLengthKey {
 			delete(indexParamsMap, k)
 			continue
@@ -608,7 +608,8 @@ func (dit *getIndexStatisticsTask) Execute(ctx context.Context) error {
 	}
 
 	resp, err := dit.datacoord.GetIndexStatistics(ctx, &indexpb.GetIndexStatisticsRequest{
-		CollectionID: dit.collectionID, IndexName: dit.IndexName})
+		CollectionID: dit.collectionID, IndexName: dit.IndexName,
+	})
 	if err != nil || resp == nil {
 		return err
 	}

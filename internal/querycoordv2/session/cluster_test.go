@@ -23,16 +23,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/mocks"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/suite"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 const bufSize = 1024 * 1024
@@ -65,6 +66,7 @@ func (suite *ClusterTestSuite) SetupTest() {
 func (suite *ClusterTestSuite) TearDownTest() {
 	suite.cluster.Stop()
 }
+
 func (suite *ClusterTestSuite) setupServers() {
 	svrs := suite.createTestServers()
 	for _, svr := range svrs {

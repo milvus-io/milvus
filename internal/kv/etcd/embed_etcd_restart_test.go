@@ -36,7 +36,7 @@ func TestEtcdRestartLoad(te *testing.T) {
 	param.Init(paramtable.NewBaseTable())
 	param.Save("etcd.config.path", "../../../configs/advanced/etcd.yaml")
 	param.Save("etcd.data.dir", etcdDataDir)
-	//clean up data
+	// clean up data
 	defer func() {
 		err := os.RemoveAll(etcdDataDir)
 		assert.NoError(te, err)
@@ -79,7 +79,7 @@ func TestEtcdRestartLoad(te *testing.T) {
 		embed := metaKv.(*embed_etcd_kv.EmbedEtcdKV)
 		embed.Close()
 
-		//restart and check test result
+		// restart and check test result
 		metaKv, _ = embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
 
 		for _, test := range saveAndLoadTests {

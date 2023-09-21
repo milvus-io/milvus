@@ -20,12 +20,13 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/suite"
 )
 
 type StreamPipelineSuite struct {
@@ -33,10 +34,10 @@ type StreamPipelineSuite struct {
 	pipeline   StreamPipeline
 	inChannel  chan *msgstream.MsgPack
 	outChannel chan msgstream.Timestamp
-	//data
+	// data
 	length  int
 	channel string
-	//mock
+	// mock
 	msgDispatcher *msgdispatcher.MockClient
 }
 

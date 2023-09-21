@@ -21,13 +21,11 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
-
-	"github.com/milvus-io/milvus/pkg/config"
-
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/config"
+	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 )
 
 const (
@@ -41,8 +39,8 @@ func TestAutoIndexParams_build(t *testing.T) {
 	CParams.Init(bt)
 
 	t.Run("test parseBuildParams success", func(t *testing.T) {
-		//Params := CParams.AutoIndexConfig
-		//buildParams := make([string]interface)
+		// Params := CParams.AutoIndexConfig
+		// buildParams := make([string]interface)
 		var err error
 		map1 := map[string]any{
 			IndexTypeKey:     "HNSW",

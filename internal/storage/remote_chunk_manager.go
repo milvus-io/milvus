@@ -26,16 +26,16 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
-
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	minio "github.com/minio/minio-go/v7"
 	"go.uber.org/zap"
 	"golang.org/x/exp/mmap"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
 const (
@@ -125,7 +125,6 @@ func (mcm *RemoteChunkManager) Size(ctx context.Context, filePath string) (int64
 // Write writes the data to minio storage.
 func (mcm *RemoteChunkManager) Write(ctx context.Context, filePath string, content []byte) error {
 	err := mcm.putObject(ctx, mcm.bucketName, filePath, bytes.NewReader(content), int64(len(content)))
-
 	if err != nil {
 		log.Warn("failed to put object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
 		return err
@@ -317,7 +316,6 @@ func (mcm *RemoteChunkManager) RemoveWithPrefix(ctx context.Context, prefix stri
 // calling `ListWithPrefix` with `prefix` = a && `recursive` = false will only returns [a, ab]
 // If caller needs all objects without level limitation, `recursive` shall be true.
 func (mcm *RemoteChunkManager) ListWithPrefix(ctx context.Context, prefix string, recursive bool) ([]string, []time.Time, error) {
-
 	// cannot use ListObjects(ctx, bucketName, Opt{Prefix:prefix, Recursive:true})
 	// if minio has lots of objects under the provided path
 	// recursive = true may timeout during the recursive browsing the objects.
@@ -336,13 +334,11 @@ func (mcm *RemoteChunkManager) ListWithPrefix(ctx context.Context, prefix string
 		// TODO add concurrent call if performance matters
 		// only return current level per call
 		objects, err := mcm.listObjects(ctx, mcm.bucketName, pre, false)
-
 		if err != nil {
 			return nil, nil, err
 		}
 
 		for object, lastModified := range objects {
-
 			// with tailing "/", object is a "directory"
 			if strings.HasSuffix(object, "/") && recursive {
 				// enqueue when recursive is true
@@ -360,7 +356,8 @@ func (mcm *RemoteChunkManager) ListWithPrefix(ctx context.Context, prefix string
 }
 
 func (mcm *RemoteChunkManager) getObject(ctx context.Context, bucketName, objectName string,
-	offset int64, size int64) (FileReader, error) {
+	offset int64, size int64,
+) (FileReader, error) {
 	start := timerecord.NewTimeRecorder("getObject")
 
 	reader, err := mcm.client.GetObject(ctx, bucketName, objectName, offset, size)

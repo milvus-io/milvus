@@ -41,6 +41,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/samber/lo"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
@@ -66,7 +67,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"github.com/samber/lo"
 )
 
 // make sure QueryNode implements types.QueryNode
@@ -207,7 +207,7 @@ func (node *QueryNode) InitSegcore() error {
 	cIndexSliceSize := C.int64_t(paramtable.Get().CommonCfg.IndexSliceSize.GetAsInt64())
 	C.InitIndexSliceSize(cIndexSliceSize)
 
-	//set up thread pool for different priorities
+	// set up thread pool for different priorities
 	cHighPriorityThreadCoreCoefficient := C.int64_t(paramtable.Get().CommonCfg.HighPriorityThreadCoreCoefficient.GetAsInt64())
 	C.InitHighPriorityThreadCoreCoefficient(cHighPriorityThreadCoreCoefficient)
 	cMiddlePriorityThreadCoreCoefficient := C.int64_t(paramtable.Get().CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsInt64())
@@ -437,7 +437,6 @@ func (node *QueryNode) Stop() error {
 				case <-time.After(time.Second):
 				}
 			}
-
 		}
 
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)

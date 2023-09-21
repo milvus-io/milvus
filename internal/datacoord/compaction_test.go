@@ -23,22 +23,21 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-
-	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 )
 
 func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
@@ -182,7 +181,6 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 					assert.Equal(t, tt.args.signal, task.triggerInfo)
 					assert.Equal(t, 1, c.executingTaskNum)
 				} else {
-
 					assert.Eventually(t,
 						func() bool {
 							c.mu.RLock()
@@ -198,7 +196,6 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 }
 
 func Test_compactionPlanHandler_execWithParallels(t *testing.T) {
-
 	mockDataNode := &mocks.MockDataNode{}
 	paramtable.Get().Save(Params.DataCoordCfg.CompactionCheckIntervalInSeconds.Key, "1")
 	defer paramtable.Get().Reset(Params.DataCoordCfg.CompactionCheckIntervalInSeconds.Key)
@@ -330,7 +327,8 @@ func TestCompactionPlanHandler_handleMergeCompactionResult(t *testing.T) {
 			data map[int64]*Session
 		}{
 			data: map[int64]*Session{
-				dataNodeID: {client: mockDataNode}},
+				dataNodeID: {client: mockDataNode},
+			},
 		},
 	}
 
@@ -485,7 +483,8 @@ func TestCompactionPlanHandler_completeCompaction(t *testing.T) {
 				data map[int64]*Session
 			}{
 				data: map[int64]*Session{
-					dataNodeID: {client: mockDataNode}},
+					dataNodeID: {client: mockDataNode},
+				},
 			},
 		}
 
@@ -577,7 +576,8 @@ func TestCompactionPlanHandler_completeCompaction(t *testing.T) {
 				data map[int64]*Session
 			}{
 				data: map[int64]*Session{
-					dataNodeID: {client: mockDataNode}},
+					dataNodeID: {client: mockDataNode},
+				},
 			},
 		}
 

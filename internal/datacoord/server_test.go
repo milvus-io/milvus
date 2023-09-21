@@ -331,14 +331,14 @@ func TestFlush(t *testing.T) {
 	})
 }
 
-//func TestGetComponentStates(t *testing.T) {
-//svr := newTestServer(t)
-//defer closeTestServer(t, svr)
-//cli := newMockDataNodeClient(1)
-//err := cli.Init()
-//assert.NoError(t, err)
-//err = cli.Start()
-//assert.NoError(t, err)
+// func TestGetComponentStates(t *testing.T) {
+// svr := newTestServer(t)
+// defer closeTestServer(t, svr)
+// cli := newMockDataNodeClient(1)
+// err := cli.Init()
+// assert.NoError(t, err)
+// err = cli.Start()
+// assert.NoError(t, err)
 
 //err = svr.cluster.Register(&dataNode{
 //id: 1,
@@ -503,7 +503,6 @@ func TestGetInsertBinlogPaths(t *testing.T) {
 		resp, err := svr.GetInsertBinlogPaths(svr.ctx, req)
 		assert.NoError(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-
 	})
 
 	t.Run("with closed server", func(t *testing.T) {
@@ -529,7 +528,6 @@ func TestGetCollectionStatistics(t *testing.T) {
 		resp, err := svr.GetCollectionStatistics(svr.ctx, req)
 		assert.NoError(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-
 	})
 	t.Run("with closed server", func(t *testing.T) {
 		svr := newTestServer(t, nil)
@@ -1743,11 +1741,10 @@ func TestDropVirtualChannel(t *testing.T) {
 		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
 		require.Nil(t, err)
 
-		//resend
+		// resend
 		resp, err = svr.DropVirtualChannel(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-
 	})
 
 	t.Run("with channel not matched", func(t *testing.T) {
@@ -1798,35 +1795,45 @@ func TestGetChannelSeekPosition(t *testing.T) {
 		channelName  string
 		expectedPos  *msgpb.MsgPosition
 	}{
-		{"test-with-channelCP",
+		{
+			"test-with-channelCP",
 			&msgpb.MsgPosition{ChannelName: "ch1", Timestamp: 100, MsgID: msgID},
 			[]*msgpb.MsgPosition{{ChannelName: "ch1", Timestamp: 50, MsgID: msgID}, {ChannelName: "ch1", Timestamp: 200, MsgID: msgID}},
 			startPos1,
-			"ch1", &msgpb.MsgPosition{ChannelName: "ch1", Timestamp: 100, MsgID: msgID}},
+			"ch1", &msgpb.MsgPosition{ChannelName: "ch1", Timestamp: 100, MsgID: msgID},
+		},
 
-		{"test-with-segmentDMLPos",
+		{
+			"test-with-segmentDMLPos",
 			nil,
 			[]*msgpb.MsgPosition{{ChannelName: "ch1", Timestamp: 50, MsgID: msgID}, {ChannelName: "ch1", Timestamp: 200, MsgID: msgID}},
 			startPos1,
-			"ch1", &msgpb.MsgPosition{ChannelName: "ch1", Timestamp: 50, MsgID: msgID}},
+			"ch1", &msgpb.MsgPosition{ChannelName: "ch1", Timestamp: 50, MsgID: msgID},
+		},
 
-		{"test-with-collStartPos",
+		{
+			"test-with-collStartPos",
 			nil,
 			nil,
 			startPos1,
-			"ch1", &msgpb.MsgPosition{ChannelName: "ch1", MsgID: startPos1[0].Data}},
+			"ch1", &msgpb.MsgPosition{ChannelName: "ch1", MsgID: startPos1[0].Data},
+		},
 
-		{"test-non-exist-channel-1",
+		{
+			"test-non-exist-channel-1",
 			nil,
 			nil,
 			startPosNonExist,
-			"ch1", nil},
+			"ch1", nil,
+		},
 
-		{"test-non-exist-channel-2",
+		{
+			"test-non-exist-channel-2",
 			nil,
 			nil,
 			nil,
-			"ch1", nil},
+			"ch1", nil,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.testName, func(t *testing.T) {
@@ -1858,7 +1865,8 @@ func TestGetChannelSeekPosition(t *testing.T) {
 
 			seekPos := svr.handler.(*ServerHandler).GetChannelSeekPosition(&channel{
 				Name:         test.channelName,
-				CollectionID: 0}, allPartitionID)
+				CollectionID: 0,
+			}, allPartitionID)
 			if test.expectedPos == nil {
 				assert.True(t, seekPos == nil)
 			} else {
@@ -2460,7 +2468,7 @@ func TestShouldDropChannel(t *testing.T) {
 	})
 
 	t.Run("channel name not in kv, collection not exist", func(t *testing.T) {
-		//myRoot.code = commonpb.ErrorCode_CollectionNotExists
+		// myRoot.code = commonpb.ErrorCode_CollectionNotExists
 		myRoot.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
 			Return(&milvuspb.DescribeCollectionResponse{
 				Status:       merr.Status(merr.WrapErrCollectionNotFound(-1)),
@@ -2509,7 +2517,6 @@ func TestShouldDropChannel(t *testing.T) {
 }
 
 func TestGetRecoveryInfo(t *testing.T) {
-
 	t.Run("test get recovery info with no segments", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
@@ -2531,7 +2538,8 @@ func TestGetRecoveryInfo(t *testing.T) {
 	})
 
 	createSegment := func(id, collectionID, partitionID, numOfRows int64, posTs uint64,
-		channel string, state commonpb.SegmentState) *datapb.SegmentInfo {
+		channel string, state commonpb.SegmentState,
+	) *datapb.SegmentInfo {
 		return &datapb.SegmentInfo{
 			ID:            id,
 			CollectionID:  collectionID,
@@ -2718,7 +2726,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.NoError(t, err)
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
 		assert.NoError(t, err)
-		//svr.indexCoord.(*mocks.MockIndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(nil, nil)
+		// svr.indexCoord.(*mocks.MockIndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(nil, nil)
 
 		req := &datapb.GetRecoveryInfoRequest{
 			CollectionID: 0,
@@ -3228,7 +3236,7 @@ func TestOptions(t *testing.T) {
 	})
 	t.Run("WithDataNodeCreator", func(t *testing.T) {
 		var target int64
-		var val = rand.Int63()
+		val := rand.Int63()
 		opt := WithDataNodeCreator(func(context.Context, string, int64) (types.DataNode, error) {
 			target = val
 			return nil, nil
@@ -3596,9 +3604,7 @@ func TestGetFlushState(t *testing.T) {
 		svr := newTestServerWithMeta(t, nil, meta)
 		defer closeTestServer(t, svr)
 
-		var (
-			collection = int64(0)
-		)
+		collection := int64(0)
 
 		resp, err := svr.GetFlushState(context.Background(), &datapb.GetFlushStateRequest{
 			FlushTs:      11,
@@ -3624,18 +3630,34 @@ func TestGetFlushAllState(t *testing.T) {
 		ExpectedSuccess          bool
 		ExpectedFlushed          bool
 	}{
-		{"test FlushAll flushed", []Timestamp{100, 200}, 99,
-			true, false, false, false, true, true},
-		{"test FlushAll not flushed", []Timestamp{100, 200}, 150,
-			true, false, false, false, true, false},
-		{"test Sever is not healthy", nil, 0,
-			false, false, false, false, false, false},
-		{"test ListDatabase failed", nil, 0,
-			true, true, false, false, false, false},
-		{"test ShowCollections failed", nil, 0,
-			true, false, true, false, false, false},
-		{"test DescribeCollection failed", nil, 0,
-			true, false, false, true, false, false},
+		{
+			"test FlushAll flushed",
+			[]Timestamp{100, 200},
+			99,
+			true, false, false, false, true, true,
+		},
+		{
+			"test FlushAll not flushed",
+			[]Timestamp{100, 200},
+			150,
+			true, false, false, false, true, false,
+		},
+		{
+			"test Sever is not healthy", nil, 0,
+			false, false, false, false, false, false,
+		},
+		{
+			"test ListDatabase failed", nil, 0,
+			true, true, false, false, false, false,
+		},
+		{
+			"test ShowCollections failed", nil, 0,
+			true, false, true, false, false, false,
+		},
+		{
+			"test DescribeCollection failed", nil, 0,
+			true, false, false, true, false, false,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.testName, func(t *testing.T) {
@@ -4238,9 +4260,9 @@ func newTestServerWithMeta(t *testing.T, receiveCh chan any, meta *meta, opts ..
 	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
 		return newMockRootCoordService(), nil
 	}
-	//indexCoord := mocks.NewMockIndexCoord(t)
-	//indexCoord.EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	//svr.indexCoord = indexCoord
+	// indexCoord := mocks.NewMockIndexCoord(t)
+	// indexCoord.EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	// svr.indexCoord = indexCoord
 
 	err = svr.Init()
 	assert.NoError(t, err)
@@ -4327,7 +4349,8 @@ func Test_CheckHealth(t *testing.T) {
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 		healthClient := &mockDataNodeClient{
 			id:    1,
-			state: commonpb.StateCode_Healthy}
+			state: commonpb.StateCode_Healthy,
+		}
 		sm := NewSessionManager()
 		sm.sessions = struct {
 			sync.RWMutex
@@ -4352,7 +4375,8 @@ func Test_CheckHealth(t *testing.T) {
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 		unhealthClient := &mockDataNodeClient{
 			id:    1,
-			state: commonpb.StateCode_Abnormal}
+			state: commonpb.StateCode_Abnormal,
+		}
 		sm := NewSessionManager()
 		sm.sessions = struct {
 			sync.RWMutex

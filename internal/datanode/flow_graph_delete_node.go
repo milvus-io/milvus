@@ -178,7 +178,8 @@ func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange, st
 // If the key may exist in the segment, returns it in map.
 // If the key not exist in the segment, the segment is filter out.
 func (dn *deleteNode) filterSegmentByPK(partID UniqueID, pks []primaryKey, tss []Timestamp) (
-	map[UniqueID][]primaryKey, map[UniqueID][]uint64) {
+	map[UniqueID][]primaryKey, map[UniqueID][]uint64,
+) {
 	segID2Pks := make(map[UniqueID][]primaryKey)
 	segID2Tss := make(map[UniqueID][]uint64)
 	segments := dn.channel.filterSegments(partID)

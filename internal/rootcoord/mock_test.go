@@ -22,6 +22,9 @@ import (
 	"os"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/mock"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -43,8 +46,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"github.com/stretchr/testify/mock"
-	"go.uber.org/zap"
 )
 
 const (

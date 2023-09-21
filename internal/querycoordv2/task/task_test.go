@@ -205,13 +205,15 @@ func (suite *TaskSuite) TestSubscribeChannelTask() {
 		}, nil)
 	for channel, segment := range suite.growingSegments {
 		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).
-			Return(&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{
-				{
-					ID:            segment,
-					CollectionID:  suite.collection,
-					PartitionID:   partitions[0],
-					InsertChannel: channel,
-				}},
+			Return(&datapb.GetSegmentInfoResponse{
+				Infos: []*datapb.SegmentInfo{
+					{
+						ID:            segment,
+						CollectionID:  suite.collection,
+						PartitionID:   partitions[0],
+						InsertChannel: channel,
+					},
+				},
 			}, nil)
 	}
 	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
@@ -394,13 +396,15 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 		},
 	}, nil)
 	for _, segment := range suite.loadSegments {
-		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return(&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{
-			{
-				ID:            segment,
-				CollectionID:  suite.collection,
-				PartitionID:   partition,
-				InsertChannel: channel.ChannelName,
-			}},
+		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return(&datapb.GetSegmentInfoResponse{
+			Infos: []*datapb.SegmentInfo{
+				{
+					ID:            segment,
+					CollectionID:  suite.collection,
+					PartitionID:   partition,
+					InsertChannel: channel.ChannelName,
+				},
+			},
 		}, nil)
 		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil)
 	}
@@ -488,13 +492,15 @@ func (suite *TaskSuite) TestLoadSegmentTaskNotIndex() {
 		},
 	}, nil)
 	for _, segment := range suite.loadSegments {
-		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return(&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{
-			{
-				ID:            segment,
-				CollectionID:  suite.collection,
-				PartitionID:   partition,
-				InsertChannel: channel.ChannelName,
-			}},
+		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return(&datapb.GetSegmentInfoResponse{
+			Infos: []*datapb.SegmentInfo{
+				{
+					ID:            segment,
+					CollectionID:  suite.collection,
+					PartitionID:   partition,
+					InsertChannel: channel.ChannelName,
+				},
+			},
 		}, nil)
 		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, merr.WrapErrIndexNotFound())
 	}
@@ -577,13 +583,15 @@ func (suite *TaskSuite) TestLoadSegmentTaskFailed() {
 		},
 	}, nil)
 	for _, segment := range suite.loadSegments {
-		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return(&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{
-			{
-				ID:            segment,
-				CollectionID:  suite.collection,
-				PartitionID:   partition,
-				InsertChannel: channel.ChannelName,
-			}},
+		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return(&datapb.GetSegmentInfoResponse{
+			Infos: []*datapb.SegmentInfo{
+				{
+					ID:            segment,
+					CollectionID:  suite.collection,
+					PartitionID:   partition,
+					InsertChannel: channel.ChannelName,
+				},
+			},
 		}, nil)
 		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, errors.New("index not ready"))
 	}
@@ -778,13 +786,15 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 		},
 	}, nil)
 	for _, segment := range suite.moveSegments {
-		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return(&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{
-			{
-				ID:            segment,
-				CollectionID:  suite.collection,
-				PartitionID:   partition,
-				InsertChannel: channel.ChannelName,
-			}},
+		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return(&datapb.GetSegmentInfoResponse{
+			Infos: []*datapb.SegmentInfo{
+				{
+					ID:            segment,
+					CollectionID:  suite.collection,
+					PartitionID:   partition,
+					InsertChannel: channel.ChannelName,
+				},
+			},
 		}, nil)
 		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil)
 	}
@@ -946,13 +956,15 @@ func (suite *TaskSuite) TestTaskCanceled() {
 		},
 	}, nil)
 	for _, segment := range suite.loadSegments {
-		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return(&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{
-			{
-				ID:            segment,
-				CollectionID:  suite.collection,
-				PartitionID:   partition,
-				InsertChannel: channel.ChannelName,
-			}},
+		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return(&datapb.GetSegmentInfoResponse{
+			Infos: []*datapb.SegmentInfo{
+				{
+					ID:            segment,
+					CollectionID:  suite.collection,
+					PartitionID:   partition,
+					InsertChannel: channel.ChannelName,
+				},
+			},
 		}, nil)
 		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil)
 	}
@@ -1031,13 +1043,15 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 		},
 	}, nil)
 	for _, segment := range suite.loadSegments {
-		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return(&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{
-			{
-				ID:            segment,
-				CollectionID:  suite.collection,
-				PartitionID:   partition,
-				InsertChannel: channel.ChannelName,
-			}},
+		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return(&datapb.GetSegmentInfoResponse{
+			Infos: []*datapb.SegmentInfo{
+				{
+					ID:            segment,
+					CollectionID:  suite.collection,
+					PartitionID:   partition,
+					InsertChannel: channel.ChannelName,
+				},
+			},
 		}, nil)
 		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil)
 	}

@@ -134,7 +134,7 @@ type Server struct {
 	icSession *sessionutil.Session
 	dnEventCh <-chan *sessionutil.SessionEvent
 	inEventCh <-chan *sessionutil.SessionEvent
-	//qcEventCh <-chan *sessionutil.SessionEvent
+	// qcEventCh <-chan *sessionutil.SessionEvent
 
 	enableActiveStandBy bool
 	activateFunc        func() error
@@ -142,9 +142,9 @@ type Server struct {
 	dataNodeCreator        dataNodeCreatorFunc
 	indexNodeCreator       indexNodeCreatorFunc
 	rootCoordClientCreator rootCoordCreatorFunc
-	//indexCoord             types.IndexCoord
+	// indexCoord             types.IndexCoord
 
-	//segReferManager  *SegmentReferenceManager
+	// segReferManager  *SegmentReferenceManager
 	indexBuilder     *indexBuilder
 	indexNodeManager *IndexNodeManager
 
@@ -902,7 +902,7 @@ func (s *Server) startFlushLoop(ctx context.Context) {
 				logutil.Logger(s.ctx).Info("flush loop shutdown")
 				return
 			case segmentID := <-s.flushCh:
-				//Ignore return error
+				// Ignore return error
 				log.Info("flush successfully", zap.Any("segmentID", segmentID))
 				err := s.postFlush(ctx, segmentID)
 				if err != nil {

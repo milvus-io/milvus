@@ -154,7 +154,8 @@ func (suite *SegmentSuite) TestValidateIndexedFieldsData() {
 			IdField: &schemapb.IDs_IntId{
 				IntId: &schemapb.LongArray{
 					Data: []int64{5, 4, 3, 2, 9, 8, 7, 6},
-				}},
+				},
+			},
 		},
 		Offset: []int64{5, 4, 3, 2, 9, 8, 7, 6},
 		FieldsData: []*schemapb.FieldData{

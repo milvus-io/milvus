@@ -69,7 +69,7 @@ func (fNode *filterNode) Operate(in Msg) Msg {
 		WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel, fmt.Sprint(fNode.collectionID)).
 		Set(float64(tsoutil.SubByNow(streamMsgPack.EndTs)))
 
-	//Get collection from collection manager
+	// Get collection from collection manager
 	collection := fNode.manager.Collection.Get(fNode.collectionID)
 	if collection == nil {
 		log.Fatal("collection not found in meta", zap.Int64("collectionID", fNode.collectionID))
@@ -84,7 +84,7 @@ func (fNode *filterNode) Operate(in Msg) Msg {
 		},
 	}
 
-	//add msg to out if msg pass check of filter
+	// add msg to out if msg pass check of filter
 	for _, msg := range streamMsgPack.Msgs {
 		err := fNode.filtrate(collection, msg)
 		if err != nil {
@@ -105,7 +105,6 @@ func (fNode *filterNode) Operate(in Msg) Msg {
 
 // filtrate message with filter policy
 func (fNode *filterNode) filtrate(c *Collection, msg msgstream.TsMsg) error {
-
 	switch msg.Type() {
 	case commonpb.MsgType_Insert:
 		insertMsg := msg.(*msgstream.InsertMsg)

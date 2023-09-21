@@ -7,11 +7,15 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/conc"
 )
 
-var ioPool *conc.Pool[any]
-var ioPoolInitOnce sync.Once
+var (
+	ioPool         *conc.Pool[any]
+	ioPoolInitOnce sync.Once
+)
 
-var statsPool *conc.Pool[any]
-var statsPoolInitOnce sync.Once
+var (
+	statsPool         *conc.Pool[any]
+	statsPoolInitOnce sync.Once
+)
 
 func initIOPool() {
 	capacity := Params.DataNodeCfg.IOConcurrency.GetAsInt()

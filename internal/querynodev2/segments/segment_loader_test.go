@@ -68,7 +68,7 @@ func (suite *SegmentLoaderSuite) SetupTest() {
 	suite.manager = NewManager()
 	ctx := context.Background()
 	// TODO:: cpp chunk manager not support local chunk manager
-	//suite.chunkManager = storage.NewLocalChunkManager(storage.RootPath(
+	// suite.chunkManager = storage.NewLocalChunkManager(storage.RootPath(
 	//	fmt.Sprintf("/tmp/milvus-ut/%d", rand.Int63())))
 	chunkManagerFactory := NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
 	suite.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
@@ -212,7 +212,6 @@ func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 			suite.True(exist)
 		}
 	}
-
 }
 
 func (suite *SegmentLoaderSuite) TestLoadWithIndex() {
@@ -432,7 +431,6 @@ func (suite *SegmentLoaderSuite) TestLoadIndex() {
 
 	err := suite.loader.LoadIndex(ctx, segment, loadInfo, 0)
 	suite.ErrorIs(err, merr.ErrIndexNotFound)
-
 }
 
 func (suite *SegmentLoaderSuite) TestLoadWithMmap() {
@@ -676,7 +674,6 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 	})
 
 	suite.Run("wait_failure", func() {
-
 		suite.SetupTest()
 
 		var idx int
@@ -705,7 +702,6 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 	})
 
 	suite.Run("wait_timeout", func() {
-
 		suite.SetupTest()
 
 		suite.segmentManager.EXPECT().GetBy(mock.Anything, mock.Anything).Return(nil)

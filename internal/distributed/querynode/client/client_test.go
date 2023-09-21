@@ -21,13 +21,13 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/internal/util/mock"
-	"github.com/milvus-io/milvus/internal/util/streamrpc"
-
-	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
+
+	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/mock"
+	"github.com/milvus-io/milvus/internal/util/streamrpc"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func Test_NewClient(t *testing.T) {
@@ -115,7 +115,7 @@ func Test_NewClient(t *testing.T) {
 		r20, err := client.SearchSegments(ctx, nil)
 		retCheck(retNotNil, r20, err)
 
-		//stream rpc
+		// stream rpc
 		streamer1 := streamrpc.NewGrpcQueryStreamer()
 		err = client.QueryStream(ctx, nil, streamer1)
 		retCheck(retNotNil, streamer1.AsClient(), err)

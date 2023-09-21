@@ -25,8 +25,10 @@ import (
 	"google.golang.org/grpc/encoding"
 )
 
-const None = ""
-const Zstd = "zstd"
+const (
+	None = ""
+	Zstd = "zstd"
+)
 
 type grpcCompressor struct {
 	encoder *zstd.Encoder

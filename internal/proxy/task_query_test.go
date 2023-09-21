@@ -424,7 +424,6 @@ func TestTaskQuery_functions(t *testing.T) {
 						Key:   test.inKey[i],
 						Value: test.inValue[i],
 					})
-
 				}
 				ret, err := parseQueryParams(inParams)
 				if test.expectErr {
@@ -519,7 +518,8 @@ func TestTaskQuery_functions(t *testing.T) {
 				1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
 				1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
 				11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 88.0,
-				11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 88.0}
+				11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 88.0,
+			}
 
 			t.Run("test limited", func(t *testing.T) {
 				tests := []struct {
@@ -541,7 +541,6 @@ func TestTaskQuery_functions(t *testing.T) {
 						assert.NoError(t, err)
 					})
 				}
-
 			})
 
 			t.Run("test unLimited and maxOutputSize", func(t *testing.T) {
@@ -872,7 +871,6 @@ func Test_queryTask_createPlan(t *testing.T) {
 	})
 
 	t.Run("query without expression", func(t *testing.T) {
-
 		tsk := &queryTask{
 			request: &milvuspb.QueryRequest{
 				OutputFields: []string{"a"},
@@ -883,7 +881,6 @@ func Test_queryTask_createPlan(t *testing.T) {
 	})
 
 	t.Run("invalid expression", func(t *testing.T) {
-
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
@@ -907,7 +904,6 @@ func Test_queryTask_createPlan(t *testing.T) {
 	})
 
 	t.Run("invalid output fields", func(t *testing.T) {
-
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{

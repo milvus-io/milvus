@@ -72,9 +72,7 @@ var (
 	}
 )
 
-var (
-	mockChunkMgrIns = &mockChunkmgr{}
-)
+var mockChunkMgrIns = &mockChunkmgr{}
 
 type mockStorageFactory struct{}
 

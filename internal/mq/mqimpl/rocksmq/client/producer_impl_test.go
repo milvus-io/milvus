@@ -40,5 +40,5 @@ func TestProducerTopic(t *testing.T) {
 	})
 	assert.Nil(t, producer)
 	assert.Error(t, err)
-	//assert.Equal(t, topicName, producer.Topic())
+	// assert.Equal(t, topicName, producer.Topic())
 }

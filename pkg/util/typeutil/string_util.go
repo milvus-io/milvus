@@ -27,7 +27,7 @@ func AddOne(data string) string {
 	if len(data) == 0 {
 		return data
 	}
-	var datab = []byte(data)
+	datab := []byte(data)
 	if datab[len(datab)-1] != 255 {
 		datab[len(datab)-1]++
 	} else {

@@ -76,7 +76,6 @@ func TestMinIOCMFail(t *testing.T) {
 	)
 	assert.Error(t, err)
 	assert.Nil(t, client)
-
 }
 
 func TestMinIOCM(t *testing.T) {
@@ -440,7 +439,6 @@ func TestMinIOCM(t *testing.T) {
 		r, err := testCM.Mmap(ctx, key)
 		assert.Error(t, err)
 		assert.Nil(t, r)
-
 	})
 
 	t.Run("test Prefix", func(t *testing.T) {

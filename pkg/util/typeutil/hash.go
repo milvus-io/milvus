@@ -93,7 +93,7 @@ func HashPK2Channels(primaryKeys *schemapb.IDs, shardNames []string) []uint32 {
 			hashValues = append(hashValues, hash%numShard)
 		}
 	default:
-		//TODO::
+		// TODO::
 	}
 
 	return hashValues
@@ -121,7 +121,6 @@ func HashKey2Partitions(keys *schemapb.FieldData, partitionNames []string) ([]ui
 			}
 		default:
 			return nil, errors.New("currently only support DataType Int64 or VarChar as partition key Field")
-
 		}
 	default:
 		return nil, errors.New("currently not support vector field as partition keys")

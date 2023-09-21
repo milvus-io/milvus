@@ -25,7 +25,6 @@ import (
 	"strconv"
 
 	"github.com/cockroachdb/errors"
-
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
@@ -207,7 +206,7 @@ func ReadBinary(reader io.Reader, receiver interface{}, dataType schemapb.DataTy
 func readFloatVectors(blobReaders []io.Reader, dim int) []float32 {
 	ret := make([]float32, 0)
 	for _, r := range blobReaders {
-		var v = make([]float32, dim)
+		v := make([]float32, dim)
 		ReadBinary(r, &v, schemapb.DataType_FloatVector)
 		ret = append(ret, v...)
 	}
@@ -217,7 +216,7 @@ func readFloatVectors(blobReaders []io.Reader, dim int) []float32 {
 func readBinaryVectors(blobReaders []io.Reader, dim int) []byte {
 	ret := make([]byte, 0)
 	for _, r := range blobReaders {
-		var v = make([]byte, dim/8)
+		v := make([]byte, dim/8)
 		ReadBinary(r, &v, schemapb.DataType_BinaryVector)
 		ret = append(ret, v...)
 	}
@@ -227,7 +226,7 @@ func readBinaryVectors(blobReaders []io.Reader, dim int) []byte {
 func readFloat16Vectors(blobReaders []io.Reader, dim int) []byte {
 	ret := make([]byte, 0)
 	for _, r := range blobReaders {
-		var v = make([]byte, dim*2)
+		v := make([]byte, dim*2)
 		ReadBinary(r, &v, schemapb.DataType_Float16Vector)
 		ret = append(ret, v...)
 	}
@@ -831,7 +830,7 @@ func GetPkFromInsertData(collSchema *schemapb.CollectionSchema, data *InsertData
 	case schemapb.DataType_VarChar:
 		realPfData, ok = pfData.(*StringFieldData)
 	default:
-		//TODO
+		// TODO
 	}
 	if !ok {
 		log.Warn("primary field not in Int64 or VarChar format", zap.Int64("fieldID", pf.FieldID))

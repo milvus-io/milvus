@@ -79,8 +79,7 @@ func newMockTsoAllocator() tsoAllocator {
 	return &mockTsoAllocator{}
 }
 
-type mockIDAllocatorInterface struct {
-}
+type mockIDAllocatorInterface struct{}
 
 func (m *mockIDAllocatorInterface) AllocOne() (UniqueID, error) {
 	return UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()), nil
@@ -312,8 +311,7 @@ func newSimpleMockMsgStream() *simpleMockMsgStream {
 	}
 }
 
-type simpleMockMsgStreamFactory struct {
-}
+type simpleMockMsgStreamFactory struct{}
 
 func (factory *simpleMockMsgStreamFactory) Init(param *paramtable.ComponentParam) error {
 	return nil
@@ -430,7 +428,7 @@ func generateFieldData(dataType schemapb.DataType, fieldName string, numRows int
 			},
 		}
 	default:
-		//TODO::
+		// TODO::
 	}
 
 	return fieldData

@@ -471,7 +471,6 @@ func (suite *LeaderObserverTestSuite) TestSyncRemovedSegments() {
 }
 
 func (suite *LeaderObserverTestSuite) TestIgnoreSyncRemovedSegments() {
-
 	observer := suite.observer
 	observer.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
 	observer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
