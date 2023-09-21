@@ -154,6 +154,9 @@ pipeline {
                                                     --set queryNode.profiling.enabled=true \
                                                     --set indexCoordinator.profiling.enabled=true \
                                                     --set indexNode.profiling.enabled=true \
+                                                    --set indexNode.disk.enabled=true \
+                                                    --set queryNode.disk.enabled=true \
+                                                    --set standalone.disk.enabled=true \
                                                     --set log.level=debug \
                                                     --set common.security.authorizationEnabled=${authenticationEnabled} \
                                                     --version ${chart_version} \
