@@ -10,7 +10,6 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "segcore/load_index_c.h"
-
 #include "common/FieldMeta.h"
 #include "common/EasyAssert.h"
 #include "index/Index.h"
@@ -20,6 +19,7 @@
 #include "log/Log.h"
 #include "segcore/Types.h"
 #include "storage/Util.h"
+#include "common/binary_set_c.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/LocalChunkManagerSingleton.h"
 
@@ -106,7 +106,7 @@ appendVecIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
     try {
         auto load_index_info =
             (milvus::segcore::LoadIndexInfo*)c_load_index_info;
-        auto binary_set = (knowhere::BinarySet*)c_binary_set;
+        auto binary_set = (milvus::BinarySet*)c_binary_set;
         auto& index_params = load_index_info->index_params;
 
         milvus::index::CreateIndexInfo index_info;
@@ -168,7 +168,7 @@ appendScalarIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
         auto load_index_info =
             (milvus::segcore::LoadIndexInfo*)c_load_index_info;
         auto field_type = load_index_info->field_type;
-        auto binary_set = (knowhere::BinarySet*)c_binary_set;
+        auto binary_set = (milvus::BinarySet*)c_binary_set;
         auto& index_params = load_index_info->index_params;
         bool find_index_type =
             index_params.count("index_type") > 0 ? true : false;

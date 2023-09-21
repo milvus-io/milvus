@@ -17,6 +17,7 @@
 #pragma once
 
 #include "common/Types.h"
+#include "binary_set_c.h"
 
 namespace milvus {
 
@@ -39,7 +40,7 @@ Disassemble(BinarySet& binarySet);
 void
 AppendSliceMeta(BinarySet& binarySet, const Config& meta_info);
 
-BinaryPtr
+Binary
 EraseSliceMeta(BinarySet& binarySet);
 
 }  // namespace milvus

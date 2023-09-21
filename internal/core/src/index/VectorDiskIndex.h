@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "index/VectorIndex.h"
+#include "knowhere/version.h"
 #include "storage/DiskFileManagerImpl.h"
 
 namespace milvus::index {
@@ -37,7 +38,7 @@ class VectorDiskAnnIndex : public VectorIndex {
         auto remote_paths_to_size = file_manager_->GetRemotePathsToFileSize();
         BinarySet binary_set;
         for (auto& file : remote_paths_to_size) {
-            binary_set.Append(file.first, nullptr, file.second);
+            binary_set.Append(file.first, Binary(nullptr, file.second));
         }
 
         return binary_set;

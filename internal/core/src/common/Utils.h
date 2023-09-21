@@ -193,7 +193,7 @@ KnowhereStatusString(knowhere::Status status) {
             return "malloc error";
         case knowhere::Status::diskann_inner_error:
             return "diskann inner error";
-        case knowhere::Status::diskann_file_error:
+        case knowhere::Status::disk_file_error:
             return "diskann file error";
         case knowhere::Status::invalid_value_in_json:
             return "invalid value in json";
@@ -201,8 +201,8 @@ KnowhereStatusString(knowhere::Status status) {
             return "arithmetic overflow";
         case knowhere::Status::raft_inner_error:
             return "raft inner error";
-        case knowhere::Status::invalid_binary_set:
-            return "invalid binary set";
+        case knowhere::Status::invalid_index_sequence:
+            return "invalid index binary sequence";
         default:
             return "unexpected status";
     }

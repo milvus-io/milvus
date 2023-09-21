@@ -22,6 +22,7 @@
 #include <vector>
 #include <memory>
 
+#include "common/BinarySet.h"
 #include "storage/IndexData.h"
 #include "storage/FileManager.h"
 #include "storage/ChunkManager.h"

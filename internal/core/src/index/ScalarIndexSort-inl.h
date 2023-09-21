@@ -106,16 +106,18 @@ ScalarIndexSort<T>::Serialize(const Config& config) {
     AssertInfo(is_built_, "index has not been built");
 
     auto index_data_size = data_.size() * sizeof(IndexStructure<T>);
-    std::shared_ptr<uint8_t[]> index_data(new uint8_t[index_data_size]);
+    std::unique_ptr<uint8_t[]> index_data(new uint8_t[index_data_size]);
     memcpy(index_data.get(), data_.data(), index_data_size);
 
-    std::shared_ptr<uint8_t[]> index_length(new uint8_t[sizeof(size_t)]);
+    std::unique_ptr<uint8_t[]> index_length(new uint8_t[sizeof(size_t)]);
     auto index_size = data_.size();
     memcpy(index_length.get(), &index_size, sizeof(size_t));
 
     BinarySet res_set;
-    res_set.Append("index_data", index_data, index_data_size);
-    res_set.Append("index_length", index_length, sizeof(size_t));
+    res_set.Append("index_data",
+                   Binary(std::move(index_data), index_data_size));
+    res_set.Append("index_length",
+                   Binary(std::move(index_length), sizeof(size_t)));
 
     milvus::Disassemble(res_set);
 
@@ -131,7 +133,7 @@ ScalarIndexSort<T>::Upload(const Config& config) {
     auto remote_paths_to_size = file_manager_->GetRemotePathsToFileSize();
     BinarySet ret;
     for (auto& file : remote_paths_to_size) {
-        ret.Append(file.first, nullptr, file.second);
+        ret.Append(file.first, Binary(nullptr, file.second));
     }
 
     return ret;
@@ -142,13 +144,15 @@ inline void
 ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
                                         const Config& config) {
     size_t index_size;
-    auto index_length = index_binary.GetByName("index_length");
-    memcpy(&index_size, index_length->data.get(), (size_t)index_length->size);
+    auto index_length_ptr = index_binary.GetBinaryPtrByName("index_length");
+    auto index_length_size = index_binary.GetBinarySizeByName("index_length");
+    memcpy(&index_size, index_length_ptr, (size_t)index_length_size);
 
-    auto index_data = index_binary.GetByName("index_data");
+    auto index_data_ptr = index_binary.GetBinaryPtrByName("index_data");
+    auto index_data_size = index_binary.GetBinarySizeByName("index_data");
     data_.resize(index_size);
     idx_to_offsets_.resize(index_size);
-    memcpy(data_.data(), index_data->data.get(), (size_t)index_data->size);
+    memcpy(data_.data(), index_data_ptr, (size_t)index_data_size);
     for (size_t i = 0; i < data_.size(); ++i) {
         idx_to_offsets_[data_[i].idx_] = i;
     }
@@ -174,10 +178,9 @@ ScalarIndexSort<T>::Load(const Config& config) {
     BinarySet binary_set;
     for (auto& [key, data] : index_datas) {
         auto size = data->Size();
-        auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
-        auto buf = std::shared_ptr<uint8_t[]>(
-            (uint8_t*)const_cast<void*>(data->Data()), deleter);
-        binary_set.Append(key, buf, size);
+        auto buf = std::unique_ptr<uint8_t[]>(
+            (uint8_t*)const_cast<void*>(data->Data()));
+        binary_set.Append(key, Binary(std::move(buf), size));
     }
 
     LoadWithoutAssemble(binary_set, config);

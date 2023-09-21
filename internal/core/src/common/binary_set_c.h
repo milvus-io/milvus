@@ -24,7 +24,6 @@ extern "C" {
 #include "common/type_c.h"
 
 typedef void* CBinarySet;
-
 CStatus
 NewBinarySet(CBinarySet* c_binary_set);
 

@@ -10,8 +10,8 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-
 #ifdef __cplusplus
+#include "common/BinarySet.h"
 extern "C" {
 #endif
 

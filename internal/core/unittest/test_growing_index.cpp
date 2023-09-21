@@ -58,7 +58,8 @@ TEST(GrowingIndex, Correctness) {
 
     milvus::proto::plan::PlanNode range_query_plan_node;
     auto vector_range_querys = range_query_plan_node.mutable_vector_anns();
-    vector_range_querys->set_vector_type(milvus::proto::plan::VectorType::FloatVector);
+    vector_range_querys->set_vector_type(
+        milvus::proto::plan::VectorType::FloatVector);
     vector_range_querys->set_placeholder_tag("$0");
     vector_range_querys->set_field_id(102);
     auto range_query_info = vector_range_querys->mutable_query_info();

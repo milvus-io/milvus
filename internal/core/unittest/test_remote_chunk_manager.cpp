@@ -112,8 +112,7 @@ TEST_F(RemoteChunkManagerTest, BucketNegtive) {
     try {
         aws_chunk_manager_->CreateBucket(testBucketName);
     } catch (SegcoreError& e) {
-        EXPECT_TRUE(std::string(e.what()).find("exists") !=
-                    string::npos);
+        EXPECT_TRUE(std::string(e.what()).find("exists") != string::npos);
     }
     aws_chunk_manager_->DeleteBucket(testBucketName);
 }
@@ -138,9 +137,9 @@ TEST_F(RemoteChunkManagerTest, WritePositive) {
     aws_chunk_manager_->SetBucketName(testBucketName);
     EXPECT_EQ(aws_chunk_manager_->GetBucketName(), testBucketName);
 
-     if (!aws_chunk_manager_->BucketExists(testBucketName)) {
-         aws_chunk_manager_->CreateBucket(testBucketName);
-     }
+    if (!aws_chunk_manager_->BucketExists(testBucketName)) {
+        aws_chunk_manager_->CreateBucket(testBucketName);
+    }
     uint8_t data[5] = {0x17, 0x32, 0x45, 0x34, 0x23};
     string path = "1";
     aws_chunk_manager_->Write(path, data, sizeof(data));

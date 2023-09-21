@@ -35,9 +35,10 @@
 #include <variant>
 #include <vector>
 
-#include "knowhere/binaryset.h"
 #include "knowhere/comp/index_param.h"
+#include "knowhere/index_sequence.h"
 #include "knowhere/dataset.h"
+#include "BinarySet.h"
 #include "simdjson.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
@@ -160,8 +161,7 @@ using Config = nlohmann::json;
 using TargetBitmap = FixedVector<bool>;
 using TargetBitmapPtr = std::unique_ptr<TargetBitmap>;
 
-using BinaryPtr = knowhere::BinaryPtr;
-using BinarySet = knowhere::BinarySet;
+using BinaryPtr = void*;
 using Dataset = knowhere::DataSet;
 using DatasetPtr = knowhere::DataSetPtr;
 using MetricType = knowhere::MetricType;

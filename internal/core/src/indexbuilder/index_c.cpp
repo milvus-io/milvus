@@ -228,7 +228,7 @@ SerializeIndexToBinarySet(CIndex index, CBinarySet* c_binary_set) {
         auto real_index =
             reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
         auto binary =
-            std::make_unique<knowhere::BinarySet>(real_index->Serialize());
+            std::make_unique<milvus::BinarySet>(real_index->Serialize());
         *c_binary_set = binary.release();
         status.error_code = Success;
         status.error_msg = "";
@@ -248,7 +248,7 @@ LoadIndexFromBinarySet(CIndex index, CBinarySet c_binary_set) {
             "failed to load index from binary set, passed index was null");
         auto real_index =
             reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
-        auto binary_set = reinterpret_cast<knowhere::BinarySet*>(c_binary_set);
+        auto binary_set = reinterpret_cast<milvus::BinarySet*>(c_binary_set);
         real_index->Load(*binary_set);
         status.error_code = Success;
         status.error_msg = "";
@@ -455,8 +455,7 @@ SerializeIndexAndUpLoad(CIndex index, CBinarySet* c_binary_set) {
             "failed to serialize index to binary set, passed index was null");
         auto real_index =
             reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
-        auto binary =
-            std::make_unique<knowhere::BinarySet>(real_index->Upload());
+        auto binary = std::make_unique<milvus::BinarySet>(real_index->Upload());
         *c_binary_set = binary.release();
         status.error_code = Success;
         status.error_msg = "";

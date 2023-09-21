@@ -407,10 +407,8 @@ TEST_P(IndexTest, BuildAndQuery) {
         create_index_info, file_manager);
     vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
 
-    std::vector<std::string> index_files;
-    for (auto& binary : binary_set.binary_map_) {
-        index_files.emplace_back(binary.first);
-    }
+    std::vector<std::string> index_files = binary_set.GetBinarySetAllKeys();
+
     load_conf["index_files"] = index_files;
     ASSERT_NO_THROW(vec_index->Load(load_conf));
     EXPECT_EQ(vec_index->Count(), NB);
@@ -461,10 +459,8 @@ TEST_P(IndexTest, Mmap) {
     }
     vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
 
-    std::vector<std::string> index_files;
-    for (auto& binary : binary_set.binary_map_) {
-        index_files.emplace_back(binary.first);
-    }
+    std::vector<std::string> index_files = binary_set.GetBinarySetAllKeys();
+
     load_conf["index_files"] = index_files;
     load_conf["mmap_filepath"] = "mmap/test_index_mmap_" + index_type;
     vec_index->Load(load_conf);
@@ -516,10 +512,7 @@ TEST_P(IndexTest, GetVector) {
 
         vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
 
-        std::vector<std::string> index_files;
-        for (auto& binary : binary_set.binary_map_) {
-            index_files.emplace_back(binary.first);
-        }
+        std::vector<std::string> index_files = binary_set.GetBinarySetAllKeys();
         load_conf["index_files"] = index_files;
         vec_index->Load(binary_set, load_conf);
         EXPECT_EQ(vec_index->Count(), NB);
@@ -613,10 +606,7 @@ TEST(Indexing, SearchDiskAnnWithInvalidParam) {
     auto new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
         create_index_info, file_manager);
     auto vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
-    std::vector<std::string> index_files;
-    for (auto& binary : binary_set.binary_map_) {
-        index_files.emplace_back(binary.first);
-    }
+    std::vector<std::string> index_files = binary_set.GetBinarySetAllKeys();
     auto load_conf = generate_load_conf(index_type, metric_type, NB);
     load_conf["index_files"] = index_files;
     vec_index->Load(load_conf);

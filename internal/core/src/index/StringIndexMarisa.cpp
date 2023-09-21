@@ -125,19 +125,19 @@ StringIndexMarisa::Serialize(const Config& config) {
     trie_.write(fd);
 
     auto size = get_file_size(fd);
-    auto index_data = std::shared_ptr<uint8_t[]>(new uint8_t[size]);
+    auto index_data = std::unique_ptr<uint8_t[]>(new uint8_t[size]);
     ReadDataFromFD(fd, index_data.get(), size);
 
     close(fd);
     remove(file.c_str());
 
     auto str_ids_len = str_ids_.size() * sizeof(size_t);
-    std::shared_ptr<uint8_t[]> str_ids(new uint8_t[str_ids_len]);
+    std::unique_ptr<uint8_t[]> str_ids(new uint8_t[str_ids_len]);
     memcpy(str_ids.get(), str_ids_.data(), str_ids_len);
 
     BinarySet res_set;
-    res_set.Append(MARISA_TRIE_INDEX, index_data, size);
-    res_set.Append(MARISA_STR_IDS, str_ids, str_ids_len);
+    res_set.Append(MARISA_TRIE_INDEX, Binary(std::move(index_data), size));
+    res_set.Append(MARISA_STR_IDS, Binary(std::move(str_ids), str_ids_len));
 
     Disassemble(res_set);
 
@@ -152,7 +152,7 @@ StringIndexMarisa::Upload(const Config& config) {
     auto remote_paths_to_size = file_manager_->GetRemotePathsToFileSize();
     BinarySet ret;
     for (auto& file : remote_paths_to_size) {
-        ret.Append(file.first, nullptr, file.second);
+        ret.Append(file.first, Binary(nullptr, file.second));
     }
 
     return ret;
@@ -165,14 +165,14 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
     auto uuid_string = boost::uuids::to_string(uuid);
     auto file = std::string("/tmp/") + uuid_string;
 
-    auto index = set.GetByName(MARISA_TRIE_INDEX);
-    auto len = index->size;
+    auto index_data = set.GetBinaryPtrByName(MARISA_TRIE_INDEX);
+    auto len = set.GetBinarySizeByName(MARISA_TRIE_INDEX);
 
     auto fd = open(
         file.c_str(), O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR | S_IXUSR);
     lseek(fd, 0, SEEK_SET);
 
-    auto status = write(fd, index->data.get(), len);
+    auto status = write(fd, index_data, len);
     if (status != len) {
         close(fd);
         remove(file.c_str());
@@ -186,10 +186,10 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
     close(fd);
     remove(file.c_str());
 
-    auto str_ids = set.GetByName(MARISA_STR_IDS);
-    auto str_ids_len = str_ids->size;
+    auto str_ids_data = set.GetBinaryPtrByName(MARISA_STR_IDS);
+    auto str_ids_len = set.GetBinarySizeByName(MARISA_STR_IDS);
     str_ids_.resize(str_ids_len / sizeof(size_t));
-    memcpy(str_ids_.data(), str_ids->data.get(), str_ids_len);
+    memcpy(str_ids_.data(), str_ids_data, str_ids_len);
 
     fill_offsets();
 }
@@ -211,10 +211,9 @@ StringIndexMarisa::Load(const Config& config) {
     BinarySet binary_set;
     for (auto& [key, data] : index_datas) {
         auto size = data->Size();
-        auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
-        auto buf = std::shared_ptr<uint8_t[]>(
-            (uint8_t*)const_cast<void*>(data->Data()), deleter);
-        binary_set.Append(key, buf, size);
+        auto buf = std::unique_ptr<uint8_t[]>(
+            (uint8_t*)const_cast<void*>(data->Data()));
+        binary_set.Append(key, Binary(std::move(buf), size));
     }
 
     LoadWithoutAssemble(binary_set, config);

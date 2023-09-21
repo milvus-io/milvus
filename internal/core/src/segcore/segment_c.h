@@ -10,7 +10,6 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -19,10 +18,10 @@ extern "C" {
 #include <stdlib.h>
 #include <stdint.h>
 
-#include "common/type_c.h"
-#include "segcore/plan_c.h"
 #include "segcore/load_index_c.h"
 #include "segcore/load_field_data_c.h"
+#include "common/type_c.h"
+#include "segcore/plan_c.h"
 
 typedef void* CSegmentInterface;
 typedef void* CSearchResult;

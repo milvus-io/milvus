@@ -15,13 +15,14 @@
 // limitations under the License.
 
 #include "common/EasyAssert.h"
-#include "knowhere/binaryset.h"
+#include "BinarySet.h"
 #include "common/binary_set_c.h"
+#include <cstring>
 
 CStatus
 NewBinarySet(CBinarySet* c_binary_set) {
     try {
-        auto binary_set = std::make_unique<knowhere::BinarySet>();
+        auto binary_set = std::make_unique<milvus::BinarySet>();
         *c_binary_set = binary_set.release();
         auto status = CStatus();
         status.error_code = milvus::ErrorCode::Success;
@@ -37,7 +38,7 @@ NewBinarySet(CBinarySet* c_binary_set) {
 
 void
 DeleteBinarySet(CBinarySet c_binary_set) {
-    auto binary_set = (knowhere::BinarySet*)c_binary_set;
+    auto binary_set = (milvus::BinarySet*)c_binary_set;
     delete binary_set;
 }
 
@@ -48,13 +49,13 @@ AppendIndexBinary(CBinarySet c_binary_set,
                   const char* c_index_key) {
     auto status = CStatus();
     try {
-        auto binary_set = (knowhere::BinarySet*)c_binary_set;
+        auto binary_set = (milvus::BinarySet*)c_binary_set;
         std::string index_key(c_index_key);
         uint8_t* index = (uint8_t*)index_binary;
-        uint8_t* dup = new uint8_t[index_size]();
-        memcpy(dup, index, index_size);
-        std::shared_ptr<uint8_t[]> data(dup);
-        binary_set->Append(index_key, data, index_size);
+        std::unique_ptr<uint8_t[]> data(new uint8_t[index_size]);
+        memcpy(data.get(), index, index_size);
+        binary_set->Append(
+            index_key, knowhere::IndexSequence(std::move(data), index_size));
 
         status.error_code = milvus::ErrorCode::Success;
         status.error_msg = "";
@@ -67,43 +68,46 @@ AppendIndexBinary(CBinarySet c_binary_set,
 
 int
 GetBinarySetSize(CBinarySet c_binary_set) {
-    auto binary_set = (knowhere::BinarySet*)c_binary_set;
-    return binary_set->binary_map_.size();
+    auto binary_set = (milvus::BinarySet*)c_binary_set;
+    return binary_set->GetBinarySetSize();
 }
 
 void
 GetBinarySetKeys(CBinarySet c_binary_set, void* data) {
-    auto binary_set = (knowhere::BinarySet*)c_binary_set;
-    auto& map_ = binary_set->binary_map_;
+    auto binary_set = (milvus::BinarySet*)c_binary_set;
+    auto binary_set_keys = binary_set->GetBinarySetAllKeys();
     const char** data_ = (const char**)data;
     std::size_t i = 0;
-    for (auto it = map_.begin(); it != map_.end(); ++it, i++) {
-        data_[i] = it->first.c_str();
+    for (auto it = binary_set_keys.begin(); it != binary_set_keys.end();
+         ++it, i++) {
+        data_[i] = (*it).c_str();
     }
 }
 
 int
 GetBinarySetValueSize(CBinarySet c_binary_set, const char* key) {
-    auto binary_set = (knowhere::BinarySet*)c_binary_set;
+    auto binary_set = (milvus::BinarySet*)c_binary_set;
     int64_t ret_ = 0;
-    try {
-        std::string key_(key);
-        auto binary = binary_set->GetByName(key_);
-        ret_ = binary->size;
-    } catch (std::exception& e) {
-    }
+    std::string key_(key);
+    ret_ = binary_set->GetBinarySizeByName(key);
     return ret_;
 }
 
 CStatus
 CopyBinarySetValue(void* data, const char* key, CBinarySet c_binary_set) {
     auto status = CStatus();
-    auto binary_set = (knowhere::BinarySet*)c_binary_set;
+    auto binary_set = (milvus::BinarySet*)c_binary_set;
     try {
-        auto binary = binary_set->GetByName(key);
-        status.error_code = milvus::ErrorCode::Success;
-        status.error_msg = "";
-        memcpy((uint8_t*)data, binary->data.get(), binary->size);
+        auto binary_ptr = binary_set->GetBinaryPtrByName(key);
+        auto bianry_size = binary_set->GetBinarySizeByName(key);
+        if (binary_ptr != nullptr && bianry_size != 0) {
+            status.error_code = milvus::ErrorCode::Success;
+            status.error_msg = "";
+            memcpy((uint8_t*)data, binary_ptr, bianry_size);
+        } else {
+            status.error_code = milvus::ErrorCode::DataIsEmpty;
+            status.error_msg = "Null binary in this key.";
+        }
     } catch (std::exception& e) {
         status.error_code = milvus::ErrorCode::UnexpectedError;
         status.error_msg = strdup(e.what());

@@ -58,7 +58,8 @@ VectorMemIndex::VectorMemIndex(const IndexType& index_type,
         file_manager_ = std::dynamic_pointer_cast<storage::MemFileManagerImpl>(
             file_manager);
     }
-    index_ = knowhere::IndexFactory::Instance().Create(GetIndexType());
+    auto version = knowhere::Version::GetCurrentVersion().VersionCode();
+    index_ = knowhere::IndexFactory::Instance().Create(GetIndexType(), version);
 }
 
 BinarySet
@@ -69,7 +70,7 @@ VectorMemIndex::Upload(const Config& config) {
     auto remote_paths_to_size = file_manager_->GetRemotePathsToFileSize();
     BinarySet ret;
     for (auto& file : remote_paths_to_size) {
-        ret.Append(file.first, nullptr, file.second);
+        ret.Append(file.first, Binary(nullptr, file.second));
     }
 
     return ret;
@@ -77,8 +78,10 @@ VectorMemIndex::Upload(const Config& config) {
 
 BinarySet
 VectorMemIndex::Serialize(const Config& config) {
-    knowhere::BinarySet ret;
-    auto stat = index_.Serialize(ret);
+    BinarySet ret;
+    knowhere::IndexSequence vec_index_seq;
+    auto stat = index_.Serialize(vec_index_seq);
+    ret.Append(index_.Type(), std::move(vec_index_seq));
     if (stat != knowhere::Status::success)
         PanicCodeInfo(
             ErrorCode::UnexpectedError,
@@ -91,7 +94,48 @@ VectorMemIndex::Serialize(const Config& config) {
 void
 VectorMemIndex::LoadWithoutAssemble(const BinarySet& binary_set,
                                     const Config& config) {
-    auto stat = index_.Deserialize(binary_set);
+    auto index_type = GetIndexType();
+    auto binary_value_ptr = binary_set.GetBinaryPtrByName(index_type);
+    auto binary_value_size = binary_set.GetBinarySizeByName(index_type);
+    auto index_seq_value =
+        std::unique_ptr<uint8_t[]>(new uint8_t[binary_value_size]);
+    memcpy(index_seq_value.get(), binary_value_ptr, binary_value_size);
+    auto index_seq =
+        knowhere::IndexSequence(std::move(index_seq_value), binary_value_size);
+
+    if (is_in_nm_list(index_type) && binary_set.Contains("RAW_DATA")) {
+        auto raw_data_ptr = binary_set.GetBinaryPtrByName("RAW_DATA");
+        auto raw_data_size = binary_set.GetBinarySizeByName("RAW_DATA");
+        knowhere::ConvertIVFFlatIfNeeded(
+            index_seq, GetMetricType(), raw_data_ptr, raw_data_size);
+    }
+    auto stat = index_.Deserialize(index_seq);
+    if (stat != knowhere::Status::success)
+        PanicCodeInfo(
+            ErrorCode::KnowhereError,
+            "failed to Deserialize index, " + KnowhereStatusString(stat));
+    SetDim(index_.Dim());
+}
+
+void
+VectorMemIndex::LoadWithoutAssemble(BinarySet&& binary_set,
+                                    const Config& config) {
+    auto index_type = GetIndexType();
+    auto index_seq = binary_set.Erase(index_type);
+    knowhere::Status stat;
+    if (GetIndexType() == knowhere::IndexEnum::INDEX_HNSW) {
+        stat = index_.Deserialize(std::move(index_seq));
+    } else {
+        if (is_in_nm_list(index_type) && binary_set.Contains("RAW_DATA")) {
+            auto raw_data_ptr = binary_set.GetBinaryPtrByName("RAW_DATA");
+            auto raw_data_size = binary_set.GetBinarySizeByName("RAW_DATA");
+            knowhere::ConvertIVFFlatIfNeeded(
+                index_seq, GetMetricType(), raw_data_ptr, raw_data_size);
+        }
+        stat = index_.Deserialize(index_seq);
+        binary_set.Erase("RAW_DATA");
+    }
+
     if (stat != knowhere::Status::success)
         PanicCodeInfo(
             ErrorCode::UnexpectedError,
@@ -205,14 +249,15 @@ VectorMemIndex::Load(const Config& config) {
     for (auto& [key, data] : index_datas) {
         LOG_SEGCORE_INFO_ << "add index data to binary set: " << key;
         auto size = data->Size();
-        auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
-        auto buf = std::shared_ptr<uint8_t[]>(
-            (uint8_t*)const_cast<void*>(data->Data()), deleter);
-        binary_set.Append(key, buf, size);
+        // take the ownership of the binary
+        auto bin = std::unique_ptr<uint8_t[], decltype(&std::free)>(
+            reinterpret_cast<uint8_t*>(data->Relinquish()), &std::free);
+        auto index_seq = knowhere::IndexSequence(std::move(bin), size);
+        binary_set.Append(key, std::move(index_seq));
     }
 
     LOG_SEGCORE_INFO_ << "load index into Knowhere...";
-    LoadWithoutAssemble(binary_set, config);
+    LoadWithoutAssemble(std::move(binary_set), config);
     LOG_SEGCORE_INFO_ << "load vector index done";
 }
 

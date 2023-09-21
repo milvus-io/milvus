@@ -19,7 +19,7 @@ INSTALL_PATH := $(PWD)/bin
 LIBRARY_PATH := $(PWD)/lib
 OS := $(shell uname -s)
 mode = Release
-disk_index = OFF
+disk_index = ON
 useasan = false
 ifeq (${USE_ASAN}, true)
 useasan = true

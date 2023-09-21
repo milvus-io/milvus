@@ -1596,8 +1596,9 @@ TEST(CApiTest, LoadIndexInfo) {
 
     auto N = 1024 * 10;
     auto [raw_data, timestamps, uids] = generate_data(N);
+    auto version = knowhere::Version::GetCurrentVersion().VersionCode();
     auto indexing = knowhere::IndexFactory::Instance().Create(
-        knowhere::IndexEnum::INDEX_FAISS_IVFSQ8);
+        knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, version);
     auto conf =
         knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
                        {knowhere::meta::DIM, DIM},
@@ -1610,8 +1611,11 @@ TEST(CApiTest, LoadIndexInfo) {
     indexing.Add(*database, conf);
     EXPECT_EQ(indexing.Count(), N);
     EXPECT_EQ(indexing.Dim(), DIM);
-    knowhere::BinarySet binary_set;
-    indexing.Serialize(binary_set);
+
+    knowhere::IndexSequence index_seq;
+    indexing.Serialize(index_seq);
+    milvus::BinarySet binary_set;
+    binary_set.Append(indexing.Type(), std::move(index_seq));
     CBinarySet c_binary_set = (CBinarySet)&binary_set;
 
     void* c_load_index_info = nullptr;
@@ -1642,8 +1646,9 @@ TEST(CApiTest, LoadIndexSearch) {
     auto N = 1024 * 10;
     auto num_query = 100;
     auto [raw_data, timestamps, uids] = generate_data(N);
+    auto version = knowhere::Version::GetCurrentVersion().VersionCode();
     auto indexing = knowhere::IndexFactory::Instance().Create(
-        knowhere::IndexEnum::INDEX_FAISS_IVFSQ8);
+        knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, version);
     auto conf =
         knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
                        {knowhere::meta::DIM, DIM},
@@ -1659,8 +1664,10 @@ TEST(CApiTest, LoadIndexSearch) {
     EXPECT_EQ(indexing.Dim(), DIM);
 
     // serializ index to binarySet
-    knowhere::BinarySet binary_set;
-    indexing.Serialize(binary_set);
+    knowhere::IndexSequence index_seq;
+    indexing.Serialize(index_seq);
+    milvus::BinarySet binary_set;
+    binary_set.Append(indexing.Type(), std::move(index_seq));
 
     // fill loadIndexInfo
     milvus::segcore::LoadIndexInfo load_index_info;

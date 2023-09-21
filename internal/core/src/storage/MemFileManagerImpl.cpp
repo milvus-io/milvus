@@ -56,9 +56,8 @@ MemFileManagerImpl::AddFile(const BinarySet& binary_set) {
 
     auto remotePrefix = GetRemoteIndexObjectPrefix();
     int64_t batch_size = 0;
-    for (auto iter = binary_set.binary_map_.begin();
-         iter != binary_set.binary_map_.end();
-         iter++) {
+    auto binary_set_keys = binary_set.GetBinarySetAllKeys();
+    for (auto& key : binary_set_keys) {
         if (batch_size >= DEFAULT_FIELD_MAX_MEMORY_LIMIT) {
             AddBatchIndexFiles();
             data_slices.clear();
@@ -67,10 +66,12 @@ MemFileManagerImpl::AddFile(const BinarySet& binary_set) {
             batch_size = 0;
         }
 
-        data_slices.emplace_back(iter->second->data.get());
-        slice_sizes.emplace_back(iter->second->size);
-        slice_names.emplace_back(remotePrefix + "/" + iter->first);
-        batch_size += iter->second->size;
+        auto binary_value_ptr = binary_set.GetBinaryPtrByName(key);
+        auto binary_value_size = binary_set.GetBinarySizeByName(key);
+        data_slices.emplace_back(binary_value_ptr);
+        slice_sizes.emplace_back(binary_value_size);
+        slice_names.emplace_back(remotePrefix + "/" + key);
+        batch_size += binary_value_size;
     }
 
     if (data_slices.size() > 0) {

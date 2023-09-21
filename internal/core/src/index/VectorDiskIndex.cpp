@@ -54,10 +54,11 @@ VectorDiskAnnIndex<T>::VectorDiskAnnIndex(
     }
 
     local_chunk_manager->CreateDir(local_index_path_prefix);
+    auto version = knowhere::Version::GetCurrentVersion().VersionCode();
     auto diskann_index_pack =
         knowhere::Pack(std::shared_ptr<knowhere::FileManager>(file_manager));
-    index_ = knowhere::IndexFactory::Instance().Create(GetIndexType(),
-                                                       diskann_index_pack);
+    index_ = knowhere::IndexFactory::Instance().Create(
+        GetIndexType(), version, diskann_index_pack);
 }
 
 template <typename T>
@@ -78,7 +79,7 @@ VectorDiskAnnIndex<T>::Load(const Config& config) {
                "index file paths is empty when load disk ann index data");
     file_manager_->CacheIndexToDisk(index_files.value());
 
-    auto stat = index_.Deserialize(knowhere::BinarySet(), load_config);
+    auto stat = index_.Deserialize(knowhere::IndexSequence(), load_config);
     if (stat != knowhere::Status::success)
         PanicCodeInfo(
             ErrorCode::UnexpectedError,
@@ -93,7 +94,7 @@ VectorDiskAnnIndex<T>::Upload(const Config& config) {
     auto remote_paths_to_size = file_manager_->GetRemotePathsToFileSize();
     BinarySet ret;
     for (auto& file : remote_paths_to_size) {
-        ret.Append(file.first, nullptr, file.second);
+        ret.Append(file.first, Binary(nullptr, file.second));
     }
 
     return ret;
