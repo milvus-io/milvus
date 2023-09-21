@@ -5,11 +5,10 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-
+	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestInitHook(t *testing.T) {

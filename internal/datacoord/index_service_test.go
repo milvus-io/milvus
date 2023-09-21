@@ -48,7 +48,7 @@ func TestServer_CreateIndex(t *testing.T) {
 	var (
 		collID  = UniqueID(1)
 		fieldID = UniqueID(10)
-		//indexID    = UniqueID(100)
+		// indexID    = UniqueID(100)
 		indexName  = "default_idx"
 		typeParams = []*commonpb.KeyValuePair{
 			{
@@ -706,7 +706,7 @@ func TestServer_DescribeIndex(t *testing.T) {
 			catalog: catalog,
 			indexes: map[UniqueID]map[UniqueID]*model.Index{
 				collID: {
-					//finished
+					// finished
 					indexID: {
 						TenantID:        "",
 						CollectionID:    collID,
@@ -1067,7 +1067,7 @@ func TestServer_GetIndexStatistics(t *testing.T) {
 			catalog: catalog,
 			indexes: map[UniqueID]map[UniqueID]*model.Index{
 				collID: {
-					//finished
+					// finished
 					indexID: {
 						TenantID:        "",
 						CollectionID:    collID,
@@ -1347,7 +1347,7 @@ func TestServer_DropIndex(t *testing.T) {
 			catalog: catalog,
 			indexes: map[UniqueID]map[UniqueID]*model.Index{
 				collID: {
-					//finished
+					// finished
 					indexID: {
 						TenantID:        "",
 						CollectionID:    collID,
@@ -1542,7 +1542,7 @@ func TestServer_GetIndexInfos(t *testing.T) {
 			catalog: &datacoord.Catalog{MetaKv: mocks.NewMetaKv(t)},
 			indexes: map[UniqueID]map[UniqueID]*model.Index{
 				collID: {
-					//finished
+					// finished
 					indexID: {
 						TenantID:        "",
 						CollectionID:    collID,

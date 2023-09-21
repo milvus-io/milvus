@@ -23,6 +23,9 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -30,9 +33,6 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	internalpb "github.com/milvus-io/milvus/internal/proto/internalpb"
 	querypb "github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/suite"
 )
 
 type RemoteWorkerSuite struct {

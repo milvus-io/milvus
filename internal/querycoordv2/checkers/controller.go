@@ -21,18 +21,17 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/pkg/log"
-	"go.uber.org/zap"
 )
 
-var (
-	checkRoundTaskNumLimit = 256
-)
+var checkRoundTaskNumLimit = 256
 
 var (
 	Segment_Checker = "segment_checker"
@@ -66,7 +65,6 @@ func NewCheckerController(
 	scheduler task.Scheduler,
 	broker meta.Broker,
 ) *CheckerController {
-
 	// CheckerController runs checkers with the order,
 	// the former checker has higher priority
 	checkers := map[string]Checker{
@@ -118,7 +116,6 @@ func getCheckerInterval(checkerType string) time.Duration {
 	default:
 		return Params.QueryCoordCfg.CheckInterval.GetAsDuration(time.Millisecond)
 	}
-
 }
 
 func (controller *CheckerController) StartChecker(ctx context.Context, checkerType string) {

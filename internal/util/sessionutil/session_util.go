@@ -176,7 +176,6 @@ func (s *Session) UnmarshalJSON(data []byte) error {
 
 // MarshalJSON marshals session to bytes.
 func (s *Session) MarshalJSON() ([]byte, error) {
-
 	verStr := s.Version.String()
 	return json.Marshal(&struct {
 		ServerID    int64  `json:"ServerID,omitempty"`
@@ -197,7 +196,6 @@ func (s *Session) MarshalJSON() ([]byte, error) {
 		Version:     verStr,
 		LeaseID:     s.leaseID,
 	})
-
 }
 
 // NewSession is a helper to build Session object.
@@ -426,7 +424,6 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 				"=",
 				0)).
 			Then(clientv3.OpPut(completeKey, string(sessionJSON), clientv3.WithLease(resp.ID))).Commit()
-
 		if err != nil {
 			log.Warn("compare and swap error, maybe the key has already been registered", zap.Error(err))
 			return err
@@ -491,7 +488,6 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 						keepAliveOnceResp = resp
 						return err
 					}, retry.Attempts(3))
-
 					if err != nil {
 						log.Warn("fail to retry keepAliveOnce", zap.String("serverName", s.ServerName), zap.Int64("leaseID", int64(*s.leaseID)), zap.Error(err))
 						s.safeCloseLiveCh()
@@ -758,7 +754,7 @@ func (w *sessionWatcher) handleWatchResponse(wresp clientv3.WatchResponse) {
 func (w *sessionWatcher) handleWatchErr(err error) error {
 	// if not ErrCompacted, just close the channel
 	if err != v3rpc.ErrCompacted {
-		//close event channel
+		// close event channel
 		log.Warn("Watch service found error", zap.Error(err))
 		close(w.eventCh)
 		return err
@@ -827,7 +823,7 @@ func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
 				if resp.Err() != nil {
 					// if not ErrCompacted, just close the channel
 					if resp.Err() != v3rpc.ErrCompacted {
-						//close event channel
+						// close event channel
 						log.Warn("Watch service found error", zap.Error(resp.Err()))
 						s.cancelKeepAlive()
 						return
@@ -1048,7 +1044,7 @@ func (s *Session) ForceActiveStandby(activateFunc func() error) error {
 		if len(sessions) != 0 {
 			activeSess := sessions[s.ServerName]
 			if activeSess == nil || activeSess.leaseID == nil {
-				//force delete all old sessions
+				// force delete all old sessions
 				s.etcdCli.Delete(s.ctx, s.activeKey)
 				for _, sess := range sessions {
 					if sess.ServerID != s.ServerID {

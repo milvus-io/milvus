@@ -95,7 +95,8 @@ func TestProxy_CheckHealth(t *testing.T) {
 
 	t.Run("proxy health check is fail", func(t *testing.T) {
 		checkHealthFunc1 := func(ctx context.Context,
-			req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+			req *milvuspb.CheckHealthRequest,
+		) (*milvuspb.CheckHealthResponse, error) {
 			return &milvuspb.CheckHealthResponse{
 				IsHealthy: false,
 				Reasons:   []string{"unHealth"},
@@ -113,7 +114,8 @@ func TestProxy_CheckHealth(t *testing.T) {
 				mock.checkHealthFunc = checkHealthFunc1
 			}),
 			queryCoord: qc,
-			dataCoord:  dataCoordMock}
+			dataCoord:  dataCoordMock,
+		}
 		node.multiRateLimiter = NewMultiRateLimiter()
 		node.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()
@@ -801,7 +803,6 @@ func TestProxy_ListClientInfos(t *testing.T) {
 		resp, err := node.ListClientInfos(context.TODO(), nil)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-
 	})
 }
 
@@ -963,7 +964,8 @@ func TestProxyListDatabase(t *testing.T) {
 			Return(&milvuspb.ListDatabasesResponse{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_Success,
-				}}, nil)
+				},
+			}, nil)
 		node.rootCoord = rc
 		node.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()

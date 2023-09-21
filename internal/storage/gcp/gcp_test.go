@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/stretchr/testify/assert"
@@ -100,5 +99,4 @@ func TestGCPWrappedHTTPTransport_RoundTrip(t *testing.T) {
 		_, err = ts.RoundTrip(req)
 		assert.Error(t, err)
 	})
-
 }

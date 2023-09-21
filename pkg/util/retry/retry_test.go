@@ -19,8 +19,9 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/lingdor/stackerror"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 func TestDo(t *testing.T) {

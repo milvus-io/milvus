@@ -730,7 +730,7 @@ func (mt *MetaTable) RenameCollection(ctx context.Context, dbName string, oldNam
 		return fmt.Errorf("target database:%s not found", newDBName)
 	}
 
-	//old collection should not be an alias
+	// old collection should not be an alias
 	_, ok = mt.aliases.get(dbName, oldName)
 	if ok {
 		log.Warn("unsupported use a alias to rename collection")
@@ -862,7 +862,7 @@ func (mt *MetaTable) RemovePartition(ctx context.Context, dbID int64, collection
 	if !ok {
 		return nil
 	}
-	var loc = -1
+	loc := -1
 	for idx, part := range coll.Partitions {
 		if part.PartitionID == partitionID {
 			loc = idx

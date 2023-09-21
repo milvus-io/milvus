@@ -26,12 +26,12 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/stretchr/testify/assert"
 )
 
 // mock class of JSONRowCounsumer
@@ -83,7 +83,6 @@ func Test_AdjustBufSize(t *testing.T) {
 	assert.NotNil(t, parser)
 	assert.Greater(t, parser.bufRowCount, 0)
 	adjustBufSize(parser, schema)
-
 }
 
 func Test_JSONParserParseRows_IntPK(t *testing.T) {

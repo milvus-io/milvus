@@ -38,7 +38,6 @@ func newEvent(eventSource, eventType string, key string, value string) *Event {
 		Value:       value,
 		HasUpdated:  false,
 	}
-
 }
 
 func PopulateEvents(source string, currentConfig, updatedConfig map[string]string) ([]*Event, error) {

@@ -20,8 +20,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/milvus-io/milvus/pkg/log"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 type baseUndoTask struct {

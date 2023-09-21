@@ -505,7 +505,6 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 }
 
 func (sd *shardDelegator) readDeleteFromMsgstream(ctx context.Context, position *msgpb.MsgPosition, safeTs uint64, candidate *pkoracle.BloomFilterSet) (*storage.DeleteData, error) {
-
 	log := sd.getLogger(ctx).With(
 		zap.String("channel", position.ChannelName),
 		zap.Int64("segmentID", candidate.ID()),
@@ -572,7 +571,6 @@ func (sd *shardDelegator) readDeleteFromMsgstream(ctx context.Context, position 
 			// reach safe ts
 			if safeTs <= msgPack.EndPositions[0].GetTimestamp() {
 				hasMore = false
-				break
 			}
 		}
 	}
@@ -655,7 +653,8 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 }
 
 func (sd *shardDelegator) SyncTargetVersion(newVersion int64, growingInTarget []int64,
-	sealedInTarget []int64, droppedInTarget []int64) {
+	sealedInTarget []int64, droppedInTarget []int64,
+) {
 	growings := sd.segmentManager.GetBy(
 		segments.WithType(segments.SegmentTypeGrowing),
 		segments.WithChannel(sd.vchannelName),

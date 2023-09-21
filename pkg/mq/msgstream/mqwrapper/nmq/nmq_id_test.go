@@ -79,7 +79,6 @@ func Test_Equal(t *testing.T) {
 		ret, err := rid1.Equal(rid1.Serialize())
 		assert.NoError(t, err)
 		assert.True(t, ret)
-
 	}
 
 	{

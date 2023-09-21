@@ -118,8 +118,10 @@ func (suite *ServiceSuite) SetupSuite() {
 		1000: 1,
 		1001: 3,
 	}
-	suite.nodes = []int64{1, 2, 3, 4, 5,
-		101, 102, 103, 104, 105}
+	suite.nodes = []int64{
+		1, 2, 3, 4, 5,
+		101, 102, 103, 104, 105,
+	}
 }
 
 func (suite *ServiceSuite) SetupTest() {
@@ -389,14 +391,16 @@ func (suite *ServiceSuite) TestResourceGroup() {
 		ID:            1,
 		CollectionID:  1,
 		Nodes:         []int64{1011, 1013},
-		ResourceGroup: "rg11"},
+		ResourceGroup: "rg11",
+	},
 		typeutil.NewUniqueSet(1011, 1013)),
 	)
 	server.meta.ReplicaManager.Put(meta.NewReplica(&querypb.Replica{
 		ID:            2,
 		CollectionID:  2,
 		Nodes:         []int64{1012, 1014},
-		ResourceGroup: "rg12"},
+		ResourceGroup: "rg12",
+	},
 		typeutil.NewUniqueSet(1012, 1014)),
 	)
 

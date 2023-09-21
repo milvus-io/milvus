@@ -3,9 +3,10 @@ package typeutil
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestNewKvPairs(t *testing.T) {

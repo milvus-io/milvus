@@ -1,8 +1,9 @@
 package deletebuffer
 
 import (
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/samber/lo"
+
+	"github.com/milvus-io/milvus/internal/storage"
 )
 
 // Item wraps cache item as `timed`.

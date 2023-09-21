@@ -34,7 +34,6 @@ import (
 )
 
 func TestBaseTaskQueue(t *testing.T) {
-
 	var err error
 	var unissuedTask task
 	var activeTask task
@@ -111,7 +110,6 @@ func TestBaseTaskQueue(t *testing.T) {
 }
 
 func TestDdTaskQueue(t *testing.T) {
-
 	var err error
 	var unissuedTask task
 	var activeTask task
@@ -189,7 +187,6 @@ func TestDdTaskQueue(t *testing.T) {
 
 // test the logic of queue
 func TestDmTaskQueue_Basic(t *testing.T) {
-
 	var err error
 	var unissuedTask task
 	var activeTask task
@@ -266,7 +263,6 @@ func TestDmTaskQueue_Basic(t *testing.T) {
 
 // test the timestamp statistics
 func TestDmTaskQueue_TimestampStatistics(t *testing.T) {
-
 	var err error
 	var unissuedTask task
 
@@ -394,7 +390,7 @@ func TestDmTaskQueue_TimestampStatistics2(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	//time.Sleep(time.Millisecond*100)
+	// time.Sleep(time.Millisecond*100)
 	needLoop := true
 	for needLoop {
 		processCountMut.RLock()
@@ -413,7 +409,6 @@ func TestDmTaskQueue_TimestampStatistics2(t *testing.T) {
 }
 
 func TestDqTaskQueue(t *testing.T) {
-
 	var err error
 	var unissuedTask task
 	var activeTask task
@@ -490,7 +485,6 @@ func TestDqTaskQueue(t *testing.T) {
 }
 
 func TestTaskScheduler(t *testing.T) {
-
 	var err error
 
 	ctx := context.Background()

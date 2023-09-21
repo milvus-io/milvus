@@ -21,8 +21,9 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/milvus-io/milvus/pkg/util/generic"
 	ants "github.com/panjf2000/ants/v2"
+
+	"github.com/milvus-io/milvus/pkg/util/generic"
 )
 
 // A goroutine pool

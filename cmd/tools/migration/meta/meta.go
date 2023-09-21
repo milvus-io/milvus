@@ -2,11 +2,14 @@ package meta
 
 import (
 	"github.com/blang/semver/v4"
+
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-type UniqueID = typeutil.UniqueID
-type Timestamp = typeutil.Timestamp
+type (
+	UniqueID  = typeutil.UniqueID
+	Timestamp = typeutil.Timestamp
+)
 
 type Meta struct {
 	SourceVersion semver.Version

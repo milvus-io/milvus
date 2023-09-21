@@ -63,7 +63,6 @@ func TestPmsFactoryWithAuth(t *testing.T) {
 
 	_, err = pmsFactory.NewTtMsgStream(ctx)
 	assert.Error(t, err)
-
 }
 
 func TestKafkaFactory(t *testing.T) {

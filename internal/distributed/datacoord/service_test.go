@@ -21,6 +21,8 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
+	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -29,8 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/stretchr/testify/assert"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 type MockDataCoord struct {
@@ -291,9 +291,9 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("Run", func(t *testing.T) {
 		server.dataCoord = &MockDataCoord{}
-		//indexCoord := mocks.NewMockIndexCoord(t)
-		//indexCoord.EXPECT().Init().Return(nil)
-		//server.indexCoord = indexCoord
+		// indexCoord := mocks.NewMockIndexCoord(t)
+		// indexCoord.EXPECT().Init().Return(nil)
+		// server.indexCoord = indexCoord
 
 		err := server.Run()
 		assert.NoError(t, err)

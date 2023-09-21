@@ -5,21 +5,20 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/milvus-io/milvus/pkg/util/merr"
-
 	"github.com/cockroachdb/errors"
-
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
 	"github.com/golang/protobuf/proto"
+	"github.com/tidwall/gjson"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/tidwall/gjson"
-	"go.uber.org/zap"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 func checkAuthorization(c *gin.Context, req interface{}) error {
@@ -577,7 +576,7 @@ func (h *Handlers) search(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(merr.ErrMissingRequiredParameters), HTTPReturnMessage: merr.ErrMissingRequiredParameters.Error()})
 		return
 	}
-	params := map[string]interface{}{ //auto generated mapping
+	params := map[string]interface{}{ // auto generated mapping
 		"level": int(commonpb.ConsistencyLevel_Bounded),
 	}
 	bs, _ := json.Marshal(params)

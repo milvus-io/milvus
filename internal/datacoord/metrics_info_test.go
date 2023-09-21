@@ -21,13 +21,13 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"github.com/stretchr/testify/assert"
 )
 
 type mockMetricDataNodeClient struct {
@@ -123,7 +123,6 @@ func TestGetDataNodeMetrics(t *testing.T) {
 	info, err = svr.getDataNodeMetrics(ctx, req, NewSession(&NodeInfo{}, mockFailClientCreator))
 	assert.NoError(t, err)
 	assert.True(t, info.HasError)
-
 }
 
 func TestGetIndexNodeMetrics(t *testing.T) {

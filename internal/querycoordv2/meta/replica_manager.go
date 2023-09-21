@@ -52,18 +52,18 @@ func (replica *Replica) AddNode(nodes ...int64) {
 }
 
 func (replica *Replica) GetNodes() []int64 {
-	replica.rwmutex.RLock()
-	defer replica.rwmutex.RUnlock()
 	if replica != nil {
+		replica.rwmutex.RLock()
+		defer replica.rwmutex.RUnlock()
 		return replica.nodes.Collect()
 	}
 	return nil
 }
 
 func (replica *Replica) Len() int {
-	replica.rwmutex.RLock()
-	defer replica.rwmutex.RUnlock()
 	if replica != nil {
+		replica.rwmutex.RLock()
+		defer replica.rwmutex.RUnlock()
 		return replica.nodes.Len()
 	}
 
@@ -71,9 +71,9 @@ func (replica *Replica) Len() int {
 }
 
 func (replica *Replica) Contains(node int64) bool {
-	replica.rwmutex.RLock()
-	defer replica.rwmutex.RUnlock()
 	if replica != nil {
+		replica.rwmutex.RLock()
+		defer replica.rwmutex.RUnlock()
 		return replica.nodes.Contain(node)
 	}
 

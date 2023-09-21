@@ -20,14 +20,15 @@ import (
 	"context"
 	"sync"
 
+	"github.com/samber/lo"
+	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"github.com/samber/lo"
-	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
 )
 
 type TargetScope = int32
@@ -324,7 +325,8 @@ func (mgr *TargetManager) getTarget(scope TargetScope) *target {
 }
 
 func (mgr *TargetManager) GetStreamingSegmentsByCollection(collectionID int64,
-	scope TargetScope) typeutil.UniqueSet {
+	scope TargetScope,
+) typeutil.UniqueSet {
 	mgr.rwMutex.RLock()
 	defer mgr.rwMutex.RUnlock()
 
@@ -345,7 +347,8 @@ func (mgr *TargetManager) GetStreamingSegmentsByCollection(collectionID int64,
 
 func (mgr *TargetManager) GetStreamingSegmentsByChannel(collectionID int64,
 	channelName string,
-	scope TargetScope) typeutil.UniqueSet {
+	scope TargetScope,
+) typeutil.UniqueSet {
 	mgr.rwMutex.RLock()
 	defer mgr.rwMutex.RUnlock()
 
@@ -367,7 +370,8 @@ func (mgr *TargetManager) GetStreamingSegmentsByChannel(collectionID int64,
 }
 
 func (mgr *TargetManager) GetHistoricalSegmentsByCollection(collectionID int64,
-	scope TargetScope) map[int64]*datapb.SegmentInfo {
+	scope TargetScope,
+) map[int64]*datapb.SegmentInfo {
 	mgr.rwMutex.RLock()
 	defer mgr.rwMutex.RUnlock()
 
@@ -382,7 +386,8 @@ func (mgr *TargetManager) GetHistoricalSegmentsByCollection(collectionID int64,
 
 func (mgr *TargetManager) GetHistoricalSegmentsByChannel(collectionID int64,
 	channelName string,
-	scope TargetScope) map[int64]*datapb.SegmentInfo {
+	scope TargetScope,
+) map[int64]*datapb.SegmentInfo {
 	mgr.rwMutex.RLock()
 	defer mgr.rwMutex.RUnlock()
 
@@ -405,7 +410,8 @@ func (mgr *TargetManager) GetHistoricalSegmentsByChannel(collectionID int64,
 
 func (mgr *TargetManager) GetDroppedSegmentsByChannel(collectionID int64,
 	channelName string,
-	scope TargetScope) []int64 {
+	scope TargetScope,
+) []int64 {
 	mgr.rwMutex.RLock()
 	defer mgr.rwMutex.RUnlock()
 
@@ -425,7 +431,8 @@ func (mgr *TargetManager) GetDroppedSegmentsByChannel(collectionID int64,
 }
 
 func (mgr *TargetManager) GetHistoricalSegmentsByPartition(collectionID int64,
-	partitionID int64, scope TargetScope) map[int64]*datapb.SegmentInfo {
+	partitionID int64, scope TargetScope,
+) map[int64]*datapb.SegmentInfo {
 	mgr.rwMutex.RLock()
 	defer mgr.rwMutex.RUnlock()
 

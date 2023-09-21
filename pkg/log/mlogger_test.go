@@ -28,7 +28,7 @@ func TestExporterV2(t *testing.T) {
 	ts.assertMessagesContains("traceID=mock-trace")
 
 	ts.CleanBuffer()
-	Ctx(nil).Info("empty context")
+	Ctx(nil).Info("empty context") //nolint:staticcheck
 	ts.assertMessagesNotContains("traceID")
 
 	fieldCtx := WithFields(ctx, zap.String("field", "test"))

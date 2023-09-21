@@ -60,7 +60,7 @@ func NewEmbededEtcdKV(cfg *embed.Config, rootPath string) (*EmbedEtcdKV, error) 
 		etcd:     e,
 	}
 
-	//wait until embed etcd is ready
+	// wait until embed etcd is ready
 	select {
 	case <-e.Server.ReadyNotify():
 		log.Info("Embedded etcd is ready!")
@@ -77,7 +77,6 @@ func (kv *EmbedEtcdKV) Close() {
 		kv.client.Close()
 		kv.etcd.Close()
 	})
-
 }
 
 // GetPath returns the full path by given key

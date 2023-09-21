@@ -26,7 +26,6 @@ import (
 )
 
 func TestPayload_ReaderAndWriter(t *testing.T) {
-
 	t.Run("TestBool", func(t *testing.T) {
 		w, err := NewPayloadWriter(schemapb.DataType_Bool)
 		require.Nil(t, err)
@@ -60,7 +59,6 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.NoError(t, err)
 		assert.ElementsMatch(t, []bool{false, false, false, false, false, false, false, false}, bools)
 		defer r.ReleasePayloadReader()
-
 	})
 
 	t.Run("TestInt8", func(t *testing.T) {

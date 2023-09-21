@@ -407,7 +407,8 @@ func createConsumer(t *testing.T,
 	kc *kafkaClient,
 	topic string,
 	groupID string,
-	initPosition mqwrapper.SubscriptionInitialPosition) mqwrapper.Consumer {
+	initPosition mqwrapper.SubscriptionInitialPosition,
+) mqwrapper.Consumer {
 	consumer, err := kc.Subscribe(mqwrapper.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            groupID,

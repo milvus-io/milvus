@@ -327,7 +327,8 @@ func Test_parseIndexParams(t *testing.T) {
 					Key:   MetricTypeKey,
 					Value: "L2",
 				},
-			}},
+			},
+		},
 	}
 
 	t.Run("parse index params", func(t *testing.T) {
@@ -411,7 +412,8 @@ func Test_parseIndexParams(t *testing.T) {
 					Key:   MetricTypeKey,
 					Value: "L2",
 				},
-			}},
+			},
+		},
 	}
 	t.Run("parse index params 2", func(t *testing.T) {
 		Params.Save(Params.AutoIndexConfig.Enable.Key, "true")

@@ -4,8 +4,9 @@ import (
 	"testing"
 
 	"github.com/antlr/antlr4/runtime/Go/antlr"
-	antlrparser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
 	"github.com/stretchr/testify/assert"
+
+	antlrparser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
 )
 
 func genNaiveInputStream() *antlr.InputStream {

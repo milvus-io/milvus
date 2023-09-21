@@ -22,9 +22,7 @@ import (
 
 type ctxLogKeyType struct{}
 
-var (
-	CtxLogKey = ctxLogKeyType{}
-)
+var CtxLogKey = ctxLogKeyType{}
 
 // Debug logs a message at DebugLevel. The message includes any fields passed
 // at the log site, as well as any fields accumulated on the logger.

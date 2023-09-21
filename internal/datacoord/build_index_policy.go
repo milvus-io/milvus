@@ -24,5 +24,4 @@ func defaultBuildIndexPolicy(buildIDs []UniqueID) {
 	sort.Slice(buildIDs, func(i, j int) bool {
 		return buildIDs[i] < buildIDs[j]
 	})
-
 }

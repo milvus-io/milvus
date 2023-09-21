@@ -22,10 +22,8 @@ import (
 	"github.com/cockroachdb/errors"
 )
 
-var (
-	// ErrNodeIDNotMatch stands for the error that grpc target id and node session id not match.
-	ErrNodeIDNotMatch = errors.New("target node id not match")
-)
+// ErrNodeIDNotMatch stands for the error that grpc target id and node session id not match.
+var ErrNodeIDNotMatch = errors.New("target node id not match")
 
 // WrapNodeIDNotMatchError wraps `ErrNodeIDNotMatch` with targetID and sessionID.
 func WrapNodeIDNotMatchError(targetID, nodeID int64) error {

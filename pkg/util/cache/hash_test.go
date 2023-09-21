@@ -45,7 +45,7 @@ func sumFNVu32(v uint32) uint64 {
 }
 
 func TestSum(t *testing.T) {
-	var tests = []struct {
+	tests := []struct {
 		k interface{}
 		h uint64
 	}{

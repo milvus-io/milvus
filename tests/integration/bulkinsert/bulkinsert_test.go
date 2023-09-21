@@ -65,7 +65,7 @@ func (s *BulkInsertSuite) TestBulkInsert() {
 	prefix := "TestBulkInsert"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
-	//floatVecField := floatVecField
+	// floatVecField := floatVecField
 	dim := 128
 
 	schema := integration.ConstructSchema(collectionName, dim, true,
@@ -187,7 +187,7 @@ func (s *BulkInsertSuite) TestBulkInsert() {
 	s.WaitForLoad(ctx, collectionName)
 
 	// search
-	expr := "" //fmt.Sprintf("%s > 0", int64Field)
+	expr := "" // fmt.Sprintf("%s > 0", int64Field)
 	nq := 10
 	topk := 10
 	roundDecimal := -1
@@ -236,18 +236,18 @@ func GenerateNumpyFile(filePath string, rowCount int, dType schemapb.DataType, t
 		if err != nil {
 			return err
 		}
-		//data := make([][]float32, rowCount)
+		// data := make([][]float32, rowCount)
 		var data [][Dim]float32
 		for i := 0; i < rowCount; i++ {
 			vec := [Dim]float32{}
 			for j := 0; j < dim; j++ {
 				vec[j] = 1.1
 			}
-			//v := reflect.Indirect(reflect.ValueOf(vec))
-			//log.Info("type", zap.Any("type", v.Kind()))
+			// v := reflect.Indirect(reflect.ValueOf(vec))
+			// log.Info("type", zap.Any("type", v.Kind()))
 			data = append(data, vec)
-			//v2 := reflect.Indirect(reflect.ValueOf(data))
-			//log.Info("type", zap.Any("type", v2.Kind()))
+			// v2 := reflect.Indirect(reflect.ValueOf(data))
+			// log.Info("type", zap.Any("type", v2.Kind()))
 		}
 		err = importutil.CreateNumpyFile(filePath, data)
 		if err != nil {

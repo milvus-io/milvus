@@ -12,9 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
-var (
-	ErrInvalidKey = errors.New("invalid load info key")
-)
+var ErrInvalidKey = errors.New("invalid load info key")
 
 const (
 	CollectionLoadInfoPrefix = "querycoord-collection-loadinfo"

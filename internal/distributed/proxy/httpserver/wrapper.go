@@ -5,15 +5,13 @@ import (
 	"net/http"
 
 	"github.com/cockroachdb/errors"
-
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 )
 
-var (
-	errBadRequest = errors.New("bad request")
-)
+var errBadRequest = errors.New("bad request")
 
 // handlerFunc handles http request with gin context
 type handlerFunc func(c *gin.Context) (interface{}, error)

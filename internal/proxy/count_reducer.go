@@ -6,8 +6,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
-type cntReducer struct {
-}
+type cntReducer struct{}
 
 func (r *cntReducer) Reduce(results []*internalpb.RetrieveResults) (*milvuspb.QueryResults, error) {
 	cnt := int64(0)

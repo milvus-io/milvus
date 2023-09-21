@@ -4,8 +4,7 @@ import (
 	"github.com/milvus-io/milvus/cmd/tools/migration/meta"
 )
 
-type migrator210To220 struct {
-}
+type migrator210To220 struct{}
 
 func (m migrator210To220) Migrate(metas *meta.Meta) (*meta.Meta, error) {
 	return meta.From210To220(metas)

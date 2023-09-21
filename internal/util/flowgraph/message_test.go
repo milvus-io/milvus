@@ -20,8 +20,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 )
 
 type MockMsg struct {
@@ -77,7 +78,6 @@ func (bm *MockMsg) Position() *MsgPosition {
 }
 
 func (bm *MockMsg) SetPosition(position *MsgPosition) {
-
 }
 
 func (bm *MockMsg) Size() int {

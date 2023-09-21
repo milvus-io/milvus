@@ -1,11 +1,12 @@
 package backend
 
 import (
+	clientv3 "go.etcd.io/etcd/client/v3"
+
 	"github.com/milvus-io/milvus/cmd/tools/migration/configs"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 type etcdBasedBackend struct {

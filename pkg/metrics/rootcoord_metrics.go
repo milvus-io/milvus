@@ -36,7 +36,7 @@ var (
 			Help:      "count of DDL operations",
 		}, []string{functionLabelName, statusLabelName})
 
-	//RootCoordDDLReqLatency records the latency for read type of DDL operations.
+	// RootCoordDDLReqLatency records the latency for read type of DDL operations.
 	RootCoordDDLReqLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
@@ -65,7 +65,7 @@ var (
 			Help:      "count of ID allocated",
 		})
 
-	//RootCoordTimestamp records the number of timestamp allocations in RootCoord.
+	// RootCoordTimestamp records the number of timestamp allocations in RootCoord.
 	RootCoordTimestamp = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,

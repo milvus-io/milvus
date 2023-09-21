@@ -149,7 +149,6 @@ func (b *RowCountBasedBalancer) BalanceReplica(replica *meta.Replica) ([]Segment
 			}
 
 			segmentsToMove = append(segmentsToMove, s)
-
 		}
 		if rowCount < average {
 			item := newNodeItem(rowCount, node)

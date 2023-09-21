@@ -41,9 +41,9 @@ import (
 
 func TestImportManager_NewImportManager(t *testing.T) {
 	var countLock sync.RWMutex
-	var globalCount = typeutil.UniqueID(0)
+	globalCount := typeutil.UniqueID(0)
 
-	var idAlloc = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+	idAlloc := func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 		countLock.Lock()
 		defer countLock.Unlock()
 		globalCount++
@@ -233,9 +233,9 @@ func TestImportManager_NewImportManager(t *testing.T) {
 
 func TestImportManager_TestSetImportTaskState(t *testing.T) {
 	var countLock sync.RWMutex
-	var globalCount = typeutil.UniqueID(0)
+	globalCount := typeutil.UniqueID(0)
 
-	var idAlloc = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+	idAlloc := func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 		countLock.Lock()
 		defer countLock.Unlock()
 		globalCount++
@@ -302,9 +302,9 @@ func TestImportManager_TestSetImportTaskState(t *testing.T) {
 
 func TestImportManager_TestEtcdCleanUp(t *testing.T) {
 	var countLock sync.RWMutex
-	var globalCount = typeutil.UniqueID(0)
+	globalCount := typeutil.UniqueID(0)
 
-	var idAlloc = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+	idAlloc := func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 		countLock.Lock()
 		defer countLock.Unlock()
 		globalCount++
@@ -392,9 +392,9 @@ func TestImportManager_TestEtcdCleanUp(t *testing.T) {
 
 func TestImportManager_TestFlipTaskStateLoop(t *testing.T) {
 	var countLock sync.RWMutex
-	var globalCount = typeutil.UniqueID(0)
+	globalCount := typeutil.UniqueID(0)
 
-	var idAlloc = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+	idAlloc := func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 		countLock.Lock()
 		defer countLock.Unlock()
 		globalCount++
@@ -520,9 +520,9 @@ func TestImportManager_TestFlipTaskStateLoop(t *testing.T) {
 
 func TestImportManager_ImportJob(t *testing.T) {
 	var countLock sync.RWMutex
-	var globalCount = typeutil.UniqueID(0)
+	globalCount := typeutil.UniqueID(0)
 
-	var idAlloc = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+	idAlloc := func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 		countLock.Lock()
 		defer countLock.Unlock()
 		globalCount++
@@ -572,7 +572,7 @@ func TestImportManager_ImportJob(t *testing.T) {
 	// since the importServiceFunc return error, tasks will be kept in pending list
 	rowReq.Files = []string{"f1.json"}
 	mgr = newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callGetSegmentStates, nil, nil)
-	resp = mgr.importJob(context.TODO(), rowReq, colID, 0)
+	_ = mgr.importJob(context.TODO(), rowReq, colID, 0)
 	assert.Equal(t, len(rowReq.Files), len(mgr.pendingTasks))
 	assert.Equal(t, 0, len(mgr.workingTasks))
 
@@ -585,7 +585,7 @@ func TestImportManager_ImportJob(t *testing.T) {
 	// column-based case, one quest one task
 	// since the importServiceFunc return error, tasks will be kept in pending list
 	mgr = newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callGetSegmentStates, nil, nil)
-	resp = mgr.importJob(context.TODO(), colReq, colID, 0)
+	_ = mgr.importJob(context.TODO(), colReq, colID, 0)
 	assert.Equal(t, 1, len(mgr.pendingTasks))
 	assert.Equal(t, 0, len(mgr.workingTasks))
 
@@ -599,13 +599,13 @@ func TestImportManager_ImportJob(t *testing.T) {
 
 	// row-based case, since the importServiceFunc return success, tasks will be sent to working list
 	mgr = newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callGetSegmentStates, nil, nil)
-	resp = mgr.importJob(context.TODO(), rowReq, colID, 0)
+	_ = mgr.importJob(context.TODO(), rowReq, colID, 0)
 	assert.Equal(t, 0, len(mgr.pendingTasks))
 	assert.Equal(t, len(rowReq.Files), len(mgr.workingTasks))
 
 	// column-based case, since the importServiceFunc return success, tasks will be sent to working list
 	mgr = newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callGetSegmentStates, nil, nil)
-	resp = mgr.importJob(context.TODO(), colReq, colID, 0)
+	_ = mgr.importJob(context.TODO(), colReq, colID, 0)
 	assert.Equal(t, 0, len(mgr.pendingTasks))
 	assert.Equal(t, 1, len(mgr.workingTasks))
 
@@ -629,10 +629,10 @@ func TestImportManager_ImportJob(t *testing.T) {
 	// row-based case, since the importServiceFunc return success for 1 task
 	// the first task is sent to working list, and 1 task left in pending list
 	mgr = newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callGetSegmentStates, nil, nil)
-	resp = mgr.importJob(context.TODO(), rowReq, colID, 0)
+	_ = mgr.importJob(context.TODO(), rowReq, colID, 0)
 	assert.Equal(t, 0, len(mgr.pendingTasks))
 	assert.Equal(t, 1, len(mgr.workingTasks))
-	resp = mgr.importJob(context.TODO(), rowReq, colID, 0)
+	_ = mgr.importJob(context.TODO(), rowReq, colID, 0)
 	assert.Equal(t, 1, len(mgr.pendingTasks))
 	assert.Equal(t, 1, len(mgr.workingTasks))
 
@@ -650,9 +650,9 @@ func TestImportManager_ImportJob(t *testing.T) {
 
 func TestImportManager_AllDataNodesBusy(t *testing.T) {
 	var countLock sync.RWMutex
-	var globalCount = typeutil.UniqueID(0)
+	globalCount := typeutil.UniqueID(0)
 
-	var idAlloc = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+	idAlloc := func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 		countLock.Lock()
 		defer countLock.Unlock()
 		globalCount++
@@ -748,9 +748,9 @@ func TestImportManager_AllDataNodesBusy(t *testing.T) {
 
 func TestImportManager_TaskState(t *testing.T) {
 	var countLock sync.RWMutex
-	var globalCount = typeutil.UniqueID(0)
+	globalCount := typeutil.UniqueID(0)
 
-	var idAlloc = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+	idAlloc := func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 		countLock.Lock()
 		defer countLock.Unlock()
 		globalCount++
@@ -863,7 +863,7 @@ func TestImportManager_TaskState(t *testing.T) {
 }
 
 func TestImportManager_AllocFail(t *testing.T) {
-	var idAlloc = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+	idAlloc := func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 		return 0, 0, errors.New("injected failure")
 	}
 	paramtable.Get().Save(Params.RootCoordCfg.ImportTaskSubPath.Key, "test_import_task")
@@ -898,9 +898,9 @@ func TestImportManager_AllocFail(t *testing.T) {
 
 func TestImportManager_ListAllTasks(t *testing.T) {
 	var countLock sync.RWMutex
-	var globalCount = typeutil.UniqueID(0)
+	globalCount := typeutil.UniqueID(0)
 
-	var idAlloc = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+	idAlloc := func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 		countLock.Lock()
 		defer countLock.Unlock()
 		globalCount++

@@ -21,12 +21,12 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 )
@@ -210,7 +210,6 @@ func TestSchema(t *testing.T) {
 }
 
 func TestSchema_GetVectorFieldSchema(t *testing.T) {
-
 	schemaNormal := &schemapb.CollectionSchema{
 		Name:        "testColl",
 		Description: "",
@@ -264,7 +263,6 @@ func TestSchema_GetVectorFieldSchema(t *testing.T) {
 		_, err := GetVectorFieldSchema(schemaInvalid)
 		assert.Error(t, err)
 	})
-
 }
 
 func TestSchema_invalid(t *testing.T) {

@@ -153,7 +153,6 @@ func (s *HelloMilvusSuite) TestHelloMilvus() {
 	s.Equal(commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
 
 	log.Info("TestHelloMilvus succeed")
-
 }
 
 func TestHelloMilvus(t *testing.T) {

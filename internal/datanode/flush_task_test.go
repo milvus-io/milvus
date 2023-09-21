@@ -19,8 +19,9 @@ package datanode
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/util/retry"
 )
 
 func TestFlushTaskRunner(t *testing.T) {
@@ -91,7 +92,6 @@ func TestFlushTaskRunner_FailError(t *testing.T) {
 
 	assert.True(t, errFlag)
 	assert.True(t, nextFlag)
-
 }
 
 func TestFlushTaskRunner_Injection(t *testing.T) {

@@ -77,7 +77,7 @@ func (m *manager) Add(collectionID UniqueID, channel string) (Pipeline, error) {
 		return pipeline, nil
 	}
 
-	//get shard delegator for add growing in pipeline
+	// get shard delegator for add growing in pipeline
 	delegator, ok := m.delegators.Get(channel)
 	if !ok {
 		return nil, merr.WrapErrChannelNotFound(channel, "delegator not found")
@@ -132,7 +132,7 @@ func (m *manager) Start(channels ...string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	//check pipelie all exist before start
+	// check pipelie all exist before start
 	for _, channel := range channels {
 		if _, ok := m.channel2Pipeline[channel]; !ok {
 			reason := fmt.Sprintf("pipeline with channel %s not exist", channel)

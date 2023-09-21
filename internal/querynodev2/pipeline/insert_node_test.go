@@ -19,26 +19,27 @@ package pipeline
 import (
 	"testing"
 
+	"github.com/samber/lo"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/samber/lo"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/suite"
 )
 
 type InsertNodeSuite struct {
 	suite.Suite
-	//datas
+	// datas
 	collectionName   string
 	collectionID     int64
 	partitionID      int64
 	channel          string
 	insertSegmentIDs []int64
 	deleteSegmentSum int
-	//mocks
+	// mocks
 	manager   *segments.Manager
 	delegator *delegator.MockShardDelegator
 }
@@ -56,14 +57,14 @@ func (suite *InsertNodeSuite) SetupSuite() {
 }
 
 func (suite *InsertNodeSuite) TestBasic() {
-	//data
+	// data
 	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
 	in := suite.buildInsertNodeMsg(schema)
 
 	collection := segments.NewCollection(suite.collectionID, schema, segments.GenTestIndexMeta(suite.collectionID, schema), querypb.LoadType_LoadCollection)
 	collection.AddPartition(suite.partitionID)
 
-	//init mock
+	// init mock
 	mockCollectionManager := segments.NewMockCollectionManager(suite.T())
 	mockCollectionManager.EXPECT().Get(suite.collectionID).Return(collection)
 
@@ -81,7 +82,7 @@ func (suite *InsertNodeSuite) TestBasic() {
 		}
 	})
 
-	//TODO mock a delgator for test
+	// TODO mock a delgator for test
 	node := newInsertNode(suite.collectionID, suite.channel, suite.manager, suite.delegator, 8)
 	out := node.Operate(in)
 
@@ -97,7 +98,7 @@ func (suite *InsertNodeSuite) TestDataTypeNotSupported() {
 	collection := segments.NewCollection(suite.collectionID, schema, segments.GenTestIndexMeta(suite.collectionID, schema), querypb.LoadType_LoadCollection)
 	collection.AddPartition(suite.partitionID)
 
-	//init mock
+	// init mock
 	mockCollectionManager := segments.NewMockCollectionManager(suite.T())
 	mockCollectionManager.EXPECT().Get(suite.collectionID).Return(collection)
 
@@ -116,7 +117,7 @@ func (suite *InsertNodeSuite) TestDataTypeNotSupported() {
 		}
 	}
 
-	//TODO mock a delgator for test
+	// TODO mock a delgator for test
 	node := newInsertNode(suite.collectionID, suite.channel, suite.manager, suite.delegator, 8)
 	suite.Panics(func() {
 		node.Operate(in)

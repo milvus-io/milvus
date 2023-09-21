@@ -24,8 +24,10 @@ import (
 )
 
 // rateCol is global rateCollector in DataNode.
-var rateCol *rateCollector
-var initOnce sync.Once
+var (
+	rateCol  *rateCollector
+	initOnce sync.Once
+)
 
 // rateCollector helps to collect and calculate values (like rate, timeTick and etc...).
 type rateCollector struct {

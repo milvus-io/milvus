@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
@@ -43,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -489,7 +489,7 @@ func (m *meta) UpdateFlushSegmentsInfo(
 	}
 	// TODO add diff encoding and compression
 	currBinlogs := clonedSegment.GetBinlogs()
-	var getFieldBinlogs = func(id UniqueID, binlogs []*datapb.FieldBinlog) *datapb.FieldBinlog {
+	getFieldBinlogs := func(id UniqueID, binlogs []*datapb.FieldBinlog) *datapb.FieldBinlog {
 		for _, binlog := range binlogs {
 			if id == binlog.GetFieldID() {
 				return binlog
@@ -530,7 +530,7 @@ func (m *meta) UpdateFlushSegmentsInfo(
 	}
 	clonedSegment.Deltalogs = currDeltaLogs
 	modSegments[segmentID] = clonedSegment
-	var getClonedSegment = func(segmentID UniqueID) *SegmentInfo {
+	getClonedSegment := func(segmentID UniqueID) *SegmentInfo {
 		if s, ok := modSegments[segmentID]; ok {
 			return s
 		}
@@ -684,7 +684,7 @@ func (m *meta) mergeDropSegment(seg2Drop *SegmentInfo) (*SegmentInfo, *segMetric
 
 	currBinlogs := clonedSegment.GetBinlogs()
 
-	var getFieldBinlogs = func(id UniqueID, binlogs []*datapb.FieldBinlog) *datapb.FieldBinlog {
+	getFieldBinlogs := func(id UniqueID, binlogs []*datapb.FieldBinlog) *datapb.FieldBinlog {
 		for _, binlog := range binlogs {
 			if id == binlog.GetFieldID() {
 				return binlog
@@ -981,7 +981,8 @@ func (m *meta) SetSegmentCompacting(segmentID UniqueID, compacting bool) {
 // - the segment info of compactedTo segment after compaction to add
 // The compactedTo segment could contain 0 numRows
 func (m *meta) PrepareCompleteCompactionMutation(plan *datapb.CompactionPlan,
-	result *datapb.CompactionResult) ([]*SegmentInfo, []*SegmentInfo, *SegmentInfo, *segMetricMutation, error) {
+	result *datapb.CompactionResult,
+) ([]*SegmentInfo, []*SegmentInfo, *SegmentInfo, *segMetricMutation, error) {
 	log.Info("meta update: prepare for complete compaction mutation")
 	compactionLogs := plan.GetSegmentBinlogs()
 	m.Lock()

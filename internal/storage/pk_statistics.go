@@ -19,9 +19,9 @@ package storage
 import (
 	"fmt"
 
+	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/cockroachdb/errors"
 
-	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
 )
@@ -102,7 +102,7 @@ func (st *PkStatistics) PkExist(pk PrimaryKey) bool {
 		varCharPk := pk.(*VarCharPrimaryKey)
 		return st.PkFilter.TestString(varCharPk.Value)
 	default:
-		//TODO::
+		// TODO::
 	}
 	// no idea, just make it as false positive
 	return true

@@ -30,6 +30,7 @@ import (
 	"github.com/apache/arrow/go/v8/parquet/pqarrow"
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"

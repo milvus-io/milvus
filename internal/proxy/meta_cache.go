@@ -497,7 +497,6 @@ func (m *MetaCache) GetPartitions(ctx context.Context, database, collectionName 
 			ret[k] = v.partitionID
 		}
 		return ret, nil
-
 	}
 
 	defer m.mu.RUnlock()

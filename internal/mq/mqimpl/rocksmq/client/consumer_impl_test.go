@@ -117,7 +117,7 @@ func TestConsumer_Subscription(t *testing.T) {
 	})
 	assert.Nil(t, consumer)
 	assert.Error(t, err)
-	//assert.Equal(t, consumerName, consumer.Subscription())
+	// assert.Equal(t, consumerName, consumer.Subscription())
 }
 
 func TestConsumer_Seek(t *testing.T) {

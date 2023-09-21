@@ -21,21 +21,19 @@ import (
 	"go.opentelemetry.io/otel"
 )
 
-var (
-	filterFunc = func(info *otelgrpc.InterceptorInfo) bool {
-		var fullMethod string
-		if info.UnaryServerInfo != nil {
-			fullMethod = info.UnaryServerInfo.FullMethod
-		} else if info.StreamServerInfo != nil {
-			fullMethod = info.StreamServerInfo.FullMethod
-		}
-		if fullMethod == `/milvus.proto.rootcoord.RootCoord/UpdateChannelTimeTick` ||
-			fullMethod == `/milvus.proto.rootcoord.RootCoord/AllocTimestamp` {
-			return false
-		}
-		return true
+var filterFunc = func(info *otelgrpc.InterceptorInfo) bool {
+	var fullMethod string
+	if info.UnaryServerInfo != nil {
+		fullMethod = info.UnaryServerInfo.FullMethod
+	} else if info.StreamServerInfo != nil {
+		fullMethod = info.StreamServerInfo.FullMethod
 	}
-)
+	if fullMethod == `/milvus.proto.rootcoord.RootCoord/UpdateChannelTimeTick` ||
+		fullMethod == `/milvus.proto.rootcoord.RootCoord/AllocTimestamp` {
+		return false
+	}
+	return true
+}
 
 // GetInterceptorOpts returns the Option of gRPC open-tracing
 func GetInterceptorOpts() []otelgrpc.Option {

@@ -7,12 +7,13 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
+
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type DocContent struct {
@@ -106,7 +107,7 @@ type YamlMarshaller struct {
 }
 
 func (m *YamlMarshaller) writeYamlRecursive(data []DocContent, level int) {
-	var topLevels = typeutil.NewOrderedMap[string, []DocContent]()
+	topLevels := typeutil.NewOrderedMap[string, []DocContent]()
 	for _, d := range data {
 		key := strings.Split(d.key, ".")[level]
 

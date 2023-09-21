@@ -55,7 +55,8 @@ type CoordinatorBroker struct {
 
 func NewCoordinatorBroker(
 	dataCoord types.DataCoord,
-	rootCoord types.RootCoord) *CoordinatorBroker {
+	rootCoord types.RootCoord,
+) *CoordinatorBroker {
 	return &CoordinatorBroker{
 		dataCoord,
 		rootCoord,

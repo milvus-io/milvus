@@ -19,8 +19,9 @@ package rootcoord
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/pkg/log"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 type baseRedoTask struct {

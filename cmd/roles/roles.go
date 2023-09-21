@@ -27,6 +27,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/cmd/components"
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/http/healthz"
@@ -43,9 +47,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	_ "github.com/milvus-io/milvus/pkg/util/symbolizer" // support symbolizer and crash dump
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"go.uber.org/zap"
 )
 
 // all milvus related metrics is in a separate registry

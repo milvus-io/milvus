@@ -25,11 +25,11 @@ import (
 	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
-	rocksmqimplclient "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/client"
-	rocksmqimplserver "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	rocksmqimplclient "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/client"
+	rocksmqimplserver "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	pulsarwrapper "github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper/pulsar"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"

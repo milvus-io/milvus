@@ -28,8 +28,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/kv"
@@ -37,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/retry"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -254,7 +253,7 @@ func binarySearchRecords(records []tsv, ts typeutil.Timestamp) (string, bool) {
 	i, j := 0, len(records)
 	for i+1 < j {
 		k := (i + j) / 2
-		//log.Warn("", zap.Int("i", i), zap.Int("j", j), zap.Int("k", k))
+		// log.Warn("", zap.Int("i", i), zap.Int("j", j), zap.Int("k", k))
 		if records[k].ts == ts {
 			return records[k].value, true
 		}
@@ -362,7 +361,7 @@ func (ss *SuffixSnapshot) Load(key string, ts typeutil.Timestamp) (string, error
 
 	// 3. find i which ts[i] <= ts && ts[i+1] > ts
 	// corner cases like len(records)==0, ts < records[0].ts is covered in binarySearch
-	//binary search
+	// binary search
 	value, found := binarySearchRecords(records, ts)
 	if !found {
 		log.Warn("not found")
@@ -435,8 +434,8 @@ func (ss *SuffixSnapshot) LoadWithPrefix(key string, ts typeutil.Timestamp) ([]s
 	// ts 0 case shall be treated as fetch latest/current value
 	if ts == 0 {
 		keys, values, err := ss.MetaKv.LoadWithPrefix(key)
-		fks := keys[:0]   //make([]string, 0, len(keys))
-		fvs := values[:0] //make([]string, 0, len(values))
+		fks := keys[:0]   // make([]string, 0, len(keys))
+		fvs := values[:0] // make([]string, 0, len(values))
 		// hide rootPrefix from return value
 		for i, k := range keys {
 			// filters tombstone
@@ -494,7 +493,6 @@ func (ss *SuffixSnapshot) LoadWithPrefix(key string, ts typeutil.Timestamp) ([]s
 		latestOriginalKey = curOriginalKey
 		return nil
 	})
-
 	if err != nil {
 		return nil, nil, err
 	}
@@ -656,7 +654,6 @@ func (ss *SuffixSnapshot) removeExpiredKvs(now time.Time) error {
 
 		return nil
 	})
-
 	if err != nil {
 		return err
 	}

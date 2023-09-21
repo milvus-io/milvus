@@ -30,7 +30,8 @@ func TestCloneByteSlice(t *testing.T) {
 		{
 			args: args{s: []byte{0xf0}},
 			want: []byte{0xf0},
-		}, {
+		},
+		{
 			args: args{s: []byte{0x0, 0xff, 0x0f, 0xf0}},
 			want: []byte{0x0, 0xff, 0x0f, 0xf0},
 		},

@@ -16,9 +16,7 @@ import (
 func TestRoundRobinPolicy(t *testing.T) {
 	var err error
 
-	var (
-		ctx = context.TODO()
-	)
+	ctx := context.TODO()
 
 	mgr := newShardClientMgr()
 

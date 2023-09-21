@@ -22,8 +22,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
@@ -35,6 +33,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type Executor struct {
@@ -59,7 +59,8 @@ func NewExecutor(meta *meta.Meta,
 	broker meta.Broker,
 	targetMgr *meta.TargetManager,
 	cluster session.Cluster,
-	nodeMgr *session.NodeManager) *Executor {
+	nodeMgr *session.NodeManager,
+) *Executor {
 	return &Executor{
 		doneCh:    make(chan struct{}),
 		meta:      meta,
@@ -285,7 +286,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	}
 	log = log.With(zap.Int64("shardLeader", leader))
 
-	//Get collection index info
+	// Get collection index info
 	indexInfo, err := ex.broker.DescribeIndex(ctx, task.CollectionID())
 	if err != nil {
 		log.Warn("fail to get index meta of collection")

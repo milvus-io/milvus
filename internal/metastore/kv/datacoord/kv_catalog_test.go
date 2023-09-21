@@ -122,7 +122,8 @@ var (
 				{
 					EntriesNum: 5,
 					LogPath:    deltalogPath,
-				}},
+				},
+			},
 		},
 	}
 	statslogs = []*datapb.FieldBinlog{
@@ -258,7 +259,6 @@ func Test_ListSegments(t *testing.T) {
 			}
 			if strings.HasPrefix(k3, s) {
 				return f([]byte(k3), []byte(savedKvs[k3]))
-
 			}
 			return errors.New("should not reach here")
 		})
@@ -372,10 +372,10 @@ func Test_AlterSegments(t *testing.T) {
 		opGroupCount := 0
 		metakv := mocks.NewMetaKv(t)
 		metakv.EXPECT().MultiSave(mock.Anything).RunAndReturn(func(m map[string]string) error {
-			var ks []string
-			for k := range m {
-				ks = append(ks, k)
-			}
+			// var ks []string
+			// for k := range m {
+			// 	ks = append(ks, k)
+			// }
 			maps.Copy(savedKvs, m)
 			opGroupCount++
 			return nil
@@ -1140,7 +1140,8 @@ func addSegment(rootPath string, collectionID, partitionID, segmentID, fieldID i
 				{
 					EntriesNum: 5,
 					LogPath:    metautil.BuildDeltaLogPath(rootPath, collectionID, partitionID, segmentID, int64(rand.Int())),
-				}},
+				},
+			},
 		},
 	}
 	statslogs = []*datapb.FieldBinlog{

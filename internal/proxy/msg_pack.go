@@ -44,7 +44,8 @@ func genInsertMsgsByPartition(ctx context.Context,
 	partitionName string,
 	rowOffsets []int,
 	channelName string,
-	insertMsg *msgstream.InsertMsg) ([]msgstream.TsMsg, error) {
+	insertMsg *msgstream.InsertMsg,
+) ([]msgstream.TsMsg, error) {
 	threshold := Params.PulsarCfg.MaxMessageSize.GetAsInt()
 
 	// create empty insert message
@@ -108,7 +109,8 @@ func repackInsertDataByPartition(ctx context.Context,
 	rowOffsets []int,
 	channelName string,
 	insertMsg *msgstream.InsertMsg,
-	segIDAssigner *segIDAssigner) ([]msgstream.TsMsg, error) {
+	segIDAssigner *segIDAssigner,
+) ([]msgstream.TsMsg, error) {
 	res := make([]msgstream.TsMsg, 0)
 
 	maxTs := Timestamp(0)
@@ -155,7 +157,8 @@ func repackInsertDataByPartition(ctx context.Context,
 
 func setMsgID(ctx context.Context,
 	msgs []msgstream.TsMsg,
-	idAllocator *allocator.IDAllocator) error {
+	idAllocator *allocator.IDAllocator,
+) error {
 	var idBegin int64
 	var err error
 
@@ -180,7 +183,8 @@ func repackInsertData(ctx context.Context,
 	insertMsg *msgstream.InsertMsg,
 	result *milvuspb.MutationResult,
 	idAllocator *allocator.IDAllocator,
-	segIDAssigner *segIDAssigner) (*msgstream.MsgPack, error) {
+	segIDAssigner *segIDAssigner,
+) (*msgstream.MsgPack, error) {
 	msgPack := &msgstream.MsgPack{
 		BeginTs: insertMsg.BeginTs(),
 		EndTs:   insertMsg.EndTs(),
@@ -219,7 +223,8 @@ func repackInsertDataWithPartitionKey(ctx context.Context,
 	insertMsg *msgstream.InsertMsg,
 	result *milvuspb.MutationResult,
 	idAllocator *allocator.IDAllocator,
-	segIDAssigner *segIDAssigner) (*msgstream.MsgPack, error) {
+	segIDAssigner *segIDAssigner,
+) (*msgstream.MsgPack, error) {
 	msgPack := &msgstream.MsgPack{
 		BeginTs: insertMsg.BeginTs(),
 		EndTs:   insertMsg.EndTs(),

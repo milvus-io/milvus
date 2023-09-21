@@ -227,7 +227,7 @@ func (queue *dmTaskQueue) Enqueue(t task) error {
 	//	1) Protect member pChanStatisticsInfos
 	//	2) Serialize the timestamp allocation for dml tasks
 
-	//1. set the current pChannels for this dmTask
+	// 1. set the current pChannels for this dmTask
 	dmt := t.(dmlTask)
 	err := dmt.setChannels()
 	if err != nil {
@@ -235,19 +235,19 @@ func (queue *dmTaskQueue) Enqueue(t task) error {
 		return err
 	}
 
-	//2. enqueue dml task
+	// 2. enqueue dml task
 	queue.statsLock.Lock()
 	defer queue.statsLock.Unlock()
 	err = queue.baseTaskQueue.Enqueue(t)
 	if err != nil {
 		return err
 	}
-	//3. commit will use pChannels got previously when preAdding and will definitely succeed
+	// 3. commit will use pChannels got previously when preAdding and will definitely succeed
 	pChannels := dmt.getChannels()
 	queue.commitPChanStats(dmt, pChannels)
-	//there's indeed a possibility that the collection info cache was expired after preAddPChanStats
-	//but considering root coord knows everything about meta modification, invalid stats appended after the meta changed
-	//will be discarded by root coord and will not lead to inconsistent state
+	// there's indeed a possibility that the collection info cache was expired after preAddPChanStats
+	// but considering root coord knows everything about meta modification, invalid stats appended after the meta changed
+	// will be discarded by root coord and will not lead to inconsistent state
 	return nil
 }
 
@@ -269,7 +269,7 @@ func (queue *dmTaskQueue) PopActiveTask(taskID UniqueID) task {
 }
 
 func (queue *dmTaskQueue) commitPChanStats(dmt dmlTask, pChannels []pChan) {
-	//1. prepare new stat for all pChannels
+	// 1. prepare new stat for all pChannels
 	newStats := make(map[pChan]pChanStatistics)
 	beginTs := dmt.BeginTs()
 	endTs := dmt.EndTs()
@@ -279,7 +279,7 @@ func (queue *dmTaskQueue) commitPChanStats(dmt dmlTask, pChannels []pChan) {
 			maxTs: endTs,
 		}
 	}
-	//2. update stats for all pChannels
+	// 2. update stats for all pChannels
 	for cName, newStat := range newStats {
 		currentStat, ok := queue.pChanStatisticsInfos[cName]
 		if !ok {
@@ -325,7 +325,6 @@ func (queue *dmTaskQueue) popPChanStats(t task) {
 }
 
 func (queue *dmTaskQueue) getPChanStatsInfo() (map[pChan]*pChanStatistics, error) {
-
 	ret := make(map[pChan]*pChanStatistics)
 	queue.statsLock.RLock()
 	defer queue.statsLock.RUnlock()

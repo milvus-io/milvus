@@ -103,7 +103,7 @@ type DataNode struct {
 	rootCoord types.RootCoord
 	dataCoord types.DataCoord
 
-	//call once
+	// call once
 	initOnce     sync.Once
 	startOnce    sync.Once
 	stopOnce     sync.Once
@@ -262,7 +262,6 @@ func (node *DataNode) Init() error {
 		node.factory.Init(Params)
 		log.Info("DataNode server init succeeded",
 			zap.String("MsgChannelSubName", Params.CommonCfg.DataNodeSubName.GetValue()))
-
 	})
 	return initError
 }
@@ -523,7 +522,6 @@ func (node *DataNode) Start() error {
 		}
 
 		chunkManager, err := node.factory.NewPersistentStorageChunkManager(node.ctx)
-
 		if err != nil {
 			startErr = err
 			return
@@ -548,7 +546,6 @@ func (node *DataNode) Start() error {
 		go node.flowgraphManager.start()
 
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
-
 	})
 	return startErr
 }

@@ -1,12 +1,13 @@
 package msgstream
 
 import (
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper/rmq"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"go.uber.org/zap"
 )
 
 // NewRocksmqFactory creates a new message stream factory based on rocksmq.

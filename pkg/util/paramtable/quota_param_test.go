@@ -212,6 +212,5 @@ func TestQuotaParam(t *testing.T) {
 		// test invalid config
 		params.Save(params.QuotaConfig.DiskQuotaPerCollection.Key, "-1")
 		assert.Equal(t, qc.DiskQuota.GetAsFloat(), qc.DiskQuotaPerCollection.GetAsFloat())
-
 	})
 }

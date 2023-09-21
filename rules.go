@@ -56,7 +56,6 @@ func timeeq(m dsl.Matcher) {
 
 // err but no an error
 func errnoterror(m dsl.Matcher) {
-
 	// Would be easier to check for all err identifiers instead, but then how do we get the type from m[] ?
 
 	m.Match(
@@ -146,7 +145,6 @@ func ifreturn(m dsl.Matcher) {
 	m.Match("if !$x { return $*_ }; if $x {$*_ }").Report("odd sequence of if test")
 	m.Match("if $x == $y { return $*_ }; if $x != $y {$*_ }").Report("odd sequence of if test")
 	m.Match("if $x != $y { return $*_ }; if $x == $y {$*_ }").Report("odd sequence of if test")
-
 }
 
 func oddifsequence(m dsl.Matcher) {
@@ -267,7 +265,6 @@ func floatloop(m dsl.Matcher) {
 }
 
 func urlredacted(m dsl.Matcher) {
-
 	m.Match(
 		"log.Println($x, $*_)",
 		"log.Println($*_, $x, $*_)",
@@ -292,7 +289,6 @@ func sprinterr(m dsl.Matcher) {
 	).
 		Where(m["err"].Type.Is("error")).
 		Report("maybe call $err.Error() instead of fmt.Sprint()?")
-
 }
 
 // disable this check, because it can not apply to generic type
@@ -351,7 +347,6 @@ func nilerr(m dsl.Matcher) {
 		`if err == nil { return $*_, err }`,
 	).
 		Report(`return nil error instead of nil value`)
-
 }
 
 func mailaddress(m dsl.Matcher) {
@@ -367,7 +362,6 @@ func mailaddress(m dsl.Matcher) {
 	).
 		Report("use net/mail Address.String() instead of fmt.Sprintf()").
 		Suggest("(&mail.Address{Name:$NAME, Address:$EMAIL}).String()")
-
 }
 
 func errnetclosed(m dsl.Matcher) {
@@ -377,7 +371,6 @@ func errnetclosed(m dsl.Matcher) {
 		Where(m["text"].Text.Matches("\".*closed network connection.*\"")).
 		Report(`String matching against error texts is fragile; use net.ErrClosed instead`).
 		Suggest(`errors.Is($err, net.ErrClosed)`)
-
 }
 
 func httpheaderadd(m dsl.Matcher) {

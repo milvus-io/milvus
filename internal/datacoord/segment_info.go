@@ -238,7 +238,7 @@ func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
 		allocations:    s.allocations,
 		lastFlushTime:  s.lastFlushTime,
 		isCompacting:   s.isCompacting,
-		//cannot copy size, since binlog may be changed
+		// cannot copy size, since binlog may be changed
 		lastWrittenTime: s.lastWrittenTime,
 	}
 	for _, opt := range opts {

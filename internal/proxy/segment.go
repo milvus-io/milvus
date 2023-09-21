@@ -319,7 +319,6 @@ func (sa *segIDAssigner) syncSegments() (bool, error) {
 	log.Debug("syncSegments call dataCoord.AssignSegmentID", zap.String("request", req.String()))
 
 	resp, err := sa.dataCoord.AssignSegmentID(context.Background(), req)
-
 	if err != nil {
 		return false, fmt.Errorf("syncSegmentID Failed:%w", err)
 	}

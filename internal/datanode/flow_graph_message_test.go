@@ -38,5 +38,4 @@ func TestInsertMsg_TimeTick(te *testing.T) {
 			assert.Equal(t, test.timeTimestanpMax, fgMsg.TimeTick())
 		})
 	}
-
 }

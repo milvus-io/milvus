@@ -27,21 +27,19 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-
+	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/examples/helloworld/helloworld"
 	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/reflection"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/reflection"
-
-	"github.com/stretchr/testify/assert"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 func TestMain(m *testing.M) {
@@ -309,7 +307,6 @@ func TestClientBase_Recall(t *testing.T) {
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, ErrConnect))
 	})
-
 }
 
 type server struct {
@@ -335,11 +332,11 @@ func TestClientBase_RetryPolicy(t *testing.T) {
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
-	var kaep = keepalive.EnforcementPolicy{
+	kaep := keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second,
 		PermitWithoutStream: true,
 	}
-	var kasp = keepalive.ServerParameters{
+	kasp := keepalive.ServerParameters{
 		Time:    60 * time.Second,
 		Timeout: 60 * time.Second,
 	}
@@ -397,11 +394,11 @@ func TestClientBase_Compression(t *testing.T) {
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
-	var kaep = keepalive.EnforcementPolicy{
+	kaep := keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second,
 		PermitWithoutStream: true,
 	}
-	var kasp = keepalive.ServerParameters{
+	kasp := keepalive.ServerParameters{
 		Time:    60 * time.Second,
 		Timeout: 60 * time.Second,
 	}

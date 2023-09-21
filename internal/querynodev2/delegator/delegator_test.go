@@ -68,7 +68,6 @@ func (s *DelegatorSuite) SetupSuite() {
 }
 
 func (s *DelegatorSuite) TearDownSuite() {
-
 }
 
 func (s *DelegatorSuite) SetupTest() {

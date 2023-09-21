@@ -5,13 +5,14 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestUnaryServerInterceptor(t *testing.T) {
@@ -162,7 +163,6 @@ func TestPrivilegeInterceptor(t *testing.T) {
 			getPolicyModel("foo")
 		})
 	})
-
 }
 
 func TestResourceGroupPrivilege(t *testing.T) {
@@ -223,5 +223,4 @@ func TestResourceGroupPrivilege(t *testing.T) {
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.TransferReplicaRequest{})
 		assert.NoError(t, err)
 	})
-
 }

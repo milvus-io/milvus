@@ -44,7 +44,6 @@ func TestKafkaProducer_SendSuccess(t *testing.T) {
 func TestKafkaProducer_SendFail(t *testing.T) {
 	kafkaAddress := getKafkaBrokerList()
 	{
-
 		deliveryChan := make(chan kafka.Event, 1)
 		rand.Seed(time.Now().UnixNano())
 		topic := fmt.Sprintf("test-topic-%d", rand.Int())

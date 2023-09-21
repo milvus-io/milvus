@@ -2,11 +2,11 @@ package indexparamcheck
 
 import (
 	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
-type baseChecker struct {
-}
+type baseChecker struct{}
 
 func (c baseChecker) CheckTrain(params map[string]string) error {
 	if !CheckIntByRange(params, DIM, DefaultMinDim, DefaultMaxDim) {

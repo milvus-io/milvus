@@ -52,7 +52,7 @@ import (
 func Test_garbageCollector_basic(t *testing.T) {
 	bucketName := `datacoord-ut` + strings.ToLower(funcutil.RandomString(8))
 	rootPath := `gc` + funcutil.RandomString(8)
-	//TODO change to Params
+	// TODO change to Params
 	cli, _, _, _, _, err := initUtOSSEnv(bucketName, rootPath, 0)
 	require.NoError(t, err)
 
@@ -91,7 +91,6 @@ func Test_garbageCollector_basic(t *testing.T) {
 			gc.close()
 		})
 	})
-
 }
 
 func validateMinioPrefixElements(t *testing.T, cli *minio.Client, bucketName string, prefix string, elements []string) {
@@ -105,7 +104,7 @@ func validateMinioPrefixElements(t *testing.T, cli *minio.Client, bucketName str
 func Test_garbageCollector_scan(t *testing.T) {
 	bucketName := `datacoord-ut` + strings.ToLower(funcutil.RandomString(8))
 	rootPath := `gc` + funcutil.RandomString(8)
-	//TODO change to Params
+	// TODO change to Params
 	cli, inserts, stats, delta, others, err := initUtOSSEnv(bucketName, rootPath, 4)
 	require.NoError(t, err)
 
@@ -332,7 +331,7 @@ func createMetaForRecycleUnusedIndexes(catalog metastore.DataCoordCatalog) *meta
 	var (
 		ctx    = context.Background()
 		collID = UniqueID(100)
-		//partID = UniqueID(200)
+		// partID = UniqueID(200)
 		fieldID = UniqueID(300)
 		indexID = UniqueID(400)
 	)
@@ -426,7 +425,7 @@ func createMetaForRecycleUnusedSegIndexes(catalog metastore.DataCoordCatalog) *m
 		ctx    = context.Background()
 		collID = UniqueID(100)
 		partID = UniqueID(200)
-		//fieldID = UniqueID(300)
+		// fieldID = UniqueID(300)
 		indexID = UniqueID(400)
 		segID   = UniqueID(500)
 	)
@@ -569,7 +568,7 @@ func createMetaTableForRecycleUnusedIndexFiles(catalog *datacoord.Catalog) *meta
 		ctx    = context.Background()
 		collID = UniqueID(100)
 		partID = UniqueID(200)
-		//fieldID = UniqueID(300)
+		// fieldID = UniqueID(300)
 		indexID = UniqueID(400)
 		segID   = UniqueID(500)
 		buildID = UniqueID(600)

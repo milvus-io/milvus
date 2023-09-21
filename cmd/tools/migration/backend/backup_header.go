@@ -3,9 +3,9 @@ package backend
 import (
 	"encoding/json"
 
-	"github.com/milvus-io/milvus/cmd/tools/migration/console"
-
 	"github.com/golang/protobuf/proto"
+
+	"github.com/milvus-io/milvus/cmd/tools/migration/console"
 )
 
 type BackupHeaderVersion int32
@@ -78,7 +78,7 @@ func (v *BackupHeaderExtra) ToJSONBytes() []byte {
 }
 
 func GetExtra(extra []byte) *BackupHeaderExtra {
-	var v = newDefaultBackupHeaderExtra()
+	v := newDefaultBackupHeaderExtra()
 	err := json.Unmarshal(extra, v)
 	if err != nil {
 		console.Error(err.Error())

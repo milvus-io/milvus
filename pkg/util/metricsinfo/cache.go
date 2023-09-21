@@ -106,7 +106,6 @@ func (manager *MetricsCacheManager) GetSystemInfoMetrics() (*milvuspb.GetMetrics
 	if manager.systemInfoMetricsInvalid ||
 		manager.systemInfoMetrics == nil ||
 		time.Since(manager.systemInfoMetricsLastUpdatedTime) >= retention {
-
 		return nil, errInvalidSystemInfosMetricCache
 	}
 

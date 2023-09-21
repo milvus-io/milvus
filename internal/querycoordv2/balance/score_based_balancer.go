@@ -39,7 +39,8 @@ func NewScoreBasedBalancer(scheduler task.Scheduler,
 	nodeManager *session.NodeManager,
 	dist *meta.DistributionManager,
 	meta *meta.Meta,
-	targetMgr *meta.TargetManager) *ScoreBasedBalancer {
+	targetMgr *meta.TargetManager,
+) *ScoreBasedBalancer {
 	return &ScoreBasedBalancer{
 		RowCountBasedBalancer: NewRowCountBasedBalancer(scheduler, nodeManager, dist, meta, targetMgr),
 	}
@@ -162,7 +163,7 @@ func (b *ScoreBasedBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAss
 		)
 		return nil, nil
 	}
-	//print current distribution before generating plans
+	// print current distribution before generating plans
 	segmentPlans, channelPlans := make([]SegmentAssignPlan, 0), make([]ChannelAssignPlan, 0)
 	if len(stoppingNodesSegments) != 0 {
 		log.Info("Handle stopping nodes",
@@ -268,7 +269,7 @@ func (b *ScoreBasedBalancer) getNormalSegmentPlan(replica *meta.Replica, nodesSe
 			break
 		}
 		if targetSegmentToMove == nil {
-			//the node with the highest score doesn't have any segments suitable for balancing, stop balancing this round
+			// the node with the highest score doesn't have any segments suitable for balancing, stop balancing this round
 			break
 		}
 
@@ -277,7 +278,7 @@ func (b *ScoreBasedBalancer) getNormalSegmentPlan(replica *meta.Replica, nodesSe
 		nextToPriority := toPriority + int(targetSegmentToMove.GetNumOfRows()) + int(float64(targetSegmentToMove.GetNumOfRows())*
 			params.Params.QueryCoordCfg.GlobalRowCountFactor.GetAsFloat())
 
-		//still unbalanced after this balance plan is executed
+		// still unbalanced after this balance plan is executed
 		if nextToPriority <= nextFromPriority {
 			plan := SegmentAssignPlan{
 				ReplicaID: replica.GetID(),
@@ -287,9 +288,9 @@ func (b *ScoreBasedBalancer) getNormalSegmentPlan(replica *meta.Replica, nodesSe
 			}
 			segmentPlans = append(segmentPlans, plan)
 		} else {
-			//if unbalance reverted after balance action, we will consider the benefit
-			//only trigger following balance when the generated reverted balance
-			//is far smaller than the original unbalance
+			// if unbalance reverted after balance action, we will consider the benefit
+			// only trigger following balance when the generated reverted balance
+			// is far smaller than the original unbalance
 			nextUnbalance := nextToPriority - nextFromPriority
 			if float64(nextUnbalance)*params.Params.QueryCoordCfg.ReverseUnbalanceTolerationFactor.GetAsFloat() < unbalance {
 				plan := SegmentAssignPlan{
@@ -300,14 +301,14 @@ func (b *ScoreBasedBalancer) getNormalSegmentPlan(replica *meta.Replica, nodesSe
 				}
 				segmentPlans = append(segmentPlans, plan)
 			} else {
-				//if the tiniest segment movement between the highest scored node and lowest scored node will
-				//not provide sufficient balance benefit, we will seize balancing in this round
+				// if the tiniest segment movement between the highest scored node and lowest scored node will
+				// not provide sufficient balance benefit, we will seize balancing in this round
 				break
 			}
 		}
 		havingMovedSegments.Insert(targetSegmentToMove.GetID())
 
-		//update node priority
+		// update node priority
 		toNode.setPriority(nextToPriority)
 		fromNode.setPriority(nextFromPriority)
 		// if toNode and fromNode can not find segment to balance, break, else try to balance the next round

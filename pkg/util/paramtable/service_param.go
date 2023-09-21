@@ -951,5 +951,4 @@ Leave it empty if you want to use AWS default endpoint`,
 		Export:       true,
 	}
 	p.UseVirtualHost.Init(base.mgr)
-
 }

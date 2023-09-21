@@ -1102,7 +1102,7 @@ func (node *Proxy) HasPartition(ctx context.Context, request *milvuspb.HasPartit
 	defer sp.End()
 	method := "HasPartition"
 	tr := timerecord.NewTimeRecorder(method)
-	//TODO: use collectionID instead of collectionName
+	// TODO: use collectionID instead of collectionName
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 		metrics.TotalLabel).Inc()
 
@@ -1402,7 +1402,7 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 
 	method := "ShowPartitions"
 	tr := timerecord.NewTimeRecorder(method)
-	//TODO: use collectionID instead of collectionName
+	// TODO: use collectionID instead of collectionName
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 		metrics.TotalLabel).Inc()
 
@@ -3301,7 +3301,7 @@ func (node *Proxy) RegisterLink(ctx context.Context, req *milvuspb.RegisterLinkR
 			},
 		}, nil
 	}
-	//metrics.ProxyLinkedSDKs.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Inc()
+	// metrics.ProxyLinkedSDKs.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Inc()
 	return &milvuspb.RegisterLinkResponse{
 		Address: nil,
 		Status: &commonpb.Status{
@@ -3436,7 +3436,7 @@ func (node *Proxy) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetrics
 			}, nil
 		}
 
-		//log.Debug("Proxy.GetProxyMetrics",
+		// log.Debug("Proxy.GetProxyMetrics",
 		//	zap.String("metricType", metricType))
 
 		return proxyMetrics, nil
@@ -4407,7 +4407,8 @@ func (node *Proxy) CheckHealth(ctx context.Context, request *milvuspb.CheckHealt
 		return &milvuspb.CheckHealthResponse{
 			Status:    unhealthyStatus(),
 			IsHealthy: false,
-			Reasons:   []string{reason}}, nil
+			Reasons:   []string{reason},
+		}, nil
 	}
 
 	group, ctx := errgroup.WithContext(ctx)
@@ -4926,7 +4927,6 @@ func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest
 			commonpbutil.WithMsgType(commonpb.MsgType_ListDatabases),
 		),
 	})
-
 	if err != nil {
 		log.Info("connect failed, failed to list databases", zap.Error(err))
 		return &milvuspb.ConnectResponse{

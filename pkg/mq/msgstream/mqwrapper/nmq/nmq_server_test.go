@@ -22,9 +22,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/nats-io/nats-server/v2/server"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 var natsServerAddress string

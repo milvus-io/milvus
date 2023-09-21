@@ -113,8 +113,7 @@ func TestKafkaConsumer_ChanWithNoAssign(t *testing.T) {
 	})
 }
 
-type mockMsgID struct {
-}
+type mockMsgID struct{}
 
 func (m2 mockMsgID) AtEarliestPosition() bool {
 	return false

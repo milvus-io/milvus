@@ -24,7 +24,7 @@ import (
 )
 
 func Test_VerifyFloat(t *testing.T) {
-	var value = math.NaN()
+	value := math.NaN()
 	err := VerifyFloat(value)
 	assert.Error(t, err)
 

@@ -37,7 +37,7 @@ func validate(ctx context.Context, manager *Manager, collectionID int64, partiti
 		return nil, merr.WrapErrCollectionNotFound(collectionID)
 	}
 
-	//validate partition
+	// validate partition
 	// no partition id specified, get all partition ids in collection
 	if len(partitionIDs) == 0 {
 		searchPartIDs = collection.GetPartitions()
@@ -59,7 +59,7 @@ func validate(ctx context.Context, manager *Manager, collectionID int64, partiti
 		return []Segment{}, nil
 	}
 
-	//validate segment
+	// validate segment
 	segments := make([]Segment, 0, len(segmentIDs))
 	var err error
 	if len(segmentIDs) == 0 {
