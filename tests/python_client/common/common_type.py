@@ -226,11 +226,11 @@ get_wrong_format_dict = [
 ]
 
 """ Specially defined list """
-all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "HNSW", "DISKANN", "BIN_FLAT", "BIN_IVF_FLAT",
+all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "HNSW", "SCANN", "DISKANN", "BIN_FLAT", "BIN_IVF_FLAT",
                    "GPU_IVF_FLAT", "GPU_IVF_PQ"]
 
 default_index_params = [{"nlist": 128}, {"nlist": 128}, {"nlist": 128}, {"nlist": 128, "m": 16, "nbits": 8},
-                        {"M": 48, "efConstruction": 500}, {}, {"nlist": 128}, {"nlist": 128},
+                        {"M": 48, "efConstruction": 500}, {"nlist": 128}, {}, {"nlist": 128}, {"nlist": 128},
                         {"nlist": 64}, {"nlist": 64, "m": 16, "nbits": 8}]
 
 Handler_type = ["GRPC", "HTTP"]
