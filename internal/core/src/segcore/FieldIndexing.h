@@ -251,12 +251,17 @@ class IndexingRecord {
                 //Small-Index disabled, create index for vector field only
                 if (index_meta_->GetIndexMaxRowCount() > 0 &&
                     index_meta_->HasFiled(field_id)) {
-                    field_indexings_.try_emplace(
-                        field_id,
-                        CreateIndex(field_meta,
-                                    index_meta_->GetFieldIndexMeta(field_id),
-                                    index_meta_->GetIndexMaxRowCount(),
-                                    segcore_config_));
+                    auto vec_filed_meta =
+                        index_meta_->GetFieldIndexMeta(field_id);
+                    //Disable growing index for flat
+                    if (!vec_filed_meta.IsFlatIndex()) {
+                        field_indexings_.try_emplace(
+                            field_id,
+                            CreateIndex(field_meta,
+                                        vec_filed_meta,
+                                        index_meta_->GetIndexMaxRowCount(),
+                                        segcore_config_));
+                    }
                 }
             }
         }

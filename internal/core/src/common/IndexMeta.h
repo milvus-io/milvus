@@ -21,6 +21,7 @@
 
 #include "pb/common.pb.h"
 #include "pb/segcore.pb.h"
+#include "knowhere/utils.h"
 #include "Types.h"
 
 namespace milvus {
@@ -42,6 +43,11 @@ class FieldIndexMeta {
     knowhere::IndexType
     GetIndexType() const {
         return index_params_.at(knowhere::meta::INDEX_TYPE);
+    }
+
+    bool
+    IsFlatIndex() const {
+        return knowhere::IsFlatIndex(GetIndexType());
     }
 
     const std::map<std::string, std::string>&
