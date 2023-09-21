@@ -396,6 +396,14 @@ func TestValidateFieldType(t *testing.T) {
 			dt:       schemapb.DataType_VarChar,
 			validate: true,
 		},
+		{
+			dt:       schemapb.DataType_String,
+			validate: false,
+		},
+		{
+			dt:       schemapb.DataType_Array,
+			validate: false,
+		},
 	}
 
 	for _, tc := range cases {

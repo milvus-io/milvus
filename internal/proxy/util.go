@@ -347,6 +347,8 @@ func validateFieldType(schema *schemapb.CollectionSchema) error {
 		switch field.GetDataType() {
 		case schemapb.DataType_String:
 			return errors.New("string data type not supported yet, please use VarChar type instead")
+		case schemapb.DataType_Array:
+			return errors.New("array data type not supported yet")
 		case schemapb.DataType_None:
 			return errors.New("data type None is not valid")
 		}
