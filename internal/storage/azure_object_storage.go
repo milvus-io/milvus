@@ -111,10 +111,10 @@ func (AzureObjectStorage *AzureObjectStorage) PutObject(ctx context.Context, buc
 
 func (AzureObjectStorage *AzureObjectStorage) StatObject(ctx context.Context, bucketName, objectName string) (int64, error) {
 	info, err := AzureObjectStorage.Client.NewContainerClient(bucketName).NewBlockBlobClient(objectName).GetProperties(ctx, &blob.GetPropertiesOptions{})
-	if err == nil {
-		return *info.ContentLength, err
+	if err != nil {
+		return 0, err
 	}
-	return 0, err
+	return *info.ContentLength, nil
 }
 
 func (AzureObjectStorage *AzureObjectStorage) ListObjects(ctx context.Context, bucketName string, prefix string, recursive bool) (map[string]time.Time, error) {

@@ -30,7 +30,7 @@ linters:
     - gci
     - whitespace
     - gofumpt
-      #    - gocritic
+    - gocritic
 
 linters-settings:
   gci:
