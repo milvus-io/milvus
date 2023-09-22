@@ -136,6 +136,8 @@ type GrpcServerConfig struct {
 
 	ServerMaxSendSize ParamItem `refreshable:"false"`
 	ServerMaxRecvSize ParamItem `refreshable:"false"`
+
+	GracefulStopTimeout ParamItem `refreshable:"true"`
 }
 
 func (p *GrpcServerConfig) Init(domain string, base *BaseTable) {
@@ -184,6 +186,15 @@ func (p *GrpcServerConfig) Init(domain string, base *BaseTable) {
 		Export: true,
 	}
 	p.ServerMaxRecvSize.Init(base.mgr)
+
+	p.GracefulStopTimeout = ParamItem{
+		Key:          "grpc.gracefulStopTimeout",
+		Version:      "2.3.1",
+		DefaultValue: "10",
+		Doc:          "second, time to wait graceful stop finish",
+		Export:       true,
+	}
+	p.GracefulStopTimeout.Init(base.mgr)
 }
 
 // GrpcClientConfig is configuration for grpc client.
