@@ -262,17 +262,21 @@ func (dt *deleteTask) PostExecute(ctx context.Context) error {
 
 func (dt *deleteTask) getStreamingQueryAndDelteFunc(stream msgstream.MsgStream, plan *planpb.PlanNode) executeFunc {
 	return func(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channelIDs ...string) error {
-		// outputField := translateOutputFields(, dt.schema, true)
-
 		partationIDs := []int64{}
 		if dt.partitionID != common.InvalidFieldID {
 			partationIDs = append(partationIDs, dt.partitionID)
 		}
 
+		log := log.Ctx(ctx).With(
+			zap.Int64("collectionID", dt.collectionID),
+			zap.Int64s("partationIDs", partationIDs),
+			zap.Strings("channels", channelIDs),
+			zap.Int64("nodeID", nodeID))
 		// set plan
 		_, outputFieldIDs := translatePkOutputFields(dt.schema)
 		outputFieldIDs = append(outputFieldIDs, common.TimeStampField)
 		plan.OutputFieldIds = outputFieldIDs
+		log.Debug("start query for delete")
 
 		serializedPlan, err := proto.Marshal(plan)
 		if err != nil {
@@ -300,9 +304,10 @@ func (dt *deleteTask) getStreamingQueryAndDelteFunc(stream msgstream.MsgStream, 
 			Scope:       querypb.DataScope_All,
 		}
 
+		rc := timerecord.NewTimeRecorder("QueryStreamDelete")
 		client, err := qn.QueryStream(ctx, queryReq)
 		if err != nil {
-			log.Warn("query for delete return error", zap.Error(err))
+			log.Warn("query stream for delete create failed", zap.Error(err))
 			return err
 		}
 
@@ -310,6 +315,7 @@ func (dt *deleteTask) getStreamingQueryAndDelteFunc(stream msgstream.MsgStream, 
 			result, err := client.Recv()
 			if err != nil {
 				if err == io.EOF {
+					log.Debug("query stream for delete finished", zap.Int64("msgID", dt.msgID), zap.Duration("duration", rc.ElapseSpan()))
 					return nil
 				}
 				return err
@@ -317,11 +323,13 @@ func (dt *deleteTask) getStreamingQueryAndDelteFunc(stream msgstream.MsgStream, 
 
 			err = merr.Error(result.GetStatus())
 			if err != nil {
+				log.Warn("query stream for delete get error status", zap.Int64("msgID", dt.msgID), zap.Error(err))
 				return err
 			}
 
 			err = dt.produce(ctx, stream, result.GetIds())
 			if err != nil {
+				log.Warn("query stream for delete produce result failed", zap.Int64("msgID", dt.msgID), zap.Error(err))
 				return err
 			}
 		}
@@ -350,7 +358,10 @@ func (dt *deleteTask) simpleDelete(ctx context.Context, termExp *planpb.Expr_Ter
 		log.Info("Failed to get primary keys from expr", zap.Error(err))
 		return err
 	}
-	log.Debug("get primary keys from expr", zap.Int64("len of primary keys", numRow))
+	log.Debug("get primary keys from expr",
+		zap.Int64("len of primary keys", numRow),
+		zap.Int64("collectionID", dt.collectionID),
+		zap.Int64("partationID", dt.partitionID))
 	err = dt.produce(ctx, stream, primaryKeys)
 	if err != nil {
 		return err

@@ -264,6 +264,13 @@ func (node *QueryNode) queryChannelStream(ctx context.Context, req *querypb.Quer
 }
 
 func (node *QueryNode) queryStreamSegments(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error {
+	log.Debug("received query stream request",
+		zap.Int64s("outputFields", req.GetReq().GetOutputFieldsId()),
+		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
+		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
+		zap.Uint64("mvccTimestamp", req.GetReq().GetMvccTimestamp()),
+	)
+
 	collection := node.manager.Collection.Get(req.Req.GetCollectionID())
 	if collection == nil {
 		return merr.WrapErrCollectionNotFound(req.Req.GetCollectionID())

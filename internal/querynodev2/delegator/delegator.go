@@ -280,7 +280,7 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 		growing = []SegmentEntry{}
 	}
 
-	log.Info("query segments...",
+	log.Info("query stream segments...",
 		zap.Int("sealedNum", len(sealed)),
 		zap.Int("growingNum", len(growing)),
 	)
