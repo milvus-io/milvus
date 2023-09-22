@@ -24,6 +24,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -54,7 +55,7 @@ func TestGetServerIDConcurrently(t *testing.T) {
 	defer etcdKV.RemoveWithPrefix("")
 
 	var wg sync.WaitGroup
-	var muList = sync.Mutex{}
+	muList := sync.Mutex{}
 
 	s := NewSession(ctx, metaRoot, etcdCli)
 	res := make([]int64, 0)
@@ -122,7 +123,7 @@ func TestUpdateSessions(t *testing.T) {
 	defer etcdKV.RemoveWithPrefix("")
 
 	var wg sync.WaitGroup
-	var muList = sync.Mutex{}
+	muList := sync.Mutex{}
 
 	s := NewSession(ctx, metaRoot, etcdCli, WithResueNodeID(false))
 
@@ -194,39 +195,55 @@ func TestSessionLivenessCheck(t *testing.T) {
 	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
 	require.NoError(t, err)
 	s := NewSession(context.Background(), metaRoot, etcdCli)
-	ctx := context.Background()
+	s.Register()
 	ch := make(chan struct{})
 	s.liveCh = ch
 	signal := make(chan struct{}, 1)
 
-	flag := false
-
-	s.LivenessCheck(ctx, func() {
-		flag = true
+	flag := atomic.NewBool(false)
+	s.LivenessCheck(context.Background(), func() {
+		flag.Store(true)
 		signal <- struct{}{}
 	})
+	assert.False(t, flag.Load())
 
-	assert.False(t, flag)
+	// test liveCh receive event, liveness won't exit, callback won't trigger
 	ch <- struct{}{}
+	assert.False(t, flag.Load())
 
-	assert.False(t, flag)
+	// test close liveCh, liveness exit, callback should trigger
 	close(ch)
-
 	<-signal
-	assert.True(t, flag)
+	assert.True(t, flag.Load())
 
-	ctx, cancel := context.WithCancel(ctx)
-	cancel()
-	ch = make(chan struct{})
-	s.liveCh = ch
-	flag = false
+	// test context done, liveness exit, callback shouldn't trigger
+	metaRoot = fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
+	s1 := NewSession(context.Background(), metaRoot, etcdCli)
+	s1.Register()
+	ctx, cancel := context.WithCancel(context.Background())
+	flag.Store(false)
 
-	s.LivenessCheck(ctx, func() {
-		flag = true
+	s1.LivenessCheck(ctx, func() {
+		flag.Store(true)
 		signal <- struct{}{}
 	})
+	cancel()
+	assert.False(t, flag.Load())
 
-	assert.False(t, flag)
+	// test context done, liveness start failed, callback should trigger
+	metaRoot = fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
+	s2 := NewSession(context.Background(), metaRoot, etcdCli)
+	s2.Register()
+	ctx, cancel = context.WithCancel(context.Background())
+	signal = make(chan struct{}, 1)
+	flag.Store(false)
+	cancel()
+	s2.LivenessCheck(ctx, func() {
+		flag.Store(true)
+		signal <- struct{}{}
+	})
+	<-signal
+	assert.True(t, flag.Load())
 }
 
 func TestWatcherHandleWatchResp(t *testing.T) {
@@ -365,9 +382,7 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 		assert.Panics(t, func() {
 			w.handleWatchResponse(wresp)
 		})
-
 	})
-
 }
 
 func TestSession_Registered(t *testing.T) {
@@ -491,7 +506,6 @@ func (suite *SessionWithVersionSuite) SetupTest() {
 	s3.Register()
 
 	suite.sessions = append(suite.sessions, s3)
-
 }
 
 func (suite *SessionWithVersionSuite) TearDownTest() {
@@ -640,7 +654,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	})
 	assert.True(t, s2.isStandby.Load().(bool))
 
-	//assert.True(t, s2.watchingPrimaryKeyLock)
+	// assert.True(t, s2.watchingPrimaryKeyLock)
 	// stop session 1, session 2 will take over primary service
 	log.Debug("Stop session 1, session 2 will take over primary service")
 	assert.False(t, flag)
