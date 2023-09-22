@@ -785,6 +785,12 @@ func TestGetPrimaryFieldSchema(t *testing.T) {
 	primaryField, err := GetPrimaryFieldSchema(schema)
 	assert.Nil(t, err)
 	assert.Equal(t, schemapb.DataType_Int64, primaryField.DataType)
+
+	hasPartitionKey := HasPartitionKey(schema)
+	assert.False(t, hasPartitionKey)
+	int64Field.IsPartitionKey = true
+	hasPartitionKey2 := HasPartitionKey(schema)
+	assert.True(t, hasPartitionKey2)
 }
 
 func TestGetPK(t *testing.T) {
