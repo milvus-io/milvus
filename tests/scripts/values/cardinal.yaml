@@ -1,0 +1,4 @@
+extraConfigFiles:
+  user.yaml: |+
+    common:
+      indexEngineVersion: "cardinal-v0"

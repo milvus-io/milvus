@@ -22,12 +22,14 @@
 #include <vector>
 #include <boost/dynamic_bitset.hpp>
 
+#include "Utils.h"
 #include "knowhere/factory.h"
 #include "index/Index.h"
 #include "common/Types.h"
 #include "common/BitsetView.h"
 #include "common/QueryResult.h"
 #include "common/QueryInfo.h"
+#include "knowhere/version.h"
 
 namespace milvus::index {
 
@@ -86,6 +88,17 @@ class VectorIndex : public IndexBase {
 
     virtual void
     CleanLocalData() {
+    }
+
+    void
+    CheckCompatible(const std::string& version) {
+        std::string err_msg =
+            "version not support : " + version +
+            " , knowhere current version " +
+            knowhere::Version::GetCurrentVersion().VersionCode();
+        AssertInfo(
+            knowhere::Version::VersionSupport(knowhere::Version(version)),
+            err_msg);
     }
 
  private:

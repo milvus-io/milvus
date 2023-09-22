@@ -45,10 +45,13 @@ constexpr const char* FIELD_ID = "field_id";
 constexpr const char* INDEX_BUILD_ID = "index_build_id";
 constexpr const char* INDEX_ID = "index_id";
 constexpr const char* INDEX_VERSION = "index_version";
+constexpr const char* INDEX_ENGINE_VERSION = "index_engine_version";
 
-// DiskAnn build params
+// VecIndex file metas
 constexpr const char* DISK_ANN_PREFIX_PATH = "index_prefix";
 constexpr const char* DISK_ANN_RAW_DATA_PATH = "data_path";
+
+// DiskAnn build params
 constexpr const char* DISK_ANN_MAX_DEGREE = "max_degree";
 constexpr const char* DISK_ANN_SEARCH_LIST_SIZE = "search_list_size";
 constexpr const char* DISK_ANN_PQ_CODE_BUDGET = "pq_code_budget_gb";

@@ -33,7 +33,8 @@ template <typename T>
 class ScalarIndexSort : public ScalarIndex<T> {
  public:
     explicit ScalarIndexSort(
-        storage::FileManagerImplPtr file_manager = nullptr);
+        const storage::FileManagerContext& file_manager_context =
+            storage::FileManagerContext());
 
     BinarySet
     Serialize(const Config& config) override;
@@ -113,7 +114,8 @@ using ScalarIndexSortPtr = std::unique_ptr<ScalarIndexSort<T>>;
 namespace milvus::index {
 template <typename T>
 inline ScalarIndexSortPtr<T>
-CreateScalarIndexSort(storage::FileManagerImplPtr file_manager = nullptr) {
-    return std::make_unique<ScalarIndexSort<T>>(file_manager);
+CreateScalarIndexSort(const storage::FileManagerContext& file_manager_context =
+                          storage::FileManagerContext()) {
+    return std::make_unique<ScalarIndexSort<T>>(file_manager_context);
 }
 }  // namespace milvus::index

@@ -186,10 +186,7 @@ GenTermPlan(const FieldMeta& fvec_meta,
         vector_type = proto::plan::VectorType::Float16Vector;
     }
 
-    auto anns = GenAnns(expr,
-                        vector_type,
-                        fvec_meta.get_id().get(),
-                        "$0");
+    auto anns = GenAnns(expr, vector_type, fvec_meta.get_id().get(), "$0");
 
     auto plan_node = GenPlanNode();
     plan_node->set_allocated_vector_anns(anns);
@@ -232,10 +229,8 @@ GenAlwaysFalsePlan(const FieldMeta& fvec_meta, const FieldMeta& str_meta) {
     } else if (fvec_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
         vector_type = proto::plan::VectorType::Float16Vector;
     }
-    auto anns = GenAnns(always_false_expr,
-                        vector_type,
-                        fvec_meta.get_id().get(),
-                        "$0");
+    auto anns =
+        GenAnns(always_false_expr, vector_type, fvec_meta.get_id().get(), "$0");
 
     auto plan_node = GenPlanNode();
     plan_node->set_allocated_vector_anns(anns);
@@ -253,10 +248,8 @@ GenAlwaysTruePlan(const FieldMeta& fvec_meta, const FieldMeta& str_meta) {
     } else if (fvec_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
         vector_type = proto::plan::VectorType::Float16Vector;
     }
-    auto anns = GenAnns(always_true_expr,
-                        vector_type,
-                        fvec_meta.get_id().get(),
-                        "$0");
+    auto anns =
+        GenAnns(always_true_expr, vector_type, fvec_meta.get_id().get(), "$0");
 
     auto plan_node = GenPlanNode();
     plan_node->set_allocated_vector_anns(anns);
@@ -386,11 +379,7 @@ TEST(StringExpr, Compare) {
         } else if (fvec_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
             vector_type = proto::plan::VectorType::Float16Vector;
         }
-        auto anns =
-            GenAnns(expr,
-                    vector_type,
-                    fvec_meta.get_id().get(),
-                    "$0");
+        auto anns = GenAnns(expr, vector_type, fvec_meta.get_id().get(), "$0");
 
         auto plan_node = std::make_unique<proto::plan::PlanNode>();
         plan_node->set_allocated_vector_anns(anns);
@@ -497,11 +486,7 @@ TEST(StringExpr, UnaryRange) {
         } else if (fvec_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
             vector_type = proto::plan::VectorType::Float16Vector;
         }
-        auto anns =
-            GenAnns(expr,
-                    vector_type,
-                    fvec_meta.get_id().get(),
-                    "$0");
+        auto anns = GenAnns(expr, vector_type, fvec_meta.get_id().get(), "$0");
 
         auto plan_node = std::make_unique<proto::plan::PlanNode>();
         plan_node->set_allocated_vector_anns(anns);
@@ -600,11 +585,7 @@ TEST(StringExpr, BinaryRange) {
         } else if (fvec_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
             vector_type = proto::plan::VectorType::Float16Vector;
         }
-        auto anns =
-            GenAnns(expr,
-                    vector_type,
-                    fvec_meta.get_id().get(),
-                    "$0");
+        auto anns = GenAnns(expr, vector_type, fvec_meta.get_id().get(), "$0");
 
         auto plan_node = std::make_unique<proto::plan::PlanNode>();
         plan_node->set_allocated_vector_anns(anns);

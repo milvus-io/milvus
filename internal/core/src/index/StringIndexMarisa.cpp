@@ -30,10 +30,11 @@
 
 namespace milvus::index {
 
-StringIndexMarisa::StringIndexMarisa(storage::FileManagerImplPtr file_manager) {
-    if (file_manager != nullptr) {
-        file_manager_ = std::dynamic_pointer_cast<storage::MemFileManagerImpl>(
-            file_manager);
+StringIndexMarisa::StringIndexMarisa(
+    const storage::FileManagerContext& file_manager_context) {
+    if (file_manager_context.Valid()) {
+        file_manager_ =
+            std::make_shared<storage::MemFileManagerImpl>(file_manager_context);
     }
 }
 

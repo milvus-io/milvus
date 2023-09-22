@@ -45,7 +45,7 @@ class IndexFactory {
     IndexCreatorBasePtr
     CreateIndex(DataType type,
                 Config& config,
-                storage::FileManagerImplPtr file_manager) {
+                const storage::FileManagerContext& context) {
         auto invalid_dtype_msg =
             std::string("invalid data type: ") + std::to_string(int(type));
 
@@ -59,12 +59,11 @@ class IndexFactory {
             case DataType::DOUBLE:
             case DataType::VARCHAR:
             case DataType::STRING:
-                return CreateScalarIndex(type, config, file_manager);
+                return CreateScalarIndex(type, config, context);
 
             case DataType::VECTOR_FLOAT:
             case DataType::VECTOR_BINARY:
-                return std::make_unique<VecIndexCreator>(
-                    type, config, file_manager);
+                return std::make_unique<VecIndexCreator>(type, config, context);
             default:
                 throw SegcoreError(
                     DataTypeInvalid,

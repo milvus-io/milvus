@@ -226,16 +226,17 @@ func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID 
 	indexes := make([]*querypb.FieldIndexInfo, 0)
 	for _, info := range segmentInfo.GetIndexInfos() {
 		indexes = append(indexes, &querypb.FieldIndexInfo{
-			FieldID:        info.GetFieldID(),
-			EnableIndex:    true,
-			IndexName:      info.GetIndexName(),
-			IndexID:        info.GetIndexID(),
-			BuildID:        info.GetBuildID(),
-			IndexParams:    info.GetIndexParams(),
-			IndexFilePaths: info.GetIndexFilePaths(),
-			IndexSize:      int64(info.GetSerializedSize()),
-			IndexVersion:   info.GetIndexVersion(),
-			NumRows:        info.GetNumRows(),
+			FieldID:            info.GetFieldID(),
+			EnableIndex:        true,
+			IndexName:          info.GetIndexName(),
+			IndexID:            info.GetIndexID(),
+			BuildID:            info.GetBuildID(),
+			IndexParams:        info.GetIndexParams(),
+			IndexFilePaths:     info.GetIndexFilePaths(),
+			IndexSize:          int64(info.GetSerializedSize()),
+			IndexVersion:       info.GetIndexVersion(),
+			NumRows:            info.GetNumRows(),
+			IndexEngineVersion: info.GetIndexEngineVersion(),
 		})
 	}
 

@@ -30,11 +30,12 @@ namespace milvus::index {
 
 template <typename T>
 inline ScalarIndexSort<T>::ScalarIndexSort(
-    storage::FileManagerImplPtr file_manager)
+    const storage::FileManagerContext& file_manager_context)
     : is_built_(false), data_() {
-    if (file_manager != nullptr) {
-        file_manager_ = std::dynamic_pointer_cast<storage::MemFileManagerImpl>(
-            file_manager);
+    if (file_manager_context.Valid()) {
+        file_manager_ =
+            std::make_shared<storage::MemFileManagerImpl>(file_manager_context);
+        AssertInfo(file_manager_ != nullptr, "create file manager failed!");
     }
 }
 

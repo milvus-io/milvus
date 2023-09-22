@@ -120,6 +120,13 @@ GetIndexTypeFromConfig(const Config& config) {
     return index_type.value();
 }
 
+std::string
+GetIndexEngineVersionFromConfig(const Config& config) {
+    auto index_engine_version =
+        GetValueFromConfig<std::string>(config, INDEX_ENGINE_VERSION);
+    return index_engine_version.has_value() ? index_engine_version.value() : "";
+}
+
 // TODO :: too ugly
 storage::FieldDataMeta
 GetFieldDataMetaFromConfig(const Config& config) {

@@ -216,6 +216,8 @@ type commonConfig struct {
 	EnableLockMetrics        ParamItem `refreshable:"false"`
 	LockSlowLogInfoThreshold ParamItem `refreshable:"true"`
 	LockSlowLogWarnThreshold ParamItem `refreshable:"true"`
+
+	IndexEngineVersion ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -612,6 +614,15 @@ like the old password verification when updating the credential`,
 		Export:       true,
 	}
 	p.LockSlowLogWarnThreshold.Init(base.mgr)
+
+	p.IndexEngineVersion = ParamItem{
+		Key:          "common.indexEngineVersion",
+		Version:      "2.3.2",
+		DefaultValue: "knowhere-v0",
+		Doc:          "version of index engine",
+		Export:       true,
+	}
+	p.IndexEngineVersion.Init(base.mgr)
 }
 
 type traceConfig struct {

@@ -28,6 +28,26 @@
 
 namespace milvus::storage {
 
+struct FileManagerContext {
+    FileManagerContext() : chunkManagerPtr(nullptr) {
+    }
+    FileManagerContext(const FieldDataMeta& fieldDataMeta,
+                       const IndexMeta& indexMeta,
+                       const ChunkManagerPtr& chunkManagerPtr)
+        : fieldDataMeta(fieldDataMeta),
+          indexMeta(indexMeta),
+          chunkManagerPtr(chunkManagerPtr) {
+    }
+    bool
+    Valid() const {
+        return chunkManagerPtr != nullptr;
+    }
+
+    FieldDataMeta fieldDataMeta;
+    IndexMeta indexMeta;
+    ChunkManagerPtr chunkManagerPtr;
+};
+
 #define FILEMANAGER_TRY try {
 #define FILEMANAGER_CATCH                                                 \
     }                                                                     \

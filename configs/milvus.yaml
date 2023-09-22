@@ -523,6 +523,8 @@ common:
       info: 500 # minimum milliseconds for printing durations in info level
       warn: 1000 # minimum milliseconds for printing durations in warn level
 
+  indexEngineVersion: "knowhere-v0"
+
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:
 #   1. TT protection;

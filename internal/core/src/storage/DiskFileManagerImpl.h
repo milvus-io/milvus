@@ -32,9 +32,7 @@ namespace milvus::storage {
 
 class DiskFileManagerImpl : public FileManagerImpl {
  public:
-    explicit DiskFileManagerImpl(const FieldDataMeta& field_mata,
-                                 IndexMeta index_meta,
-                                 ChunkManagerPtr remote_chunk_manager);
+    explicit DiskFileManagerImpl(const FileManagerContext& fileManagerContext);
 
     virtual ~DiskFileManagerImpl();
 

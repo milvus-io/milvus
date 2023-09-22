@@ -87,6 +87,10 @@ CStatus
 AppendInsertFilePath(CBuildIndexInfo c_build_index_info, const char* file_path);
 
 CStatus
+AppendIndexEngineVersionToBuildInfo(CBuildIndexInfo c_load_index_info,
+                                    const char* c_index_engine_version);
+
+CStatus
 CreateIndexV2(CIndex* res_index, CBuildIndexInfo c_build_index_info);
 
 CStatus

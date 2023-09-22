@@ -112,7 +112,9 @@ TYPED_TEST_P(TypedScalarIndexCreatorTest, Constructor) {
         }
 
         auto creator = milvus::indexbuilder::CreateScalarIndex(
-            milvus::DataType(dtype), config, nullptr);
+            milvus::DataType(dtype),
+            config,
+            milvus::storage::FileManagerContext());
     }
 }
 
@@ -133,12 +135,16 @@ TYPED_TEST_P(TypedScalarIndexCreatorTest, Codec) {
             config[iter->first] = iter->second;
         }
         auto creator = milvus::indexbuilder::CreateScalarIndex(
-            milvus::DataType(dtype), config, nullptr);
+            milvus::DataType(dtype),
+            config,
+            milvus::storage::FileManagerContext());
         auto arr = GenArr<T>(nb);
         build_index<T>(creator, arr);
         auto binary_set = creator->Serialize();
         auto copy_creator = milvus::indexbuilder::CreateScalarIndex(
-            milvus::DataType(dtype), config, nullptr);
+            milvus::DataType(dtype),
+            config,
+            milvus::storage::FileManagerContext());
         copy_creator->Load(binary_set);
     }
 }

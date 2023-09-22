@@ -37,8 +37,9 @@ WITH_PROMETHEUS="ON"
 CUDA_ARCH="DEFAULT"
 CUSTOM_THIRDPARTY_PATH=""
 BUILD_DISK_ANN="OFF"
+INDEX_ENGINE="knowhere"
 
-while getopts "p:t:s:f:o:ulrcghzme" arg; do
+while getopts "p:t:s:f:o:ulrcghzmex" arg; do
   case $arg in
   f)
     CUSTOM_THIRDPARTY_PATH=$OPTARG
@@ -81,6 +82,9 @@ while getopts "p:t:s:f:o:ulrcghzme" arg; do
     ;;
   n)
     BUILD_DISK_ANN="OFF"
+    ;;
+  x)
+    INDEX_ENGINE=$OPTARG
     ;;
   h) # help
     echo "
@@ -154,6 +158,7 @@ CMAKE_CMD="cmake \
 -DCUSTOM_THIRDPARTY_DOWNLOAD_PATH=${CUSTOM_THIRDPARTY_PATH} \
 -DKNOWHERE_GPU_VERSION=${SUPPORT_GPU} \
 -DBUILD_DISK_ANN=${BUILD_DISK_ANN} \
+-DINDEX_ENGINE=${INDEX_ENGINE} \
 ${SCRIPTS_DIR}"
 echo ${CMAKE_CMD}
 ${CMAKE_CMD}

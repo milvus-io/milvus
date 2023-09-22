@@ -48,15 +48,16 @@ class IndexFactory {
 
     IndexBasePtr
     CreateIndex(const CreateIndexInfo& create_index_info,
-                storage::FileManagerImplPtr file_manager);
+                const storage::FileManagerContext& file_manager_context);
 
     IndexBasePtr
     CreateVectorIndex(const CreateIndexInfo& create_index_info,
-                      storage::FileManagerImplPtr file_manager);
+                      const storage::FileManagerContext& file_manager_context);
 
     IndexBasePtr
     CreateScalarIndex(const CreateIndexInfo& create_index_info,
-                      storage::FileManagerImplPtr file_manager = nullptr);
+                      const storage::FileManagerContext& file_manager_context =
+                          storage::FileManagerContext());
 
     // IndexBasePtr
     // CreateIndex(DataType dtype, const IndexType& index_type);
@@ -64,7 +65,8 @@ class IndexFactory {
     template <typename T>
     ScalarIndexPtr<T>
     CreateScalarIndex(const IndexType& index_type,
-                      storage::FileManagerImplPtr file_manager = nullptr);
+                      const storage::FileManagerContext& file_manager_context =
+                          storage::FileManagerContext());
 };
 
 }  // namespace milvus::index

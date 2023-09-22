@@ -910,7 +910,9 @@ GenVecIndexing(int64_t N, int64_t dim, const float* vec) {
                        {knowhere::meta::DEVICE_ID, 0}};
     auto database = knowhere::GenDataSet(N, dim, vec);
     auto indexing = std::make_unique<index::VectorMemIndex>(
-        knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, knowhere::metric::L2);
+        knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+        knowhere::metric::L2,
+        knowhere::Version::GetCurrentVersion().VersionCode());
     indexing->BuildWithDataset(database, conf);
     return indexing;
 }

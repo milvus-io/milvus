@@ -19,17 +19,20 @@
 
 namespace milvus::indexbuilder {
 
-VecIndexCreator::VecIndexCreator(DataType data_type,
-                                 Config& config,
-                                 storage::FileManagerImplPtr file_manager)
+VecIndexCreator::VecIndexCreator(
+    DataType data_type,
+    Config& config,
+    const storage::FileManagerContext& file_manager_context)
     : data_type_(data_type), config_(config) {
     index::CreateIndexInfo index_info;
     index_info.field_type = data_type_;
     index_info.index_type = index::GetIndexTypeFromConfig(config_);
     index_info.metric_type = index::GetMetricTypeFromConfig(config_);
+    index_info.index_engine_version =
+        index::GetIndexEngineVersionFromConfig(config_);
 
-    index_ = index::IndexFactory::GetInstance().CreateIndex(index_info,
-                                                            file_manager);
+    index_ = index::IndexFactory::GetInstance().CreateIndex(
+        index_info, file_manager_context);
     AssertInfo(index_ != nullptr,
                "[VecIndexCreator]Index is null after create index");
 }

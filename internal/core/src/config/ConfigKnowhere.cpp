@@ -20,7 +20,6 @@
 #include "common/EasyAssert.h"
 #include "glog/logging.h"
 #include "log/Log.h"
-#include "knowhere/comp/thread_pool.h"
 #include "knowhere/comp/knowhere_config.h"
 
 namespace milvus::config {
@@ -74,12 +73,12 @@ KnowhereSetSimdType(const char* value) {
 
 void
 KnowhereInitBuildThreadPool(const uint32_t num_threads) {
-    knowhere::ThreadPool::InitGlobalBuildThreadPool(num_threads);
+    knowhere::KnowhereConfig::SetBuildThreadPoolSize(num_threads);
 }
 
 void
 KnowhereInitSearchThreadPool(const uint32_t num_threads) {
-    knowhere::ThreadPool::InitGlobalSearchThreadPool(num_threads);
+    knowhere::KnowhereConfig::SetSearchThreadPoolSize(num_threads);
     if (!knowhere::KnowhereConfig::SetAioContextPool(num_threads)) {
         PanicInfo("Failed to set aio context pool with num_threads " +
                   std::to_string(num_threads));
