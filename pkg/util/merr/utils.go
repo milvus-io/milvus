@@ -593,3 +593,11 @@ func WrapErrFieldNotFound[T any](field T, msg ...string) error {
 func wrapWithField(err error, name string, value any) error {
 	return errors.Wrapf(err, "%s=%v", name, value)
 }
+
+func WrapBadBulkInsertRequest(msg ...string) error {
+	return errors.Wrap(ErrBadBulkInsertRequest, strings.Join(msg, "; "))
+}
+
+func WrapBulkInsertPartitionNotFound(collection any, partition any) error {
+	return errors.Wrapf(ErrBulkInsertPartitionNotFound, "collection=%s, partition=%s", collection, partition)
+}

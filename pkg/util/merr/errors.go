@@ -115,6 +115,10 @@ var (
 	ErrInvalidSearchResult       = newMilvusError("fail to parse search result", 1805, false)
 	ErrCheckPrimaryKey           = newMilvusError("please check the primary key and its' type can only in [int, string]", 1806, false)
 
+	// bulkinsert related
+	ErrBadBulkInsertRequest        = newMilvusError("bad bulkinsert request", 1900, false)
+	ErrBulkInsertPartitionNotFound = newMilvusError("partition not found during bulkinsert", 1901, false)
+
 	// Segcore related
 	ErrSegcore = newMilvusError("segcore error", 2000, false)
 

@@ -19,6 +19,7 @@ package rootcoord
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus/pkg/common"
 	"math/rand"
 	"os"
 	"sync"
@@ -1052,10 +1053,11 @@ func TestCore_Import(t *testing.T) {
 		meta.GetPartitionByNameFunc = func(collID UniqueID, partitionName string, ts Timestamp) (UniqueID, error) {
 			return 0, errors.New("mock GetPartitionByNameFunc error")
 		}
-		_, err := c.Import(ctx, &milvuspb.ImportRequest{
+		resp, err := c.Import(ctx, &milvuspb.ImportRequest{
 			CollectionName: "a-good-name",
 		})
-		assert.Error(t, err)
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrBulkInsertPartitionNotFound)
 	})
 
 	t.Run("normal case", func(t *testing.T) {
@@ -1099,7 +1101,7 @@ func TestCore_Import(t *testing.T) {
 			},
 		})
 		assert.NotNil(t, resp)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrBadBulkInsertRequest)
 	})
 
 	// Remove the following case after bulkinsert can support partition key
@@ -1152,11 +1154,69 @@ func TestCore_Import(t *testing.T) {
 		meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
 			return coll.Clone(), nil
 		}
-		_, err := c.Import(ctx, &milvuspb.ImportRequest{
+		resp, err := c.Import(ctx, &milvuspb.ImportRequest{
 			CollectionName: "a-good-name",
 			PartitionName:  "p1",
 		})
-		assert.Error(t, err)
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrBadBulkInsertRequest)
+	})
+
+	t.Run("backup should set partition name", func(t *testing.T) {
+		ctx := context.Background()
+		c := newTestCore(withHealthyCode(),
+			withMeta(meta))
+		meta.GetCollectionIDByNameFunc = func(name string) (UniqueID, error) {
+			return 100, nil
+		}
+		meta.GetCollectionVirtualChannelsFunc = func(colID int64) []string {
+			return []string{"ch-1", "ch-2"}
+		}
+		meta.GetPartitionByNameFunc = func(collID UniqueID, partitionName string, ts Timestamp) (UniqueID, error) {
+			return 101, nil
+		}
+		coll := &model.Collection{
+			CollectionID: 100,
+			Name:         "a-good-name",
+			Fields: []*model.Field{
+				{
+					FieldID:        101,
+					Name:           "test_field_name_1",
+					IsPrimaryKey:   false,
+					IsPartitionKey: true,
+					DataType:       schemapb.DataType_Int64,
+				},
+			},
+		}
+		meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
+			return coll.Clone(), nil
+		}
+		resp1, err := c.Import(ctx, &milvuspb.ImportRequest{
+			CollectionName: "a-good-name",
+			Options: []*commonpb.KeyValuePair{
+				{
+					Key:   importutil.BackupFlag,
+					Value: "true",
+				},
+			},
+		})
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp1.GetStatus()), merr.ErrBadBulkInsertRequest)
+
+		meta.GetPartitionByNameFunc = func(collID UniqueID, partitionName string, ts Timestamp) (UniqueID, error) {
+			return common.InvalidPartitionID, fmt.Errorf("partition ID not found for partition name '%s'", partitionName)
+		}
+		resp2, err := c.Import(ctx, &milvuspb.ImportRequest{
+			CollectionName: "a-good-name",
+			PartitionName:  "a-bad-name",
+			Options: []*commonpb.KeyValuePair{
+				{
+					Key:   importutil.BackupFlag,
+					Value: "true",
+				},
+			},
+		})
+		assert.ErrorIs(t, merr.Error(resp2.GetStatus()), merr.ErrBulkInsertPartitionNotFound)
 	})
 }
 

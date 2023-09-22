@@ -81,12 +81,6 @@ func NewBinlogAdapter(ctx context.Context,
 		return nil, errors.New("collection schema is nil")
 	}
 
-	// binlog import doesn't support partition key, the caller must specify one partition for importing
-	if len(collectionInfo.PartitionIDs) != 1 {
-		log.Warn("Binlog adapter: target partition must be only one", zap.Int("partitions", len(collectionInfo.PartitionIDs)))
-		return nil, errors.New("target partition must be only one")
-	}
-
 	if chunkManager == nil {
 		log.Warn("Binlog adapter: chunk manager pointer is nil")
 		return nil, errors.New("chunk manager pointer is nil")

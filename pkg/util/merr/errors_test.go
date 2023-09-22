@@ -133,6 +133,10 @@ func (s *ErrSuite) TestWrap() {
 
 	// field related
 	s.ErrorIs(WrapErrFieldNotFound("meta", "failed to get field"), ErrFieldNotFound)
+
+	// bulkinsert related
+	s.ErrorIs(WrapBadBulkInsertRequest("fail reason"), ErrBadBulkInsertRequest)
+	s.ErrorIs(WrapBulkInsertPartitionNotFound("hello_milvus", "notexist"), ErrBulkInsertPartitionNotFound)
 }
 
 func (s *ErrSuite) TestOldCode() {

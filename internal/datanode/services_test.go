@@ -455,6 +455,18 @@ func (s *DataNodeServicesSuite) TestImport() {
 		s.Assert().NoError(err)
 		s.Assert().True(merr.Ok(stat))
 		s.Assert().Equal("", stat.GetReason())
+
+		reqWithoutPartition := &datapb.ImportTaskRequest{
+			ImportTask: &datapb.ImportTask{
+				CollectionId: 100,
+				ChannelNames: []string{chName1, chName2},
+				Files:        []string{filePath},
+				RowBased:     true,
+			},
+		}
+		stat2, err := s.node.Import(context.WithValue(s.ctx, ctxKey{}, ""), reqWithoutPartition)
+		s.Assert().NoError(err)
+		s.Assert().False(merr.Ok(stat2))
 	})
 
 	s.Run("Test Import bad flow graph", func() {
