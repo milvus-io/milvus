@@ -256,57 +256,38 @@ func StartMiniCluster(ctx context.Context, opts ...Option) (cluster *MiniCluster
 		cluster.Proxy = proxy
 	}
 
-	// cluster.dataCoord.SetIndexCoord(cluster.indexCoord)
 	cluster.DataCoord.SetRootCoord(cluster.RootCoord)
-
 	err = cluster.RootCoord.SetDataCoord(cluster.DataCoord)
 	if err != nil {
-		return
-	}
-	//err = cluster.rootCoord.SetIndexCoord(cluster.indexCoord)
-	//if err != nil {
-	//	return
-	//}
-	err = cluster.RootCoord.SetQueryCoord(cluster.QueryCoord)
-	if err != nil {
-		return
+		return nil, err
 	}
 
-	// err = cluster.queryCoord.SetIndexCoord(cluster.indexCoord)
+	err = cluster.RootCoord.SetQueryCoord(cluster.QueryCoord)
 	if err != nil {
-		return
+		return nil, err
 	}
+
 	err = cluster.QueryCoord.SetDataCoord(cluster.DataCoord)
 	if err != nil {
-		return
+		return nil, err
 	}
 	err = cluster.QueryCoord.SetRootCoord(cluster.RootCoord)
 	if err != nil {
-		return
+		return nil, err
 	}
-
-	//err = cluster.indexCoord.SetDataCoord(cluster.dataCoord)
-	//if err != nil {
-	//	return
-	//}
-	//err = cluster.indexCoord.SetRootCoord(cluster.rootCoord)
-	//if err != nil {
-	//	return
-	//}
 
 	for _, dataNode := range cluster.DataNodes {
 		err = dataNode.SetDataCoord(cluster.DataCoord)
 		if err != nil {
-			return
+			return nil, err
 		}
 		err = dataNode.SetRootCoord(cluster.RootCoord)
 		if err != nil {
-			return
+			return nil, err
 		}
 	}
 
 	cluster.Proxy.SetDataCoordClient(cluster.DataCoord)
-	// cluster.proxy.SetIndexCoordClient(cluster.indexCoord)
 	cluster.Proxy.SetQueryCoordClient(cluster.QueryCoord)
 	cluster.Proxy.SetRootCoordClient(cluster.RootCoord)
 
