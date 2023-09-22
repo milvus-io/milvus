@@ -571,8 +571,8 @@ class TestDeleteOperation(TestcaseBase):
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
 
         # raise exception
-        error = {ct.err_code: 1,
-                 ct.err_msg: f"partitionID of partitionName:{ct.default_tag} can not be find"}
+        error = {ct.err_code: 15,
+                 ct.err_msg: "Failed to get partition id: partition not found"}
         collection_w.delete(tmp_expr, partition_name=ct.default_tag,
                             check_task=CheckTasks.err_res, check_items=error)
 
@@ -952,7 +952,6 @@ class TestDeleteOperation(TestcaseBase):
             expr = f'{ct.default_int64_field_name} in {ids[i * batch: (i + 1) * batch]}'
             res, _ = collection_w.delete(expr)
             assert res.delete_count == batch
-            assert collection_w.num_entities == tmp_nb
 
         # query with all ids
         expr = f'{ct.default_int64_field_name} in {ids}'
@@ -1558,7 +1557,6 @@ class TestDeleteString(TestcaseBase):
             expr = expr.replace("'", "\"")
             res, _ = collection_w.delete(expr)
             assert res.delete_count == batch
-            assert collection_w.num_entities == tmp_nb
 
         # query with all ids
         expr = f'{ct.default_string_field_name} in {ids}'

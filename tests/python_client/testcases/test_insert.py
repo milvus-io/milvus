@@ -302,9 +302,9 @@ class TestInsertParams(TestcaseBase):
         new_float_value = pd.Series(
             data=[float(i) for i in range(nb)], dtype="float64")
         df[df.columns[1]] = new_float_value
-        error = {ct.err_code: 5}
-        collection_w.insert(
-            data=df, check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 1,
+                 ct.err_msg: "The data type of field float doesn't match, expected: FLOAT, got DOUBLE"}
+        collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_value_less(self):
@@ -374,8 +374,7 @@ class TestInsertParams(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: "The fields don't match with schema fields, "
                                              "expected: ['int64', 'float', 'varchar', 'float_vector'], "
                                              "got ['int64', 'float', 'varchar']"}
-        collection_w.insert(
-            data=df, check_task=CheckTasks.err_res, check_items=error)
+        collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_list_order_inconsistent_schema(self):
@@ -391,9 +390,9 @@ class TestInsertParams(TestcaseBase):
         float_values = [np.float32(i) for i in range(nb)]
         float_vec_values = cf.gen_vectors(nb, ct.default_dim)
         data = [float_values, int_values, float_vec_values]
-        error = {ct.err_code: 5}
-        collection_w.insert(
-            data=data, check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 1,
+                 ct.err_msg: "The data type of field int64 doesn't match, expected: INT64, got FLOAT"}
+        collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_insert_dataframe_order_inconsistent_schema(self):
@@ -1263,7 +1262,7 @@ class TestInsertInvalid(TestcaseBase):
         collection_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=collection_name)
         df = cf.gen_default_list_data(ct.default_nb)
-        error = {ct.err_code: 1, 'err_msg': "partition name is illegal"}
+        error = {ct.err_code: 15, ct.err_msg: "partition=p: partition not found"}
         mutation_res, _ = collection_w.insert(data=df, partition_name="p", check_task=CheckTasks.err_res,
                                               check_items=error)
 
