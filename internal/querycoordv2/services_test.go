@@ -19,6 +19,7 @@ package querycoordv2
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"testing"
 	"time"
 
@@ -1768,7 +1769,7 @@ func (suite *ServiceSuite) updateChannelDist(collection int64) {
 	replicas := suite.meta.ReplicaManager.GetByCollection(collection)
 	for _, replica := range replicas {
 		i := 0
-		for _, node := range replica.GetNodes() {
+		for _, node := range suite.sortInt64(replica.GetNodes()) {
 			suite.dist.ChannelDistManager.Update(node, meta.DmChannelFromVChannel(&datapb.VchannelInfo{
 				CollectionID: collection,
 				ChannelName:  channels[i],
@@ -1792,13 +1793,20 @@ func (suite *ServiceSuite) updateChannelDist(collection int64) {
 	}
 }
 
+func (suite *ServiceSuite) sortInt64(ints []int64) []int64 {
+	sort.Slice(ints, func(i int, j int) bool {
+		return ints[i] < ints[j]
+	})
+	return ints
+}
+
 func (suite *ServiceSuite) updateChannelDistWithoutSegment(collection int64) {
 	channels := suite.channels[collection]
 
 	replicas := suite.meta.ReplicaManager.GetByCollection(collection)
 	for _, replica := range replicas {
 		i := 0
-		for _, node := range replica.GetNodes() {
+		for _, node := range suite.sortInt64(replica.GetNodes()) {
 			suite.dist.ChannelDistManager.Update(node, meta.DmChannelFromVChannel(&datapb.VchannelInfo{
 				CollectionID: collection,
 				ChannelName:  channels[i],
