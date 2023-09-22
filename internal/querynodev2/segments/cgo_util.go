@@ -86,11 +86,11 @@ func GetCProtoBlob(cProto *C.CProto) []byte {
 
 func GetLocalUsedSize(path string) (int64, error) {
 	var availableSize int64
-	cSize := C.int64_t(availableSize)
+	cSize := (*C.int64_t)(&availableSize)
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
 
-	status := C.GetLocalUsedSize(cPath, &cSize)
+	status := C.GetLocalUsedSize(cPath, cSize)
 	err := HandleCStatus(&status, "get local used size failed")
 	if err != nil {
 		return 0, err
