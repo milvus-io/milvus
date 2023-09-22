@@ -154,7 +154,7 @@ var (
 			Subsystem: typeutil.DataNodeRole,
 			Name:      "compaction_latency",
 			Help:      "latency of compaction operation",
-			Buckets:   []float64{0.001, 0.1, 0.5, 1, 5, 10, 20, 50, 100, 250, 500, 1000, 3600, 5000, 10000}, // unit seconds
+			Buckets:   longTaskBuckets,
 		}, []string{
 			nodeIDLabelName,
 		})

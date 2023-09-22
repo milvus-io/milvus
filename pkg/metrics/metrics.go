@@ -95,6 +95,9 @@ var (
 	// [1 2 4 8 16 32 64 128 256 512 1024 2048 4096 8192 16384 32768 65536 1.31072e+05]
 	buckets = prometheus.ExponentialBuckets(1, 2, 18)
 
+	// longTaskBuckets provides long task duration in milliseconds
+	longTaskBuckets = []float64{1, 100, 500, 1000, 5000, 10000, 20000, 50000, 100000, 250000, 500000, 1000000, 3600000, 5000000, 10000000} // unit milliseconds
+
 	NumNodes = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,

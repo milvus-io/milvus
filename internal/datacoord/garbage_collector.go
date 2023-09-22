@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"path"
 	"sort"
 	"strings"
@@ -33,7 +34,9 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -141,9 +144,10 @@ func (gc *garbageCollector) scan() {
 	prefixes = append(prefixes, path.Join(gc.option.cli.RootPath(), common.SegmentInsertLogPath))
 	prefixes = append(prefixes, path.Join(gc.option.cli.RootPath(), common.SegmentStatslogPath))
 	prefixes = append(prefixes, path.Join(gc.option.cli.RootPath(), common.SegmentDeltaLogPath))
+	labels := []string{metrics.InsertFileLabel, metrics.StatFileLabel, metrics.DeleteFileLabel}
 	var removedKeys []string
 
-	for _, prefix := range prefixes {
+	for idx, prefix := range prefixes {
 		startTs := time.Now()
 		infoKeys, modTimes, err := gc.option.cli.ListWithPrefix(ctx, prefix, true)
 		if err != nil {
@@ -152,8 +156,12 @@ func (gc *garbageCollector) scan() {
 				zap.Error(err),
 			)
 		}
+		cost := time.Since(startTs)
 		segmentMap, filesMap := getMetaMap()
-		log.Info("gc scan finish list object", zap.String("prefix", prefix), zap.Duration("time spent", time.Since(startTs)), zap.Int("keys", len(infoKeys)))
+		metrics.GarbageCollectorListLatency.
+			WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), labels[idx]).
+			Observe(float64(cost.Milliseconds()))
+		log.Info("gc scan finish list object", zap.String("prefix", prefix), zap.Duration("time spent", cost), zap.Int("keys", len(infoKeys)))
 		for i, infoKey := range infoKeys {
 			total++
 			_, has := filesMap[infoKey]
@@ -191,6 +199,7 @@ func (gc *garbageCollector) scan() {
 			}
 		}
 	}
+	metrics.GarbageCollectorRunCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(1)
 	log.Info("scan file to do garbage collection",
 		zap.Int("total", total),
 		zap.Int("valid", valid),

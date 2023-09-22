@@ -712,7 +712,7 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 	)
 
 	log.Info("compact overall elapse", zap.Duration("elapse", time.Since(compactStart)))
-	metrics.DataNodeCompactionLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(t.tr.ElapseSpan().Seconds())
+	metrics.DataNodeCompactionLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(t.tr.ElapseSpan().Milliseconds()))
 	metrics.DataNodeCompactionLatencyInQueue.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(durInQueue.Milliseconds()))
 
 	return pack, nil

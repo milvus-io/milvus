@@ -149,6 +149,26 @@ var (
 			Buckets:   buckets,
 		}, []string{segmentFileTypeLabelName})
 
+	/* garbage collector related metrics */
+
+	// GarbageCollectorListLatency metrics for gc scan storage files.
+	GarbageCollectorListLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "gc_list_latency",
+			Help:      "latency of list objects in storage while garbage collecting (in milliseconds)",
+			Buckets:   longTaskBuckets,
+		}, []string{nodeIDLabelName, segmentFileTypeLabelName})
+
+	GarbageCollectorRunCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "gc_run_count",
+			Help:      "garbage collection running count",
+		}, []string{nodeIDLabelName})
+
 	/* hard to implement, commented now
 	DataCoordSegmentSizeRatio = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
