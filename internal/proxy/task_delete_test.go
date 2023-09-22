@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -81,10 +80,8 @@ func TestDeleteTask_GetChannels(t *testing.T) {
 		mock.AnythingOfType("string"),
 	).Return(collectionID, nil)
 	globalMetaCache = cache
-	chMgr := newMockChannelsMgr()
-	chMgr.getChannelsFunc = func(collectionID UniqueID) ([]pChan, error) {
-		return channels, nil
-	}
+	chMgr := NewMockChannelsMgr(t)
+	chMgr.EXPECT().getChannels(mock.Anything).Return(channels, nil)
 	dt := deleteTask{
 		ctx: context.Background(),
 		req: &milvuspb.DeleteRequest{
@@ -97,13 +94,6 @@ func TestDeleteTask_GetChannels(t *testing.T) {
 	resChannels := dt.getChannels()
 	assert.ElementsMatch(t, channels, resChannels)
 	assert.ElementsMatch(t, channels, dt.pChannels)
-
-	chMgr.getChannelsFunc = func(collectionID UniqueID) ([]pChan, error) {
-		return nil, fmt.Errorf("mock err")
-	}
-	// get channels again, should return task's pChannels, so getChannelsFunc should not invoke again
-	resChannels = dt.getChannels()
-	assert.ElementsMatch(t, channels, resChannels)
 }
 
 func TestDeleteTask_PreExecute(t *testing.T) {

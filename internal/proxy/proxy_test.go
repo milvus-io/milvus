@@ -4113,7 +4113,7 @@ func TestProxy_Import(t *testing.T) {
 		defer wg.Done()
 		proxy := &Proxy{}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
-		chMgr := newMockChannelsMgr()
+		chMgr := NewMockChannelsMgr(t)
 		proxy.chMgr = chMgr
 		rc := newMockRootCoord()
 		rc.ImportFunc = func(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
@@ -4133,7 +4133,7 @@ func TestProxy_Import(t *testing.T) {
 		defer wg.Done()
 		proxy := &Proxy{}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
-		chMgr := newMockChannelsMgr()
+		chMgr := NewMockChannelsMgr(t)
 		proxy.chMgr = chMgr
 		rc := newMockRootCoord()
 		rc.ImportFunc = func(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
@@ -4153,7 +4153,7 @@ func TestProxy_Import(t *testing.T) {
 		defer wg.Done()
 		proxy := &Proxy{}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
-		chMgr := newMockChannelsMgr()
+		chMgr := NewMockChannelsMgr(t)
 		proxy.chMgr = chMgr
 		rc := newMockRootCoord()
 		rc.ImportFunc = func(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
