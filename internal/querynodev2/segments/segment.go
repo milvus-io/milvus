@@ -43,12 +43,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
-	pkoracle "github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
+	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
@@ -434,35 +432,6 @@ func (s *LocalSegment) GetFieldDataPath(index *IndexedFieldInfo, offset int64) (
 		}
 	}
 	return dataPath, offsetInBinlog
-}
-
-func (s *LocalSegment) ValidateIndexedFieldsData(ctx context.Context, result *segcorepb.RetrieveResults) error {
-	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", s.Collection()),
-		zap.Int64("partitionID", s.Partition()),
-		zap.Int64("segmentID", s.ID()),
-	)
-
-	for _, fieldData := range result.FieldsData {
-		if !typeutil.IsVectorType(fieldData.GetType()) {
-			continue
-		}
-		if !s.ExistIndex(fieldData.FieldId) {
-			continue
-		}
-		if !s.HasRawData(fieldData.FieldId) {
-			index := s.GetIndex(fieldData.FieldId)
-			indexType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.IndexTypeKey, index.IndexInfo.GetIndexParams())
-			if err != nil {
-				return err
-			}
-			err = fmt.Errorf("vector output fields for %s index is not allowed", indexType)
-			log.Warn("validate fields failed", zap.Error(err))
-			return err
-		}
-	}
-
-	return nil
 }
 
 // -------------------------------------------------------------------------------------- interfaces for growing segment

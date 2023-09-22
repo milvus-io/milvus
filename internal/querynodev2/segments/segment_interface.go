@@ -63,7 +63,6 @@ type Segment interface {
 	// Read operations
 	Search(ctx context.Context, searchReq *SearchRequest) (*SearchResult, error)
 	Retrieve(ctx context.Context, plan *RetrievePlan) (*segcorepb.RetrieveResults, error)
-	ValidateIndexedFieldsData(ctx context.Context, result *segcorepb.RetrieveResults) error
 
 	Release()
 }
