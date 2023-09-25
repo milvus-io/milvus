@@ -18,7 +18,7 @@ query_res_tmp_expr = [{f'{ct.default_int64_field_name}': 0}]
 query_tmp_expr_str = [{f'{ct.default_string_field_name}': "0"}]
 exp_res = "exp_res"
 default_string_expr = "varchar in [ \"0\"]"
-default_invaild_string_exp = "varchar >= 0"
+default_invalid_string_exp = "varchar >= 0"
 index_name1 = cf.gen_unique_str("float")
 index_name2 = cf.gen_unique_str("varchar")
 default_search_params = ct.default_search_params
@@ -190,10 +190,11 @@ class TestDeleteParams(TestcaseBase):
         method: delete with expr vector field
         expected: raise exception
         """
-        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True, is_all_data_type=True, is_index=True)[0]
+        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True,
+                                                    is_all_data_type=True, is_index=True)[0]
         expr = f"{ct.default_float_vec_field_name} in [[0.1]]"
         error = {ct.err_code: 1,
-            ct.err_msg: f"failed to create expr plan, expr = {expr}"}
+                 ct.err_msg: f"failed to create expr plan, expr = {expr}"}
 
         collection_w.delete(expr, check_task=CheckTasks.err_res, check_items=error)
 
@@ -209,7 +210,7 @@ class TestDeleteParams(TestcaseBase):
 
         # No exception
         expr = f'{ct.default_int64_field_name} in {[tmp_nb]}'
-        collection_w.delete(expr=expr)[0]
+        collection_w.delete(expr=expr)
         collection_w.query(tmp_expr, check_task=CheckTasks.check_query_results,
                            check_items={exp_res: query_res_tmp_expr})
 
@@ -223,7 +224,7 @@ class TestDeleteParams(TestcaseBase):
         # init collection with tmp_nb default data
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
         expr = f'{ct.default_int64_field_name} in {[0, tmp_nb]}'
-        collection_w.delete(expr=expr)[0]
+        collection_w.delete(expr=expr)
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1763,8 +1764,8 @@ class TestDeleteString(TestcaseBase):
             self.init_collection_general(prefix, nb=tmp_nb, insert_data=True, primary_field=ct.default_string_field_name)[0]
         collection_w.load()
         error = {ct.err_code: 0,
-                 ct.err_msg: f"failed to create expr plan, expr = {default_invaild_string_exp}"}
-        collection_w.delete(expr=default_invaild_string_exp,
+                 ct.err_msg: f"failed to create expr plan, expr = {default_invalid_string_exp}"}
+        collection_w.delete(expr=default_invalid_string_exp,
                             check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1921,6 +1922,7 @@ class TestDeleteComplexExpr(TestcaseBase):
             data[ct.default_json_field_name] = [{"string": string_list[i]} for i in range(nb)]
             data[ct.default_string_field_name] = string_list
         collection_w.insert(data)
+        collection_w.flush()
         collection_w.load()
 
         # delete with expressions
