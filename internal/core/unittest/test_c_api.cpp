@@ -249,7 +249,8 @@ generate_index(void* raw_data,
                IndexType index_type,
                int64_t dim,
                int64_t N) {
-    auto engine_version = knowhere::Version::GetCurrentVersion().VersionCode();
+    auto engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
     CreateIndexInfo create_index_info{
         field_type, index_type, metric_type, engine_version};
     auto indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
@@ -1600,7 +1601,7 @@ TEST(CApiTest, LoadIndexInfo) {
     auto [raw_data, timestamps, uids] = generate_data(N);
     auto indexing = knowhere::IndexFactory::Instance().Create(
         knowhere::IndexEnum::INDEX_FAISS_IVFSQ8,
-        knowhere::Version::GetCurrentVersion().VersionCode());
+        knowhere::Version::GetCurrentVersion().VersionNumber());
     auto conf =
         knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
                        {knowhere::meta::DIM, DIM},
@@ -1633,7 +1634,9 @@ TEST(CApiTest, LoadIndexInfo) {
     status = AppendFieldInfo(
         c_load_index_info, 0, 0, 0, 0, CDataType::FloatVector, "");
     ASSERT_EQ(status.error_code, Success);
-    AppendIndexEngineVersionToLoadInfo(c_load_index_info, knowhere::Version::GetCurrentVersion().VersionCode().c_str());
+    AppendIndexEngineVersionToLoadInfo(
+        c_load_index_info,
+        knowhere::Version::GetCurrentVersion().VersionNumber());
     status = AppendIndex(c_load_index_info, c_binary_set);
     ASSERT_EQ(status.error_code, Success);
     DeleteLoadIndexInfo(c_load_index_info);
@@ -1648,7 +1651,7 @@ TEST(CApiTest, LoadIndexSearch) {
     auto [raw_data, timestamps, uids] = generate_data(N);
     auto indexing = knowhere::IndexFactory::Instance().Create(
         knowhere::IndexEnum::INDEX_FAISS_IVFSQ8,
-        knowhere::Version::GetCurrentVersion().VersionCode());
+        knowhere::Version::GetCurrentVersion().VersionNumber());
     auto conf =
         knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
                        {knowhere::meta::DIM, DIM},
@@ -1674,7 +1677,7 @@ TEST(CApiTest, LoadIndexSearch) {
     load_index_info.index = std::make_unique<VectorMemIndex>(
         index_params["index_type"],
         knowhere::metric::L2,
-        knowhere::Version::GetCurrentVersion().VersionCode());
+        knowhere::Version::GetCurrentVersion().VersionNumber());
     load_index_info.index->Load(binary_set);
 
     // search
@@ -1792,7 +1795,9 @@ TEST(CApiTest, Indexing_Without_Predicate) {
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(
         c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, "");
-    AppendIndexEngineVersionToLoadInfo(c_load_index_info, knowhere::Version::GetCurrentVersion().VersionCode().c_str());
+    AppendIndexEngineVersionToLoadInfo(
+        c_load_index_info,
+        knowhere::Version::GetCurrentVersion().VersionNumber());
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
     // load index for vec field, load raw data for scalar field
     auto sealed_segment = SealedCreator(schema, dataset);
@@ -1932,7 +1937,9 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(
         c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, "");
-    AppendIndexEngineVersionToLoadInfo(c_load_index_info, knowhere::Version::GetCurrentVersion().VersionCode().c_str());
+    AppendIndexEngineVersionToLoadInfo(
+        c_load_index_info,
+        knowhere::Version::GetCurrentVersion().VersionNumber());
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     // load index for vec field, load raw data for scalar field
@@ -2102,7 +2109,9 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(
         c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, "");
-    AppendIndexEngineVersionToLoadInfo(c_load_index_info, knowhere::Version::GetCurrentVersion().VersionCode().c_str());
+    AppendIndexEngineVersionToLoadInfo(
+        c_load_index_info,
+        knowhere::Version::GetCurrentVersion().VersionNumber());
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     // load index for vec field, load raw data for scalar field
@@ -2274,7 +2283,9 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(
         c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, "");
-    AppendIndexEngineVersionToLoadInfo(c_load_index_info, knowhere::Version::GetCurrentVersion().VersionCode().c_str());
+    AppendIndexEngineVersionToLoadInfo(
+        c_load_index_info,
+        knowhere::Version::GetCurrentVersion().VersionNumber());
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     // load index for vec field, load raw data for scalar field
@@ -2438,7 +2449,9 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(
         c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, "");
-    AppendIndexEngineVersionToLoadInfo(c_load_index_info, knowhere::Version::GetCurrentVersion().VersionCode().c_str());
+    AppendIndexEngineVersionToLoadInfo(
+        c_load_index_info,
+        knowhere::Version::GetCurrentVersion().VersionNumber());
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     // load index for vec field, load raw data for scalar field
@@ -2603,7 +2616,9 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(
         c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, "");
-    AppendIndexEngineVersionToLoadInfo(c_load_index_info, knowhere::Version::GetCurrentVersion().VersionCode().c_str());
+    AppendIndexEngineVersionToLoadInfo(
+        c_load_index_info,
+        knowhere::Version::GetCurrentVersion().VersionNumber());
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     // load index for vec field, load raw data for scalar field
@@ -2774,7 +2789,9 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(
         c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector, "");
-    AppendIndexEngineVersionToLoadInfo(c_load_index_info, knowhere::Version::GetCurrentVersion().VersionCode().c_str());
+    AppendIndexEngineVersionToLoadInfo(
+        c_load_index_info,
+        knowhere::Version::GetCurrentVersion().VersionNumber());
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     // load index for vec field, load raw data for scalar field
@@ -2945,7 +2962,9 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(
         c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector, "");
-    AppendIndexEngineVersionToLoadInfo(c_load_index_info, knowhere::Version::GetCurrentVersion().VersionCode().c_str());
+    AppendIndexEngineVersionToLoadInfo(
+        c_load_index_info,
+        knowhere::Version::GetCurrentVersion().VersionNumber());
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     // load index for vec field, load raw data for scalar field
@@ -3110,7 +3129,9 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(
         c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector, "");
-    AppendIndexEngineVersionToLoadInfo(c_load_index_info, knowhere::Version::GetCurrentVersion().VersionCode().c_str());
+    AppendIndexEngineVersionToLoadInfo(
+        c_load_index_info,
+        knowhere::Version::GetCurrentVersion().VersionNumber());
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     // load index for vec field, load raw data for scalar field
@@ -3298,7 +3319,9 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(
         c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector, "");
-    AppendIndexEngineVersionToLoadInfo(c_load_index_info, knowhere::Version::GetCurrentVersion().VersionCode().c_str());
+    AppendIndexEngineVersionToLoadInfo(
+        c_load_index_info,
+        knowhere::Version::GetCurrentVersion().VersionNumber());
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     // load index for vec field, load raw data for scalar field
@@ -3469,7 +3492,9 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(
         c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, "");
-    AppendIndexEngineVersionToLoadInfo(c_load_index_info, knowhere::Version::GetCurrentVersion().VersionCode().c_str());
+    AppendIndexEngineVersionToLoadInfo(
+        c_load_index_info,
+        knowhere::Version::GetCurrentVersion().VersionNumber());
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
@@ -3694,7 +3719,9 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(
         c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, "");
-    AppendIndexEngineVersionToLoadInfo(c_load_index_info, knowhere::Version::GetCurrentVersion().VersionCode().c_str());
+    AppendIndexEngineVersionToLoadInfo(
+        c_load_index_info,
+        knowhere::Version::GetCurrentVersion().VersionNumber());
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     // load vec index

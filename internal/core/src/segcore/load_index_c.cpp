@@ -211,10 +211,7 @@ AppendIndexV2(CLoadIndexInfo c_load_index_info) {
         auto& index_params = load_index_info->index_params;
         auto field_type = load_index_info->field_type;
 
-        auto engine_version =
-            load_index_info->index_engine_version.empty()
-                ? knowhere::Version::GetDefaultVersion().VersionCode()
-                : load_index_info->index_engine_version;
+        auto engine_version = load_index_info->index_engine_version;
 
         milvus::index::CreateIndexInfo index_info;
         index_info.field_type = load_index_info->field_type;
@@ -326,11 +323,10 @@ AppendIndexInfo(CLoadIndexInfo c_load_index_info,
 
 CStatus
 AppendIndexEngineVersionToLoadInfo(CLoadIndexInfo c_load_index_info,
-                                   const char* c_index_engine_version) {
+                                   int32_t index_engine_version) {
     try {
         auto load_index_info =
             (milvus::segcore::LoadIndexInfo*)c_load_index_info;
-        std::string index_engine_version(c_index_engine_version);
         load_index_info->index_engine_version = index_engine_version;
 
         auto status = CStatus();

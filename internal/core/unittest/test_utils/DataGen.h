@@ -912,7 +912,7 @@ GenVecIndexing(int64_t N, int64_t dim, const float* vec) {
     auto indexing = std::make_unique<index::VectorMemIndex>(
         knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
         knowhere::metric::L2,
-        knowhere::Version::GetCurrentVersion().VersionCode());
+        knowhere::Version::GetCurrentVersion().VersionNumber());
     indexing->BuildWithDataset(database, conf);
     return indexing;
 }

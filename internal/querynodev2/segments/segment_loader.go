@@ -673,7 +673,8 @@ func (loader *segmentLoader) loadFieldsIndex(ctx context.Context,
 			zap.Int64("segment", segment.segmentID),
 			zap.Int64("fieldID", fieldID),
 			zap.Any("binlog", fieldInfo.FieldBinlog.Binlogs),
-			zap.String("index_engine_version", fieldInfo.IndexInfo.GetIndexEngineVersion()),
+			zap.Int32("current_index_version", fieldInfo.IndexInfo.GetCurrentIndexVersion()),
+			zap.Int32("minimal_index_version", fieldInfo.IndexInfo.GetMinimalIndexVersion()),
 		)
 
 		segment.AddIndex(fieldID, fieldInfo)

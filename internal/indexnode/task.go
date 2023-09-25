@@ -337,7 +337,7 @@ func (it *indexBuildTask) BuildIndex(ctx context.Context) error {
 		}
 	}
 
-	if err := buildIndexInfo.AppendIndexEngineVersion(it.req.GetIndexEngineVersion()); err != nil {
+	if err := buildIndexInfo.AppendIndexEngineVersion(it.req.GetCurrentIndexVersion()); err != nil {
 		log.Ctx(ctx).Warn("append index engine version failed", zap.Error(err))
 		return err
 	}

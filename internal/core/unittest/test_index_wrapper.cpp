@@ -134,7 +134,8 @@ TEST_P(IndexWrapperTest, BuildAndQuery) {
 
     storage::FileManagerContext file_manager_context(
         field_data_meta, index_meta, chunk_manager);
-    config[milvus::index::INDEX_ENGINE_VERSION] = knowhere::Version::GetCurrentVersion().VersionCode();
+    config[milvus::index::INDEX_ENGINE_VERSION] =
+        std::to_string(knowhere::Version::GetCurrentVersion().VersionNumber());
     auto index = milvus::indexbuilder::IndexFactory::GetInstance().CreateIndex(
         vec_field_data_type, config, file_manager_context);
 

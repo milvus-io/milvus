@@ -91,11 +91,12 @@ class VectorIndex : public IndexBase {
     }
 
     void
-    CheckCompatible(const std::string& version) {
+    CheckCompatible(const IndexVersion& version) {
         std::string err_msg =
-            "version not support : " + version +
+            "version not support : " + std::to_string(version) +
             " , knowhere current version " +
-            knowhere::Version::GetCurrentVersion().VersionCode();
+            std::to_string(
+                knowhere::Version::GetCurrentVersion().VersionNumber());
         AssertInfo(
             knowhere::Version::VersionSupport(knowhere::Version(version)),
             err_msg);

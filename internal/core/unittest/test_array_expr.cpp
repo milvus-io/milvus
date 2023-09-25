@@ -1531,7 +1531,7 @@ TEST(Expr, TestArrayInTerm) {
                  return false;
              }},
     };
-    
+
     std::string raw_plan_tmp = R"(vector_anns: <
                                     field_id: 100
                                     predicates: <

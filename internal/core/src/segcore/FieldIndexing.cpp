@@ -36,7 +36,7 @@ VectorFieldIndexing::VectorFieldIndexing(const FieldMeta& field_meta,
     index_ = std::make_unique<index::VectorMemIndex>(
         config_->GetIndexType(),
         config_->GetMetricType(),
-        knowhere::Version::GetCurrentVersion().VersionCode());
+        knowhere::Version::GetCurrentVersion().VersionNumber());
 }
 
 void
@@ -58,7 +58,7 @@ VectorFieldIndexing::BuildIndexRange(int64_t ack_beg,
         auto indexing = std::make_unique<index::VectorMemIndex>(
             knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
             knowhere::metric::L2,
-            knowhere::Version::GetCurrentVersion().VersionCode());
+            knowhere::Version::GetCurrentVersion().VersionNumber());
         auto dataset = knowhere::GenDataSet(
             source->get_size_per_chunk(), dim, chunk.data());
         indexing->BuildWithDataset(dataset, conf);

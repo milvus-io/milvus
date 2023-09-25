@@ -63,7 +63,8 @@ func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest
 		zap.Any("typeParams", req.GetTypeParams()),
 		zap.Any("indexParams", req.GetIndexParams()),
 		zap.Int64("numRows", req.GetNumRows()),
-		zap.String("index_engine_version", req.GetIndexEngineVersion()),
+		zap.Int32("current_index_version", req.GetCurrentIndexVersion()),
+		zap.Int32("minimal_index_version", req.GetMinimalIndexVersion()),
 	)
 	ctx, sp := otel.Tracer(typeutil.IndexNodeRole).Start(ctx, "IndexNode-CreateIndex", trace.WithAttributes(
 		attribute.Int64("indexBuildID", req.GetBuildID()),

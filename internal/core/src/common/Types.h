@@ -165,6 +165,7 @@ using BinarySet = knowhere::BinarySet;
 using Dataset = knowhere::DataSet;
 using DatasetPtr = knowhere::DataSetPtr;
 using MetricType = knowhere::MetricType;
+using IndexVersion = knowhere::IndexVersion;
 // TODO :: type define milvus index type(vector index type and scalar index type)
 using IndexType = knowhere::IndexType;
 

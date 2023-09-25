@@ -224,7 +224,7 @@ TEST(Indexing, Naive) {
     create_index_info.metric_type = knowhere::metric::L2;
     create_index_info.index_type = knowhere::IndexEnum::INDEX_FAISS_IVFPQ;
     create_index_info.index_engine_version =
-        knowhere::Version::GetCurrentVersion().VersionCode();
+        knowhere::Version::GetCurrentVersion().VersionNumber();
     auto index = milvus::index::IndexFactory::GetInstance().CreateIndex(
         create_index_info, milvus::storage::FileManagerContext());
 
@@ -389,7 +389,7 @@ TEST_P(IndexTest, BuildAndQuery) {
     create_index_info.metric_type = metric_type;
     create_index_info.field_type = vec_field_data_type;
     create_index_info.index_engine_version =
-        knowhere::Version::GetCurrentVersion().VersionCode();
+        knowhere::Version::GetCurrentVersion().VersionNumber();
     index::IndexBasePtr index;
 
     milvus::storage::FieldDataMeta field_data_meta{1, 2, 3, 100};
@@ -442,7 +442,7 @@ TEST_P(IndexTest, Mmap) {
     create_index_info.metric_type = metric_type;
     create_index_info.field_type = vec_field_data_type;
     create_index_info.index_engine_version =
-        knowhere::Version::GetCurrentVersion().VersionCode();
+        knowhere::Version::GetCurrentVersion().VersionNumber();
     index::IndexBasePtr index;
 
     milvus::storage::FieldDataMeta field_data_meta{1, 2, 3, 100};
@@ -499,7 +499,7 @@ TEST_P(IndexTest, GetVector) {
     create_index_info.metric_type = metric_type;
     create_index_info.field_type = vec_field_data_type;
     create_index_info.index_engine_version =
-        knowhere::Version::GetCurrentVersion().VersionCode();
+        knowhere::Version::GetCurrentVersion().VersionNumber();
     index::IndexBasePtr index;
 
     milvus::storage::FieldDataMeta field_data_meta{1, 2, 3, 100};
@@ -578,7 +578,7 @@ TEST(Indexing, SearchDiskAnnWithInvalidParam) {
     create_index_info.metric_type = metric_type;
     create_index_info.field_type = milvus::DataType::VECTOR_FLOAT;
     create_index_info.index_engine_version =
-            knowhere::Version::GetCurrentVersion().VersionCode();
+        knowhere::Version::GetCurrentVersion().VersionNumber();
 
     int64_t collection_id = 1;
     int64_t partition_id = 2;

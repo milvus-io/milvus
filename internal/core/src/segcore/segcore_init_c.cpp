@@ -77,4 +77,14 @@ SegcoreCloseGlog() {
     }
 }
 
+extern "C" int32_t
+GetCurrentIndexVersion() {
+    return milvus::config::GetCurrentIndexVersion();
+}
+
+extern "C" int32_t
+GetMinimalIndexVersion() {
+    return milvus::config::GetMinimalIndexVersion();
+}
+
 }  // namespace milvus::segcore
