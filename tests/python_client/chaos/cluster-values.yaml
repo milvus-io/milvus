@@ -8,24 +8,10 @@ image:
     tag: master-latest
     pullPolicy: IfNotPresent
 
-queryNode:
-  resources:
-    requests:
-      cpu: 4
-    limits:
-      cpu: 8
-
-dataNode:
-  resources:
-    requests:
-      cpu: 4
-    limits:
-      cpu: 8
-
 indexNode:
   resources:
     requests:
-      cpu: 4
+      cpu: 2
     limits:
       cpu: 8
 
