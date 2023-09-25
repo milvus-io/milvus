@@ -90,7 +90,7 @@ TEST(Sealed, without_predicate) {
     create_index_info.metric_type = knowhere::metric::L2;
     create_index_info.index_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
     create_index_info.index_engine_version =
-        knowhere::Version::GetCurrentVersion().VersionCode();
+        knowhere::Version::GetCurrentVersion().VersionNumber();
 
     auto indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
         create_index_info, milvus::storage::FileManagerContext());
@@ -205,7 +205,7 @@ TEST(Sealed, with_predicate) {
     create_index_info.metric_type = knowhere::metric::L2;
     create_index_info.index_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
     create_index_info.index_engine_version =
-        knowhere::Version::GetCurrentVersion().VersionCode();
+        knowhere::Version::GetCurrentVersion().VersionNumber();
     auto indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
         create_index_info, milvus::storage::FileManagerContext());
 
@@ -311,7 +311,7 @@ TEST(Sealed, with_predicate_filter_all) {
     create_index_info.metric_type = knowhere::metric::L2;
     create_index_info.index_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
     create_index_info.index_engine_version =
-        knowhere::Version::GetCurrentVersion().VersionCode();
+        knowhere::Version::GetCurrentVersion().VersionNumber();
     auto ivf_indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
         create_index_info, milvus::storage::FileManagerContext());
 
@@ -351,7 +351,7 @@ TEST(Sealed, with_predicate_filter_all) {
     create_index_info.metric_type = knowhere::metric::L2;
     create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
     create_index_info.index_engine_version =
-            knowhere::Version::GetCurrentVersion().VersionCode();
+        knowhere::Version::GetCurrentVersion().VersionNumber();
     auto hnsw_indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
         create_index_info, milvus::storage::FileManagerContext());
     hnsw_indexing->BuildWithDataset(database, hnsw_conf);
@@ -1224,7 +1224,7 @@ TEST(Sealed, GetVectorFromChunkCache) {
     auto indexing = std::make_unique<index::VectorMemIndex>(
         index_type,
         metric_type,
-        knowhere::Version::GetCurrentVersion().VersionCode());
+        knowhere::Version::GetCurrentVersion().VersionNumber());
     indexing->BuildWithDataset(ds, conf);
     auto segment_sealed = CreateSealedSegment(schema);
 

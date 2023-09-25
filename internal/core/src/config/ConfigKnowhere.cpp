@@ -21,6 +21,7 @@
 #include "glog/logging.h"
 #include "log/Log.h"
 #include "knowhere/comp/knowhere_config.h"
+#include "knowhere/version.h"
 
 namespace milvus::config {
 
@@ -83,6 +84,16 @@ KnowhereInitSearchThreadPool(const uint32_t num_threads) {
         PanicInfo("Failed to set aio context pool with num_threads " +
                   std::to_string(num_threads));
     }
+}
+
+int32_t
+GetMinimalIndexVersion() {
+    return knowhere::Version::GetMinimalVersion().VersionNumber();
+}
+
+int32_t
+GetCurrentIndexVersion() {
+    return knowhere::Version::GetCurrentVersion().VersionNumber();
 }
 
 }  // namespace milvus::config

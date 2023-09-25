@@ -53,8 +53,8 @@ CreateIndex(enum CDataType dtype,
             config[param.key()] = param.value();
         }
 
-        config[milvus::index::INDEX_ENGINE_VERSION] =
-            knowhere::Version::GetDefaultVersion().VersionCode();
+        config[milvus::index::INDEX_ENGINE_VERSION] = std::to_string(
+            knowhere::Version::GetCurrentVersion().VersionNumber());
 
         auto& index_factory = milvus::indexbuilder::IndexFactory::GetInstance();
         auto index =
@@ -90,13 +90,11 @@ CreateIndexV2(CIndex* res_index, CBuildIndexInfo c_build_index_info) {
         AssertInfo(index_type.has_value(), "index type is empty");
         index_info.index_type = index_type.value();
 
-        auto engine_version =
-            build_index_info->index_engine_version.empty()
-                ? knowhere::Version::GetDefaultVersion().VersionCode()
-                : build_index_info->index_engine_version;
+        auto engine_version = build_index_info->index_engine_version;
 
         index_info.index_engine_version = engine_version;
-        config[milvus::index::INDEX_ENGINE_VERSION] = engine_version;
+        config[milvus::index::INDEX_ENGINE_VERSION] =
+            std::to_string(engine_version);
 
         // get metric type
         if (milvus::datatype_is_vector(field_type)) {
@@ -459,10 +457,9 @@ AppendInsertFilePath(CBuildIndexInfo c_build_index_info,
 
 CStatus
 AppendIndexEngineVersionToBuildInfo(CBuildIndexInfo c_load_index_info,
-                                    const char* c_index_engine_version) {
+                                    int32_t index_engine_version) {
     try {
         auto build_index_info = (BuildIndexInfo*)c_load_index_info;
-        std::string index_engine_version(c_index_engine_version);
         build_index_info->index_engine_version = index_engine_version;
 
         auto status = CStatus();

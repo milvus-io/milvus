@@ -36,7 +36,7 @@ template <typename T>
 VectorDiskAnnIndex<T>::VectorDiskAnnIndex(
     const IndexType& index_type,
     const MetricType& metric_type,
-    const std::string& version,
+    const IndexVersion& version,
     const storage::FileManagerContext& file_manager_context)
     : VectorIndex(index_type, metric_type) {
     file_manager_ =

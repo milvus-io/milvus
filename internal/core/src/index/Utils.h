@@ -100,7 +100,7 @@ GetMetricTypeFromConfig(const Config& config);
 std::string
 GetIndexTypeFromConfig(const Config& config);
 
-std::string
+IndexVersion
 GetIndexEngineVersionFromConfig(const Config& config);
 
 storage::FieldDataMeta

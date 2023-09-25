@@ -151,9 +151,8 @@ func (bi *BuildIndexInfo) AppendInsertFile(filePath string) error {
 	return HandleCStatus(&status, "appendInsertFile failed")
 }
 
-func (bi *BuildIndexInfo) AppendIndexEngineVersion(indexEngineVersion string) error {
-	cIndexEngineVersion := C.CString(indexEngineVersion)
-	defer C.free(unsafe.Pointer(cIndexEngineVersion))
+func (bi *BuildIndexInfo) AppendIndexEngineVersion(indexEngineVersion int32) error {
+	cIndexEngineVersion := C.int32_t(indexEngineVersion)
 
 	status := C.AppendIndexEngineVersionToBuildInfo(bi.cBuildIndexInfo, cIndexEngineVersion)
 	return HandleCStatus(&status, "AppendIndexEngineVersion failed")

@@ -61,7 +61,7 @@ IndexBuilder_build(benchmark::State& state) {
         config[param.key()] = param.value();
     }
     config[milvus::index::INDEX_ENGINE_VERSION] =
-        knowhere::Version::GetCurrentVersion().VersionCode();
+        std::to_string(knowhere::Version::GetCurrentVersion().VersionNumber());
 
     auto is_binary = state.range(2);
     auto dataset = GenDataset(NB, metric_type, is_binary);

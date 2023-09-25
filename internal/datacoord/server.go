@@ -135,6 +135,7 @@ type Server struct {
 	dnEventCh <-chan *sessionutil.SessionEvent
 	inEventCh <-chan *sessionutil.SessionEvent
 	// qcEventCh <-chan *sessionutil.SessionEvent
+	qnEventCh <-chan *sessionutil.SessionEvent
 
 	enableActiveStandBy bool
 	activateFunc        func() error
@@ -145,8 +146,9 @@ type Server struct {
 	// indexCoord             types.IndexCoord
 
 	// segReferManager  *SegmentReferenceManager
-	indexBuilder     *indexBuilder
-	indexNodeManager *IndexNodeManager
+	indexBuilder              *indexBuilder
+	indexNodeManager          *IndexNodeManager
+	IndexEngineVersionManager *IndexEngineVersionManager
 
 	// manage ways that data coord access other coord
 	broker Broker
@@ -523,6 +525,15 @@ func (s *Server) initServiceDiscovery() error {
 	}
 	s.inEventCh = s.session.WatchServices(typeutil.IndexNodeRole, inRevision+1, nil)
 
+	s.IndexEngineVersionManager = newIndexEngineVersionManager()
+	qnSessions, qnRevision, err := s.session.GetSessions(typeutil.QueryNodeRole)
+	if err != nil {
+		log.Warn("DataCoord get QueryNode sessions failed", zap.Error(err))
+		return err
+	}
+	s.IndexEngineVersionManager.Startup(qnSessions)
+	s.qnEventCh = s.session.WatchServicesWithVersionRange(typeutil.QueryNodeRole, r, qnRevision+1, nil)
+
 	return nil
 }
 
@@ -818,6 +829,19 @@ func (s *Server) watchService(ctx context.Context) {
 				}()
 				return
 			}
+		case event, ok := <-s.qnEventCh:
+			if !ok {
+				s.stopServiceWatch()
+				return
+			}
+			if err := s.handleSessionEvent(ctx, typeutil.QueryNodeRole, event); err != nil {
+				go func() {
+					if err := s.Stop(); err != nil {
+						log.Warn("DataCoord server stop error", zap.Error(err))
+					}
+				}()
+				return
+			}
 		}
 	}
 }
@@ -877,6 +901,26 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 			serverID := event.Session.ServerID
 			log.Info("received indexnode SessionUpdateEvent", zap.Int64("serverID", serverID))
 			s.indexNodeManager.StoppingNode(serverID)
+		default:
+			log.Warn("receive unknown service event type",
+				zap.Any("type", event.EventType))
+		}
+	case typeutil.QueryNodeRole:
+		switch event.EventType {
+		case sessionutil.SessionAddEvent:
+			log.Info("received querynode register",
+				zap.String("address", event.Session.Address),
+				zap.Int64("serverID", event.Session.ServerID))
+			s.IndexEngineVersionManager.AddNode(event.Session)
+		case sessionutil.SessionDelEvent:
+			log.Info("received querynode unregister",
+				zap.String("address", event.Session.Address),
+				zap.Int64("serverID", event.Session.ServerID))
+			s.IndexEngineVersionManager.RemoveNode(event.Session)
+		case sessionutil.SessionUpdateEvent:
+			serverID := event.Session.ServerID
+			log.Info("received querynode SessionUpdateEvent", zap.Int64("serverID", serverID))
+			s.IndexEngineVersionManager.Update(event.Session)
 		default:
 			log.Warn("receive unknown service event type",
 				zap.Any("type", event.EventType))

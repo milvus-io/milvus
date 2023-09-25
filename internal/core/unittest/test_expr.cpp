@@ -801,7 +801,7 @@ TEST(Expr, TestUnaryRangeJson) {
         proto::plan::Array val;
         std::vector<std::string> nested_path;
     };
-    
+
     proto::plan::Array arr;
     arr.set_same_type(true);
     proto::plan::GenericValue int_val1;

@@ -30,7 +30,7 @@ class VectorDiskAnnIndex : public VectorIndex {
     explicit VectorDiskAnnIndex(
         const IndexType& index_type,
         const MetricType& metric_type,
-        const std::string& version,
+        const IndexVersion& version,
         const storage::FileManagerContext& file_manager_context);
     BinarySet
     Serialize(const Config& config) override {  // deprecated

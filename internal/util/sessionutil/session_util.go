@@ -78,6 +78,11 @@ const (
 	SessionUpdateEvent
 )
 
+type IndexEngineVersion struct {
+	MinimalIndexVersion int32 `json:"MinimalIndexVersion,omitempty"`
+	CurrentIndexVersion int32 `json:"CurrentIndexVersion,omitempty"`
+}
+
 // Session is a struct to store service's session, including ServerID, ServerName,
 // Address.
 // Exclusive indicates that this server can only start one.
@@ -89,13 +94,14 @@ type Session struct {
 	keepAliveCancel context.CancelFunc
 	keepAliveCtx    context.Context
 
-	ServerID    int64  `json:"ServerID,omitempty"`
-	ServerName  string `json:"ServerName,omitempty"`
-	Address     string `json:"Address,omitempty"`
-	Exclusive   bool   `json:"Exclusive,omitempty"`
-	Stopping    bool   `json:"Stopping,omitempty"`
-	TriggerKill bool
-	Version     semver.Version `json:"Version,omitempty"`
+	ServerID           int64  `json:"ServerID,omitempty"`
+	ServerName         string `json:"ServerName,omitempty"`
+	Address            string `json:"Address,omitempty"`
+	Exclusive          bool   `json:"Exclusive,omitempty"`
+	Stopping           bool   `json:"Stopping,omitempty"`
+	TriggerKill        bool
+	Version            semver.Version     `json:"Version,omitempty"`
+	IndexEngineVersion IndexEngineVersion `json:"IndexEngineVersion,omitempty"`
 
 	liveChOnce sync.Once
 	liveCh     chan struct{}
@@ -134,6 +140,14 @@ func WithResueNodeID(b bool) SessionOption {
 	return func(session *Session) { session.reuseNodeID = b }
 }
 
+// WithIndexEngineVersion should be only used by querynode.
+func WithIndexEngineVersion(minimal, current int32) SessionOption {
+	return func(session *Session) {
+		session.IndexEngineVersion.MinimalIndexVersion = minimal
+		session.IndexEngineVersion.CurrentIndexVersion = current
+	}
+}
+
 func (s *Session) apply(opts ...SessionOption) {
 	for _, opt := range opts {
 		opt(s)
@@ -143,14 +157,15 @@ func (s *Session) apply(opts ...SessionOption) {
 // UnmarshalJSON unmarshal bytes to Session.
 func (s *Session) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		ServerID    int64  `json:"ServerID,omitempty"`
-		ServerName  string `json:"ServerName,omitempty"`
-		Address     string `json:"Address,omitempty"`
-		Exclusive   bool   `json:"Exclusive,omitempty"`
-		Stopping    bool   `json:"Stopping,omitempty"`
-		TriggerKill bool
-		Version     string            `json:"Version"`
-		LeaseID     *clientv3.LeaseID `json:"LeaseID,omitempty"`
+		ServerID           int64  `json:"ServerID,omitempty"`
+		ServerName         string `json:"ServerName,omitempty"`
+		Address            string `json:"Address,omitempty"`
+		Exclusive          bool   `json:"Exclusive,omitempty"`
+		Stopping           bool   `json:"Stopping,omitempty"`
+		TriggerKill        bool
+		Version            string            `json:"Version"`
+		IndexEngineVersion string            `json:"IndexEngineVersion,omitempty"`
+		LeaseID            *clientv3.LeaseID `json:"LeaseID,omitempty"`
 	}
 	err := json.Unmarshal(data, &raw)
 	if err != nil {
@@ -162,6 +177,17 @@ func (s *Session) UnmarshalJSON(data []byte) error {
 		if err != nil {
 			return err
 		}
+	}
+
+	if raw.IndexEngineVersion != "" {
+		json.Unmarshal([]byte(raw.IndexEngineVersion), &s.IndexEngineVersion)
+		if err != nil {
+			return err
+		}
+	} else {
+		// set zero when queryNode not register knowhere version
+		s.IndexEngineVersion.MinimalIndexVersion = 0
+		s.IndexEngineVersion.CurrentIndexVersion = 0
 	}
 
 	s.ServerID = raw.ServerID
@@ -177,24 +203,30 @@ func (s *Session) UnmarshalJSON(data []byte) error {
 // MarshalJSON marshals session to bytes.
 func (s *Session) MarshalJSON() ([]byte, error) {
 	verStr := s.Version.String()
+	indexVerStr, err := json.Marshal(s.IndexEngineVersion)
+	if err != nil {
+		return nil, err
+	}
 	return json.Marshal(&struct {
-		ServerID    int64  `json:"ServerID,omitempty"`
-		ServerName  string `json:"ServerName,omitempty"`
-		Address     string `json:"Address,omitempty"`
-		Exclusive   bool   `json:"Exclusive,omitempty"`
-		Stopping    bool   `json:"Stopping,omitempty"`
-		TriggerKill bool
-		Version     string            `json:"Version"`
-		LeaseID     *clientv3.LeaseID `json:"LeaseID,omitempty"`
+		ServerID           int64  `json:"ServerID,omitempty"`
+		ServerName         string `json:"ServerName,omitempty"`
+		Address            string `json:"Address,omitempty"`
+		Exclusive          bool   `json:"Exclusive,omitempty"`
+		Stopping           bool   `json:"Stopping,omitempty"`
+		TriggerKill        bool
+		Version            string            `json:"Version"`
+		IndexEngineVersion string            `json:"IndexEngineVersion,omitempty"`
+		LeaseID            *clientv3.LeaseID `json:"LeaseID,omitempty"`
 	}{
-		ServerID:    s.ServerID,
-		ServerName:  s.ServerName,
-		Address:     s.Address,
-		Exclusive:   s.Exclusive,
-		Stopping:    s.Stopping,
-		TriggerKill: s.TriggerKill,
-		Version:     verStr,
-		LeaseID:     s.leaseID,
+		ServerID:           s.ServerID,
+		ServerName:         s.ServerName,
+		Address:            s.Address,
+		Exclusive:          s.Exclusive,
+		Stopping:           s.Stopping,
+		TriggerKill:        s.TriggerKill,
+		Version:            verStr,
+		IndexEngineVersion: string(indexVerStr),
+		LeaseID:            s.leaseID,
 	})
 }
 

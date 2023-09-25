@@ -51,24 +51,25 @@ func (s *Server) startIndexService(ctx context.Context) {
 }
 
 func (s *Server) createIndexForSegment(segment *SegmentInfo, indexID UniqueID) error {
-	indexEngineVersion := Params.CommonCfg.IndexEngineVersion.GetValue()
+	indexEngineVersion := s.IndexEngineVersionManager.GetCurrentIndexEngineVersion()
 	log.Info("create index for segment", zap.Int64("segmentID", segment.ID), zap.Int64("indexID", indexID),
-		zap.String("index_engine_version", indexEngineVersion),
+		zap.Int32("index_engine_version", indexEngineVersion),
 	)
 	buildID, err := s.allocator.allocID(context.Background())
 	if err != nil {
 		return err
 	}
 	segIndex := &model.SegmentIndex{
-		SegmentID:          segment.ID,
-		CollectionID:       segment.CollectionID,
-		PartitionID:        segment.PartitionID,
-		NumRows:            segment.NumOfRows,
-		IndexID:            indexID,
-		BuildID:            buildID,
-		CreateTime:         uint64(segment.ID),
-		WriteHandoff:       false,
-		IndexEngineVersion: indexEngineVersion,
+		SegmentID:           segment.ID,
+		CollectionID:        segment.CollectionID,
+		PartitionID:         segment.PartitionID,
+		NumRows:             segment.NumOfRows,
+		IndexID:             indexID,
+		BuildID:             buildID,
+		CreateTime:          uint64(segment.ID),
+		WriteHandoff:        false,
+		CurrentIndexVersion: s.IndexEngineVersionManager.GetCurrentIndexEngineVersion(),
+		MinimalIndexVersion: s.IndexEngineVersionManager.GetMinimalIndexEngineVersion(),
 	}
 	if err = s.meta.AddSegmentIndex(segIndex); err != nil {
 		return err
@@ -736,17 +737,18 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 					indexParams = append(indexParams, s.meta.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)...)
 					ret.SegmentInfo[segID].IndexInfos = append(ret.SegmentInfo[segID].IndexInfos,
 						&indexpb.IndexFilePathInfo{
-							SegmentID:          segID,
-							FieldID:            s.meta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID),
-							IndexID:            segIdx.IndexID,
-							BuildID:            segIdx.BuildID,
-							IndexName:          s.meta.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID),
-							IndexParams:        indexParams,
-							IndexFilePaths:     indexFilePaths,
-							SerializedSize:     segIdx.IndexSize,
-							IndexVersion:       segIdx.IndexVersion,
-							NumRows:            segIdx.NumRows,
-							IndexEngineVersion: segIdx.IndexEngineVersion,
+							SegmentID:           segID,
+							FieldID:             s.meta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID),
+							IndexID:             segIdx.IndexID,
+							BuildID:             segIdx.BuildID,
+							IndexName:           s.meta.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID),
+							IndexParams:         indexParams,
+							IndexFilePaths:      indexFilePaths,
+							SerializedSize:      segIdx.IndexSize,
+							IndexVersion:        segIdx.IndexVersion,
+							NumRows:             segIdx.NumRows,
+							CurrentIndexVersion: segIdx.CurrentIndexVersion,
+							MinimalIndexVersion: segIdx.MinimalIndexVersion,
 						})
 				}
 			}
