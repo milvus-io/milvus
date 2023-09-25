@@ -451,8 +451,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         dim = 1
         fields = [cf.gen_int64_field("int64_1"), cf.gen_int64_field("int64_2"),
                   cf.gen_float_vec_field(dim=dim)]
-        schema = cf.gen_collection_schema(
-            fields=fields, primary_field="int64_1")
+        schema = cf.gen_collection_schema(fields=fields, primary_field="int64_1")
         collection_w = self.init_collection_wrap(schema=schema)
 
         # 2. insert data
@@ -462,14 +461,11 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.insert(dataframe)
 
         # 3. search with expression
-        log.info(
-            "test_search_with_expression: searching with expression: %s" % expression)
-        collection_w.create_index(
-            ct.default_float_vec_field_name, index_params=ct.default_flat_index)
+        log.info("test_search_with_expression: searching with expression: %s" % expression)
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         expression = expression.replace("&&", "and").replace("||", "or")
-        vectors = [[random.random() for _ in range(dim)]
-                   for _ in range(default_nq)]
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, nb, expression,
                             check_task=CheckTasks.err_res,
@@ -4793,7 +4789,7 @@ class TestSearchString(TestcaseBase):
                             )
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("expression", cf.gen_normal_string_expressions(ct.default_string_field_name))
+    @pytest.mark.parametrize("expression", cf.gen_normal_string_expressions([ct.default_string_field_name]))
     def test_search_with_different_string_expr(self, dim, expression, _async, enable_dynamic_field):
         """
         target: test search with different string expressions

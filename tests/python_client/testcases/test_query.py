@@ -2304,7 +2304,7 @@ class TestQueryString(TestcaseBase):
                            check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("expression", cf.gen_normal_string_expressions(default_string_field_name))
+    @pytest.mark.parametrize("expression", cf.gen_normal_string_expressions([default_string_field_name]))
     def test_query_string_is_primary(self, expression):
         """
         target: test query with output field only primary field

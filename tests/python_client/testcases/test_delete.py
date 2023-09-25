@@ -1,5 +1,6 @@
+import random
 import time
-
+import pandas as pd
 import pytest
 
 from base.client_base import TestcaseBase
@@ -1856,7 +1857,7 @@ class TestDeleteComplexExpr(TestcaseBase):
     Test case of delete interface with complex expr
     """
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("expression", cf.gen_normal_expressions()[1:])
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
     def test_delete_normal_expressions(self, expression, enable_dynamic_field):
@@ -1934,7 +1935,7 @@ class TestDeleteComplexExpr(TestcaseBase):
                            check_task=CheckTasks.check_query_results,
                            check_items={'count(*)': nb - len(deleted_str)})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_delete_expr_empty_string(self):
         """
         target: test delete with expr empty
@@ -1948,7 +1949,7 @@ class TestDeleteComplexExpr(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: "expr cannot be empty"}
         collection_w.delete(expr="", check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_delete_complex_expr_before_load(self):
         """
         target: test delete before load
@@ -1961,3 +1962,249 @@ class TestDeleteComplexExpr(TestcaseBase):
         # delete
         error = {ct.err_code: 1, ct.err_msg: "collection not loaded: unrecoverable error"}
         collection_w.delete(expr="int64 >= 0", check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("expr_prefix", ["json_contains", "JSON_CONTAINS"])
+    @pytest.mark.parametrize("field_name", ["json_field['list']", "list"])
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    def test_delete_expr_json_contains_base(self, expr_prefix, field_name, enable_dynamic_field):
+        """
+        target: test delete expr using json_contains
+        method: delete using expression using json_contains
+        expected: delete successfully
+        """
+        if field_name == "list" and enable_dynamic_field is False:
+            pytest.skip("only support when enable_dynamic_filed == True")
+        # init collection with nb default data
+        collection_w = self.init_collection_general(prefix, False, enable_dynamic_field=enable_dynamic_field)[0]
+
+        # insert
+        listMix = [[i, i + 2] for i in range(ct.default_nb)] # only int
+        if enable_dynamic_field:
+            data = cf.gen_default_rows_data()
+            for i in range(ct.default_nb):
+                data[i][ct.default_json_field_name] = {"list": listMix[i]}
+                data[i]['list'] = listMix[i]
+        else:
+            data = cf.gen_default_dataframe_data()
+            data[ct.default_json_field_name] = [{"list": listMix[i]} for i in range(ct.default_nb)]
+        collection_w.insert(data)
+        collection_w.load()
+
+        # delete with expressions
+        delete_ids = random.randint(2, ct.default_nb - 2)
+        expression = f"{expr_prefix}({field_name}, {delete_ids})"
+        res = collection_w.delete(expression)[0]
+        exp_ids = cf.assert_json_contains(expression, listMix)
+        assert res.delete_count == len(exp_ids)
+
+        # query to check
+        collection_w.query(expression, check_task=CheckTasks.check_query_empty)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("expr_prefix", ["json_contains_all", "JSON_CONTAINS_ALL",
+                                             "json_contains_any", "JSON_CONTAINS_ANY"])
+    @pytest.mark.parametrize("field_name", ["json_field['list']", "list"])
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    def test_delete_expr_json_contains_all(self, expr_prefix, field_name, enable_dynamic_field):
+        """
+        target: test delete expr using json_contains
+        method: delete using expression using json_contains
+        expected: delete successfully
+        """
+        if field_name == "list" and enable_dynamic_field is False:
+            pytest.skip("only support when enable_dynamic_filed == True")
+        # init collection with nb default data
+        collection_w = self.init_collection_general(prefix, False, enable_dynamic_field=enable_dynamic_field)[0]
+
+        # insert
+        listMix = [[i, i * 0.00001, bool(i % 2), [i, str(i)]] for i in range(ct.default_nb)]  # mix int, float, list, bool
+        if enable_dynamic_field:
+            data = cf.gen_default_rows_data()
+            for i in range(ct.default_nb):
+                data[i][ct.default_json_field_name] = {"list": listMix[i]}
+                data[i]['list'] = listMix[i]
+        else:
+            data = cf.gen_default_dataframe_data()
+            data[ct.default_json_field_name] = [{"list": listMix[i]} for i in range(ct.default_nb)]
+        collection_w.insert(data)
+        collection_w.load()
+
+        # delete with expressions
+        ids = random.randint(0, ct.default_nb)
+        delete_ids = [bool(ids % 2), ids]
+        expression = f"{expr_prefix}({field_name}, {delete_ids})"
+        res = collection_w.delete(expression)[0]
+        exp_ids = cf.assert_json_contains(expression, listMix)
+        assert res.delete_count == len(exp_ids)
+
+        # query to check
+        collection_w.query(expression, check_task=CheckTasks.check_query_empty)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("expressions",
+                             cf.gen_field_compare_expressions(["int64_1", "json_field['int'][0]"],
+                                                              ["int64_2", "json_field['int'][1]"]))
+    def test_delete_expr_compare_two_variables(self, expressions):
+        """
+        target: test delete expr using 2 variables
+        method: delete with expressions using compare 2 variables
+        expected: delete successfully
+        """
+        # init collection with nb default data
+        nb = 1000
+        dim = 32
+        fields = [cf.gen_int64_field("int64_1"), cf.gen_int64_field("int64_2"),
+                  cf.gen_json_field("json_field"), cf.gen_float_vec_field("float_vector", dim=dim)]
+        schema = cf.gen_collection_schema(fields=fields, primary_field="int64_1")
+        collection_w = self.init_collection_wrap(schema=schema)
+
+        # insert
+        int64_1_values = [i for i in range(nb)]
+        int64_2_values = [random.randint(0, nb) for _ in range(nb)]
+        vectors = cf.gen_vectors(nb, dim)
+        json_values = [[i, int64_2_values[i]] for i in range(nb)]
+        data = pd.DataFrame({
+            "int64_1": int64_1_values,
+            "int64_2": int64_2_values,
+            "json_field": [{"int": json_values[i]} for i in range(nb)],
+            "float_vector": vectors
+        })
+        collection_w.insert(data)
+        collection_w.create_index("float_vector")
+        collection_w.load()
+
+        # delete with expressions
+        error = {ct.err_code: 1, ct.err_msg: f"failed to create expr plan, expr = {expressions}"}
+        collection_w.delete(expressions, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("expression", cf.gen_json_field_expressions())
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    def test_delete_expr_json_field(self, expression, enable_dynamic_field):
+        """
+        target: test delete entities using normal expression
+        method: delete using normal expression
+        expected: delete successfully
+        """
+        # init collection with nb default data
+        collection_w, _vectors, _, insert_ids = \
+            self.init_collection_general(prefix, True, enable_dynamic_field=enable_dynamic_field)[0:4]
+
+        # filter result with expression in collection
+        _vectors = _vectors[0]
+        expression = expression.replace("&&", "and").replace("||", "or")
+        filter_ids = []
+        json_field = {}
+        for i, _id in enumerate(insert_ids):
+            if enable_dynamic_field:
+                json_field['number'] = _vectors[i][ct.default_json_field_name]['number']
+                json_field['float'] = _vectors[i][ct.default_json_field_name]['float']
+            else:
+                json_field['number'] = _vectors[ct.default_json_field_name][i]['number']
+                json_field['float'] = _vectors[ct.default_json_field_name][i]['float']
+            if not expression or eval(expression):
+                filter_ids.append(_id)
+
+        # delete with expressions
+        res = collection_w.delete(expression)[0]
+        assert res.delete_count == len(filter_ids)
+
+        # query to check
+        collection_w.query(f"int64 in {filter_ids}", check_task=CheckTasks.check_query_empty)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("normal_expression, json_expression", zip(cf.gen_normal_expressions()[1:4],
+                                                                       cf.gen_json_field_expressions()[6:9]))
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    def test_delete_expr_complex_mixed(self, normal_expression, json_expression, enable_dynamic_field):
+        """
+        target: test delete entities using normal expression
+        method: delete using normal expression
+        expected: delete successfully
+        """
+        # init collection with nb default data
+        collection_w, _vectors, _, insert_ids = \
+            self.init_collection_general(prefix, True, enable_dynamic_field=enable_dynamic_field)[0:4]
+
+        # filter result with expression in collection
+        expression = normal_expression + ' and ' + json_expression
+        _vectors = _vectors[0]
+        expression = expression.replace("&&", "and").replace("||", "or")
+        filter_ids = []
+        json_field = {}
+        for i, _id in enumerate(insert_ids):
+            if enable_dynamic_field:
+                json_field['number'] = _vectors[i][ct.default_json_field_name]['number']
+                json_field['float'] = _vectors[i][ct.default_json_field_name]['float']
+                int64 = _vectors[i][ct.default_int64_field_name]
+                float = _vectors[i][ct.default_float_field_name]
+            else:
+                json_field['number'] = _vectors[ct.default_json_field_name][i]['number']
+                json_field['float'] = _vectors[ct.default_json_field_name][i]['float']
+                int64 = _vectors.int64[i]
+                float = _vectors.float[i]
+            if not expression or eval(expression):
+                filter_ids.append(_id)
+
+        # delete with expressions
+        res = collection_w.delete(expression)[0]
+        assert res.delete_count == len(filter_ids)
+
+        # query to check
+        collection_w.query(f"int64 in {filter_ids}", check_task=CheckTasks.check_query_empty)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("expression", cf.gen_normal_string_expressions(["varchar", "json_field['string']", "NewStr"]))
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    def test_delete_string_expressions_normal(self, expression, enable_dynamic_field):
+        """
+        target: test delete expr like
+        method: delete using expression like
+        expected: delete successfully
+        """
+        if "NewStr" in expression and enable_dynamic_field is False:
+            pytest.skip("only support when enable_dynamic_filed == True")
+        # init collection with nb default data
+        nb = 1000
+        collection_w, _vectors, _, insert_ids = \
+            self.init_collection_general(prefix, False, enable_dynamic_field=enable_dynamic_field)[0:4]
+
+        # insert
+        if enable_dynamic_field:
+            data = cf.gen_default_rows_data(nb)
+            for i in range(nb):
+                data[i][ct.default_json_field_name] = {"string": str(i)}
+                data[i]['NewStr'] = str(i)
+        else:
+            data = cf.gen_default_dataframe_data(nb)
+            data[ct.default_json_field_name] = [{"string": str(i)} for i in range(nb)]
+        collection_w.insert(data)
+        collection_w.load()
+
+        # calculate the result
+        _vectors = data
+        expression = expression.replace("&&", "and").replace("||", "or")
+        filter_ids = []
+        json_field = {}
+        for i in range(nb):
+            if enable_dynamic_field:
+                json_field['string'] = _vectors[i][ct.default_json_field_name]['string']
+                varchar = _vectors[i][ct.default_string_field_name]
+                NewStr = _vectors[i]['NewStr']
+            else:
+                json_field['string'] = _vectors[ct.default_json_field_name][i]['string']
+                varchar = _vectors.varchar[i]
+            if not expression or eval(expression):
+                filter_ids.append(i)
+
+        # delete with expressions
+        res = collection_w.delete(expression)[0]
+        assert res.delete_count == len(filter_ids)
+
+        # query to check
+        collection_w.load()
+        collection_w.query("int64 >= 0", output_fields=['count(*)'],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={'count(*)': nb - len(filter_ids)})
+
