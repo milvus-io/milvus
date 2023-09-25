@@ -758,8 +758,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[1:6],
-                                 ct.default_index_params[1:6]))
+                             zip(ct.all_index_types[1:7],
+                                 ct.default_index_params[1:7]))
     def test_search_different_index_invalid_params(self, index, params):
         """
         target: test search with different index
