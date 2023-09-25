@@ -104,6 +104,12 @@ type DataNode interface {
 
 	// FlushChannels notifies DataNode to sync all the segments belongs to the target channels.
 	FlushChannels(ctx context.Context, req *datapb.FlushChannelsRequest) (*commonpb.Status, error)
+
+	// NotifyChannelOperation notifies channel operations to DataNode, including WatchChannel operation
+	// and RelaseChannel Operation
+	NotifyChannelOperation(ctx context.Context, req *datapb.ChannelOperationsRequest) (*commonpb.Status, error)
+	// CheckChannelOperationProgress checks progress of the channel operation in DataNode.
+	CheckChannelOperationProgress(ctx context.Context, req *datapb.ChannelWatchInfo) (*datapb.ChannelOperationProgressResponse, error)
 }
 
 // DataNodeComponent is used by grpc server of DataNode

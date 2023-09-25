@@ -401,3 +401,11 @@ func (s *Server) SyncSegments(ctx context.Context, request *datapb.SyncSegmentsR
 func (s *Server) FlushChannels(ctx context.Context, req *datapb.FlushChannelsRequest) (*commonpb.Status, error) {
 	return s.datanode.FlushChannels(ctx, req)
 }
+
+func (s *Server) NotifyChannelOperation(ctx context.Context, req *datapb.ChannelOperationsRequest) (*commonpb.Status, error) {
+	return s.datanode.NotifyChannelOperation(ctx, req)
+}
+
+func (s *Server) CheckChannelOperationProgress(ctx context.Context, req *datapb.ChannelWatchInfo) (*datapb.ChannelOperationProgressResponse, error) {
+	return s.datanode.CheckChannelOperationProgress(ctx, req)
+}

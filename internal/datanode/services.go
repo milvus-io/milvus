@@ -406,6 +406,18 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 	return merr.Status(nil), nil
 }
 
+func (node *DataNode) NotifyChannelOperation(ctx context.Context, req *datapb.ChannelOperationsRequest) (*commonpb.Status, error) {
+	log.Warn("DataNode NotifyChannelOperation is unimplemented")
+	return merr.Status(merr.ErrServiceUnavailable), nil
+}
+
+func (node *DataNode) CheckChannelOperationProgress(ctx context.Context, req *datapb.ChannelWatchInfo) (*datapb.ChannelOperationProgressResponse, error) {
+	log.Warn("DataNode CheckChannelOperationProgress is unimplemented")
+	return &datapb.ChannelOperationProgressResponse{
+		Status: merr.Status(merr.ErrServiceUnavailable),
+	}, nil
+}
+
 // Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
 func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*commonpb.Status, error) {
 	logFields := []zap.Field{

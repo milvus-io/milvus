@@ -841,3 +841,14 @@ func (s *DataNodeServicesSuite) TestFlushChannels() {
 
 	s.Assert().True(fgService.channel.getFlushTs() == flushTs)
 }
+
+func (s *DataNodeServicesSuite) TestRPCWatch() {
+	ctx := context.Background()
+	status, err := s.node.NotifyChannelOperation(ctx, nil)
+	s.NoError(err)
+	s.NotNil(status)
+
+	resp, err := s.node.CheckChannelOperationProgress(ctx, nil)
+	s.NoError(err)
+	s.NotNil(resp)
+}

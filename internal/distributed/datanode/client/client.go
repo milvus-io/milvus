@@ -236,3 +236,15 @@ func (c *Client) FlushChannels(ctx context.Context, req *datapb.FlushChannelsReq
 		return client.FlushChannels(ctx, req)
 	})
 }
+
+func (c *Client) NotifyChannelOperation(ctx context.Context, req *datapb.ChannelOperationsRequest) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataNodeClient) (*commonpb.Status, error) {
+		return client.NotifyChannelOperation(ctx, req)
+	})
+}
+
+func (c *Client) CheckChannelOperationProgress(ctx context.Context, req *datapb.ChannelWatchInfo) (*datapb.ChannelOperationProgressResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataNodeClient) (*datapb.ChannelOperationProgressResponse, error) {
+		return client.CheckChannelOperationProgress(ctx, req)
+	})
+}
