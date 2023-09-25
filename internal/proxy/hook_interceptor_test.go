@@ -146,3 +146,11 @@ func TestDefaultHook(t *testing.T) {
 		d.Release()
 	})
 }
+
+func TestUpdateProxyFunctionCallMetric(t *testing.T) {
+	assert.NotPanics(t, func() {
+		updateProxyFunctionCallMetric("/milvus.proto.milvus.MilvusService/Flush")
+		updateProxyFunctionCallMetric("Flush")
+		updateProxyFunctionCallMetric("")
+	})
+}
