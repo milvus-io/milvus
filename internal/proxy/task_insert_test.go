@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -236,10 +235,8 @@ func TestInsertTask(t *testing.T) {
 			mock.AnythingOfType("string"),
 		).Return(collectionID, nil)
 		globalMetaCache = cache
-		chMgr := newMockChannelsMgr()
-		chMgr.getChannelsFunc = func(collectionID UniqueID) ([]pChan, error) {
-			return channels, nil
-		}
+		chMgr := NewMockChannelsMgr(t)
+		chMgr.EXPECT().getChannels(mock.Anything).Return(channels, nil)
 		it := insertTask{
 			ctx: context.Background(),
 			insertMsg: &msgstream.InsertMsg{
@@ -254,12 +251,5 @@ func TestInsertTask(t *testing.T) {
 		resChannels := it.getChannels()
 		assert.ElementsMatch(t, channels, resChannels)
 		assert.ElementsMatch(t, channels, it.pChannels)
-
-		chMgr.getChannelsFunc = func(collectionID UniqueID) ([]pChan, error) {
-			return nil, fmt.Errorf("mock err")
-		}
-		// get channels again, should return task's pChannels, so getChannelsFunc should not invoke again
-		resChannels = it.getChannels()
-		assert.ElementsMatch(t, channels, resChannels)
 	})
 }

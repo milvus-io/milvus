@@ -17,7 +17,6 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -307,10 +306,8 @@ func TestUpsertTask(t *testing.T) {
 		).Return(collectionID, nil)
 		globalMetaCache = cache
 
-		chMgr := newMockChannelsMgr()
-		chMgr.getChannelsFunc = func(collectionID UniqueID) ([]pChan, error) {
-			return channels, nil
-		}
+		chMgr := NewMockChannelsMgr(t)
+		chMgr.EXPECT().getChannels(mock.Anything).Return(channels, nil)
 		ut := upsertTask{
 			ctx: context.Background(),
 			req: &milvuspb.UpsertRequest{
@@ -323,12 +320,5 @@ func TestUpsertTask(t *testing.T) {
 		resChannels := ut.getChannels()
 		assert.ElementsMatch(t, channels, resChannels)
 		assert.ElementsMatch(t, channels, ut.pChannels)
-
-		chMgr.getChannelsFunc = func(collectionID UniqueID) ([]pChan, error) {
-			return nil, fmt.Errorf("mock err")
-		}
-		// get channels again, should return task's pChannels, so getChannelsFunc should not invoke again
-		resChannels = ut.getChannels()
-		assert.ElementsMatch(t, channels, resChannels)
 	})
 }

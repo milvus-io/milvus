@@ -575,10 +575,8 @@ func TestTaskScheduler_concurrentPushAndPop(t *testing.T) {
 
 	run := func(wg *sync.WaitGroup) {
 		defer wg.Done()
-		chMgr := newMockChannelsMgr()
-		chMgr.getChannelsFunc = func(collectionID UniqueID) ([]pChan, error) {
-			return channels, nil
-		}
+		chMgr := NewMockChannelsMgr(t)
+		chMgr.EXPECT().getChannels(mock.Anything).Return(channels, nil)
 		it := &insertTask{
 			ctx: context.Background(),
 			insertMsg: &msgstream.InsertMsg{
@@ -593,9 +591,7 @@ func TestTaskScheduler_concurrentPushAndPop(t *testing.T) {
 		assert.NoError(t, err)
 		task := scheduler.scheduleDmTask()
 		scheduler.dmQueue.AddActiveTask(task)
-		chMgr.getChannelsFunc = func(collectionID UniqueID) ([]pChan, error) {
-			return nil, fmt.Errorf("mock err")
-		}
+		chMgr.EXPECT().getChannels(mock.Anything).Return(nil, fmt.Errorf("mock err"))
 		scheduler.dmQueue.PopActiveTask(task.ID()) // assert no panic
 	}
 

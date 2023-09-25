@@ -34,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -45,11 +44,8 @@ func TestProxy_InvalidateCollectionMetaCache_remove_stream(t *testing.T) {
 	globalMetaCache = nil
 	defer func() { globalMetaCache = cache }()
 
-	chMgr := newMockChannelsMgr()
-	chMgr.removeDMLStreamFuncType = func(collectionID UniqueID) error {
-		log.Debug("TestProxy_InvalidateCollectionMetaCache_remove_stream, remove dml stream")
-		return nil
-	}
+	chMgr := NewMockChannelsMgr(t)
+	chMgr.EXPECT().removeDMLStream(mock.Anything).Return()
 
 	node := &Proxy{chMgr: chMgr}
 	node.stateCode.Store(commonpb.StateCode_Healthy)
