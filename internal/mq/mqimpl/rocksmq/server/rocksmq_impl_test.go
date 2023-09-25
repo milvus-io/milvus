@@ -1188,7 +1188,7 @@ func TestRocksmq_CheckPreTopicValid(t *testing.T) {
 	assert.Equal(t, true, errors.Is(err, merr.ErrMqTopicNotFound))
 
 	channelName2 := "topic2"
-	// topic is not empty
+	// allow topic is not empty
 	err = rmq.CreateTopic(channelName2)
 	defer rmq.DestroyTopic(channelName2)
 	assert.NoError(t, err)
@@ -1204,7 +1204,7 @@ func TestRocksmq_CheckPreTopicValid(t *testing.T) {
 	assert.NoError(t, err)
 
 	err = rmq.CheckTopicValid(channelName2)
-	assert.Equal(t, true, errors.Is(err, merr.ErrMqTopicNotEmpty))
+	assert.NoError(t, err)
 
 	channelName3 := "topic3"
 	// pass

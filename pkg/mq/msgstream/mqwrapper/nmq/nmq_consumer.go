@@ -149,7 +149,6 @@ func (nc *Consumer) GetLatestMsgID() (mqwrapper.MessageID, error) {
 
 // CheckTopicValid verifies if the given topic is valid for this consumer.
 // 1. topic should exist.
-// 2. topic should be empty.
 func (nc *Consumer) CheckTopicValid(topic string) error {
 	if err := nc.closed(); err != nil {
 		return err
@@ -162,17 +161,12 @@ func (nc *Consumer) CheckTopicValid(topic string) error {
 	}
 
 	// check if topic valid or exist.
-	streamInfo, err := nc.js.StreamInfo(topic)
+	_, err := nc.js.StreamInfo(topic)
 	if errors.Is(err, nats.ErrStreamNotFound) {
 		return merr.WrapErrMqTopicNotFound(topic, err.Error())
 	} else if err != nil {
 		log.Warn("fail to get stream info of nats", zap.String("topic", nc.topic), zap.Error(err))
 		return errors.Wrap(err, "failed to get stream info of nats jetstream")
-	}
-
-	// check if topic stream is empty.
-	if streamInfo.State.Msgs > 0 {
-		return merr.WrapErrMqTopicNotEmpty(topic, "stream in nats is not empty")
 	}
 	return nil
 }

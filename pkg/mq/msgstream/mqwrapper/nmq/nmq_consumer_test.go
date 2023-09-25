@@ -26,7 +26,6 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 func TestNatsConsumer_Subscription(t *testing.T) {
@@ -219,7 +218,7 @@ func TestCheckTopicValid(t *testing.T) {
 	err = consumer.CheckTopicValid("BadTopic")
 	assert.Error(t, err)
 
-	// non empty topic should fail
+	// not empty topic can pass
 	pub, err := client.CreateProducer(mqwrapper.ProducerOptions{
 		Topic: topic,
 	})
@@ -230,7 +229,7 @@ func TestCheckTopicValid(t *testing.T) {
 	assert.NoError(t, err)
 
 	err = consumer.CheckTopicValid(topic)
-	assert.ErrorIs(t, err, merr.ErrMqTopicNotEmpty)
+	assert.NoError(t, err)
 
 	consumer.Close()
 	err = consumer.CheckTopicValid(topic)

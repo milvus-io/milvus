@@ -1151,22 +1151,14 @@ func (rmq *rocksmq) updateAckedInfo(topicName, groupName string, firstID UniqueI
 }
 
 func (rmq *rocksmq) CheckTopicValid(topic string) error {
-	// Check if key exists
-	log := log.With(zap.String("topic", topic))
-
 	_, ok := topicMu.Load(topic)
 	if !ok {
 		return merr.WrapErrMqTopicNotFound(topic, "failed to get topic")
 	}
 
-	latestMsgID, err := rmq.GetLatestMsg(topic)
+	_, err := rmq.GetLatestMsg(topic)
 	if err != nil {
 		return err
 	}
-
-	if latestMsgID != DefaultMessageID {
-		return merr.WrapErrMqTopicNotEmpty(topic, "topic is not empty")
-	}
-	log.Info("created topic is empty")
 	return nil
 }
