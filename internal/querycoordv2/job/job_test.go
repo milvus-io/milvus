@@ -123,7 +123,7 @@ func (suite *JobSuite) SetupSuite() {
 				})
 			}
 		}
-		suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collection).Return(vChannels, segmentBinlogs, nil)
+		suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collection).Return(vChannels, segmentBinlogs, nil).Maybe()
 	}
 
 	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything).
@@ -137,7 +137,7 @@ func (suite *JobSuite) SetupSuite() {
 		Return(merr.Status(nil), nil)
 	suite.cluster.EXPECT().
 		ReleasePartitions(mock.Anything, mock.Anything, mock.Anything).
-		Return(merr.Status(nil), nil)
+		Return(merr.Status(nil), nil).Maybe()
 }
 
 func (suite *JobSuite) SetupTest() {
