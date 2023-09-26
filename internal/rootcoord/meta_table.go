@@ -1225,12 +1225,18 @@ func (mt *MetaTable) CreateRole(tenant string, entity *milvuspb.RoleEntity) erro
 
 	results, err := mt.catalog.ListRole(mt.ctx, tenant, nil, false)
 	if err != nil {
-		log.Error("fail to list roles", zap.Error(err))
+		log.Warn("fail to list roles", zap.Error(err))
 		return err
+	}
+	for _, result := range results {
+		if result.GetRole().GetName() == entity.Name {
+			log.Info("role already exists", zap.String("role", entity.Name))
+			return common.NewIgnorableError(errors.Newf("role [%s] already exists", entity))
+		}
 	}
 	if len(results) >= Params.ProxyCfg.MaxRoleNum.GetAsInt() {
 		errMsg := "unable to create role because the number of roles has reached the limit"
-		log.Error(errMsg, zap.Int("max_role_num", Params.ProxyCfg.MaxRoleNum.GetAsInt()))
+		log.Warn(errMsg, zap.Int("max_role_num", Params.ProxyCfg.MaxRoleNum.GetAsInt()))
 		return errors.New(errMsg)
 	}
 

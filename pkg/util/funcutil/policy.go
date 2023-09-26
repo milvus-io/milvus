@@ -40,7 +40,7 @@ func GetPrivilegeExtObj(m proto.GeneratedMessage) (commonpb.PrivilegeExt, error)
 
 	extObj, err := proto.GetExtension(md.Options, commonpb.E_PrivilegeExtObj)
 	if err != nil {
-		log.Warn("GetExtension fail", zap.Error(err))
+		log.Info("GetExtension fail", zap.Error(err))
 		return commonpb.PrivilegeExt{}, err
 	}
 	privilegeExt := extObj.(*commonpb.PrivilegeExt)

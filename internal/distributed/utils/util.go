@@ -3,9 +3,10 @@ package utils
 import (
 	"time"
 
+	"google.golang.org/grpc"
+
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"google.golang.org/grpc"
 )
 
 func GracefulStopGRPCServer(s *grpc.Server) {
