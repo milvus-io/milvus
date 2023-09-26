@@ -11,10 +11,10 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-set( KNOWHERE_VERSION 87190cf )
+set( KNOWHERE_VERSION c249c5d )
 set( GIT_REPOSITORY  "https://github.com/zilliztech/knowhere.git")
 if ( INDEX_ENGINE STREQUAL "cardinal" )
-    set( KNOWHERE_VERSION 87190cf )
+    set( KNOWHERE_VERSION c249c5d )
     set( GIT_REPOSITORY  "https://github.com/zilliztech/knowhere-cloud.git")
 endif()
 message(STATUS "Knowhere repo: ${GIT_REPOSITORY}")
