@@ -53,6 +53,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver"
 	qcc "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
+	"github.com/milvus-io/milvus/internal/distributed/utils"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/management"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -110,7 +111,6 @@ type Server struct {
 
 // NewServer create a Proxy server.
 func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error) {
-
 	var err error
 	server := &Server{
 		ctx: ctx,
@@ -197,12 +197,12 @@ func (s *Server) startExternalRPCServer(grpcExternalPort int, errChan chan error
 
 func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 	defer s.wg.Done()
-	var kaep = keepalive.EnforcementPolicy{
+	kaep := keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
 		PermitWithoutStream: true,            // Allow pings even when there are no active streams
 	}
 
-	var kasp = keepalive.ServerParameters{
+	kasp := keepalive.ServerParameters{
 		Time:    60 * time.Second, // Ping the client if it is idle for 60 seconds to ensure the connection is still active
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
@@ -290,12 +290,12 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 
 func (s *Server) startInternalGrpc(grpcPort int, errChan chan error) {
 	defer s.wg.Done()
-	var kaep = keepalive.EnforcementPolicy{
+	kaep := keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
 		PermitWithoutStream: true,            // Allow pings even when there are no active streams
 	}
 
-	var kasp = keepalive.ServerParameters{
+	kasp := keepalive.ServerParameters{
 		Time:    60 * time.Second, // Ping the client if it is idle for 60 seconds to ensure the connection is still active
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
@@ -662,7 +662,6 @@ func (s *Server) start() error {
 // Stop stop the Proxy Server
 func (s *Server) Stop() error {
 	log.Info("Proxy stop", zap.String("internal address", Params.GetInternalAddress()), zap.String("external address", Params.GetInternalAddress()))
-	s.proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
 	var err error
 	if s.closer != nil {
 		if err = s.closer.Close(); err != nil {
@@ -680,15 +679,13 @@ func (s *Server) Stop() error {
 	go func() {
 		defer gracefulWg.Done()
 		if s.grpcInternalServer != nil {
-			log.Info("Graceful stop grpc internal server...")
-			s.grpcInternalServer.GracefulStop()
+			utils.GracefulStopGRPCServer(s.grpcInternalServer, time.Duration(Params.GracefulStopTimeout)*time.Second)
 		}
 		if s.tcpServer != nil {
 			log.Info("Graceful stop Proxy tcp server...")
 			s.tcpServer.Close()
 		} else if s.grpcExternalServer != nil {
-			log.Info("Graceful stop grpc external server...")
-			s.grpcExternalServer.GracefulStop()
+			utils.GracefulStopGRPCServer(s.grpcExternalServer, time.Duration(Params.GracefulStopTimeout)*time.Second)
 			if s.httpServer != nil {
 				log.Info("Graceful stop grpc http server...")
 				s.httpServer.Close()
@@ -881,7 +878,6 @@ func (s *Server) GetPersistentSegmentInfo(ctx context.Context, request *milvuspb
 // GetQuerySegmentInfo notifies Proxy to get query segment info.
 func (s *Server) GetQuerySegmentInfo(ctx context.Context, request *milvuspb.GetQuerySegmentInfoRequest) (*milvuspb.GetQuerySegmentInfoResponse, error) {
 	return s.proxy.GetQuerySegmentInfo(ctx, request)
-
 }
 
 func (s *Server) Dummy(ctx context.Context, request *milvuspb.DummyRequest) (*milvuspb.DummyResponse, error) {

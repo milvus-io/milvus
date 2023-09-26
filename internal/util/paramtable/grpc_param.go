@@ -50,6 +50,8 @@ const (
 
 	ProxyInternalPort = 19529
 	ProxyExternalPort = 19530
+
+	DefaultGrpcGracefulStopTimeout = 30
 )
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -85,7 +87,6 @@ func (p *grpcConfig) LoadFromEnv() {
 
 // LoadFromArgs is used to initialize configuration items from args.
 func (p *grpcConfig) LoadFromArgs() {
-
 }
 
 func (p *grpcConfig) initPort() {
@@ -115,6 +116,8 @@ type GrpcServerConfig struct {
 
 	ServerMaxSendSize int
 	ServerMaxRecvSize int
+
+	GracefulStopTimeout int
 }
 
 // InitOnce initialize grpc server config once
@@ -129,6 +132,7 @@ func (p *GrpcServerConfig) Init(domain string) {
 
 	p.InitServerMaxSendSize()
 	p.InitServerMaxRecvSize()
+	p.InitGracefulStopTimeout()
 }
 
 func (p *GrpcServerConfig) InitServerMaxSendSize() {
@@ -173,6 +177,30 @@ func (p *GrpcServerConfig) InitServerMaxRecvSize() {
 
 	log.Debug("initServerMaxRecvSize",
 		zap.String("role", p.Domain), zap.Int("grpc.serverMaxRecvSize", p.ServerMaxRecvSize))
+}
+
+func (p *GrpcServerConfig) InitGracefulStopTimeout() {
+	var err error
+
+	valueStr, err := p.LoadWithPriority([]string{p.Domain + ".grpc.gracefulStopTimeout"})
+	if err != nil {
+		p.GracefulStopTimeout = DefaultGrpcGracefulStopTimeout
+	}
+
+	value, err := strconv.Atoi(valueStr)
+	if err != nil {
+		log.Warn("Failed to parse grpc.gracefulStopTimeout, set to default",
+			zap.String("role", p.Domain),
+			zap.String("grpc.gracefulStopTimeout", valueStr),
+			zap.Error(err))
+		p.GracefulStopTimeout = DefaultGrpcGracefulStopTimeout
+	} else {
+		p.GracefulStopTimeout = value
+	}
+
+	log.Debug("initGracefulStopTimeout",
+		zap.String("role", p.Domain),
+		zap.Int("grpc.gracefulStopTimeout", p.GracefulStopTimeout))
 }
 
 // GrpcClientConfig is configuration for grpc client.

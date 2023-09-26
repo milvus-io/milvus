@@ -35,6 +35,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/distributed/utils"
 	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -97,12 +98,12 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	ctx, cancel := context.WithCancel(s.loopCtx)
 	defer cancel()
 
-	var kaep = keepalive.EnforcementPolicy{
+	kaep := keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
 		PermitWithoutStream: true,            // Allow pings even when there are no active streams
 	}
 
-	var kasp = keepalive.ServerParameters{
+	kasp := keepalive.ServerParameters{
 		Time:    60 * time.Second, // Ping the client if it is idle for 60 seconds to ensure the connection is still active
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
@@ -230,8 +231,7 @@ func (s *Server) Stop() error {
 		defer s.etcdCli.Close()
 	}
 	if s.grpcServer != nil {
-		log.Info("Graceful stop grpc server...")
-		s.grpcServer.GracefulStop()
+		utils.GracefulStopGRPCServer(s.grpcServer, time.Duration(Params.GracefulStopTimeout)*time.Second)
 	}
 	s.loopWg.Wait()
 

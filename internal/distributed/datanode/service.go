@@ -39,6 +39,7 @@ import (
 	dn "github.com/milvus-io/milvus/internal/datanode"
 	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
+	"github.com/milvus-io/milvus/internal/distributed/utils"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -81,7 +82,7 @@ type Server struct {
 // NewServer new DataNode grpc server
 func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)
-	var s = &Server{
+	s := &Server{
 		ctx:         ctx1,
 		cancel:      cancel,
 		factory:     factory,
@@ -110,12 +111,12 @@ func (s *Server) startGrpc() error {
 // startGrpcLoop starts the grep loop of datanode component.
 func (s *Server) startGrpcLoop(grpcPort int) {
 	defer s.wg.Done()
-	var kaep = keepalive.EnforcementPolicy{
+	kaep := keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
 		PermitWithoutStream: true,            // Allow pings even when there are no active streams
 	}
 
-	var kasp = keepalive.ServerParameters{
+	kasp := keepalive.ServerParameters{
 		Time:    60 * time.Second, // Ping the client if it is idle for 60 seconds to ensure the connection is still active
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
@@ -127,7 +128,6 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 		lis, err = net.Listen("tcp", addr)
 		return err
 	}, retry.Attempts(10))
-
 	if err != nil {
 		log.Error("DataNode GrpcServer:failed to listen", zap.Error(err))
 		s.grpcErrChan <- err
@@ -172,7 +172,6 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 		log.Warn("DataNode failed to start gRPC")
 		s.grpcErrChan <- err
 	}
-
 }
 
 func (s *Server) SetEtcdClient(client *clientv3.Client) {
@@ -215,22 +214,7 @@ func (s *Server) Stop() error {
 		defer s.etcdCli.Close()
 	}
 	if s.grpcServer != nil {
-		log.Info("Graceful stop grpc server...")
-		// make graceful stop has a timeout
-		stopped := make(chan struct{})
-		go func() {
-			s.grpcServer.GracefulStop()
-			close(stopped)
-		}()
-
-		t := time.NewTimer(10 * time.Second)
-		select {
-		case <-t.C:
-			// hard stop since grace timeout
-			s.grpcServer.Stop()
-		case <-stopped:
-			t.Stop()
-		}
+		utils.GracefulStopGRPCServer(s.grpcServer, time.Duration(Params.GracefulStopTimeout)*time.Second)
 	}
 
 	err := s.datanode.Stop()
