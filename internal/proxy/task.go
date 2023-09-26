@@ -574,6 +574,7 @@ func (dct *describeCollectionTask) Execute(ctx context.Context) error {
 					IsDynamic:      field.IsDynamic,
 					IsPartitionKey: field.IsPartitionKey,
 					DefaultValue:   field.DefaultValue,
+					ElementType:    field.ElementType,
 				})
 			}
 		}
