@@ -144,14 +144,15 @@ func (cit *createIndexTask) parseIndexParams() error {
 				return merr.WrapErrParameterInvalid(DefaultStringIndexType, specifyIndexType, "index type not match")
 			}
 			indexParamsMap[common.IndexTypeKey] = DefaultStringIndexType
-		} else {
-			if cit.fieldSchema.DataType == schemapb.DataType_JSON {
-				return merr.WrapErrParameterInvalid("not json field", "create index on json field", "create index on json field is not supported")
-			}
+		} else if typeutil.IsArithmetic(cit.fieldSchema.DataType) {
 			if exist && specifyIndexType != DefaultIndexType {
-				return merr.WrapErrParameterInvalid(DefaultStringIndexType, specifyIndexType, "index type not match")
+				return merr.WrapErrParameterInvalid(DefaultIndexType, specifyIndexType, "index type not match")
 			}
 			indexParamsMap[common.IndexTypeKey] = DefaultIndexType
+		} else {
+			return merr.WrapErrParameterInvalid("supported field",
+				fmt.Sprintf("create index on %s field", cit.fieldSchema.DataType.String()),
+				"create index on json field is not supported")
 		}
 	}
 
