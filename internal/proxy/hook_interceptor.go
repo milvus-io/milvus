@@ -123,10 +123,11 @@ func UnaryServerHookInterceptor() grpc.UnaryServerInterceptor {
 }
 
 func updateProxyFunctionCallMetric(fullMethod string) {
-	if fullMethod == "" {
+	strs := strings.Split(fullMethod, "/")
+	method := strs[len(strs)-1]
+	if method == "" {
 		return
 	}
-	method := strings.Split(fullMethod, "/")[0]
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel).Inc()
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
 }
