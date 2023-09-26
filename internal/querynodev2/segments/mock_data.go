@@ -252,6 +252,7 @@ func GenTestCollectionSchema(collectionName string, pkType schemapb.DataType) *s
 	fieldDouble := genConstantFieldSchema(simpleDoubleField)
 	// fieldArray := genConstantFieldSchema(simpleArrayField)
 	fieldJSON := genConstantFieldSchema(simpleJSONField)
+	fieldArray := genConstantFieldSchema(simpleArrayField)
 	floatVecFieldSchema := genVectorFieldSchema(simpleFloatVecField)
 	binVecFieldSchema := genVectorFieldSchema(simpleBinVecField)
 	var pkFieldSchema *schemapb.FieldSchema
@@ -273,11 +274,11 @@ func GenTestCollectionSchema(collectionName string, pkType schemapb.DataType) *s
 			fieldInt32,
 			fieldFloat,
 			fieldDouble,
-			// fieldArray,
 			fieldJSON,
 			floatVecFieldSchema,
 			binVecFieldSchema,
 			pkFieldSchema,
+			fieldArray,
 		},
 	}
 

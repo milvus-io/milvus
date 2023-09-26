@@ -699,6 +699,17 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 				} else {
 					dstScalar.GetStringData().Data = append(dstScalar.GetStringData().Data, srcScalar.StringData.Data...)
 				}
+			case *schemapb.ScalarField_ArrayData:
+				if dstScalar.GetArrayData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_ArrayData{
+						ArrayData: &schemapb.ArrayArray{
+							Data:        srcScalar.ArrayData.Data,
+							ElementType: srcScalar.ArrayData.ElementType,
+						},
+					}
+				} else {
+					dstScalar.GetArrayData().Data = append(dstScalar.GetArrayData().Data, srcScalar.ArrayData.Data...)
+				}
 			case *schemapb.ScalarField_JsonData:
 				if dstScalar.GetJsonData() == nil {
 					dstScalar.Data = &schemapb.ScalarField_JsonData{

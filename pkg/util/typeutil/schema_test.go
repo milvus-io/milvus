@@ -614,6 +614,7 @@ func genFieldData(fieldName string, fieldID int64, fieldType schemapb.DataType, 
 					},
 				},
 			},
+			FieldId: fieldID,
 		}
 
 	case schemapb.DataType_JSON:
@@ -1209,35 +1210,116 @@ func TestGetDataAndGetDataSize(t *testing.T) {
 }
 
 func TestMergeFieldData(t *testing.T) {
-	dstFields := []*schemapb.FieldData{
-		genFieldData("int64", 100, schemapb.DataType_Int64, []int64{1, 2, 3}, 1),
-		genFieldData("vector", 101, schemapb.DataType_FloatVector, []float32{1, 2, 3}, 1),
-		genFieldData("json", 102, schemapb.DataType_JSON, [][]byte{[]byte(`{"key":"value"}`), []byte(`{"hello":"world"}`)}, 1),
-	}
+	t.Run("merge data", func(t *testing.T) {
+		dstFields := []*schemapb.FieldData{
+			genFieldData("int64", 100, schemapb.DataType_Int64, []int64{1, 2, 3}, 1),
+			genFieldData("vector", 101, schemapb.DataType_FloatVector, []float32{1, 2, 3}, 1),
+			genFieldData("json", 102, schemapb.DataType_JSON, [][]byte{[]byte(`{"key":"value"}`), []byte(`{"hello":"world"}`)}, 1),
+			genFieldData("array", 103, schemapb.DataType_Array, []*schemapb.ScalarField{
+				{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{
+							Data: []int32{1, 2, 3},
+						},
+					},
+				},
+			}, 1),
+		}
 
-	srcFields := []*schemapb.FieldData{
-		genFieldData("int64", 100, schemapb.DataType_Int64, []int64{4, 5, 6}, 1),
-		genFieldData("vector", 101, schemapb.DataType_FloatVector, []float32{4, 5, 6}, 1),
-		genFieldData("json", 102, schemapb.DataType_JSON, [][]byte{[]byte(`{"key":"value"}`), []byte(`{"hello":"world"}`)}, 1),
-	}
+		srcFields := []*schemapb.FieldData{
+			genFieldData("int64", 100, schemapb.DataType_Int64, []int64{4, 5, 6}, 1),
+			genFieldData("vector", 101, schemapb.DataType_FloatVector, []float32{4, 5, 6}, 1),
+			genFieldData("json", 102, schemapb.DataType_JSON, [][]byte{[]byte(`{"key":"value"}`), []byte(`{"hello":"world"}`)}, 1),
+			genFieldData("array", 103, schemapb.DataType_Array, []*schemapb.ScalarField{
+				{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{
+							Data: []int32{4, 5, 6},
+						},
+					},
+				},
+			}, 1),
+		}
 
-	err := MergeFieldData(dstFields, srcFields)
-	assert.NoError(t, err)
+		err := MergeFieldData(dstFields, srcFields)
+		assert.NoError(t, err)
 
-	assert.Equal(t, []int64{1, 2, 3, 4, 5, 6}, dstFields[0].GetScalars().GetLongData().Data)
-	assert.Equal(t, []float32{1, 2, 3, 4, 5, 6}, dstFields[1].GetVectors().GetFloatVector().Data)
-	assert.Equal(t, [][]byte{[]byte(`{"key":"value"}`), []byte(`{"hello":"world"}`), []byte(`{"key":"value"}`), []byte(`{"hello":"world"}`)},
-		dstFields[2].GetScalars().GetJsonData().Data)
-
-	emptyField := &schemapb.FieldData{
-		Type: schemapb.DataType_None,
-		Field: &schemapb.FieldData_Scalars{
-			Scalars: &schemapb.ScalarField{
-				Data: nil,
+		assert.Equal(t, []int64{1, 2, 3, 4, 5, 6}, dstFields[0].GetScalars().GetLongData().Data)
+		assert.Equal(t, []float32{1, 2, 3, 4, 5, 6}, dstFields[1].GetVectors().GetFloatVector().Data)
+		assert.Equal(t, [][]byte{[]byte(`{"key":"value"}`), []byte(`{"hello":"world"}`), []byte(`{"key":"value"}`), []byte(`{"hello":"world"}`)},
+			dstFields[2].GetScalars().GetJsonData().Data)
+		assert.Equal(t, []*schemapb.ScalarField{
+			{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: []int32{1, 2, 3},
+					},
+				},
+			},
+			{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: []int32{4, 5, 6},
+					},
+				},
 			},
 		},
-	}
+			dstFields[3].GetScalars().GetArrayData().Data)
+	})
 
-	err = MergeFieldData([]*schemapb.FieldData{emptyField}, []*schemapb.FieldData{emptyField})
-	assert.Error(t, err)
+	t.Run("merge with nil", func(t *testing.T) {
+		srcFields := []*schemapb.FieldData{
+			genFieldData("int64", 100, schemapb.DataType_Int64, []int64{1, 2, 3}, 1),
+			genFieldData("vector", 101, schemapb.DataType_FloatVector, []float32{1, 2, 3}, 1),
+			genFieldData("json", 102, schemapb.DataType_JSON, [][]byte{[]byte(`{"key":"value"}`), []byte(`{"hello":"world"}`)}, 1),
+			genFieldData("array", 103, schemapb.DataType_Array, []*schemapb.ScalarField{
+				{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{
+							Data: []int32{1, 2, 3},
+						},
+					},
+				},
+			}, 1),
+		}
+
+		dstFields := []*schemapb.FieldData{
+			{Type: schemapb.DataType_Int64, FieldName: "int64", Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{}}}, FieldId: 100},
+			{Type: schemapb.DataType_FloatVector, FieldName: "vector", Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Data: &schemapb.VectorField_FloatVector{}}}, FieldId: 101},
+			{Type: schemapb.DataType_JSON, FieldName: "json", Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_JsonData{}}}, FieldId: 102},
+			{Type: schemapb.DataType_Array, FieldName: "array", Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{}}}, FieldId: 103},
+		}
+
+		err := MergeFieldData(dstFields, srcFields)
+		assert.NoError(t, err)
+
+		assert.Equal(t, []int64{1, 2, 3}, dstFields[0].GetScalars().GetLongData().Data)
+		assert.Equal(t, []float32{1, 2, 3}, dstFields[1].GetVectors().GetFloatVector().Data)
+		assert.Equal(t, [][]byte{[]byte(`{"key":"value"}`), []byte(`{"hello":"world"}`)},
+			dstFields[2].GetScalars().GetJsonData().Data)
+		assert.Equal(t, []*schemapb.ScalarField{
+			{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: []int32{1, 2, 3},
+					},
+				},
+			},
+		},
+			dstFields[3].GetScalars().GetArrayData().Data)
+	})
+
+	t.Run("error case", func(t *testing.T) {
+		emptyField := &schemapb.FieldData{
+			Type: schemapb.DataType_None,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: nil,
+				},
+			},
+		}
+
+		err := MergeFieldData([]*schemapb.FieldData{emptyField}, []*schemapb.FieldData{emptyField})
+		assert.Error(t, err)
+	})
 }
