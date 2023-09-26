@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
+	"github.com/milvus-io/milvus/internal/kv/predicates"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/testutils"
@@ -73,7 +74,7 @@ func genChannelOperations(from, to int64, num int) ChannelOpSet {
 
 func TestChannelStore_Update(t *testing.T) {
 	txnKv := mocks.NewTxnKV(t)
-	txnKv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything).Run(func(saves map[string]string, removals []string) {
+	txnKv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything).Run(func(saves map[string]string, removals []string, preds ...predicates.Predicate) {
 		assert.False(t, len(saves)+len(removals) > 128, "too many operations")
 	}).Return(nil)
 

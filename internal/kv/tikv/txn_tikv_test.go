@@ -29,6 +29,8 @@ import (
 	"github.com/tikv/client-go/v2/txnkv"
 	"github.com/tikv/client-go/v2/txnkv/transaction"
 	"golang.org/x/exp/maps"
+
+	"github.com/milvus-io/milvus/internal/kv/predicates"
 )
 
 func TestTiKVLoad(te *testing.T) {
@@ -595,4 +597,46 @@ func TestTiKVUnimplemented(t *testing.T) {
 
 	_, err = kv.CompareVersionAndSwap("k", 1, "target")
 	assert.Error(t, err)
+}
+
+func TestTxnWithPredicates(t *testing.T) {
+	kv := NewTiKV(txnClient, "/")
+	err := kv.RemoveWithPrefix("")
+	require.NoError(t, err)
+
+	prepareKV := map[string]string{
+		"lease1": "1",
+		"lease2": "2",
+	}
+
+	err = kv.MultiSave(prepareKV)
+	require.NoError(t, err)
+
+	multiSaveAndRemovePredTests := []struct {
+		tag           string
+		multiSave     map[string]string
+		preds         []predicates.Predicate
+		expectSuccess bool
+	}{
+		{"predicate_ok", map[string]string{"a": "b"}, []predicates.Predicate{predicates.ValueEqual("lease1", "1")}, true},
+		{"predicate_fail", map[string]string{"a": "b"}, []predicates.Predicate{predicates.ValueEqual("lease1", "2")}, false},
+	}
+
+	for _, test := range multiSaveAndRemovePredTests {
+		t.Run(test.tag, func(t *testing.T) {
+			err := kv.MultiSaveAndRemove(test.multiSave, nil, test.preds...)
+			t.Log(err)
+			if test.expectSuccess {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
+			}
+			err = kv.MultiSaveAndRemoveWithPrefix(test.multiSave, nil, test.preds...)
+			if test.expectSuccess {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
+			}
+		})
+	}
 }

@@ -554,6 +554,14 @@ func WrapErrIoFailed(key string, msg ...string) error {
 	return err
 }
 
+func WrapErrIoFailedReason(reason string, msg ...string) error {
+	err := errors.Wrapf(ErrIoFailed, reason)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
 // Parameter related
 func WrapErrParameterInvalid[T any](expected, actual T, msg ...string) error {
 	err := errors.Wrapf(ErrParameterInvalid, "expected=%v, actual=%v", expected, actual)
