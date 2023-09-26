@@ -248,15 +248,15 @@ func (broker *CoordinatorBroker) DescribeIndex(ctx context.Context, collectionID
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 
-	resp, err := broker.dataCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
+	resp, _ := broker.dataCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
 		CollectionID: collectionID,
 	})
 
-	if err != nil || resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Error("failed to fetch index meta",
 			zap.Int64("collection", collectionID),
-			zap.Error(err))
-		return nil, err
+			zap.Error(merr.Error(resp.GetStatus())))
+		return nil, merr.Error(resp.GetStatus())
 	}
 	return resp.IndexInfos, nil
 }

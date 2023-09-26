@@ -78,20 +78,15 @@ func loadPartitions(ctx context.Context,
 			return err
 		}
 	}
-	indexes, err := broker.DescribeIndex(ctx, collection)
-	if err != nil {
-		return err
-	}
 
 	replicas := meta.ReplicaManager.GetByCollection(collection)
 	loadReq := &querypb.LoadPartitionsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_LoadPartitions,
 		},
-		CollectionID:  collection,
-		PartitionIDs:  partitions,
-		Schema:        schema,
-		IndexInfoList: indexes,
+		CollectionID: collection,
+		PartitionIDs: partitions,
+		Schema:       schema,
 	}
 	for _, replica := range replicas {
 		for _, node := range replica.GetNodes() {

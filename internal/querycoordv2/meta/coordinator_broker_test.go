@@ -29,7 +29,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func TestCoordinatorBroker_GetCollectionSchema(t *testing.T) {
@@ -145,5 +147,25 @@ func TestCoordinatorBroker_GetPartitions(t *testing.T) {
 		broker := &CoordinatorBroker{rootCoord: rc}
 		_, err := broker.GetPartitions(ctx, collection)
 		assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
+	})
+}
+
+func TestCoordinatorBroker_DescribeIndex(t *testing.T) {
+	paramtable.Init()
+	t.Run("get error", func(t *testing.T) {
+		dc := mocks.NewMockDataCoordClient(t)
+		resp := &indexpb.DescribeIndexResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "fake error for test",
+			},
+		}
+		dc.EXPECT().DescribeIndex(mock.Anything, mock.Anything).
+			Return(resp, nil)
+
+		broker := &CoordinatorBroker{dataCoord: dc}
+		descResp, err := broker.DescribeIndex(context.Background(), 1)
+		assert.Error(t, err)
+		assert.Nil(t, descResp)
 	})
 }

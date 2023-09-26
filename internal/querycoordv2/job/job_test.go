@@ -128,8 +128,6 @@ func (suite *JobSuite) SetupSuite() {
 
 	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything).
 		Return(nil, nil)
-	suite.broker.EXPECT().DescribeIndex(mock.Anything, mock.Anything).
-		Return(nil, nil)
 
 	suite.cluster = session.NewMockCluster(suite.T())
 	suite.cluster.EXPECT().
@@ -1188,56 +1186,10 @@ func (suite *JobSuite) TestLoadCreateReplicaFailed() {
 }
 
 func (suite *JobSuite) TestCallLoadPartitionFailed() {
-	// call LoadPartitions failed at get index info
-	getIndexErr := fmt.Errorf("mock get index error")
-	suite.broker.ExpectedCalls = lo.Filter(suite.broker.ExpectedCalls, func(call *mock.Call, _ int) bool {
-		return call.Method != "DescribeIndex"
-	})
-	for _, collection := range suite.collections {
-		suite.broker.EXPECT().DescribeIndex(mock.Anything, collection).Return(nil, getIndexErr)
-		loadCollectionReq := &querypb.LoadCollectionRequest{
-			CollectionID: collection,
-		}
-		loadCollectionJob := NewLoadCollectionJob(
-			context.Background(),
-			loadCollectionReq,
-			suite.dist,
-			suite.meta,
-			suite.broker,
-			suite.cluster,
-			suite.targetMgr,
-			suite.targetObserver,
-			suite.nodeMgr,
-		)
-		suite.scheduler.Add(loadCollectionJob)
-		err := loadCollectionJob.Wait()
-		suite.T().Logf("%s", err)
-		suite.ErrorIs(err, getIndexErr)
-
-		loadPartitionReq := &querypb.LoadPartitionsRequest{
-			CollectionID: collection,
-			PartitionIDs: suite.partitions[collection],
-		}
-		loadPartitionJob := NewLoadPartitionJob(
-			context.Background(),
-			loadPartitionReq,
-			suite.dist,
-			suite.meta,
-			suite.broker,
-			suite.cluster,
-			suite.targetMgr,
-			suite.targetObserver,
-			suite.nodeMgr,
-		)
-		suite.scheduler.Add(loadPartitionJob)
-		err = loadPartitionJob.Wait()
-		suite.ErrorIs(err, getIndexErr)
-	}
-
 	// call LoadPartitions failed at get schema
 	getSchemaErr := fmt.Errorf("mock get schema error")
 	suite.broker.ExpectedCalls = lo.Filter(suite.broker.ExpectedCalls, func(call *mock.Call, _ int) bool {
-		return call.Method != "GetCollectionSchema"
+		return call.Method != "GetCollectionSchema" && call.Method != "DescribeIndex"
 	})
 	for _, collection := range suite.collections {
 		suite.broker.EXPECT().GetCollectionSchema(mock.Anything, collection).Return(nil, getSchemaErr)
@@ -1283,7 +1235,6 @@ func (suite *JobSuite) TestCallLoadPartitionFailed() {
 		return call.Method != "DescribeIndex" && call.Method != "GetCollectionSchema"
 	})
 	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything).Return(nil, nil)
-	suite.broker.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(nil, nil)
 }
 
 func (suite *JobSuite) TestCallReleasePartitionFailed() {
