@@ -1241,32 +1241,22 @@ func getCollectionProgress(
 		CollectionIDs: []int64{collectionID},
 	})
 	if err != nil {
-		log.Warn("fail to show collections", zap.Int64("collection_id", collectionID), zap.Error(err))
+		log.Warn("fail to show collections",
+			zap.Int64("collectionID", collectionID),
+			zap.Error(err),
+		)
 		return
 	}
 
-	if resp.GetStatus().GetErrorCode() == commonpb.ErrorCode_InsufficientMemoryToLoad {
-		err = ErrInsufficientMemory
-		log.Warn("detected insufficientMemoryError when getCollectionProgress", zap.Int64("collection_id", collectionID), zap.String("reason", resp.GetStatus().GetReason()))
-		return
-	}
-
-	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		err = merr.Error(resp.GetStatus())
-		log.Warn("fail to show collections", zap.Int64("collection_id", collectionID),
-			zap.String("reason", resp.GetStatus().GetReason()))
-		return
-	}
-
-	if len(resp.InMemoryPercentages) == 0 {
-		errMsg := "fail to show collections from the querycoord, no data"
-		err = errors.New(errMsg)
-		log.Warn(errMsg, zap.Int64("collection_id", collectionID))
+	err = merr.Error(resp.GetStatus())
+	if err != nil {
+		log.Warn("fail to show collections",
+			zap.Int64("collectionID", collectionID),
+			zap.Error(err))
 		return
 	}
 
 	loadProgress = resp.GetInMemoryPercentages()[0]
-
 	if len(resp.GetRefreshProgress()) > 0 { // Compatibility for new Proxy with old QueryCoord
 		refreshProgress = resp.GetRefreshProgress()[0]
 	}
@@ -1311,34 +1301,17 @@ func getPartitionProgress(
 			zap.Error(err))
 		return
 	}
-	if resp.GetStatus().GetErrorCode() == commonpb.ErrorCode_InsufficientMemoryToLoad {
-		err = ErrInsufficientMemory
-		log.Warn("detected insufficientMemoryError when getPartitionProgress",
-			zap.Int64("collection_id", collectionID),
-			zap.String("collection_name", collectionName),
-			zap.Strings("partition_names", partitionNames),
-			zap.String("reason", resp.GetStatus().GetReason()),
-		)
-		return
-	}
 
-	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+	err = merr.Error(resp.GetStatus())
+	if err != nil {
 		err = merr.Error(resp.GetStatus())
 		log.Warn("fail to show partitions",
-			zap.String("collection_name", collectionName),
-			zap.Strings("partition_names", partitionNames),
-			zap.String("reason", resp.GetStatus().GetReason()))
+			zap.String("collectionName", collectionName),
+			zap.Strings("partitionNames", partitionNames),
+			zap.Error(err))
 		return
 	}
 
-	if len(resp.InMemoryPercentages) != len(partitionIDs) {
-		errMsg := "fail to show partitions from the querycoord, invalid data num"
-		err = errors.New(errMsg)
-		log.Warn(errMsg, zap.Int64("collection_id", collectionID),
-			zap.String("collection_name", collectionName),
-			zap.Strings("partition_names", partitionNames))
-		return
-	}
 	for _, p := range resp.InMemoryPercentages {
 		loadProgress += p
 	}

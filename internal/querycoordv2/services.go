@@ -104,7 +104,7 @@ func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectio
 				}, nil
 			}
 
-			err = fmt.Errorf("collection %d has not been loaded to memory or load failed", collectionID)
+			err = merr.WrapErrCollectionNotLoaded(collectionID)
 			log.Warn("show collection failed", zap.Error(err))
 			return &querypb.ShowCollectionsResponse{
 				Status: merr.Status(err),
@@ -162,10 +162,9 @@ func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitions
 			}
 
 			err = merr.WrapErrPartitionNotLoaded(partitionID)
-			msg := fmt.Sprintf("partition %d has not been loaded to memory or load failed", partitionID)
-			log.Warn(msg)
+			log.Warn("show partitions failed", zap.Error(err))
 			return &querypb.ShowPartitionsResponse{
-				Status: merr.Status(errors.Wrap(err, msg)),
+				Status: merr.Status(err),
 			}, nil
 		}
 		percentages = append(percentages, int64(percentage))

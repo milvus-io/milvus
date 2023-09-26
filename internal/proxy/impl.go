@@ -1483,13 +1483,13 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 
 	getErrResponse := func(err error) *milvuspb.GetLoadingProgressResponse {
 		log.Warn("fail to get loading progress",
-			zap.String("collection_name", request.CollectionName),
-			zap.Strings("partition_name", request.PartitionNames),
+			zap.String("collectionName", request.CollectionName),
+			zap.Strings("partitionName", request.PartitionNames),
 			zap.Error(err))
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
-		if errors.Is(err, ErrInsufficientMemory) {
+		if errors.Is(err, merr.ErrServiceMemoryLimitExceeded) {
 			return &milvuspb.GetLoadingProgressResponse{
-				Status: InSufficientMemoryStatus(request.GetCollectionName()),
+				Status: merr.Status(err),
 			}
 		}
 		return &milvuspb.GetLoadingProgressResponse{
@@ -1574,14 +1574,6 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 		return getErrResponse(err), nil
 	}
 
-	// TODO(longjiquan): https://github.com/milvus-io/milvus/issues/21485, Remove `GetComponentStates` after error code
-	// 	is ready to distinguish case whether the querycoord is not healthy or the collection is not even loaded.
-	if statesResp, err := node.queryCoord.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{}); err != nil {
-		return getErrResponse(err), nil
-	} else if statesResp.State == nil || statesResp.State.StateCode != commonpb.StateCode_Healthy {
-		return getErrResponse(fmt.Errorf("the querycoord server isn't healthy, state: %v", statesResp.State)), nil
-	}
-
 	successResponse := &milvuspb.GetLoadStateResponse{
 		Status: merr.Status(nil),
 	}
@@ -1615,24 +1607,30 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 	var progress int64
 	if len(request.GetPartitionNames()) == 0 {
 		if progress, _, err = getCollectionProgress(ctx, node.queryCoord, request.GetBase(), collectionID); err != nil {
-			if errors.Is(err, ErrInsufficientMemory) {
+			if err != nil {
+				if errors.Is(err, merr.ErrCollectionNotLoaded) {
+					successResponse.State = commonpb.LoadState_LoadStateNotLoad
+					return successResponse, nil
+				}
 				return &milvuspb.GetLoadStateResponse{
-					Status: InSufficientMemoryStatus(request.GetCollectionName()),
+					Status: merr.Status(err),
 				}, nil
 			}
-			successResponse.State = commonpb.LoadState_LoadStateNotLoad
-			return successResponse, nil
 		}
 	} else {
 		if progress, _, err = getPartitionProgress(ctx, node.queryCoord, request.GetBase(),
 			request.GetPartitionNames(), request.GetCollectionName(), collectionID, request.GetDbName()); err != nil {
-			if errors.Is(err, ErrInsufficientMemory) {
+			if err != nil {
+				if errors.IsAny(err,
+					merr.ErrCollectionNotLoaded,
+					merr.ErrPartitionNotLoaded) {
+					successResponse.State = commonpb.LoadState_LoadStateNotLoad
+					return successResponse, nil
+				}
 				return &milvuspb.GetLoadStateResponse{
-					Status: InSufficientMemoryStatus(request.GetCollectionName()),
+					Status: merr.Status(err),
 				}, nil
 			}
-			successResponse.State = commonpb.LoadState_LoadStateNotLoad
-			return successResponse, nil
 		}
 	}
 	if progress >= 100 {

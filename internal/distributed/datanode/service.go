@@ -24,7 +24,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
@@ -50,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 )
@@ -326,11 +326,8 @@ func (s *Server) WatchDmChannels(ctx context.Context, req *datapb.WatchDmChannel
 }
 
 func (s *Server) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
-	if s.datanode.GetStateCode() != commonpb.StateCode_Healthy {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    "DataNode isn't healthy.",
-		}, errors.New("DataNode is not ready yet")
+	if err := merr.CheckHealthy(s.datanode.GetStateCode()); err != nil {
+		return merr.Status(err), nil
 	}
 	return s.datanode.FlushSegments(ctx, req)
 }
