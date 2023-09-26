@@ -17,7 +17,6 @@
 package checkers
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -127,8 +126,7 @@ func (suite *CheckerControllerSuite) TestBasic() {
 
 	suite.balancer.EXPECT().AssignSegment(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	suite.balancer.EXPECT().AssignChannel(mock.Anything, mock.Anything).Return(nil)
-	ctx := context.Background()
-	suite.controller.Start(ctx)
+	suite.controller.Start()
 	defer suite.controller.Stop()
 
 	suite.Eventually(func() bool {

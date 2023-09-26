@@ -126,7 +126,7 @@ func (queue *taskQueue) Range(fn func(task Task) bool) {
 }
 
 type Scheduler interface {
-	Start(ctx context.Context)
+	Start()
 	Stop()
 	AddExecutor(nodeID int64)
 	RemoveExecutor(nodeID int64)
@@ -191,7 +191,7 @@ func NewScheduler(ctx context.Context,
 	}
 }
 
-func (scheduler *taskScheduler) Start(ctx context.Context) {}
+func (scheduler *taskScheduler) Start() {}
 
 func (scheduler *taskScheduler) Stop() {
 	scheduler.rwmutex.Lock()
@@ -200,6 +200,13 @@ func (scheduler *taskScheduler) Stop() {
 	for nodeID, executor := range scheduler.executors {
 		executor.Stop()
 		delete(scheduler.executors, nodeID)
+	}
+
+	for _, task := range scheduler.segmentTasks {
+		scheduler.remove(task)
+	}
+	for _, task := range scheduler.channelTasks {
+		scheduler.remove(task)
 	}
 }
 

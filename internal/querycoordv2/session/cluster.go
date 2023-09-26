@@ -57,7 +57,7 @@ type Cluster interface {
 	GetMetrics(ctx context.Context, nodeID int64, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 	SyncDistribution(ctx context.Context, nodeID int64, req *querypb.SyncDistributionRequest) (*commonpb.Status, error)
 	GetComponentStates(ctx context.Context, nodeID int64) (*milvuspb.ComponentStates, error)
-	Start(ctx context.Context)
+	Start()
 	Stop()
 }
 
@@ -85,7 +85,7 @@ func NewCluster(nodeManager *NodeManager, queryNodeCreator QueryNodeCreator) *Qu
 	return c
 }
 
-func (c *QueryCluster) Start(ctx context.Context) {
+func (c *QueryCluster) Start() {
 	c.wg.Add(1)
 	go c.updateLoop()
 }

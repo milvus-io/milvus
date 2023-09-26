@@ -17,7 +17,6 @@
 package observers
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -213,9 +212,9 @@ func (suite *CollectionObserverSuite) SetupTest() {
 	for _, collection := range suite.collections {
 		suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil).Maybe()
 	}
-	suite.targetObserver.Start(context.Background())
-	suite.leaderObserver.Start(context.TODO())
-	suite.ob.Start(context.Background())
+	suite.targetObserver.Start()
+	suite.leaderObserver.Start()
+	suite.ob.Start()
 	suite.loadAll()
 }
 

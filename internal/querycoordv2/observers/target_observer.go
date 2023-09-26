@@ -42,7 +42,7 @@ type targetUpdateRequest struct {
 }
 
 type TargetObserver struct {
-	c         chan struct{}
+	cancel    context.CancelFunc
 	wg        sync.WaitGroup
 	meta      *meta.Meta
 	targetMgr *meta.TargetManager
@@ -60,7 +60,6 @@ type TargetObserver struct {
 
 func NewTargetObserver(meta *meta.Meta, targetMgr *meta.TargetManager, distMgr *meta.DistributionManager, broker meta.Broker) *TargetObserver {
 	return &TargetObserver{
-		c:                    make(chan struct{}),
 		meta:                 meta,
 		targetMgr:            targetMgr,
 		distMgr:              distMgr,
@@ -72,14 +71,19 @@ func NewTargetObserver(meta *meta.Meta, targetMgr *meta.TargetManager, distMgr *
 	}
 }
 
-func (ob *TargetObserver) Start(ctx context.Context) {
+func (ob *TargetObserver) Start() {
+	ctx, cancel := context.WithCancel(context.Background())
+	ob.cancel = cancel
+
 	ob.wg.Add(1)
 	go ob.schedule(ctx)
 }
 
 func (ob *TargetObserver) Stop() {
 	ob.stopOnce.Do(func() {
-		close(ob.c)
+		if ob.cancel != nil {
+			ob.cancel()
+		}
 		ob.wg.Wait()
 	})
 }
@@ -93,9 +97,6 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Info("Close target observer due to context canceled")
-			return
-		case <-ob.c:
 			log.Info("Close target observer")
 			return
 
