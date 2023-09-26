@@ -1847,20 +1847,7 @@ func (c *Core) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvus
 		return nil, err
 	}
 
-	// Backup tool call import must with a partition name, each time restore a partition
 	isBackUp := importutil.IsBackup(req.GetOptions())
-	if isBackUp {
-		if len(req.GetPartitionName()) == 0 {
-			log.Info("partition name not specified when backup recovery",
-				zap.String("collectionName", req.GetCollectionName()))
-			ret := &milvuspb.ImportResponse{
-				Status: failStatus(commonpb.ErrorCode_UnexpectedError,
-					"partition name not specified when backup"),
-			}
-			return ret, nil
-		}
-	}
-
 	cID := colInfo.CollectionID
 	req.ChannelNames = c.meta.GetCollectionVirtualChannels(cID)
 
@@ -1872,24 +1859,45 @@ func (c *Core) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvus
 		}
 	}
 
-	// If has partition key and not backup/restore mode, don't allow user to specify partition name
-	if hasPartitionKey && !isBackUp && req.GetPartitionName() != "" {
-		msg := "not allow to set partition name for collection with partition key"
-		log.Warn(msg, zap.String("collection name", req.GetCollectionName()))
-		return nil, errors.New(msg)
-	}
-
 	// Get partition ID by partition name
 	var pID UniqueID
-	if !hasPartitionKey {
-		if req.GetPartitionName() == "" {
-			req.PartitionName = Params.CommonCfg.DefaultPartitionName.GetValue()
+	if isBackUp {
+		// Currently, Backup tool call import must with a partition name, each time restore a partition
+		if req.GetPartitionName() != "" {
+			if pID, err = c.meta.GetPartitionByName(cID, req.GetPartitionName(), typeutil.MaxTimestamp); err != nil {
+				log.Warn("failed to get partition ID from its name", zap.String("partition name", req.GetPartitionName()), zap.Error(err))
+				return &milvuspb.ImportResponse{
+					Status: merr.Status(merr.WrapBulkInsertPartitionNotFound(req.GetCollectionName(), req.GetPartitionName())),
+				}, nil
+			}
+		} else {
+			log.Info("partition name not specified when backup recovery",
+				zap.String("collectionName", req.GetCollectionName()))
+			return &milvuspb.ImportResponse{
+				Status: merr.Status(merr.WrapBadBulkInsertRequest("partition name not specified when backup")),
+			}, nil
 		}
-		if pID, err = c.meta.GetPartitionByName(cID, req.GetPartitionName(), typeutil.MaxTimestamp); err != nil {
-			log.Warn("failed to get partition ID from its name",
-				zap.String("partition name", req.GetPartitionName()),
-				zap.Error(err))
-			return nil, err
+	} else {
+		if hasPartitionKey {
+			if req.GetPartitionName() != "" {
+				msg := "not allow to set partition name for collection with partition key"
+				log.Warn(msg, zap.String("collection name", req.GetCollectionName()))
+				return &milvuspb.ImportResponse{
+					Status: merr.Status(merr.WrapBadBulkInsertRequest(msg)),
+				}, nil
+			}
+		} else {
+			if req.GetPartitionName() == "" {
+				req.PartitionName = Params.CommonCfg.DefaultPartitionName.GetValue()
+			}
+			if pID, err = c.meta.GetPartitionByName(cID, req.GetPartitionName(), typeutil.MaxTimestamp); err != nil {
+				log.Warn("failed to get partition ID from its name",
+					zap.String("partition name", req.GetPartitionName()),
+					zap.Error(err))
+				return &milvuspb.ImportResponse{
+					Status: merr.Status(merr.WrapBulkInsertPartitionNotFound(req.GetCollectionName(), req.GetPartitionName())),
+				}, nil
+			}
 		}
 	}
 

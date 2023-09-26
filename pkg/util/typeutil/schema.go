@@ -792,6 +792,16 @@ func GetPartitionKeyFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.Fi
 	return nil, errors.New("partition key field is not found")
 }
 
+// HasPartitionKey check if a collection schema has PartitionKey field
+func HasPartitionKey(schema *schemapb.CollectionSchema) bool {
+	for _, fieldSchema := range schema.Fields {
+		if fieldSchema.IsPartitionKey {
+			return true
+		}
+	}
+	return false
+}
+
 // GetPrimaryFieldData get primary field data from all field data inserted from sdk
 func GetPrimaryFieldData(datas []*schemapb.FieldData, primaryFieldSchema *schemapb.FieldSchema) (*schemapb.FieldData, error) {
 	primaryFieldID := primaryFieldSchema.FieldID

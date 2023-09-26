@@ -495,15 +495,24 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 		return returnFailFunc("failed to get collection info for collection ID", err)
 	}
 
-	// the colInfo doesn't have a collect database name(it is empty). use the database name passed from rootcoord.
-	partitions, err := node.getPartitions(ctx, req.GetImportTask().GetDatabaseName(), colInfo.GetCollectionName())
-	if err != nil {
-		return returnFailFunc("failed to get partition id list", err)
-	}
-
-	partitionIDs, err := importutil.DeduceTargetPartitions(partitions, colInfo.GetSchema(), req.GetImportTask().GetPartitionId())
-	if err != nil {
-		return returnFailFunc("failed to decude target partitions", err)
+	var partitionIDs []int64
+	if req.GetImportTask().GetPartitionId() == 0 {
+		if !typeutil.HasPartitionKey(colInfo.GetSchema()) {
+			err = errors.New("try auto-distribute data but the collection has no partition key")
+			return returnFailFunc(err.Error(), err)
+		}
+		// TODO: prefer to set partitionIDs in coord instead of get here.
+		// the colInfo doesn't have a correct database name(it is empty). use the database name passed from rootcoord.
+		partitions, err := node.getPartitions(ctx, req.GetImportTask().GetDatabaseName(), colInfo.GetCollectionName())
+		if err != nil {
+			return returnFailFunc("failed to get partition id list", err)
+		}
+		_, partitionIDs, err = typeutil.RearrangePartitionsForPartitionKey(partitions)
+		if err != nil {
+			return returnFailFunc("failed to rearrange target partitions", err)
+		}
+	} else {
+		partitionIDs = []int64{req.GetImportTask().GetPartitionId()}
 	}
 
 	collectionInfo, err := importutil.NewCollectionInfo(colInfo.GetSchema(), colInfo.GetShardsNum(), partitionIDs)

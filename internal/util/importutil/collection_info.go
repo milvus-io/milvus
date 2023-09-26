@@ -23,34 +23,19 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type CollectionInfo struct {
 	Schema   *schemapb.CollectionSchema
 	ShardNum int32
 
-	PartitionIDs []int64 // target partitions of bulkinsert, one partition for non-partition-key collection, or all partiitons for partition-key collection
+	PartitionIDs []int64 // target partitions of bulkinsert
 
 	PrimaryKey   *schemapb.FieldSchema
 	PartitionKey *schemapb.FieldSchema
 	DynamicField *schemapb.FieldSchema
 
 	Name2FieldID map[string]int64 // this member is for Numpy file name validation and JSON row validation
-}
-
-func DeduceTargetPartitions(partitions map[string]int64, collectionSchema *schemapb.CollectionSchema, defaultPartition int64) ([]int64, error) {
-	// if no partition key, rutrn the default partition ID as target partition
-	_, err := typeutil.GetPartitionKeyFieldSchema(collectionSchema)
-	if err != nil {
-		return []int64{defaultPartition}, nil
-	}
-
-	_, partitionIDs, err := typeutil.RearrangePartitionsForPartitionKey(partitions)
-	if err != nil {
-		return nil, err
-	}
-	return partitionIDs, nil
 }
 
 func NewCollectionInfo(collectionSchema *schemapb.CollectionSchema,
