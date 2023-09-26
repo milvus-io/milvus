@@ -121,11 +121,7 @@ func (ob *CollectionObserver) observeTimeout() {
 		ob.targetMgr.RemoveCollection(collection.GetCollectionID())
 	}
 
-	partitions := utils.GroupPartitionsByCollection(
-		ob.meta.CollectionManager.GetAllPartitions())
-	if len(partitions) > 0 {
-		log.Info("observes partitions timeout", zap.Int("partitionNum", len(partitions)))
-	}
+	partitions := utils.GroupPartitionsByCollection(ob.meta.CollectionManager.GetAllPartitions())
 	for collection, partitions := range partitions {
 		for _, partition := range partitions {
 			if partition.GetStatus() != querypb.LoadStatus_Loading ||
