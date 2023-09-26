@@ -150,9 +150,8 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
             break;
         }
         default: {
-            PanicCodeInfo(DataTypeInvalid,
-                          fmt::format("unsupported data type {}",
-                                      fmt::underlying(data_type)));
+            PanicInfo(DataTypeInvalid,
+                      fmt::format("unsupported data type {}", data_type));
         }
     }
 }
@@ -222,9 +221,9 @@ CreateArrowBuilder(DataType data_type) {
             return std::make_shared<arrow::BinaryBuilder>();
         }
         default: {
-            PanicCodeInfo(DataTypeInvalid,
-                          fmt::format("unsupported numeric data type {}",
-                                      fmt::underlying(data_type)));
+            PanicInfo(
+                DataTypeInvalid,
+                fmt::format("unsupported numeric data type {}", data_type));
         }
     }
 }
@@ -248,9 +247,9 @@ CreateArrowBuilder(DataType data_type, int dim) {
                 arrow::fixed_size_binary(dim * sizeof(float16)));
         }
         default: {
-            PanicCodeInfo(DataTypeInvalid,
-                          fmt::format("unsupported vector data type {}",
-                                      fmt::underlying(data_type)));
+            PanicInfo(
+                DataTypeInvalid,
+                fmt::format("unsupported vector data type {}", data_type));
         }
     }
 }
@@ -288,9 +287,9 @@ CreateArrowSchema(DataType data_type) {
             return arrow::schema({arrow::field("val", arrow::binary())});
         }
         default: {
-            PanicCodeInfo(DataTypeInvalid,
-                          fmt::format("unsupported numeric data type {}",
-                                      fmt::underlying(data_type)));
+            PanicInfo(
+                DataTypeInvalid,
+                fmt::format("unsupported numeric data type {}", data_type));
         }
     }
 }
@@ -314,9 +313,9 @@ CreateArrowSchema(DataType data_type, int dim) {
                 "val", arrow::fixed_size_binary(dim * sizeof(float16)))});
         }
         default: {
-            PanicCodeInfo(DataTypeInvalid,
-                          fmt::format("unsupported vector data type {}",
-                                      fmt::underlying(data_type)));
+            PanicInfo(
+                DataTypeInvalid,
+                fmt::format("unsupported vector data type {}", data_type));
         }
     }
 }
@@ -335,9 +334,8 @@ GetDimensionFromFileMetaData(const parquet::ColumnDescriptor* schema,
             return schema->type_length() / sizeof(float16);
         }
         default:
-            PanicCodeInfo(DataTypeInvalid,
-                          fmt::format("unsupported data type {}",
-                                      fmt::underlying(data_type)));
+            PanicInfo(DataTypeInvalid,
+                      fmt::format("unsupported data type {}", data_type));
     }
 }
 
@@ -362,9 +360,8 @@ GetDimensionFromArrowArray(std::shared_ptr<arrow::Array> data,
             return array->byte_width() * 8;
         }
         default:
-            PanicCodeInfo(DataTypeInvalid,
-                          fmt::format("unsupported data type {}",
-                                      fmt::underlying(data_type)));
+            PanicInfo(DataTypeInvalid,
+                      fmt::format("unsupported data type {}", data_type));
     }
 }
 
@@ -606,10 +603,9 @@ CreateChunkManager(const StorageConfig& storage_config) {
         }
 
         default: {
-            PanicCodeInfo(
-                ConfigInvalid,
-                fmt::format("unsupported storage_config.storage_type {}",
-                            fmt::underlying(storage_type)));
+            PanicInfo(ConfigInvalid,
+                      fmt::format("unsupported storage_config.storage_type {}",
+                                  fmt::underlying(storage_type)));
         }
     }
 }

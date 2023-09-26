@@ -53,6 +53,8 @@ enum ErrorCode {
     DataFormatBroken = 2024,
     JsonKeyInvalid = 2025,
     MetricTypeInvalid = 2026,
+    FieldNotLoaded = 2027,
+    ExprInvalid = 2028,
     UnistdError = 2030,
     KnowhereError = 2100,
 };
@@ -71,7 +73,7 @@ class SegcoreError : public std::runtime_error {
  public:
     static SegcoreError
     success() {
-        return SegcoreError(ErrorCode::Success, "");
+        return {ErrorCode::Success, ""};
     }
 
     SegcoreError(ErrorCode error_code, const std::string& error_msg)
@@ -125,13 +127,8 @@ FailureCStatus(std::exception* ex) {
     } while (0)
 
 #define Assert(expr) AssertInfo((expr), "")
-#define PanicInfo(info)                                                      \
-    do {                                                                     \
-        milvus::impl::EasyAssertInfo(false, "", __FILE__, __LINE__, (info)); \
-        __builtin_unreachable();                                             \
-    } while (0)
 
-#define PanicCodeInfo(errcode, info)                         \
+#define PanicInfo(errcode, info)                             \
     do {                                                     \
         milvus::impl::EasyAssertInfo(                        \
             false, "", __FILE__, __LINE__, (info), errcode); \

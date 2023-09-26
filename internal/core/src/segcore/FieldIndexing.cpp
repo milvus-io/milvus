@@ -250,10 +250,9 @@ CreateIndex(const FieldMeta& field_meta,
                                                          segment_max_row_count,
                                                          segcore_config);
         } else {
-            PanicCodeInfo(
-                DataTypeInvalid,
-                fmt::format("unsupported vector type in index: {}",
-                            fmt::underlying(field_meta.get_data_type())));
+            PanicInfo(DataTypeInvalid,
+                      fmt::format("unsupported vector type in index: {}",
+                                  field_meta.get_data_type()));
         }
     }
     switch (field_meta.get_data_type()) {
@@ -282,10 +281,9 @@ CreateIndex(const FieldMeta& field_meta,
             return std::make_unique<ScalarFieldIndexing<std::string>>(
                 field_meta, segcore_config);
         default:
-            PanicCodeInfo(
-                DataTypeInvalid,
-                fmt::format("unsupported scalar type in index: {}",
-                            fmt::underlying(field_meta.get_data_type())));
+            PanicInfo(DataTypeInvalid,
+                      fmt::format("unsupported scalar type in index: {}",
+                                  field_meta.get_data_type()));
     }
 }
 

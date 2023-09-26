@@ -22,7 +22,7 @@ namespace milvus::query {
 template <typename T, typename U>
 inline bool
 Match(const T& x, const U& y, OpType op) {
-    PanicInfo("not supported");
+    PanicInfo(NotImplemented, "not supported");
 }
 
 template <>
@@ -34,7 +34,7 @@ Match<std::string>(const std::string& str, const std::string& val, OpType op) {
         case OpType::PostfixMatch:
             return PostfixMatch(str, val);
         default:
-            PanicInfo("not supported");
+            PanicInfo(OpTypeInvalid, "not supported");
     }
 }
 
@@ -49,7 +49,7 @@ Match<std::string_view>(const std::string_view& str,
         case OpType::PostfixMatch:
             return PostfixMatch(str, val);
         default:
-            PanicInfo("not supported");
+            PanicInfo(OpTypeInvalid, "not supported");
     }
 }
 
