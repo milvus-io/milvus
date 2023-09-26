@@ -68,3 +68,7 @@ func (m *GrpcIndexNodeClient) GetMetrics(ctx context.Context, in *milvuspb.GetMe
 func (m *GrpcIndexNodeClient) ShowConfigurations(ctx context.Context, in *internalpb.ShowConfigurationsRequest, opts ...grpc.CallOption) (*internalpb.ShowConfigurationsResponse, error) {
 	return &internalpb.ShowConfigurationsResponse{}, m.Err
 }
+
+func (m *GrpcIndexNodeClient) Close() error {
+	return m.Err
+}

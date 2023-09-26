@@ -66,7 +66,7 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 }
 
 // GetComponentStates will return current state of DataNode
-func (node *DataNode) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+func (node *DataNode) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	log.Debug("DataNode current state", zap.Any("State", node.stateCode.Load()))
 	nodeID := common.NotRegisteredID
 	if node.GetSession() != nil && node.session.Registered() {
@@ -179,14 +179,14 @@ func (node *DataNode) ResendSegmentStats(ctx context.Context, req *datapb.Resend
 }
 
 // GetTimeTickChannel currently do nothing
-func (node *DataNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (node *DataNode) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: merr.Status(nil),
 	}, nil
 }
 
 // GetStatisticsChannel currently do nothing
-func (node *DataNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (node *DataNode) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: merr.Status(nil),
 	}, nil

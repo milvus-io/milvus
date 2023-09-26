@@ -38,7 +38,7 @@ type NodeInfo struct {
 type Session struct {
 	sync.Mutex
 	info          *NodeInfo
-	client        types.DataNode
+	client        types.DataNodeClient
 	clientCreator dataNodeCreatorFunc
 	isDisposed    bool
 }
@@ -52,7 +52,7 @@ func NewSession(info *NodeInfo, creator dataNodeCreatorFunc) *Session {
 }
 
 // GetOrCreateClient gets or creates a new client for session
-func (n *Session) GetOrCreateClient(ctx context.Context) (types.DataNode, error) {
+func (n *Session) GetOrCreateClient(ctx context.Context) (types.DataNodeClient, error) {
 	n.Lock()
 	defer n.Unlock()
 
@@ -76,10 +76,7 @@ func (n *Session) initClient(ctx context.Context) (err error) {
 	if n.client, err = n.clientCreator(ctx, n.info.Address, n.info.NodeID); err != nil {
 		return
 	}
-	if err = n.client.Init(); err != nil {
-		return
-	}
-	return n.client.Start()
+	return nil
 }
 
 // Dispose releases client connection
@@ -88,7 +85,7 @@ func (n *Session) Dispose() {
 	defer n.Unlock()
 
 	if n.client != nil {
-		n.client.Stop()
+		n.client.Close()
 		n.client = nil
 	}
 	n.isDisposed = true

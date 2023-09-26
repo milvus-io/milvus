@@ -25,6 +25,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -84,7 +85,7 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 	_ = InitMetaCache(ctx, rootCoord, queryCoord, shardMgr)
 	assert.Error(t, gist.Execute(ctx))
 
-	rootCoord.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	rootCoord.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
 		return &milvuspb.DescribeCollectionResponse{
 			Status:         merr.Status(nil),
 			Schema:         newTestSchema(),
@@ -93,7 +94,7 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 		}, nil
 	}
 
-	datacoord.GetIndexStateFunc = func(ctx context.Context, request *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error) {
+	datacoord.GetIndexStateFunc = func(ctx context.Context, request *indexpb.GetIndexStateRequest, opts ...grpc.CallOption) (*indexpb.GetIndexStateResponse, error) {
 		return &indexpb.GetIndexStateResponse{
 			Status:     merr.Status(nil),
 			State:      commonpb.IndexState_Finished,
@@ -208,8 +209,8 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 	})
 }
 
-func getMockQueryCoord() *mocks.MockQueryCoord {
-	qc := &mocks.MockQueryCoord{}
+func getMockQueryCoord() *mocks.MockQueryCoordClient {
+	qc := &mocks.MockQueryCoordClient{}
 	successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
 	qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
 	qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{

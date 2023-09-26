@@ -38,16 +38,11 @@ func TestProxy_metrics(t *testing.T) {
 	ctx := context.Background()
 
 	rc := NewRootCoordMock()
-	rc.Start()
-	defer rc.Stop()
+	defer rc.Close()
 
-	qc := getQueryCoord()
-	qc.Start()
-	defer qc.Stop()
-
+	qc := getQueryCoordClient()
 	dc := NewDataCoordMock()
-	dc.Start()
-	defer dc.Stop()
+	defer dc.Close()
 
 	proxy := &Proxy{
 		rootCoord:  rc,

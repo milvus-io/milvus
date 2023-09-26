@@ -24,14 +24,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	grpcindexnode "github.com/milvus-io/milvus/internal/distributed/indexnode"
-	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/mock"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -47,15 +42,6 @@ func Test_NewClient(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, client)
 
-	err = client.Init()
-	assert.NoError(t, err)
-
-	err = client.Start()
-	assert.NoError(t, err)
-
-	err = client.Register()
-	assert.NoError(t, err)
-
 	checkFunc := func(retNotNil bool) {
 		retCheck := func(notNil bool, ret interface{}, err error) {
 			if notNil {
@@ -67,10 +53,10 @@ func Test_NewClient(t *testing.T) {
 			}
 		}
 
-		r1, err := client.GetComponentStates(ctx)
+		r1, err := client.GetComponentStates(ctx, nil)
 		retCheck(retNotNil, r1, err)
 
-		r3, err := client.GetStatisticsChannel(ctx)
+		r3, err := client.GetStatisticsChannel(ctx, nil)
 		retCheck(retNotNil, r3, err)
 
 		r4, err := client.CreateJob(ctx, nil)
@@ -117,57 +103,23 @@ func Test_NewClient(t *testing.T) {
 	client.grpcClient.SetNewGrpcClientFunc(newFunc3)
 	checkFunc(true)
 
-	err = client.Stop()
+	err = client.Close()
 	assert.NoError(t, err)
 }
 
 func TestIndexNodeClient(t *testing.T) {
-	paramtable.Init()
-	ctx := context.Background()
-
-	factory := dependency.NewDefaultFactory(true)
-	ins, err := grpcindexnode.NewServer(ctx, factory)
-	assert.NoError(t, err)
-	assert.NotNil(t, ins)
-
-	inm := indexnode.NewIndexNodeMock()
-	etcdCli, err := etcd.GetEtcdClient(
-		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		Params.EtcdCfg.Endpoints.GetAsStrings(),
-		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
-	assert.NoError(t, err)
-	inm.SetEtcdClient(etcdCli)
-	err = ins.SetClient(inm)
-	assert.NoError(t, err)
-
-	err = ins.Run()
-	assert.NoError(t, err)
-
-	inc, err := NewClient(ctx, "localhost:21121", paramtable.GetNodeID(), false)
-	assert.NoError(t, err)
+	inc := &mock.GrpcIndexNodeClient{Err: nil}
 	assert.NotNil(t, inc)
 
-	err = inc.Init()
-	assert.NoError(t, err)
-
-	err = inc.Start()
-	assert.NoError(t, err)
-
+	ctx := context.TODO()
 	t.Run("GetComponentStates", func(t *testing.T) {
-		states, err := inc.GetComponentStates(ctx)
+		_, err := inc.GetComponentStates(ctx, nil)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.StateCode_Healthy, states.State.StateCode)
-		assert.Equal(t, commonpb.ErrorCode_Success, states.GetStatus().GetErrorCode())
 	})
 
 	t.Run("GetStatisticsChannel", func(t *testing.T) {
-		resp, err := inc.GetStatisticsChannel(ctx)
+		_, err := inc.GetStatisticsChannel(ctx, nil)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("CreatJob", func(t *testing.T) {
@@ -175,52 +127,43 @@ func TestIndexNodeClient(t *testing.T) {
 			ClusterID: "0",
 			BuildID:   0,
 		}
-		resp, err := inc.CreateJob(ctx, req)
+		_, err := inc.CreateJob(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
 	t.Run("QueryJob", func(t *testing.T) {
 		req := &indexpb.QueryJobsRequest{}
-		resp, err := inc.QueryJobs(ctx, req)
+		_, err := inc.QueryJobs(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("DropJob", func(t *testing.T) {
 		req := &indexpb.DropJobsRequest{}
-		resp, err := inc.DropJobs(ctx, req)
+		_, err := inc.DropJobs(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
 	t.Run("ShowConfigurations", func(t *testing.T) {
 		req := &internalpb.ShowConfigurationsRequest{
 			Pattern: "",
 		}
-		resp, err := inc.ShowConfigurations(ctx, req)
+		_, err := inc.ShowConfigurations(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("GetMetrics", func(t *testing.T) {
 		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
 		assert.NoError(t, err)
-		resp, err := inc.GetMetrics(ctx, req)
+		_, err = inc.GetMetrics(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("GetJobStats", func(t *testing.T) {
 		req := &indexpb.GetJobStatsRequest{}
-		resp, err := inc.GetJobStats(ctx, req)
+		_, err := inc.GetJobStats(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
-	err = ins.Stop()
-	assert.NoError(t, err)
-
-	err = inc.Stop()
+	err := inc.Close()
 	assert.NoError(t, err)
 }

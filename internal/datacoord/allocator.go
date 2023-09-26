@@ -37,13 +37,13 @@ var _ allocator = (*rootCoordAllocator)(nil)
 
 // rootCoordAllocator use RootCoord as allocator
 type rootCoordAllocator struct {
-	types.RootCoord
+	types.RootCoordClient
 }
 
 // newRootCoordAllocator gets an allocator from RootCoord
-func newRootCoordAllocator(rootCoordClient types.RootCoord) allocator {
+func newRootCoordAllocator(rootCoordClient types.RootCoordClient) allocator {
 	return &rootCoordAllocator{
-		RootCoord: rootCoordClient,
+		RootCoordClient: rootCoordClient,
 	}
 }
 

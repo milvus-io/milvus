@@ -70,9 +70,9 @@ type QueryCluster struct {
 	stopOnce    sync.Once
 }
 
-type QueryNodeCreator func(ctx context.Context, addr string, nodeID int64) (types.QueryNode, error)
+type QueryNodeCreator func(ctx context.Context, addr string, nodeID int64) (types.QueryNodeClient, error)
 
-func DefaultQueryNodeCreator(ctx context.Context, addr string, nodeID int64) (types.QueryNode, error) {
+func DefaultQueryNodeCreator(ctx context.Context, addr string, nodeID int64) (types.QueryNodeClient, error) {
 	return grpcquerynodeclient.NewClient(ctx, addr, nodeID)
 }
 
@@ -121,7 +121,7 @@ func (c *QueryCluster) updateLoop() {
 func (c *QueryCluster) LoadSegments(ctx context.Context, nodeID int64, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
 	var status *commonpb.Status
 	var err error
-	err1 := c.send(ctx, nodeID, func(cli types.QueryNode) {
+	err1 := c.send(ctx, nodeID, func(cli types.QueryNodeClient) {
 		req := proto.Clone(req).(*querypb.LoadSegmentsRequest)
 		req.Base.TargetID = nodeID
 		status, err = cli.LoadSegments(ctx, req)
@@ -135,7 +135,7 @@ func (c *QueryCluster) LoadSegments(ctx context.Context, nodeID int64, req *quer
 func (c *QueryCluster) WatchDmChannels(ctx context.Context, nodeID int64, req *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {
 	var status *commonpb.Status
 	var err error
-	err1 := c.send(ctx, nodeID, func(cli types.QueryNode) {
+	err1 := c.send(ctx, nodeID, func(cli types.QueryNodeClient) {
 		req := proto.Clone(req).(*querypb.WatchDmChannelsRequest)
 		req.Base.TargetID = nodeID
 		status, err = cli.WatchDmChannels(ctx, req)
@@ -149,7 +149,7 @@ func (c *QueryCluster) WatchDmChannels(ctx context.Context, nodeID int64, req *q
 func (c *QueryCluster) UnsubDmChannel(ctx context.Context, nodeID int64, req *querypb.UnsubDmChannelRequest) (*commonpb.Status, error) {
 	var status *commonpb.Status
 	var err error
-	err1 := c.send(ctx, nodeID, func(cli types.QueryNode) {
+	err1 := c.send(ctx, nodeID, func(cli types.QueryNodeClient) {
 		req := proto.Clone(req).(*querypb.UnsubDmChannelRequest)
 		req.Base.TargetID = nodeID
 		status, err = cli.UnsubDmChannel(ctx, req)
@@ -163,7 +163,7 @@ func (c *QueryCluster) UnsubDmChannel(ctx context.Context, nodeID int64, req *qu
 func (c *QueryCluster) ReleaseSegments(ctx context.Context, nodeID int64, req *querypb.ReleaseSegmentsRequest) (*commonpb.Status, error) {
 	var status *commonpb.Status
 	var err error
-	err1 := c.send(ctx, nodeID, func(cli types.QueryNode) {
+	err1 := c.send(ctx, nodeID, func(cli types.QueryNodeClient) {
 		req := proto.Clone(req).(*querypb.ReleaseSegmentsRequest)
 		req.Base.TargetID = nodeID
 		status, err = cli.ReleaseSegments(ctx, req)
@@ -177,7 +177,7 @@ func (c *QueryCluster) ReleaseSegments(ctx context.Context, nodeID int64, req *q
 func (c *QueryCluster) LoadPartitions(ctx context.Context, nodeID int64, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
 	var status *commonpb.Status
 	var err error
-	err1 := c.send(ctx, nodeID, func(cli types.QueryNode) {
+	err1 := c.send(ctx, nodeID, func(cli types.QueryNodeClient) {
 		req := proto.Clone(req).(*querypb.LoadPartitionsRequest)
 		req.Base.TargetID = nodeID
 		status, err = cli.LoadPartitions(ctx, req)
@@ -191,7 +191,7 @@ func (c *QueryCluster) LoadPartitions(ctx context.Context, nodeID int64, req *qu
 func (c *QueryCluster) ReleasePartitions(ctx context.Context, nodeID int64, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
 	var status *commonpb.Status
 	var err error
-	err1 := c.send(ctx, nodeID, func(cli types.QueryNode) {
+	err1 := c.send(ctx, nodeID, func(cli types.QueryNodeClient) {
 		req := proto.Clone(req).(*querypb.ReleasePartitionsRequest)
 		req.Base.TargetID = nodeID
 		status, err = cli.ReleasePartitions(ctx, req)
@@ -205,7 +205,7 @@ func (c *QueryCluster) ReleasePartitions(ctx context.Context, nodeID int64, req 
 func (c *QueryCluster) GetDataDistribution(ctx context.Context, nodeID int64, req *querypb.GetDataDistributionRequest) (*querypb.GetDataDistributionResponse, error) {
 	var resp *querypb.GetDataDistributionResponse
 	var err error
-	err1 := c.send(ctx, nodeID, func(cli types.QueryNode) {
+	err1 := c.send(ctx, nodeID, func(cli types.QueryNodeClient) {
 		req := proto.Clone(req).(*querypb.GetDataDistributionRequest)
 		req.Base = &commonpb.MsgBase{
 			TargetID: nodeID,
@@ -223,7 +223,7 @@ func (c *QueryCluster) GetMetrics(ctx context.Context, nodeID int64, req *milvus
 		resp *milvuspb.GetMetricsResponse
 		err  error
 	)
-	err1 := c.send(ctx, nodeID, func(cli types.QueryNode) {
+	err1 := c.send(ctx, nodeID, func(cli types.QueryNodeClient) {
 		resp, err = cli.GetMetrics(ctx, req)
 	})
 	if err1 != nil {
@@ -237,7 +237,7 @@ func (c *QueryCluster) SyncDistribution(ctx context.Context, nodeID int64, req *
 		resp *commonpb.Status
 		err  error
 	)
-	err1 := c.send(ctx, nodeID, func(cli types.QueryNode) {
+	err1 := c.send(ctx, nodeID, func(cli types.QueryNodeClient) {
 		req := proto.Clone(req).(*querypb.SyncDistributionRequest)
 		req.Base.TargetID = nodeID
 		resp, err = cli.SyncDistribution(ctx, req)
@@ -253,8 +253,8 @@ func (c *QueryCluster) GetComponentStates(ctx context.Context, nodeID int64) (*m
 		resp *milvuspb.ComponentStates
 		err  error
 	)
-	err1 := c.send(ctx, nodeID, func(cli types.QueryNode) {
-		resp, err = cli.GetComponentStates(ctx)
+	err1 := c.send(ctx, nodeID, func(cli types.QueryNodeClient) {
+		resp, err = cli.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 	})
 	if err1 != nil {
 		return nil, err1
@@ -262,7 +262,7 @@ func (c *QueryCluster) GetComponentStates(ctx context.Context, nodeID int64) (*m
 	return resp, err
 }
 
-func (c *QueryCluster) send(ctx context.Context, nodeID int64, fn func(cli types.QueryNode)) error {
+func (c *QueryCluster) send(ctx context.Context, nodeID int64, fn func(cli types.QueryNodeClient)) error {
 	node := c.nodeManager.Get(nodeID)
 	if node == nil {
 		return WrapErrNodeNotFound(nodeID)
@@ -279,7 +279,7 @@ func (c *QueryCluster) send(ctx context.Context, nodeID int64, fn func(cli types
 
 type clients struct {
 	sync.RWMutex
-	clients          map[int64]types.QueryNode // nodeID -> client
+	clients          map[int64]types.QueryNodeClient // nodeID -> client
 	queryNodeCreator QueryNodeCreator
 }
 
@@ -294,28 +294,22 @@ func (c *clients) getAllNodeIDs() []int64 {
 	return ret
 }
 
-func (c *clients) getOrCreate(ctx context.Context, node *NodeInfo) (types.QueryNode, error) {
+func (c *clients) getOrCreate(ctx context.Context, node *NodeInfo) (types.QueryNodeClient, error) {
 	if cli := c.get(node.ID()); cli != nil {
 		return cli, nil
 	}
 	return c.create(node)
 }
 
-func createNewClient(ctx context.Context, addr string, nodeID int64, queryNodeCreator QueryNodeCreator) (types.QueryNode, error) {
+func createNewClient(ctx context.Context, addr string, nodeID int64, queryNodeCreator QueryNodeCreator) (types.QueryNodeClient, error) {
 	newCli, err := queryNodeCreator(ctx, addr, nodeID)
 	if err != nil {
-		return nil, err
-	}
-	if err = newCli.Init(); err != nil {
-		return nil, err
-	}
-	if err = newCli.Start(); err != nil {
 		return nil, err
 	}
 	return newCli, nil
 }
 
-func (c *clients) create(node *NodeInfo) (types.QueryNode, error) {
+func (c *clients) create(node *NodeInfo) (types.QueryNodeClient, error) {
 	c.Lock()
 	defer c.Unlock()
 	if cli, ok := c.clients[node.ID()]; ok {
@@ -329,7 +323,7 @@ func (c *clients) create(node *NodeInfo) (types.QueryNode, error) {
 	return cli, nil
 }
 
-func (c *clients) get(nodeID int64) types.QueryNode {
+func (c *clients) get(nodeID int64) types.QueryNodeClient {
 	c.RLock()
 	defer c.RUnlock()
 	return c.clients[nodeID]
@@ -339,7 +333,7 @@ func (c *clients) close(nodeID int64) {
 	c.Lock()
 	defer c.Unlock()
 	if cli, ok := c.clients[nodeID]; ok {
-		if err := cli.Stop(); err != nil {
+		if err := cli.Close(); err != nil {
 			log.Warn("error occurred during stopping client", zap.Int64("nodeID", nodeID), zap.Error(err))
 		}
 		delete(c.clients, nodeID)
@@ -350,7 +344,7 @@ func (c *clients) closeAll() {
 	c.Lock()
 	defer c.Unlock()
 	for nodeID, cli := range c.clients {
-		if err := cli.Stop(); err != nil {
+		if err := cli.Close(); err != nil {
 			log.Warn("error occurred during stopping client", zap.Int64("nodeID", nodeID), zap.Error(err))
 		}
 	}
@@ -358,7 +352,7 @@ func (c *clients) closeAll() {
 
 func newClients(queryNodeCreator QueryNodeCreator) *clients {
 	return &clients{
-		clients:          make(map[int64]types.QueryNode),
+		clients:          make(map[int64]types.QueryNodeClient),
 		queryNodeCreator: queryNodeCreator,
 	}
 }

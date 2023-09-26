@@ -51,7 +51,7 @@ type ttNode struct {
 	vChannelName   string
 	channel        Channel
 	lastUpdateTime *atomic.Time
-	dataCoord      types.DataCoord
+	dataCoord      types.DataCoordClient
 
 	updateCPLock  sync.Mutex
 	notifyChannel chan checkPoint
@@ -149,7 +149,7 @@ func (ttn *ttNode) updateChannelCP(channelPos *msgpb.MsgPosition, curTs time.Tim
 	return nil
 }
 
-func newTTNode(config *nodeConfig, dc types.DataCoord) (*ttNode, error) {
+func newTTNode(config *nodeConfig, dc types.DataCoordClient) (*ttNode, error) {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(Params.DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
 	baseNode.SetMaxParallelism(Params.DataNodeCfg.FlowGraphMaxParallelism.GetAsInt32())

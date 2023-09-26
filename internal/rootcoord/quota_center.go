@@ -87,8 +87,8 @@ type collectionStates = map[milvuspb.QuotaState]commonpb.ErrorCode
 type QuotaCenter struct {
 	// clients
 	proxies    *proxyClientManager
-	queryCoord types.QueryCoord
-	dataCoord  types.DataCoord
+	queryCoord types.QueryCoordClient
+	dataCoord  types.DataCoordClient
 	meta       IMetaTable
 
 	// metrics
@@ -113,7 +113,7 @@ type QuotaCenter struct {
 }
 
 // NewQuotaCenter returns a new QuotaCenter.
-func NewQuotaCenter(proxies *proxyClientManager, queryCoord types.QueryCoord, dataCoord types.DataCoord, tsoAllocator tso.Allocator, meta IMetaTable) *QuotaCenter {
+func NewQuotaCenter(proxies *proxyClientManager, queryCoord types.QueryCoordClient, dataCoord types.DataCoordClient, tsoAllocator tso.Allocator, meta IMetaTable) *QuotaCenter {
 	return &QuotaCenter{
 		proxies:             proxies,
 		queryCoord:          queryCoord,

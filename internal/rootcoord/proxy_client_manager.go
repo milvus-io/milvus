@@ -36,17 +36,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 )
 
-type proxyCreator func(ctx context.Context, addr string, nodeID int64) (types.Proxy, error)
+type proxyCreator func(ctx context.Context, addr string, nodeID int64) (types.ProxyClient, error)
 
-func DefaultProxyCreator(ctx context.Context, addr string, nodeID int64) (types.Proxy, error) {
+func DefaultProxyCreator(ctx context.Context, addr string, nodeID int64) (types.ProxyClient, error) {
 	cli, err := grpcproxyclient.NewClient(ctx, addr, nodeID)
 	if err != nil {
-		return nil, err
-	}
-	if err := cli.Init(); err != nil {
-		return nil, err
-	}
-	if err := cli.Start(); err != nil {
 		return nil, err
 	}
 	return cli, nil
@@ -55,7 +49,7 @@ func DefaultProxyCreator(ctx context.Context, addr string, nodeID int64) (types.
 type proxyClientManager struct {
 	creator     proxyCreator
 	lock        sync.RWMutex
-	proxyClient map[int64]types.Proxy
+	proxyClient map[int64]types.ProxyClient
 	helper      proxyClientManagerHelper
 }
 
@@ -70,7 +64,7 @@ var defaultClientManagerHelper = proxyClientManagerHelper{
 func newProxyClientManager(creator proxyCreator) *proxyClientManager {
 	return &proxyClientManager{
 		creator:     creator,
-		proxyClient: make(map[int64]types.Proxy),
+		proxyClient: make(map[int64]types.ProxyClient),
 		helper:      defaultClientManagerHelper,
 	}
 }
@@ -118,7 +112,7 @@ func (p *proxyClientManager) connect(session *sessionutil.Session) {
 
 	_, ok := p.proxyClient[session.ServerID]
 	if ok {
-		pc.Stop()
+		pc.Close()
 		return
 	}
 	p.proxyClient[session.ServerID] = pc
@@ -132,7 +126,7 @@ func (p *proxyClientManager) DelProxyClient(s *sessionutil.Session) {
 
 	cli, ok := p.proxyClient[s.ServerID]
 	if ok {
-		cli.Stop()
+		cli.Close()
 	}
 
 	delete(p.proxyClient, s.ServerID)

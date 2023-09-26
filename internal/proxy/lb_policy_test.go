@@ -41,9 +41,9 @@ import (
 
 type LBPolicySuite struct {
 	suite.Suite
-	rc types.RootCoord
-	qc *mocks.MockQueryCoord
-	qn *mocks.MockQueryNode
+	rc types.RootCoordClient
+	qc *mocks.MockQueryCoordClient
+	qn *mocks.MockQueryNodeClient
 
 	mgr        *MockShardClientManager
 	lbBalancer *MockLBBalancer
@@ -65,7 +65,7 @@ func (s *LBPolicySuite) SetupTest() {
 	s.nodes = []int64{1, 2, 3, 4, 5}
 	s.channels = []string{"channel1", "channel2"}
 	successStatus := commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
-	qc := mocks.NewMockQueryCoord(s.T())
+	qc := mocks.NewMockQueryCoordClient(s.T())
 	qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(&successStatus, nil)
 
 	qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
@@ -90,11 +90,9 @@ func (s *LBPolicySuite) SetupTest() {
 
 	s.qc = qc
 	s.rc = NewRootCoordMock()
-	s.rc.Start()
 
-	s.qn = mocks.NewMockQueryNode(s.T())
-	s.qn.EXPECT().GetAddress().Return("localhost").Maybe()
-	s.qn.EXPECT().GetComponentStates(mock.Anything).Return(nil, nil).Maybe()
+	s.qn = mocks.NewMockQueryNodeClient(s.T())
+	s.qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 	s.mgr = NewMockShardClientManager(s.T())
 	s.mgr.EXPECT().UpdateShardLeaders(mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -250,7 +248,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 		channel:        s.channels[0],
 		shardLeaders:   s.nodes,
 		nq:             1,
-		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNode, s ...string) error {
+		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNodeClient, s ...string) error {
 			return nil
 		},
 		retryTimes: 1,
@@ -267,7 +265,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 		channel:        s.channels[0],
 		shardLeaders:   s.nodes,
 		nq:             1,
-		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNode, s ...string) error {
+		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNodeClient, s ...string) error {
 			return nil
 		},
 		retryTimes: 1,
@@ -287,7 +285,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 		channel:        s.channels[0],
 		shardLeaders:   s.nodes,
 		nq:             1,
-		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNode, s ...string) error {
+		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNodeClient, s ...string) error {
 			return nil
 		},
 		retryTimes: 1,
@@ -305,7 +303,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 		channel:        s.channels[0],
 		shardLeaders:   s.nodes,
 		nq:             1,
-		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNode, s ...string) error {
+		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNodeClient, s ...string) error {
 			return nil
 		},
 		retryTimes: 2,
@@ -326,7 +324,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 		channel:        s.channels[0],
 		shardLeaders:   s.nodes,
 		nq:             1,
-		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNode, s ...string) error {
+		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNodeClient, s ...string) error {
 			counter++
 			if counter == 1 {
 				return errors.New("fake error")
@@ -341,8 +339,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	s.mgr.ExpectedCalls = nil
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
-	s.qn.EXPECT().GetAddress().Return("localhost").Maybe()
-	s.qn.EXPECT().GetComponentStates(mock.Anything).Return(nil, nil).Maybe()
+	s.qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	s.qn.EXPECT().Search(mock.Anything, mock.Anything).Return(nil, context.Canceled).Times(1)
 	s.qn.EXPECT().Search(mock.Anything, mock.Anything).Return(nil, context.DeadlineExceeded)
 	err = s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
@@ -352,7 +349,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 		channel:        s.channels[0],
 		shardLeaders:   s.nodes,
 		nq:             1,
-		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNode, s ...string) error {
+		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNodeClient, s ...string) error {
 			_, err := qn.Search(ctx, nil)
 			return err
 		},
@@ -373,7 +370,7 @@ func (s *LBPolicySuite) TestExecute() {
 		collectionName: s.collectionName,
 		collectionID:   s.collectionID,
 		nq:             1,
-		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNode, s ...string) error {
+		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNodeClient, s ...string) error {
 			return nil
 		},
 	})
@@ -386,7 +383,7 @@ func (s *LBPolicySuite) TestExecute() {
 		collectionName: s.collectionName,
 		collectionID:   s.collectionID,
 		nq:             1,
-		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNode, s ...string) error {
+		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNodeClient, s ...string) error {
 			// succeed in first execute
 			if counter.Add(1) == 1 {
 				return nil
@@ -407,7 +404,7 @@ func (s *LBPolicySuite) TestExecute() {
 		collectionName: s.collectionName,
 		collectionID:   s.collectionID,
 		nq:             1,
-		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNode, s ...string) error {
+		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNodeClient, s ...string) error {
 			return nil
 		},
 	})

@@ -49,13 +49,13 @@ type Broker interface {
 }
 
 type CoordinatorBroker struct {
-	dataCoord types.DataCoord
-	rootCoord types.RootCoord
+	dataCoord types.DataCoordClient
+	rootCoord types.RootCoordClient
 }
 
 func NewCoordinatorBroker(
-	dataCoord types.DataCoord,
-	rootCoord types.RootCoord,
+	dataCoord types.DataCoordClient,
+	rootCoord types.RootCoordClient,
 ) *CoordinatorBroker {
 	return &CoordinatorBroker{
 		dataCoord,

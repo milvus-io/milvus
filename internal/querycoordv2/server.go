@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
@@ -79,8 +80,8 @@ type Server struct {
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
 	// Coordinators
-	dataCoord types.DataCoord
-	rootCoord types.RootCoord
+	dataCoord types.DataCoordClient
+	rootCoord types.RootCoordClient
 
 	// Meta
 	store     metastore.QueryCoordCatalog
@@ -509,7 +510,7 @@ func (s *Server) State() commonpb.StateCode {
 	return commonpb.StateCode(s.status.Load())
 }
 
-func (s *Server) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	nodeID := common.NotRegisteredID
 	if s.session != nil && s.session.Registered() {
 		nodeID = s.session.ServerID
@@ -527,13 +528,13 @@ func (s *Server) GetComponentStates(ctx context.Context) (*milvuspb.ComponentSta
 	}, nil
 }
 
-func (s *Server) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: merr.Status(nil),
 	}, nil
 }
 
-func (s *Server) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: merr.Status(nil),
 		Value:  Params.CommonCfg.QueryCoordTimeTick.GetValue(),
@@ -554,7 +555,7 @@ func (s *Server) SetTiKVClient(client *txnkv.Client) {
 }
 
 // SetRootCoord sets root coordinator's client
-func (s *Server) SetRootCoord(rootCoord types.RootCoord) error {
+func (s *Server) SetRootCoordClient(rootCoord types.RootCoordClient) error {
 	if rootCoord == nil {
 		return errors.New("null RootCoord interface")
 	}
@@ -564,7 +565,7 @@ func (s *Server) SetRootCoord(rootCoord types.RootCoord) error {
 }
 
 // SetDataCoord sets data coordinator's client
-func (s *Server) SetDataCoord(dataCoord types.DataCoord) error {
+func (s *Server) SetDataCoordClient(dataCoord types.DataCoordClient) error {
 	if dataCoord == nil {
 		return errors.New("null DataCoord interface")
 	}
@@ -573,7 +574,7 @@ func (s *Server) SetDataCoord(dataCoord types.DataCoord) error {
 	return nil
 }
 
-func (s *Server) SetQueryNodeCreator(f func(ctx context.Context, addr string, nodeID int64) (types.QueryNode, error)) {
+func (s *Server) SetQueryNodeCreator(f func(ctx context.Context, addr string, nodeID int64) (types.QueryNodeClient, error)) {
 	s.queryNodeCreator = f
 }
 

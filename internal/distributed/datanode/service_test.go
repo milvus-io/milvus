@@ -24,6 +24,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -90,19 +91,19 @@ func (m *MockDataNode) GetAddress() string {
 	return ""
 }
 
-func (m *MockDataNode) SetRootCoord(rc types.RootCoord) error {
+func (m *MockDataNode) SetRootCoordClient(rc types.RootCoordClient) error {
 	return m.err
 }
 
-func (m *MockDataNode) SetDataCoord(dc types.DataCoord) error {
+func (m *MockDataNode) SetDataCoordClient(dc types.DataCoordClient) error {
 	return m.err
 }
 
-func (m *MockDataNode) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+func (m *MockDataNode) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	return m.states, m.err
 }
 
-func (m *MockDataNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (m *MockDataNode) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return m.strResp, m.err
 }
 
@@ -163,18 +164,10 @@ func (m *MockDataNode) CheckChannelOperationProgress(ctx context.Context, req *d
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type mockDataCoord struct {
-	types.DataCoord
+	types.DataCoordClient
 }
 
-func (m *mockDataCoord) Init() error {
-	return nil
-}
-
-func (m *mockDataCoord) Start() error {
-	return nil
-}
-
-func (m *mockDataCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+func (m *mockDataCoord) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error) {
 	return &milvuspb.ComponentStates{
 		State: &milvuspb.ComponentInfo{
 			StateCode: commonpb.StateCode_Healthy,
@@ -194,18 +187,10 @@ func (m *mockDataCoord) Stop() error {
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type mockRootCoord struct {
-	types.RootCoord
+	types.RootCoordClient
 }
 
-func (m *mockRootCoord) Init() error {
-	return nil
-}
-
-func (m *mockRootCoord) Start() error {
-	return nil
-}
-
-func (m *mockRootCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+func (m *mockRootCoord) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error) {
 	return &milvuspb.ComponentStates{
 		State: &milvuspb.ComponentInfo{
 			StateCode: commonpb.StateCode_Healthy,
@@ -231,11 +216,11 @@ func Test_NewServer(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, server)
 
-	server.newRootCoordClient = func(string, *clientv3.Client) (types.RootCoord, error) {
+	server.newRootCoordClient = func(string, *clientv3.Client) (types.RootCoordClient, error) {
 		return &mockRootCoord{}, nil
 	}
 
-	server.newDataCoordClient = func(string, *clientv3.Client) (types.DataCoord, error) {
+	server.newDataCoordClient = func(string, *clientv3.Client) (types.DataCoordClient, error) {
 		return &mockDataCoord{}, nil
 	}
 
@@ -370,11 +355,11 @@ func Test_Run(t *testing.T) {
 		regErr: errors.New("error"),
 	}
 
-	server.newRootCoordClient = func(string, *clientv3.Client) (types.RootCoord, error) {
+	server.newRootCoordClient = func(string, *clientv3.Client) (types.RootCoordClient, error) {
 		return &mockRootCoord{}, nil
 	}
 
-	server.newDataCoordClient = func(string, *clientv3.Client) (types.DataCoord, error) {
+	server.newDataCoordClient = func(string, *clientv3.Client) (types.DataCoordClient, error) {
 		return &mockDataCoord{}, nil
 	}
 

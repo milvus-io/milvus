@@ -71,8 +71,8 @@ type Server struct {
 	etcdCli *clientv3.Client
 	tikvCli *txnkv.Client
 
-	dataCoord types.DataCoord
-	rootCoord types.RootCoord
+	dataCoord types.DataCoordClient
+	rootCoord types.RootCoordClient
 }
 
 // NewServer create a new QueryCoord grpc server.
@@ -159,15 +159,6 @@ func (s *Server) init() error {
 		}
 	}
 
-	if err = s.rootCoord.Init(); err != nil {
-		log.Error("QueryCoord RootCoordClient Init failed", zap.Error(err))
-		panic(err)
-	}
-
-	if err = s.rootCoord.Start(); err != nil {
-		log.Error("QueryCoord RootCoordClient Start failed", zap.Error(err))
-		panic(err)
-	}
 	// wait for master init or healthy
 	log.Debug("QueryCoord try to wait for RootCoord ready")
 	err = componentutil.WaitForComponentHealthy(s.loopCtx, s.rootCoord, "RootCoord", 1000000, time.Millisecond*200)
@@ -190,14 +181,6 @@ func (s *Server) init() error {
 		}
 	}
 
-	if err = s.dataCoord.Init(); err != nil {
-		log.Error("QueryCoord DataCoordClient Init failed", zap.Error(err))
-		panic(err)
-	}
-	if err = s.dataCoord.Start(); err != nil {
-		log.Error("QueryCoord DataCoordClient Start failed", zap.Error(err))
-		panic(err)
-	}
 	log.Debug("QueryCoord try to wait for DataCoord ready")
 	err = componentutil.WaitForComponentHealthy(s.loopCtx, s.dataCoord, "DataCoord", 1000000, time.Millisecond*200)
 	if err != nil {
@@ -309,30 +292,30 @@ func (s *Server) SetTiKVClient(client *txnkv.Client) {
 }
 
 // SetRootCoord sets the RootCoord's client for QueryCoord component.
-func (s *Server) SetRootCoord(m types.RootCoord) error {
-	s.queryCoord.SetRootCoord(m)
+func (s *Server) SetRootCoord(m types.RootCoordClient) error {
+	s.queryCoord.SetRootCoordClient(m)
 	return nil
 }
 
 // SetDataCoord sets the DataCoord's client for QueryCoord component.
-func (s *Server) SetDataCoord(d types.DataCoord) error {
-	s.queryCoord.SetDataCoord(d)
+func (s *Server) SetDataCoord(d types.DataCoordClient) error {
+	s.queryCoord.SetDataCoordClient(d)
 	return nil
 }
 
 // GetComponentStates gets the component states of QueryCoord.
 func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
-	return s.queryCoord.GetComponentStates(ctx)
+	return s.queryCoord.GetComponentStates(ctx, req)
 }
 
 // GetTimeTickChannel gets the time tick channel of QueryCoord.
 func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.queryCoord.GetTimeTickChannel(ctx)
+	return s.queryCoord.GetTimeTickChannel(ctx, req)
 }
 
 // GetStatisticsChannel gets the statistics channel of QueryCoord.
 func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.queryCoord.GetStatisticsChannel(ctx)
+	return s.queryCoord.GetStatisticsChannel(ctx, req)
 }
 
 // ShowCollections shows the collections in the QueryCoord.

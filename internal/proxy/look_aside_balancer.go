@@ -28,6 +28,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -226,7 +227,7 @@ func (b *LookAsideBalancer) checkQueryNodeHealthLoop(ctx context.Context) {
 							return struct{}{}, nil
 						}
 
-						resp, err := qn.GetComponentStates(ctx)
+						resp, err := qn.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 						if err != nil {
 							if b.trySetQueryNodeUnReachable(node, err) {
 								log.Warn("get component status failed, set node unreachable", zap.Int64("node", node), zap.Error(err))

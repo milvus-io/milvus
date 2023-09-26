@@ -22,6 +22,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -32,25 +33,25 @@ import (
 )
 
 type mockMetricDataNodeClient struct {
-	types.DataNode
+	types.DataNodeClient
 	mock func() (*milvuspb.GetMetricsResponse, error)
 }
 
-func (c *mockMetricDataNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+func (c *mockMetricDataNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
 	if c.mock == nil {
-		return c.DataNode.GetMetrics(ctx, req)
+		return c.DataNodeClient.GetMetrics(ctx, req)
 	}
 	return c.mock()
 }
 
 type mockMetricIndexNodeClient struct {
-	types.IndexNode
+	types.IndexNodeClient
 	mock func() (*milvuspb.GetMetricsResponse, error)
 }
 
-func (m *mockMetricIndexNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+func (m *mockMetricIndexNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
 	if m.mock == nil {
-		return m.IndexNode.GetMetrics(ctx, req)
+		return m.IndexNodeClient.GetMetrics(ctx, req)
 	}
 	return m.mock()
 }
@@ -69,7 +70,7 @@ func TestGetDataNodeMetrics(t *testing.T) {
 	_, err = svr.getDataNodeMetrics(ctx, req, NewSession(&NodeInfo{}, nil))
 	assert.Error(t, err)
 
-	creator := func(ctx context.Context, addr string, nodeID int64) (types.DataNode, error) {
+	creator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
 		return newMockDataNodeClient(100, nil)
 	}
 
@@ -81,10 +82,10 @@ func TestGetDataNodeMetrics(t *testing.T) {
 	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.DataNodeRole, 100), info.BaseComponentInfos.Name)
 
 	getMockFailedClientCreator := func(mockFunc func() (*milvuspb.GetMetricsResponse, error)) dataNodeCreatorFunc {
-		return func(ctx context.Context, addr string, nodeID int64) (types.DataNode, error) {
+		return func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
 			cli, err := creator(ctx, addr, nodeID)
 			assert.NoError(t, err)
-			return &mockMetricDataNodeClient{DataNode: cli, mock: mockFunc}, nil
+			return &mockMetricDataNodeClient{DataNodeClient: cli, mock: mockFunc}, nil
 		}
 	}
 

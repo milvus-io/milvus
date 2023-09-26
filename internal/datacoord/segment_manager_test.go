@@ -149,7 +149,7 @@ func TestLastExpireReset(t *testing.T) {
 	paramtable.Init()
 	Params.Save(Params.DataCoordCfg.AllocLatestExpireAttempt.Key, "1")
 	Params.Save(Params.DataCoordCfg.SegmentMaxSize.Key, "1")
-	mockAllocator := newRootCoordAllocator(newMockRootCoordService())
+	mockAllocator := newRootCoordAllocator(newMockRootCoordClient())
 	etcdCli, _ := etcd.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),

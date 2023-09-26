@@ -39,11 +39,11 @@ import (
 type metaService struct {
 	channel      Channel
 	collectionID UniqueID
-	rootCoord    types.RootCoord
+	rootCoord    types.RootCoordClient
 }
 
 // newMetaService creates a new metaService with provided RootCoord and collectionID.
-func newMetaService(rc types.RootCoord, collectionID UniqueID) *metaService {
+func newMetaService(rc types.RootCoordClient, collectionID UniqueID) *metaService {
 	return &metaService{
 		rootCoord:    rc,
 		collectionID: collectionID,

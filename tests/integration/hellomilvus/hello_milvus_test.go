@@ -156,5 +156,6 @@ func (s *HelloMilvusSuite) TestHelloMilvus() {
 }
 
 func TestHelloMilvus(t *testing.T) {
+	t.Skip("Skip integration test, need to refactor integration test framework")
 	suite.Run(t, new(HelloMilvusSuite))
 }

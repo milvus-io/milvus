@@ -291,7 +291,7 @@ func (suite *ServerSuite) TestDisableActiveStandby() {
 	suite.NoError(err)
 	suite.Equal(commonpb.StateCode_Healthy, suite.server.State())
 
-	states, err := suite.server.GetComponentStates(context.Background())
+	states, err := suite.server.GetComponentStates(context.Background(), nil)
 	suite.NoError(err)
 	suite.Equal(commonpb.StateCode_Healthy, states.GetState().GetStateCode())
 }
@@ -304,8 +304,8 @@ func (suite *ServerSuite) TestEnableActiveStandby() {
 
 	suite.server, err = suite.newQueryCoord()
 	suite.NoError(err)
-	mockRootCoord := coordMocks.NewRootCoord(suite.T())
-	mockDataCoord := coordMocks.NewMockDataCoord(suite.T())
+	mockRootCoord := coordMocks.NewMockRootCoordClient(suite.T())
+	mockDataCoord := coordMocks.NewMockDataCoordClient(suite.T())
 
 	mockRootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		Status: merr.Status(nil),
@@ -324,12 +324,12 @@ func (suite *ServerSuite) TestEnableActiveStandby() {
 		}, nil).Maybe()
 		suite.expectGetRecoverInfoByMockDataCoord(collection, mockDataCoord)
 	}
-	err = suite.server.SetRootCoord(mockRootCoord)
+	err = suite.server.SetRootCoordClient(mockRootCoord)
 	suite.NoError(err)
-	err = suite.server.SetDataCoord(mockDataCoord)
+	err = suite.server.SetDataCoordClient(mockDataCoord)
 	suite.NoError(err)
 	// suite.hackServer()
-	states1, err := suite.server.GetComponentStates(context.Background())
+	states1, err := suite.server.GetComponentStates(context.Background(), nil)
 	suite.NoError(err)
 	suite.Equal(commonpb.StateCode_StandBy, states1.GetState().GetStateCode())
 	err = suite.server.Register()
@@ -337,7 +337,7 @@ func (suite *ServerSuite) TestEnableActiveStandby() {
 	err = suite.server.Start()
 	suite.NoError(err)
 
-	states2, err := suite.server.GetComponentStates(context.Background())
+	states2, err := suite.server.GetComponentStates(context.Background(), nil)
 	suite.NoError(err)
 	suite.Equal(commonpb.StateCode_Healthy, states2.GetState().GetStateCode())
 
@@ -412,7 +412,7 @@ func (suite *ServerSuite) expectLoadAndReleasePartitions(querynode *mocks.MockQu
 	querynode.EXPECT().ReleasePartitions(mock.Anything, mock.Anything).Return(merr.Status(nil), nil).Maybe()
 }
 
-func (suite *ServerSuite) expectGetRecoverInfoByMockDataCoord(collection int64, dataCoord *coordMocks.MockDataCoord) {
+func (suite *ServerSuite) expectGetRecoverInfoByMockDataCoord(collection int64, dataCoord *coordMocks.MockDataCoordClient) {
 	var (
 		vChannels    []*datapb.VchannelInfo
 		segmentInfos []*datapb.SegmentInfo
@@ -527,8 +527,8 @@ func (suite *ServerSuite) hackServer() {
 }
 
 func (suite *ServerSuite) hackBroker(server *Server) {
-	mockRootCoord := coordMocks.NewRootCoord(suite.T())
-	mockDataCoord := coordMocks.NewMockDataCoord(suite.T())
+	mockRootCoord := coordMocks.NewMockRootCoordClient(suite.T())
+	mockDataCoord := coordMocks.NewMockDataCoordClient(suite.T())
 
 	for _, collection := range suite.collections {
 		mockRootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
@@ -546,9 +546,9 @@ func (suite *ServerSuite) hackBroker(server *Server) {
 			PartitionIDs: suite.partitions[collection],
 		}, nil).Maybe()
 	}
-	err := server.SetRootCoord(mockRootCoord)
+	err := server.SetRootCoordClient(mockRootCoord)
 	suite.NoError(err)
-	err = server.SetDataCoord(mockDataCoord)
+	err = server.SetDataCoordClient(mockDataCoord)
 	suite.NoError(err)
 }
 

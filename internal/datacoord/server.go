@@ -82,11 +82,11 @@ type (
 	Timestamp = typeutil.Timestamp
 )
 
-type dataNodeCreatorFunc func(ctx context.Context, addr string, nodeID int64) (types.DataNode, error)
+type dataNodeCreatorFunc func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error)
 
-type indexNodeCreatorFunc func(ctx context.Context, addr string, nodeID int64) (types.IndexNode, error)
+type indexNodeCreatorFunc func(ctx context.Context, addr string, nodeID int64) (types.IndexNodeClient, error)
 
-type rootCoordCreatorFunc func(ctx context.Context, metaRootPath string, etcdClient *clientv3.Client) (types.RootCoord, error)
+type rootCoordCreatorFunc func(ctx context.Context, metaRootPath string, etcdClient *clientv3.Client) (types.RootCoordClient, error)
 
 // makes sure Server implements `DataCoord`
 var _ types.DataCoord = (*Server)(nil)
@@ -115,7 +115,7 @@ type Server struct {
 	cluster          *Cluster
 	sessionManager   *SessionManager
 	channelManager   *ChannelManager
-	rootCoordClient  types.RootCoord
+	rootCoordClient  types.RootCoordClient
 	garbageCollector *garbageCollector
 	gcOpt            GcOption
 	handler          Handler
@@ -227,15 +227,15 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 	return s
 }
 
-func defaultDataNodeCreatorFunc(ctx context.Context, addr string, nodeID int64) (types.DataNode, error) {
+func defaultDataNodeCreatorFunc(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
 	return datanodeclient.NewClient(ctx, addr, nodeID)
 }
 
-func defaultIndexNodeCreatorFunc(ctx context.Context, addr string, nodeID int64) (types.IndexNode, error) {
+func defaultIndexNodeCreatorFunc(ctx context.Context, addr string, nodeID int64) (types.IndexNodeClient, error) {
 	return indexnodeclient.NewClient(ctx, addr, nodeID, Params.DataCoordCfg.WithCredential.GetAsBool())
 }
 
-func defaultRootCoordCreatorFunc(ctx context.Context, metaRootPath string, client *clientv3.Client) (types.RootCoord, error) {
+func defaultRootCoordCreatorFunc(ctx context.Context, metaRootPath string, client *clientv3.Client) (types.RootCoordClient, error) {
 	return rootcoordclient.NewClient(ctx, metaRootPath, client)
 }
 
@@ -432,15 +432,15 @@ func (s *Server) SetTiKVClient(client *txnkv.Client) {
 	s.tikvCli = client
 }
 
-func (s *Server) SetRootCoord(rootCoord types.RootCoord) {
+func (s *Server) SetRootCoordClient(rootCoord types.RootCoordClient) {
 	s.rootCoordClient = rootCoord
 }
 
-func (s *Server) SetDataNodeCreator(f func(context.Context, string, int64) (types.DataNode, error)) {
+func (s *Server) SetDataNodeCreator(f func(context.Context, string, int64) (types.DataNodeClient, error)) {
 	s.dataNodeCreator = f
 }
 
-func (s *Server) SetIndexNodeCreator(f func(context.Context, string, int64) (types.IndexNode, error)) {
+func (s *Server) SetIndexNodeCreator(f func(context.Context, string, int64) (types.IndexNodeClient, error)) {
 	s.indexNodeCreator = f
 }
 
@@ -1014,10 +1014,7 @@ func (s *Server) initRootCoordClient() error {
 			return err
 		}
 	}
-	if err = s.rootCoordClient.Init(); err != nil {
-		return err
-	}
-	return s.rootCoordClient.Start()
+	return nil
 }
 
 // Stop do the Server finalize processes

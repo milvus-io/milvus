@@ -183,7 +183,7 @@ func (s *Server) getDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetric
 	return infos, nil
 }
 
-func (s *Server) getIndexNodeMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, node types.IndexNode) (metricsinfo.IndexNodeInfos, error) {
+func (s *Server) getIndexNodeMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, node types.IndexNodeClient) (metricsinfo.IndexNodeInfos, error) {
 	infos := metricsinfo.IndexNodeInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
 			HasError: true,

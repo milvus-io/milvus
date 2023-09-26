@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -80,15 +81,15 @@ func (m *mockCore) SetEtcdClient(etcdClient *clientv3.Client) {
 func (m *mockCore) SetTiKVClient(client *txnkv.Client) {
 }
 
-func (m *mockCore) SetDataCoord(types.DataCoord) error {
+func (m *mockCore) SetDataCoordClient(client types.DataCoordClient) error {
 	return nil
 }
 
-func (m *mockCore) SetQueryCoord(types.QueryCoord) error {
+func (m *mockCore) SetQueryCoordClient(client types.QueryCoordClient) error {
 	return nil
 }
 
-func (m *mockCore) SetProxyCreator(func(ctx context.Context, addr string, nodeID int64) (types.Proxy, error)) {
+func (m *mockCore) SetProxyCreator(func(ctx context.Context, addr string, nodeID int64) (types.ProxyClient, error)) {
 }
 
 func (m *mockCore) Register() error {
@@ -108,20 +109,14 @@ func (m *mockCore) Stop() error {
 }
 
 type mockDataCoord struct {
-	types.DataCoord
-	initErr  error
-	startErr error
+	types.DataCoordClient
 }
 
-func (m *mockDataCoord) Init() error {
-	return m.initErr
+func (m *mockDataCoord) Close() error {
+	return nil
 }
 
-func (m *mockDataCoord) Start() error {
-	return m.startErr
-}
-
-func (m *mockDataCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+func (m *mockDataCoord) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error) {
 	return &milvuspb.ComponentStates{
 		State: &milvuspb.ComponentInfo{
 			StateCode: commonpb.StateCode_Healthy,
@@ -140,20 +135,12 @@ func (m *mockDataCoord) Stop() error {
 }
 
 type mockQueryCoord struct {
-	types.QueryCoord
+	types.QueryCoordClient
 	initErr  error
 	startErr error
 }
 
-func (m *mockQueryCoord) Init() error {
-	return m.initErr
-}
-
-func (m *mockQueryCoord) Start() error {
-	return m.startErr
-}
-
-func (m *mockQueryCoord) Stop() error {
+func (m *mockQueryCoord) Close() error {
 	return fmt.Errorf("stop error")
 }
 
@@ -181,10 +168,10 @@ func TestRun(t *testing.T) {
 		assert.Error(t, err)
 		assert.EqualError(t, err, "listen tcp: address 1000000: invalid port")
 
-		svr.newDataCoordClient = func(string, *clientv3.Client) types.DataCoord {
+		svr.newDataCoordClient = func(string, *clientv3.Client) types.DataCoordClient {
 			return &mockDataCoord{}
 		}
-		svr.newQueryCoordClient = func(string, *clientv3.Client) types.QueryCoord {
+		svr.newQueryCoordClient = func(string, *clientv3.Client) types.QueryCoordClient {
 			return &mockQueryCoord{}
 		}
 
@@ -260,8 +247,8 @@ func TestServerRun_DataCoordClientInitErr(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, server)
 
-		server.newDataCoordClient = func(string, *clientv3.Client) types.DataCoord {
-			return &mockDataCoord{initErr: errors.New("mock datacoord init error")}
+		server.newDataCoordClient = func(string, *clientv3.Client) types.DataCoordClient {
+			return &mockDataCoord{}
 		}
 		assert.Panics(t, func() { server.Run() })
 
@@ -286,8 +273,8 @@ func TestServerRun_DataCoordClientStartErr(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, server)
 
-		server.newDataCoordClient = func(string, *clientv3.Client) types.DataCoord {
-			return &mockDataCoord{startErr: errors.New("mock datacoord start error")}
+		server.newDataCoordClient = func(string, *clientv3.Client) types.DataCoordClient {
+			return &mockDataCoord{}
 		}
 		assert.Panics(t, func() { server.Run() })
 
@@ -312,7 +299,7 @@ func TestServerRun_QueryCoordClientInitErr(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, server)
 
-		server.newQueryCoordClient = func(string, *clientv3.Client) types.QueryCoord {
+		server.newQueryCoordClient = func(string, *clientv3.Client) types.QueryCoordClient {
 			return &mockQueryCoord{initErr: errors.New("mock querycoord init error")}
 		}
 		assert.Panics(t, func() { server.Run() })
@@ -338,7 +325,7 @@ func TestServer_QueryCoordClientStartErr(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, server)
 
-		server.newQueryCoordClient = func(string, *clientv3.Client) types.QueryCoord {
+		server.newQueryCoordClient = func(string, *clientv3.Client) types.QueryCoordClient {
 			return &mockQueryCoord{startErr: errors.New("mock querycoord start error")}
 		}
 		assert.Panics(t, func() { server.Run() })

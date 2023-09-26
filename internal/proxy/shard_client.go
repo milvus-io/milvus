@@ -6,12 +6,14 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
 
 	qnClient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
-type queryNodeCreatorFunc func(ctx context.Context, addr string, nodeID int64) (types.QueryNode, error)
+type queryNodeCreatorFunc func(ctx context.Context, addr string, nodeID int64) (types.QueryNodeClient, error)
 
 type nodeInfo struct {
 	nodeID  UniqueID
@@ -27,12 +29,12 @@ var errClosed = errors.New("client is closed")
 type shardClient struct {
 	sync.RWMutex
 	info     nodeInfo
-	client   types.QueryNode
+	client   types.QueryNodeClient
 	isClosed bool
 	refCnt   int
 }
 
-func (n *shardClient) getClient(ctx context.Context) (types.QueryNode, error) {
+func (n *shardClient) getClient(ctx context.Context) (types.QueryNodeClient, error) {
 	n.RLock()
 	defer n.RUnlock()
 	if n.isClosed {
@@ -54,7 +56,9 @@ func (n *shardClient) close() {
 	n.isClosed = true
 	n.refCnt = 0
 	if n.client != nil {
-		n.client.Stop()
+		if err := n.client.Close(); err != nil {
+			log.Warn("close grpc client failed", zap.Error(err))
+		}
 		n.client = nil
 	}
 }
@@ -80,7 +84,7 @@ func (n *shardClient) Close() {
 	n.close()
 }
 
-func newShardClient(info *nodeInfo, client types.QueryNode) *shardClient {
+func newShardClient(info *nodeInfo, client types.QueryNodeClient) *shardClient {
 	ret := &shardClient{
 		info: nodeInfo{
 			nodeID:  info.nodeID,
@@ -93,7 +97,7 @@ func newShardClient(info *nodeInfo, client types.QueryNode) *shardClient {
 }
 
 type shardClientMgr interface {
-	GetClient(ctx context.Context, nodeID UniqueID) (types.QueryNode, error)
+	GetClient(ctx context.Context, nodeID UniqueID) (types.QueryNodeClient, error)
 	UpdateShardLeaders(oldLeaders map[string][]nodeInfo, newLeaders map[string][]nodeInfo) error
 	Close()
 	SetClientCreatorFunc(creator queryNodeCreatorFunc)
@@ -114,7 +118,7 @@ func withShardClientCreator(creator queryNodeCreatorFunc) shardClientMgrOpt {
 	return func(s shardClientMgr) { s.SetClientCreatorFunc(creator) }
 }
 
-func defaultQueryNodeClientCreator(ctx context.Context, addr string, nodeID int64) (types.QueryNode, error) {
+func defaultQueryNodeClientCreator(ctx context.Context, addr string, nodeID int64) (types.QueryNodeClient, error) {
 	return qnClient.NewClient(ctx, addr, nodeID)
 }
 
@@ -195,7 +199,7 @@ func (c *shardClientMgrImpl) UpdateShardLeaders(oldLeaders map[string][]nodeInfo
 	return nil
 }
 
-func (c *shardClientMgrImpl) GetClient(ctx context.Context, nodeID UniqueID) (types.QueryNode, error) {
+func (c *shardClientMgrImpl) GetClient(ctx context.Context, nodeID UniqueID) (types.QueryNodeClient, error) {
 	c.clients.RLock()
 	client, ok := c.clients.data[nodeID]
 	c.clients.RUnlock()

@@ -95,9 +95,9 @@ type Server struct {
 	serverID atomic.Int64
 
 	etcdCli          *clientv3.Client
-	rootCoordClient  types.RootCoord
-	dataCoordClient  types.DataCoord
-	queryCoordClient types.QueryCoord
+	rootCoordClient  types.RootCoordClient
+	dataCoordClient  types.DataCoordClient
+	queryCoordClient types.QueryCoordClient
 }
 
 // NewServer create a Proxy server.
@@ -516,13 +516,6 @@ func (s *Server) init() error {
 		log.Debug("create RootCoord client for Proxy done")
 	}
 
-	log.Debug("init RootCoord client for Proxy")
-	if err := s.rootCoordClient.Init(); err != nil {
-		log.Warn("failed to init RootCoord client for Proxy", zap.Error(err))
-		return err
-	}
-	log.Debug("init RootCoord client for Proxy done")
-
 	log.Debug("Proxy wait for RootCoord to be healthy")
 	if err := componentutil.WaitForComponentHealthy(s.ctx, s.rootCoordClient, "RootCoord", 1000000, time.Millisecond*200); err != nil {
 		log.Warn("Proxy failed to wait for RootCoord to be healthy", zap.Error(err))
@@ -545,13 +538,6 @@ func (s *Server) init() error {
 		log.Debug("create DataCoord client for Proxy done")
 	}
 
-	log.Debug("init DataCoord client for Proxy")
-	if err := s.dataCoordClient.Init(); err != nil {
-		log.Warn("failed to init DataCoord client for Proxy", zap.Error(err))
-		return err
-	}
-	log.Debug("init DataCoord client for Proxy done")
-
 	log.Debug("Proxy wait for DataCoord to be healthy")
 	if err := componentutil.WaitForComponentHealthy(s.ctx, s.dataCoordClient, "DataCoord", 1000000, time.Millisecond*200); err != nil {
 		log.Warn("Proxy failed to wait for DataCoord to be healthy", zap.Error(err))
@@ -573,13 +559,6 @@ func (s *Server) init() error {
 		}
 		log.Debug("create QueryCoord client for Proxy done")
 	}
-
-	log.Debug("init QueryCoord client for Proxy")
-	if err := s.queryCoordClient.Init(); err != nil {
-		log.Warn("failed to init QueryCoord client for Proxy", zap.Error(err))
-		return err
-	}
-	log.Debug("init QueryCoord client for Proxy done")
 
 	log.Debug("Proxy wait for QueryCoord to be healthy")
 	if err := componentutil.WaitForComponentHealthy(s.ctx, s.queryCoordClient, "QueryCoord", 1000000, time.Millisecond*200); err != nil {
@@ -678,12 +657,12 @@ func (s *Server) Stop() error {
 
 // GetComponentStates get the component states
 func (s *Server) GetComponentStates(ctx context.Context, request *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
-	return s.proxy.GetComponentStates(ctx)
+	return s.proxy.GetComponentStates(ctx, request)
 }
 
 // GetStatisticsChannel get the statistics channel
 func (s *Server) GetStatisticsChannel(ctx context.Context, request *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.proxy.GetStatisticsChannel(ctx)
+	return s.proxy.GetStatisticsChannel(ctx, request)
 }
 
 // InvalidateCollectionMetaCache notifies Proxy to clear all the meta cache of specific collection.
@@ -951,7 +930,7 @@ func (s *Server) Check(ctx context.Context, req *grpc_health_v1.HealthCheckReque
 	ret := &grpc_health_v1.HealthCheckResponse{
 		Status: grpc_health_v1.HealthCheckResponse_NOT_SERVING,
 	}
-	state, err := s.proxy.GetComponentStates(ctx)
+	state, err := s.proxy.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 	if err != nil {
 		return ret, err
 	}
@@ -970,7 +949,7 @@ func (s *Server) Watch(req *grpc_health_v1.HealthCheckRequest, server grpc_healt
 	ret := &grpc_health_v1.HealthCheckResponse{
 		Status: grpc_health_v1.HealthCheckResponse_NOT_SERVING,
 	}
-	state, err := s.proxy.GetComponentStates(s.ctx)
+	state, err := s.proxy.GetComponentStates(s.ctx, nil)
 	if err != nil {
 		return server.Send(ret)
 	}

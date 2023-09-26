@@ -155,11 +155,11 @@ func (m *Mock) Stop() error {
 	return m.CallStop()
 }
 
-func (m *Mock) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+func (m *Mock) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	return m.CallGetComponentStates(ctx)
 }
 
-func (m *Mock) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (m *Mock) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return m.CallGetStatisticsChannel(ctx)
 }
 

@@ -18,6 +18,8 @@ import (
 
 	rootcoordpb "github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 
+	txnkv "github.com/tikv/client-go/v2/txnkv"
+
 	types "github.com/milvus-io/milvus/internal/types"
 )
 
@@ -34,17 +36,17 @@ func (_m *RootCoord) EXPECT() *RootCoord_Expecter {
 	return &RootCoord_Expecter{mock: &_m.Mock}
 }
 
-// AllocID provides a mock function with given fields: ctx, req
-func (_m *RootCoord) AllocID(ctx context.Context, req *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
-	ret := _m.Called(ctx, req)
+// AllocID provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) AllocID(_a0 context.Context, _a1 *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *rootcoordpb.AllocIDResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.AllocIDRequest) *rootcoordpb.AllocIDResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*rootcoordpb.AllocIDResponse)
@@ -52,7 +54,7 @@ func (_m *RootCoord) AllocID(ctx context.Context, req *rootcoordpb.AllocIDReques
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.AllocIDRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -66,13 +68,13 @@ type RootCoord_AllocID_Call struct {
 }
 
 // AllocID is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *rootcoordpb.AllocIDRequest
-func (_e *RootCoord_Expecter) AllocID(ctx interface{}, req interface{}) *RootCoord_AllocID_Call {
-	return &RootCoord_AllocID_Call{Call: _e.mock.On("AllocID", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *rootcoordpb.AllocIDRequest
+func (_e *RootCoord_Expecter) AllocID(_a0 interface{}, _a1 interface{}) *RootCoord_AllocID_Call {
+	return &RootCoord_AllocID_Call{Call: _e.mock.On("AllocID", _a0, _a1)}
 }
 
-func (_c *RootCoord_AllocID_Call) Run(run func(ctx context.Context, req *rootcoordpb.AllocIDRequest)) *RootCoord_AllocID_Call {
+func (_c *RootCoord_AllocID_Call) Run(run func(_a0 context.Context, _a1 *rootcoordpb.AllocIDRequest)) *RootCoord_AllocID_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*rootcoordpb.AllocIDRequest))
 	})
@@ -89,17 +91,17 @@ func (_c *RootCoord_AllocID_Call) RunAndReturn(run func(context.Context, *rootco
 	return _c
 }
 
-// AllocTimestamp provides a mock function with given fields: ctx, req
-func (_m *RootCoord) AllocTimestamp(ctx context.Context, req *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
-	ret := _m.Called(ctx, req)
+// AllocTimestamp provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) AllocTimestamp(_a0 context.Context, _a1 *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *rootcoordpb.AllocTimestampResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.AllocTimestampRequest) *rootcoordpb.AllocTimestampResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*rootcoordpb.AllocTimestampResponse)
@@ -107,7 +109,7 @@ func (_m *RootCoord) AllocTimestamp(ctx context.Context, req *rootcoordpb.AllocT
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.AllocTimestampRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -121,13 +123,13 @@ type RootCoord_AllocTimestamp_Call struct {
 }
 
 // AllocTimestamp is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *rootcoordpb.AllocTimestampRequest
-func (_e *RootCoord_Expecter) AllocTimestamp(ctx interface{}, req interface{}) *RootCoord_AllocTimestamp_Call {
-	return &RootCoord_AllocTimestamp_Call{Call: _e.mock.On("AllocTimestamp", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *rootcoordpb.AllocTimestampRequest
+func (_e *RootCoord_Expecter) AllocTimestamp(_a0 interface{}, _a1 interface{}) *RootCoord_AllocTimestamp_Call {
+	return &RootCoord_AllocTimestamp_Call{Call: _e.mock.On("AllocTimestamp", _a0, _a1)}
 }
 
-func (_c *RootCoord_AllocTimestamp_Call) Run(run func(ctx context.Context, req *rootcoordpb.AllocTimestampRequest)) *RootCoord_AllocTimestamp_Call {
+func (_c *RootCoord_AllocTimestamp_Call) Run(run func(_a0 context.Context, _a1 *rootcoordpb.AllocTimestampRequest)) *RootCoord_AllocTimestamp_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*rootcoordpb.AllocTimestampRequest))
 	})
@@ -144,17 +146,17 @@ func (_c *RootCoord_AllocTimestamp_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
-// AlterAlias provides a mock function with given fields: ctx, req
-func (_m *RootCoord) AlterAlias(ctx context.Context, req *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// AlterAlias provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) AlterAlias(_a0 context.Context, _a1 *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterAliasRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterAliasRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -162,7 +164,7 @@ func (_m *RootCoord) AlterAlias(ctx context.Context, req *milvuspb.AlterAliasReq
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.AlterAliasRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -176,13 +178,13 @@ type RootCoord_AlterAlias_Call struct {
 }
 
 // AlterAlias is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.AlterAliasRequest
-func (_e *RootCoord_Expecter) AlterAlias(ctx interface{}, req interface{}) *RootCoord_AlterAlias_Call {
-	return &RootCoord_AlterAlias_Call{Call: _e.mock.On("AlterAlias", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.AlterAliasRequest
+func (_e *RootCoord_Expecter) AlterAlias(_a0 interface{}, _a1 interface{}) *RootCoord_AlterAlias_Call {
+	return &RootCoord_AlterAlias_Call{Call: _e.mock.On("AlterAlias", _a0, _a1)}
 }
 
-func (_c *RootCoord_AlterAlias_Call) Run(run func(ctx context.Context, req *milvuspb.AlterAliasRequest)) *RootCoord_AlterAlias_Call {
+func (_c *RootCoord_AlterAlias_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.AlterAliasRequest)) *RootCoord_AlterAlias_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.AlterAliasRequest))
 	})
@@ -199,17 +201,17 @@ func (_c *RootCoord_AlterAlias_Call) RunAndReturn(run func(context.Context, *mil
 	return _c
 }
 
-// AlterCollection provides a mock function with given fields: ctx, request
-func (_m *RootCoord) AlterCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, request)
+// AlterCollection provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) AlterCollection(_a0 context.Context, _a1 *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterCollectionRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterCollectionRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -217,7 +219,7 @@ func (_m *RootCoord) AlterCollection(ctx context.Context, request *milvuspb.Alte
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.AlterCollectionRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -231,13 +233,13 @@ type RootCoord_AlterCollection_Call struct {
 }
 
 // AlterCollection is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.AlterCollectionRequest
-func (_e *RootCoord_Expecter) AlterCollection(ctx interface{}, request interface{}) *RootCoord_AlterCollection_Call {
-	return &RootCoord_AlterCollection_Call{Call: _e.mock.On("AlterCollection", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.AlterCollectionRequest
+func (_e *RootCoord_Expecter) AlterCollection(_a0 interface{}, _a1 interface{}) *RootCoord_AlterCollection_Call {
+	return &RootCoord_AlterCollection_Call{Call: _e.mock.On("AlterCollection", _a0, _a1)}
 }
 
-func (_c *RootCoord_AlterCollection_Call) Run(run func(ctx context.Context, request *milvuspb.AlterCollectionRequest)) *RootCoord_AlterCollection_Call {
+func (_c *RootCoord_AlterCollection_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.AlterCollectionRequest)) *RootCoord_AlterCollection_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.AlterCollectionRequest))
 	})
@@ -254,17 +256,17 @@ func (_c *RootCoord_AlterCollection_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
-// CheckHealth provides a mock function with given fields: ctx, req
-func (_m *RootCoord) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
-	ret := _m.Called(ctx, req)
+// CheckHealth provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) CheckHealth(_a0 context.Context, _a1 *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.CheckHealthResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CheckHealthRequest) *milvuspb.CheckHealthResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.CheckHealthResponse)
@@ -272,7 +274,7 @@ func (_m *RootCoord) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthR
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CheckHealthRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -286,13 +288,13 @@ type RootCoord_CheckHealth_Call struct {
 }
 
 // CheckHealth is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.CheckHealthRequest
-func (_e *RootCoord_Expecter) CheckHealth(ctx interface{}, req interface{}) *RootCoord_CheckHealth_Call {
-	return &RootCoord_CheckHealth_Call{Call: _e.mock.On("CheckHealth", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.CheckHealthRequest
+func (_e *RootCoord_Expecter) CheckHealth(_a0 interface{}, _a1 interface{}) *RootCoord_CheckHealth_Call {
+	return &RootCoord_CheckHealth_Call{Call: _e.mock.On("CheckHealth", _a0, _a1)}
 }
 
-func (_c *RootCoord_CheckHealth_Call) Run(run func(ctx context.Context, req *milvuspb.CheckHealthRequest)) *RootCoord_CheckHealth_Call {
+func (_c *RootCoord_CheckHealth_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.CheckHealthRequest)) *RootCoord_CheckHealth_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.CheckHealthRequest))
 	})
@@ -309,17 +311,17 @@ func (_c *RootCoord_CheckHealth_Call) RunAndReturn(run func(context.Context, *mi
 	return _c
 }
 
-// CreateAlias provides a mock function with given fields: ctx, req
-func (_m *RootCoord) CreateAlias(ctx context.Context, req *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// CreateAlias provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) CreateAlias(_a0 context.Context, _a1 *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateAliasRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateAliasRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -327,7 +329,7 @@ func (_m *RootCoord) CreateAlias(ctx context.Context, req *milvuspb.CreateAliasR
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CreateAliasRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -341,13 +343,13 @@ type RootCoord_CreateAlias_Call struct {
 }
 
 // CreateAlias is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.CreateAliasRequest
-func (_e *RootCoord_Expecter) CreateAlias(ctx interface{}, req interface{}) *RootCoord_CreateAlias_Call {
-	return &RootCoord_CreateAlias_Call{Call: _e.mock.On("CreateAlias", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.CreateAliasRequest
+func (_e *RootCoord_Expecter) CreateAlias(_a0 interface{}, _a1 interface{}) *RootCoord_CreateAlias_Call {
+	return &RootCoord_CreateAlias_Call{Call: _e.mock.On("CreateAlias", _a0, _a1)}
 }
 
-func (_c *RootCoord_CreateAlias_Call) Run(run func(ctx context.Context, req *milvuspb.CreateAliasRequest)) *RootCoord_CreateAlias_Call {
+func (_c *RootCoord_CreateAlias_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.CreateAliasRequest)) *RootCoord_CreateAlias_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.CreateAliasRequest))
 	})
@@ -364,17 +366,17 @@ func (_c *RootCoord_CreateAlias_Call) RunAndReturn(run func(context.Context, *mi
 	return _c
 }
 
-// CreateCollection provides a mock function with given fields: ctx, req
-func (_m *RootCoord) CreateCollection(ctx context.Context, req *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// CreateCollection provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) CreateCollection(_a0 context.Context, _a1 *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateCollectionRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateCollectionRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -382,7 +384,7 @@ func (_m *RootCoord) CreateCollection(ctx context.Context, req *milvuspb.CreateC
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CreateCollectionRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -396,13 +398,13 @@ type RootCoord_CreateCollection_Call struct {
 }
 
 // CreateCollection is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.CreateCollectionRequest
-func (_e *RootCoord_Expecter) CreateCollection(ctx interface{}, req interface{}) *RootCoord_CreateCollection_Call {
-	return &RootCoord_CreateCollection_Call{Call: _e.mock.On("CreateCollection", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.CreateCollectionRequest
+func (_e *RootCoord_Expecter) CreateCollection(_a0 interface{}, _a1 interface{}) *RootCoord_CreateCollection_Call {
+	return &RootCoord_CreateCollection_Call{Call: _e.mock.On("CreateCollection", _a0, _a1)}
 }
 
-func (_c *RootCoord_CreateCollection_Call) Run(run func(ctx context.Context, req *milvuspb.CreateCollectionRequest)) *RootCoord_CreateCollection_Call {
+func (_c *RootCoord_CreateCollection_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.CreateCollectionRequest)) *RootCoord_CreateCollection_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.CreateCollectionRequest))
 	})
@@ -419,17 +421,17 @@ func (_c *RootCoord_CreateCollection_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
-// CreateCredential provides a mock function with given fields: ctx, req
-func (_m *RootCoord) CreateCredential(ctx context.Context, req *internalpb.CredentialInfo) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// CreateCredential provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) CreateCredential(_a0 context.Context, _a1 *internalpb.CredentialInfo) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.CredentialInfo) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.CredentialInfo) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -437,7 +439,7 @@ func (_m *RootCoord) CreateCredential(ctx context.Context, req *internalpb.Crede
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.CredentialInfo) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -451,13 +453,13 @@ type RootCoord_CreateCredential_Call struct {
 }
 
 // CreateCredential is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *internalpb.CredentialInfo
-func (_e *RootCoord_Expecter) CreateCredential(ctx interface{}, req interface{}) *RootCoord_CreateCredential_Call {
-	return &RootCoord_CreateCredential_Call{Call: _e.mock.On("CreateCredential", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *internalpb.CredentialInfo
+func (_e *RootCoord_Expecter) CreateCredential(_a0 interface{}, _a1 interface{}) *RootCoord_CreateCredential_Call {
+	return &RootCoord_CreateCredential_Call{Call: _e.mock.On("CreateCredential", _a0, _a1)}
 }
 
-func (_c *RootCoord_CreateCredential_Call) Run(run func(ctx context.Context, req *internalpb.CredentialInfo)) *RootCoord_CreateCredential_Call {
+func (_c *RootCoord_CreateCredential_Call) Run(run func(_a0 context.Context, _a1 *internalpb.CredentialInfo)) *RootCoord_CreateCredential_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*internalpb.CredentialInfo))
 	})
@@ -474,17 +476,17 @@ func (_c *RootCoord_CreateCredential_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
-// CreateDatabase provides a mock function with given fields: ctx, req
-func (_m *RootCoord) CreateDatabase(ctx context.Context, req *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// CreateDatabase provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) CreateDatabase(_a0 context.Context, _a1 *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateDatabaseRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -492,7 +494,7 @@ func (_m *RootCoord) CreateDatabase(ctx context.Context, req *milvuspb.CreateDat
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CreateDatabaseRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -506,13 +508,13 @@ type RootCoord_CreateDatabase_Call struct {
 }
 
 // CreateDatabase is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.CreateDatabaseRequest
-func (_e *RootCoord_Expecter) CreateDatabase(ctx interface{}, req interface{}) *RootCoord_CreateDatabase_Call {
-	return &RootCoord_CreateDatabase_Call{Call: _e.mock.On("CreateDatabase", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.CreateDatabaseRequest
+func (_e *RootCoord_Expecter) CreateDatabase(_a0 interface{}, _a1 interface{}) *RootCoord_CreateDatabase_Call {
+	return &RootCoord_CreateDatabase_Call{Call: _e.mock.On("CreateDatabase", _a0, _a1)}
 }
 
-func (_c *RootCoord_CreateDatabase_Call) Run(run func(ctx context.Context, req *milvuspb.CreateDatabaseRequest)) *RootCoord_CreateDatabase_Call {
+func (_c *RootCoord_CreateDatabase_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.CreateDatabaseRequest)) *RootCoord_CreateDatabase_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.CreateDatabaseRequest))
 	})
@@ -529,17 +531,17 @@ func (_c *RootCoord_CreateDatabase_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
-// CreatePartition provides a mock function with given fields: ctx, req
-func (_m *RootCoord) CreatePartition(ctx context.Context, req *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// CreatePartition provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) CreatePartition(_a0 context.Context, _a1 *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreatePartitionRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreatePartitionRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -547,7 +549,7 @@ func (_m *RootCoord) CreatePartition(ctx context.Context, req *milvuspb.CreatePa
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CreatePartitionRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -561,13 +563,13 @@ type RootCoord_CreatePartition_Call struct {
 }
 
 // CreatePartition is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.CreatePartitionRequest
-func (_e *RootCoord_Expecter) CreatePartition(ctx interface{}, req interface{}) *RootCoord_CreatePartition_Call {
-	return &RootCoord_CreatePartition_Call{Call: _e.mock.On("CreatePartition", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.CreatePartitionRequest
+func (_e *RootCoord_Expecter) CreatePartition(_a0 interface{}, _a1 interface{}) *RootCoord_CreatePartition_Call {
+	return &RootCoord_CreatePartition_Call{Call: _e.mock.On("CreatePartition", _a0, _a1)}
 }
 
-func (_c *RootCoord_CreatePartition_Call) Run(run func(ctx context.Context, req *milvuspb.CreatePartitionRequest)) *RootCoord_CreatePartition_Call {
+func (_c *RootCoord_CreatePartition_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.CreatePartitionRequest)) *RootCoord_CreatePartition_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.CreatePartitionRequest))
 	})
@@ -584,17 +586,17 @@ func (_c *RootCoord_CreatePartition_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
-// CreateRole provides a mock function with given fields: ctx, req
-func (_m *RootCoord) CreateRole(ctx context.Context, req *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// CreateRole provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) CreateRole(_a0 context.Context, _a1 *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateRoleRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateRoleRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -602,7 +604,7 @@ func (_m *RootCoord) CreateRole(ctx context.Context, req *milvuspb.CreateRoleReq
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CreateRoleRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -616,13 +618,13 @@ type RootCoord_CreateRole_Call struct {
 }
 
 // CreateRole is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.CreateRoleRequest
-func (_e *RootCoord_Expecter) CreateRole(ctx interface{}, req interface{}) *RootCoord_CreateRole_Call {
-	return &RootCoord_CreateRole_Call{Call: _e.mock.On("CreateRole", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.CreateRoleRequest
+func (_e *RootCoord_Expecter) CreateRole(_a0 interface{}, _a1 interface{}) *RootCoord_CreateRole_Call {
+	return &RootCoord_CreateRole_Call{Call: _e.mock.On("CreateRole", _a0, _a1)}
 }
 
-func (_c *RootCoord_CreateRole_Call) Run(run func(ctx context.Context, req *milvuspb.CreateRoleRequest)) *RootCoord_CreateRole_Call {
+func (_c *RootCoord_CreateRole_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.CreateRoleRequest)) *RootCoord_CreateRole_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.CreateRoleRequest))
 	})
@@ -639,17 +641,17 @@ func (_c *RootCoord_CreateRole_Call) RunAndReturn(run func(context.Context, *mil
 	return _c
 }
 
-// DeleteCredential provides a mock function with given fields: ctx, req
-func (_m *RootCoord) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCredentialRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// DeleteCredential provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) DeleteCredential(_a0 context.Context, _a1 *milvuspb.DeleteCredentialRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DeleteCredentialRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DeleteCredentialRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -657,7 +659,7 @@ func (_m *RootCoord) DeleteCredential(ctx context.Context, req *milvuspb.DeleteC
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DeleteCredentialRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -671,13 +673,13 @@ type RootCoord_DeleteCredential_Call struct {
 }
 
 // DeleteCredential is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.DeleteCredentialRequest
-func (_e *RootCoord_Expecter) DeleteCredential(ctx interface{}, req interface{}) *RootCoord_DeleteCredential_Call {
-	return &RootCoord_DeleteCredential_Call{Call: _e.mock.On("DeleteCredential", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DeleteCredentialRequest
+func (_e *RootCoord_Expecter) DeleteCredential(_a0 interface{}, _a1 interface{}) *RootCoord_DeleteCredential_Call {
+	return &RootCoord_DeleteCredential_Call{Call: _e.mock.On("DeleteCredential", _a0, _a1)}
 }
 
-func (_c *RootCoord_DeleteCredential_Call) Run(run func(ctx context.Context, req *milvuspb.DeleteCredentialRequest)) *RootCoord_DeleteCredential_Call {
+func (_c *RootCoord_DeleteCredential_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DeleteCredentialRequest)) *RootCoord_DeleteCredential_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.DeleteCredentialRequest))
 	})
@@ -694,17 +696,17 @@ func (_c *RootCoord_DeleteCredential_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
-// DescribeCollection provides a mock function with given fields: ctx, req
-func (_m *RootCoord) DescribeCollection(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-	ret := _m.Called(ctx, req)
+// DescribeCollection provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) DescribeCollection(_a0 context.Context, _a1 *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.DescribeCollectionResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DescribeCollectionRequest) *milvuspb.DescribeCollectionResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.DescribeCollectionResponse)
@@ -712,7 +714,7 @@ func (_m *RootCoord) DescribeCollection(ctx context.Context, req *milvuspb.Descr
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DescribeCollectionRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -726,13 +728,13 @@ type RootCoord_DescribeCollection_Call struct {
 }
 
 // DescribeCollection is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.DescribeCollectionRequest
-func (_e *RootCoord_Expecter) DescribeCollection(ctx interface{}, req interface{}) *RootCoord_DescribeCollection_Call {
-	return &RootCoord_DescribeCollection_Call{Call: _e.mock.On("DescribeCollection", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DescribeCollectionRequest
+func (_e *RootCoord_Expecter) DescribeCollection(_a0 interface{}, _a1 interface{}) *RootCoord_DescribeCollection_Call {
+	return &RootCoord_DescribeCollection_Call{Call: _e.mock.On("DescribeCollection", _a0, _a1)}
 }
 
-func (_c *RootCoord_DescribeCollection_Call) Run(run func(ctx context.Context, req *milvuspb.DescribeCollectionRequest)) *RootCoord_DescribeCollection_Call {
+func (_c *RootCoord_DescribeCollection_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DescribeCollectionRequest)) *RootCoord_DescribeCollection_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.DescribeCollectionRequest))
 	})
@@ -749,17 +751,17 @@ func (_c *RootCoord_DescribeCollection_Call) RunAndReturn(run func(context.Conte
 	return _c
 }
 
-// DescribeCollectionInternal provides a mock function with given fields: ctx, req
-func (_m *RootCoord) DescribeCollectionInternal(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-	ret := _m.Called(ctx, req)
+// DescribeCollectionInternal provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) DescribeCollectionInternal(_a0 context.Context, _a1 *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.DescribeCollectionResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DescribeCollectionRequest) *milvuspb.DescribeCollectionResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.DescribeCollectionResponse)
@@ -767,7 +769,7 @@ func (_m *RootCoord) DescribeCollectionInternal(ctx context.Context, req *milvus
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DescribeCollectionRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -781,13 +783,13 @@ type RootCoord_DescribeCollectionInternal_Call struct {
 }
 
 // DescribeCollectionInternal is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.DescribeCollectionRequest
-func (_e *RootCoord_Expecter) DescribeCollectionInternal(ctx interface{}, req interface{}) *RootCoord_DescribeCollectionInternal_Call {
-	return &RootCoord_DescribeCollectionInternal_Call{Call: _e.mock.On("DescribeCollectionInternal", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DescribeCollectionRequest
+func (_e *RootCoord_Expecter) DescribeCollectionInternal(_a0 interface{}, _a1 interface{}) *RootCoord_DescribeCollectionInternal_Call {
+	return &RootCoord_DescribeCollectionInternal_Call{Call: _e.mock.On("DescribeCollectionInternal", _a0, _a1)}
 }
 
-func (_c *RootCoord_DescribeCollectionInternal_Call) Run(run func(ctx context.Context, req *milvuspb.DescribeCollectionRequest)) *RootCoord_DescribeCollectionInternal_Call {
+func (_c *RootCoord_DescribeCollectionInternal_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DescribeCollectionRequest)) *RootCoord_DescribeCollectionInternal_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.DescribeCollectionRequest))
 	})
@@ -804,17 +806,17 @@ func (_c *RootCoord_DescribeCollectionInternal_Call) RunAndReturn(run func(conte
 	return _c
 }
 
-// DropAlias provides a mock function with given fields: ctx, req
-func (_m *RootCoord) DropAlias(ctx context.Context, req *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// DropAlias provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) DropAlias(_a0 context.Context, _a1 *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropAliasRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropAliasRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -822,7 +824,7 @@ func (_m *RootCoord) DropAlias(ctx context.Context, req *milvuspb.DropAliasReque
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DropAliasRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -836,13 +838,13 @@ type RootCoord_DropAlias_Call struct {
 }
 
 // DropAlias is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.DropAliasRequest
-func (_e *RootCoord_Expecter) DropAlias(ctx interface{}, req interface{}) *RootCoord_DropAlias_Call {
-	return &RootCoord_DropAlias_Call{Call: _e.mock.On("DropAlias", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DropAliasRequest
+func (_e *RootCoord_Expecter) DropAlias(_a0 interface{}, _a1 interface{}) *RootCoord_DropAlias_Call {
+	return &RootCoord_DropAlias_Call{Call: _e.mock.On("DropAlias", _a0, _a1)}
 }
 
-func (_c *RootCoord_DropAlias_Call) Run(run func(ctx context.Context, req *milvuspb.DropAliasRequest)) *RootCoord_DropAlias_Call {
+func (_c *RootCoord_DropAlias_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DropAliasRequest)) *RootCoord_DropAlias_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.DropAliasRequest))
 	})
@@ -859,17 +861,17 @@ func (_c *RootCoord_DropAlias_Call) RunAndReturn(run func(context.Context, *milv
 	return _c
 }
 
-// DropCollection provides a mock function with given fields: ctx, req
-func (_m *RootCoord) DropCollection(ctx context.Context, req *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// DropCollection provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) DropCollection(_a0 context.Context, _a1 *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropCollectionRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropCollectionRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -877,7 +879,7 @@ func (_m *RootCoord) DropCollection(ctx context.Context, req *milvuspb.DropColle
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DropCollectionRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -891,13 +893,13 @@ type RootCoord_DropCollection_Call struct {
 }
 
 // DropCollection is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.DropCollectionRequest
-func (_e *RootCoord_Expecter) DropCollection(ctx interface{}, req interface{}) *RootCoord_DropCollection_Call {
-	return &RootCoord_DropCollection_Call{Call: _e.mock.On("DropCollection", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DropCollectionRequest
+func (_e *RootCoord_Expecter) DropCollection(_a0 interface{}, _a1 interface{}) *RootCoord_DropCollection_Call {
+	return &RootCoord_DropCollection_Call{Call: _e.mock.On("DropCollection", _a0, _a1)}
 }
 
-func (_c *RootCoord_DropCollection_Call) Run(run func(ctx context.Context, req *milvuspb.DropCollectionRequest)) *RootCoord_DropCollection_Call {
+func (_c *RootCoord_DropCollection_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DropCollectionRequest)) *RootCoord_DropCollection_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.DropCollectionRequest))
 	})
@@ -914,17 +916,17 @@ func (_c *RootCoord_DropCollection_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
-// DropDatabase provides a mock function with given fields: ctx, req
-func (_m *RootCoord) DropDatabase(ctx context.Context, req *milvuspb.DropDatabaseRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// DropDatabase provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) DropDatabase(_a0 context.Context, _a1 *milvuspb.DropDatabaseRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropDatabaseRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropDatabaseRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -932,7 +934,7 @@ func (_m *RootCoord) DropDatabase(ctx context.Context, req *milvuspb.DropDatabas
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DropDatabaseRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -946,13 +948,13 @@ type RootCoord_DropDatabase_Call struct {
 }
 
 // DropDatabase is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.DropDatabaseRequest
-func (_e *RootCoord_Expecter) DropDatabase(ctx interface{}, req interface{}) *RootCoord_DropDatabase_Call {
-	return &RootCoord_DropDatabase_Call{Call: _e.mock.On("DropDatabase", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DropDatabaseRequest
+func (_e *RootCoord_Expecter) DropDatabase(_a0 interface{}, _a1 interface{}) *RootCoord_DropDatabase_Call {
+	return &RootCoord_DropDatabase_Call{Call: _e.mock.On("DropDatabase", _a0, _a1)}
 }
 
-func (_c *RootCoord_DropDatabase_Call) Run(run func(ctx context.Context, req *milvuspb.DropDatabaseRequest)) *RootCoord_DropDatabase_Call {
+func (_c *RootCoord_DropDatabase_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DropDatabaseRequest)) *RootCoord_DropDatabase_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.DropDatabaseRequest))
 	})
@@ -969,17 +971,17 @@ func (_c *RootCoord_DropDatabase_Call) RunAndReturn(run func(context.Context, *m
 	return _c
 }
 
-// DropPartition provides a mock function with given fields: ctx, req
-func (_m *RootCoord) DropPartition(ctx context.Context, req *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// DropPartition provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) DropPartition(_a0 context.Context, _a1 *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropPartitionRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropPartitionRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -987,7 +989,7 @@ func (_m *RootCoord) DropPartition(ctx context.Context, req *milvuspb.DropPartit
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DropPartitionRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1001,13 +1003,13 @@ type RootCoord_DropPartition_Call struct {
 }
 
 // DropPartition is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.DropPartitionRequest
-func (_e *RootCoord_Expecter) DropPartition(ctx interface{}, req interface{}) *RootCoord_DropPartition_Call {
-	return &RootCoord_DropPartition_Call{Call: _e.mock.On("DropPartition", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DropPartitionRequest
+func (_e *RootCoord_Expecter) DropPartition(_a0 interface{}, _a1 interface{}) *RootCoord_DropPartition_Call {
+	return &RootCoord_DropPartition_Call{Call: _e.mock.On("DropPartition", _a0, _a1)}
 }
 
-func (_c *RootCoord_DropPartition_Call) Run(run func(ctx context.Context, req *milvuspb.DropPartitionRequest)) *RootCoord_DropPartition_Call {
+func (_c *RootCoord_DropPartition_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DropPartitionRequest)) *RootCoord_DropPartition_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.DropPartitionRequest))
 	})
@@ -1024,17 +1026,17 @@ func (_c *RootCoord_DropPartition_Call) RunAndReturn(run func(context.Context, *
 	return _c
 }
 
-// DropRole provides a mock function with given fields: ctx, req
-func (_m *RootCoord) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// DropRole provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) DropRole(_a0 context.Context, _a1 *milvuspb.DropRoleRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropRoleRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropRoleRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -1042,7 +1044,7 @@ func (_m *RootCoord) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DropRoleRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1056,13 +1058,13 @@ type RootCoord_DropRole_Call struct {
 }
 
 // DropRole is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.DropRoleRequest
-func (_e *RootCoord_Expecter) DropRole(ctx interface{}, req interface{}) *RootCoord_DropRole_Call {
-	return &RootCoord_DropRole_Call{Call: _e.mock.On("DropRole", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DropRoleRequest
+func (_e *RootCoord_Expecter) DropRole(_a0 interface{}, _a1 interface{}) *RootCoord_DropRole_Call {
+	return &RootCoord_DropRole_Call{Call: _e.mock.On("DropRole", _a0, _a1)}
 }
 
-func (_c *RootCoord_DropRole_Call) Run(run func(ctx context.Context, req *milvuspb.DropRoleRequest)) *RootCoord_DropRole_Call {
+func (_c *RootCoord_DropRole_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DropRoleRequest)) *RootCoord_DropRole_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.DropRoleRequest))
 	})
@@ -1079,25 +1081,25 @@ func (_c *RootCoord_DropRole_Call) RunAndReturn(run func(context.Context, *milvu
 	return _c
 }
 
-// GetComponentStates provides a mock function with given fields: ctx
-func (_m *RootCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
-	ret := _m.Called(ctx)
+// GetComponentStates provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) GetComponentStates(_a0 context.Context, _a1 *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.ComponentStates
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) (*milvuspb.ComponentStates, error)); ok {
-		return rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error)); ok {
+		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context) *milvuspb.ComponentStates); ok {
-		r0 = rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetComponentStatesRequest) *milvuspb.ComponentStates); ok {
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.ComponentStates)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = rf(ctx)
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetComponentStatesRequest) error); ok {
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1111,14 +1113,15 @@ type RootCoord_GetComponentStates_Call struct {
 }
 
 // GetComponentStates is a helper method to define mock.On call
-//   - ctx context.Context
-func (_e *RootCoord_Expecter) GetComponentStates(ctx interface{}) *RootCoord_GetComponentStates_Call {
-	return &RootCoord_GetComponentStates_Call{Call: _e.mock.On("GetComponentStates", ctx)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetComponentStatesRequest
+func (_e *RootCoord_Expecter) GetComponentStates(_a0 interface{}, _a1 interface{}) *RootCoord_GetComponentStates_Call {
+	return &RootCoord_GetComponentStates_Call{Call: _e.mock.On("GetComponentStates", _a0, _a1)}
 }
 
-func (_c *RootCoord_GetComponentStates_Call) Run(run func(ctx context.Context)) *RootCoord_GetComponentStates_Call {
+func (_c *RootCoord_GetComponentStates_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetComponentStatesRequest)) *RootCoord_GetComponentStates_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
+		run(args[0].(context.Context), args[1].(*milvuspb.GetComponentStatesRequest))
 	})
 	return _c
 }
@@ -1128,22 +1131,22 @@ func (_c *RootCoord_GetComponentStates_Call) Return(_a0 *milvuspb.ComponentState
 	return _c
 }
 
-func (_c *RootCoord_GetComponentStates_Call) RunAndReturn(run func(context.Context) (*milvuspb.ComponentStates, error)) *RootCoord_GetComponentStates_Call {
+func (_c *RootCoord_GetComponentStates_Call) RunAndReturn(run func(context.Context, *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error)) *RootCoord_GetComponentStates_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// GetCredential provides a mock function with given fields: ctx, req
-func (_m *RootCoord) GetCredential(ctx context.Context, req *rootcoordpb.GetCredentialRequest) (*rootcoordpb.GetCredentialResponse, error) {
-	ret := _m.Called(ctx, req)
+// GetCredential provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) GetCredential(_a0 context.Context, _a1 *rootcoordpb.GetCredentialRequest) (*rootcoordpb.GetCredentialResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *rootcoordpb.GetCredentialResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.GetCredentialRequest) (*rootcoordpb.GetCredentialResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.GetCredentialRequest) *rootcoordpb.GetCredentialResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*rootcoordpb.GetCredentialResponse)
@@ -1151,7 +1154,7 @@ func (_m *RootCoord) GetCredential(ctx context.Context, req *rootcoordpb.GetCred
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.GetCredentialRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1165,13 +1168,13 @@ type RootCoord_GetCredential_Call struct {
 }
 
 // GetCredential is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *rootcoordpb.GetCredentialRequest
-func (_e *RootCoord_Expecter) GetCredential(ctx interface{}, req interface{}) *RootCoord_GetCredential_Call {
-	return &RootCoord_GetCredential_Call{Call: _e.mock.On("GetCredential", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *rootcoordpb.GetCredentialRequest
+func (_e *RootCoord_Expecter) GetCredential(_a0 interface{}, _a1 interface{}) *RootCoord_GetCredential_Call {
+	return &RootCoord_GetCredential_Call{Call: _e.mock.On("GetCredential", _a0, _a1)}
 }
 
-func (_c *RootCoord_GetCredential_Call) Run(run func(ctx context.Context, req *rootcoordpb.GetCredentialRequest)) *RootCoord_GetCredential_Call {
+func (_c *RootCoord_GetCredential_Call) Run(run func(_a0 context.Context, _a1 *rootcoordpb.GetCredentialRequest)) *RootCoord_GetCredential_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*rootcoordpb.GetCredentialRequest))
 	})
@@ -1188,17 +1191,17 @@ func (_c *RootCoord_GetCredential_Call) RunAndReturn(run func(context.Context, *
 	return _c
 }
 
-// GetImportState provides a mock function with given fields: ctx, req
-func (_m *RootCoord) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
-	ret := _m.Called(ctx, req)
+// GetImportState provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) GetImportState(_a0 context.Context, _a1 *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.GetImportStateResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetImportStateRequest) *milvuspb.GetImportStateResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.GetImportStateResponse)
@@ -1206,7 +1209,7 @@ func (_m *RootCoord) GetImportState(ctx context.Context, req *milvuspb.GetImport
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetImportStateRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1220,13 +1223,13 @@ type RootCoord_GetImportState_Call struct {
 }
 
 // GetImportState is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.GetImportStateRequest
-func (_e *RootCoord_Expecter) GetImportState(ctx interface{}, req interface{}) *RootCoord_GetImportState_Call {
-	return &RootCoord_GetImportState_Call{Call: _e.mock.On("GetImportState", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetImportStateRequest
+func (_e *RootCoord_Expecter) GetImportState(_a0 interface{}, _a1 interface{}) *RootCoord_GetImportState_Call {
+	return &RootCoord_GetImportState_Call{Call: _e.mock.On("GetImportState", _a0, _a1)}
 }
 
-func (_c *RootCoord_GetImportState_Call) Run(run func(ctx context.Context, req *milvuspb.GetImportStateRequest)) *RootCoord_GetImportState_Call {
+func (_c *RootCoord_GetImportState_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetImportStateRequest)) *RootCoord_GetImportState_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.GetImportStateRequest))
 	})
@@ -1298,25 +1301,25 @@ func (_c *RootCoord_GetMetrics_Call) RunAndReturn(run func(context.Context, *mil
 	return _c
 }
 
-// GetStatisticsChannel provides a mock function with given fields: ctx
-func (_m *RootCoord) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	ret := _m.Called(ctx)
+// GetStatisticsChannel provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) GetStatisticsChannel(_a0 context.Context, _a1 *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.StringResponse
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) (*milvuspb.StringResponse, error)); ok {
-		return rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error)); ok {
+		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context) *milvuspb.StringResponse); ok {
-		r0 = rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetStatisticsChannelRequest) *milvuspb.StringResponse); ok {
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.StringResponse)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = rf(ctx)
+	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.GetStatisticsChannelRequest) error); ok {
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1330,14 +1333,15 @@ type RootCoord_GetStatisticsChannel_Call struct {
 }
 
 // GetStatisticsChannel is a helper method to define mock.On call
-//   - ctx context.Context
-func (_e *RootCoord_Expecter) GetStatisticsChannel(ctx interface{}) *RootCoord_GetStatisticsChannel_Call {
-	return &RootCoord_GetStatisticsChannel_Call{Call: _e.mock.On("GetStatisticsChannel", ctx)}
+//   - _a0 context.Context
+//   - _a1 *internalpb.GetStatisticsChannelRequest
+func (_e *RootCoord_Expecter) GetStatisticsChannel(_a0 interface{}, _a1 interface{}) *RootCoord_GetStatisticsChannel_Call {
+	return &RootCoord_GetStatisticsChannel_Call{Call: _e.mock.On("GetStatisticsChannel", _a0, _a1)}
 }
 
-func (_c *RootCoord_GetStatisticsChannel_Call) Run(run func(ctx context.Context)) *RootCoord_GetStatisticsChannel_Call {
+func (_c *RootCoord_GetStatisticsChannel_Call) Run(run func(_a0 context.Context, _a1 *internalpb.GetStatisticsChannelRequest)) *RootCoord_GetStatisticsChannel_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
+		run(args[0].(context.Context), args[1].(*internalpb.GetStatisticsChannelRequest))
 	})
 	return _c
 }
@@ -1347,30 +1351,30 @@ func (_c *RootCoord_GetStatisticsChannel_Call) Return(_a0 *milvuspb.StringRespon
 	return _c
 }
 
-func (_c *RootCoord_GetStatisticsChannel_Call) RunAndReturn(run func(context.Context) (*milvuspb.StringResponse, error)) *RootCoord_GetStatisticsChannel_Call {
+func (_c *RootCoord_GetStatisticsChannel_Call) RunAndReturn(run func(context.Context, *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error)) *RootCoord_GetStatisticsChannel_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// GetTimeTickChannel provides a mock function with given fields: ctx
-func (_m *RootCoord) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	ret := _m.Called(ctx)
+// GetTimeTickChannel provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) GetTimeTickChannel(_a0 context.Context, _a1 *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.StringResponse
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) (*milvuspb.StringResponse, error)); ok {
-		return rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error)); ok {
+		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context) *milvuspb.StringResponse); ok {
-		r0 = rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetTimeTickChannelRequest) *milvuspb.StringResponse); ok {
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.StringResponse)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = rf(ctx)
+	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.GetTimeTickChannelRequest) error); ok {
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1384,14 +1388,15 @@ type RootCoord_GetTimeTickChannel_Call struct {
 }
 
 // GetTimeTickChannel is a helper method to define mock.On call
-//   - ctx context.Context
-func (_e *RootCoord_Expecter) GetTimeTickChannel(ctx interface{}) *RootCoord_GetTimeTickChannel_Call {
-	return &RootCoord_GetTimeTickChannel_Call{Call: _e.mock.On("GetTimeTickChannel", ctx)}
+//   - _a0 context.Context
+//   - _a1 *internalpb.GetTimeTickChannelRequest
+func (_e *RootCoord_Expecter) GetTimeTickChannel(_a0 interface{}, _a1 interface{}) *RootCoord_GetTimeTickChannel_Call {
+	return &RootCoord_GetTimeTickChannel_Call{Call: _e.mock.On("GetTimeTickChannel", _a0, _a1)}
 }
 
-func (_c *RootCoord_GetTimeTickChannel_Call) Run(run func(ctx context.Context)) *RootCoord_GetTimeTickChannel_Call {
+func (_c *RootCoord_GetTimeTickChannel_Call) Run(run func(_a0 context.Context, _a1 *internalpb.GetTimeTickChannelRequest)) *RootCoord_GetTimeTickChannel_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
+		run(args[0].(context.Context), args[1].(*internalpb.GetTimeTickChannelRequest))
 	})
 	return _c
 }
@@ -1401,22 +1406,22 @@ func (_c *RootCoord_GetTimeTickChannel_Call) Return(_a0 *milvuspb.StringResponse
 	return _c
 }
 
-func (_c *RootCoord_GetTimeTickChannel_Call) RunAndReturn(run func(context.Context) (*milvuspb.StringResponse, error)) *RootCoord_GetTimeTickChannel_Call {
+func (_c *RootCoord_GetTimeTickChannel_Call) RunAndReturn(run func(context.Context, *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error)) *RootCoord_GetTimeTickChannel_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// HasCollection provides a mock function with given fields: ctx, req
-func (_m *RootCoord) HasCollection(ctx context.Context, req *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
-	ret := _m.Called(ctx, req)
+// HasCollection provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) HasCollection(_a0 context.Context, _a1 *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.BoolResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.HasCollectionRequest) *milvuspb.BoolResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.BoolResponse)
@@ -1424,7 +1429,7 @@ func (_m *RootCoord) HasCollection(ctx context.Context, req *milvuspb.HasCollect
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.HasCollectionRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1438,13 +1443,13 @@ type RootCoord_HasCollection_Call struct {
 }
 
 // HasCollection is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.HasCollectionRequest
-func (_e *RootCoord_Expecter) HasCollection(ctx interface{}, req interface{}) *RootCoord_HasCollection_Call {
-	return &RootCoord_HasCollection_Call{Call: _e.mock.On("HasCollection", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.HasCollectionRequest
+func (_e *RootCoord_Expecter) HasCollection(_a0 interface{}, _a1 interface{}) *RootCoord_HasCollection_Call {
+	return &RootCoord_HasCollection_Call{Call: _e.mock.On("HasCollection", _a0, _a1)}
 }
 
-func (_c *RootCoord_HasCollection_Call) Run(run func(ctx context.Context, req *milvuspb.HasCollectionRequest)) *RootCoord_HasCollection_Call {
+func (_c *RootCoord_HasCollection_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.HasCollectionRequest)) *RootCoord_HasCollection_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.HasCollectionRequest))
 	})
@@ -1461,17 +1466,17 @@ func (_c *RootCoord_HasCollection_Call) RunAndReturn(run func(context.Context, *
 	return _c
 }
 
-// HasPartition provides a mock function with given fields: ctx, req
-func (_m *RootCoord) HasPartition(ctx context.Context, req *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
-	ret := _m.Called(ctx, req)
+// HasPartition provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) HasPartition(_a0 context.Context, _a1 *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.BoolResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.HasPartitionRequest) *milvuspb.BoolResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.BoolResponse)
@@ -1479,7 +1484,7 @@ func (_m *RootCoord) HasPartition(ctx context.Context, req *milvuspb.HasPartitio
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.HasPartitionRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1493,13 +1498,13 @@ type RootCoord_HasPartition_Call struct {
 }
 
 // HasPartition is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.HasPartitionRequest
-func (_e *RootCoord_Expecter) HasPartition(ctx interface{}, req interface{}) *RootCoord_HasPartition_Call {
-	return &RootCoord_HasPartition_Call{Call: _e.mock.On("HasPartition", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.HasPartitionRequest
+func (_e *RootCoord_Expecter) HasPartition(_a0 interface{}, _a1 interface{}) *RootCoord_HasPartition_Call {
+	return &RootCoord_HasPartition_Call{Call: _e.mock.On("HasPartition", _a0, _a1)}
 }
 
-func (_c *RootCoord_HasPartition_Call) Run(run func(ctx context.Context, req *milvuspb.HasPartitionRequest)) *RootCoord_HasPartition_Call {
+func (_c *RootCoord_HasPartition_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.HasPartitionRequest)) *RootCoord_HasPartition_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.HasPartitionRequest))
 	})
@@ -1516,17 +1521,17 @@ func (_c *RootCoord_HasPartition_Call) RunAndReturn(run func(context.Context, *m
 	return _c
 }
 
-// Import provides a mock function with given fields: ctx, req
-func (_m *RootCoord) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
-	ret := _m.Called(ctx, req)
+// Import provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) Import(_a0 context.Context, _a1 *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.ImportResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ImportRequest) *milvuspb.ImportResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.ImportResponse)
@@ -1534,7 +1539,7 @@ func (_m *RootCoord) Import(ctx context.Context, req *milvuspb.ImportRequest) (*
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ImportRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1548,13 +1553,13 @@ type RootCoord_Import_Call struct {
 }
 
 // Import is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.ImportRequest
-func (_e *RootCoord_Expecter) Import(ctx interface{}, req interface{}) *RootCoord_Import_Call {
-	return &RootCoord_Import_Call{Call: _e.mock.On("Import", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ImportRequest
+func (_e *RootCoord_Expecter) Import(_a0 interface{}, _a1 interface{}) *RootCoord_Import_Call {
+	return &RootCoord_Import_Call{Call: _e.mock.On("Import", _a0, _a1)}
 }
 
-func (_c *RootCoord_Import_Call) Run(run func(ctx context.Context, req *milvuspb.ImportRequest)) *RootCoord_Import_Call {
+func (_c *RootCoord_Import_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ImportRequest)) *RootCoord_Import_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.ImportRequest))
 	})
@@ -1612,17 +1617,17 @@ func (_c *RootCoord_Init_Call) RunAndReturn(run func() error) *RootCoord_Init_Ca
 	return _c
 }
 
-// InvalidateCollectionMetaCache provides a mock function with given fields: ctx, request
-func (_m *RootCoord) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, request)
+// InvalidateCollectionMetaCache provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) InvalidateCollectionMetaCache(_a0 context.Context, _a1 *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *proxypb.InvalidateCollMetaCacheRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -1630,7 +1635,7 @@ func (_m *RootCoord) InvalidateCollectionMetaCache(ctx context.Context, request 
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *proxypb.InvalidateCollMetaCacheRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1644,13 +1649,13 @@ type RootCoord_InvalidateCollectionMetaCache_Call struct {
 }
 
 // InvalidateCollectionMetaCache is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *proxypb.InvalidateCollMetaCacheRequest
-func (_e *RootCoord_Expecter) InvalidateCollectionMetaCache(ctx interface{}, request interface{}) *RootCoord_InvalidateCollectionMetaCache_Call {
-	return &RootCoord_InvalidateCollectionMetaCache_Call{Call: _e.mock.On("InvalidateCollectionMetaCache", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *proxypb.InvalidateCollMetaCacheRequest
+func (_e *RootCoord_Expecter) InvalidateCollectionMetaCache(_a0 interface{}, _a1 interface{}) *RootCoord_InvalidateCollectionMetaCache_Call {
+	return &RootCoord_InvalidateCollectionMetaCache_Call{Call: _e.mock.On("InvalidateCollectionMetaCache", _a0, _a1)}
 }
 
-func (_c *RootCoord_InvalidateCollectionMetaCache_Call) Run(run func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest)) *RootCoord_InvalidateCollectionMetaCache_Call {
+func (_c *RootCoord_InvalidateCollectionMetaCache_Call) Run(run func(_a0 context.Context, _a1 *proxypb.InvalidateCollMetaCacheRequest)) *RootCoord_InvalidateCollectionMetaCache_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*proxypb.InvalidateCollMetaCacheRequest))
 	})
@@ -1667,17 +1672,17 @@ func (_c *RootCoord_InvalidateCollectionMetaCache_Call) RunAndReturn(run func(co
 	return _c
 }
 
-// ListCredUsers provides a mock function with given fields: ctx, req
-func (_m *RootCoord) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error) {
-	ret := _m.Called(ctx, req)
+// ListCredUsers provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) ListCredUsers(_a0 context.Context, _a1 *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.ListCredUsersResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListCredUsersRequest) *milvuspb.ListCredUsersResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.ListCredUsersResponse)
@@ -1685,7 +1690,7 @@ func (_m *RootCoord) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUs
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListCredUsersRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1699,13 +1704,13 @@ type RootCoord_ListCredUsers_Call struct {
 }
 
 // ListCredUsers is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.ListCredUsersRequest
-func (_e *RootCoord_Expecter) ListCredUsers(ctx interface{}, req interface{}) *RootCoord_ListCredUsers_Call {
-	return &RootCoord_ListCredUsers_Call{Call: _e.mock.On("ListCredUsers", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ListCredUsersRequest
+func (_e *RootCoord_Expecter) ListCredUsers(_a0 interface{}, _a1 interface{}) *RootCoord_ListCredUsers_Call {
+	return &RootCoord_ListCredUsers_Call{Call: _e.mock.On("ListCredUsers", _a0, _a1)}
 }
 
-func (_c *RootCoord_ListCredUsers_Call) Run(run func(ctx context.Context, req *milvuspb.ListCredUsersRequest)) *RootCoord_ListCredUsers_Call {
+func (_c *RootCoord_ListCredUsers_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ListCredUsersRequest)) *RootCoord_ListCredUsers_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.ListCredUsersRequest))
 	})
@@ -1722,17 +1727,17 @@ func (_c *RootCoord_ListCredUsers_Call) RunAndReturn(run func(context.Context, *
 	return _c
 }
 
-// ListDatabases provides a mock function with given fields: ctx, req
-func (_m *RootCoord) ListDatabases(ctx context.Context, req *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error) {
-	ret := _m.Called(ctx, req)
+// ListDatabases provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) ListDatabases(_a0 context.Context, _a1 *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.ListDatabasesResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListDatabasesRequest) *milvuspb.ListDatabasesResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.ListDatabasesResponse)
@@ -1740,7 +1745,7 @@ func (_m *RootCoord) ListDatabases(ctx context.Context, req *milvuspb.ListDataba
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListDatabasesRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1754,13 +1759,13 @@ type RootCoord_ListDatabases_Call struct {
 }
 
 // ListDatabases is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.ListDatabasesRequest
-func (_e *RootCoord_Expecter) ListDatabases(ctx interface{}, req interface{}) *RootCoord_ListDatabases_Call {
-	return &RootCoord_ListDatabases_Call{Call: _e.mock.On("ListDatabases", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ListDatabasesRequest
+func (_e *RootCoord_Expecter) ListDatabases(_a0 interface{}, _a1 interface{}) *RootCoord_ListDatabases_Call {
+	return &RootCoord_ListDatabases_Call{Call: _e.mock.On("ListDatabases", _a0, _a1)}
 }
 
-func (_c *RootCoord_ListDatabases_Call) Run(run func(ctx context.Context, req *milvuspb.ListDatabasesRequest)) *RootCoord_ListDatabases_Call {
+func (_c *RootCoord_ListDatabases_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ListDatabasesRequest)) *RootCoord_ListDatabases_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.ListDatabasesRequest))
 	})
@@ -1777,17 +1782,17 @@ func (_c *RootCoord_ListDatabases_Call) RunAndReturn(run func(context.Context, *
 	return _c
 }
 
-// ListImportTasks provides a mock function with given fields: ctx, req
-func (_m *RootCoord) ListImportTasks(ctx context.Context, req *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
-	ret := _m.Called(ctx, req)
+// ListImportTasks provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) ListImportTasks(_a0 context.Context, _a1 *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.ListImportTasksResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListImportTasksRequest) *milvuspb.ListImportTasksResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.ListImportTasksResponse)
@@ -1795,7 +1800,7 @@ func (_m *RootCoord) ListImportTasks(ctx context.Context, req *milvuspb.ListImpo
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListImportTasksRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1809,13 +1814,13 @@ type RootCoord_ListImportTasks_Call struct {
 }
 
 // ListImportTasks is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.ListImportTasksRequest
-func (_e *RootCoord_Expecter) ListImportTasks(ctx interface{}, req interface{}) *RootCoord_ListImportTasks_Call {
-	return &RootCoord_ListImportTasks_Call{Call: _e.mock.On("ListImportTasks", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ListImportTasksRequest
+func (_e *RootCoord_Expecter) ListImportTasks(_a0 interface{}, _a1 interface{}) *RootCoord_ListImportTasks_Call {
+	return &RootCoord_ListImportTasks_Call{Call: _e.mock.On("ListImportTasks", _a0, _a1)}
 }
 
-func (_c *RootCoord_ListImportTasks_Call) Run(run func(ctx context.Context, req *milvuspb.ListImportTasksRequest)) *RootCoord_ListImportTasks_Call {
+func (_c *RootCoord_ListImportTasks_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ListImportTasksRequest)) *RootCoord_ListImportTasks_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.ListImportTasksRequest))
 	})
@@ -1832,17 +1837,17 @@ func (_c *RootCoord_ListImportTasks_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
-// ListPolicy provides a mock function with given fields: ctx, in
-func (_m *RootCoord) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
-	ret := _m.Called(ctx, in)
+// ListPolicy provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) ListPolicy(_a0 context.Context, _a1 *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *internalpb.ListPolicyResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error)); ok {
-		return rf(ctx, in)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ListPolicyRequest) *internalpb.ListPolicyResponse); ok {
-		r0 = rf(ctx, in)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*internalpb.ListPolicyResponse)
@@ -1850,7 +1855,7 @@ func (_m *RootCoord) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRe
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.ListPolicyRequest) error); ok {
-		r1 = rf(ctx, in)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1864,13 +1869,13 @@ type RootCoord_ListPolicy_Call struct {
 }
 
 // ListPolicy is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *internalpb.ListPolicyRequest
-func (_e *RootCoord_Expecter) ListPolicy(ctx interface{}, in interface{}) *RootCoord_ListPolicy_Call {
-	return &RootCoord_ListPolicy_Call{Call: _e.mock.On("ListPolicy", ctx, in)}
+//   - _a0 context.Context
+//   - _a1 *internalpb.ListPolicyRequest
+func (_e *RootCoord_Expecter) ListPolicy(_a0 interface{}, _a1 interface{}) *RootCoord_ListPolicy_Call {
+	return &RootCoord_ListPolicy_Call{Call: _e.mock.On("ListPolicy", _a0, _a1)}
 }
 
-func (_c *RootCoord_ListPolicy_Call) Run(run func(ctx context.Context, in *internalpb.ListPolicyRequest)) *RootCoord_ListPolicy_Call {
+func (_c *RootCoord_ListPolicy_Call) Run(run func(_a0 context.Context, _a1 *internalpb.ListPolicyRequest)) *RootCoord_ListPolicy_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*internalpb.ListPolicyRequest))
 	})
@@ -1887,17 +1892,17 @@ func (_c *RootCoord_ListPolicy_Call) RunAndReturn(run func(context.Context, *int
 	return _c
 }
 
-// OperatePrivilege provides a mock function with given fields: ctx, req
-func (_m *RootCoord) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// OperatePrivilege provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) OperatePrivilege(_a0 context.Context, _a1 *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.OperatePrivilegeRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -1905,7 +1910,7 @@ func (_m *RootCoord) OperatePrivilege(ctx context.Context, req *milvuspb.Operate
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.OperatePrivilegeRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1919,13 +1924,13 @@ type RootCoord_OperatePrivilege_Call struct {
 }
 
 // OperatePrivilege is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.OperatePrivilegeRequest
-func (_e *RootCoord_Expecter) OperatePrivilege(ctx interface{}, req interface{}) *RootCoord_OperatePrivilege_Call {
-	return &RootCoord_OperatePrivilege_Call{Call: _e.mock.On("OperatePrivilege", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.OperatePrivilegeRequest
+func (_e *RootCoord_Expecter) OperatePrivilege(_a0 interface{}, _a1 interface{}) *RootCoord_OperatePrivilege_Call {
+	return &RootCoord_OperatePrivilege_Call{Call: _e.mock.On("OperatePrivilege", _a0, _a1)}
 }
 
-func (_c *RootCoord_OperatePrivilege_Call) Run(run func(ctx context.Context, req *milvuspb.OperatePrivilegeRequest)) *RootCoord_OperatePrivilege_Call {
+func (_c *RootCoord_OperatePrivilege_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.OperatePrivilegeRequest)) *RootCoord_OperatePrivilege_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.OperatePrivilegeRequest))
 	})
@@ -1942,17 +1947,17 @@ func (_c *RootCoord_OperatePrivilege_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
-// OperateUserRole provides a mock function with given fields: ctx, req
-func (_m *RootCoord) OperateUserRole(ctx context.Context, req *milvuspb.OperateUserRoleRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// OperateUserRole provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) OperateUserRole(_a0 context.Context, _a1 *milvuspb.OperateUserRoleRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.OperateUserRoleRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.OperateUserRoleRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -1960,7 +1965,7 @@ func (_m *RootCoord) OperateUserRole(ctx context.Context, req *milvuspb.OperateU
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.OperateUserRoleRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1974,13 +1979,13 @@ type RootCoord_OperateUserRole_Call struct {
 }
 
 // OperateUserRole is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.OperateUserRoleRequest
-func (_e *RootCoord_Expecter) OperateUserRole(ctx interface{}, req interface{}) *RootCoord_OperateUserRole_Call {
-	return &RootCoord_OperateUserRole_Call{Call: _e.mock.On("OperateUserRole", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.OperateUserRoleRequest
+func (_e *RootCoord_Expecter) OperateUserRole(_a0 interface{}, _a1 interface{}) *RootCoord_OperateUserRole_Call {
+	return &RootCoord_OperateUserRole_Call{Call: _e.mock.On("OperateUserRole", _a0, _a1)}
 }
 
-func (_c *RootCoord_OperateUserRole_Call) Run(run func(ctx context.Context, req *milvuspb.OperateUserRoleRequest)) *RootCoord_OperateUserRole_Call {
+func (_c *RootCoord_OperateUserRole_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.OperateUserRoleRequest)) *RootCoord_OperateUserRole_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.OperateUserRoleRequest))
 	})
@@ -2038,17 +2043,17 @@ func (_c *RootCoord_Register_Call) RunAndReturn(run func() error) *RootCoord_Reg
 	return _c
 }
 
-// RenameCollection provides a mock function with given fields: ctx, req
-func (_m *RootCoord) RenameCollection(ctx context.Context, req *milvuspb.RenameCollectionRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// RenameCollection provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) RenameCollection(_a0 context.Context, _a1 *milvuspb.RenameCollectionRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.RenameCollectionRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.RenameCollectionRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -2056,7 +2061,7 @@ func (_m *RootCoord) RenameCollection(ctx context.Context, req *milvuspb.RenameC
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.RenameCollectionRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2070,13 +2075,13 @@ type RootCoord_RenameCollection_Call struct {
 }
 
 // RenameCollection is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.RenameCollectionRequest
-func (_e *RootCoord_Expecter) RenameCollection(ctx interface{}, req interface{}) *RootCoord_RenameCollection_Call {
-	return &RootCoord_RenameCollection_Call{Call: _e.mock.On("RenameCollection", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.RenameCollectionRequest
+func (_e *RootCoord_Expecter) RenameCollection(_a0 interface{}, _a1 interface{}) *RootCoord_RenameCollection_Call {
+	return &RootCoord_RenameCollection_Call{Call: _e.mock.On("RenameCollection", _a0, _a1)}
 }
 
-func (_c *RootCoord_RenameCollection_Call) Run(run func(ctx context.Context, req *milvuspb.RenameCollectionRequest)) *RootCoord_RenameCollection_Call {
+func (_c *RootCoord_RenameCollection_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.RenameCollectionRequest)) *RootCoord_RenameCollection_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.RenameCollectionRequest))
 	})
@@ -2093,17 +2098,17 @@ func (_c *RootCoord_RenameCollection_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
-// ReportImport provides a mock function with given fields: ctx, req
-func (_m *RootCoord) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// ReportImport provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) ReportImport(_a0 context.Context, _a1 *rootcoordpb.ImportResult) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.ImportResult) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.ImportResult) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -2111,7 +2116,7 @@ func (_m *RootCoord) ReportImport(ctx context.Context, req *rootcoordpb.ImportRe
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.ImportResult) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2125,13 +2130,13 @@ type RootCoord_ReportImport_Call struct {
 }
 
 // ReportImport is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *rootcoordpb.ImportResult
-func (_e *RootCoord_Expecter) ReportImport(ctx interface{}, req interface{}) *RootCoord_ReportImport_Call {
-	return &RootCoord_ReportImport_Call{Call: _e.mock.On("ReportImport", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *rootcoordpb.ImportResult
+func (_e *RootCoord_Expecter) ReportImport(_a0 interface{}, _a1 interface{}) *RootCoord_ReportImport_Call {
+	return &RootCoord_ReportImport_Call{Call: _e.mock.On("ReportImport", _a0, _a1)}
 }
 
-func (_c *RootCoord_ReportImport_Call) Run(run func(ctx context.Context, req *rootcoordpb.ImportResult)) *RootCoord_ReportImport_Call {
+func (_c *RootCoord_ReportImport_Call) Run(run func(_a0 context.Context, _a1 *rootcoordpb.ImportResult)) *RootCoord_ReportImport_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*rootcoordpb.ImportResult))
 	})
@@ -2148,17 +2153,17 @@ func (_c *RootCoord_ReportImport_Call) RunAndReturn(run func(context.Context, *r
 	return _c
 }
 
-// SelectGrant provides a mock function with given fields: ctx, req
-func (_m *RootCoord) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantRequest) (*milvuspb.SelectGrantResponse, error) {
-	ret := _m.Called(ctx, req)
+// SelectGrant provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) SelectGrant(_a0 context.Context, _a1 *milvuspb.SelectGrantRequest) (*milvuspb.SelectGrantResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.SelectGrantResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.SelectGrantRequest) (*milvuspb.SelectGrantResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.SelectGrantRequest) *milvuspb.SelectGrantResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.SelectGrantResponse)
@@ -2166,7 +2171,7 @@ func (_m *RootCoord) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantR
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.SelectGrantRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2180,13 +2185,13 @@ type RootCoord_SelectGrant_Call struct {
 }
 
 // SelectGrant is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.SelectGrantRequest
-func (_e *RootCoord_Expecter) SelectGrant(ctx interface{}, req interface{}) *RootCoord_SelectGrant_Call {
-	return &RootCoord_SelectGrant_Call{Call: _e.mock.On("SelectGrant", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.SelectGrantRequest
+func (_e *RootCoord_Expecter) SelectGrant(_a0 interface{}, _a1 interface{}) *RootCoord_SelectGrant_Call {
+	return &RootCoord_SelectGrant_Call{Call: _e.mock.On("SelectGrant", _a0, _a1)}
 }
 
-func (_c *RootCoord_SelectGrant_Call) Run(run func(ctx context.Context, req *milvuspb.SelectGrantRequest)) *RootCoord_SelectGrant_Call {
+func (_c *RootCoord_SelectGrant_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.SelectGrantRequest)) *RootCoord_SelectGrant_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.SelectGrantRequest))
 	})
@@ -2203,17 +2208,17 @@ func (_c *RootCoord_SelectGrant_Call) RunAndReturn(run func(context.Context, *mi
 	return _c
 }
 
-// SelectRole provides a mock function with given fields: ctx, req
-func (_m *RootCoord) SelectRole(ctx context.Context, req *milvuspb.SelectRoleRequest) (*milvuspb.SelectRoleResponse, error) {
-	ret := _m.Called(ctx, req)
+// SelectRole provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) SelectRole(_a0 context.Context, _a1 *milvuspb.SelectRoleRequest) (*milvuspb.SelectRoleResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.SelectRoleResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.SelectRoleRequest) (*milvuspb.SelectRoleResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.SelectRoleRequest) *milvuspb.SelectRoleResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.SelectRoleResponse)
@@ -2221,7 +2226,7 @@ func (_m *RootCoord) SelectRole(ctx context.Context, req *milvuspb.SelectRoleReq
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.SelectRoleRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2235,13 +2240,13 @@ type RootCoord_SelectRole_Call struct {
 }
 
 // SelectRole is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.SelectRoleRequest
-func (_e *RootCoord_Expecter) SelectRole(ctx interface{}, req interface{}) *RootCoord_SelectRole_Call {
-	return &RootCoord_SelectRole_Call{Call: _e.mock.On("SelectRole", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.SelectRoleRequest
+func (_e *RootCoord_Expecter) SelectRole(_a0 interface{}, _a1 interface{}) *RootCoord_SelectRole_Call {
+	return &RootCoord_SelectRole_Call{Call: _e.mock.On("SelectRole", _a0, _a1)}
 }
 
-func (_c *RootCoord_SelectRole_Call) Run(run func(ctx context.Context, req *milvuspb.SelectRoleRequest)) *RootCoord_SelectRole_Call {
+func (_c *RootCoord_SelectRole_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.SelectRoleRequest)) *RootCoord_SelectRole_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.SelectRoleRequest))
 	})
@@ -2258,17 +2263,17 @@ func (_c *RootCoord_SelectRole_Call) RunAndReturn(run func(context.Context, *mil
 	return _c
 }
 
-// SelectUser provides a mock function with given fields: ctx, req
-func (_m *RootCoord) SelectUser(ctx context.Context, req *milvuspb.SelectUserRequest) (*milvuspb.SelectUserResponse, error) {
-	ret := _m.Called(ctx, req)
+// SelectUser provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) SelectUser(_a0 context.Context, _a1 *milvuspb.SelectUserRequest) (*milvuspb.SelectUserResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.SelectUserResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.SelectUserRequest) (*milvuspb.SelectUserResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.SelectUserRequest) *milvuspb.SelectUserResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.SelectUserResponse)
@@ -2276,7 +2281,7 @@ func (_m *RootCoord) SelectUser(ctx context.Context, req *milvuspb.SelectUserReq
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.SelectUserRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2290,13 +2295,13 @@ type RootCoord_SelectUser_Call struct {
 }
 
 // SelectUser is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.SelectUserRequest
-func (_e *RootCoord_Expecter) SelectUser(ctx interface{}, req interface{}) *RootCoord_SelectUser_Call {
-	return &RootCoord_SelectUser_Call{Call: _e.mock.On("SelectUser", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.SelectUserRequest
+func (_e *RootCoord_Expecter) SelectUser(_a0 interface{}, _a1 interface{}) *RootCoord_SelectUser_Call {
+	return &RootCoord_SelectUser_Call{Call: _e.mock.On("SelectUser", _a0, _a1)}
 }
 
-func (_c *RootCoord_SelectUser_Call) Run(run func(ctx context.Context, req *milvuspb.SelectUserRequest)) *RootCoord_SelectUser_Call {
+func (_c *RootCoord_SelectUser_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.SelectUserRequest)) *RootCoord_SelectUser_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.SelectUserRequest))
 	})
@@ -2346,12 +2351,12 @@ func (_c *RootCoord_SetAddress_Call) RunAndReturn(run func(string)) *RootCoord_S
 	return _c
 }
 
-// SetDataCoord provides a mock function with given fields: dataCoord
-func (_m *RootCoord) SetDataCoord(dataCoord types.DataCoord) error {
+// SetDataCoordClient provides a mock function with given fields: dataCoord
+func (_m *RootCoord) SetDataCoordClient(dataCoord types.DataCoordClient) error {
 	ret := _m.Called(dataCoord)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(types.DataCoord) error); ok {
+	if rf, ok := ret.Get(0).(func(types.DataCoordClient) error); ok {
 		r0 = rf(dataCoord)
 	} else {
 		r0 = ret.Error(0)
@@ -2360,30 +2365,30 @@ func (_m *RootCoord) SetDataCoord(dataCoord types.DataCoord) error {
 	return r0
 }
 
-// RootCoord_SetDataCoord_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetDataCoord'
-type RootCoord_SetDataCoord_Call struct {
+// RootCoord_SetDataCoordClient_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetDataCoordClient'
+type RootCoord_SetDataCoordClient_Call struct {
 	*mock.Call
 }
 
-// SetDataCoord is a helper method to define mock.On call
-//   - dataCoord types.DataCoord
-func (_e *RootCoord_Expecter) SetDataCoord(dataCoord interface{}) *RootCoord_SetDataCoord_Call {
-	return &RootCoord_SetDataCoord_Call{Call: _e.mock.On("SetDataCoord", dataCoord)}
+// SetDataCoordClient is a helper method to define mock.On call
+//   - dataCoord types.DataCoordClient
+func (_e *RootCoord_Expecter) SetDataCoordClient(dataCoord interface{}) *RootCoord_SetDataCoordClient_Call {
+	return &RootCoord_SetDataCoordClient_Call{Call: _e.mock.On("SetDataCoordClient", dataCoord)}
 }
 
-func (_c *RootCoord_SetDataCoord_Call) Run(run func(dataCoord types.DataCoord)) *RootCoord_SetDataCoord_Call {
+func (_c *RootCoord_SetDataCoordClient_Call) Run(run func(dataCoord types.DataCoordClient)) *RootCoord_SetDataCoordClient_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(types.DataCoord))
+		run(args[0].(types.DataCoordClient))
 	})
 	return _c
 }
 
-func (_c *RootCoord_SetDataCoord_Call) Return(_a0 error) *RootCoord_SetDataCoord_Call {
+func (_c *RootCoord_SetDataCoordClient_Call) Return(_a0 error) *RootCoord_SetDataCoordClient_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *RootCoord_SetDataCoord_Call) RunAndReturn(run func(types.DataCoord) error) *RootCoord_SetDataCoord_Call {
+func (_c *RootCoord_SetDataCoordClient_Call) RunAndReturn(run func(types.DataCoordClient) error) *RootCoord_SetDataCoordClient_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2422,7 +2427,7 @@ func (_c *RootCoord_SetEtcdClient_Call) RunAndReturn(run func(*clientv3.Client))
 }
 
 // SetProxyCreator provides a mock function with given fields: _a0
-func (_m *RootCoord) SetProxyCreator(_a0 func(context.Context, string, int64) (types.Proxy, error)) {
+func (_m *RootCoord) SetProxyCreator(_a0 func(context.Context, string, int64) (types.ProxyClient, error)) {
 	_m.Called(_a0)
 }
 
@@ -2432,14 +2437,14 @@ type RootCoord_SetProxyCreator_Call struct {
 }
 
 // SetProxyCreator is a helper method to define mock.On call
-//   - _a0 func(context.Context , string , int64)(types.Proxy , error)
+//   - _a0 func(context.Context , string , int64)(types.ProxyClient , error)
 func (_e *RootCoord_Expecter) SetProxyCreator(_a0 interface{}) *RootCoord_SetProxyCreator_Call {
 	return &RootCoord_SetProxyCreator_Call{Call: _e.mock.On("SetProxyCreator", _a0)}
 }
 
-func (_c *RootCoord_SetProxyCreator_Call) Run(run func(_a0 func(context.Context, string, int64) (types.Proxy, error))) *RootCoord_SetProxyCreator_Call {
+func (_c *RootCoord_SetProxyCreator_Call) Run(run func(_a0 func(context.Context, string, int64) (types.ProxyClient, error))) *RootCoord_SetProxyCreator_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(func(context.Context, string, int64) (types.Proxy, error)))
+		run(args[0].(func(context.Context, string, int64) (types.ProxyClient, error)))
 	})
 	return _c
 }
@@ -2449,17 +2454,17 @@ func (_c *RootCoord_SetProxyCreator_Call) Return() *RootCoord_SetProxyCreator_Ca
 	return _c
 }
 
-func (_c *RootCoord_SetProxyCreator_Call) RunAndReturn(run func(func(context.Context, string, int64) (types.Proxy, error))) *RootCoord_SetProxyCreator_Call {
+func (_c *RootCoord_SetProxyCreator_Call) RunAndReturn(run func(func(context.Context, string, int64) (types.ProxyClient, error))) *RootCoord_SetProxyCreator_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// SetQueryCoord provides a mock function with given fields: queryCoord
-func (_m *RootCoord) SetQueryCoord(queryCoord types.QueryCoord) error {
+// SetQueryCoordClient provides a mock function with given fields: queryCoord
+func (_m *RootCoord) SetQueryCoordClient(queryCoord types.QueryCoordClient) error {
 	ret := _m.Called(queryCoord)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(types.QueryCoord) error); ok {
+	if rf, ok := ret.Get(0).(func(types.QueryCoordClient) error); ok {
 		r0 = rf(queryCoord)
 	} else {
 		r0 = ret.Error(0)
@@ -2468,45 +2473,78 @@ func (_m *RootCoord) SetQueryCoord(queryCoord types.QueryCoord) error {
 	return r0
 }
 
-// RootCoord_SetQueryCoord_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetQueryCoord'
-type RootCoord_SetQueryCoord_Call struct {
+// RootCoord_SetQueryCoordClient_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetQueryCoordClient'
+type RootCoord_SetQueryCoordClient_Call struct {
 	*mock.Call
 }
 
-// SetQueryCoord is a helper method to define mock.On call
-//   - queryCoord types.QueryCoord
-func (_e *RootCoord_Expecter) SetQueryCoord(queryCoord interface{}) *RootCoord_SetQueryCoord_Call {
-	return &RootCoord_SetQueryCoord_Call{Call: _e.mock.On("SetQueryCoord", queryCoord)}
+// SetQueryCoordClient is a helper method to define mock.On call
+//   - queryCoord types.QueryCoordClient
+func (_e *RootCoord_Expecter) SetQueryCoordClient(queryCoord interface{}) *RootCoord_SetQueryCoordClient_Call {
+	return &RootCoord_SetQueryCoordClient_Call{Call: _e.mock.On("SetQueryCoordClient", queryCoord)}
 }
 
-func (_c *RootCoord_SetQueryCoord_Call) Run(run func(queryCoord types.QueryCoord)) *RootCoord_SetQueryCoord_Call {
+func (_c *RootCoord_SetQueryCoordClient_Call) Run(run func(queryCoord types.QueryCoordClient)) *RootCoord_SetQueryCoordClient_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(types.QueryCoord))
+		run(args[0].(types.QueryCoordClient))
 	})
 	return _c
 }
 
-func (_c *RootCoord_SetQueryCoord_Call) Return(_a0 error) *RootCoord_SetQueryCoord_Call {
+func (_c *RootCoord_SetQueryCoordClient_Call) Return(_a0 error) *RootCoord_SetQueryCoordClient_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *RootCoord_SetQueryCoord_Call) RunAndReturn(run func(types.QueryCoord) error) *RootCoord_SetQueryCoord_Call {
+func (_c *RootCoord_SetQueryCoordClient_Call) RunAndReturn(run func(types.QueryCoordClient) error) *RootCoord_SetQueryCoordClient_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// ShowCollections provides a mock function with given fields: ctx, req
-func (_m *RootCoord) ShowCollections(ctx context.Context, req *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
-	ret := _m.Called(ctx, req)
+// SetTiKVClient provides a mock function with given fields: client
+func (_m *RootCoord) SetTiKVClient(client *txnkv.Client) {
+	_m.Called(client)
+}
+
+// RootCoord_SetTiKVClient_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetTiKVClient'
+type RootCoord_SetTiKVClient_Call struct {
+	*mock.Call
+}
+
+// SetTiKVClient is a helper method to define mock.On call
+//   - client *txnkv.Client
+func (_e *RootCoord_Expecter) SetTiKVClient(client interface{}) *RootCoord_SetTiKVClient_Call {
+	return &RootCoord_SetTiKVClient_Call{Call: _e.mock.On("SetTiKVClient", client)}
+}
+
+func (_c *RootCoord_SetTiKVClient_Call) Run(run func(client *txnkv.Client)) *RootCoord_SetTiKVClient_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*txnkv.Client))
+	})
+	return _c
+}
+
+func (_c *RootCoord_SetTiKVClient_Call) Return() *RootCoord_SetTiKVClient_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *RootCoord_SetTiKVClient_Call) RunAndReturn(run func(*txnkv.Client)) *RootCoord_SetTiKVClient_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ShowCollections provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) ShowCollections(_a0 context.Context, _a1 *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.ShowCollectionsResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ShowCollectionsRequest) *milvuspb.ShowCollectionsResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.ShowCollectionsResponse)
@@ -2514,7 +2552,7 @@ func (_m *RootCoord) ShowCollections(ctx context.Context, req *milvuspb.ShowColl
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ShowCollectionsRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2528,13 +2566,13 @@ type RootCoord_ShowCollections_Call struct {
 }
 
 // ShowCollections is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.ShowCollectionsRequest
-func (_e *RootCoord_Expecter) ShowCollections(ctx interface{}, req interface{}) *RootCoord_ShowCollections_Call {
-	return &RootCoord_ShowCollections_Call{Call: _e.mock.On("ShowCollections", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ShowCollectionsRequest
+func (_e *RootCoord_Expecter) ShowCollections(_a0 interface{}, _a1 interface{}) *RootCoord_ShowCollections_Call {
+	return &RootCoord_ShowCollections_Call{Call: _e.mock.On("ShowCollections", _a0, _a1)}
 }
 
-func (_c *RootCoord_ShowCollections_Call) Run(run func(ctx context.Context, req *milvuspb.ShowCollectionsRequest)) *RootCoord_ShowCollections_Call {
+func (_c *RootCoord_ShowCollections_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ShowCollectionsRequest)) *RootCoord_ShowCollections_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.ShowCollectionsRequest))
 	})
@@ -2551,17 +2589,17 @@ func (_c *RootCoord_ShowCollections_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
-// ShowConfigurations provides a mock function with given fields: ctx, req
-func (_m *RootCoord) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
-	ret := _m.Called(ctx, req)
+// ShowConfigurations provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) ShowConfigurations(_a0 context.Context, _a1 *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *internalpb.ShowConfigurationsResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ShowConfigurationsRequest) *internalpb.ShowConfigurationsResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*internalpb.ShowConfigurationsResponse)
@@ -2569,7 +2607,7 @@ func (_m *RootCoord) ShowConfigurations(ctx context.Context, req *internalpb.Sho
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.ShowConfigurationsRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2583,13 +2621,13 @@ type RootCoord_ShowConfigurations_Call struct {
 }
 
 // ShowConfigurations is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *internalpb.ShowConfigurationsRequest
-func (_e *RootCoord_Expecter) ShowConfigurations(ctx interface{}, req interface{}) *RootCoord_ShowConfigurations_Call {
-	return &RootCoord_ShowConfigurations_Call{Call: _e.mock.On("ShowConfigurations", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *internalpb.ShowConfigurationsRequest
+func (_e *RootCoord_Expecter) ShowConfigurations(_a0 interface{}, _a1 interface{}) *RootCoord_ShowConfigurations_Call {
+	return &RootCoord_ShowConfigurations_Call{Call: _e.mock.On("ShowConfigurations", _a0, _a1)}
 }
 
-func (_c *RootCoord_ShowConfigurations_Call) Run(run func(ctx context.Context, req *internalpb.ShowConfigurationsRequest)) *RootCoord_ShowConfigurations_Call {
+func (_c *RootCoord_ShowConfigurations_Call) Run(run func(_a0 context.Context, _a1 *internalpb.ShowConfigurationsRequest)) *RootCoord_ShowConfigurations_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*internalpb.ShowConfigurationsRequest))
 	})
@@ -2606,17 +2644,17 @@ func (_c *RootCoord_ShowConfigurations_Call) RunAndReturn(run func(context.Conte
 	return _c
 }
 
-// ShowPartitions provides a mock function with given fields: ctx, req
-func (_m *RootCoord) ShowPartitions(ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
-	ret := _m.Called(ctx, req)
+// ShowPartitions provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) ShowPartitions(_a0 context.Context, _a1 *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.ShowPartitionsResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ShowPartitionsRequest) *milvuspb.ShowPartitionsResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.ShowPartitionsResponse)
@@ -2624,7 +2662,7 @@ func (_m *RootCoord) ShowPartitions(ctx context.Context, req *milvuspb.ShowParti
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ShowPartitionsRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2638,13 +2676,13 @@ type RootCoord_ShowPartitions_Call struct {
 }
 
 // ShowPartitions is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.ShowPartitionsRequest
-func (_e *RootCoord_Expecter) ShowPartitions(ctx interface{}, req interface{}) *RootCoord_ShowPartitions_Call {
-	return &RootCoord_ShowPartitions_Call{Call: _e.mock.On("ShowPartitions", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ShowPartitionsRequest
+func (_e *RootCoord_Expecter) ShowPartitions(_a0 interface{}, _a1 interface{}) *RootCoord_ShowPartitions_Call {
+	return &RootCoord_ShowPartitions_Call{Call: _e.mock.On("ShowPartitions", _a0, _a1)}
 }
 
-func (_c *RootCoord_ShowPartitions_Call) Run(run func(ctx context.Context, req *milvuspb.ShowPartitionsRequest)) *RootCoord_ShowPartitions_Call {
+func (_c *RootCoord_ShowPartitions_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ShowPartitionsRequest)) *RootCoord_ShowPartitions_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.ShowPartitionsRequest))
 	})
@@ -2661,17 +2699,17 @@ func (_c *RootCoord_ShowPartitions_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
-// ShowPartitionsInternal provides a mock function with given fields: ctx, req
-func (_m *RootCoord) ShowPartitionsInternal(ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
-	ret := _m.Called(ctx, req)
+// ShowPartitionsInternal provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) ShowPartitionsInternal(_a0 context.Context, _a1 *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.ShowPartitionsResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ShowPartitionsRequest) *milvuspb.ShowPartitionsResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.ShowPartitionsResponse)
@@ -2679,7 +2717,7 @@ func (_m *RootCoord) ShowPartitionsInternal(ctx context.Context, req *milvuspb.S
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ShowPartitionsRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2693,13 +2731,13 @@ type RootCoord_ShowPartitionsInternal_Call struct {
 }
 
 // ShowPartitionsInternal is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.ShowPartitionsRequest
-func (_e *RootCoord_Expecter) ShowPartitionsInternal(ctx interface{}, req interface{}) *RootCoord_ShowPartitionsInternal_Call {
-	return &RootCoord_ShowPartitionsInternal_Call{Call: _e.mock.On("ShowPartitionsInternal", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ShowPartitionsRequest
+func (_e *RootCoord_Expecter) ShowPartitionsInternal(_a0 interface{}, _a1 interface{}) *RootCoord_ShowPartitionsInternal_Call {
+	return &RootCoord_ShowPartitionsInternal_Call{Call: _e.mock.On("ShowPartitionsInternal", _a0, _a1)}
 }
 
-func (_c *RootCoord_ShowPartitionsInternal_Call) Run(run func(ctx context.Context, req *milvuspb.ShowPartitionsRequest)) *RootCoord_ShowPartitionsInternal_Call {
+func (_c *RootCoord_ShowPartitionsInternal_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ShowPartitionsRequest)) *RootCoord_ShowPartitionsInternal_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.ShowPartitionsRequest))
 	})
@@ -2716,17 +2754,17 @@ func (_c *RootCoord_ShowPartitionsInternal_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
-// ShowSegments provides a mock function with given fields: ctx, req
-func (_m *RootCoord) ShowSegments(ctx context.Context, req *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error) {
-	ret := _m.Called(ctx, req)
+// ShowSegments provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) ShowSegments(_a0 context.Context, _a1 *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.ShowSegmentsResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ShowSegmentsRequest) *milvuspb.ShowSegmentsResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.ShowSegmentsResponse)
@@ -2734,7 +2772,7 @@ func (_m *RootCoord) ShowSegments(ctx context.Context, req *milvuspb.ShowSegment
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ShowSegmentsRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2748,13 +2786,13 @@ type RootCoord_ShowSegments_Call struct {
 }
 
 // ShowSegments is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.ShowSegmentsRequest
-func (_e *RootCoord_Expecter) ShowSegments(ctx interface{}, req interface{}) *RootCoord_ShowSegments_Call {
-	return &RootCoord_ShowSegments_Call{Call: _e.mock.On("ShowSegments", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ShowSegmentsRequest
+func (_e *RootCoord_Expecter) ShowSegments(_a0 interface{}, _a1 interface{}) *RootCoord_ShowSegments_Call {
+	return &RootCoord_ShowSegments_Call{Call: _e.mock.On("ShowSegments", _a0, _a1)}
 }
 
-func (_c *RootCoord_ShowSegments_Call) Run(run func(ctx context.Context, req *milvuspb.ShowSegmentsRequest)) *RootCoord_ShowSegments_Call {
+func (_c *RootCoord_ShowSegments_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ShowSegmentsRequest)) *RootCoord_ShowSegments_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.ShowSegmentsRequest))
 	})
@@ -2853,17 +2891,17 @@ func (_c *RootCoord_Stop_Call) RunAndReturn(run func() error) *RootCoord_Stop_Ca
 	return _c
 }
 
-// UpdateChannelTimeTick provides a mock function with given fields: ctx, req
-func (_m *RootCoord) UpdateChannelTimeTick(ctx context.Context, req *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// UpdateChannelTimeTick provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) UpdateChannelTimeTick(_a0 context.Context, _a1 *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ChannelTimeTickMsg) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -2871,7 +2909,7 @@ func (_m *RootCoord) UpdateChannelTimeTick(ctx context.Context, req *internalpb.
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.ChannelTimeTickMsg) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2885,13 +2923,13 @@ type RootCoord_UpdateChannelTimeTick_Call struct {
 }
 
 // UpdateChannelTimeTick is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *internalpb.ChannelTimeTickMsg
-func (_e *RootCoord_Expecter) UpdateChannelTimeTick(ctx interface{}, req interface{}) *RootCoord_UpdateChannelTimeTick_Call {
-	return &RootCoord_UpdateChannelTimeTick_Call{Call: _e.mock.On("UpdateChannelTimeTick", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *internalpb.ChannelTimeTickMsg
+func (_e *RootCoord_Expecter) UpdateChannelTimeTick(_a0 interface{}, _a1 interface{}) *RootCoord_UpdateChannelTimeTick_Call {
+	return &RootCoord_UpdateChannelTimeTick_Call{Call: _e.mock.On("UpdateChannelTimeTick", _a0, _a1)}
 }
 
-func (_c *RootCoord_UpdateChannelTimeTick_Call) Run(run func(ctx context.Context, req *internalpb.ChannelTimeTickMsg)) *RootCoord_UpdateChannelTimeTick_Call {
+func (_c *RootCoord_UpdateChannelTimeTick_Call) Run(run func(_a0 context.Context, _a1 *internalpb.ChannelTimeTickMsg)) *RootCoord_UpdateChannelTimeTick_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*internalpb.ChannelTimeTickMsg))
 	})
@@ -2908,17 +2946,17 @@ func (_c *RootCoord_UpdateChannelTimeTick_Call) RunAndReturn(run func(context.Co
 	return _c
 }
 
-// UpdateCredential provides a mock function with given fields: ctx, req
-func (_m *RootCoord) UpdateCredential(ctx context.Context, req *internalpb.CredentialInfo) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// UpdateCredential provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) UpdateCredential(_a0 context.Context, _a1 *internalpb.CredentialInfo) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.CredentialInfo) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.CredentialInfo) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -2926,7 +2964,7 @@ func (_m *RootCoord) UpdateCredential(ctx context.Context, req *internalpb.Crede
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.CredentialInfo) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2940,13 +2978,13 @@ type RootCoord_UpdateCredential_Call struct {
 }
 
 // UpdateCredential is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *internalpb.CredentialInfo
-func (_e *RootCoord_Expecter) UpdateCredential(ctx interface{}, req interface{}) *RootCoord_UpdateCredential_Call {
-	return &RootCoord_UpdateCredential_Call{Call: _e.mock.On("UpdateCredential", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *internalpb.CredentialInfo
+func (_e *RootCoord_Expecter) UpdateCredential(_a0 interface{}, _a1 interface{}) *RootCoord_UpdateCredential_Call {
+	return &RootCoord_UpdateCredential_Call{Call: _e.mock.On("UpdateCredential", _a0, _a1)}
 }
 
-func (_c *RootCoord_UpdateCredential_Call) Run(run func(ctx context.Context, req *internalpb.CredentialInfo)) *RootCoord_UpdateCredential_Call {
+func (_c *RootCoord_UpdateCredential_Call) Run(run func(_a0 context.Context, _a1 *internalpb.CredentialInfo)) *RootCoord_UpdateCredential_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*internalpb.CredentialInfo))
 	})

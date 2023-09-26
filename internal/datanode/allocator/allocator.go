@@ -45,7 +45,7 @@ type Impl struct {
 	*gAllocator.IDAllocator
 }
 
-func New(ctx context.Context, rootCoord types.RootCoord, peerID UniqueID) (Allocator, error) {
+func New(ctx context.Context, rootCoord types.RootCoordClient, peerID UniqueID) (Allocator, error) {
 	idAlloc, err := gAllocator.NewIDAllocator(ctx, rootCoord, peerID)
 	if err != nil {
 		return nil, err

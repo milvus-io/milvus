@@ -47,7 +47,7 @@ func TestPrivilegeInterceptor(t *testing.T) {
 
 		ctx = GetContext(context.Background(), "alice:123456")
 		client := &MockRootCoordClientInterface{}
-		queryCoord := &mocks.MockQueryCoord{}
+		queryCoord := &mocks.MockQueryCoordClient{}
 		mgr := newShardClientMgr()
 
 		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
@@ -175,7 +175,7 @@ func TestResourceGroupPrivilege(t *testing.T) {
 
 		ctx = GetContext(context.Background(), "fooo:123456")
 		client := &MockRootCoordClientInterface{}
-		queryCoord := &mocks.MockQueryCoord{}
+		queryCoord := &mocks.MockQueryCoordClient{}
 		mgr := newShardClientMgr()
 
 		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {

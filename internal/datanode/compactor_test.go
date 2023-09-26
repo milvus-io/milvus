@@ -274,7 +274,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 		collectionID := int64(1)
 		meta := NewMetaFactory().GetCollectionMeta(collectionID, "test", schemapb.DataType_Int64)
 
-		rc := &mocks.RootCoord{}
+		rc := &mocks.MockRootCoordClient{}
 		rc.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
 			Return(&milvuspb.DescribeCollectionResponse{
 				Schema: meta.GetSchema(),

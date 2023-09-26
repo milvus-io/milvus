@@ -465,26 +465,26 @@ func TestComponentState(t *testing.T) {
 	paramtable.Init()
 	in := NewIndexNode(ctx, factory)
 	in.SetEtcdClient(getEtcdClient())
-	state, err := in.GetComponentStates(ctx)
+	state, err := in.GetComponentStates(ctx, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, state.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	assert.Equal(t, state.State.StateCode, commonpb.StateCode_Abnormal)
 
 	assert.Nil(t, in.Init())
-	state, err = in.GetComponentStates(ctx)
+	state, err = in.GetComponentStates(ctx, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, state.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	assert.Equal(t, state.State.StateCode, commonpb.StateCode_Initializing)
 
 	assert.Nil(t, in.Start())
-	state, err = in.GetComponentStates(ctx)
+	state, err = in.GetComponentStates(ctx, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, state.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	assert.Equal(t, state.State.StateCode, commonpb.StateCode_Healthy)
 
 	assert.Nil(t, in.Stop())
 	assert.Nil(t, in.Stop())
-	state, err = in.GetComponentStates(ctx)
+	state, err = in.GetComponentStates(ctx, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, state.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	assert.Equal(t, state.State.StateCode, commonpb.StateCode_Abnormal)
@@ -499,7 +499,7 @@ func TestGetTimeTickChannel(t *testing.T) {
 	)
 	paramtable.Init()
 	in := NewIndexNode(ctx, factory)
-	ret, err := in.GetTimeTickChannel(ctx)
+	ret, err := in.GetTimeTickChannel(ctx, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, ret.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 }
@@ -514,7 +514,7 @@ func TestGetStatisticChannel(t *testing.T) {
 	paramtable.Init()
 	in := NewIndexNode(ctx, factory)
 
-	ret, err := in.GetStatisticsChannel(ctx)
+	ret, err := in.GetStatisticsChannel(ctx, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, ret.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 }

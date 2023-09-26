@@ -39,7 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	tikv "github.com/milvus-io/milvus/internal/kv/tikv"
+	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore"
 	kvmetestore "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -113,8 +113,8 @@ type Core struct {
 	idAllocator  allocator.Interface
 	tsoAllocator tso2.Allocator
 
-	dataCoord  types.DataCoord
-	queryCoord types.QueryCoord
+	dataCoord  types.DataCoordClient
+	queryCoord types.QueryCoordClient
 
 	quotaCenter *QuotaCenter
 
@@ -246,11 +246,11 @@ func (c *Core) tsLoop() {
 	}
 }
 
-func (c *Core) SetProxyCreator(f func(ctx context.Context, addr string, nodeID int64) (types.Proxy, error)) {
+func (c *Core) SetProxyCreator(f func(ctx context.Context, addr string, nodeID int64) (types.ProxyClient, error)) {
 	c.proxyCreator = f
 }
 
-func (c *Core) SetDataCoord(s types.DataCoord) error {
+func (c *Core) SetDataCoordClient(s types.DataCoordClient) error {
 	if s == nil {
 		return errors.New("null DataCoord interface")
 	}
@@ -258,7 +258,7 @@ func (c *Core) SetDataCoord(s types.DataCoord) error {
 	return nil
 }
 
-func (c *Core) SetQueryCoord(s types.QueryCoord) error {
+func (c *Core) SetQueryCoordClient(s types.QueryCoordClient) error {
 	if s == nil {
 		return errors.New("null QueryCoord interface")
 	}
@@ -756,7 +756,7 @@ func (c *Core) Stop() error {
 }
 
 // GetComponentStates get states of components
-func (c *Core) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+func (c *Core) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	code := c.stateCode.Load().(commonpb.StateCode)
 
 	nodeID := common.NotRegisteredID
@@ -785,7 +785,7 @@ func (c *Core) GetComponentStates(ctx context.Context) (*milvuspb.ComponentState
 }
 
 // GetTimeTickChannel get timetick channel name
-func (c *Core) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (c *Core) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: merr.Status(nil),
 		Value:  Params.CommonCfg.RootCoordTimeTick.GetValue(),
@@ -793,7 +793,7 @@ func (c *Core) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse
 }
 
 // GetStatisticsChannel get statistics channel name
-func (c *Core) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (c *Core) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: merr.Status(nil),
 		Value:  Params.CommonCfg.RootCoordStatistics.GetValue(),
@@ -2803,7 +2803,7 @@ func (c *Core) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest)
 		nodeID := nodeID
 		proxyClient := proxyClient
 		group.Go(func() error {
-			sta, err := proxyClient.GetComponentStates(ctx)
+			sta, err := proxyClient.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 			isHealthy, reason := errorutil.UnHealthReasonWithComponentStatesOrErr("proxy", nodeID, sta, err)
 			if !isHealthy {
 				mu.Lock()

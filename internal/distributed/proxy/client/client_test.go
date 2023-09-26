@@ -42,12 +42,6 @@ func Test_NewClient(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, client)
 
-	err = client.Start()
-	assert.NoError(t, err)
-
-	err = client.Register()
-	assert.NoError(t, err)
-
 	checkFunc := func(retNotNil bool) {
 		retCheck := func(notNil bool, ret interface{}, err error) {
 			if notNil {
@@ -59,10 +53,10 @@ func Test_NewClient(t *testing.T) {
 			}
 		}
 
-		r1, err := client.GetComponentStates(ctx)
+		r1, err := client.GetComponentStates(ctx, nil)
 		retCheck(retNotNil, r1, err)
 
-		r2, err := client.GetStatisticsChannel(ctx)
+		r2, err := client.GetStatisticsChannel(ctx, nil)
 		retCheck(retNotNil, r2, err)
 
 		r3, err := client.InvalidateCollectionMetaCache(ctx, nil)
@@ -123,10 +117,10 @@ func Test_NewClient(t *testing.T) {
 		assert.Error(t, err)
 	}
 
-	r1Timeout, err := client.GetComponentStates(shortCtx)
+	r1Timeout, err := client.GetComponentStates(shortCtx, nil)
 	retCheck(r1Timeout, err)
 
-	r2Timeout, err := client.GetStatisticsChannel(shortCtx)
+	r2Timeout, err := client.GetStatisticsChannel(shortCtx, nil)
 	retCheck(r2Timeout, err)
 
 	r3Timeout, err := client.InvalidateCollectionMetaCache(shortCtx, nil)
@@ -144,6 +138,6 @@ func Test_NewClient(t *testing.T) {
 	}
 
 	// cleanup
-	err = client.Stop()
+	err = client.Close()
 	assert.NoError(t, err)
 }

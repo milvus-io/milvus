@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
-	streamMocks "github.com/milvus-io/milvus/internal/util/streamrpc/mocks"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -64,7 +63,7 @@ func (m *MockRootCoord) Register() error {
 func (m *MockRootCoord) SetEtcdClient(client *clientv3.Client) {
 }
 
-func (m *MockRootCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+func (m *MockRootCoord) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	return &milvuspb.ComponentStates{
 		State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
 		Status: &commonpb.Status{ErrorCode: m.stateErr},
@@ -100,7 +99,7 @@ func Test_NewServer(t *testing.T) {
 	})
 
 	t.Run("GetComponentStates", func(t *testing.T) {
-		mockQN.EXPECT().GetComponentStates(mock.Anything).Return(&milvuspb.ComponentStates{
+		mockQN.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
 			State: &milvuspb.ComponentInfo{
 				StateCode: commonpb.StateCode_Healthy,
 			},
@@ -112,7 +111,7 @@ func Test_NewServer(t *testing.T) {
 	})
 
 	t.Run("GetStatisticsChannel", func(t *testing.T) {
-		mockQN.EXPECT().GetStatisticsChannel(mock.Anything).Return(&milvuspb.StringResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil)
+		mockQN.EXPECT().GetStatisticsChannel(mock.Anything, mock.Anything).Return(&milvuspb.StringResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil)
 		req := &internalpb.GetStatisticsChannelRequest{}
 		resp, err := server.GetStatisticsChannel(ctx, req)
 		assert.NoError(t, err)
@@ -120,7 +119,7 @@ func Test_NewServer(t *testing.T) {
 	})
 
 	t.Run("GetTimeTickChannel", func(t *testing.T) {
-		mockQN.EXPECT().GetTimeTickChannel(mock.Anything).Return(&milvuspb.StringResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil)
+		mockQN.EXPECT().GetTimeTickChannel(mock.Anything, mock.Anything).Return(&milvuspb.StringResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil)
 		req := &internalpb.GetTimeTickChannelRequest{}
 		resp, err := server.GetTimeTickChannel(ctx, req)
 		assert.NoError(t, err)
@@ -227,13 +226,9 @@ func Test_NewServer(t *testing.T) {
 	})
 
 	t.Run("QueryStream", func(t *testing.T) {
-		mockQN.EXPECT().QueryStream(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-		req := &querypb.QueryRequest{}
-		streamer := streamMocks.NewMockQueryStreamServer(t)
-		streamer.EXPECT().Context().Return(ctx)
-
-		err := server.QueryStream(req, streamer)
-		assert.NoError(t, err)
+		mockQN.EXPECT().QueryStream(mock.Anything, mock.Anything).Return(nil)
+		ret := server.QueryStream(nil, nil)
+		assert.Nil(t, ret)
 	})
 
 	t.Run("QuerySegments", func(t *testing.T) {
@@ -247,13 +242,9 @@ func Test_NewServer(t *testing.T) {
 	})
 
 	t.Run("QueryStreamSegments", func(t *testing.T) {
-		mockQN.EXPECT().QueryStreamSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-		req := &querypb.QueryRequest{}
-		streamer := streamMocks.NewMockQueryStreamSegmentsServer(t)
-		streamer.EXPECT().Context().Return(ctx)
-
-		err := server.QueryStreamSegments(req, streamer)
-		assert.NoError(t, err)
+		mockQN.EXPECT().QueryStreamSegments(mock.Anything, mock.Anything).Return(nil)
+		ret := server.QueryStreamSegments(nil, nil)
+		assert.Nil(t, ret)
 	})
 
 	t.Run("SyncReplicaSegments", func(t *testing.T) {

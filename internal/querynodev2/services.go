@@ -57,7 +57,7 @@ import (
 )
 
 // GetComponentStates returns information about whether the node is healthy
-func (node *QueryNode) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+func (node *QueryNode) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	stats := &milvuspb.ComponentStates{
 		Status: merr.Status(nil),
 	}
@@ -79,7 +79,7 @@ func (node *QueryNode) GetComponentStates(ctx context.Context) (*milvuspb.Compon
 
 // GetTimeTickChannel returns the time tick channel
 // TimeTickChannel contains many time tick messages, which will be sent by query nodes
-func (node *QueryNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (node *QueryNode) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: merr.Status(nil),
 		Value:  paramtable.Get().CommonCfg.QueryCoordTimeTick.GetValue(),
@@ -88,7 +88,7 @@ func (node *QueryNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.String
 
 // GetStatisticsChannel returns the statistics channel
 // Statistics channel contains statistics infos of query nodes, such as segment infos, memory infos
-func (node *QueryNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (node *QueryNode) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: merr.Status(nil),
 	}, nil
@@ -928,62 +928,6 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 	return result, nil
 }
 
-func (node *QueryNode) QueryStreamSegments(ctx context.Context, req *querypb.QueryRequest, streamer streamrpc.QueryStreamer) error {
-	msgID := req.Req.Base.GetMsgID()
-	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID()
-	channel := req.GetDmlChannels()[0]
-	srv := streamer.AsServer()
-
-	log := log.Ctx(ctx).With(
-		zap.Int64("msgID", msgID),
-		zap.Int64("collectionID", req.GetReq().GetCollectionID()),
-		zap.String("channel", channel),
-		zap.String("scope", req.GetScope().String()),
-	)
-
-	resp := &internalpb.RetrieveResults{}
-	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.TotalLabel, metrics.FromLeader).Inc()
-	defer func() {
-		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.FailLabel, metrics.FromLeader).Inc()
-		}
-	}()
-
-	if !node.lifetime.Add(commonpbutil.IsHealthy) {
-		resp.Status = merr.Status(merr.WrapErrServiceUnavailable(fmt.Sprintf("node id: %d is unhealthy", paramtable.GetNodeID())))
-		srv.Send(resp)
-		return nil
-	}
-	defer node.lifetime.Done()
-
-	log.Debug("start do query with channel",
-		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
-		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
-	)
-
-	tr := timerecord.NewTimeRecorder("queryChannel")
-
-	err := node.queryStreamSegments(ctx, req, srv)
-	if err != nil {
-		resp.Status = merr.Status(err)
-		srv.Send(resp)
-		return nil
-	}
-
-	tr.CtxElapse(ctx, fmt.Sprintf("do query done, traceID = %s, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
-		traceID,
-		req.GetFromShardLeader(),
-		channel,
-		req.GetSegmentIDs(),
-	))
-
-	// TODO QueryNodeSQLatencyInQueue QueryNodeReduceLatency
-	latency := tr.ElapseSpan()
-	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
-	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.SuccessLabel, metrics.FromLeader).Inc()
-	return nil
-}
-
 // Query performs replica query tasks.
 func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
 	if req.FromShardLeader {
@@ -1077,13 +1021,13 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 	return ret, nil
 }
 
-// QueryStream
-func (node *QueryNode) QueryStream(ctx context.Context, req *querypb.QueryRequest, streamer streamrpc.QueryStreamer) error {
+func (node *QueryNode) QueryStream(req *querypb.QueryRequest, srv querypb.QueryNode_QueryStreamServer) error {
+	ctx := srv.Context()
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetReq().GetCollectionID()),
 		zap.Strings("shards", req.GetDmlChannels()),
 	)
-	srv := streamer.AsServer()
+	concurrentSrv := streamrpc.NewConcurrentQueryStreamServer(srv)
 
 	log.Debug("received query stream request",
 		zap.Int64s("outputFields", req.GetReq().GetOutputFieldsId()),
@@ -1096,7 +1040,7 @@ func (node *QueryNode) QueryStream(ctx context.Context, req *querypb.QueryReques
 	if !node.lifetime.Add(commonpbutil.IsHealthy) {
 		msg := fmt.Sprintf("query node %d is not ready", paramtable.GetNodeID())
 		err := merr.WrapErrServiceNotReady(msg)
-		srv.Send(&internalpb.RetrieveResults{Status: merr.Status(err)})
+		concurrentSrv.Send(&internalpb.RetrieveResults{Status: merr.Status(err)})
 		return nil
 	}
 	defer node.lifetime.Done()
@@ -1120,7 +1064,7 @@ func (node *QueryNode) QueryStream(ctx context.Context, req *querypb.QueryReques
 		}
 
 		runningGp.Go(func() error {
-			err := node.queryChannelStream(runningCtx, req, ch, srv)
+			err := node.queryChannelStream(runningCtx, req, ch, concurrentSrv)
 			if err != nil {
 				return err
 			}
@@ -1129,7 +1073,7 @@ func (node *QueryNode) QueryStream(ctx context.Context, req *querypb.QueryReques
 	}
 
 	if err := runningGp.Wait(); err != nil {
-		srv.Send(&internalpb.RetrieveResults{
+		concurrentSrv.Send(&internalpb.RetrieveResults{
 			Status: merr.Status(err),
 		})
 		return nil
@@ -1137,6 +1081,63 @@ func (node *QueryNode) QueryStream(ctx context.Context, req *querypb.QueryReques
 
 	collector.Rate.Add(metricsinfo.NQPerSecond, 1)
 	metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel).Add(float64(proto.Size(req)))
+	return nil
+}
+
+func (node *QueryNode) QueryStreamSegments(req *querypb.QueryRequest, srv querypb.QueryNode_QueryStreamSegmentsServer) error {
+	ctx := srv.Context()
+	msgID := req.Req.Base.GetMsgID()
+	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID()
+	channel := req.GetDmlChannels()[0]
+	concurrentSrv := streamrpc.NewConcurrentQueryStreamServer(srv)
+
+	log := log.Ctx(ctx).With(
+		zap.Int64("msgID", msgID),
+		zap.Int64("collectionID", req.GetReq().GetCollectionID()),
+		zap.String("channel", channel),
+		zap.String("scope", req.GetScope().String()),
+	)
+
+	resp := &internalpb.RetrieveResults{}
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.TotalLabel, metrics.FromLeader).Inc()
+	defer func() {
+		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.FailLabel, metrics.FromLeader).Inc()
+		}
+	}()
+
+	if !node.lifetime.Add(commonpbutil.IsHealthy) {
+		resp.Status = merr.Status(merr.WrapErrServiceUnavailable(fmt.Sprintf("node id: %d is unhealthy", paramtable.GetNodeID())))
+		concurrentSrv.Send(resp)
+		return nil
+	}
+	defer node.lifetime.Done()
+
+	log.Debug("start do query with channel",
+		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
+		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
+	)
+
+	tr := timerecord.NewTimeRecorder("queryChannel")
+
+	err := node.queryStreamSegments(ctx, req, concurrentSrv)
+	if err != nil {
+		resp.Status = merr.Status(err)
+		concurrentSrv.Send(resp)
+		return nil
+	}
+
+	tr.CtxElapse(ctx, fmt.Sprintf("do query done, traceID = %s, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
+		traceID,
+		req.GetFromShardLeader(),
+		channel,
+		req.GetSegmentIDs(),
+	))
+
+	// TODO QueryNodeSQLatencyInQueue QueryNodeReduceLatency
+	latency := tr.ElapseSpan()
+	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.SuccessLabel, metrics.FromLeader).Inc()
 	return nil
 }
 

@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -941,11 +942,11 @@ func TestInsertBufferNodeSuite(t *testing.T) {
 
 // CompactedRootCoord has meta info compacted at ts
 type CompactedRootCoord struct {
-	types.RootCoord
+	types.RootCoordClient
 	compactTs Timestamp
 }
 
-func (m *CompactedRootCoord) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+func (m *CompactedRootCoord) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
 	if in.TimeStamp != 0 && in.GetTimeStamp() <= m.compactTs {
 		return &milvuspb.DescribeCollectionResponse{
 			Status: &commonpb.Status{
@@ -954,7 +955,7 @@ func (m *CompactedRootCoord) DescribeCollection(ctx context.Context, in *milvusp
 			},
 		}, nil
 	}
-	return m.RootCoord.DescribeCollection(ctx, in)
+	return m.RootCoordClient.DescribeCollection(ctx, in)
 }
 
 func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
@@ -986,8 +987,8 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 			pkType: test.pkType,
 		}
 		mockRootCoord := &CompactedRootCoord{
-			RootCoord: rcf,
-			compactTs: 100,
+			RootCoordClient: rcf,
+			compactTs:       100,
 		}
 
 		channel := newChannel(insertChannelName, collMeta.ID, collMeta.Schema, mockRootCoord, cm)

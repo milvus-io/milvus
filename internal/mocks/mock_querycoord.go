@@ -34,17 +34,17 @@ func (_m *MockQueryCoord) EXPECT() *MockQueryCoord_Expecter {
 	return &MockQueryCoord_Expecter{mock: &_m.Mock}
 }
 
-// CheckHealth provides a mock function with given fields: ctx, req
-func (_m *MockQueryCoord) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
-	ret := _m.Called(ctx, req)
+// CheckHealth provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) CheckHealth(_a0 context.Context, _a1 *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.CheckHealthResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CheckHealthRequest) *milvuspb.CheckHealthResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.CheckHealthResponse)
@@ -52,7 +52,7 @@ func (_m *MockQueryCoord) CheckHealth(ctx context.Context, req *milvuspb.CheckHe
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CheckHealthRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -66,13 +66,13 @@ type MockQueryCoord_CheckHealth_Call struct {
 }
 
 // CheckHealth is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.CheckHealthRequest
-func (_e *MockQueryCoord_Expecter) CheckHealth(ctx interface{}, req interface{}) *MockQueryCoord_CheckHealth_Call {
-	return &MockQueryCoord_CheckHealth_Call{Call: _e.mock.On("CheckHealth", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.CheckHealthRequest
+func (_e *MockQueryCoord_Expecter) CheckHealth(_a0 interface{}, _a1 interface{}) *MockQueryCoord_CheckHealth_Call {
+	return &MockQueryCoord_CheckHealth_Call{Call: _e.mock.On("CheckHealth", _a0, _a1)}
 }
 
-func (_c *MockQueryCoord_CheckHealth_Call) Run(run func(ctx context.Context, req *milvuspb.CheckHealthRequest)) *MockQueryCoord_CheckHealth_Call {
+func (_c *MockQueryCoord_CheckHealth_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.CheckHealthRequest)) *MockQueryCoord_CheckHealth_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.CheckHealthRequest))
 	})
@@ -89,17 +89,17 @@ func (_c *MockQueryCoord_CheckHealth_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
-// CreateResourceGroup provides a mock function with given fields: ctx, req
-func (_m *MockQueryCoord) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// CreateResourceGroup provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) CreateResourceGroup(_a0 context.Context, _a1 *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateResourceGroupRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -107,7 +107,7 @@ func (_m *MockQueryCoord) CreateResourceGroup(ctx context.Context, req *milvuspb
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CreateResourceGroupRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -121,13 +121,13 @@ type MockQueryCoord_CreateResourceGroup_Call struct {
 }
 
 // CreateResourceGroup is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.CreateResourceGroupRequest
-func (_e *MockQueryCoord_Expecter) CreateResourceGroup(ctx interface{}, req interface{}) *MockQueryCoord_CreateResourceGroup_Call {
-	return &MockQueryCoord_CreateResourceGroup_Call{Call: _e.mock.On("CreateResourceGroup", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.CreateResourceGroupRequest
+func (_e *MockQueryCoord_Expecter) CreateResourceGroup(_a0 interface{}, _a1 interface{}) *MockQueryCoord_CreateResourceGroup_Call {
+	return &MockQueryCoord_CreateResourceGroup_Call{Call: _e.mock.On("CreateResourceGroup", _a0, _a1)}
 }
 
-func (_c *MockQueryCoord_CreateResourceGroup_Call) Run(run func(ctx context.Context, req *milvuspb.CreateResourceGroupRequest)) *MockQueryCoord_CreateResourceGroup_Call {
+func (_c *MockQueryCoord_CreateResourceGroup_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.CreateResourceGroupRequest)) *MockQueryCoord_CreateResourceGroup_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.CreateResourceGroupRequest))
 	})
@@ -144,17 +144,17 @@ func (_c *MockQueryCoord_CreateResourceGroup_Call) RunAndReturn(run func(context
 	return _c
 }
 
-// DescribeResourceGroup provides a mock function with given fields: ctx, req
-func (_m *MockQueryCoord) DescribeResourceGroup(ctx context.Context, req *querypb.DescribeResourceGroupRequest) (*querypb.DescribeResourceGroupResponse, error) {
-	ret := _m.Called(ctx, req)
+// DescribeResourceGroup provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) DescribeResourceGroup(_a0 context.Context, _a1 *querypb.DescribeResourceGroupRequest) (*querypb.DescribeResourceGroupResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *querypb.DescribeResourceGroupResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *querypb.DescribeResourceGroupRequest) (*querypb.DescribeResourceGroupResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *querypb.DescribeResourceGroupRequest) *querypb.DescribeResourceGroupResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*querypb.DescribeResourceGroupResponse)
@@ -162,7 +162,7 @@ func (_m *MockQueryCoord) DescribeResourceGroup(ctx context.Context, req *queryp
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *querypb.DescribeResourceGroupRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -176,13 +176,13 @@ type MockQueryCoord_DescribeResourceGroup_Call struct {
 }
 
 // DescribeResourceGroup is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *querypb.DescribeResourceGroupRequest
-func (_e *MockQueryCoord_Expecter) DescribeResourceGroup(ctx interface{}, req interface{}) *MockQueryCoord_DescribeResourceGroup_Call {
-	return &MockQueryCoord_DescribeResourceGroup_Call{Call: _e.mock.On("DescribeResourceGroup", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *querypb.DescribeResourceGroupRequest
+func (_e *MockQueryCoord_Expecter) DescribeResourceGroup(_a0 interface{}, _a1 interface{}) *MockQueryCoord_DescribeResourceGroup_Call {
+	return &MockQueryCoord_DescribeResourceGroup_Call{Call: _e.mock.On("DescribeResourceGroup", _a0, _a1)}
 }
 
-func (_c *MockQueryCoord_DescribeResourceGroup_Call) Run(run func(ctx context.Context, req *querypb.DescribeResourceGroupRequest)) *MockQueryCoord_DescribeResourceGroup_Call {
+func (_c *MockQueryCoord_DescribeResourceGroup_Call) Run(run func(_a0 context.Context, _a1 *querypb.DescribeResourceGroupRequest)) *MockQueryCoord_DescribeResourceGroup_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*querypb.DescribeResourceGroupRequest))
 	})
@@ -199,17 +199,17 @@ func (_c *MockQueryCoord_DescribeResourceGroup_Call) RunAndReturn(run func(conte
 	return _c
 }
 
-// DropResourceGroup provides a mock function with given fields: ctx, req
-func (_m *MockQueryCoord) DropResourceGroup(ctx context.Context, req *milvuspb.DropResourceGroupRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// DropResourceGroup provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) DropResourceGroup(_a0 context.Context, _a1 *milvuspb.DropResourceGroupRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropResourceGroupRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropResourceGroupRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -217,7 +217,7 @@ func (_m *MockQueryCoord) DropResourceGroup(ctx context.Context, req *milvuspb.D
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DropResourceGroupRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -231,13 +231,13 @@ type MockQueryCoord_DropResourceGroup_Call struct {
 }
 
 // DropResourceGroup is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.DropResourceGroupRequest
-func (_e *MockQueryCoord_Expecter) DropResourceGroup(ctx interface{}, req interface{}) *MockQueryCoord_DropResourceGroup_Call {
-	return &MockQueryCoord_DropResourceGroup_Call{Call: _e.mock.On("DropResourceGroup", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DropResourceGroupRequest
+func (_e *MockQueryCoord_Expecter) DropResourceGroup(_a0 interface{}, _a1 interface{}) *MockQueryCoord_DropResourceGroup_Call {
+	return &MockQueryCoord_DropResourceGroup_Call{Call: _e.mock.On("DropResourceGroup", _a0, _a1)}
 }
 
-func (_c *MockQueryCoord_DropResourceGroup_Call) Run(run func(ctx context.Context, req *milvuspb.DropResourceGroupRequest)) *MockQueryCoord_DropResourceGroup_Call {
+func (_c *MockQueryCoord_DropResourceGroup_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DropResourceGroupRequest)) *MockQueryCoord_DropResourceGroup_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.DropResourceGroupRequest))
 	})
@@ -254,25 +254,25 @@ func (_c *MockQueryCoord_DropResourceGroup_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
-// GetComponentStates provides a mock function with given fields: ctx
-func (_m *MockQueryCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
-	ret := _m.Called(ctx)
+// GetComponentStates provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) GetComponentStates(_a0 context.Context, _a1 *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.ComponentStates
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) (*milvuspb.ComponentStates, error)); ok {
-		return rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error)); ok {
+		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context) *milvuspb.ComponentStates); ok {
-		r0 = rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetComponentStatesRequest) *milvuspb.ComponentStates); ok {
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.ComponentStates)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = rf(ctx)
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetComponentStatesRequest) error); ok {
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -286,14 +286,15 @@ type MockQueryCoord_GetComponentStates_Call struct {
 }
 
 // GetComponentStates is a helper method to define mock.On call
-//   - ctx context.Context
-func (_e *MockQueryCoord_Expecter) GetComponentStates(ctx interface{}) *MockQueryCoord_GetComponentStates_Call {
-	return &MockQueryCoord_GetComponentStates_Call{Call: _e.mock.On("GetComponentStates", ctx)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetComponentStatesRequest
+func (_e *MockQueryCoord_Expecter) GetComponentStates(_a0 interface{}, _a1 interface{}) *MockQueryCoord_GetComponentStates_Call {
+	return &MockQueryCoord_GetComponentStates_Call{Call: _e.mock.On("GetComponentStates", _a0, _a1)}
 }
 
-func (_c *MockQueryCoord_GetComponentStates_Call) Run(run func(ctx context.Context)) *MockQueryCoord_GetComponentStates_Call {
+func (_c *MockQueryCoord_GetComponentStates_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetComponentStatesRequest)) *MockQueryCoord_GetComponentStates_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
+		run(args[0].(context.Context), args[1].(*milvuspb.GetComponentStatesRequest))
 	})
 	return _c
 }
@@ -303,22 +304,22 @@ func (_c *MockQueryCoord_GetComponentStates_Call) Return(_a0 *milvuspb.Component
 	return _c
 }
 
-func (_c *MockQueryCoord_GetComponentStates_Call) RunAndReturn(run func(context.Context) (*milvuspb.ComponentStates, error)) *MockQueryCoord_GetComponentStates_Call {
+func (_c *MockQueryCoord_GetComponentStates_Call) RunAndReturn(run func(context.Context, *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error)) *MockQueryCoord_GetComponentStates_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// GetMetrics provides a mock function with given fields: ctx, req
-func (_m *MockQueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	ret := _m.Called(ctx, req)
+// GetMetrics provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) GetMetrics(_a0 context.Context, _a1 *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.GetMetricsResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetMetricsRequest) *milvuspb.GetMetricsResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.GetMetricsResponse)
@@ -326,7 +327,7 @@ func (_m *MockQueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetri
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetMetricsRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -340,13 +341,13 @@ type MockQueryCoord_GetMetrics_Call struct {
 }
 
 // GetMetrics is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.GetMetricsRequest
-func (_e *MockQueryCoord_Expecter) GetMetrics(ctx interface{}, req interface{}) *MockQueryCoord_GetMetrics_Call {
-	return &MockQueryCoord_GetMetrics_Call{Call: _e.mock.On("GetMetrics", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetMetricsRequest
+func (_e *MockQueryCoord_Expecter) GetMetrics(_a0 interface{}, _a1 interface{}) *MockQueryCoord_GetMetrics_Call {
+	return &MockQueryCoord_GetMetrics_Call{Call: _e.mock.On("GetMetrics", _a0, _a1)}
 }
 
-func (_c *MockQueryCoord_GetMetrics_Call) Run(run func(ctx context.Context, req *milvuspb.GetMetricsRequest)) *MockQueryCoord_GetMetrics_Call {
+func (_c *MockQueryCoord_GetMetrics_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetMetricsRequest)) *MockQueryCoord_GetMetrics_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.GetMetricsRequest))
 	})
@@ -363,17 +364,17 @@ func (_c *MockQueryCoord_GetMetrics_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
-// GetPartitionStates provides a mock function with given fields: ctx, req
-func (_m *MockQueryCoord) GetPartitionStates(ctx context.Context, req *querypb.GetPartitionStatesRequest) (*querypb.GetPartitionStatesResponse, error) {
-	ret := _m.Called(ctx, req)
+// GetPartitionStates provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) GetPartitionStates(_a0 context.Context, _a1 *querypb.GetPartitionStatesRequest) (*querypb.GetPartitionStatesResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *querypb.GetPartitionStatesResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *querypb.GetPartitionStatesRequest) (*querypb.GetPartitionStatesResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *querypb.GetPartitionStatesRequest) *querypb.GetPartitionStatesResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*querypb.GetPartitionStatesResponse)
@@ -381,7 +382,7 @@ func (_m *MockQueryCoord) GetPartitionStates(ctx context.Context, req *querypb.G
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *querypb.GetPartitionStatesRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -395,13 +396,13 @@ type MockQueryCoord_GetPartitionStates_Call struct {
 }
 
 // GetPartitionStates is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *querypb.GetPartitionStatesRequest
-func (_e *MockQueryCoord_Expecter) GetPartitionStates(ctx interface{}, req interface{}) *MockQueryCoord_GetPartitionStates_Call {
-	return &MockQueryCoord_GetPartitionStates_Call{Call: _e.mock.On("GetPartitionStates", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *querypb.GetPartitionStatesRequest
+func (_e *MockQueryCoord_Expecter) GetPartitionStates(_a0 interface{}, _a1 interface{}) *MockQueryCoord_GetPartitionStates_Call {
+	return &MockQueryCoord_GetPartitionStates_Call{Call: _e.mock.On("GetPartitionStates", _a0, _a1)}
 }
 
-func (_c *MockQueryCoord_GetPartitionStates_Call) Run(run func(ctx context.Context, req *querypb.GetPartitionStatesRequest)) *MockQueryCoord_GetPartitionStates_Call {
+func (_c *MockQueryCoord_GetPartitionStates_Call) Run(run func(_a0 context.Context, _a1 *querypb.GetPartitionStatesRequest)) *MockQueryCoord_GetPartitionStates_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*querypb.GetPartitionStatesRequest))
 	})
@@ -418,17 +419,17 @@ func (_c *MockQueryCoord_GetPartitionStates_Call) RunAndReturn(run func(context.
 	return _c
 }
 
-// GetReplicas provides a mock function with given fields: ctx, req
-func (_m *MockQueryCoord) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
-	ret := _m.Called(ctx, req)
+// GetReplicas provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) GetReplicas(_a0 context.Context, _a1 *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.GetReplicasResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetReplicasRequest) *milvuspb.GetReplicasResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.GetReplicasResponse)
@@ -436,7 +437,7 @@ func (_m *MockQueryCoord) GetReplicas(ctx context.Context, req *milvuspb.GetRepl
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetReplicasRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -450,13 +451,13 @@ type MockQueryCoord_GetReplicas_Call struct {
 }
 
 // GetReplicas is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.GetReplicasRequest
-func (_e *MockQueryCoord_Expecter) GetReplicas(ctx interface{}, req interface{}) *MockQueryCoord_GetReplicas_Call {
-	return &MockQueryCoord_GetReplicas_Call{Call: _e.mock.On("GetReplicas", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetReplicasRequest
+func (_e *MockQueryCoord_Expecter) GetReplicas(_a0 interface{}, _a1 interface{}) *MockQueryCoord_GetReplicas_Call {
+	return &MockQueryCoord_GetReplicas_Call{Call: _e.mock.On("GetReplicas", _a0, _a1)}
 }
 
-func (_c *MockQueryCoord_GetReplicas_Call) Run(run func(ctx context.Context, req *milvuspb.GetReplicasRequest)) *MockQueryCoord_GetReplicas_Call {
+func (_c *MockQueryCoord_GetReplicas_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetReplicasRequest)) *MockQueryCoord_GetReplicas_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.GetReplicasRequest))
 	})
@@ -473,17 +474,17 @@ func (_c *MockQueryCoord_GetReplicas_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
-// GetSegmentInfo provides a mock function with given fields: ctx, req
-func (_m *MockQueryCoord) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
-	ret := _m.Called(ctx, req)
+// GetSegmentInfo provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) GetSegmentInfo(_a0 context.Context, _a1 *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *querypb.GetSegmentInfoResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *querypb.GetSegmentInfoRequest) *querypb.GetSegmentInfoResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*querypb.GetSegmentInfoResponse)
@@ -491,7 +492,7 @@ func (_m *MockQueryCoord) GetSegmentInfo(ctx context.Context, req *querypb.GetSe
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *querypb.GetSegmentInfoRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -505,13 +506,13 @@ type MockQueryCoord_GetSegmentInfo_Call struct {
 }
 
 // GetSegmentInfo is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *querypb.GetSegmentInfoRequest
-func (_e *MockQueryCoord_Expecter) GetSegmentInfo(ctx interface{}, req interface{}) *MockQueryCoord_GetSegmentInfo_Call {
-	return &MockQueryCoord_GetSegmentInfo_Call{Call: _e.mock.On("GetSegmentInfo", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *querypb.GetSegmentInfoRequest
+func (_e *MockQueryCoord_Expecter) GetSegmentInfo(_a0 interface{}, _a1 interface{}) *MockQueryCoord_GetSegmentInfo_Call {
+	return &MockQueryCoord_GetSegmentInfo_Call{Call: _e.mock.On("GetSegmentInfo", _a0, _a1)}
 }
 
-func (_c *MockQueryCoord_GetSegmentInfo_Call) Run(run func(ctx context.Context, req *querypb.GetSegmentInfoRequest)) *MockQueryCoord_GetSegmentInfo_Call {
+func (_c *MockQueryCoord_GetSegmentInfo_Call) Run(run func(_a0 context.Context, _a1 *querypb.GetSegmentInfoRequest)) *MockQueryCoord_GetSegmentInfo_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*querypb.GetSegmentInfoRequest))
 	})
@@ -528,17 +529,17 @@ func (_c *MockQueryCoord_GetSegmentInfo_Call) RunAndReturn(run func(context.Cont
 	return _c
 }
 
-// GetShardLeaders provides a mock function with given fields: ctx, req
-func (_m *MockQueryCoord) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error) {
-	ret := _m.Called(ctx, req)
+// GetShardLeaders provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) GetShardLeaders(_a0 context.Context, _a1 *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *querypb.GetShardLeadersResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *querypb.GetShardLeadersRequest) *querypb.GetShardLeadersResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*querypb.GetShardLeadersResponse)
@@ -546,7 +547,7 @@ func (_m *MockQueryCoord) GetShardLeaders(ctx context.Context, req *querypb.GetS
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *querypb.GetShardLeadersRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -560,13 +561,13 @@ type MockQueryCoord_GetShardLeaders_Call struct {
 }
 
 // GetShardLeaders is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *querypb.GetShardLeadersRequest
-func (_e *MockQueryCoord_Expecter) GetShardLeaders(ctx interface{}, req interface{}) *MockQueryCoord_GetShardLeaders_Call {
-	return &MockQueryCoord_GetShardLeaders_Call{Call: _e.mock.On("GetShardLeaders", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *querypb.GetShardLeadersRequest
+func (_e *MockQueryCoord_Expecter) GetShardLeaders(_a0 interface{}, _a1 interface{}) *MockQueryCoord_GetShardLeaders_Call {
+	return &MockQueryCoord_GetShardLeaders_Call{Call: _e.mock.On("GetShardLeaders", _a0, _a1)}
 }
 
-func (_c *MockQueryCoord_GetShardLeaders_Call) Run(run func(ctx context.Context, req *querypb.GetShardLeadersRequest)) *MockQueryCoord_GetShardLeaders_Call {
+func (_c *MockQueryCoord_GetShardLeaders_Call) Run(run func(_a0 context.Context, _a1 *querypb.GetShardLeadersRequest)) *MockQueryCoord_GetShardLeaders_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*querypb.GetShardLeadersRequest))
 	})
@@ -583,25 +584,25 @@ func (_c *MockQueryCoord_GetShardLeaders_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
-// GetStatisticsChannel provides a mock function with given fields: ctx
-func (_m *MockQueryCoord) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	ret := _m.Called(ctx)
+// GetStatisticsChannel provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) GetStatisticsChannel(_a0 context.Context, _a1 *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.StringResponse
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) (*milvuspb.StringResponse, error)); ok {
-		return rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error)); ok {
+		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context) *milvuspb.StringResponse); ok {
-		r0 = rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetStatisticsChannelRequest) *milvuspb.StringResponse); ok {
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.StringResponse)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = rf(ctx)
+	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.GetStatisticsChannelRequest) error); ok {
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -615,14 +616,15 @@ type MockQueryCoord_GetStatisticsChannel_Call struct {
 }
 
 // GetStatisticsChannel is a helper method to define mock.On call
-//   - ctx context.Context
-func (_e *MockQueryCoord_Expecter) GetStatisticsChannel(ctx interface{}) *MockQueryCoord_GetStatisticsChannel_Call {
-	return &MockQueryCoord_GetStatisticsChannel_Call{Call: _e.mock.On("GetStatisticsChannel", ctx)}
+//   - _a0 context.Context
+//   - _a1 *internalpb.GetStatisticsChannelRequest
+func (_e *MockQueryCoord_Expecter) GetStatisticsChannel(_a0 interface{}, _a1 interface{}) *MockQueryCoord_GetStatisticsChannel_Call {
+	return &MockQueryCoord_GetStatisticsChannel_Call{Call: _e.mock.On("GetStatisticsChannel", _a0, _a1)}
 }
 
-func (_c *MockQueryCoord_GetStatisticsChannel_Call) Run(run func(ctx context.Context)) *MockQueryCoord_GetStatisticsChannel_Call {
+func (_c *MockQueryCoord_GetStatisticsChannel_Call) Run(run func(_a0 context.Context, _a1 *internalpb.GetStatisticsChannelRequest)) *MockQueryCoord_GetStatisticsChannel_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
+		run(args[0].(context.Context), args[1].(*internalpb.GetStatisticsChannelRequest))
 	})
 	return _c
 }
@@ -632,30 +634,30 @@ func (_c *MockQueryCoord_GetStatisticsChannel_Call) Return(_a0 *milvuspb.StringR
 	return _c
 }
 
-func (_c *MockQueryCoord_GetStatisticsChannel_Call) RunAndReturn(run func(context.Context) (*milvuspb.StringResponse, error)) *MockQueryCoord_GetStatisticsChannel_Call {
+func (_c *MockQueryCoord_GetStatisticsChannel_Call) RunAndReturn(run func(context.Context, *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error)) *MockQueryCoord_GetStatisticsChannel_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// GetTimeTickChannel provides a mock function with given fields: ctx
-func (_m *MockQueryCoord) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	ret := _m.Called(ctx)
+// GetTimeTickChannel provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) GetTimeTickChannel(_a0 context.Context, _a1 *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.StringResponse
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) (*milvuspb.StringResponse, error)); ok {
-		return rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error)); ok {
+		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context) *milvuspb.StringResponse); ok {
-		r0 = rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetTimeTickChannelRequest) *milvuspb.StringResponse); ok {
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.StringResponse)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = rf(ctx)
+	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.GetTimeTickChannelRequest) error); ok {
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -669,14 +671,15 @@ type MockQueryCoord_GetTimeTickChannel_Call struct {
 }
 
 // GetTimeTickChannel is a helper method to define mock.On call
-//   - ctx context.Context
-func (_e *MockQueryCoord_Expecter) GetTimeTickChannel(ctx interface{}) *MockQueryCoord_GetTimeTickChannel_Call {
-	return &MockQueryCoord_GetTimeTickChannel_Call{Call: _e.mock.On("GetTimeTickChannel", ctx)}
+//   - _a0 context.Context
+//   - _a1 *internalpb.GetTimeTickChannelRequest
+func (_e *MockQueryCoord_Expecter) GetTimeTickChannel(_a0 interface{}, _a1 interface{}) *MockQueryCoord_GetTimeTickChannel_Call {
+	return &MockQueryCoord_GetTimeTickChannel_Call{Call: _e.mock.On("GetTimeTickChannel", _a0, _a1)}
 }
 
-func (_c *MockQueryCoord_GetTimeTickChannel_Call) Run(run func(ctx context.Context)) *MockQueryCoord_GetTimeTickChannel_Call {
+func (_c *MockQueryCoord_GetTimeTickChannel_Call) Run(run func(_a0 context.Context, _a1 *internalpb.GetTimeTickChannelRequest)) *MockQueryCoord_GetTimeTickChannel_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
+		run(args[0].(context.Context), args[1].(*internalpb.GetTimeTickChannelRequest))
 	})
 	return _c
 }
@@ -686,7 +689,7 @@ func (_c *MockQueryCoord_GetTimeTickChannel_Call) Return(_a0 *milvuspb.StringRes
 	return _c
 }
 
-func (_c *MockQueryCoord_GetTimeTickChannel_Call) RunAndReturn(run func(context.Context) (*milvuspb.StringResponse, error)) *MockQueryCoord_GetTimeTickChannel_Call {
+func (_c *MockQueryCoord_GetTimeTickChannel_Call) RunAndReturn(run func(context.Context, *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error)) *MockQueryCoord_GetTimeTickChannel_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -732,17 +735,17 @@ func (_c *MockQueryCoord_Init_Call) RunAndReturn(run func() error) *MockQueryCoo
 	return _c
 }
 
-// ListResourceGroups provides a mock function with given fields: ctx, req
-func (_m *MockQueryCoord) ListResourceGroups(ctx context.Context, req *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error) {
-	ret := _m.Called(ctx, req)
+// ListResourceGroups provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) ListResourceGroups(_a0 context.Context, _a1 *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.ListResourceGroupsResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListResourceGroupsRequest) *milvuspb.ListResourceGroupsResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.ListResourceGroupsResponse)
@@ -750,7 +753,7 @@ func (_m *MockQueryCoord) ListResourceGroups(ctx context.Context, req *milvuspb.
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListResourceGroupsRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -764,13 +767,13 @@ type MockQueryCoord_ListResourceGroups_Call struct {
 }
 
 // ListResourceGroups is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.ListResourceGroupsRequest
-func (_e *MockQueryCoord_Expecter) ListResourceGroups(ctx interface{}, req interface{}) *MockQueryCoord_ListResourceGroups_Call {
-	return &MockQueryCoord_ListResourceGroups_Call{Call: _e.mock.On("ListResourceGroups", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ListResourceGroupsRequest
+func (_e *MockQueryCoord_Expecter) ListResourceGroups(_a0 interface{}, _a1 interface{}) *MockQueryCoord_ListResourceGroups_Call {
+	return &MockQueryCoord_ListResourceGroups_Call{Call: _e.mock.On("ListResourceGroups", _a0, _a1)}
 }
 
-func (_c *MockQueryCoord_ListResourceGroups_Call) Run(run func(ctx context.Context, req *milvuspb.ListResourceGroupsRequest)) *MockQueryCoord_ListResourceGroups_Call {
+func (_c *MockQueryCoord_ListResourceGroups_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ListResourceGroupsRequest)) *MockQueryCoord_ListResourceGroups_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.ListResourceGroupsRequest))
 	})
@@ -787,17 +790,17 @@ func (_c *MockQueryCoord_ListResourceGroups_Call) RunAndReturn(run func(context.
 	return _c
 }
 
-// LoadBalance provides a mock function with given fields: ctx, req
-func (_m *MockQueryCoord) LoadBalance(ctx context.Context, req *querypb.LoadBalanceRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// LoadBalance provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) LoadBalance(_a0 context.Context, _a1 *querypb.LoadBalanceRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *querypb.LoadBalanceRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *querypb.LoadBalanceRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -805,7 +808,7 @@ func (_m *MockQueryCoord) LoadBalance(ctx context.Context, req *querypb.LoadBala
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *querypb.LoadBalanceRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -819,13 +822,13 @@ type MockQueryCoord_LoadBalance_Call struct {
 }
 
 // LoadBalance is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *querypb.LoadBalanceRequest
-func (_e *MockQueryCoord_Expecter) LoadBalance(ctx interface{}, req interface{}) *MockQueryCoord_LoadBalance_Call {
-	return &MockQueryCoord_LoadBalance_Call{Call: _e.mock.On("LoadBalance", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *querypb.LoadBalanceRequest
+func (_e *MockQueryCoord_Expecter) LoadBalance(_a0 interface{}, _a1 interface{}) *MockQueryCoord_LoadBalance_Call {
+	return &MockQueryCoord_LoadBalance_Call{Call: _e.mock.On("LoadBalance", _a0, _a1)}
 }
 
-func (_c *MockQueryCoord_LoadBalance_Call) Run(run func(ctx context.Context, req *querypb.LoadBalanceRequest)) *MockQueryCoord_LoadBalance_Call {
+func (_c *MockQueryCoord_LoadBalance_Call) Run(run func(_a0 context.Context, _a1 *querypb.LoadBalanceRequest)) *MockQueryCoord_LoadBalance_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*querypb.LoadBalanceRequest))
 	})
@@ -842,17 +845,17 @@ func (_c *MockQueryCoord_LoadBalance_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
-// LoadCollection provides a mock function with given fields: ctx, req
-func (_m *MockQueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// LoadCollection provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) LoadCollection(_a0 context.Context, _a1 *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *querypb.LoadCollectionRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *querypb.LoadCollectionRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -860,7 +863,7 @@ func (_m *MockQueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadC
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *querypb.LoadCollectionRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -874,13 +877,13 @@ type MockQueryCoord_LoadCollection_Call struct {
 }
 
 // LoadCollection is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *querypb.LoadCollectionRequest
-func (_e *MockQueryCoord_Expecter) LoadCollection(ctx interface{}, req interface{}) *MockQueryCoord_LoadCollection_Call {
-	return &MockQueryCoord_LoadCollection_Call{Call: _e.mock.On("LoadCollection", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *querypb.LoadCollectionRequest
+func (_e *MockQueryCoord_Expecter) LoadCollection(_a0 interface{}, _a1 interface{}) *MockQueryCoord_LoadCollection_Call {
+	return &MockQueryCoord_LoadCollection_Call{Call: _e.mock.On("LoadCollection", _a0, _a1)}
 }
 
-func (_c *MockQueryCoord_LoadCollection_Call) Run(run func(ctx context.Context, req *querypb.LoadCollectionRequest)) *MockQueryCoord_LoadCollection_Call {
+func (_c *MockQueryCoord_LoadCollection_Call) Run(run func(_a0 context.Context, _a1 *querypb.LoadCollectionRequest)) *MockQueryCoord_LoadCollection_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*querypb.LoadCollectionRequest))
 	})
@@ -897,17 +900,17 @@ func (_c *MockQueryCoord_LoadCollection_Call) RunAndReturn(run func(context.Cont
 	return _c
 }
 
-// LoadPartitions provides a mock function with given fields: ctx, req
-func (_m *MockQueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// LoadPartitions provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) LoadPartitions(_a0 context.Context, _a1 *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *querypb.LoadPartitionsRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *querypb.LoadPartitionsRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -915,7 +918,7 @@ func (_m *MockQueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadP
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *querypb.LoadPartitionsRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -929,13 +932,13 @@ type MockQueryCoord_LoadPartitions_Call struct {
 }
 
 // LoadPartitions is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *querypb.LoadPartitionsRequest
-func (_e *MockQueryCoord_Expecter) LoadPartitions(ctx interface{}, req interface{}) *MockQueryCoord_LoadPartitions_Call {
-	return &MockQueryCoord_LoadPartitions_Call{Call: _e.mock.On("LoadPartitions", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *querypb.LoadPartitionsRequest
+func (_e *MockQueryCoord_Expecter) LoadPartitions(_a0 interface{}, _a1 interface{}) *MockQueryCoord_LoadPartitions_Call {
+	return &MockQueryCoord_LoadPartitions_Call{Call: _e.mock.On("LoadPartitions", _a0, _a1)}
 }
 
-func (_c *MockQueryCoord_LoadPartitions_Call) Run(run func(ctx context.Context, req *querypb.LoadPartitionsRequest)) *MockQueryCoord_LoadPartitions_Call {
+func (_c *MockQueryCoord_LoadPartitions_Call) Run(run func(_a0 context.Context, _a1 *querypb.LoadPartitionsRequest)) *MockQueryCoord_LoadPartitions_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*querypb.LoadPartitionsRequest))
 	})
@@ -993,17 +996,17 @@ func (_c *MockQueryCoord_Register_Call) RunAndReturn(run func() error) *MockQuer
 	return _c
 }
 
-// ReleaseCollection provides a mock function with given fields: ctx, req
-func (_m *MockQueryCoord) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// ReleaseCollection provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) ReleaseCollection(_a0 context.Context, _a1 *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ReleaseCollectionRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ReleaseCollectionRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -1011,7 +1014,7 @@ func (_m *MockQueryCoord) ReleaseCollection(ctx context.Context, req *querypb.Re
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *querypb.ReleaseCollectionRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1025,13 +1028,13 @@ type MockQueryCoord_ReleaseCollection_Call struct {
 }
 
 // ReleaseCollection is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *querypb.ReleaseCollectionRequest
-func (_e *MockQueryCoord_Expecter) ReleaseCollection(ctx interface{}, req interface{}) *MockQueryCoord_ReleaseCollection_Call {
-	return &MockQueryCoord_ReleaseCollection_Call{Call: _e.mock.On("ReleaseCollection", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *querypb.ReleaseCollectionRequest
+func (_e *MockQueryCoord_Expecter) ReleaseCollection(_a0 interface{}, _a1 interface{}) *MockQueryCoord_ReleaseCollection_Call {
+	return &MockQueryCoord_ReleaseCollection_Call{Call: _e.mock.On("ReleaseCollection", _a0, _a1)}
 }
 
-func (_c *MockQueryCoord_ReleaseCollection_Call) Run(run func(ctx context.Context, req *querypb.ReleaseCollectionRequest)) *MockQueryCoord_ReleaseCollection_Call {
+func (_c *MockQueryCoord_ReleaseCollection_Call) Run(run func(_a0 context.Context, _a1 *querypb.ReleaseCollectionRequest)) *MockQueryCoord_ReleaseCollection_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*querypb.ReleaseCollectionRequest))
 	})
@@ -1048,17 +1051,17 @@ func (_c *MockQueryCoord_ReleaseCollection_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
-// ReleasePartitions provides a mock function with given fields: ctx, req
-func (_m *MockQueryCoord) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// ReleasePartitions provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) ReleasePartitions(_a0 context.Context, _a1 *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ReleasePartitionsRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ReleasePartitionsRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -1066,7 +1069,7 @@ func (_m *MockQueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Re
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *querypb.ReleasePartitionsRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1080,13 +1083,13 @@ type MockQueryCoord_ReleasePartitions_Call struct {
 }
 
 // ReleasePartitions is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *querypb.ReleasePartitionsRequest
-func (_e *MockQueryCoord_Expecter) ReleasePartitions(ctx interface{}, req interface{}) *MockQueryCoord_ReleasePartitions_Call {
-	return &MockQueryCoord_ReleasePartitions_Call{Call: _e.mock.On("ReleasePartitions", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *querypb.ReleasePartitionsRequest
+func (_e *MockQueryCoord_Expecter) ReleasePartitions(_a0 interface{}, _a1 interface{}) *MockQueryCoord_ReleasePartitions_Call {
+	return &MockQueryCoord_ReleasePartitions_Call{Call: _e.mock.On("ReleasePartitions", _a0, _a1)}
 }
 
-func (_c *MockQueryCoord_ReleasePartitions_Call) Run(run func(ctx context.Context, req *querypb.ReleasePartitionsRequest)) *MockQueryCoord_ReleasePartitions_Call {
+func (_c *MockQueryCoord_ReleasePartitions_Call) Run(run func(_a0 context.Context, _a1 *querypb.ReleasePartitionsRequest)) *MockQueryCoord_ReleasePartitions_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*querypb.ReleasePartitionsRequest))
 	})
@@ -1136,12 +1139,12 @@ func (_c *MockQueryCoord_SetAddress_Call) RunAndReturn(run func(string)) *MockQu
 	return _c
 }
 
-// SetDataCoord provides a mock function with given fields: dataCoord
-func (_m *MockQueryCoord) SetDataCoord(dataCoord types.DataCoord) error {
+// SetDataCoordClient provides a mock function with given fields: dataCoord
+func (_m *MockQueryCoord) SetDataCoordClient(dataCoord types.DataCoordClient) error {
 	ret := _m.Called(dataCoord)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(types.DataCoord) error); ok {
+	if rf, ok := ret.Get(0).(func(types.DataCoordClient) error); ok {
 		r0 = rf(dataCoord)
 	} else {
 		r0 = ret.Error(0)
@@ -1150,30 +1153,30 @@ func (_m *MockQueryCoord) SetDataCoord(dataCoord types.DataCoord) error {
 	return r0
 }
 
-// MockQueryCoord_SetDataCoord_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetDataCoord'
-type MockQueryCoord_SetDataCoord_Call struct {
+// MockQueryCoord_SetDataCoordClient_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetDataCoordClient'
+type MockQueryCoord_SetDataCoordClient_Call struct {
 	*mock.Call
 }
 
-// SetDataCoord is a helper method to define mock.On call
-//   - dataCoord types.DataCoord
-func (_e *MockQueryCoord_Expecter) SetDataCoord(dataCoord interface{}) *MockQueryCoord_SetDataCoord_Call {
-	return &MockQueryCoord_SetDataCoord_Call{Call: _e.mock.On("SetDataCoord", dataCoord)}
+// SetDataCoordClient is a helper method to define mock.On call
+//   - dataCoord types.DataCoordClient
+func (_e *MockQueryCoord_Expecter) SetDataCoordClient(dataCoord interface{}) *MockQueryCoord_SetDataCoordClient_Call {
+	return &MockQueryCoord_SetDataCoordClient_Call{Call: _e.mock.On("SetDataCoordClient", dataCoord)}
 }
 
-func (_c *MockQueryCoord_SetDataCoord_Call) Run(run func(dataCoord types.DataCoord)) *MockQueryCoord_SetDataCoord_Call {
+func (_c *MockQueryCoord_SetDataCoordClient_Call) Run(run func(dataCoord types.DataCoordClient)) *MockQueryCoord_SetDataCoordClient_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(types.DataCoord))
+		run(args[0].(types.DataCoordClient))
 	})
 	return _c
 }
 
-func (_c *MockQueryCoord_SetDataCoord_Call) Return(_a0 error) *MockQueryCoord_SetDataCoord_Call {
+func (_c *MockQueryCoord_SetDataCoordClient_Call) Return(_a0 error) *MockQueryCoord_SetDataCoordClient_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockQueryCoord_SetDataCoord_Call) RunAndReturn(run func(types.DataCoord) error) *MockQueryCoord_SetDataCoord_Call {
+func (_c *MockQueryCoord_SetDataCoordClient_Call) RunAndReturn(run func(types.DataCoordClient) error) *MockQueryCoord_SetDataCoordClient_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1212,7 +1215,7 @@ func (_c *MockQueryCoord_SetEtcdClient_Call) RunAndReturn(run func(*clientv3.Cli
 }
 
 // SetQueryNodeCreator provides a mock function with given fields: _a0
-func (_m *MockQueryCoord) SetQueryNodeCreator(_a0 func(context.Context, string, int64) (types.QueryNode, error)) {
+func (_m *MockQueryCoord) SetQueryNodeCreator(_a0 func(context.Context, string, int64) (types.QueryNodeClient, error)) {
 	_m.Called(_a0)
 }
 
@@ -1222,14 +1225,14 @@ type MockQueryCoord_SetQueryNodeCreator_Call struct {
 }
 
 // SetQueryNodeCreator is a helper method to define mock.On call
-//   - _a0 func(context.Context , string , int64)(types.QueryNode , error)
+//   - _a0 func(context.Context , string , int64)(types.QueryNodeClient , error)
 func (_e *MockQueryCoord_Expecter) SetQueryNodeCreator(_a0 interface{}) *MockQueryCoord_SetQueryNodeCreator_Call {
 	return &MockQueryCoord_SetQueryNodeCreator_Call{Call: _e.mock.On("SetQueryNodeCreator", _a0)}
 }
 
-func (_c *MockQueryCoord_SetQueryNodeCreator_Call) Run(run func(_a0 func(context.Context, string, int64) (types.QueryNode, error))) *MockQueryCoord_SetQueryNodeCreator_Call {
+func (_c *MockQueryCoord_SetQueryNodeCreator_Call) Run(run func(_a0 func(context.Context, string, int64) (types.QueryNodeClient, error))) *MockQueryCoord_SetQueryNodeCreator_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(func(context.Context, string, int64) (types.QueryNode, error)))
+		run(args[0].(func(context.Context, string, int64) (types.QueryNodeClient, error)))
 	})
 	return _c
 }
@@ -1239,17 +1242,17 @@ func (_c *MockQueryCoord_SetQueryNodeCreator_Call) Return() *MockQueryCoord_SetQ
 	return _c
 }
 
-func (_c *MockQueryCoord_SetQueryNodeCreator_Call) RunAndReturn(run func(func(context.Context, string, int64) (types.QueryNode, error))) *MockQueryCoord_SetQueryNodeCreator_Call {
+func (_c *MockQueryCoord_SetQueryNodeCreator_Call) RunAndReturn(run func(func(context.Context, string, int64) (types.QueryNodeClient, error))) *MockQueryCoord_SetQueryNodeCreator_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// SetRootCoord provides a mock function with given fields: rootCoord
-func (_m *MockQueryCoord) SetRootCoord(rootCoord types.RootCoord) error {
+// SetRootCoordClient provides a mock function with given fields: rootCoord
+func (_m *MockQueryCoord) SetRootCoordClient(rootCoord types.RootCoordClient) error {
 	ret := _m.Called(rootCoord)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(types.RootCoord) error); ok {
+	if rf, ok := ret.Get(0).(func(types.RootCoordClient) error); ok {
 		r0 = rf(rootCoord)
 	} else {
 		r0 = ret.Error(0)
@@ -1258,30 +1261,30 @@ func (_m *MockQueryCoord) SetRootCoord(rootCoord types.RootCoord) error {
 	return r0
 }
 
-// MockQueryCoord_SetRootCoord_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetRootCoord'
-type MockQueryCoord_SetRootCoord_Call struct {
+// MockQueryCoord_SetRootCoordClient_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetRootCoordClient'
+type MockQueryCoord_SetRootCoordClient_Call struct {
 	*mock.Call
 }
 
-// SetRootCoord is a helper method to define mock.On call
-//   - rootCoord types.RootCoord
-func (_e *MockQueryCoord_Expecter) SetRootCoord(rootCoord interface{}) *MockQueryCoord_SetRootCoord_Call {
-	return &MockQueryCoord_SetRootCoord_Call{Call: _e.mock.On("SetRootCoord", rootCoord)}
+// SetRootCoordClient is a helper method to define mock.On call
+//   - rootCoord types.RootCoordClient
+func (_e *MockQueryCoord_Expecter) SetRootCoordClient(rootCoord interface{}) *MockQueryCoord_SetRootCoordClient_Call {
+	return &MockQueryCoord_SetRootCoordClient_Call{Call: _e.mock.On("SetRootCoordClient", rootCoord)}
 }
 
-func (_c *MockQueryCoord_SetRootCoord_Call) Run(run func(rootCoord types.RootCoord)) *MockQueryCoord_SetRootCoord_Call {
+func (_c *MockQueryCoord_SetRootCoordClient_Call) Run(run func(rootCoord types.RootCoordClient)) *MockQueryCoord_SetRootCoordClient_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(types.RootCoord))
+		run(args[0].(types.RootCoordClient))
 	})
 	return _c
 }
 
-func (_c *MockQueryCoord_SetRootCoord_Call) Return(_a0 error) *MockQueryCoord_SetRootCoord_Call {
+func (_c *MockQueryCoord_SetRootCoordClient_Call) Return(_a0 error) *MockQueryCoord_SetRootCoordClient_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockQueryCoord_SetRootCoord_Call) RunAndReturn(run func(types.RootCoord) error) *MockQueryCoord_SetRootCoord_Call {
+func (_c *MockQueryCoord_SetRootCoordClient_Call) RunAndReturn(run func(types.RootCoordClient) error) *MockQueryCoord_SetRootCoordClient_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1319,17 +1322,17 @@ func (_c *MockQueryCoord_SetTiKVClient_Call) RunAndReturn(run func(*txnkv.Client
 	return _c
 }
 
-// ShowCollections provides a mock function with given fields: ctx, req
-func (_m *MockQueryCoord) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-	ret := _m.Called(ctx, req)
+// ShowCollections provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) ShowCollections(_a0 context.Context, _a1 *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *querypb.ShowCollectionsResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ShowCollectionsRequest) *querypb.ShowCollectionsResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*querypb.ShowCollectionsResponse)
@@ -1337,7 +1340,7 @@ func (_m *MockQueryCoord) ShowCollections(ctx context.Context, req *querypb.Show
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *querypb.ShowCollectionsRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1351,13 +1354,13 @@ type MockQueryCoord_ShowCollections_Call struct {
 }
 
 // ShowCollections is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *querypb.ShowCollectionsRequest
-func (_e *MockQueryCoord_Expecter) ShowCollections(ctx interface{}, req interface{}) *MockQueryCoord_ShowCollections_Call {
-	return &MockQueryCoord_ShowCollections_Call{Call: _e.mock.On("ShowCollections", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *querypb.ShowCollectionsRequest
+func (_e *MockQueryCoord_Expecter) ShowCollections(_a0 interface{}, _a1 interface{}) *MockQueryCoord_ShowCollections_Call {
+	return &MockQueryCoord_ShowCollections_Call{Call: _e.mock.On("ShowCollections", _a0, _a1)}
 }
 
-func (_c *MockQueryCoord_ShowCollections_Call) Run(run func(ctx context.Context, req *querypb.ShowCollectionsRequest)) *MockQueryCoord_ShowCollections_Call {
+func (_c *MockQueryCoord_ShowCollections_Call) Run(run func(_a0 context.Context, _a1 *querypb.ShowCollectionsRequest)) *MockQueryCoord_ShowCollections_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*querypb.ShowCollectionsRequest))
 	})
@@ -1374,17 +1377,17 @@ func (_c *MockQueryCoord_ShowCollections_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
-// ShowConfigurations provides a mock function with given fields: ctx, req
-func (_m *MockQueryCoord) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
-	ret := _m.Called(ctx, req)
+// ShowConfigurations provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) ShowConfigurations(_a0 context.Context, _a1 *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *internalpb.ShowConfigurationsResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ShowConfigurationsRequest) *internalpb.ShowConfigurationsResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*internalpb.ShowConfigurationsResponse)
@@ -1392,7 +1395,7 @@ func (_m *MockQueryCoord) ShowConfigurations(ctx context.Context, req *internalp
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.ShowConfigurationsRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1406,13 +1409,13 @@ type MockQueryCoord_ShowConfigurations_Call struct {
 }
 
 // ShowConfigurations is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *internalpb.ShowConfigurationsRequest
-func (_e *MockQueryCoord_Expecter) ShowConfigurations(ctx interface{}, req interface{}) *MockQueryCoord_ShowConfigurations_Call {
-	return &MockQueryCoord_ShowConfigurations_Call{Call: _e.mock.On("ShowConfigurations", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *internalpb.ShowConfigurationsRequest
+func (_e *MockQueryCoord_Expecter) ShowConfigurations(_a0 interface{}, _a1 interface{}) *MockQueryCoord_ShowConfigurations_Call {
+	return &MockQueryCoord_ShowConfigurations_Call{Call: _e.mock.On("ShowConfigurations", _a0, _a1)}
 }
 
-func (_c *MockQueryCoord_ShowConfigurations_Call) Run(run func(ctx context.Context, req *internalpb.ShowConfigurationsRequest)) *MockQueryCoord_ShowConfigurations_Call {
+func (_c *MockQueryCoord_ShowConfigurations_Call) Run(run func(_a0 context.Context, _a1 *internalpb.ShowConfigurationsRequest)) *MockQueryCoord_ShowConfigurations_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*internalpb.ShowConfigurationsRequest))
 	})
@@ -1429,17 +1432,17 @@ func (_c *MockQueryCoord_ShowConfigurations_Call) RunAndReturn(run func(context.
 	return _c
 }
 
-// ShowPartitions provides a mock function with given fields: ctx, req
-func (_m *MockQueryCoord) ShowPartitions(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
-	ret := _m.Called(ctx, req)
+// ShowPartitions provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) ShowPartitions(_a0 context.Context, _a1 *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *querypb.ShowPartitionsResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ShowPartitionsRequest) *querypb.ShowPartitionsResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*querypb.ShowPartitionsResponse)
@@ -1447,7 +1450,7 @@ func (_m *MockQueryCoord) ShowPartitions(ctx context.Context, req *querypb.ShowP
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *querypb.ShowPartitionsRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1461,13 +1464,13 @@ type MockQueryCoord_ShowPartitions_Call struct {
 }
 
 // ShowPartitions is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *querypb.ShowPartitionsRequest
-func (_e *MockQueryCoord_Expecter) ShowPartitions(ctx interface{}, req interface{}) *MockQueryCoord_ShowPartitions_Call {
-	return &MockQueryCoord_ShowPartitions_Call{Call: _e.mock.On("ShowPartitions", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *querypb.ShowPartitionsRequest
+func (_e *MockQueryCoord_Expecter) ShowPartitions(_a0 interface{}, _a1 interface{}) *MockQueryCoord_ShowPartitions_Call {
+	return &MockQueryCoord_ShowPartitions_Call{Call: _e.mock.On("ShowPartitions", _a0, _a1)}
 }
 
-func (_c *MockQueryCoord_ShowPartitions_Call) Run(run func(ctx context.Context, req *querypb.ShowPartitionsRequest)) *MockQueryCoord_ShowPartitions_Call {
+func (_c *MockQueryCoord_ShowPartitions_Call) Run(run func(_a0 context.Context, _a1 *querypb.ShowPartitionsRequest)) *MockQueryCoord_ShowPartitions_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*querypb.ShowPartitionsRequest))
 	})
@@ -1566,17 +1569,17 @@ func (_c *MockQueryCoord_Stop_Call) RunAndReturn(run func() error) *MockQueryCoo
 	return _c
 }
 
-// SyncNewCreatedPartition provides a mock function with given fields: ctx, req
-func (_m *MockQueryCoord) SyncNewCreatedPartition(ctx context.Context, req *querypb.SyncNewCreatedPartitionRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// SyncNewCreatedPartition provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) SyncNewCreatedPartition(_a0 context.Context, _a1 *querypb.SyncNewCreatedPartitionRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *querypb.SyncNewCreatedPartitionRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *querypb.SyncNewCreatedPartitionRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -1584,7 +1587,7 @@ func (_m *MockQueryCoord) SyncNewCreatedPartition(ctx context.Context, req *quer
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *querypb.SyncNewCreatedPartitionRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1598,13 +1601,13 @@ type MockQueryCoord_SyncNewCreatedPartition_Call struct {
 }
 
 // SyncNewCreatedPartition is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *querypb.SyncNewCreatedPartitionRequest
-func (_e *MockQueryCoord_Expecter) SyncNewCreatedPartition(ctx interface{}, req interface{}) *MockQueryCoord_SyncNewCreatedPartition_Call {
-	return &MockQueryCoord_SyncNewCreatedPartition_Call{Call: _e.mock.On("SyncNewCreatedPartition", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *querypb.SyncNewCreatedPartitionRequest
+func (_e *MockQueryCoord_Expecter) SyncNewCreatedPartition(_a0 interface{}, _a1 interface{}) *MockQueryCoord_SyncNewCreatedPartition_Call {
+	return &MockQueryCoord_SyncNewCreatedPartition_Call{Call: _e.mock.On("SyncNewCreatedPartition", _a0, _a1)}
 }
 
-func (_c *MockQueryCoord_SyncNewCreatedPartition_Call) Run(run func(ctx context.Context, req *querypb.SyncNewCreatedPartitionRequest)) *MockQueryCoord_SyncNewCreatedPartition_Call {
+func (_c *MockQueryCoord_SyncNewCreatedPartition_Call) Run(run func(_a0 context.Context, _a1 *querypb.SyncNewCreatedPartitionRequest)) *MockQueryCoord_SyncNewCreatedPartition_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*querypb.SyncNewCreatedPartitionRequest))
 	})
@@ -1621,17 +1624,17 @@ func (_c *MockQueryCoord_SyncNewCreatedPartition_Call) RunAndReturn(run func(con
 	return _c
 }
 
-// TransferNode provides a mock function with given fields: ctx, req
-func (_m *MockQueryCoord) TransferNode(ctx context.Context, req *milvuspb.TransferNodeRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// TransferNode provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) TransferNode(_a0 context.Context, _a1 *milvuspb.TransferNodeRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.TransferNodeRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.TransferNodeRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -1639,7 +1642,7 @@ func (_m *MockQueryCoord) TransferNode(ctx context.Context, req *milvuspb.Transf
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.TransferNodeRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1653,13 +1656,13 @@ type MockQueryCoord_TransferNode_Call struct {
 }
 
 // TransferNode is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.TransferNodeRequest
-func (_e *MockQueryCoord_Expecter) TransferNode(ctx interface{}, req interface{}) *MockQueryCoord_TransferNode_Call {
-	return &MockQueryCoord_TransferNode_Call{Call: _e.mock.On("TransferNode", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.TransferNodeRequest
+func (_e *MockQueryCoord_Expecter) TransferNode(_a0 interface{}, _a1 interface{}) *MockQueryCoord_TransferNode_Call {
+	return &MockQueryCoord_TransferNode_Call{Call: _e.mock.On("TransferNode", _a0, _a1)}
 }
 
-func (_c *MockQueryCoord_TransferNode_Call) Run(run func(ctx context.Context, req *milvuspb.TransferNodeRequest)) *MockQueryCoord_TransferNode_Call {
+func (_c *MockQueryCoord_TransferNode_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.TransferNodeRequest)) *MockQueryCoord_TransferNode_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.TransferNodeRequest))
 	})
@@ -1676,17 +1679,17 @@ func (_c *MockQueryCoord_TransferNode_Call) RunAndReturn(run func(context.Contex
 	return _c
 }
 
-// TransferReplica provides a mock function with given fields: ctx, req
-func (_m *MockQueryCoord) TransferReplica(ctx context.Context, req *querypb.TransferReplicaRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// TransferReplica provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) TransferReplica(_a0 context.Context, _a1 *querypb.TransferReplicaRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *querypb.TransferReplicaRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *querypb.TransferReplicaRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -1694,7 +1697,7 @@ func (_m *MockQueryCoord) TransferReplica(ctx context.Context, req *querypb.Tran
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *querypb.TransferReplicaRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1708,13 +1711,13 @@ type MockQueryCoord_TransferReplica_Call struct {
 }
 
 // TransferReplica is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *querypb.TransferReplicaRequest
-func (_e *MockQueryCoord_Expecter) TransferReplica(ctx interface{}, req interface{}) *MockQueryCoord_TransferReplica_Call {
-	return &MockQueryCoord_TransferReplica_Call{Call: _e.mock.On("TransferReplica", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *querypb.TransferReplicaRequest
+func (_e *MockQueryCoord_Expecter) TransferReplica(_a0 interface{}, _a1 interface{}) *MockQueryCoord_TransferReplica_Call {
+	return &MockQueryCoord_TransferReplica_Call{Call: _e.mock.On("TransferReplica", _a0, _a1)}
 }
 
-func (_c *MockQueryCoord_TransferReplica_Call) Run(run func(ctx context.Context, req *querypb.TransferReplicaRequest)) *MockQueryCoord_TransferReplica_Call {
+func (_c *MockQueryCoord_TransferReplica_Call) Run(run func(_a0 context.Context, _a1 *querypb.TransferReplicaRequest)) *MockQueryCoord_TransferReplica_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*querypb.TransferReplicaRequest))
 	})

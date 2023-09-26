@@ -22,6 +22,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -66,7 +67,7 @@ type RootCoordFails1 struct {
 }
 
 // DescribeCollectionInternal override method that will fails
-func (rc *RootCoordFails1) DescribeCollectionInternal(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+func (rc *RootCoordFails1) DescribeCollectionInternal(ctx context.Context, req *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
 	return nil, errors.New("always fail")
 }
 
@@ -76,7 +77,7 @@ type RootCoordFails2 struct {
 }
 
 // DescribeCollectionInternal override method that will fails
-func (rc *RootCoordFails2) DescribeCollectionInternal(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+func (rc *RootCoordFails2) DescribeCollectionInternal(ctx context.Context, req *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
 	return &milvuspb.DescribeCollectionResponse{
 		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
 	}, nil

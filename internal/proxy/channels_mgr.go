@@ -87,7 +87,7 @@ type getChannelsFuncType = func(collectionID UniqueID) (channelInfos, error)
 type repackFuncType = func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error)
 
 // getDmlChannelsFunc returns a function about how to get dml channels of a collection.
-func getDmlChannelsFunc(ctx context.Context, rc types.RootCoord) getChannelsFuncType {
+func getDmlChannelsFunc(ctx context.Context, rc types.RootCoordClient) getChannelsFuncType {
 	return func(collectionID UniqueID) (channelInfos, error) {
 		req := &milvuspb.DescribeCollectionRequest{
 			Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection)),

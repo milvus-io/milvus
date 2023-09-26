@@ -273,7 +273,7 @@ func (i *IndexNode) SetEtcdClient(client *clientv3.Client) {
 }
 
 // GetComponentStates gets the component states of IndexNode.
-func (i *IndexNode) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+func (i *IndexNode) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	log.RatedInfo(10, "get IndexNode components states ...")
 	nodeID := common.NotRegisteredID
 	if i.session != nil && i.session.Registered() {
@@ -300,7 +300,7 @@ func (i *IndexNode) GetComponentStates(ctx context.Context) (*milvuspb.Component
 }
 
 // GetTimeTickChannel gets the time tick channel of IndexNode.
-func (i *IndexNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (i *IndexNode) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
 	log.RatedInfo(10, "get IndexNode time tick channel ...")
 
 	return &milvuspb.StringResponse{
@@ -309,7 +309,7 @@ func (i *IndexNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRes
 }
 
 // GetStatisticsChannel gets the statistics channel of IndexNode.
-func (i *IndexNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (i *IndexNode) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	log.RatedInfo(10, "get IndexNode statistics channel ...")
 	return &milvuspb.StringResponse{
 		Status: merr.Status(nil),

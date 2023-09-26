@@ -8,6 +8,8 @@ import (
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	federpb "github.com/milvus-io/milvus-proto/go-api/v2/federpb"
+
 	internalpb "github.com/milvus-io/milvus/internal/proto/internalpb"
 
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -32,17 +34,17 @@ func (_m *MockProxy) EXPECT() *MockProxy_Expecter {
 	return &MockProxy_Expecter{mock: &_m.Mock}
 }
 
-// AllocTimestamp provides a mock function with given fields: ctx, req
-func (_m *MockProxy) AllocTimestamp(ctx context.Context, req *milvuspb.AllocTimestampRequest) (*milvuspb.AllocTimestampResponse, error) {
-	ret := _m.Called(ctx, req)
+// AllocTimestamp provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) AllocTimestamp(_a0 context.Context, _a1 *milvuspb.AllocTimestampRequest) (*milvuspb.AllocTimestampResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.AllocTimestampResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AllocTimestampRequest) (*milvuspb.AllocTimestampResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AllocTimestampRequest) *milvuspb.AllocTimestampResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.AllocTimestampResponse)
@@ -50,7 +52,7 @@ func (_m *MockProxy) AllocTimestamp(ctx context.Context, req *milvuspb.AllocTime
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.AllocTimestampRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -64,13 +66,13 @@ type MockProxy_AllocTimestamp_Call struct {
 }
 
 // AllocTimestamp is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.AllocTimestampRequest
-func (_e *MockProxy_Expecter) AllocTimestamp(ctx interface{}, req interface{}) *MockProxy_AllocTimestamp_Call {
-	return &MockProxy_AllocTimestamp_Call{Call: _e.mock.On("AllocTimestamp", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.AllocTimestampRequest
+func (_e *MockProxy_Expecter) AllocTimestamp(_a0 interface{}, _a1 interface{}) *MockProxy_AllocTimestamp_Call {
+	return &MockProxy_AllocTimestamp_Call{Call: _e.mock.On("AllocTimestamp", _a0, _a1)}
 }
 
-func (_c *MockProxy_AllocTimestamp_Call) Run(run func(ctx context.Context, req *milvuspb.AllocTimestampRequest)) *MockProxy_AllocTimestamp_Call {
+func (_c *MockProxy_AllocTimestamp_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.AllocTimestampRequest)) *MockProxy_AllocTimestamp_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.AllocTimestampRequest))
 	})
@@ -87,17 +89,17 @@ func (_c *MockProxy_AllocTimestamp_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
-// AlterAlias provides a mock function with given fields: ctx, request
-func (_m *MockProxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, request)
+// AlterAlias provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) AlterAlias(_a0 context.Context, _a1 *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterAliasRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterAliasRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -105,7 +107,7 @@ func (_m *MockProxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAlia
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.AlterAliasRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -119,13 +121,13 @@ type MockProxy_AlterAlias_Call struct {
 }
 
 // AlterAlias is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.AlterAliasRequest
-func (_e *MockProxy_Expecter) AlterAlias(ctx interface{}, request interface{}) *MockProxy_AlterAlias_Call {
-	return &MockProxy_AlterAlias_Call{Call: _e.mock.On("AlterAlias", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.AlterAliasRequest
+func (_e *MockProxy_Expecter) AlterAlias(_a0 interface{}, _a1 interface{}) *MockProxy_AlterAlias_Call {
+	return &MockProxy_AlterAlias_Call{Call: _e.mock.On("AlterAlias", _a0, _a1)}
 }
 
-func (_c *MockProxy_AlterAlias_Call) Run(run func(ctx context.Context, request *milvuspb.AlterAliasRequest)) *MockProxy_AlterAlias_Call {
+func (_c *MockProxy_AlterAlias_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.AlterAliasRequest)) *MockProxy_AlterAlias_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.AlterAliasRequest))
 	})
@@ -142,17 +144,17 @@ func (_c *MockProxy_AlterAlias_Call) RunAndReturn(run func(context.Context, *mil
 	return _c
 }
 
-// AlterCollection provides a mock function with given fields: ctx, request
-func (_m *MockProxy) AlterCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, request)
+// AlterCollection provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) AlterCollection(_a0 context.Context, _a1 *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterCollectionRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterCollectionRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -160,7 +162,7 @@ func (_m *MockProxy) AlterCollection(ctx context.Context, request *milvuspb.Alte
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.AlterCollectionRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -174,13 +176,13 @@ type MockProxy_AlterCollection_Call struct {
 }
 
 // AlterCollection is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.AlterCollectionRequest
-func (_e *MockProxy_Expecter) AlterCollection(ctx interface{}, request interface{}) *MockProxy_AlterCollection_Call {
-	return &MockProxy_AlterCollection_Call{Call: _e.mock.On("AlterCollection", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.AlterCollectionRequest
+func (_e *MockProxy_Expecter) AlterCollection(_a0 interface{}, _a1 interface{}) *MockProxy_AlterCollection_Call {
+	return &MockProxy_AlterCollection_Call{Call: _e.mock.On("AlterCollection", _a0, _a1)}
 }
 
-func (_c *MockProxy_AlterCollection_Call) Run(run func(ctx context.Context, request *milvuspb.AlterCollectionRequest)) *MockProxy_AlterCollection_Call {
+func (_c *MockProxy_AlterCollection_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.AlterCollectionRequest)) *MockProxy_AlterCollection_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.AlterCollectionRequest))
 	})
@@ -197,17 +199,17 @@ func (_c *MockProxy_AlterCollection_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
-// CalcDistance provides a mock function with given fields: ctx, request
-func (_m *MockProxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDistanceRequest) (*milvuspb.CalcDistanceResults, error) {
-	ret := _m.Called(ctx, request)
+// CalcDistance provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) CalcDistance(_a0 context.Context, _a1 *milvuspb.CalcDistanceRequest) (*milvuspb.CalcDistanceResults, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.CalcDistanceResults
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CalcDistanceRequest) (*milvuspb.CalcDistanceResults, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CalcDistanceRequest) *milvuspb.CalcDistanceResults); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.CalcDistanceResults)
@@ -215,7 +217,7 @@ func (_m *MockProxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDis
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CalcDistanceRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -229,13 +231,13 @@ type MockProxy_CalcDistance_Call struct {
 }
 
 // CalcDistance is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.CalcDistanceRequest
-func (_e *MockProxy_Expecter) CalcDistance(ctx interface{}, request interface{}) *MockProxy_CalcDistance_Call {
-	return &MockProxy_CalcDistance_Call{Call: _e.mock.On("CalcDistance", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.CalcDistanceRequest
+func (_e *MockProxy_Expecter) CalcDistance(_a0 interface{}, _a1 interface{}) *MockProxy_CalcDistance_Call {
+	return &MockProxy_CalcDistance_Call{Call: _e.mock.On("CalcDistance", _a0, _a1)}
 }
 
-func (_c *MockProxy_CalcDistance_Call) Run(run func(ctx context.Context, request *milvuspb.CalcDistanceRequest)) *MockProxy_CalcDistance_Call {
+func (_c *MockProxy_CalcDistance_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.CalcDistanceRequest)) *MockProxy_CalcDistance_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.CalcDistanceRequest))
 	})
@@ -252,17 +254,17 @@ func (_c *MockProxy_CalcDistance_Call) RunAndReturn(run func(context.Context, *m
 	return _c
 }
 
-// CheckHealth provides a mock function with given fields: ctx, req
-func (_m *MockProxy) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
-	ret := _m.Called(ctx, req)
+// CheckHealth provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) CheckHealth(_a0 context.Context, _a1 *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.CheckHealthResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CheckHealthRequest) *milvuspb.CheckHealthResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.CheckHealthResponse)
@@ -270,7 +272,7 @@ func (_m *MockProxy) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthR
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CheckHealthRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -284,13 +286,13 @@ type MockProxy_CheckHealth_Call struct {
 }
 
 // CheckHealth is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.CheckHealthRequest
-func (_e *MockProxy_Expecter) CheckHealth(ctx interface{}, req interface{}) *MockProxy_CheckHealth_Call {
-	return &MockProxy_CheckHealth_Call{Call: _e.mock.On("CheckHealth", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.CheckHealthRequest
+func (_e *MockProxy_Expecter) CheckHealth(_a0 interface{}, _a1 interface{}) *MockProxy_CheckHealth_Call {
+	return &MockProxy_CheckHealth_Call{Call: _e.mock.On("CheckHealth", _a0, _a1)}
 }
 
-func (_c *MockProxy_CheckHealth_Call) Run(run func(ctx context.Context, req *milvuspb.CheckHealthRequest)) *MockProxy_CheckHealth_Call {
+func (_c *MockProxy_CheckHealth_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.CheckHealthRequest)) *MockProxy_CheckHealth_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.CheckHealthRequest))
 	})
@@ -307,17 +309,17 @@ func (_c *MockProxy_CheckHealth_Call) RunAndReturn(run func(context.Context, *mi
 	return _c
 }
 
-// Connect provides a mock function with given fields: ctx, req
-func (_m *MockProxy) Connect(ctx context.Context, req *milvuspb.ConnectRequest) (*milvuspb.ConnectResponse, error) {
-	ret := _m.Called(ctx, req)
+// Connect provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) Connect(_a0 context.Context, _a1 *milvuspb.ConnectRequest) (*milvuspb.ConnectResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.ConnectResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ConnectRequest) (*milvuspb.ConnectResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ConnectRequest) *milvuspb.ConnectResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.ConnectResponse)
@@ -325,7 +327,7 @@ func (_m *MockProxy) Connect(ctx context.Context, req *milvuspb.ConnectRequest) 
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ConnectRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -339,13 +341,13 @@ type MockProxy_Connect_Call struct {
 }
 
 // Connect is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.ConnectRequest
-func (_e *MockProxy_Expecter) Connect(ctx interface{}, req interface{}) *MockProxy_Connect_Call {
-	return &MockProxy_Connect_Call{Call: _e.mock.On("Connect", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ConnectRequest
+func (_e *MockProxy_Expecter) Connect(_a0 interface{}, _a1 interface{}) *MockProxy_Connect_Call {
+	return &MockProxy_Connect_Call{Call: _e.mock.On("Connect", _a0, _a1)}
 }
 
-func (_c *MockProxy_Connect_Call) Run(run func(ctx context.Context, req *milvuspb.ConnectRequest)) *MockProxy_Connect_Call {
+func (_c *MockProxy_Connect_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ConnectRequest)) *MockProxy_Connect_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.ConnectRequest))
 	})
@@ -362,17 +364,17 @@ func (_c *MockProxy_Connect_Call) RunAndReturn(run func(context.Context, *milvus
 	return _c
 }
 
-// CreateAlias provides a mock function with given fields: ctx, request
-func (_m *MockProxy) CreateAlias(ctx context.Context, request *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, request)
+// CreateAlias provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) CreateAlias(_a0 context.Context, _a1 *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateAliasRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateAliasRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -380,7 +382,7 @@ func (_m *MockProxy) CreateAlias(ctx context.Context, request *milvuspb.CreateAl
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CreateAliasRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -394,13 +396,13 @@ type MockProxy_CreateAlias_Call struct {
 }
 
 // CreateAlias is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.CreateAliasRequest
-func (_e *MockProxy_Expecter) CreateAlias(ctx interface{}, request interface{}) *MockProxy_CreateAlias_Call {
-	return &MockProxy_CreateAlias_Call{Call: _e.mock.On("CreateAlias", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.CreateAliasRequest
+func (_e *MockProxy_Expecter) CreateAlias(_a0 interface{}, _a1 interface{}) *MockProxy_CreateAlias_Call {
+	return &MockProxy_CreateAlias_Call{Call: _e.mock.On("CreateAlias", _a0, _a1)}
 }
 
-func (_c *MockProxy_CreateAlias_Call) Run(run func(ctx context.Context, request *milvuspb.CreateAliasRequest)) *MockProxy_CreateAlias_Call {
+func (_c *MockProxy_CreateAlias_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.CreateAliasRequest)) *MockProxy_CreateAlias_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.CreateAliasRequest))
 	})
@@ -417,17 +419,17 @@ func (_c *MockProxy_CreateAlias_Call) RunAndReturn(run func(context.Context, *mi
 	return _c
 }
 
-// CreateCollection provides a mock function with given fields: ctx, request
-func (_m *MockProxy) CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, request)
+// CreateCollection provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) CreateCollection(_a0 context.Context, _a1 *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateCollectionRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateCollectionRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -435,7 +437,7 @@ func (_m *MockProxy) CreateCollection(ctx context.Context, request *milvuspb.Cre
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CreateCollectionRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -449,13 +451,13 @@ type MockProxy_CreateCollection_Call struct {
 }
 
 // CreateCollection is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.CreateCollectionRequest
-func (_e *MockProxy_Expecter) CreateCollection(ctx interface{}, request interface{}) *MockProxy_CreateCollection_Call {
-	return &MockProxy_CreateCollection_Call{Call: _e.mock.On("CreateCollection", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.CreateCollectionRequest
+func (_e *MockProxy_Expecter) CreateCollection(_a0 interface{}, _a1 interface{}) *MockProxy_CreateCollection_Call {
+	return &MockProxy_CreateCollection_Call{Call: _e.mock.On("CreateCollection", _a0, _a1)}
 }
 
-func (_c *MockProxy_CreateCollection_Call) Run(run func(ctx context.Context, request *milvuspb.CreateCollectionRequest)) *MockProxy_CreateCollection_Call {
+func (_c *MockProxy_CreateCollection_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.CreateCollectionRequest)) *MockProxy_CreateCollection_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.CreateCollectionRequest))
 	})
@@ -472,17 +474,17 @@ func (_c *MockProxy_CreateCollection_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
-// CreateCredential provides a mock function with given fields: ctx, req
-func (_m *MockProxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// CreateCredential provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) CreateCredential(_a0 context.Context, _a1 *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateCredentialRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateCredentialRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -490,7 +492,7 @@ func (_m *MockProxy) CreateCredential(ctx context.Context, req *milvuspb.CreateC
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CreateCredentialRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -504,13 +506,13 @@ type MockProxy_CreateCredential_Call struct {
 }
 
 // CreateCredential is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.CreateCredentialRequest
-func (_e *MockProxy_Expecter) CreateCredential(ctx interface{}, req interface{}) *MockProxy_CreateCredential_Call {
-	return &MockProxy_CreateCredential_Call{Call: _e.mock.On("CreateCredential", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.CreateCredentialRequest
+func (_e *MockProxy_Expecter) CreateCredential(_a0 interface{}, _a1 interface{}) *MockProxy_CreateCredential_Call {
+	return &MockProxy_CreateCredential_Call{Call: _e.mock.On("CreateCredential", _a0, _a1)}
 }
 
-func (_c *MockProxy_CreateCredential_Call) Run(run func(ctx context.Context, req *milvuspb.CreateCredentialRequest)) *MockProxy_CreateCredential_Call {
+func (_c *MockProxy_CreateCredential_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.CreateCredentialRequest)) *MockProxy_CreateCredential_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.CreateCredentialRequest))
 	})
@@ -527,17 +529,17 @@ func (_c *MockProxy_CreateCredential_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
-// CreateDatabase provides a mock function with given fields: ctx, req
-func (_m *MockProxy) CreateDatabase(ctx context.Context, req *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// CreateDatabase provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) CreateDatabase(_a0 context.Context, _a1 *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateDatabaseRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -545,7 +547,7 @@ func (_m *MockProxy) CreateDatabase(ctx context.Context, req *milvuspb.CreateDat
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CreateDatabaseRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -559,13 +561,13 @@ type MockProxy_CreateDatabase_Call struct {
 }
 
 // CreateDatabase is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.CreateDatabaseRequest
-func (_e *MockProxy_Expecter) CreateDatabase(ctx interface{}, req interface{}) *MockProxy_CreateDatabase_Call {
-	return &MockProxy_CreateDatabase_Call{Call: _e.mock.On("CreateDatabase", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.CreateDatabaseRequest
+func (_e *MockProxy_Expecter) CreateDatabase(_a0 interface{}, _a1 interface{}) *MockProxy_CreateDatabase_Call {
+	return &MockProxy_CreateDatabase_Call{Call: _e.mock.On("CreateDatabase", _a0, _a1)}
 }
 
-func (_c *MockProxy_CreateDatabase_Call) Run(run func(ctx context.Context, req *milvuspb.CreateDatabaseRequest)) *MockProxy_CreateDatabase_Call {
+func (_c *MockProxy_CreateDatabase_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.CreateDatabaseRequest)) *MockProxy_CreateDatabase_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.CreateDatabaseRequest))
 	})
@@ -582,17 +584,17 @@ func (_c *MockProxy_CreateDatabase_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
-// CreateIndex provides a mock function with given fields: ctx, request
-func (_m *MockProxy) CreateIndex(ctx context.Context, request *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, request)
+// CreateIndex provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) CreateIndex(_a0 context.Context, _a1 *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateIndexRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateIndexRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -600,7 +602,7 @@ func (_m *MockProxy) CreateIndex(ctx context.Context, request *milvuspb.CreateIn
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CreateIndexRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -614,13 +616,13 @@ type MockProxy_CreateIndex_Call struct {
 }
 
 // CreateIndex is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.CreateIndexRequest
-func (_e *MockProxy_Expecter) CreateIndex(ctx interface{}, request interface{}) *MockProxy_CreateIndex_Call {
-	return &MockProxy_CreateIndex_Call{Call: _e.mock.On("CreateIndex", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.CreateIndexRequest
+func (_e *MockProxy_Expecter) CreateIndex(_a0 interface{}, _a1 interface{}) *MockProxy_CreateIndex_Call {
+	return &MockProxy_CreateIndex_Call{Call: _e.mock.On("CreateIndex", _a0, _a1)}
 }
 
-func (_c *MockProxy_CreateIndex_Call) Run(run func(ctx context.Context, request *milvuspb.CreateIndexRequest)) *MockProxy_CreateIndex_Call {
+func (_c *MockProxy_CreateIndex_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.CreateIndexRequest)) *MockProxy_CreateIndex_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.CreateIndexRequest))
 	})
@@ -637,17 +639,17 @@ func (_c *MockProxy_CreateIndex_Call) RunAndReturn(run func(context.Context, *mi
 	return _c
 }
 
-// CreatePartition provides a mock function with given fields: ctx, request
-func (_m *MockProxy) CreatePartition(ctx context.Context, request *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, request)
+// CreatePartition provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) CreatePartition(_a0 context.Context, _a1 *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreatePartitionRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreatePartitionRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -655,7 +657,7 @@ func (_m *MockProxy) CreatePartition(ctx context.Context, request *milvuspb.Crea
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CreatePartitionRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -669,13 +671,13 @@ type MockProxy_CreatePartition_Call struct {
 }
 
 // CreatePartition is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.CreatePartitionRequest
-func (_e *MockProxy_Expecter) CreatePartition(ctx interface{}, request interface{}) *MockProxy_CreatePartition_Call {
-	return &MockProxy_CreatePartition_Call{Call: _e.mock.On("CreatePartition", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.CreatePartitionRequest
+func (_e *MockProxy_Expecter) CreatePartition(_a0 interface{}, _a1 interface{}) *MockProxy_CreatePartition_Call {
+	return &MockProxy_CreatePartition_Call{Call: _e.mock.On("CreatePartition", _a0, _a1)}
 }
 
-func (_c *MockProxy_CreatePartition_Call) Run(run func(ctx context.Context, request *milvuspb.CreatePartitionRequest)) *MockProxy_CreatePartition_Call {
+func (_c *MockProxy_CreatePartition_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.CreatePartitionRequest)) *MockProxy_CreatePartition_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.CreatePartitionRequest))
 	})
@@ -692,17 +694,17 @@ func (_c *MockProxy_CreatePartition_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
-// CreateResourceGroup provides a mock function with given fields: ctx, req
-func (_m *MockProxy) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// CreateResourceGroup provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) CreateResourceGroup(_a0 context.Context, _a1 *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateResourceGroupRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -710,7 +712,7 @@ func (_m *MockProxy) CreateResourceGroup(ctx context.Context, req *milvuspb.Crea
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CreateResourceGroupRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -724,13 +726,13 @@ type MockProxy_CreateResourceGroup_Call struct {
 }
 
 // CreateResourceGroup is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.CreateResourceGroupRequest
-func (_e *MockProxy_Expecter) CreateResourceGroup(ctx interface{}, req interface{}) *MockProxy_CreateResourceGroup_Call {
-	return &MockProxy_CreateResourceGroup_Call{Call: _e.mock.On("CreateResourceGroup", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.CreateResourceGroupRequest
+func (_e *MockProxy_Expecter) CreateResourceGroup(_a0 interface{}, _a1 interface{}) *MockProxy_CreateResourceGroup_Call {
+	return &MockProxy_CreateResourceGroup_Call{Call: _e.mock.On("CreateResourceGroup", _a0, _a1)}
 }
 
-func (_c *MockProxy_CreateResourceGroup_Call) Run(run func(ctx context.Context, req *milvuspb.CreateResourceGroupRequest)) *MockProxy_CreateResourceGroup_Call {
+func (_c *MockProxy_CreateResourceGroup_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.CreateResourceGroupRequest)) *MockProxy_CreateResourceGroup_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.CreateResourceGroupRequest))
 	})
@@ -747,17 +749,17 @@ func (_c *MockProxy_CreateResourceGroup_Call) RunAndReturn(run func(context.Cont
 	return _c
 }
 
-// CreateRole provides a mock function with given fields: ctx, req
-func (_m *MockProxy) CreateRole(ctx context.Context, req *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// CreateRole provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) CreateRole(_a0 context.Context, _a1 *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateRoleRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateRoleRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -765,7 +767,7 @@ func (_m *MockProxy) CreateRole(ctx context.Context, req *milvuspb.CreateRoleReq
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CreateRoleRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -779,13 +781,13 @@ type MockProxy_CreateRole_Call struct {
 }
 
 // CreateRole is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.CreateRoleRequest
-func (_e *MockProxy_Expecter) CreateRole(ctx interface{}, req interface{}) *MockProxy_CreateRole_Call {
-	return &MockProxy_CreateRole_Call{Call: _e.mock.On("CreateRole", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.CreateRoleRequest
+func (_e *MockProxy_Expecter) CreateRole(_a0 interface{}, _a1 interface{}) *MockProxy_CreateRole_Call {
+	return &MockProxy_CreateRole_Call{Call: _e.mock.On("CreateRole", _a0, _a1)}
 }
 
-func (_c *MockProxy_CreateRole_Call) Run(run func(ctx context.Context, req *milvuspb.CreateRoleRequest)) *MockProxy_CreateRole_Call {
+func (_c *MockProxy_CreateRole_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.CreateRoleRequest)) *MockProxy_CreateRole_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.CreateRoleRequest))
 	})
@@ -802,17 +804,17 @@ func (_c *MockProxy_CreateRole_Call) RunAndReturn(run func(context.Context, *mil
 	return _c
 }
 
-// Delete provides a mock function with given fields: ctx, request
-func (_m *MockProxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) (*milvuspb.MutationResult, error) {
-	ret := _m.Called(ctx, request)
+// Delete provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) Delete(_a0 context.Context, _a1 *milvuspb.DeleteRequest) (*milvuspb.MutationResult, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.MutationResult
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DeleteRequest) (*milvuspb.MutationResult, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DeleteRequest) *milvuspb.MutationResult); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.MutationResult)
@@ -820,7 +822,7 @@ func (_m *MockProxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DeleteRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -834,13 +836,13 @@ type MockProxy_Delete_Call struct {
 }
 
 // Delete is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.DeleteRequest
-func (_e *MockProxy_Expecter) Delete(ctx interface{}, request interface{}) *MockProxy_Delete_Call {
-	return &MockProxy_Delete_Call{Call: _e.mock.On("Delete", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DeleteRequest
+func (_e *MockProxy_Expecter) Delete(_a0 interface{}, _a1 interface{}) *MockProxy_Delete_Call {
+	return &MockProxy_Delete_Call{Call: _e.mock.On("Delete", _a0, _a1)}
 }
 
-func (_c *MockProxy_Delete_Call) Run(run func(ctx context.Context, request *milvuspb.DeleteRequest)) *MockProxy_Delete_Call {
+func (_c *MockProxy_Delete_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DeleteRequest)) *MockProxy_Delete_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.DeleteRequest))
 	})
@@ -857,17 +859,17 @@ func (_c *MockProxy_Delete_Call) RunAndReturn(run func(context.Context, *milvusp
 	return _c
 }
 
-// DeleteCredential provides a mock function with given fields: ctx, req
-func (_m *MockProxy) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCredentialRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// DeleteCredential provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) DeleteCredential(_a0 context.Context, _a1 *milvuspb.DeleteCredentialRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DeleteCredentialRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DeleteCredentialRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -875,7 +877,7 @@ func (_m *MockProxy) DeleteCredential(ctx context.Context, req *milvuspb.DeleteC
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DeleteCredentialRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -889,13 +891,13 @@ type MockProxy_DeleteCredential_Call struct {
 }
 
 // DeleteCredential is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.DeleteCredentialRequest
-func (_e *MockProxy_Expecter) DeleteCredential(ctx interface{}, req interface{}) *MockProxy_DeleteCredential_Call {
-	return &MockProxy_DeleteCredential_Call{Call: _e.mock.On("DeleteCredential", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DeleteCredentialRequest
+func (_e *MockProxy_Expecter) DeleteCredential(_a0 interface{}, _a1 interface{}) *MockProxy_DeleteCredential_Call {
+	return &MockProxy_DeleteCredential_Call{Call: _e.mock.On("DeleteCredential", _a0, _a1)}
 }
 
-func (_c *MockProxy_DeleteCredential_Call) Run(run func(ctx context.Context, req *milvuspb.DeleteCredentialRequest)) *MockProxy_DeleteCredential_Call {
+func (_c *MockProxy_DeleteCredential_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DeleteCredentialRequest)) *MockProxy_DeleteCredential_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.DeleteCredentialRequest))
 	})
@@ -912,17 +914,72 @@ func (_c *MockProxy_DeleteCredential_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
-// DescribeCollection provides a mock function with given fields: ctx, request
-func (_m *MockProxy) DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-	ret := _m.Called(ctx, request)
+// DescribeAlias provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) DescribeAlias(_a0 context.Context, _a1 *milvuspb.DescribeAliasRequest) (*milvuspb.DescribeAliasResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *milvuspb.DescribeAliasResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DescribeAliasRequest) (*milvuspb.DescribeAliasResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DescribeAliasRequest) *milvuspb.DescribeAliasResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.DescribeAliasResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DescribeAliasRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_DescribeAlias_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DescribeAlias'
+type MockProxy_DescribeAlias_Call struct {
+	*mock.Call
+}
+
+// DescribeAlias is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DescribeAliasRequest
+func (_e *MockProxy_Expecter) DescribeAlias(_a0 interface{}, _a1 interface{}) *MockProxy_DescribeAlias_Call {
+	return &MockProxy_DescribeAlias_Call{Call: _e.mock.On("DescribeAlias", _a0, _a1)}
+}
+
+func (_c *MockProxy_DescribeAlias_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DescribeAliasRequest)) *MockProxy_DescribeAlias_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.DescribeAliasRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_DescribeAlias_Call) Return(_a0 *milvuspb.DescribeAliasResponse, _a1 error) *MockProxy_DescribeAlias_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_DescribeAlias_Call) RunAndReturn(run func(context.Context, *milvuspb.DescribeAliasRequest) (*milvuspb.DescribeAliasResponse, error)) *MockProxy_DescribeAlias_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DescribeCollection provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) DescribeCollection(_a0 context.Context, _a1 *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.DescribeCollectionResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DescribeCollectionRequest) *milvuspb.DescribeCollectionResponse); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.DescribeCollectionResponse)
@@ -930,7 +987,7 @@ func (_m *MockProxy) DescribeCollection(ctx context.Context, request *milvuspb.D
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DescribeCollectionRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -944,13 +1001,13 @@ type MockProxy_DescribeCollection_Call struct {
 }
 
 // DescribeCollection is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.DescribeCollectionRequest
-func (_e *MockProxy_Expecter) DescribeCollection(ctx interface{}, request interface{}) *MockProxy_DescribeCollection_Call {
-	return &MockProxy_DescribeCollection_Call{Call: _e.mock.On("DescribeCollection", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DescribeCollectionRequest
+func (_e *MockProxy_Expecter) DescribeCollection(_a0 interface{}, _a1 interface{}) *MockProxy_DescribeCollection_Call {
+	return &MockProxy_DescribeCollection_Call{Call: _e.mock.On("DescribeCollection", _a0, _a1)}
 }
 
-func (_c *MockProxy_DescribeCollection_Call) Run(run func(ctx context.Context, request *milvuspb.DescribeCollectionRequest)) *MockProxy_DescribeCollection_Call {
+func (_c *MockProxy_DescribeCollection_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DescribeCollectionRequest)) *MockProxy_DescribeCollection_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.DescribeCollectionRequest))
 	})
@@ -967,17 +1024,17 @@ func (_c *MockProxy_DescribeCollection_Call) RunAndReturn(run func(context.Conte
 	return _c
 }
 
-// DescribeIndex provides a mock function with given fields: ctx, request
-func (_m *MockProxy) DescribeIndex(ctx context.Context, request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
-	ret := _m.Called(ctx, request)
+// DescribeIndex provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) DescribeIndex(_a0 context.Context, _a1 *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.DescribeIndexResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DescribeIndexRequest) *milvuspb.DescribeIndexResponse); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.DescribeIndexResponse)
@@ -985,7 +1042,7 @@ func (_m *MockProxy) DescribeIndex(ctx context.Context, request *milvuspb.Descri
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DescribeIndexRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -999,13 +1056,13 @@ type MockProxy_DescribeIndex_Call struct {
 }
 
 // DescribeIndex is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.DescribeIndexRequest
-func (_e *MockProxy_Expecter) DescribeIndex(ctx interface{}, request interface{}) *MockProxy_DescribeIndex_Call {
-	return &MockProxy_DescribeIndex_Call{Call: _e.mock.On("DescribeIndex", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DescribeIndexRequest
+func (_e *MockProxy_Expecter) DescribeIndex(_a0 interface{}, _a1 interface{}) *MockProxy_DescribeIndex_Call {
+	return &MockProxy_DescribeIndex_Call{Call: _e.mock.On("DescribeIndex", _a0, _a1)}
 }
 
-func (_c *MockProxy_DescribeIndex_Call) Run(run func(ctx context.Context, request *milvuspb.DescribeIndexRequest)) *MockProxy_DescribeIndex_Call {
+func (_c *MockProxy_DescribeIndex_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DescribeIndexRequest)) *MockProxy_DescribeIndex_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.DescribeIndexRequest))
 	})
@@ -1022,17 +1079,17 @@ func (_c *MockProxy_DescribeIndex_Call) RunAndReturn(run func(context.Context, *
 	return _c
 }
 
-// DescribeResourceGroup provides a mock function with given fields: ctx, req
-func (_m *MockProxy) DescribeResourceGroup(ctx context.Context, req *milvuspb.DescribeResourceGroupRequest) (*milvuspb.DescribeResourceGroupResponse, error) {
-	ret := _m.Called(ctx, req)
+// DescribeResourceGroup provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) DescribeResourceGroup(_a0 context.Context, _a1 *milvuspb.DescribeResourceGroupRequest) (*milvuspb.DescribeResourceGroupResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.DescribeResourceGroupResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DescribeResourceGroupRequest) (*milvuspb.DescribeResourceGroupResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DescribeResourceGroupRequest) *milvuspb.DescribeResourceGroupResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.DescribeResourceGroupResponse)
@@ -1040,7 +1097,7 @@ func (_m *MockProxy) DescribeResourceGroup(ctx context.Context, req *milvuspb.De
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DescribeResourceGroupRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1054,13 +1111,13 @@ type MockProxy_DescribeResourceGroup_Call struct {
 }
 
 // DescribeResourceGroup is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.DescribeResourceGroupRequest
-func (_e *MockProxy_Expecter) DescribeResourceGroup(ctx interface{}, req interface{}) *MockProxy_DescribeResourceGroup_Call {
-	return &MockProxy_DescribeResourceGroup_Call{Call: _e.mock.On("DescribeResourceGroup", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DescribeResourceGroupRequest
+func (_e *MockProxy_Expecter) DescribeResourceGroup(_a0 interface{}, _a1 interface{}) *MockProxy_DescribeResourceGroup_Call {
+	return &MockProxy_DescribeResourceGroup_Call{Call: _e.mock.On("DescribeResourceGroup", _a0, _a1)}
 }
 
-func (_c *MockProxy_DescribeResourceGroup_Call) Run(run func(ctx context.Context, req *milvuspb.DescribeResourceGroupRequest)) *MockProxy_DescribeResourceGroup_Call {
+func (_c *MockProxy_DescribeResourceGroup_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DescribeResourceGroupRequest)) *MockProxy_DescribeResourceGroup_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.DescribeResourceGroupRequest))
 	})
@@ -1077,17 +1134,72 @@ func (_c *MockProxy_DescribeResourceGroup_Call) RunAndReturn(run func(context.Co
 	return _c
 }
 
-// DropAlias provides a mock function with given fields: ctx, request
-func (_m *MockProxy) DropAlias(ctx context.Context, request *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, request)
+// DescribeSegmentIndexData provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) DescribeSegmentIndexData(_a0 context.Context, _a1 *federpb.DescribeSegmentIndexDataRequest) (*federpb.DescribeSegmentIndexDataResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *federpb.DescribeSegmentIndexDataResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *federpb.DescribeSegmentIndexDataRequest) (*federpb.DescribeSegmentIndexDataResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *federpb.DescribeSegmentIndexDataRequest) *federpb.DescribeSegmentIndexDataResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*federpb.DescribeSegmentIndexDataResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *federpb.DescribeSegmentIndexDataRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_DescribeSegmentIndexData_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DescribeSegmentIndexData'
+type MockProxy_DescribeSegmentIndexData_Call struct {
+	*mock.Call
+}
+
+// DescribeSegmentIndexData is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *federpb.DescribeSegmentIndexDataRequest
+func (_e *MockProxy_Expecter) DescribeSegmentIndexData(_a0 interface{}, _a1 interface{}) *MockProxy_DescribeSegmentIndexData_Call {
+	return &MockProxy_DescribeSegmentIndexData_Call{Call: _e.mock.On("DescribeSegmentIndexData", _a0, _a1)}
+}
+
+func (_c *MockProxy_DescribeSegmentIndexData_Call) Run(run func(_a0 context.Context, _a1 *federpb.DescribeSegmentIndexDataRequest)) *MockProxy_DescribeSegmentIndexData_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*federpb.DescribeSegmentIndexDataRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_DescribeSegmentIndexData_Call) Return(_a0 *federpb.DescribeSegmentIndexDataResponse, _a1 error) *MockProxy_DescribeSegmentIndexData_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_DescribeSegmentIndexData_Call) RunAndReturn(run func(context.Context, *federpb.DescribeSegmentIndexDataRequest) (*federpb.DescribeSegmentIndexDataResponse, error)) *MockProxy_DescribeSegmentIndexData_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropAlias provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) DropAlias(_a0 context.Context, _a1 *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropAliasRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropAliasRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -1095,7 +1207,7 @@ func (_m *MockProxy) DropAlias(ctx context.Context, request *milvuspb.DropAliasR
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DropAliasRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1109,13 +1221,13 @@ type MockProxy_DropAlias_Call struct {
 }
 
 // DropAlias is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.DropAliasRequest
-func (_e *MockProxy_Expecter) DropAlias(ctx interface{}, request interface{}) *MockProxy_DropAlias_Call {
-	return &MockProxy_DropAlias_Call{Call: _e.mock.On("DropAlias", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DropAliasRequest
+func (_e *MockProxy_Expecter) DropAlias(_a0 interface{}, _a1 interface{}) *MockProxy_DropAlias_Call {
+	return &MockProxy_DropAlias_Call{Call: _e.mock.On("DropAlias", _a0, _a1)}
 }
 
-func (_c *MockProxy_DropAlias_Call) Run(run func(ctx context.Context, request *milvuspb.DropAliasRequest)) *MockProxy_DropAlias_Call {
+func (_c *MockProxy_DropAlias_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DropAliasRequest)) *MockProxy_DropAlias_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.DropAliasRequest))
 	})
@@ -1132,17 +1244,17 @@ func (_c *MockProxy_DropAlias_Call) RunAndReturn(run func(context.Context, *milv
 	return _c
 }
 
-// DropCollection provides a mock function with given fields: ctx, request
-func (_m *MockProxy) DropCollection(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, request)
+// DropCollection provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) DropCollection(_a0 context.Context, _a1 *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropCollectionRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropCollectionRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -1150,7 +1262,7 @@ func (_m *MockProxy) DropCollection(ctx context.Context, request *milvuspb.DropC
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DropCollectionRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1164,13 +1276,13 @@ type MockProxy_DropCollection_Call struct {
 }
 
 // DropCollection is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.DropCollectionRequest
-func (_e *MockProxy_Expecter) DropCollection(ctx interface{}, request interface{}) *MockProxy_DropCollection_Call {
-	return &MockProxy_DropCollection_Call{Call: _e.mock.On("DropCollection", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DropCollectionRequest
+func (_e *MockProxy_Expecter) DropCollection(_a0 interface{}, _a1 interface{}) *MockProxy_DropCollection_Call {
+	return &MockProxy_DropCollection_Call{Call: _e.mock.On("DropCollection", _a0, _a1)}
 }
 
-func (_c *MockProxy_DropCollection_Call) Run(run func(ctx context.Context, request *milvuspb.DropCollectionRequest)) *MockProxy_DropCollection_Call {
+func (_c *MockProxy_DropCollection_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DropCollectionRequest)) *MockProxy_DropCollection_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.DropCollectionRequest))
 	})
@@ -1187,17 +1299,17 @@ func (_c *MockProxy_DropCollection_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
-// DropDatabase provides a mock function with given fields: ctx, req
-func (_m *MockProxy) DropDatabase(ctx context.Context, req *milvuspb.DropDatabaseRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// DropDatabase provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) DropDatabase(_a0 context.Context, _a1 *milvuspb.DropDatabaseRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropDatabaseRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropDatabaseRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -1205,7 +1317,7 @@ func (_m *MockProxy) DropDatabase(ctx context.Context, req *milvuspb.DropDatabas
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DropDatabaseRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1219,13 +1331,13 @@ type MockProxy_DropDatabase_Call struct {
 }
 
 // DropDatabase is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.DropDatabaseRequest
-func (_e *MockProxy_Expecter) DropDatabase(ctx interface{}, req interface{}) *MockProxy_DropDatabase_Call {
-	return &MockProxy_DropDatabase_Call{Call: _e.mock.On("DropDatabase", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DropDatabaseRequest
+func (_e *MockProxy_Expecter) DropDatabase(_a0 interface{}, _a1 interface{}) *MockProxy_DropDatabase_Call {
+	return &MockProxy_DropDatabase_Call{Call: _e.mock.On("DropDatabase", _a0, _a1)}
 }
 
-func (_c *MockProxy_DropDatabase_Call) Run(run func(ctx context.Context, req *milvuspb.DropDatabaseRequest)) *MockProxy_DropDatabase_Call {
+func (_c *MockProxy_DropDatabase_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DropDatabaseRequest)) *MockProxy_DropDatabase_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.DropDatabaseRequest))
 	})
@@ -1242,17 +1354,17 @@ func (_c *MockProxy_DropDatabase_Call) RunAndReturn(run func(context.Context, *m
 	return _c
 }
 
-// DropIndex provides a mock function with given fields: ctx, request
-func (_m *MockProxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, request)
+// DropIndex provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) DropIndex(_a0 context.Context, _a1 *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropIndexRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropIndexRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -1260,7 +1372,7 @@ func (_m *MockProxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexR
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DropIndexRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1274,13 +1386,13 @@ type MockProxy_DropIndex_Call struct {
 }
 
 // DropIndex is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.DropIndexRequest
-func (_e *MockProxy_Expecter) DropIndex(ctx interface{}, request interface{}) *MockProxy_DropIndex_Call {
-	return &MockProxy_DropIndex_Call{Call: _e.mock.On("DropIndex", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DropIndexRequest
+func (_e *MockProxy_Expecter) DropIndex(_a0 interface{}, _a1 interface{}) *MockProxy_DropIndex_Call {
+	return &MockProxy_DropIndex_Call{Call: _e.mock.On("DropIndex", _a0, _a1)}
 }
 
-func (_c *MockProxy_DropIndex_Call) Run(run func(ctx context.Context, request *milvuspb.DropIndexRequest)) *MockProxy_DropIndex_Call {
+func (_c *MockProxy_DropIndex_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DropIndexRequest)) *MockProxy_DropIndex_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.DropIndexRequest))
 	})
@@ -1297,17 +1409,17 @@ func (_c *MockProxy_DropIndex_Call) RunAndReturn(run func(context.Context, *milv
 	return _c
 }
 
-// DropPartition provides a mock function with given fields: ctx, request
-func (_m *MockProxy) DropPartition(ctx context.Context, request *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, request)
+// DropPartition provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) DropPartition(_a0 context.Context, _a1 *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropPartitionRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropPartitionRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -1315,7 +1427,7 @@ func (_m *MockProxy) DropPartition(ctx context.Context, request *milvuspb.DropPa
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DropPartitionRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1329,13 +1441,13 @@ type MockProxy_DropPartition_Call struct {
 }
 
 // DropPartition is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.DropPartitionRequest
-func (_e *MockProxy_Expecter) DropPartition(ctx interface{}, request interface{}) *MockProxy_DropPartition_Call {
-	return &MockProxy_DropPartition_Call{Call: _e.mock.On("DropPartition", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DropPartitionRequest
+func (_e *MockProxy_Expecter) DropPartition(_a0 interface{}, _a1 interface{}) *MockProxy_DropPartition_Call {
+	return &MockProxy_DropPartition_Call{Call: _e.mock.On("DropPartition", _a0, _a1)}
 }
 
-func (_c *MockProxy_DropPartition_Call) Run(run func(ctx context.Context, request *milvuspb.DropPartitionRequest)) *MockProxy_DropPartition_Call {
+func (_c *MockProxy_DropPartition_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DropPartitionRequest)) *MockProxy_DropPartition_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.DropPartitionRequest))
 	})
@@ -1352,17 +1464,17 @@ func (_c *MockProxy_DropPartition_Call) RunAndReturn(run func(context.Context, *
 	return _c
 }
 
-// DropResourceGroup provides a mock function with given fields: ctx, req
-func (_m *MockProxy) DropResourceGroup(ctx context.Context, req *milvuspb.DropResourceGroupRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// DropResourceGroup provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) DropResourceGroup(_a0 context.Context, _a1 *milvuspb.DropResourceGroupRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropResourceGroupRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropResourceGroupRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -1370,7 +1482,7 @@ func (_m *MockProxy) DropResourceGroup(ctx context.Context, req *milvuspb.DropRe
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DropResourceGroupRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1384,13 +1496,13 @@ type MockProxy_DropResourceGroup_Call struct {
 }
 
 // DropResourceGroup is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.DropResourceGroupRequest
-func (_e *MockProxy_Expecter) DropResourceGroup(ctx interface{}, req interface{}) *MockProxy_DropResourceGroup_Call {
-	return &MockProxy_DropResourceGroup_Call{Call: _e.mock.On("DropResourceGroup", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DropResourceGroupRequest
+func (_e *MockProxy_Expecter) DropResourceGroup(_a0 interface{}, _a1 interface{}) *MockProxy_DropResourceGroup_Call {
+	return &MockProxy_DropResourceGroup_Call{Call: _e.mock.On("DropResourceGroup", _a0, _a1)}
 }
 
-func (_c *MockProxy_DropResourceGroup_Call) Run(run func(ctx context.Context, req *milvuspb.DropResourceGroupRequest)) *MockProxy_DropResourceGroup_Call {
+func (_c *MockProxy_DropResourceGroup_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DropResourceGroupRequest)) *MockProxy_DropResourceGroup_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.DropResourceGroupRequest))
 	})
@@ -1407,17 +1519,17 @@ func (_c *MockProxy_DropResourceGroup_Call) RunAndReturn(run func(context.Contex
 	return _c
 }
 
-// DropRole provides a mock function with given fields: ctx, req
-func (_m *MockProxy) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// DropRole provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) DropRole(_a0 context.Context, _a1 *milvuspb.DropRoleRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropRoleRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropRoleRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -1425,7 +1537,7 @@ func (_m *MockProxy) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DropRoleRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1439,13 +1551,13 @@ type MockProxy_DropRole_Call struct {
 }
 
 // DropRole is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.DropRoleRequest
-func (_e *MockProxy_Expecter) DropRole(ctx interface{}, req interface{}) *MockProxy_DropRole_Call {
-	return &MockProxy_DropRole_Call{Call: _e.mock.On("DropRole", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DropRoleRequest
+func (_e *MockProxy_Expecter) DropRole(_a0 interface{}, _a1 interface{}) *MockProxy_DropRole_Call {
+	return &MockProxy_DropRole_Call{Call: _e.mock.On("DropRole", _a0, _a1)}
 }
 
-func (_c *MockProxy_DropRole_Call) Run(run func(ctx context.Context, req *milvuspb.DropRoleRequest)) *MockProxy_DropRole_Call {
+func (_c *MockProxy_DropRole_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DropRoleRequest)) *MockProxy_DropRole_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.DropRoleRequest))
 	})
@@ -1462,17 +1574,17 @@ func (_c *MockProxy_DropRole_Call) RunAndReturn(run func(context.Context, *milvu
 	return _c
 }
 
-// Dummy provides a mock function with given fields: ctx, request
-func (_m *MockProxy) Dummy(ctx context.Context, request *milvuspb.DummyRequest) (*milvuspb.DummyResponse, error) {
-	ret := _m.Called(ctx, request)
+// Dummy provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) Dummy(_a0 context.Context, _a1 *milvuspb.DummyRequest) (*milvuspb.DummyResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.DummyResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DummyRequest) (*milvuspb.DummyResponse, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DummyRequest) *milvuspb.DummyResponse); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.DummyResponse)
@@ -1480,7 +1592,7 @@ func (_m *MockProxy) Dummy(ctx context.Context, request *milvuspb.DummyRequest) 
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DummyRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1494,13 +1606,13 @@ type MockProxy_Dummy_Call struct {
 }
 
 // Dummy is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.DummyRequest
-func (_e *MockProxy_Expecter) Dummy(ctx interface{}, request interface{}) *MockProxy_Dummy_Call {
-	return &MockProxy_Dummy_Call{Call: _e.mock.On("Dummy", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DummyRequest
+func (_e *MockProxy_Expecter) Dummy(_a0 interface{}, _a1 interface{}) *MockProxy_Dummy_Call {
+	return &MockProxy_Dummy_Call{Call: _e.mock.On("Dummy", _a0, _a1)}
 }
 
-func (_c *MockProxy_Dummy_Call) Run(run func(ctx context.Context, request *milvuspb.DummyRequest)) *MockProxy_Dummy_Call {
+func (_c *MockProxy_Dummy_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DummyRequest)) *MockProxy_Dummy_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.DummyRequest))
 	})
@@ -1517,17 +1629,17 @@ func (_c *MockProxy_Dummy_Call) RunAndReturn(run func(context.Context, *milvuspb
 	return _c
 }
 
-// Flush provides a mock function with given fields: ctx, request
-func (_m *MockProxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*milvuspb.FlushResponse, error) {
-	ret := _m.Called(ctx, request)
+// Flush provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) Flush(_a0 context.Context, _a1 *milvuspb.FlushRequest) (*milvuspb.FlushResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.FlushResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.FlushRequest) (*milvuspb.FlushResponse, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.FlushRequest) *milvuspb.FlushResponse); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.FlushResponse)
@@ -1535,7 +1647,7 @@ func (_m *MockProxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) 
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.FlushRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1549,13 +1661,13 @@ type MockProxy_Flush_Call struct {
 }
 
 // Flush is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.FlushRequest
-func (_e *MockProxy_Expecter) Flush(ctx interface{}, request interface{}) *MockProxy_Flush_Call {
-	return &MockProxy_Flush_Call{Call: _e.mock.On("Flush", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.FlushRequest
+func (_e *MockProxy_Expecter) Flush(_a0 interface{}, _a1 interface{}) *MockProxy_Flush_Call {
+	return &MockProxy_Flush_Call{Call: _e.mock.On("Flush", _a0, _a1)}
 }
 
-func (_c *MockProxy_Flush_Call) Run(run func(ctx context.Context, request *milvuspb.FlushRequest)) *MockProxy_Flush_Call {
+func (_c *MockProxy_Flush_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.FlushRequest)) *MockProxy_Flush_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.FlushRequest))
 	})
@@ -1572,17 +1684,17 @@ func (_c *MockProxy_Flush_Call) RunAndReturn(run func(context.Context, *milvuspb
 	return _c
 }
 
-// FlushAll provides a mock function with given fields: ctx, request
-func (_m *MockProxy) FlushAll(ctx context.Context, request *milvuspb.FlushAllRequest) (*milvuspb.FlushAllResponse, error) {
-	ret := _m.Called(ctx, request)
+// FlushAll provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) FlushAll(_a0 context.Context, _a1 *milvuspb.FlushAllRequest) (*milvuspb.FlushAllResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.FlushAllResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.FlushAllRequest) (*milvuspb.FlushAllResponse, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.FlushAllRequest) *milvuspb.FlushAllResponse); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.FlushAllResponse)
@@ -1590,7 +1702,7 @@ func (_m *MockProxy) FlushAll(ctx context.Context, request *milvuspb.FlushAllReq
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.FlushAllRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1604,13 +1716,13 @@ type MockProxy_FlushAll_Call struct {
 }
 
 // FlushAll is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.FlushAllRequest
-func (_e *MockProxy_Expecter) FlushAll(ctx interface{}, request interface{}) *MockProxy_FlushAll_Call {
-	return &MockProxy_FlushAll_Call{Call: _e.mock.On("FlushAll", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.FlushAllRequest
+func (_e *MockProxy_Expecter) FlushAll(_a0 interface{}, _a1 interface{}) *MockProxy_FlushAll_Call {
+	return &MockProxy_FlushAll_Call{Call: _e.mock.On("FlushAll", _a0, _a1)}
 }
 
-func (_c *MockProxy_FlushAll_Call) Run(run func(ctx context.Context, request *milvuspb.FlushAllRequest)) *MockProxy_FlushAll_Call {
+func (_c *MockProxy_FlushAll_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.FlushAllRequest)) *MockProxy_FlushAll_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.FlushAllRequest))
 	})
@@ -1668,17 +1780,17 @@ func (_c *MockProxy_GetAddress_Call) RunAndReturn(run func() string) *MockProxy_
 	return _c
 }
 
-// GetCollectionStatistics provides a mock function with given fields: ctx, request
-func (_m *MockProxy) GetCollectionStatistics(ctx context.Context, request *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
-	ret := _m.Called(ctx, request)
+// GetCollectionStatistics provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) GetCollectionStatistics(_a0 context.Context, _a1 *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.GetCollectionStatisticsResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetCollectionStatisticsRequest) *milvuspb.GetCollectionStatisticsResponse); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.GetCollectionStatisticsResponse)
@@ -1686,7 +1798,7 @@ func (_m *MockProxy) GetCollectionStatistics(ctx context.Context, request *milvu
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetCollectionStatisticsRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1700,13 +1812,13 @@ type MockProxy_GetCollectionStatistics_Call struct {
 }
 
 // GetCollectionStatistics is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.GetCollectionStatisticsRequest
-func (_e *MockProxy_Expecter) GetCollectionStatistics(ctx interface{}, request interface{}) *MockProxy_GetCollectionStatistics_Call {
-	return &MockProxy_GetCollectionStatistics_Call{Call: _e.mock.On("GetCollectionStatistics", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetCollectionStatisticsRequest
+func (_e *MockProxy_Expecter) GetCollectionStatistics(_a0 interface{}, _a1 interface{}) *MockProxy_GetCollectionStatistics_Call {
+	return &MockProxy_GetCollectionStatistics_Call{Call: _e.mock.On("GetCollectionStatistics", _a0, _a1)}
 }
 
-func (_c *MockProxy_GetCollectionStatistics_Call) Run(run func(ctx context.Context, request *milvuspb.GetCollectionStatisticsRequest)) *MockProxy_GetCollectionStatistics_Call {
+func (_c *MockProxy_GetCollectionStatistics_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetCollectionStatisticsRequest)) *MockProxy_GetCollectionStatistics_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.GetCollectionStatisticsRequest))
 	})
@@ -1723,17 +1835,17 @@ func (_c *MockProxy_GetCollectionStatistics_Call) RunAndReturn(run func(context.
 	return _c
 }
 
-// GetCompactionState provides a mock function with given fields: ctx, req
-func (_m *MockProxy) GetCompactionState(ctx context.Context, req *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error) {
-	ret := _m.Called(ctx, req)
+// GetCompactionState provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) GetCompactionState(_a0 context.Context, _a1 *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.GetCompactionStateResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetCompactionStateRequest) *milvuspb.GetCompactionStateResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.GetCompactionStateResponse)
@@ -1741,7 +1853,7 @@ func (_m *MockProxy) GetCompactionState(ctx context.Context, req *milvuspb.GetCo
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetCompactionStateRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1755,13 +1867,13 @@ type MockProxy_GetCompactionState_Call struct {
 }
 
 // GetCompactionState is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.GetCompactionStateRequest
-func (_e *MockProxy_Expecter) GetCompactionState(ctx interface{}, req interface{}) *MockProxy_GetCompactionState_Call {
-	return &MockProxy_GetCompactionState_Call{Call: _e.mock.On("GetCompactionState", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetCompactionStateRequest
+func (_e *MockProxy_Expecter) GetCompactionState(_a0 interface{}, _a1 interface{}) *MockProxy_GetCompactionState_Call {
+	return &MockProxy_GetCompactionState_Call{Call: _e.mock.On("GetCompactionState", _a0, _a1)}
 }
 
-func (_c *MockProxy_GetCompactionState_Call) Run(run func(ctx context.Context, req *milvuspb.GetCompactionStateRequest)) *MockProxy_GetCompactionState_Call {
+func (_c *MockProxy_GetCompactionState_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetCompactionStateRequest)) *MockProxy_GetCompactionState_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.GetCompactionStateRequest))
 	})
@@ -1778,17 +1890,17 @@ func (_c *MockProxy_GetCompactionState_Call) RunAndReturn(run func(context.Conte
 	return _c
 }
 
-// GetCompactionStateWithPlans provides a mock function with given fields: ctx, req
-func (_m *MockProxy) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error) {
-	ret := _m.Called(ctx, req)
+// GetCompactionStateWithPlans provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) GetCompactionStateWithPlans(_a0 context.Context, _a1 *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.GetCompactionPlansResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetCompactionPlansRequest) *milvuspb.GetCompactionPlansResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.GetCompactionPlansResponse)
@@ -1796,7 +1908,7 @@ func (_m *MockProxy) GetCompactionStateWithPlans(ctx context.Context, req *milvu
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetCompactionPlansRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1810,13 +1922,13 @@ type MockProxy_GetCompactionStateWithPlans_Call struct {
 }
 
 // GetCompactionStateWithPlans is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.GetCompactionPlansRequest
-func (_e *MockProxy_Expecter) GetCompactionStateWithPlans(ctx interface{}, req interface{}) *MockProxy_GetCompactionStateWithPlans_Call {
-	return &MockProxy_GetCompactionStateWithPlans_Call{Call: _e.mock.On("GetCompactionStateWithPlans", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetCompactionPlansRequest
+func (_e *MockProxy_Expecter) GetCompactionStateWithPlans(_a0 interface{}, _a1 interface{}) *MockProxy_GetCompactionStateWithPlans_Call {
+	return &MockProxy_GetCompactionStateWithPlans_Call{Call: _e.mock.On("GetCompactionStateWithPlans", _a0, _a1)}
 }
 
-func (_c *MockProxy_GetCompactionStateWithPlans_Call) Run(run func(ctx context.Context, req *milvuspb.GetCompactionPlansRequest)) *MockProxy_GetCompactionStateWithPlans_Call {
+func (_c *MockProxy_GetCompactionStateWithPlans_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetCompactionPlansRequest)) *MockProxy_GetCompactionStateWithPlans_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.GetCompactionPlansRequest))
 	})
@@ -1833,25 +1945,25 @@ func (_c *MockProxy_GetCompactionStateWithPlans_Call) RunAndReturn(run func(cont
 	return _c
 }
 
-// GetComponentStates provides a mock function with given fields: ctx
-func (_m *MockProxy) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
-	ret := _m.Called(ctx)
+// GetComponentStates provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) GetComponentStates(_a0 context.Context, _a1 *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.ComponentStates
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) (*milvuspb.ComponentStates, error)); ok {
-		return rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error)); ok {
+		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context) *milvuspb.ComponentStates); ok {
-		r0 = rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetComponentStatesRequest) *milvuspb.ComponentStates); ok {
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.ComponentStates)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = rf(ctx)
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetComponentStatesRequest) error); ok {
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1865,14 +1977,15 @@ type MockProxy_GetComponentStates_Call struct {
 }
 
 // GetComponentStates is a helper method to define mock.On call
-//   - ctx context.Context
-func (_e *MockProxy_Expecter) GetComponentStates(ctx interface{}) *MockProxy_GetComponentStates_Call {
-	return &MockProxy_GetComponentStates_Call{Call: _e.mock.On("GetComponentStates", ctx)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetComponentStatesRequest
+func (_e *MockProxy_Expecter) GetComponentStates(_a0 interface{}, _a1 interface{}) *MockProxy_GetComponentStates_Call {
+	return &MockProxy_GetComponentStates_Call{Call: _e.mock.On("GetComponentStates", _a0, _a1)}
 }
 
-func (_c *MockProxy_GetComponentStates_Call) Run(run func(ctx context.Context)) *MockProxy_GetComponentStates_Call {
+func (_c *MockProxy_GetComponentStates_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetComponentStatesRequest)) *MockProxy_GetComponentStates_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
+		run(args[0].(context.Context), args[1].(*milvuspb.GetComponentStatesRequest))
 	})
 	return _c
 }
@@ -1882,22 +1995,22 @@ func (_c *MockProxy_GetComponentStates_Call) Return(_a0 *milvuspb.ComponentState
 	return _c
 }
 
-func (_c *MockProxy_GetComponentStates_Call) RunAndReturn(run func(context.Context) (*milvuspb.ComponentStates, error)) *MockProxy_GetComponentStates_Call {
+func (_c *MockProxy_GetComponentStates_Call) RunAndReturn(run func(context.Context, *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error)) *MockProxy_GetComponentStates_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// GetDdChannel provides a mock function with given fields: ctx, request
-func (_m *MockProxy) GetDdChannel(ctx context.Context, request *internalpb.GetDdChannelRequest) (*milvuspb.StringResponse, error) {
-	ret := _m.Called(ctx, request)
+// GetDdChannel provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) GetDdChannel(_a0 context.Context, _a1 *internalpb.GetDdChannelRequest) (*milvuspb.StringResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.StringResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetDdChannelRequest) (*milvuspb.StringResponse, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetDdChannelRequest) *milvuspb.StringResponse); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.StringResponse)
@@ -1905,7 +2018,7 @@ func (_m *MockProxy) GetDdChannel(ctx context.Context, request *internalpb.GetDd
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.GetDdChannelRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1919,13 +2032,13 @@ type MockProxy_GetDdChannel_Call struct {
 }
 
 // GetDdChannel is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *internalpb.GetDdChannelRequest
-func (_e *MockProxy_Expecter) GetDdChannel(ctx interface{}, request interface{}) *MockProxy_GetDdChannel_Call {
-	return &MockProxy_GetDdChannel_Call{Call: _e.mock.On("GetDdChannel", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *internalpb.GetDdChannelRequest
+func (_e *MockProxy_Expecter) GetDdChannel(_a0 interface{}, _a1 interface{}) *MockProxy_GetDdChannel_Call {
+	return &MockProxy_GetDdChannel_Call{Call: _e.mock.On("GetDdChannel", _a0, _a1)}
 }
 
-func (_c *MockProxy_GetDdChannel_Call) Run(run func(ctx context.Context, request *internalpb.GetDdChannelRequest)) *MockProxy_GetDdChannel_Call {
+func (_c *MockProxy_GetDdChannel_Call) Run(run func(_a0 context.Context, _a1 *internalpb.GetDdChannelRequest)) *MockProxy_GetDdChannel_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*internalpb.GetDdChannelRequest))
 	})
@@ -1942,17 +2055,17 @@ func (_c *MockProxy_GetDdChannel_Call) RunAndReturn(run func(context.Context, *i
 	return _c
 }
 
-// GetFlushAllState provides a mock function with given fields: ctx, req
-func (_m *MockProxy) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error) {
-	ret := _m.Called(ctx, req)
+// GetFlushAllState provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) GetFlushAllState(_a0 context.Context, _a1 *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.GetFlushAllStateResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetFlushAllStateRequest) *milvuspb.GetFlushAllStateResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.GetFlushAllStateResponse)
@@ -1960,7 +2073,7 @@ func (_m *MockProxy) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlus
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetFlushAllStateRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1974,13 +2087,13 @@ type MockProxy_GetFlushAllState_Call struct {
 }
 
 // GetFlushAllState is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.GetFlushAllStateRequest
-func (_e *MockProxy_Expecter) GetFlushAllState(ctx interface{}, req interface{}) *MockProxy_GetFlushAllState_Call {
-	return &MockProxy_GetFlushAllState_Call{Call: _e.mock.On("GetFlushAllState", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetFlushAllStateRequest
+func (_e *MockProxy_Expecter) GetFlushAllState(_a0 interface{}, _a1 interface{}) *MockProxy_GetFlushAllState_Call {
+	return &MockProxy_GetFlushAllState_Call{Call: _e.mock.On("GetFlushAllState", _a0, _a1)}
 }
 
-func (_c *MockProxy_GetFlushAllState_Call) Run(run func(ctx context.Context, req *milvuspb.GetFlushAllStateRequest)) *MockProxy_GetFlushAllState_Call {
+func (_c *MockProxy_GetFlushAllState_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetFlushAllStateRequest)) *MockProxy_GetFlushAllState_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.GetFlushAllStateRequest))
 	})
@@ -1997,17 +2110,17 @@ func (_c *MockProxy_GetFlushAllState_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
-// GetFlushState provides a mock function with given fields: ctx, req
-func (_m *MockProxy) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
-	ret := _m.Called(ctx, req)
+// GetFlushState provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) GetFlushState(_a0 context.Context, _a1 *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.GetFlushStateResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetFlushStateRequest) *milvuspb.GetFlushStateResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.GetFlushStateResponse)
@@ -2015,7 +2128,7 @@ func (_m *MockProxy) GetFlushState(ctx context.Context, req *milvuspb.GetFlushSt
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetFlushStateRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2029,13 +2142,13 @@ type MockProxy_GetFlushState_Call struct {
 }
 
 // GetFlushState is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.GetFlushStateRequest
-func (_e *MockProxy_Expecter) GetFlushState(ctx interface{}, req interface{}) *MockProxy_GetFlushState_Call {
-	return &MockProxy_GetFlushState_Call{Call: _e.mock.On("GetFlushState", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetFlushStateRequest
+func (_e *MockProxy_Expecter) GetFlushState(_a0 interface{}, _a1 interface{}) *MockProxy_GetFlushState_Call {
+	return &MockProxy_GetFlushState_Call{Call: _e.mock.On("GetFlushState", _a0, _a1)}
 }
 
-func (_c *MockProxy_GetFlushState_Call) Run(run func(ctx context.Context, req *milvuspb.GetFlushStateRequest)) *MockProxy_GetFlushState_Call {
+func (_c *MockProxy_GetFlushState_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetFlushStateRequest)) *MockProxy_GetFlushState_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.GetFlushStateRequest))
 	})
@@ -2052,17 +2165,17 @@ func (_c *MockProxy_GetFlushState_Call) RunAndReturn(run func(context.Context, *
 	return _c
 }
 
-// GetImportState provides a mock function with given fields: ctx, req
-func (_m *MockProxy) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
-	ret := _m.Called(ctx, req)
+// GetImportState provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) GetImportState(_a0 context.Context, _a1 *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.GetImportStateResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetImportStateRequest) *milvuspb.GetImportStateResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.GetImportStateResponse)
@@ -2070,7 +2183,7 @@ func (_m *MockProxy) GetImportState(ctx context.Context, req *milvuspb.GetImport
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetImportStateRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2084,13 +2197,13 @@ type MockProxy_GetImportState_Call struct {
 }
 
 // GetImportState is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.GetImportStateRequest
-func (_e *MockProxy_Expecter) GetImportState(ctx interface{}, req interface{}) *MockProxy_GetImportState_Call {
-	return &MockProxy_GetImportState_Call{Call: _e.mock.On("GetImportState", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetImportStateRequest
+func (_e *MockProxy_Expecter) GetImportState(_a0 interface{}, _a1 interface{}) *MockProxy_GetImportState_Call {
+	return &MockProxy_GetImportState_Call{Call: _e.mock.On("GetImportState", _a0, _a1)}
 }
 
-func (_c *MockProxy_GetImportState_Call) Run(run func(ctx context.Context, req *milvuspb.GetImportStateRequest)) *MockProxy_GetImportState_Call {
+func (_c *MockProxy_GetImportState_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetImportStateRequest)) *MockProxy_GetImportState_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.GetImportStateRequest))
 	})
@@ -2107,17 +2220,17 @@ func (_c *MockProxy_GetImportState_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
-// GetIndexBuildProgress provides a mock function with given fields: ctx, request
-func (_m *MockProxy) GetIndexBuildProgress(ctx context.Context, request *milvuspb.GetIndexBuildProgressRequest) (*milvuspb.GetIndexBuildProgressResponse, error) {
-	ret := _m.Called(ctx, request)
+// GetIndexBuildProgress provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) GetIndexBuildProgress(_a0 context.Context, _a1 *milvuspb.GetIndexBuildProgressRequest) (*milvuspb.GetIndexBuildProgressResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.GetIndexBuildProgressResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetIndexBuildProgressRequest) (*milvuspb.GetIndexBuildProgressResponse, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetIndexBuildProgressRequest) *milvuspb.GetIndexBuildProgressResponse); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.GetIndexBuildProgressResponse)
@@ -2125,7 +2238,7 @@ func (_m *MockProxy) GetIndexBuildProgress(ctx context.Context, request *milvusp
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetIndexBuildProgressRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2139,13 +2252,13 @@ type MockProxy_GetIndexBuildProgress_Call struct {
 }
 
 // GetIndexBuildProgress is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.GetIndexBuildProgressRequest
-func (_e *MockProxy_Expecter) GetIndexBuildProgress(ctx interface{}, request interface{}) *MockProxy_GetIndexBuildProgress_Call {
-	return &MockProxy_GetIndexBuildProgress_Call{Call: _e.mock.On("GetIndexBuildProgress", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetIndexBuildProgressRequest
+func (_e *MockProxy_Expecter) GetIndexBuildProgress(_a0 interface{}, _a1 interface{}) *MockProxy_GetIndexBuildProgress_Call {
+	return &MockProxy_GetIndexBuildProgress_Call{Call: _e.mock.On("GetIndexBuildProgress", _a0, _a1)}
 }
 
-func (_c *MockProxy_GetIndexBuildProgress_Call) Run(run func(ctx context.Context, request *milvuspb.GetIndexBuildProgressRequest)) *MockProxy_GetIndexBuildProgress_Call {
+func (_c *MockProxy_GetIndexBuildProgress_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetIndexBuildProgressRequest)) *MockProxy_GetIndexBuildProgress_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.GetIndexBuildProgressRequest))
 	})
@@ -2162,17 +2275,17 @@ func (_c *MockProxy_GetIndexBuildProgress_Call) RunAndReturn(run func(context.Co
 	return _c
 }
 
-// GetIndexState provides a mock function with given fields: ctx, request
-func (_m *MockProxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndexStateRequest) (*milvuspb.GetIndexStateResponse, error) {
-	ret := _m.Called(ctx, request)
+// GetIndexState provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) GetIndexState(_a0 context.Context, _a1 *milvuspb.GetIndexStateRequest) (*milvuspb.GetIndexStateResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.GetIndexStateResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetIndexStateRequest) (*milvuspb.GetIndexStateResponse, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetIndexStateRequest) *milvuspb.GetIndexStateResponse); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.GetIndexStateResponse)
@@ -2180,7 +2293,7 @@ func (_m *MockProxy) GetIndexState(ctx context.Context, request *milvuspb.GetInd
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetIndexStateRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2194,13 +2307,13 @@ type MockProxy_GetIndexState_Call struct {
 }
 
 // GetIndexState is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.GetIndexStateRequest
-func (_e *MockProxy_Expecter) GetIndexState(ctx interface{}, request interface{}) *MockProxy_GetIndexState_Call {
-	return &MockProxy_GetIndexState_Call{Call: _e.mock.On("GetIndexState", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetIndexStateRequest
+func (_e *MockProxy_Expecter) GetIndexState(_a0 interface{}, _a1 interface{}) *MockProxy_GetIndexState_Call {
+	return &MockProxy_GetIndexState_Call{Call: _e.mock.On("GetIndexState", _a0, _a1)}
 }
 
-func (_c *MockProxy_GetIndexState_Call) Run(run func(ctx context.Context, request *milvuspb.GetIndexStateRequest)) *MockProxy_GetIndexState_Call {
+func (_c *MockProxy_GetIndexState_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetIndexStateRequest)) *MockProxy_GetIndexState_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.GetIndexStateRequest))
 	})
@@ -2217,17 +2330,17 @@ func (_c *MockProxy_GetIndexState_Call) RunAndReturn(run func(context.Context, *
 	return _c
 }
 
-// GetIndexStatistics provides a mock function with given fields: ctx, request
-func (_m *MockProxy) GetIndexStatistics(ctx context.Context, request *milvuspb.GetIndexStatisticsRequest) (*milvuspb.GetIndexStatisticsResponse, error) {
-	ret := _m.Called(ctx, request)
+// GetIndexStatistics provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) GetIndexStatistics(_a0 context.Context, _a1 *milvuspb.GetIndexStatisticsRequest) (*milvuspb.GetIndexStatisticsResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.GetIndexStatisticsResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetIndexStatisticsRequest) (*milvuspb.GetIndexStatisticsResponse, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetIndexStatisticsRequest) *milvuspb.GetIndexStatisticsResponse); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.GetIndexStatisticsResponse)
@@ -2235,7 +2348,7 @@ func (_m *MockProxy) GetIndexStatistics(ctx context.Context, request *milvuspb.G
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetIndexStatisticsRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2249,13 +2362,13 @@ type MockProxy_GetIndexStatistics_Call struct {
 }
 
 // GetIndexStatistics is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.GetIndexStatisticsRequest
-func (_e *MockProxy_Expecter) GetIndexStatistics(ctx interface{}, request interface{}) *MockProxy_GetIndexStatistics_Call {
-	return &MockProxy_GetIndexStatistics_Call{Call: _e.mock.On("GetIndexStatistics", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetIndexStatisticsRequest
+func (_e *MockProxy_Expecter) GetIndexStatistics(_a0 interface{}, _a1 interface{}) *MockProxy_GetIndexStatistics_Call {
+	return &MockProxy_GetIndexStatistics_Call{Call: _e.mock.On("GetIndexStatistics", _a0, _a1)}
 }
 
-func (_c *MockProxy_GetIndexStatistics_Call) Run(run func(ctx context.Context, request *milvuspb.GetIndexStatisticsRequest)) *MockProxy_GetIndexStatistics_Call {
+func (_c *MockProxy_GetIndexStatistics_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetIndexStatisticsRequest)) *MockProxy_GetIndexStatistics_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.GetIndexStatisticsRequest))
 	})
@@ -2272,17 +2385,17 @@ func (_c *MockProxy_GetIndexStatistics_Call) RunAndReturn(run func(context.Conte
 	return _c
 }
 
-// GetLoadState provides a mock function with given fields: ctx, request
-func (_m *MockProxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadStateRequest) (*milvuspb.GetLoadStateResponse, error) {
-	ret := _m.Called(ctx, request)
+// GetLoadState provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) GetLoadState(_a0 context.Context, _a1 *milvuspb.GetLoadStateRequest) (*milvuspb.GetLoadStateResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.GetLoadStateResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetLoadStateRequest) (*milvuspb.GetLoadStateResponse, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetLoadStateRequest) *milvuspb.GetLoadStateResponse); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.GetLoadStateResponse)
@@ -2290,7 +2403,7 @@ func (_m *MockProxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoad
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetLoadStateRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2304,13 +2417,13 @@ type MockProxy_GetLoadState_Call struct {
 }
 
 // GetLoadState is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.GetLoadStateRequest
-func (_e *MockProxy_Expecter) GetLoadState(ctx interface{}, request interface{}) *MockProxy_GetLoadState_Call {
-	return &MockProxy_GetLoadState_Call{Call: _e.mock.On("GetLoadState", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetLoadStateRequest
+func (_e *MockProxy_Expecter) GetLoadState(_a0 interface{}, _a1 interface{}) *MockProxy_GetLoadState_Call {
+	return &MockProxy_GetLoadState_Call{Call: _e.mock.On("GetLoadState", _a0, _a1)}
 }
 
-func (_c *MockProxy_GetLoadState_Call) Run(run func(ctx context.Context, request *milvuspb.GetLoadStateRequest)) *MockProxy_GetLoadState_Call {
+func (_c *MockProxy_GetLoadState_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetLoadStateRequest)) *MockProxy_GetLoadState_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.GetLoadStateRequest))
 	})
@@ -2327,17 +2440,17 @@ func (_c *MockProxy_GetLoadState_Call) RunAndReturn(run func(context.Context, *m
 	return _c
 }
 
-// GetLoadingProgress provides a mock function with given fields: ctx, request
-func (_m *MockProxy) GetLoadingProgress(ctx context.Context, request *milvuspb.GetLoadingProgressRequest) (*milvuspb.GetLoadingProgressResponse, error) {
-	ret := _m.Called(ctx, request)
+// GetLoadingProgress provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) GetLoadingProgress(_a0 context.Context, _a1 *milvuspb.GetLoadingProgressRequest) (*milvuspb.GetLoadingProgressResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.GetLoadingProgressResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetLoadingProgressRequest) (*milvuspb.GetLoadingProgressResponse, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetLoadingProgressRequest) *milvuspb.GetLoadingProgressResponse); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.GetLoadingProgressResponse)
@@ -2345,7 +2458,7 @@ func (_m *MockProxy) GetLoadingProgress(ctx context.Context, request *milvuspb.G
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetLoadingProgressRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2359,13 +2472,13 @@ type MockProxy_GetLoadingProgress_Call struct {
 }
 
 // GetLoadingProgress is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.GetLoadingProgressRequest
-func (_e *MockProxy_Expecter) GetLoadingProgress(ctx interface{}, request interface{}) *MockProxy_GetLoadingProgress_Call {
-	return &MockProxy_GetLoadingProgress_Call{Call: _e.mock.On("GetLoadingProgress", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetLoadingProgressRequest
+func (_e *MockProxy_Expecter) GetLoadingProgress(_a0 interface{}, _a1 interface{}) *MockProxy_GetLoadingProgress_Call {
+	return &MockProxy_GetLoadingProgress_Call{Call: _e.mock.On("GetLoadingProgress", _a0, _a1)}
 }
 
-func (_c *MockProxy_GetLoadingProgress_Call) Run(run func(ctx context.Context, request *milvuspb.GetLoadingProgressRequest)) *MockProxy_GetLoadingProgress_Call {
+func (_c *MockProxy_GetLoadingProgress_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetLoadingProgressRequest)) *MockProxy_GetLoadingProgress_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.GetLoadingProgressRequest))
 	})
@@ -2382,17 +2495,17 @@ func (_c *MockProxy_GetLoadingProgress_Call) RunAndReturn(run func(context.Conte
 	return _c
 }
 
-// GetMetrics provides a mock function with given fields: ctx, request
-func (_m *MockProxy) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	ret := _m.Called(ctx, request)
+// GetMetrics provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) GetMetrics(_a0 context.Context, _a1 *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.GetMetricsResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetMetricsRequest) *milvuspb.GetMetricsResponse); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.GetMetricsResponse)
@@ -2400,7 +2513,7 @@ func (_m *MockProxy) GetMetrics(ctx context.Context, request *milvuspb.GetMetric
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetMetricsRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2414,13 +2527,13 @@ type MockProxy_GetMetrics_Call struct {
 }
 
 // GetMetrics is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.GetMetricsRequest
-func (_e *MockProxy_Expecter) GetMetrics(ctx interface{}, request interface{}) *MockProxy_GetMetrics_Call {
-	return &MockProxy_GetMetrics_Call{Call: _e.mock.On("GetMetrics", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetMetricsRequest
+func (_e *MockProxy_Expecter) GetMetrics(_a0 interface{}, _a1 interface{}) *MockProxy_GetMetrics_Call {
+	return &MockProxy_GetMetrics_Call{Call: _e.mock.On("GetMetrics", _a0, _a1)}
 }
 
-func (_c *MockProxy_GetMetrics_Call) Run(run func(ctx context.Context, request *milvuspb.GetMetricsRequest)) *MockProxy_GetMetrics_Call {
+func (_c *MockProxy_GetMetrics_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetMetricsRequest)) *MockProxy_GetMetrics_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.GetMetricsRequest))
 	})
@@ -2437,17 +2550,17 @@ func (_c *MockProxy_GetMetrics_Call) RunAndReturn(run func(context.Context, *mil
 	return _c
 }
 
-// GetPartitionStatistics provides a mock function with given fields: ctx, request
-func (_m *MockProxy) GetPartitionStatistics(ctx context.Context, request *milvuspb.GetPartitionStatisticsRequest) (*milvuspb.GetPartitionStatisticsResponse, error) {
-	ret := _m.Called(ctx, request)
+// GetPartitionStatistics provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) GetPartitionStatistics(_a0 context.Context, _a1 *milvuspb.GetPartitionStatisticsRequest) (*milvuspb.GetPartitionStatisticsResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.GetPartitionStatisticsResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetPartitionStatisticsRequest) (*milvuspb.GetPartitionStatisticsResponse, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetPartitionStatisticsRequest) *milvuspb.GetPartitionStatisticsResponse); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.GetPartitionStatisticsResponse)
@@ -2455,7 +2568,7 @@ func (_m *MockProxy) GetPartitionStatistics(ctx context.Context, request *milvus
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetPartitionStatisticsRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2469,13 +2582,13 @@ type MockProxy_GetPartitionStatistics_Call struct {
 }
 
 // GetPartitionStatistics is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.GetPartitionStatisticsRequest
-func (_e *MockProxy_Expecter) GetPartitionStatistics(ctx interface{}, request interface{}) *MockProxy_GetPartitionStatistics_Call {
-	return &MockProxy_GetPartitionStatistics_Call{Call: _e.mock.On("GetPartitionStatistics", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetPartitionStatisticsRequest
+func (_e *MockProxy_Expecter) GetPartitionStatistics(_a0 interface{}, _a1 interface{}) *MockProxy_GetPartitionStatistics_Call {
+	return &MockProxy_GetPartitionStatistics_Call{Call: _e.mock.On("GetPartitionStatistics", _a0, _a1)}
 }
 
-func (_c *MockProxy_GetPartitionStatistics_Call) Run(run func(ctx context.Context, request *milvuspb.GetPartitionStatisticsRequest)) *MockProxy_GetPartitionStatistics_Call {
+func (_c *MockProxy_GetPartitionStatistics_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetPartitionStatisticsRequest)) *MockProxy_GetPartitionStatistics_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.GetPartitionStatisticsRequest))
 	})
@@ -2492,17 +2605,17 @@ func (_c *MockProxy_GetPartitionStatistics_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
-// GetPersistentSegmentInfo provides a mock function with given fields: ctx, request
-func (_m *MockProxy) GetPersistentSegmentInfo(ctx context.Context, request *milvuspb.GetPersistentSegmentInfoRequest) (*milvuspb.GetPersistentSegmentInfoResponse, error) {
-	ret := _m.Called(ctx, request)
+// GetPersistentSegmentInfo provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) GetPersistentSegmentInfo(_a0 context.Context, _a1 *milvuspb.GetPersistentSegmentInfoRequest) (*milvuspb.GetPersistentSegmentInfoResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.GetPersistentSegmentInfoResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetPersistentSegmentInfoRequest) (*milvuspb.GetPersistentSegmentInfoResponse, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetPersistentSegmentInfoRequest) *milvuspb.GetPersistentSegmentInfoResponse); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.GetPersistentSegmentInfoResponse)
@@ -2510,7 +2623,7 @@ func (_m *MockProxy) GetPersistentSegmentInfo(ctx context.Context, request *milv
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetPersistentSegmentInfoRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2524,13 +2637,13 @@ type MockProxy_GetPersistentSegmentInfo_Call struct {
 }
 
 // GetPersistentSegmentInfo is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.GetPersistentSegmentInfoRequest
-func (_e *MockProxy_Expecter) GetPersistentSegmentInfo(ctx interface{}, request interface{}) *MockProxy_GetPersistentSegmentInfo_Call {
-	return &MockProxy_GetPersistentSegmentInfo_Call{Call: _e.mock.On("GetPersistentSegmentInfo", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetPersistentSegmentInfoRequest
+func (_e *MockProxy_Expecter) GetPersistentSegmentInfo(_a0 interface{}, _a1 interface{}) *MockProxy_GetPersistentSegmentInfo_Call {
+	return &MockProxy_GetPersistentSegmentInfo_Call{Call: _e.mock.On("GetPersistentSegmentInfo", _a0, _a1)}
 }
 
-func (_c *MockProxy_GetPersistentSegmentInfo_Call) Run(run func(ctx context.Context, request *milvuspb.GetPersistentSegmentInfoRequest)) *MockProxy_GetPersistentSegmentInfo_Call {
+func (_c *MockProxy_GetPersistentSegmentInfo_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetPersistentSegmentInfoRequest)) *MockProxy_GetPersistentSegmentInfo_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.GetPersistentSegmentInfoRequest))
 	})
@@ -2547,17 +2660,17 @@ func (_c *MockProxy_GetPersistentSegmentInfo_Call) RunAndReturn(run func(context
 	return _c
 }
 
-// GetProxyMetrics provides a mock function with given fields: ctx, request
-func (_m *MockProxy) GetProxyMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	ret := _m.Called(ctx, request)
+// GetProxyMetrics provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) GetProxyMetrics(_a0 context.Context, _a1 *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.GetMetricsResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetMetricsRequest) *milvuspb.GetMetricsResponse); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.GetMetricsResponse)
@@ -2565,7 +2678,7 @@ func (_m *MockProxy) GetProxyMetrics(ctx context.Context, request *milvuspb.GetM
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetMetricsRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2579,13 +2692,13 @@ type MockProxy_GetProxyMetrics_Call struct {
 }
 
 // GetProxyMetrics is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.GetMetricsRequest
-func (_e *MockProxy_Expecter) GetProxyMetrics(ctx interface{}, request interface{}) *MockProxy_GetProxyMetrics_Call {
-	return &MockProxy_GetProxyMetrics_Call{Call: _e.mock.On("GetProxyMetrics", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetMetricsRequest
+func (_e *MockProxy_Expecter) GetProxyMetrics(_a0 interface{}, _a1 interface{}) *MockProxy_GetProxyMetrics_Call {
+	return &MockProxy_GetProxyMetrics_Call{Call: _e.mock.On("GetProxyMetrics", _a0, _a1)}
 }
 
-func (_c *MockProxy_GetProxyMetrics_Call) Run(run func(ctx context.Context, request *milvuspb.GetMetricsRequest)) *MockProxy_GetProxyMetrics_Call {
+func (_c *MockProxy_GetProxyMetrics_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetMetricsRequest)) *MockProxy_GetProxyMetrics_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.GetMetricsRequest))
 	})
@@ -2602,17 +2715,17 @@ func (_c *MockProxy_GetProxyMetrics_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
-// GetQuerySegmentInfo provides a mock function with given fields: ctx, request
-func (_m *MockProxy) GetQuerySegmentInfo(ctx context.Context, request *milvuspb.GetQuerySegmentInfoRequest) (*milvuspb.GetQuerySegmentInfoResponse, error) {
-	ret := _m.Called(ctx, request)
+// GetQuerySegmentInfo provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) GetQuerySegmentInfo(_a0 context.Context, _a1 *milvuspb.GetQuerySegmentInfoRequest) (*milvuspb.GetQuerySegmentInfoResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.GetQuerySegmentInfoResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetQuerySegmentInfoRequest) (*milvuspb.GetQuerySegmentInfoResponse, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetQuerySegmentInfoRequest) *milvuspb.GetQuerySegmentInfoResponse); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.GetQuerySegmentInfoResponse)
@@ -2620,7 +2733,7 @@ func (_m *MockProxy) GetQuerySegmentInfo(ctx context.Context, request *milvuspb.
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetQuerySegmentInfoRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2634,13 +2747,13 @@ type MockProxy_GetQuerySegmentInfo_Call struct {
 }
 
 // GetQuerySegmentInfo is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.GetQuerySegmentInfoRequest
-func (_e *MockProxy_Expecter) GetQuerySegmentInfo(ctx interface{}, request interface{}) *MockProxy_GetQuerySegmentInfo_Call {
-	return &MockProxy_GetQuerySegmentInfo_Call{Call: _e.mock.On("GetQuerySegmentInfo", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetQuerySegmentInfoRequest
+func (_e *MockProxy_Expecter) GetQuerySegmentInfo(_a0 interface{}, _a1 interface{}) *MockProxy_GetQuerySegmentInfo_Call {
+	return &MockProxy_GetQuerySegmentInfo_Call{Call: _e.mock.On("GetQuerySegmentInfo", _a0, _a1)}
 }
 
-func (_c *MockProxy_GetQuerySegmentInfo_Call) Run(run func(ctx context.Context, request *milvuspb.GetQuerySegmentInfoRequest)) *MockProxy_GetQuerySegmentInfo_Call {
+func (_c *MockProxy_GetQuerySegmentInfo_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetQuerySegmentInfoRequest)) *MockProxy_GetQuerySegmentInfo_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.GetQuerySegmentInfoRequest))
 	})
@@ -2710,17 +2823,17 @@ func (_c *MockProxy_GetRateLimiter_Call) RunAndReturn(run func() (types.Limiter,
 	return _c
 }
 
-// GetReplicas provides a mock function with given fields: ctx, req
-func (_m *MockProxy) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
-	ret := _m.Called(ctx, req)
+// GetReplicas provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) GetReplicas(_a0 context.Context, _a1 *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.GetReplicasResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetReplicasRequest) *milvuspb.GetReplicasResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.GetReplicasResponse)
@@ -2728,7 +2841,7 @@ func (_m *MockProxy) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasR
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetReplicasRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2742,13 +2855,13 @@ type MockProxy_GetReplicas_Call struct {
 }
 
 // GetReplicas is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.GetReplicasRequest
-func (_e *MockProxy_Expecter) GetReplicas(ctx interface{}, req interface{}) *MockProxy_GetReplicas_Call {
-	return &MockProxy_GetReplicas_Call{Call: _e.mock.On("GetReplicas", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetReplicasRequest
+func (_e *MockProxy_Expecter) GetReplicas(_a0 interface{}, _a1 interface{}) *MockProxy_GetReplicas_Call {
+	return &MockProxy_GetReplicas_Call{Call: _e.mock.On("GetReplicas", _a0, _a1)}
 }
 
-func (_c *MockProxy_GetReplicas_Call) Run(run func(ctx context.Context, req *milvuspb.GetReplicasRequest)) *MockProxy_GetReplicas_Call {
+func (_c *MockProxy_GetReplicas_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetReplicasRequest)) *MockProxy_GetReplicas_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.GetReplicasRequest))
 	})
@@ -2765,25 +2878,25 @@ func (_c *MockProxy_GetReplicas_Call) RunAndReturn(run func(context.Context, *mi
 	return _c
 }
 
-// GetStatisticsChannel provides a mock function with given fields: ctx
-func (_m *MockProxy) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	ret := _m.Called(ctx)
+// GetStatisticsChannel provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) GetStatisticsChannel(_a0 context.Context, _a1 *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.StringResponse
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) (*milvuspb.StringResponse, error)); ok {
-		return rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error)); ok {
+		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context) *milvuspb.StringResponse); ok {
-		r0 = rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetStatisticsChannelRequest) *milvuspb.StringResponse); ok {
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.StringResponse)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = rf(ctx)
+	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.GetStatisticsChannelRequest) error); ok {
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2797,14 +2910,15 @@ type MockProxy_GetStatisticsChannel_Call struct {
 }
 
 // GetStatisticsChannel is a helper method to define mock.On call
-//   - ctx context.Context
-func (_e *MockProxy_Expecter) GetStatisticsChannel(ctx interface{}) *MockProxy_GetStatisticsChannel_Call {
-	return &MockProxy_GetStatisticsChannel_Call{Call: _e.mock.On("GetStatisticsChannel", ctx)}
+//   - _a0 context.Context
+//   - _a1 *internalpb.GetStatisticsChannelRequest
+func (_e *MockProxy_Expecter) GetStatisticsChannel(_a0 interface{}, _a1 interface{}) *MockProxy_GetStatisticsChannel_Call {
+	return &MockProxy_GetStatisticsChannel_Call{Call: _e.mock.On("GetStatisticsChannel", _a0, _a1)}
 }
 
-func (_c *MockProxy_GetStatisticsChannel_Call) Run(run func(ctx context.Context)) *MockProxy_GetStatisticsChannel_Call {
+func (_c *MockProxy_GetStatisticsChannel_Call) Run(run func(_a0 context.Context, _a1 *internalpb.GetStatisticsChannelRequest)) *MockProxy_GetStatisticsChannel_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
+		run(args[0].(context.Context), args[1].(*internalpb.GetStatisticsChannelRequest))
 	})
 	return _c
 }
@@ -2814,22 +2928,77 @@ func (_c *MockProxy_GetStatisticsChannel_Call) Return(_a0 *milvuspb.StringRespon
 	return _c
 }
 
-func (_c *MockProxy_GetStatisticsChannel_Call) RunAndReturn(run func(context.Context) (*milvuspb.StringResponse, error)) *MockProxy_GetStatisticsChannel_Call {
+func (_c *MockProxy_GetStatisticsChannel_Call) RunAndReturn(run func(context.Context, *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error)) *MockProxy_GetStatisticsChannel_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// HasCollection provides a mock function with given fields: ctx, request
-func (_m *MockProxy) HasCollection(ctx context.Context, request *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
-	ret := _m.Called(ctx, request)
+// GetVersion provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) GetVersion(_a0 context.Context, _a1 *milvuspb.GetVersionRequest) (*milvuspb.GetVersionResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *milvuspb.GetVersionResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetVersionRequest) (*milvuspb.GetVersionResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetVersionRequest) *milvuspb.GetVersionResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.GetVersionResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetVersionRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_GetVersion_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetVersion'
+type MockProxy_GetVersion_Call struct {
+	*mock.Call
+}
+
+// GetVersion is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetVersionRequest
+func (_e *MockProxy_Expecter) GetVersion(_a0 interface{}, _a1 interface{}) *MockProxy_GetVersion_Call {
+	return &MockProxy_GetVersion_Call{Call: _e.mock.On("GetVersion", _a0, _a1)}
+}
+
+func (_c *MockProxy_GetVersion_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetVersionRequest)) *MockProxy_GetVersion_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.GetVersionRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_GetVersion_Call) Return(_a0 *milvuspb.GetVersionResponse, _a1 error) *MockProxy_GetVersion_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_GetVersion_Call) RunAndReturn(run func(context.Context, *milvuspb.GetVersionRequest) (*milvuspb.GetVersionResponse, error)) *MockProxy_GetVersion_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// HasCollection provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) HasCollection(_a0 context.Context, _a1 *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.BoolResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.HasCollectionRequest) *milvuspb.BoolResponse); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.BoolResponse)
@@ -2837,7 +3006,7 @@ func (_m *MockProxy) HasCollection(ctx context.Context, request *milvuspb.HasCol
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.HasCollectionRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2851,13 +3020,13 @@ type MockProxy_HasCollection_Call struct {
 }
 
 // HasCollection is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.HasCollectionRequest
-func (_e *MockProxy_Expecter) HasCollection(ctx interface{}, request interface{}) *MockProxy_HasCollection_Call {
-	return &MockProxy_HasCollection_Call{Call: _e.mock.On("HasCollection", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.HasCollectionRequest
+func (_e *MockProxy_Expecter) HasCollection(_a0 interface{}, _a1 interface{}) *MockProxy_HasCollection_Call {
+	return &MockProxy_HasCollection_Call{Call: _e.mock.On("HasCollection", _a0, _a1)}
 }
 
-func (_c *MockProxy_HasCollection_Call) Run(run func(ctx context.Context, request *milvuspb.HasCollectionRequest)) *MockProxy_HasCollection_Call {
+func (_c *MockProxy_HasCollection_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.HasCollectionRequest)) *MockProxy_HasCollection_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.HasCollectionRequest))
 	})
@@ -2874,17 +3043,17 @@ func (_c *MockProxy_HasCollection_Call) RunAndReturn(run func(context.Context, *
 	return _c
 }
 
-// HasPartition provides a mock function with given fields: ctx, request
-func (_m *MockProxy) HasPartition(ctx context.Context, request *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
-	ret := _m.Called(ctx, request)
+// HasPartition provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) HasPartition(_a0 context.Context, _a1 *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.BoolResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.HasPartitionRequest) *milvuspb.BoolResponse); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.BoolResponse)
@@ -2892,7 +3061,7 @@ func (_m *MockProxy) HasPartition(ctx context.Context, request *milvuspb.HasPart
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.HasPartitionRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2906,13 +3075,13 @@ type MockProxy_HasPartition_Call struct {
 }
 
 // HasPartition is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.HasPartitionRequest
-func (_e *MockProxy_Expecter) HasPartition(ctx interface{}, request interface{}) *MockProxy_HasPartition_Call {
-	return &MockProxy_HasPartition_Call{Call: _e.mock.On("HasPartition", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.HasPartitionRequest
+func (_e *MockProxy_Expecter) HasPartition(_a0 interface{}, _a1 interface{}) *MockProxy_HasPartition_Call {
+	return &MockProxy_HasPartition_Call{Call: _e.mock.On("HasPartition", _a0, _a1)}
 }
 
-func (_c *MockProxy_HasPartition_Call) Run(run func(ctx context.Context, request *milvuspb.HasPartitionRequest)) *MockProxy_HasPartition_Call {
+func (_c *MockProxy_HasPartition_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.HasPartitionRequest)) *MockProxy_HasPartition_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.HasPartitionRequest))
 	})
@@ -2929,17 +3098,17 @@ func (_c *MockProxy_HasPartition_Call) RunAndReturn(run func(context.Context, *m
 	return _c
 }
 
-// Import provides a mock function with given fields: ctx, req
-func (_m *MockProxy) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
-	ret := _m.Called(ctx, req)
+// Import provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) Import(_a0 context.Context, _a1 *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.ImportResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ImportRequest) *milvuspb.ImportResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.ImportResponse)
@@ -2947,7 +3116,7 @@ func (_m *MockProxy) Import(ctx context.Context, req *milvuspb.ImportRequest) (*
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ImportRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2961,13 +3130,13 @@ type MockProxy_Import_Call struct {
 }
 
 // Import is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.ImportRequest
-func (_e *MockProxy_Expecter) Import(ctx interface{}, req interface{}) *MockProxy_Import_Call {
-	return &MockProxy_Import_Call{Call: _e.mock.On("Import", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ImportRequest
+func (_e *MockProxy_Expecter) Import(_a0 interface{}, _a1 interface{}) *MockProxy_Import_Call {
+	return &MockProxy_Import_Call{Call: _e.mock.On("Import", _a0, _a1)}
 }
 
-func (_c *MockProxy_Import_Call) Run(run func(ctx context.Context, req *milvuspb.ImportRequest)) *MockProxy_Import_Call {
+func (_c *MockProxy_Import_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ImportRequest)) *MockProxy_Import_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.ImportRequest))
 	})
@@ -3025,17 +3194,17 @@ func (_c *MockProxy_Init_Call) RunAndReturn(run func() error) *MockProxy_Init_Ca
 	return _c
 }
 
-// Insert provides a mock function with given fields: ctx, request
-func (_m *MockProxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) (*milvuspb.MutationResult, error) {
-	ret := _m.Called(ctx, request)
+// Insert provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) Insert(_a0 context.Context, _a1 *milvuspb.InsertRequest) (*milvuspb.MutationResult, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.MutationResult
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.InsertRequest) (*milvuspb.MutationResult, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.InsertRequest) *milvuspb.MutationResult); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.MutationResult)
@@ -3043,7 +3212,7 @@ func (_m *MockProxy) Insert(ctx context.Context, request *milvuspb.InsertRequest
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.InsertRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -3057,13 +3226,13 @@ type MockProxy_Insert_Call struct {
 }
 
 // Insert is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.InsertRequest
-func (_e *MockProxy_Expecter) Insert(ctx interface{}, request interface{}) *MockProxy_Insert_Call {
-	return &MockProxy_Insert_Call{Call: _e.mock.On("Insert", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.InsertRequest
+func (_e *MockProxy_Expecter) Insert(_a0 interface{}, _a1 interface{}) *MockProxy_Insert_Call {
+	return &MockProxy_Insert_Call{Call: _e.mock.On("Insert", _a0, _a1)}
 }
 
-func (_c *MockProxy_Insert_Call) Run(run func(ctx context.Context, request *milvuspb.InsertRequest)) *MockProxy_Insert_Call {
+func (_c *MockProxy_Insert_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.InsertRequest)) *MockProxy_Insert_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.InsertRequest))
 	})
@@ -3080,17 +3249,17 @@ func (_c *MockProxy_Insert_Call) RunAndReturn(run func(context.Context, *milvusp
 	return _c
 }
 
-// InvalidateCollectionMetaCache provides a mock function with given fields: ctx, request
-func (_m *MockProxy) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, request)
+// InvalidateCollectionMetaCache provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) InvalidateCollectionMetaCache(_a0 context.Context, _a1 *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *proxypb.InvalidateCollMetaCacheRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -3098,7 +3267,7 @@ func (_m *MockProxy) InvalidateCollectionMetaCache(ctx context.Context, request 
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *proxypb.InvalidateCollMetaCacheRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -3112,13 +3281,13 @@ type MockProxy_InvalidateCollectionMetaCache_Call struct {
 }
 
 // InvalidateCollectionMetaCache is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *proxypb.InvalidateCollMetaCacheRequest
-func (_e *MockProxy_Expecter) InvalidateCollectionMetaCache(ctx interface{}, request interface{}) *MockProxy_InvalidateCollectionMetaCache_Call {
-	return &MockProxy_InvalidateCollectionMetaCache_Call{Call: _e.mock.On("InvalidateCollectionMetaCache", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *proxypb.InvalidateCollMetaCacheRequest
+func (_e *MockProxy_Expecter) InvalidateCollectionMetaCache(_a0 interface{}, _a1 interface{}) *MockProxy_InvalidateCollectionMetaCache_Call {
+	return &MockProxy_InvalidateCollectionMetaCache_Call{Call: _e.mock.On("InvalidateCollectionMetaCache", _a0, _a1)}
 }
 
-func (_c *MockProxy_InvalidateCollectionMetaCache_Call) Run(run func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest)) *MockProxy_InvalidateCollectionMetaCache_Call {
+func (_c *MockProxy_InvalidateCollectionMetaCache_Call) Run(run func(_a0 context.Context, _a1 *proxypb.InvalidateCollMetaCacheRequest)) *MockProxy_InvalidateCollectionMetaCache_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*proxypb.InvalidateCollMetaCacheRequest))
 	})
@@ -3135,17 +3304,17 @@ func (_c *MockProxy_InvalidateCollectionMetaCache_Call) RunAndReturn(run func(co
 	return _c
 }
 
-// InvalidateCredentialCache provides a mock function with given fields: ctx, request
-func (_m *MockProxy) InvalidateCredentialCache(ctx context.Context, request *proxypb.InvalidateCredCacheRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, request)
+// InvalidateCredentialCache provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) InvalidateCredentialCache(_a0 context.Context, _a1 *proxypb.InvalidateCredCacheRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *proxypb.InvalidateCredCacheRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *proxypb.InvalidateCredCacheRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -3153,7 +3322,7 @@ func (_m *MockProxy) InvalidateCredentialCache(ctx context.Context, request *pro
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *proxypb.InvalidateCredCacheRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -3167,13 +3336,13 @@ type MockProxy_InvalidateCredentialCache_Call struct {
 }
 
 // InvalidateCredentialCache is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *proxypb.InvalidateCredCacheRequest
-func (_e *MockProxy_Expecter) InvalidateCredentialCache(ctx interface{}, request interface{}) *MockProxy_InvalidateCredentialCache_Call {
-	return &MockProxy_InvalidateCredentialCache_Call{Call: _e.mock.On("InvalidateCredentialCache", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *proxypb.InvalidateCredCacheRequest
+func (_e *MockProxy_Expecter) InvalidateCredentialCache(_a0 interface{}, _a1 interface{}) *MockProxy_InvalidateCredentialCache_Call {
+	return &MockProxy_InvalidateCredentialCache_Call{Call: _e.mock.On("InvalidateCredentialCache", _a0, _a1)}
 }
 
-func (_c *MockProxy_InvalidateCredentialCache_Call) Run(run func(ctx context.Context, request *proxypb.InvalidateCredCacheRequest)) *MockProxy_InvalidateCredentialCache_Call {
+func (_c *MockProxy_InvalidateCredentialCache_Call) Run(run func(_a0 context.Context, _a1 *proxypb.InvalidateCredCacheRequest)) *MockProxy_InvalidateCredentialCache_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*proxypb.InvalidateCredCacheRequest))
 	})
@@ -3190,17 +3359,72 @@ func (_c *MockProxy_InvalidateCredentialCache_Call) RunAndReturn(run func(contex
 	return _c
 }
 
-// ListClientInfos provides a mock function with given fields: ctx, req
-func (_m *MockProxy) ListClientInfos(ctx context.Context, req *proxypb.ListClientInfosRequest) (*proxypb.ListClientInfosResponse, error) {
-	ret := _m.Called(ctx, req)
+// ListAliases provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) ListAliases(_a0 context.Context, _a1 *milvuspb.ListAliasesRequest) (*milvuspb.ListAliasesResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *milvuspb.ListAliasesResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListAliasesRequest) (*milvuspb.ListAliasesResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListAliasesRequest) *milvuspb.ListAliasesResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ListAliasesResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListAliasesRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_ListAliases_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListAliases'
+type MockProxy_ListAliases_Call struct {
+	*mock.Call
+}
+
+// ListAliases is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ListAliasesRequest
+func (_e *MockProxy_Expecter) ListAliases(_a0 interface{}, _a1 interface{}) *MockProxy_ListAliases_Call {
+	return &MockProxy_ListAliases_Call{Call: _e.mock.On("ListAliases", _a0, _a1)}
+}
+
+func (_c *MockProxy_ListAliases_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ListAliasesRequest)) *MockProxy_ListAliases_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.ListAliasesRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_ListAliases_Call) Return(_a0 *milvuspb.ListAliasesResponse, _a1 error) *MockProxy_ListAliases_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_ListAliases_Call) RunAndReturn(run func(context.Context, *milvuspb.ListAliasesRequest) (*milvuspb.ListAliasesResponse, error)) *MockProxy_ListAliases_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListClientInfos provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) ListClientInfos(_a0 context.Context, _a1 *proxypb.ListClientInfosRequest) (*proxypb.ListClientInfosResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *proxypb.ListClientInfosResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *proxypb.ListClientInfosRequest) (*proxypb.ListClientInfosResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *proxypb.ListClientInfosRequest) *proxypb.ListClientInfosResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*proxypb.ListClientInfosResponse)
@@ -3208,7 +3432,7 @@ func (_m *MockProxy) ListClientInfos(ctx context.Context, req *proxypb.ListClien
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *proxypb.ListClientInfosRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -3222,13 +3446,13 @@ type MockProxy_ListClientInfos_Call struct {
 }
 
 // ListClientInfos is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *proxypb.ListClientInfosRequest
-func (_e *MockProxy_Expecter) ListClientInfos(ctx interface{}, req interface{}) *MockProxy_ListClientInfos_Call {
-	return &MockProxy_ListClientInfos_Call{Call: _e.mock.On("ListClientInfos", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *proxypb.ListClientInfosRequest
+func (_e *MockProxy_Expecter) ListClientInfos(_a0 interface{}, _a1 interface{}) *MockProxy_ListClientInfos_Call {
+	return &MockProxy_ListClientInfos_Call{Call: _e.mock.On("ListClientInfos", _a0, _a1)}
 }
 
-func (_c *MockProxy_ListClientInfos_Call) Run(run func(ctx context.Context, req *proxypb.ListClientInfosRequest)) *MockProxy_ListClientInfos_Call {
+func (_c *MockProxy_ListClientInfos_Call) Run(run func(_a0 context.Context, _a1 *proxypb.ListClientInfosRequest)) *MockProxy_ListClientInfos_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*proxypb.ListClientInfosRequest))
 	})
@@ -3245,17 +3469,17 @@ func (_c *MockProxy_ListClientInfos_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
-// ListCredUsers provides a mock function with given fields: ctx, req
-func (_m *MockProxy) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error) {
-	ret := _m.Called(ctx, req)
+// ListCredUsers provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) ListCredUsers(_a0 context.Context, _a1 *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.ListCredUsersResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListCredUsersRequest) *milvuspb.ListCredUsersResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.ListCredUsersResponse)
@@ -3263,7 +3487,7 @@ func (_m *MockProxy) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUs
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListCredUsersRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -3277,13 +3501,13 @@ type MockProxy_ListCredUsers_Call struct {
 }
 
 // ListCredUsers is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.ListCredUsersRequest
-func (_e *MockProxy_Expecter) ListCredUsers(ctx interface{}, req interface{}) *MockProxy_ListCredUsers_Call {
-	return &MockProxy_ListCredUsers_Call{Call: _e.mock.On("ListCredUsers", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ListCredUsersRequest
+func (_e *MockProxy_Expecter) ListCredUsers(_a0 interface{}, _a1 interface{}) *MockProxy_ListCredUsers_Call {
+	return &MockProxy_ListCredUsers_Call{Call: _e.mock.On("ListCredUsers", _a0, _a1)}
 }
 
-func (_c *MockProxy_ListCredUsers_Call) Run(run func(ctx context.Context, req *milvuspb.ListCredUsersRequest)) *MockProxy_ListCredUsers_Call {
+func (_c *MockProxy_ListCredUsers_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ListCredUsersRequest)) *MockProxy_ListCredUsers_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.ListCredUsersRequest))
 	})
@@ -3300,17 +3524,17 @@ func (_c *MockProxy_ListCredUsers_Call) RunAndReturn(run func(context.Context, *
 	return _c
 }
 
-// ListDatabases provides a mock function with given fields: ctx, req
-func (_m *MockProxy) ListDatabases(ctx context.Context, req *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error) {
-	ret := _m.Called(ctx, req)
+// ListDatabases provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) ListDatabases(_a0 context.Context, _a1 *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.ListDatabasesResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListDatabasesRequest) *milvuspb.ListDatabasesResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.ListDatabasesResponse)
@@ -3318,7 +3542,7 @@ func (_m *MockProxy) ListDatabases(ctx context.Context, req *milvuspb.ListDataba
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListDatabasesRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -3332,13 +3556,13 @@ type MockProxy_ListDatabases_Call struct {
 }
 
 // ListDatabases is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.ListDatabasesRequest
-func (_e *MockProxy_Expecter) ListDatabases(ctx interface{}, req interface{}) *MockProxy_ListDatabases_Call {
-	return &MockProxy_ListDatabases_Call{Call: _e.mock.On("ListDatabases", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ListDatabasesRequest
+func (_e *MockProxy_Expecter) ListDatabases(_a0 interface{}, _a1 interface{}) *MockProxy_ListDatabases_Call {
+	return &MockProxy_ListDatabases_Call{Call: _e.mock.On("ListDatabases", _a0, _a1)}
 }
 
-func (_c *MockProxy_ListDatabases_Call) Run(run func(ctx context.Context, req *milvuspb.ListDatabasesRequest)) *MockProxy_ListDatabases_Call {
+func (_c *MockProxy_ListDatabases_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ListDatabasesRequest)) *MockProxy_ListDatabases_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.ListDatabasesRequest))
 	})
@@ -3355,17 +3579,17 @@ func (_c *MockProxy_ListDatabases_Call) RunAndReturn(run func(context.Context, *
 	return _c
 }
 
-// ListImportTasks provides a mock function with given fields: ctx, req
-func (_m *MockProxy) ListImportTasks(ctx context.Context, req *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
-	ret := _m.Called(ctx, req)
+// ListImportTasks provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) ListImportTasks(_a0 context.Context, _a1 *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.ListImportTasksResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListImportTasksRequest) *milvuspb.ListImportTasksResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.ListImportTasksResponse)
@@ -3373,7 +3597,7 @@ func (_m *MockProxy) ListImportTasks(ctx context.Context, req *milvuspb.ListImpo
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListImportTasksRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -3387,13 +3611,13 @@ type MockProxy_ListImportTasks_Call struct {
 }
 
 // ListImportTasks is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.ListImportTasksRequest
-func (_e *MockProxy_Expecter) ListImportTasks(ctx interface{}, req interface{}) *MockProxy_ListImportTasks_Call {
-	return &MockProxy_ListImportTasks_Call{Call: _e.mock.On("ListImportTasks", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ListImportTasksRequest
+func (_e *MockProxy_Expecter) ListImportTasks(_a0 interface{}, _a1 interface{}) *MockProxy_ListImportTasks_Call {
+	return &MockProxy_ListImportTasks_Call{Call: _e.mock.On("ListImportTasks", _a0, _a1)}
 }
 
-func (_c *MockProxy_ListImportTasks_Call) Run(run func(ctx context.Context, req *milvuspb.ListImportTasksRequest)) *MockProxy_ListImportTasks_Call {
+func (_c *MockProxy_ListImportTasks_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ListImportTasksRequest)) *MockProxy_ListImportTasks_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.ListImportTasksRequest))
 	})
@@ -3410,17 +3634,72 @@ func (_c *MockProxy_ListImportTasks_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
-// ListResourceGroups provides a mock function with given fields: ctx, req
-func (_m *MockProxy) ListResourceGroups(ctx context.Context, req *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error) {
-	ret := _m.Called(ctx, req)
+// ListIndexedSegment provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) ListIndexedSegment(_a0 context.Context, _a1 *federpb.ListIndexedSegmentRequest) (*federpb.ListIndexedSegmentResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *federpb.ListIndexedSegmentResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *federpb.ListIndexedSegmentRequest) (*federpb.ListIndexedSegmentResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *federpb.ListIndexedSegmentRequest) *federpb.ListIndexedSegmentResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*federpb.ListIndexedSegmentResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *federpb.ListIndexedSegmentRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_ListIndexedSegment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListIndexedSegment'
+type MockProxy_ListIndexedSegment_Call struct {
+	*mock.Call
+}
+
+// ListIndexedSegment is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *federpb.ListIndexedSegmentRequest
+func (_e *MockProxy_Expecter) ListIndexedSegment(_a0 interface{}, _a1 interface{}) *MockProxy_ListIndexedSegment_Call {
+	return &MockProxy_ListIndexedSegment_Call{Call: _e.mock.On("ListIndexedSegment", _a0, _a1)}
+}
+
+func (_c *MockProxy_ListIndexedSegment_Call) Run(run func(_a0 context.Context, _a1 *federpb.ListIndexedSegmentRequest)) *MockProxy_ListIndexedSegment_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*federpb.ListIndexedSegmentRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_ListIndexedSegment_Call) Return(_a0 *federpb.ListIndexedSegmentResponse, _a1 error) *MockProxy_ListIndexedSegment_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_ListIndexedSegment_Call) RunAndReturn(run func(context.Context, *federpb.ListIndexedSegmentRequest) (*federpb.ListIndexedSegmentResponse, error)) *MockProxy_ListIndexedSegment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListResourceGroups provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) ListResourceGroups(_a0 context.Context, _a1 *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.ListResourceGroupsResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListResourceGroupsRequest) *milvuspb.ListResourceGroupsResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.ListResourceGroupsResponse)
@@ -3428,7 +3707,7 @@ func (_m *MockProxy) ListResourceGroups(ctx context.Context, req *milvuspb.ListR
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListResourceGroupsRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -3442,13 +3721,13 @@ type MockProxy_ListResourceGroups_Call struct {
 }
 
 // ListResourceGroups is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.ListResourceGroupsRequest
-func (_e *MockProxy_Expecter) ListResourceGroups(ctx interface{}, req interface{}) *MockProxy_ListResourceGroups_Call {
-	return &MockProxy_ListResourceGroups_Call{Call: _e.mock.On("ListResourceGroups", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ListResourceGroupsRequest
+func (_e *MockProxy_Expecter) ListResourceGroups(_a0 interface{}, _a1 interface{}) *MockProxy_ListResourceGroups_Call {
+	return &MockProxy_ListResourceGroups_Call{Call: _e.mock.On("ListResourceGroups", _a0, _a1)}
 }
 
-func (_c *MockProxy_ListResourceGroups_Call) Run(run func(ctx context.Context, req *milvuspb.ListResourceGroupsRequest)) *MockProxy_ListResourceGroups_Call {
+func (_c *MockProxy_ListResourceGroups_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ListResourceGroupsRequest)) *MockProxy_ListResourceGroups_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.ListResourceGroupsRequest))
 	})
@@ -3465,17 +3744,17 @@ func (_c *MockProxy_ListResourceGroups_Call) RunAndReturn(run func(context.Conte
 	return _c
 }
 
-// LoadBalance provides a mock function with given fields: ctx, request
-func (_m *MockProxy) LoadBalance(ctx context.Context, request *milvuspb.LoadBalanceRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, request)
+// LoadBalance provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) LoadBalance(_a0 context.Context, _a1 *milvuspb.LoadBalanceRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.LoadBalanceRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.LoadBalanceRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -3483,7 +3762,7 @@ func (_m *MockProxy) LoadBalance(ctx context.Context, request *milvuspb.LoadBala
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.LoadBalanceRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -3497,13 +3776,13 @@ type MockProxy_LoadBalance_Call struct {
 }
 
 // LoadBalance is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.LoadBalanceRequest
-func (_e *MockProxy_Expecter) LoadBalance(ctx interface{}, request interface{}) *MockProxy_LoadBalance_Call {
-	return &MockProxy_LoadBalance_Call{Call: _e.mock.On("LoadBalance", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.LoadBalanceRequest
+func (_e *MockProxy_Expecter) LoadBalance(_a0 interface{}, _a1 interface{}) *MockProxy_LoadBalance_Call {
+	return &MockProxy_LoadBalance_Call{Call: _e.mock.On("LoadBalance", _a0, _a1)}
 }
 
-func (_c *MockProxy_LoadBalance_Call) Run(run func(ctx context.Context, request *milvuspb.LoadBalanceRequest)) *MockProxy_LoadBalance_Call {
+func (_c *MockProxy_LoadBalance_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.LoadBalanceRequest)) *MockProxy_LoadBalance_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.LoadBalanceRequest))
 	})
@@ -3520,17 +3799,17 @@ func (_c *MockProxy_LoadBalance_Call) RunAndReturn(run func(context.Context, *mi
 	return _c
 }
 
-// LoadCollection provides a mock function with given fields: ctx, request
-func (_m *MockProxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCollectionRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, request)
+// LoadCollection provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) LoadCollection(_a0 context.Context, _a1 *milvuspb.LoadCollectionRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.LoadCollectionRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.LoadCollectionRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -3538,7 +3817,7 @@ func (_m *MockProxy) LoadCollection(ctx context.Context, request *milvuspb.LoadC
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.LoadCollectionRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -3552,13 +3831,13 @@ type MockProxy_LoadCollection_Call struct {
 }
 
 // LoadCollection is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.LoadCollectionRequest
-func (_e *MockProxy_Expecter) LoadCollection(ctx interface{}, request interface{}) *MockProxy_LoadCollection_Call {
-	return &MockProxy_LoadCollection_Call{Call: _e.mock.On("LoadCollection", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.LoadCollectionRequest
+func (_e *MockProxy_Expecter) LoadCollection(_a0 interface{}, _a1 interface{}) *MockProxy_LoadCollection_Call {
+	return &MockProxy_LoadCollection_Call{Call: _e.mock.On("LoadCollection", _a0, _a1)}
 }
 
-func (_c *MockProxy_LoadCollection_Call) Run(run func(ctx context.Context, request *milvuspb.LoadCollectionRequest)) *MockProxy_LoadCollection_Call {
+func (_c *MockProxy_LoadCollection_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.LoadCollectionRequest)) *MockProxy_LoadCollection_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.LoadCollectionRequest))
 	})
@@ -3575,17 +3854,17 @@ func (_c *MockProxy_LoadCollection_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
-// LoadPartitions provides a mock function with given fields: ctx, request
-func (_m *MockProxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPartitionsRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, request)
+// LoadPartitions provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) LoadPartitions(_a0 context.Context, _a1 *milvuspb.LoadPartitionsRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.LoadPartitionsRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.LoadPartitionsRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -3593,7 +3872,7 @@ func (_m *MockProxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadP
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.LoadPartitionsRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -3607,13 +3886,13 @@ type MockProxy_LoadPartitions_Call struct {
 }
 
 // LoadPartitions is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.LoadPartitionsRequest
-func (_e *MockProxy_Expecter) LoadPartitions(ctx interface{}, request interface{}) *MockProxy_LoadPartitions_Call {
-	return &MockProxy_LoadPartitions_Call{Call: _e.mock.On("LoadPartitions", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.LoadPartitionsRequest
+func (_e *MockProxy_Expecter) LoadPartitions(_a0 interface{}, _a1 interface{}) *MockProxy_LoadPartitions_Call {
+	return &MockProxy_LoadPartitions_Call{Call: _e.mock.On("LoadPartitions", _a0, _a1)}
 }
 
-func (_c *MockProxy_LoadPartitions_Call) Run(run func(ctx context.Context, request *milvuspb.LoadPartitionsRequest)) *MockProxy_LoadPartitions_Call {
+func (_c *MockProxy_LoadPartitions_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.LoadPartitionsRequest)) *MockProxy_LoadPartitions_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.LoadPartitionsRequest))
 	})
@@ -3630,17 +3909,17 @@ func (_c *MockProxy_LoadPartitions_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
-// ManualCompaction provides a mock function with given fields: ctx, req
-func (_m *MockProxy) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error) {
-	ret := _m.Called(ctx, req)
+// ManualCompaction provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) ManualCompaction(_a0 context.Context, _a1 *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.ManualCompactionResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ManualCompactionRequest) *milvuspb.ManualCompactionResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.ManualCompactionResponse)
@@ -3648,7 +3927,7 @@ func (_m *MockProxy) ManualCompaction(ctx context.Context, req *milvuspb.ManualC
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ManualCompactionRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -3662,13 +3941,13 @@ type MockProxy_ManualCompaction_Call struct {
 }
 
 // ManualCompaction is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.ManualCompactionRequest
-func (_e *MockProxy_Expecter) ManualCompaction(ctx interface{}, req interface{}) *MockProxy_ManualCompaction_Call {
-	return &MockProxy_ManualCompaction_Call{Call: _e.mock.On("ManualCompaction", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ManualCompactionRequest
+func (_e *MockProxy_Expecter) ManualCompaction(_a0 interface{}, _a1 interface{}) *MockProxy_ManualCompaction_Call {
+	return &MockProxy_ManualCompaction_Call{Call: _e.mock.On("ManualCompaction", _a0, _a1)}
 }
 
-func (_c *MockProxy_ManualCompaction_Call) Run(run func(ctx context.Context, req *milvuspb.ManualCompactionRequest)) *MockProxy_ManualCompaction_Call {
+func (_c *MockProxy_ManualCompaction_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ManualCompactionRequest)) *MockProxy_ManualCompaction_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.ManualCompactionRequest))
 	})
@@ -3685,17 +3964,17 @@ func (_c *MockProxy_ManualCompaction_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
-// OperatePrivilege provides a mock function with given fields: ctx, req
-func (_m *MockProxy) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// OperatePrivilege provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) OperatePrivilege(_a0 context.Context, _a1 *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.OperatePrivilegeRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -3703,7 +3982,7 @@ func (_m *MockProxy) OperatePrivilege(ctx context.Context, req *milvuspb.Operate
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.OperatePrivilegeRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -3717,13 +3996,13 @@ type MockProxy_OperatePrivilege_Call struct {
 }
 
 // OperatePrivilege is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.OperatePrivilegeRequest
-func (_e *MockProxy_Expecter) OperatePrivilege(ctx interface{}, req interface{}) *MockProxy_OperatePrivilege_Call {
-	return &MockProxy_OperatePrivilege_Call{Call: _e.mock.On("OperatePrivilege", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.OperatePrivilegeRequest
+func (_e *MockProxy_Expecter) OperatePrivilege(_a0 interface{}, _a1 interface{}) *MockProxy_OperatePrivilege_Call {
+	return &MockProxy_OperatePrivilege_Call{Call: _e.mock.On("OperatePrivilege", _a0, _a1)}
 }
 
-func (_c *MockProxy_OperatePrivilege_Call) Run(run func(ctx context.Context, req *milvuspb.OperatePrivilegeRequest)) *MockProxy_OperatePrivilege_Call {
+func (_c *MockProxy_OperatePrivilege_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.OperatePrivilegeRequest)) *MockProxy_OperatePrivilege_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.OperatePrivilegeRequest))
 	})
@@ -3740,17 +4019,17 @@ func (_c *MockProxy_OperatePrivilege_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
-// OperateUserRole provides a mock function with given fields: ctx, req
-func (_m *MockProxy) OperateUserRole(ctx context.Context, req *milvuspb.OperateUserRoleRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// OperateUserRole provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) OperateUserRole(_a0 context.Context, _a1 *milvuspb.OperateUserRoleRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.OperateUserRoleRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.OperateUserRoleRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -3758,7 +4037,7 @@ func (_m *MockProxy) OperateUserRole(ctx context.Context, req *milvuspb.OperateU
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.OperateUserRoleRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -3772,13 +4051,13 @@ type MockProxy_OperateUserRole_Call struct {
 }
 
 // OperateUserRole is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.OperateUserRoleRequest
-func (_e *MockProxy_Expecter) OperateUserRole(ctx interface{}, req interface{}) *MockProxy_OperateUserRole_Call {
-	return &MockProxy_OperateUserRole_Call{Call: _e.mock.On("OperateUserRole", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.OperateUserRoleRequest
+func (_e *MockProxy_Expecter) OperateUserRole(_a0 interface{}, _a1 interface{}) *MockProxy_OperateUserRole_Call {
+	return &MockProxy_OperateUserRole_Call{Call: _e.mock.On("OperateUserRole", _a0, _a1)}
 }
 
-func (_c *MockProxy_OperateUserRole_Call) Run(run func(ctx context.Context, req *milvuspb.OperateUserRoleRequest)) *MockProxy_OperateUserRole_Call {
+func (_c *MockProxy_OperateUserRole_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.OperateUserRoleRequest)) *MockProxy_OperateUserRole_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.OperateUserRoleRequest))
 	})
@@ -3795,17 +4074,17 @@ func (_c *MockProxy_OperateUserRole_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
-// Query provides a mock function with given fields: ctx, request
-func (_m *MockProxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
-	ret := _m.Called(ctx, request)
+// Query provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) Query(_a0 context.Context, _a1 *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.QueryResults
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.QueryRequest) (*milvuspb.QueryResults, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.QueryRequest) *milvuspb.QueryResults); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.QueryResults)
@@ -3813,7 +4092,7 @@ func (_m *MockProxy) Query(ctx context.Context, request *milvuspb.QueryRequest) 
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.QueryRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -3827,13 +4106,13 @@ type MockProxy_Query_Call struct {
 }
 
 // Query is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.QueryRequest
-func (_e *MockProxy_Expecter) Query(ctx interface{}, request interface{}) *MockProxy_Query_Call {
-	return &MockProxy_Query_Call{Call: _e.mock.On("Query", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.QueryRequest
+func (_e *MockProxy_Expecter) Query(_a0 interface{}, _a1 interface{}) *MockProxy_Query_Call {
+	return &MockProxy_Query_Call{Call: _e.mock.On("Query", _a0, _a1)}
 }
 
-func (_c *MockProxy_Query_Call) Run(run func(ctx context.Context, request *milvuspb.QueryRequest)) *MockProxy_Query_Call {
+func (_c *MockProxy_Query_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.QueryRequest)) *MockProxy_Query_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.QueryRequest))
 	})
@@ -3850,17 +4129,17 @@ func (_c *MockProxy_Query_Call) RunAndReturn(run func(context.Context, *milvuspb
 	return _c
 }
 
-// RefreshPolicyInfoCache provides a mock function with given fields: ctx, req
-func (_m *MockProxy) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// RefreshPolicyInfoCache provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) RefreshPolicyInfoCache(_a0 context.Context, _a1 *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *proxypb.RefreshPolicyInfoCacheRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -3868,7 +4147,7 @@ func (_m *MockProxy) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.Re
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *proxypb.RefreshPolicyInfoCacheRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -3882,13 +4161,13 @@ type MockProxy_RefreshPolicyInfoCache_Call struct {
 }
 
 // RefreshPolicyInfoCache is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *proxypb.RefreshPolicyInfoCacheRequest
-func (_e *MockProxy_Expecter) RefreshPolicyInfoCache(ctx interface{}, req interface{}) *MockProxy_RefreshPolicyInfoCache_Call {
-	return &MockProxy_RefreshPolicyInfoCache_Call{Call: _e.mock.On("RefreshPolicyInfoCache", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *proxypb.RefreshPolicyInfoCacheRequest
+func (_e *MockProxy_Expecter) RefreshPolicyInfoCache(_a0 interface{}, _a1 interface{}) *MockProxy_RefreshPolicyInfoCache_Call {
+	return &MockProxy_RefreshPolicyInfoCache_Call{Call: _e.mock.On("RefreshPolicyInfoCache", _a0, _a1)}
 }
 
-func (_c *MockProxy_RefreshPolicyInfoCache_Call) Run(run func(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest)) *MockProxy_RefreshPolicyInfoCache_Call {
+func (_c *MockProxy_RefreshPolicyInfoCache_Call) Run(run func(_a0 context.Context, _a1 *proxypb.RefreshPolicyInfoCacheRequest)) *MockProxy_RefreshPolicyInfoCache_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*proxypb.RefreshPolicyInfoCacheRequest))
 	})
@@ -3946,17 +4225,17 @@ func (_c *MockProxy_Register_Call) RunAndReturn(run func() error) *MockProxy_Reg
 	return _c
 }
 
-// RegisterLink provides a mock function with given fields: ctx, request
-func (_m *MockProxy) RegisterLink(ctx context.Context, request *milvuspb.RegisterLinkRequest) (*milvuspb.RegisterLinkResponse, error) {
-	ret := _m.Called(ctx, request)
+// RegisterLink provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) RegisterLink(_a0 context.Context, _a1 *milvuspb.RegisterLinkRequest) (*milvuspb.RegisterLinkResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.RegisterLinkResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.RegisterLinkRequest) (*milvuspb.RegisterLinkResponse, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.RegisterLinkRequest) *milvuspb.RegisterLinkResponse); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.RegisterLinkResponse)
@@ -3964,7 +4243,7 @@ func (_m *MockProxy) RegisterLink(ctx context.Context, request *milvuspb.Registe
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.RegisterLinkRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -3978,13 +4257,13 @@ type MockProxy_RegisterLink_Call struct {
 }
 
 // RegisterLink is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.RegisterLinkRequest
-func (_e *MockProxy_Expecter) RegisterLink(ctx interface{}, request interface{}) *MockProxy_RegisterLink_Call {
-	return &MockProxy_RegisterLink_Call{Call: _e.mock.On("RegisterLink", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.RegisterLinkRequest
+func (_e *MockProxy_Expecter) RegisterLink(_a0 interface{}, _a1 interface{}) *MockProxy_RegisterLink_Call {
+	return &MockProxy_RegisterLink_Call{Call: _e.mock.On("RegisterLink", _a0, _a1)}
 }
 
-func (_c *MockProxy_RegisterLink_Call) Run(run func(ctx context.Context, request *milvuspb.RegisterLinkRequest)) *MockProxy_RegisterLink_Call {
+func (_c *MockProxy_RegisterLink_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.RegisterLinkRequest)) *MockProxy_RegisterLink_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.RegisterLinkRequest))
 	})
@@ -4001,17 +4280,17 @@ func (_c *MockProxy_RegisterLink_Call) RunAndReturn(run func(context.Context, *m
 	return _c
 }
 
-// ReleaseCollection provides a mock function with given fields: ctx, request
-func (_m *MockProxy) ReleaseCollection(ctx context.Context, request *milvuspb.ReleaseCollectionRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, request)
+// ReleaseCollection provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) ReleaseCollection(_a0 context.Context, _a1 *milvuspb.ReleaseCollectionRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ReleaseCollectionRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ReleaseCollectionRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -4019,7 +4298,7 @@ func (_m *MockProxy) ReleaseCollection(ctx context.Context, request *milvuspb.Re
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ReleaseCollectionRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -4033,13 +4312,13 @@ type MockProxy_ReleaseCollection_Call struct {
 }
 
 // ReleaseCollection is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.ReleaseCollectionRequest
-func (_e *MockProxy_Expecter) ReleaseCollection(ctx interface{}, request interface{}) *MockProxy_ReleaseCollection_Call {
-	return &MockProxy_ReleaseCollection_Call{Call: _e.mock.On("ReleaseCollection", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ReleaseCollectionRequest
+func (_e *MockProxy_Expecter) ReleaseCollection(_a0 interface{}, _a1 interface{}) *MockProxy_ReleaseCollection_Call {
+	return &MockProxy_ReleaseCollection_Call{Call: _e.mock.On("ReleaseCollection", _a0, _a1)}
 }
 
-func (_c *MockProxy_ReleaseCollection_Call) Run(run func(ctx context.Context, request *milvuspb.ReleaseCollectionRequest)) *MockProxy_ReleaseCollection_Call {
+func (_c *MockProxy_ReleaseCollection_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ReleaseCollectionRequest)) *MockProxy_ReleaseCollection_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.ReleaseCollectionRequest))
 	})
@@ -4056,17 +4335,17 @@ func (_c *MockProxy_ReleaseCollection_Call) RunAndReturn(run func(context.Contex
 	return _c
 }
 
-// ReleasePartitions provides a mock function with given fields: ctx, request
-func (_m *MockProxy) ReleasePartitions(ctx context.Context, request *milvuspb.ReleasePartitionsRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, request)
+// ReleasePartitions provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) ReleasePartitions(_a0 context.Context, _a1 *milvuspb.ReleasePartitionsRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ReleasePartitionsRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ReleasePartitionsRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -4074,7 +4353,7 @@ func (_m *MockProxy) ReleasePartitions(ctx context.Context, request *milvuspb.Re
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ReleasePartitionsRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -4088,13 +4367,13 @@ type MockProxy_ReleasePartitions_Call struct {
 }
 
 // ReleasePartitions is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.ReleasePartitionsRequest
-func (_e *MockProxy_Expecter) ReleasePartitions(ctx interface{}, request interface{}) *MockProxy_ReleasePartitions_Call {
-	return &MockProxy_ReleasePartitions_Call{Call: _e.mock.On("ReleasePartitions", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ReleasePartitionsRequest
+func (_e *MockProxy_Expecter) ReleasePartitions(_a0 interface{}, _a1 interface{}) *MockProxy_ReleasePartitions_Call {
+	return &MockProxy_ReleasePartitions_Call{Call: _e.mock.On("ReleasePartitions", _a0, _a1)}
 }
 
-func (_c *MockProxy_ReleasePartitions_Call) Run(run func(ctx context.Context, request *milvuspb.ReleasePartitionsRequest)) *MockProxy_ReleasePartitions_Call {
+func (_c *MockProxy_ReleasePartitions_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ReleasePartitionsRequest)) *MockProxy_ReleasePartitions_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.ReleasePartitionsRequest))
 	})
@@ -4111,17 +4390,17 @@ func (_c *MockProxy_ReleasePartitions_Call) RunAndReturn(run func(context.Contex
 	return _c
 }
 
-// RenameCollection provides a mock function with given fields: ctx, req
-func (_m *MockProxy) RenameCollection(ctx context.Context, req *milvuspb.RenameCollectionRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// RenameCollection provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) RenameCollection(_a0 context.Context, _a1 *milvuspb.RenameCollectionRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.RenameCollectionRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.RenameCollectionRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -4129,7 +4408,7 @@ func (_m *MockProxy) RenameCollection(ctx context.Context, req *milvuspb.RenameC
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.RenameCollectionRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -4143,13 +4422,13 @@ type MockProxy_RenameCollection_Call struct {
 }
 
 // RenameCollection is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.RenameCollectionRequest
-func (_e *MockProxy_Expecter) RenameCollection(ctx interface{}, req interface{}) *MockProxy_RenameCollection_Call {
-	return &MockProxy_RenameCollection_Call{Call: _e.mock.On("RenameCollection", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.RenameCollectionRequest
+func (_e *MockProxy_Expecter) RenameCollection(_a0 interface{}, _a1 interface{}) *MockProxy_RenameCollection_Call {
+	return &MockProxy_RenameCollection_Call{Call: _e.mock.On("RenameCollection", _a0, _a1)}
 }
 
-func (_c *MockProxy_RenameCollection_Call) Run(run func(ctx context.Context, req *milvuspb.RenameCollectionRequest)) *MockProxy_RenameCollection_Call {
+func (_c *MockProxy_RenameCollection_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.RenameCollectionRequest)) *MockProxy_RenameCollection_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.RenameCollectionRequest))
 	})
@@ -4166,17 +4445,17 @@ func (_c *MockProxy_RenameCollection_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
-// Search provides a mock function with given fields: ctx, request
-func (_m *MockProxy) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
-	ret := _m.Called(ctx, request)
+// Search provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) Search(_a0 context.Context, _a1 *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.SearchResults
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.SearchRequest) *milvuspb.SearchResults); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.SearchResults)
@@ -4184,7 +4463,7 @@ func (_m *MockProxy) Search(ctx context.Context, request *milvuspb.SearchRequest
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.SearchRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -4198,13 +4477,13 @@ type MockProxy_Search_Call struct {
 }
 
 // Search is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.SearchRequest
-func (_e *MockProxy_Expecter) Search(ctx interface{}, request interface{}) *MockProxy_Search_Call {
-	return &MockProxy_Search_Call{Call: _e.mock.On("Search", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.SearchRequest
+func (_e *MockProxy_Expecter) Search(_a0 interface{}, _a1 interface{}) *MockProxy_Search_Call {
+	return &MockProxy_Search_Call{Call: _e.mock.On("Search", _a0, _a1)}
 }
 
-func (_c *MockProxy_Search_Call) Run(run func(ctx context.Context, request *milvuspb.SearchRequest)) *MockProxy_Search_Call {
+func (_c *MockProxy_Search_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.SearchRequest)) *MockProxy_Search_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.SearchRequest))
 	})
@@ -4221,17 +4500,17 @@ func (_c *MockProxy_Search_Call) RunAndReturn(run func(context.Context, *milvusp
 	return _c
 }
 
-// SelectGrant provides a mock function with given fields: ctx, req
-func (_m *MockProxy) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantRequest) (*milvuspb.SelectGrantResponse, error) {
-	ret := _m.Called(ctx, req)
+// SelectGrant provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) SelectGrant(_a0 context.Context, _a1 *milvuspb.SelectGrantRequest) (*milvuspb.SelectGrantResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.SelectGrantResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.SelectGrantRequest) (*milvuspb.SelectGrantResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.SelectGrantRequest) *milvuspb.SelectGrantResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.SelectGrantResponse)
@@ -4239,7 +4518,7 @@ func (_m *MockProxy) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantR
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.SelectGrantRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -4253,13 +4532,13 @@ type MockProxy_SelectGrant_Call struct {
 }
 
 // SelectGrant is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.SelectGrantRequest
-func (_e *MockProxy_Expecter) SelectGrant(ctx interface{}, req interface{}) *MockProxy_SelectGrant_Call {
-	return &MockProxy_SelectGrant_Call{Call: _e.mock.On("SelectGrant", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.SelectGrantRequest
+func (_e *MockProxy_Expecter) SelectGrant(_a0 interface{}, _a1 interface{}) *MockProxy_SelectGrant_Call {
+	return &MockProxy_SelectGrant_Call{Call: _e.mock.On("SelectGrant", _a0, _a1)}
 }
 
-func (_c *MockProxy_SelectGrant_Call) Run(run func(ctx context.Context, req *milvuspb.SelectGrantRequest)) *MockProxy_SelectGrant_Call {
+func (_c *MockProxy_SelectGrant_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.SelectGrantRequest)) *MockProxy_SelectGrant_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.SelectGrantRequest))
 	})
@@ -4276,17 +4555,17 @@ func (_c *MockProxy_SelectGrant_Call) RunAndReturn(run func(context.Context, *mi
 	return _c
 }
 
-// SelectRole provides a mock function with given fields: ctx, req
-func (_m *MockProxy) SelectRole(ctx context.Context, req *milvuspb.SelectRoleRequest) (*milvuspb.SelectRoleResponse, error) {
-	ret := _m.Called(ctx, req)
+// SelectRole provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) SelectRole(_a0 context.Context, _a1 *milvuspb.SelectRoleRequest) (*milvuspb.SelectRoleResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.SelectRoleResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.SelectRoleRequest) (*milvuspb.SelectRoleResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.SelectRoleRequest) *milvuspb.SelectRoleResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.SelectRoleResponse)
@@ -4294,7 +4573,7 @@ func (_m *MockProxy) SelectRole(ctx context.Context, req *milvuspb.SelectRoleReq
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.SelectRoleRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -4308,13 +4587,13 @@ type MockProxy_SelectRole_Call struct {
 }
 
 // SelectRole is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.SelectRoleRequest
-func (_e *MockProxy_Expecter) SelectRole(ctx interface{}, req interface{}) *MockProxy_SelectRole_Call {
-	return &MockProxy_SelectRole_Call{Call: _e.mock.On("SelectRole", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.SelectRoleRequest
+func (_e *MockProxy_Expecter) SelectRole(_a0 interface{}, _a1 interface{}) *MockProxy_SelectRole_Call {
+	return &MockProxy_SelectRole_Call{Call: _e.mock.On("SelectRole", _a0, _a1)}
 }
 
-func (_c *MockProxy_SelectRole_Call) Run(run func(ctx context.Context, req *milvuspb.SelectRoleRequest)) *MockProxy_SelectRole_Call {
+func (_c *MockProxy_SelectRole_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.SelectRoleRequest)) *MockProxy_SelectRole_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.SelectRoleRequest))
 	})
@@ -4331,17 +4610,17 @@ func (_c *MockProxy_SelectRole_Call) RunAndReturn(run func(context.Context, *mil
 	return _c
 }
 
-// SelectUser provides a mock function with given fields: ctx, req
-func (_m *MockProxy) SelectUser(ctx context.Context, req *milvuspb.SelectUserRequest) (*milvuspb.SelectUserResponse, error) {
-	ret := _m.Called(ctx, req)
+// SelectUser provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) SelectUser(_a0 context.Context, _a1 *milvuspb.SelectUserRequest) (*milvuspb.SelectUserResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.SelectUserResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.SelectUserRequest) (*milvuspb.SelectUserResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.SelectUserRequest) *milvuspb.SelectUserResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.SelectUserResponse)
@@ -4349,7 +4628,7 @@ func (_m *MockProxy) SelectUser(ctx context.Context, req *milvuspb.SelectUserReq
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.SelectUserRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -4363,13 +4642,13 @@ type MockProxy_SelectUser_Call struct {
 }
 
 // SelectUser is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.SelectUserRequest
-func (_e *MockProxy_Expecter) SelectUser(ctx interface{}, req interface{}) *MockProxy_SelectUser_Call {
-	return &MockProxy_SelectUser_Call{Call: _e.mock.On("SelectUser", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.SelectUserRequest
+func (_e *MockProxy_Expecter) SelectUser(_a0 interface{}, _a1 interface{}) *MockProxy_SelectUser_Call {
+	return &MockProxy_SelectUser_Call{Call: _e.mock.On("SelectUser", _a0, _a1)}
 }
 
-func (_c *MockProxy_SelectUser_Call) Run(run func(ctx context.Context, req *milvuspb.SelectUserRequest)) *MockProxy_SelectUser_Call {
+func (_c *MockProxy_SelectUser_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.SelectUserRequest)) *MockProxy_SelectUser_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.SelectUserRequest))
 	})
@@ -4420,7 +4699,7 @@ func (_c *MockProxy_SetAddress_Call) RunAndReturn(run func(string)) *MockProxy_S
 }
 
 // SetDataCoordClient provides a mock function with given fields: dataCoord
-func (_m *MockProxy) SetDataCoordClient(dataCoord types.DataCoord) {
+func (_m *MockProxy) SetDataCoordClient(dataCoord types.DataCoordClient) {
 	_m.Called(dataCoord)
 }
 
@@ -4430,14 +4709,14 @@ type MockProxy_SetDataCoordClient_Call struct {
 }
 
 // SetDataCoordClient is a helper method to define mock.On call
-//   - dataCoord types.DataCoord
+//   - dataCoord types.DataCoordClient
 func (_e *MockProxy_Expecter) SetDataCoordClient(dataCoord interface{}) *MockProxy_SetDataCoordClient_Call {
 	return &MockProxy_SetDataCoordClient_Call{Call: _e.mock.On("SetDataCoordClient", dataCoord)}
 }
 
-func (_c *MockProxy_SetDataCoordClient_Call) Run(run func(dataCoord types.DataCoord)) *MockProxy_SetDataCoordClient_Call {
+func (_c *MockProxy_SetDataCoordClient_Call) Run(run func(dataCoord types.DataCoordClient)) *MockProxy_SetDataCoordClient_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(types.DataCoord))
+		run(args[0].(types.DataCoordClient))
 	})
 	return _c
 }
@@ -4447,7 +4726,7 @@ func (_c *MockProxy_SetDataCoordClient_Call) Return() *MockProxy_SetDataCoordCli
 	return _c
 }
 
-func (_c *MockProxy_SetDataCoordClient_Call) RunAndReturn(run func(types.DataCoord)) *MockProxy_SetDataCoordClient_Call {
+func (_c *MockProxy_SetDataCoordClient_Call) RunAndReturn(run func(types.DataCoordClient)) *MockProxy_SetDataCoordClient_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -4486,7 +4765,7 @@ func (_c *MockProxy_SetEtcdClient_Call) RunAndReturn(run func(*clientv3.Client))
 }
 
 // SetQueryCoordClient provides a mock function with given fields: queryCoord
-func (_m *MockProxy) SetQueryCoordClient(queryCoord types.QueryCoord) {
+func (_m *MockProxy) SetQueryCoordClient(queryCoord types.QueryCoordClient) {
 	_m.Called(queryCoord)
 }
 
@@ -4496,14 +4775,14 @@ type MockProxy_SetQueryCoordClient_Call struct {
 }
 
 // SetQueryCoordClient is a helper method to define mock.On call
-//   - queryCoord types.QueryCoord
+//   - queryCoord types.QueryCoordClient
 func (_e *MockProxy_Expecter) SetQueryCoordClient(queryCoord interface{}) *MockProxy_SetQueryCoordClient_Call {
 	return &MockProxy_SetQueryCoordClient_Call{Call: _e.mock.On("SetQueryCoordClient", queryCoord)}
 }
 
-func (_c *MockProxy_SetQueryCoordClient_Call) Run(run func(queryCoord types.QueryCoord)) *MockProxy_SetQueryCoordClient_Call {
+func (_c *MockProxy_SetQueryCoordClient_Call) Run(run func(queryCoord types.QueryCoordClient)) *MockProxy_SetQueryCoordClient_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(types.QueryCoord))
+		run(args[0].(types.QueryCoordClient))
 	})
 	return _c
 }
@@ -4513,13 +4792,13 @@ func (_c *MockProxy_SetQueryCoordClient_Call) Return() *MockProxy_SetQueryCoordC
 	return _c
 }
 
-func (_c *MockProxy_SetQueryCoordClient_Call) RunAndReturn(run func(types.QueryCoord)) *MockProxy_SetQueryCoordClient_Call {
+func (_c *MockProxy_SetQueryCoordClient_Call) RunAndReturn(run func(types.QueryCoordClient)) *MockProxy_SetQueryCoordClient_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // SetQueryNodeCreator provides a mock function with given fields: _a0
-func (_m *MockProxy) SetQueryNodeCreator(_a0 func(context.Context, string, int64) (types.QueryNode, error)) {
+func (_m *MockProxy) SetQueryNodeCreator(_a0 func(context.Context, string, int64) (types.QueryNodeClient, error)) {
 	_m.Called(_a0)
 }
 
@@ -4529,14 +4808,14 @@ type MockProxy_SetQueryNodeCreator_Call struct {
 }
 
 // SetQueryNodeCreator is a helper method to define mock.On call
-//   - _a0 func(context.Context , string , int64)(types.QueryNode , error)
+//   - _a0 func(context.Context , string , int64)(types.QueryNodeClient , error)
 func (_e *MockProxy_Expecter) SetQueryNodeCreator(_a0 interface{}) *MockProxy_SetQueryNodeCreator_Call {
 	return &MockProxy_SetQueryNodeCreator_Call{Call: _e.mock.On("SetQueryNodeCreator", _a0)}
 }
 
-func (_c *MockProxy_SetQueryNodeCreator_Call) Run(run func(_a0 func(context.Context, string, int64) (types.QueryNode, error))) *MockProxy_SetQueryNodeCreator_Call {
+func (_c *MockProxy_SetQueryNodeCreator_Call) Run(run func(_a0 func(context.Context, string, int64) (types.QueryNodeClient, error))) *MockProxy_SetQueryNodeCreator_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(func(context.Context, string, int64) (types.QueryNode, error)))
+		run(args[0].(func(context.Context, string, int64) (types.QueryNodeClient, error)))
 	})
 	return _c
 }
@@ -4546,22 +4825,22 @@ func (_c *MockProxy_SetQueryNodeCreator_Call) Return() *MockProxy_SetQueryNodeCr
 	return _c
 }
 
-func (_c *MockProxy_SetQueryNodeCreator_Call) RunAndReturn(run func(func(context.Context, string, int64) (types.QueryNode, error))) *MockProxy_SetQueryNodeCreator_Call {
+func (_c *MockProxy_SetQueryNodeCreator_Call) RunAndReturn(run func(func(context.Context, string, int64) (types.QueryNodeClient, error))) *MockProxy_SetQueryNodeCreator_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// SetRates provides a mock function with given fields: ctx, req
-func (_m *MockProxy) SetRates(ctx context.Context, req *proxypb.SetRatesRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// SetRates provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) SetRates(_a0 context.Context, _a1 *proxypb.SetRatesRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *proxypb.SetRatesRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *proxypb.SetRatesRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -4569,7 +4848,7 @@ func (_m *MockProxy) SetRates(ctx context.Context, req *proxypb.SetRatesRequest)
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *proxypb.SetRatesRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -4583,13 +4862,13 @@ type MockProxy_SetRates_Call struct {
 }
 
 // SetRates is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *proxypb.SetRatesRequest
-func (_e *MockProxy_Expecter) SetRates(ctx interface{}, req interface{}) *MockProxy_SetRates_Call {
-	return &MockProxy_SetRates_Call{Call: _e.mock.On("SetRates", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *proxypb.SetRatesRequest
+func (_e *MockProxy_Expecter) SetRates(_a0 interface{}, _a1 interface{}) *MockProxy_SetRates_Call {
+	return &MockProxy_SetRates_Call{Call: _e.mock.On("SetRates", _a0, _a1)}
 }
 
-func (_c *MockProxy_SetRates_Call) Run(run func(ctx context.Context, req *proxypb.SetRatesRequest)) *MockProxy_SetRates_Call {
+func (_c *MockProxy_SetRates_Call) Run(run func(_a0 context.Context, _a1 *proxypb.SetRatesRequest)) *MockProxy_SetRates_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*proxypb.SetRatesRequest))
 	})
@@ -4607,7 +4886,7 @@ func (_c *MockProxy_SetRates_Call) RunAndReturn(run func(context.Context, *proxy
 }
 
 // SetRootCoordClient provides a mock function with given fields: rootCoord
-func (_m *MockProxy) SetRootCoordClient(rootCoord types.RootCoord) {
+func (_m *MockProxy) SetRootCoordClient(rootCoord types.RootCoordClient) {
 	_m.Called(rootCoord)
 }
 
@@ -4617,14 +4896,14 @@ type MockProxy_SetRootCoordClient_Call struct {
 }
 
 // SetRootCoordClient is a helper method to define mock.On call
-//   - rootCoord types.RootCoord
+//   - rootCoord types.RootCoordClient
 func (_e *MockProxy_Expecter) SetRootCoordClient(rootCoord interface{}) *MockProxy_SetRootCoordClient_Call {
 	return &MockProxy_SetRootCoordClient_Call{Call: _e.mock.On("SetRootCoordClient", rootCoord)}
 }
 
-func (_c *MockProxy_SetRootCoordClient_Call) Run(run func(rootCoord types.RootCoord)) *MockProxy_SetRootCoordClient_Call {
+func (_c *MockProxy_SetRootCoordClient_Call) Run(run func(rootCoord types.RootCoordClient)) *MockProxy_SetRootCoordClient_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(types.RootCoord))
+		run(args[0].(types.RootCoordClient))
 	})
 	return _c
 }
@@ -4634,22 +4913,22 @@ func (_c *MockProxy_SetRootCoordClient_Call) Return() *MockProxy_SetRootCoordCli
 	return _c
 }
 
-func (_c *MockProxy_SetRootCoordClient_Call) RunAndReturn(run func(types.RootCoord)) *MockProxy_SetRootCoordClient_Call {
+func (_c *MockProxy_SetRootCoordClient_Call) RunAndReturn(run func(types.RootCoordClient)) *MockProxy_SetRootCoordClient_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// ShowCollections provides a mock function with given fields: ctx, request
-func (_m *MockProxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
-	ret := _m.Called(ctx, request)
+// ShowCollections provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) ShowCollections(_a0 context.Context, _a1 *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.ShowCollectionsResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ShowCollectionsRequest) *milvuspb.ShowCollectionsResponse); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.ShowCollectionsResponse)
@@ -4657,7 +4936,7 @@ func (_m *MockProxy) ShowCollections(ctx context.Context, request *milvuspb.Show
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ShowCollectionsRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -4671,13 +4950,13 @@ type MockProxy_ShowCollections_Call struct {
 }
 
 // ShowCollections is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.ShowCollectionsRequest
-func (_e *MockProxy_Expecter) ShowCollections(ctx interface{}, request interface{}) *MockProxy_ShowCollections_Call {
-	return &MockProxy_ShowCollections_Call{Call: _e.mock.On("ShowCollections", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ShowCollectionsRequest
+func (_e *MockProxy_Expecter) ShowCollections(_a0 interface{}, _a1 interface{}) *MockProxy_ShowCollections_Call {
+	return &MockProxy_ShowCollections_Call{Call: _e.mock.On("ShowCollections", _a0, _a1)}
 }
 
-func (_c *MockProxy_ShowCollections_Call) Run(run func(ctx context.Context, request *milvuspb.ShowCollectionsRequest)) *MockProxy_ShowCollections_Call {
+func (_c *MockProxy_ShowCollections_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ShowCollectionsRequest)) *MockProxy_ShowCollections_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.ShowCollectionsRequest))
 	})
@@ -4694,17 +4973,17 @@ func (_c *MockProxy_ShowCollections_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
-// ShowPartitions provides a mock function with given fields: ctx, request
-func (_m *MockProxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
-	ret := _m.Called(ctx, request)
+// ShowPartitions provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) ShowPartitions(_a0 context.Context, _a1 *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.ShowPartitionsResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ShowPartitionsRequest) *milvuspb.ShowPartitionsResponse); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.ShowPartitionsResponse)
@@ -4712,7 +4991,7 @@ func (_m *MockProxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowP
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ShowPartitionsRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -4726,13 +5005,13 @@ type MockProxy_ShowPartitions_Call struct {
 }
 
 // ShowPartitions is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.ShowPartitionsRequest
-func (_e *MockProxy_Expecter) ShowPartitions(ctx interface{}, request interface{}) *MockProxy_ShowPartitions_Call {
-	return &MockProxy_ShowPartitions_Call{Call: _e.mock.On("ShowPartitions", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ShowPartitionsRequest
+func (_e *MockProxy_Expecter) ShowPartitions(_a0 interface{}, _a1 interface{}) *MockProxy_ShowPartitions_Call {
+	return &MockProxy_ShowPartitions_Call{Call: _e.mock.On("ShowPartitions", _a0, _a1)}
 }
 
-func (_c *MockProxy_ShowPartitions_Call) Run(run func(ctx context.Context, request *milvuspb.ShowPartitionsRequest)) *MockProxy_ShowPartitions_Call {
+func (_c *MockProxy_ShowPartitions_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ShowPartitionsRequest)) *MockProxy_ShowPartitions_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.ShowPartitionsRequest))
 	})
@@ -4831,17 +5110,17 @@ func (_c *MockProxy_Stop_Call) RunAndReturn(run func() error) *MockProxy_Stop_Ca
 	return _c
 }
 
-// TransferNode provides a mock function with given fields: ctx, req
-func (_m *MockProxy) TransferNode(ctx context.Context, req *milvuspb.TransferNodeRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// TransferNode provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) TransferNode(_a0 context.Context, _a1 *milvuspb.TransferNodeRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.TransferNodeRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.TransferNodeRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -4849,7 +5128,7 @@ func (_m *MockProxy) TransferNode(ctx context.Context, req *milvuspb.TransferNod
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.TransferNodeRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -4863,13 +5142,13 @@ type MockProxy_TransferNode_Call struct {
 }
 
 // TransferNode is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.TransferNodeRequest
-func (_e *MockProxy_Expecter) TransferNode(ctx interface{}, req interface{}) *MockProxy_TransferNode_Call {
-	return &MockProxy_TransferNode_Call{Call: _e.mock.On("TransferNode", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.TransferNodeRequest
+func (_e *MockProxy_Expecter) TransferNode(_a0 interface{}, _a1 interface{}) *MockProxy_TransferNode_Call {
+	return &MockProxy_TransferNode_Call{Call: _e.mock.On("TransferNode", _a0, _a1)}
 }
 
-func (_c *MockProxy_TransferNode_Call) Run(run func(ctx context.Context, req *milvuspb.TransferNodeRequest)) *MockProxy_TransferNode_Call {
+func (_c *MockProxy_TransferNode_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.TransferNodeRequest)) *MockProxy_TransferNode_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.TransferNodeRequest))
 	})
@@ -4886,17 +5165,17 @@ func (_c *MockProxy_TransferNode_Call) RunAndReturn(run func(context.Context, *m
 	return _c
 }
 
-// TransferReplica provides a mock function with given fields: ctx, req
-func (_m *MockProxy) TransferReplica(ctx context.Context, req *milvuspb.TransferReplicaRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// TransferReplica provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) TransferReplica(_a0 context.Context, _a1 *milvuspb.TransferReplicaRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.TransferReplicaRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.TransferReplicaRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -4904,7 +5183,7 @@ func (_m *MockProxy) TransferReplica(ctx context.Context, req *milvuspb.Transfer
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.TransferReplicaRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -4918,13 +5197,13 @@ type MockProxy_TransferReplica_Call struct {
 }
 
 // TransferReplica is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.TransferReplicaRequest
-func (_e *MockProxy_Expecter) TransferReplica(ctx interface{}, req interface{}) *MockProxy_TransferReplica_Call {
-	return &MockProxy_TransferReplica_Call{Call: _e.mock.On("TransferReplica", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.TransferReplicaRequest
+func (_e *MockProxy_Expecter) TransferReplica(_a0 interface{}, _a1 interface{}) *MockProxy_TransferReplica_Call {
+	return &MockProxy_TransferReplica_Call{Call: _e.mock.On("TransferReplica", _a0, _a1)}
 }
 
-func (_c *MockProxy_TransferReplica_Call) Run(run func(ctx context.Context, req *milvuspb.TransferReplicaRequest)) *MockProxy_TransferReplica_Call {
+func (_c *MockProxy_TransferReplica_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.TransferReplicaRequest)) *MockProxy_TransferReplica_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.TransferReplicaRequest))
 	})
@@ -4941,17 +5220,17 @@ func (_c *MockProxy_TransferReplica_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
-// UpdateCredential provides a mock function with given fields: ctx, req
-func (_m *MockProxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCredentialRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
+// UpdateCredential provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) UpdateCredential(_a0 context.Context, _a1 *milvuspb.UpdateCredentialRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.UpdateCredentialRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.UpdateCredentialRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -4959,7 +5238,7 @@ func (_m *MockProxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateC
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.UpdateCredentialRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -4973,13 +5252,13 @@ type MockProxy_UpdateCredential_Call struct {
 }
 
 // UpdateCredential is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.UpdateCredentialRequest
-func (_e *MockProxy_Expecter) UpdateCredential(ctx interface{}, req interface{}) *MockProxy_UpdateCredential_Call {
-	return &MockProxy_UpdateCredential_Call{Call: _e.mock.On("UpdateCredential", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.UpdateCredentialRequest
+func (_e *MockProxy_Expecter) UpdateCredential(_a0 interface{}, _a1 interface{}) *MockProxy_UpdateCredential_Call {
+	return &MockProxy_UpdateCredential_Call{Call: _e.mock.On("UpdateCredential", _a0, _a1)}
 }
 
-func (_c *MockProxy_UpdateCredential_Call) Run(run func(ctx context.Context, req *milvuspb.UpdateCredentialRequest)) *MockProxy_UpdateCredential_Call {
+func (_c *MockProxy_UpdateCredential_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.UpdateCredentialRequest)) *MockProxy_UpdateCredential_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.UpdateCredentialRequest))
 	})
@@ -4996,17 +5275,17 @@ func (_c *MockProxy_UpdateCredential_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
-// UpdateCredentialCache provides a mock function with given fields: ctx, request
-func (_m *MockProxy) UpdateCredentialCache(ctx context.Context, request *proxypb.UpdateCredCacheRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, request)
+// UpdateCredentialCache provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) UpdateCredentialCache(_a0 context.Context, _a1 *proxypb.UpdateCredCacheRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *proxypb.UpdateCredCacheRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *proxypb.UpdateCredCacheRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*commonpb.Status)
@@ -5014,7 +5293,7 @@ func (_m *MockProxy) UpdateCredentialCache(ctx context.Context, request *proxypb
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *proxypb.UpdateCredCacheRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -5028,13 +5307,13 @@ type MockProxy_UpdateCredentialCache_Call struct {
 }
 
 // UpdateCredentialCache is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *proxypb.UpdateCredCacheRequest
-func (_e *MockProxy_Expecter) UpdateCredentialCache(ctx interface{}, request interface{}) *MockProxy_UpdateCredentialCache_Call {
-	return &MockProxy_UpdateCredentialCache_Call{Call: _e.mock.On("UpdateCredentialCache", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *proxypb.UpdateCredCacheRequest
+func (_e *MockProxy_Expecter) UpdateCredentialCache(_a0 interface{}, _a1 interface{}) *MockProxy_UpdateCredentialCache_Call {
+	return &MockProxy_UpdateCredentialCache_Call{Call: _e.mock.On("UpdateCredentialCache", _a0, _a1)}
 }
 
-func (_c *MockProxy_UpdateCredentialCache_Call) Run(run func(ctx context.Context, request *proxypb.UpdateCredCacheRequest)) *MockProxy_UpdateCredentialCache_Call {
+func (_c *MockProxy_UpdateCredentialCache_Call) Run(run func(_a0 context.Context, _a1 *proxypb.UpdateCredCacheRequest)) *MockProxy_UpdateCredentialCache_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*proxypb.UpdateCredCacheRequest))
 	})
@@ -5084,17 +5363,17 @@ func (_c *MockProxy_UpdateStateCode_Call) RunAndReturn(run func(commonpb.StateCo
 	return _c
 }
 
-// Upsert provides a mock function with given fields: ctx, request
-func (_m *MockProxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) (*milvuspb.MutationResult, error) {
-	ret := _m.Called(ctx, request)
+// Upsert provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) Upsert(_a0 context.Context, _a1 *milvuspb.UpsertRequest) (*milvuspb.MutationResult, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.MutationResult
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.UpsertRequest) (*milvuspb.MutationResult, error)); ok {
-		return rf(ctx, request)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.UpsertRequest) *milvuspb.MutationResult); ok {
-		r0 = rf(ctx, request)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.MutationResult)
@@ -5102,7 +5381,7 @@ func (_m *MockProxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.UpsertRequest) error); ok {
-		r1 = rf(ctx, request)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -5116,13 +5395,13 @@ type MockProxy_Upsert_Call struct {
 }
 
 // Upsert is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *milvuspb.UpsertRequest
-func (_e *MockProxy_Expecter) Upsert(ctx interface{}, request interface{}) *MockProxy_Upsert_Call {
-	return &MockProxy_Upsert_Call{Call: _e.mock.On("Upsert", ctx, request)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.UpsertRequest
+func (_e *MockProxy_Expecter) Upsert(_a0 interface{}, _a1 interface{}) *MockProxy_Upsert_Call {
+	return &MockProxy_Upsert_Call{Call: _e.mock.On("Upsert", _a0, _a1)}
 }
 
-func (_c *MockProxy_Upsert_Call) Run(run func(ctx context.Context, request *milvuspb.UpsertRequest)) *MockProxy_Upsert_Call {
+func (_c *MockProxy_Upsert_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.UpsertRequest)) *MockProxy_Upsert_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.UpsertRequest))
 	})

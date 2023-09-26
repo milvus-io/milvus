@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/util/uniquegenerator"
 )
 
 var _ datapb.DataCoordClient = &GrpcDataCoordClient{}
@@ -44,7 +45,16 @@ func (m *GrpcDataCoordClient) CheckHealth(ctx context.Context, in *milvuspb.Chec
 }
 
 func (m *GrpcDataCoordClient) GetComponentStates(ctx context.Context, in *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error) {
-	return &milvuspb.ComponentStates{}, m.Err
+	return &milvuspb.ComponentStates{
+		State: &milvuspb.ComponentInfo{
+			NodeID:    int64(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
+			Role:      "MockDataCoord",
+			StateCode: commonpb.StateCode_Healthy,
+			ExtraInfo: nil,
+		},
+		SubcomponentStates: nil,
+		Status:             &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+	}, m.Err
 }
 
 func (m *GrpcDataCoordClient) GetTimeTickChannel(ctx context.Context, in *internalpb.GetTimeTickChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
@@ -218,4 +228,8 @@ func (m *GrpcDataCoordClient) GetIndexBuildProgress(ctx context.Context, req *in
 
 func (m *GrpcDataCoordClient) ReportDataNodeTtMsgs(ctx context.Context, in *datapb.ReportDataNodeTtMsgsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcDataCoordClient) Close() error {
+	return nil
 }

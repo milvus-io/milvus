@@ -55,19 +55,19 @@ func (_c *MockShardClientManager_Close_Call) RunAndReturn(run func()) *MockShard
 }
 
 // GetClient provides a mock function with given fields: ctx, nodeID
-func (_m *MockShardClientManager) GetClient(ctx context.Context, nodeID int64) (types.QueryNode, error) {
+func (_m *MockShardClientManager) GetClient(ctx context.Context, nodeID int64) (types.QueryNodeClient, error) {
 	ret := _m.Called(ctx, nodeID)
 
-	var r0 types.QueryNode
+	var r0 types.QueryNodeClient
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64) (types.QueryNode, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, int64) (types.QueryNodeClient, error)); ok {
 		return rf(ctx, nodeID)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, int64) types.QueryNode); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, int64) types.QueryNodeClient); ok {
 		r0 = rf(ctx, nodeID)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(types.QueryNode)
+			r0 = ret.Get(0).(types.QueryNodeClient)
 		}
 	}
 
@@ -99,12 +99,12 @@ func (_c *MockShardClientManager_GetClient_Call) Run(run func(ctx context.Contex
 	return _c
 }
 
-func (_c *MockShardClientManager_GetClient_Call) Return(_a0 types.QueryNode, _a1 error) *MockShardClientManager_GetClient_Call {
+func (_c *MockShardClientManager_GetClient_Call) Return(_a0 types.QueryNodeClient, _a1 error) *MockShardClientManager_GetClient_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockShardClientManager_GetClient_Call) RunAndReturn(run func(context.Context, int64) (types.QueryNode, error)) *MockShardClientManager_GetClient_Call {
+func (_c *MockShardClientManager_GetClient_Call) RunAndReturn(run func(context.Context, int64) (types.QueryNodeClient, error)) *MockShardClientManager_GetClient_Call {
 	_c.Call.Return(run)
 	return _c
 }

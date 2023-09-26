@@ -225,9 +225,9 @@ func (s *Server) Stop() error {
 	return nil
 }
 
-// SetClient sets the IndexNode's instance.
-func (s *Server) SetClient(indexNodeClient types.IndexNodeComponent) error {
-	s.indexnode = indexNodeClient
+// setServer sets the IndexNode's instance.
+func (s *Server) setServer(indexNode types.IndexNodeComponent) error {
+	s.indexnode = indexNode
 	return nil
 }
 
@@ -238,12 +238,12 @@ func (s *Server) SetEtcdClient(etcdCli *clientv3.Client) {
 
 // GetComponentStates gets the component states of IndexNode.
 func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
-	return s.indexnode.GetComponentStates(ctx)
+	return s.indexnode.GetComponentStates(ctx, req)
 }
 
 // GetStatisticsChannel gets the statistics channel of IndexNode.
 func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.indexnode.GetStatisticsChannel(ctx)
+	return s.indexnode.GetStatisticsChannel(ctx, req)
 }
 
 // CreateJob sends the create index request to IndexNode.

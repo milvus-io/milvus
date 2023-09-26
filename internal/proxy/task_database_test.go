@@ -15,8 +15,7 @@ import (
 func TestCreateDatabaseTask(t *testing.T) {
 	paramtable.Init()
 	rc := NewRootCoordMock()
-	rc.Start()
-	defer rc.Stop()
+	defer rc.Close()
 
 	ctx := context.Background()
 	task := &createDatabaseTask{
@@ -62,8 +61,7 @@ func TestCreateDatabaseTask(t *testing.T) {
 func TestDropDatabaseTask(t *testing.T) {
 	paramtable.Init()
 	rc := NewRootCoordMock()
-	rc.Start()
-	defer rc.Stop()
+	defer rc.Close()
 
 	ctx := context.Background()
 	task := &dropDatabaseTask{
@@ -116,8 +114,7 @@ func TestDropDatabaseTask(t *testing.T) {
 func TestListDatabaseTask(t *testing.T) {
 	paramtable.Init()
 	rc := NewRootCoordMock()
-	rc.Start()
-	defer rc.Stop()
+	defer rc.Close()
 
 	ctx := context.Background()
 	task := &listDatabaseTask{

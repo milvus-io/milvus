@@ -26,6 +26,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -159,7 +160,7 @@ type DataFactory struct {
 }
 
 type RootCoordFactory struct {
-	types.RootCoord
+	types.RootCoordClient
 	ID             UniqueID
 	collectionName string
 	collectionID   UniqueID
@@ -175,7 +176,7 @@ type RootCoordFactory struct {
 }
 
 type DataCoordFactory struct {
-	types.DataCoord
+	types.DataCoordClient
 
 	SaveBinlogPathError  bool
 	SaveBinlogPathStatus commonpb.ErrorCode
@@ -198,7 +199,7 @@ type DataCoordFactory struct {
 	ReportDataNodeTtMsgsNotSuccess bool
 }
 
-func (ds *DataCoordFactory) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
+func (ds *DataCoordFactory) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest, opts ...grpc.CallOption) (*datapb.AssignSegmentIDResponse, error) {
 	if ds.AddSegmentError {
 		return nil, errors.New("Error")
 	}
@@ -220,7 +221,7 @@ func (ds *DataCoordFactory) AssignSegmentID(ctx context.Context, req *datapb.Ass
 	return res, nil
 }
 
-func (ds *DataCoordFactory) CompleteCompaction(ctx context.Context, req *datapb.CompactionResult) (*commonpb.Status, error) {
+func (ds *DataCoordFactory) CompleteCompaction(ctx context.Context, req *datapb.CompactionResult, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	if ds.CompleteCompactionError {
 		return nil, errors.New("Error")
 	}
@@ -231,14 +232,14 @@ func (ds *DataCoordFactory) CompleteCompaction(ctx context.Context, req *datapb.
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
 
-func (ds *DataCoordFactory) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
+func (ds *DataCoordFactory) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	if ds.SaveBinlogPathError {
 		return nil, errors.New("Error")
 	}
 	return &commonpb.Status{ErrorCode: ds.SaveBinlogPathStatus}, nil
 }
 
-func (ds *DataCoordFactory) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error) {
+func (ds *DataCoordFactory) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest, opts ...grpc.CallOption) (*datapb.DropVirtualChannelResponse, error) {
 	if ds.DropVirtualChannelError {
 		return nil, errors.New("error")
 	}
@@ -249,15 +250,15 @@ func (ds *DataCoordFactory) DropVirtualChannel(ctx context.Context, req *datapb.
 	}, nil
 }
 
-func (ds *DataCoordFactory) UpdateSegmentStatistics(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest) (*commonpb.Status, error) {
+func (ds *DataCoordFactory) UpdateSegmentStatistics(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return merr.Status(nil), nil
 }
 
-func (ds *DataCoordFactory) UpdateChannelCheckpoint(ctx context.Context, req *datapb.UpdateChannelCheckpointRequest) (*commonpb.Status, error) {
+func (ds *DataCoordFactory) UpdateChannelCheckpoint(ctx context.Context, req *datapb.UpdateChannelCheckpointRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return merr.Status(nil), nil
 }
 
-func (ds *DataCoordFactory) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDataNodeTtMsgsRequest) (*commonpb.Status, error) {
+func (ds *DataCoordFactory) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDataNodeTtMsgsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	if ds.ReportDataNodeTtMsgsError {
 		return nil, errors.New("mock ReportDataNodeTtMsgs error")
 	}
@@ -269,29 +270,29 @@ func (ds *DataCoordFactory) ReportDataNodeTtMsgs(ctx context.Context, req *datap
 	return merr.Status(nil), nil
 }
 
-func (ds *DataCoordFactory) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSegmentRequest) (*commonpb.Status, error) {
+func (ds *DataCoordFactory) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSegmentRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return merr.Status(nil), nil
 }
 
-func (ds *DataCoordFactory) UnsetIsImportingState(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
+func (ds *DataCoordFactory) UnsetIsImportingState(ctx context.Context, req *datapb.UnsetIsImportingStateRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return merr.Status(nil), nil
 }
 
-func (ds *DataCoordFactory) MarkSegmentsDropped(context.Context, *datapb.MarkSegmentsDroppedRequest) (*commonpb.Status, error) {
+func (ds *DataCoordFactory) MarkSegmentsDropped(ctx context.Context, req *datapb.MarkSegmentsDroppedRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return merr.Status(nil), nil
 }
 
-func (ds *DataCoordFactory) BroadcastAlteredCollection(ctx context.Context, req *datapb.AlterCollectionRequest) (*commonpb.Status, error) {
+func (ds *DataCoordFactory) BroadcastAlteredCollection(ctx context.Context, req *datapb.AlterCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return merr.Status(nil), nil
 }
 
-func (ds *DataCoordFactory) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+func (ds *DataCoordFactory) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest, opts ...grpc.CallOption) (*milvuspb.CheckHealthResponse, error) {
 	return &milvuspb.CheckHealthResponse{
 		IsHealthy: true,
 	}, nil
 }
 
-func (ds *DataCoordFactory) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
+func (ds *DataCoordFactory) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest, opts ...grpc.CallOption) (*datapb.GetSegmentInfoResponse, error) {
 	if ds.GetSegmentInfosError {
 		return nil, errors.New("mock get segment info error")
 	}
@@ -945,7 +946,7 @@ func (m *RootCoordFactory) setCollectionName(name string) {
 	m.collectionName = name
 }
 
-func (m *RootCoordFactory) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
+func (m *RootCoordFactory) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest, opts ...grpc.CallOption) (*rootcoordpb.AllocIDResponse, error) {
 	resp := &rootcoordpb.AllocIDResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -973,7 +974,7 @@ func (m *RootCoordFactory) AllocID(ctx context.Context, in *rootcoordpb.AllocIDR
 	return resp, nil
 }
 
-func (m *RootCoordFactory) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
+func (m *RootCoordFactory) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestampRequest, opts ...grpc.CallOption) (*rootcoordpb.AllocTimestampResponse, error) {
 	resp := &rootcoordpb.AllocTimestampResponse{
 		Status:    &commonpb.Status{},
 		Timestamp: 1000,
@@ -988,7 +989,7 @@ func (m *RootCoordFactory) AllocTimestamp(ctx context.Context, in *rootcoordpb.A
 	return resp, nil
 }
 
-func (m *RootCoordFactory) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
+func (m *RootCoordFactory) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowCollectionsResponse, error) {
 	resp := &milvuspb.ShowCollectionsResponse{
 		Status:          &commonpb.Status{},
 		CollectionNames: []string{m.collectionName},
@@ -996,7 +997,7 @@ func (m *RootCoordFactory) ShowCollections(ctx context.Context, in *milvuspb.Sho
 	return resp, nil
 }
 
-func (m *RootCoordFactory) DescribeCollectionInternal(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+func (m *RootCoordFactory) DescribeCollectionInternal(ctx context.Context, in *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
 	f := MetaFactory{}
 	meta := f.GetCollectionMeta(m.collectionID, m.collectionName, m.pkType)
 	resp := &milvuspb.DescribeCollectionResponse{
@@ -1022,7 +1023,7 @@ func (m *RootCoordFactory) DescribeCollectionInternal(ctx context.Context, in *m
 	return resp, nil
 }
 
-func (m *RootCoordFactory) ShowPartitions(ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+func (m *RootCoordFactory) ShowPartitions(ctx context.Context, req *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error) {
 	if m.ShowPartitionsErr {
 		return &milvuspb.ShowPartitionsResponse{
 			Status: merr.Status(nil),
@@ -1045,7 +1046,7 @@ func (m *RootCoordFactory) ShowPartitions(ctx context.Context, req *milvuspb.Sho
 	}, nil
 }
 
-func (m *RootCoordFactory) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+func (m *RootCoordFactory) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error) {
 	return &milvuspb.ComponentStates{
 		State:              &milvuspb.ComponentInfo{},
 		SubcomponentStates: make([]*milvuspb.ComponentInfo, 0),
@@ -1053,7 +1054,7 @@ func (m *RootCoordFactory) GetComponentStates(ctx context.Context) (*milvuspb.Co
 	}, nil
 }
 
-func (m *RootCoordFactory) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult) (*commonpb.Status, error) {
+func (m *RootCoordFactory) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	if ctx != nil && ctx.Value(ctxKey{}) != nil {
 		if v := ctx.Value(ctxKey{}).(string); v == returnError {
 			return nil, fmt.Errorf("injected error")

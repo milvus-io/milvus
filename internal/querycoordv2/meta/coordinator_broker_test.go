@@ -34,7 +34,7 @@ import (
 
 func TestCoordinatorBroker_GetCollectionSchema(t *testing.T) {
 	t.Run("got error on DescribeCollection", func(t *testing.T) {
-		rootCoord := mocks.NewRootCoord(t)
+		rootCoord := mocks.NewMockRootCoordClient(t)
 		rootCoord.On("DescribeCollection",
 			mock.Anything,
 			mock.Anything,
@@ -46,7 +46,7 @@ func TestCoordinatorBroker_GetCollectionSchema(t *testing.T) {
 	})
 
 	t.Run("non-success code", func(t *testing.T) {
-		rootCoord := mocks.NewRootCoord(t)
+		rootCoord := mocks.NewMockRootCoordClient(t)
 		rootCoord.On("DescribeCollection",
 			mock.Anything,
 			mock.Anything,
@@ -60,7 +60,7 @@ func TestCoordinatorBroker_GetCollectionSchema(t *testing.T) {
 	})
 
 	t.Run("normal case", func(t *testing.T) {
-		rootCoord := mocks.NewRootCoord(t)
+		rootCoord := mocks.NewMockRootCoordClient(t)
 		rootCoord.On("DescribeCollection",
 			mock.Anything,
 			mock.Anything,
@@ -78,7 +78,7 @@ func TestCoordinatorBroker_GetCollectionSchema(t *testing.T) {
 
 func TestCoordinatorBroker_GetRecoveryInfo(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
-		dc := mocks.NewMockDataCoord(t)
+		dc := mocks.NewMockDataCoordClient(t)
 		dc.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return(&datapb.GetRecoveryInfoResponseV2{}, nil)
 
 		ctx := context.Background()
@@ -89,7 +89,7 @@ func TestCoordinatorBroker_GetRecoveryInfo(t *testing.T) {
 	})
 
 	t.Run("get error", func(t *testing.T) {
-		dc := mocks.NewMockDataCoord(t)
+		dc := mocks.NewMockDataCoordClient(t)
 		fakeErr := errors.New("fake error")
 		dc.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return(nil, fakeErr)
 
@@ -101,7 +101,7 @@ func TestCoordinatorBroker_GetRecoveryInfo(t *testing.T) {
 	})
 
 	t.Run("return non-success code", func(t *testing.T) {
-		dc := mocks.NewMockDataCoord(t)
+		dc := mocks.NewMockDataCoordClient(t)
 		dc.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return(&datapb.GetRecoveryInfoResponseV2{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -121,7 +121,7 @@ func TestCoordinatorBroker_GetPartitions(t *testing.T) {
 	partitions := []int64{10, 11, 12}
 
 	t.Run("normal case", func(t *testing.T) {
-		rc := mocks.NewRootCoord(t)
+		rc := mocks.NewMockRootCoordClient(t)
 		rc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
 			Status:       &commonpb.Status{},
 			PartitionIDs: partitions,
@@ -136,7 +136,7 @@ func TestCoordinatorBroker_GetPartitions(t *testing.T) {
 	})
 
 	t.Run("collection not exist", func(t *testing.T) {
-		rc := mocks.NewRootCoord(t)
+		rc := mocks.NewMockRootCoordClient(t)
 		rc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
 			Status: merr.Status(merr.WrapErrCollectionNotFound("mock")),
 		}, nil)

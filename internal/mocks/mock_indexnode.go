@@ -181,25 +181,25 @@ func (_c *MockIndexNode_GetAddress_Call) RunAndReturn(run func() string) *MockIn
 	return _c
 }
 
-// GetComponentStates provides a mock function with given fields: ctx
-func (_m *MockIndexNode) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
-	ret := _m.Called(ctx)
+// GetComponentStates provides a mock function with given fields: _a0, _a1
+func (_m *MockIndexNode) GetComponentStates(_a0 context.Context, _a1 *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.ComponentStates
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) (*milvuspb.ComponentStates, error)); ok {
-		return rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error)); ok {
+		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context) *milvuspb.ComponentStates); ok {
-		r0 = rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetComponentStatesRequest) *milvuspb.ComponentStates); ok {
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.ComponentStates)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = rf(ctx)
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetComponentStatesRequest) error); ok {
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -213,14 +213,15 @@ type MockIndexNode_GetComponentStates_Call struct {
 }
 
 // GetComponentStates is a helper method to define mock.On call
-//   - ctx context.Context
-func (_e *MockIndexNode_Expecter) GetComponentStates(ctx interface{}) *MockIndexNode_GetComponentStates_Call {
-	return &MockIndexNode_GetComponentStates_Call{Call: _e.mock.On("GetComponentStates", ctx)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetComponentStatesRequest
+func (_e *MockIndexNode_Expecter) GetComponentStates(_a0 interface{}, _a1 interface{}) *MockIndexNode_GetComponentStates_Call {
+	return &MockIndexNode_GetComponentStates_Call{Call: _e.mock.On("GetComponentStates", _a0, _a1)}
 }
 
-func (_c *MockIndexNode_GetComponentStates_Call) Run(run func(ctx context.Context)) *MockIndexNode_GetComponentStates_Call {
+func (_c *MockIndexNode_GetComponentStates_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetComponentStatesRequest)) *MockIndexNode_GetComponentStates_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
+		run(args[0].(context.Context), args[1].(*milvuspb.GetComponentStatesRequest))
 	})
 	return _c
 }
@@ -230,7 +231,7 @@ func (_c *MockIndexNode_GetComponentStates_Call) Return(_a0 *milvuspb.ComponentS
 	return _c
 }
 
-func (_c *MockIndexNode_GetComponentStates_Call) RunAndReturn(run func(context.Context) (*milvuspb.ComponentStates, error)) *MockIndexNode_GetComponentStates_Call {
+func (_c *MockIndexNode_GetComponentStates_Call) RunAndReturn(run func(context.Context, *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error)) *MockIndexNode_GetComponentStates_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -290,17 +291,17 @@ func (_c *MockIndexNode_GetJobStats_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
-// GetMetrics provides a mock function with given fields: ctx, req
-func (_m *MockIndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	ret := _m.Called(ctx, req)
+// GetMetrics provides a mock function with given fields: _a0, _a1
+func (_m *MockIndexNode) GetMetrics(_a0 context.Context, _a1 *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.GetMetricsResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetMetricsRequest) *milvuspb.GetMetricsResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.GetMetricsResponse)
@@ -308,7 +309,7 @@ func (_m *MockIndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetric
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetMetricsRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -322,13 +323,13 @@ type MockIndexNode_GetMetrics_Call struct {
 }
 
 // GetMetrics is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.GetMetricsRequest
-func (_e *MockIndexNode_Expecter) GetMetrics(ctx interface{}, req interface{}) *MockIndexNode_GetMetrics_Call {
-	return &MockIndexNode_GetMetrics_Call{Call: _e.mock.On("GetMetrics", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetMetricsRequest
+func (_e *MockIndexNode_Expecter) GetMetrics(_a0 interface{}, _a1 interface{}) *MockIndexNode_GetMetrics_Call {
+	return &MockIndexNode_GetMetrics_Call{Call: _e.mock.On("GetMetrics", _a0, _a1)}
 }
 
-func (_c *MockIndexNode_GetMetrics_Call) Run(run func(ctx context.Context, req *milvuspb.GetMetricsRequest)) *MockIndexNode_GetMetrics_Call {
+func (_c *MockIndexNode_GetMetrics_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetMetricsRequest)) *MockIndexNode_GetMetrics_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.GetMetricsRequest))
 	})
@@ -345,25 +346,25 @@ func (_c *MockIndexNode_GetMetrics_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
-// GetStatisticsChannel provides a mock function with given fields: ctx
-func (_m *MockIndexNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	ret := _m.Called(ctx)
+// GetStatisticsChannel provides a mock function with given fields: _a0, _a1
+func (_m *MockIndexNode) GetStatisticsChannel(_a0 context.Context, _a1 *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.StringResponse
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) (*milvuspb.StringResponse, error)); ok {
-		return rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error)); ok {
+		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context) *milvuspb.StringResponse); ok {
-		r0 = rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetStatisticsChannelRequest) *milvuspb.StringResponse); ok {
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.StringResponse)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = rf(ctx)
+	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.GetStatisticsChannelRequest) error); ok {
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -377,14 +378,15 @@ type MockIndexNode_GetStatisticsChannel_Call struct {
 }
 
 // GetStatisticsChannel is a helper method to define mock.On call
-//   - ctx context.Context
-func (_e *MockIndexNode_Expecter) GetStatisticsChannel(ctx interface{}) *MockIndexNode_GetStatisticsChannel_Call {
-	return &MockIndexNode_GetStatisticsChannel_Call{Call: _e.mock.On("GetStatisticsChannel", ctx)}
+//   - _a0 context.Context
+//   - _a1 *internalpb.GetStatisticsChannelRequest
+func (_e *MockIndexNode_Expecter) GetStatisticsChannel(_a0 interface{}, _a1 interface{}) *MockIndexNode_GetStatisticsChannel_Call {
+	return &MockIndexNode_GetStatisticsChannel_Call{Call: _e.mock.On("GetStatisticsChannel", _a0, _a1)}
 }
 
-func (_c *MockIndexNode_GetStatisticsChannel_Call) Run(run func(ctx context.Context)) *MockIndexNode_GetStatisticsChannel_Call {
+func (_c *MockIndexNode_GetStatisticsChannel_Call) Run(run func(_a0 context.Context, _a1 *internalpb.GetStatisticsChannelRequest)) *MockIndexNode_GetStatisticsChannel_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
+		run(args[0].(context.Context), args[1].(*internalpb.GetStatisticsChannelRequest))
 	})
 	return _c
 }
@@ -394,7 +396,7 @@ func (_c *MockIndexNode_GetStatisticsChannel_Call) Return(_a0 *milvuspb.StringRe
 	return _c
 }
 
-func (_c *MockIndexNode_GetStatisticsChannel_Call) RunAndReturn(run func(context.Context) (*milvuspb.StringResponse, error)) *MockIndexNode_GetStatisticsChannel_Call {
+func (_c *MockIndexNode_GetStatisticsChannel_Call) RunAndReturn(run func(context.Context, *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error)) *MockIndexNode_GetStatisticsChannel_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -602,17 +604,17 @@ func (_c *MockIndexNode_SetEtcdClient_Call) RunAndReturn(run func(*clientv3.Clie
 	return _c
 }
 
-// ShowConfigurations provides a mock function with given fields: ctx, req
-func (_m *MockIndexNode) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
-	ret := _m.Called(ctx, req)
+// ShowConfigurations provides a mock function with given fields: _a0, _a1
+func (_m *MockIndexNode) ShowConfigurations(_a0 context.Context, _a1 *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *internalpb.ShowConfigurationsResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ShowConfigurationsRequest) *internalpb.ShowConfigurationsResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*internalpb.ShowConfigurationsResponse)
@@ -620,7 +622,7 @@ func (_m *MockIndexNode) ShowConfigurations(ctx context.Context, req *internalpb
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.ShowConfigurationsRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -634,13 +636,13 @@ type MockIndexNode_ShowConfigurations_Call struct {
 }
 
 // ShowConfigurations is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *internalpb.ShowConfigurationsRequest
-func (_e *MockIndexNode_Expecter) ShowConfigurations(ctx interface{}, req interface{}) *MockIndexNode_ShowConfigurations_Call {
-	return &MockIndexNode_ShowConfigurations_Call{Call: _e.mock.On("ShowConfigurations", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *internalpb.ShowConfigurationsRequest
+func (_e *MockIndexNode_Expecter) ShowConfigurations(_a0 interface{}, _a1 interface{}) *MockIndexNode_ShowConfigurations_Call {
+	return &MockIndexNode_ShowConfigurations_Call{Call: _e.mock.On("ShowConfigurations", _a0, _a1)}
 }
 
-func (_c *MockIndexNode_ShowConfigurations_Call) Run(run func(ctx context.Context, req *internalpb.ShowConfigurationsRequest)) *MockIndexNode_ShowConfigurations_Call {
+func (_c *MockIndexNode_ShowConfigurations_Call) Run(run func(_a0 context.Context, _a1 *internalpb.ShowConfigurationsRequest)) *MockIndexNode_ShowConfigurations_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*internalpb.ShowConfigurationsRequest))
 	})

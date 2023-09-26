@@ -149,7 +149,7 @@ type addSegmentReq struct {
 
 var _ Channel = &ChannelMeta{}
 
-func newChannel(channelName string, collID UniqueID, schema *schemapb.CollectionSchema, rc types.RootCoord, cm storage.ChunkManager) *ChannelMeta {
+func newChannel(channelName string, collID UniqueID, schema *schemapb.CollectionSchema, rc types.RootCoordClient, cm storage.ChunkManager) *ChannelMeta {
 	metaService := newMetaService(rc, collID)
 
 	channel := ChannelMeta{

@@ -7,6 +7,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -301,7 +302,7 @@ func TestDeleteTask_Execute(t *testing.T) {
 		defer cancel()
 
 		mockMgr := NewMockChannelsMgr(t)
-		rc := mocks.NewRootCoord(t)
+		rc := mocks.NewMockRootCoordClient(t)
 		allocator, err := allocator.NewIDAllocator(ctx, rc, paramtable.GetNodeID())
 		assert.NoError(t, err)
 		allocator.Close()
@@ -331,7 +332,7 @@ func TestDeleteTask_Execute(t *testing.T) {
 		defer cancel()
 
 		mockMgr := NewMockChannelsMgr(t)
-		rc := mocks.NewRootCoord(t)
+		rc := mocks.NewMockRootCoordClient(t)
 		rc.EXPECT().AllocID(mock.Anything, mock.Anything).Return(
 			&rootcoordpb.AllocIDResponse{
 				Status: merr.Status(nil),
@@ -364,7 +365,7 @@ func TestDeleteTask_Execute(t *testing.T) {
 
 	t.Run("complex delete query rpc failed", func(t *testing.T) {
 		mockMgr := NewMockChannelsMgr(t)
-		qn := mocks.NewMockQueryNode(t)
+		qn := mocks.NewMockQueryNodeClient(t)
 		lb := NewMockLBPolicy(t)
 
 		dt := deleteTask{
@@ -393,7 +394,7 @@ func TestDeleteTask_Execute(t *testing.T) {
 			return workload.exec(ctx, 1, qn)
 		})
 
-		qn.EXPECT().QueryStream(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock error"))
+		qn.EXPECT().QueryStream(mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
 		assert.Error(t, dt.Execute(context.Background()))
 		assert.Equal(t, int64(0), dt.result.DeleteCnt)
 	})
@@ -403,8 +404,8 @@ func TestDeleteTask_Execute(t *testing.T) {
 		defer cancel()
 
 		mockMgr := NewMockChannelsMgr(t)
-		rc := mocks.NewRootCoord(t)
-		qn := mocks.NewMockQueryNode(t)
+		rc := mocks.NewMockRootCoordClient(t)
+		qn := mocks.NewMockQueryNodeClient(t)
 		lb := NewMockLBPolicy(t)
 		rc.EXPECT().AllocID(mock.Anything, mock.Anything).Return(
 			&rootcoordpb.AllocIDResponse{
@@ -443,11 +444,10 @@ func TestDeleteTask_Execute(t *testing.T) {
 			return workload.exec(ctx, 1, qn)
 		})
 
-		qn.EXPECT().QueryStream(mock.Anything, mock.Anything, mock.Anything).Run(
-			func(ctx context.Context, req *querypb.QueryRequest, streamer streamrpc.QueryStreamer) {
+		qn.EXPECT().QueryStream(mock.Anything, mock.Anything).Call.Return(
+			func(ctx context.Context, in *querypb.QueryRequest, opts ...grpc.CallOption) querypb.QueryNode_QueryStreamClient {
 				client := streamrpc.NewLocalQueryClient(ctx)
 				server := client.CreateServer()
-				streamer.SetClient(client)
 
 				server.Send(&internalpb.RetrieveResults{
 					Status: merr.Status(nil),
@@ -463,7 +463,8 @@ func TestDeleteTask_Execute(t *testing.T) {
 				server.Send(&internalpb.RetrieveResults{
 					Status: merr.Status(errors.New("mock error")),
 				})
-			}).Return(nil)
+				return client
+			}, nil)
 		stream.EXPECT().Produce(mock.Anything).Return(nil)
 
 		assert.Error(t, dt.Execute(context.Background()))
@@ -476,8 +477,8 @@ func TestDeleteTask_Execute(t *testing.T) {
 		defer cancel()
 
 		mockMgr := NewMockChannelsMgr(t)
-		rc := mocks.NewRootCoord(t)
-		qn := mocks.NewMockQueryNode(t)
+		rc := mocks.NewMockRootCoordClient(t)
+		qn := mocks.NewMockQueryNodeClient(t)
 		lb := NewMockLBPolicy(t)
 		rc.EXPECT().AllocID(mock.Anything, mock.Anything).Return(
 			&rootcoordpb.AllocIDResponse{
@@ -516,11 +517,10 @@ func TestDeleteTask_Execute(t *testing.T) {
 			return workload.exec(ctx, 1, qn)
 		})
 
-		qn.EXPECT().QueryStream(mock.Anything, mock.Anything, mock.Anything).Run(
-			func(ctx context.Context, req *querypb.QueryRequest, streamer streamrpc.QueryStreamer) {
+		qn.EXPECT().QueryStream(mock.Anything, mock.Anything).Call.Return(
+			func(ctx context.Context, in *querypb.QueryRequest, opts ...grpc.CallOption) querypb.QueryNode_QueryStreamClient {
 				client := streamrpc.NewLocalQueryClient(ctx)
 				server := client.CreateServer()
-				streamer.SetClient(client)
 
 				server.Send(&internalpb.RetrieveResults{
 					Status: merr.Status(nil),
@@ -533,7 +533,8 @@ func TestDeleteTask_Execute(t *testing.T) {
 					},
 				})
 				server.FinishSend(nil)
-			}).Return(nil)
+				return client
+			}, nil)
 		stream.EXPECT().Produce(mock.Anything).Return(errors.New("mock error"))
 
 		assert.Error(t, dt.Execute(context.Background()))
@@ -545,8 +546,8 @@ func TestDeleteTask_Execute(t *testing.T) {
 		defer cancel()
 
 		mockMgr := NewMockChannelsMgr(t)
-		rc := mocks.NewRootCoord(t)
-		qn := mocks.NewMockQueryNode(t)
+		rc := mocks.NewMockRootCoordClient(t)
+		qn := mocks.NewMockQueryNodeClient(t)
 		lb := NewMockLBPolicy(t)
 		rc.EXPECT().AllocID(mock.Anything, mock.Anything).Return(
 			&rootcoordpb.AllocIDResponse{
@@ -585,11 +586,10 @@ func TestDeleteTask_Execute(t *testing.T) {
 			return workload.exec(ctx, 1, qn)
 		})
 
-		qn.EXPECT().QueryStream(mock.Anything, mock.Anything, mock.Anything).Run(
-			func(ctx context.Context, req *querypb.QueryRequest, streamer streamrpc.QueryStreamer) {
+		qn.EXPECT().QueryStream(mock.Anything, mock.Anything).Call.Return(
+			func(ctx context.Context, in *querypb.QueryRequest, opts ...grpc.CallOption) querypb.QueryNode_QueryStreamClient {
 				client := streamrpc.NewLocalQueryClient(ctx)
 				server := client.CreateServer()
-				streamer.SetClient(client)
 
 				server.Send(&internalpb.RetrieveResults{
 					Status: merr.Status(nil),
@@ -602,7 +602,8 @@ func TestDeleteTask_Execute(t *testing.T) {
 					},
 				})
 				server.FinishSend(nil)
-			}).Return(nil)
+				return client
+			}, nil)
 		stream.EXPECT().Produce(mock.Anything).Return(nil)
 
 		assert.NoError(t, dt.Execute(context.Background()))

@@ -95,8 +95,8 @@ type DataNode struct {
 
 	etcdCli   *clientv3.Client
 	address   string
-	rootCoord types.RootCoord
-	dataCoord types.DataCoord
+	rootCoord types.RootCoordClient
+	dataCoord types.DataCoordClient
 
 	// call once
 	initOnce     sync.Once
@@ -155,8 +155,8 @@ func (node *DataNode) SetEtcdClient(etcdCli *clientv3.Client) {
 	node.etcdCli = etcdCli
 }
 
-// SetRootCoord sets RootCoord's grpc client, error is returned if repeatedly set.
-func (node *DataNode) SetRootCoord(rc types.RootCoord) error {
+// SetRootCoordClient sets RootCoord's grpc client, error is returned if repeatedly set.
+func (node *DataNode) SetRootCoordClient(rc types.RootCoordClient) error {
 	switch {
 	case rc == nil, node.rootCoord != nil:
 		return errors.New("nil parameter or repeatedly set")
@@ -166,8 +166,8 @@ func (node *DataNode) SetRootCoord(rc types.RootCoord) error {
 	}
 }
 
-// SetDataCoord sets data service's grpc client, error is returned if repeatedly set.
-func (node *DataNode) SetDataCoord(ds types.DataCoord) error {
+// SetDataCoordClient sets data service's grpc client, error is returned if repeatedly set.
+func (node *DataNode) SetDataCoordClient(ds types.DataCoordClient) error {
 	switch {
 	case ds == nil, node.dataCoord != nil:
 		return errors.New("nil parameter or repeatedly set")

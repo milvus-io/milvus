@@ -166,14 +166,14 @@ func (suite *ServiceSuite) TearDownTest() {
 func (suite *ServiceSuite) TestGetComponentStatesNormal() {
 	ctx := context.Background()
 	suite.node.session.UpdateRegistered(true)
-	rsp, err := suite.node.GetComponentStates(ctx)
+	rsp, err := suite.node.GetComponentStates(ctx, nil)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, rsp.GetStatus().GetErrorCode())
 	suite.Equal(commonpb.StateCode_Healthy, rsp.State.StateCode)
 
 	// after update
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
-	rsp, err = suite.node.GetComponentStates(ctx)
+	rsp, err = suite.node.GetComponentStates(ctx, nil)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, rsp.GetStatus().GetErrorCode())
 	suite.Equal(commonpb.StateCode_Abnormal, rsp.State.StateCode)
@@ -181,14 +181,14 @@ func (suite *ServiceSuite) TestGetComponentStatesNormal() {
 
 func (suite *ServiceSuite) TestGetTimeTiclChannel_Normal() {
 	ctx := context.Background()
-	rsp, err := suite.node.GetTimeTickChannel(ctx)
+	rsp, err := suite.node.GetTimeTickChannel(ctx, nil)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, rsp.GetStatus().GetErrorCode())
 }
 
 func (suite *ServiceSuite) TestGetStatisChannel_Normal() {
 	ctx := context.Background()
-	rsp, err := suite.node.GetStatisticsChannel(ctx)
+	rsp, err := suite.node.GetStatisticsChannel(ctx, nil)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, rsp.GetStatus().GetErrorCode())
 }
@@ -1402,11 +1402,8 @@ func (suite *ServiceSuite) TestQueryStream_Normal() {
 	client := streamrpc.NewLocalQueryClient(ctx)
 	server := client.CreateServer()
 
-	streamer := streamrpc.NewGrpcQueryStreamer()
-	streamer.SetServer(streamrpc.NewConcurrentQueryStreamServer(server))
-
 	go func() {
-		err := suite.node.QueryStream(ctx, req, streamer)
+		err := suite.node.QueryStream(req, server)
 		suite.NoError(err)
 		server.FinishSend(err)
 	}()
@@ -1439,11 +1436,9 @@ func (suite *ServiceSuite) TestQueryStream_Failed() {
 
 	queryFunc := func(wg *sync.WaitGroup, req *querypb.QueryRequest, client *streamrpc.LocalQueryClient) {
 		server := client.CreateServer()
-		streamer := streamrpc.NewGrpcQueryStreamer()
-		streamer.SetServer(streamrpc.NewConcurrentQueryStreamServer(server))
 
 		defer wg.Done()
-		err := suite.node.QueryStream(ctx, req, streamer)
+		err := suite.node.QueryStream(req, server)
 		suite.NoError(err)
 		server.FinishSend(err)
 	}
@@ -1564,11 +1559,8 @@ func (suite *ServiceSuite) TestQueryStreamSegments_Normal() {
 	client := streamrpc.NewLocalQueryClient(ctx)
 	server := client.CreateServer()
 
-	streamer := streamrpc.NewGrpcQueryStreamer()
-	streamer.SetServer(streamrpc.NewConcurrentQueryStreamServer(server))
-
 	go func() {
-		err := suite.node.QueryStreamSegments(ctx, req, streamer)
+		err := suite.node.QueryStreamSegments(req, server)
 		suite.NoError(err)
 		server.FinishSend(err)
 	}()

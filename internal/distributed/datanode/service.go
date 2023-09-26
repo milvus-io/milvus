@@ -68,8 +68,8 @@ type Server struct {
 	rootCoord types.RootCoord
 	dataCoord types.DataCoord
 
-	newRootCoordClient func(string, *clientv3.Client) (types.RootCoord, error)
-	newDataCoordClient func(string, *clientv3.Client) (types.DataCoord, error)
+	newRootCoordClient func(string, *clientv3.Client) (types.RootCoordClient, error)
+	newDataCoordClient func(string, *clientv3.Client) (types.DataCoordClient, error)
 }
 
 // NewServer new DataNode grpc server
@@ -80,10 +80,10 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 		cancel:      cancel,
 		factory:     factory,
 		grpcErrChan: make(chan error),
-		newRootCoordClient: func(etcdMetaRoot string, client *clientv3.Client) (types.RootCoord, error) {
+		newRootCoordClient: func(etcdMetaRoot string, client *clientv3.Client) (types.RootCoordClient, error) {
 			return rcc.NewClient(ctx1, etcdMetaRoot, client)
 		},
-		newDataCoordClient: func(etcdMetaRoot string, client *clientv3.Client) (types.DataCoord, error) {
+		newDataCoordClient: func(etcdMetaRoot string, client *clientv3.Client) (types.DataCoordClient, error) {
 			return dcc.NewClient(ctx1, etcdMetaRoot, client)
 		},
 	}
@@ -173,12 +173,12 @@ func (s *Server) SetEtcdClient(client *clientv3.Client) {
 	s.datanode.SetEtcdClient(client)
 }
 
-func (s *Server) SetRootCoordInterface(ms types.RootCoord) error {
-	return s.datanode.SetRootCoord(ms)
+func (s *Server) SetRootCoordInterface(ms types.RootCoordClient) error {
+	return s.datanode.SetRootCoordClient(ms)
 }
 
-func (s *Server) SetDataCoordInterface(ds types.DataCoord) error {
-	return s.datanode.SetDataCoord(ds)
+func (s *Server) SetDataCoordInterface(ds types.DataCoordClient) error {
+	return s.datanode.SetDataCoordClient(ds)
 }
 
 // Run initializes and starts Datanode's grpc service.
@@ -271,14 +271,7 @@ func (s *Server) init() error {
 			log.Error("failed to create new RootCoord client", zap.Error(err))
 			panic(err)
 		}
-		if err = rootCoordClient.Init(); err != nil {
-			log.Error("failed to init RootCoord client", zap.Error(err))
-			panic(err)
-		}
-		if err = rootCoordClient.Start(); err != nil {
-			log.Error("failed to start RootCoord client", zap.Error(err))
-			panic(err)
-		}
+
 		if err = componentutil.WaitForComponentHealthy(ctx, rootCoordClient, "RootCoord", 1000000, time.Millisecond*200); err != nil {
 			log.Error("failed to wait for RootCoord client to be ready", zap.Error(err))
 			panic(err)
@@ -297,14 +290,7 @@ func (s *Server) init() error {
 			log.Error("failed to create new DataCoord client", zap.Error(err))
 			panic(err)
 		}
-		if err = dataCoordClient.Init(); err != nil {
-			log.Error("failed to init DataCoord client", zap.Error(err))
-			panic(err)
-		}
-		if err = dataCoordClient.Start(); err != nil {
-			log.Error("failed to start DataCoord client", zap.Error(err))
-			panic(err)
-		}
+
 		if err = componentutil.WaitForComponentInitOrHealthy(ctx, dataCoordClient, "DataCoord", 1000000, time.Millisecond*200); err != nil {
 			log.Error("failed to wait for DataCoord client to be ready", zap.Error(err))
 			panic(err)
@@ -340,12 +326,12 @@ func (s *Server) start() error {
 
 // GetComponentStates gets the component states of Datanode
 func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
-	return s.datanode.GetComponentStates(ctx)
+	return s.datanode.GetComponentStates(ctx, req)
 }
 
 // GetStatisticsChannel gets the statistics channel of Datanode.
 func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.datanode.GetStatisticsChannel(ctx)
+	return s.datanode.GetStatisticsChannel(ctx, req)
 }
 
 // Deprecated

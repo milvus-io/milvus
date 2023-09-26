@@ -54,8 +54,8 @@ type dataSyncService struct {
 	msFactory    msgstream.Factory
 	collectionID UniqueID // collection id of vchan for which this data sync service serves
 	vchannelName string
-	dataCoord    types.DataCoord // DataCoord instance to interact with
-	clearSignal  chan<- string   // signal channel to notify flowgraph close for collection/partition drop msg consumed
+	dataCoord    types.DataCoordClient // DataCoord instance to interact with
+	clearSignal  chan<- string         // signal channel to notify flowgraph close for collection/partition drop msg consumed
 
 	delBufferManager *DeltaBufferManager
 	flushingSegCache *Cache       // a guarding cache stores currently flushing segment ids
@@ -79,7 +79,7 @@ func newDataSyncService(
 	factory msgstream.Factory,
 	vchan *datapb.VchannelInfo,
 	clearSignal chan<- string,
-	dataCoord types.DataCoord,
+	dataCoord types.DataCoordClient,
 	flushingSegCache *Cache,
 	chunkManager storage.ChunkManager,
 	compactor *compactionExecutor,

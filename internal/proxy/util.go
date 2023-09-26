@@ -1044,7 +1044,7 @@ func validateIndexName(indexName string) error {
 	return nil
 }
 
-func isCollectionLoaded(ctx context.Context, qc types.QueryCoord, collID int64) (bool, error) {
+func isCollectionLoaded(ctx context.Context, qc types.QueryCoordClient, collID int64) (bool, error) {
 	// get all loading collections
 	resp, err := qc.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
 		CollectionIDs: nil,
@@ -1064,7 +1064,7 @@ func isCollectionLoaded(ctx context.Context, qc types.QueryCoord, collID int64) 
 	return false, nil
 }
 
-func isPartitionLoaded(ctx context.Context, qc types.QueryCoord, collID int64, partIDs []int64) (bool, error) {
+func isPartitionLoaded(ctx context.Context, qc types.QueryCoordClient, collID int64, partIDs []int64) (bool, error) {
 	// get all loading collections
 	resp, err := qc.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
 		CollectionID: collID,
@@ -1228,7 +1228,7 @@ func getPartitionKeyFieldData(fieldSchema *schemapb.FieldSchema, insertMsg *msgs
 
 func getCollectionProgress(
 	ctx context.Context,
-	queryCoord types.QueryCoord,
+	queryCoord types.QueryCoordClient,
 	msgBase *commonpb.MsgBase,
 	collectionID int64,
 ) (loadProgress int64, refreshProgress int64, err error) {
@@ -1275,7 +1275,7 @@ func getCollectionProgress(
 
 func getPartitionProgress(
 	ctx context.Context,
-	queryCoord types.QueryCoord,
+	queryCoord types.QueryCoordClient,
 	msgBase *commonpb.MsgBase,
 	partitionNames []string,
 	collectionName string,

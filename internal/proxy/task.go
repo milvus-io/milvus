@@ -118,7 +118,7 @@ type createCollectionTask struct {
 	Condition
 	*milvuspb.CreateCollectionRequest
 	ctx       context.Context
-	rootCoord types.RootCoord
+	rootCoord types.RootCoordClient
 	result    *commonpb.Status
 	schema    *schemapb.CollectionSchema
 }
@@ -315,7 +315,7 @@ type dropCollectionTask struct {
 	Condition
 	*milvuspb.DropCollectionRequest
 	ctx       context.Context
-	rootCoord types.RootCoord
+	rootCoord types.RootCoordClient
 	result    *commonpb.Status
 	chMgr     channelsMgr
 	chTicker  channelsTimeTicker
@@ -382,7 +382,7 @@ type hasCollectionTask struct {
 	Condition
 	*milvuspb.HasCollectionRequest
 	ctx       context.Context
-	rootCoord types.RootCoord
+	rootCoord types.RootCoordClient
 	result    *milvuspb.BoolResponse
 }
 
@@ -456,7 +456,7 @@ type describeCollectionTask struct {
 	Condition
 	*milvuspb.DescribeCollectionRequest
 	ctx       context.Context
-	rootCoord types.RootCoord
+	rootCoord types.RootCoordClient
 	result    *milvuspb.DescribeCollectionResponse
 }
 
@@ -587,8 +587,8 @@ type showCollectionsTask struct {
 	Condition
 	*milvuspb.ShowCollectionsRequest
 	ctx        context.Context
-	rootCoord  types.RootCoord
-	queryCoord types.QueryCoord
+	rootCoord  types.RootCoordClient
+	queryCoord types.QueryCoordClient
 	result     *milvuspb.ShowCollectionsResponse
 }
 
@@ -746,7 +746,7 @@ type alterCollectionTask struct {
 	Condition
 	*milvuspb.AlterCollectionRequest
 	ctx       context.Context
-	rootCoord types.RootCoord
+	rootCoord types.RootCoordClient
 	result    *commonpb.Status
 }
 
@@ -808,7 +808,7 @@ type createPartitionTask struct {
 	Condition
 	*milvuspb.CreatePartitionRequest
 	ctx       context.Context
-	rootCoord types.RootCoord
+	rootCoord types.RootCoordClient
 	result    *commonpb.Status
 }
 
@@ -893,8 +893,8 @@ type dropPartitionTask struct {
 	Condition
 	*milvuspb.DropPartitionRequest
 	ctx        context.Context
-	rootCoord  types.RootCoord
-	queryCoord types.QueryCoord
+	rootCoord  types.RootCoordClient
+	queryCoord types.QueryCoordClient
 	result     *commonpb.Status
 }
 
@@ -1005,7 +1005,7 @@ type hasPartitionTask struct {
 	Condition
 	*milvuspb.HasPartitionRequest
 	ctx       context.Context
-	rootCoord types.RootCoord
+	rootCoord types.RootCoordClient
 	result    *milvuspb.BoolResponse
 }
 
@@ -1081,8 +1081,8 @@ type showPartitionsTask struct {
 	Condition
 	*milvuspb.ShowPartitionsRequest
 	ctx        context.Context
-	rootCoord  types.RootCoord
-	queryCoord types.QueryCoord
+	rootCoord  types.RootCoordClient
+	queryCoord types.QueryCoordClient
 	result     *milvuspb.ShowPartitionsResponse
 }
 
@@ -1243,7 +1243,7 @@ type flushTask struct {
 	Condition
 	*milvuspb.FlushRequest
 	ctx       context.Context
-	dataCoord types.DataCoord
+	dataCoord types.DataCoordClient
 	result    *milvuspb.FlushResponse
 }
 
@@ -1339,8 +1339,8 @@ type loadCollectionTask struct {
 	Condition
 	*milvuspb.LoadCollectionRequest
 	ctx        context.Context
-	queryCoord types.QueryCoord
-	datacoord  types.DataCoord
+	queryCoord types.QueryCoordClient
+	datacoord  types.DataCoordClient
 	result     *commonpb.Status
 
 	collectionID UniqueID
@@ -1484,7 +1484,7 @@ type releaseCollectionTask struct {
 	Condition
 	*milvuspb.ReleaseCollectionRequest
 	ctx        context.Context
-	queryCoord types.QueryCoord
+	queryCoord types.QueryCoordClient
 	result     *commonpb.Status
 	chMgr      channelsMgr
 
@@ -1572,8 +1572,8 @@ type loadPartitionsTask struct {
 	Condition
 	*milvuspb.LoadPartitionsRequest
 	ctx        context.Context
-	queryCoord types.QueryCoord
-	datacoord  types.DataCoord
+	queryCoord types.QueryCoordClient
+	datacoord  types.DataCoordClient
 	result     *commonpb.Status
 
 	collectionID UniqueID
@@ -1711,7 +1711,7 @@ type releasePartitionsTask struct {
 	Condition
 	*milvuspb.ReleasePartitionsRequest
 	ctx        context.Context
-	queryCoord types.QueryCoord
+	queryCoord types.QueryCoordClient
 	result     *commonpb.Status
 
 	collectionID UniqueID
@@ -1812,7 +1812,7 @@ type CreateAliasTask struct {
 	Condition
 	*milvuspb.CreateAliasRequest
 	ctx       context.Context
-	rootCoord types.RootCoord
+	rootCoord types.RootCoordClient
 	result    *commonpb.Status
 }
 
@@ -1897,7 +1897,7 @@ type DropAliasTask struct {
 	Condition
 	*milvuspb.DropAliasRequest
 	ctx       context.Context
-	rootCoord types.RootCoord
+	rootCoord types.RootCoordClient
 	result    *commonpb.Status
 }
 
@@ -1967,7 +1967,7 @@ type AlterAliasTask struct {
 	Condition
 	*milvuspb.AlterAliasRequest
 	ctx       context.Context
-	rootCoord types.RootCoord
+	rootCoord types.RootCoordClient
 	result    *commonpb.Status
 }
 
@@ -2040,7 +2040,7 @@ type CreateResourceGroupTask struct {
 	Condition
 	*milvuspb.CreateResourceGroupRequest
 	ctx        context.Context
-	queryCoord types.QueryCoord
+	queryCoord types.QueryCoordClient
 	result     *commonpb.Status
 }
 
@@ -2102,7 +2102,7 @@ type DropResourceGroupTask struct {
 	Condition
 	*milvuspb.DropResourceGroupRequest
 	ctx        context.Context
-	queryCoord types.QueryCoord
+	queryCoord types.QueryCoordClient
 	result     *commonpb.Status
 }
 
@@ -2164,7 +2164,7 @@ type DescribeResourceGroupTask struct {
 	Condition
 	*milvuspb.DescribeResourceGroupRequest
 	ctx        context.Context
-	queryCoord types.QueryCoord
+	queryCoord types.QueryCoordClient
 	result     *milvuspb.DescribeResourceGroupResponse
 }
 
@@ -2285,7 +2285,7 @@ type TransferNodeTask struct {
 	Condition
 	*milvuspb.TransferNodeRequest
 	ctx        context.Context
-	queryCoord types.QueryCoord
+	queryCoord types.QueryCoordClient
 	result     *commonpb.Status
 }
 
@@ -2347,7 +2347,7 @@ type TransferReplicaTask struct {
 	Condition
 	*milvuspb.TransferReplicaRequest
 	ctx        context.Context
-	queryCoord types.QueryCoord
+	queryCoord types.QueryCoordClient
 	result     *commonpb.Status
 }
 
@@ -2418,7 +2418,7 @@ type ListResourceGroupsTask struct {
 	Condition
 	*milvuspb.ListResourceGroupsRequest
 	ctx        context.Context
-	queryCoord types.QueryCoord
+	queryCoord types.QueryCoordClient
 	result     *milvuspb.ListResourceGroupsResponse
 }
 

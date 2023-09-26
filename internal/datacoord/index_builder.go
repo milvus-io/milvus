@@ -420,7 +420,7 @@ func (ib *indexBuilder) dropIndexTask(buildID, nodeID UniqueID) bool {
 
 // assignTask sends the index task to the IndexNode, it has a timeout interval, if the IndexNode doesn't respond within
 // the interval, it is considered that the task sending failed.
-func (ib *indexBuilder) assignTask(builderClient types.IndexNode, req *indexpb.CreateJobRequest) error {
+func (ib *indexBuilder) assignTask(builderClient types.IndexNodeClient, req *indexpb.CreateJobRequest) error {
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()
 	resp, err := builderClient.CreateJob(ctx, req)
