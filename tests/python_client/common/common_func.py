@@ -935,7 +935,10 @@ def gen_invalid_search_param(index_type, metric_type="L2"):
         for search_list in ["-1"]:
             diskann_search_param = {"metric_type": metric_type, "params": {"search_list": search_list}}
             search_params.append(diskann_search_param)
-
+    elif index_type == "SCANN":
+        for reorder_k in [-1]:
+            scann_search_param = {"metric_type": metric_type, "params": {"reorder_k": reorder_k, "nprobe": 10}}
+            search_params.append(scann_search_param)
     else:
         log.error("Invalid index_type.")
         raise Exception("Invalid index_type.")
