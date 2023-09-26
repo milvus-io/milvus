@@ -35,6 +35,7 @@ func TestMain(m *testing.M) {
 
 	broker := mockCluster.BootstrapServers()
 	Params.Save("kafka.brokerList", broker)
+	log.Info("start testing kafka broker", zap.String("address", broker))
 
 	exitCode := m.Run()
 	os.Exit(exitCode)

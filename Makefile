@@ -202,7 +202,7 @@ generated-proto: download-milvus-proto build-3rdparty
 	@(env bash $(PWD)/scripts/generate_proto.sh)
 
 build-cpp: generated-proto
-	@echo "Building Milvus cpp library ... ${AZURE_OPTION}"
+	@echo "Building Milvus cpp library ..."
 	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine})
 
 build-cpp-gpu: generated-proto
