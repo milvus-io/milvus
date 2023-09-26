@@ -25,7 +25,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -57,47 +56,32 @@ func TestIndexNodeManager_PeekClient(t *testing.T) {
 		return ic
 	}
 
+	err := errors.New("error")
+
 	t.Run("multiple unavailable IndexNode", func(t *testing.T) {
 		nm := &IndexNodeManager{
 			ctx: context.TODO(),
 			nodeClients: map[UniqueID]types.IndexNodeClient{
 				1: getMockedGetJobStatsClient(&indexpb.GetJobStatsResponse{
-					Status: &commonpb.Status{
-						ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					},
-				}, errors.New("error")),
+					Status: merr.Status(err),
+				}, err),
 				2: getMockedGetJobStatsClient(&indexpb.GetJobStatsResponse{
-					Status: &commonpb.Status{
-						ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					},
-				}, errors.New("error")),
+					Status: merr.Status(err),
+				}, err),
 				3: getMockedGetJobStatsClient(&indexpb.GetJobStatsResponse{
-					Status: &commonpb.Status{
-						ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					},
-				}, errors.New("error")),
+					Status: merr.Status(err),
+				}, err),
 				4: getMockedGetJobStatsClient(&indexpb.GetJobStatsResponse{
-					Status: &commonpb.Status{
-						ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					},
-				}, errors.New("error")),
+					Status: merr.Status(err),
+				}, err),
 				5: getMockedGetJobStatsClient(&indexpb.GetJobStatsResponse{
-					Status: &commonpb.Status{
-						ErrorCode: commonpb.ErrorCode_UnexpectedError,
-						Reason:    "fail reason",
-					},
+					Status: merr.Status(err),
 				}, nil),
 				6: getMockedGetJobStatsClient(&indexpb.GetJobStatsResponse{
-					Status: &commonpb.Status{
-						ErrorCode: commonpb.ErrorCode_UnexpectedError,
-						Reason:    "fail reason",
-					},
+					Status: merr.Status(err),
 				}, nil),
 				7: getMockedGetJobStatsClient(&indexpb.GetJobStatsResponse{
-					Status: &commonpb.Status{
-						ErrorCode: commonpb.ErrorCode_UnexpectedError,
-						Reason:    "fail reason",
-					},
+					Status: merr.Status(err),
 				}, nil),
 				8: getMockedGetJobStatsClient(&indexpb.GetJobStatsResponse{
 					TaskSlots: 1,
@@ -122,6 +106,8 @@ func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
 		ic.EXPECT().GetJobStats(mock.Anything, mock.Anything, mock.Anything).Return(resp, err)
 		return ic
 	}
+
+	err := errors.New("error")
 
 	t.Run("support", func(t *testing.T) {
 		nm := &IndexNodeManager{
@@ -175,7 +161,7 @@ func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
 			ctx:  context.Background(),
 			lock: sync.RWMutex{},
 			nodeClients: map[UniqueID]types.IndexNodeClient{
-				1: getMockedGetJobStatsClient(nil, errors.New("error")),
+				1: getMockedGetJobStatsClient(nil, err),
 			},
 		}
 
@@ -189,10 +175,7 @@ func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
 			lock: sync.RWMutex{},
 			nodeClients: map[UniqueID]types.IndexNodeClient{
 				1: getMockedGetJobStatsClient(&indexpb.GetJobStatsResponse{
-					Status: &commonpb.Status{
-						ErrorCode: commonpb.ErrorCode_UnexpectedError,
-						Reason:    "fail reason",
-					},
+					Status:     merr.Status(err),
 					TaskSlots:  0,
 					JobInfos:   nil,
 					EnableDisk: false,

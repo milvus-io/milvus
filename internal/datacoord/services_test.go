@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 )
 
@@ -586,7 +587,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		closeTestServer(t, svr)
 		resp, err := svr.GetRecoveryInfoV2(context.TODO(), &datapb.GetRecoveryInfoRequestV2{})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+		err = merr.Error(resp.GetStatus())
+		assert.ErrorIs(t, err, merr.ErrServiceNotReady)
 	})
 }

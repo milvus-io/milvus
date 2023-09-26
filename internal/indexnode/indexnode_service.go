@@ -116,8 +116,7 @@ func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest
 	if err := i.sched.IndexBuildQueue.Enqueue(task); err != nil {
 		log.Ctx(ctx).Warn("IndexNode failed to schedule", zap.Int64("indexBuildID", req.GetBuildID()),
 			zap.String("clusterID", req.GetClusterID()), zap.Error(err))
-		ret.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		ret.Reason = err.Error()
+		ret = merr.Status(err)
 		metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.FailLabel).Inc()
 		return ret, nil
 	}

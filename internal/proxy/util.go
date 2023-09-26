@@ -1192,8 +1192,9 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, result *milvuspb.M
 			// upsert has not supported when autoID == true
 			log.Info("can not upsert when auto id enabled",
 				zap.String("primaryFieldSchemaName", primaryFieldSchema.Name))
-			result.Status.ErrorCode = commonpb.ErrorCode_UpsertAutoIDTrue
-			return nil, fmt.Errorf("upsert can not assign primary field data when auto id enabled %v", primaryFieldSchema.Name)
+			err := merr.WrapErrParameterInvalidMsg(fmt.Sprintf("upsert can not assign primary field data when auto id enabled %v", primaryFieldSchema.GetName()))
+			result.Status = merr.Status(err)
+			return nil, err
 		}
 		primaryFieldData, err = typeutil.GetPrimaryFieldData(insertMsg.GetFieldsData(), primaryFieldSchema)
 		if err != nil {

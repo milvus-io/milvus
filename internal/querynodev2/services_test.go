@@ -780,20 +780,19 @@ func (suite *ServiceSuite) TestLoadSegments_Failed() {
 	// Delegator not found
 	status, err := suite.node.LoadSegments(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
-	suite.Contains(status.GetReason(), "failed to load segments, delegator not found")
+	suite.ErrorIs(merr.Error(status), merr.ErrChannelNotFound)
 
 	// target not match
 	req.Base.TargetID = -1
 	status, err = suite.node.LoadSegments(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_NodeIDNotMatch, status.GetErrorCode())
+	suite.ErrorIs(merr.Error(status), merr.ErrNodeNotMatch)
 
 	// node not healthy
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	status, err = suite.node.LoadSegments(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_NotReadyServe, status.GetErrorCode())
+	suite.ErrorIs(merr.Error(status), merr.ErrServiceNotReady)
 }
 
 func (suite *ServiceSuite) TestLoadSegments_Transfer() {

@@ -59,10 +59,7 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 	log.Warn("DataNode WatchDmChannels is not in use")
 
 	// TODO ERROR OF GRPC NOT IN USE
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-		Reason:    "watchDmChannels do nothing",
-	}, nil
+	return merr.Status(nil), nil
 }
 
 // GetComponentStates will return current state of DataNode

@@ -2338,22 +2338,6 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		chTicker:      node.chTicker,
 	}
 
-	constructFailedResponse := func(err error, errCode commonpb.ErrorCode) *milvuspb.MutationResult {
-		numRows := request.NumRows
-		errIndex := make([]uint32, numRows)
-		for i := uint32(0); i < numRows; i++ {
-			errIndex[i] = i
-		}
-
-		return &milvuspb.MutationResult{
-			Status: &commonpb.Status{
-				ErrorCode: errCode,
-				Reason:    err.Error(),
-			},
-			ErrIndex: errIndex,
-		}
-	}
-
 	log.Debug("Enqueue upsert request in Proxy",
 		zap.Int("len(FieldsData)", len(request.FieldsData)),
 		zap.Int("len(HashKeys)", len(request.HashKeys)))
@@ -2380,9 +2364,19 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		// Not every error case changes the status internally
 		// change status there to handle it
 		if it.result.GetStatus().GetErrorCode() == commonpb.ErrorCode_Success {
-			it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			it.result.Status = merr.Status(err)
 		}
-		return constructFailedResponse(err, it.result.GetStatus().GetErrorCode()), nil
+
+		numRows := request.NumRows
+		errIndex := make([]uint32, numRows)
+		for i := uint32(0); i < numRows; i++ {
+			errIndex[i] = i
+		}
+
+		return &milvuspb.MutationResult{
+			Status:   merr.Status(err),
+			ErrIndex: errIndex,
+		}, nil
 	}
 
 	if it.result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
@@ -2538,7 +2532,7 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 		},
 	}
 	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
-		resp.Status.Reason = "proxy is not healthy"
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
@@ -2588,7 +2582,6 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
 
-		resp.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
@@ -2945,10 +2938,10 @@ func (node *Proxy) FlushAll(ctx context.Context, req *milvuspb.FlushAllRequest) 
 	log := log.With(zap.String("db", req.GetDbName()))
 
 	resp := &milvuspb.FlushAllResponse{
-		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
+		Status: merr.Status(nil),
 	}
 	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
-		resp.Status.Reason = "proxy is not healthy"
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 	log.Info(rpcReceived("FlushAll"))
@@ -2979,7 +2972,7 @@ func (node *Proxy) FlushAll(ctx context.Context, req *milvuspb.FlushAllRequest) 
 			return dbName == req.GetDbName()
 		})
 		if len(dbNames) == 0 {
-			resp.Status.Reason = fmt.Sprintf("failed to get db %s", req.GetDbName())
+			resp.Status = merr.Status(merr.WrapErrDatabaseNotFound(req.GetDbName()))
 			return resp, nil
 		}
 	}
@@ -3027,7 +3020,6 @@ func (node *Proxy) FlushAll(ctx context.Context, req *milvuspb.FlushAllRequest) 
 	}
 
 	resp.FlushAllTs = ts
-	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 
 	log.Info(rpcDone("FlushAll"), zap.Uint64("FlushAllTs", ts),
 		zap.Time("FlushAllTime", tsoutil.PhysicalTime(ts)))
@@ -3057,9 +3049,7 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 		zap.Any("collection", req.CollectionName))
 
 	resp := &milvuspb.GetPersistentSegmentInfoResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		},
+		Status: merr.Status(nil),
 	}
 	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		resp.Status = merr.Status(err)
@@ -3074,7 +3064,7 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
-		resp.Status.Reason = fmt.Errorf("getCollectionID failed, err:%w", err).Error()
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
@@ -3086,7 +3076,7 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 	})
 	if err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
-		resp.Status.Reason = fmt.Errorf("getSegmentsOfCollection, err:%w", err).Error()
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
@@ -3104,7 +3094,7 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 			metrics.FailLabel).Inc()
 		log.Warn("GetPersistentSegmentInfo fail",
 			zap.Error(err))
-		resp.Status.Reason = fmt.Errorf("dataCoord:GetSegmentInfo, err:%w", err).Error()
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 	err = merr.Error(infoResp.GetStatus())
@@ -3130,7 +3120,6 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 		metrics.SuccessLabel).Inc()
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	resp.Infos = persistentInfos
 	return resp, nil
 }
@@ -3148,9 +3137,7 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 		zap.Any("collection", req.CollectionName))
 
 	resp := &milvuspb.GetQuerySegmentInfoResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		},
+		Status: merr.Status(nil),
 	}
 	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		resp.Status = merr.Status(err)
@@ -3206,7 +3193,6 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.SuccessLabel).Inc()
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	resp.Infos = queryInfos
 	return resp, nil
 }
@@ -3448,16 +3434,14 @@ func (node *Proxy) LoadBalance(ctx context.Context, req *milvuspb.LoadBalanceReq
 		return unhealthyStatus(), nil
 	}
 
-	status := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-	}
+	status := merr.Status(nil)
 
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		log.Warn("failed to get collection id",
 			zap.String("collectionName", req.GetCollectionName()),
 			zap.Error(err))
-		status.Reason = err.Error()
+		status = merr.Status(err)
 		return status, nil
 	}
 	infoResp, err := node.queryCoord.LoadBalance(ctx, &querypb.LoadBalanceRequest{
@@ -3476,19 +3460,18 @@ func (node *Proxy) LoadBalance(ctx context.Context, req *milvuspb.LoadBalanceReq
 		log.Warn("Failed to LoadBalance from Query Coordinator",
 			zap.Any("req", req),
 			zap.Error(err))
-		status.Reason = err.Error()
+		status = merr.Status(err)
 		return status, nil
 	}
 	if infoResp.ErrorCode != commonpb.ErrorCode_Success {
 		log.Warn("Failed to LoadBalance from Query Coordinator",
 			zap.String("errMsg", infoResp.Reason))
-		status.Reason = infoResp.Reason
+		status = infoResp
 		return status, nil
 	}
 	log.Debug("LoadBalance Done",
 		zap.Any("req", req),
 		zap.Any("status", infoResp))
-	status.ErrorCode = commonpb.ErrorCode_Success
 	return status, nil
 }
 
@@ -3710,8 +3693,7 @@ func (node *Proxy) Import(ctx context.Context, req *milvuspb.ImportRequest) (*mi
 	if err != nil {
 		log.Error("failed to execute import request",
 			zap.Error(err))
-		resp.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		resp.Status.Reason = "request options is not illegal    \n" + err.Error() + "    \nIllegal option format    \n" + importutil.OptionFormat
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
@@ -3726,7 +3708,6 @@ func (node *Proxy) Import(ctx context.Context, req *milvuspb.ImportRequest) (*mi
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
 		log.Error("failed to execute bulk insert request",
 			zap.Error(err))
-		resp.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
@@ -3745,7 +3726,9 @@ func (node *Proxy) GetImportState(ctx context.Context, req *milvuspb.GetImportSt
 
 	log.Debug("received get import state request",
 		zap.Int64("taskID", req.GetTask()))
-	resp := &milvuspb.GetImportStateResponse{}
+	resp := &milvuspb.GetImportStateResponse{
+		Status: merr.Status(nil),
+	}
 	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil
@@ -3760,7 +3743,6 @@ func (node *Proxy) GetImportState(ctx context.Context, req *milvuspb.GetImportSt
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
 		log.Error("failed to execute get import state",
 			zap.Error(err))
-		resp.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
@@ -3781,7 +3763,9 @@ func (node *Proxy) ListImportTasks(ctx context.Context, req *milvuspb.ListImport
 	log := log.Ctx(ctx)
 
 	log.Debug("received list import tasks request")
-	resp := &milvuspb.ListImportTasksResponse{}
+	resp := &milvuspb.ListImportTasksResponse{
+		Status: merr.Status(nil),
+	}
 	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil
@@ -3795,7 +3779,6 @@ func (node *Proxy) ListImportTasks(ctx context.Context, req *milvuspb.ListImport
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
 		log.Error("failed to execute list import tasks",
 			zap.Error(err))
-		resp.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
@@ -4363,9 +4346,7 @@ func (node *Proxy) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.Refr
 
 // SetRates limits the rates of requests.
 func (node *Proxy) SetRates(ctx context.Context, request *proxypb.SetRatesRequest) (*commonpb.Status, error) {
-	resp := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-	}
+	resp := merr.Status(nil)
 	if err := merr.CheckHealthy(node.stateCode.Load().(commonpb.StateCode)); err != nil {
 		resp = unhealthyStatus()
 		return resp, nil
@@ -4374,10 +4355,10 @@ func (node *Proxy) SetRates(ctx context.Context, request *proxypb.SetRatesReques
 	err := node.multiRateLimiter.SetRates(request.GetRates())
 	// TODO: set multiple rate limiter rates
 	if err != nil {
-		resp.Reason = err.Error()
+		resp = merr.Status(err)
 		return resp, nil
 	}
-	resp.ErrorCode = commonpb.ErrorCode_Success
+
 	return resp, nil
 }
 

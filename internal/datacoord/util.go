@@ -22,7 +22,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -30,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 // Response response interface for verification
@@ -51,32 +51,16 @@ func VerifyResponse(response interface{}, err error) error {
 		if resp.GetStatus() == nil {
 			return errNilStatusResponse
 		}
-		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			return errors.New(resp.GetStatus().GetReason())
-		}
+		return merr.Error(resp.GetStatus())
+
 	case *commonpb.Status:
 		if resp == nil {
 			return errNilResponse
 		}
-		if resp.ErrorCode != commonpb.ErrorCode_Success {
-			return errors.New(resp.GetReason())
-		}
+		return merr.Error(resp)
 	default:
 		return errUnknownResponseType
 	}
-	return nil
-}
-
-// failResponse sets status to failed with unexpected error and reason.
-func failResponse(status *commonpb.Status, reason string) {
-	status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-	status.Reason = reason
-}
-
-// failResponseWithCode sets status to failed with error code and reason.
-func failResponseWithCode(status *commonpb.Status, errCode commonpb.ErrorCode, reason string) {
-	status.ErrorCode = errCode
-	status.Reason = reason
 }
 
 func FilterInIndexedSegments(handler Handler, mt *meta, segments ...*SegmentInfo) []*SegmentInfo {

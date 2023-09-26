@@ -212,7 +212,7 @@ func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID 
 		return nil, err
 	}
 	if resp.GetSegmentInfo() == nil {
-		err = merr.WrapErrCollectionNotFound(segmentID)
+		err = merr.WrapErrIndexNotFoundForSegment(segmentID)
 		log.Warn("failed to get segment index info",
 			zap.Error(err))
 		return nil, err
@@ -220,7 +220,7 @@ func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID 
 
 	segmentInfo, ok := resp.GetSegmentInfo()[segmentID]
 	if !ok || len(segmentInfo.GetIndexInfos()) == 0 {
-		return nil, merr.WrapErrIndexNotFound()
+		return nil, merr.WrapErrIndexNotFoundForSegment(segmentID)
 	}
 
 	indexes := make([]*querypb.FieldIndexInfo, 0)

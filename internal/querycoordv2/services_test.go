@@ -1241,7 +1241,7 @@ func (suite *ServiceSuite) TestLoadBalanceFailed() {
 		}
 		resp, err := server.LoadBalance(ctx, req)
 		suite.NoError(err)
-		suite.ErrorIs(merr.Error(resp), merr.ErrParameterInvalid)
+		suite.ErrorIs(merr.Error(resp), merr.ErrNodeNotFound)
 	}
 
 	// Test balance task failed

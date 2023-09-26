@@ -19,7 +19,6 @@ package rootcoord
 import (
 	"context"
 	"fmt"
-	"github.com/milvus-io/milvus/pkg/common"
 	"math/rand"
 	"os"
 	"sync"
@@ -47,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -1216,6 +1216,7 @@ func TestCore_Import(t *testing.T) {
 				},
 			},
 		})
+		assert.NoError(t, err)
 		assert.ErrorIs(t, merr.Error(resp2.GetStatus()), merr.ErrBulkInsertPartitionNotFound)
 	})
 }
@@ -1336,7 +1337,7 @@ func TestCore_ListImportTasks(t *testing.T) {
 					CollectionID: ti3.CollectionId,
 				}, nil
 			}
-			return nil, errors.New("GetCollectionByName error")
+			return nil, merr.WrapErrCollectionNotFound(collectionName)
 		}
 
 		ctx := context.Background()
@@ -1374,7 +1375,7 @@ func TestCore_ListImportTasks(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, 0, len(resp.GetTasks()))
-		assert.Equal(t, commonpb.ErrorCode_IllegalCollectionName, resp.GetStatus().GetErrorCode())
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrCollectionNotFound)
 
 		// list the latest 2 tasks
 		resp, err = c.ListImportTasks(ctx, &milvuspb.ListImportTasksRequest{

@@ -74,7 +74,10 @@ linters-settings:
   forbidigo:
     forbid:
       - '^time\.Tick$'
-      - '^return merr.Err[a-zA-Z]+$'
+      - 'return merr\.Err[a-zA-Z]+'
+      - 'merr\.Wrap\w+\(\)\.Error\(\)'
+      - '\.(ErrorCode|Reason) = '
+      - 'Reason:\s+\w+\.Error\(\)'
       #- 'fmt\.Print.*' WIP
 
 issues:

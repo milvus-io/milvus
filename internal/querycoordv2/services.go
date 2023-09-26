@@ -674,7 +674,7 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 	srcNode := req.GetSourceNodeIDs()[0]
 	replica := s.meta.ReplicaManager.GetByCollectionAndNode(req.GetCollectionID(), srcNode)
 	if replica == nil {
-		err := merr.WrapErrReplicaNotFound(-1, fmt.Sprintf("replica not found for collection %d and node %d", req.GetCollectionID(), srcNode))
+		err := merr.WrapErrNodeNotFound(srcNode, fmt.Sprintf("source node not found in any replica of collection %d", req.GetCollectionID()))
 		msg := "source node not found in any replica"
 		log.Warn(msg)
 		return merr.Status(err), nil
@@ -685,9 +685,8 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 	}
 	for _, dstNode := range req.GetDstNodeIDs() {
 		if !replica.Contains(dstNode) {
-			err := merr.WrapErrParameterInvalid("destination node in the same replica as source node", fmt.Sprintf("destination node %d not in replica %d", dstNode, replica.GetID()))
-			msg := "destination nodes have to be in the same replica of source node"
-			log.Warn(msg)
+			err := merr.WrapErrNodeNotFound(dstNode, "destination node not found in the same replica")
+			log.Warn("failed to balance to the destination node", zap.Error(err))
 			return merr.Status(err), nil
 		}
 		if err := s.isStoppingNode(dstNode); err != nil {

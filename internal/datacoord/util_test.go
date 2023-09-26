@@ -110,7 +110,7 @@ func (suite *UtilSuite) TestVerifyResponse() {
 	for _, c := range cases {
 		r := VerifyResponse(c.resp, c.err)
 		if c.equalValue {
-			suite.EqualValues(c.expected.Error(), r.Error())
+			suite.Contains(r.Error(), c.expected.Error())
 		} else {
 			suite.Equal(c.expected, r)
 		}
