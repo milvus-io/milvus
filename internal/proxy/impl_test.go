@@ -63,7 +63,7 @@ func TestProxy_InvalidateCollectionMetaCache_remove_stream(t *testing.T) {
 
 func TestProxy_CheckHealth(t *testing.T) {
 	t.Run("not healthy", func(t *testing.T) {
-		node := &Proxy{session: &sessionutil.Session{ServerID: 1}}
+		node := &Proxy{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
 		node.multiRateLimiter = NewMultiRateLimiter()
 		node.stateCode.Store(commonpb.StateCode_Abnormal)
 		ctx := context.Background()
@@ -80,7 +80,7 @@ func TestProxy_CheckHealth(t *testing.T) {
 			rootCoord:  NewRootCoordMock(),
 			queryCoord: qc,
 			dataCoord:  NewDataCoordMock(),
-			session:    &sessionutil.Session{ServerID: 1},
+			session:    &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}},
 		}
 		node.multiRateLimiter = NewMultiRateLimiter()
 		node.stateCode.Store(commonpb.StateCode_Healthy)
@@ -108,7 +108,7 @@ func TestProxy_CheckHealth(t *testing.T) {
 		qc := &mocks.MockQueryCoordClient{}
 		qc.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(nil, errors.New("test"))
 		node := &Proxy{
-			session: &sessionutil.Session{ServerID: 1},
+			session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}},
 			rootCoord: NewRootCoordMock(func(mock *RootCoordMock) {
 				mock.checkHealthFunc = checkHealthFunc1
 			}),
@@ -159,7 +159,7 @@ func TestProxy_CheckHealth(t *testing.T) {
 
 func TestProxyRenameCollection(t *testing.T) {
 	t.Run("not healthy", func(t *testing.T) {
-		node := &Proxy{session: &sessionutil.Session{ServerID: 1}}
+		node := &Proxy{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
 		node.stateCode.Store(commonpb.StateCode_Abnormal)
 		ctx := context.Background()
 		resp, err := node.RenameCollection(ctx, &milvuspb.RenameCollectionRequest{})
@@ -168,7 +168,7 @@ func TestProxyRenameCollection(t *testing.T) {
 	})
 
 	t.Run("rename with illegal new collection name", func(t *testing.T) {
-		node := &Proxy{session: &sessionutil.Session{ServerID: 1}}
+		node := &Proxy{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
 		node.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		resp, err := node.RenameCollection(ctx, &milvuspb.RenameCollectionRequest{NewName: "$#^%#&#$*!)#@!"})
@@ -181,7 +181,7 @@ func TestProxyRenameCollection(t *testing.T) {
 		rc.On("RenameCollection", mock.Anything, mock.Anything).
 			Return(nil, errors.New("fail"))
 		node := &Proxy{
-			session:   &sessionutil.Session{ServerID: 1},
+			session:   &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}},
 			rootCoord: rc,
 		}
 		node.stateCode.Store(commonpb.StateCode_Healthy)
@@ -197,7 +197,7 @@ func TestProxyRenameCollection(t *testing.T) {
 		rc.On("RenameCollection", mock.Anything, mock.Anything).
 			Return(merr.Status(nil), nil)
 		node := &Proxy{
-			session:   &sessionutil.Session{ServerID: 1},
+			session:   &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}},
 			rootCoord: rc,
 		}
 		node.stateCode.Store(commonpb.StateCode_Healthy)
@@ -884,7 +884,7 @@ func TestProxyCreateDatabase(t *testing.T) {
 	paramtable.Init()
 
 	t.Run("not healthy", func(t *testing.T) {
-		node := &Proxy{session: &sessionutil.Session{ServerID: 1}}
+		node := &Proxy{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
 		node.stateCode.Store(commonpb.StateCode_Abnormal)
 		ctx := context.Background()
 		resp, err := node.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{})
@@ -938,7 +938,7 @@ func TestProxyDropDatabase(t *testing.T) {
 	paramtable.Init()
 
 	t.Run("not healthy", func(t *testing.T) {
-		node := &Proxy{session: &sessionutil.Session{ServerID: 1}}
+		node := &Proxy{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
 		node.stateCode.Store(commonpb.StateCode_Abnormal)
 		ctx := context.Background()
 		resp, err := node.DropDatabase(ctx, &milvuspb.DropDatabaseRequest{})
@@ -992,7 +992,7 @@ func TestProxyListDatabase(t *testing.T) {
 	paramtable.Init()
 
 	t.Run("not healthy", func(t *testing.T) {
-		node := &Proxy{session: &sessionutil.Session{ServerID: 1}}
+		node := &Proxy{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
 		node.stateCode.Store(commonpb.StateCode_Abnormal)
 		ctx := context.Background()
 		resp, err := node.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{})

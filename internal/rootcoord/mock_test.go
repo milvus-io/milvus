@@ -390,7 +390,7 @@ func newMockProxy() *mockProxy {
 
 func newTestCore(opts ...Opt) *Core {
 	c := &Core{
-		session: &sessionutil.Session{ServerID: TestRootCoordID},
+		session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: TestRootCoordID}},
 	}
 	executor := newMockStepExecutor()
 	executor.AddStepsFunc = func(s *stepStack) {

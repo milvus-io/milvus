@@ -321,7 +321,7 @@ func (s *DataNodeServicesSuite) TestShowConfigurations() {
 
 	// test closed server
 	node := &DataNode{}
-	node.SetSession(&sessionutil.Session{ServerID: 1})
+	node.SetSession(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}})
 	node.stateCode.Store(commonpb.StateCode_Abnormal)
 
 	resp, err := node.ShowConfigurations(s.ctx, req)
@@ -338,7 +338,7 @@ func (s *DataNodeServicesSuite) TestShowConfigurations() {
 
 func (s *DataNodeServicesSuite) TestGetMetrics() {
 	node := &DataNode{}
-	node.SetSession(&sessionutil.Session{ServerID: 1})
+	node.SetSession(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}})
 	node.flowgraphManager = newFlowgraphManager()
 	// server is closed
 	node.stateCode.Store(commonpb.StateCode_Abnormal)

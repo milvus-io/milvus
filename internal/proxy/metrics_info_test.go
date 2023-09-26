@@ -48,7 +48,7 @@ func TestProxy_metrics(t *testing.T) {
 		rootCoord:  rc,
 		queryCoord: qc,
 		dataCoord:  dc,
-		session:    &sessionutil.Session{Address: funcutil.GenRandomStr()},
+		session:    &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{Address: funcutil.GenRandomStr()}},
 	}
 
 	rc.getMetricsFunc = func(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {

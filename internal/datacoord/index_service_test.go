@@ -41,7 +41,7 @@ import (
 )
 
 func TestServerId(t *testing.T) {
-	s := &Server{session: &sessionutil.Session{ServerID: 0}}
+	s := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 0}}}
 	assert.Equal(t, int64(0), s.serverID())
 }
 

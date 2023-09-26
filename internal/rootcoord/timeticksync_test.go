@@ -129,10 +129,10 @@ func TestMultiTimetickSync(t *testing.T) {
 		defer wg.Done()
 
 		// suppose this is rooit
-		ttSync.addSession(&sessionutil.Session{ServerID: 1})
+		ttSync.addSession(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}})
 
 		// suppose this is proxy1
-		ttSync.addSession(&sessionutil.Session{ServerID: 2})
+		ttSync.addSession(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 2}})
 
 		msg := &internalpb.ChannelTimeTickMsg{
 			Base: &commonpb.MsgBase{

@@ -79,7 +79,7 @@ var emptyFlushAndDropFunc flushAndDropFunc = func(_ []*segmentFlushPack) {}
 func newIDLEDataNodeMock(ctx context.Context, pkType schemapb.DataType) *DataNode {
 	factory := dependency.NewDefaultFactory(true)
 	node := NewDataNode(ctx, factory)
-	node.SetSession(&sessionutil.Session{ServerID: 1})
+	node.SetSession(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}})
 	node.dispClient = msgdispatcher.NewClient(factory, typeutil.DataNodeRole, paramtable.GetNodeID())
 
 	rc := &RootCoordFactory{
