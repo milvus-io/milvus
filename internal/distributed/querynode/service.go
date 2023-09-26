@@ -34,6 +34,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/distributed/utils"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	qn "github.com/milvus-io/milvus/internal/querynodev2"
@@ -244,8 +245,7 @@ func (s *Server) Stop() error {
 
 	s.cancel()
 	if s.grpcServer != nil {
-		log.Debug("Graceful stop grpc server...")
-		s.grpcServer.GracefulStop()
+		utils.GracefulStopGRPCServer(s.grpcServer)
 	}
 	s.wg.Wait()
 	return nil

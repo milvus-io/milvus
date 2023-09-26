@@ -38,6 +38,7 @@ import (
 	dn "github.com/milvus-io/milvus/internal/datanode"
 	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
+	"github.com/milvus-io/milvus/internal/distributed/utils"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -205,22 +206,7 @@ func (s *Server) Stop() error {
 		defer s.etcdCli.Close()
 	}
 	if s.grpcServer != nil {
-		log.Debug("Graceful stop grpc server...")
-		// make graceful stop has a timeout
-		stopped := make(chan struct{})
-		go func() {
-			s.grpcServer.GracefulStop()
-			close(stopped)
-		}()
-
-		t := time.NewTimer(10 * time.Second)
-		select {
-		case <-t.C:
-			// hard stop since grace timeout
-			s.grpcServer.Stop()
-		case <-stopped:
-			t.Stop()
-		}
+		utils.GracefulStopGRPCServer(s.grpcServer)
 	}
 
 	err := s.datanode.Stop()

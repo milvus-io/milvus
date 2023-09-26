@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
+	"github.com/milvus-io/milvus/internal/distributed/utils"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	qc "github.com/milvus-io/milvus/internal/querycoordv2"
@@ -273,12 +274,12 @@ func (s *Server) Stop() error {
 	if s.etcdCli != nil {
 		defer s.etcdCli.Close()
 	}
-	err := s.queryCoord.Stop()
 	s.loopCancel()
 	if s.grpcServer != nil {
-		log.Debug("Graceful stop grpc server...")
-		s.grpcServer.GracefulStop()
+		utils.GracefulStopGRPCServer(s.grpcServer)
 	}
+	err := s.queryCoord.Stop()
+
 	return err
 }
 
