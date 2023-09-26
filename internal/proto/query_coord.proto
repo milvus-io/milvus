@@ -80,7 +80,8 @@ service QueryNode {
   rpc Delete(DeleteRequest) returns (common.Status) {}
 }
 
-//--------------------QueryCoord grpc request and response proto------------------
+// --------------------QueryCoord grpc request and response proto------------------
+
 message ShowCollectionsRequest {
   common.MsgBase base = 1;
   // Not useful for now
@@ -206,7 +207,8 @@ message SyncNewCreatedPartitionRequest {
   int64 partitionID = 3;
 }
 
-//-----------------query node grpc request and response proto----------------
+// -----------------query node grpc request and response proto----------------
+
 message LoadMetaInfo {
   LoadType load_type = 1;
   int64 collectionID = 2;
@@ -351,7 +353,8 @@ message GetLoadInfoResponse {
   repeated int64 partitions = 4;
 }
 
-//----------------request auto triggered by QueryCoord-----------------
+// ----------------request auto triggered by QueryCoord-----------------
+
 message HandoffSegmentsRequest {
   common.MsgBase base = 1;
   repeated SegmentInfo segmentInfos = 2;
@@ -367,7 +370,7 @@ message LoadBalanceRequest {
   int64 collectionID = 6;
 }
 
-//-------------------- internal meta proto------------------
+// -------------------- internal meta proto------------------
 
 enum DataScope {
   UnKnown = 0;
@@ -465,7 +468,8 @@ message UnsubscribeChannelInfo {
   repeated UnsubscribeChannels collection_channels = 2;
 }
 
-//---- synchronize messages proto between QueryCoord and QueryNode -----
+// ---- synchronize messages proto between QueryCoord and QueryNode -----
+
 message SegmentChangeInfo {
   int64 online_nodeID = 1;
   repeated SegmentInfo online_segments = 2;
