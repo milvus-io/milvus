@@ -514,6 +514,18 @@ func TestDataNode(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, stat.GetErrorCode())
 		assert.Equal(t, "", stat.GetReason())
+
+		reqWithoutPartition := &datapb.ImportTaskRequest{
+			ImportTask: &datapb.ImportTask{
+				CollectionId: 100,
+				ChannelNames: []string{chName1, chName2},
+				Files:        []string{filePath},
+				RowBased:     true,
+			},
+		}
+		stat2, err := node.Import(context.WithValue(ctx, ctxKey{}, ""), reqWithoutPartition)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, stat2.GetErrorCode())
 	})
 
 	t.Run("Test Import show partitions error", func(t *testing.T) {
