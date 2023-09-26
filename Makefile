@@ -120,7 +120,10 @@ lint-fix: getdeps
 		echo "gofumpt v$(GOFUMPT_VERSION) already installed"; \
 	fi
 	@echo "Running gofumpt fix"
-	@$(INSTALL_PATH)/gofumpt -l -w .
+	@$(INSTALL_PATH)/gofumpt -l -w internal/
+	@$(INSTALL_PATH)/gofumpt -l -w cmd/
+	@$(INSTALL_PATH)/gofumpt -l -w pkg/
+	@$(INSTALL_PATH)/gofumpt -l -w tests/integration/
 	@echo "Running gci fix"
 	@$(INSTALL_PATH)/gci write cmd/ --skip-generated -s standard -s default -s "prefix(github.com/milvus-io)" --custom-order
 	@$(INSTALL_PATH)/gci write internal/ --skip-generated -s standard -s default -s "prefix(github.com/milvus-io)" --custom-order
