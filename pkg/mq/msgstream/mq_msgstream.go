@@ -869,6 +869,8 @@ func (ms *MqTtMsgStream) Seek(ctx context.Context, msgPositions []*msgpb.MsgPosi
 						MsgID:       msg.ID().Serialize(),
 					})
 					ms.chanMsgBuf[consumer] = append(ms.chanMsgBuf[consumer], tsMsg)
+				} else {
+					log.Info("skip msg", zap.Any("msg", tsMsg))
 				}
 			}
 		}
