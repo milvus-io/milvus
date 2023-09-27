@@ -758,20 +758,11 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 			Status: merr.Status(err),
 		}, nil
 	}
-
-	dresp, err := s.broker.DescribeCollectionInternal(s.ctx, collectionID)
-	if err != nil {
-		log.Error("get collection info from rootcoord failed",
-			zap.Error(err))
-
-		resp.Status = merr.Status(err)
-		return resp, nil
-	}
-	channels := dresp.GetVirtualChannelNames()
+	channels := s.channelManager.GetChannelsByCollectionID(collectionID)
 	channelInfos := make([]*datapb.VchannelInfo, 0, len(channels))
 	flushedIDs := make(typeutil.UniqueSet)
-	for _, c := range channels {
-		channelInfo := s.handler.GetQueryVChanPositions(&channel{Name: c, CollectionID: collectionID}, partitionIDs...)
+	for _, ch := range channels {
+		channelInfo := s.handler.GetQueryVChanPositions(ch, partitionIDs...)
 		channelInfos = append(channelInfos, channelInfo)
 		log.Info("datacoord append channelInfo in GetRecoveryInfo",
 			zap.String("channel", channelInfo.GetChannelName()),
