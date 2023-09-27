@@ -3,6 +3,7 @@ package proxy
 import (
 	"fmt"
 	"math"
+	"reflect"
 
 	"go.uber.org/zap"
 
@@ -364,6 +365,72 @@ func (v *validateUtil) checkIntegerFieldData(field *schemapb.FieldData, fieldSch
 	return nil
 }
 
+func (v *validateUtil) checkArrayElement(array *schemapb.ArrayArray, field *schemapb.FieldSchema) error {
+	switch field.GetElementType() {
+	case schemapb.DataType_Bool:
+		for _, row := range array.GetData() {
+			actualType := reflect.TypeOf(row.GetData())
+			if actualType != reflect.TypeOf((*schemapb.ScalarField_BoolData)(nil)) {
+				return merr.WrapErrParameterInvalid("bool array",
+					fmt.Sprintf("%s array", actualType.String()), "insert data does not match")
+			}
+		}
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		for _, row := range array.GetData() {
+			actualType := reflect.TypeOf(row.GetData())
+			if actualType != reflect.TypeOf((*schemapb.ScalarField_IntData)(nil)) {
+				return merr.WrapErrParameterInvalid("int array",
+					fmt.Sprintf("%s array", actualType.String()), "insert data does not match")
+			}
+			if v.checkOverflow {
+				if field.GetElementType() == schemapb.DataType_Int8 {
+					if err := verifyOverflowByRange(row.GetIntData().GetData(), math.MinInt8, math.MaxInt8); err != nil {
+						return err
+					}
+				}
+				if field.GetElementType() == schemapb.DataType_Int16 {
+					if err := verifyOverflowByRange(row.GetIntData().GetData(), math.MinInt16, math.MaxInt16); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	case schemapb.DataType_Int64:
+		for _, row := range array.GetData() {
+			actualType := reflect.TypeOf(row.GetData())
+			if actualType != reflect.TypeOf((*schemapb.ScalarField_LongData)(nil)) {
+				return merr.WrapErrParameterInvalid("int64 array",
+					fmt.Sprintf("%s array", actualType.String()), "insert data does not match")
+			}
+		}
+	case schemapb.DataType_Float:
+		for _, row := range array.GetData() {
+			actualType := reflect.TypeOf(row.GetData())
+			if actualType != reflect.TypeOf((*schemapb.ScalarField_FloatData)(nil)) {
+				return merr.WrapErrParameterInvalid("float array",
+					fmt.Sprintf("%s array", actualType.String()), "insert data does not match")
+			}
+		}
+	case schemapb.DataType_Double:
+		for _, row := range array.GetData() {
+			actualType := reflect.TypeOf(row.GetData())
+			if actualType != reflect.TypeOf((*schemapb.ScalarField_DoubleData)(nil)) {
+				return merr.WrapErrParameterInvalid("double array",
+					fmt.Sprintf("%s array", actualType.String()), "insert data does not match")
+			}
+		}
+	case schemapb.DataType_VarChar, schemapb.DataType_String:
+		for _, row := range array.GetData() {
+			actualType := reflect.TypeOf(row.GetData())
+			if actualType != reflect.TypeOf((*schemapb.ScalarField_StringData)(nil)) {
+				return merr.WrapErrParameterInvalid("string array",
+					fmt.Sprintf("%s array", actualType.String()), "insert data does not match")
+			}
+		}
+	}
+	return nil
+}
+
 func (v *validateUtil) checkArrayFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	data := field.GetScalars().GetArrayData()
 	if data == nil {
@@ -390,7 +457,7 @@ func (v *validateUtil) checkArrayFieldData(field *schemapb.FieldData, fieldSchem
 			}
 		}
 	}
-	return nil
+	return v.checkArrayElement(data, fieldSchema)
 }
 
 func verifyLengthPerRow[E interface{ ~string | ~[]byte }](strArr []E, maxLength int64) error {
