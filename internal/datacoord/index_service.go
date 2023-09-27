@@ -213,9 +213,9 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 func (s *Server) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error) {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.String("indexName", req.GetIndexName()),
 	)
-	log.Info("receive GetIndexState request",
-		zap.String("indexName", req.GetIndexName()))
+	log.Info("receive GetIndexState request")
 
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		log.Warn(msgDataCoordIsUnhealthy(paramtable.GetNodeID()), zap.Error(err))
@@ -227,8 +227,7 @@ func (s *Server) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRe
 	indexes := s.meta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
 	if len(indexes) == 0 {
 		err := merr.WrapErrIndexNotFound(req.GetIndexName())
-		log.Warn("GetIndexState fail",
-			zap.String("indexName", req.GetIndexName()), zap.Error(err))
+		log.Warn("GetIndexState fail", zap.Error(err))
 		return &indexpb.GetIndexStateResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -245,12 +244,7 @@ func (s *Server) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRe
 		State:  commonpb.IndexState_Finished,
 	}
 
-	indexInfo := &indexpb.IndexInfo{
-		IndexedRows:          0,
-		TotalRows:            0,
-		State:                0,
-		IndexStateFailReason: "",
-	}
+	indexInfo := &indexpb.IndexInfo{}
 	s.completeIndexInfo(indexInfo, indexes[0], s.meta.SelectSegments(func(info *SegmentInfo) bool {
 		return isFlush(info) && info.CollectionID == req.GetCollectionID()
 	}), false, indexes[0].CreateTime)
@@ -258,7 +252,8 @@ func (s *Server) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRe
 	ret.FailReason = indexInfo.IndexStateFailReason
 
 	log.Info("GetIndexState success",
-		zap.String("IndexName", req.GetIndexName()), zap.String("state", ret.GetState().String()))
+		zap.String("state", ret.GetState().String()),
+	)
 	return ret, nil
 }
 
@@ -485,9 +480,11 @@ func (s *Server) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetInde
 func (s *Server) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.String("indexName", req.GetIndexName()),
 	)
-	log.Info("receive DescribeIndex request", zap.String("indexName", req.GetIndexName()),
-		zap.Uint64("timestamp", req.GetTimestamp()))
+	log.Info("receive DescribeIndex request",
+		zap.Uint64("timestamp", req.GetTimestamp()),
+	)
 
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		log.Warn(msgDataCoordIsUnhealthy(paramtable.GetNodeID()), zap.Error(err))
@@ -499,7 +496,7 @@ func (s *Server) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRe
 	indexes := s.meta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
 	if len(indexes) == 0 {
 		err := merr.WrapErrIndexNotFound(req.GetIndexName())
-		log.Warn("DescribeIndex fail", zap.String("indexName", req.GetIndexName()), zap.Error(err))
+		log.Warn("DescribeIndex fail", zap.Error(err))
 		return &indexpb.DescribeIndexResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -532,7 +529,7 @@ func (s *Server) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRe
 		s.completeIndexInfo(indexInfo, index, segments, false, createTs)
 		indexInfos = append(indexInfos, indexInfo)
 	}
-	log.Info("DescribeIndex success", zap.String("indexName", req.GetIndexName()))
+	log.Info("DescribeIndex success")
 	return &indexpb.DescribeIndexResponse{
 		Status:     merr.Status(nil),
 		IndexInfos: indexInfos,

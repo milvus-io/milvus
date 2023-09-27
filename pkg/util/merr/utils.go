@@ -489,6 +489,14 @@ func WrapErrIndexNotFoundForSegment(segmentID int64, msg ...string) error {
 	return err
 }
 
+func WrapErrIndexNotFoundForCollection(collection string, msg ...string) error {
+	err := wrapWithField(ErrIndexNotFound, "collection", collection)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
 func WrapErrIndexNotSupported(indexType string, msg ...string) error {
 	err := wrapWithField(ErrIndexNotSupported, "indexType", indexType)
 	if len(msg) > 0 {
