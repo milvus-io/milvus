@@ -146,7 +146,7 @@ func (suite *TaskSuite) SetupTest() {
 	suite.cluster = session.NewMockCluster(suite.T())
 
 	suite.scheduler = suite.newScheduler()
-	suite.scheduler.Start(context.Background())
+	suite.scheduler.Start()
 	suite.scheduler.AddExecutor(1)
 	suite.scheduler.AddExecutor(2)
 	suite.scheduler.AddExecutor(3)

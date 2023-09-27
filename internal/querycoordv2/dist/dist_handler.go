@@ -246,6 +246,10 @@ func (dh *distHandler) stop() {
 	dh.stopOnce.Do(func() {
 		close(dh.c)
 		dh.wg.Wait()
+
+		// clear dist
+		dh.dist.ChannelDistManager.Update(dh.nodeID)
+		dh.dist.SegmentDistManager.Update(dh.nodeID)
 	})
 }
 

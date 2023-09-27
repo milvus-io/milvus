@@ -428,40 +428,41 @@ func (s *Server) startQueryCoord() error {
 }
 
 func (s *Server) startServerLoop() {
+	// start the components from inside to outside,
+	// to make the dependencies ready for every component
 	log.Info("start cluster...")
-	s.cluster.Start(s.ctx)
-
-	log.Info("start job scheduler...")
-	s.jobScheduler.Start(s.ctx)
-
-	log.Info("start task scheduler...")
-	s.taskScheduler.Start(s.ctx)
-
-	log.Info("start checker controller...")
-	s.checkerController.Start(s.ctx)
+	s.cluster.Start()
 
 	log.Info("start observers...")
-	s.collectionObserver.Start(s.ctx)
-	s.leaderObserver.Start(s.ctx)
-	s.targetObserver.Start(s.ctx)
-	s.replicaObserver.Start(s.ctx)
-	s.resourceObserver.Start(s.ctx)
+	s.collectionObserver.Start()
+	s.leaderObserver.Start()
+	s.targetObserver.Start()
+	s.replicaObserver.Start()
+	s.resourceObserver.Start()
+
+	log.Info("start task scheduler...")
+	s.taskScheduler.Start()
+
+	log.Info("start checker controller...")
+	s.checkerController.Start()
+
+	log.Info("start job scheduler...")
+	s.jobScheduler.Start()
 }
 
 func (s *Server) Stop() error {
+	// stop the components from outside to inside,
+	// to make the dependencies stopped working properly,
+	// cancel the server context first to stop receiving requests
 	s.cancel()
-	if s.session != nil {
-		s.session.Stop()
-	}
 
-	if s.cluster != nil {
-		log.Info("stop cluster...")
-		s.cluster.Stop()
-	}
+	// FOLLOW the dependence graph:
+	// job scheduler -> checker controller -> task scheduler -> dist controller -> cluster -> session
+	// observers -> dist controller
 
-	if s.distController != nil {
-		log.Info("stop dist controller...")
-		s.distController.Stop()
+	if s.jobScheduler != nil {
+		log.Info("stop job scheduler...")
+		s.jobScheduler.Stop()
 	}
 
 	if s.checkerController != nil {
@@ -472,11 +473,6 @@ func (s *Server) Stop() error {
 	if s.taskScheduler != nil {
 		log.Info("stop task scheduler...")
 		s.taskScheduler.Stop()
-	}
-
-	if s.jobScheduler != nil {
-		log.Info("stop job scheduler...")
-		s.jobScheduler.Stop()
 	}
 
 	log.Info("stop observers...")
@@ -494,6 +490,20 @@ func (s *Server) Stop() error {
 	}
 	if s.resourceObserver != nil {
 		s.resourceObserver.Stop()
+	}
+
+	if s.distController != nil {
+		log.Info("stop dist controller...")
+		s.distController.Stop()
+	}
+
+	if s.cluster != nil {
+		log.Info("stop cluster...")
+		s.cluster.Stop()
+	}
+
+	if s.session != nil {
+		s.session.Stop()
 	}
 
 	s.wg.Wait()

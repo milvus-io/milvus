@@ -42,7 +42,7 @@ var (
 )
 
 type CheckerController struct {
-	stopCh         chan struct{}
+	cancel         context.CancelFunc
 	manualCheckChs map[string]chan struct{}
 	meta           *meta.Meta
 	dist           *meta.DistributionManager
@@ -87,7 +87,6 @@ func NewCheckerController(
 	}
 
 	return &CheckerController{
-		stopCh:         make(chan struct{}),
 		manualCheckChs: manualCheckChs,
 		meta:           meta,
 		dist:           dist,
@@ -98,9 +97,12 @@ func NewCheckerController(
 	}
 }
 
-func (controller *CheckerController) Start(ctx context.Context) {
+func (controller *CheckerController) Start() {
+	ctx, cancel := context.WithCancel(context.Background())
+	controller.cancel = cancel
+
 	for checkerType := range controller.checkers {
-		go controller.StartChecker(ctx, checkerType)
+		go controller.startChecker(ctx, checkerType)
 	}
 }
 
@@ -119,7 +121,7 @@ func getCheckerInterval(checkerType string) time.Duration {
 	}
 }
 
-func (controller *CheckerController) StartChecker(ctx context.Context, checkerType string) {
+func (controller *CheckerController) startChecker(ctx context.Context, checkerType string) {
 	interval := getCheckerInterval(checkerType)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -127,11 +129,6 @@ func (controller *CheckerController) StartChecker(ctx context.Context, checkerTy
 	for {
 		select {
 		case <-ctx.Done():
-			log.Info("Checker stopped due to context canceled",
-				zap.String("type", checkerType))
-			return
-
-		case <-controller.stopCh:
 			log.Info("Checker stopped",
 				zap.String("type", checkerType))
 			return
@@ -149,7 +146,9 @@ func (controller *CheckerController) StartChecker(ctx context.Context, checkerTy
 
 func (controller *CheckerController) Stop() {
 	controller.stopOnce.Do(func() {
-		close(controller.stopCh)
+		if controller.cancel != nil {
+			controller.cancel()
+		}
 	})
 }
 

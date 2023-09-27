@@ -17,7 +17,6 @@
 package observers
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -83,7 +82,7 @@ func (suite *TargetObserverSuite) SetupTest() {
 	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
 	suite.distMgr = meta.NewDistributionManager()
 	suite.observer = NewTargetObserver(suite.meta, suite.targetMgr, suite.distMgr, suite.broker)
-	suite.observer.Start(context.TODO())
+	suite.observer.Start()
 	suite.collectionID = int64(1000)
 	suite.partitionID = int64(100)
 

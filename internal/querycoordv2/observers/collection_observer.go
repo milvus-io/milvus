@@ -34,7 +34,8 @@ import (
 )
 
 type CollectionObserver struct {
-	stopCh chan struct{}
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
 
 	dist                 *meta.DistributionManager
 	meta                 *meta.Meta
@@ -56,7 +57,6 @@ func NewCollectionObserver(
 	checherController *checkers.CheckerController,
 ) *CollectionObserver {
 	return &CollectionObserver{
-		stopCh:               make(chan struct{}),
 		dist:                 dist,
 		meta:                 meta,
 		targetMgr:            targetMgr,
@@ -67,23 +67,25 @@ func NewCollectionObserver(
 	}
 }
 
-func (ob *CollectionObserver) Start(ctx context.Context) {
+func (ob *CollectionObserver) Start() {
+	ctx, cancel := context.WithCancel(context.Background())
+	ob.cancel = cancel
+
 	const observePeriod = time.Second
+	ob.wg.Add(1)
 	go func() {
+		defer ob.wg.Done()
+
 		ticker := time.NewTicker(observePeriod)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
-				log.Info("CollectionObserver stopped due to context canceled")
-				return
-
-			case <-ob.stopCh:
 				log.Info("CollectionObserver stopped")
 				return
 
 			case <-ticker.C:
-				ob.Observe()
+				ob.Observe(ctx)
 			}
 		}
 	}()
@@ -91,11 +93,14 @@ func (ob *CollectionObserver) Start(ctx context.Context) {
 
 func (ob *CollectionObserver) Stop() {
 	ob.stopOnce.Do(func() {
-		close(ob.stopCh)
+		if ob.cancel != nil {
+			ob.cancel()
+		}
+		ob.wg.Wait()
 	})
 }
 
-func (ob *CollectionObserver) Observe() {
+func (ob *CollectionObserver) Observe(ctx context.Context) {
 	ob.observeTimeout()
 	ob.observeLoadStatus()
 }

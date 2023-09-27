@@ -88,8 +88,9 @@ func (dc *ControllerImpl) SyncAll(ctx context.Context) {
 func (dc *ControllerImpl) Stop() {
 	dc.mu.Lock()
 	defer dc.mu.Unlock()
-	for _, h := range dc.handlers {
+	for nodeID, h := range dc.handlers {
 		h.stop()
+		delete(dc.handlers, nodeID)
 	}
 }
 

@@ -31,28 +31,32 @@ import (
 
 // check whether rg lack of node, try to transfer node from default rg
 type ResourceObserver struct {
-	c    chan struct{}
-	wg   sync.WaitGroup
-	meta *meta.Meta
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+	meta   *meta.Meta
 
 	stopOnce sync.Once
 }
 
 func NewResourceObserver(meta *meta.Meta) *ResourceObserver {
 	return &ResourceObserver{
-		c:    make(chan struct{}),
 		meta: meta,
 	}
 }
 
-func (ob *ResourceObserver) Start(ctx context.Context) {
+func (ob *ResourceObserver) Start() {
+	ctx, cancel := context.WithCancel(context.Background())
+	ob.cancel = cancel
+
 	ob.wg.Add(1)
 	go ob.schedule(ctx)
 }
 
 func (ob *ResourceObserver) Stop() {
 	ob.stopOnce.Do(func() {
-		close(ob.c)
+		if ob.cancel != nil {
+			ob.cancel()
+		}
 		ob.wg.Wait()
 	})
 }
@@ -66,9 +70,6 @@ func (ob *ResourceObserver) schedule(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Info("Close resource group observer due to context canceled")
-			return
-		case <-ob.c:
 			log.Info("Close resource group observer")
 			return
 
