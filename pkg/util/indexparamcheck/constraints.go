@@ -1,6 +1,8 @@
 package indexparamcheck
 
 import (
+	"math"
+
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 )
@@ -20,10 +22,11 @@ const (
 	// DefaultMaxDim is the largest dimension supported in Milvus
 	DefaultMaxDim = 32768
 
-	HNSWMinEfConstruction = 8
-	HNSWMaxEfConstruction = 512
-	HNSWMinM              = 4
-	HNSWMaxM              = 64
+	// TODO(liliu-z): Merge this limit check into Knowhere. Provide a dry-run API or independent param check API for this.
+	HNSWMinEfConstruction = 1
+	HNSWMaxEfConstruction = math.MaxInt32
+	HNSWMinM              = 1
+	HNSWMaxM              = 2048
 
 	// DIM is a constant used to represent dimension
 	DIM = common.DimKey
