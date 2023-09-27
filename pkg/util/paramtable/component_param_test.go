@@ -278,6 +278,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 1000, Params.ChannelCheckInterval.GetAsInt())
 		assert.Equal(t, 10000, Params.BalanceCheckInterval.GetAsInt())
 		assert.Equal(t, 10000, Params.IndexCheckInterval.GetAsInt())
+		assert.Equal(t, 3, Params.CollectionRecoverTimesLimit.GetAsInt())
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {

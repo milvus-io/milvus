@@ -539,6 +539,7 @@ message CollectionLoadInfo {
   LoadStatus status = 4;
   map<int64, int64> field_indexID = 5;
   LoadType load_type = 6;
+  int32 recover_times = 7;
 }
 
 message PartitionLoadInfo {
@@ -547,6 +548,7 @@ message PartitionLoadInfo {
   int32 replica_number = 3; // Deprecated: No longer used; kept for compatibility.
   LoadStatus status = 4;
   map<int64, int64> field_indexID = 5; // Deprecated: No longer used; kept for compatibility.
+  int32 recover_times = 7;
 }
 
 message Replica {

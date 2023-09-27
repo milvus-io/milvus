@@ -25,6 +25,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -32,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -328,16 +330,96 @@ func (suite *CollectionManagerSuite) TestRecover_normal() {
 	suite.clearMemory()
 	err := mgr.Recover(suite.broker)
 	suite.NoError(err)
-	for i, collection := range suite.collections {
-		exist := suite.colLoadPercent[i] == 100
-		suite.Equal(exist, mgr.Exist(collection))
-		if !exist {
-			continue
-		}
-		for j, partitionID := range suite.partitions[collection] {
+	for _, collection := range suite.collections {
+		suite.True(mgr.Exist(collection))
+		for _, partitionID := range suite.partitions[collection] {
 			partition := mgr.GetPartition(partitionID)
-			exist = suite.parLoadPercent[collection][j] == 100
-			suite.Equal(exist, partition != nil)
+			suite.NotNil(partition)
+		}
+	}
+}
+
+func (suite *CollectionManagerSuite) TestRecoverLoadingCollection() {
+	mgr := suite.mgr
+	suite.releaseAll()
+	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything).Return(nil, nil)
+	// test put collection with partitions
+	for i, collection := range suite.collections {
+		suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil).Maybe()
+		col := &Collection{
+			CollectionLoadInfo: &querypb.CollectionLoadInfo{
+				CollectionID:  collection,
+				ReplicaNumber: suite.replicaNumber[i],
+				Status:        querypb.LoadStatus_Loading,
+				LoadType:      suite.loadTypes[i],
+			},
+			LoadPercentage: 0,
+			CreatedAt:      time.Now(),
+		}
+		partitions := lo.Map(suite.partitions[collection], func(partition int64, j int) *Partition {
+			return &Partition{
+				PartitionLoadInfo: &querypb.PartitionLoadInfo{
+					CollectionID:  collection,
+					PartitionID:   partition,
+					ReplicaNumber: suite.replicaNumber[i],
+					Status:        querypb.LoadStatus_Loading,
+				},
+				LoadPercentage: 0,
+				CreatedAt:      time.Now(),
+			}
+		})
+		err := suite.mgr.PutCollection(col, partitions...)
+		suite.NoError(err)
+	}
+
+	// recover for first time, expected recover success
+	suite.clearMemory()
+	err := mgr.Recover(suite.broker)
+	suite.NoError(err)
+	for _, collectionID := range suite.collections {
+		collection := mgr.GetCollection(collectionID)
+		suite.NotNil(collection)
+		suite.Equal(int32(1), collection.GetRecoverTimes())
+		for _, partitionID := range suite.partitions[collectionID] {
+			partition := mgr.GetPartition(partitionID)
+			suite.NotNil(partition)
+			suite.Equal(int32(1), partition.GetRecoverTimes())
+		}
+	}
+
+	// update load percent, then recover for second time
+	for _, collectionID := range suite.collections {
+		for _, partitionID := range suite.partitions[collectionID] {
+			mgr.UpdateLoadPercent(partitionID, 10)
+		}
+	}
+	suite.clearMemory()
+	err = mgr.Recover(suite.broker)
+	suite.NoError(err)
+	for _, collectionID := range suite.collections {
+		collection := mgr.GetCollection(collectionID)
+		suite.NotNil(collection)
+		suite.Equal(int32(2), collection.GetRecoverTimes())
+		for _, partitionID := range suite.partitions[collectionID] {
+			partition := mgr.GetPartition(partitionID)
+			suite.NotNil(partition)
+			suite.Equal(int32(2), partition.GetRecoverTimes())
+		}
+	}
+
+	// test recover loading collection reach limit
+	for i := 0; i < int(paramtable.Get().QueryCoordCfg.CollectionRecoverTimesLimit.GetAsInt32()); i++ {
+		log.Info("stupid", zap.Int("count", i))
+		suite.clearMemory()
+		err = mgr.Recover(suite.broker)
+		suite.NoError(err)
+	}
+	for _, collectionID := range suite.collections {
+		collection := mgr.GetCollection(collectionID)
+		suite.Nil(collection)
+		for _, partitionID := range suite.partitions[collectionID] {
+			partition := mgr.GetPartition(partitionID)
+			suite.Nil(partition)
 		}
 	}
 }
@@ -368,15 +450,15 @@ func (suite *CollectionManagerSuite) TestRecover_with_dropped() {
 	suite.clearMemory()
 	err := mgr.Recover(suite.broker)
 	suite.NoError(err)
-	for i, collection := range suite.collections {
-		exist := suite.colLoadPercent[i] == 100 && collection != droppedCollection
+	for _, collection := range suite.collections {
+		exist := collection != droppedCollection
 		suite.Equal(exist, mgr.Exist(collection))
 		if !exist {
 			continue
 		}
-		for j, partitionID := range suite.partitions[collection] {
+		for _, partitionID := range suite.partitions[collection] {
 			partition := mgr.GetPartition(partitionID)
-			exist = suite.parLoadPercent[collection][j] == 100 && partitionID != droppedPartition
+			exist = partitionID != droppedPartition
 			suite.Equal(exist, partition != nil)
 		}
 	}
