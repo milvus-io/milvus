@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
+	"github.com/milvus-io/milvus/internal/querynodev2/optimizers"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -180,7 +181,7 @@ func (suite *OptimizeSearchParamSuite) TestOptimizeSearchParam() {
 	defer cancel()
 
 	suite.Run("normal_run", func() {
-		mockHook := &MockQueryHook{}
+		mockHook := optimizers.NewMockQueryHook(suite.T())
 		mockHook.EXPECT().Run(mock.Anything).Run(func(params map[string]any) {
 			params[common.TopKKey] = int64(50)
 			params[common.SearchParamKey] = `{"param": 2}`
@@ -237,7 +238,7 @@ func (suite *OptimizeSearchParamSuite) TestOptimizeSearchParam() {
 	})
 
 	suite.Run("other_plannode", func() {
-		mockHook := &MockQueryHook{}
+		mockHook := optimizers.NewMockQueryHook(suite.T())
 		mockHook.EXPECT().Run(mock.Anything).Run(func(params map[string]any) {
 			params[common.TopKKey] = int64(50)
 			params[common.SearchParamKey] = `{"param": 2}`
@@ -262,11 +263,7 @@ func (suite *OptimizeSearchParamSuite) TestOptimizeSearchParam() {
 	})
 
 	suite.Run("no_serialized_plan", func() {
-		mockHook := &MockQueryHook{}
-		mockHook.EXPECT().Run(mock.Anything).Run(func(params map[string]any) {
-			params[common.TopKKey] = int64(50)
-			params[common.SearchParamKey] = `{"param": 2}`
-		}).Return(nil)
+		mockHook := optimizers.NewMockQueryHook(suite.T())
 		suite.node.queryHook = mockHook
 		defer func() { suite.node.queryHook = nil }()
 
@@ -278,7 +275,7 @@ func (suite *OptimizeSearchParamSuite) TestOptimizeSearchParam() {
 	})
 
 	suite.Run("hook_run_error", func() {
-		mockHook := &MockQueryHook{}
+		mockHook := optimizers.NewMockQueryHook(suite.T())
 		mockHook.EXPECT().Run(mock.Anything).Run(func(params map[string]any) {
 			params[common.TopKKey] = int64(50)
 			params[common.SearchParamKey] = `{"param": 2}`

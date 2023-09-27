@@ -1024,49 +1024,6 @@ func (_c *MockSegment_UpdateBloomFilter_Call) RunAndReturn(run func([]storage.Pr
 	return _c
 }
 
-// ValidateIndexedFieldsData provides a mock function with given fields: ctx, result
-func (_m *MockSegment) ValidateIndexedFieldsData(ctx context.Context, result *segcorepb.RetrieveResults) error {
-	ret := _m.Called(ctx, result)
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *segcorepb.RetrieveResults) error); ok {
-		r0 = rf(ctx, result)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockSegment_ValidateIndexedFieldsData_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ValidateIndexedFieldsData'
-type MockSegment_ValidateIndexedFieldsData_Call struct {
-	*mock.Call
-}
-
-// ValidateIndexedFieldsData is a helper method to define mock.On call
-//   - ctx context.Context
-//   - result *segcorepb.RetrieveResults
-func (_e *MockSegment_Expecter) ValidateIndexedFieldsData(ctx interface{}, result interface{}) *MockSegment_ValidateIndexedFieldsData_Call {
-	return &MockSegment_ValidateIndexedFieldsData_Call{Call: _e.mock.On("ValidateIndexedFieldsData", ctx, result)}
-}
-
-func (_c *MockSegment_ValidateIndexedFieldsData_Call) Run(run func(ctx context.Context, result *segcorepb.RetrieveResults)) *MockSegment_ValidateIndexedFieldsData_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*segcorepb.RetrieveResults))
-	})
-	return _c
-}
-
-func (_c *MockSegment_ValidateIndexedFieldsData_Call) Return(_a0 error) *MockSegment_ValidateIndexedFieldsData_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockSegment_ValidateIndexedFieldsData_Call) RunAndReturn(run func(context.Context, *segcorepb.RetrieveResults) error) *MockSegment_ValidateIndexedFieldsData_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // Version provides a mock function with given fields:
 func (_m *MockSegment) Version() int64 {
 	ret := _m.Called()

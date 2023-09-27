@@ -49,6 +49,7 @@ import (
 	grpcquerynodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
+	"github.com/milvus-io/milvus/internal/querynodev2/optimizers"
 	"github.com/milvus-io/milvus/internal/querynodev2/pipeline"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
@@ -127,7 +128,7 @@ type QueryNode struct {
 		knnPool *conc.Pool*/
 
 	// parameter turning hook
-	queryHook queryHook
+	queryHook optimizers.QueryHook
 }
 
 // NewQueryNode will return a QueryNode with abnormal state.
@@ -488,13 +489,6 @@ func (node *QueryNode) SetAddress(address string) {
 	node.address = address
 }
 
-type queryHook interface {
-	Run(map[string]any) error
-	Init(string) error
-	InitTuningConfig(map[string]string) error
-	DeleteTuningConfig(string) error
-}
-
 // initHook initializes parameter tuning hook.
 func (node *QueryNode) initHook() error {
 	path := paramtable.Get().QueryNodeCfg.SoPath.GetValue()
@@ -514,7 +508,7 @@ func (node *QueryNode) initHook() error {
 		return fmt.Errorf("fail to find the 'QueryNodePlugin' object in the plugin, error: %s", err.Error())
 	}
 
-	hoo, ok := h.(queryHook)
+	hoo, ok := h.(optimizers.QueryHook)
 	if !ok {
 		return fmt.Errorf("fail to convert the `Hook` interface")
 	}
