@@ -497,6 +497,42 @@ func Test_parseIndexParams(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("create index on array field", func(t *testing.T) {
+		cit3 := &createIndexTask{
+			Condition: nil,
+			req: &milvuspb.CreateIndexRequest{
+				Base:           nil,
+				DbName:         "",
+				CollectionName: "",
+				FieldName:      "",
+				ExtraParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.IndexTypeKey,
+						Value: "STL_SORT",
+					},
+				},
+				IndexName: "",
+			},
+			ctx:            nil,
+			rootCoord:      nil,
+			result:         nil,
+			isAutoIndex:    false,
+			newIndexParams: nil,
+			newTypeParams:  nil,
+			collectionID:   0,
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:      101,
+				Name:         "FieldID",
+				IsPrimaryKey: false,
+				Description:  "field no.1",
+				DataType:     schemapb.DataType_Array,
+				ElementType:  schemapb.DataType_Int64,
+			},
+		}
+		err := cit3.parseIndexParams()
+		assert.Error(t, err)
+	})
+
 	t.Run("pass vector index type on scalar field", func(t *testing.T) {
 		cit4 := &createIndexTask{
 			Condition: nil,

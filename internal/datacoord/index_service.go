@@ -630,6 +630,8 @@ func (s *Server) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 	for _, index := range indexes {
 		indexIDs = append(indexIDs, index.IndexID)
 	}
+	// Compatibility logic. To prevent the index on the corresponding segments
+	// from being dropped at the same time when dropping_partition in version 2.1
 	if len(req.GetPartitionIDs()) == 0 {
 		// drop collection index
 		err := s.meta.MarkIndexAsDeleted(req.GetCollectionID(), indexIDs)
