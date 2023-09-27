@@ -1,11 +1,12 @@
 package model
 
 import (
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/samber/lo"
 )
 
 type Collection struct {

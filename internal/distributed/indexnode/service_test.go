@@ -20,7 +20,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -28,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"

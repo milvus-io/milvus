@@ -24,16 +24,16 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 )
 
 var binlogTestDir = "/tmp/milvus_test/test_binlog_io"
@@ -201,7 +201,6 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
 				if test.isvalid {
-
 					k, v, err := b.genDeltaBlobs(&DeleteData{
 						Pks: []primaryKey{test.deletepk},
 						Tss: []uint64{test.ts},
@@ -237,7 +236,6 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 			assert.Error(t, err)
 			assert.Empty(t, k)
 			assert.Empty(t, v)
-
 		})
 	})
 

@@ -33,9 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
-var (
-	maxTxnNum = 128
-)
+var maxTxnNum = 128
 
 // GetEtcdClient returns etcd client
 func GetEtcdClient(
@@ -45,7 +43,8 @@ func GetEtcdClient(
 	certFile string,
 	keyFile string,
 	caCertFile string,
-	minVersion string) (*clientv3.Client, error) {
+	minVersion string,
+) (*clientv3.Client, error) {
 	log.Info("create etcd client",
 		zap.Bool("useEmbedEtcd", useEmbedEtcd),
 		zap.Bool("useSSL", useSSL),

@@ -35,7 +35,6 @@ func HashKey2Partitions(fieldSchema *schemapb.FieldSchema, keys []*planpb.Generi
 		}
 	default:
 		return nil, errors.New("currently only support DataType Int64 or VarChar as partition keys")
-
 	}
 
 	result := make([]string, 0)

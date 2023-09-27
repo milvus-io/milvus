@@ -4,10 +4,10 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/util/metric"
-
-	"github.com/stretchr/testify/assert"
 )
 
 func Test_diskannChecker_CheckTrain(t *testing.T) {
@@ -84,7 +84,6 @@ func Test_diskannChecker_CheckTrain(t *testing.T) {
 }
 
 func Test_diskannChecker_CheckValidDataType(t *testing.T) {
-
 	cases := []struct {
 		dType    schemapb.DataType
 		errIsNil bool

@@ -20,10 +20,10 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 func Test_parseDummyRequestType(t *testing.T) {

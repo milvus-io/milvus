@@ -21,9 +21,8 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"golang.org/x/exp/maps"
-
 	"go.uber.org/zap"
+	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus/pkg/log"
 )

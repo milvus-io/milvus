@@ -23,24 +23,27 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-
 	"google.golang.org/grpc"
+
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 const (
 	clientRequestIDKey = "client_request_id"
 )
 
-var _globalL, _globalW atomic.Value
-var once sync.Once
+var (
+	_globalL, _globalW atomic.Value
+	once               sync.Once
+)
 
 func A() *zap.Logger {
 	return _globalL.Load().(*zap.Logger)
 }
+
 func W() *RotateLogger {
 	return _globalW.Load().(*RotateLogger)
 }
@@ -109,11 +112,11 @@ func PrintAccessInfo(ctx context.Context, resp interface{}, err error, rpcInfo *
 	}
 
 	fields := []zap.Field{
-		//format time cost of task
+		// format time cost of task
 		zap.String("timeCost", fmt.Sprintf("%d ms", timeCost)),
 	}
 
-	//get trace ID of task
+	// get trace ID of task
 	traceID, ok := getTraceID(ctx)
 	if !ok {
 		log.Warn("access log print failed: could not get trace ID")
@@ -121,7 +124,7 @@ func PrintAccessInfo(ctx context.Context, resp interface{}, err error, rpcInfo *
 	}
 	fields = append(fields, zap.String("traceId", traceID))
 
-	//get response size of task
+	// get response size of task
 	responseSize, ok := getResponseSize(resp)
 	if !ok {
 		log.Warn("access log print failed: could not get response size")
@@ -129,7 +132,7 @@ func PrintAccessInfo(ctx context.Context, resp interface{}, err error, rpcInfo *
 	}
 	fields = append(fields, zap.Int("responseSize", responseSize))
 
-	//get err code of task
+	// get err code of task
 	errCode, ok := getErrCode(resp)
 	if !ok {
 		// unknown error code
@@ -137,13 +140,13 @@ func PrintAccessInfo(ctx context.Context, resp interface{}, err error, rpcInfo *
 	}
 	fields = append(fields, zap.Int("errorCode", errCode))
 
-	//get status of grpc
+	// get status of grpc
 	Status := getGrpcStatus(err)
 	if Status == "OK" && errCode > 0 {
 		Status = "TaskFailed"
 	}
 
-	//get method name of grpc
+	// get method name of grpc
 	_, methodName := path.Split(rpcInfo.FullMethod)
 
 	A().Info(fmt.Sprintf("%v: %s-%s", Status, getAccessAddr(ctx), methodName), fields...)

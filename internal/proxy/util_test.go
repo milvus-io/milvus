@@ -25,8 +25,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/log"
-
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -41,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/crypto"

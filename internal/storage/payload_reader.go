@@ -4,12 +4,11 @@ import (
 	"bytes"
 	"fmt"
 
-	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
-
 	"github.com/apache/arrow/go/v8/arrow"
 	"github.com/apache/arrow/go/v8/parquet"
 	"github.com/apache/arrow/go/v8/parquet/file"
+	"github.com/cockroachdb/errors"
+	"github.com/golang/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )

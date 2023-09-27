@@ -23,15 +23,15 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
 	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 )
 
 type BaseResponse interface {

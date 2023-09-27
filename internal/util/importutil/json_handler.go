@@ -23,7 +23,6 @@ import (
 	"strconv"
 
 	"github.com/cockroachdb/errors"
-
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -72,7 +71,8 @@ func NewJSONRowConsumer(ctx context.Context,
 	collectionInfo *CollectionInfo,
 	idAlloc *allocator.IDAllocator,
 	blockSize int64,
-	flushFunc ImportFlushFunc) (*JSONRowConsumer, error) {
+	flushFunc ImportFlushFunc,
+) (*JSONRowConsumer, error) {
 	if collectionInfo == nil {
 		log.Warn("JSON row consumer: collection schema is nil")
 		return nil, errors.New("collection schema is nil")

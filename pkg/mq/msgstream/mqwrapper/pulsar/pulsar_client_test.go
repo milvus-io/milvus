@@ -135,7 +135,7 @@ func Consume1(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 			consumer.Ack(msg)
 			VerifyMessage(t, msg)
 			(*total)++
-			//log.Debug("total", zap.Int("val", *total))
+			// log.Debug("total", zap.Int("val", *total))
 		}
 	}
 	c <- msg.ID()
@@ -174,7 +174,7 @@ func Consume2(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 			consumer.Ack(msg)
 			VerifyMessage(t, msg)
 			(*total)++
-			//log.Debug("total", zap.Int("val", *total))
+			// log.Debug("total", zap.Int("val", *total))
 		}
 	}
 }
@@ -201,7 +201,7 @@ func Consume3(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 			consumer.Ack(msg)
 			VerifyMessage(t, msg)
 			(*total)++
-			//log.Debug("total", zap.Int("val", *total))
+			// log.Debug("total", zap.Int("val", *total))
 		}
 	}
 }
@@ -284,7 +284,7 @@ func Consume21(ctx context.Context, t *testing.T, pc *pulsarClient, topic string
 			v := BytesToInt(msg.Payload())
 			log.Info("RECV", zap.Any("v", v))
 			(*total)++
-			//log.Debug("total", zap.Int("val", *total))
+			// log.Debug("total", zap.Int("val", *total))
 		}
 	}
 	c <- &pulsarID{messageID: msg.ID()}
@@ -324,7 +324,7 @@ func Consume22(ctx context.Context, t *testing.T, pc *pulsarClient, topic string
 			v := BytesToInt(msg.Payload())
 			log.Info("RECV", zap.Any("v", v))
 			(*total)++
-			//log.Debug("total", zap.Int("val", *total))
+			// log.Debug("total", zap.Int("val", *total))
 		}
 	}
 }
@@ -352,7 +352,7 @@ func Consume23(ctx context.Context, t *testing.T, pc *pulsarClient, topic string
 			v := BytesToInt(msg.Payload())
 			log.Info("RECV", zap.Any("v", v))
 			(*total)++
-			//log.Debug("total", zap.Int("val", *total))
+			// log.Debug("total", zap.Int("val", *total))
 		}
 	}
 }

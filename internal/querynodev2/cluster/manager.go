@@ -39,7 +39,7 @@ type WorkerBuilder func(ctx context.Context, nodeID int64) (Worker, error)
 type grpcWorkerManager struct {
 	workers *typeutil.ConcurrentMap[int64, Worker]
 	builder WorkerBuilder
-	sf      conc.Singleflight[Worker] //singleflight.Group
+	sf      conc.Singleflight[Worker] // singleflight.Group
 }
 
 // GetWorker returns worker with specified nodeID.

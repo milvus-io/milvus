@@ -171,7 +171,8 @@ func TestRepackInsertDataWithPartitionKey(t *testing.T) {
 	fieldName2Types := map[string]schemapb.DataType{
 		testInt64Field:    schemapb.DataType_Int64,
 		testVarCharField:  schemapb.DataType_VarChar,
-		testFloatVecField: schemapb.DataType_FloatVector}
+		testFloatVecField: schemapb.DataType_FloatVector,
+	}
 
 	t.Run("create collection with partition key", func(t *testing.T) {
 		schema := ConstructCollectionSchemaWithPartitionKey(collectionName, fieldName2Types, testInt64Field, testVarCharField, false)

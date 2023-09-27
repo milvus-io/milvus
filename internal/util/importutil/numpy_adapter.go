@@ -29,13 +29,13 @@ import (
 	"unicode/utf8"
 
 	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/sbinet/npyio"
 	"github.com/sbinet/npyio/npy"
 	"go.uber.org/zap"
 	"golang.org/x/text/encoding/unicode"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 var (

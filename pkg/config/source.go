@@ -44,7 +44,7 @@ type EtcdInfo struct {
 	CaCertFile string
 	MinVersion string
 
-	//Pull Configuration interval, unit is second
+	// Pull Configuration interval, unit is second
 	RefreshInterval time.Duration
 }
 

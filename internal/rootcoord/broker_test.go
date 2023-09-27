@@ -21,18 +21,16 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 )
 
 func TestServerBroker_ReleaseCollection(t *testing.T) {

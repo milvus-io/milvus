@@ -203,7 +203,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 	})
 
 	t.Run("ToRelease-ReleaseSuccess-Reassign-ToWatch-2-DN", func(t *testing.T) {
-		var oldNode = UniqueID(120)
+		oldNode := UniqueID(120)
 		cName := channelNamePrefix + "ToRelease-ReleaseSuccess-Reassign-ToWatch-2-DN"
 
 		watchkv.RemoveWithPrefix("")
@@ -289,7 +289,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 	})
 
 	t.Run("ToRelease-ReleaseFail-CleanUpAndDelete-Reassign-ToWatch-2-DN", func(t *testing.T) {
-		var oldNode = UniqueID(121)
+		oldNode := UniqueID(121)
 
 		cName := channelNamePrefix + "ToRelease-ReleaseFail-CleanUpAndDelete-Reassign-ToWatch-2-DN"
 		watchkv.RemoveWithPrefix("")
@@ -520,7 +520,7 @@ func TestChannelManager(t *testing.T) {
 
 	t.Run("test Reassign", func(t *testing.T) {
 		defer watchkv.RemoveWithPrefix("")
-		var collectionID = UniqueID(5)
+		collectionID := UniqueID(5)
 
 		tests := []struct {
 			nodeID UniqueID
@@ -571,9 +571,7 @@ func TestChannelManager(t *testing.T) {
 	t.Run("test DeleteNode", func(t *testing.T) {
 		defer watchkv.RemoveWithPrefix("")
 
-		var (
-			collectionID = UniqueID(999)
-		)
+		collectionID := UniqueID(999)
 		chManager, err := NewChannelManager(watchkv, newMockHandler(), withStateChecker())
 		require.NoError(t, err)
 		chManager.store = &ChannelStore{
@@ -581,7 +579,8 @@ func TestChannelManager(t *testing.T) {
 			channelsInfo: map[int64]*NodeChannelInfo{
 				1: {1, []*channel{
 					{Name: "channel-1", CollectionID: collectionID},
-					{Name: "channel-2", CollectionID: collectionID}}},
+					{Name: "channel-2", CollectionID: collectionID},
+				}},
 				bufferID: {bufferID, []*channel{}},
 			},
 		}
@@ -596,7 +595,7 @@ func TestChannelManager(t *testing.T) {
 
 	t.Run("test CleanupAndReassign", func(t *testing.T) {
 		defer watchkv.RemoveWithPrefix("")
-		var collectionID = UniqueID(6)
+		collectionID := UniqueID(6)
 
 		tests := []struct {
 			nodeID UniqueID
@@ -745,7 +744,7 @@ func TestChannelManager(t *testing.T) {
 		)
 		cName := channelNamePrefix + "TestBgChecker"
 
-		//1. set up channel_manager
+		// 1. set up channel_manager
 		ctx, cancel := context.WithCancel(context.TODO())
 		defer cancel()
 		chManager, err := NewChannelManager(watchkv, newMockHandler(), withBgChecker())
@@ -753,12 +752,12 @@ func TestChannelManager(t *testing.T) {
 		assert.NotNil(t, chManager.bgChecker)
 		chManager.Startup(ctx, []int64{nodeID})
 
-		//2. test isSilent function running correctly
+		// 2. test isSilent function running correctly
 		Params.Save(Params.DataCoordCfg.ChannelBalanceSilentDuration.Key, "3")
 		assert.False(t, chManager.isSilent())
 		assert.False(t, chManager.stateTimer.hasRunningTimers())
 
-		//3. watch one channel
+		// 3. watch one channel
 		chManager.Watch(&channel{Name: cName, CollectionID: collectionID})
 		assert.False(t, chManager.isSilent())
 		assert.True(t, chManager.stateTimer.hasRunningTimers())
@@ -766,7 +765,7 @@ func TestChannelManager(t *testing.T) {
 		waitAndStore(t, watchkv, key, datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess)
 		waitAndCheckState(t, watchkv, datapb.ChannelWatchState_WatchSuccess, nodeID, cName, collectionID)
 
-		//4. wait for duration and check silent again
+		// 4. wait for duration and check silent again
 		time.Sleep(Params.DataCoordCfg.ChannelBalanceSilentDuration.GetAsDuration(time.Second))
 		chManager.stateTimer.removeTimers([]string{cName})
 		assert.True(t, chManager.isSilent())
@@ -839,7 +838,8 @@ func TestChannelManager_Reload(t *testing.T) {
 			chManager.store = &ChannelStore{
 				store: watchkv,
 				channelsInfo: map[int64]*NodeChannelInfo{
-					nodeID: {nodeID, []*channel{{Name: channelName, CollectionID: collectionID}}}},
+					nodeID: {nodeID, []*channel{{Name: channelName, CollectionID: collectionID}}},
+				},
 			}
 
 			data, err := proto.Marshal(getWatchInfoWithState(datapb.ChannelWatchState_WatchFailure, collectionID, channelName))
@@ -861,7 +861,8 @@ func TestChannelManager_Reload(t *testing.T) {
 			chManager.store = &ChannelStore{
 				store: watchkv,
 				channelsInfo: map[int64]*NodeChannelInfo{
-					nodeID: {nodeID, []*channel{{Name: channelName, CollectionID: collectionID}}}},
+					nodeID: {nodeID, []*channel{{Name: channelName, CollectionID: collectionID}}},
+				},
 			}
 
 			require.NoError(t, err)
@@ -902,7 +903,6 @@ func TestChannelManager_Reload(t *testing.T) {
 			v, err := watchkv.Load(path.Join(prefix, strconv.FormatInt(nodeID, 10), channelName))
 			assert.Error(t, err)
 			assert.Empty(t, v)
-
 		})
 	})
 
@@ -958,9 +958,7 @@ func TestChannelManager_BalanceBehaviour(t *testing.T) {
 	t.Run("one node with three channels add a new node", func(t *testing.T) {
 		defer watchkv.RemoveWithPrefix("")
 
-		var (
-			collectionID = UniqueID(999)
-		)
+		collectionID := UniqueID(999)
 
 		chManager, err := NewChannelManager(watchkv, newMockHandler(), withStateChecker())
 		require.NoError(t, err)
@@ -976,12 +974,12 @@ func TestChannelManager_BalanceBehaviour(t *testing.T) {
 				1: {1, []*channel{
 					{Name: "channel-1", CollectionID: collectionID},
 					{Name: "channel-2", CollectionID: collectionID},
-					{Name: "channel-3", CollectionID: collectionID}}}},
+					{Name: "channel-3", CollectionID: collectionID},
+				}},
+			},
 		}
 
-		var (
-			channelBalanced string
-		)
+		var channelBalanced string
 
 		chManager.AddNode(2)
 		channelBalanced = "channel-1"
@@ -1047,7 +1045,6 @@ func TestChannelManager_BalanceBehaviour(t *testing.T) {
 		assert.True(t, chManager.Match(1, "channel-1"))
 		assert.True(t, chManager.Match(1, "channel-4"))
 	})
-
 }
 
 func TestChannelManager_RemoveChannel(t *testing.T) {
@@ -1153,6 +1150,5 @@ func TestChannelManager_HelperFunc(t *testing.T) {
 				assert.ElementsMatch(t, test.expectedOut, nodes)
 			})
 		}
-
 	})
 }

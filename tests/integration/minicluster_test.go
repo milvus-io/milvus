@@ -32,7 +32,7 @@ type MiniClusterMethodsSuite struct {
 }
 
 func (s *MiniClusterMethodsSuite) TestStartAndStop() {
-	//Do nothing
+	// Do nothing
 }
 
 func (s *MiniClusterMethodsSuite) TestRemoveDataNode() {
@@ -42,7 +42,7 @@ func (s *MiniClusterMethodsSuite) TestRemoveDataNode() {
 
 	datanode := datanode.NewDataNode(ctx, c.factory)
 	datanode.SetEtcdClient(c.EtcdCli)
-	//datanode := c.CreateDefaultDataNode()
+	// datanode := c.CreateDefaultDataNode()
 
 	err := c.AddDataNode(datanode)
 	s.NoError(err)
@@ -77,7 +77,7 @@ func (s *MiniClusterMethodsSuite) TestRemoveQueryNode() {
 
 	queryNode := querynodev2.NewQueryNode(ctx, c.factory)
 	queryNode.SetEtcdClient(c.EtcdCli)
-	//queryNode := c.CreateDefaultQueryNode()
+	// queryNode := c.CreateDefaultQueryNode()
 
 	err := c.AddQueryNode(queryNode)
 	s.NoError(err)
@@ -103,7 +103,6 @@ func (s *MiniClusterMethodsSuite) TestRemoveQueryNode() {
 
 	s.Equal(1, c.clusterConfig.QueryNodeNum)
 	s.Equal(1, len(c.QueryNodes))
-
 }
 
 func (s *MiniClusterMethodsSuite) TestRemoveIndexNode() {
@@ -113,7 +112,7 @@ func (s *MiniClusterMethodsSuite) TestRemoveIndexNode() {
 
 	indexNode := indexnode.NewIndexNode(ctx, c.factory)
 	indexNode.SetEtcdClient(c.EtcdCli)
-	//indexNode := c.CreateDefaultIndexNode()
+	// indexNode := c.CreateDefaultIndexNode()
 
 	err := c.AddIndexNode(indexNode)
 	s.NoError(err)
@@ -139,11 +138,9 @@ func (s *MiniClusterMethodsSuite) TestRemoveIndexNode() {
 
 	s.Equal(1, c.clusterConfig.IndexNodeNum)
 	s.Equal(1, len(c.IndexNodes))
-
 }
 
 func (s *MiniClusterMethodsSuite) TestUpdateClusterSize() {
-
 	c := s.Cluster
 
 	err := c.UpdateClusterSize(ClusterConfig{

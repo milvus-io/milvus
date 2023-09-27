@@ -19,11 +19,12 @@ package job
 import (
 	"context"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/log"
-	"go.uber.org/zap"
 )
 
 type UndoList struct {
@@ -42,7 +43,8 @@ type UndoList struct {
 }
 
 func NewUndoList(ctx context.Context, meta *meta.Meta,
-	cluster session.Cluster, targetMgr *meta.TargetManager, targetObserver *observers.TargetObserver) *UndoList {
+	cluster session.Cluster, targetMgr *meta.TargetManager, targetObserver *observers.TargetObserver,
+) *UndoList {
 	return &UndoList{
 		ctx:            ctx,
 		meta:           meta,

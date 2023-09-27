@@ -6,11 +6,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/milvus-io/milvus/cmd/tools/migration/legacy/legacypb"
-
-	"github.com/milvus-io/milvus/cmd/tools/migration/allocator"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/cmd/tools/migration/allocator"
+	"github.com/milvus-io/milvus/cmd/tools/migration/legacy/legacypb"
 	"github.com/milvus-io/milvus/cmd/tools/migration/versions"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -19,7 +19,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"go.uber.org/zap"
 )
 
 func alias210ToAlias220(record *pb.CollectionInfo, ts Timestamp) *model.Alias {

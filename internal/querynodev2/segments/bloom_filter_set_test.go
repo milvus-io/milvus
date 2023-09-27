@@ -19,8 +19,9 @@ package segments
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/milvus-io/milvus/internal/storage"
 )
 
 type BloomFilterSetSuite struct {

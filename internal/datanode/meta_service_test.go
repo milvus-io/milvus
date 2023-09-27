@@ -21,11 +21,11 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/stretchr/testify/assert"
 )
 
 const (
@@ -47,7 +47,6 @@ func TestMetaService_All(t *testing.T) {
 	ms := newMetaService(mFactory, collectionID0)
 
 	t.Run("Test getCollectionSchema", func(t *testing.T) {
-
 		sch, err := ms.getCollectionSchema(ctx, collectionID0, 0)
 		assert.NoError(t, err)
 		assert.NotNil(t, sch)
@@ -84,7 +83,6 @@ func (rc *RootCoordFails2) DescribeCollectionInternal(ctx context.Context, req *
 }
 
 func TestMetaServiceRootCoodFails(t *testing.T) {
-
 	t.Run("Test Describe with error", func(t *testing.T) {
 		rc := &RootCoordFails1{}
 		rc.setCollectionID(collectionID0)

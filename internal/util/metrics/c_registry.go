@@ -26,18 +26,19 @@ package metrics
 
 */
 import "C"
+
 import (
 	"sort"
 	"strings"
 	"sync"
 	"unsafe"
 
-	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 	"go.uber.org/zap"
 
-	dto "github.com/prometheus/client_model/go"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 // metricSorter is a sortable slice of *dto.Metric.
@@ -119,9 +120,7 @@ type CRegistry struct {
 
 // Gather implements Gatherer.
 func (r *CRegistry) Gather() (res []*dto.MetricFamily, err error) {
-	var (
-		parser expfmt.TextParser
-	)
+	var parser expfmt.TextParser
 
 	r.mtx.RLock()
 	cMetricsStr := C.GetKnowhereMetrics()

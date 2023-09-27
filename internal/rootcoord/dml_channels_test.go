@@ -24,20 +24,18 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestDmlMsgStream(t *testing.T) {
 	t.Run("RefCnt", func(t *testing.T) {
-
 		dms := &dmlMsgStream{refcnt: 0}
 		assert.Equal(t, int64(0), dms.RefCnt())
 		assert.Equal(t, int64(0), dms.Used())

@@ -221,7 +221,6 @@ func TestTimetickSyncWithExistChannels(t *testing.T) {
 	})
 
 	// test get new channels
-
 }
 
 func TestTimetickSyncInvalidName(t *testing.T) {

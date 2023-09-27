@@ -5,11 +5,12 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
-	"go.uber.org/zap"
 )
 
 func (i *IndexNode) loadOrStoreTask(ClusterID string, buildID UniqueID, info *taskInfo) *taskInfo {

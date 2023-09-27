@@ -27,5 +27,4 @@ func TestName(t *testing.T) {
 	wrapper.Error("Testing")
 	wrapper.Errorln("Testing")
 	wrapper.Errorf("%s", "Testing")
-
 }

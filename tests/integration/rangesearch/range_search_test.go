@@ -186,7 +186,6 @@ func (s *RangeSearchSuite) TestRangeSearchIP() {
 	log.Info("TestRangeSearchIP succeed")
 	log.Info("=========================")
 	log.Info("=========================")
-
 }
 
 func (s *RangeSearchSuite) TestRangeSearchL2() {
@@ -335,7 +334,6 @@ func (s *RangeSearchSuite) TestRangeSearchL2() {
 	log.Info("TestRangeSearchL2 succeed")
 	log.Info("=========================")
 	log.Info("=========================")
-
 }
 
 func TestRangeSearch(t *testing.T) {

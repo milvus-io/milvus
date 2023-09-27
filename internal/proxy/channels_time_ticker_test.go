@@ -23,12 +23,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-
-	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
 )
 
 func newGetStatisticsFunc(pchans []pChan) getPChanStatisticsFuncType {

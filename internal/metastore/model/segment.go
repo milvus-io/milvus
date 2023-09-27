@@ -15,7 +15,7 @@ type Segment struct {
 	CompactionFrom      []int64
 	CreatedByCompaction bool
 	SegmentState        commonpb.SegmentState
-	//IndexInfos          []*SegmentIndex
+	// IndexInfos          []*SegmentIndex
 	ReplicaIds []int64
 	NodeIds    []int64
 }

@@ -22,6 +22,8 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
+	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -30,8 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"github.com/stretchr/testify/assert"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -160,9 +160,11 @@ type mockDataCoord struct {
 func (m *mockDataCoord) Init() error {
 	return nil
 }
+
 func (m *mockDataCoord) Start() error {
 	return nil
 }
+
 func (m *mockDataCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
 	return &milvuspb.ComponentStates{
 		State: &milvuspb.ComponentInfo{
@@ -178,6 +180,7 @@ func (m *mockDataCoord) GetComponentStates(ctx context.Context) (*milvuspb.Compo
 		},
 	}, nil
 }
+
 func (m *mockDataCoord) Stop() error {
 	return fmt.Errorf("stop error")
 }
@@ -190,9 +193,11 @@ type mockRootCoord struct {
 func (m *mockRootCoord) Init() error {
 	return nil
 }
+
 func (m *mockRootCoord) Start() error {
 	return nil
 }
+
 func (m *mockRootCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
 	return &milvuspb.ComponentStates{
 		State: &milvuspb.ComponentInfo{
@@ -208,6 +213,7 @@ func (m *mockRootCoord) GetComponentStates(ctx context.Context) (*milvuspb.Compo
 		},
 	}, nil
 }
+
 func (m *mockRootCoord) Stop() error {
 	return fmt.Errorf("stop error")
 }

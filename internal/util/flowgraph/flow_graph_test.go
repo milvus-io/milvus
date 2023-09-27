@@ -24,8 +24,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 // Flow graph basic example: count `c = pow(a) + 2`
@@ -137,7 +138,7 @@ func createExampleFlowGraph() (*TimeTickedFlowGraph, chan float64, chan float64,
 	fg.AddNode(b)
 	fg.AddNode(c)
 
-	var err = fg.SetEdges(a.Name(),
+	err := fg.SetEdges(a.Name(),
 		[]string{b.Name()},
 	)
 	if err != nil {

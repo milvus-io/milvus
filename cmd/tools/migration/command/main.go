@@ -5,9 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/milvus-io/milvus/cmd/tools/migration/console"
-
 	"github.com/milvus-io/milvus/cmd/tools/migration/configs"
+	"github.com/milvus-io/milvus/cmd/tools/migration/console"
 )
 
 func Execute(args []string) {

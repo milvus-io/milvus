@@ -10,14 +10,14 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/stretchr/testify/assert"
 )
 
 func Test_WrappedInsertRequest_JSONMarshal_AsInsertRequest(t *testing.T) {
@@ -46,8 +46,10 @@ func (m *mockProxyComponent) Dummy(ctx context.Context, request *milvuspb.DummyR
 	return nil, nil
 }
 
-var emptyBody = &gin.H{}
-var testStatus = &commonpb.Status{Reason: "ok"}
+var (
+	emptyBody  = &gin.H{}
+	testStatus = &commonpb.Status{Reason: "ok"}
+)
 
 func (m *mockProxyComponent) CreateDatabase(ctx context.Context, in *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
 	return testStatus, nil
@@ -112,9 +114,11 @@ func (m *mockProxyComponent) HasPartition(ctx context.Context, request *milvuspb
 func (m *mockProxyComponent) LoadPartitions(ctx context.Context, request *milvuspb.LoadPartitionsRequest) (*commonpb.Status, error) {
 	return testStatus, nil
 }
+
 func (m *mockProxyComponent) ReleasePartitions(ctx context.Context, request *milvuspb.ReleasePartitionsRequest) (*commonpb.Status, error) {
 	return testStatus, nil
 }
+
 func (m *mockProxyComponent) GetPartitionStatistics(ctx context.Context, request *milvuspb.GetPartitionStatisticsRequest) (*milvuspb.GetPartitionStatisticsResponse, error) {
 	return &milvuspb.GetPartitionStatisticsResponse{Status: testStatus}, nil
 }
@@ -413,7 +417,8 @@ func TestHandlers(t *testing.T) {
 		},
 		{
 			http.MethodGet, "/partition/statistics", emptyBody,
-			http.StatusOK, milvuspb.GetPartitionStatisticsResponse{Status: testStatus},
+			http.StatusOK,
+			milvuspb.GetPartitionStatisticsResponse{Status: testStatus},
 		},
 		{
 			http.MethodGet, "/partitions", emptyBody,
@@ -456,26 +461,32 @@ func TestHandlers(t *testing.T) {
 			http.StatusOK, &milvuspb.MutationResult{Acknowledged: true},
 		},
 		{
-			http.MethodDelete, "/entities", milvuspb.DeleteRequest{Expr: "some expr"},
+			http.MethodDelete, "/entities",
+			milvuspb.DeleteRequest{Expr: "some expr"},
 			http.StatusOK, &milvuspb.MutationResult{Acknowledged: true},
 		},
 		{
-			http.MethodPost, "/search", milvuspb.SearchRequest{Dsl: "some dsl"},
+			http.MethodPost, "/search",
+			milvuspb.SearchRequest{Dsl: "some dsl"},
 			http.StatusOK, &searchResult,
 		},
 		{
-			http.MethodPost, "/query", milvuspb.QueryRequest{Expr: "some expr"},
+			http.MethodPost, "/query",
+			milvuspb.QueryRequest{Expr: "some expr"},
 			http.StatusOK, &queryResult,
 		},
 		{
-			http.MethodPost, "/persist", milvuspb.FlushRequest{CollectionNames: []string{"c1"}},
+			http.MethodPost, "/persist",
+			milvuspb.FlushRequest{CollectionNames: []string{"c1"}},
 			http.StatusOK, flushResult,
 		},
 		{
-			http.MethodGet, "/distance", milvuspb.CalcDistanceRequest{
+			http.MethodGet, "/distance",
+			milvuspb.CalcDistanceRequest{
 				Params: []*commonpb.KeyValuePair{
 					{Key: "key", Value: "val"},
-				}},
+				},
+			},
 			http.StatusOK, calcDistanceResult,
 		},
 		{

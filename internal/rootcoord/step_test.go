@@ -25,8 +25,8 @@ import (
 )
 
 func Test_waitForTsSyncedStep_Execute(t *testing.T) {
-	//Params.InitOnce()
-	//Params.ProxyCfg.TimeTickInterval = time.Millisecond
+	// Params.InitOnce()
+	// Params.ProxyCfg.TimeTickInterval = time.Millisecond
 
 	ticker := newRocksMqTtSynchronizer()
 	core := newTestCore(withTtSynchronizer(ticker))

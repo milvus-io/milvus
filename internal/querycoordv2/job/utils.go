@@ -68,7 +68,8 @@ func loadPartitions(ctx context.Context,
 	broker meta.Broker,
 	withSchema bool,
 	collection int64,
-	partitions ...int64) error {
+	partitions ...int64,
+) error {
 	var err error
 	var schema *schemapb.CollectionSchema
 	if withSchema {
@@ -113,7 +114,8 @@ func releasePartitions(ctx context.Context,
 	meta *meta.Meta,
 	cluster session.Cluster,
 	collection int64,
-	partitions ...int64) {
+	partitions ...int64,
+) {
 	log := log.Ctx(ctx).With(zap.Int64("collection", collection), zap.Int64s("partitions", partitions))
 	replicas := meta.ReplicaManager.GetByCollection(collection)
 	releaseReq := &querypb.ReleasePartitionsRequest{

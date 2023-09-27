@@ -74,11 +74,11 @@ func (dNode *deleteNode) Operate(in Msg) Msg {
 	}
 
 	if len(deleteDatas) > 0 {
-		//do Delete, use ts range max as ts
+		// do Delete, use ts range max as ts
 		dNode.delegator.ProcessDelete(lo.Values(deleteDatas), nodeMsg.timeRange.timestampMax)
 	}
 
-	//update tSafe
+	// update tSafe
 	err := dNode.tSafeManager.Set(dNode.channel, nodeMsg.timeRange.timestampMax)
 	if err != nil {
 		// should not happen, QueryNode should addTSafe before start pipeline

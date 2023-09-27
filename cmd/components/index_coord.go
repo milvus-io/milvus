@@ -26,8 +26,7 @@ import (
 )
 
 // IndexCoord implements IndexCoord grpc server
-type IndexCoord struct {
-}
+type IndexCoord struct{}
 
 // NewIndexCoord creates a new IndexCoord
 func NewIndexCoord(ctx context.Context, factory dependency.Factory) (*IndexCoord, error) {

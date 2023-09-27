@@ -24,13 +24,13 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"go.uber.org/zap"
 )
 
 // A struct to hold insert log paths and delta log paths of a segment
@@ -74,7 +74,8 @@ func NewBinlogAdapter(ctx context.Context,
 	chunkManager storage.ChunkManager,
 	flushFunc ImportFlushFunc,
 	tsStartPoint uint64,
-	tsEndPoint uint64) (*BinlogAdapter, error) {
+	tsEndPoint uint64,
+) (*BinlogAdapter, error) {
 	if collectionInfo == nil {
 		log.Warn("Binlog adapter: collection schema is nil")
 		return nil, errors.New("collection schema is nil")
@@ -513,7 +514,8 @@ func (p *BinlogAdapter) readPrimaryKeys(logPath string) ([]int64, []string, erro
 func (p *BinlogAdapter) getShardingListByPrimaryInt64(primaryKeys []int64,
 	timestampList []int64,
 	memoryData []ShardData,
-	intDeletedList map[int64]uint64) ([]int32, error) {
+	intDeletedList map[int64]uint64,
+) ([]int32, error) {
 	if len(timestampList) != len(primaryKeys) {
 		log.Warn("Binlog adapter: primary key length is not equal to timestamp list length",
 			zap.Int("primaryKeysLen", len(primaryKeys)), zap.Int("timestampLen", len(timestampList)))
@@ -566,7 +568,8 @@ func (p *BinlogAdapter) getShardingListByPrimaryInt64(primaryKeys []int64,
 func (p *BinlogAdapter) getShardingListByPrimaryVarchar(primaryKeys []string,
 	timestampList []int64,
 	memoryData []ShardData,
-	strDeletedList map[string]uint64) ([]int32, error) {
+	strDeletedList map[string]uint64,
+) ([]int32, error) {
 	if len(timestampList) != len(primaryKeys) {
 		log.Warn("Binlog adapter: primary key length is not equal to timestamp list length",
 			zap.Int("primaryKeysLen", len(primaryKeys)), zap.Int("timestampLen", len(timestampList)))
@@ -637,7 +640,8 @@ func (p *BinlogAdapter) verifyField(fieldID storage.FieldID, memoryData []ShardD
 // the no.2, no.4, no.6, no.8, no.10 will be put into shard_1
 // Note: the row count of insert log need to be equal to length of shardList
 func (p *BinlogAdapter) readInsertlog(fieldID storage.FieldID, logPath string,
-	memoryData []ShardData, shardList []int32) error {
+	memoryData []ShardData, shardList []int32,
+) error {
 	err := p.verifyField(fieldID, memoryData)
 	if err != nil {
 		log.Warn("Binlog adapter: could not read binlog file", zap.String("logPath", logPath), zap.Error(err))
@@ -779,7 +783,8 @@ func (p *BinlogAdapter) readInsertlog(fieldID storage.FieldID, logPath string,
 }
 
 func (p *BinlogAdapter) dispatchBoolToShards(data []bool, memoryData []ShardData,
-	shardList []int32, fieldID storage.FieldID) error {
+	shardList []int32, fieldID storage.FieldID,
+) error {
 	// verify row count
 	if len(data) != len(shardList) {
 		log.Warn("Binlog adapter: bool field row count is not equal to shard list row count %d", zap.Int("dataLen", len(data)), zap.Int("shardLen", len(shardList)))
@@ -813,7 +818,8 @@ func (p *BinlogAdapter) dispatchBoolToShards(data []bool, memoryData []ShardData
 }
 
 func (p *BinlogAdapter) dispatchInt8ToShards(data []int8, memoryData []ShardData,
-	shardList []int32, fieldID storage.FieldID) error {
+	shardList []int32, fieldID storage.FieldID,
+) error {
 	// verify row count
 	if len(data) != len(shardList) {
 		log.Warn("Binlog adapter: int8 field row count is not equal to shard list row count", zap.Int("dataLen", len(data)), zap.Int("shardLen", len(shardList)))
@@ -847,7 +853,8 @@ func (p *BinlogAdapter) dispatchInt8ToShards(data []int8, memoryData []ShardData
 }
 
 func (p *BinlogAdapter) dispatchInt16ToShards(data []int16, memoryData []ShardData,
-	shardList []int32, fieldID storage.FieldID) error {
+	shardList []int32, fieldID storage.FieldID,
+) error {
 	// verify row count
 	if len(data) != len(shardList) {
 		log.Warn("Binlog adapter: int16 field row count is not equal to shard list row count", zap.Int("dataLen", len(data)), zap.Int("shardLen", len(shardList)))
@@ -881,7 +888,8 @@ func (p *BinlogAdapter) dispatchInt16ToShards(data []int16, memoryData []ShardDa
 }
 
 func (p *BinlogAdapter) dispatchInt32ToShards(data []int32, memoryData []ShardData,
-	shardList []int32, fieldID storage.FieldID) error {
+	shardList []int32, fieldID storage.FieldID,
+) error {
 	// verify row count
 	if len(data) != len(shardList) {
 		log.Warn("Binlog adapter: int32 field row count is not equal to shard list row count", zap.Int("dataLen", len(data)), zap.Int("shardLen", len(shardList)))
@@ -915,7 +923,8 @@ func (p *BinlogAdapter) dispatchInt32ToShards(data []int32, memoryData []ShardDa
 }
 
 func (p *BinlogAdapter) dispatchInt64ToShards(data []int64, memoryData []ShardData,
-	shardList []int32, fieldID storage.FieldID) error {
+	shardList []int32, fieldID storage.FieldID,
+) error {
 	// verify row count
 	if len(data) != len(shardList) {
 		log.Warn("Binlog adapter: int64 field row count is not equal to shard list row count", zap.Int("dataLen", len(data)), zap.Int("shardLen", len(shardList)))
@@ -949,7 +958,8 @@ func (p *BinlogAdapter) dispatchInt64ToShards(data []int64, memoryData []ShardDa
 }
 
 func (p *BinlogAdapter) dispatchFloatToShards(data []float32, memoryData []ShardData,
-	shardList []int32, fieldID storage.FieldID) error {
+	shardList []int32, fieldID storage.FieldID,
+) error {
 	// verify row count
 	if len(data) != len(shardList) {
 		log.Warn("Binlog adapter: float field row count is not equal to shard list row count", zap.Int("dataLen", len(data)), zap.Int("shardLen", len(shardList)))
@@ -983,7 +993,8 @@ func (p *BinlogAdapter) dispatchFloatToShards(data []float32, memoryData []Shard
 }
 
 func (p *BinlogAdapter) dispatchDoubleToShards(data []float64, memoryData []ShardData,
-	shardList []int32, fieldID storage.FieldID) error {
+	shardList []int32, fieldID storage.FieldID,
+) error {
 	// verify row count
 	if len(data) != len(shardList) {
 		log.Warn("Binlog adapter: double field row count is not equal to shard list row count", zap.Int("dataLen", len(data)), zap.Int("shardLen", len(shardList)))
@@ -1017,7 +1028,8 @@ func (p *BinlogAdapter) dispatchDoubleToShards(data []float64, memoryData []Shar
 }
 
 func (p *BinlogAdapter) dispatchVarcharToShards(data []string, memoryData []ShardData,
-	shardList []int32, fieldID storage.FieldID) error {
+	shardList []int32, fieldID storage.FieldID,
+) error {
 	// verify row count
 	if len(data) != len(shardList) {
 		log.Warn("Binlog adapter: varchar field row count is not equal to shard list row count", zap.Int("dataLen", len(data)), zap.Int("shardLen", len(shardList)))
@@ -1051,7 +1063,8 @@ func (p *BinlogAdapter) dispatchVarcharToShards(data []string, memoryData []Shar
 }
 
 func (p *BinlogAdapter) dispatchBytesToShards(data [][]byte, memoryData []ShardData,
-	shardList []int32, fieldID storage.FieldID) error {
+	shardList []int32, fieldID storage.FieldID,
+) error {
 	// verify row count
 	if len(data) != len(shardList) {
 		log.Warn("Binlog adapter: JSON field row count is not equal to shard list row count", zap.Int("dataLen", len(data)), zap.Int("shardLen", len(shardList)))
@@ -1085,7 +1098,8 @@ func (p *BinlogAdapter) dispatchBytesToShards(data [][]byte, memoryData []ShardD
 }
 
 func (p *BinlogAdapter) dispatchBinaryVecToShards(data []byte, dim int, memoryData []ShardData,
-	shardList []int32, fieldID storage.FieldID) error {
+	shardList []int32, fieldID storage.FieldID,
+) error {
 	// verify row count
 	bytesPerVector := dim / 8
 	count := len(data) / bytesPerVector
@@ -1132,7 +1146,8 @@ func (p *BinlogAdapter) dispatchBinaryVecToShards(data []byte, dim int, memoryDa
 }
 
 func (p *BinlogAdapter) dispatchFloatVecToShards(data []float32, dim int, memoryData []ShardData,
-	shardList []int32, fieldID storage.FieldID) error {
+	shardList []int32, fieldID storage.FieldID,
+) error {
 	// verify row count
 	count := len(data) / dim
 	if count != len(shardList) {

@@ -23,13 +23,13 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
 // TODO this num should be determined by resources of datanode, for now, we set to a fixed value for simple
@@ -102,12 +102,13 @@ type compactionPlanHandler struct {
 	quit             chan struct{}
 	wg               sync.WaitGroup
 	flushCh          chan UniqueID
-	//segRefer         *SegmentReferenceManager
+	// segRefer         *SegmentReferenceManager
 	parallelCh map[int64]chan struct{}
 }
 
 func newCompactionPlanHandler(sessions *SessionManager, cm *ChannelManager, meta *meta,
-	allocator allocator, flush chan UniqueID) *compactionPlanHandler {
+	allocator allocator, flush chan UniqueID,
+) *compactionPlanHandler {
 	return &compactionPlanHandler{
 		plans:     make(map[int64]*compactionTask),
 		chManager: cm,
@@ -115,7 +116,7 @@ func newCompactionPlanHandler(sessions *SessionManager, cm *ChannelManager, meta
 		sessions:  sessions,
 		allocator: allocator,
 		flushCh:   flush,
-		//segRefer:   segRefer,
+		// segRefer:   segRefer,
 		parallelCh: make(map[int64]chan struct{}),
 	}
 }
@@ -263,7 +264,7 @@ func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.Compact
 		return err
 	}
 
-	var nodeID = c.plans[plan.GetPlanID()].dataNodeID
+	nodeID := c.plans[plan.GetPlanID()].dataNodeID
 	req := &datapb.SyncSegmentsRequest{
 		PlanID:        plan.PlanID,
 		CompactedTo:   newSegment.GetID(),

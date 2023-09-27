@@ -24,9 +24,11 @@ const (
 	runtimeUpdateTimeKey = "runtime.updateTime"
 )
 
-var once sync.Once
-var params ComponentParam
-var hookParams hookConfig
+var (
+	once       sync.Once
+	params     ComponentParam
+	hookParams hookConfig
+)
 
 func Init() {
 	once.Do(func() {

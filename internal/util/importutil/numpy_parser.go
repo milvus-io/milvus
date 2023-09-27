@@ -72,7 +72,8 @@ func NewNumpyParser(ctx context.Context,
 	blockSize int64,
 	chunkManager storage.ChunkManager,
 	flushFunc ImportFlushFunc,
-	updateProgressFunc func(percent int64)) (*NumpyParser, error) {
+	updateProgressFunc func(percent int64),
+) (*NumpyParser, error) {
 	if collectionInfo == nil {
 		log.Warn("Numper parser: collection schema is nil")
 		return nil, errors.New("collection schema is nil")
@@ -600,7 +601,6 @@ func (p *NumpyParser) readData(columnReader *NumpyColumnReader, rowCount int) (s
 				log.Warn("Numpy parser: illegal value in float vector array", zap.Error(err))
 				return nil, fmt.Errorf("illegal value in float vector array: %s", err.Error())
 			}
-
 		} else if elementType == schemapb.DataType_Double {
 			data = make([]float32, 0, columnReader.rowCount)
 			data64, err := columnReader.reader.ReadFloat64(rowCount * columnReader.dimension)

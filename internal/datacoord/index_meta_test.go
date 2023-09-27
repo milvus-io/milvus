@@ -41,7 +41,7 @@ import (
 func TestMeta_CanCreateIndex(t *testing.T) {
 	var (
 		collID = UniqueID(1)
-		//partID     = UniqueID(2)
+		// partID     = UniqueID(2)
 		indexID    = UniqueID(10)
 		fieldID    = UniqueID(100)
 		indexName  = "_default_idx"
@@ -162,7 +162,7 @@ func TestMeta_CanCreateIndex(t *testing.T) {
 func TestMeta_HasSameReq(t *testing.T) {
 	var (
 		collID = UniqueID(1)
-		//partID     = UniqueID(2)
+		// partID     = UniqueID(2)
 		indexID    = UniqueID(10)
 		fieldID    = UniqueID(100)
 		indexName  = "_default_idx"
@@ -371,7 +371,7 @@ func TestMeta_AddSegmentIndex(t *testing.T) {
 func TestMeta_GetIndexIDByName(t *testing.T) {
 	var (
 		collID = UniqueID(1)
-		//partID     = UniqueID(2)
+		// partID     = UniqueID(2)
 		indexID    = UniqueID(10)
 		fieldID    = UniqueID(100)
 		indexName  = "_default_idx"
@@ -425,7 +425,6 @@ func TestMeta_GetIndexIDByName(t *testing.T) {
 		indexID2CreateTS := m.GetIndexIDByName(collID, indexName)
 		assert.Contains(t, indexID2CreateTS, indexID)
 	})
-
 }
 
 func TestMeta_GetSegmentIndexState(t *testing.T) {

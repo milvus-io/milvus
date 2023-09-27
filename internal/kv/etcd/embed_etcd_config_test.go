@@ -37,7 +37,7 @@ func TestEtcdConfigLoad(te *testing.T) {
 	te.Setenv("etcd.data.dir", "etcd.test.data.dir")
 
 	param.Init(paramtable.NewBaseTable())
-	//clean up data
+	// clean up data
 	defer func() {
 		os.RemoveAll("etcd.test.data.dir")
 	}()

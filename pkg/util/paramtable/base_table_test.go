@@ -110,7 +110,7 @@ func TestBaseTable_Get(t *testing.T) {
 }
 
 func TestBaseTable_Pulsar(t *testing.T) {
-	//test PULSAR ADDRESS
+	// test PULSAR ADDRESS
 	t.Setenv("PULSAR_ADDRESS", "pulsar://localhost:6650")
 	baseParams.init()
 

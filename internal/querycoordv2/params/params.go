@@ -29,9 +29,7 @@ import (
 
 var Params *paramtable.ComponentParam = paramtable.Get()
 
-var (
-	ErrFailedAllocateID = errors.New("failed to allocate ID")
-)
+var ErrFailedAllocateID = errors.New("failed to allocate ID")
 
 // GenerateEtcdConfig returns a etcd config with a random root path,
 // NOTE: for test only

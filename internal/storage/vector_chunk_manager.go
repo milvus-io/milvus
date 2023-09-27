@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
 	"go.uber.org/zap"
 	"golang.org/x/exp/mmap"
 
@@ -33,9 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/cache"
 )
 
-var (
-	defaultLocalCacheSize = 64
-)
+var defaultLocalCacheSize = 64
 
 // VectorChunkManager is responsible for read and write vector data.
 type VectorChunkManager struct {
@@ -291,6 +288,7 @@ func (vcm *VectorChunkManager) ReadAt(ctx context.Context, filePath string, off 
 	}
 	return p, nil
 }
+
 func (vcm *VectorChunkManager) Remove(ctx context.Context, filePath string) error {
 	err := vcm.vectorStorage.Remove(ctx, filePath)
 	if err != nil {

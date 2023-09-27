@@ -23,10 +23,10 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
 	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
 
 func TestChannelEventManager(t *testing.T) {
@@ -150,7 +150,6 @@ func parseWatchInfo(key string, data []byte) (*datapb.ChannelWatchInfo, error) {
 	watchInfo := datapb.ChannelWatchInfo{}
 	if err := proto.Unmarshal(data, &watchInfo); err != nil {
 		return nil, fmt.Errorf("invalid event data: fail to parse ChannelWatchInfo, key: %s, err: %v", key, err)
-
 	}
 
 	if watchInfo.Vchan == nil {
@@ -193,7 +192,6 @@ func TestEventTickler(t *testing.T) {
 				}
 			}
 		}
-
 	}()
 
 	tickler.inc()

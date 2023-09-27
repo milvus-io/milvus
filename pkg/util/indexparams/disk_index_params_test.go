@@ -22,10 +22,11 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestDiskIndexParams(t *testing.T) {

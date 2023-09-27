@@ -253,7 +253,6 @@ func TestLeveledLogger(t *testing.T) {
 	SetLevel(zapcore.FatalLevel + 1)
 	assert.Equal(t, ctxL(), L())
 	SetLevel(orgLevel)
-
 }
 
 func TestStdAndFileLogger(t *testing.T) {

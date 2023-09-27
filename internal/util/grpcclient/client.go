@@ -25,6 +25,16 @@ import (
 
 	"github.com/cockroachdb/errors"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.uber.org/atomic"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -38,15 +48,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
-	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
-	"go.uber.org/atomic"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/backoff"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/keepalive"
 )
 
 // GrpcClient abstracts client of grpc
@@ -461,7 +462,6 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 		retry.MaxSleepTime(time.Duration(c.MaxBackoff*1000)*time.Millisecond))
 	// default value list: MaxAttempts 10, InitialBackoff 0.2s, MaxBackoff 10s
 	// and consume 52.8s if all retry failed
-
 	if err != nil {
 		// make the error more friendly to user
 		if IsCrossClusterRoutingErr(err) {

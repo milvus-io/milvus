@@ -64,7 +64,7 @@ func (mService *metaService) getCollectionInfo(ctx context.Context, collID Uniqu
 	req := &milvuspb.DescribeCollectionRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
-			commonpbutil.WithMsgID(0), //GOOSE TODO
+			commonpbutil.WithMsgID(0), // GOOSE TODO
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		// please do not specify the collection name alone after database feature.

@@ -22,17 +22,16 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
-var (
-	// For compatibility
-	oldErrCodes = map[int32]commonpb.ErrorCode{
-		ErrServiceNotReady.code():    commonpb.ErrorCode_NotReadyServe,
-		ErrCollectionNotFound.code(): commonpb.ErrorCode_CollectionNotExists,
-	}
-)
+// For compatibility
+var oldErrCodes = map[int32]commonpb.ErrorCode{
+	ErrServiceNotReady.code():    commonpb.ErrorCode_NotReadyServe,
+	ErrCollectionNotFound.code(): commonpb.ErrorCode_CollectionNotExists,
+}
 
 // Code returns the error code of the given error,
 // WARN: DO NOT use this for now

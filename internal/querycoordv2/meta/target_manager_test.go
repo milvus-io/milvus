@@ -138,7 +138,8 @@ func (suite *TargetManagerSuite) SetupTest() {
 		suite.meta.PutCollection(&Collection{
 			CollectionLoadInfo: &querypb.CollectionLoadInfo{
 				CollectionID:  collection,
-				ReplicaNumber: 1},
+				ReplicaNumber: 1,
+			},
 		})
 		for _, partition := range suite.partitions[collection] {
 			suite.meta.PutPartition(&Partition{
@@ -183,7 +184,8 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget() {
 	suite.meta.PutCollection(&Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{
 			CollectionID:  collectionID,
-			ReplicaNumber: 1},
+			ReplicaNumber: 1,
+		},
 	})
 	suite.meta.PutPartition(&Partition{
 		PartitionLoadInfo: &querypb.PartitionLoadInfo{
@@ -251,7 +253,6 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget() {
 
 	err = suite.mgr.UpdateCollectionNextTarget(collectionID)
 	suite.NoError(err)
-
 }
 
 func (suite *TargetManagerSuite) TestRemovePartition() {
@@ -365,7 +366,8 @@ func (suite *TargetManagerSuite) TestGetSegmentByChannel() {
 	suite.meta.PutCollection(&Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{
 			CollectionID:  collectionID,
-			ReplicaNumber: 1},
+			ReplicaNumber: 1,
+		},
 	})
 	suite.meta.PutPartition(&Partition{
 		PartitionLoadInfo: &querypb.PartitionLoadInfo{

@@ -42,27 +42,26 @@ func TestEtcd(t *testing.T) {
 	assert.False(t, resp.Count < 1)
 	assert.Equal(t, string(resp.Kvs[0].Value), "value")
 
-	etcdCli, err = GetEtcdClient(false, true, []string{},
+	_, err = GetEtcdClient(false, true, []string{},
 		"../../../configs/cert/client.pem",
 		"../../../configs/cert/client.key",
 		"../../../configs/cert/ca.pem",
 		"some not right word")
 	assert.Error(t, err)
 
-	etcdCli, err = GetEtcdClient(false, true, []string{},
+	_, err = GetEtcdClient(false, true, []string{},
 		"../../../configs/cert/client.pem",
 		"../../../configs/cert/client.key",
 		"wrong/file",
 		"1.2")
 	assert.Error(t, err)
 
-	etcdCli, err = GetEtcdClient(false, true, []string{},
+	_, err = GetEtcdClient(false, true, []string{},
 		"wrong/file",
 		"../../../configs/cert/client.key",
 		"../../../configs/cert/ca.pem",
 		"1.2")
 	assert.Error(t, err)
-
 }
 
 func Test_buildKvGroup(t *testing.T) {

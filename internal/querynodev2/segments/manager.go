@@ -29,6 +29,8 @@ import (
 	"fmt"
 	"sync"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/eventlog"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -36,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
-	"go.uber.org/zap"
 )
 
 type SegmentFilter func(segment Segment) bool
@@ -152,7 +153,7 @@ func (mgr *segmentManager) Put(segmentType SegmentType, segments ...Segment) {
 	var replacedSegment []Segment
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
-	targetMap := mgr.growingSegments
+	var targetMap map[UniqueID]Segment
 	switch segmentType {
 	case SegmentTypeGrowing:
 		targetMap = mgr.growingSegments
@@ -523,7 +524,7 @@ func (mgr *segmentManager) Clear() {
 
 func (mgr *segmentManager) updateMetric() {
 	// update collection and partiation metric
-	var collections, partiations = make(Set[int64]), make(Set[int64])
+	collections, partiations := make(Set[int64]), make(Set[int64])
 	for _, seg := range mgr.growingSegments {
 		collections.Insert(seg.Collection())
 		partiations.Insert(seg.Partition())

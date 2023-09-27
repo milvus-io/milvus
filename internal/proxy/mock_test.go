@@ -81,8 +81,7 @@ func newMockTsoAllocator() tsoAllocator {
 	return &mockTsoAllocator{}
 }
 
-type mockIDAllocatorInterface struct {
-}
+type mockIDAllocatorInterface struct{}
 
 func (m *mockIDAllocatorInterface) AllocOne() (UniqueID, error) {
 	return UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()), nil
@@ -195,15 +194,15 @@ func (m *mockDmlTask) getChannels() []vChan {
 }
 
 func newMockDmlTask(ctx context.Context) *mockDmlTask {
-	shardNum := 2
-
-	vchans := make([]vChan, 0, shardNum)
-	pchans := make([]pChan, 0, shardNum)
-
-	for i := 0; i < shardNum; i++ {
-		vchans = append(vchans, funcutil.GenRandomStr())
-		pchans = append(pchans, funcutil.GenRandomStr())
-	}
+	// shardNum := 2
+	//
+	// vchans := make([]vChan, 0, shardNum)
+	// pchans := make([]pChan, 0, shardNum)
+	//
+	// for i := 0; i < shardNum; i++ {
+	// 	vchans = append(vchans, funcutil.GenRandomStr())
+	// 	pchans = append(pchans, funcutil.GenRandomStr())
+	// }
 
 	return &mockDmlTask{
 		mockTask: newMockTask(ctx),
@@ -311,8 +310,7 @@ func newSimpleMockMsgStream() *simpleMockMsgStream {
 	}
 }
 
-type simpleMockMsgStreamFactory struct {
-}
+type simpleMockMsgStreamFactory struct{}
 
 func (factory *simpleMockMsgStreamFactory) Init(param *paramtable.ComponentParam) error {
 	return nil
@@ -429,7 +427,7 @@ func generateFieldData(dataType schemapb.DataType, fieldName string, numRows int
 			},
 		}
 	default:
-		//TODO::
+		// TODO::
 	}
 
 	return fieldData

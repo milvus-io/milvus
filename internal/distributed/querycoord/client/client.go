@@ -20,6 +20,10 @@ import (
 	"context"
 	"fmt"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -31,9 +35,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
 )
 
 var Params *paramtable.ComponentParam = paramtable.Get()

@@ -21,9 +21,6 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/internal/util/mock"
-
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
 
@@ -32,6 +29,8 @@ import (
 	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/mock"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"

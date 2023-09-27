@@ -18,7 +18,6 @@ package querynodev2
 
 import (
 	"context"
-
 	"testing"
 
 	"github.com/samber/lo"

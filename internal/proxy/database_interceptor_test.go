@@ -133,5 +133,4 @@ func TestDatabaseInterceptor(t *testing.T) {
 			}
 		}
 	})
-
 }

@@ -799,7 +799,7 @@ func AppendIDs(dst *schemapb.IDs, src *schemapb.IDs, idx int) {
 			dst.GetStrId().Data = append(dst.GetStrId().Data, src.GetStrId().Data[idx])
 		}
 	default:
-		//TODO
+		// TODO
 	}
 }
 
@@ -815,7 +815,7 @@ func GetSizeOfIDs(data *schemapb.IDs) int {
 	case *schemapb.IDs_StrId:
 		result = len(data.GetStrId().GetData())
 	default:
-		//TODO::
+		// TODO::
 	}
 
 	return result

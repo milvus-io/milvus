@@ -40,5 +40,4 @@ func TestRmsFactory(t *testing.T) {
 
 	_, err = rmsFactory.NewTtMsgStream(ctx)
 	assert.NoError(t, err)
-
 }

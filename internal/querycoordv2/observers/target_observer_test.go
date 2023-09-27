@@ -41,7 +41,7 @@ type TargetObserverSuite struct {
 	suite.Suite
 
 	kv kv.MetaKv
-	//dependency
+	// dependency
 	meta      *meta.Meta
 	targetMgr *meta.TargetManager
 	distMgr   *meta.DistributionManager

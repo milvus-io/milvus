@@ -20,9 +20,10 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestSegment_UpdatePKRange(t *testing.T) {

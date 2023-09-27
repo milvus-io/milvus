@@ -33,7 +33,7 @@ type deleteTask struct {
 	deleteMsg  *BaseDeleteTask
 	ctx        context.Context
 	deleteExpr string
-	//req       *milvuspb.DeleteRequest
+	// req       *milvuspb.DeleteRequest
 	result    *milvuspb.MutationResult
 	chMgr     channelsMgr
 	chTicker  channelsTimeTicker

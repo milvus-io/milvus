@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/blang/semver/v4"
+
 	"github.com/milvus-io/milvus/cmd/tools/migration/meta"
 	"github.com/milvus-io/milvus/cmd/tools/migration/versions"
 )

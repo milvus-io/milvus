@@ -56,7 +56,6 @@ type QueryNodeSuite struct {
 
 func (suite *QueryNodeSuite) SetupSuite() {
 	suite.address = "test-address"
-
 }
 
 func (suite *QueryNodeSuite) SetupTest() {

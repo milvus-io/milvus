@@ -24,12 +24,13 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"github.com/stretchr/testify/assert"
 )
 
 /* #nosec G103 */
@@ -832,7 +833,6 @@ func TestDropPartitionEvent(t *testing.T) {
 
 		r.Close()
 	})
-
 }
 
 /* #nosec G103 */
@@ -1081,7 +1081,6 @@ func TestEventReaderError(t *testing.T) {
 	r, err = newEventReader(schemapb.DataType_Int64, buf)
 	assert.Nil(t, r)
 	assert.Error(t, err)
-
 }
 
 func TestEventClose(t *testing.T) {

@@ -1208,7 +1208,6 @@ func (m *mockRootCoord) GetCredential(ctx context.Context, request *rootcoordpb.
 		return m.GetGetCredentialFunc(ctx, request)
 	}
 	return nil, errors.New("mock")
-
 }
 
 func (m *mockRootCoord) DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {

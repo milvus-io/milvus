@@ -22,6 +22,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/google/btree"
+
 	"github.com/milvus-io/milvus/pkg/common"
 )
 

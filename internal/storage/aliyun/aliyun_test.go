@@ -5,10 +5,11 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/internal/storage/aliyun/mocks"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/storage/aliyun/mocks"
 )
 
 func TestNewMinioClient(t *testing.T) {

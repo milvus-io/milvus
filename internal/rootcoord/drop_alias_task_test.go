@@ -54,7 +54,6 @@ func Test_dropAliasTask_Execute(t *testing.T) {
 		task := &dropAliasTask{
 			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.DropAliasRequest{
-
 				Base:  &commonpb.MsgBase{MsgType: commonpb.MsgType_DropAlias},
 				Alias: alias,
 			},
@@ -69,7 +68,6 @@ func Test_dropAliasTask_Execute(t *testing.T) {
 		task := &dropAliasTask{
 			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.DropAliasRequest{
-
 				Base:  &commonpb.MsgBase{MsgType: commonpb.MsgType_DropAlias},
 				Alias: alias,
 			},
@@ -92,7 +90,6 @@ func Test_dropAliasTask_Execute(t *testing.T) {
 		task := &dropAliasTask{
 			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.DropAliasRequest{
-
 				Base:  &commonpb.MsgBase{MsgType: commonpb.MsgType_DropAlias},
 				Alias: alias,
 			},

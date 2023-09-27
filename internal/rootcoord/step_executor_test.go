@@ -23,13 +23,12 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/pkg/util/retry"
-	"github.com/stretchr/testify/assert"
 )
 
-type mockChildStep struct {
-}
+type mockChildStep struct{}
 
 func (m *mockChildStep) Execute(ctx context.Context) ([]nestedStep, error) {
 	return nil, nil
@@ -47,8 +46,7 @@ func newMockChildStep() *mockChildStep {
 	return &mockChildStep{}
 }
 
-type mockStepWithChild struct {
-}
+type mockStepWithChild struct{}
 
 func (m *mockStepWithChild) Execute(ctx context.Context) ([]nestedStep, error) {
 	return []nestedStep{newMockChildStep()}, nil

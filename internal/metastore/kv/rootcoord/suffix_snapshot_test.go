@@ -24,8 +24,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -34,12 +32,11 @@ import (
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-var (
-	snapshotPrefix = "snapshots"
-)
+var snapshotPrefix = "snapshots"
 
 var Params = paramtable.Get()
 
@@ -272,7 +269,6 @@ func Test_SuffixSnaphotIsTSOfKey(t *testing.T) {
 		assert.EqualValues(t, c.expected, ts)
 		assert.Equal(t, c.shouldFound, found)
 	}
-
 }
 
 func Test_SuffixSnapshotLoad(t *testing.T) {

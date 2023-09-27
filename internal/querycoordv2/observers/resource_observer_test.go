@@ -41,7 +41,7 @@ type ResourceObserverSuite struct {
 	suite.Suite
 
 	kv kv.MetaKv
-	//dependency
+	// dependency
 	store    *mocks.QueryCoordCatalog
 	meta     *meta.Meta
 	observer *ResourceObserver
@@ -122,7 +122,7 @@ func (suite *ResourceObserverSuite) TestCheckNodesInReplica() {
 	suite.meta.ResourceManager.HandleNodeDown(100)
 	suite.meta.ResourceManager.HandleNodeDown(101)
 
-	//before auto recover rg
+	// before auto recover rg
 	suite.Eventually(func() bool {
 		lackNodesNum := suite.meta.ResourceManager.CheckLackOfNode("rg")
 		nodesInReplica := suite.meta.ReplicaManager.Get(2).GetNodes()
@@ -189,7 +189,7 @@ func (suite *ResourceObserverSuite) TestRecoverReplicaFailed() {
 	suite.meta.ResourceManager.HandleNodeDown(100)
 	suite.meta.ResourceManager.HandleNodeDown(101)
 
-	//before auto recover rg
+	// before auto recover rg
 	suite.Eventually(func() bool {
 		lackNodesNum := suite.meta.ResourceManager.CheckLackOfNode("rg")
 		nodesInReplica := suite.meta.ReplicaManager.Get(2).GetNodes()

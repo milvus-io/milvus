@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	"github.com/bits-and-blooms/bloom/v3"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -37,7 +38,7 @@ const (
 type PrimaryKeyStats struct {
 	FieldID int64              `json:"fieldID"`
 	Max     int64              `json:"max"` // useless, will delete
-	Min     int64              `json:"min"` //useless, will delete
+	Min     int64              `json:"min"` // useless, will delete
 	BF      *bloom.BloomFilter `json:"bf"`
 	PkType  int64              `json:"pkType"`
 	MaxPk   PrimaryKey         `json:"maxPk"`
@@ -154,7 +155,7 @@ func (stats *PrimaryKeyStats) UpdateByMsgs(msgs FieldData) {
 			stats.BF.AddString(str)
 		}
 	default:
-		//TODO::
+		// TODO::
 	}
 }
 
@@ -172,7 +173,6 @@ func (stats *PrimaryKeyStats) Update(pk PrimaryKey) {
 	default:
 		log.Warn("Update pk stats with invalid data type")
 	}
-
 }
 
 // updatePk update minPk and maxPk value

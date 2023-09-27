@@ -24,13 +24,13 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"github.com/stretchr/testify/assert"
 )
 
 // sampleSchema() return a schema contains all supported data types with an int64 primary key
@@ -381,14 +381,14 @@ func createBlockData(collectionSchema *schemapb.CollectionSchema, fieldsData map
 }
 
 func createShardsData(collectionSchema *schemapb.CollectionSchema, fieldsData map[storage.FieldID]interface{},
-	shardNum int32, partitionIDs []int64) []ShardData {
+	shardNum int32, partitionIDs []int64,
+) []ShardData {
 	shardsData := make([]ShardData, 0, shardNum)
 	for i := 0; i < int(shardNum); i++ {
 		shardData := make(ShardData)
 		for p := 0; p < len(partitionIDs); p++ {
 			blockData := createBlockData(collectionSchema, fieldsData)
 			shardData[partitionIDs[p]] = blockData
-
 		}
 		shardsData = append(shardsData, shardData)
 	}

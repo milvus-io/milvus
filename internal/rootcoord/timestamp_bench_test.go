@@ -87,7 +87,6 @@ func Benchmark_RootCoord_AllocTimestamp(b *testing.B) {
 		}
 		_, err := c.AllocTimestamp(ctx, &req)
 		assert.Nil(b, err)
-
 	}
 	b.StopTimer()
 }

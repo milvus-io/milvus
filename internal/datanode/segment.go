@@ -24,7 +24,6 @@ import (
 	"sync/atomic"
 
 	"github.com/bits-and-blooms/bloom/v3"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -34,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
 // Segment contains the latest segment infos from channel.

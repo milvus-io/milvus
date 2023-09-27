@@ -29,7 +29,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/exp/mmap"
 
@@ -170,7 +169,8 @@ func createMockCallbackFunctions(t *testing.T, rowCounter *rowCounterTest) (Assi
 	}
 
 	saveSegmentFunc := func(fieldsInsert []*datapb.FieldBinlog, fieldsStats []*datapb.FieldBinlog,
-		segmentID int64, targetChName string, rowCount int64, partID int64) error {
+		segmentID int64, targetChName string, rowCount int64, partID int64,
+	) error {
 		return nil
 	}
 
@@ -214,7 +214,8 @@ func Test_ImportWrapperNew(t *testing.T) {
 		return nil, nil, nil
 	}
 	saveBinFunc := func(fieldsInsert []*datapb.FieldBinlog, fieldsStats []*datapb.FieldBinlog,
-		segmentID int64, targetChName string, rowCount int64, partID int64) error {
+		segmentID int64, targetChName string, rowCount int64, partID int64,
+	) error {
 		return nil
 	}
 
@@ -921,7 +922,8 @@ func Test_ImportWrapperReportPersisted(t *testing.T) {
 
 	// error when closing segments
 	wrapper.saveSegmentFunc = func(fieldsInsert []*datapb.FieldBinlog, fieldsStats []*datapb.FieldBinlog,
-		segmentID int64, targetChName string, rowCount int64, partID int64) error {
+		segmentID int64, targetChName string, rowCount int64, partID int64,
+	) error {
 		return errors.New("error")
 	}
 	wrapper.workingSegments[0] = map[int64]*WorkingSegment{
@@ -932,7 +934,8 @@ func Test_ImportWrapperReportPersisted(t *testing.T) {
 
 	// failed to report
 	wrapper.saveSegmentFunc = func(fieldsInsert []*datapb.FieldBinlog, fieldsStats []*datapb.FieldBinlog,
-		segmentID int64, targetChName string, rowCount int64, partID int64) error {
+		segmentID int64, targetChName string, rowCount int64, partID int64,
+	) error {
 		return nil
 	}
 	wrapper.reportFunc = func(res *rootcoordpb.ImportResult) error {
@@ -1010,7 +1013,8 @@ func Test_ImportWrapperFlushFunc(t *testing.T) {
 
 	t.Run("close segment, saveSegmentFunc returns error", func(t *testing.T) {
 		wrapper.saveSegmentFunc = func(fieldsInsert []*datapb.FieldBinlog, fieldsStats []*datapb.FieldBinlog,
-			segmentID int64, targetChName string, rowCount int64, partID int64) error {
+			segmentID int64, targetChName string, rowCount int64, partID int64,
+		) error {
 			return errors.New("error")
 		}
 		wrapper.segmentSize = 1
@@ -1035,7 +1039,8 @@ func Test_ImportWrapperFlushFunc(t *testing.T) {
 
 	t.Run("createBinlogsFunc returns error", func(t *testing.T) {
 		wrapper.saveSegmentFunc = func(fieldsInsert []*datapb.FieldBinlog, fieldsStats []*datapb.FieldBinlog,
-			segmentID int64, targetChName string, rowCount int64, partID int64) error {
+			segmentID int64, targetChName string, rowCount int64, partID int64,
+		) error {
 			return nil
 		}
 		wrapper.assignSegmentFunc = func(shardID int, partID int64) (int64, string, error) {

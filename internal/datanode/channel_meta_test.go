@@ -202,7 +202,8 @@ func TestChannelMeta_getCollectionAndPartitionID(t *testing.T) {
 			seg.setType(test.segType)
 			channel := &ChannelMeta{
 				segments: map[UniqueID]*Segment{
-					test.segID: &seg},
+					test.segID: &seg,
+				},
 			}
 
 			collID, parID, err := channel.getCollectionAndPartitionID(test.segID)
@@ -690,11 +691,9 @@ func TestChannelMeta_InterfaceMethod(t *testing.T) {
 				} else {
 					assert.False(t, channel.hasSegment(3, true))
 				}
-
 			})
 		}
 	})
-
 }
 
 func TestChannelMeta_loadStats(t *testing.T) {
@@ -717,7 +716,7 @@ func TestChannelMeta_loadStats(t *testing.T) {
 			partitionID: 2,
 		}
 
-		//gen pk stats bytes
+		// gen pk stats bytes
 		stats := storage.NewPrimaryKeyStats(106, int64(schemapb.DataType_Int64), 10)
 		iCodec := storage.NewInsertCodecWithSchema(meta)
 
@@ -739,7 +738,8 @@ func TestChannelMeta_loadStats(t *testing.T) {
 				Binlogs: []*datapb.Binlog{{
 					//<StatsLogPath>/<collectionID>/<partitionID>/<segmentID>/<FieldID>/<logIdx>
 					LogPath: path.Join(common.SegmentStatslogPath, metautil.JoinIDPath(1, 2, 1, 106, 10)),
-				}}}}, 0)
+				}},
+			}}, 0)
 		assert.NoError(t, err)
 
 		// load flushed stats log
@@ -754,7 +754,8 @@ func TestChannelMeta_loadStats(t *testing.T) {
 				Binlogs: []*datapb.Binlog{{
 					//<StatsLogPath>/<collectionID>/<partitionID>/<segmentID>/<FieldID>/<logIdx>
 					LogPath: path.Join(common.SegmentStatslogPath, metautil.JoinIDPath(1, 2, 2, 106), storage.CompoundStatsType.LogIdx()),
-				}}}}, 0)
+				}},
+			}}, 0)
 		assert.NoError(t, err)
 	})
 }
@@ -815,7 +816,6 @@ func TestChannelMeta_UpdatePKRange(t *testing.T) {
 		assert.True(t, segNew.isPKExist(pk))
 		assert.True(t, segNormal.isPKExist(pk))
 	}
-
 }
 
 func TestChannelMeta_ChannelCP(t *testing.T) {
@@ -851,7 +851,8 @@ func TestChannelMeta_ChannelCP(t *testing.T) {
 	t.Run("set insertBuffer&deleteBuffer then get", func(t *testing.T) {
 		run := func(curInsertPos, curDeletePos *msgpb.MsgPosition,
 			hisInsertPoss, hisDeletePoss []*msgpb.MsgPosition,
-			ttPos, expectedPos *msgpb.MsgPosition) {
+			ttPos, expectedPos *msgpb.MsgPosition,
+		) {
 			segmentID := UniqueID(1)
 			channel := newChannel(mockVChannel, collID, nil, rc, cm)
 			channel.chunkManager = &mockDataCM{}

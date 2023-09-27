@@ -22,13 +22,13 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestIndexNodeManager_AddNode(t *testing.T) {

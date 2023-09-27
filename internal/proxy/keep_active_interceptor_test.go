@@ -4,9 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"google.golang.org/grpc"
-
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 )
 

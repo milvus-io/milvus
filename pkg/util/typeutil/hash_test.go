@@ -21,13 +21,14 @@ import (
 	"testing"
 	"unsafe"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
 func TestUint64(t *testing.T) {
 	var i int64 = -1
-	var u = uint64(i)
+	u := uint64(i)
 	t.Log(i)
 	t.Log(u)
 }
@@ -54,7 +55,7 @@ func TestHash32_Uint64(t *testing.T) {
 }
 
 func TestHash32_String(t *testing.T) {
-	var u = "ok"
+	u := "ok"
 	h, err := Hash32String(u)
 	assert.NoError(t, err)
 
@@ -151,7 +152,7 @@ func TestHashPK2Channels(t *testing.T) {
 	}
 	ret := HashPK2Channels(int64IDs, channels)
 	assert.Equal(t, 5, len(ret))
-	//same pk hash to same channel
+	// same pk hash to same channel
 	assert.Equal(t, ret[1], ret[2])
 
 	stringIDs := &schemapb.IDs{

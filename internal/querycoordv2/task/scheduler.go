@@ -23,10 +23,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -37,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
-	"github.com/samber/lo"
 )
 
 const (
@@ -165,7 +165,8 @@ func NewScheduler(ctx context.Context,
 	targetMgr *meta.TargetManager,
 	broker meta.Broker,
 	cluster session.Cluster,
-	nodeMgr *session.NodeManager) *taskScheduler {
+	nodeMgr *session.NodeManager,
+) *taskScheduler {
 	id := time.Now().UnixMilli()
 	return &taskScheduler{
 		ctx:       ctx,

@@ -21,8 +21,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/metrics"
 	"go.uber.org/atomic"
+
+	"github.com/milvus-io/milvus/pkg/metrics"
 )
 
 type Manager interface {

@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/kv"
+	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
@@ -39,8 +40,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/testutils"
-
-	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 )
 
 // MetaReloadSuite tests meta reload & meta creation related logic
@@ -311,7 +310,6 @@ func TestMeta_Basic(t *testing.T) {
 		info1_1 = meta.GetHealthySegment(segID1_1)
 		assert.NotNil(t, info1_1)
 		assert.Equal(t, false, info1_1.GetIsImporting())
-
 	})
 
 	t.Run("Test segment with kv fails", func(t *testing.T) {
@@ -349,7 +347,7 @@ func TestMeta_Basic(t *testing.T) {
 		assert.Error(t, err)
 
 		catalog = datacoord.NewCatalog(metakv, "", "")
-		meta, err = newMeta(context.TODO(), catalog, nil)
+		_, err = newMeta(context.TODO(), catalog, nil)
 		assert.NoError(t, err)
 	})
 
@@ -484,8 +482,10 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 		meta, err := newMemoryMeta()
 		assert.NoError(t, err)
 
-		segment1 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 1, State: commonpb.SegmentState_Growing, Binlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, getInsertLogPath("binlog0", 1))},
-			Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, getStatsLogPath("statslog0", 1))}}}
+		segment1 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 1, State: commonpb.SegmentState_Growing, Binlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, getInsertLogPath("binlog0", 1))},
+			Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, getStatsLogPath("statslog0", 1))},
+		}}
 		err = meta.AddSegment(segment1)
 		assert.NoError(t, err)
 
@@ -513,7 +513,6 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 		assert.Equal(t, updated.State, expected.State)
 		assert.Equal(t, updated.size.Load(), expected.size.Load())
 		assert.Equal(t, updated.NumOfRows, expected.NumOfRows)
-
 	})
 
 	t.Run("update non-existed segment", func(t *testing.T) {

@@ -8,8 +8,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
-type cntReducer struct {
-}
+type cntReducer struct{}
 
 func (r *cntReducer) Reduce(ctx context.Context, results []*internalpb.RetrieveResults) (*internalpb.RetrieveResults, error) {
 	cnt := int64(0)
@@ -23,8 +22,7 @@ func (r *cntReducer) Reduce(ctx context.Context, results []*internalpb.RetrieveR
 	return funcutil.WrapCntToInternalResult(cnt), nil
 }
 
-type cntReducerSegCore struct {
-}
+type cntReducerSegCore struct{}
 
 func (r *cntReducerSegCore) Reduce(ctx context.Context, results []*segcorepb.RetrieveResults) (*segcorepb.RetrieveResults, error) {
 	cnt := int64(0)

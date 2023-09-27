@@ -386,6 +386,7 @@ func generateStringArray(numRows int) []string {
 	}
 	return ret
 }
+
 func generateArrayArray(numRows int) []*schemapb.ScalarField {
 	ret := make([]*schemapb.ScalarField, 0, numRows)
 	for i := 0; i < numRows; i++ {
@@ -399,6 +400,7 @@ func generateArrayArray(numRows int) []*schemapb.ScalarField {
 	}
 	return ret
 }
+
 func generateJSONArray(numRows int) [][]byte {
 	ret := make([][]byte, 0, numRows)
 	for i := 0; i < numRows; i++ {
@@ -550,8 +552,10 @@ func GenTestScalarFieldData(dType schemapb.DataType, fieldName string, fieldID i
 				Data: &schemapb.ScalarField_JsonData{
 					JsonData: &schemapb.JSONArray{
 						Data: generateJSONArray(numRows),
-					}},
-			}}
+					},
+				},
+			},
+		}
 
 	default:
 		panic("data type not supported")
@@ -639,7 +643,7 @@ func SaveBinLog(ctx context.Context,
 		}
 
 		k := JoinIDPath(collectionID, partitionID, segmentID, fieldID)
-		//key := path.Join(defaultLocalStorage, "insert-log", k)
+		// key := path.Join(defaultLocalStorage, "insert-log", k)
 		key := path.Join(chunkManager.RootPath(), "insert-log", k)
 		kvs[key] = blob.Value
 		fieldBinlog = append(fieldBinlog, &datapb.FieldBinlog{
@@ -662,7 +666,7 @@ func SaveBinLog(ctx context.Context,
 		}
 
 		k := JoinIDPath(collectionID, partitionID, segmentID, fieldID)
-		//key := path.Join(defaultLocalStorage, "stats-log", k)
+		// key := path.Join(defaultLocalStorage, "stats-log", k)
 		key := path.Join(chunkManager.RootPath(), "stats-log", k)
 		kvs[key] = blob.Value[:]
 		statsBinlog = append(statsBinlog, &datapb.FieldBinlog{
@@ -680,7 +684,8 @@ func genStorageBlob(collectionID int64,
 	partitionID int64,
 	segmentID int64,
 	msgLength int,
-	schema *schemapb.CollectionSchema) ([]*storage.Blob, []*storage.Blob, error) {
+	schema *schemapb.CollectionSchema,
+) ([]*storage.Blob, []*storage.Blob, error) {
 	tmpSchema := &schemapb.CollectionSchema{
 		Name:   schema.Name,
 		AutoID: schema.AutoID,
@@ -808,7 +813,6 @@ func SaveDeltaLog(collectionID int64,
 	segmentID int64,
 	cm storage.ChunkManager,
 ) ([]*datapb.FieldBinlog, error) {
-
 	binlogWriter := storage.NewDeleteBinlogWriter(schemapb.DataType_String, collectionID, partitionID, segmentID)
 	eventWriter, _ := binlogWriter.NextDeleteEventWriter()
 	dData := &storage.DeleteData{
@@ -840,7 +844,7 @@ func SaveDeltaLog(collectionID int64,
 	fieldBinlog := make([]*datapb.FieldBinlog, 0)
 	log.Debug("[query node unittest] save delta log", zap.Int64("fieldID", pkFieldID))
 	key := JoinIDPath(collectionID, partitionID, segmentID, pkFieldID)
-	//keyPath := path.Join(defaultLocalStorage, "delta-log", key)
+	// keyPath := path.Join(defaultLocalStorage, "delta-log", key)
 	keyPath := path.Join(cm.RootPath(), "delta-log", key)
 	kvs[keyPath] = blob.Value[:]
 	fieldBinlog = append(fieldBinlog, &datapb.FieldBinlog{
@@ -892,7 +896,7 @@ func GenAndSaveIndex(collectionID, partitionID, segmentID, fieldID int64, msgLen
 
 	indexPaths := make([]string, 0)
 	for _, index := range serializedIndexBlobs {
-		//indexPath := filepath.Join(defaultLocalStorage, strconv.Itoa(int(segmentID)), index.Key)
+		// indexPath := filepath.Join(defaultLocalStorage, strconv.Itoa(int(segmentID)), index.Key)
 		indexPath := filepath.Join(cm.RootPath(), "index_files",
 			strconv.Itoa(int(segmentID)), index.Key)
 		indexPaths = append(indexPaths, indexPath)
@@ -932,13 +936,13 @@ func genIndexParams(indexType, metricType string) (map[string]string, map[string
 	} else if indexType == IndexHNSW {
 		indexParams["M"] = strconv.Itoa(16)
 		indexParams["efConstruction"] = strconv.Itoa(efConstruction)
-		//indexParams["ef"] = strconv.Itoa(ef)
+		// indexParams["ef"] = strconv.Itoa(ef)
 	} else if indexType == IndexFaissBinIVFFlat { // binary vector
 		indexParams["nlist"] = strconv.Itoa(nlist)
 		indexParams["m"] = strconv.Itoa(m)
 		indexParams["nbits"] = strconv.Itoa(nbits)
 	} else if indexType == IndexFaissBinIDMap {
-		//indexParams[common.DimKey] = strconv.Itoa(defaultDim)
+		// indexParams[common.DimKey] = strconv.Itoa(defaultDim)
 	} else {
 		panic("")
 	}
@@ -1001,7 +1005,7 @@ func genPlaceHolderGroup(nq int64) ([]byte, error) {
 		Values: make([][]byte, 0),
 	}
 	for i := int64(0); i < nq; i++ {
-		var vec = make([]float32, defaultDim)
+		vec := make([]float32, defaultDim)
 		for j := 0; j < defaultDim; j++ {
 			vec[j] = rand.Float32()
 		}
@@ -1152,7 +1156,6 @@ func checkSearchResult(nq int64, plan *SearchPlan, searchResult *SearchResult) e
 }
 
 func genSearchPlanAndRequests(collection *Collection, segments []int64, indexType string, nq int64) (*SearchRequest, error) {
-
 	iReq, _ := genSearchRequest(nq, indexType, collection)
 	queryReq := &querypb.SearchRequest{
 		Req:             iReq,

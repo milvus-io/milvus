@@ -25,16 +25,16 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/internal/util/mock"
+	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proxy"
+	"github.com/milvus-io/milvus/internal/util/mock"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/stretchr/testify/assert"
-	"google.golang.org/grpc"
 )
 
 func TestMain(m *testing.M) {

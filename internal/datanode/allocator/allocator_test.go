@@ -87,6 +87,7 @@ func (m *RootCoordFactory) AllocID(ctx context.Context, in *rootcoordpb.AllocIDR
 		Count: in.GetCount(),
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
-		}}
+		},
+	}
 	return resp, nil
 }

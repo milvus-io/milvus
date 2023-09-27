@@ -20,10 +20,11 @@ import (
 	"fmt"
 	"sync"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
-	"go.uber.org/zap"
 )
 
 // Manager is the interface for tsafe manager.

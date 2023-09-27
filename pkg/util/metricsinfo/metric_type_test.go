@@ -58,7 +58,6 @@ func Test_ParseMetricType(t *testing.T) {
 			t.Errorf("ParseMetricType(%s) = %s, but got: %s", test.s, test.want, got)
 		}
 	}
-
 }
 
 func Test_ConstructRequestByMetricType(t *testing.T) {

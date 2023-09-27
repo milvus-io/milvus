@@ -16,8 +16,9 @@
 
 package main
 
+import "C"
+
 import (
-	"C"
 	"os"
 
 	"github.com/milvus-io/milvus/cmd/milvus"

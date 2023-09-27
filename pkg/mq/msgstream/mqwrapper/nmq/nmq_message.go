@@ -19,9 +19,10 @@ package nmq
 import (
 	"log"
 
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 )
 
 // Check nmqMessage implements ConsumerMessage

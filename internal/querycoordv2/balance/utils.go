@@ -78,7 +78,7 @@ func CreateSegmentTasksFromPlans(ctx context.Context, checkerID int64, timeout t
 			// from balance checker
 			t.SetPriority(task.TaskPriorityLow)
 		} else {
-			//from segment checker
+			// from segment checker
 			t.SetPriority(task.TaskPriorityNormal)
 		}
 		ret = append(ret, t)
@@ -124,7 +124,8 @@ func CreateChannelTasksFromPlans(ctx context.Context, checkerID int64, timeout t
 }
 
 func PrintNewBalancePlans(collectionID int64, replicaID int64, segmentPlans []SegmentAssignPlan,
-	channelPlans []ChannelAssignPlan) {
+	channelPlans []ChannelAssignPlan,
+) {
 	balanceInfo := fmt.Sprintf("%s new plans:{collectionID:%d, replicaID:%d, ", PlanInfoPrefix, collectionID, replicaID)
 	for _, segmentPlan := range segmentPlans {
 		balanceInfo += segmentPlan.ToString()
@@ -138,9 +139,10 @@ func PrintNewBalancePlans(collectionID int64, replicaID int64, segmentPlans []Se
 
 func PrintCurrentReplicaDist(replica *meta.Replica,
 	stoppingNodesSegments map[int64][]*meta.Segment, nodeSegments map[int64][]*meta.Segment,
-	channelManager *meta.ChannelDistManager, segmentDistMgr *meta.SegmentDistManager) {
+	channelManager *meta.ChannelDistManager, segmentDistMgr *meta.SegmentDistManager,
+) {
 	distInfo := fmt.Sprintf("%s {collectionID:%d, replicaID:%d, ", DistInfoPrefix, replica.CollectionID, replica.GetID())
-	//1. print stopping nodes segment distribution
+	// 1. print stopping nodes segment distribution
 	distInfo += "[stoppingNodesSegmentDist:"
 	for stoppingNodeID, stoppedSegments := range stoppingNodesSegments {
 		distInfo += fmt.Sprintf("[nodeID:%d, ", stoppingNodeID)
@@ -151,7 +153,7 @@ func PrintCurrentReplicaDist(replica *meta.Replica,
 		distInfo += "]]"
 	}
 	distInfo += "]"
-	//2. print normal nodes segment distribution
+	// 2. print normal nodes segment distribution
 	distInfo += "[normalNodesSegmentDist:"
 	for normalNodeID, normalNodeCollectionSegments := range nodeSegments {
 		distInfo += fmt.Sprintf("[nodeID:%d, ", normalNodeID)
@@ -171,7 +173,7 @@ func PrintCurrentReplicaDist(replica *meta.Replica,
 	}
 	distInfo += "]"
 
-	//3. print stopping nodes channel distribution
+	// 3. print stopping nodes channel distribution
 	distInfo += "[stoppingNodesChannelDist:"
 	for stoppingNodeID := range stoppingNodesSegments {
 		stoppingNodeChannels := channelManager.GetByCollectionAndNode(replica.GetCollectionID(), stoppingNodeID)
@@ -184,7 +186,7 @@ func PrintCurrentReplicaDist(replica *meta.Replica,
 	}
 	distInfo += "]"
 
-	//4. print normal nodes channel distribution
+	// 4. print normal nodes channel distribution
 	distInfo += "[normalNodesChannelDist:"
 	for normalNodeID := range nodeSegments {
 		normalNodeChannels := channelManager.GetByCollectionAndNode(replica.GetCollectionID(), normalNodeID)

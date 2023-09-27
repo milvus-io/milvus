@@ -21,10 +21,10 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/stretchr/testify/assert"
 )
 
 func createBinlogBuf(t *testing.T, dataType schemapb.DataType, data interface{}) []byte {

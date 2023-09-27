@@ -141,12 +141,18 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 			in          []Msg
 			description string
 		}{
-			{[]Msg{},
-				"Invalid input length == 0"},
-			{[]Msg{&flowGraphMsg{}, &flowGraphMsg{}, &flowGraphMsg{}},
-				"Invalid input length == 3"},
-			{[]Msg{&mockMsg{}},
-				"Invalid input length == 1 but input message is not flowGraphMsg"},
+			{
+				[]Msg{},
+				"Invalid input length == 0",
+			},
+			{
+				[]Msg{&flowGraphMsg{}, &flowGraphMsg{}, &flowGraphMsg{}},
+				"Invalid input length == 3",
+			},
+			{
+				[]Msg{&mockMsg{}},
+				"Invalid input length == 1 but input message is not flowGraphMsg",
+			},
 		}
 
 		for _, test := range invalidInTests {
@@ -488,7 +494,6 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 			//     // assert.Equal(t, int64(1), iBNode.insertBuffer.size(UniqueID(i+1)))
 			// }
 		}
-
 	})
 
 	t.Run("Auto with manual flush", func(t *testing.T) {
@@ -566,7 +571,6 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 				assert.Equal(t, false, pack.flushed)
 			}
 		}
-
 	})
 }
 
@@ -925,7 +929,6 @@ func (s *InsertBufferNodeSuite) TestFillInSyncTasks() {
 			s.Assert().True(task.auto)
 		}
 	})
-
 }
 
 func TestInsertBufferNodeSuite(t *testing.T) {
@@ -1027,7 +1030,7 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 
 		for _, msg := range inMsg.insertMessages {
 			msg.EndTimestamp = 101 // ts valid
-			msg.RowIDs = []int64{} //misaligned data
+			msg.RowIDs = []int64{} // misaligned data
 			err = iBNode.bufferInsertMsg(msg, &msgpb.MsgPosition{}, &msgpb.MsgPosition{})
 			assert.Error(t, err)
 		}
@@ -1073,7 +1076,6 @@ func TestInsertBufferNode_updateSegmentStates(te *testing.T) {
 }
 
 func TestInsertBufferNode_getTimestampRange(t *testing.T) {
-
 	type testCase struct {
 		tag string
 

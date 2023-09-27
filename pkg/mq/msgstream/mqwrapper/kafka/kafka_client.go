@@ -43,7 +43,6 @@ func getBasicConfig(address string) kafka.ConfigMap {
 func NewKafkaClientInstance(address string) *kafkaClient {
 	config := getBasicConfig(address)
 	return NewKafkaClientInstanceWithConfigMap(config, kafka.ConfigMap{}, kafka.ConfigMap{})
-
 }
 
 func NewKafkaClientInstanceWithConfigMap(config kafka.ConfigMap, extraConsumerConfig kafka.ConfigMap, extraProducerConfig kafka.ConfigMap) *kafkaClient {
@@ -78,7 +77,6 @@ func NewKafkaClientInstanceWithConfig(config *paramtable.KafkaConfig) *kafkaClie
 	}
 
 	return NewKafkaClientInstanceWithConfigMap(kafkaConfig, specExtraConfig(config.ConsumerExtraConfig.GetValue()), specExtraConfig(config.ProducerExtraConfig.GetValue()))
-
 }
 
 func cloneKafkaConfig(config kafka.ConfigMap) *kafka.ConfigMap {
@@ -137,7 +135,7 @@ func (kc *kafkaClient) newProducerConfig() *kafka.ConfigMap {
 	// we want to ensure tt send out as soon as possible
 	newConf.SetKey("linger.ms", 2)
 
-	//special producer config
+	// special producer config
 	kc.specialExtraConfig(newConf, kc.producerConfig)
 
 	return newConf
@@ -148,9 +146,9 @@ func (kc *kafkaClient) newConsumerConfig(group string, offset mqwrapper.Subscrip
 
 	newConf.SetKey("group.id", group)
 	newConf.SetKey("enable.auto.commit", false)
-	//Kafka default will not create topics if consumer's the topics don't exist.
-	//In order to compatible with other MQ, we need to enable the following configuration,
-	//meanwhile, some implementation also try to consume a non-exist topic, such as dataCoordTimeTick.
+	// Kafka default will not create topics if consumer's the topics don't exist.
+	// In order to compatible with other MQ, we need to enable the following configuration,
+	// meanwhile, some implementation also try to consume a non-exist topic, such as dataCoordTimeTick.
 	newConf.SetKey("allow.auto.create.topics", true)
 	kc.specialExtraConfig(newConf, kc.consumerConfig)
 

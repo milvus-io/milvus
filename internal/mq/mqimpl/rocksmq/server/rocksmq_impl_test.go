@@ -102,7 +102,6 @@ func (rmq *rocksmq) produceBefore2(topicName string, messages []producerMessageB
 
 	msgLen := len(messages)
 	idStart, idEnd, err := rmq.idAllocator.Alloc(uint32(msgLen))
-
 	if err != nil {
 		return []UniqueID{}, err
 	}
@@ -150,7 +149,6 @@ func (rmq *rocksmq) produceBefore2(topicName string, messages []producerMessageB
 
 	getProduceTime := time.Since(start).Milliseconds()
 	if getProduceTime > 200 {
-
 		log.Warn("rocksmq produce too slowly", zap.String("topic", topicName),
 			zap.Int64("get lock elapse", getLockTime),
 			zap.Int64("alloc elapse", allocTime-getLockTime),
@@ -183,7 +181,6 @@ func (rmq *rocksmq) produceIn2(topicName string, messages []ProducerMessage) ([]
 
 	msgLen := len(messages)
 	idStart, idEnd, err := rmq.idAllocator.Alloc(uint32(msgLen))
-
 	if err != nil {
 		return []UniqueID{}, err
 	}
@@ -663,7 +660,6 @@ func TestRocksmq_Seek(t *testing.T) {
 	assert.Equal(t, messages[0].MsgID, seekID2)
 
 	_ = rmq.DestroyConsumerGroup(channelName, groupName1)
-
 }
 
 func TestRocksmq_Loop(t *testing.T) {
@@ -1371,7 +1367,7 @@ func TestRocksmq_updateAckedInfoErr(t *testing.T) {
 	rmq.CreateTopic(topicName)
 	defer rmq.DestroyTopic(topicName)
 
-	//add message, make sure rmq has more than one page
+	// add message, make sure rmq has more than one page
 	msgNum := 100
 	pMsgs := make([]ProducerMessage, msgNum)
 	for i := 0; i < msgNum; i++ {
@@ -1390,9 +1386,9 @@ func TestRocksmq_updateAckedInfoErr(t *testing.T) {
 			GroupName: groupName + strconv.Itoa(i),
 			MsgMutex:  make(chan struct{}),
 		}
-		//make sure consumer not in rmq.consumersID
+		// make sure consumer not in rmq.consumersID
 		rmq.DestroyConsumerGroup(topicName, groupName+strconv.Itoa(i))
-		//add consumer to rmq.consumers
+		// add consumer to rmq.consumers
 		rmq.RegisterConsumer(consumer)
 	}
 
@@ -1445,7 +1441,7 @@ func TestRocksmq_Info(t *testing.T) {
 
 	assert.True(t, rmq.Info())
 
-	//test error
+	// test error
 	rmq.kv = &rocksdbkv.RocksdbKV{}
 	assert.False(t, rmq.Info())
 }

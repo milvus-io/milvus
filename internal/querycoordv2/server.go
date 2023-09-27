@@ -59,10 +59,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-var (
-	// Only for re-export
-	Params = params.Params
-)
+// Only for re-export
+var Params = params.Params
 
 type Server struct {
 	ctx                 context.Context
@@ -513,7 +511,7 @@ func (s *Server) GetComponentStates(ctx context.Context) (*milvuspb.ComponentSta
 	return &milvuspb.ComponentStates{
 		Status: merr.Status(nil),
 		State:  serviceComponentInfo,
-		//SubcomponentStates: subComponentInfos,
+		// SubcomponentStates: subComponentInfos,
 	}, nil
 }
 

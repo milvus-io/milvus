@@ -17,10 +17,11 @@
 package collector
 
 import (
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
-	"go.uber.org/zap"
 )
 
 var Average *averageCollector
@@ -65,11 +66,11 @@ func init() {
 	Average = newAverageCollector()
 	Counter = newCounter()
 
-	//init rate Metric
+	// init rate Metric
 	for _, label := range RateMetrics() {
 		Rate.Register(label)
 	}
-	//init average metric
+	// init average metric
 
 	for _, label := range AverageMetrics() {
 		Average.Register(label)

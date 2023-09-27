@@ -7,6 +7,7 @@ package indexcgowrapper
 #include "indexbuilder/index_c.h"
 */
 import "C"
+
 import (
 	"context"
 	"fmt"
@@ -18,7 +19,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-
 	"github.com/milvus-io/milvus/internal/proto/indexcgopb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -41,9 +41,7 @@ type CodecIndex interface {
 	UpLoad() (map[string]int64, error)
 }
 
-var (
-	_ CodecIndex = (*CgoIndex)(nil)
-)
+var _ CodecIndex = (*CgoIndex)(nil)
 
 type CgoIndex struct {
 	indexPtr C.CIndex

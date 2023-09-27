@@ -34,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
-
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
@@ -521,10 +520,9 @@ func validateSchema(coll *schemapb.CollectionSchema) error {
 				if err4 != nil {
 					return err4
 				}
-			} else {
-				// in C++, default type will be specified
-				// do nothing
 			}
+			// in C++, default type will be specified
+			// do nothing
 		} else {
 			if len(field.IndexParams) != 0 {
 				return fmt.Errorf("index params is not empty for scalar field: %s(%d)", field.Name, field.FieldID)

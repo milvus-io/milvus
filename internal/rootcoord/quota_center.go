@@ -264,7 +264,7 @@ func (q *QuotaCenter) syncMetrics() error {
 	if err != nil {
 		return err
 	}
-	//log.Debug("QuotaCenter sync metrics done",
+	// log.Debug("QuotaCenter sync metrics done",
 	//	zap.Any("dataNodeMetrics", q.dataNodeMetrics),
 	//	zap.Any("queryNodeMetrics", q.queryNodeMetrics),
 	//	zap.Any("proxyMetrics", q.proxyMetrics),

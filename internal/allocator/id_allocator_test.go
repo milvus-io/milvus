@@ -20,14 +20,14 @@ import (
 	"context"
 	"testing"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 )
 
-type mockIDAllocator struct {
-}
+type mockIDAllocator struct{}
 
 func (tso *mockIDAllocator) AllocID(ctx context.Context, req *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
 	return &rootcoordpb.AllocIDResponse{

@@ -21,11 +21,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
 
 func TestChannelStateTimer(t *testing.T) {
@@ -242,6 +242,5 @@ func TestChannelStateTimer_parses(t *testing.T) {
 		for _, test := range tests {
 			assert.Equal(t, test.outAckType, getAckType(test.inState))
 		}
-
 	})
 }

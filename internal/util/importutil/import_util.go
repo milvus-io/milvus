@@ -37,8 +37,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-type BlockData map[storage.FieldID]storage.FieldData // a map of field ID to field data
-type ShardData map[int64]BlockData                   // a map of partition ID to block data
+type (
+	BlockData map[storage.FieldID]storage.FieldData // a map of field ID to field data
+	ShardData map[int64]BlockData                   // a map of partition ID to block data
+)
 
 func isCanceled(ctx context.Context) bool {
 	// canceled?
@@ -154,7 +156,7 @@ type Validator struct {
 	isString    bool                                                 // for string field
 	dimension   int                                                  // only for vector field
 	fieldName   string                                               // field name
-	fieldID     int64                                                //field ID
+	fieldID     int64                                                // field ID
 }
 
 // initValidators constructs valiator methods and data conversion methods
@@ -469,8 +471,8 @@ func tryFlushBlocks(ctx context.Context,
 	callFlushFunc ImportFlushFunc,
 	blockSize int64,
 	maxTotalSize int64,
-	force bool) error {
-
+	force bool,
+) error {
 	totalSize := 0
 	biggestSize := 0
 	biggestItem := -1

@@ -34,7 +34,7 @@ import (
 // test of filter node
 type FilterNodeSuite struct {
 	suite.Suite
-	//datas
+	// datas
 	collectionID int64
 	partitionIDs []int64
 	channel      string
@@ -44,10 +44,10 @@ type FilterNodeSuite struct {
 	excludedSegmentIDs []int64
 	insertSegmentIDs   []int64
 	deleteSegmentSum   int
-	//segmentID of msg invalid because empty of not aligned
+	// segmentID of msg invalid because empty of not aligned
 	errSegmentID int64
 
-	//mocks
+	// mocks
 	manager *segments.Manager
 }
 
@@ -63,7 +63,7 @@ func (suite *FilterNodeSuite) SetupSuite() {
 	suite.deleteSegmentSum = 4
 	suite.errSegmentID = 7
 
-	//init excludedSegment
+	// init excludedSegment
 	suite.excludedSegments = typeutil.NewConcurrentMap[int64, *datapb.SegmentInfo]()
 	for _, id := range suite.excludedSegmentIDs {
 		suite.excludedSegments.Insert(id, &datapb.SegmentInfo{
@@ -76,10 +76,10 @@ func (suite *FilterNodeSuite) SetupSuite() {
 
 // test filter node with collection load collection
 func (suite *FilterNodeSuite) TestWithLoadCollection() {
-	//data
+	// data
 	suite.validSegmentIDs = []int64{2, 3, 4, 5, 6}
 
-	//mock
+	// mock
 	collection := segments.NewCollectionWithoutSchema(suite.collectionID, querypb.LoadType_LoadCollection)
 	for _, partitionID := range suite.partitionIDs {
 		collection.AddPartition(partitionID)
@@ -111,10 +111,10 @@ func (suite *FilterNodeSuite) TestWithLoadCollection() {
 
 // test filter node with collection load partition
 func (suite *FilterNodeSuite) TestWithLoadPartation() {
-	//data
+	// data
 	suite.validSegmentIDs = []int64{2, 3, 4, 5, 6}
 
-	//mock
+	// mock
 	collection := segments.NewCollectionWithoutSchema(suite.collectionID, querypb.LoadType_LoadPartition)
 	collection.AddPartition(suite.partitionIDs[0])
 
@@ -149,43 +149,43 @@ func (suite *FilterNodeSuite) buildMsgPack() *msgstream.MsgPack {
 		Msgs:    []msgstream.TsMsg{},
 	}
 
-	//add valid insert
+	// add valid insert
 	for _, id := range suite.insertSegmentIDs {
 		insertMsg := buildInsertMsg(suite.collectionID, suite.partitionIDs[id%2], id, suite.channel, 1)
 		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
 	}
 
-	//add valid delete
+	// add valid delete
 	for i := 0; i < suite.deleteSegmentSum; i++ {
 		deleteMsg := buildDeleteMsg(suite.collectionID, suite.partitionIDs[i%2], suite.channel, 1)
 		msgPack.Msgs = append(msgPack.Msgs, deleteMsg)
 	}
 
-	//add invalid msg
+	// add invalid msg
 
-	//segment in excludedSegments
-	//some one end timestamp befroe dmlPosition timestamp will be invalid
+	// segment in excludedSegments
+	// some one end timestamp befroe dmlPosition timestamp will be invalid
 	for _, id := range suite.excludedSegmentIDs {
 		insertMsg := buildInsertMsg(suite.collectionID, suite.partitionIDs[id%2], id, suite.channel, 1)
 		insertMsg.EndTimestamp = uint64(id)
 		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
 	}
 
-	//empty msg
+	// empty msg
 	insertMsg := buildInsertMsg(suite.collectionID, suite.partitionIDs[0], suite.errSegmentID, suite.channel, 0)
 	msgPack.Msgs = append(msgPack.Msgs, insertMsg)
 
 	deleteMsg := buildDeleteMsg(suite.collectionID, suite.partitionIDs[0], suite.channel, 0)
 	msgPack.Msgs = append(msgPack.Msgs, deleteMsg)
 
-	//msg not target
+	// msg not target
 	insertMsg = buildInsertMsg(suite.collectionID+1, 1, 0, "Unknown", 1)
 	msgPack.Msgs = append(msgPack.Msgs, insertMsg)
 
 	deleteMsg = buildDeleteMsg(suite.collectionID+1, 1, "Unknown", 1)
 	msgPack.Msgs = append(msgPack.Msgs, deleteMsg)
 
-	//msg not aligned
+	// msg not aligned
 	insertMsg = buildInsertMsg(suite.collectionID, suite.partitionIDs[0], suite.errSegmentID, suite.channel, 1)
 	insertMsg.Timestamps = []uint64{}
 	msgPack.Msgs = append(msgPack.Msgs, insertMsg)

@@ -13,23 +13,35 @@ import (
 	"github.com/milvus-io/milvus/pkg/util"
 )
 
-type TtCollectionsMeta220 map[UniqueID]map[Timestamp]*model.Collection // coll_id -> ts -> coll
-type CollectionsMeta220 map[UniqueID]*model.Collection                 // coll_id -> coll
+type (
+	TtCollectionsMeta220 map[UniqueID]map[Timestamp]*model.Collection // coll_id -> ts -> coll
+	CollectionsMeta220   map[UniqueID]*model.Collection               // coll_id -> coll
+)
 
-type TtAliasesMeta220 map[string]map[Timestamp]*model.Alias // alias name -> ts -> coll
-type AliasesMeta220 map[string]*model.Alias                 // alias name -> coll
+type (
+	TtAliasesMeta220 map[string]map[Timestamp]*model.Alias // alias name -> ts -> coll
+	AliasesMeta220   map[string]*model.Alias               // alias name -> coll
+)
 
-type TtPartitionsMeta220 map[UniqueID]map[Timestamp][]*model.Partition // coll_id -> ts -> partitions
-type PartitionsMeta220 map[UniqueID][]*model.Partition                 // coll_id -> ts -> partitions
+type (
+	TtPartitionsMeta220 map[UniqueID]map[Timestamp][]*model.Partition // coll_id -> ts -> partitions
+	PartitionsMeta220   map[UniqueID][]*model.Partition               // coll_id -> ts -> partitions
+)
 
-type TtFieldsMeta220 map[UniqueID]map[Timestamp][]*model.Field // coll_id -> ts -> fields
-type FieldsMeta220 map[UniqueID][]*model.Field                 // coll_id -> ts -> fields
+type (
+	TtFieldsMeta220 map[UniqueID]map[Timestamp][]*model.Field // coll_id -> ts -> fields
+	FieldsMeta220   map[UniqueID][]*model.Field               // coll_id -> ts -> fields
+)
 
-type CollectionIndexesMeta220 map[UniqueID]map[UniqueID]*model.Index     // coll_id -> index_id -> index
-type SegmentIndexesMeta220 map[UniqueID]map[UniqueID]*model.SegmentIndex // seg_id -> index_id -> segment index
+type (
+	CollectionIndexesMeta220 map[UniqueID]map[UniqueID]*model.Index        // coll_id -> index_id -> index
+	SegmentIndexesMeta220    map[UniqueID]map[UniqueID]*model.SegmentIndex // seg_id -> index_id -> segment index
+)
 
-type CollectionLoadInfo220 map[UniqueID]*model.CollectionLoadInfo            // collectionID -> CollectionLoadInfo
-type PartitionLoadInfo220 map[UniqueID]map[UniqueID]*model.PartitionLoadInfo // collectionID, partitionID -> PartitionLoadInfo
+type (
+	CollectionLoadInfo220 map[UniqueID]*model.CollectionLoadInfo             // collectionID -> CollectionLoadInfo
+	PartitionLoadInfo220  map[UniqueID]map[UniqueID]*model.PartitionLoadInfo // collectionID, partitionID -> PartitionLoadInfo
+)
 
 func (meta *TtCollectionsMeta220) GenerateSaves(sourceVersion semver.Version) (map[string]string, error) {
 	saves := make(map[string]string)
