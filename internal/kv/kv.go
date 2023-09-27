@@ -19,6 +19,7 @@ package kv
 import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/milvus-io/milvus/internal/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -57,8 +58,8 @@ type BaseKV interface {
 //go:generate mockery --name=TxnKV --with-expecter
 type TxnKV interface {
 	BaseKV
-	MultiSaveAndRemove(saves map[string]string, removals []string) error
-	MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error
+	MultiSaveAndRemove(saves map[string]string, removals []string, preds ...predicates.Predicate) error
+	MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, preds ...predicates.Predicate) error
 }
 
 // MetaKv is TxnKV for metadata. It should save data with lease.

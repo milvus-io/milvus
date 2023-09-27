@@ -33,9 +33,11 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/kv"
+	"github.com/milvus-io/milvus/internal/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
@@ -426,72 +428,98 @@ func (kv *txnTiKV) RemoveWithPrefix(prefix string) error {
 }
 
 // MultiSaveAndRemove saves the key-value pairs and removes the keys in a transaction.
-func (kv *txnTiKV) MultiSaveAndRemove(saves map[string]string, removals []string) error {
+func (kv *txnTiKV) MultiSaveAndRemove(saves map[string]string, removals []string, preds ...predicates.Predicate) error {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
 	defer cancel()
 
-	var logging_error error
-	defer logWarnOnFailure(&logging_error, "txnTiKV MultiSaveAndRemove error", zap.Any("saves", saves), zap.Strings("removes", removals), zap.Int("saveLength", len(saves)), zap.Int("removeLength", len(removals)))
+	var loggingErr error
+	defer logWarnOnFailure(&loggingErr, "txnTiKV MultiSaveAndRemove error", zap.Any("saves", saves), zap.Strings("removes", removals), zap.Int("saveLength", len(saves)), zap.Int("removeLength", len(removals)))
 
 	txn, err := beginTxn(kv.txn)
 	if err != nil {
-		logging_error = errors.Wrap(err, "Failed to create txn for MultiSaveAndRemove")
-		return logging_error
+		loggingErr = errors.Wrap(err, "Failed to create txn for MultiSaveAndRemove")
+		return loggingErr
 	}
 
 	// Defer a rollback only if the transaction hasn't been committed
-	defer rollbackOnFailure(&logging_error, txn)
+	defer rollbackOnFailure(&loggingErr, txn)
+
+	for _, pred := range preds {
+		key := path.Join(kv.rootPath, pred.Key())
+		val, err := txn.Get(ctx, []byte(key))
+		if err != nil {
+			loggingErr = errors.Wrap(err, fmt.Sprintf("failed to read predicate target (%s:%v) for MultiSaveAndRemove", pred.Key(), pred.TargetValue()))
+			return loggingErr
+		}
+		if !pred.IsTrue(val) {
+			loggingErr = merr.WrapErrIoFailedReason("failed to meet predicate", fmt.Sprintf("key=%s, value=%v", pred.Key(), pred.TargetValue()))
+			return loggingErr
+		}
+	}
 
 	for key, value := range saves {
 		key = path.Join(kv.rootPath, key)
 		// Check if value is empty or taking reserved EmptyValue
 		byte_value, err := convertEmptyStringToByte(value)
 		if err != nil {
-			logging_error = errors.Wrap(err, fmt.Sprintf("Failed to cast to byte (%s:%s) for MultiSaveAndRemove", key, value))
-			return logging_error
+			loggingErr = errors.Wrap(err, fmt.Sprintf("Failed to cast to byte (%s:%s) for MultiSaveAndRemove", key, value))
+			return loggingErr
 		}
 		err = txn.Set([]byte(key), byte_value)
 		if err != nil {
-			logging_error = errors.Wrap(err, fmt.Sprintf("Failed to set (%s:%s) for MultiSaveAndRemove", key, value))
-			return logging_error
+			loggingErr = errors.Wrap(err, fmt.Sprintf("Failed to set (%s:%s) for MultiSaveAndRemove", key, value))
+			return loggingErr
 		}
 	}
 
 	for _, key := range removals {
 		key = path.Join(kv.rootPath, key)
 		if err = txn.Delete([]byte(key)); err != nil {
-			logging_error = errors.Wrap(err, fmt.Sprintf("Failed to delete %s for MultiSaveAndRemove", key))
-			return logging_error
+			loggingErr = errors.Wrap(err, fmt.Sprintf("Failed to delete %s for MultiSaveAndRemove", key))
+			return loggingErr
 		}
 	}
 
 	err = kv.executeTxn(txn, ctx)
 	if err != nil {
-		logging_error = errors.Wrap(err, "Failed to commit for MultiSaveAndRemove")
-		return logging_error
+		loggingErr = errors.Wrap(err, "Failed to commit for MultiSaveAndRemove")
+		return loggingErr
 	}
 	CheckElapseAndWarn(start, "Slow txnTiKV MultiSaveAndRemove() operation", zap.Any("saves", saves), zap.Strings("removals", removals))
 	return nil
 }
 
 // MultiSaveAndRemoveWithPrefix saves kv in @saves and removes the keys with given prefix in @removals.
-func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error {
+func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, preds ...predicates.Predicate) error {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
 	defer cancel()
 
-	var logging_error error
-	defer logWarnOnFailure(&logging_error, "txnTiKV MultiSaveAndRemoveWithPrefix() error", zap.Any("saves", saves), zap.Strings("removes", removals), zap.Int("saveLength", len(saves)), zap.Int("removeLength", len(removals)))
+	var loggingErr error
+	defer logWarnOnFailure(&loggingErr, "txnTiKV MultiSaveAndRemoveWithPrefix() error", zap.Any("saves", saves), zap.Strings("removes", removals), zap.Int("saveLength", len(saves)), zap.Int("removeLength", len(removals)))
 
 	txn, err := beginTxn(kv.txn)
 	if err != nil {
-		logging_error = errors.Wrap(err, "Failed to create txn for MultiSaveAndRemoveWithPrefix")
-		return logging_error
+		loggingErr = errors.Wrap(err, "Failed to create txn for MultiSaveAndRemoveWithPrefix")
+		return loggingErr
 	}
 
 	// Defer a rollback only if the transaction hasn't been committed
-	defer rollbackOnFailure(&logging_error, txn)
+	defer rollbackOnFailure(&loggingErr, txn)
+
+	for _, pred := range preds {
+		key := path.Join(kv.rootPath, pred.Key())
+		val, err := txn.Get(ctx, []byte(key))
+		if err != nil {
+			loggingErr = errors.Wrap(err, fmt.Sprintf("failed to read predicate target (%s:%v) for MultiSaveAndRemove", pred.Key(), pred.TargetValue()))
+			return loggingErr
+		}
+		if !pred.IsTrue(val) {
+			loggingErr = merr.WrapErrIoFailedReason("failed to meet predicate", fmt.Sprintf("key=%s, value=%v", pred.Key(), pred.TargetValue()))
+			return loggingErr
+		}
+	}
 
 	// Save key-value pairs
 	for key, value := range saves {
@@ -499,13 +527,13 @@ func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removal
 		// Check if value is empty or taking reserved EmptyValue
 		byte_value, err := convertEmptyStringToByte(value)
 		if err != nil {
-			logging_error = errors.Wrap(err, fmt.Sprintf("Failed to cast to byte (%s:%s) for MultiSaveAndRemoveWithPrefix()", key, value))
-			return logging_error
+			loggingErr = errors.Wrap(err, fmt.Sprintf("Failed to cast to byte (%s:%s) for MultiSaveAndRemoveWithPrefix()", key, value))
+			return loggingErr
 		}
 		err = txn.Set([]byte(key), byte_value)
 		if err != nil {
-			logging_error = errors.Wrap(err, fmt.Sprintf("Failed to set (%s:%s) for MultiSaveAndRemoveWithPrefix()", key, value))
-			return logging_error
+			loggingErr = errors.Wrap(err, fmt.Sprintf("Failed to set (%s:%s) for MultiSaveAndRemoveWithPrefix()", key, value))
+			return loggingErr
 		}
 	}
 	// Remove keys with prefix
@@ -518,31 +546,31 @@ func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removal
 		// Use Scan to iterate over keys in the prefix range
 		iter, err := txn.Iter(startKey, endKey)
 		if err != nil {
-			logging_error = errors.Wrap(err, fmt.Sprintf("Failed to create iterater for %s during MultiSaveAndRemoveWithPrefix()", prefix))
-			return logging_error
+			loggingErr = errors.Wrap(err, fmt.Sprintf("Failed to create iterater for %s during MultiSaveAndRemoveWithPrefix()", prefix))
+			return loggingErr
 		}
 
 		// Iterate over keys and delete them
 		for iter.Valid() {
 			key := iter.Key()
 			err = txn.Delete(key)
-			if logging_error != nil {
-				logging_error = errors.Wrap(err, fmt.Sprintf("Failed to delete %s for MultiSaveAndRemoveWithPrefix", string(key)))
-				return logging_error
+			if loggingErr != nil {
+				loggingErr = errors.Wrap(err, fmt.Sprintf("Failed to delete %s for MultiSaveAndRemoveWithPrefix", string(key)))
+				return loggingErr
 			}
 
 			// Move the iterator to the next key
 			err = iter.Next()
 			if err != nil {
-				logging_error = errors.Wrap(err, fmt.Sprintf("Failed to move Iterator after key %s for MultiSaveAndRemoveWithPrefix", string(key)))
-				return logging_error
+				loggingErr = errors.Wrap(err, fmt.Sprintf("Failed to move Iterator after key %s for MultiSaveAndRemoveWithPrefix", string(key)))
+				return loggingErr
 			}
 		}
 	}
 	err = kv.executeTxn(txn, ctx)
 	if err != nil {
-		logging_error = errors.Wrap(err, "Failed to commit for MultiSaveAndRemoveWithPrefix")
-		return logging_error
+		loggingErr = errors.Wrap(err, "Failed to commit for MultiSaveAndRemoveWithPrefix")
+		return loggingErr
 	}
 	CheckElapseAndWarn(start, "Slow txnTiKV MultiSaveAndRemoveWithPrefix() operation", zap.Any("saves", saves), zap.Strings("removals", removals))
 	return nil

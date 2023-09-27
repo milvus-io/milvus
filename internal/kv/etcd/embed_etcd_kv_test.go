@@ -18,15 +18,20 @@ package etcdkv_test
 
 import (
 	"fmt"
+	"path"
 	"sort"
 	"testing"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	"golang.org/x/exp/maps"
 
+	"github.com/milvus-io/milvus/internal/kv"
 	embed_etcd_kv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/kv/predicates"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -824,4 +829,91 @@ func TestEmbedEtcd(te *testing.T) {
 		assert.NoError(t, err)
 		assert.False(t, has)
 	})
+}
+
+type EmbedEtcdKVSuite struct {
+	suite.Suite
+
+	param *paramtable.ComponentParam
+
+	rootPath string
+	kv       kv.MetaKv
+}
+
+func (s *EmbedEtcdKVSuite) SetupSuite() {
+	te := s.T()
+	te.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
+	param := new(paramtable.ComponentParam)
+	te.Setenv("etcd.use.embed", "true")
+	te.Setenv("etcd.config.path", "../../../configs/advanced/etcd.yaml")
+
+	dir := te.TempDir()
+	te.Setenv("etcd.data.dir", dir)
+
+	param.Init(paramtable.NewBaseTable())
+	s.param = param
+}
+
+func (s *EmbedEtcdKVSuite) SetupTest() {
+	s.rootPath = path.Join("unittest/etcdkv", funcutil.RandomString(8))
+
+	metaKv, err := embed_etcd_kv.NewMetaKvFactory(s.rootPath, &s.param.EtcdCfg)
+	s.Require().NoError(err)
+	s.kv = metaKv
+}
+
+func (s *EmbedEtcdKVSuite) TearDownTest() {
+	if s.kv != nil {
+		s.kv.RemoveWithPrefix("")
+		s.kv.Close()
+		s.kv = nil
+	}
+}
+
+func (s *EmbedEtcdKVSuite) TestTxnWithPredicates() {
+	etcdKV := s.kv
+
+	prepareKV := map[string]string{
+		"lease1": "1",
+		"lease2": "2",
+	}
+
+	err := etcdKV.MultiSave(prepareKV)
+	s.Require().NoError(err)
+
+	badPredicate := predicates.NewMockPredicate(s.T())
+	badPredicate.EXPECT().Type().Return(0)
+	badPredicate.EXPECT().Target().Return(predicates.PredTargetValue)
+
+	multiSaveAndRemovePredTests := []struct {
+		tag           string
+		multiSave     map[string]string
+		preds         []predicates.Predicate
+		expectSuccess bool
+	}{
+		{"predicate_ok", map[string]string{"a": "b"}, []predicates.Predicate{predicates.ValueEqual("lease1", "1")}, true},
+		{"predicate_fail", map[string]string{"a": "b"}, []predicates.Predicate{predicates.ValueEqual("lease1", "2")}, false},
+		{"bad_predicate", map[string]string{"a": "b"}, []predicates.Predicate{badPredicate}, false},
+	}
+
+	for _, test := range multiSaveAndRemovePredTests {
+		s.Run(test.tag, func() {
+			err := etcdKV.MultiSaveAndRemove(test.multiSave, nil, test.preds...)
+			if test.expectSuccess {
+				s.NoError(err)
+			} else {
+				s.Error(err)
+			}
+			err = etcdKV.MultiSaveAndRemoveWithPrefix(test.multiSave, nil, test.preds...)
+			if test.expectSuccess {
+				s.NoError(err)
+			} else {
+				s.Error(err)
+			}
+		})
+	}
+}
+
+func TestEmbedEtcdKV(t *testing.T) {
+	suite.Run(t, new(EmbedEtcdKVSuite))
 }
