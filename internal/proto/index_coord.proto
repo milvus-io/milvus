@@ -84,7 +84,6 @@ message SegmentIndex {
   uint64 serialize_size = 14;
   bool write_handoff = 15;
   int32 current_index_version = 16;
-  int32 minimal_index_version = 17;
 }
 
 message RegisterNodeRequest {
@@ -155,7 +154,6 @@ message IndexFilePathInfo {
   int64 index_version = 9;
   int64 num_rows = 10;
   int32 current_index_version = 11;
-  int32 minimal_index_version = 12;
 }
 
 message SegmentInfo {
@@ -228,7 +226,6 @@ message CreateJobRequest {
   repeated common.KeyValuePair type_params = 10;
   int64 num_rows = 11;
   int32 current_index_version = 12;
-  int32 minimal_index_version = 13;
 }
 
 message QueryJobsRequest {
@@ -242,6 +239,7 @@ message IndexTaskInfo {
   repeated string index_file_keys = 3;
   uint64 serialized_size = 4;
   string fail_reason = 5;
+  int32 current_index_version = 6;
 }
 
 message QueryJobsResponse {

@@ -51,25 +51,20 @@ func (s *Server) startIndexService(ctx context.Context) {
 }
 
 func (s *Server) createIndexForSegment(segment *SegmentInfo, indexID UniqueID) error {
-	indexEngineVersion := s.IndexEngineVersionManager.GetCurrentIndexEngineVersion()
-	log.Info("create index for segment", zap.Int64("segmentID", segment.ID), zap.Int64("indexID", indexID),
-		zap.Int32("index_engine_version", indexEngineVersion),
-	)
+	log.Info("create index for segment", zap.Int64("segmentID", segment.ID), zap.Int64("indexID", indexID))
 	buildID, err := s.allocator.allocID(context.Background())
 	if err != nil {
 		return err
 	}
 	segIndex := &model.SegmentIndex{
-		SegmentID:           segment.ID,
-		CollectionID:        segment.CollectionID,
-		PartitionID:         segment.PartitionID,
-		NumRows:             segment.NumOfRows,
-		IndexID:             indexID,
-		BuildID:             buildID,
-		CreateTime:          uint64(segment.ID),
-		WriteHandoff:        false,
-		CurrentIndexVersion: s.IndexEngineVersionManager.GetCurrentIndexEngineVersion(),
-		MinimalIndexVersion: s.IndexEngineVersionManager.GetMinimalIndexEngineVersion(),
+		SegmentID:    segment.ID,
+		CollectionID: segment.CollectionID,
+		PartitionID:  segment.PartitionID,
+		NumRows:      segment.NumOfRows,
+		IndexID:      indexID,
+		BuildID:      buildID,
+		CreateTime:   uint64(segment.ID),
+		WriteHandoff: false,
 	}
 	if err = s.meta.AddSegmentIndex(segIndex); err != nil {
 		return err
@@ -692,7 +687,6 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 							IndexVersion:        segIdx.IndexVersion,
 							NumRows:             segIdx.NumRows,
 							CurrentIndexVersion: segIdx.CurrentIndexVersion,
-							MinimalIndexVersion: segIdx.MinimalIndexVersion,
 						})
 				}
 			}

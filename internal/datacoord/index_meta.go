@@ -531,6 +531,7 @@ func (m *meta) FinishTask(taskInfo *indexpb.IndexTaskInfo) error {
 		segIdx.IndexFileKeys = common.CloneStringList(taskInfo.GetIndexFileKeys())
 		segIdx.FailReason = taskInfo.GetFailReason()
 		segIdx.IndexSize = taskInfo.GetSerializedSize()
+		segIdx.CurrentIndexVersion = taskInfo.GetCurrentIndexVersion()
 		return m.alterSegmentIndexes([]*model.SegmentIndex{segIdx})
 	}
 
@@ -539,7 +540,9 @@ func (m *meta) FinishTask(taskInfo *indexpb.IndexTaskInfo) error {
 	}
 
 	log.Info("finish index task success", zap.Int64("buildID", taskInfo.GetBuildID()),
-		zap.String("state", taskInfo.GetState().String()), zap.String("fail reason", taskInfo.GetFailReason()))
+		zap.String("state", taskInfo.GetState().String()), zap.String("fail reason", taskInfo.GetFailReason()),
+		zap.Int32("current_index_version", taskInfo.GetCurrentIndexVersion()),
+	)
 	m.updateIndexTasksMetrics()
 	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(taskInfo.GetIndexFileKeys())))
 	return nil

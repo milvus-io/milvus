@@ -56,7 +56,14 @@ func (i *IndexNode) foreachTaskInfo(fn func(ClusterID string, buildID UniqueID, 
 	}
 }
 
-func (i *IndexNode) storeIndexFilesAndStatistic(ClusterID string, buildID UniqueID, fileKeys []string, serializedSize uint64, statistic *indexpb.JobInfo) {
+func (i *IndexNode) storeIndexFilesAndStatistic(
+	ClusterID string,
+	buildID UniqueID,
+	fileKeys []string,
+	serializedSize uint64,
+	statistic *indexpb.JobInfo,
+	currentIndexVersion int32,
+) {
 	key := taskKey{ClusterID: ClusterID, BuildID: buildID}
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
@@ -64,6 +71,7 @@ func (i *IndexNode) storeIndexFilesAndStatistic(ClusterID string, buildID Unique
 		info.fileKeys = common.CloneStringList(fileKeys)
 		info.serializedSize = serializedSize
 		info.statistic = proto.Clone(statistic).(*indexpb.JobInfo)
+		info.currentIndexVersion = currentIndexVersion
 		return
 	}
 }
