@@ -24,6 +24,7 @@
 #include "Meta.h"
 #include "common/Utils.h"
 #include "common/Slice.h"
+#include "common/Types.h"
 #include "index/Utils.h"
 
 namespace milvus::index {
@@ -253,9 +254,8 @@ ScalarIndexSort<T>::Range(const T value, const OpType op) {
                 data_.begin(), data_.end(), IndexStructure<T>(value));
             break;
         default:
-            throw SegcoreError(
-                OpTypeInvalid,
-                fmt::format("Invalid OperatorType: {}", fmt::underlying(op)));
+            throw SegcoreError(OpTypeInvalid,
+                               fmt::format("Invalid OperatorType: {}", op));
     }
     for (; lb < ub; ++lb) {
         bitset[lb->idx_] = true;

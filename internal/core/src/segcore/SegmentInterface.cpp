@@ -165,9 +165,9 @@ SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan,
                     break;
                 }
                 default: {
-                    PanicCodeInfo(DataTypeInvalid,
-                                  fmt::format("unsupported datatype {}",
-                                              field_meta.get_data_type()));
+                    PanicInfo(DataTypeInvalid,
+                              fmt::format("unsupported datatype {}",
+                                          field_meta.get_data_type()));
                 }
             }
         }

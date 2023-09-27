@@ -39,8 +39,8 @@ class ScalarIndex : public IndexBase {
     void
     BuildWithDataset(const DatasetPtr& dataset,
                      const Config& config = {}) override {
-        PanicCodeInfo(Unsupported,
-                      "scalar index don't support build index with dataset");
+        PanicInfo(Unsupported,
+                  "scalar index don't support build index with dataset");
     };
 
  public:

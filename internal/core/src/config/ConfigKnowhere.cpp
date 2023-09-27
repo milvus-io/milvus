@@ -62,13 +62,13 @@ KnowhereSetSimdType(const char* value) {
     } else if (strcmp(value, "avx") == 0 || strcmp(value, "sse4_2") == 0) {
         simd_type = knowhere::KnowhereConfig::SimdType::SSE4_2;
     } else {
-        PanicInfo("invalid SIMD type: " + std::string(value));
+        PanicInfo(ConfigInvalid, "invalid SIMD type: " + std::string(value));
     }
     try {
         return knowhere::KnowhereConfig::SetSimdType(simd_type);
     } catch (std::exception& e) {
         LOG_SERVER_ERROR_ << e.what();
-        PanicInfo(e.what());
+        PanicInfo(ConfigInvalid, e.what());
     }
 }
 
@@ -81,8 +81,9 @@ void
 KnowhereInitSearchThreadPool(const uint32_t num_threads) {
     knowhere::KnowhereConfig::SetSearchThreadPoolSize(num_threads);
     if (!knowhere::KnowhereConfig::SetAioContextPool(num_threads)) {
-        PanicInfo("Failed to set aio context pool with num_threads " +
-                  std::to_string(num_threads));
+        PanicInfo(ConfigInvalid,
+                  "Failed to set aio context pool with num_threads " +
+                      std::to_string(num_threads));
     }
 }
 

@@ -41,9 +41,8 @@ IndexData::Serialize(StorageType medium) {
         case StorageType::LocalDisk:
             return serialize_to_local_file();
         default:
-            PanicCodeInfo(DataFormatBroken,
-                          fmt::format("unsupported medium type {}",
-                                      fmt::underlying(medium)));
+            PanicInfo(DataFormatBroken,
+                      fmt::format("unsupported medium type {}", medium));
     }
 }
 

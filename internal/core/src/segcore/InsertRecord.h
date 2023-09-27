@@ -87,7 +87,7 @@ class OffsetOrderedMap : public OffsetMap {
 
     void
     seal() override {
-        PanicCodeInfo(
+        PanicInfo(
             NotImplemented,
             "OffsetOrderedMap used for growing segment could not be sealed.");
     }
@@ -182,8 +182,8 @@ class OffsetOrderedArray : public OffsetMap {
     void
     insert(const PkType& pk, int64_t offset) override {
         if (is_sealed) {
-            PanicCodeInfo(Unsupported,
-                          "OffsetOrderedArray could not insert after seal");
+            PanicInfo(Unsupported,
+                      "OffsetOrderedArray could not insert after seal");
         }
         array_.push_back(std::make_pair(std::get<T>(pk), offset));
     }
@@ -294,11 +294,9 @@ struct InsertRecord {
                         break;
                     }
                     default: {
-                        PanicCodeInfo(
-                            DataTypeInvalid,
-                            fmt::format(
-                                "unsupported pk type",
-                                fmt::underlying(field_meta.get_data_type())));
+                        PanicInfo(DataTypeInvalid,
+                                  fmt::format("unsupported pk type",
+                                              field_meta.get_data_type()));
                     }
                 }
             }
@@ -318,10 +316,9 @@ struct InsertRecord {
                         field_id, field_meta.get_dim(), size_per_chunk);
                     continue;
                 } else {
-                    PanicCodeInfo(DataTypeInvalid,
-                                  fmt::format("unsupported vector type",
-                                              fmt::underlying(
-                                                  field_meta.get_data_type())));
+                    PanicInfo(DataTypeInvalid,
+                              fmt::format("unsupported vector type",
+                                          field_meta.get_data_type()));
                 }
             }
             switch (field_meta.get_data_type()) {
@@ -367,10 +364,9 @@ struct InsertRecord {
                     break;
                 }
                 default: {
-                    PanicCodeInfo(DataTypeInvalid,
-                                  fmt::format("unsupported scalar type",
-                                              fmt::underlying(
-                                                  field_meta.get_data_type())));
+                    PanicInfo(DataTypeInvalid,
+                              fmt::format("unsupported scalar type",
+                                          field_meta.get_data_type()));
                 }
             }
         }
@@ -420,9 +416,9 @@ struct InsertRecord {
                 break;
             }
             default: {
-                PanicCodeInfo(DataTypeInvalid,
-                              fmt::format("unsupported primary key data type",
-                                          fmt::underlying(data_type)));
+                PanicInfo(DataTypeInvalid,
+                          fmt::format("unsupported primary key data type",
+                                      data_type));
             }
         }
     }
@@ -452,10 +448,9 @@ struct InsertRecord {
                     break;
                 }
                 default: {
-                    PanicCodeInfo(
-                        DataTypeInvalid,
-                        fmt::format("unsupported primary key data type",
-                                    fmt::underlying(data_type)));
+                    PanicInfo(DataTypeInvalid,
+                              fmt::format("unsupported primary key data type",
+                                          data_type));
                 }
             }
         }

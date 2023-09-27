@@ -310,3 +310,50 @@ IsTermExpr(Expr* expr) {
 }
 
 }  // namespace milvus::query
+
+template <>
+struct fmt::formatter<milvus::query::LogicalUnaryExpr::OpType>
+    : formatter<string_view> {
+    auto
+    format(milvus::query::LogicalUnaryExpr::OpType c,
+           format_context& ctx) const {
+        string_view name = "unknown";
+        switch (c) {
+            case milvus::query::LogicalUnaryExpr::OpType::Invalid:
+                name = "Invalid";
+                break;
+            case milvus::query::LogicalUnaryExpr::OpType::LogicalNot:
+                name = "LogicalNot";
+                break;
+        }
+        return formatter<string_view>::format(name, ctx);
+    }
+};
+
+template <>
+struct fmt::formatter<milvus::query::LogicalBinaryExpr::OpType>
+    : formatter<string_view> {
+    auto
+    format(milvus::query::LogicalBinaryExpr::OpType c,
+           format_context& ctx) const {
+        string_view name = "unknown";
+        switch (c) {
+            case milvus::query::LogicalBinaryExpr::OpType::Invalid:
+                name = "Invalid";
+                break;
+            case milvus::query::LogicalBinaryExpr::OpType::LogicalAnd:
+                name = "LogicalAdd";
+                break;
+            case milvus::query::LogicalBinaryExpr::OpType::LogicalOr:
+                name = "LogicalOr";
+                break;
+            case milvus::query::LogicalBinaryExpr::OpType::LogicalXor:
+                name = "LogicalXor";
+                break;
+            case milvus::query::LogicalBinaryExpr::OpType::LogicalMinus:
+                name = "LogicalMinus";
+                break;
+        }
+        return formatter<string_view>::format(name, ctx);
+    }
+};

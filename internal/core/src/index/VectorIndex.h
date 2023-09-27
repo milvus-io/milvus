@@ -45,14 +45,13 @@ class VectorIndex : public IndexBase {
     BuildWithRawData(size_t n,
                      const void* values,
                      const Config& config = {}) override {
-        PanicCodeInfo(Unsupported,
-                      "vector index don't support build index with raw data");
+        PanicInfo(Unsupported,
+                  "vector index don't support build index with raw data");
     };
 
     virtual void
     AddWithDataset(const DatasetPtr& dataset, const Config& config) {
-        PanicCodeInfo(Unsupported,
-                      "vector index don't support add with dataset");
+        PanicInfo(Unsupported, "vector index don't support add with dataset");
     }
 
     virtual std::unique_ptr<SearchResult>

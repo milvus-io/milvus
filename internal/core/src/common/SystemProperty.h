@@ -18,7 +18,7 @@
 
 #include <string>
 
-#include "Types.h"
+#include "common/Types.h"
 
 namespace milvus {
 
@@ -63,3 +63,23 @@ class SystemProperty {
 };
 
 }  // namespace milvus
+
+template <>
+struct fmt::formatter<milvus::SystemFieldType> : formatter<string_view> {
+    auto
+    format(milvus::SystemFieldType c, format_context& ctx) const {
+        string_view name = "unknown";
+        switch (c) {
+            case milvus::SystemFieldType::Invalid:
+                name = "Invalid";
+                break;
+            case milvus::SystemFieldType::RowId:
+                name = "RowId";
+                break;
+            case milvus::SystemFieldType::Timestamp:
+                name = "Timestamp";
+                break;
+        }
+        return formatter<string_view>::format(name, ctx);
+    }
+};

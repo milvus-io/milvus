@@ -66,8 +66,8 @@ FillField(DataType data_type, const storage::FieldDataPtr data, void* dst) {
                 break;
             }
             default:
-                PanicInfo(fmt::format("not supported data type {}",
-                                      datatype_name(data_type)));
+                PanicInfo(DataTypeInvalid,
+                          fmt::format("not supported data type {}", data_type));
         }
     } else {
         memcpy(dst, data->Data(), data->Size());
@@ -125,7 +125,8 @@ WriteFieldData(File& file,
                 break;
             }
             default:
-                PanicInfo(fmt::format("not supported data type {}",
+                PanicInfo(DataTypeInvalid,
+                          fmt::format("not supported data type {}",
                                       datatype_name(data_type)));
         }
     } else {

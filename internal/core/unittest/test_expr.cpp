@@ -762,7 +762,7 @@ TEST(Expr, TestUnaryRangeJson) {
                     break;
                 }
                 default: {
-                    PanicCodeInfo(Unsupported, "unsupported range node");
+                    PanicInfo(Unsupported, "unsupported range node");
                 }
             }
 
@@ -816,9 +816,7 @@ TEST(Expr, TestUnaryRangeJson) {
     int_val3.set_int64_val(int64_t(3));
     arr.add_array()->CopyFrom(int_val3);
 
-    std::vector<TestArrayCase> array_cases = {
-        {arr, {"array"}}
-    };
+    std::vector<TestArrayCase> array_cases = {{arr, {"array"}}};
 
     for (const auto& testcase : array_cases) {
         auto check = [&](OpType op) {
@@ -830,11 +828,12 @@ TEST(Expr, TestUnaryRangeJson) {
         for (auto& op : ops) {
             RetrievePlanNode plan;
             auto pointer = milvus::Json::pointer(testcase.nested_path);
-            plan.predicate_ = std::make_unique<UnaryRangeExprImpl<proto::plan::Array>>(
-                ColumnInfo(json_fid, DataType::JSON, testcase.nested_path),
-                op,
-                testcase.val,
-                proto::plan::GenericValue::ValCase::kArrayVal);
+            plan.predicate_ =
+                std::make_unique<UnaryRangeExprImpl<proto::plan::Array>>(
+                    ColumnInfo(json_fid, DataType::JSON, testcase.nested_path),
+                    op,
+                    testcase.val,
+                    proto::plan::GenericValue::ValCase::kArrayVal);
             auto final = visitor.call_child(*plan.predicate_.value());
             EXPECT_EQ(final.size(), N * num_iters);
 
@@ -4111,9 +4110,7 @@ TEST(Expr, TestJsonContainsArray) {
         {{sub_arr1, sub_arr2}, {"array2"}}};
 
     for (auto& testcase : diff_testcases2) {
-        auto check = [&]() {
-            return true;
-        };
+        auto check = [&]() { return true; };
         RetrievePlanNode plan;
         auto pointer = milvus::Json::pointer(testcase.nested_path);
         plan.predicate_ =
@@ -4248,11 +4245,11 @@ TEST(Expr, TestJsonContainsArray) {
     }
 }
 
-milvus::proto::plan::GenericValue generatedArrayWithFourDiffType(
-    int64_t int_val,
-    double float_val,
-    bool bool_val,
-    std::string string_val) {
+milvus::proto::plan::GenericValue
+generatedArrayWithFourDiffType(int64_t int_val,
+                               double float_val,
+                               bool bool_val,
+                               std::string string_val) {
     using namespace milvus;
 
     proto::plan::GenericValue value;
@@ -4312,11 +4309,15 @@ TEST(Expr, TestJsonContainsDiffTypeArray) {
 
     proto::plan::GenericValue int_value;
     int_value.set_int64_val(1);
-    auto diff_type_array1 = generatedArrayWithFourDiffType(1, 2.2, false, "abc");
-    auto diff_type_array2 = generatedArrayWithFourDiffType(1, 2.2, false, "def");
+    auto diff_type_array1 =
+        generatedArrayWithFourDiffType(1, 2.2, false, "abc");
+    auto diff_type_array2 =
+        generatedArrayWithFourDiffType(1, 2.2, false, "def");
     auto diff_type_array3 = generatedArrayWithFourDiffType(1, 2.2, true, "abc");
-    auto diff_type_array4 = generatedArrayWithFourDiffType(1, 3.3, false, "abc");
-    auto diff_type_array5 = generatedArrayWithFourDiffType(2, 2.2, false, "abc");
+    auto diff_type_array4 =
+        generatedArrayWithFourDiffType(1, 3.3, false, "abc");
+    auto diff_type_array5 =
+        generatedArrayWithFourDiffType(2, 2.2, false, "abc");
 
     std::vector<Testcase<proto::plan::GenericValue>> diff_testcases{
         {{diff_type_array1, int_value}, {"array3"}, true},
@@ -4327,9 +4328,7 @@ TEST(Expr, TestJsonContainsDiffTypeArray) {
     };
 
     for (auto& testcase : diff_testcases) {
-        auto check = [&]() {
-            return testcase.res;
-        };
+        auto check = [&]() { return testcase.res; };
         RetrievePlanNode plan;
         auto pointer = milvus::Json::pointer(testcase.nested_path);
         plan.predicate_ =
@@ -4355,9 +4354,7 @@ TEST(Expr, TestJsonContainsDiffTypeArray) {
     }
 
     for (auto& testcase : diff_testcases) {
-        auto check = [&]() {
-            return false;
-        };
+        auto check = [&]() { return false; };
         RetrievePlanNode plan;
         auto pointer = milvus::Json::pointer(testcase.nested_path);
         plan.predicate_ =
@@ -4433,10 +4430,13 @@ TEST(Expr, TestJsonContainsDiffType) {
     proto::plan::GenericValue int_val2;
     int_val2.set_int64_val(int64_t(1));
 
-
     std::vector<Testcase<proto::plan::GenericValue>> diff_testcases{
-        {{int_val, bool_val, float_val, string_val}, {"diff_type_array"}, false},
-        {{string_val2, bool_val2, float_val2, int_val2}, {"diff_type_array"}, true},
+        {{int_val, bool_val, float_val, string_val},
+         {"diff_type_array"},
+         false},
+        {{string_val2, bool_val2, float_val2, int_val2},
+         {"diff_type_array"},
+         true},
     };
 
     for (auto& testcase : diff_testcases) {

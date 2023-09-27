@@ -227,8 +227,7 @@ class Array {
                 return true;
             }
             default:
-                PanicCodeInfo(Unsupported,
-                              "unsupported element type for array");
+                PanicInfo(Unsupported, "unsupported element type for array");
         }
     }
 
@@ -264,8 +263,8 @@ class Array {
                     return static_cast<T>(
                         reinterpret_cast<double*>(data_)[index]);
                 default:
-                    PanicCodeInfo(Unsupported,
-                                  "unsupported element type for array");
+                    PanicInfo(Unsupported,
+                              "unsupported element type for array");
             }
         }
         return reinterpret_cast<T*>(data_)[index];
@@ -481,8 +480,8 @@ class ArrayView {
                     return static_cast<T>(
                         reinterpret_cast<double*>(data_)[index]);
                 default:
-                    PanicCodeInfo(Unsupported,
-                                  "unsupported element type for array");
+                    PanicInfo(Unsupported,
+                              "unsupported element type for array");
             }
         }
         return reinterpret_cast<T*>(data_)[index];

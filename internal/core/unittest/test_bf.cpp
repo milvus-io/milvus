@@ -56,7 +56,7 @@ Distances(const float* base,
         }
         return res;
     } else {
-        PanicCodeInfo(MetricTypeInvalid, "invalid metric type");
+        PanicInfo(MetricTypeInvalid, "invalid metric type");
     }
 }
 
@@ -85,7 +85,7 @@ Ref(const float* base,
     } else if (milvus::IsMetricType(metric, knowhere::metric::IP)) {
         std::reverse(res.begin(), res.end());
     } else {
-        PanicCodeInfo(MetricTypeInvalid, "invalid metric type");
+        PanicInfo(MetricTypeInvalid, "invalid metric type");
     }
     return GetOffsets(res, topk);
 }

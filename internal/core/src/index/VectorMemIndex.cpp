@@ -84,9 +84,8 @@ VectorMemIndex::Serialize(const Config& config) {
     knowhere::BinarySet ret;
     auto stat = index_.Serialize(ret);
     if (stat != knowhere::Status::success)
-        PanicCodeInfo(
-            ErrorCode::UnexpectedError,
-            "failed to serialize index, " + KnowhereStatusString(stat));
+        PanicInfo(ErrorCode::UnexpectedError,
+                  "failed to serialize index, " + KnowhereStatusString(stat));
     Disassemble(ret);
 
     return ret;
@@ -97,9 +96,8 @@ VectorMemIndex::LoadWithoutAssemble(const BinarySet& binary_set,
                                     const Config& config) {
     auto stat = index_.Deserialize(binary_set, config);
     if (stat != knowhere::Status::success)
-        PanicCodeInfo(
-            ErrorCode::UnexpectedError,
-            "failed to Deserialize index, " + KnowhereStatusString(stat));
+        PanicInfo(ErrorCode::UnexpectedError,
+                  "failed to Deserialize index, " + KnowhereStatusString(stat));
     SetDim(index_.Dim());
 }
 
@@ -231,8 +229,8 @@ VectorMemIndex::BuildWithDataset(const DatasetPtr& dataset,
     knowhere::TimeRecorder rc("BuildWithoutIds", 1);
     auto stat = index_.Build(*dataset, index_config);
     if (stat != knowhere::Status::success)
-        PanicCodeInfo(ErrorCode::IndexBuildError,
-                      "failed to build index, " + KnowhereStatusString(stat));
+        PanicInfo(ErrorCode::IndexBuildError,
+                  "failed to build index, " + KnowhereStatusString(stat));
     rc.ElapseFromBegin("Done");
     SetDim(index_.Dim());
 }
@@ -283,8 +281,8 @@ VectorMemIndex::AddWithDataset(const DatasetPtr& dataset,
     knowhere::TimeRecorder rc("AddWithDataset", 1);
     auto stat = index_.Add(*dataset, index_config);
     if (stat != knowhere::Status::success)
-        PanicCodeInfo(ErrorCode::IndexBuildError,
-                      "failed to append index, " + KnowhereStatusString(stat));
+        PanicInfo(ErrorCode::IndexBuildError,
+                  "failed to append index, " + KnowhereStatusString(stat));
     rc.ElapseFromBegin("Done");
 }
 
@@ -313,10 +311,10 @@ VectorMemIndex::Query(const DatasetPtr dataset,
             auto res = index_.RangeSearch(*dataset, search_conf, bitset);
             milvus::tracer::AddEvent("finish_knowhere_index_range_search");
             if (!res.has_value()) {
-                PanicCodeInfo(ErrorCode::UnexpectedError,
-                              fmt::format("failed to range search: {}: {}",
-                                          KnowhereStatusString(res.error()),
-                                          res.what()));
+                PanicInfo(ErrorCode::UnexpectedError,
+                          fmt::format("failed to range search: {}: {}",
+                                      KnowhereStatusString(res.error()),
+                                      res.what()));
             }
             auto result = ReGenRangeSearchResult(
                 res.value(), topk, num_queries, GetMetricType());
@@ -327,10 +325,10 @@ VectorMemIndex::Query(const DatasetPtr dataset,
             auto res = index_.Search(*dataset, search_conf, bitset);
             milvus::tracer::AddEvent("finish_knowhere_index_search");
             if (!res.has_value()) {
-                PanicCodeInfo(ErrorCode::UnexpectedError,
-                              fmt::format("failed to search: {}: {}",
-                                          KnowhereStatusString(res.error()),
-                                          res.what()));
+                PanicInfo(ErrorCode::UnexpectedError,
+                          fmt::format("failed to search: {}: {}",
+                                      KnowhereStatusString(res.error()),
+                                      res.what()));
             }
             return res.value();
         }
@@ -369,9 +367,8 @@ std::vector<uint8_t>
 VectorMemIndex::GetVector(const DatasetPtr dataset) const {
     auto res = index_.GetVectorByIds(*dataset);
     if (!res.has_value()) {
-        PanicCodeInfo(
-            ErrorCode::UnexpectedError,
-            "failed to get vector, " + KnowhereStatusString(res.error()));
+        PanicInfo(ErrorCode::UnexpectedError,
+                  "failed to get vector, " + KnowhereStatusString(res.error()));
     }
     auto index_type = GetIndexType();
     auto tensor = res.value()->GetTensor();
@@ -489,9 +486,9 @@ VectorMemIndex::LoadFromFile(const Config& config) {
     conf[kEnableMmap] = true;
     auto stat = index_.DeserializeFromFile(filepath.value(), conf);
     if (stat != knowhere::Status::success) {
-        PanicCodeInfo(ErrorCode::UnexpectedError,
-                      fmt::format("failed to Deserialize index: {}",
-                                  KnowhereStatusString(stat)));
+        PanicInfo(ErrorCode::UnexpectedError,
+                  fmt::format("failed to Deserialize index: {}",
+                              KnowhereStatusString(stat)));
     }
 
     auto dim = index_.Dim();
