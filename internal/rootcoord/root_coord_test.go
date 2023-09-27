@@ -1206,7 +1206,7 @@ func TestCore_Import(t *testing.T) {
 		meta.GetPartitionByNameFunc = func(collID UniqueID, partitionName string, ts Timestamp) (UniqueID, error) {
 			return common.InvalidPartitionID, fmt.Errorf("partition ID not found for partition name '%s'", partitionName)
 		}
-		resp2, err := c.Import(ctx, &milvuspb.ImportRequest{
+		resp2, _ := c.Import(ctx, &milvuspb.ImportRequest{
 			CollectionName: "a-good-name",
 			PartitionName:  "a-bad-name",
 			Options: []*commonpb.KeyValuePair{

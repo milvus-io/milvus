@@ -34,6 +34,7 @@ import (
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -102,6 +103,11 @@ func TestRbacCreateRole(t *testing.T) {
 			assert.Error(t, err)
 		})
 	}
+	t.Run("role has existed", func(t *testing.T) {
+		err := mt.CreateRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: "role1"})
+		assert.Error(t, err)
+		assert.True(t, common.IsIgnorableError(err))
+	})
 
 	{
 		mockCata := mocks.NewRootCoordCatalog(t)
