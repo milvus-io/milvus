@@ -33,9 +33,9 @@ const (
 	DefaultIndexSliceSize                      = 16
 	DefaultGracefulTime                        = 5000 // ms
 	DefaultGracefulStopTimeout                 = 1800 // s
-	DefaultHighPriorityThreadCoreCoefficient   = 100
-	DefaultMiddlePriorityThreadCoreCoefficient = 50
-	DefaultLowPriorityThreadCoreCoefficient    = 10
+	DefaultHighPriorityThreadCoreCoefficient   = 10
+	DefaultMiddlePriorityThreadCoreCoefficient = 5
+	DefaultLowPriorityThreadCoreCoefficient    = 1
 
 	DefaultSessionTTL        = 60 // s
 	DefaultSessionRetryTimes = 30
