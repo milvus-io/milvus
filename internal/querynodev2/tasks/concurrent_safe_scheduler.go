@@ -1,8 +1,8 @@
 package tasks
 
 import (
-	"context"
 	"fmt"
+	"sync"
 
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -11,6 +11,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -30,6 +32,7 @@ func newScheduler(policy schedulePolicy) Scheduler {
 		execChan:         make(chan Task),
 		pool:             conc.NewPool[any](maxReadConcurrency, conc.WithPreAlloc(true)),
 		schedulerCounter: schedulerCounter{},
+		lifetime:         lifetime.NewLifetime(lifetime.Initializing),
 	}
 }
 
@@ -44,12 +47,23 @@ type scheduler struct {
 	receiveChan chan addTaskReq
 	execChan    chan Task
 	pool        *conc.Pool[any]
+
+	// wg is the waitgroup for internal worker goroutine
+	wg sync.WaitGroup
+	// lifetime controls scheduler State & make sure all requests accepted will be processed
+	lifetime lifetime.Lifetime[lifetime.State]
+
 	schedulerCounter
 }
 
 // Add a new task into scheduler,
 // error will be returned if scheduler reaches some limit.
 func (s *scheduler) Add(task Task) (err error) {
+	if !s.lifetime.Add(lifetime.IsWorking) {
+		return merr.WrapErrServiceUnavailable("scheduler closed")
+	}
+	defer s.lifetime.Done()
+
 	errCh := make(chan error, 1)
 
 	// TODO: add operation should be fast, is UnsolveLen metric unnesscery?
@@ -68,16 +82,31 @@ func (s *scheduler) Add(task Task) (err error) {
 
 // Start schedule the owned task asynchronously and continuously.
 // Start should be only call once.
-func (s *scheduler) Start(ctx context.Context) {
+func (s *scheduler) Start() {
+	s.wg.Add(2)
+
 	// Start a background task executing loop.
-	go s.exec(ctx)
+	go s.exec()
 
 	// Begin to schedule tasks.
-	go s.schedule(ctx)
+	go s.schedule()
+
+	s.lifetime.SetState(lifetime.Working)
+}
+
+func (s *scheduler) Stop() {
+	s.lifetime.SetState(lifetime.Stopped)
+	// wait all accepted Add done
+	s.lifetime.Wait()
+	// close receiveChan start stopping process for `schedule`
+	close(s.receiveChan)
+	// wait workers quit
+	s.wg.Wait()
 }
 
 // schedule the owned task asynchronously and continuously.
-func (s *scheduler) schedule(ctx context.Context) {
+func (s *scheduler) schedule() {
+	defer s.wg.Done()
 	var task Task
 	for {
 		s.setupReadyLenMetric()
@@ -87,10 +116,19 @@ func (s *scheduler) schedule(ctx context.Context) {
 		task, nq, execChan = s.setupExecListener(task)
 
 		select {
-		case <-ctx.Done():
-			log.Warn("unexpected quit of schedule loop")
-			return
-		case req := <-s.receiveChan:
+		case req, ok := <-s.receiveChan:
+			if !ok {
+				log.Info("receiveChan closed, processing remaining request")
+				// drain policy maintained task
+				for task != nil {
+					execChan <- task
+					s.updateWaitingTaskCounter(-1, -nq)
+					task = s.produceExecChan()
+				}
+				log.Info("all task put into exeChan, schedule worker exit")
+				close(s.execChan)
+				return
+			}
 			// Receive add operation request and return the process result.
 			// And consume recv chan as much as possible.
 			s.consumeRecvChan(req, maxReceiveChanBatchConsumeNum)
@@ -166,42 +204,42 @@ func (s *scheduler) produceExecChan() Task {
 }
 
 // exec exec the ready task in background continuously.
-func (s *scheduler) exec(ctx context.Context) {
+func (s *scheduler) exec() {
+	defer s.wg.Done()
 	log.Info("start execute loop")
 	for {
-		select {
-		case <-ctx.Done():
-			log.Warn("unexpected quit of exec loop")
+		t, ok := <-s.execChan
+		if !ok {
+			log.Info("scheduler execChan closed, worker exit")
 			return
-		case t := <-s.execChan:
-			// Skip this task if task is canceled.
-			if err := t.Canceled(); err != nil {
-				log.Warn("task canceled before executing", zap.Error(err))
-				t.Done(err)
-				continue
-			}
-			if err := t.PreExecute(); err != nil {
-				log.Warn("failed to pre-execute task", zap.Error(err))
-				t.Done(err)
-				continue
-			}
-
-			s.pool.Submit(func() (any, error) {
-				// Update concurrency metric and notify task done.
-				metrics.QueryNodeReadTaskConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
-				collector.Counter.Inc(metricsinfo.ExecuteQueueType, 1)
-
-				err := t.Execute()
-
-				// Update all metric after task finished.
-				metrics.QueryNodeReadTaskConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Dec()
-				collector.Counter.Dec(metricsinfo.ExecuteQueueType, -1)
-
-				// Notify task done.
-				t.Done(err)
-				return nil, err
-			})
 		}
+		// Skip this task if task is canceled.
+		if err := t.Canceled(); err != nil {
+			log.Warn("task canceled before executing", zap.Error(err))
+			t.Done(err)
+			continue
+		}
+		if err := t.PreExecute(); err != nil {
+			log.Warn("failed to pre-execute task", zap.Error(err))
+			t.Done(err)
+			continue
+		}
+
+		s.pool.Submit(func() (any, error) {
+			// Update concurrency metric and notify task done.
+			metrics.QueryNodeReadTaskConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
+			collector.Counter.Inc(metricsinfo.ExecuteQueueType, 1)
+
+			err := t.Execute()
+
+			// Update all metric after task finished.
+			metrics.QueryNodeReadTaskConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Dec()
+			collector.Counter.Dec(metricsinfo.ExecuteQueueType, -1)
+
+			// Notify task done.
+			t.Done(err)
+			return nil, err
+		})
 	}
 }
 

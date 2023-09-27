@@ -1,9 +1,5 @@
 package tasks
 
-import (
-	"context"
-)
-
 const (
 	schedulePolicyNameFIFO            = "fifo"
 	schedulePolicyNameUserTaskPolling = "user-task-polling"
@@ -44,9 +40,12 @@ type Scheduler interface {
 	Add(task Task) error
 
 	// Start schedule the owned task asynchronously and continuously.
-	// 1. Stop processing until ctx.Cancel() is called.
-	// 2. Only call once.
-	Start(ctx context.Context)
+	// Shall be called only once
+	Start()
+
+	// Stop make scheduler deny all incoming tasks
+	// and cleans up all related resources
+	Stop()
 
 	// GetWaitingTaskTotalNQ
 	GetWaitingTaskTotalNQ() int64

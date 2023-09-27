@@ -21,12 +21,31 @@ func TestScheduler(t *testing.T) {
 	t.Run("fifo", func(t *testing.T) {
 		testScheduler(t, newFIFOPolicy())
 	})
+	t.Run("scheduler_not_working", func(t *testing.T) {
+		scheduler := newScheduler(newFIFOPolicy())
+
+		task := newMockTask(mockTaskConfig{
+			nq:          1,
+			executeCost: 10 * time.Millisecond,
+			execution: func(ctx context.Context) error {
+				return nil
+			},
+		})
+
+		err := scheduler.Add(task)
+		assert.Error(t, err)
+
+		scheduler.Stop()
+
+		err = scheduler.Add(task)
+		assert.Error(t, err)
+	})
 }
 
 func testScheduler(t *testing.T, policy schedulePolicy) {
 	// start a new scheduler
 	scheduler := newScheduler(policy)
-	go scheduler.Start(context.Background())
+	scheduler.Start()
 
 	var cnt atomic.Int32
 	n := 100
