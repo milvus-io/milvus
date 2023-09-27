@@ -16,22 +16,23 @@ import (
 	"testing"
 	"time"
 
-	"github.com/blang/semver/v4"
+	semver "github.com/blang/semver/v4"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/server/v3/embed"
+	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/common"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
-
-	"go.etcd.io/etcd/api/v3/mvccpb"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.etcd.io/etcd/server/v3/embed"
-	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 var Params paramtable.BaseTable
@@ -896,4 +897,41 @@ func (s *SessionSuite) TestSafeCloseLiveCh() {
 
 func TestSessionSuite(t *testing.T) {
 	suite.Run(t, new(SessionSuite))
+}
+
+func TestServerInfoOp(t *testing.T) {
+	t.Run("test with specified pid", func(t *testing.T) {
+		pid := 9999999
+		serverID := int64(999)
+
+		filePath := GetServerInfoFilePath(pid)
+		defer os.RemoveAll(filePath)
+
+		saveServerInfoInternal(typeutil.QueryCoordRole, serverID, pid)
+		saveServerInfoInternal(typeutil.DataCoordRole, serverID, pid)
+		saveServerInfoInternal(typeutil.IndexCoordRole, serverID, pid)
+		saveServerInfoInternal(typeutil.ProxyRole, serverID, pid)
+
+		sessions := GetSessions(pid)
+		assert.Equal(t, 7, len(sessions))
+		assert.ElementsMatch(t, sessions, []string{
+			"querycoord", "querycoord-999",
+			"datacoord", "datacoord-999",
+			"indexcoord", "indexcoord-999",
+			"proxy-999"})
+
+		RemoveServerInfoFile(pid)
+		sessions = GetSessions(pid)
+		assert.Equal(t, 0, len(sessions))
+	})
+
+	t.Run("test with os pid", func(t *testing.T) {
+		serverID := int64(9999)
+		filePath := GetServerInfoFilePath(os.Getpid())
+		defer os.RemoveAll(filePath)
+
+		SaveServerInfo(typeutil.QueryCoordRole, serverID)
+		sessions := GetSessions(os.Getpid())
+		assert.Equal(t, 2, len(sessions))
+	})
 }

@@ -42,6 +42,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -181,6 +182,7 @@ func (i *IndexNode) initSession() error {
 	}
 	i.session.Init(typeutil.IndexNodeRole, Params.IndexNodeCfg.IP+":"+strconv.Itoa(Params.IndexNodeCfg.Port), false, true)
 	Params.IndexNodeCfg.SetNodeID(i.session.ServerID)
+	sessionutil.SaveServerInfo(typeutil.IndexNodeRole, i.session.ServerID)
 	Params.SetLogger(i.session.ServerID)
 	return nil
 }

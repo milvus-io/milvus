@@ -43,7 +43,12 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/samber/lo"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -58,9 +63,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/samber/lo"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
 // make sure QueryNode implements types.QueryNode
@@ -205,6 +207,7 @@ func (node *QueryNode) initSession() error {
 	node.session.Init(typeutil.QueryNodeRole, Params.QueryNodeCfg.QueryNodeIP+":"+strconv.FormatInt(Params.QueryNodeCfg.QueryNodePort, 10), false, true)
 	Params.QueryNodeCfg.SetNodeID(node.session.ServerID)
 	Params.SetLogger(Params.QueryNodeCfg.GetNodeID())
+	sessionutil.SaveServerInfo(typeutil.QueryNodeRole, node.session.ServerID)
 	log.Info("QueryNode init session", zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()), zap.String("node address", node.session.Address))
 	return nil
 }
