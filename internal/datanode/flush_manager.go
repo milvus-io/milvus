@@ -746,7 +746,7 @@ func dropVirtualChannelFunc(dsService *dataSyncService, opts ...retry.Option) fl
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(0), // TODO msg type
 				commonpbutil.WithMsgID(0),   // TODO msg id
-				commonpbutil.WithSourceID(paramtable.GetNodeID()),
+				commonpbutil.WithSourceID(dsService.serverID),
 			),
 			ChannelName: dsService.vchannelName,
 		}
@@ -900,7 +900,7 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(0),
 				commonpbutil.WithMsgID(0),
-				commonpbutil.WithSourceID(dsService.serverID),
+				commonpbutil.WithSourceID(paramtable.GetNodeID()),
 			),
 			SegmentID:           pack.segmentID,
 			CollectionID:        dsService.collectionID,

@@ -24,6 +24,8 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
@@ -36,13 +38,14 @@ type mockMsgStreamFactory struct {
 	NewMsgStreamNoError bool
 }
 
-var _ msgstream.Factory = &mockMsgStreamFactory{}
+var (
+	_ msgstream.Factory  = &mockMsgStreamFactory{}
+	_ dependency.Factory = (*mockMsgStreamFactory)(nil)
+)
 
-func (mm *mockMsgStreamFactory) Init(params *paramtable.ComponentParam) error {
-	if !mm.InitReturnNil {
-		return errors.New("Init Error")
-	}
-	return nil
+func (mm *mockMsgStreamFactory) Init(params *paramtable.ComponentParam) {}
+func (mm *mockMsgStreamFactory) NewPersistentStorageChunkManager(ctx context.Context) (storage.ChunkManager, error) {
+	return nil, nil
 }
 
 func (mm *mockMsgStreamFactory) NewMsgStream(ctx context.Context) (msgstream.MsgStream, error) {

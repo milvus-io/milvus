@@ -432,7 +432,7 @@ func TestEventTickler(t *testing.T) {
 	kv.RemoveWithPrefix(etcdPrefix)
 	defer kv.RemoveWithPrefix(etcdPrefix)
 
-	tickler := newTickler(0, path.Join(etcdPrefix, channelName), &datapb.ChannelWatchInfo{
+	tickler := newEtcdTickler(0, path.Join(etcdPrefix, channelName), &datapb.ChannelWatchInfo{
 		Vchan: &datapb.VchannelInfo{
 			ChannelName: channelName,
 		},

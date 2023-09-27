@@ -66,8 +66,8 @@ func newDmInputNode(initCtx context.Context, dispatcherClient msgdispatcher.Clie
 	node := flowgraph.NewInputNode(
 		input,
 		name,
-		dmNodeConfig.maxQueueLength,
-		dmNodeConfig.maxParallelism,
+		Params.DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32(),
+		Params.DataNodeCfg.FlowGraphMaxParallelism.GetAsInt32(),
 		typeutil.DataNodeRole,
 		paramtable.GetNodeID(),
 		dmNodeConfig.collectionID,
