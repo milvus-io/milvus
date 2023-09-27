@@ -22,7 +22,10 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+
 	grpcdatanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -30,14 +33,12 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/retry"
-	"go.uber.org/zap"
 )
 
 const (
 	flushTimeout = 15 * time.Second
 	// TODO: evaluate and update import timeout.
-	importTimeout    = 3 * time.Hour
-	reCollectTimeout = 5 * time.Second
+	importTimeout = 3 * time.Hour
 )
 
 // SessionManager provides the grpc interfaces of cluster
@@ -221,32 +222,6 @@ func (c *SessionManager) execImport(ctx context.Context, nodeID int64, itr *data
 	}
 
 	log.Info("success to import", zap.Int64("node", nodeID), zap.Any("import task", itr))
-}
-
-// ReCollectSegmentStats collects segment stats info from DataNodes, after DataCoord reboots.
-func (c *SessionManager) ReCollectSegmentStats(ctx context.Context, nodeID int64) error {
-	cli, err := c.getClient(ctx, nodeID)
-	if err != nil {
-		log.Warn("failed to get dataNode client", zap.Int64("DataNode ID", nodeID), zap.Error(err))
-		return err
-	}
-	ctx, cancel := context.WithTimeout(ctx, reCollectTimeout)
-	defer cancel()
-	resp, err := cli.ResendSegmentStats(ctx, &datapb.ResendSegmentStatsRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_ResendSegmentStats),
-			commonpbutil.WithSourceID(Params.DataCoordCfg.GetNodeID()),
-		),
-	})
-	if err := VerifyResponse(resp, err); err != nil {
-		log.Warn("re-collect segment stats call failed",
-			zap.Int64("DataNode ID", nodeID), zap.Error(err))
-		return err
-	}
-	log.Info("re-collect segment stats call succeeded",
-		zap.Int64("DataNode ID", nodeID),
-		zap.Int64s("segment stat collected", resp.GetSegResent()))
-	return nil
 }
 
 func (c *SessionManager) GetCompactionState() map[int64]*datapb.CompactionStateResult {

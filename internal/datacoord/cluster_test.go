@@ -23,13 +23,14 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"stathat.com/c/consistent"
+
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"stathat.com/c/consistent"
 )
 
 func getMetaKv(t *testing.T) kv.MetaKv {
@@ -584,67 +585,4 @@ func TestCluster_Import(t *testing.T) {
 		cluster.Import(ctx, 1, &datapb.ImportTaskRequest{})
 	})
 	time.Sleep(500 * time.Millisecond)
-}
-
-func TestCluster_ReCollectSegmentStats(t *testing.T) {
-	kv := getMetaKv(t)
-	defer func() {
-		kv.RemoveWithPrefix("")
-		kv.Close()
-	}()
-
-	t.Run("recollect succeed", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.TODO())
-		defer cancel()
-		var mockSessionCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNode, error) {
-			return newMockDataNodeClient(1, nil)
-		}
-		sessionManager := NewSessionManager(withSessionCreator(mockSessionCreator))
-		channelManager, err := NewChannelManager(kv, newMockHandler())
-		assert.Nil(t, err)
-		cluster := NewCluster(sessionManager, channelManager)
-		defer cluster.Close()
-		addr := "localhost:8080"
-		info := &NodeInfo{
-			Address: addr,
-			NodeID:  1,
-		}
-		nodes := []*NodeInfo{info}
-		err = cluster.Startup(ctx, nodes)
-		assert.Nil(t, err)
-
-		err = cluster.Watch("chan-1", 1)
-		assert.NoError(t, err)
-
-		assert.NotPanics(t, func() {
-			cluster.ReCollectSegmentStats(ctx)
-		})
-		time.Sleep(500 * time.Millisecond)
-	})
-
-	t.Run("recollect failed", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.TODO())
-		defer cancel()
-		sessionManager := NewSessionManager()
-		channelManager, err := NewChannelManager(kv, newMockHandler())
-		assert.Nil(t, err)
-		cluster := NewCluster(sessionManager, channelManager)
-		defer cluster.Close()
-		addr := "localhost:8080"
-		info := &NodeInfo{
-			Address: addr,
-			NodeID:  1,
-		}
-		nodes := []*NodeInfo{info}
-		err = cluster.Startup(ctx, nodes)
-		assert.Nil(t, err)
-
-		err = cluster.Watch("chan-1", 1)
-		assert.NoError(t, err)
-
-		assert.NotPanics(t, func() {
-			cluster.ReCollectSegmentStats(ctx)
-		})
-		time.Sleep(500 * time.Millisecond)
-	})
 }

@@ -30,9 +30,14 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+
 	"github.com/milvus-io/milvus/internal/common"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
@@ -47,9 +52,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 )
 
 const returnError = "ReturnError"
@@ -1253,11 +1255,11 @@ func TestDataNode_ResendSegmentStats(t *testing.T) {
 	resp, err := node.ResendSegmentStats(node.ctx, req)
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-	assert.ElementsMatch(t, []UniqueID{0, 1, 2}, resp.GetSegResent())
+	assert.Empty(t, resp.GetSegResent())
 
 	// Duplicate call.
 	resp, err = node.ResendSegmentStats(node.ctx, req)
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-	assert.ElementsMatch(t, []UniqueID{0, 1, 2}, resp.GetSegResent())
+	assert.Empty(t, resp.GetSegResent())
 }
