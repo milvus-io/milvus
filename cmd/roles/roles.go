@@ -18,6 +18,7 @@ package roles
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -37,6 +38,7 @@ import (
 	rocksmqimpl "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	internalmetrics "github.com/milvus-io/milvus/internal/util/metrics"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/tracer"
@@ -149,6 +151,53 @@ func NewMilvusRoles() *MilvusRoles {
 		closed: make(chan struct{}),
 	}
 	return mr
+}
+
+func (mr *MilvusRoles) Init(serverType string, flags *flag.FlagSet) error {
+	mr.Local = false
+	switch serverType {
+	case typeutil.RootCoordRole:
+		mr.EnableRootCoord = true
+	case typeutil.ProxyRole:
+		mr.EnableProxy = true
+	case typeutil.QueryCoordRole:
+		mr.EnableQueryCoord = true
+	case typeutil.QueryNodeRole:
+		mr.EnableQueryNode = true
+	case typeutil.DataCoordRole:
+		mr.EnableDataCoord = true
+	case typeutil.DataNodeRole:
+		mr.EnableDataNode = true
+	case typeutil.IndexCoordRole:
+		mr.EnableIndexCoord = true
+	case typeutil.IndexNodeRole:
+		mr.EnableIndexNode = true
+	case typeutil.StandaloneRole, typeutil.EmbeddedRole:
+		mr.EnableRootCoord = true
+		mr.EnableProxy = true
+		mr.EnableQueryCoord = true
+		mr.EnableQueryNode = true
+		mr.EnableDataCoord = true
+		mr.EnableDataNode = true
+		mr.EnableIndexCoord = true
+		mr.EnableIndexNode = true
+		mr.Local = true
+		mr.Embedded = serverType == typeutil.EmbeddedRole
+	case typeutil.RoleMixture:
+		flags.BoolVar(&mr.EnableRootCoord, typeutil.RootCoordRole, false, "enable root coordinator")
+		flags.BoolVar(&mr.EnableQueryCoord, typeutil.QueryCoordRole, false, "enable query coordinator")
+		flags.BoolVar(&mr.EnableIndexCoord, typeutil.IndexCoordRole, false, "enable index coordinator")
+		flags.BoolVar(&mr.EnableDataCoord, typeutil.DataCoordRole, false, "enable data coordinator")
+
+		flags.BoolVar(&mr.EnableQueryNode, typeutil.QueryNodeRole, false, "enable query node")
+		flags.BoolVar(&mr.EnableDataNode, typeutil.DataNodeRole, false, "enable data node")
+		flags.BoolVar(&mr.EnableIndexNode, typeutil.IndexNodeRole, false, "enable index node")
+		flags.BoolVar(&mr.EnableProxy, typeutil.ProxyRole, false, "enable proxy node")
+
+	default:
+		return fmt.Errorf("Unknown server type = %s", serverType)
+	}
+	return nil
 }
 
 // EnvValue not used now.
@@ -423,4 +472,59 @@ func (mr *MilvusRoles) Run(alias string) {
 	}
 
 	log.Info("Milvus components graceful stop done")
+}
+
+// clean Milvus resource after exit, such as session
+func (mr *MilvusRoles) Clean(ctx context.Context, serverID int64) error {
+	params := paramtable.Get()
+	etcdConfig := &params.EtcdCfg
+
+	etcdCli, err := etcd.GetEtcdClient(
+		etcdConfig.UseEmbedEtcd.GetAsBool(),
+		etcdConfig.EtcdUseSSL.GetAsBool(),
+		etcdConfig.Endpoints.GetAsStrings(),
+		etcdConfig.EtcdTLSCert.GetValue(),
+		etcdConfig.EtcdTLSKey.GetValue(),
+		etcdConfig.EtcdTLSCACert.GetValue(),
+		etcdConfig.EtcdTLSMinVersion.GetValue())
+	if err != nil {
+		log.Debug("QueryCoord connect to etcd failed", zap.Error(err))
+		return err
+	}
+	defer etcdCli.Close()
+
+	if mr.EnableRootCoord {
+		err = sessionutil.ForceDeleteSession(ctx, etcdCli, typeutil.RootCoordRole, serverID, sessionutil.ServerIDMatchFilter)
+	}
+
+	if mr.EnableProxy {
+		err = sessionutil.ForceDeleteSession(ctx, etcdCli, typeutil.ProxyRole, serverID, sessionutil.ServerIDMatchFilter)
+	}
+
+	if mr.EnableQueryCoord {
+		err = sessionutil.ForceDeleteSession(ctx, etcdCli, typeutil.QueryCoordRole, serverID, sessionutil.ServerIDMatchFilter)
+	}
+
+	if mr.EnableQueryNode {
+		err = sessionutil.ForceDeleteSession(ctx, etcdCli, typeutil.QueryNodeRole, serverID, sessionutil.ServerIDMatchFilter)
+	}
+
+	if mr.EnableDataCoord {
+		err = sessionutil.ForceDeleteSession(ctx, etcdCli, typeutil.DataCoordRole, serverID, sessionutil.ServerIDMatchFilter)
+	}
+
+	if mr.EnableDataNode {
+		err = sessionutil.ForceDeleteSession(ctx, etcdCli, typeutil.DataNodeRole, serverID, sessionutil.ServerIDMatchFilter)
+	}
+
+	if mr.EnableIndexCoord {
+		err = sessionutil.ForceDeleteSession(ctx, etcdCli, typeutil.IndexCoordRole, serverID, sessionutil.ServerIDMatchFilter)
+	}
+
+	if mr.EnableIndexNode {
+		err = sessionutil.ForceDeleteSession(ctx, etcdCli, typeutil.IndexNodeRole, serverID, sessionutil.ServerIDMatchFilter)
+	}
+
+	log.Info("Finish to clean milvus occupied resource after exit")
+	return err
 }

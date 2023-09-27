@@ -9,7 +9,7 @@ import (
 
 var (
 	usageLine = fmt.Sprintf("Usage:\n"+
-		"%s\n%s\n%s\n%s\n", runLine, stopLine, mckLine, serverTypeLine)
+		"%s\n%s\n%s\n%s\n", runLine, stopLine, mckLine, serverTypeLine, cleanLine)
 
 	serverTypeLine = `
 [server type]
@@ -62,5 +62,13 @@ milvus mck run [flags]
 milvus mck cleanTrash [flags]
 	Clean the back inconsistent data
 	Tips: The flags is the same as its of the 'milvus mck [flags]'
+`
+
+	cleanLine = `
+milvus clean [server type] [flags]
+	clean resource after milvus exit
+[flags]
+	-alias ''
+		Set alias
 `
 )

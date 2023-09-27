@@ -46,6 +46,8 @@ const (
 	DataNodeRole = "datanode"
 	// IndexNodeRole is a constant represent IndexNode
 	IndexNodeRole = "indexnode"
+	// IndexNodeRole is for mixture Milvus
+	RoleMixture = "mixture"
 )
 
 var (

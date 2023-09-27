@@ -59,3 +59,13 @@ func RunMilvus(args []string) {
 
 	c.execute(args, flags)
 }
+
+// clean milvus session after milvus exit
+func Clean(args []string) {
+	flags := flag.NewFlagSet(args[0], flag.ExitOnError)
+	flags.Usage = func() {
+		fmt.Fprintln(os.Stderr, usageLine)
+	}
+	cmd := &clean{}
+	cmd.execute(args, flags)
+}

@@ -17,11 +17,32 @@
 package main
 
 import (
+	"fmt"
+	"log"
 	"os"
+	"os/exec"
+	"path/filepath"
 
 	"github.com/milvus-io/milvus/cmd/milvus"
 )
 
 func main() {
-	milvus.RunMilvus(os.Args)
+	if os.Getppid() == 1 {
+		filePath, _ := filepath.Abs(os.Args[0])
+		cmd := exec.Command(filePath, os.Args[1:]...)
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		fmt.Println("try to run milvus as child progress")
+		if err := cmd.Run(); err != nil {
+			fmt.Println("milvus exit code", cmd.ProcessState.ExitCode())
+			log.Println("milvus fail reason:", err.Error())
+		}
+	} else {
+		milvus.RunMilvus(os.Args)
+	}
+
+	// try to clean component session after milvus core exit
+	milvus.Clean(os.Args)
 }

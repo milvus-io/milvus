@@ -574,9 +574,13 @@ func fnWithTimeout(fn func() error, d time.Duration) error {
 // GetSessions will get all sessions registered in etcd.
 // Revision is returned for WatchServices to prevent key events from being missed.
 func (s *Session) GetSessions(prefix string) (map[string]*Session, int64, error) {
-	res := make(map[string]*Session)
 	key := path.Join(s.metaRoot, DefaultServiceRoot, prefix)
-	resp, err := s.etcdCli.Get(s.ctx, key, clientv3.WithPrefix(),
+	return GetSessions(s.ctx, s.etcdCli, key)
+}
+
+func GetSessions(ctx context.Context, etcdCli *clientv3.Client, sessionKeyPrefix string) (map[string]*Session, int64, error) {
+	res := make(map[string]*Session)
+	resp, err := etcdCli.Get(ctx, sessionKeyPrefix, clientv3.WithPrefix(),
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 	if err != nil {
 		return nil, 0, err
@@ -589,7 +593,7 @@ func (s *Session) GetSessions(prefix string) (map[string]*Session, int64, error)
 		}
 		_, mapKey := path.Split(string(kv.Key))
 		log.Debug("SessionUtil GetSessions",
-			zap.String("prefix", prefix),
+			zap.String("prefix", sessionKeyPrefix),
 			zap.String("key", mapKey),
 			zap.String("address", session.Address))
 		res[mapKey] = session
@@ -1078,28 +1082,7 @@ func (s *Session) ForceActiveStandby(activateFunc func() error) error {
 		}
 
 		// try to release old session first
-		sessions, _, err := s.GetSessions(s.ServerName)
-		if err != nil {
-			return err
-		}
-
-		if len(sessions) != 0 {
-			activeSess := sessions[s.ServerName]
-			if activeSess == nil || activeSess.leaseID == nil {
-				// force delete all old sessions
-				s.etcdCli.Delete(s.ctx, s.activeKey)
-				for _, sess := range sessions {
-					if sess.ServerID != s.ServerID {
-						sess.getCompleteKey()
-						key := path.Join(s.metaRoot, DefaultServiceRoot, fmt.Sprintf("%s-%d", sess.ServerName, sess.ServerID))
-						s.etcdCli.Delete(s.ctx, key)
-					}
-				}
-			} else {
-				// force release old active session
-				_, _ = s.etcdCli.Revoke(s.ctx, *activeSess.leaseID)
-			}
-		}
+		ForceDeleteSession(s.ctx, s.etcdCli, s.ServerName, s.ServerID, ServerIDNotMatchFilter)
 
 		// then try to register as active
 		resp, err := s.etcdCli.Txn(s.ctx).If(
@@ -1128,6 +1111,44 @@ func (s *Session) ForceActiveStandby(activateFunc func() error) error {
 	log.Info(fmt.Sprintf("serverName: %v quit STANDBY mode, this node will become ACTIVE", s.ServerName))
 	if activateFunc != nil {
 		return activateFunc()
+	}
+	return nil
+}
+
+type ServerIDFilter = func(sess *Session, targetServerID int64) bool
+
+func ServerIDMatchFilter(sess *Session, targetServerID int64) bool {
+	return sess.ServerID == targetServerID
+}
+
+func ServerIDNotMatchFilter(sess *Session, targetServerID int64) bool {
+	return sess.ServerID != targetServerID
+}
+
+func ForceDeleteSession(ctx context.Context, etcdCli *clientv3.Client, serverName string, serverID int64, filter ServerIDFilter) error {
+	metaRoot := paramtable.Get().EtcdCfg.MetaRootPath.GetValue()
+	sessionKeyPrefix := path.Join(metaRoot, DefaultServiceRoot, serverName)
+	sessions, _, err := GetSessions(ctx, etcdCli, sessionKeyPrefix)
+	if err != nil {
+		return err
+	}
+
+	if len(sessions) != 0 {
+		activeSess := sessions[serverName]
+		if activeSess == nil || activeSess.leaseID == nil {
+			// try to delete active session if exist, such as querycoord/datacoord/rootcoord
+			etcdCli.Delete(ctx, sessionKeyPrefix)
+			for _, sess := range sessions {
+				// delete all session which match the ServerIDFilter
+				if filter(sess, serverID) {
+					key := path.Join(metaRoot, DefaultServiceRoot, fmt.Sprintf("%s-%d", sess.ServerName, sess.ServerID))
+					etcdCli.Delete(ctx, key)
+				}
+			}
+		} else {
+			// force release old active session
+			_, _ = etcdCli.Revoke(ctx, *activeSess.leaseID)
+		}
 	}
 	return nil
 }
