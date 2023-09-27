@@ -111,6 +111,7 @@ service DataNode {
   // https://wiki.lfaidata.foundation/display/MIL/MEP+24+--+Support+bulk+load
   rpc Import(ImportTaskRequest) returns(common.Status) {}
 
+  // Deprecated
   rpc ResendSegmentStats(ResendSegmentStatsRequest) returns(ResendSegmentStatsResponse) {}
 
   rpc AddImportSegment(AddImportSegmentRequest) returns(AddImportSegmentResponse) {}
