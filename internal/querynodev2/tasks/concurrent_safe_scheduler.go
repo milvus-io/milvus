@@ -153,7 +153,10 @@ func (s *scheduler) consumeRecvChan(req addTaskReq, limit int) {
 	// consume the add chan until reaching the batch operation limit
 	for i := 1; i < limit; i++ {
 		select {
-		case req := <-s.receiveChan:
+		case req, ok := <-s.receiveChan:
+			if !ok {
+				return
+			}
 			if !s.handleAddTaskRequest(req, maxWaitTaskNum) {
 				return
 			}
