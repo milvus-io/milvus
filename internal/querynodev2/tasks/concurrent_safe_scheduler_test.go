@@ -8,8 +8,11 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
+	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -40,6 +43,8 @@ func TestScheduler(t *testing.T) {
 		err = scheduler.Add(task)
 		assert.Error(t, err)
 	})
+
+	suite.Run(t, new(SchedulerSuite))
 }
 
 func testScheduler(t *testing.T, policy schedulePolicy) {
@@ -97,4 +102,38 @@ func testScheduler(t *testing.T, policy schedulePolicy) {
 	assert.Equal(t, cnt.Load(), int32(2*n))
 	assert.Equal(t, 0, int(scheduler.GetWaitingTaskTotal()))
 	assert.Equal(t, 0, int(scheduler.GetWaitingTaskTotalNQ()))
+}
+
+type SchedulerSuite struct {
+	suite.Suite
+}
+
+func (s *SchedulerSuite) TestConsumeRecvChan() {
+	s.Run("consume_chan_closed", func() {
+		ch := make(chan addTaskReq, 10)
+		close(ch)
+		scheduler := &scheduler{
+			policy:           newFIFOPolicy(),
+			receiveChan:      ch,
+			execChan:         make(chan Task),
+			pool:             conc.NewPool[any](10, conc.WithPreAlloc(true)),
+			schedulerCounter: schedulerCounter{},
+			lifetime:         lifetime.NewLifetime(lifetime.Initializing),
+		}
+
+		task := newMockTask(mockTaskConfig{
+			nq:          1,
+			executeCost: 10 * time.Millisecond,
+			execution: func(ctx context.Context) error {
+				return nil
+			},
+		})
+
+		s.NotPanics(func() {
+			scheduler.consumeRecvChan(addTaskReq{
+				task: task,
+				err:  make(chan error, 1),
+			}, maxReceiveChanBatchConsumeNum)
+		})
+	})
 }
