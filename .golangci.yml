@@ -48,6 +48,11 @@ linters-settings:
     rules:
       - name: unused-parameter
         disabled: true
+      - name: var-naming
+        severity: warning
+        disabled: false
+        arguments:
+          - ["ID"] # Allow list
   misspell:
     locale: US
   gocritic:

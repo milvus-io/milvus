@@ -31,14 +31,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
-var checkRoundTaskNumLimit = 256
+const (
+	segmentChecker = "segment_checker"
+	channelChecker = "channel_checker"
+	balanceChecker = "balance_checker"
+	indexChecker   = "index_checker"
+)
 
 var (
-	Segment_Checker = "segment_checker"
-	Channel_Checker = "channel_checker"
-	Balance_Checker = "balance_checker"
-	Index_Checker   = "index_checker"
-	CheckerOrder    = []string{Channel_Checker, Segment_Checker, Balance_Checker, Index_Checker}
+	checkRoundTaskNumLimit = 256
+	checkerOrder           = []string{channelChecker, segmentChecker, balanceChecker, indexChecker}
 )
 
 type CheckerController struct {
@@ -69,21 +71,21 @@ func NewCheckerController(
 	// CheckerController runs checkers with the order,
 	// the former checker has higher priority
 	checkers := map[string]Checker{
-		Channel_Checker: NewChannelChecker(meta, dist, targetMgr, balancer),
-		Segment_Checker: NewSegmentChecker(meta, dist, targetMgr, balancer, nodeMgr),
-		Balance_Checker: NewBalanceChecker(meta, balancer, nodeMgr, scheduler),
-		Index_Checker:   NewIndexChecker(meta, dist, broker),
+		channelChecker: NewChannelChecker(meta, dist, targetMgr, balancer),
+		segmentChecker: NewSegmentChecker(meta, dist, targetMgr, balancer, nodeMgr),
+		balanceChecker: NewBalanceChecker(meta, balancer, nodeMgr, scheduler),
+		indexChecker:   NewIndexChecker(meta, dist, broker),
 	}
 
 	id := 0
-	for _, checkerName := range CheckerOrder {
+	for _, checkerName := range checkerOrder {
 		checkers[checkerName].SetID(int64(id + 1))
 	}
 
 	manualCheckChs := map[string]chan struct{}{
-		Channel_Checker: make(chan struct{}, 1),
-		Segment_Checker: make(chan struct{}, 1),
-		Balance_Checker: make(chan struct{}, 1),
+		channelChecker: make(chan struct{}, 1),
+		segmentChecker: make(chan struct{}, 1),
+		balanceChecker: make(chan struct{}, 1),
 	}
 
 	return &CheckerController{
@@ -108,13 +110,13 @@ func (controller *CheckerController) Start() {
 
 func getCheckerInterval(checkerType string) time.Duration {
 	switch checkerType {
-	case Segment_Checker:
+	case segmentChecker:
 		return Params.QueryCoordCfg.SegmentCheckInterval.GetAsDuration(time.Millisecond)
-	case Channel_Checker:
+	case channelChecker:
 		return Params.QueryCoordCfg.ChannelCheckInterval.GetAsDuration(time.Millisecond)
-	case Balance_Checker:
+	case balanceChecker:
 		return Params.QueryCoordCfg.BalanceCheckInterval.GetAsDuration(time.Millisecond)
-	case Index_Checker:
+	case indexChecker:
 		return Params.QueryCoordCfg.IndexCheckInterval.GetAsDuration(time.Millisecond)
 	default:
 		return Params.QueryCoordCfg.CheckInterval.GetAsDuration(time.Millisecond)
