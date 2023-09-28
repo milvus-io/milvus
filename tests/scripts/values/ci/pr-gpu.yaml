@@ -28,10 +28,16 @@ queryCoordinator:
 queryNode:
   nodeSelector:
     nvidia.com/gpu.present: 'true'
+  extraEnv:
+    - name: CUDA_VISIBLE_DEVICES
+      value: "0,1"
   resources:
     requests:
+      nvidia.com/gpu: 2
       cpu: "0.5"
       memory: "500Mi"
+    limits:
+      nvidia.com/gpu: 2
 
 indexCoordinator:
   nodeSelector:
@@ -44,10 +50,16 @@ indexCoordinator:
 indexNode:
   nodeSelector:
     nvidia.com/gpu.present: 'true'
+  extraEnv:
+    - name: CUDA_VISIBLE_DEVICES
+      value: "0,1"
   resources:
     requests:
+      nvidia.com/gpu: 2
       cpu: "0.5"
       memory: "500Mi"
+    limits:
+      nvidia.com/gpu: 2
 
 dataCoordinator:
   nodeSelector:
