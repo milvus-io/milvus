@@ -74,6 +74,14 @@ var _ types.IndexNodeComponent = (*IndexNode)(nil)
 // Params is a GlobalParamTable singleton of indexnode
 var Params *paramtable.ComponentParam = paramtable.Get()
 
+func getCurrentIndexVersion(v int32) int32 {
+	cCurrent := int32(C.GetCurrentIndexVersion())
+	if cCurrent < v {
+		return cCurrent
+	}
+	return v
+}
+
 type taskKey struct {
 	ClusterID string
 	BuildID   UniqueID

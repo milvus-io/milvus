@@ -666,7 +666,7 @@ func TestIndexBuilder(t *testing.T) {
 	chunkManager := &mocks.ChunkManager{}
 	chunkManager.EXPECT().RootPath().Return("root")
 
-	ib := newIndexBuilder(ctx, mt, nodeManager, chunkManager)
+	ib := newIndexBuilder(ctx, mt, nodeManager, chunkManager, newIndexEngineVersionManager())
 
 	assert.Equal(t, 6, len(ib.tasks))
 	assert.Equal(t, indexTaskInit, ib.tasks[buildID])
@@ -737,8 +737,9 @@ func TestIndexBuilder_Error(t *testing.T) {
 		tasks: map[int64]indexTaskState{
 			buildID: indexTaskInit,
 		},
-		meta:         createMetaTable(ec),
-		chunkManager: chunkManager,
+		meta:                      createMetaTable(ec),
+		chunkManager:              chunkManager,
+		indexEngineVersionManager: newIndexEngineVersionManager(),
 	}
 
 	t.Run("meta not exist", func(t *testing.T) {

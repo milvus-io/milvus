@@ -148,7 +148,7 @@ type Server struct {
 	// segReferManager  *SegmentReferenceManager
 	indexBuilder              *indexBuilder
 	indexNodeManager          *IndexNodeManager
-	IndexEngineVersionManager *IndexEngineVersionManager
+	indexEngineVersionManager *IndexEngineVersionManager
 
 	// manage ways that data coord access other coord
 	broker Broker
@@ -525,13 +525,13 @@ func (s *Server) initServiceDiscovery() error {
 	}
 	s.inEventCh = s.session.WatchServices(typeutil.IndexNodeRole, inRevision+1, nil)
 
-	s.IndexEngineVersionManager = newIndexEngineVersionManager()
+	s.indexEngineVersionManager = newIndexEngineVersionManager()
 	qnSessions, qnRevision, err := s.session.GetSessions(typeutil.QueryNodeRole)
 	if err != nil {
 		log.Warn("DataCoord get QueryNode sessions failed", zap.Error(err))
 		return err
 	}
-	s.IndexEngineVersionManager.Startup(qnSessions)
+	s.indexEngineVersionManager.Startup(qnSessions)
 	s.qnEventCh = s.session.WatchServicesWithVersionRange(typeutil.QueryNodeRole, r, qnRevision+1, nil)
 
 	return nil
@@ -578,7 +578,7 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 
 func (s *Server) initIndexBuilder(manager storage.ChunkManager) {
 	if s.indexBuilder == nil {
-		s.indexBuilder = newIndexBuilder(s.ctx, s.meta, s.indexNodeManager, manager)
+		s.indexBuilder = newIndexBuilder(s.ctx, s.meta, s.indexNodeManager, manager, s.indexEngineVersionManager)
 	}
 }
 
@@ -911,16 +911,16 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 			log.Info("received querynode register",
 				zap.String("address", event.Session.Address),
 				zap.Int64("serverID", event.Session.ServerID))
-			s.IndexEngineVersionManager.AddNode(event.Session)
+			s.indexEngineVersionManager.AddNode(event.Session)
 		case sessionutil.SessionDelEvent:
 			log.Info("received querynode unregister",
 				zap.String("address", event.Session.Address),
 				zap.Int64("serverID", event.Session.ServerID))
-			s.IndexEngineVersionManager.RemoveNode(event.Session)
+			s.indexEngineVersionManager.RemoveNode(event.Session)
 		case sessionutil.SessionUpdateEvent:
 			serverID := event.Session.ServerID
 			log.Info("received querynode SessionUpdateEvent", zap.Int64("serverID", serverID))
-			s.IndexEngineVersionManager.Update(event.Session)
+			s.indexEngineVersionManager.Update(event.Session)
 		default:
 			log.Warn("receive unknown service event type",
 				zap.Any("type", event.EventType))

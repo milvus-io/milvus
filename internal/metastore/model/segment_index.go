@@ -24,7 +24,6 @@ type SegmentIndex struct {
 	// deprecated
 	WriteHandoff        bool
 	CurrentIndexVersion int32
-	MinimalIndexVersion int32
 }
 
 func UnmarshalSegmentIndexModel(segIndex *indexpb.SegmentIndex) *SegmentIndex {
@@ -49,7 +48,6 @@ func UnmarshalSegmentIndexModel(segIndex *indexpb.SegmentIndex) *SegmentIndex {
 		IndexSize:           segIndex.SerializeSize,
 		WriteHandoff:        segIndex.WriteHandoff,
 		CurrentIndexVersion: segIndex.GetCurrentIndexVersion(),
-		MinimalIndexVersion: segIndex.GetMinimalIndexVersion(),
 	}
 }
 
@@ -75,7 +73,6 @@ func MarshalSegmentIndexModel(segIdx *SegmentIndex) *indexpb.SegmentIndex {
 		SerializeSize:       segIdx.IndexSize,
 		WriteHandoff:        segIdx.WriteHandoff,
 		CurrentIndexVersion: segIdx.CurrentIndexVersion,
-		MinimalIndexVersion: segIdx.MinimalIndexVersion,
 	}
 }
 
@@ -97,6 +94,5 @@ func CloneSegmentIndex(segIndex *SegmentIndex) *SegmentIndex {
 		IndexSize:           segIndex.IndexSize,
 		WriteHandoff:        segIndex.WriteHandoff,
 		CurrentIndexVersion: segIndex.CurrentIndexVersion,
-		MinimalIndexVersion: segIndex.MinimalIndexVersion,
 	}
 }

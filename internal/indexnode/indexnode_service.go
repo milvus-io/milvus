@@ -64,7 +64,6 @@ func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest
 		zap.Any("indexParams", req.GetIndexParams()),
 		zap.Int64("numRows", req.GetNumRows()),
 		zap.Int32("current_index_version", req.GetCurrentIndexVersion()),
-		zap.Int32("minimal_index_version", req.GetMinimalIndexVersion()),
 	)
 	ctx, sp := otel.Tracer(typeutil.IndexNodeRole).Start(ctx, "IndexNode-CreateIndex", trace.WithAttributes(
 		attribute.Int64("indexBuildID", req.GetBuildID()),
@@ -142,10 +141,11 @@ func (i *IndexNode) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest
 	i.foreachTaskInfo(func(ClusterID string, buildID UniqueID, info *taskInfo) {
 		if ClusterID == req.GetClusterID() {
 			infos[buildID] = &taskInfo{
-				state:          info.state,
-				fileKeys:       common.CloneStringList(info.fileKeys),
-				serializedSize: info.serializedSize,
-				failReason:     info.failReason,
+				state:               info.state,
+				fileKeys:            common.CloneStringList(info.fileKeys),
+				serializedSize:      info.serializedSize,
+				failReason:          info.failReason,
+				currentIndexVersion: info.currentIndexVersion,
 			}
 		}
 	})
@@ -166,6 +166,7 @@ func (i *IndexNode) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest
 			ret.IndexInfos[i].IndexFileKeys = info.fileKeys
 			ret.IndexInfos[i].SerializedSize = info.serializedSize
 			ret.IndexInfos[i].FailReason = info.failReason
+			ret.IndexInfos[i].CurrentIndexVersion = info.currentIndexVersion
 			log.RatedDebug(5, "querying index build task",
 				zap.Int64("indexBuildID", buildID),
 				zap.String("state", info.state.String()),

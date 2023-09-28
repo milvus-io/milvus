@@ -52,11 +52,12 @@ var (
 type Blob = storage.Blob
 
 type taskInfo struct {
-	cancel         context.CancelFunc
-	state          commonpb.IndexState
-	fileKeys       []string
-	serializedSize uint64
-	failReason     string
+	cancel              context.CancelFunc
+	state               commonpb.IndexState
+	fileKeys            []string
+	serializedSize      uint64
+	failReason          string
+	currentIndexVersion int32
 
 	// task statistics
 	statistic *indexpb.JobInfo
@@ -81,27 +82,28 @@ type indexBuildTask struct {
 	cancel context.CancelFunc
 	ctx    context.Context
 
-	cm             storage.ChunkManager
-	index          indexcgowrapper.CodecIndex
-	savePaths      []string
-	req            *indexpb.CreateJobRequest
-	BuildID        UniqueID
-	nodeID         UniqueID
-	ClusterID      string
-	collectionID   UniqueID
-	partitionID    UniqueID
-	segmentID      UniqueID
-	fieldID        UniqueID
-	fieldType      schemapb.DataType
-	fieldData      storage.FieldData
-	indexBlobs     []*storage.Blob
-	newTypeParams  map[string]string
-	newIndexParams map[string]string
-	serializedSize uint64
-	tr             *timerecord.TimeRecorder
-	queueDur       time.Duration
-	statistic      indexpb.JobInfo
-	node           *IndexNode
+	cm                  storage.ChunkManager
+	index               indexcgowrapper.CodecIndex
+	savePaths           []string
+	req                 *indexpb.CreateJobRequest
+	currentIndexVersion int32
+	BuildID             UniqueID
+	nodeID              UniqueID
+	ClusterID           string
+	collectionID        UniqueID
+	partitionID         UniqueID
+	segmentID           UniqueID
+	fieldID             UniqueID
+	fieldType           schemapb.DataType
+	fieldData           storage.FieldData
+	indexBlobs          []*storage.Blob
+	newTypeParams       map[string]string
+	newIndexParams      map[string]string
+	serializedSize      uint64
+	tr                  *timerecord.TimeRecorder
+	queueDur            time.Duration
+	statistic           indexpb.JobInfo
+	node                *IndexNode
 }
 
 func (it *indexBuildTask) Reset() {
@@ -337,7 +339,8 @@ func (it *indexBuildTask) BuildIndex(ctx context.Context) error {
 		}
 	}
 
-	if err := buildIndexInfo.AppendIndexEngineVersion(it.req.GetCurrentIndexVersion()); err != nil {
+	it.currentIndexVersion = getCurrentIndexVersion(it.req.GetCurrentIndexVersion())
+	if err := buildIndexInfo.AppendIndexEngineVersion(it.currentIndexVersion); err != nil {
 		log.Ctx(ctx).Warn("append index engine version failed", zap.Error(err))
 		return err
 	}
@@ -389,7 +392,7 @@ func (it *indexBuildTask) SaveIndexFiles(ctx context.Context) error {
 	}
 
 	it.statistic.EndTime = time.Now().UnixMicro()
-	it.node.storeIndexFilesAndStatistic(it.ClusterID, it.BuildID, saveFileKeys, it.serializedSize, &it.statistic)
+	it.node.storeIndexFilesAndStatistic(it.ClusterID, it.BuildID, saveFileKeys, it.serializedSize, &it.statistic, it.currentIndexVersion)
 	log.Ctx(ctx).Debug("save index files done", zap.Strings("IndexFiles", saveFileKeys))
 	saveIndexFileDur := it.tr.RecordSpan()
 	metrics.IndexNodeSaveIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(saveIndexFileDur.Seconds())
