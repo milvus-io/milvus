@@ -192,25 +192,31 @@ func (sd *shardDelegator) modifyQueryRequest(req *querypb.QueryRequest, scope qu
 // Search preforms search operation on shard.
 func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest) ([]*internalpb.SearchResults, error) {
 	log := sd.getLogger(ctx)
+	log.Warn("debug search channel by 10")
 	if !sd.lifetime.Add(isWorking) {
 		return nil, errors.New("delegator is not serviceable")
 	}
 	defer sd.lifetime.Done()
 
+	log.Warn("debug search channel by 11")
 	if !funcutil.SliceContain(req.GetDmlChannels(), sd.vchannelName) {
 		log.Warn("deletgator received search request not belongs to it",
 			zap.Strings("reqChannels", req.GetDmlChannels()),
 		)
 		return nil, fmt.Errorf("dml channel not match, delegator channel %s, search channels %v", sd.vchannelName, req.GetDmlChannels())
 	}
+	log.Warn("debug search channel by 12")
 
 	partitions := req.GetReq().GetPartitionIDs()
+	log.Warn("debug search channel by 13")
 	if !sd.collection.ExistPartition(partitions...) {
 		return nil, merr.WrapErrPartitionNotLoaded(partitions)
 	}
+	log.Warn("debug search channel by 14")
 
 	// wait tsafe
 	waitTr := timerecord.NewTimeRecorder("wait tSafe")
+	log.Warn("debug search channel by 15")
 	err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
 	if err != nil {
 		log.Warn("delegator search failed to wait tsafe", zap.Error(err))

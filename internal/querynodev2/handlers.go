@@ -384,6 +384,10 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 
 	// From Proxy
 	tr := timerecord.NewTimeRecorder("searchDelegator")
+	log.Debug("debug search channel 1",
+		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
+		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
+	)
 	// get delegator
 	sd, ok := node.delegators.Get(channel)
 	if !ok {
@@ -391,17 +395,29 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 		log.Warn("Query failed, failed to get shard delegator for search", zap.Error(err))
 		return nil, err
 	}
+	log.Debug("debug search channel 2",
+		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
+		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
+	)
 	req, err = node.optimizeSearchParams(ctx, req, sd)
 	if err != nil {
 		log.Warn("failed to optimize search params", zap.Error(err))
 		return nil, err
 	}
+	log.Debug("debug search channel 3",
+		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
+		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
+	)
 	// do search
 	results, err := sd.Search(searchCtx, req)
 	if err != nil {
 		log.Warn("failed to search on delegator", zap.Error(err))
 		return nil, err
 	}
+	log.Debug("debug search channel 4",
+		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
+		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
+	)
 
 	// reduce result
 	tr.CtxElapse(ctx, fmt.Sprintf("start reduce query result, traceID = %s, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
