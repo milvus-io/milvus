@@ -497,7 +497,7 @@ func (dit *describeIndexTask) Execute(ctx context.Context) error {
 	dit.result = &milvuspb.DescribeIndexResponse{}
 	dit.result.Status = resp.GetStatus()
 	if dit.result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return errors.New(dit.result.GetStatus().GetReason())
+		return merr.Error(dit.result.GetStatus())
 	}
 	for _, indexInfo := range resp.IndexInfos {
 		field, err := schemaHelper.GetFieldFromID(indexInfo.FieldID)
@@ -617,7 +617,7 @@ func (dit *getIndexStatisticsTask) Execute(ctx context.Context) error {
 	dit.result = &milvuspb.GetIndexStatisticsResponse{}
 	dit.result.Status = resp.GetStatus()
 	if dit.result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return errors.New(dit.result.GetStatus().GetReason())
+		return merr.Error(dit.result.GetStatus())
 	}
 	for _, indexInfo := range resp.IndexInfos {
 		field, err := schemaHelper.GetFieldFromID(indexInfo.FieldID)

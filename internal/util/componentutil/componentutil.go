@@ -21,11 +21,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 )
 
@@ -40,7 +40,7 @@ func WaitForComponentStates[T interface {
 		}
 
 		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			return errors.New(resp.GetStatus().GetReason())
+			return merr.Error(resp.GetStatus())
 		}
 
 		meet := false

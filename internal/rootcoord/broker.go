@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -202,7 +203,7 @@ func (b *ServerBroker) Flush(ctx context.Context, cID int64, segIDs []int64) err
 		return errors.New("failed to call flush to data coordinator: " + err.Error())
 	}
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return errors.New(resp.GetStatus().GetReason())
+		return merr.Error(resp.GetStatus())
 	}
 	log.Info("flush on collection succeed", zap.Int64("collectionID", cID))
 	return nil
@@ -251,7 +252,7 @@ func (b *ServerBroker) GetSegmentIndexState(ctx context.Context, collID UniqueID
 		return nil, err
 	}
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return nil, errors.New(resp.GetStatus().GetReason())
+		return nil, merr.Error(resp.GetStatus())
 	}
 
 	return resp.GetStates(), nil

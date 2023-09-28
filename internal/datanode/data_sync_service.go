@@ -34,7 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/conc"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 )
@@ -149,7 +149,7 @@ func getSegmentInfos(ctx context.Context, datacoord types.DataCoordClient, segme
 		SegmentIDs:       segmentIDs,
 		IncludeUnHealthy: true,
 	})
-	if err := funcutil.VerifyResponse(infoResp, err); err != nil {
+	if err := merr.CheckRpcCall(infoResp, err); err != nil {
 		log.Error("Fail to get SegmentInfo by ids from datacoord", zap.Error(err))
 		return nil, err
 	}

@@ -595,7 +595,7 @@ class TestPartitionOperations(TestcaseBase):
         # create partition failed
         self.partition_wrap.init_partition(collection_w.collection, cf.gen_unique_str(prefix),
                                            check_task=CheckTasks.err_res,
-                                           check_items={ct.err_code: 1, ct.err_msg: "can't find collection"})
+                                           check_items={ct.err_code: 4, ct.err_msg: "collection not found"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_partition_same_name_in_diff_collections(self):
@@ -849,7 +849,7 @@ class TestPartitionOperations(TestcaseBase):
 
         # release the partition and check err response
         partition_w.release(check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: "can't find collection"})
+                            check_items={ct.err_code: 4, ct.err_msg: "collection not found"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_partition_release_after_collection_released(self):
@@ -963,7 +963,7 @@ class TestPartitionOperations(TestcaseBase):
         # insert data to partition
         partition_w.insert(cf.gen_default_dataframe_data(),
                            check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 1, ct.err_msg: "None Type"})
+                           check_items={ct.err_code: 4, ct.err_msg: "collection not found"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_partition_insert_maximum_size_data(self):

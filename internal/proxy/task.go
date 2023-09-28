@@ -443,7 +443,7 @@ func (hct *hasCollectionTask) Execute(ctx context.Context) error {
 		return errors.New("has collection resp is nil")
 	}
 	if hct.result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return errors.New(hct.result.GetStatus().GetReason())
+		return merr.Error(hct.result.GetStatus())
 	}
 	return nil
 }
@@ -657,7 +657,7 @@ func (sct *showCollectionsTask) Execute(ctx context.Context) error {
 	}
 
 	if respFromRootCoord.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return errors.New(respFromRootCoord.GetStatus().GetReason())
+		return merr.Error(respFromRootCoord.GetStatus())
 	}
 
 	if sct.GetType() == milvuspb.ShowType_InMemory {
@@ -1071,7 +1071,7 @@ func (hpt *hasPartitionTask) Execute(ctx context.Context) (err error) {
 		return err
 	}
 	if hpt.result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return errors.New(hpt.result.GetStatus().GetReason())
+		return merr.Error(hpt.result.GetStatus())
 	}
 	return err
 }
@@ -1156,7 +1156,7 @@ func (spt *showPartitionsTask) Execute(ctx context.Context) error {
 	}
 
 	if respFromRootCoord.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return errors.New(respFromRootCoord.GetStatus().GetReason())
+		return merr.Error(respFromRootCoord.GetStatus())
 	}
 
 	if spt.GetType() == milvuspb.ShowType_InMemory {
@@ -1200,7 +1200,7 @@ func (spt *showPartitionsTask) Execute(ctx context.Context) error {
 		}
 
 		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			return errors.New(resp.GetStatus().GetReason())
+			return merr.Error(resp.GetStatus())
 		}
 
 		spt.result = &milvuspb.ShowPartitionsResponse{
@@ -1316,7 +1316,7 @@ func (ft *flushTask) Execute(ctx context.Context) error {
 			return fmt.Errorf("failed to call flush to data coordinator: %s", err.Error())
 		}
 		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			return errors.New(resp.GetStatus().GetReason())
+			return merr.Error(resp.GetStatus())
 		}
 		coll2Segments[collName] = &schemapb.LongArray{Data: resp.GetSegmentIDs()}
 		flushColl2Segments[collName] = &schemapb.LongArray{Data: resp.GetFlushSegmentIDs()}
@@ -1432,7 +1432,7 @@ func (lct *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		return err
 	}
 	if indexResponse.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return errors.New(indexResponse.GetStatus().GetReason())
+		return merr.Error(indexResponse.GetStatus())
 	}
 
 	hasVecIndex := false
@@ -1660,7 +1660,7 @@ func (lpt *loadPartitionsTask) Execute(ctx context.Context) error {
 		return err
 	}
 	if indexResponse.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return errors.New(indexResponse.GetStatus().GetReason())
+		return merr.Error(indexResponse.GetStatus())
 	}
 
 	hasVecIndex := false

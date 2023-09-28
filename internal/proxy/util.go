@@ -177,24 +177,24 @@ func ValidateResourceGroupName(entity string) error {
 
 func ValidateDatabaseName(dbName string) error {
 	if dbName == "" {
-		return merr.WrapErrInvalidedDatabaseName(dbName, "database name couldn't be empty")
+		return merr.WrapErrDatabaseNameInvalid(dbName, "database name couldn't be empty")
 	}
 
 	if len(dbName) > Params.ProxyCfg.MaxNameLength.GetAsInt() {
-		return merr.WrapErrInvalidedDatabaseName(dbName,
+		return merr.WrapErrDatabaseNameInvalid(dbName,
 			fmt.Sprintf("the length of a database name must be less than %d characters", Params.ProxyCfg.MaxNameLength.GetAsInt()))
 	}
 
 	firstChar := dbName[0]
 	if firstChar != '_' && !isAlpha(firstChar) {
-		return merr.WrapErrInvalidedDatabaseName(dbName,
+		return merr.WrapErrDatabaseNameInvalid(dbName,
 			"the first character of a database name must be an underscore or letter")
 	}
 
 	for i := 1; i < len(dbName); i++ {
 		c := dbName[i]
 		if c != '_' && !isAlpha(c) && !isNumber(c) {
-			return merr.WrapErrInvalidedDatabaseName(dbName,
+			return merr.WrapErrDatabaseNameInvalid(dbName,
 				"database name can only contain numbers, letters and underscores")
 		}
 	}
@@ -1053,7 +1053,7 @@ func isCollectionLoaded(ctx context.Context, qc types.QueryCoordClient, collID i
 		return false, err
 	}
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return false, errors.New(resp.GetStatus().GetReason())
+		return false, merr.Error(resp.GetStatus())
 	}
 
 	for _, loadedCollID := range resp.GetCollectionIDs() {
@@ -1074,7 +1074,7 @@ func isPartitionLoaded(ctx context.Context, qc types.QueryCoordClient, collID in
 		return false, err
 	}
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return false, errors.New(resp.GetStatus().GetReason())
+		return false, merr.Error(resp.GetStatus())
 	}
 
 	for _, loadedPartID := range resp.GetPartitionIDs() {

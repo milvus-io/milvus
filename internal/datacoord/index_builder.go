@@ -22,7 +22,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -31,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 type indexTaskState int32
@@ -430,15 +430,14 @@ func (ib *indexBuilder) assignTask(builderClient types.IndexNodeClient, req *ind
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()
 	resp, err := builderClient.CreateJob(ctx, req)
+	if err == nil {
+		err = merr.Error(resp)
+	}
 	if err != nil {
 		log.Error("IndexCoord assignmentTasksLoop builderClient.CreateIndex failed", zap.Error(err))
 		return err
 	}
 
-	if resp.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Error("IndexCoord assignmentTasksLoop builderClient.CreateIndex failed", zap.String("Reason", resp.GetReason()))
-		return errors.New(resp.GetReason())
-	}
 	return nil
 }
 

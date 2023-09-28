@@ -922,24 +922,26 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 				return err
 			}
 
+			err = merr.Error(rsp)
+
 			// Segment not found during stale segment flush. Segment might get compacted already.
 			// Stop retry and still proceed to the end, ignoring this error.
-			if !pack.flushed && rsp.GetErrorCode() == commonpb.ErrorCode_SegmentNotFound {
+			if !pack.flushed && errors.Is(err, merr.ErrSegmentNotFound) {
 				log.Warn("stale segment not found, could be compacted",
 					zap.Int64("segmentID", pack.segmentID))
 				log.Warn("failed to SaveBinlogPaths",
 					zap.Int64("segmentID", pack.segmentID),
-					zap.Error(errors.New(rsp.GetReason())))
+					zap.Error(err))
 				return nil
 			}
 			// meta error, datanode handles a virtual channel does not belong here
-			if rsp.GetErrorCode() == commonpb.ErrorCode_MetaFailed {
+			if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrChannelNotFound) {
 				log.Warn("meta error found, skip sync and start to drop virtual channel", zap.String("channel", dsService.vchannelName))
 				return nil
 			}
 
-			if rsp.ErrorCode != commonpb.ErrorCode_Success {
-				return fmt.Errorf("data service save bin log path failed, reason = %s", rsp.Reason)
+			if err != nil {
+				return err
 			}
 
 			dsService.channel.transferNewSegments(lo.Map(startPos, func(pos *datapb.SegmentStartPosition, _ int) UniqueID {

@@ -23,7 +23,6 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -33,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -104,7 +104,7 @@ func getDmlChannelsFunc(ctx context.Context, rc types.RootCoordClient) getChanne
 			log.Error("failed to describe collection",
 				zap.String("error_code", resp.GetStatus().GetErrorCode().String()),
 				zap.String("reason", resp.GetStatus().GetReason()))
-			return channelInfos{}, errors.New(resp.GetStatus().GetReason())
+			return channelInfos{}, merr.Error(resp.GetStatus())
 		}
 
 		return newChannels(resp.GetVirtualChannelNames(), resp.GetPhysicalChannelNames())

@@ -23,7 +23,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/parameterutil.go"
 )
 
@@ -855,10 +854,4 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 	}
 
 	return queryResp, nil
-}
-
-// --------------------- error code --------------------- //
-
-func Code(err error) int32 {
-	return merr.Code(err)
 }

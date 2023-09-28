@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -130,7 +129,7 @@ func (broker *CoordinatorBroker) GetRecoveryInfo(ctx context.Context, collection
 	}
 
 	if recoveryInfo.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		err = errors.New(recoveryInfo.GetStatus().GetReason())
+		err = merr.Error(recoveryInfo.GetStatus())
 		log.Warn("get recovery info failed", zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID), zap.Error(err))
 		return nil, nil, err
 	}
@@ -156,7 +155,7 @@ func (broker *CoordinatorBroker) GetRecoveryInfoV2(ctx context.Context, collecti
 	}
 
 	if recoveryInfo.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		err = errors.New(recoveryInfo.GetStatus().GetReason())
+		err = merr.Error(recoveryInfo.GetStatus())
 		log.Warn("get recovery info failed", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs), zap.Error(err))
 		return nil, nil, err
 	}

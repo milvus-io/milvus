@@ -197,7 +197,7 @@ func TestServer_GetIndexState(t *testing.T) {
 	})
 
 	s.stateCode.Store(commonpb.StateCode_Healthy)
-	t.Run("index not exist", func(t *testing.T) {
+	t.Run("index not found", func(t *testing.T) {
 		resp, err := s.GetIndexState(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_IndexNotExist, resp.GetStatus().GetErrorCode())

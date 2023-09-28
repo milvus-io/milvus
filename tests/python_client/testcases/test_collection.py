@@ -1068,7 +1068,7 @@ class TestCollectionOperation(TestcaseBase):
                                              check_items={exp_name: c_name, exp_schema: default_schema})
         self.collection_wrap.drop()
         assert not self.utility_wrap.has_collection(c_name)[0]
-        error = {ct.err_code: 1, ct.err_msg: f'HasPartition failed: collection not found: {c_name}'}
+        error = {ct.err_code: 4, ct.err_msg: 'collection not found'}
         collection_w.has_partition("p", check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -3030,7 +3030,7 @@ class TestLoadCollection(TestcaseBase):
         collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
         collection_w.load(check_task=CheckTasks.err_res,
                           check_items={"err_code": 1,
-                                       "err_msg": "index not exist"})
+                                       "err_msg": "index not found"})
 
 
 class TestDescribeCollection(TestcaseBase):

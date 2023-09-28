@@ -227,7 +227,7 @@ assert self.partition_wrap.is_empty
        # drop collection
        collection_w.drop()
        # create partition failed
-       self.partition_wrap.init_partition(collection_w.collection, partition_name, check_task=CheckTasks.err_res, check_items={ct.err_code: 1, ct.err_msg: "can't find collection"})
+       self.partition_wrap.init_partition(collection_w.collection, partition_name, check_task=CheckTasks.err_res, check_items={ct.err_code: 4, ct.err_msg: "collection not found"})
    ```
 
 - Tips

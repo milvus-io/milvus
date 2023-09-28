@@ -33,7 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
@@ -131,7 +131,7 @@ func (ttn *ttNode) updateChannelCP(channelPos *msgpb.MsgPosition, curTs time.Tim
 		VChannel: ttn.vChannelName,
 		Position: channelPos,
 	})
-	if err = funcutil.VerifyResponse(resp, err); err != nil {
+	if err = merr.CheckRpcCall(resp, err); err != nil {
 		log.Warn("UpdateChannelCheckpoint failed", zap.String("channel", ttn.vChannelName),
 			zap.Time("channelCPTs", channelCPTs), zap.Error(err))
 		return err
