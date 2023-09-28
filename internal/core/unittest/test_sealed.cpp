@@ -1182,7 +1182,8 @@ TEST(Sealed, GetVectorFromChunkCache) {
     milvus::storage::RemoteChunkManagerSingleton::GetInstance().Init(sc);
     auto mcm = std::make_unique<milvus::storage::MinioChunkManager>(sc);
     mcm->CreateBucket(sc.bucket_name);
-    milvus::storage::ChunkCacheSingleton::GetInstance().Init(mmap_dir);
+    milvus::storage::ChunkCacheSingleton::GetInstance().Init(mmap_dir,
+                                                             "willneed");
 
     auto schema = std::make_shared<Schema>();
     auto fakevec_id = schema->AddDebugField(

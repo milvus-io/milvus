@@ -26,6 +26,8 @@
 #include "storage/ChunkCache.h"
 #include "storage/LocalChunkManagerSingleton.h"
 
+#define DEFAULT_READ_AHEAD_POLICY "willneed"
+
 TEST(ChunkCacheTest, Read) {
     auto N = 10000;
     auto dim = 128;
@@ -67,7 +69,8 @@ TEST(ChunkCacheTest, Read) {
                  field_data_meta,
                  field_meta);
 
-    auto cc = std::make_shared<milvus::storage::ChunkCache>(mmap_dir, lcm);
+    auto cc = std::make_shared<milvus::storage::ChunkCache>(
+        mmap_dir, DEFAULT_READ_AHEAD_POLICY, lcm);
     const auto& column = cc->Read(file_name);
     Assert(column->ByteSize() == dim * N * 4);
 
@@ -129,7 +132,8 @@ TEST(ChunkCacheTest, TestMultithreads) {
                  field_data_meta,
                  field_meta);
 
-    auto cc = std::make_shared<milvus::storage::ChunkCache>(mmap_dir, lcm);
+    auto cc = std::make_shared<milvus::storage::ChunkCache>(
+        mmap_dir, DEFAULT_READ_AHEAD_POLICY, lcm);
 
     constexpr int threads = 16;
     std::vector<int64_t> total_counts(threads);

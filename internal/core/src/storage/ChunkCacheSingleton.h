@@ -39,11 +39,12 @@ class ChunkCacheSingleton {
     }
 
     void
-    Init(const std::string& root_path) {
+    Init(std::string root_path, std::string read_ahead_policy) {
         if (cc_ == nullptr) {
             auto rcm = RemoteChunkManagerSingleton::GetInstance()
                            .GetRemoteChunkManager();
-            cc_ = std::make_shared<ChunkCache>(root_path, rcm);
+            cc_ = std::make_shared<ChunkCache>(
+                std::move(root_path), std::move(read_ahead_policy), rcm);
         }
     }
 

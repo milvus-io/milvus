@@ -81,9 +81,10 @@ InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config) {
 }
 
 CStatus
-InitChunkCacheSingleton(const char* c_dir_path) {
+InitChunkCacheSingleton(const char* c_dir_path, const char* read_ahead_policy) {
     try {
-        milvus::storage::ChunkCacheSingleton::GetInstance().Init(c_dir_path);
+        milvus::storage::ChunkCacheSingleton::GetInstance().Init(
+            c_dir_path, read_ahead_policy);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);

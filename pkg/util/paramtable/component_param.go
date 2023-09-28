@@ -1529,6 +1529,9 @@ type queryNodeConfig struct {
 	CacheMemoryLimit ParamItem `refreshable:"false"`
 	MmapDirPath      ParamItem `refreshable:"false"`
 
+	// chunk cache
+	ReadAheadPolicy ParamItem `refreshable:"false"`
+
 	GroupEnabled         ParamItem `refreshable:"true"`
 	MaxReceiveChanSize   ParamItem `refreshable:"false"`
 	MaxUnsolvedQueueSize ParamItem `refreshable:"true"`
@@ -1714,6 +1717,14 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Doc:          "The folder that storing data files for mmap, setting to a path will enable Milvus to load data with mmap",
 	}
 	p.MmapDirPath.Init(base.mgr)
+
+	p.ReadAheadPolicy = ParamItem{
+		Key:          "queryNode.cache.readAheadPolicy",
+		Version:      "2.3.2",
+		DefaultValue: "willneed",
+		Doc:          "The read ahead policy of chunk cache, options: `normal, random, sequential, willneed, dontneed`",
+	}
+	p.ReadAheadPolicy.Init(base.mgr)
 
 	p.GroupEnabled = ParamItem{
 		Key:          "queryNode.grouping.enabled",
