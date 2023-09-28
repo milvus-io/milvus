@@ -9,7 +9,7 @@ spec:
       - chaos-testing
     labelSelectors:
       app.kubernetes.io/instance: milvus-chaos-tikv
-      app.kubernetes.io/component: tikv
+      app.kubernetes.io/component: pd
   mode: fixed
   value: "1"
   action: pod-failure
