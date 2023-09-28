@@ -236,13 +236,13 @@ func (node *QueryNode) InitSegcore() error {
 	if len(mmapDirPath) == 0 {
 		mmapDirPath = paramtable.Get().LocalStorageCfg.Path.GetValue()
 	}
-	mmapDirPath += "/chunk_cache"
+	chunkCachePath := path.Join(mmapDirPath, "chunk_cache")
 	policy := paramtable.Get().QueryNodeCfg.ReadAheadPolicy.GetValue()
-	err = initcore.InitChunkCache(mmapDirPath, policy)
+	err = initcore.InitChunkCache(chunkCachePath, policy)
 	if err != nil {
 		return err
 	}
-	log.Info("InitChunkCache done", zap.String("dir", mmapDirPath), zap.String("policy", policy))
+	log.Info("InitChunkCache done", zap.String("dir", chunkCachePath), zap.String("policy", policy))
 
 	initcore.InitTraceConfig(paramtable.Get())
 	return nil
