@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/querynodev2/optimizers"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -157,7 +158,7 @@ func (suite *QueryNodeSuite) TestInit_QueryHook() {
 	err = suite.node.Init()
 	suite.NoError(err)
 
-	mockHook := &MockQueryHook{}
+	mockHook := optimizers.NewMockQueryHook(suite.T())
 	suite.node.queryHook = mockHook
 	suite.node.handleQueryHookEvent()
 
