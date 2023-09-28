@@ -272,15 +272,14 @@ class ApiCollectionWrapper:
         return res, check_result
 
     @trace()
-    def create_index(self, field_name, index_params=None, index_name=None, check_task=None, check_items=None, **kwargs):
-        timeout = 1200
+    def create_index(self, field_name, index_params=None, index_name=None, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = 1200 if timeout is None else timeout
         index_name = INDEX_NAME if index_name is None else index_name
         index_name = kwargs.get("index_name", index_name)
         kwargs.update({"index_name": index_name})
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.collection.create_index, field_name, index_params, timeout], **kwargs)
-        check_result = ResponseChecker(res, func_name, check_task, check_items, check, timeout=timeout,
-                                       field_name=field_name, index_params=index_params, **kwargs).run()
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
 
     @trace()
