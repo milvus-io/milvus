@@ -389,7 +389,7 @@ func (node *QueryNode) Init() error {
 // Start mainly start QueryNode's query service.
 func (node *QueryNode) Start() error {
 	node.startOnce.Do(func() {
-		node.scheduler.Start(node.ctx)
+		node.scheduler.Start()
 
 		paramtable.SetCreateTime(time.Now())
 		paramtable.SetUpdateTime(time.Now())
@@ -453,6 +453,9 @@ func (node *QueryNode) Stop() error {
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		node.lifetime.Wait()
 		node.cancel()
+		if node.scheduler != nil {
+			node.scheduler.Stop()
+		}
 		if node.pipelineManager != nil {
 			node.pipelineManager.Close()
 		}

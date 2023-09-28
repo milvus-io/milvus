@@ -78,20 +78,6 @@ type ShardDelegator interface {
 
 var _ ShardDelegator = (*shardDelegator)(nil)
 
-const (
-	initializing int32 = iota
-	working
-	stopped
-)
-
-func notStopped(state int32) bool {
-	return state != stopped
-}
-
-func isWorking(state int32) bool {
-	return state == working
-}
-
 // shardDelegator maintains the shard distribution and streaming part of the data.
 type shardDelegator struct {
 	// shard information attributes
@@ -104,7 +90,7 @@ type shardDelegator struct {
 
 	workerManager cluster.Manager
 
-	lifetime lifetime.Lifetime[int32]
+	lifetime lifetime.Lifetime[lifetime.State]
 
 	distribution   *distribution
 	segmentManager segments.SegmentManager
@@ -133,16 +119,16 @@ func (sd *shardDelegator) getLogger(ctx context.Context) *log.MLogger {
 
 // Serviceable returns whether delegator is serviceable now.
 func (sd *shardDelegator) Serviceable() bool {
-	return sd.lifetime.GetState() == working
+	return lifetime.IsWorking(sd.lifetime.GetState())
 }
 
 func (sd *shardDelegator) Stopped() bool {
-	return sd.lifetime.GetState() == stopped
+	return !lifetime.NotStopped(sd.lifetime.GetState())
 }
 
 // Start sets delegator to working state.
 func (sd *shardDelegator) Start() {
-	sd.lifetime.SetState(working)
+	sd.lifetime.SetState(lifetime.Working)
 }
 
 // Collection returns delegator collection id.
@@ -192,7 +178,7 @@ func (sd *shardDelegator) modifyQueryRequest(req *querypb.QueryRequest, scope qu
 // Search preforms search operation on shard.
 func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest) ([]*internalpb.SearchResults, error) {
 	log := sd.getLogger(ctx)
-	if !sd.lifetime.Add(isWorking) {
+	if !sd.lifetime.Add(lifetime.IsWorking) {
 		return nil, errors.New("delegator is not serviceable")
 	}
 	defer sd.lifetime.Done()
@@ -320,7 +306,7 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 // Query performs query operation on shard.
 func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) ([]*internalpb.RetrieveResults, error) {
 	log := sd.getLogger(ctx)
-	if !sd.lifetime.Add(isWorking) {
+	if !sd.lifetime.Add(lifetime.IsWorking) {
 		return nil, errors.New("delegator is not serviceable")
 	}
 	defer sd.lifetime.Done()
@@ -385,7 +371,7 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 // GetStatistics returns statistics aggregated by delegator.
 func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) ([]*internalpb.GetStatisticsResponse, error) {
 	log := sd.getLogger(ctx)
-	if !sd.lifetime.Add(isWorking) {
+	if !sd.lifetime.Add(lifetime.IsWorking) {
 		return nil, errors.New("delegator is not serviceable")
 	}
 	defer sd.lifetime.Done()
@@ -624,7 +610,7 @@ func (sd *shardDelegator) updateTSafe() {
 
 // Close closes the delegator.
 func (sd *shardDelegator) Close() {
-	sd.lifetime.SetState(stopped)
+	sd.lifetime.SetState(lifetime.Stopped)
 	sd.lifetime.Close()
 	// broadcast to all waitTsafe goroutine to quit
 	sd.tsCond.Broadcast()
@@ -659,7 +645,7 @@ func NewShardDelegator(collectionID UniqueID, replicaID UniqueID, channel string
 		collection:     collection,
 		segmentManager: manager.Segment,
 		workerManager:  workerManager,
-		lifetime:       lifetime.NewLifetime(initializing),
+		lifetime:       lifetime.NewLifetime(lifetime.Initializing),
 		distribution:   NewDistribution(),
 		deleteBuffer:   deletebuffer.NewDoubleCacheDeleteBuffer[*deletebuffer.Item](startTs, maxSegmentDeleteBuffer),
 		pkOracle:       pkoracle.NewPkOracle(),
@@ -670,7 +656,7 @@ func NewShardDelegator(collectionID UniqueID, replicaID UniqueID, channel string
 	}
 	m := sync.Mutex{}
 	sd.tsCond = sync.NewCond(&m)
-	if sd.lifetime.Add(notStopped) {
+	if sd.lifetime.Add(lifetime.NotStopped) {
 		go sd.watchTSafe()
 	}
 	log.Info("finish build new shardDelegator")
