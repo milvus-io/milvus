@@ -944,13 +944,15 @@ func GenAndSaveIndex(collectionID, partitionID, segmentID, fieldID int64, msgLen
 			return nil, err
 		}
 	}
+	_, cCurrentIndexVersion := getIndexEngineVersion()
 
 	return &querypb.FieldIndexInfo{
-		FieldID:        fieldID,
-		EnableIndex:    true,
-		IndexName:      "querynode-test",
-		IndexParams:    funcutil.Map2KeyValuePair(indexParams),
-		IndexFilePaths: indexPaths,
+		FieldID:             fieldID,
+		EnableIndex:         true,
+		IndexName:           "querynode-test",
+		IndexParams:         funcutil.Map2KeyValuePair(indexParams),
+		IndexFilePaths:      indexPaths,
+		CurrentIndexVersion: cCurrentIndexVersion,
 	}, nil
 }
 
