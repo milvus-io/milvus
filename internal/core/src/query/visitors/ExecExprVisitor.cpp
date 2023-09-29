@@ -28,6 +28,7 @@
 #include "common/Json.h"
 #include "common/Types.h"
 #include "common/EasyAssert.h"
+#include "fmt/core.h"
 #include "pb/plan.pb.h"
 #include "query/ExprImpl.h"
 #include "query/Relational.h"
@@ -117,7 +118,8 @@ ExecExprVisitor::visit(LogicalUnaryExpr& expr) {
             break;
         }
         default: {
-            PanicInfo("Invalid Unary Op");
+            PanicInfo(OpTypeInvalid,
+                      fmt::format("Invalid Unary Op {}", expr.op_type_));
         }
     }
     AssertInfo(res.size() == row_count_,
@@ -164,7 +166,8 @@ ExecExprVisitor::visit(LogicalBinaryExpr& expr) {
             break;
         }
         default: {
-            PanicInfo("Invalid Binary Op");
+            PanicInfo(OpTypeInvalid,
+                      fmt::format("Invalid Binary Op {}", expr.op_type_));
         }
     }
     AssertInfo(res.size() == row_count_,
@@ -440,7 +443,8 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcherImpl(UnaryRangeExpr& expr_raw)
         }
         // TODO: PostfixMatch
         default: {
-            PanicInfo("unsupported range node");
+            PanicInfo(OpTypeInvalid,
+                      fmt::format("unsupported range node {}", op));
         }
     }
 }
@@ -494,7 +498,9 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw)
             }
 
             default: {
-                PanicInfo("unsupported range node");
+                PanicInfo(
+                    OpTypeInvalid,
+                    fmt::format("unsupported range node {}", expr.op_type_));
             }
         }
     }
@@ -550,9 +556,9 @@ CompareTwoJsonArray(T arr1, const proto::plan::Array& arr2) {
                 break;
             }
             default:
-                PanicCodeInfo(DataTypeInvalid,
-                              fmt::format("unsupported data type {}",
-                                          arr2.array(i).val_case()));
+                PanicInfo(DataTypeInvalid,
+                          fmt::format("unsupported data type {}",
+                                      arr2.array(i).val_case()));
         }
         i++;
     }
@@ -693,7 +699,8 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcherJson(UnaryRangeExpr& expr_raw)
         }
         // TODO: PostfixMatch
         default: {
-            PanicInfo("unsupported range node");
+            PanicInfo(OpTypeInvalid,
+                      fmt::format("unsupported range node {}", op));
         }
     }
 }
@@ -805,7 +812,8 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcherArray(UnaryRangeExpr& expr_raw)
         }
         // TODO: PostfixMatch
         default: {
-            PanicInfo("unsupported range node");
+            PanicInfo(OpTypeInvalid,
+                      fmt::format("unsupported range node {}", op));
         }
     }
 }
@@ -896,7 +904,9 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(
                         expr.column_.field_id, index_func, elem_func);
                 }
                 default: {
-                    PanicInfo("unsupported arithmetic operation");
+                    PanicInfo(
+                        OpTypeInvalid,
+                        fmt::format("unsupported arithmetic operation {}", op));
                 }
             }
         }
@@ -963,12 +973,17 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(
                         expr.column_.field_id, index_func, elem_func);
                 }
                 default: {
-                    PanicInfo("unsupported arithmetic operation");
+                    PanicInfo(
+                        OpTypeInvalid,
+                        fmt::format("unsupported arithmetic operation {}", op));
                 }
             }
         }
         default: {
-            PanicInfo("unsupported range node with arithmetic operation");
+            PanicInfo(
+                OpTypeInvalid,
+                fmt::format(
+                    "unsupported range node with arithmetic operation {}", op));
         }
     }
 }
@@ -1100,7 +1115,9 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcherJson(
                         expr.column_.field_id, index_func, elem_func);
                 }
                 default: {
-                    PanicInfo("unsupported arithmetic operation");
+                    PanicInfo(
+                        OpTypeInvalid,
+                        fmt::format("unsupported arithmetic operation {}", op));
                 }
             }
         }
@@ -1185,12 +1202,17 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcherJson(
                         expr.column_.field_id, index_func, elem_func);
                 }
                 default: {
-                    PanicInfo("unsupported arithmetic operation");
+                    PanicInfo(
+                        OpTypeInvalid,
+                        fmt::format("unsupported arithmetic operation {}", op));
                 }
             }
         }
         default: {
-            PanicInfo("unsupported range node with arithmetic operation");
+            PanicInfo(
+                OpTypeInvalid,
+                fmt::format(
+                    "unsupported range node with arithmetic operation {}", op));
         }
     }
 }  // namespace milvus::query
@@ -1292,7 +1314,9 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcherArray(
                         expr.column_.field_id, index_func, elem_func);
                 }
                 default: {
-                    PanicInfo("unsupported arithmetic operation");
+                    PanicInfo(
+                        OpTypeInvalid,
+                        fmt::format("unsupported arithmetic operation {}", op));
                 }
             }
         }
@@ -1371,12 +1395,17 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcherArray(
                         expr.column_.field_id, index_func, elem_func);
                 }
                 default: {
-                    PanicInfo("unsupported arithmetic operation");
+                    PanicInfo(
+                        OpTypeInvalid,
+                        fmt::format("unsupported arithmetic operation {}", op));
                 }
             }
         }
         default: {
-            PanicInfo("unsupported range node with arithmetic operation");
+            PanicInfo(
+                OpTypeInvalid,
+                fmt::format(
+                    "unsupported range node with arithmetic operation {}", op));
         }
     }
 }  // namespace milvus::query
@@ -1640,6 +1669,7 @@ ExecExprVisitor::visit(UnaryRangeExpr& expr) {
                     break;
                 default:
                     PanicInfo(
+                        DataTypeInvalid,
                         fmt::format("unknown data type: {}", expr.val_case_));
             }
             break;
@@ -1665,12 +1695,14 @@ ExecExprVisitor::visit(UnaryRangeExpr& expr) {
                     break;
                 default:
                     PanicInfo(
+                        DataTypeInvalid,
                         fmt::format("unknown data type: {}", expr.val_case_));
             }
             break;
         }
         default:
-            PanicInfo(fmt::format("unsupported data type: {}",
+            PanicInfo(DataTypeInvalid,
+                      fmt::format("unsupported data type: {}",
                                   expr.column_.data_type));
     }
     AssertInfo(res.size() == row_count_,
@@ -1729,6 +1761,7 @@ ExecExprVisitor::visit(BinaryArithOpEvalRangeExpr& expr) {
                 }
                 default: {
                     PanicInfo(
+                        DataTypeInvalid,
                         fmt::format("unsupported value type {} in expression",
                                     expr.val_case_));
                 }
@@ -1749,6 +1782,7 @@ ExecExprVisitor::visit(BinaryArithOpEvalRangeExpr& expr) {
                 }
                 default: {
                     PanicInfo(
+                        DataTypeInvalid,
                         fmt::format("unsupported value type {} in expression",
                                     expr.val_case_));
                 }
@@ -1756,7 +1790,8 @@ ExecExprVisitor::visit(BinaryArithOpEvalRangeExpr& expr) {
             break;
         }
         default:
-            PanicInfo(fmt::format("unsupported data type: {}",
+            PanicInfo(DataTypeInvalid,
+                      fmt::format("unsupported data type: {}",
                                   expr.column_.data_type));
     }
     AssertInfo(res.size() == row_count_,
@@ -1824,6 +1859,7 @@ ExecExprVisitor::visit(BinaryRangeExpr& expr) {
                 }
                 default: {
                     PanicInfo(
+                        DataTypeInvalid,
                         fmt::format("unsupported value type {} in expression",
                                     expr.val_case_));
                 }
@@ -1846,8 +1882,8 @@ ExecExprVisitor::visit(BinaryRangeExpr& expr) {
                     break;
                 }
                 default: {
-                    PanicCodeInfo(
-                        Unsupported,
+                    PanicInfo(
+                        DataTypeInvalid,
                         fmt::format("unsupported value type {} in expression",
                                     expr.val_case_));
                 }
@@ -1855,7 +1891,8 @@ ExecExprVisitor::visit(BinaryRangeExpr& expr) {
             break;
         }
         default:
-            PanicInfo(fmt::format("unsupported data type: {}",
+            PanicInfo(DataTypeInvalid,
+                      fmt::format("unsupported data type: {}",
                                   expr.column_.data_type));
     }
     AssertInfo(res.size() == row_count_,
@@ -1873,7 +1910,7 @@ struct relational {
     template <typename... T>
     bool
     operator()(T const&...) const {
-        PanicInfo("incompatible operands");
+        PanicInfo(OpTypeInvalid, "incompatible operands");
     }
 };
 
@@ -1946,7 +1983,10 @@ ExecExprVisitor::ExecCompareLeftType(const FieldId& left_field_id,
                     left_raw_data, right_field_id, chunk_id, cmp_func);
                 break;
             default:
-                PanicInfo("unsupported left datatype of compare expr");
+                PanicInfo(
+                    DataTypeInvalid,
+                    fmt::format("unsupported right datatype {} of compare expr",
+                                right_field_type));
         }
         results.push_back(result);
     }
@@ -1997,7 +2037,10 @@ ExecExprVisitor::ExecCompareExprDispatcherForNonIndexedSegment(
                                                         expr.right_data_type_,
                                                         cmp_func);
         default:
-            PanicInfo("unsupported right datatype of compare expr");
+            PanicInfo(
+                DataTypeInvalid,
+                fmt::format("unsupported right datatype {} of compare expr",
+                            expr.left_data_type_));
     }
 }
 
@@ -2202,9 +2245,8 @@ ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, Op op)
                     }
                 }
                 default:
-                    PanicCodeInfo(
-                        DataTypeInvalid,
-                        fmt::format("unsupported data type {}", type));
+                    PanicInfo(DataTypeInvalid,
+                              fmt::format("unsupported data type {}", type));
             }
         };
         auto left = getChunkData(
@@ -2272,9 +2314,8 @@ ExecExprVisitor::visit(CompareExpr& expr) {
             // case OpType::PostfixMatch: {
             // }
         default: {
-            PanicCodeInfo(OpTypeInvalid,
-                          fmt::format("unsupported optype {}",
-                                      fmt::underlying(expr.op_type_)));
+            PanicInfo(OpTypeInvalid,
+                      fmt::format("unsupported optype {}", expr.op_type_));
         }
     }
     AssertInfo(res.size() == row_count_,
@@ -2318,7 +2359,7 @@ ExecExprVisitor::ExecTermVisitorImpl(TermExpr& expr_raw) -> BitsetType {
                 break;
             }
             default: {
-                PanicCodeInfo(
+                PanicInfo(
                     DataTypeInvalid,
                     fmt::format("unsupported data type {}", expr.val_case_));
             }
@@ -2651,9 +2692,9 @@ ExecExprVisitor::visit(TermExpr& expr) {
                     res = ExecTermVisitorImplTemplateJson<bool>(expr);
                     break;
                 default:
-                    PanicCodeInfo(DataTypeInvalid,
-                                  fmt::format("unsupported data type {}",
-                                              expr.val_case_));
+                    PanicInfo(DataTypeInvalid,
+                              fmt::format("unsupported data type {}",
+                                          expr.val_case_));
             }
             break;
         }
@@ -2675,16 +2716,16 @@ ExecExprVisitor::visit(TermExpr& expr) {
                     res = ExecTermVisitorImplTemplateArray<bool>(expr);
                     break;
                 default:
-                    PanicCodeInfo(
+                    PanicInfo(
                         Unsupported,
                         fmt::format("unknown data type: {}", expr.val_case_));
             }
             break;
         }
         default:
-            PanicCodeInfo(DataTypeInvalid,
-                          fmt::format("unsupported data type {}",
-                                      expr.column_.data_type));
+            PanicInfo(DataTypeInvalid,
+                      fmt::format("unsupported data type {}",
+                                  expr.column_.data_type));
     }
     AssertInfo(res.size() == row_count_,
                "[ExecExprVisitor]Size of results not equal row count");
@@ -2711,9 +2752,9 @@ ExecExprVisitor::visit(ExistsExpr& expr) {
             break;
         }
         default:
-            PanicCodeInfo(DataTypeInvalid,
-                          fmt::format("unsupported data type {}",
-                                      expr.column_.data_type));
+            PanicInfo(DataTypeInvalid,
+                      fmt::format("unsupported data type {}",
+                                  expr.column_.data_type));
     }
     AssertInfo(res.size() == row_count_,
                "[ExecExprVisitor]Size of results not equal row count");
@@ -2902,9 +2943,9 @@ ExecExprVisitor::ExecJsonContainsWithDiffType(JsonContainsExpr& expr_raw)
                         break;
                     }
                     default:
-                        PanicCodeInfo(DataTypeInvalid,
-                                      fmt::format("unsupported data type {}",
-                                                  element.val_case()));
+                        PanicInfo(DataTypeInvalid,
+                                  fmt::format("unsupported data type {}",
+                                              element.val_case()));
                 }
             }
         }
@@ -3052,84 +3093,84 @@ ExecExprVisitor::ExecJsonContainsAllWithDiffType(JsonContainsExpr& expr_raw)
         elements_index.insert(i);
         i++;
     }
-    auto elem_func = [&elements, &elements_index, &pointer](
-                         const milvus::Json& json) {
-        auto doc = json.doc();
-        auto array = doc.at_pointer(pointer).get_array();
-        if (array.error()) {
-            return false;
-        }
-        std::unordered_set<int> tmp_elements_index(elements_index);
-        for (auto&& it : array) {
-            int i = -1;
-            for (auto& element : elements) {
-                i++;
-                switch (element.val_case()) {
-                    case proto::plan::GenericValue::kBoolVal: {
-                        auto val = it.template get<bool>();
-                        if (val.error()) {
-                            continue;
+    auto elem_func =
+        [&elements, &elements_index, &pointer](const milvus::Json& json) {
+            auto doc = json.doc();
+            auto array = doc.at_pointer(pointer).get_array();
+            if (array.error()) {
+                return false;
+            }
+            std::unordered_set<int> tmp_elements_index(elements_index);
+            for (auto&& it : array) {
+                int i = -1;
+                for (auto& element : elements) {
+                    i++;
+                    switch (element.val_case()) {
+                        case proto::plan::GenericValue::kBoolVal: {
+                            auto val = it.template get<bool>();
+                            if (val.error()) {
+                                continue;
+                            }
+                            if (val.value() == element.bool_val()) {
+                                tmp_elements_index.erase(i);
+                            }
+                            break;
                         }
-                        if (val.value() == element.bool_val()) {
-                            tmp_elements_index.erase(i);
+                        case proto::plan::GenericValue::kInt64Val: {
+                            auto val = it.template get<int64_t>();
+                            if (val.error()) {
+                                continue;
+                            }
+                            if (val.value() == element.int64_val()) {
+                                tmp_elements_index.erase(i);
+                            }
+                            break;
                         }
-                        break;
-                    }
-                    case proto::plan::GenericValue::kInt64Val: {
-                        auto val = it.template get<int64_t>();
-                        if (val.error()) {
-                            continue;
+                        case proto::plan::GenericValue::kFloatVal: {
+                            auto val = it.template get<double>();
+                            if (val.error()) {
+                                continue;
+                            }
+                            if (val.value() == element.float_val()) {
+                                tmp_elements_index.erase(i);
+                            }
+                            break;
                         }
-                        if (val.value() == element.int64_val()) {
-                            tmp_elements_index.erase(i);
+                        case proto::plan::GenericValue::kStringVal: {
+                            auto val = it.template get<std::string_view>();
+                            if (val.error()) {
+                                continue;
+                            }
+                            if (val.value() == element.string_val()) {
+                                tmp_elements_index.erase(i);
+                            }
+                            break;
                         }
-                        break;
-                    }
-                    case proto::plan::GenericValue::kFloatVal: {
-                        auto val = it.template get<double>();
-                        if (val.error()) {
-                            continue;
+                        case proto::plan::GenericValue::kArrayVal: {
+                            auto val = it.get_array();
+                            if (val.error()) {
+                                continue;
+                            }
+                            if (CompareTwoJsonArray(val, element.array_val())) {
+                                tmp_elements_index.erase(i);
+                            }
+                            break;
                         }
-                        if (val.value() == element.float_val()) {
-                            tmp_elements_index.erase(i);
-                        }
-                        break;
-                    }
-                    case proto::plan::GenericValue::kStringVal: {
-                        auto val = it.template get<std::string_view>();
-                        if (val.error()) {
-                            continue;
-                        }
-                        if (val.value() == element.string_val()) {
-                            tmp_elements_index.erase(i);
-                        }
-                        break;
-                    }
-                    case proto::plan::GenericValue::kArrayVal: {
-                        auto val = it.get_array();
-                        if (val.error()) {
-                            continue;
-                        }
-                        if (CompareTwoJsonArray(val, element.array_val())) {
-                            tmp_elements_index.erase(i);
-                        }
-                        break;
-                    }
-                    default:
-                        PanicCodeInfo(DataTypeInvalid,
+                        default:
+                            PanicInfo(DataTypeInvalid,
                                       fmt::format("unsupported data type {}",
                                                   element.val_case()));
+                    }
+                    if (tmp_elements_index.size() == 0) {
+                        return true;
+                    }
                 }
                 if (tmp_elements_index.size() == 0) {
                     return true;
                 }
             }
-            if (tmp_elements_index.size() == 0) {
-                return true;
-            }
-        }
-        return tmp_elements_index.size() == 0;
-    };
+            return tmp_elements_index.size() == 0;
+        };
 
     return ExecRangeVisitorImpl<milvus::Json>(
         expr.column_.field_id, index_func, elem_func);
@@ -3166,9 +3207,9 @@ ExecExprVisitor::visit(JsonContainsExpr& expr) {
                         break;
                     }
                     default:
-                        PanicCodeInfo(DataTypeInvalid,
-                                      fmt::format("unsupported data type {}",
-                                                  expr.val_case_));
+                        PanicInfo(DataTypeInvalid,
+                                  fmt::format("unsupported data type {}",
+                                              expr.val_case_));
                 }
             } else {
                 if (expr.same_type_) {
@@ -3194,10 +3235,9 @@ ExecExprVisitor::visit(JsonContainsExpr& expr) {
                             break;
                         }
                         default:
-                            PanicCodeInfo(
-                                Unsupported,
-                                fmt::format("unsupported value type {}",
-                                            expr.val_case_));
+                            PanicInfo(Unsupported,
+                                      fmt::format("unsupported value type {}",
+                                                  expr.val_case_));
                     }
                 } else {
                     res = ExecJsonContainsWithDiffType(expr);
@@ -3225,9 +3265,9 @@ ExecExprVisitor::visit(JsonContainsExpr& expr) {
                         break;
                     }
                     default:
-                        PanicCodeInfo(DataTypeInvalid,
-                                      fmt::format("unsupported data type {}",
-                                                  expr.val_case_));
+                        PanicInfo(DataTypeInvalid,
+                                  fmt::format("unsupported data type {}",
+                                              expr.val_case_));
                 }
             } else {
                 if (expr.same_type_) {
@@ -3253,7 +3293,7 @@ ExecExprVisitor::visit(JsonContainsExpr& expr) {
                             break;
                         }
                         default:
-                            PanicCodeInfo(
+                            PanicInfo(
                                 Unsupported,
                                 fmt::format(
                                     "unsupported value type {} in expression",
@@ -3266,9 +3306,9 @@ ExecExprVisitor::visit(JsonContainsExpr& expr) {
             break;
         }
         default:
-            PanicCodeInfo(DataTypeInvalid,
-                          fmt::format("unsupported json contains type {}",
-                                      expr.val_case_));
+            PanicInfo(DataTypeInvalid,
+                      fmt::format("unsupported json contains type {}",
+                                  expr.val_case_));
     }
     AssertInfo(res.size() == row_count_,
                "[ExecExprVisitor]Size of results not equal row count");

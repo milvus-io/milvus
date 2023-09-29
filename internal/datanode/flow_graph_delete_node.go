@@ -198,8 +198,8 @@ func (dn *deleteNode) filterSegmentByPK(partID UniqueID, pks []primaryKey, tss [
 
 func newDeleteNode(ctx context.Context, fm flushManager, manager *DeltaBufferManager, sig chan<- string, config *nodeConfig) (*deleteNode, error) {
 	baseNode := BaseNode{}
-	baseNode.SetMaxQueueLength(config.maxQueueLength)
-	baseNode.SetMaxParallelism(config.maxParallelism)
+	baseNode.SetMaxQueueLength(Params.DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
+	baseNode.SetMaxParallelism(Params.DataNodeCfg.FlowGraphMaxParallelism.GetAsInt32())
 
 	return &deleteNode{
 		ctx:              ctx,

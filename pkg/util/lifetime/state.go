@@ -14,37 +14,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package util
+package lifetime
 
-import (
-	"fmt"
-	"strings"
+// Singal alias for chan struct{}.
+type Signal chan struct{}
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+// BiState provides pre-defined simple binary state - normal or closed.
+type BiState int32
+
+const (
+	Normal BiState = 0
+	Closed BiState = 1
 )
 
-// WrapStatus wraps status with given error code, message and errors
-func WrapStatus(code commonpb.ErrorCode, msg string, errs ...error) *commonpb.Status {
-	status := &commonpb.Status{
-		ErrorCode: code,
-		Reason:    msg,
-	}
+// State provides pre-defined three stage state.
+type State int32
 
-	for _, err := range errs {
-		status.Reason = fmt.Sprintf("%s, err=%v", status.Reason, err)
-	}
+const (
+	Initializing State = iota
+	Working
+	Stopped
+)
 
-	return status
+func NotStopped(state State) bool {
+	return state != Stopped
 }
 
-// SuccessStatus returns a success status with given message
-func SuccessStatus(msgs ...string) *commonpb.Status {
-	return &commonpb.Status{
-		Reason: strings.Join(msgs, "; "),
-	}
-}
-
-// WrapError wraps error with given message
-func WrapError(msg string, err error) error {
-	return fmt.Errorf("%s[%w]", msg, err)
+func IsWorking(state State) bool {
+	return state == Working
 }

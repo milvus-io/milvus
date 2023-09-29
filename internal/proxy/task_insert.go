@@ -233,8 +233,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	channelNames, err := it.chMgr.getVChannels(collID)
 	if err != nil {
 		log.Warn("get vChannels failed", zap.Int64("collectionID", collID), zap.Error(err))
-		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		it.result.Status.Reason = err.Error()
+		it.result.Status = merr.Status(err)
 		return err
 	}
 
@@ -255,8 +254,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	}
 	if err != nil {
 		log.Warn("assign segmentID and repack insert data failed", zap.Error(err))
-		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		it.result.Status.Reason = err.Error()
+		it.result.Status = merr.Status(err)
 		return err
 	}
 	assignSegmentIDDur := tr.RecordSpan()
@@ -266,8 +264,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	err = stream.Produce(msgPack)
 	if err != nil {
 		log.Warn("fail to produce insert msg", zap.Error(err))
-		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		it.result.Status.Reason = err.Error()
+		it.result.Status = merr.Status(err)
 		return err
 	}
 	sendMsgDur := tr.RecordSpan()

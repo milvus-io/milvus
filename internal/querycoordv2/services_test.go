@@ -150,7 +150,7 @@ func (suite *ServiceSuite) SetupTest() {
 		suite.dist,
 		suite.broker,
 	)
-	suite.targetObserver.Start(context.Background())
+	suite.targetObserver.Start()
 	for _, node := range suite.nodes {
 		suite.nodeMgr.Add(session.NewNodeInfo(node, "localhost"))
 		err := suite.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, node)
@@ -159,7 +159,7 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.cluster = session.NewMockCluster(suite.T())
 	suite.jobScheduler = job.NewScheduler()
 	suite.taskScheduler = task.NewMockScheduler(suite.T())
-	suite.jobScheduler.Start(context.Background())
+	suite.jobScheduler.Start()
 	suite.balancer = balance.NewRowCountBasedBalancer(
 		suite.taskScheduler,
 		suite.nodeMgr,
@@ -954,7 +954,7 @@ func (suite *ServiceSuite) TestReleasePartition() {
 func (suite *ServiceSuite) TestRefreshCollection() {
 	server := suite.server
 
-	server.collectionObserver.Start(context.Background())
+	server.collectionObserver.Start()
 
 	// Test refresh all collections.
 	for _, collection := range suite.collections {
@@ -1241,7 +1241,7 @@ func (suite *ServiceSuite) TestLoadBalanceFailed() {
 		}
 		resp, err := server.LoadBalance(ctx, req)
 		suite.NoError(err)
-		suite.ErrorIs(merr.Error(resp), merr.ErrParameterInvalid)
+		suite.ErrorIs(merr.Error(resp), merr.ErrNodeNotFound)
 	}
 
 	// Test balance task failed

@@ -536,7 +536,9 @@ func (dct *describeCollectionTask) Execute(ctx context.Context) error {
 		// compatibility with PyMilvus existing implementation
 		err := merr.Error(dct.result.GetStatus())
 		if errors.Is(err, merr.ErrCollectionNotFound) {
+			// nolint
 			dct.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			// nolint
 			dct.result.Status.Reason = "can't find collection " + dct.result.GetStatus().GetReason()
 		}
 	} else {
@@ -572,6 +574,7 @@ func (dct *describeCollectionTask) Execute(ctx context.Context) error {
 					IsDynamic:      field.IsDynamic,
 					IsPartitionKey: field.IsPartitionKey,
 					DefaultValue:   field.DefaultValue,
+					ElementType:    field.ElementType,
 				})
 			}
 		}

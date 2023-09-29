@@ -16,6 +16,17 @@
 
 package segments
 
+/*
+#cgo pkg-config: milvus_segcore milvus_common
+
+#include "segcore/collection_c.h"
+#include "segcore/segment_c.h"
+#include "segcore/segcore_init_c.h"
+#include "common/init_c.h"
+
+*/
+import "C"
+
 import (
 	"context"
 	"fmt"
@@ -674,7 +685,6 @@ func (loader *segmentLoader) loadFieldsIndex(ctx context.Context,
 			zap.Int64("fieldID", fieldID),
 			zap.Any("binlog", fieldInfo.FieldBinlog.Binlogs),
 			zap.Int32("current_index_version", fieldInfo.IndexInfo.GetCurrentIndexVersion()),
-			zap.Int32("minimal_index_version", fieldInfo.IndexInfo.GetMinimalIndexVersion()),
 		)
 
 		segment.AddIndex(fieldID, fieldInfo)
@@ -1097,4 +1107,9 @@ func getBinlogDataSize(fieldBinlog *datapb.FieldBinlog) int64 {
 	}
 
 	return fieldSize
+}
+
+func getIndexEngineVersion() (minimal, current int32) {
+	cMinimal, cCurrent := C.GetMinimalIndexVersion(), C.GetCurrentIndexVersion()
+	return int32(cMinimal), int32(cCurrent)
 }

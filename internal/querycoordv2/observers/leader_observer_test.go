@@ -158,7 +158,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegments() {
 	}
 
 	called := atomic.NewBool(false)
-	suite.mockCluster.EXPECT().SyncDistribution(context.TODO(), int64(2),
+	suite.mockCluster.EXPECT().SyncDistribution(mock.Anything, int64(2),
 		mock.AnythingOfType("*querypb.SyncDistributionRequest")).
 		Run(func(ctx context.Context, nodeID int64, req *querypb.SyncDistributionRequest) {
 			assert.ElementsMatch(suite.T(), []*querypb.SyncDistributionRequest{req},
@@ -167,7 +167,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegments() {
 		}).
 		Return(&commonpb.Status{}, nil)
 
-	observer.Start(context.TODO())
+	observer.Start()
 
 	suite.Eventually(
 		func() bool {
@@ -249,7 +249,7 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncLoadedSegments() {
 		}
 	}
 	called := atomic.NewBool(false)
-	suite.mockCluster.EXPECT().SyncDistribution(context.TODO(), int64(2), mock.AnythingOfType("*querypb.SyncDistributionRequest")).
+	suite.mockCluster.EXPECT().SyncDistribution(mock.Anything, int64(2), mock.AnythingOfType("*querypb.SyncDistributionRequest")).
 		Run(func(ctx context.Context, nodeID int64, req *querypb.SyncDistributionRequest) {
 			assert.ElementsMatch(suite.T(), []*querypb.SyncDistributionRequest{req},
 				[]*querypb.SyncDistributionRequest{expectReqeustFunc(req.GetVersion())})
@@ -257,7 +257,7 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncLoadedSegments() {
 		}).
 		Return(&commonpb.Status{}, nil)
 
-	observer.Start(context.TODO())
+	observer.Start()
 
 	suite.Eventually(
 		func() bool {
@@ -303,7 +303,7 @@ func (suite *LeaderObserverTestSuite) TestIgnoreBalancedSegment() {
 	}
 	leaderView.TargetVersion = observer.target.GetCollectionTargetVersion(1, meta.CurrentTarget)
 	observer.dist.LeaderViewManager.Update(2, leaderView)
-	observer.Start(context.TODO())
+	observer.Start()
 
 	// Nothing should happen
 	time.Sleep(2 * time.Second)
@@ -383,7 +383,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 		}
 	}
 	called := atomic.NewBool(false)
-	suite.mockCluster.EXPECT().SyncDistribution(context.TODO(), int64(2),
+	suite.mockCluster.EXPECT().SyncDistribution(mock.Anything, int64(2),
 		mock.AnythingOfType("*querypb.SyncDistributionRequest")).
 		Run(func(ctx context.Context, nodeID int64, req *querypb.SyncDistributionRequest) {
 			assert.ElementsMatch(suite.T(), []*querypb.SyncDistributionRequest{req},
@@ -392,7 +392,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 		}).
 		Return(&commonpb.Status{}, nil)
 
-	observer.Start(context.TODO())
+	observer.Start()
 
 	suite.Eventually(
 		func() bool {
@@ -453,7 +453,7 @@ func (suite *LeaderObserverTestSuite) TestSyncRemovedSegments() {
 		}
 	}
 	ch := make(chan struct{})
-	suite.mockCluster.EXPECT().SyncDistribution(context.TODO(), int64(2),
+	suite.mockCluster.EXPECT().SyncDistribution(mock.Anything, int64(2),
 		mock.AnythingOfType("*querypb.SyncDistributionRequest")).
 		Run(func(ctx context.Context, nodeID int64, req *querypb.SyncDistributionRequest) {
 			assert.ElementsMatch(suite.T(), []*querypb.SyncDistributionRequest{req},
@@ -462,7 +462,7 @@ func (suite *LeaderObserverTestSuite) TestSyncRemovedSegments() {
 		}).
 		Return(&commonpb.Status{}, nil)
 
-	observer.Start(context.TODO())
+	observer.Start()
 
 	select {
 	case <-ch:
@@ -522,7 +522,7 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncRemovedSegments() {
 		}
 	}
 	called := atomic.NewBool(false)
-	suite.mockCluster.EXPECT().SyncDistribution(context.TODO(), int64(2), mock.AnythingOfType("*querypb.SyncDistributionRequest")).
+	suite.mockCluster.EXPECT().SyncDistribution(mock.Anything, int64(2), mock.AnythingOfType("*querypb.SyncDistributionRequest")).
 		Run(func(ctx context.Context, nodeID int64, req *querypb.SyncDistributionRequest) {
 			assert.ElementsMatch(suite.T(), []*querypb.SyncDistributionRequest{req},
 				[]*querypb.SyncDistributionRequest{expectReqeustFunc(req.GetVersion())})
@@ -530,7 +530,7 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncRemovedSegments() {
 		}).
 		Return(&commonpb.Status{}, nil)
 
-	observer.Start(context.TODO())
+	observer.Start()
 	suite.Eventually(func() bool {
 		return called.Load()
 	},

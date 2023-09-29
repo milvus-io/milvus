@@ -699,12 +699,19 @@ func (ibNode *insertBufferNode) getCollectionandPartitionIDbySegID(segmentID Uni
 	return ibNode.channel.getCollectionAndPartitionID(segmentID)
 }
 
-func newInsertBufferNode(ctx context.Context, collID UniqueID, delBufManager *DeltaBufferManager, flushCh <-chan flushMsg, resendTTCh <-chan resendTTMsg,
-	fm flushManager, flushingSegCache *Cache, config *nodeConfig, timeTickManager *timeTickSender,
+func newInsertBufferNode(
+	ctx context.Context,
+	flushCh <-chan flushMsg,
+	resendTTCh <-chan resendTTMsg,
+	delBufManager *DeltaBufferManager,
+	fm flushManager,
+	flushingSegCache *Cache,
+	timeTickManager *timeTickSender,
+	config *nodeConfig,
 ) (*insertBufferNode, error) {
 	baseNode := BaseNode{}
-	baseNode.SetMaxQueueLength(config.maxQueueLength)
-	baseNode.SetMaxParallelism(config.maxParallelism)
+	baseNode.SetMaxQueueLength(Params.DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
+	baseNode.SetMaxParallelism(Params.DataNodeCfg.FlowGraphMaxParallelism.GetAsInt32())
 
 	if Params.DataNodeCfg.DataNodeTimeTickByRPC.GetAsBool() {
 		return &insertBufferNode{
@@ -767,7 +774,7 @@ func newInsertBufferNode(ctx context.Context, collID UniqueID, delBufManager *De
 		sub := tsoutil.SubByNow(ts)
 		pChan := funcutil.ToPhysicalChannel(config.vChannelName)
 		metrics.DataNodeProduceTimeTickLag.
-			WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(collID), pChan).
+			WithLabelValues(fmt.Sprint(config.serverID), fmt.Sprint(config.collectionID), pChan).
 			Set(float64(sub))
 		return wTtMsgStream.Produce(&msgPack)
 	})

@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -140,16 +141,29 @@ func (m *CollectionManager) Recover(broker Broker) error {
 			ctxLog.Warn("failed to get collection schema", zap.Error(err))
 			return err
 		}
-		// Collections not loaded done should be deprecated
-		if collection.GetStatus() != querypb.LoadStatus_Loaded || collection.GetReplicaNumber() <= 0 {
-			ctxLog.Info("skip recovery and release collection",
+
+		if collection.GetReplicaNumber() <= 0 {
+			ctxLog.Info("skip recovery and release collection due to invalid replica number",
 				zap.Int64("collectionID", collection.GetCollectionID()),
-				zap.String("status", collection.GetStatus().String()),
-				zap.Int32("replicaNumber", collection.GetReplicaNumber()),
-			)
+				zap.Int32("replicaNumber", collection.GetReplicaNumber()))
 			m.catalog.ReleaseCollection(collection.GetCollectionID())
 			continue
 		}
+
+		if collection.GetStatus() != querypb.LoadStatus_Loaded {
+			if collection.RecoverTimes >= paramtable.Get().QueryCoordCfg.CollectionRecoverTimesLimit.GetAsInt32() {
+				m.catalog.ReleaseCollection(collection.CollectionID)
+				ctxLog.Info("recover loading collection times reach limit, release collection",
+					zap.Int64("collectionID", collection.CollectionID),
+					zap.Int32("recoverTimes", collection.RecoverTimes))
+				break
+			}
+			// update recoverTimes meta in etcd
+			collection.RecoverTimes += 1
+			m.putCollection(true, &Collection{CollectionLoadInfo: collection})
+			continue
+		}
+
 		m.collections[collection.CollectionID] = &Collection{
 			CollectionLoadInfo: collection,
 		}
@@ -176,31 +190,30 @@ func (m *CollectionManager) Recover(broker Broker) error {
 		})
 		if len(omitPartitions) > 0 {
 			ctxLog.Info("skip dropped partitions during recovery",
-				zap.Int64("collection", collection), zap.Int64s("partitions", omitPartitions))
+				zap.Int64("collection", collection),
+				zap.Int64s("partitions", omitPartitions))
 			m.catalog.ReleasePartition(collection, omitPartitions...)
 		}
 
-		sawLoaded := false
 		for _, partition := range partitions {
 			// Partitions not loaded done should be deprecated
 			if partition.GetStatus() != querypb.LoadStatus_Loaded {
-				log.Info("skip recovery and release partition",
-					zap.Int64("collectionID", collection),
-					zap.Int64("partitionID", partition.GetPartitionID()),
-					zap.String("status", partition.GetStatus().String()),
-				)
-				m.catalog.ReleasePartition(collection, partition.GetPartitionID())
+				if partition.RecoverTimes >= paramtable.Get().QueryCoordCfg.CollectionRecoverTimesLimit.GetAsInt32() {
+					m.catalog.ReleaseCollection(collection)
+					ctxLog.Info("recover loading partition times reach limit, release collection",
+						zap.Int64("collectionID", collection),
+						zap.Int32("recoverTimes", partition.RecoverTimes))
+					break
+				}
+
+				partition.RecoverTimes += 1
+				m.putPartition([]*Partition{{PartitionLoadInfo: partition}}, true)
 				continue
 			}
 
-			sawLoaded = true
 			m.partitions[partition.PartitionID] = &Partition{
 				PartitionLoadInfo: partition,
 			}
-		}
-
-		if !sawLoaded {
-			m.catalog.ReleaseCollection(collection)
 		}
 	}
 
@@ -496,6 +509,8 @@ func (m *CollectionManager) UpdateLoadPercent(partitionID int64, loadPercent int
 	if loadPercent == 100 {
 		savePartition = true
 		newPartition.Status = querypb.LoadStatus_Loaded
+		// if partition becomes loaded, clear it's recoverTimes in load info
+		newPartition.RecoverTimes = 0
 		elapsed := time.Since(newPartition.CreatedAt)
 		metrics.QueryCoordLoadLatency.WithLabelValues().Observe(float64(elapsed.Milliseconds()))
 		eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("Partition %d loaded", partitionID)))
@@ -517,12 +532,14 @@ func (m *CollectionManager) UpdateLoadPercent(partitionID int64, loadPercent int
 	if collectionPercent == 100 {
 		saveCollection = true
 		newCollection.Status = querypb.LoadStatus_Loaded
-		elapsed := time.Since(newCollection.CreatedAt)
+
+		// if collection becomes loaded, clear it's recoverTimes in load info
+		newCollection.RecoverTimes = 0
 
 		// TODO: what if part of the collection has been unloaded? Now we decrease the metric only after
 		// 	`ReleaseCollection` is triggered. Maybe it's hard to make this metric really accurate.
 		metrics.QueryCoordNumCollections.WithLabelValues().Inc()
-
+		elapsed := time.Since(newCollection.CreatedAt)
 		metrics.QueryCoordLoadLatency.WithLabelValues().Observe(float64(elapsed.Milliseconds()))
 		eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("Collection %d loaded", newCollection.CollectionID)))
 	}

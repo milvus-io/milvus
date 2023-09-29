@@ -33,9 +33,9 @@ const (
 	DefaultIndexSliceSize                      = 16
 	DefaultGracefulTime                        = 5000 // ms
 	DefaultGracefulStopTimeout                 = 1800 // s
-	DefaultHighPriorityThreadCoreCoefficient   = 100
-	DefaultMiddlePriorityThreadCoreCoefficient = 50
-	DefaultLowPriorityThreadCoreCoefficient    = 10
+	DefaultHighPriorityThreadCoreCoefficient   = 10
+	DefaultMiddlePriorityThreadCoreCoefficient = 5
+	DefaultLowPriorityThreadCoreCoefficient    = 1
 
 	DefaultSessionTTL        = 60 // s
 	DefaultSessionRetryTimes = 30
@@ -1174,14 +1174,15 @@ type queryCoordConfig struct {
 	// Deprecated: Since 2.2.2, use different interval for different checker
 	CheckInterval ParamItem `refreshable:"true"`
 
-	NextTargetSurviveTime      ParamItem `refreshable:"true"`
-	UpdateNextTargetInterval   ParamItem `refreshable:"false"`
-	CheckNodeInReplicaInterval ParamItem `refreshable:"false"`
-	CheckResourceGroupInterval ParamItem `refreshable:"false"`
-	EnableRGAutoRecover        ParamItem `refreshable:"true"`
-	CheckHealthInterval        ParamItem `refreshable:"false"`
-	CheckHealthRPCTimeout      ParamItem `refreshable:"true"`
-	BrokerTimeout              ParamItem `refreshable:"false"`
+	NextTargetSurviveTime       ParamItem `refreshable:"true"`
+	UpdateNextTargetInterval    ParamItem `refreshable:"false"`
+	CheckNodeInReplicaInterval  ParamItem `refreshable:"false"`
+	CheckResourceGroupInterval  ParamItem `refreshable:"false"`
+	EnableRGAutoRecover         ParamItem `refreshable:"true"`
+	CheckHealthInterval         ParamItem `refreshable:"false"`
+	CheckHealthRPCTimeout       ParamItem `refreshable:"true"`
+	BrokerTimeout               ParamItem `refreshable:"false"`
+	CollectionRecoverTimesLimit ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -1483,6 +1484,16 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.BrokerTimeout.Init(base.mgr)
+
+	p.CollectionRecoverTimesLimit = ParamItem{
+		Key:          "queryCoord.collectionRecoverTimes",
+		Version:      "2.3.3",
+		DefaultValue: "3",
+		PanicIfEmpty: true,
+		Doc:          "if collection recover times reach the limit during loading state, release it",
+		Export:       true,
+	}
+	p.CollectionRecoverTimesLimit.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -1517,6 +1528,9 @@ type queryNodeConfig struct {
 	CacheEnabled     ParamItem `refreshable:"false"`
 	CacheMemoryLimit ParamItem `refreshable:"false"`
 	MmapDirPath      ParamItem `refreshable:"false"`
+
+	// chunk cache
+	ReadAheadPolicy ParamItem `refreshable:"false"`
 
 	GroupEnabled         ParamItem `refreshable:"true"`
 	MaxReceiveChanSize   ParamItem `refreshable:"false"`
@@ -1703,6 +1717,14 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Doc:          "The folder that storing data files for mmap, setting to a path will enable Milvus to load data with mmap",
 	}
 	p.MmapDirPath.Init(base.mgr)
+
+	p.ReadAheadPolicy = ParamItem{
+		Key:          "queryNode.cache.readAheadPolicy",
+		Version:      "2.3.2",
+		DefaultValue: "willneed",
+		Doc:          "The read ahead policy of chunk cache, options: `normal, random, sequential, willneed, dontneed`",
+	}
+	p.ReadAheadPolicy.Init(base.mgr)
 
 	p.GroupEnabled = ParamItem{
 		Key:          "queryNode.grouping.enabled",

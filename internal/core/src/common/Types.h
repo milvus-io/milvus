@@ -35,6 +35,7 @@
 #include <variant>
 #include <vector>
 
+#include "fmt/core.h"
 #include "knowhere/binaryset.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/dataset.h"
@@ -233,6 +234,62 @@ struct fmt::formatter<milvus::DataType> : formatter<string_view> {
                 break;
             case milvus::DataType::VECTOR_FLOAT16:
                 name = "VECTOR_FLOAT16";
+                break;
+        }
+        return formatter<string_view>::format(name, ctx);
+    }
+};
+
+template <>
+struct fmt::formatter<milvus::OpType> : formatter<string_view> {
+    auto
+    format(milvus::OpType c, format_context& ctx) const {
+        string_view name = "unknown";
+        switch (c) {
+            case milvus::OpType::Invalid:
+                name = "Invalid";
+                break;
+            case milvus::OpType::GreaterThan:
+                name = "GreaterThan";
+                break;
+            case milvus::OpType::GreaterEqual:
+                name = "GreaterEqual";
+                break;
+            case milvus::OpType::LessThan:
+                name = "LessThan";
+                break;
+            case milvus::OpType::LessEqual:
+                name = "LessEqual";
+                break;
+            case milvus::OpType::Equal:
+                name = "Equal";
+                break;
+            case milvus::OpType::NotEqual:
+                name = "NotEqual";
+                break;
+            case milvus::OpType::PrefixMatch:
+                name = "PrefixMatch";
+                break;
+            case milvus::OpType::PostfixMatch:
+                name = "PostfixMatch";
+                break;
+            case milvus::OpType::Match:
+                name = "Match";
+                break;
+            case milvus::OpType::Range:
+                name = "Range";
+                break;
+            case milvus::OpType::In:
+                name = "In";
+                break;
+            case milvus::OpType::NotIn:
+                name = "NotIn";
+                break;
+            case milvus::OpType::OpType_INT_MIN_SENTINEL_DO_NOT_USE_:
+                name = "OpType_INT_MIN_SENTINEL_DO_NOT_USE";
+                break;
+            case milvus::OpType::OpType_INT_MAX_SENTINEL_DO_NOT_USE_:
+                name = "OpType_INT_MAX_SENTINEL_DO_NOT_USE";
                 break;
         }
         return formatter<string_view>::format(name, ctx);

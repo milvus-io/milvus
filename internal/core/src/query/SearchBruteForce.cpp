@@ -105,10 +105,10 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
             base_dataset, query_dataset, config, bitset);
         milvus::tracer::AddEvent("knowhere_finish_BruteForce_RangeSearch");
         if (!res.has_value()) {
-            PanicCodeInfo(KnowhereError,
-                          fmt::format("failed to range search: {}: {}",
-                                      KnowhereStatusString(res.error()),
-                                      res.what()));
+            PanicInfo(KnowhereError,
+                      fmt::format("failed to range search: {}: {}",
+                                  KnowhereStatusString(res.error()),
+                                  res.what()));
         }
         auto result =
             ReGenRangeSearchResult(res.value(), topk, nq, dataset.metric_type);

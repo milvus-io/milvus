@@ -115,7 +115,7 @@ struct GeneratedData {
                         target_field_data.vectors().float16_vector().data());
                     std::copy_n(src_data, len, ret.data());
                 } else {
-                    PanicCodeInfo(Unsupported, "unsupported");
+                    PanicInfo(Unsupported, "unsupported");
                 }
 
                 return std::move(ret);
@@ -190,7 +190,7 @@ struct GeneratedData {
                         break;
                     }
                     default: {
-                        PanicCodeInfo(Unsupported, "unsupported");
+                        PanicInfo(Unsupported, "unsupported");
                     }
                 }
             }
@@ -206,7 +206,7 @@ struct GeneratedData {
             }
         }
 
-        PanicCodeInfo(FieldIDInvalid, "field id not find");
+        PanicInfo(FieldIDInvalid, "field id not find");
     }
 
  private:
@@ -757,7 +757,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 break;
             }
             default: {
-                PanicCodeInfo(Unsupported, "unsupported");
+                PanicInfo(Unsupported, "unsupported");
             }
         }
     } else {
@@ -828,7 +828,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 break;
             }
             default: {
-                PanicCodeInfo(Unsupported, "unsupported");
+                PanicInfo(Unsupported, "unsupported");
             }
         }
     }

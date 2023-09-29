@@ -69,7 +69,7 @@ def gen_str_invalid_vectors(nb, dim):
 
 def gen_binary_vectors(nb, dim):
     # binary: each int presents 8 dimension
-    # so if binary vector dimension is 16，use [x, y], which x and y could be any int between 0 to 255
+    # so if binary vector dimension is 16，use [x, y], which x and y could be any int between 0 and 255
     vectors = [[random.randint(0, 255) for _ in range(dim)] for _ in range(nb)]
     return vectors
 
@@ -276,6 +276,21 @@ def gen_string_in_numpy_file(dir, data_field, rows, start=0, force=False):
     return file_name
 
 
+def gen_bool_in_numpy_file(dir, data_field, rows, start=0, force=False):
+    file_name = f"{data_field}.npy"
+    file = f"{dir}/{file_name}"
+    if not os.path.exists(file) or force:
+        # non vector columns
+        data = []
+        if rows > 0:
+            data = [random.choice([True, False]) for i in range(start, rows+start)]
+        arr = np.array(data)
+        # print(f"file_name: {file_name} data type: {arr.dtype}")
+        log.info(f"file_name: {file_name} data type: {arr.dtype} data shape: {arr.shape}")
+        np.save(file, arr)
+    return file_name
+
+
 def gen_int_or_float_in_numpy_file(dir, data_field, rows, start=0, force=False):
     file_name = f"{data_field}.npy"
     file = f"{dir}/{file_name}"
@@ -378,6 +393,8 @@ def gen_npy_files(float_vector, rows, dim, data_fields, file_nums=1, err_type=""
                                                       rows=rows, dim=dim, force=force)
             elif data_field == DataField.string_field:  # string field for numpy not supported yet at 2022-10-17
                 file_name = gen_string_in_numpy_file(dir=data_source, data_field=data_field, rows=rows, force=force)
+            elif data_field == DataField.bool_field:
+                file_name = gen_bool_in_numpy_file(dir=data_source, data_field=data_field, rows=rows, force=force)
             else:
                 file_name = gen_int_or_float_in_numpy_file(dir=data_source, data_field=data_field,
                                                            rows=rows, force=force)
@@ -468,8 +485,8 @@ def prepare_bulk_insert_json_files(minio_endpoint="", bucket_name="milvus-bucket
     return files
 
 
-def prepare_bulk_insert_numpy_files(minio_endpoint="", bucket_name="milvus-bucket", rows=100, dim=128, data_fields=[DataField.vec_field],
-                                  float_vector=True, file_nums=1, force=False):
+def prepare_bulk_insert_numpy_files(minio_endpoint="", bucket_name="milvus-bucket", rows=100, dim=128,
+                                    data_fields=[DataField.vec_field], float_vector=True, file_nums=1, force=False):
     """
     Generate column based files based on params in numpy format and copy them to the minio
     Note: each field in data_fields would be generated one numpy file.
@@ -484,20 +501,20 @@ def prepare_bulk_insert_numpy_files(minio_endpoint="", bucket_name="milvus-bucke
     :type float_vector: boolean
 
     :param: data_fields: data fields to be generated in the file(s):
-            it support one or all of [int_pk, vectors, int, float]
-            Note: it does not automatically adds pk field
+            it supports one or all of [int_pk, vectors, int, float]
+            Note: it does not automatically add pk field
     :type data_fields: list
 
     :param file_nums: file numbers to be generated
         The file(s) would be  generated in data_source folder if file_nums = 1
-        The file(s) would be generated in different subfolers if file_nums > 1
+        The file(s) would be generated in different sub-folders if file_nums > 1
     :type file_nums: int
 
     :param force: re-generate the file(s) regardless existing or not
     :type force: boolean
 
     Return: List
-        File name list or file name with subfolder list
+        File name list or file name with sub-folder list
     """
     files = gen_npy_files(rows=rows, dim=dim, float_vector=float_vector,
                           data_fields=data_fields,
@@ -505,4 +522,3 @@ def prepare_bulk_insert_numpy_files(minio_endpoint="", bucket_name="milvus-bucke
 
     copy_files_to_minio(host=minio_endpoint, r_source=data_source, files=files, bucket_name=bucket_name, force=force)
     return files
-

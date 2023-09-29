@@ -16,7 +16,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/collector"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
-	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -220,7 +219,7 @@ func (t *SearchTask) Execute() error {
 			Base: &commonpb.MsgBase{
 				SourceID: paramtable.GetNodeID(),
 			},
-			Status:         util.WrapStatus(commonpb.ErrorCode_Success, ""),
+			Status:         merr.Status(nil),
 			MetricType:     req.GetReq().GetMetricType(),
 			NumQueries:     t.originNqs[i],
 			TopK:           t.originTopks[i],

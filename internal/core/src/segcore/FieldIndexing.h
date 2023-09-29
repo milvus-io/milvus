@@ -111,8 +111,8 @@ class ScalarFieldIndexing : public FieldIndexing {
                        int64_t size,
                        const VectorBase* vec_base,
                        const void* data_source) override {
-        PanicCodeInfo(Unsupported,
-                      "scalar index don't support append segment index");
+        PanicInfo(Unsupported,
+                  "scalar index don't support append segment index");
     }
 
     void
@@ -120,8 +120,8 @@ class ScalarFieldIndexing : public FieldIndexing {
                      int64_t count,
                      int64_t element_size,
                      void* output) override {
-        PanicCodeInfo(Unsupported,
-                      "scalar index don't support get data from index");
+        PanicInfo(Unsupported,
+                  "scalar index don't support get data from index");
     }
     idx_t
     get_index_cursor() override {

@@ -163,10 +163,10 @@ func (suite *JobSuite) SetupTest() {
 		suite.dist,
 		suite.broker,
 	)
-	suite.targetObserver.Start(context.Background())
+	suite.targetObserver.Start()
 	suite.scheduler = NewScheduler()
 
-	suite.scheduler.Start(context.Background())
+	suite.scheduler.Start()
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
 
 	suite.nodeMgr.Add(session.NewNodeInfo(1000, "localhost"))

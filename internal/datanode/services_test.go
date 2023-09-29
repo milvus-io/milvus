@@ -190,7 +190,7 @@ func (s *DataNodeServicesSuite) TestFlushSegments() {
 		FlushedSegmentIds:   []int64{},
 	}
 
-	err := s.node.flowgraphManager.addAndStart(s.node, vchan, nil, genTestTickler())
+	err := s.node.flowgraphManager.addAndStartWithEtcdTickler(s.node, vchan, nil, genTestTickler())
 	s.Require().NoError(err)
 
 	fgservice, ok := s.node.flowgraphManager.getFlowgraphService(dmChannelName)
@@ -394,14 +394,14 @@ func (s *DataNodeServicesSuite) TestImport() {
 
 		chName1 := "fake-by-dev-rootcoord-dml-testimport-1"
 		chName2 := "fake-by-dev-rootcoord-dml-testimport-2"
-		err := s.node.flowgraphManager.addAndStart(s.node, &datapb.VchannelInfo{
+		err := s.node.flowgraphManager.addAndStartWithEtcdTickler(s.node, &datapb.VchannelInfo{
 			CollectionID:        100,
 			ChannelName:         chName1,
 			UnflushedSegmentIds: []int64{},
 			FlushedSegmentIds:   []int64{},
 		}, nil, genTestTickler())
 		s.Require().Nil(err)
-		err = s.node.flowgraphManager.addAndStart(s.node, &datapb.VchannelInfo{
+		err = s.node.flowgraphManager.addAndStartWithEtcdTickler(s.node, &datapb.VchannelInfo{
 			CollectionID:        100,
 			ChannelName:         chName2,
 			UnflushedSegmentIds: []int64{},
@@ -472,14 +472,14 @@ func (s *DataNodeServicesSuite) TestImport() {
 	s.Run("Test Import bad flow graph", func() {
 		chName1 := "fake-by-dev-rootcoord-dml-testimport-1-badflowgraph"
 		chName2 := "fake-by-dev-rootcoord-dml-testimport-2-badflowgraph"
-		err := s.node.flowgraphManager.addAndStart(s.node, &datapb.VchannelInfo{
+		err := s.node.flowgraphManager.addAndStartWithEtcdTickler(s.node, &datapb.VchannelInfo{
 			CollectionID:        100,
 			ChannelName:         chName1,
 			UnflushedSegmentIds: []int64{},
 			FlushedSegmentIds:   []int64{},
 		}, nil, genTestTickler())
 		s.Require().Nil(err)
-		err = s.node.flowgraphManager.addAndStart(s.node, &datapb.VchannelInfo{
+		err = s.node.flowgraphManager.addAndStartWithEtcdTickler(s.node, &datapb.VchannelInfo{
 			CollectionID:        999, // wrong collection ID.
 			ChannelName:         chName2,
 			UnflushedSegmentIds: []int64{},
@@ -620,14 +620,14 @@ func (s *DataNodeServicesSuite) TestAddImportSegment() {
 
 		chName1 := "fake-by-dev-rootcoord-dml-testaddsegment-1"
 		chName2 := "fake-by-dev-rootcoord-dml-testaddsegment-2"
-		err := s.node.flowgraphManager.addAndStart(s.node, &datapb.VchannelInfo{
+		err := s.node.flowgraphManager.addAndStartWithEtcdTickler(s.node, &datapb.VchannelInfo{
 			CollectionID:        100,
 			ChannelName:         chName1,
 			UnflushedSegmentIds: []int64{},
 			FlushedSegmentIds:   []int64{},
 		}, nil, genTestTickler())
 		s.Require().NoError(err)
-		err = s.node.flowgraphManager.addAndStart(s.node, &datapb.VchannelInfo{
+		err = s.node.flowgraphManager.addAndStartWithEtcdTickler(s.node, &datapb.VchannelInfo{
 			CollectionID:        100,
 			ChannelName:         chName2,
 			UnflushedSegmentIds: []int64{},
@@ -670,7 +670,8 @@ func (s *DataNodeServicesSuite) TestAddImportSegment() {
 func (s *DataNodeServicesSuite) TestSyncSegments() {
 	chanName := "fake-by-dev-rootcoord-dml-test-syncsegments-1"
 
-	err := s.node.flowgraphManager.addAndStart(s.node, &datapb.VchannelInfo{
+	err := s.node.flowgraphManager.addAndStartWithEtcdTickler(s.node, &datapb.VchannelInfo{
+		CollectionID:        1,
 		ChannelName:         chanName,
 		UnflushedSegmentIds: []int64{},
 		FlushedSegmentIds:   []int64{100, 200, 300},
@@ -679,9 +680,9 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 	fg, ok := s.node.flowgraphManager.getFlowgraphService(chanName)
 	s.Assert().True(ok)
 
-	s1 := Segment{segmentID: 100}
-	s2 := Segment{segmentID: 200}
-	s3 := Segment{segmentID: 300}
+	s1 := Segment{segmentID: 100, collectionID: 1}
+	s2 := Segment{segmentID: 200, collectionID: 1}
+	s3 := Segment{segmentID: 300, collectionID: 1}
 	s1.setType(datapb.SegmentType_Flushed)
 	s2.setType(datapb.SegmentType_Flushed)
 	s3.setType(datapb.SegmentType_Flushed)
@@ -762,7 +763,7 @@ func (s *DataNodeServicesSuite) TestResendSegmentStats() {
 		FlushedSegmentIds:   []int64{},
 	}
 
-	err := s.node.flowgraphManager.addAndStart(s.node, vChan, nil, genTestTickler())
+	err := s.node.flowgraphManager.addAndStartWithEtcdTickler(s.node, vChan, nil, genTestTickler())
 	s.Require().Nil(err)
 
 	fgService, ok := s.node.flowgraphManager.getFlowgraphService(dmChannelName)
@@ -831,7 +832,7 @@ func (s *DataNodeServicesSuite) TestFlushChannels() {
 		FlushedSegmentIds:   []int64{},
 	}
 
-	err := s.node.flowgraphManager.addAndStart(s.node, vChan, nil, genTestTickler())
+	err := s.node.flowgraphManager.addAndStartWithEtcdTickler(s.node, vChan, nil, genTestTickler())
 	s.Require().NoError(err)
 
 	fgService, ok := s.node.flowgraphManager.getFlowgraphService(dmChannelName)

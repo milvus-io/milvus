@@ -22,7 +22,9 @@ import (
 
 	"github.com/google/btree"
 
+	"github.com/milvus-io/milvus/internal/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 // MemoryKV implements BaseKv interface and relies on underling btree.BTree.
@@ -217,7 +219,10 @@ func (kv *MemoryKV) MultiRemove(keys []string) error {
 }
 
 // MultiSaveAndRemove saves and removes given key-value pairs in MemoryKV atomicly.
-func (kv *MemoryKV) MultiSaveAndRemove(saves map[string]string, removals []string) error {
+func (kv *MemoryKV) MultiSaveAndRemove(saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+	if len(preds) > 0 {
+		return merr.WrapErrServiceUnavailable("predicates not supported")
+	}
 	kv.Lock()
 	defer kv.Unlock()
 	for key, value := range saves {
@@ -283,7 +288,10 @@ func (kv *MemoryKV) Close() {
 }
 
 // MultiSaveAndRemoveWithPrefix saves key-value pairs in @saves, & remove key with prefix in @removals in MemoryKV atomically.
-func (kv *MemoryKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error {
+func (kv *MemoryKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+	if len(preds) > 0 {
+		return merr.WrapErrServiceUnavailable("predicates not supported")
+	}
 	kv.Lock()
 	defer kv.Unlock()
 

@@ -167,11 +167,11 @@ func parseDeleteEventKey(key string) string {
 func (node *DataNode) handlePutEvent(watchInfo *datapb.ChannelWatchInfo, version int64) (err error) {
 	vChanName := watchInfo.GetVchan().GetChannelName()
 	key := path.Join(Params.CommonCfg.DataCoordWatchSubPath.GetValue(), fmt.Sprintf("%d", node.GetSession().ServerID), vChanName)
-	tickler := newTickler(version, key, watchInfo, node.watchKv, Params.DataNodeCfg.WatchEventTicklerInterval.GetAsDuration(time.Second))
+	tickler := newEtcdTickler(version, key, watchInfo, node.watchKv, Params.DataNodeCfg.WatchEventTicklerInterval.GetAsDuration(time.Second))
 
 	switch watchInfo.State {
 	case datapb.ChannelWatchState_Uncomplete, datapb.ChannelWatchState_ToWatch:
-		if err := node.flowgraphManager.addAndStart(node, watchInfo.GetVchan(), watchInfo.GetSchema(), tickler); err != nil {
+		if err := node.flowgraphManager.addAndStartWithEtcdTickler(node, watchInfo.GetVchan(), watchInfo.GetSchema(), tickler); err != nil {
 			log.Warn("handle put event: new data sync service failed", zap.String("vChanName", vChanName), zap.Error(err))
 			watchInfo.State = datapb.ChannelWatchState_WatchFailure
 		} else {
@@ -291,7 +291,7 @@ func isEndWatchState(state datapb.ChannelWatchState) bool {
 		state != datapb.ChannelWatchState_Uncomplete // legacy state, equal to ToWatch
 }
 
-type tickler struct {
+type etcdTickler struct {
 	progress *atomic.Int32
 	version  int64
 
@@ -305,11 +305,11 @@ type tickler struct {
 	isWatchFailed *atomic.Bool
 }
 
-func (t *tickler) inc() {
+func (t *etcdTickler) inc() {
 	t.progress.Inc()
 }
 
-func (t *tickler) watch() {
+func (t *etcdTickler) watch() {
 	if t.interval == 0 {
 		log.Info("zero interval, close ticler watch",
 			zap.String("channelName", t.watchInfo.GetVchan().GetChannelName()),
@@ -363,13 +363,13 @@ func (t *tickler) watch() {
 	}()
 }
 
-func (t *tickler) stop() {
+func (t *etcdTickler) stop() {
 	close(t.closeCh)
 	t.closeWg.Wait()
 }
 
-func newTickler(version int64, path string, watchInfo *datapb.ChannelWatchInfo, kv kv.WatchKV, interval time.Duration) *tickler {
-	return &tickler{
+func newEtcdTickler(version int64, path string, watchInfo *datapb.ChannelWatchInfo, kv kv.WatchKV, interval time.Duration) *etcdTickler {
+	return &etcdTickler{
 		progress:      atomic.NewInt32(0),
 		path:          path,
 		kv:            kv,

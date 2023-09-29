@@ -14,6 +14,7 @@
 #include "query/ExprImpl.h"
 #include "query/Plan.h"
 #include "query/generated/ShowExprVisitor.h"
+#include "common/Types.h"
 
 namespace milvus::query {
 using Json = nlohmann::json;
@@ -90,7 +91,8 @@ ShowExprVisitor::visit(LogicalBinaryExpr& expr) {
             case OpType::LogicalXor:
                 return "LogicalXor";
             default:
-                PanicInfo("unsupported op");
+                PanicInfo(OpTypeInvalid,
+                          fmt::format("unsupported operation {}", op));
         }
     }(expr.op_type_);
 
@@ -134,7 +136,9 @@ ShowExprVisitor::visit(TermExpr& expr) {
             case DataType::JSON:
                 return TermExtract<milvus::Json>(expr);
             default:
-                PanicInfo("unsupported type");
+                PanicInfo(
+                    DataTypeInvalid,
+                    fmt::format("unsupported type {}", expr.column_.data_type));
         }
     }();
 
@@ -192,7 +196,9 @@ ShowExprVisitor::visit(UnaryRangeExpr& expr) {
             json_opt_ = UnaryRangeExtract<milvus::Json>(expr);
             return;
         default:
-            PanicInfo("unsupported type");
+            PanicInfo(
+                DataTypeInvalid,
+                fmt::format("unsupported type {}", expr.column_.data_type));
     }
 }
 
@@ -247,7 +253,9 @@ ShowExprVisitor::visit(BinaryRangeExpr& expr) {
             json_opt_ = BinaryRangeExtract<milvus::Json>(expr);
             return;
         default:
-            PanicInfo("unsupported type");
+            PanicInfo(
+                DataTypeInvalid,
+                fmt::format("unsupported type {}", expr.column_.data_type));
     }
 }
 
@@ -317,7 +325,9 @@ ShowExprVisitor::visit(BinaryArithOpEvalRangeExpr& expr) {
             json_opt_ = BinaryArithOpEvalRangeExtract<milvus::Json>(expr);
             return;
         default:
-            PanicInfo("unsupported type");
+            PanicInfo(
+                DataTypeInvalid,
+                fmt::format("unsupported type {}", expr.column_.data_type));
     }
 }
 

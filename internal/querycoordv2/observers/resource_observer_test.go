@@ -16,7 +16,6 @@
 package observers
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -77,7 +76,7 @@ func (suite *ResourceObserverSuite) SetupTest() {
 	suite.meta = meta.NewMeta(idAllocator, suite.store, suite.nodeMgr)
 
 	suite.observer = NewResourceObserver(suite.meta)
-	suite.observer.Start(context.TODO())
+	suite.observer.Start()
 
 	suite.store.EXPECT().SaveResourceGroup(mock.Anything).Return(nil)
 	for i := 0; i < 10; i++ {

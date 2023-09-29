@@ -302,7 +302,7 @@ func TestRateLimiter(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 		// avoid production precision issues when comparing 0-terminated numbers
-		newRate := fmt.Sprintf("%.3f1", rand.Float64())
+		newRate := fmt.Sprintf("%.2f1", rand.Float64())
 		etcdCli.KV.Put(ctx, "by-dev/config/quotaAndLimits/ddl/collectionRate", newRate)
 		etcdCli.KV.Put(ctx, "by-dev/config/quotaAndLimits/ddl/partitionRate", "invalid")
 

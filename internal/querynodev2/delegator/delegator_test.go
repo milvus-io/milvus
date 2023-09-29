@@ -1050,14 +1050,14 @@ func TestDelegatorWatchTsafe(t *testing.T) {
 	sd := &shardDelegator{
 		tsafeManager: tsafeManager,
 		vchannelName: channelName,
-		lifetime:     lifetime.NewLifetime(initializing),
+		lifetime:     lifetime.NewLifetime(lifetime.Initializing),
 		latestTsafe:  atomic.NewUint64(0),
 	}
 	defer sd.Close()
 
 	m := sync.Mutex{}
 	sd.tsCond = sync.NewCond(&m)
-	if sd.lifetime.Add(notStopped) {
+	if sd.lifetime.Add(lifetime.NotStopped) {
 		go sd.watchTSafe()
 	}
 
@@ -1077,7 +1077,7 @@ func TestDelegatorTSafeListenerClosed(t *testing.T) {
 	sd := &shardDelegator{
 		tsafeManager: tsafeManager,
 		vchannelName: channelName,
-		lifetime:     lifetime.NewLifetime(initializing),
+		lifetime:     lifetime.NewLifetime(lifetime.Initializing),
 		latestTsafe:  atomic.NewUint64(0),
 	}
 	defer sd.Close()
@@ -1085,7 +1085,7 @@ func TestDelegatorTSafeListenerClosed(t *testing.T) {
 	m := sync.Mutex{}
 	sd.tsCond = sync.NewCond(&m)
 	signal := make(chan struct{})
-	if sd.lifetime.Add(notStopped) {
+	if sd.lifetime.Add(lifetime.NotStopped) {
 		go func() {
 			sd.watchTSafe()
 			close(signal)

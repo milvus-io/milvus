@@ -22,12 +22,6 @@ import (
 	"github.com/cockroachdb/errors"
 )
 
-// errNilKvClient stands for a nil kv client is detected when initialized
-var errNilKvClient = errors.New("kv client not initialized")
-
-// serverNotServingErrMsg used for Status Reason when DataCoord is not healthy
-const serverNotServingErrMsg = "DataCoord is not serving"
-
 // errors for VerifyResponse
 var (
 	errNilResponse         = errors.New("response is nil")

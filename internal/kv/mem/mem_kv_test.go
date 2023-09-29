@@ -20,6 +20,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/kv/predicates"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 func TestMemoryKV_SaveAndLoadBytes(t *testing.T) {
@@ -241,4 +244,17 @@ func TestHasPrefix(t *testing.T) {
 	has, err = kv.HasPrefix("key")
 	assert.NoError(t, err)
 	assert.False(t, has)
+}
+
+func TestPredicates(t *testing.T) {
+	kv := NewMemoryKV()
+
+	// predicates not supported for mem kv for now
+	err := kv.MultiSaveAndRemove(map[string]string{}, []string{}, predicates.ValueEqual("a", "b"))
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
+
+	err = kv.MultiSaveAndRemoveWithPrefix(map[string]string{}, []string{}, predicates.ValueEqual("a", "b"))
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
 }

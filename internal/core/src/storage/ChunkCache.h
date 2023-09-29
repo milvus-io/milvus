@@ -21,11 +21,23 @@
 
 namespace milvus::storage {
 
+extern std::map<std::string, int> ReadAheadPolicy_Map;
+
 class ChunkCache {
  public:
-    explicit ChunkCache(const std::string& path, ChunkManagerPtr cm)
-        : path_prefix_(path), cm_(cm) {
-        LOG_SEGCORE_INFO_ << "Init ChunkCache with prefix: " << path_prefix_;
+    explicit ChunkCache(std::string path,
+                        const std::string& read_ahead_policy,
+                        ChunkManagerPtr cm)
+        : path_prefix_(std::move(path)), cm_(cm) {
+        auto iter = ReadAheadPolicy_Map.find(read_ahead_policy);
+        AssertInfo(iter != ReadAheadPolicy_Map.end(),
+                   fmt::format("unrecognized read ahead policy: {}, "
+                               "should be one of `normal, random, sequential, "
+                               "willneed, dontneed`",
+                               read_ahead_policy));
+        read_ahead_policy_ = iter->second;
+        LOG_SEGCORE_INFO_ << "Init ChunkCache with prefix: " << path_prefix_
+                          << ", read_ahead_policy: " << read_ahead_policy;
     }
 
     ~ChunkCache() = default;
@@ -51,6 +63,7 @@ class ChunkCache {
 
  private:
     mutable std::mutex mutex_;
+    int read_ahead_policy_;
     std::string path_prefix_;
     ChunkManagerPtr cm_;
     ColumnTable columns_;

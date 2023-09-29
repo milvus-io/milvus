@@ -31,7 +31,7 @@ import (
 
 // check replica, find outbound nodes and remove it from replica if all segment/channel has been moved
 type ReplicaObserver struct {
-	c       chan struct{}
+	cancel  context.CancelFunc
 	wg      sync.WaitGroup
 	meta    *meta.Meta
 	distMgr *meta.DistributionManager
@@ -41,20 +41,24 @@ type ReplicaObserver struct {
 
 func NewReplicaObserver(meta *meta.Meta, distMgr *meta.DistributionManager) *ReplicaObserver {
 	return &ReplicaObserver{
-		c:       make(chan struct{}),
 		meta:    meta,
 		distMgr: distMgr,
 	}
 }
 
-func (ob *ReplicaObserver) Start(ctx context.Context) {
+func (ob *ReplicaObserver) Start() {
+	ctx, cancel := context.WithCancel(context.Background())
+	ob.cancel = cancel
+
 	ob.wg.Add(1)
 	go ob.schedule(ctx)
 }
 
 func (ob *ReplicaObserver) Stop() {
 	ob.stopOnce.Do(func() {
-		close(ob.c)
+		if ob.cancel != nil {
+			ob.cancel()
+		}
 		ob.wg.Wait()
 	})
 }
@@ -68,9 +72,6 @@ func (ob *ReplicaObserver) schedule(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Info("Close replica observer due to context canceled")
-			return
-		case <-ob.c:
 			log.Info("Close replica observer")
 			return
 

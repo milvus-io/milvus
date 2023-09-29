@@ -23,8 +23,11 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/kv/predicates"
 	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 func TestRocksdbKV(t *testing.T) {
@@ -363,4 +366,21 @@ func TestHasPrefix(t *testing.T) {
 	has, err = db.HasPrefix("key")
 	assert.NoError(t, err)
 	assert.False(t, has)
+}
+
+func TestPredicates(t *testing.T) {
+	dir := t.TempDir()
+	db, err := rocksdbkv.NewRocksdbKV(dir)
+
+	require.NoError(t, err)
+	defer db.Close()
+	defer db.RemoveWithPrefix("")
+
+	err = db.MultiSaveAndRemove(map[string]string{}, []string{}, predicates.ValueEqual("a", "b"))
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
+
+	err = db.MultiSaveAndRemoveWithPrefix(map[string]string{}, []string{}, predicates.ValueEqual("a", "b"))
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
 }

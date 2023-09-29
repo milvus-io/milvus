@@ -43,7 +43,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -59,10 +61,7 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 	log.Warn("DataNode WatchDmChannels is not in use")
 
 	// TODO ERROR OF GRPC NOT IN USE
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-		Reason:    "watchDmChannels do nothing",
-	}, nil
+	return merr.Status(nil), nil
 }
 
 // GetComponentStates will return current state of DataNode
@@ -645,7 +644,7 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 	// Get the current dml channel position ID, that will be used in segments start positions and end positions.
 	var posID []byte
 	err = retry.Do(ctx, func() error {
-		id, innerError := ds.getChannelLatestMsgID(context.Background(), req.GetChannelName(), req.GetSegmentId())
+		id, innerError := node.getChannelLatestMsgID(context.Background(), req.GetChannelName(), req.GetSegmentId())
 		posID = id
 		return innerError
 	}, retry.Attempts(30))
@@ -702,6 +701,28 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 		Status:     merr.Status(nil),
 		ChannelPos: posID,
 	}, nil
+}
+
+func (node *DataNode) getChannelLatestMsgID(ctx context.Context, channelName string, segmentID int64) ([]byte, error) {
+	pChannelName := funcutil.ToPhysicalChannel(channelName)
+	dmlStream, err := node.factory.NewMsgStream(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer dmlStream.Close()
+
+	subName := fmt.Sprintf("datanode-%d-%s-%d", paramtable.GetNodeID(), channelName, segmentID)
+	log.Debug("dataSyncService register consumer for getChannelLatestMsgID",
+		zap.String("pChannelName", pChannelName),
+		zap.String("subscription", subName),
+	)
+	dmlStream.AsConsumer(ctx, []string{pChannelName}, subName, mqwrapper.SubscriptionPositionUnknown)
+	id, err := dmlStream.GetLatestMsgID(pChannelName)
+	if err != nil {
+		log.Error("fail to GetLatestMsgID", zap.String("pChannelName", pChannelName), zap.Error(err))
+		return nil, err
+	}
+	return id.Serialize(), nil
 }
 
 func assignSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest) importutil.AssignSegmentFunc {

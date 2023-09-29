@@ -55,7 +55,7 @@ ChunkCache::Prefetch(const std::string& filepath) {
     auto ok =
         madvise(reinterpret_cast<void*>(const_cast<char*>(column->Data())),
                 column->ByteSize(),
-                MADV_WILLNEED);  // TODO: sheep, make it configurable
+                read_ahead_policy_);
     AssertInfo(ok == 0,
                fmt::format("failed to madvise to the data file {}, err: {}",
                            path.c_str(),

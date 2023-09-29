@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -88,20 +89,16 @@ func (s *Server) getSystemInfoMetrics(
 	}
 
 	resp := &milvuspb.GetMetricsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		},
-		Response:      "",
+		Status:        merr.Status(nil),
 		ComponentName: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, paramtable.GetNodeID()),
 	}
 	var err error
 	resp.Response, err = metricsinfo.MarshalTopology(coordTopology)
 	if err != nil {
-		resp.Status.Reason = err.Error()
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
-	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
 }
 

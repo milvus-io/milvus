@@ -77,24 +77,31 @@ type indexBuilder struct {
 
 	meta *meta
 
-	policy       buildIndexPolicy
-	nodeManager  *IndexNodeManager
-	chunkManager storage.ChunkManager
+	policy                    buildIndexPolicy
+	nodeManager               *IndexNodeManager
+	chunkManager              storage.ChunkManager
+	indexEngineVersionManager *IndexEngineVersionManager
 }
 
-func newIndexBuilder(ctx context.Context, metaTable *meta, nodeManager *IndexNodeManager, chunkManager storage.ChunkManager) *indexBuilder {
+func newIndexBuilder(
+	ctx context.Context,
+	metaTable *meta, nodeManager *IndexNodeManager,
+	chunkManager storage.ChunkManager,
+	indexEngineVersionManager *IndexEngineVersionManager,
+) *indexBuilder {
 	ctx, cancel := context.WithCancel(ctx)
 
 	ib := &indexBuilder{
-		ctx:              ctx,
-		cancel:           cancel,
-		meta:             metaTable,
-		tasks:            make(map[int64]indexTaskState),
-		notifyChan:       make(chan struct{}, 1),
-		scheduleDuration: Params.DataCoordCfg.IndexTaskSchedulerInterval.GetAsDuration(time.Millisecond),
-		policy:           defaultBuildIndexPolicy,
-		nodeManager:      nodeManager,
-		chunkManager:     chunkManager,
+		ctx:                       ctx,
+		cancel:                    cancel,
+		meta:                      metaTable,
+		tasks:                     make(map[int64]indexTaskState),
+		notifyChan:                make(chan struct{}, 1),
+		scheduleDuration:          Params.DataCoordCfg.IndexTaskSchedulerInterval.GetAsDuration(time.Millisecond),
+		policy:                    defaultBuildIndexPolicy,
+		nodeManager:               nodeManager,
+		chunkManager:              chunkManager,
+		indexEngineVersionManager: indexEngineVersionManager,
 	}
 	ib.reloadFromKV()
 	return ib
@@ -228,7 +235,7 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 		}
 		indexParams := ib.meta.GetIndexParams(meta.CollectionID, meta.IndexID)
 		if isFlatIndex(getIndexType(indexParams)) || meta.NumRows < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64() {
-			log.Ctx(ib.ctx).Debug("segment does not need index really", zap.Int64("buildID", buildID),
+			log.Ctx(ib.ctx).Info("segment does not need index really", zap.Int64("buildID", buildID),
 				zap.Int64("segmentID", meta.SegmentID), zap.Int64("num rows", meta.NumRows))
 			if err := ib.meta.FinishTask(&indexpb.IndexTaskInfo{
 				BuildID:        buildID,
@@ -301,8 +308,7 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 			IndexParams:         indexParams,
 			TypeParams:          typeParams,
 			NumRows:             meta.NumRows,
-			CurrentIndexVersion: meta.CurrentIndexVersion,
-			MinimalIndexVersion: meta.MinimalIndexVersion,
+			CurrentIndexVersion: ib.indexEngineVersionManager.GetCurrentIndexEngineVersion(),
 		}
 		if err := ib.assignTask(client, req); err != nil {
 			// need to release lock then reassign, so set task state to retry

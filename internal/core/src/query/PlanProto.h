@@ -98,6 +98,9 @@ struct fmt::formatter<milvus::proto::plan::GenericValue::ValCase>
             case milvus::proto::plan::GenericValue::ValCase::kStringVal:
                 name = "kStringVal";
                 break;
+            case milvus::proto::plan::GenericValue::ValCase::kArrayVal:
+                name = "kArrayVal";
+                break;
             case milvus::proto::plan::GenericValue::ValCase::VAL_NOT_SET:
                 name = "VAL_NOT_SET";
                 break;

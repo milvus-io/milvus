@@ -278,6 +278,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 1000, Params.ChannelCheckInterval.GetAsInt())
 		assert.Equal(t, 10000, Params.BalanceCheckInterval.GetAsInt())
 		assert.Equal(t, 10000, Params.IndexCheckInterval.GetAsInt())
+		assert.Equal(t, 3, Params.CollectionRecoverTimesLimit.GetAsInt())
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
@@ -307,6 +308,9 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int32(10240), Params.MaxUnsolvedQueueSize.GetAsInt32())
 		assert.Equal(t, 10.0, Params.CPURatio.GetAsFloat())
 		assert.Equal(t, uint32(runtime.GOMAXPROCS(0)), Params.KnowhereThreadPoolSize.GetAsUint32())
+
+		// chunk cache
+		assert.Equal(t, "willneed", Params.ReadAheadPolicy.GetValue())
 
 		// test small indexNlist/NProbe default
 		params.Remove("queryNode.segcore.smallIndex.nlist")

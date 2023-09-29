@@ -160,9 +160,9 @@ SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
                 break;
             }
             default: {
-                PanicCodeInfo(DataTypeInvalid,
-                              fmt::format("unsupported primary key type",
-                                          field_meta.get_data_type()));
+                PanicInfo(DataTypeInvalid,
+                          fmt::format("unsupported primary key type {}",
+                                      field_meta.get_data_type()));
             }
         }
     }
@@ -330,7 +330,8 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                     break;
                 }
                 default: {
-                    PanicInfo("unsupported data type");
+                    PanicInfo(DataTypeInvalid,
+                              fmt::format("unsupported data type", data_type));
                 }
             }
 
@@ -443,7 +444,8 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
                 break;
             }
             default: {
-                PanicInfo(fmt::format("unsupported data type {}", data_type));
+                PanicInfo(DataTypeInvalid,
+                          fmt::format("unsupported data type {}", data_type));
             }
         }
     } else {
@@ -782,9 +784,10 @@ SegmentSealedImpl::check_search(const query::Plan* plan) const {
 
     if (!is_system_field_ready()) {
         PanicInfo(
+            FieldNotLoaded,
             "failed to load row ID or timestamp, potential missing bin logs or "
             "empty segments. Segment ID = " +
-            std::to_string(this->id_));
+                std::to_string(this->id_));
     }
 
     auto& request_fields = plan->extra_info_opt_.value().involved_fields_;
@@ -798,17 +801,18 @@ SegmentSealedImpl::check_search(const query::Plan* plan) const {
         auto field_id =
             FieldId(absent_fields.find_first() + START_USER_FIELDID);
         auto& field_meta = schema_->operator[](field_id);
-        PanicInfo("User Field(" + field_meta.get_name().get() +
-                  ") is not loaded");
+        PanicInfo(
+            FieldNotLoaded,
+            "User Field(" + field_meta.get_name().get() + ") is not loaded");
     }
 }
 
 SegmentSealedImpl::SegmentSealedImpl(SchemaPtr schema, int64_t segment_id)
-    : schema_(schema),
-      insert_record_(*schema, MAX_ROW_COUNT),
-      field_data_ready_bitset_(schema->size()),
+    : field_data_ready_bitset_(schema->size()),
       index_ready_bitset_(schema->size()),
       scalar_indexings_(schema->size()),
+      insert_record_(*schema, MAX_ROW_COUNT),
+      schema_(schema),
       id_(segment_id) {
 }
 
@@ -853,7 +857,8 @@ SegmentSealedImpl::bulk_subscript(SystemFieldType system_type,
                 output);
             break;
         default:
-            PanicInfo("unknown subscript fields");
+            PanicInfo(DataTypeInvalid,
+                      fmt::format("unknown subscript fields", system_type));
     }
 }
 
@@ -986,6 +991,7 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id,
 
             default:
                 PanicInfo(
+                    DataTypeInvalid,
                     fmt::format("unsupported data type: {}",
                                 datatype_name(field_meta.get_data_type())));
         }
@@ -1049,7 +1055,9 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id,
         }
 
         default: {
-            PanicInfo("unsupported");
+            PanicInfo(DataTypeInvalid,
+                      fmt::format("unsupported data type {}",
+                                  field_meta.get_data_type()));
         }
     }
 }
@@ -1117,7 +1125,8 @@ SegmentSealedImpl::search_ids(const IdArray& id_array,
                     break;
                 }
                 default: {
-                    PanicInfo("unsupported type");
+                    PanicInfo(DataTypeInvalid,
+                              fmt::format("unsupported type {}", data_type));
                 }
             }
             res_offsets.push_back(offset);
@@ -1182,7 +1191,7 @@ SegmentSealedImpl::LoadSegmentMeta(
         slice_lengths.push_back(info.row_count());
     }
     insert_record_.timestamp_index_.set_length_meta(std::move(slice_lengths));
-    PanicInfo("unimplemented");
+    PanicInfo(NotImplemented, "unimplemented");
 }
 
 int64_t

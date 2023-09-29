@@ -48,8 +48,10 @@ var once sync.Once
 // NewClient creates a pulsarClient object
 // according to the parameter opts of type pulsar.ClientOptions
 func NewClient(tenant string, namespace string, opts pulsar.ClientOptions) (*pulsarClient, error) {
+	var err error
 	once.Do(func() {
-		c, err := pulsar.NewClient(opts)
+		var c pulsar.Client
+		c, err = pulsar.NewClient(opts)
 		if err != nil {
 			log.Error("Failed to set pulsar client: ", zap.Error(err))
 			return
@@ -61,7 +63,7 @@ func NewClient(tenant string, namespace string, opts pulsar.ClientOptions) (*pul
 		}
 		sc = cli
 	})
-	return sc, nil
+	return sc, err
 }
 
 // CreateProducer create a pulsar producer from options

@@ -95,9 +95,8 @@ datatype_name(DataType data_type) {
             return "vector_float16";
         }
         default: {
-            PanicCodeInfo(DataTypeInvalid,
-                          fmt::format("Unsupported DataType({})",
-                                      fmt::underlying(data_type)));
+            PanicInfo(DataTypeInvalid,
+                      fmt::format("Unsupported DataType({})", data_type));
         }
     }
 }

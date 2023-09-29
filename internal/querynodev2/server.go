@@ -49,6 +49,7 @@ import (
 	grpcquerynodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
+	"github.com/milvus-io/milvus/internal/querynodev2/optimizers"
 	"github.com/milvus-io/milvus/internal/querynodev2/pipeline"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
@@ -127,7 +128,7 @@ type QueryNode struct {
 		knnPool *conc.Pool*/
 
 	// parameter turning hook
-	queryHook queryHook
+	queryHook optimizers.QueryHook
 }
 
 // NewQueryNode will return a QueryNode with abnormal state.
@@ -236,11 +237,12 @@ func (node *QueryNode) InitSegcore() error {
 		mmapDirPath = paramtable.Get().LocalStorageCfg.Path.GetValue()
 	}
 	mmapDirPath += "/chunk_cache"
-	err = initcore.InitChunkCache(mmapDirPath)
+	policy := paramtable.Get().QueryNodeCfg.ReadAheadPolicy.GetValue()
+	err = initcore.InitChunkCache(mmapDirPath, policy)
 	if err != nil {
 		return err
 	}
-	log.Info("InitChunkCache done", zap.String("dir", mmapDirPath))
+	log.Info("InitChunkCache done", zap.String("dir", mmapDirPath), zap.String("policy", policy))
 
 	initcore.InitTraceConfig(paramtable.Get())
 	return nil
@@ -388,7 +390,7 @@ func (node *QueryNode) Init() error {
 // Start mainly start QueryNode's query service.
 func (node *QueryNode) Start() error {
 	node.startOnce.Do(func() {
-		node.scheduler.Start(node.ctx)
+		node.scheduler.Start()
 
 		paramtable.SetCreateTime(time.Now())
 		paramtable.SetUpdateTime(time.Now())
@@ -452,6 +454,9 @@ func (node *QueryNode) Stop() error {
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		node.lifetime.Wait()
 		node.cancel()
+		if node.scheduler != nil {
+			node.scheduler.Stop()
+		}
 		if node.pipelineManager != nil {
 			node.pipelineManager.Close()
 		}
@@ -488,13 +493,6 @@ func (node *QueryNode) SetAddress(address string) {
 	node.address = address
 }
 
-type queryHook interface {
-	Run(map[string]any) error
-	Init(string) error
-	InitTuningConfig(map[string]string) error
-	DeleteTuningConfig(string) error
-}
-
 // initHook initializes parameter tuning hook.
 func (node *QueryNode) initHook() error {
 	path := paramtable.Get().QueryNodeCfg.SoPath.GetValue()
@@ -514,7 +512,7 @@ func (node *QueryNode) initHook() error {
 		return fmt.Errorf("fail to find the 'QueryNodePlugin' object in the plugin, error: %s", err.Error())
 	}
 
-	hoo, ok := h.(queryHook)
+	hoo, ok := h.(optimizers.QueryHook)
 	if !ok {
 		return fmt.Errorf("fail to convert the `Hook` interface")
 	}
