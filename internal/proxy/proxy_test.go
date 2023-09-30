@@ -4242,18 +4242,8 @@ func TestProxy_GetLoadState(t *testing.T) {
 
 	{
 		qc := getQueryCoordClient()
-		qc.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
-			State: &milvuspb.ComponentInfo{
-				NodeID:    0,
-				Role:      typeutil.QueryCoordRole,
-				StateCode: commonpb.StateCode_Abnormal,
-				ExtraInfo: nil,
-			},
-			SubcomponentStates: nil,
-			Status:             merr.Status(nil),
-		}, nil)
 		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
-			Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			Status:              merr.Status(merr.WrapErrServiceNotReady("initialization")),
 			CollectionIDs:       nil,
 			InMemoryPercentages: []int64{},
 		}, nil)
@@ -4261,27 +4251,17 @@ func TestProxy_GetLoadState(t *testing.T) {
 		proxy.stateCode.Store(commonpb.StateCode_Healthy)
 		stateResp, err := proxy.GetLoadState(context.Background(), &milvuspb.GetLoadStateRequest{CollectionName: "foo"})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, stateResp.GetStatus().GetErrorCode())
+		assert.ErrorIs(t, merr.Error(stateResp.GetStatus()), merr.ErrServiceNotReady)
 
 		progressResp, err := proxy.GetLoadingProgress(context.Background(), &milvuspb.GetLoadingProgressRequest{CollectionName: "foo"})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, progressResp.GetStatus().GetErrorCode())
+		assert.ErrorIs(t, merr.Error(progressResp.GetStatus()), merr.ErrServiceNotReady)
 	}
 
 	{
 		qc := getQueryCoordClient()
-		qc.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
-			State: &milvuspb.ComponentInfo{
-				NodeID:    0,
-				Role:      typeutil.QueryCoordRole,
-				StateCode: commonpb.StateCode_Healthy,
-				ExtraInfo: nil,
-			},
-			SubcomponentStates: nil,
-			Status:             merr.Status(nil),
-		}, nil)
-		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(nil, errors.New("test"))
-		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(nil, errors.New("test"))
+		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(nil, merr.WrapErrCollectionNotLoaded("foo"))
+		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(nil, merr.WrapErrPartitionNotLoaded("p1"))
 		proxy := &Proxy{queryCoord: qc}
 		proxy.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -4304,37 +4284,6 @@ func TestProxy_GetLoadState(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, progressResp.GetStatus().GetErrorCode())
 		assert.Equal(t, int64(0), progressResp.Progress)
-	}
-
-	{
-		qc := getQueryCoordClient()
-		qc.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
-			State: &milvuspb.ComponentInfo{
-				NodeID:    0,
-				Role:      typeutil.QueryCoordRole,
-				StateCode: commonpb.StateCode_Healthy,
-				ExtraInfo: nil,
-			},
-			SubcomponentStates: nil,
-			Status:             merr.Status(nil),
-		}, nil)
-		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
-			Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-			CollectionIDs:       nil,
-			InMemoryPercentages: []int64{},
-		}, nil)
-		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(nil, errors.New("test"))
-		proxy := &Proxy{queryCoord: qc}
-		proxy.stateCode.Store(commonpb.StateCode_Healthy)
-
-		stateResp, err := proxy.GetLoadState(context.Background(), &milvuspb.GetLoadStateRequest{CollectionName: "foo"})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, stateResp.GetStatus().GetErrorCode())
-		assert.Equal(t, commonpb.LoadState_LoadStateNotLoad, stateResp.State)
-
-		progressResp, err := proxy.GetLoadingProgress(context.Background(), &milvuspb.GetLoadingProgressRequest{CollectionName: "foo"})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, progressResp.GetStatus().GetErrorCode())
 	}
 
 	{
@@ -4415,11 +4364,13 @@ func TestProxy_GetLoadState(t *testing.T) {
 			SubcomponentStates: nil,
 			Status:             merr.Status(nil),
 		}, nil)
+
+		mockErr := merr.WrapErrServiceMemoryLimitExceeded(110, 100)
 		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
-			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_InsufficientMemoryToLoad},
+			Status: merr.Status(mockErr),
 		}, nil)
 		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
-			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_InsufficientMemoryToLoad},
+			Status: merr.Status(mockErr),
 		}, nil)
 		proxy := &Proxy{queryCoord: qc}
 		proxy.stateCode.Store(commonpb.StateCode_Healthy)

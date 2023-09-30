@@ -1057,7 +1057,7 @@ func TestCore_Import(t *testing.T) {
 			CollectionName: "a-good-name",
 		})
 		assert.NoError(t, err)
-		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrBulkInsertPartitionNotFound)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrPartitionNotFound)
 	})
 
 	t.Run("normal case", func(t *testing.T) {
@@ -1101,7 +1101,7 @@ func TestCore_Import(t *testing.T) {
 			},
 		})
 		assert.NotNil(t, resp)
-		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrBadBulkInsertRequest)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
 	})
 
 	// Remove the following case after bulkinsert can support partition key
@@ -1159,7 +1159,7 @@ func TestCore_Import(t *testing.T) {
 			PartitionName:  "p1",
 		})
 		assert.NoError(t, err)
-		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrBadBulkInsertRequest)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
 	})
 
 	t.Run("backup should set partition name", func(t *testing.T) {
@@ -1201,7 +1201,7 @@ func TestCore_Import(t *testing.T) {
 			},
 		})
 		assert.NoError(t, err)
-		assert.ErrorIs(t, merr.Error(resp1.GetStatus()), merr.ErrBadBulkInsertRequest)
+		assert.ErrorIs(t, merr.Error(resp1.GetStatus()), merr.ErrParameterInvalid)
 
 		meta.GetPartitionByNameFunc = func(collID UniqueID, partitionName string, ts Timestamp) (UniqueID, error) {
 			return common.InvalidPartitionID, fmt.Errorf("partition ID not found for partition name '%s'", partitionName)
@@ -1217,7 +1217,7 @@ func TestCore_Import(t *testing.T) {
 			},
 		})
 		assert.NoError(t, err)
-		assert.ErrorIs(t, merr.Error(resp2.GetStatus()), merr.ErrBulkInsertPartitionNotFound)
+		assert.ErrorIs(t, merr.Error(resp2.GetStatus()), merr.ErrPartitionNotFound)
 	})
 }
 

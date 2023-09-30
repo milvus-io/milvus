@@ -262,7 +262,7 @@ func Test_NewServer(t *testing.T) {
 			status: &commonpb.Status{},
 		}
 		states, err := server.FlushSegments(ctx, nil)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, states)
 	})
 

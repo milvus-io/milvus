@@ -1865,25 +1865,25 @@ func (c *Core) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvus
 		// Currently, Backup tool call import must with a partition name, each time restore a partition
 		if req.GetPartitionName() != "" {
 			if pID, err = c.meta.GetPartitionByName(cID, req.GetPartitionName(), typeutil.MaxTimestamp); err != nil {
-				log.Warn("failed to get partition ID from its name", zap.String("partition name", req.GetPartitionName()), zap.Error(err))
+				log.Warn("failed to get partition ID from its name", zap.String("partitionName", req.GetPartitionName()), zap.Error(err))
 				return &milvuspb.ImportResponse{
-					Status: merr.Status(merr.WrapBulkInsertPartitionNotFound(req.GetCollectionName(), req.GetPartitionName())),
+					Status: merr.Status(merr.WrapErrPartitionNotFound(req.GetPartitionName())),
 				}, nil
 			}
 		} else {
 			log.Info("partition name not specified when backup recovery",
 				zap.String("collectionName", req.GetCollectionName()))
 			return &milvuspb.ImportResponse{
-				Status: merr.Status(merr.WrapBadBulkInsertRequest("partition name not specified when backup")),
+				Status: merr.Status(merr.WrapErrParameterInvalidMsg("partition not specified")),
 			}, nil
 		}
 	} else {
 		if hasPartitionKey {
 			if req.GetPartitionName() != "" {
 				msg := "not allow to set partition name for collection with partition key"
-				log.Warn(msg, zap.String("collection name", req.GetCollectionName()))
+				log.Warn(msg, zap.String("collectionName", req.GetCollectionName()))
 				return &milvuspb.ImportResponse{
-					Status: merr.Status(merr.WrapBadBulkInsertRequest(msg)),
+					Status: merr.Status(merr.WrapErrParameterInvalidMsg(msg)),
 				}, nil
 			}
 		} else {
@@ -1895,7 +1895,7 @@ func (c *Core) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvus
 					zap.String("partition name", req.GetPartitionName()),
 					zap.Error(err))
 				return &milvuspb.ImportResponse{
-					Status: merr.Status(merr.WrapBulkInsertPartitionNotFound(req.GetCollectionName(), req.GetPartitionName())),
+					Status: merr.Status(merr.WrapErrPartitionNotFound(req.GetPartitionName())),
 				}, nil
 			}
 		}
@@ -1904,8 +1904,8 @@ func (c *Core) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvus
 	log.Info("RootCoord receive import request",
 		zap.String("collectionName", req.GetCollectionName()),
 		zap.Int64("collectionID", cID),
-		zap.String("partition name", req.GetPartitionName()),
-		zap.Strings("virtual channel names", req.GetChannelNames()),
+		zap.String("partitionName", req.GetPartitionName()),
+		zap.Strings("virtualChannelNames", req.GetChannelNames()),
 		zap.Int64("partitionID", pID),
 		zap.Int("# of files = ", len(req.GetFiles())),
 	)
@@ -1997,11 +1997,7 @@ func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (
 	// Upon receiving ReportImport request, update the related task's state in task store.
 	ti, err := c.importManager.updateTaskInfo(ir)
 	if err != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UpdateImportTaskFailure,
-			Reason:    err.Error(),
-			Code:      merr.Code(err),
-		}, nil
+		return merr.Status(err), nil
 	}
 
 	// If task failed, send task to idle datanode

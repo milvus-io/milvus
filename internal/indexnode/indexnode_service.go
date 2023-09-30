@@ -42,19 +42,20 @@ import (
 )
 
 func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest) (*commonpb.Status, error) {
+	log := log.Ctx(ctx).With(
+		zap.String("clusterID", req.GetClusterID()),
+		zap.Int64("indexBuildID", req.GetBuildID()),
+	)
+
 	if !i.lifetime.Add(commonpbutil.IsHealthy) {
 		stateCode := i.lifetime.GetState()
-		log.Ctx(ctx).Warn("index node not ready",
+		log.Warn("index node not ready",
 			zap.String("state", stateCode.String()),
-			zap.String("clusterID", req.GetClusterID()),
-			zap.Int64("indexBuildID", req.GetBuildID()),
 		)
 		return merr.Status(merr.WrapErrServiceNotReady(stateCode.String())), nil
 	}
 	defer i.lifetime.Done()
-	log.Ctx(ctx).Info("IndexNode building index ...",
-		zap.String("clusterID", req.GetClusterID()),
-		zap.Int64("indexBuildID", req.GetBuildID()),
+	log.Info("IndexNode building index ...",
 		zap.Int64("indexID", req.GetIndexID()),
 		zap.String("indexName", req.GetIndexName()),
 		zap.String("indexFilePrefix", req.GetIndexFilePrefix()),
@@ -77,26 +78,20 @@ func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest
 		cancel: taskCancel,
 		state:  commonpb.IndexState_InProgress,
 	}); oldInfo != nil {
-		log.Ctx(ctx).Warn("duplicated index build task", zap.String("clusterID", req.GetClusterID()), zap.Int64("buildID", req.GetBuildID()))
+		err := merr.WrapErrIndexDuplicate(req.GetIndexName(), "building index task existed")
+		log.Warn("duplicated index build task", zap.Error(err))
 		metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.FailLabel).Inc()
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_BuildIndexError,
-			Reason:    "duplicated index build task",
-		}, nil
+		return merr.Status(err), nil
 	}
 	cm, err := i.storageFactory.NewChunkManager(i.loopCtx, req.GetStorageConfig())
 	if err != nil {
-		log.Ctx(ctx).Error("create chunk manager failed", zap.String("bucket", req.GetStorageConfig().GetBucketName()),
+		log.Error("create chunk manager failed", zap.String("bucket", req.GetStorageConfig().GetBucketName()),
 			zap.String("accessKey", req.GetStorageConfig().GetAccessKeyID()),
-			zap.String("clusterID", req.GetClusterID()), zap.Int64("indexBuildID", req.GetBuildID()),
 			zap.Error(err),
 		)
 		i.deleteTaskInfos(ctx, []taskKey{{ClusterID: req.GetClusterID(), BuildID: req.GetBuildID()}})
 		metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.FailLabel).Inc()
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_BuildIndexError,
-			Reason:    "create chunk manager failed, error: " + err.Error(),
-		}, nil
+		return merr.Status(err), nil
 	}
 	task := &indexBuildTask{
 		ident:          fmt.Sprintf("%s/%d", req.ClusterID, req.BuildID),
@@ -113,15 +108,15 @@ func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest
 	}
 	ret := merr.Status(nil)
 	if err := i.sched.IndexBuildQueue.Enqueue(task); err != nil {
-		log.Ctx(ctx).Warn("IndexNode failed to schedule", zap.Int64("indexBuildID", req.GetBuildID()),
-			zap.String("clusterID", req.GetClusterID()), zap.Error(err))
+		log.Warn("IndexNode failed to schedule",
+			zap.Error(err))
 		ret = merr.Status(err)
 		metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.FailLabel).Inc()
 		return ret, nil
 	}
 	metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SuccessLabel).Inc()
-	log.Ctx(ctx).Info("IndexNode successfully scheduled", zap.Int64("indexBuildID", req.GetBuildID()),
-		zap.String("clusterID", req.GetClusterID()), zap.String("indexName", req.GetIndexName()))
+	log.Info("IndexNode successfully scheduled",
+		zap.String("indexName", req.GetIndexName()))
 	return ret, nil
 }
 
@@ -253,7 +248,6 @@ func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequ
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    msgIndexNodeIsUnhealthy(paramtable.GetNodeID()),
 			},
-			Response: "",
 		}, nil
 	}
 	defer i.lifetime.Done()
@@ -266,8 +260,7 @@ func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequ
 			zap.Error(err))
 
 		return &milvuspb.GetMetricsResponse{
-			Status:   merr.Status(err),
-			Response: "",
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -289,10 +282,6 @@ func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequ
 		zap.String("metricType", metricType))
 
 	return &milvuspb.GetMetricsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    metricsinfo.MsgUnimplementedMetric,
-		},
-		Response: "",
+		Status: merr.Status(merr.WrapErrMetricNotFound(metricType)),
 	}, nil
 }

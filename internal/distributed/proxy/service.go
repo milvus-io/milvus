@@ -868,19 +868,13 @@ func (s *Server) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasReq
 
 func (s *Server) DescribeAlias(ctx context.Context, request *milvuspb.DescribeAliasRequest) (*milvuspb.DescribeAliasResponse, error) {
 	return &milvuspb.DescribeAliasResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    "TODO: implement me",
-		},
+		Status: merr.Status(merr.WrapErrServiceUnavailable("DescribeAlias unimplemented")),
 	}, nil
 }
 
 func (s *Server) ListAliases(ctx context.Context, request *milvuspb.ListAliasesRequest) (*milvuspb.ListAliasesResponse, error) {
 	return &milvuspb.ListAliasesResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    "TODO: implement me",
-		},
+		Status: merr.Status(merr.WrapErrServiceUnavailable("ListAliases unimplemented")),
 	}, nil
 }
 
@@ -1070,19 +1064,13 @@ func (s *Server) ListResourceGroups(ctx context.Context, req *milvuspb.ListResou
 
 func (s *Server) ListIndexedSegment(ctx context.Context, req *federpb.ListIndexedSegmentRequest) (*federpb.ListIndexedSegmentResponse, error) {
 	return &federpb.ListIndexedSegmentResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    "not implemented",
-		},
+		Status: merr.Status(merr.WrapErrServiceUnavailable("ListIndexedSegment unimplemented")),
 	}, nil
 }
 
 func (s *Server) DescribeSegmentIndexData(ctx context.Context, req *federpb.DescribeSegmentIndexDataRequest) (*federpb.DescribeSegmentIndexDataResponse, error) {
 	return &federpb.DescribeSegmentIndexDataResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    "not implemented",
-		},
+		Status: merr.Status(merr.WrapErrServiceUnavailable("DescribeSegmentIndexData unimplemented")),
 	}, nil
 }
 

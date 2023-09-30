@@ -419,21 +419,16 @@ func (m *importManager) isRowbased(files []string) (bool, error) {
 // importJob processes the import request, generates import tasks, sends these tasks to DataCoord, and returns
 // immediately.
 func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportRequest, cID int64, pID int64) *milvuspb.ImportResponse {
-	returnErrorFunc := func(reason string) *milvuspb.ImportResponse {
+	if len(req.GetFiles()) == 0 {
 		return &milvuspb.ImportResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    reason,
-			},
+			Status: merr.Status(merr.WrapErrParameterInvalidMsg("import request is empty")),
 		}
 	}
 
-	if req == nil || len(req.Files) == 0 {
-		return returnErrorFunc("import request is empty")
-	}
-
 	if m.callImportService == nil {
-		return returnErrorFunc("import service is not available")
+		return &milvuspb.ImportResponse{
+			Status: merr.Status(merr.WrapErrServiceUnavailable("import service unavailable")),
+		}
 	}
 
 	resp := &milvuspb.ImportResponse{
@@ -553,7 +548,9 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 		return nil
 	}()
 	if err != nil {
-		return returnErrorFunc(err.Error())
+		return &milvuspb.ImportResponse{
+			Status: merr.Status(err),
+		}
 	}
 	if sendOutTasksErr := m.sendOutTasks(ctx); sendOutTasksErr != nil {
 		log.Error("fail to send out tasks", zap.Error(sendOutTasksErr))
@@ -755,11 +752,8 @@ func (m *importManager) copyTaskInfo(input *datapb.ImportTaskInfo, output *milvu
 // getTaskState looks for task with the given ID and returns its import state.
 func (m *importManager) getTaskState(tID int64) *milvuspb.GetImportStateResponse {
 	resp := &milvuspb.GetImportStateResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    "import task id doesn't exist",
-		},
-		Infos: make([]*commonpb.KeyValuePair, 0),
+		Status: merr.Status(nil),
+		Infos:  make([]*commonpb.KeyValuePair, 0),
 	}
 	// (1) Search in pending tasks list.
 	found := false
@@ -786,24 +780,24 @@ func (m *importManager) getTaskState(tID int64) *milvuspb.GetImportStateResponse
 		return resp
 	}
 	// (3) Search in Etcd.
-	if v, err := m.taskStore.Load(BuildImportTaskKey(tID)); err == nil && v != "" {
-		ti := &datapb.ImportTaskInfo{}
-		if err := proto.Unmarshal([]byte(v), ti); err != nil {
-			log.Error("failed to unmarshal proto", zap.String("taskInfo", v), zap.Error(err))
-		} else {
-			m.copyTaskInfo(ti, resp)
-			found = true
-		}
-	} else {
+	v, err := m.taskStore.Load(BuildImportTaskKey(tID))
+	if err != nil {
 		log.Warn("failed to load task info from Etcd",
 			zap.String("value", v),
-			zap.Error(err))
-	}
-	if found {
-		log.Info("getting import task state", zap.Int64("task ID", tID), zap.Any("state", resp.State), zap.Int64s("segment", resp.SegmentIds))
+			zap.Error(err),
+		)
+		resp.Status = merr.Status(err)
 		return resp
 	}
-	log.Debug("get import task state failed", zap.Int64("taskID", tID))
+
+	ti := &datapb.ImportTaskInfo{}
+	if err := proto.Unmarshal([]byte(v), ti); err != nil {
+		log.Error("failed to unmarshal proto", zap.String("taskInfo", v), zap.Error(err))
+		resp.Status = merr.Status(err)
+		return resp
+	}
+
+	m.copyTaskInfo(ti, resp)
 	return resp
 }
 

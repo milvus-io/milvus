@@ -92,8 +92,7 @@ func TestGetMetricsError(t *testing.T) {
 	}
 	resp, err = in.GetMetrics(ctx, unsupportedReq)
 	assert.NoError(t, err)
-	assert.Equal(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_UnexpectedError)
-	assert.Equal(t, resp.GetStatus().GetReason(), metricsinfo.MsgUnimplementedMetric)
+	assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrMetricNotFound)
 }
 
 func TestMockFieldData(t *testing.T) {
