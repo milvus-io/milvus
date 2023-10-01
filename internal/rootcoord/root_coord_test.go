@@ -801,7 +801,7 @@ func TestRootCoord_UpdateChannelTimeTick(t *testing.T) {
 		defaultTs := Timestamp(101)
 
 		ticker := newRocksMqTtSynchronizer()
-		ticker.addSession(&sessionutil.Session{ServerID: source})
+		ticker.addSession(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: source}})
 
 		ctx := context.Background()
 		c := newTestCore(withHealthyCode(),
@@ -1650,7 +1650,7 @@ func TestCore_sendMinDdlTsAsTt(t *testing.T) {
 	c.stateCode.Store(commonpb.StateCode_Healthy)
 	c.session.ServerID = TestRootCoordID
 	c.sendMinDdlTsAsTt() // no session.
-	ticker.addSession(&sessionutil.Session{ServerID: TestRootCoordID})
+	ticker.addSession(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: TestRootCoordID}})
 	c.sendMinDdlTsAsTt()
 	sched.GetMinDdlTsFunc = func() Timestamp {
 		return typeutil.ZeroTimestamp
@@ -1667,7 +1667,7 @@ func TestCore_sendMinDdlTsAsTt(t *testing.T) {
 
 func TestCore_startTimeTickLoop(t *testing.T) {
 	ticker := newRocksMqTtSynchronizer()
-	ticker.addSession(&sessionutil.Session{ServerID: TestRootCoordID})
+	ticker.addSession(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: TestRootCoordID}})
 	ddlManager := newMockDdlTsLockManager()
 	ddlManager.GetMinDdlTsFunc = func() Timestamp {
 		return 100

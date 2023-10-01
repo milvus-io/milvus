@@ -222,8 +222,10 @@ func TestConnectionManager_processEvent(t *testing.T) {
 		cm := &ConnectionManager{
 			closeCh: make(chan struct{}),
 			session: &sessionutil.Session{
-				ServerID:    1,
-				TriggerKill: true,
+				SessionRaw: sessionutil.SessionRaw{
+					ServerID:    1,
+					TriggerKill: true,
+				},
 			},
 		}
 

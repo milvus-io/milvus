@@ -53,7 +53,7 @@ func TestProxyManager(t *testing.T) {
 	etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
 	defer etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
 	s1 := sessionutil.Session{
-		ServerID: 100,
+		SessionRaw: sessionutil.SessionRaw{ServerID: 100},
 	}
 	b1, err := json.Marshal(&s1)
 	assert.NoError(t, err)
@@ -62,7 +62,7 @@ func TestProxyManager(t *testing.T) {
 	assert.NoError(t, err)
 
 	s0 := sessionutil.Session{
-		ServerID: 99,
+		SessionRaw: sessionutil.SessionRaw{ServerID: 99},
 	}
 	b0, err := json.Marshal(&s0)
 	assert.NoError(t, err)
@@ -94,7 +94,7 @@ func TestProxyManager(t *testing.T) {
 	t.Log("======== start watch proxy ==========")
 
 	s2 := sessionutil.Session{
-		ServerID: 101,
+		SessionRaw: sessionutil.SessionRaw{ServerID: 101},
 	}
 	b2, err := json.Marshal(&s2)
 	assert.NoError(t, err)

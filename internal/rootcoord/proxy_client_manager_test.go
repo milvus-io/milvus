@@ -118,8 +118,10 @@ func TestProxyClientManager_GetProxyClients(t *testing.T) {
 	pcm := newProxyClientManager(core.proxyCreator)
 
 	session := &sessionutil.Session{
-		ServerID: 100,
-		Address:  "localhost",
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID: 100,
+			Address:  "localhost",
+		},
 	}
 
 	sessions := []*sessionutil.Session{session}
@@ -150,8 +152,10 @@ func TestProxyClientManager_AddProxyClient(t *testing.T) {
 	pcm := newProxyClientManager(core.proxyCreator)
 
 	session := &sessionutil.Session{
-		ServerID: 100,
-		Address:  "localhost",
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID: 100,
+			Address:  "localhost",
+		},
 	}
 
 	pcm.AddProxyClient(session)

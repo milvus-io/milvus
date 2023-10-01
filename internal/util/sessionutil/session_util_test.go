@@ -98,7 +98,7 @@ func TestInit(t *testing.T) {
 
 	s := NewSession(ctx, metaRoot, etcdCli)
 	s.Init("inittest", "testAddr", false, false)
-	assert.NotEqual(t, int64(0), s.leaseID)
+	assert.NotEqual(t, int64(0), s.LeaseID)
 	assert.NotEqual(t, int64(0), s.ServerID)
 	s.Register()
 	sessions, _, err := s.GetSessions("inittest")
@@ -400,10 +400,12 @@ func TestSession_String(t *testing.T) {
 
 func TestSesssionMarshal(t *testing.T) {
 	s := &Session{
-		ServerID:   1,
-		ServerName: "test",
-		Address:    "localhost",
-		Version:    common.Version,
+		SessionRaw: SessionRaw{
+			ServerID:   1,
+			ServerName: "test",
+			Address:    "localhost",
+		},
+		Version: common.Version,
 	}
 
 	bs, err := json.Marshal(s)
@@ -663,7 +665,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	{
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
-		_, _ = s1.etcdCli.Revoke(ctx, *s1.leaseID)
+		_, _ = s1.etcdCli.Revoke(ctx, *s1.LeaseID)
 	}
 	select {
 	case <-signal:

@@ -935,7 +935,7 @@ func TestService_WatchServices(t *testing.T) {
 	factory := dependency.NewDefaultFactory(true)
 	svr := CreateServer(context.TODO(), factory)
 	svr.session = &sessionutil.Session{
-		TriggerKill: true,
+		SessionRaw: sessionutil.SessionRaw{TriggerKill: true},
 	}
 	svr.serverLoopWg.Add(1)
 
@@ -3277,10 +3277,12 @@ func TestHandleSessionEvent(t *testing.T) {
 		evt := &sessionutil.SessionEvent{
 			EventType: sessionutil.SessionNoneEvent,
 			Session: &sessionutil.Session{
-				ServerID:   0,
-				ServerName: "",
-				Address:    "",
-				Exclusive:  false,
+				SessionRaw: sessionutil.SessionRaw{
+					ServerID:   0,
+					ServerName: "",
+					Address:    "",
+					Exclusive:  false,
+				},
 			},
 		}
 		err = svr.handleSessionEvent(context.Background(), typeutil.DataNodeRole, evt)
@@ -3289,10 +3291,12 @@ func TestHandleSessionEvent(t *testing.T) {
 		evt = &sessionutil.SessionEvent{
 			EventType: sessionutil.SessionAddEvent,
 			Session: &sessionutil.Session{
-				ServerID:   101,
-				ServerName: "DN101",
-				Address:    "DN127.0.0.101",
-				Exclusive:  false,
+				SessionRaw: sessionutil.SessionRaw{
+					ServerID:   101,
+					ServerName: "DN101",
+					Address:    "DN127.0.0.101",
+					Exclusive:  false,
+				},
 			},
 		}
 		err = svr.handleSessionEvent(context.Background(), typeutil.DataNodeRole, evt)
@@ -3304,10 +3308,12 @@ func TestHandleSessionEvent(t *testing.T) {
 		evt = &sessionutil.SessionEvent{
 			EventType: sessionutil.SessionDelEvent,
 			Session: &sessionutil.Session{
-				ServerID:   101,
-				ServerName: "DN101",
-				Address:    "DN127.0.0.101",
-				Exclusive:  false,
+				SessionRaw: sessionutil.SessionRaw{
+					ServerID:   101,
+					ServerName: "DN101",
+					Address:    "DN127.0.0.101",
+					Exclusive:  false,
+				},
 			},
 		}
 		err = svr.handleSessionEvent(context.Background(), typeutil.DataNodeRole, evt)
@@ -4320,7 +4326,7 @@ func newTestServer2(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 func Test_CheckHealth(t *testing.T) {
 	t.Run("not healthy", func(t *testing.T) {
 		ctx := context.Background()
-		s := &Server{session: &sessionutil.Session{ServerID: 1}}
+		s := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
 		s.stateCode.Store(commonpb.StateCode_Abnormal)
 		resp, err := s.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)
@@ -4329,7 +4335,7 @@ func Test_CheckHealth(t *testing.T) {
 	})
 
 	t.Run("data node health check is ok", func(t *testing.T) {
-		svr := &Server{session: &sessionutil.Session{ServerID: 1}}
+		svr := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 		healthClient := &mockDataNodeClient{
 			id:    1,
@@ -4355,7 +4361,7 @@ func Test_CheckHealth(t *testing.T) {
 	})
 
 	t.Run("data node health check is fail", func(t *testing.T) {
-		svr := &Server{session: &sessionutil.Session{ServerID: 1}}
+		svr := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 		unhealthClient := &mockDataNodeClient{
 			id:    1,

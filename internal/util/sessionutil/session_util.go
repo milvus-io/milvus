@@ -83,6 +83,19 @@ type IndexEngineVersion struct {
 	CurrentIndexVersion int32 `json:"CurrentIndexVersion,omitempty"`
 }
 
+// SessionRaw the persistent part of Session.
+type SessionRaw struct {
+	ServerID           int64  `json:"ServerID,omitempty"`
+	ServerName         string `json:"ServerName,omitempty"`
+	Address            string `json:"Address,omitempty"`
+	Exclusive          bool   `json:"Exclusive,omitempty"`
+	Stopping           bool   `json:"Stopping,omitempty"`
+	TriggerKill        bool
+	Version            string             `json:"Version"`
+	IndexEngineVersion IndexEngineVersion `json:"IndexEngineVersion,omitempty"`
+	LeaseID            *clientv3.LeaseID  `json:"LeaseID,omitempty"`
+}
+
 // Session is a struct to store service's session, including ServerID, ServerName,
 // Address.
 // Exclusive indicates that this server can only start one.
@@ -94,20 +107,14 @@ type Session struct {
 	keepAliveCancel context.CancelFunc
 	keepAliveCtx    context.Context
 
-	ServerID           int64  `json:"ServerID,omitempty"`
-	ServerName         string `json:"ServerName,omitempty"`
-	Address            string `json:"Address,omitempty"`
-	Exclusive          bool   `json:"Exclusive,omitempty"`
-	Stopping           bool   `json:"Stopping,omitempty"`
-	TriggerKill        bool
-	Version            semver.Version     `json:"Version,omitempty"`
-	IndexEngineVersion IndexEngineVersion `json:"IndexEngineVersion,omitempty"`
+	SessionRaw
+
+	Version semver.Version `json:"Version,omitempty"`
 
 	liveChOnce sync.Once
 	liveCh     chan struct{}
 
 	etcdCli           *clientv3.Client
-	leaseID           *clientv3.LeaseID
 	watchSessionKeyCh clientv3.WatchChan
 	watchCancel       atomic.Pointer[context.CancelFunc]
 	wg                sync.WaitGroup
@@ -156,78 +163,25 @@ func (s *Session) apply(opts ...SessionOption) {
 
 // UnmarshalJSON unmarshal bytes to Session.
 func (s *Session) UnmarshalJSON(data []byte) error {
-	var raw struct {
-		ServerID           int64  `json:"ServerID,omitempty"`
-		ServerName         string `json:"ServerName,omitempty"`
-		Address            string `json:"Address,omitempty"`
-		Exclusive          bool   `json:"Exclusive,omitempty"`
-		Stopping           bool   `json:"Stopping,omitempty"`
-		TriggerKill        bool
-		Version            string            `json:"Version"`
-		IndexEngineVersion string            `json:"IndexEngineVersion,omitempty"`
-		LeaseID            *clientv3.LeaseID `json:"LeaseID,omitempty"`
-	}
-	err := json.Unmarshal(data, &raw)
+	err := json.Unmarshal(data, &s.SessionRaw)
 	if err != nil {
 		return err
 	}
 
-	if raw.Version != "" {
-		s.Version, err = semver.Parse(raw.Version)
+	if s.SessionRaw.Version != "" {
+		s.Version, err = semver.Parse(s.SessionRaw.Version)
 		if err != nil {
 			return err
 		}
 	}
 
-	if raw.IndexEngineVersion != "" {
-		json.Unmarshal([]byte(raw.IndexEngineVersion), &s.IndexEngineVersion)
-		if err != nil {
-			return err
-		}
-	} else {
-		// set zero when queryNode not register knowhere version
-		s.IndexEngineVersion.MinimalIndexVersion = 0
-		s.IndexEngineVersion.CurrentIndexVersion = 0
-	}
-
-	s.ServerID = raw.ServerID
-	s.ServerName = raw.ServerName
-	s.Address = raw.Address
-	s.Exclusive = raw.Exclusive
-	s.Stopping = raw.Stopping
-	s.TriggerKill = raw.TriggerKill
-	s.leaseID = raw.LeaseID
 	return nil
 }
 
 // MarshalJSON marshals session to bytes.
 func (s *Session) MarshalJSON() ([]byte, error) {
-	verStr := s.Version.String()
-	indexVerStr, err := json.Marshal(s.IndexEngineVersion)
-	if err != nil {
-		return nil, err
-	}
-	return json.Marshal(&struct {
-		ServerID           int64  `json:"ServerID,omitempty"`
-		ServerName         string `json:"ServerName,omitempty"`
-		Address            string `json:"Address,omitempty"`
-		Exclusive          bool   `json:"Exclusive,omitempty"`
-		Stopping           bool   `json:"Stopping,omitempty"`
-		TriggerKill        bool
-		Version            string            `json:"Version"`
-		IndexEngineVersion string            `json:"IndexEngineVersion,omitempty"`
-		LeaseID            *clientv3.LeaseID `json:"LeaseID,omitempty"`
-	}{
-		ServerID:           s.ServerID,
-		ServerName:         s.ServerName,
-		Address:            s.Address,
-		Exclusive:          s.Exclusive,
-		Stopping:           s.Stopping,
-		TriggerKill:        s.TriggerKill,
-		Version:            verStr,
-		IndexEngineVersion: string(indexVerStr),
-		LeaseID:            s.leaseID,
-	})
+	s.SessionRaw.Version = s.Version.String()
+	return json.Marshal(s.SessionRaw)
 }
 
 // NewSession is a helper to build Session object.
@@ -443,7 +397,7 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 			log.Error("register service", zap.Error(err))
 			return err
 		}
-		s.leaseID = &resp.ID
+		s.LeaseID = &resp.ID
 
 		sessionJSON, err := json.Marshal(s)
 		if err != nil {
@@ -516,21 +470,21 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 					err := retry.Do(s.ctx, func() error {
 						ctx, cancel := context.WithTimeout(s.keepAliveCtx, time.Second*10)
 						defer cancel()
-						resp, err := s.etcdCli.KeepAliveOnce(ctx, *s.leaseID)
+						resp, err := s.etcdCli.KeepAliveOnce(ctx, *s.LeaseID)
 						keepAliveOnceResp = resp
 						return err
 					}, retry.Attempts(3))
 					if err != nil {
-						log.Warn("fail to retry keepAliveOnce", zap.String("serverName", s.ServerName), zap.Int64("leaseID", int64(*s.leaseID)), zap.Error(err))
+						log.Warn("fail to retry keepAliveOnce", zap.String("serverName", s.ServerName), zap.Int64("LeaseID", int64(*s.LeaseID)), zap.Error(err))
 						s.safeCloseLiveCh()
 						return
 					}
-					log.Info("succeed to KeepAliveOnce", zap.String("serverName", s.ServerName), zap.Int64("leaseID", int64(*s.leaseID)), zap.Any("resp", keepAliveOnceResp))
+					log.Info("succeed to KeepAliveOnce", zap.String("serverName", s.ServerName), zap.Int64("LeaseID", int64(*s.LeaseID)), zap.Any("resp", keepAliveOnceResp))
 
 					var chNew <-chan *clientv3.LeaseKeepAliveResponse
 					keepAliveFunc := func() error {
 						var err1 error
-						chNew, err1 = s.etcdCli.KeepAlive(s.keepAliveCtx, *s.leaseID)
+						chNew, err1 = s.etcdCli.KeepAlive(s.keepAliveCtx, *s.LeaseID)
 						return err1
 					}
 					err = fnWithTimeout(keepAliveFunc, time.Second*10)
@@ -627,7 +581,7 @@ func (s *Session) GetSessionsWithVersionRange(prefix string, r semver.Range) (ma
 }
 
 func (s *Session) GoingStop() error {
-	if s == nil || s.etcdCli == nil || s.leaseID == nil {
+	if s == nil || s.etcdCli == nil || s.LeaseID == nil {
 		return errors.New("the session hasn't been init")
 	}
 
@@ -650,7 +604,7 @@ func (s *Session) GoingStop() error {
 		log.Error("fail to marshal the session", zap.String("key", completeKey))
 		return err
 	}
-	_, err = s.etcdCli.Put(s.ctx, completeKey, string(sessionJSON), clientv3.WithLease(*s.leaseID))
+	_, err = s.etcdCli.Put(s.ctx, completeKey, string(sessionJSON), clientv3.WithLease(*s.LeaseID))
 	if err != nil {
 		log.Error("fail to update the session to stopping state", zap.String("key", completeKey))
 		return err
@@ -906,12 +860,12 @@ func (s *Session) Stop() {
 	s.wg.Wait()
 }
 
-// Revoke revokes the internal leaseID for the session key
+// Revoke revokes the internal LeaseID for the session key
 func (s *Session) Revoke(timeout time.Duration) {
 	if s == nil {
 		return
 	}
-	if s.etcdCli == nil || s.leaseID == nil {
+	if s.etcdCli == nil || s.LeaseID == nil {
 		return
 	}
 	if s.Disconnected() {
@@ -921,7 +875,7 @@ func (s *Session) Revoke(timeout time.Duration) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	// ignores resp & error, just do best effort to revoke
-	_, _ = s.etcdCli.Revoke(ctx, *s.leaseID)
+	_, _ = s.etcdCli.Revoke(ctx, *s.LeaseID)
 }
 
 // UpdateRegistered update the state of registered.
@@ -998,7 +952,7 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 				clientv3.Version(s.activeKey),
 				"=",
 				0)).
-			Then(clientv3.OpPut(s.activeKey, string(sessionJSON), clientv3.WithLease(*s.leaseID))).Commit()
+			Then(clientv3.OpPut(s.activeKey, string(sessionJSON), clientv3.WithLease(*s.LeaseID))).Commit()
 		if err != nil {
 			log.Error("register active key to etcd failed", zap.Error(err))
 			return false, -1, err
@@ -1085,7 +1039,7 @@ func (s *Session) ForceActiveStandby(activateFunc func() error) error {
 
 		if len(sessions) != 0 {
 			activeSess := sessions[s.ServerName]
-			if activeSess == nil || activeSess.leaseID == nil {
+			if activeSess == nil || activeSess.LeaseID == nil {
 				// force delete all old sessions
 				s.etcdCli.Delete(s.ctx, s.activeKey)
 				for _, sess := range sessions {
@@ -1097,7 +1051,7 @@ func (s *Session) ForceActiveStandby(activateFunc func() error) error {
 				}
 			} else {
 				// force release old active session
-				_, _ = s.etcdCli.Revoke(s.ctx, *activeSess.leaseID)
+				_, _ = s.etcdCli.Revoke(s.ctx, *activeSess.LeaseID)
 			}
 		}
 
@@ -1107,7 +1061,7 @@ func (s *Session) ForceActiveStandby(activateFunc func() error) error {
 				clientv3.Version(s.activeKey),
 				"=",
 				0)).
-			Then(clientv3.OpPut(s.activeKey, string(sessionJSON), clientv3.WithLease(*s.leaseID))).Commit()
+			Then(clientv3.OpPut(s.activeKey, string(sessionJSON), clientv3.WithLease(*s.LeaseID))).Commit()
 
 		if !resp.Succeeded {
 			msg := fmt.Sprintf("failed to force register ACTIVE %s", s.ServerName)

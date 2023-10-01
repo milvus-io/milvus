@@ -156,7 +156,7 @@ func TestDataNode(t *testing.T) {
 
 	t.Run("Test getSystemInfoMetrics", func(t *testing.T) {
 		emptyNode := &DataNode{}
-		emptyNode.SetSession(&sessionutil.Session{ServerID: 1})
+		emptyNode.SetSession(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}})
 		emptyNode.flowgraphManager = newFlowgraphManager()
 
 		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
@@ -171,7 +171,7 @@ func TestDataNode(t *testing.T) {
 
 	t.Run("Test getSystemInfoMetrics with quotaMetric error", func(t *testing.T) {
 		emptyNode := &DataNode{}
-		emptyNode.SetSession(&sessionutil.Session{ServerID: 1})
+		emptyNode.SetSession(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}})
 		emptyNode.flowgraphManager = newFlowgraphManager()
 
 		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
