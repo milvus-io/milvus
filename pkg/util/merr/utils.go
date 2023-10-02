@@ -708,6 +708,11 @@ func WrapErrFieldNotFound[T any](field T, msg ...string) error {
 	return err
 }
 
+func WrapErrAllocateTs(reason string) error {
+	err := errors.Wrap(ErrAllocTs, reason)
+	return err
+}
+
 func wrapWithField(err error, name string, value any) error {
 	return errors.Wrapf(err, "%s=%v", name, value)
 }

@@ -38,7 +38,7 @@ import (
 
 var binlogTestDir = "/tmp/milvus_test/test_binlog_io"
 
-var validGeneratorFn = func(count int, done <-chan struct{}) <-chan UniqueID {
+var validGeneratorFn = func(ctx context.Context, count int, done <-chan struct{}) <-chan UniqueID {
 	ret := make(chan UniqueID, count)
 	for i := 0; i < count; i++ {
 		ret <- int64(100 + i)
@@ -114,7 +114,7 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 
 		t.Run("gen insert blob failed", func(t *testing.T) {
 			alloc := allocator.NewMockAllocator(t)
-			alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Call.Return(nil, fmt.Errorf("mock err"))
+			alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything, mock.Anything).Call.Return(nil, fmt.Errorf("mock err"))
 			b := binlogIO{cm, alloc}
 			_, _, err := b.uploadStatsLog(context.Background(), 1, 10, genInsertData(), genTestStat(meta), 10, meta)
 			assert.Error(t, err)
@@ -138,7 +138,7 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 			alloc := allocator.NewMockAllocator(t)
 			b := binlogIO{cm, alloc}
 
-			alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Call.Return(nil, fmt.Errorf("mock err"))
+			alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything, mock.Anything).Call.Return(nil, fmt.Errorf("mock err"))
 
 			_, err := b.uploadInsertLog(context.Background(), 1, 10, genInsertData(), meta)
 			assert.Error(t, err)
@@ -149,7 +149,7 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 			alloc := allocator.NewMockAllocator(t)
 			b := binlogIO{mkc, alloc}
 
-			alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Call.Return(validGeneratorFn, nil)
+			alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything, mock.Anything).Call.Return(validGeneratorFn, nil)
 
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
@@ -182,7 +182,7 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 
 	t.Run("Test genDeltaBlobs", func(t *testing.T) {
 		alloc := allocator.NewMockAllocator(t)
-		alloc.EXPECT().AllocOne().Call.Return(int64(11111), nil)
+		alloc.EXPECT().AllocOne(mock.Anything).Call.Return(int64(11111), nil)
 
 		b := &binlogIO{cm, alloc}
 		f := &MetaFactory{}
@@ -201,10 +201,11 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
 				if test.isvalid {
-					k, v, err := b.genDeltaBlobs(&DeleteData{
-						Pks: []primaryKey{test.deletepk},
-						Tss: []uint64{test.ts},
-					}, meta.GetID(), 10, 1)
+					k, v, err := b.genDeltaBlobs(context.Background(),
+						&DeleteData{
+							Pks: []primaryKey{test.deletepk},
+							Tss: []uint64{test.ts},
+						}, meta.GetID(), 10, 1)
 
 					assert.NoError(t, err)
 					assert.NotEmpty(t, k)
@@ -222,7 +223,7 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 		t.Run("Test serialize error", func(t *testing.T) {
 			alloc := allocator.NewMockAllocator(t)
 			b := &binlogIO{cm, alloc}
-			k, v, err := b.genDeltaBlobs(&DeleteData{Pks: []primaryKey{pk}, Tss: []uint64{}}, 1, 1, 1)
+			k, v, err := b.genDeltaBlobs(context.Background(), &DeleteData{Pks: []primaryKey{pk}, Tss: []uint64{}}, 1, 1, 1)
 			assert.Error(t, err)
 			assert.Empty(t, k)
 			assert.Empty(t, v)
@@ -230,9 +231,9 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 
 		t.Run("Test AllocOne error", func(t *testing.T) {
 			alloc := allocator.NewMockAllocator(t)
-			alloc.EXPECT().AllocOne().Call.Return(int64(0), fmt.Errorf("mock AllocOne error"))
+			alloc.EXPECT().AllocOne(context.Background()).Call.Return(int64(0), fmt.Errorf("mock AllocOne error"))
 			bin := binlogIO{cm, alloc}
-			k, v, err := bin.genDeltaBlobs(&DeleteData{Pks: []primaryKey{pk}, Tss: []uint64{1}}, 1, 1, 1)
+			k, v, err := bin.genDeltaBlobs(context.Background(), &DeleteData{Pks: []primaryKey{pk}, Tss: []uint64{1}}, 1, 1, 1)
 			assert.Error(t, err)
 			assert.Empty(t, k)
 			assert.Empty(t, v)
@@ -242,7 +243,7 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 	t.Run("Test genInsertBlobs", func(t *testing.T) {
 		f := &MetaFactory{}
 		alloc := allocator.NewMockAllocator(t)
-		alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Call.Return(validGeneratorFn, nil)
+		alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything, mock.Anything).Call.Return(validGeneratorFn, nil)
 		b := binlogIO{cm, alloc}
 
 		tests := []struct {
@@ -260,7 +261,7 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 				iCodec := storage.NewInsertCodecWithSchema(meta)
 
 				kvs := make(map[string][]byte)
-				pin, err := b.genInsertBlobs(genInsertData(), 10, 1, iCodec, kvs)
+				pin, err := b.genInsertBlobs(context.Background(), genInsertData(), 10, 1, iCodec, kvs)
 
 				assert.NoError(t, err)
 				assert.Equal(t, 12, len(pin))
@@ -284,7 +285,7 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 
 			bin := &binlogIO{cm, allocator.NewMockAllocator(t)}
 			kvs := make(map[string][]byte)
-			pin, err := bin.genInsertBlobs(genEmptyInsertData(), 10, 1, iCodec, kvs)
+			pin, err := bin.genInsertBlobs(context.Background(), genEmptyInsertData(), 10, 1, iCodec, kvs)
 
 			assert.Error(t, err)
 			assert.Empty(t, kvs)
@@ -297,11 +298,11 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 			iCodec := storage.NewInsertCodecWithSchema(meta)
 
 			alloc := allocator.NewMockAllocator(t)
-			alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock GetGenerator error"))
+			alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock GetGenerator error"))
 			bin := &binlogIO{cm, alloc}
 			kvs := make(map[string][]byte)
 
-			pin, err := bin.genInsertBlobs(genInsertData(), 10, 1, iCodec, kvs)
+			pin, err := bin.genInsertBlobs(context.Background(), genInsertData(), 10, 1, iCodec, kvs)
 
 			assert.Error(t, err)
 			assert.Empty(t, kvs)
@@ -312,7 +313,7 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 	t.Run("Test genStatsBlob", func(t *testing.T) {
 		f := &MetaFactory{}
 		alloc := allocator.NewMockAllocator(t)
-		alloc.EXPECT().AllocOne().Return(0, nil)
+		alloc.EXPECT().AllocOne(mock.Anything).Return(0, nil)
 
 		b := binlogIO{cm, alloc}
 
@@ -331,7 +332,7 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 				iCodec := storage.NewInsertCodecWithSchema(meta)
 
 				kvs := make(map[string][]byte)
-				stat, err := b.genStatBlobs(genTestStat(meta), 10, 1, iCodec, kvs, 0)
+				stat, err := b.genStatBlobs(context.Background(), genTestStat(meta), 10, 1, iCodec, kvs, 0)
 
 				assert.NoError(t, err)
 				assert.Equal(t, 1, len(stat))
@@ -350,7 +351,7 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 			iCodec := storage.NewInsertCodecWithSchema(meta)
 
 			kvs := make(map[string][]byte)
-			_, err := b.genStatBlobs(nil, 10, 1, iCodec, kvs, 0)
+			_, err := b.genStatBlobs(context.Background(), nil, 10, 1, iCodec, kvs, 0)
 			assert.Error(t, err)
 		})
 	})

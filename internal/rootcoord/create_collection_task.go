@@ -256,7 +256,7 @@ func (t *createCollectionTask) assignShardsNum() {
 
 func (t *createCollectionTask) assignCollectionID() error {
 	var err error
-	t.collID, err = t.core.idAllocator.AllocOne()
+	t.collID, err = t.core.idAllocator.AllocOne(t.ctx)
 	return err
 }
 
@@ -287,7 +287,7 @@ func (t *createCollectionTask) assignPartitionIDs() error {
 	}
 
 	t.partIDs = make([]UniqueID, len(t.partitionNames))
-	start, end, err := t.core.idAllocator.Alloc(uint32(len(t.partitionNames)))
+	start, end, err := t.core.idAllocator.Alloc(t.ctx, uint32(len(t.partitionNames)))
 	if err != nil {
 		return err
 	}

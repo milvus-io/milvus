@@ -17,6 +17,8 @@
 package allocator
 
 import (
+	"context"
+
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -28,6 +30,6 @@ type UniqueID = typeutil.UniqueID
 // AllocOne allocates one id.
 // See GlobalIDAllocator for implementation details
 type Interface interface {
-	Alloc(count uint32) (UniqueID, UniqueID, error)
-	AllocOne() (UniqueID, error)
+	Alloc(ctx context.Context, count uint32) (UniqueID, UniqueID, error)
+	AllocOne(ctx context.Context) (UniqueID, error)
 }

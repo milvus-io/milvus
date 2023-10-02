@@ -1,6 +1,7 @@
 package tso
 
 import (
+	"context"
 	"time"
 )
 
@@ -28,7 +29,7 @@ func (m MockAllocator) SetTSO(tso uint64) error {
 	return m.SetTSOF(tso)
 }
 
-func (m MockAllocator) GenerateTSO(count uint32) (uint64, error) {
+func (m MockAllocator) GenerateTSO(ctx context.Context, count uint32) (uint64, error) {
 	return m.GenerateTSOF(count)
 }
 

@@ -46,6 +46,7 @@ import (
 
 const (
 	GetMetricsTimeout = 10 * time.Second
+	allocTsTimeout    = 10 * time.Second
 	SetRatesTimeout   = 10 * time.Second
 )
 
@@ -430,7 +431,10 @@ func (q *QuotaCenter) calculateWriteRates() error {
 
 	q.checkDiskQuota()
 
-	ts, err := q.tsoAllocator.GenerateTSO(1)
+	ctx, cancel := context.WithTimeout(context.Background(), allocTsTimeout)
+	defer cancel()
+
+	ts, err := q.tsoAllocator.GenerateTSO(ctx, 1)
 	if err != nil {
 		return err
 	}

@@ -12,6 +12,7 @@
 package server
 
 import (
+	"context"
 	"os"
 	"strconv"
 	"testing"
@@ -62,7 +63,7 @@ func TestRmqRetention_Basic(t *testing.T) {
 		pMsg := ProducerMessage{Payload: []byte(msg)}
 		pMsgs[i] = pMsg
 	}
-	ids, err := rmq.Produce(topicName, pMsgs)
+	ids, err := rmq.Produce(context.TODO(), topicName, pMsgs)
 	assert.NoError(t, err)
 	assert.Equal(t, len(pMsgs), len(ids))
 
@@ -158,7 +159,7 @@ func TestRmqRetention_NotConsumed(t *testing.T) {
 		pMsg := ProducerMessage{Payload: []byte(msg)}
 		pMsgs[i] = pMsg
 	}
-	ids, err := rmq.Produce(topicName, pMsgs)
+	ids, err := rmq.Produce(context.TODO(), topicName, pMsgs)
 	assert.NoError(t, err)
 	assert.Equal(t, len(pMsgs), len(ids))
 
@@ -271,7 +272,7 @@ func TestRmqRetention_MultipleTopic(t *testing.T) {
 		pMsg := ProducerMessage{Payload: []byte(msg)}
 		pMsgs[i] = pMsg
 	}
-	ids1, err := rmq.Produce(topicName, pMsgs)
+	ids1, err := rmq.Produce(context.TODO(), topicName, pMsgs)
 	assert.NoError(t, err)
 	assert.Equal(t, len(pMsgs), len(ids1))
 
@@ -285,7 +286,7 @@ func TestRmqRetention_MultipleTopic(t *testing.T) {
 		pMsg := ProducerMessage{Payload: []byte(msg)}
 		pMsgs[i] = pMsg
 	}
-	ids2, err := rmq.Produce(topicName, pMsgs)
+	ids2, err := rmq.Produce(context.TODO(), topicName, pMsgs)
 	assert.NoError(t, err)
 	assert.Equal(t, len(pMsgs), len(ids2))
 
@@ -441,7 +442,7 @@ func TestRetentionInfo_InitRetentionInfo(t *testing.T) {
 		pMsg := ProducerMessage{Payload: []byte(msg)}
 		pMsgs[i] = pMsg
 	}
-	ids, err := rmq.Produce(topicName, pMsgs)
+	ids, err := rmq.Produce(context.TODO(), topicName, pMsgs)
 	assert.NoError(t, err)
 	assert.Equal(t, len(pMsgs), len(ids))
 
@@ -492,7 +493,7 @@ func TestRmqRetention_PageTimeExpire(t *testing.T) {
 		pMsg := ProducerMessage{Payload: []byte(msg)}
 		pMsgs[i] = pMsg
 	}
-	ids, err := rmq.Produce(topicName, pMsgs)
+	ids, err := rmq.Produce(context.TODO(), topicName, pMsgs)
 	assert.NoError(t, err)
 	assert.Equal(t, len(pMsgs), len(ids))
 
@@ -524,7 +525,7 @@ func TestRmqRetention_PageTimeExpire(t *testing.T) {
 		pMsg := ProducerMessage{Payload: []byte(msg)}
 		pMsgs2[i] = pMsg
 	}
-	ids2, err := rmq.Produce(topicName, pMsgs2)
+	ids2, err := rmq.Produce(context.TODO(), topicName, pMsgs2)
 	assert.NoError(t, err)
 	assert.Equal(t, len(pMsgs2), len(ids2))
 
@@ -619,7 +620,7 @@ func TestRmqRetention_PageSizeExpire(t *testing.T) {
 		pMsg := ProducerMessage{Payload: []byte(msg)}
 		pMsgs[i] = pMsg
 	}
-	ids, err := rmq.Produce(topicName, pMsgs)
+	ids, err := rmq.Produce(context.TODO(), topicName, pMsgs)
 	assert.NoError(t, err)
 	assert.Equal(t, len(pMsgs), len(ids))
 

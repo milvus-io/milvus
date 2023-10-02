@@ -18,14 +18,13 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 	"strconv"
-	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
@@ -47,8 +46,6 @@ func newTimestampAllocator(tso timestampAllocatorInterface, peerID UniqueID) (*t
 
 func (ta *timestampAllocator) alloc(ctx context.Context, count uint32) ([]Timestamp, error) {
 	tr := timerecord.NewTimeRecorder("applyTimestamp")
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
 	req := &rootcoordpb.AllocTimestampRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_RequestTSO),
@@ -64,13 +61,13 @@ func (ta *timestampAllocator) alloc(ctx context.Context, count uint32) ([]Timest
 	}()
 
 	if err != nil {
-		return nil, fmt.Errorf("syncTimestamp Failed:%w", err)
+		return nil, merr.WrapErrAllocateTs(err.Error())
 	}
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return nil, fmt.Errorf("syncTimeStamp Failed:%s", resp.GetStatus().GetReason())
+		return nil, merr.WrapErrAllocateTs(resp.GetStatus().GetReason())
 	}
 	if resp == nil {
-		return nil, fmt.Errorf("empty AllocTimestampResponse")
+		return nil, merr.WrapErrAllocateTs("empty AllocTimestampResponse")
 	}
 	start, cnt := resp.GetTimestamp(), resp.GetCount()
 	ret := make([]Timestamp, cnt)

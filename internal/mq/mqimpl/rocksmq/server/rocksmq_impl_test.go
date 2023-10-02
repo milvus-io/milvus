@@ -12,6 +12,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -82,7 +83,7 @@ func etcdEndpoints() []string {
 }
 
 // to test compatibility concern
-func (rmq *rocksmq) produceBefore2(topicName string, messages []producerMessageBefore2) ([]UniqueID, error) {
+func (rmq *rocksmq) produceBefore2(ctx context.Context, topicName string, messages []producerMessageBefore2) ([]UniqueID, error) {
 	if rmq.isClosed() {
 		return nil, errors.New(RmqNotServingErrMsg)
 	}
@@ -101,7 +102,7 @@ func (rmq *rocksmq) produceBefore2(topicName string, messages []producerMessageB
 	getLockTime := time.Since(start).Milliseconds()
 
 	msgLen := len(messages)
-	idStart, idEnd, err := rmq.idAllocator.Alloc(uint32(msgLen))
+	idStart, idEnd, err := rmq.idAllocator.Alloc(ctx, uint32(msgLen))
 	if err != nil {
 		return []UniqueID{}, err
 	}
@@ -161,7 +162,7 @@ func (rmq *rocksmq) produceBefore2(topicName string, messages []producerMessageB
 }
 
 // to test compatibility concern
-func (rmq *rocksmq) produceIn2(topicName string, messages []ProducerMessage) ([]UniqueID, error) {
+func (rmq *rocksmq) produceIn2(ctx context.Context, topicName string, messages []ProducerMessage) ([]UniqueID, error) {
 	if rmq.isClosed() {
 		return nil, errors.New(RmqNotServingErrMsg)
 	}
@@ -180,7 +181,7 @@ func (rmq *rocksmq) produceIn2(topicName string, messages []ProducerMessage) ([]
 	getLockTime := time.Since(start).Milliseconds()
 
 	msgLen := len(messages)
-	idStart, idEnd, err := rmq.idAllocator.Alloc(uint32(msgLen))
+	idStart, idEnd, err := rmq.idAllocator.Alloc(ctx, uint32(msgLen))
 	if err != nil {
 		return []UniqueID{}, err
 	}
@@ -295,7 +296,7 @@ func TestRocksmq_RegisterConsumer(t *testing.T) {
 	pMsgA := ProducerMessage{Payload: []byte(msgA)}
 	pMsgs[0] = pMsgA
 
-	_, err = rmq.Produce(topicName, pMsgs)
+	_, err = rmq.Produce(context.TODO(), topicName, pMsgs)
 	assert.NoError(t, err)
 
 	rmq.Notify(topicName, groupName)
@@ -341,7 +342,7 @@ func TestRocksmq_Basic(t *testing.T) {
 	pMsgA := ProducerMessage{Payload: []byte(msgA), Properties: map[string]string{common.TraceIDKey: "a"}}
 	pMsgs[0] = pMsgA
 
-	_, err = rmq.Produce(channelName, pMsgs)
+	_, err = rmq.Produce(context.TODO(), channelName, pMsgs)
 	assert.NoError(t, err)
 
 	pMsgB := ProducerMessage{Payload: []byte("b_message"), Properties: map[string]string{common.TraceIDKey: "b"}}
@@ -349,7 +350,7 @@ func TestRocksmq_Basic(t *testing.T) {
 
 	pMsgs[0] = pMsgB
 	pMsgs = append(pMsgs, pMsgC)
-	_, err = rmq.Produce(channelName, pMsgs)
+	_, err = rmq.Produce(context.TODO(), channelName, pMsgs)
 	assert.NoError(t, err)
 
 	groupName := "test_group"
@@ -406,7 +407,7 @@ func TestRocksmq_Compatibility(t *testing.T) {
 	tMsgs := make([]producerMessageBefore2, 1)
 	tMsgD := producerMessageBefore2{Payload: []byte(msgD)}
 	tMsgs[0] = tMsgD
-	_, err = rmq.produceBefore2(channelName, tMsgs)
+	_, err = rmq.produceBefore2(context.TODO(), channelName, tMsgs)
 	assert.NoError(t, err)
 
 	groupName := "test_group"
@@ -437,7 +438,7 @@ func TestRocksmq_Compatibility(t *testing.T) {
 	properties[common.TraceIDKey] = "1"
 	tMsg1 := ProducerMessage{Payload: []byte(msg1), Properties: properties}
 	tMsgs1[0] = tMsg1
-	_, err = rmq.produceIn2(channelName, tMsgs1)
+	_, err = rmq.produceIn2(context.TODO(), channelName, tMsgs1)
 	assert.NoError(t, err)
 
 	msg2, err := rmq.Consume(channelName, groupName, 1)
@@ -462,7 +463,7 @@ func TestRocksmq_Compatibility(t *testing.T) {
 	msg4 := "4_message"
 	tMsg4 := ProducerMessage{Payload: []byte(msg4)}
 	tMsgs3[1] = tMsg4
-	_, err = rmq.Produce(channelName, tMsgs3)
+	_, err = rmq.Produce(context.TODO(), channelName, tMsgs3)
 	assert.NoError(t, err)
 
 	msg5, err := rmq.Consume(channelName, groupName, 2)
@@ -508,7 +509,7 @@ func TestRocksmq_MultiConsumer(t *testing.T) {
 		pMsg := ProducerMessage{Payload: []byte(msg)}
 		pMsgs[i] = pMsg
 	}
-	ids, err := rmq.Produce(channelName, pMsgs)
+	ids, err := rmq.Produce(context.TODO(), channelName, pMsgs)
 	assert.NoError(t, err)
 	assert.Equal(t, len(pMsgs), len(ids))
 
@@ -567,10 +568,10 @@ func TestRocksmq_Dummy(t *testing.T) {
 	err = rmq.DestroyConsumerGroup(channelName, channelName1)
 	assert.NoError(t, err)
 
-	_, err = rmq.Produce(channelName, nil)
+	_, err = rmq.Produce(context.TODO(), channelName, nil)
 	assert.Error(t, err)
 
-	_, err = rmq.Produce(channelName1, nil)
+	_, err = rmq.Produce(context.TODO(), channelName1, nil)
 	assert.Error(t, err)
 
 	groupName1 := "group_dummy"
@@ -580,7 +581,7 @@ func TestRocksmq_Dummy(t *testing.T) {
 	channelName2 := strings.Repeat(channelName1, 100)
 	err = rmq.CreateTopic(channelName2)
 	assert.NoError(t, err)
-	_, err = rmq.Produce(channelName2, nil)
+	_, err = rmq.Produce(context.TODO(), channelName2, nil)
 	assert.Error(t, err)
 
 	channelName3 := "channel/dummy"
@@ -596,7 +597,7 @@ func TestRocksmq_Dummy(t *testing.T) {
 	_, err = rmq.Consume(channelName, groupName1, 1)
 	assert.Error(t, err)
 	topicMu.Store(channelName, channelName)
-	_, err = rmq.Produce(channelName, nil)
+	_, err = rmq.Produce(context.TODO(), channelName, nil)
 	assert.Error(t, err)
 
 	_, err = rmq.Consume(channelName, groupName1, 1)
@@ -634,7 +635,7 @@ func TestRocksmq_Seek(t *testing.T) {
 		pMsg := ProducerMessage{Payload: []byte(msg)}
 		pMsgs := make([]ProducerMessage, 1)
 		pMsgs[0] = pMsg
-		id, err := rmq.Produce(channelName, pMsgs)
+		id, err := rmq.Produce(context.TODO(), channelName, pMsgs)
 		if i == 50 {
 			seekID = id[0]
 		}
@@ -697,7 +698,7 @@ func TestRocksmq_Loop(t *testing.T) {
 		pMsg := ProducerMessage{Payload: []byte(msg)}
 		pMsgs := make([]ProducerMessage, 1)
 		pMsgs[0] = pMsg
-		_, err := rmq.Produce(channelName, pMsgs)
+		_, err := rmq.Produce(context.TODO(), channelName, pMsgs)
 		assert.NoError(t, err)
 	}
 
@@ -708,7 +709,7 @@ func TestRocksmq_Loop(t *testing.T) {
 		pMsg := ProducerMessage{Payload: []byte(msg)}
 		pMsgs[i] = pMsg
 	}
-	_, err = rmq.Produce(channelName, pMsgs)
+	_, err = rmq.Produce(context.TODO(), channelName, pMsgs)
 	assert.NoError(t, err)
 
 	// Consume loopNum message once
@@ -777,7 +778,7 @@ func TestRocksmq_Goroutines(t *testing.T) {
 			pMsgs[0] = pMsg0
 			pMsgs[1] = pMsg1
 
-			ids, err := mq.Produce(channelName, pMsgs)
+			ids, err := mq.Produce(context.TODO(), channelName, pMsgs)
 			assert.NoError(t, err)
 			assert.Equal(t, len(pMsgs), len(ids))
 			msgChan <- msg0
@@ -847,7 +848,7 @@ func TestRocksmq_Throughout(t *testing.T) {
 	for i := 0; i < entityNum; i++ {
 		msg := "message_" + strconv.Itoa(i)
 		pMsg := ProducerMessage{Payload: []byte(msg)}
-		ids, err := rmq.Produce(channelName, []ProducerMessage{pMsg})
+		ids, err := rmq.Produce(context.TODO(), channelName, []ProducerMessage{pMsg})
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(ids))
 	}
@@ -917,9 +918,9 @@ func TestRocksmq_MultiChan(t *testing.T) {
 		msg1 := "for_chann1_" + strconv.Itoa(i)
 		pMsg0 := ProducerMessage{Payload: []byte(msg0)}
 		pMsg1 := ProducerMessage{Payload: []byte(msg1)}
-		_, err = rmq.Produce(channelName0, []ProducerMessage{pMsg0})
+		_, err = rmq.Produce(context.TODO(), channelName0, []ProducerMessage{pMsg0})
 		assert.NoError(t, err)
-		_, err = rmq.Produce(channelName1, []ProducerMessage{pMsg1})
+		_, err = rmq.Produce(context.TODO(), channelName1, []ProducerMessage{pMsg1})
 		assert.NoError(t, err)
 	}
 
@@ -967,20 +968,20 @@ func TestRocksmq_CopyData(t *testing.T) {
 
 	msg0 := "abcde"
 	pMsg0 := ProducerMessage{Payload: []byte(msg0)}
-	_, err = rmq.Produce(channelName0, []ProducerMessage{pMsg0})
+	_, err = rmq.Produce(context.TODO(), channelName0, []ProducerMessage{pMsg0})
 	assert.NoError(t, err)
 
 	pMsg1 := ProducerMessage{Payload: nil}
-	_, err = rmq.Produce(channelName1, []ProducerMessage{pMsg1})
+	_, err = rmq.Produce(context.TODO(), channelName1, []ProducerMessage{pMsg1})
 	assert.NoError(t, err)
 
 	pMsg2 := ProducerMessage{Payload: []byte{}}
-	_, err = rmq.Produce(channelName1, []ProducerMessage{pMsg2})
+	_, err = rmq.Produce(context.TODO(), channelName1, []ProducerMessage{pMsg2})
 	assert.NoError(t, err)
 
 	var emptyTargetData []byte
 	pMsg3 := ProducerMessage{Payload: emptyTargetData}
-	_, err = rmq.Produce(channelName1, []ProducerMessage{pMsg3})
+	_, err = rmq.Produce(context.TODO(), channelName1, []ProducerMessage{pMsg3})
 	assert.NoError(t, err)
 
 	groupName := "test_group"
@@ -1051,14 +1052,14 @@ func TestRocksmq_SeekToLatest(t *testing.T) {
 		pMsg := ProducerMessage{Payload: []byte(msg)}
 		pMsgs[i] = pMsg
 	}
-	_, err = rmq.Produce(channelNamePrev, pMsgs)
+	_, err = rmq.Produce(context.TODO(), channelNamePrev, pMsgs)
 	assert.NoError(t, err)
 
 	// should hit the case where channel is null
 	err = rmq.SeekToLatest(channelName, groupName)
 	assert.NoError(t, err)
 
-	ids, err := rmq.Produce(channelName, pMsgs)
+	ids, err := rmq.Produce(context.TODO(), channelName, pMsgs)
 	assert.NoError(t, err)
 
 	// able to read out
@@ -1082,7 +1083,7 @@ func TestRocksmq_SeekToLatest(t *testing.T) {
 		pMsg := ProducerMessage{Payload: []byte(msg)}
 		pMsgs[i] = pMsg
 	}
-	ids, err = rmq.Produce(channelName, pMsgs)
+	ids, err = rmq.Produce(context.TODO(), channelName, pMsgs)
 	assert.NoError(t, err)
 
 	// make sure we only consume the latest message
@@ -1140,7 +1141,7 @@ func TestRocksmq_GetLatestMsg(t *testing.T) {
 		pMsgs2[i] = pMsg
 	}
 
-	ids, err := rmq.Produce(channelName, pMsgs1)
+	ids, err := rmq.Produce(context.TODO(), channelName, pMsgs1)
 	assert.NoError(t, err)
 	assert.Equal(t, len(ids), loopNum)
 
@@ -1153,7 +1154,7 @@ func TestRocksmq_GetLatestMsg(t *testing.T) {
 	channelName2 := newChanName()
 	err = rmq.CreateTopic(channelName2)
 	assert.NoError(t, err)
-	ids, err = rmq.Produce(channelName2, pMsgs2)
+	ids, err = rmq.Produce(context.TODO(), channelName2, pMsgs2)
 	assert.NoError(t, err)
 
 	msgID, err = rmq.GetLatestMsg(channelName2)
@@ -1200,7 +1201,7 @@ func TestRocksmq_CheckPreTopicValid(t *testing.T) {
 		pMsg := ProducerMessage{Payload: []byte(msg)}
 		pMsgs[i] = pMsg
 	}
-	_, err = rmq.Produce(channelName2, pMsgs)
+	_, err = rmq.Produce(context.TODO(), channelName2, pMsgs)
 	assert.NoError(t, err)
 
 	err = rmq.CheckTopicValid(channelName2)
@@ -1241,7 +1242,7 @@ func TestRocksmq_Close(t *testing.T) {
 	assert.Error(t, rmq.CreateTopic(""))
 	assert.Error(t, rmq.CreateConsumerGroup("", ""))
 	rmq.RegisterConsumer(&Consumer{})
-	_, err = rmq.Produce("", nil)
+	_, err = rmq.Produce(context.TODO(), "", nil)
 	assert.Error(t, err)
 	_, err = rmq.Consume("", "", 0)
 	assert.Error(t, err)
@@ -1375,7 +1376,7 @@ func TestRocksmq_updateAckedInfoErr(t *testing.T) {
 		pMsg := ProducerMessage{Payload: []byte(msg)}
 		pMsgs[i] = pMsg
 	}
-	ids, err := rmq.Produce(topicName, pMsgs)
+	ids, err := rmq.Produce(context.TODO(), topicName, pMsgs)
 	assert.NoError(t, err)
 	assert.Equal(t, len(pMsgs), len(ids))
 

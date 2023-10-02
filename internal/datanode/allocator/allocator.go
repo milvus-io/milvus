@@ -26,12 +26,13 @@ import (
 
 type UniqueID = typeutil.UniqueID
 
+// TODO, why should it use the normal allocator?
 type Allocator interface {
 	Start() error
 	Close()
-	AllocOne() (UniqueID, error)
-	Alloc(count uint32) (UniqueID, UniqueID, error)
-	GetGenerator(count int, done <-chan struct{}) (<-chan UniqueID, error)
+	AllocOne(ctx context.Context) (UniqueID, error)
+	Alloc(ctx context.Context, count uint32) (UniqueID, UniqueID, error)
+	GetGenerator(ctx context.Context, count int, done <-chan struct{}) (<-chan UniqueID, error)
 	GetIDAlloactor() *gAllocator.IDAllocator
 }
 
@@ -57,8 +58,8 @@ func (a *Impl) GetIDAlloactor() *gAllocator.IDAllocator {
 	return a.IDAllocator
 }
 
-func (a *Impl) GetGenerator(count int, done <-chan struct{}) (<-chan UniqueID, error) {
-	idStart, _, err := a.Alloc(uint32(count))
+func (a *Impl) GetGenerator(ctx context.Context, count int, done <-chan struct{}) (<-chan UniqueID, error) {
+	idStart, _, err := a.Alloc(ctx, uint32(count))
 	if err != nil {
 		return nil, err
 	}

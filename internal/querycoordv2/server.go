@@ -76,7 +76,7 @@ type Server struct {
 	address             string
 	session             *sessionutil.Session
 	kv                  kv.MetaKv
-	idAllocator         func() (int64, error)
+	idAllocator         func(ctx context.Context) (int64, error)
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
 	// Coordinators
@@ -228,8 +228,8 @@ func (s *Server) initQueryCoord() error {
 		log.Error("query coordinator id allocator initialize failed", zap.Error(err))
 		return err
 	}
-	s.idAllocator = func() (int64, error) {
-		return idAllocator.AllocOne()
+	s.idAllocator = func(ctx context.Context) (int64, error) {
+		return idAllocator.AllocOne(ctx)
 	}
 
 	// Init metrics cache manager

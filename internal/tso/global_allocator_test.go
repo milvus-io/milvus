@@ -17,6 +17,7 @@
 package tso
 
 import (
+	"context"
 	"math"
 	"os"
 	"strings"
@@ -42,6 +43,7 @@ func TestGlobalTSOAllocator_Initialize(t *testing.T) {
 	assert.NoError(t, err)
 	defer etcdCli.Close()
 
+	ctx := context.TODO()
 	etcdKV := tsoutil2.NewTSOKVBase(etcdCli, "/test/root/kv", "tsoTest")
 	gTestTsoAllocator = NewGlobalTSOAllocator("timestamp", etcdKV)
 	err = gTestTsoAllocator.Initialize()
@@ -57,11 +59,11 @@ func TestGlobalTSOAllocator_Initialize(t *testing.T) {
 	t.Run("GenerateTSO", func(t *testing.T) {
 		count := 1000
 		perCount := uint32(100)
-		startTs, err := gTestTsoAllocator.GenerateTSO(perCount)
+		startTs, err := gTestTsoAllocator.GenerateTSO(ctx, perCount)
 		assert.NoError(t, err)
 		lastPhysical, lastLogical := tsoutil.ParseTS(startTs)
 		for i := 0; i < count; i++ {
-			ts, _ := gTestTsoAllocator.GenerateTSO(perCount)
+			ts, _ := gTestTsoAllocator.GenerateTSO(ctx, perCount)
 			physical, logical := tsoutil.ParseTS(ts)
 			if lastPhysical.Equal(physical) {
 				diff := logical - lastLogical
@@ -83,6 +85,8 @@ func TestGlobalTSOAllocator_All(t *testing.T) {
 	defer etcdCli.Close()
 	etcdKV := tsoutil2.NewTSOKVBase(etcdCli, "/test/root/kv", "tsoTest")
 
+	ctx := context.TODO()
+
 	gTestTsoAllocator = NewGlobalTSOAllocator("timestamp", etcdKV)
 	t.Run("Initialize", func(t *testing.T) {
 		err := gTestTsoAllocator.Initialize()
@@ -95,11 +99,11 @@ func TestGlobalTSOAllocator_All(t *testing.T) {
 	t.Run("GenerateTSO", func(t *testing.T) {
 		count := 1000
 		perCount := uint32(100)
-		startTs, err := gTestTsoAllocator.GenerateTSO(perCount)
+		startTs, err := gTestTsoAllocator.GenerateTSO(ctx, perCount)
 		assert.NoError(t, err)
 		lastPhysical, lastLogical := tsoutil.ParseTS(startTs)
 		for i := 0; i < count; i++ {
-			ts, err2 := gTestTsoAllocator.GenerateTSO(perCount)
+			ts, err2 := gTestTsoAllocator.GenerateTSO(ctx, perCount)
 			assert.Nil(t, err2)
 			physical, logical := tsoutil.ParseTS(ts)
 			if lastPhysical.Equal(physical) {
@@ -114,13 +118,13 @@ func TestGlobalTSOAllocator_All(t *testing.T) {
 	t.Run("GenerateTSO2", func(t *testing.T) {
 		count := 1000
 		maxL := 1 << 18
-		startTs, err := gTestTsoAllocator.GenerateTSO(uint32(maxL))
+		startTs, err := gTestTsoAllocator.GenerateTSO(ctx, uint32(maxL))
 		step := 10
 		perCount := uint32(step) << 18 // 10 ms
 		assert.NoError(t, err)
 		lastPhysical, lastLogical := tsoutil.ParseTS(startTs)
 		for i := 0; i < count; i++ {
-			ts, _ := gTestTsoAllocator.GenerateTSO(perCount)
+			ts, _ := gTestTsoAllocator.GenerateTSO(ctx, perCount)
 			physical, logical := tsoutil.ParseTS(ts)
 			assert.Equal(t, logical, lastLogical)
 			assert.Equal(t, physical, lastPhysical.Add(time.Millisecond*time.Duration(step)))
@@ -132,7 +136,7 @@ func TestGlobalTSOAllocator_All(t *testing.T) {
 
 	gTestTsoAllocator.SetLimitMaxLogic(true)
 	t.Run("SetTSO", func(t *testing.T) {
-		ts, err2 := gTestTsoAllocator.GenerateTSO(1)
+		ts, err2 := gTestTsoAllocator.GenerateTSO(ctx, 1)
 		assert.Nil(t, err2)
 		curTime, logical := tsoutil.ParseTS(ts)
 		nextTime := curTime.Add(2 * time.Second)
@@ -147,12 +151,12 @@ func TestGlobalTSOAllocator_All(t *testing.T) {
 	})
 
 	t.Run("Alloc", func(t *testing.T) {
-		_, err := gTestTsoAllocator.Alloc(100)
+		_, err := gTestTsoAllocator.Alloc(ctx, 100)
 		assert.NoError(t, err)
 	})
 
 	t.Run("AllocOne", func(t *testing.T) {
-		_, err := gTestTsoAllocator.AllocOne()
+		_, err := gTestTsoAllocator.AllocOne(ctx)
 		assert.NoError(t, err)
 	})
 
@@ -173,13 +177,16 @@ func TestGlobalTSOAllocator_Fail(t *testing.T) {
 	etcdKV := tsoutil2.NewTSOKVBase(etcdCli, "/test/root/kv", "tsoTest")
 	assert.NoError(t, err)
 	gTestTsoAllocator = NewGlobalTSOAllocator("timestamp", etcdKV)
+
+	ctx := context.TODO()
+
 	t.Run("Initialize", func(t *testing.T) {
 		err := gTestTsoAllocator.Initialize()
 		assert.NoError(t, err)
 	})
 
 	t.Run("GenerateTSO_invalid", func(t *testing.T) {
-		_, err := gTestTsoAllocator.GenerateTSO(0)
+		_, err := gTestTsoAllocator.GenerateTSO(ctx, 0)
 		assert.Error(t, err)
 	})
 
@@ -193,10 +200,10 @@ func TestGlobalTSOAllocator_Fail(t *testing.T) {
 	})
 
 	t.Run("Alloc_invalid", func(t *testing.T) {
-		_, err := gTestTsoAllocator.Alloc(0)
+		_, err := gTestTsoAllocator.Alloc(ctx, 0)
 		assert.Error(t, err)
 
-		_, err = gTestTsoAllocator.Alloc(math.MaxUint32)
+		_, err = gTestTsoAllocator.Alloc(ctx, math.MaxUint32)
 		assert.Error(t, err)
 	})
 
@@ -219,7 +226,6 @@ func TestGlobalTSOAllocator_Update(t *testing.T) {
 	gTestTsoAllocator = NewGlobalTSOAllocator("timestamp", etcdKV)
 	err = gTestTsoAllocator.Initialize()
 	assert.NoError(t, err)
-
 	err = gTestTsoAllocator.UpdateTSO()
 	assert.NoError(t, err)
 	time.Sleep(160 * time.Millisecond)
@@ -245,10 +251,11 @@ func TestGlobalTSOAllocator_load(t *testing.T) {
 	err = gTestTsoAllocator.Initialize()
 	assert.NoError(t, err)
 
+	ctx := context.TODO()
 	err = gTestTsoAllocator.UpdateTSO()
 	assert.NoError(t, err)
 
-	ts, _ := gTestTsoAllocator.GenerateTSO(1)
+	ts, _ := gTestTsoAllocator.GenerateTSO(ctx, 1)
 	curTime, logical := tsoutil.ParseTS(ts)
 	nextTime := curTime.Add(2 * time.Second)
 	physical := nextTime.UnixNano() / int64(time.Millisecond)
@@ -260,7 +267,7 @@ func TestGlobalTSOAllocator_load(t *testing.T) {
 	err = gTestTsoAllocator.Initialize()
 	assert.NoError(t, err)
 
-	ts2, err2 := gTestTsoAllocator.GenerateTSO(1)
+	ts2, err2 := gTestTsoAllocator.GenerateTSO(ctx, 1)
 	assert.Nil(t, err2)
 	curTime2, _ := tsoutil.ParseTS(ts2)
 	assert.True(t, ts2 >= target)

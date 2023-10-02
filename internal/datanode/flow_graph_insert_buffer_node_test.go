@@ -210,7 +210,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	factory := dependency.NewDefaultFactory(true)
 
 	alloc := allocator.NewMockAllocator(t)
-	alloc.EXPECT().Alloc(mock.Anything).Call.Return(int64(22222),
+	alloc.EXPECT().Alloc(mock.Anything, mock.Anything).Call.Return(int64(22222),
 		func(count uint32) int64 {
 			return int64(22222 + count)
 		}, nil)
@@ -379,8 +379,8 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 	alloc := allocator.NewMockAllocator(t)
-	alloc.EXPECT().Alloc(mock.Anything).Call.Return(int64(22222),
-		func(count uint32) int64 {
+	alloc.EXPECT().Alloc(mock.Anything, mock.Anything).Call.Return(int64(22222),
+		func(ctx2 context.Context, count uint32) int64 {
 			return int64(22222 + count)
 		}, nil)
 	fm := NewRendezvousFlushManager(alloc, cm, channel, func(pack *segmentFlushPack) {
@@ -628,8 +628,8 @@ func TestInsertBufferNodeRollBF(t *testing.T) {
 	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 	alloc := allocator.NewMockAllocator(t)
-	alloc.EXPECT().Alloc(mock.Anything).Call.Return(int64(22222),
-		func(count uint32) int64 {
+	alloc.EXPECT().Alloc(mock.Anything, mock.Anything).Call.Return(int64(22222),
+		func(ctx2 context.Context, count uint32) int64 {
 			return int64(22222 + count)
 		}, nil)
 	fm := NewRendezvousFlushManager(alloc, cm, channel, func(pack *segmentFlushPack) {

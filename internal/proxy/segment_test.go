@@ -103,17 +103,16 @@ func TestSegmentAllocator1(t *testing.T) {
 	collNames := []string{"abc", "cba"}
 	for i := 0; i < 10; i++ {
 		colName := collNames[i%2]
-		ret, err := segAllocator.GetSegmentID(1, 1, colName, 1, 1)
+		ret, err := segAllocator.GetSegmentID(context.TODO(), 1, 1, colName, 1, 1)
 		assert.NoError(t, err)
 		total += ret[1]
 	}
 	assert.Equal(t, uint32(10), total)
 
-	ret, err := segAllocator.GetSegmentID(1, 1, "abc", segCountPerRPC-10, 999)
+	ret, err := segAllocator.GetSegmentID(context.TODO(), 1, 1, "abc", segCountPerRPC-10, 999)
 	assert.NoError(t, err)
 	assert.Equal(t, uint32(segCountPerRPC-10), ret[1])
-
-	_, err = segAllocator.GetSegmentID(1, 1, "abc", 10, 1001)
+	_, err = segAllocator.GetSegmentID(context.TODO(), 1, 1, "abc", 10, 1001)
 	assert.Error(t, err)
 	wg.Wait()
 }
@@ -146,13 +145,13 @@ func TestSegmentAllocator2(t *testing.T) {
 	}(wg)
 	total := uint32(0)
 	for i := 0; i < 10; i++ {
-		ret, err := segAllocator.GetSegmentID(1, 1, "abc", 1, 200)
+		ret, err := segAllocator.GetSegmentID(context.TODO(), 1, 1, "abc", 1, 200)
 		assert.NoError(t, err)
 		total += ret[1]
 	}
 	assert.Equal(t, uint32(10), total)
 	time.Sleep(50 * time.Millisecond)
-	_, err = segAllocator.GetSegmentID(1, 1, "abc", segCountPerRPC-10, getLastTick2())
+	_, err = segAllocator.GetSegmentID(context.TODO(), 1, 1, "abc", segCountPerRPC-10, getLastTick2())
 	assert.Error(t, err)
 	wg.Wait()
 }
@@ -173,7 +172,7 @@ func TestSegmentAllocator3(t *testing.T) {
 		segAllocator.Close()
 	}(wg)
 	time.Sleep(50 * time.Millisecond)
-	_, err = segAllocator.GetSegmentID(1, 1, "abc", 10, 100)
+	_, err = segAllocator.GetSegmentID(context.TODO(), 1, 1, "abc", 10, 100)
 	assert.Error(t, err)
 	wg.Wait()
 }
@@ -229,7 +228,7 @@ func TestSegmentAllocator4(t *testing.T) {
 		segAllocator.Close()
 	}(wg)
 	time.Sleep(50 * time.Millisecond)
-	_, err = segAllocator.GetSegmentID(1, 1, "abc", 10, 100)
+	_, err = segAllocator.GetSegmentID(context.TODO(), 1, 1, "abc", 10, 100)
 	assert.Error(t, err)
 	wg.Wait()
 }
@@ -263,7 +262,7 @@ func TestSegmentAllocator5(t *testing.T) {
 		segAllocator.Close()
 	}(wg)
 	time.Sleep(50 * time.Millisecond)
-	_, err = segAllocator.GetSegmentID(1, 1, "abc", 10, 100)
+	_, err = segAllocator.GetSegmentID(context.TODO(), 1, 1, "abc", 10, 100)
 	assert.Error(t, err)
 	wg.Wait()
 }
@@ -298,7 +297,7 @@ func TestSegmentAllocator6(t *testing.T) {
 		if i == 0 {
 			count = 0
 		}
-		_, err = segAllocator.GetSegmentID(1, 1, colName, count, 100)
+		_, err = segAllocator.GetSegmentID(context.TODO(), 1, 1, colName, count, 100)
 		if err != nil {
 			t.Log(err)
 			success = false

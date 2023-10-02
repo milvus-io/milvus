@@ -411,7 +411,7 @@ func (dt *deleteTask) produce(ctx context.Context, stream msgstream.MsgStream, p
 }
 
 func (dt *deleteTask) newDeleteMsg(ctx context.Context) (*msgstream.DeleteMsg, error) {
-	msgid, err := dt.idAllocator.AllocOne()
+	msgid, err := dt.idAllocator.AllocOne(ctx)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to allocate MsgID of delete")
 	}

@@ -12,6 +12,8 @@
 package client
 
 import (
+	"context"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
@@ -50,8 +52,9 @@ func (p *producer) Topic() string {
 }
 
 // Send produce message in rocksmq
-func (p *producer) Send(message *ProducerMessage) (UniqueID, error) {
-	ids, err := p.c.server.Produce(p.topic, []server.ProducerMessage{
+// TODO Ignore the context for now, rocksmq should also follow context
+func (p *producer) Send(ctx context.Context, message *ProducerMessage) (UniqueID, error) {
+	ids, err := p.c.server.Produce(ctx, p.topic, []server.ProducerMessage{
 		{
 			Payload:    message.Payload,
 			Properties: message.Properties,

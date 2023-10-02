@@ -160,7 +160,7 @@ func (c *bgGarbageCollector) RemoveCreatingPartition(dbID int64, partition *mode
 }
 
 func (c *bgGarbageCollector) notifyCollectionGc(ctx context.Context, coll *model.Collection) (ddlTs Timestamp, err error) {
-	ts, err := c.s.tsoAllocator.GenerateTSO(1)
+	ts, err := c.s.tsoAllocator.GenerateTSO(ctx, 1)
 	if err != nil {
 		return 0, err
 	}
@@ -192,7 +192,7 @@ func (c *bgGarbageCollector) notifyCollectionGc(ctx context.Context, coll *model
 }
 
 func (c *bgGarbageCollector) notifyPartitionGc(ctx context.Context, pChannels []string, partition *model.Partition) (ddlTs Timestamp, err error) {
-	ts, err := c.s.tsoAllocator.GenerateTSO(1)
+	ts, err := c.s.tsoAllocator.GenerateTSO(ctx, 1)
 	if err != nil {
 		return 0, err
 	}

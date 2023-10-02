@@ -44,7 +44,7 @@ func TestImportManager_NewImportManager(t *testing.T) {
 	var countLock sync.RWMutex
 	globalCount := typeutil.UniqueID(0)
 
-	idAlloc := func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+	idAlloc := func(ctx context.Context, count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 		countLock.Lock()
 		defer countLock.Unlock()
 		globalCount++
@@ -230,7 +230,7 @@ func TestImportManager_TestSetImportTaskState(t *testing.T) {
 	var countLock sync.RWMutex
 	globalCount := typeutil.UniqueID(0)
 
-	idAlloc := func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+	idAlloc := func(ctx context.Context, count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 		countLock.Lock()
 		defer countLock.Unlock()
 		globalCount++
@@ -299,7 +299,7 @@ func TestImportManager_TestEtcdCleanUp(t *testing.T) {
 	var countLock sync.RWMutex
 	globalCount := typeutil.UniqueID(0)
 
-	idAlloc := func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+	idAlloc := func(ctx context.Context, count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 		countLock.Lock()
 		defer countLock.Unlock()
 		globalCount++
@@ -383,7 +383,7 @@ func TestImportManager_TestFlipTaskStateLoop(t *testing.T) {
 	var countLock sync.RWMutex
 	globalCount := typeutil.UniqueID(0)
 
-	idAlloc := func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+	idAlloc := func(ctx context.Context, count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 		countLock.Lock()
 		defer countLock.Unlock()
 		globalCount++
@@ -503,7 +503,7 @@ func TestImportManager_ImportJob(t *testing.T) {
 	var countLock sync.RWMutex
 	globalCount := typeutil.UniqueID(0)
 
-	idAlloc := func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+	idAlloc := func(ctx context.Context, count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 		countLock.Lock()
 		defer countLock.Unlock()
 		globalCount++
@@ -633,7 +633,7 @@ func TestImportManager_AllDataNodesBusy(t *testing.T) {
 	var countLock sync.RWMutex
 	globalCount := typeutil.UniqueID(0)
 
-	idAlloc := func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+	idAlloc := func(ctx context.Context, count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 		countLock.Lock()
 		defer countLock.Unlock()
 		globalCount++
@@ -727,7 +727,7 @@ func TestImportManager_TaskState(t *testing.T) {
 	var countLock sync.RWMutex
 	globalCount := typeutil.UniqueID(0)
 
-	idAlloc := func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+	idAlloc := func(ctx context.Context, count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 		countLock.Lock()
 		defer countLock.Unlock()
 		globalCount++
@@ -834,7 +834,7 @@ func TestImportManager_TaskState(t *testing.T) {
 }
 
 func TestImportManager_AllocFail(t *testing.T) {
-	idAlloc := func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+	idAlloc := func(ctx context.Context, count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 		return 0, 0, errors.New("injected failure")
 	}
 	paramtable.Get().Save(Params.RootCoordCfg.ImportTaskSubPath.Key, "test_import_task")
@@ -867,7 +867,7 @@ func TestImportManager_ListAllTasks(t *testing.T) {
 	var countLock sync.RWMutex
 	globalCount := typeutil.UniqueID(0)
 
-	idAlloc := func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+	idAlloc := func(ctx context.Context, count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 		countLock.Lock()
 		defer countLock.Unlock()
 		globalCount++

@@ -448,8 +448,11 @@ generate-mockery-kv: getdeps
 	$(INSTALL_PATH)/mockery --name=SnapShotKV --dir=$(PWD)/internal/kv --output=$(PWD)/internal/kv/mocks --filename=snapshot_kv.go --with-expecter
 	$(INSTALL_PATH)/mockery --name=Predicate --dir=$(PWD)/internal/kv/predicates --output=$(PWD)/internal/kv/predicates --filename=mock_predicate.go --with-expecter --inpackage
 
+generate-mockery-mq: getdeps
+	$(INSTALL_PATH)/mockery --name=RocksMQ --dir=$(PWD)/internal/mq/mqimpl/rocksmq/server --output=$(PWD)/internal/mq/mqimpl/rocksmq/server/mock --filename=mock_rocksmq.go --with-expecter
+
 generate-mockery-pkg:
 	$(MAKE) -C pkg generate-mockery
 
-generate-mockery: generate-mockery-types generate-mockery-kv generate-mockery-rootcoord generate-mockery-proxy generate-mockery-querycoord generate-mockery-querynode generate-mockery-datacoord generate-mockery-pkg
+generate-mockery: generate-mockery-types generate-mockery-kv generate-mockery-rootcoord generate-mockery-proxy generate-mockery-querycoord generate-mockery-querynode generate-mockery-datacoord generate-mockery-pkg generate-mockery-mq
 

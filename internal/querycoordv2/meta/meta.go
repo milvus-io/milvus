@@ -17,6 +17,8 @@
 package meta
 
 import (
+	"context"
+
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 )
@@ -28,7 +30,7 @@ type Meta struct {
 }
 
 func NewMeta(
-	idAllocator func() (int64, error),
+	idAllocator func(ctx context.Context) (int64, error),
 	catalog metastore.QueryCoordCatalog,
 	nodeMgr *session.NodeManager,
 ) *Meta {

@@ -3,6 +3,7 @@
 package mocktso
 
 import (
+	context "context"
 	time "time"
 
 	mock "github.com/stretchr/testify/mock"
@@ -21,23 +22,23 @@ func (_m *Allocator) EXPECT() *Allocator_Expecter {
 	return &Allocator_Expecter{mock: &_m.Mock}
 }
 
-// GenerateTSO provides a mock function with given fields: count
-func (_m *Allocator) GenerateTSO(count uint32) (uint64, error) {
-	ret := _m.Called(count)
+// GenerateTSO provides a mock function with given fields: ctx, count
+func (_m *Allocator) GenerateTSO(ctx context.Context, count uint32) (uint64, error) {
+	ret := _m.Called(ctx, count)
 
 	var r0 uint64
 	var r1 error
-	if rf, ok := ret.Get(0).(func(uint32) (uint64, error)); ok {
-		return rf(count)
+	if rf, ok := ret.Get(0).(func(context.Context, uint32) (uint64, error)); ok {
+		return rf(ctx, count)
 	}
-	if rf, ok := ret.Get(0).(func(uint32) uint64); ok {
-		r0 = rf(count)
+	if rf, ok := ret.Get(0).(func(context.Context, uint32) uint64); ok {
+		r0 = rf(ctx, count)
 	} else {
 		r0 = ret.Get(0).(uint64)
 	}
 
-	if rf, ok := ret.Get(1).(func(uint32) error); ok {
-		r1 = rf(count)
+	if rf, ok := ret.Get(1).(func(context.Context, uint32) error); ok {
+		r1 = rf(ctx, count)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -51,14 +52,15 @@ type Allocator_GenerateTSO_Call struct {
 }
 
 // GenerateTSO is a helper method to define mock.On call
+//   - ctx context.Context
 //   - count uint32
-func (_e *Allocator_Expecter) GenerateTSO(count interface{}) *Allocator_GenerateTSO_Call {
-	return &Allocator_GenerateTSO_Call{Call: _e.mock.On("GenerateTSO", count)}
+func (_e *Allocator_Expecter) GenerateTSO(ctx interface{}, count interface{}) *Allocator_GenerateTSO_Call {
+	return &Allocator_GenerateTSO_Call{Call: _e.mock.On("GenerateTSO", ctx, count)}
 }
 
-func (_c *Allocator_GenerateTSO_Call) Run(run func(count uint32)) *Allocator_GenerateTSO_Call {
+func (_c *Allocator_GenerateTSO_Call) Run(run func(ctx context.Context, count uint32)) *Allocator_GenerateTSO_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(uint32))
+		run(args[0].(context.Context), args[1].(uint32))
 	})
 	return _c
 }
@@ -68,7 +70,7 @@ func (_c *Allocator_GenerateTSO_Call) Return(_a0 uint64, _a1 error) *Allocator_G
 	return _c
 }
 
-func (_c *Allocator_GenerateTSO_Call) RunAndReturn(run func(uint32) (uint64, error)) *Allocator_GenerateTSO_Call {
+func (_c *Allocator_GenerateTSO_Call) RunAndReturn(run func(context.Context, uint32) (uint64, error)) *Allocator_GenerateTSO_Call {
 	_c.Call.Return(run)
 	return _c
 }

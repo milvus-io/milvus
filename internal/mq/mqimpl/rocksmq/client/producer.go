@@ -11,6 +11,8 @@
 
 package client
 
+import "context"
+
 // ProducerOptions is the options of a producer
 type ProducerOptions struct {
 	Topic string
@@ -28,7 +30,7 @@ type Producer interface {
 	Topic() string
 
 	// publish a message
-	Send(message *ProducerMessage) (UniqueID, error)
+	Send(ctx context.Context, message *ProducerMessage) (UniqueID, error)
 
 	// Close a producer
 	Close()

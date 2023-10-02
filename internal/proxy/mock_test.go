@@ -83,11 +83,11 @@ func newMockTsoAllocator() tsoAllocator {
 
 type mockIDAllocatorInterface struct{}
 
-func (m *mockIDAllocatorInterface) AllocOne() (UniqueID, error) {
+func (m *mockIDAllocatorInterface) AllocOne(ctx context.Context) (UniqueID, error) {
 	return UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()), nil
 }
 
-func (m *mockIDAllocatorInterface) Alloc(count uint32) (UniqueID, UniqueID, error) {
+func (m *mockIDAllocatorInterface) Alloc(ctx context.Context, count uint32) (UniqueID, UniqueID, error) {
 	return UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()), UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt() + int(count)), nil
 }
 

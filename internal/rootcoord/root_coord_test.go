@@ -1402,7 +1402,7 @@ func TestCore_ReportImport(t *testing.T) {
 	paramtable.Get().Save(Params.RootCoordCfg.ImportTaskSubPath.Key, "importtask")
 	var countLock sync.RWMutex
 	globalCount := typeutil.UniqueID(0)
-	idAlloc := func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+	idAlloc := func(ctx context.Context, count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 		countLock.Lock()
 		defer countLock.Unlock()
 		globalCount++

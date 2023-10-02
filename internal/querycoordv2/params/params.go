@@ -17,6 +17,7 @@
 package params
 
 import (
+	"context"
 	"math/rand"
 	"strconv"
 	"sync/atomic"
@@ -46,15 +47,15 @@ func RandomMetaRootPath() string {
 	return "test-query-coord-" + strconv.FormatInt(rand.Int63(), 10)
 }
 
-func RandomIncrementIDAllocator() func() (int64, error) {
+func RandomIncrementIDAllocator() func(ctx context.Context) (int64, error) {
 	id := rand.Int63() / 2
-	return func() (int64, error) {
+	return func(ctx context.Context) (int64, error) {
 		return atomic.AddInt64(&id, 1), nil
 	}
 }
 
-func ErrorIDAllocator() func() (int64, error) {
-	return func() (int64, error) {
+func ErrorIDAllocator() func(ctx context.Context) (int64, error) {
+	return func(ctx context.Context) (int64, error) {
 		return 0, ErrFailedAllocateID
 	}
 }

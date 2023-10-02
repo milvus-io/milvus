@@ -17,6 +17,7 @@
 package meta
 
 import (
+	"context"
 	"testing"
 
 	"github.com/golang/protobuf/proto"
@@ -38,7 +39,7 @@ type ReplicaManagerSuite struct {
 	nodes          []int64
 	collections    []int64
 	replicaNumbers []int32
-	idAllocator    func() (int64, error)
+	idAllocator    func(ctx context.Context) (int64, error)
 	kv             kv.MetaKv
 	catalog        metastore.QueryCoordCatalog
 	mgr            *ReplicaManager

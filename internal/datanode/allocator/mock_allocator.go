@@ -3,6 +3,8 @@
 package allocator
 
 import (
+	context "context"
+
 	internalallocator "github.com/milvus-io/milvus/internal/allocator"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -20,30 +22,30 @@ func (_m *MockAllocator) EXPECT() *MockAllocator_Expecter {
 	return &MockAllocator_Expecter{mock: &_m.Mock}
 }
 
-// Alloc provides a mock function with given fields: count
-func (_m *MockAllocator) Alloc(count uint32) (int64, int64, error) {
-	ret := _m.Called(count)
+// Alloc provides a mock function with given fields: ctx, count
+func (_m *MockAllocator) Alloc(ctx context.Context, count uint32) (int64, int64, error) {
+	ret := _m.Called(ctx, count)
 
 	var r0 int64
 	var r1 int64
 	var r2 error
-	if rf, ok := ret.Get(0).(func(uint32) (int64, int64, error)); ok {
-		return rf(count)
+	if rf, ok := ret.Get(0).(func(context.Context, uint32) (int64, int64, error)); ok {
+		return rf(ctx, count)
 	}
-	if rf, ok := ret.Get(0).(func(uint32) int64); ok {
-		r0 = rf(count)
+	if rf, ok := ret.Get(0).(func(context.Context, uint32) int64); ok {
+		r0 = rf(ctx, count)
 	} else {
 		r0 = ret.Get(0).(int64)
 	}
 
-	if rf, ok := ret.Get(1).(func(uint32) int64); ok {
-		r1 = rf(count)
+	if rf, ok := ret.Get(1).(func(context.Context, uint32) int64); ok {
+		r1 = rf(ctx, count)
 	} else {
 		r1 = ret.Get(1).(int64)
 	}
 
-	if rf, ok := ret.Get(2).(func(uint32) error); ok {
-		r2 = rf(count)
+	if rf, ok := ret.Get(2).(func(context.Context, uint32) error); ok {
+		r2 = rf(ctx, count)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -57,14 +59,15 @@ type MockAllocator_Alloc_Call struct {
 }
 
 // Alloc is a helper method to define mock.On call
+//   - ctx context.Context
 //   - count uint32
-func (_e *MockAllocator_Expecter) Alloc(count interface{}) *MockAllocator_Alloc_Call {
-	return &MockAllocator_Alloc_Call{Call: _e.mock.On("Alloc", count)}
+func (_e *MockAllocator_Expecter) Alloc(ctx interface{}, count interface{}) *MockAllocator_Alloc_Call {
+	return &MockAllocator_Alloc_Call{Call: _e.mock.On("Alloc", ctx, count)}
 }
 
-func (_c *MockAllocator_Alloc_Call) Run(run func(count uint32)) *MockAllocator_Alloc_Call {
+func (_c *MockAllocator_Alloc_Call) Run(run func(ctx context.Context, count uint32)) *MockAllocator_Alloc_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(uint32))
+		run(args[0].(context.Context), args[1].(uint32))
 	})
 	return _c
 }
@@ -74,28 +77,28 @@ func (_c *MockAllocator_Alloc_Call) Return(_a0 int64, _a1 int64, _a2 error) *Moc
 	return _c
 }
 
-func (_c *MockAllocator_Alloc_Call) RunAndReturn(run func(uint32) (int64, int64, error)) *MockAllocator_Alloc_Call {
+func (_c *MockAllocator_Alloc_Call) RunAndReturn(run func(context.Context, uint32) (int64, int64, error)) *MockAllocator_Alloc_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// AllocOne provides a mock function with given fields:
-func (_m *MockAllocator) AllocOne() (int64, error) {
-	ret := _m.Called()
+// AllocOne provides a mock function with given fields: ctx
+func (_m *MockAllocator) AllocOne(ctx context.Context) (int64, error) {
+	ret := _m.Called(ctx)
 
 	var r0 int64
 	var r1 error
-	if rf, ok := ret.Get(0).(func() (int64, error)); ok {
-		return rf()
+	if rf, ok := ret.Get(0).(func(context.Context) (int64, error)); ok {
+		return rf(ctx)
 	}
-	if rf, ok := ret.Get(0).(func() int64); ok {
-		r0 = rf()
+	if rf, ok := ret.Get(0).(func(context.Context) int64); ok {
+		r0 = rf(ctx)
 	} else {
 		r0 = ret.Get(0).(int64)
 	}
 
-	if rf, ok := ret.Get(1).(func() error); ok {
-		r1 = rf()
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -109,13 +112,14 @@ type MockAllocator_AllocOne_Call struct {
 }
 
 // AllocOne is a helper method to define mock.On call
-func (_e *MockAllocator_Expecter) AllocOne() *MockAllocator_AllocOne_Call {
-	return &MockAllocator_AllocOne_Call{Call: _e.mock.On("AllocOne")}
+//   - ctx context.Context
+func (_e *MockAllocator_Expecter) AllocOne(ctx interface{}) *MockAllocator_AllocOne_Call {
+	return &MockAllocator_AllocOne_Call{Call: _e.mock.On("AllocOne", ctx)}
 }
 
-func (_c *MockAllocator_AllocOne_Call) Run(run func()) *MockAllocator_AllocOne_Call {
+func (_c *MockAllocator_AllocOne_Call) Run(run func(ctx context.Context)) *MockAllocator_AllocOne_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		run(args[0].(context.Context))
 	})
 	return _c
 }
@@ -125,7 +129,7 @@ func (_c *MockAllocator_AllocOne_Call) Return(_a0 int64, _a1 error) *MockAllocat
 	return _c
 }
 
-func (_c *MockAllocator_AllocOne_Call) RunAndReturn(run func() (int64, error)) *MockAllocator_AllocOne_Call {
+func (_c *MockAllocator_AllocOne_Call) RunAndReturn(run func(context.Context) (int64, error)) *MockAllocator_AllocOne_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -162,25 +166,25 @@ func (_c *MockAllocator_Close_Call) RunAndReturn(run func()) *MockAllocator_Clos
 	return _c
 }
 
-// GetGenerator provides a mock function with given fields: count, done
-func (_m *MockAllocator) GetGenerator(count int, done <-chan struct{}) (<-chan int64, error) {
-	ret := _m.Called(count, done)
+// GetGenerator provides a mock function with given fields: ctx, count, done
+func (_m *MockAllocator) GetGenerator(ctx context.Context, count int, done <-chan struct{}) (<-chan int64, error) {
+	ret := _m.Called(ctx, count, done)
 
 	var r0 <-chan int64
 	var r1 error
-	if rf, ok := ret.Get(0).(func(int, <-chan struct{}) (<-chan int64, error)); ok {
-		return rf(count, done)
+	if rf, ok := ret.Get(0).(func(context.Context, int, <-chan struct{}) (<-chan int64, error)); ok {
+		return rf(ctx, count, done)
 	}
-	if rf, ok := ret.Get(0).(func(int, <-chan struct{}) <-chan int64); ok {
-		r0 = rf(count, done)
+	if rf, ok := ret.Get(0).(func(context.Context, int, <-chan struct{}) <-chan int64); ok {
+		r0 = rf(ctx, count, done)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(<-chan int64)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(int, <-chan struct{}) error); ok {
-		r1 = rf(count, done)
+	if rf, ok := ret.Get(1).(func(context.Context, int, <-chan struct{}) error); ok {
+		r1 = rf(ctx, count, done)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -194,15 +198,16 @@ type MockAllocator_GetGenerator_Call struct {
 }
 
 // GetGenerator is a helper method to define mock.On call
+//   - ctx context.Context
 //   - count int
 //   - done <-chan struct{}
-func (_e *MockAllocator_Expecter) GetGenerator(count interface{}, done interface{}) *MockAllocator_GetGenerator_Call {
-	return &MockAllocator_GetGenerator_Call{Call: _e.mock.On("GetGenerator", count, done)}
+func (_e *MockAllocator_Expecter) GetGenerator(ctx interface{}, count interface{}, done interface{}) *MockAllocator_GetGenerator_Call {
+	return &MockAllocator_GetGenerator_Call{Call: _e.mock.On("GetGenerator", ctx, count, done)}
 }
 
-func (_c *MockAllocator_GetGenerator_Call) Run(run func(count int, done <-chan struct{})) *MockAllocator_GetGenerator_Call {
+func (_c *MockAllocator_GetGenerator_Call) Run(run func(ctx context.Context, count int, done <-chan struct{})) *MockAllocator_GetGenerator_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int), args[1].(<-chan struct{}))
+		run(args[0].(context.Context), args[1].(int), args[2].(<-chan struct{}))
 	})
 	return _c
 }
@@ -212,7 +217,7 @@ func (_c *MockAllocator_GetGenerator_Call) Return(_a0 <-chan int64, _a1 error) *
 	return _c
 }
 
-func (_c *MockAllocator_GetGenerator_Call) RunAndReturn(run func(int, <-chan struct{}) (<-chan int64, error)) *MockAllocator_GetGenerator_Call {
+func (_c *MockAllocator_GetGenerator_Call) RunAndReturn(run func(context.Context, int, <-chan struct{}) (<-chan int64, error)) *MockAllocator_GetGenerator_Call {
 	_c.Call.Return(run)
 	return _c
 }

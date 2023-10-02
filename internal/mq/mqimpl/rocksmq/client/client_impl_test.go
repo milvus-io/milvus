@@ -12,6 +12,7 @@
 package client
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"testing"
@@ -20,7 +21,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
+	mocks "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server/mock"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -139,7 +140,7 @@ func TestClient_Subscribe(t *testing.T) {
 }
 
 func TestClient_SubscribeError(t *testing.T) {
-	mockMQ := server.NewMockRocksMQ(t)
+	mockMQ := mocks.NewRocksMQ(t)
 	client, err := NewClient(Options{
 		Server: mockMQ,
 	})
@@ -191,7 +192,7 @@ func TestClient_SeekLatest(t *testing.T) {
 		Payload:    make([]byte, 10),
 		Properties: map[string]string{},
 	}
-	id, err := producer.Send(msg)
+	id, err := producer.Send(context.TODO(), msg)
 	assert.NoError(t, err)
 
 	msgChan := consumer1.Chan()
@@ -223,7 +224,7 @@ func TestClient_SeekLatest(t *testing.T) {
 			msg := &ProducerMessage{
 				Payload: make([]byte, 8),
 			}
-			_, err = producer.Send(msg)
+			_, err = producer.Send(context.TODO(), msg)
 			assert.NoError(t, err)
 		}
 	}
@@ -264,7 +265,7 @@ func TestClient_consume(t *testing.T) {
 	msg := &ProducerMessage{
 		Payload: make([]byte, 10),
 	}
-	id, err := producer.Send(msg)
+	id, err := producer.Send(context.TODO(), msg)
 	assert.NoError(t, err)
 
 	msgChan := consumer.Chan()

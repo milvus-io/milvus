@@ -61,7 +61,7 @@ func (t *createPartitionTask) Execute(ctx context.Context) error {
 			len(t.collMeta.Partitions), cfgMaxPartitionNum, t.collMeta.Name)
 	}
 
-	partID, err := t.core.idAllocator.AllocOne()
+	partID, err := t.core.idAllocator.AllocOne(t.ctx)
 	if err != nil {
 		return err
 	}

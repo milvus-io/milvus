@@ -383,7 +383,7 @@ func (sa *segIDAssigner) processFunc(req allocator.Request) error {
 	return err2
 }
 
-func (sa *segIDAssigner) GetSegmentID(collID UniqueID, partitionID UniqueID, channelName string, count uint32, ts Timestamp) (map[UniqueID]uint32, error) {
+func (sa *segIDAssigner) GetSegmentID(ctx context.Context, collID UniqueID, partitionID UniqueID, channelName string, count uint32, ts Timestamp) (map[UniqueID]uint32, error) {
 	req := &segRequest{
 		BaseRequest: allocator.BaseRequest{Done: make(chan error), Valid: false},
 		collID:      collID,
@@ -393,7 +393,7 @@ func (sa *segIDAssigner) GetSegmentID(collID UniqueID, partitionID UniqueID, cha
 		timestamp:   ts,
 	}
 	sa.Reqs <- req
-	if err := req.Wait(); err != nil {
+	if err := req.Wait(ctx); err != nil {
 		return nil, fmt.Errorf("getSegmentID failed: %s", err)
 	}
 

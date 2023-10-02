@@ -34,7 +34,7 @@ const (
 
 // Request defines an interface which has Wait and Notify methods.
 type Request interface {
-	Wait() error
+	Wait(ctx context.Context) error
 	Notify(error)
 }
 
@@ -45,9 +45,13 @@ type BaseRequest struct {
 }
 
 // Wait is blocked until the request is allocated or an error occurs.
-func (req *BaseRequest) Wait() error {
-	err := <-req.Done
-	return err
+func (req *BaseRequest) Wait(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-req.Done:
+		return err
+	}
 }
 
 // Notify is used to send error to the requester.
@@ -303,5 +307,5 @@ func (ta *CachedAllocator) CleanCache() {
 		},
 	}
 	ta.ForceSyncChan <- req
-	_ = req.Wait()
+	_ = req.Wait(context.Background())
 }

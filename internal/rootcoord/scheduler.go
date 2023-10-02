@@ -125,7 +125,7 @@ func (s *scheduler) updateLatestTsoAsMinDdlTs() {
 }
 
 func (s *scheduler) setID(task task) error {
-	id, err := s.idAllocator.AllocOne()
+	id, err := s.idAllocator.AllocOne(task.GetCtx())
 	if err != nil {
 		return err
 	}
@@ -134,7 +134,7 @@ func (s *scheduler) setID(task task) error {
 }
 
 func (s *scheduler) setTs(task task) error {
-	ts, err := s.tsoAllocator.GenerateTSO(1)
+	ts, err := s.tsoAllocator.GenerateTSO(task.GetCtx(), 1)
 	if err != nil {
 		return err
 	}

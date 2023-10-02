@@ -204,8 +204,8 @@ func TestDataSyncService_Start(t *testing.T) {
 	node.broker = broker
 
 	alloc := allocator.NewMockAllocator(t)
-	alloc.EXPECT().Alloc(mock.Anything).Call.Return(int64(22222),
-		func(count uint32) int64 {
+	alloc.EXPECT().Alloc(mock.Anything, mock.Anything).Call.Return(int64(22222),
+		func(ctx2 context.Context, count uint32) int64 {
 			return int64(22222 + count)
 		}, nil)
 	node.allocator = alloc
@@ -416,9 +416,9 @@ func TestDataSyncService_Close(t *testing.T) {
 	}
 
 	alloc := allocator.NewMockAllocator(t)
-	alloc.EXPECT().AllocOne().Call.Return(int64(11111), nil).Maybe()
-	alloc.EXPECT().Alloc(mock.Anything).Call.Return(int64(22222),
-		func(count uint32) int64 {
+	alloc.EXPECT().AllocOne(mock.Anything).Call.Return(int64(11111), nil)
+	alloc.EXPECT().Alloc(mock.Anything, mock.Anything).Call.Return(int64(22222),
+		func(ctx2 context.Context, count uint32) int64 {
 			return int64(22222 + count)
 		}, nil).Maybe()
 	node.allocator = alloc
