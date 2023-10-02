@@ -241,7 +241,7 @@ func (mt *MetaTable) reloadWithNonDatabase() error {
 }
 
 func (mt *MetaTable) createDefaultDb() error {
-	ts, err := mt.tsoAllocator.GenerateTSO(1)
+	ts, err := mt.tsoAllocator.GenerateTSO(mt.ctx, 1)
 	if err != nil {
 		return err
 	}

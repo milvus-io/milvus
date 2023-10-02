@@ -43,7 +43,7 @@ func (t *createDatabaseTask) Prepare(ctx context.Context) error {
 		return merr.WrapErrDatabaseResourceLimitExceeded(fmt.Sprintf("Failed to create database, limit={%d}", cfgMaxDatabaseNum))
 	}
 
-	t.dbID, err = t.core.idAllocator.AllocOne()
+	t.dbID, err = t.core.idAllocator.AllocOne(t.ctx)
 	if err != nil {
 		return err
 	}

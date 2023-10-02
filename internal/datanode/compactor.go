@@ -501,7 +501,7 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 		return nil, errIllegalCompactionPlan
 
 	case t.plan.GetType() == datapb.CompactionType_MergeCompaction || t.plan.GetType() == datapb.CompactionType_MixCompaction:
-		targetSegID, err = t.AllocOne()
+		targetSegID, err = t.AllocOne(ctxTimeout)
 		if err != nil {
 			log.Warn("compact wrong", zap.Error(err))
 			return nil, err

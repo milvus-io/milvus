@@ -17,6 +17,7 @@
 package rootcoord
 
 import (
+	"context"
 	"sync"
 
 	"go.uber.org/atomic"
@@ -46,7 +47,7 @@ func (c *ddlTsLockManager) GetMinDdlTs() Timestamp {
 	}
 	c.Lock()
 	defer c.Unlock()
-	ts, err := c.tsoAllocator.GenerateTSO(1)
+	ts, err := c.tsoAllocator.GenerateTSO(context.Background(), 1)
 	if err != nil {
 		return c.lastTs.Load()
 	}

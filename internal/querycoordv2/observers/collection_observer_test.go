@@ -17,6 +17,7 @@
 package observers
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -54,7 +55,7 @@ type CollectionObserverSuite struct {
 	nodes         []int64
 
 	// Mocks
-	idAllocator func() (int64, error)
+	idAllocator func(ctx context.Context) (int64, error)
 	etcd        *clientv3.Client
 	kv          kv.MetaKv
 	store       metastore.QueryCoordCatalog

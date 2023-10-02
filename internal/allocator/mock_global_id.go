@@ -1,5 +1,7 @@
 package allocator
 
+import "context"
+
 type MockGIDAllocator struct {
 	Interface
 	AllocF    func(count uint32) (UniqueID, UniqueID, error)
@@ -7,11 +9,11 @@ type MockGIDAllocator struct {
 	UpdateIDF func() error
 }
 
-func (m MockGIDAllocator) Alloc(count uint32) (UniqueID, UniqueID, error) {
+func (m MockGIDAllocator) Alloc(ctx context.Context, count uint32) (UniqueID, UniqueID, error) {
 	return m.AllocF(count)
 }
 
-func (m MockGIDAllocator) AllocOne() (UniqueID, error) {
+func (m MockGIDAllocator) AllocOne(ctx context.Context) (UniqueID, error) {
 	return m.AllocOneF()
 }
 

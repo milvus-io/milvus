@@ -138,8 +138,8 @@ func (ia *IDAllocator) processFunc(req Request) error {
 }
 
 // AllocOne allocates one id.
-func (ia *IDAllocator) AllocOne() (UniqueID, error) {
-	ret, _, err := ia.Alloc(1)
+func (ia *IDAllocator) AllocOne(ctx context.Context) (UniqueID, error) {
+	ret, _, err := ia.Alloc(ctx, 1)
 	if err != nil {
 		return 0, err
 	}
@@ -147,7 +147,7 @@ func (ia *IDAllocator) AllocOne() (UniqueID, error) {
 }
 
 // Alloc allocates the id of the count number.
-func (ia *IDAllocator) Alloc(count uint32) (UniqueID, UniqueID, error) {
+func (ia *IDAllocator) Alloc(ctx context.Context, count uint32) (UniqueID, UniqueID, error) {
 	if ia.closed() {
 		return 0, 0, errors.New("fail to allocate ID, closed allocator")
 	}
@@ -155,7 +155,7 @@ func (ia *IDAllocator) Alloc(count uint32) (UniqueID, UniqueID, error) {
 
 	req.count = count
 	ia.Reqs <- req
-	if err := req.Wait(); err != nil {
+	if err := req.Wait(ctx); err != nil {
 		return 0, 0, err
 	}
 

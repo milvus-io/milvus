@@ -12,6 +12,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"path"
 	"runtime"
@@ -601,7 +602,7 @@ func (rmq *rocksmq) destroyConsumerGroupInternal(topicName, groupName string) er
 }
 
 // Produce produces messages for topic and updates page infos for retention
-func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]UniqueID, error) {
+func (rmq *rocksmq) Produce(ctx context.Context, topicName string, messages []ProducerMessage) ([]UniqueID, error) {
 	if rmq.isClosed() {
 		return nil, errors.New(RmqNotServingErrMsg)
 	}
@@ -620,7 +621,7 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 	getLockTime := time.Since(start).Milliseconds()
 
 	msgLen := len(messages)
-	idStart, idEnd, err := rmq.idAllocator.Alloc(uint32(msgLen))
+	idStart, idEnd, err := rmq.idAllocator.Alloc(ctx, uint32(msgLen))
 	if err != nil {
 		return []UniqueID{}, err
 	}

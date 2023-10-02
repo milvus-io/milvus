@@ -95,7 +95,7 @@ func (s *DataNodeServicesSuite) SetupTest() {
 	alloc.EXPECT().Start().Return(nil).Maybe()
 	alloc.EXPECT().Close().Maybe()
 	alloc.EXPECT().GetIDAlloactor().Return(&allocator2.IDAllocator{}).Maybe()
-	alloc.EXPECT().Alloc(mock.Anything).Call.Return(int64(22222),
+	alloc.EXPECT().Alloc(mock.Anything, mock.Anything).Call.Return(int64(22222),
 		func(count uint32) int64 {
 			return int64(22222 + count)
 		}, nil).Maybe()

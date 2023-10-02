@@ -773,7 +773,7 @@ func (p *NumpyParser) splitFieldsData(fieldsData BlockData, shards []ShardData) 
 	}
 
 	// generate auto id for primary key and rowid field
-	rowIDBegin, rowIDEnd, err := p.rowIDAllocator.Alloc(uint32(rowCount))
+	rowIDBegin, rowIDEnd, err := p.rowIDAllocator.Alloc(p.ctx, uint32(rowCount))
 	if err != nil {
 		log.Warn("Numpy parser: failed to alloc row ID", zap.Int("rowCount", rowCount), zap.Error(err))
 		return fmt.Errorf("failed to alloc %d rows ID, error: %w", rowCount, err)

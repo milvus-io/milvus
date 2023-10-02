@@ -213,6 +213,7 @@ func Error(status *commonpb.Status) error {
 	if code == 0 {
 		return newMilvusError(status.GetReason(), Code(OldCodeToMerr(status.GetErrorCode())), false)
 	}
+
 	return newMilvusError(status.GetReason(), code, code&retryableFlag != 0)
 }
 
@@ -753,6 +754,11 @@ func WrapErrFieldNameInvalid(field any, msg ...string) error {
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "; "))
 	}
+	return err
+}
+
+func WrapErrAllocateTs(reason string) error {
+	err := errors.Wrap(ErrAllocTs, reason)
 	return err
 }
 

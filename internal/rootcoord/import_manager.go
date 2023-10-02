@@ -78,7 +78,7 @@ type importManager struct {
 
 	startOnce sync.Once
 
-	idAllocator               func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error)
+	idAllocator               func(ctx context.Context, count uint32) (typeutil.UniqueID, typeutil.UniqueID, error)
 	callImportService         func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)
 	getCollectionName         func(dbName string, collID, partitionID typeutil.UniqueID) (string, string, error)
 	callGetSegmentStates      func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error)
@@ -87,7 +87,7 @@ type importManager struct {
 
 // newImportManager helper function to create a importManager
 func newImportManager(ctx context.Context, client kv.TxnKV,
-	idAlloc func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error),
+	idAlloc func(ctx2 context.Context, count uint32) (typeutil.UniqueID, typeutil.UniqueID, error),
 	importService func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error),
 	getSegmentStates func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error),
 	getCollectionName func(dbName string, collID, partitionID typeutil.UniqueID) (string, string, error),
@@ -470,7 +470,7 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 			// For row-based importing, each file makes a task.
 			taskList := make([]int64, len(req.Files))
 			for i := 0; i < len(req.Files); i++ {
-				tID, _, err := m.idAllocator(1)
+				tID, _, err := m.idAllocator(ctx, 1)
 				if err != nil {
 					log.Error("failed to allocate ID for import task", zap.Error(err))
 					return err
@@ -510,7 +510,7 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 		} else {
 			// TODO: Merge duplicated code :(
 			// for column-based, all files is a task
-			tID, _, err := m.idAllocator(1)
+			tID, _, err := m.idAllocator(ctx, 1)
 			if err != nil {
 				return err
 			}

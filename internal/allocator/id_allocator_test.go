@@ -51,16 +51,16 @@ func TestIDAllocator(t *testing.T) {
 	err = idAllocator.Start()
 	assert.NoError(t, err)
 
-	idStart, idEnd, err := idAllocator.Alloc(20000)
+	idStart, idEnd, err := idAllocator.Alloc(ctx, 20000)
 	assert.NoError(t, err)
 	assert.Equal(t, idStart, int64(1))
 	assert.Equal(t, idEnd, int64(20001))
 
-	id, err := idAllocator.AllocOne()
+	id, err := idAllocator.AllocOne(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, id, int64(20001))
 
-	id, err = idAllocator.AllocOne()
+	id, err = idAllocator.AllocOne(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, id, int64(20002))
 }
@@ -74,6 +74,6 @@ func TestIDAllocatorClose(t *testing.T) {
 
 	a.Close()
 
-	_, _, err = a.Alloc(10)
+	_, _, err = a.Alloc(context.TODO(), 10)
 	assert.Error(t, err)
 }

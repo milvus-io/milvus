@@ -30,7 +30,7 @@ import (
 
 type GetCollectionNameFunc func(dbName string, collID, partitionID UniqueID) (string, string, error)
 
-type IDAllocator func(count uint32) (UniqueID, UniqueID, error)
+type IDAllocator func(ctx context.Context, count uint32) (UniqueID, UniqueID, error)
 
 type ImportFunc func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)
 
@@ -106,8 +106,8 @@ func GetCollectionNameWithCore(c *Core) GetCollectionNameFunc {
 }
 
 func IDAllocatorWithCore(c *Core) IDAllocator {
-	return func(count uint32) (UniqueID, UniqueID, error) {
-		return c.idAllocator.Alloc(count)
+	return func(ctx context.Context, count uint32) (UniqueID, UniqueID, error) {
+		return c.idAllocator.Alloc(ctx, count)
 	}
 }
 

@@ -891,7 +891,7 @@ func createBinLogs(rowNum int, schema *schemapb.CollectionSchema, ts Timestamp,
 		return nil, nil, err
 	}
 
-	start, _, err := node.allocator.Alloc(uint32(len(binLogs)))
+	start, _, err := node.allocator.Alloc(ctx, uint32(len(binLogs)))
 	if err != nil {
 		return nil, nil, err
 	}

@@ -5088,7 +5088,7 @@ func (node *Proxy) ReplicateMessage(ctx context.Context, req *milvuspb.Replicate
 		}
 		switch realMsg := tsMsg.(type) {
 		case *msgstream.InsertMsg:
-			assignedSegmentInfos, err := node.segAssigner.GetSegmentID(realMsg.GetCollectionID(), realMsg.GetPartitionID(),
+			assignedSegmentInfos, err := node.segAssigner.GetSegmentID(ctx, realMsg.GetCollectionID(), realMsg.GetPartitionID(),
 				realMsg.GetShardName(), uint32(realMsg.NumRows), req.EndTs)
 			if err != nil {
 				ctxLog.Warn("failed to get segment id", zap.Error(err))

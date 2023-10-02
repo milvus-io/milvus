@@ -459,7 +459,8 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 	var logidx int64
 	allocNum := uint32(len(binLogBlobs) + boolToInt(!flushed && pkStatsBlob != nil))
 	if allocNum != 0 {
-		logidx, _, err = m.Alloc(allocNum)
+		// TODO we never timeout here at flush
+		logidx, _, err = m.Alloc(context.Background(), allocNum)
 		if err != nil {
 			return nil, err
 		}
@@ -548,7 +549,7 @@ func (m *rendezvousFlushManager) flushDelData(data *DelDataBuf, segmentID Unique
 		return err
 	}
 
-	logID, err := m.AllocOne()
+	logID, err := m.AllocOne(context.TODO())
 	if err != nil {
 		log.Error("failed to alloc ID", zap.Error(err))
 		return err

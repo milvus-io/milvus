@@ -140,6 +140,9 @@ var (
 	// Segcore related
 	ErrSegcore = newMilvusError("segcore error", 2000, false)
 
+	// TS related
+	ErrAllocTs = newMilvusError("tso allocate error", 2100, true)
+
 	// Do NOT export this,
 	// never allow programmer using this, keep only for converting unknown error to milvusError
 	errUnexpected = newMilvusError("unexpected error", (1<<16)-1, false)

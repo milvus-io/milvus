@@ -296,8 +296,8 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 		channel.segments[1] = &Segment{numRows: 10}
 
 		alloc := allocator.NewMockAllocator(t)
-		alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Call.Return(validGeneratorFn, nil)
-		alloc.EXPECT().AllocOne().Return(0, nil)
+		alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything, mock.Anything).Call.Return(validGeneratorFn, nil)
+		alloc.EXPECT().AllocOne(mock.Anything).Return(0, nil)
 		t.Run("Merge without expiration", func(t *testing.T) {
 			mockbIO := &binlogIO{cm, alloc}
 			paramtable.Get().Save(Params.CommonCfg.EntityExpirationTTL.Key, "0")
@@ -691,7 +691,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			defer cancel()
 
 			alloc := allocator.NewMockAllocator(t)
-			alloc.EXPECT().AllocOne().Call.Return(int64(11111), nil)
+			alloc.EXPECT().AllocOne(mock.Anything).Call.Return(int64(11111), nil)
 
 			meta := f.GetCollectionMeta(UniqueID(10001), "test_upload_remain_log", schemapb.DataType_Int64)
 			stats := storage.NewPrimaryKeyStats(106, int64(schemapb.DataType_Int64), 10)
@@ -738,7 +738,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 
 	t.Run("Test compact invalid", func(t *testing.T) {
 		alloc := allocator.NewMockAllocator(t)
-		alloc.EXPECT().AllocOne().Call.Return(int64(11111), nil)
+		alloc.EXPECT().AllocOne(mock.Anything).Call.Return(int64(11111), nil)
 		ctx, cancel := context.WithCancel(context.TODO())
 		emptyTask := &compactionTask{
 			ctx:     ctx,
@@ -773,8 +773,8 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 
 	t.Run("Test typeII compact valid", func(t *testing.T) {
 		alloc := allocator.NewMockAllocator(t)
-		alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Call.Return(validGeneratorFn, nil)
-		alloc.EXPECT().AllocOne().Call.Return(int64(19530), nil)
+		alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything, mock.Anything).Call.Return(validGeneratorFn, nil)
+		alloc.EXPECT().AllocOne(mock.Anything).Call.Return(int64(19530), nil)
 		type testCase struct {
 			pkType schemapb.DataType
 			iData1 storage.FieldData
@@ -930,8 +930,9 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		var collName string = "test_compact_coll_name"
 
 		alloc := allocator.NewMockAllocator(t)
-		alloc.EXPECT().AllocOne().Call.Return(int64(19530), nil)
-		alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Call.Return(validGeneratorFn, nil)
+
+		alloc.EXPECT().AllocOne(mock.Anything).Call.Return(int64(19530), nil)
+		alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything, mock.Anything).Call.Return(validGeneratorFn, nil)
 
 		meta := NewMetaFactory().GetCollectionMeta(collID, "test_compact_coll_name", schemapb.DataType_Int64)
 		broker := broker.NewMockBroker(t)
@@ -943,6 +944,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 				CollectionName: collName,
 				ShardsNum:      common.DefaultShardsNum,
 			}, nil)
+
 		mockfm := &mockFlushManager{}
 		mockbIO := &binlogIO{cm, alloc}
 		channel := newChannel("channelname", collID, nil, broker, cm)

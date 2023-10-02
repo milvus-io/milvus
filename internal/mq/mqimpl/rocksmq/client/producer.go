@@ -11,7 +11,11 @@
 
 package client
 
-import "github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+import (
+	"context"
+
+	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+)
 
 // ProducerOptions is the options of a producer
 type ProducerOptions struct {
@@ -24,7 +28,7 @@ type Producer interface {
 	Topic() string
 
 	// publish a message
-	Send(message *mqwrapper.ProducerMessage) (UniqueID, error)
+	Send(ctx context.Context, message *mqwrapper.ProducerMessage) (UniqueID, error)
 
 	// Close a producer
 	Close()

@@ -38,7 +38,7 @@ func (rp *rmqProducer) Send(ctx context.Context, message *mqwrapper.ProducerMess
 	start := timerecord.NewTimeRecorder("send msg to stream")
 	metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.TotalLabel).Inc()
 
-	id, err := rp.p.Send(message)
+	id, err := rp.p.Send(ctx, message)
 	if err != nil {
 		metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.FailLabel).Inc()
 		return &server.RmqID{MessageID: id}, err

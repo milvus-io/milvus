@@ -11,6 +11,8 @@
 
 package server
 
+import "context"
+
 // ProducerMessage that will be written to rocksdb
 type ProducerMessage struct {
 	Payload []byte
@@ -42,7 +44,7 @@ type RocksMQ interface {
 	GetLatestMsg(topicName string) (int64, error)
 	CheckTopicValid(topicName string) error
 
-	Produce(topicName string, messages []ProducerMessage) ([]UniqueID, error)
+	Produce(ctx context.Context, topicName string, messages []ProducerMessage) ([]UniqueID, error)
 	Consume(topicName string, groupName string, n int) ([]ConsumerMessage, error)
 	Seek(topicName string, groupName string, msgID UniqueID) error
 	SeekToLatest(topicName, groupName string) error

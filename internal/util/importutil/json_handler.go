@@ -155,7 +155,7 @@ func (v *JSONRowConsumer) Handle(rows []map[storage.FieldID]interface{}) error {
 			return fmt.Errorf("primary keys is auto-generated but IDAllocator is nil")
 		}
 		var err error
-		rowIDBegin, rowIDEnd, err = v.rowIDAllocator.Alloc(uint32(len(rows)))
+		rowIDBegin, rowIDEnd, err = v.rowIDAllocator.Alloc(v.ctx, uint32(len(rows)))
 		if err != nil {
 			log.Warn("JSON row consumer: failed to generate primary keys", zap.Int("count", len(rows)), zap.Error(err))
 			return fmt.Errorf("failed to generate %d primary keys, error: %w", len(rows), err)

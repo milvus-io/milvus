@@ -17,6 +17,8 @@
 package allocator
 
 import (
+	"context"
+
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -44,8 +46,8 @@ func (gia *GlobalIDAllocator) Initialize() error {
 // Alloc allocates the id of the count number.
 // GenerateTSO is used to generate a given number of TSOs.
 // Make sure you have initialized the TSO allocator before calling.
-func (gia *GlobalIDAllocator) Alloc(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
-	timestamp, err := gia.allocator.GenerateTSO(count)
+func (gia *GlobalIDAllocator) Alloc(ctx context.Context, count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+	timestamp, err := gia.allocator.GenerateTSO(ctx, count)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -55,8 +57,8 @@ func (gia *GlobalIDAllocator) Alloc(count uint32) (typeutil.UniqueID, typeutil.U
 }
 
 // AllocOne allocates one id.
-func (gia *GlobalIDAllocator) AllocOne() (typeutil.UniqueID, error) {
-	timestamp, err := gia.allocator.GenerateTSO(1)
+func (gia *GlobalIDAllocator) AllocOne(ctx context.Context) (typeutil.UniqueID, error) {
+	timestamp, err := gia.allocator.GenerateTSO(ctx, 1)
 	if err != nil {
 		return 0, err
 	}

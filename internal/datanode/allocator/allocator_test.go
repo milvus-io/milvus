@@ -50,7 +50,7 @@ func TestGetGenerator(t *testing.T) {
 
 		t.Run(test.description, func(t *testing.T) {
 			done := make(chan struct{})
-			gen, err := alloc.GetGenerator(test.innumber, done)
+			gen, err := alloc.GetGenerator(context.TODO(), test.innumber, done)
 			assert.NoError(t, err)
 
 			r := make([]UniqueID, 0)
@@ -62,7 +62,7 @@ func TestGetGenerator(t *testing.T) {
 
 			if test.innumber > 1 {
 				donedone := make(chan struct{})
-				gen, err := alloc.GetGenerator(test.innumber, donedone)
+				gen, err := alloc.GetGenerator(context.TODO(), test.innumber, donedone)
 				assert.NoError(t, err)
 
 				_, ok := <-gen

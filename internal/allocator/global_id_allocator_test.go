@@ -17,6 +17,7 @@
 package allocator
 
 import (
+	"context"
 	"net/url"
 	"os"
 	"testing"
@@ -80,33 +81,34 @@ func TestGlobalTSOAllocator_All(t *testing.T) {
 
 	gTestIDAllocator = NewGlobalIDAllocator("idTimestamp", etcdKV)
 
+	ctx := context.TODO()
 	t.Run("Initialize", func(t *testing.T) {
 		err := gTestIDAllocator.Initialize()
 		assert.NoError(t, err)
 	})
 
 	t.Run("AllocOne", func(t *testing.T) {
-		one, err := gTestIDAllocator.AllocOne()
+		one, err := gTestIDAllocator.AllocOne(ctx)
 		assert.NoError(t, err)
-		ano, err := gTestIDAllocator.AllocOne()
+		ano, err := gTestIDAllocator.AllocOne(ctx)
 		assert.NoError(t, err)
 		assert.NotEqual(t, one, ano)
 	})
 
 	t.Run("Alloc", func(t *testing.T) {
 		count := uint32(2 << 10)
-		idStart, idEnd, err := gTestIDAllocator.Alloc(count)
+		idStart, idEnd, err := gTestIDAllocator.Alloc(ctx, count)
 		assert.NoError(t, err)
 		assert.Equal(t, count, uint32(idEnd-idStart))
 	})
 
 	t.Run("Alloc2", func(t *testing.T) {
 		count1 := uint32(2 << 18)
-		id1, err := gTestIDAllocator.allocator.GenerateTSO(count1)
+		id1, err := gTestIDAllocator.allocator.GenerateTSO(ctx, count1)
 		assert.NoError(t, err)
 
 		count2 := uint32(2 << 8)
-		id2, err := gTestIDAllocator.allocator.GenerateTSO(count2)
+		id2, err := gTestIDAllocator.allocator.GenerateTSO(ctx, count2)
 		assert.NoError(t, err)
 		assert.Equal(t, id2-id1, uint64(count2))
 	})

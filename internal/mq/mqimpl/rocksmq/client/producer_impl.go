@@ -12,6 +12,8 @@
 package client
 
 import (
+	"context"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
@@ -51,7 +53,8 @@ func (p *producer) Topic() string {
 }
 
 // Send produce message in rocksmq
-func (p *producer) Send(message *mqwrapper.ProducerMessage) (UniqueID, error) {
+// TODO Ignore the context for now, rocksmq should also follow context
+func (p *producer) Send(ctx context.Context, message *mqwrapper.ProducerMessage) (UniqueID, error) {
 	// NOTICE: this is the hack.
 	// we should not unmarshal the payload here but we can not extend the payload byte
 	payload := message.Payload
@@ -65,7 +68,7 @@ func (p *producer) Send(message *mqwrapper.ProducerMessage) (UniqueID, error) {
 		}
 	}
 
-	ids, err := p.c.server.Produce(p.topic, []server.ProducerMessage{
+	ids, err := p.c.server.Produce(ctx, p.topic, []server.ProducerMessage{
 		{
 			Payload: payload,
 		},

@@ -620,7 +620,7 @@ func (c *Core) restore(ctx context.Context) error {
 			return err
 		}
 		for _, coll := range colls {
-			ts, err := c.tsoAllocator.GenerateTSO(1)
+			ts, err := c.tsoAllocator.GenerateTSO(ctx, 1)
 			if err != nil {
 				return err
 			}
@@ -1519,7 +1519,7 @@ func (c *Core) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestam
 		}, nil
 	}
 
-	ts, err := c.tsoAllocator.GenerateTSO(in.GetCount())
+	ts, err := c.tsoAllocator.GenerateTSO(ctx, in.GetCount())
 	if err != nil {
 		log.Ctx(ctx).Error("failed to allocate timestamp", zap.String("role", typeutil.RootCoordRole),
 			zap.Error(err))
@@ -1546,7 +1546,7 @@ func (c *Core) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest) (*ro
 			Status: merr.Status(err),
 		}, nil
 	}
-	start, _, err := c.idAllocator.Alloc(in.Count)
+	start, _, err := c.idAllocator.Alloc(ctx, in.Count)
 	if err != nil {
 		log.Ctx(ctx).Error("failed to allocate id",
 			zap.String("role", typeutil.RootCoordRole),

@@ -12,6 +12,7 @@ import (
 
 // NewRocksmqFactory creates a new message stream factory based on rocksmq.
 func NewRocksmqFactory(path string, cfg *paramtable.ServiceParam) msgstream.Factory {
+	paramtable.Get().Save("rocksmq.compressionTypes", "0,0,0,0,0")
 	if err := server.InitRocksMQ(path); err != nil {
 		log.Fatal("fail to init rocksmq", zap.Error(err))
 	}

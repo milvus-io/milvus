@@ -152,7 +152,7 @@ func (b *binlogIO) uploadSegmentFiles(
 }
 
 // genDeltaBlobs returns key, value
-func (b *binlogIO) genDeltaBlobs(data *DeleteData, collID, partID, segID UniqueID) (string, []byte, error) {
+func (b *binlogIO) genDeltaBlobs(ctx context.Context, data *DeleteData, collID, partID, segID UniqueID) (string, []byte, error) {
 	dCodec := storage.NewDeleteCodec()
 
 	blob, err := dCodec.Serialize(collID, partID, segID, data)
@@ -160,7 +160,7 @@ func (b *binlogIO) genDeltaBlobs(data *DeleteData, collID, partID, segID UniqueI
 		return "", nil, err
 	}
 
-	idx, err := b.AllocOne()
+	idx, err := b.AllocOne(ctx)
 	if err != nil {
 		return "", nil, err
 	}
@@ -172,7 +172,7 @@ func (b *binlogIO) genDeltaBlobs(data *DeleteData, collID, partID, segID UniqueI
 }
 
 // genInsertBlobs returns insert-paths and save blob to kvs
-func (b *binlogIO) genInsertBlobs(data *InsertData, partID, segID UniqueID, iCodec *storage.InsertCodec, kvs map[string][]byte) (map[UniqueID]*datapb.FieldBinlog, error) {
+func (b *binlogIO) genInsertBlobs(ctx context.Context, data *InsertData, partID, segID UniqueID, iCodec *storage.InsertCodec, kvs map[string][]byte) (map[UniqueID]*datapb.FieldBinlog, error) {
 	inlogs, err := iCodec.Serialize(partID, segID, data)
 	if err != nil {
 		return nil, err
@@ -182,7 +182,7 @@ func (b *binlogIO) genInsertBlobs(data *InsertData, partID, segID UniqueID, iCod
 	notifyGenIdx := make(chan struct{})
 	defer close(notifyGenIdx)
 
-	generator, err := b.GetGenerator(len(inlogs), notifyGenIdx)
+	generator, err := b.GetGenerator(ctx, len(inlogs), notifyGenIdx)
 	if err != nil {
 		return nil, err
 	}
@@ -207,14 +207,14 @@ func (b *binlogIO) genInsertBlobs(data *InsertData, partID, segID UniqueID, iCod
 }
 
 // genStatBlobs return stats log paths and save blob to kvs
-func (b *binlogIO) genStatBlobs(stats *storage.PrimaryKeyStats, partID, segID UniqueID, iCodec *storage.InsertCodec, kvs map[string][]byte, totRows int64) (map[UniqueID]*datapb.FieldBinlog, error) {
+func (b *binlogIO) genStatBlobs(ctx context.Context, stats *storage.PrimaryKeyStats, partID, segID UniqueID, iCodec *storage.InsertCodec, kvs map[string][]byte, totRows int64) (map[UniqueID]*datapb.FieldBinlog, error) {
 	statBlob, err := iCodec.SerializePkStats(stats, totRows)
 	if err != nil {
 		return nil, err
 	}
 	statPaths := make(map[UniqueID]*datapb.FieldBinlog)
 
-	idx, err := b.AllocOne()
+	idx, err := b.AllocOne(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -253,7 +253,7 @@ func (b *binlogIO) uploadStatsLog(
 	kvs := make(map[string][]byte)
 
 	if !iData.IsEmpty() {
-		inPaths, err = b.genInsertBlobs(iData, partID, segID, iCodec, kvs)
+		inPaths, err = b.genInsertBlobs(ctx, iData, partID, segID, iCodec, kvs)
 		if err != nil {
 			log.Warn("generate insert blobs wrong",
 				zap.Int64("collectionID", iCodec.Schema.GetID()),
@@ -263,7 +263,7 @@ func (b *binlogIO) uploadStatsLog(
 		}
 	}
 
-	statPaths, err := b.genStatBlobs(stats, partID, segID, iCodec, kvs, totRows)
+	statPaths, err := b.genStatBlobs(ctx, stats, partID, segID, iCodec, kvs, totRows)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -294,7 +294,7 @@ func (b *binlogIO) uploadInsertLog(
 		return nil, nil
 	}
 
-	inpaths, err := b.genInsertBlobs(iData, partID, segID, iCodec, kvs)
+	inpaths, err := b.genInsertBlobs(ctx, iData, partID, segID, iCodec, kvs)
 	if err != nil {
 		return nil, err
 	}
@@ -320,7 +320,7 @@ func (b *binlogIO) uploadDeltaLog(
 	)
 
 	if dData.RowCount > 0 {
-		k, v, err := b.genDeltaBlobs(dData, meta.GetID(), partID, segID)
+		k, v, err := b.genDeltaBlobs(ctx, dData, meta.GetID(), partID, segID)
 		if err != nil {
 			log.Warn("generate delta blobs wrong",
 				zap.Int64("collectionID", meta.GetID()),

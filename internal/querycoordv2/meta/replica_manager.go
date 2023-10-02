@@ -17,6 +17,7 @@
 package meta
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -98,12 +99,12 @@ func (replica *Replica) Clone() *Replica {
 type ReplicaManager struct {
 	rwmutex sync.RWMutex
 
-	idAllocator func() (int64, error)
+	idAllocator func(ctx context.Context) (int64, error)
 	replicas    map[typeutil.UniqueID]*Replica
 	catalog     metastore.QueryCoordCatalog
 }
 
-func NewReplicaManager(idAllocator func() (int64, error), catalog metastore.QueryCoordCatalog) *ReplicaManager {
+func NewReplicaManager(idAllocator func(ctx context.Context) (int64, error), catalog metastore.QueryCoordCatalog) *ReplicaManager {
 	return &ReplicaManager{
 		idAllocator: idAllocator,
 		replicas:    make(map[int64]*Replica),
@@ -180,7 +181,8 @@ func (m *ReplicaManager) Put(replicas ...*Replica) error {
 }
 
 func (m *ReplicaManager) spawn(collectionID typeutil.UniqueID, rgName string) (*Replica, error) {
-	id, err := m.idAllocator()
+	// TODO, remove the idallocator, the id could be based on some simple algorithm, for exampl
+	id, err := m.idAllocator(context.Background())
 	if err != nil {
 		return nil, err
 	}

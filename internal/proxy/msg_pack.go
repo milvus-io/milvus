@@ -126,7 +126,7 @@ func repackInsertDataByPartition(ctx context.Context,
 		return nil, err
 	}
 	beforeAssign := time.Now()
-	assignedSegmentInfos, err := segIDAssigner.GetSegmentID(insertMsg.CollectionID, partitionID, channelName, uint32(len(rowOffsets)), maxTs)
+	assignedSegmentInfos, err := segIDAssigner.GetSegmentID(ctx, insertMsg.CollectionID, partitionID, channelName, uint32(len(rowOffsets)), maxTs)
 	metrics.ProxyAssignSegmentIDLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(time.Since(beforeAssign).Milliseconds()))
 	if err != nil {
 		log.Error("allocate segmentID for insert data failed",
@@ -163,7 +163,7 @@ func setMsgID(ctx context.Context,
 	var err error
 
 	err = retry.Do(ctx, func() error {
-		idBegin, _, err = idAllocator.Alloc(uint32(len(msgs)))
+		idBegin, _, err = idAllocator.Alloc(ctx, uint32(len(msgs)))
 		return err
 	})
 	if err != nil {

@@ -30,14 +30,16 @@
 package tso
 
 import (
+	"context"
+	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -57,7 +59,7 @@ type Allocator interface {
 	SetTSO(tso uint64) error
 	// GenerateTSO is used to generate a given number of TSOs.
 	// Make sure you have initialized the TSO allocator before calling.
-	GenerateTSO(count uint32) (uint64, error)
+	GenerateTSO(ctx context.Context, count uint32) (uint64, error)
 	// Reset is used to reset the TSO allocator.
 	Reset()
 
@@ -66,6 +68,7 @@ type Allocator interface {
 
 // GlobalTSOAllocator is the global single point TSO allocator.
 type GlobalTSOAllocator struct {
+	sync.RWMutex
 	tso           *timestampOracle
 	LimitMaxLogic bool
 }
@@ -85,6 +88,13 @@ func NewGlobalTSOAllocator(key string, txnKV kv.TxnKV) *GlobalTSOAllocator {
 
 // Initialize will initialize the created global TSO allocator.
 func (gta *GlobalTSOAllocator) Initialize() error {
+	gta.Lock()
+	defer gta.Unlock()
+	// init once
+	current := (*atomicObject)(atomic.LoadPointer(&gta.tso.TSO))
+	if current != nil {
+		return nil
+	}
 	return gta.tso.InitTimestamp()
 }
 
@@ -97,50 +107,61 @@ func (gta *GlobalTSOAllocator) SetLimitMaxLogic(flag bool) {
 
 // UpdateTSO is used to update the TSO in memory and the time window in etcd.
 func (gta *GlobalTSOAllocator) UpdateTSO() error {
+	gta.Lock()
+	defer gta.Unlock()
 	return gta.tso.UpdateTimestamp()
 }
 
 // SetTSO sets the physical part with given tso.
 func (gta *GlobalTSOAllocator) SetTSO(tso uint64) error {
+	gta.Lock()
+	defer gta.Unlock()
 	return gta.tso.ResetUserTimestamp(tso)
 }
 
 // GenerateTSO is used to generate a given number of TSOs.
 // Make sure you have initialized the TSO allocator before calling.
-func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (uint64, error) {
+func (gta *GlobalTSOAllocator) GenerateTSO(ctx context.Context, count uint32) (uint64, error) {
 	var physical, logical int64
 	if count == 0 {
-		return 0, errors.New("tso count should be positive")
+		return 0, merr.WrapErrAllocateTs("tso count should be positive")
 	}
 
-	maxRetryCount := 10
+	for {
+		select {
+		case <-ctx.Done():
+			return 0, merr.WrapErrAllocateTs("tso allocation timeout")
+		default:
+			current := (*atomicObject)(atomic.LoadPointer(&gta.tso.TSO))
+			if current == nil || current.physical.Equal(typeutil.ZeroTime) {
+				// If it's leader, maybe SyncTimestamp hasn't completed yet
+				log.Info("force initialize tso")
+				err := gta.Initialize()
+				if err != nil {
+					log.Warn("failed to update tso", zap.Error(err))
+				}
+				continue
+			}
 
-	for i := 0; i < maxRetryCount; i++ {
-		current := (*atomicObject)(atomic.LoadPointer(&gta.tso.TSO))
-		if current == nil || current.physical.Equal(typeutil.ZeroTime) {
-			// If it's leader, maybe SyncTimestamp hasn't completed yet
-			log.Info("sync hasn't completed yet, wait for a while")
-			time.Sleep(200 * time.Millisecond)
-			continue
+			physical = current.physical.UnixMilli()
+			logical = atomic.AddInt64(&current.logical, int64(count))
+			if logical >= maxLogical && gta.LimitMaxLogic {
+				log.Info("force update tso due to logical ts used up")
+				err := gta.UpdateTSO()
+				if err != nil {
+					log.Warn("failed to update tso", zap.Error(err))
+				}
+				continue
+			}
+			return tsoutil.ComposeTS(physical, logical), nil
 		}
-
-		physical = current.physical.UnixMilli()
-		logical = atomic.AddInt64(&current.logical, int64(count))
-		if logical >= maxLogical && gta.LimitMaxLogic {
-			log.Info("logical part outside of max logical interval, please check ntp time",
-				zap.Int("retry-count", i))
-			time.Sleep(UpdateTimestampStep)
-			continue
-		}
-		return tsoutil.ComposeTS(physical, logical), nil
 	}
-	return 0, errors.New("can not get timestamp")
 }
 
 // Alloc allocates a batch of timestamps. What is returned is the starting timestamp.
-func (gta *GlobalTSOAllocator) Alloc(count uint32) (typeutil.Timestamp, error) {
+func (gta *GlobalTSOAllocator) Alloc(ctx context.Context, count uint32) (typeutil.Timestamp, error) {
 	// return gta.tso.SyncTimestamp()
-	start, err := gta.GenerateTSO(count)
+	start, err := gta.GenerateTSO(ctx, count)
 	if err != nil {
 		return typeutil.ZeroTimestamp, err
 	}
@@ -152,8 +173,8 @@ func (gta *GlobalTSOAllocator) Alloc(count uint32) (typeutil.Timestamp, error) {
 }
 
 // AllocOne only allocates one timestamp.
-func (gta *GlobalTSOAllocator) AllocOne() (typeutil.Timestamp, error) {
-	return gta.GenerateTSO(1)
+func (gta *GlobalTSOAllocator) AllocOne(ctx context.Context) (typeutil.Timestamp, error) {
+	return gta.GenerateTSO(ctx, 1)
 }
 
 // Reset is used to reset the TSO allocator.
