@@ -30,10 +30,10 @@ const (
 	DefaultServerMaxRecvSize = 512 * 1024 * 1024
 
 	// DefaultClientMaxSendSize defines the maximum size of data per grpc request can send by client side.
-	DefaultClientMaxSendSize = 100 * 1024 * 1024
+	DefaultClientMaxSendSize = 256 * 1024 * 1024
 
 	// DefaultClientMaxRecvSize defines the maximum size of data per grpc request can receive by client side.
-	DefaultClientMaxRecvSize = 100 * 1024 * 1024
+	DefaultClientMaxRecvSize = 256 * 1024 * 1024
 
 	// DefaultLogLevel defines the log level of grpc
 	DefaultLogLevel = "WARNING"
