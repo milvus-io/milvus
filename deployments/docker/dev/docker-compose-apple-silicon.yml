@@ -56,7 +56,7 @@ services:
       - "6831:6831/udp"
       - "4317:4317" # OLTP over gRPC
       - "4318:4318" # OLTP over HTTP
-      - "16686:16686" # frontent
+      - "16686:16686" # frontend
       - "14268:14268" # jaeger.thirft
 
 networks:

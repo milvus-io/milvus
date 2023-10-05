@@ -1567,7 +1567,7 @@
     },
     {
       "aliasColors": {
-        "Incoming Byte Topic: depositos-comando-ledger": "light-orange"
+        "Incoming Byte Topic: deposits-comando-ledger": "light-orange"
       },
       "bars": false,
       "dashLength": 10,

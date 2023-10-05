@@ -11,7 +11,7 @@
     - deploy-minio
     - deploy-pulsar
 
-# Deploy all 3 nodes on the same host can be benefitial from I/O optimized disk, and it's easier
+# Deploy all 3 nodes on the same host can be beneficial from I/O optimized disk, and it's easier
 # to have additional host running a set of milvus nodes.
 - name: Create milvus nodes 
   hosts: nodes
