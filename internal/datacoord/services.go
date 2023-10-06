@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -866,15 +867,37 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 			rowCount = segment.NumOfRows
 		}
 
+		// save the traffic of sending
+		binLogs, err := datacoord.CompressBinLog(segment.Binlogs)
+		if err != nil {
+			log.Warn("failed to compress segment", zap.Int64("segmentID", id), zap.Error(err))
+			resp.Status.Reason = err.Error()
+			return resp, nil
+		}
+
+		deltaLogs, err := datacoord.CompressBinLog(segment.Deltalogs)
+		if err != nil {
+			log.Warn("failed to compress segment", zap.Int64("segmentID", id), zap.Error(err))
+			resp.Status.Reason = err.Error()
+			return resp, nil
+		}
+
+		statLogs, err := datacoord.CompressBinLog(segment.Statslogs)
+		if err != nil {
+			log.Warn("failed to compress segment", zap.Int64("segmentID", id), zap.Error(err))
+			resp.Status.Reason = err.Error()
+			return resp, nil
+		}
+
 		segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
 			ID:            segment.ID,
 			PartitionID:   segment.PartitionID,
 			CollectionID:  segment.CollectionID,
 			InsertChannel: segment.InsertChannel,
 			NumOfRows:     rowCount,
-			Binlogs:       segment.Binlogs,
-			Statslogs:     segment.Statslogs,
-			Deltalogs:     segment.Deltalogs,
+			Binlogs:       binLogs,
+			Statslogs:     statLogs,
+			Deltalogs:     deltaLogs,
 		})
 	}
 

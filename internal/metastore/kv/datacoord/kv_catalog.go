@@ -670,6 +670,61 @@ func fillLogIDByLogPath(multiFieldBinlogs ...[]*datapb.FieldBinlog) error {
 	return nil
 }
 
+func CompressBinLog(fieldBinLogs []*datapb.FieldBinlog) ([]*datapb.FieldBinlog, error) {
+	compressedFieldBinLogs := make([]*datapb.FieldBinlog, 0)
+	for _, fieldBinLog := range fieldBinLogs {
+		compressedFieldBinLog := &datapb.FieldBinlog{}
+		compressedFieldBinLog.FieldID = fieldBinLog.FieldID
+		for _, binlog := range fieldBinLog.Binlogs {
+			logPath := binlog.LogPath
+			idx := strings.LastIndex(logPath, "/")
+			if idx == -1 {
+				return nil, fmt.Errorf("invailed binlog path: %s", logPath)
+			}
+			logPathStr := logPath[(idx + 1):]
+			logID, err := strconv.ParseInt(logPathStr, 10, 64)
+			if err != nil {
+				return nil, err
+			}
+			binlog := &datapb.Binlog{
+				EntriesNum: binlog.EntriesNum,
+				// remove timestamp since it's not necessary
+				//TimestampTo:   binlog.TimestampTo,
+				//TimestampFrom: binlog.TimestampFrom,
+				LogSize: binlog.LogSize,
+				LogID:   logID,
+			}
+			compressedFieldBinLog.Binlogs = append(compressedFieldBinLog.Binlogs, binlog)
+		}
+		compressedFieldBinLogs = append(compressedFieldBinLogs, compressedFieldBinLog)
+	}
+	return compressedFieldBinLogs, nil
+}
+
+func DecompressBinLog(path string, info *datapb.SegmentInfo) error {
+	for _, fieldBinLogs := range info.GetBinlogs() {
+		err := fillLogPathByLogID(path, storage.InsertBinlog, info.CollectionID, info.PartitionID, info.ID, fieldBinLogs)
+		if err != nil {
+			return err
+		}
+	}
+
+	for _, deltaLogs := range info.GetDeltalogs() {
+		err := fillLogPathByLogID(path, storage.DeleteBinlog, info.CollectionID, info.PartitionID, info.ID, deltaLogs)
+		if err != nil {
+			return err
+		}
+	}
+
+	for _, statsLogs := range info.GetStatslogs() {
+		err := fillLogPathByLogID(path, storage.StatsBinlog, info.CollectionID, info.PartitionID, info.ID, statsLogs)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // build a binlog path on the storage by metadata
 func buildLogPath(chunkManagerRootPath string, binlogType storage.BinlogType, collectionID, partitionID, segmentID, filedID, logID typeutil.UniqueID) (string, error) {
 	switch binlogType {

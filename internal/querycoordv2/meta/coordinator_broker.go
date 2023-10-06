@@ -27,9 +27,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/types"
 
 	"go.uber.org/zap"
@@ -168,6 +170,12 @@ func (broker *CoordinatorBroker) GetRecoveryInfoV2(ctx context.Context, collecti
 		err = errors.New(recoveryInfo.GetStatus().GetReason())
 		log.Error("get recovery info failed", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs), zap.Error(err))
 		return nil, nil, err
+	}
+
+	path := params.Params.MinioCfg.RootPath
+	// refill log ID with log path
+	for _, segmentInfo := range recoveryInfo.Segments {
+		datacoord.DecompressBinLog(path, segmentInfo)
 	}
 
 	return recoveryInfo.Channels, recoveryInfo.Segments, nil
