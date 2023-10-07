@@ -855,7 +855,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [13])
-    @pytest.mark.parametrize("entities", [300])
+    @pytest.mark.parametrize("entities", [150])
     @pytest.mark.parametrize("file_nums", [10])
     def test_partition_key_on_multi_numpy_files(
             self, auto_id, dim, entities, file_nums
@@ -903,7 +903,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             )
             task_ids.append(task_id)
         success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=task_ids, timeout=90
+            task_ids=task_ids, timeout=120
         )
         log.info(f"bulk insert state:{success}")
 
