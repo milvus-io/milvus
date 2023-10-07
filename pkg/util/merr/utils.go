@@ -78,7 +78,7 @@ func Status(err error) *commonpb.Status {
 	}
 }
 
-func CheckRpcCall(resp any, err error) error {
+func CheckRPCCall(resp any, err error) error {
 	if err != nil {
 		return err
 	}
