@@ -21,6 +21,12 @@ enum SegmentType {
   Compacted = 3;
 }
 
+enum SegmentLevel {
+  Legacy = 0; // zero value for legacy logic
+  L0 = 1; // L0 segment, contains delta data for current channel
+  L1 = 2; // L1 segment, normal segment, with no extra compaction attribute
+}
+
 service DataCoord {
   rpc GetComponentStates(milvus.GetComponentStatesRequest) returns (milvus.ComponentStates) {}
   rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
@@ -295,6 +301,12 @@ message SegmentInfo {
   // For compatibility reasons, this flag of an old compacted segment may still be False.
   // As for new fields added in the message, they will be populated with their respective field types' default values.
   bool compacted = 19;
+
+  // Segment level, indicating compaction segment level
+  // Available value: Legacy, L0, L1
+  // For legacy level, it represent old segment before segment level introduced
+  // so segments with Legacy level shall be treated as L1 segment
+  SegmentLevel level = 20;
 }
 
 message SegmentStartPosition {
