@@ -4167,7 +4167,7 @@ func TestDataCoordServer_UpdateChannelCheckpoint(t *testing.T) {
 	})
 }
 
-var global_test_tikv = tikv.SetupLocalTxn()
+var globalTestTikv = tikv.SetupLocalTxn()
 
 func newTestServer(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 	var err error
@@ -4188,7 +4188,7 @@ func newTestServer(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 
 	svr := CreateServer(context.TODO(), factory)
 	svr.SetEtcdClient(etcdCli)
-	svr.SetTiKVClient(global_test_tikv)
+	svr.SetTiKVClient(globalTestTikv)
 
 	svr.dataNodeCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
 		return newMockDataNodeClient(0, receiveCh)
@@ -4242,7 +4242,7 @@ func newTestServerWithMeta(t *testing.T, receiveCh chan any, meta *meta, opts ..
 
 	svr := CreateServer(context.TODO(), factory, opts...)
 	svr.SetEtcdClient(etcdCli)
-	svr.SetTiKVClient(global_test_tikv)
+	svr.SetTiKVClient(globalTestTikv)
 
 	svr.dataNodeCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
 		return newMockDataNodeClient(0, receiveCh)
@@ -4299,7 +4299,7 @@ func newTestServer2(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 
 	svr := CreateServer(context.TODO(), factory, opts...)
 	svr.SetEtcdClient(etcdCli)
-	svr.SetTiKVClient(global_test_tikv)
+	svr.SetTiKVClient(globalTestTikv)
 
 	svr.dataNodeCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
 		return newMockDataNodeClient(0, receiveCh)
@@ -4495,7 +4495,7 @@ func testDataCoordBase(t *testing.T, opts ...Option) *Server {
 
 	svr := CreateServer(ctx, factory, opts...)
 	svr.SetEtcdClient(etcdCli)
-	svr.SetTiKVClient(global_test_tikv)
+	svr.SetTiKVClient(globalTestTikv)
 
 	svr.SetDataNodeCreator(func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
 		return newMockDataNodeClient(0, nil)

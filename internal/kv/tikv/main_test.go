@@ -80,8 +80,8 @@ func setupRemoteTiKV() {
 	}
 }
 
-func setupTiKV(use_remote bool) {
-	if use_remote {
+func setupTiKV(useRemote bool) {
+	if useRemote {
 		setupRemoteTiKV()
 	} else {
 		setupLocalTiKV()

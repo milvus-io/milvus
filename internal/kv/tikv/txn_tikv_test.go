@@ -561,7 +561,7 @@ func TestEmptyKey(t *testing.T) {
 }
 
 func TestScanSize(t *testing.T) {
-	scan_size := SnapshotScanSize
+	scanSize := SnapshotScanSize
 	kv := NewTiKV(txnClient, "/")
 	err := kv.RemoveWithPrefix("")
 	require.NoError(t, err)
@@ -570,18 +570,18 @@ func TestScanSize(t *testing.T) {
 	defer kv.RemoveWithPrefix("")
 
 	// Test total > scansize
-	key_map := map[string]string{}
-	for i := 1; i <= scan_size+100; i++ {
+	keyMap := map[string]string{}
+	for i := 1; i <= scanSize+100; i++ {
 		a := fmt.Sprintf("%v", i)
-		key_map[a] = a
+		keyMap[a] = a
 	}
 
-	err = kv.MultiSave(key_map)
+	err = kv.MultiSave(keyMap)
 	assert.NoError(t, err)
 
 	keys, _, err := kv.LoadWithPrefix("")
 	assert.NoError(t, err)
-	assert.Equal(t, len(keys), scan_size+100)
+	assert.Equal(t, len(keys), scanSize+100)
 
 	err = kv.RemoveWithPrefix("")
 	require.NoError(t, err)
