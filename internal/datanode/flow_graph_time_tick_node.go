@@ -131,7 +131,7 @@ func (ttn *ttNode) updateChannelCP(channelPos *msgpb.MsgPosition, curTs time.Tim
 		VChannel: ttn.vChannelName,
 		Position: channelPos,
 	})
-	if err = merr.CheckRpcCall(resp, err); err != nil {
+	if err = merr.CheckRPCCall(resp, err); err != nil {
 		log.Warn("UpdateChannelCheckpoint failed", zap.String("channel", ttn.vChannelName),
 			zap.Time("channelCPTs", channelCPTs), zap.Error(err))
 		return err

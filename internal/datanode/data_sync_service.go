@@ -149,7 +149,7 @@ func getSegmentInfos(ctx context.Context, datacoord types.DataCoordClient, segme
 		SegmentIDs:       segmentIDs,
 		IncludeUnHealthy: true,
 	})
-	if err := merr.CheckRpcCall(infoResp, err); err != nil {
+	if err := merr.CheckRPCCall(infoResp, err); err != nil {
 		log.Error("Fail to get SegmentInfo by ids from datacoord", zap.Error(err))
 		return nil, err
 	}
