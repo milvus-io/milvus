@@ -73,7 +73,7 @@ func tiTxnBegin(txn *txnkv.Client) (*transaction.KVTxn, error) {
 	return txn.Begin()
 }
 
-func tiTxnCommit(txn *transaction.KVTxn, ctx context.Context) error {
+func tiTxnCommit(ctx context.Context, txn *transaction.KVTxn) error {
 	return txn.Commit(ctx)
 }
 
@@ -143,10 +143,9 @@ func (kv *txnTiKV) Has(key string) (bool, error) {
 		// Dont error out if not present unless failed call to tikv
 		if common.IsKeyNotExistError(err) {
 			return false, nil
-		} else {
-			loggingErr = errors.Wrap(err, fmt.Sprintf("Failed to read key: %s", key))
-			return false, loggingErr
 		}
+		loggingErr = errors.Wrap(err, fmt.Sprintf("Failed to read key: %s", key))
+		return false, loggingErr
 	}
 	CheckElapseAndWarn(start, "Slow txnTiKV Has() operation", zap.String("key", key))
 	return true, nil
@@ -348,7 +347,7 @@ func (kv *txnTiKV) MultiSave(kvs map[string]string) error {
 			return loggingErr
 		}
 	}
-	err = kv.executeTxn(txn, ctx)
+	err = kv.executeTxn(ctx, txn)
 	if err != nil {
 		loggingErr = errors.Wrap(err, "Failed to commit for MultiSave()")
 		return loggingErr
@@ -397,7 +396,7 @@ func (kv *txnTiKV) MultiRemove(keys []string) error {
 		}
 	}
 
-	err = kv.executeTxn(txn, ctx)
+	err = kv.executeTxn(ctx, txn)
 	if err != nil {
 		loggingErr = errors.Wrap(err, "Failed to commit for MultiRemove()")
 		return loggingErr
@@ -481,7 +480,7 @@ func (kv *txnTiKV) MultiSaveAndRemove(saves map[string]string, removals []string
 		}
 	}
 
-	err = kv.executeTxn(txn, ctx)
+	err = kv.executeTxn(ctx, txn)
 	if err != nil {
 		loggingErr = errors.Wrap(err, "Failed to commit for MultiSaveAndRemove")
 		return loggingErr
@@ -567,7 +566,7 @@ func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removal
 			}
 		}
 	}
-	err = kv.executeTxn(txn, ctx)
+	err = kv.executeTxn(ctx, txn)
 	if err != nil {
 		loggingErr = errors.Wrap(err, "Failed to commit for MultiSaveAndRemoveWithPrefix")
 		return loggingErr
@@ -620,12 +619,12 @@ func (kv *txnTiKV) WalkWithPrefix(prefix string, paginationSize int, fn func([]b
 	return nil
 }
 
-func (kv *txnTiKV) executeTxn(txn *transaction.KVTxn, ctx context.Context) error {
+func (kv *txnTiKV) executeTxn(ctx context.Context, txn *transaction.KVTxn) error {
 	start := timerecord.NewTimeRecorder("executeTxn")
 
 	elapsed := start.ElapseSpan()
 	metrics.MetaOpCounter.WithLabelValues(metrics.MetaTxnLabel, metrics.TotalLabel).Inc()
-	err := commitTxn(txn, ctx)
+	err := commitTxn(ctx, txn)
 	if err == nil {
 		metrics.MetaRequestLatency.WithLabelValues(metrics.MetaTxnLabel).Observe(float64(elapsed.Milliseconds()))
 		metrics.MetaOpCounter.WithLabelValues(metrics.MetaTxnLabel, metrics.SuccessLabel).Inc()
@@ -651,10 +650,9 @@ func (kv *txnTiKV) getTiKVMeta(ctx context.Context, key string) (string, error) 
 		if err == tikverr.ErrNotExist {
 			// If key is missing
 			return "", common.NewKeyNotExistError(key)
-		} else {
-			// If call to tikv fails
-			return "", errors.Wrap(err, fmt.Sprintf("Failed to get value for key %s in getTiKVMeta", key))
 		}
+		// If call to tikv fails
+		return "", errors.Wrap(err, fmt.Sprintf("Failed to get value for key %s in getTiKVMeta", key))
 	}
 
 	// Check if value is the empty placeholder
@@ -692,7 +690,7 @@ func (kv *txnTiKV) putTiKVMeta(ctx context.Context, key, val string) error {
 	if err != nil {
 		return errors.Wrap(err, fmt.Sprintf("Failed to set value for key %s in putTiKVMeta", key))
 	}
-	err = commitTxn(txn, ctx1)
+	err = commitTxn(ctx1, txn)
 
 	elapsed := start.ElapseSpan()
 	metrics.MetaOpCounter.WithLabelValues(metrics.MetaPutLabel, metrics.TotalLabel).Inc()
@@ -724,7 +722,7 @@ func (kv *txnTiKV) removeTiKVMeta(ctx context.Context, key string) error {
 	if err != nil {
 		return errors.Wrap(err, fmt.Sprintf("Failed to remove key %s in removeTiKVMeta", key))
 	}
-	err = commitTxn(txn, ctx1)
+	err = commitTxn(ctx1, txn)
 
 	elapsed := start.ElapseSpan()
 	metrics.MetaOpCounter.WithLabelValues(metrics.MetaRemoveLabel, metrics.TotalLabel).Inc()
@@ -765,9 +763,8 @@ func isEmptyByte(value []byte) bool {
 func convertEmptyByteToString(value []byte) string {
 	if isEmptyByte(value) {
 		return ""
-	} else {
-		return string(value)
 	}
+	return string(value)
 }
 
 // Convert string into EmptyValue if empty else cast to []byte. Will throw error if value is equal

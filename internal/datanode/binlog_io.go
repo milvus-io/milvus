@@ -101,9 +101,8 @@ func (b *binlogIO) download(ctx context.Context, paths []string) ([]*Blob, error
 	for i := range futures {
 		if !futures[i].OK() {
 			return nil, futures[i].Err()
-		} else {
-			resp[i] = &Blob{Value: futures[i].Value().([]byte)}
 		}
+		resp[i] = &Blob{Value: futures[i].Value().([]byte)}
 	}
 
 	return resp, nil

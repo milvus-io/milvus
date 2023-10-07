@@ -36,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type Collection struct {
@@ -100,8 +99,8 @@ func (partition *Partition) Clone() *Partition {
 type CollectionManager struct {
 	rwmutex sync.RWMutex
 
-	collections map[UniqueID]*Collection
-	partitions  map[UniqueID]*Partition
+	collections map[typeutil.UniqueID]*Collection
+	partitions  map[typeutil.UniqueID]*Partition
 	catalog     metastore.QueryCoordCatalog
 }
 
@@ -275,21 +274,21 @@ func (m *CollectionManager) upgradeRecover(broker Broker) error {
 	return nil
 }
 
-func (m *CollectionManager) GetCollection(collectionID UniqueID) *Collection {
+func (m *CollectionManager) GetCollection(collectionID typeutil.UniqueID) *Collection {
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
 
 	return m.collections[collectionID]
 }
 
-func (m *CollectionManager) GetPartition(partitionID UniqueID) *Partition {
+func (m *CollectionManager) GetPartition(partitionID typeutil.UniqueID) *Partition {
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
 
 	return m.partitions[partitionID]
 }
 
-func (m *CollectionManager) GetLoadType(collectionID UniqueID) querypb.LoadType {
+func (m *CollectionManager) GetLoadType(collectionID typeutil.UniqueID) querypb.LoadType {
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
 
@@ -300,7 +299,7 @@ func (m *CollectionManager) GetLoadType(collectionID UniqueID) querypb.LoadType 
 	return querypb.LoadType_UnKnownType
 }
 
-func (m *CollectionManager) GetReplicaNumber(collectionID UniqueID) int32 {
+func (m *CollectionManager) GetReplicaNumber(collectionID typeutil.UniqueID) int32 {
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
 
@@ -312,14 +311,14 @@ func (m *CollectionManager) GetReplicaNumber(collectionID UniqueID) int32 {
 }
 
 // CalculateLoadPercentage checks if collection is currently fully loaded.
-func (m *CollectionManager) CalculateLoadPercentage(collectionID UniqueID) int32 {
+func (m *CollectionManager) CalculateLoadPercentage(collectionID typeutil.UniqueID) int32 {
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
 
 	return m.calculateLoadPercentage(collectionID)
 }
 
-func (m *CollectionManager) calculateLoadPercentage(collectionID UniqueID) int32 {
+func (m *CollectionManager) calculateLoadPercentage(collectionID typeutil.UniqueID) int32 {
 	_, ok := m.collections[collectionID]
 	if ok {
 		partitions := m.getPartitionsByCollection(collectionID)
@@ -332,7 +331,7 @@ func (m *CollectionManager) calculateLoadPercentage(collectionID UniqueID) int32
 	return -1
 }
 
-func (m *CollectionManager) GetPartitionLoadPercentage(partitionID UniqueID) int32 {
+func (m *CollectionManager) GetPartitionLoadPercentage(partitionID typeutil.UniqueID) int32 {
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
 
@@ -343,7 +342,7 @@ func (m *CollectionManager) GetPartitionLoadPercentage(partitionID UniqueID) int
 	return -1
 }
 
-func (m *CollectionManager) CalculateLoadStatus(collectionID UniqueID) querypb.LoadStatus {
+func (m *CollectionManager) CalculateLoadStatus(collectionID typeutil.UniqueID) querypb.LoadStatus {
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
 
@@ -366,7 +365,7 @@ func (m *CollectionManager) CalculateLoadStatus(collectionID UniqueID) querypb.L
 	return querypb.LoadStatus_Invalid
 }
 
-func (m *CollectionManager) GetFieldIndex(collectionID UniqueID) map[int64]int64 {
+func (m *CollectionManager) GetFieldIndex(collectionID typeutil.UniqueID) map[int64]int64 {
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
 
@@ -377,7 +376,7 @@ func (m *CollectionManager) GetFieldIndex(collectionID UniqueID) map[int64]int64
 	return nil
 }
 
-func (m *CollectionManager) Exist(collectionID UniqueID) bool {
+func (m *CollectionManager) Exist(collectionID typeutil.UniqueID) bool {
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
 
@@ -411,14 +410,14 @@ func (m *CollectionManager) GetAllPartitions() []*Partition {
 	return lo.Values(m.partitions)
 }
 
-func (m *CollectionManager) GetPartitionsByCollection(collectionID UniqueID) []*Partition {
+func (m *CollectionManager) GetPartitionsByCollection(collectionID typeutil.UniqueID) []*Partition {
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
 
 	return m.getPartitionsByCollection(collectionID)
 }
 
-func (m *CollectionManager) getPartitionsByCollection(collectionID UniqueID) []*Partition {
+func (m *CollectionManager) getPartitionsByCollection(collectionID typeutil.UniqueID) []*Partition {
 	partitions := make([]*Partition, 0)
 	for _, partition := range m.partitions {
 		if partition.CollectionID == collectionID {
@@ -547,7 +546,7 @@ func (m *CollectionManager) UpdateLoadPercent(partitionID int64, loadPercent int
 }
 
 // RemoveCollection removes collection and its partitions.
-func (m *CollectionManager) RemoveCollection(collectionID UniqueID) error {
+func (m *CollectionManager) RemoveCollection(collectionID typeutil.UniqueID) error {
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
 
@@ -567,7 +566,7 @@ func (m *CollectionManager) RemoveCollection(collectionID UniqueID) error {
 	return nil
 }
 
-func (m *CollectionManager) RemovePartition(collectionID UniqueID, partitionIDs ...UniqueID) error {
+func (m *CollectionManager) RemovePartition(collectionID typeutil.UniqueID, partitionIDs ...typeutil.UniqueID) error {
 	if len(partitionIDs) == 0 {
 		return nil
 	}
@@ -578,7 +577,7 @@ func (m *CollectionManager) RemovePartition(collectionID UniqueID, partitionIDs 
 	return m.removePartition(collectionID, partitionIDs...)
 }
 
-func (m *CollectionManager) removePartition(collectionID UniqueID, partitionIDs ...UniqueID) error {
+func (m *CollectionManager) removePartition(collectionID typeutil.UniqueID, partitionIDs ...typeutil.UniqueID) error {
 	err := m.catalog.ReleasePartition(collectionID, partitionIDs...)
 	if err != nil {
 		return err

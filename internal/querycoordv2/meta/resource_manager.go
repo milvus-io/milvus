@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 var (
@@ -56,7 +55,7 @@ var DefaultResourceGroupName = "__default_resource_group"
 var DefaultResourceGroupCapacity = 1000000
 
 type ResourceGroup struct {
-	nodes    UniqueSet
+	nodes    typeutil.UniqueSet
 	capacity int
 }
 

@@ -391,34 +391,34 @@ func TestProxy_FlushAll_DbCollection(t *testing.T) {
 	globalMetaCache = cache
 
 	for _, test := range tests {
-		factory := dependency.NewDefaultFactory(true)
-		ctx := context.Background()
-		paramtable.Init()
-
-		node, err := NewProxy(ctx, factory)
-		assert.NoError(t, err)
-		node.stateCode.Store(commonpb.StateCode_Healthy)
-		node.tsoAllocator = &timestampAllocator{
-			tso: newMockTimestampAllocatorInterface(),
-		}
-
-		Params.Save(Params.ProxyCfg.MaxTaskNum.Key, "1000")
-		node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
-		assert.NoError(t, err)
-		err = node.sched.Start()
-		assert.NoError(t, err)
-		defer node.sched.Close()
-		node.dataCoord = mocks.NewMockDataCoordClient(t)
-		node.rootCoord = mocks.NewMockRootCoordClient(t)
-		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
-		node.dataCoord.(*mocks.MockDataCoordClient).EXPECT().Flush(mock.Anything, mock.Anything).
-			Return(&datapb.FlushResponse{Status: successStatus}, nil).Maybe()
-		node.rootCoord.(*mocks.MockRootCoordClient).EXPECT().ShowCollections(mock.Anything, mock.Anything).
-			Return(&milvuspb.ShowCollectionsResponse{Status: successStatus, CollectionNames: []string{"col-0"}}, nil).Maybe()
-		node.rootCoord.(*mocks.MockRootCoordClient).EXPECT().ListDatabases(mock.Anything, mock.Anything).
-			Return(&milvuspb.ListDatabasesResponse{Status: successStatus, DbNames: []string{"default"}}, nil).Maybe()
-
 		t.Run(test.testName, func(t *testing.T) {
+			factory := dependency.NewDefaultFactory(true)
+			ctx := context.Background()
+			paramtable.Init()
+
+			node, err := NewProxy(ctx, factory)
+			assert.NoError(t, err)
+			node.stateCode.Store(commonpb.StateCode_Healthy)
+			node.tsoAllocator = &timestampAllocator{
+				tso: newMockTimestampAllocatorInterface(),
+			}
+
+			Params.Save(Params.ProxyCfg.MaxTaskNum.Key, "1000")
+			node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
+			assert.NoError(t, err)
+			err = node.sched.Start()
+			assert.NoError(t, err)
+			defer node.sched.Close()
+			node.dataCoord = mocks.NewMockDataCoordClient(t)
+			node.rootCoord = mocks.NewMockRootCoordClient(t)
+			successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
+			node.dataCoord.(*mocks.MockDataCoordClient).EXPECT().Flush(mock.Anything, mock.Anything).
+				Return(&datapb.FlushResponse{Status: successStatus}, nil).Maybe()
+			node.rootCoord.(*mocks.MockRootCoordClient).EXPECT().ShowCollections(mock.Anything, mock.Anything).
+				Return(&milvuspb.ShowCollectionsResponse{Status: successStatus, CollectionNames: []string{"col-0"}}, nil).Maybe()
+			node.rootCoord.(*mocks.MockRootCoordClient).EXPECT().ListDatabases(mock.Anything, mock.Anything).
+				Return(&milvuspb.ListDatabasesResponse{Status: successStatus, DbNames: []string{"default"}}, nil).Maybe()
+
 			resp, err := node.FlushAll(ctx, test.FlushRequest)
 			assert.NoError(t, err)
 			if test.ExpectedSuccess {

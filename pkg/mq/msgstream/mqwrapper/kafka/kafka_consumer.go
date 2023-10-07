@@ -228,12 +228,10 @@ func (kc *Consumer) CheckTopicValid(topic string) error {
 	if err != nil {
 		switch v := err.(type) {
 		case kafka.Error:
-
 			if v.Code() == kafka.ErrUnknownTopic || v.Code() == kafka.ErrUnknownTopicOrPart {
 				return merr.WrapErrMqTopicNotFound(topic, err.Error())
-			} else {
-				return merr.WrapErrMqInternal(err)
 			}
+			return merr.WrapErrMqInternal(err)
 		default:
 			return err
 		}
