@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 )
 
@@ -692,14 +693,14 @@ func TestFlushNotifyFunc(t *testing.T) {
 	})
 
 	t.Run("datacoord save fails", func(t *testing.T) {
-		dataCoord.SaveBinlogPathStatus = commonpb.ErrorCode_UnexpectedError
+		dataCoord.SaveBinlogPathStatus = merr.Status(merr.WrapErrCollectionNotFound("collection"))
 		assert.Panics(t, func() {
 			notifyFunc(&segmentFlushPack{})
 		})
 	})
 
 	t.Run("stale segment not found", func(t *testing.T) {
-		dataCoord.SaveBinlogPathStatus = commonpb.ErrorCode_SegmentNotFound
+		dataCoord.SaveBinlogPathStatus = merr.Status(merr.WrapErrSegmentNotFound(100))
 		assert.NotPanics(t, func() {
 			notifyFunc(&segmentFlushPack{flushed: false})
 		})
@@ -708,7 +709,7 @@ func TestFlushNotifyFunc(t *testing.T) {
 	// issue https://github.com/milvus-io/milvus/issues/17097
 	// meta error, datanode shall not panic, just drop the virtual channel
 	t.Run("datacoord found meta error", func(t *testing.T) {
-		dataCoord.SaveBinlogPathStatus = commonpb.ErrorCode_MetaFailed
+		dataCoord.SaveBinlogPathStatus = merr.Status(merr.WrapErrChannelNotFound("channel"))
 		assert.NotPanics(t, func() {
 			notifyFunc(&segmentFlushPack{})
 		})

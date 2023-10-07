@@ -21,7 +21,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -30,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
@@ -160,7 +160,7 @@ func (m *timeTickSender) sendReport(ctx context.Context) error {
 	log.RatedDebug(30, "timeTickSender send datanode timetick message", zap.Any("toSendMsgs", toSendMsgs), zap.Any("sendLastTss", sendLastTss))
 	err := retry.Do(ctx, func() error {
 		submitTs := tsoutil.ComposeTSByTime(time.Now(), 0)
-		statusResp, err := m.dataCoord.ReportDataNodeTtMsgs(ctx, &datapb.ReportDataNodeTtMsgsRequest{
+		status, err := m.dataCoord.ReportDataNodeTtMsgs(ctx, &datapb.ReportDataNodeTtMsgsRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_DataNodeTt),
 				commonpbutil.WithTimeStamp(submitTs),
@@ -168,16 +168,12 @@ func (m *timeTickSender) sendReport(ctx context.Context) error {
 			),
 			Msgs: toSendMsgs,
 		})
+		if err == nil {
+			err = merr.Error(status)
+		}
 		if err != nil {
 			log.Warn("error happen when ReportDataNodeTtMsgs", zap.Error(err))
 			return err
-		}
-		if statusResp.GetErrorCode() != commonpb.ErrorCode_Success {
-			log.Warn("ReportDataNodeTtMsgs resp status not succeed",
-				zap.String("error_code", statusResp.GetErrorCode().String()),
-				zap.Int32("code", statusResp.GetCode()),
-				zap.String("reason", statusResp.GetReason()))
-			return errors.New(statusResp.GetReason())
 		}
 		return nil
 	}, retry.Attempts(20), retry.Sleep(time.Millisecond*100))

@@ -78,6 +78,23 @@ func Status(err error) *commonpb.Status {
 	}
 }
 
+func CheckRpcCall(resp any, err error) error {
+	if err != nil {
+		return err
+	}
+	if resp == nil {
+		return errUnexpected
+	}
+	switch resp := resp.(type) {
+	case interface{ GetStatus() *commonpb.Status }:
+		return Error(resp.GetStatus())
+	case *commonpb.Status:
+		return Error(resp)
+	}
+	return nil
+}
+
+// Deprecated
 func StatusWithErrorCode(err error, code commonpb.ErrorCode) *commonpb.Status {
 	if err == nil {
 		return &commonpb.Status{}
@@ -289,7 +306,7 @@ func WrapErrDatabaseResourceLimitExceeded(msg ...string) error {
 	return err
 }
 
-func WrapErrInvalidedDatabaseName(database any, msg ...string) error {
+func WrapErrDatabaseNameInvalid(database any, msg ...string) error {
 	err := wrapWithField(ErrDatabaseInvalidName, "database", database)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "; "))

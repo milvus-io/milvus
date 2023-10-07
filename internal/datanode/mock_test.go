@@ -180,12 +180,12 @@ type DataCoordFactory struct {
 	types.DataCoordClient
 
 	SaveBinlogPathError  bool
-	SaveBinlogPathStatus commonpb.ErrorCode
+	SaveBinlogPathStatus *commonpb.Status
 
 	CompleteCompactionError      bool
 	CompleteCompactionNotSuccess bool
+	DropVirtualChannelError      bool
 
-	DropVirtualChannelError  bool
 	DropVirtualChannelStatus commonpb.ErrorCode
 
 	GetSegmentInfosError      bool
@@ -237,7 +237,7 @@ func (ds *DataCoordFactory) SaveBinlogPaths(ctx context.Context, req *datapb.Sav
 	if ds.SaveBinlogPathError {
 		return nil, errors.New("Error")
 	}
-	return &commonpb.Status{ErrorCode: ds.SaveBinlogPathStatus}, nil
+	return ds.SaveBinlogPathStatus, nil
 }
 
 func (ds *DataCoordFactory) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest, opts ...grpc.CallOption) (*datapb.DropVirtualChannelResponse, error) {
@@ -967,7 +967,7 @@ func (m *RootCoordFactory) AllocID(ctx context.Context, in *rootcoordpb.AllocIDR
 	}
 
 	if m.ID == -1 {
-		return nil, errors.New(resp.Status.GetReason())
+		return nil, merr.Error(resp.Status)
 	}
 
 	resp.ID = m.ID
@@ -1014,8 +1014,7 @@ func (m *RootCoordFactory) DescribeCollectionInternal(ctx context.Context, in *m
 	}
 
 	if m.collectionID == -1 {
-		resp.Status.ErrorCode = commonpb.ErrorCode_Success
-		return resp, errors.New(resp.Status.GetReason())
+		return nil, merr.Error(resp.Status)
 	}
 
 	resp.CollectionID = m.collectionID

@@ -83,6 +83,7 @@ linters-settings:
       - 'merr\.Wrap\w+\(\)\.Error\(\)'
       - '\.(ErrorCode|Reason) = '
       - 'Reason:\s+\w+\.Error\(\)'
+      - 'errors.New\((.+)\.GetReason\(\)\)'
       #- 'fmt\.Print.*' WIP
 
 issues:

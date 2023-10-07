@@ -582,14 +582,13 @@ func (node *DataNode) getPartitions(ctx context.Context, dbName string, collecti
 		zap.String("collectionName", collectionName),
 	}
 	resp, err := node.rootCoord.ShowPartitions(ctx, req)
+	if err == nil {
+		err = merr.Error(resp.GetStatus())
+	}
 	if err != nil {
 		logFields = append(logFields, zap.Error(err))
 		log.Warn("failed to get partitions of collection", logFields...)
 		return nil, err
-	}
-	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("failed to get partitions of collection", logFields...)
-		return nil, errors.New(resp.GetStatus().GetReason())
 	}
 
 	partitionNames := resp.GetPartitionNames()
@@ -1042,7 +1041,7 @@ func reportImportFunc(node *DataNode) importutil.ReportFunc {
 				return err
 			}
 			if status.GetErrorCode() != commonpb.ErrorCode_Success {
-				return errors.New(status.GetReason())
+				return merr.Error(status)
 			}
 			return nil
 		}, retry.Attempts(node.reportImportRetryTimes))

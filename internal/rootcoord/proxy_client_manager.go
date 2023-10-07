@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
@@ -33,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 )
 
@@ -239,7 +239,7 @@ func (p *proxyClientManager) RefreshPolicyInfoCache(ctx context.Context, req *pr
 				return fmt.Errorf("RefreshPolicyInfoCache failed, proxyID = %d, err = %s", k, err)
 			}
 			if status.GetErrorCode() != commonpb.ErrorCode_Success {
-				return errors.New(status.GetReason())
+				return merr.Error(status)
 			}
 			return nil
 		})

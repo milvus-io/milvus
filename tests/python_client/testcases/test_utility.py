@@ -809,7 +809,7 @@ class TestUtilityBase(TestcaseBase):
         self.utility_wrap.index_building_progress(
             c_name,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1, ct.err_msg: "can't find collection"})
+            check_items={ct.err_code: 4, ct.err_msg: "collection not found"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_process_collection_empty(self):
@@ -898,7 +898,7 @@ class TestUtilityBase(TestcaseBase):
         self.utility_wrap.wait_for_index_building_complete(
             c_name,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1, ct.err_msg: "can't find collection"})
+            check_items={ct.err_code: 4, ct.err_msg: "collection not found"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_wait_index_collection_empty(self):
@@ -4721,7 +4721,7 @@ class TestUtilityNegativeRbac(TestcaseBase):
         # collection flush with db_b permission
         self.database_wrap.using_database(db_b)
         collection_w.flush(check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 1, ct.err_msg: "can't find collection"})
+                           check_items={ct.err_code: 4, ct.err_msg: "collection not found"})
         self.database_wrap.using_database(db_a)
         collection_w.flush(check_task=CheckTasks.check_permission_deny)
 
