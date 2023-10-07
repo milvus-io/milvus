@@ -105,6 +105,12 @@ var (
 	ErrMqTopicNotEmpty = newMilvusError("topic not empty", 1301, false)
 	ErrMqInternal      = newMilvusError("message queue internal error", 1302, false)
 
+	// Privilege related
+	// this operation is denied because the user not authorized, user need to login in first
+	ErrPrivilegeNotAuthenticated = newMilvusError("not authenticated", 1400, false)
+	// this operation is denied because the user has no permission to do this, user need higher privilege
+	ErrPrivilegeNotPermitted = newMilvusError("privilege not permitted", 1401, false)
+
 	// field related
 	ErrFieldNotFound = newMilvusError("field not found", 1700, false)
 

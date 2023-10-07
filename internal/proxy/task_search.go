@@ -639,10 +639,7 @@ func (t *searchTask) Requery() error {
 
 func (t *searchTask) fillInEmptyResult(numQueries int64) {
 	t.result = &milvuspb.SearchResults{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "search result is empty",
-		},
+		Status:         merr.Success("search result is empty"),
 		CollectionName: t.collectionName,
 		Results: &schemapb.SearchResultData{
 			NumQueries: numQueries,

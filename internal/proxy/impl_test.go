@@ -49,7 +49,7 @@ func TestProxy_InvalidateCollectionMetaCache_remove_stream(t *testing.T) {
 	chMgr.EXPECT().removeDMLStream(mock.Anything).Return()
 
 	node := &Proxy{chMgr: chMgr}
-	node.stateCode.Store(commonpb.StateCode_Healthy)
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	ctx := context.Background()
 	req := &proxypb.InvalidateCollMetaCacheRequest{
@@ -65,7 +65,7 @@ func TestProxy_CheckHealth(t *testing.T) {
 	t.Run("not healthy", func(t *testing.T) {
 		node := &Proxy{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
 		node.multiRateLimiter = NewMultiRateLimiter()
-		node.stateCode.Store(commonpb.StateCode_Abnormal)
+		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		ctx := context.Background()
 		resp, err := node.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)
@@ -83,7 +83,7 @@ func TestProxy_CheckHealth(t *testing.T) {
 			session:    &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}},
 		}
 		node.multiRateLimiter = NewMultiRateLimiter()
-		node.stateCode.Store(commonpb.StateCode_Healthy)
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		resp, err := node.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)
@@ -116,7 +116,7 @@ func TestProxy_CheckHealth(t *testing.T) {
 			dataCoord:  dataCoordMock,
 		}
 		node.multiRateLimiter = NewMultiRateLimiter()
-		node.stateCode.Store(commonpb.StateCode_Healthy)
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		resp, err := node.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)
@@ -133,7 +133,7 @@ func TestProxy_CheckHealth(t *testing.T) {
 			queryCoord: qc,
 		}
 		node.multiRateLimiter = NewMultiRateLimiter()
-		node.stateCode.Store(commonpb.StateCode_Healthy)
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
 		resp, err := node.CheckHealth(context.Background(), &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, true, resp.IsHealthy)
@@ -160,20 +160,20 @@ func TestProxy_CheckHealth(t *testing.T) {
 func TestProxyRenameCollection(t *testing.T) {
 	t.Run("not healthy", func(t *testing.T) {
 		node := &Proxy{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
-		node.stateCode.Store(commonpb.StateCode_Abnormal)
+		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		ctx := context.Background()
 		resp, err := node.RenameCollection(ctx, &milvuspb.RenameCollectionRequest{})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+		assert.ErrorIs(t, merr.Error(resp), merr.ErrServiceNotReady)
 	})
 
 	t.Run("rename with illegal new collection name", func(t *testing.T) {
 		node := &Proxy{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
-		node.stateCode.Store(commonpb.StateCode_Healthy)
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		resp, err := node.RenameCollection(ctx, &milvuspb.RenameCollectionRequest{NewName: "$#^%#&#$*!)#@!"})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_IllegalCollectionName, resp.GetErrorCode())
+		assert.ErrorIs(t, merr.Error(resp), merr.ErrParameterInvalid)
 	})
 
 	t.Run("rename fail", func(t *testing.T) {
@@ -184,7 +184,7 @@ func TestProxyRenameCollection(t *testing.T) {
 			session:   &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}},
 			rootCoord: rc,
 		}
-		node.stateCode.Store(commonpb.StateCode_Healthy)
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 
 		resp, err := node.RenameCollection(ctx, &milvuspb.RenameCollectionRequest{NewName: "new"})
@@ -200,7 +200,7 @@ func TestProxyRenameCollection(t *testing.T) {
 			session:   &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}},
 			rootCoord: rc,
 		}
-		node.stateCode.Store(commonpb.StateCode_Healthy)
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 
 		resp, err := node.RenameCollection(ctx, &milvuspb.RenameCollectionRequest{NewName: "new"})
@@ -216,7 +216,7 @@ func TestProxy_ResourceGroup(t *testing.T) {
 	node, err := NewProxy(ctx, factory)
 	assert.NoError(t, err)
 	node.multiRateLimiter = NewMultiRateLimiter()
-	node.stateCode.Store(commonpb.StateCode_Healthy)
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	qc := mocks.NewMockQueryCoordClient(t)
 	node.SetQueryCoordClient(qc)
@@ -308,7 +308,7 @@ func TestProxy_InvalidResourceGroupName(t *testing.T) {
 	node, err := NewProxy(ctx, factory)
 	assert.NoError(t, err)
 	node.multiRateLimiter = NewMultiRateLimiter()
-	node.stateCode.Store(commonpb.StateCode_Healthy)
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	qc := mocks.NewMockQueryCoordClient(t)
 	node.SetQueryCoordClient(qc)
@@ -329,7 +329,7 @@ func TestProxy_InvalidResourceGroupName(t *testing.T) {
 			ResourceGroup: "...",
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, resp.ErrorCode, commonpb.ErrorCode_IllegalArgument)
+		assert.ErrorIs(t, merr.Error(resp), merr.ErrParameterInvalid)
 	})
 
 	t.Run("drop resource group", func(t *testing.T) {
@@ -347,7 +347,7 @@ func TestProxy_InvalidResourceGroupName(t *testing.T) {
 			NumNode:             1,
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, resp.ErrorCode, commonpb.ErrorCode_IllegalArgument)
+		assert.ErrorIs(t, merr.Error(resp), merr.ErrParameterInvalid)
 	})
 
 	t.Run("transfer replica", func(t *testing.T) {
@@ -358,7 +358,7 @@ func TestProxy_InvalidResourceGroupName(t *testing.T) {
 			CollectionName:      "collection1",
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, resp.ErrorCode, commonpb.ErrorCode_IllegalArgument)
+		assert.ErrorIs(t, merr.Error(resp), merr.ErrParameterInvalid)
 	})
 }
 
@@ -398,7 +398,7 @@ func TestProxy_FlushAll_DbCollection(t *testing.T) {
 
 			node, err := NewProxy(ctx, factory)
 			assert.NoError(t, err)
-			node.stateCode.Store(commonpb.StateCode_Healthy)
+			node.UpdateStateCode(commonpb.StateCode_Healthy)
 			node.tsoAllocator = &timestampAllocator{
 				tso: newMockTimestampAllocatorInterface(),
 			}
@@ -437,7 +437,7 @@ func TestProxy_FlushAll(t *testing.T) {
 
 	node, err := NewProxy(ctx, factory)
 	assert.NoError(t, err)
-	node.stateCode.Store(commonpb.StateCode_Healthy)
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	node.tsoAllocator = &timestampAllocator{
 		tso: newMockTimestampAllocatorInterface(),
 	}
@@ -483,11 +483,11 @@ func TestProxy_FlushAll(t *testing.T) {
 	})
 
 	t.Run("FlushAll failed, server is abnormal", func(t *testing.T) {
-		node.stateCode.Store(commonpb.StateCode_Abnormal)
+		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		resp, err := node.FlushAll(ctx, &milvuspb.FlushAllRequest{})
 		assert.NoError(t, err)
 		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
-		node.stateCode.Store(commonpb.StateCode_Healthy)
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
 	})
 
 	t.Run("FlushAll failed, get id failed", func(t *testing.T) {
@@ -557,7 +557,7 @@ func TestProxy_GetFlushAllState(t *testing.T) {
 
 	node, err := NewProxy(ctx, factory)
 	assert.NoError(t, err)
-	node.stateCode.Store(commonpb.StateCode_Healthy)
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	node.tsoAllocator = &timestampAllocator{
 		tso: newMockTimestampAllocatorInterface(),
 	}
@@ -576,11 +576,11 @@ func TestProxy_GetFlushAllState(t *testing.T) {
 	})
 
 	t.Run("GetFlushAllState failed, server is abnormal", func(t *testing.T) {
-		node.stateCode.Store(commonpb.StateCode_Abnormal)
+		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		resp, err := node.GetFlushAllState(ctx, &milvuspb.GetFlushAllStateRequest{})
 		assert.NoError(t, err)
 		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
-		node.stateCode.Store(commonpb.StateCode_Healthy)
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
 	})
 
 	t.Run("DataCoord GetFlushAllState failed", func(t *testing.T) {
@@ -604,7 +604,7 @@ func TestProxy_GetFlushState(t *testing.T) {
 
 	node, err := NewProxy(ctx, factory)
 	assert.NoError(t, err)
-	node.stateCode.Store(commonpb.StateCode_Healthy)
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	node.tsoAllocator = &timestampAllocator{
 		tso: newMockTimestampAllocatorInterface(),
 	}
@@ -623,11 +623,11 @@ func TestProxy_GetFlushState(t *testing.T) {
 	})
 
 	t.Run("GetFlushState failed, server is abnormal", func(t *testing.T) {
-		node.stateCode.Store(commonpb.StateCode_Abnormal)
+		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		resp, err := node.GetFlushState(ctx, &milvuspb.GetFlushStateRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_NotReadyServe)
-		node.stateCode.Store(commonpb.StateCode_Healthy)
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
 	})
 
 	t.Run("GetFlushState with collection name", func(t *testing.T) {
@@ -635,7 +635,7 @@ func TestProxy_GetFlushState(t *testing.T) {
 			CollectionName: "*",
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_UnexpectedError)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
 
 		cacheBak := globalMetaCache
 		defer func() { globalMetaCache = cacheBak }()
@@ -684,7 +684,7 @@ func TestProxy_GetReplicas(t *testing.T) {
 
 	node, err := NewProxy(ctx, factory)
 	assert.NoError(t, err)
-	node.stateCode.Store(commonpb.StateCode_Healthy)
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	node.tsoAllocator = &timestampAllocator{
 		tso: newMockTimestampAllocatorInterface(),
 	}
@@ -705,13 +705,13 @@ func TestProxy_GetReplicas(t *testing.T) {
 	})
 
 	t.Run("proxy_not_healthy", func(t *testing.T) {
-		node.stateCode.Store(commonpb.StateCode_Abnormal)
+		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		resp, err := node.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
 			CollectionID: 1000,
 		})
 		assert.NoError(t, err)
 		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
-		node.stateCode.Store(commonpb.StateCode_Healthy)
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
 	})
 
 	t.Run("QueryCoordClient_returnsError", func(t *testing.T) {
@@ -757,7 +757,7 @@ func TestProxy_Connect(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(&milvuspb.ListDatabasesResponse{
-			Status: unhealthyStatus(),
+			Status: merr.Status(merr.WrapErrServiceNotReady("initialization")),
 		}, nil)
 
 		node := &Proxy{rootCoord: r}
@@ -885,11 +885,11 @@ func TestProxyCreateDatabase(t *testing.T) {
 
 	t.Run("not healthy", func(t *testing.T) {
 		node := &Proxy{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
-		node.stateCode.Store(commonpb.StateCode_Abnormal)
+		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		ctx := context.Background()
 		resp, err := node.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+		assert.ErrorIs(t, merr.Error(resp), merr.ErrServiceNotReady)
 	})
 
 	factory := dependency.NewDefaultFactory(true)
@@ -901,7 +901,7 @@ func TestProxyCreateDatabase(t *testing.T) {
 		tso: newMockTimestampAllocatorInterface(),
 	}
 	node.multiRateLimiter = NewMultiRateLimiter()
-	node.stateCode.Store(commonpb.StateCode_Healthy)
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
 	node.sched.ddQueue.setMaxTaskNum(10)
 	assert.NoError(t, err)
@@ -925,7 +925,7 @@ func TestProxyCreateDatabase(t *testing.T) {
 		rc.On("CreateDatabase", mock.Anything, mock.Anything).
 			Return(merr.Status(nil), nil)
 		node.rootCoord = rc
-		node.stateCode.Store(commonpb.StateCode_Healthy)
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 
 		resp, err := node.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{DbName: "db"})
@@ -939,11 +939,11 @@ func TestProxyDropDatabase(t *testing.T) {
 
 	t.Run("not healthy", func(t *testing.T) {
 		node := &Proxy{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
-		node.stateCode.Store(commonpb.StateCode_Abnormal)
+		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		ctx := context.Background()
 		resp, err := node.DropDatabase(ctx, &milvuspb.DropDatabaseRequest{})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+		assert.ErrorIs(t, merr.Error(resp), merr.ErrServiceNotReady)
 	})
 
 	factory := dependency.NewDefaultFactory(true)
@@ -955,7 +955,7 @@ func TestProxyDropDatabase(t *testing.T) {
 		tso: newMockTimestampAllocatorInterface(),
 	}
 	node.multiRateLimiter = NewMultiRateLimiter()
-	node.stateCode.Store(commonpb.StateCode_Healthy)
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
 	node.sched.ddQueue.setMaxTaskNum(10)
 	assert.NoError(t, err)
@@ -979,7 +979,7 @@ func TestProxyDropDatabase(t *testing.T) {
 		rc.On("DropDatabase", mock.Anything, mock.Anything).
 			Return(merr.Status(nil), nil)
 		node.rootCoord = rc
-		node.stateCode.Store(commonpb.StateCode_Healthy)
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 
 		resp, err := node.DropDatabase(ctx, &milvuspb.DropDatabaseRequest{DbName: "db"})
@@ -993,7 +993,7 @@ func TestProxyListDatabase(t *testing.T) {
 
 	t.Run("not healthy", func(t *testing.T) {
 		node := &Proxy{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
-		node.stateCode.Store(commonpb.StateCode_Abnormal)
+		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		ctx := context.Background()
 		resp, err := node.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{})
 		assert.NoError(t, err)
@@ -1009,7 +1009,7 @@ func TestProxyListDatabase(t *testing.T) {
 		tso: newMockTimestampAllocatorInterface(),
 	}
 	node.multiRateLimiter = NewMultiRateLimiter()
-	node.stateCode.Store(commonpb.StateCode_Healthy)
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
 	node.sched.ddQueue.setMaxTaskNum(10)
 	assert.NoError(t, err)
@@ -1035,7 +1035,7 @@ func TestProxyListDatabase(t *testing.T) {
 				Status: merr.Status(nil),
 			}, nil)
 		node.rootCoord = rc
-		node.stateCode.Store(commonpb.StateCode_Healthy)
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 
 		resp, err := node.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{})
