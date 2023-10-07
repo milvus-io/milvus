@@ -90,7 +90,7 @@ struct StorageConfig {
     std::string storage_type = "minio";
     std::string cloud_provider = "aws";
     std::string iam_endpoint = "";
-    std::string log_level = "error";
+    std::string log_level = "warn";
     std::string region = "";
     bool useSSL = false;
     bool useIAM = false;
