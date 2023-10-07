@@ -2182,6 +2182,7 @@ class TestDeleteComplexExpr(TestcaseBase):
             data = cf.gen_default_dataframe_data(nb)
             data[ct.default_json_field_name] = [{"string": str(i)} for i in range(nb)]
         collection_w.insert(data)
+        collection_w.flush()
         collection_w.load()
 
         # calculate the result
