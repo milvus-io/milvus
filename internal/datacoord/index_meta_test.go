@@ -28,7 +28,6 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/internal/kv/mocks"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -731,7 +730,7 @@ func TestMeta_MarkIndexAsDeleted(t *testing.T) {
 }
 
 func TestMeta_GetSegmentIndexes(t *testing.T) {
-	m := createMetaTable(&datacoord.Catalog{MetaKv: mocks.NewMetaKv(t)})
+	m := createMetaTable(&datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)})
 
 	t.Run("success", func(t *testing.T) {
 		segIndexes := m.GetSegmentIndexes(segID)

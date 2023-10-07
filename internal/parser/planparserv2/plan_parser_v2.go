@@ -137,14 +137,13 @@ func CreateSearchPlan(schemaPb *schemapb.CollectionSchema, exprStr string, vecto
 	var vectorType planpb.VectorType
 	if !typeutil.IsVectorType(dataType) {
 		return nil, fmt.Errorf("field (%s) to search is not of vector data type", vectorFieldName)
+	}
+	if dataType == schemapb.DataType_FloatVector {
+		vectorType = planpb.VectorType_FloatVector
+	} else if dataType == schemapb.DataType_BinaryVector {
+		vectorType = planpb.VectorType_BinaryVector
 	} else {
-		if dataType == schemapb.DataType_FloatVector {
-			vectorType = planpb.VectorType_FloatVector
-		} else if dataType == schemapb.DataType_BinaryVector {
-			vectorType = planpb.VectorType_BinaryVector
-		} else {
-			vectorType = planpb.VectorType_Float16Vector
-		}
+		vectorType = planpb.VectorType_Float16Vector
 	}
 	planNode := &planpb.PlanNode{
 		Node: &planpb.PlanNode_VectorAnns{

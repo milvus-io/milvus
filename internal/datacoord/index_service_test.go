@@ -27,7 +27,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/kv/mocks"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -183,7 +182,7 @@ func TestServer_GetIndexState(t *testing.T) {
 	)
 	s := &Server{
 		meta: &meta{
-			catalog: &datacoord.Catalog{MetaKv: mocks.NewMetaKv(t)},
+			catalog: &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)},
 		},
 		allocator:       newMockAllocator(),
 		notifyIndexChan: make(chan UniqueID, 1),
@@ -204,7 +203,7 @@ func TestServer_GetIndexState(t *testing.T) {
 	})
 
 	s.meta = &meta{
-		catalog: &datacoord.Catalog{MetaKv: mocks.NewMetaKv(t)},
+		catalog: &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)},
 		indexes: map[UniqueID]map[UniqueID]*model.Index{
 			collID: {
 				indexID: {
@@ -255,7 +254,7 @@ func TestServer_GetIndexState(t *testing.T) {
 	})
 
 	s.meta = &meta{
-		catalog: &datacoord.Catalog{MetaKv: mocks.NewMetaKv(t)},
+		catalog: &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)},
 		indexes: map[UniqueID]map[UniqueID]*model.Index{
 			collID: {
 				indexID: {
@@ -373,7 +372,7 @@ func TestServer_GetSegmentIndexState(t *testing.T) {
 	)
 	s := &Server{
 		meta: &meta{
-			catalog:  &datacoord.Catalog{MetaKv: mocks.NewMetaKv(t)},
+			catalog:  &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)},
 			indexes:  map[UniqueID]map[UniqueID]*model.Index{},
 			segments: &SegmentsInfo{map[UniqueID]*SegmentInfo{}},
 		},
@@ -508,7 +507,7 @@ func TestServer_GetIndexBuildProgress(t *testing.T) {
 
 	s := &Server{
 		meta: &meta{
-			catalog:  &datacoord.Catalog{MetaKv: mocks.NewMetaKv(t)},
+			catalog:  &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)},
 			indexes:  map[UniqueID]map[UniqueID]*model.Index{},
 			segments: &SegmentsInfo{map[UniqueID]*SegmentInfo{}},
 		},
@@ -1540,7 +1539,7 @@ func TestServer_GetIndexInfos(t *testing.T) {
 
 	s := &Server{
 		meta: &meta{
-			catalog: &datacoord.Catalog{MetaKv: mocks.NewMetaKv(t)},
+			catalog: &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)},
 			indexes: map[UniqueID]map[UniqueID]*model.Index{
 				collID: {
 					// finished

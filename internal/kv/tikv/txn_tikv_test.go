@@ -325,7 +325,7 @@ func TestTiKVLoad(te *testing.T) {
 		kv := NewTiKV(txnClient, rootPath)
 		defer kv.Close()
 
-		commitTxn = func(txn *transaction.KVTxn, ctx context.Context) error {
+		commitTxn = func(ctx context.Context, txn *transaction.KVTxn) error {
 			return fmt.Errorf("bad txn commit!")
 		}
 		defer func() {

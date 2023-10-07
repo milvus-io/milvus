@@ -28,16 +28,15 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type Replica struct {
 	*querypb.Replica
-	nodes   UniqueSet // a helper field for manipulating replica's Nodes slice field
+	nodes   typeutil.UniqueSet // a helper field for manipulating replica's Nodes slice field
 	rwmutex sync.RWMutex
 }
 
-func NewReplica(replica *querypb.Replica, nodes UniqueSet) *Replica {
+func NewReplica(replica *querypb.Replica, nodes typeutil.UniqueSet) *Replica {
 	return &Replica{
 		Replica: replica,
 		nodes:   nodes,
@@ -92,7 +91,7 @@ func (replica *Replica) Clone() *Replica {
 	defer replica.rwmutex.RUnlock()
 	return &Replica{
 		Replica: proto.Clone(replica.Replica).(*querypb.Replica),
-		nodes:   NewUniqueSet(replica.Replica.Nodes...),
+		nodes:   typeutil.NewUniqueSet(replica.Replica.Nodes...),
 	}
 }
 
@@ -100,7 +99,7 @@ type ReplicaManager struct {
 	rwmutex sync.RWMutex
 
 	idAllocator func() (int64, error)
-	replicas    map[UniqueID]*Replica
+	replicas    map[typeutil.UniqueID]*Replica
 	catalog     metastore.QueryCoordCatalog
 }
 
@@ -128,7 +127,7 @@ func (m *ReplicaManager) Recover(collections []int64) error {
 		if collectionSet.Contain(replica.GetCollectionID()) {
 			m.replicas[replica.GetID()] = &Replica{
 				Replica: replica,
-				nodes:   NewUniqueSet(replica.GetNodes()...),
+				nodes:   typeutil.NewUniqueSet(replica.GetNodes()...),
 			}
 			log.Info("recover replica",
 				zap.Int64("collectionID", replica.GetCollectionID()),
@@ -150,7 +149,7 @@ func (m *ReplicaManager) Recover(collections []int64) error {
 	return nil
 }
 
-func (m *ReplicaManager) Get(id UniqueID) *Replica {
+func (m *ReplicaManager) Get(id typeutil.UniqueID) *Replica {
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
 
@@ -180,7 +179,7 @@ func (m *ReplicaManager) Put(replicas ...*Replica) error {
 	return m.put(replicas...)
 }
 
-func (m *ReplicaManager) spawn(collectionID UniqueID, rgName string) (*Replica, error) {
+func (m *ReplicaManager) spawn(collectionID typeutil.UniqueID, rgName string) (*Replica, error) {
 	id, err := m.idAllocator()
 	if err != nil {
 		return nil, err
@@ -191,7 +190,7 @@ func (m *ReplicaManager) spawn(collectionID UniqueID, rgName string) (*Replica, 
 			CollectionID:  collectionID,
 			ResourceGroup: rgName,
 		},
-		nodes: make(UniqueSet),
+		nodes: make(typeutil.UniqueSet),
 	}, nil
 }
 
@@ -208,7 +207,7 @@ func (m *ReplicaManager) put(replicas ...*Replica) error {
 
 // RemoveCollection removes replicas of given collection,
 // returns error if failed to remove replica from KV
-func (m *ReplicaManager) RemoveCollection(collectionID UniqueID) error {
+func (m *ReplicaManager) RemoveCollection(collectionID typeutil.UniqueID) error {
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
 
@@ -224,7 +223,7 @@ func (m *ReplicaManager) RemoveCollection(collectionID UniqueID) error {
 	return nil
 }
 
-func (m *ReplicaManager) GetByCollection(collectionID UniqueID) []*Replica {
+func (m *ReplicaManager) GetByCollection(collectionID typeutil.UniqueID) []*Replica {
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
 
@@ -238,7 +237,7 @@ func (m *ReplicaManager) GetByCollection(collectionID UniqueID) []*Replica {
 	return replicas
 }
 
-func (m *ReplicaManager) GetByCollectionAndNode(collectionID, nodeID UniqueID) *Replica {
+func (m *ReplicaManager) GetByCollectionAndNode(collectionID, nodeID typeutil.UniqueID) *Replica {
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
 
@@ -279,7 +278,7 @@ func (m *ReplicaManager) GetByResourceGroup(rgName string) []*Replica {
 	return ret
 }
 
-func (m *ReplicaManager) AddNode(replicaID UniqueID, nodes ...UniqueID) error {
+func (m *ReplicaManager) AddNode(replicaID typeutil.UniqueID, nodes ...typeutil.UniqueID) error {
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
 
@@ -293,7 +292,7 @@ func (m *ReplicaManager) AddNode(replicaID UniqueID, nodes ...UniqueID) error {
 	return m.put(replica)
 }
 
-func (m *ReplicaManager) RemoveNode(replicaID UniqueID, nodes ...UniqueID) error {
+func (m *ReplicaManager) RemoveNode(replicaID typeutil.UniqueID, nodes ...typeutil.UniqueID) error {
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
 
@@ -307,7 +306,7 @@ func (m *ReplicaManager) RemoveNode(replicaID UniqueID, nodes ...UniqueID) error
 	return m.put(replica)
 }
 
-func (m *ReplicaManager) GetResourceGroupByCollection(collection UniqueID) typeutil.Set[string] {
+func (m *ReplicaManager) GetResourceGroupByCollection(collection typeutil.UniqueID) typeutil.Set[string] {
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
 
