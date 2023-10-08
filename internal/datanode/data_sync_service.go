@@ -43,7 +43,8 @@ import (
 type dataSyncService struct {
 	ctx          context.Context
 	cancelFn     context.CancelFunc
-	channel      Channel  // channel stores meta of channel
+	channel      Channel // channel stores meta of channel
+	opID         int64
 	collectionID UniqueID // collection id of vchan for which this data sync service serves
 	vchannelName string
 
@@ -137,24 +138,81 @@ func (dsService *dataSyncService) clearGlobalFlushingCache() {
 	dsService.flushingSegCache.Remove(segments...)
 }
 
-// getSegmentInfos return the SegmentInfo details according to the given ids through RPC to datacoord
-// TODO: add a broker for the rpc
-func getSegmentInfos(ctx context.Context, datacoord types.DataCoordClient, segmentIDs []int64) ([]*datapb.SegmentInfo, error) {
-	infoResp, err := datacoord.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_SegmentInfo),
-			commonpbutil.WithMsgID(0),
-			commonpbutil.WithSourceID(paramtable.GetNodeID()),
-		),
-		SegmentIDs:       segmentIDs,
-		IncludeUnHealthy: true,
-	})
-	if err := merr.CheckRPCCall(infoResp, err); err != nil {
-		log.Error("Fail to get SegmentInfo by ids from datacoord", zap.Error(err))
+func getChannelWithTickler(initCtx context.Context, node *DataNode, info *datapb.ChannelWatchInfo, tickler *tickler, unflushed, flushed []*datapb.SegmentInfo) (Channel, error) {
+	var (
+		channelName  = info.GetVchan().GetChannelName()
+		collectionID = info.GetVchan().GetCollectionID()
+		recoverTs    = info.GetVchan().GetSeekPosition().GetTimestamp()
+	)
+
+	// init channel meta
+	channel := newChannel(channelName, collectionID, info.GetSchema(), node.rootCoord, node.chunkManager)
+
+	// tickler will update addSegment progress to watchInfo
+	futures := make([]*conc.Future[any], 0, len(unflushed)+len(flushed))
+	tickler.setTotal(int32(len(unflushed) + len(flushed)))
+
+	for _, us := range unflushed {
+		log.Info("recover growing segments from checkpoints",
+			zap.String("vChannelName", us.GetInsertChannel()),
+			zap.Int64("segmentID", us.GetID()),
+			zap.Int64("numRows", us.GetNumOfRows()),
+		)
+
+		// avoid closure capture iteration variable
+		segment := us
+		future := getOrCreateIOPool().Submit(func() (interface{}, error) {
+			if err := channel.addSegment(initCtx, addSegmentReq{
+				segType:      datapb.SegmentType_Normal,
+				segID:        segment.GetID(),
+				collID:       segment.CollectionID,
+				partitionID:  segment.PartitionID,
+				numOfRows:    segment.GetNumOfRows(),
+				statsBinLogs: segment.Statslogs,
+				binLogs:      segment.GetBinlogs(),
+				endPos:       segment.GetDmlPosition(),
+				recoverTs:    recoverTs,
+			}); err != nil {
+				return nil, err
+			}
+			tickler.inc()
+			return nil, nil
+		})
+		futures = append(futures, future)
+	}
+
+	for _, fs := range flushed {
+		log.Info("recover sealed segments form checkpoints",
+			zap.String("vChannelName", fs.GetInsertChannel()),
+			zap.Int64("segmentID", fs.GetID()),
+			zap.Int64("numRows", fs.GetNumOfRows()),
+		)
+		// avoid closure capture iteration variable
+		segment := fs
+		future := getOrCreateIOPool().Submit(func() (interface{}, error) {
+			if err := channel.addSegment(initCtx, addSegmentReq{
+				segType:      datapb.SegmentType_Flushed,
+				segID:        segment.GetID(),
+				collID:       segment.GetCollectionID(),
+				partitionID:  segment.GetPartitionID(),
+				numOfRows:    segment.GetNumOfRows(),
+				statsBinLogs: segment.GetStatslogs(),
+				binLogs:      segment.GetBinlogs(),
+				recoverTs:    recoverTs,
+			}); err != nil {
+				return nil, err
+			}
+			tickler.inc()
+			return nil, nil
+		})
+		futures = append(futures, future)
+	}
+
+	if err := conc.AwaitAll(futures...); err != nil {
 		return nil, err
 	}
 
-	return infoResp.Infos, nil
+	return channel, nil
 }
 
 // getChannelWithEtcdTickler updates progress into etcd when a new segment is added into channel.
@@ -271,6 +329,7 @@ func getServiceWithChannel(initCtx context.Context, node *DataNode, info *datapb
 		flushCh:          flushCh,
 		resendTTCh:       resendTTCh,
 		delBufferManager: delBufferManager,
+		opID:             info.GetOpID(),
 
 		dispClient: node.dispClient,
 		msFactory:  node.factory,
@@ -374,4 +433,48 @@ func newServiceWithEtcdTickler(initCtx context.Context, node *DataNode, info *da
 	}
 
 	return getServiceWithChannel(initCtx, node, info, channel, unflushedSegmentInfos, flushedSegmentInfos)
+}
+
+// newDataSyncService gets a dataSyncService, but flowgraphs are not running
+// initCtx is used to init the dataSyncService only, if initCtx.Canceled or initCtx.Timeout
+// newDataSyncService stops and returns the initCtx.Err()
+// NOTE: compactiable for event manager
+func newDataSyncService(initCtx context.Context, node *DataNode, info *datapb.ChannelWatchInfo, tickler *tickler) (*dataSyncService, error) {
+	// recover segment checkpoints
+	unflushedSegmentInfos, err := getSegmentInfos(initCtx, node.dataCoord, info.GetVchan().GetUnflushedSegmentIds())
+	if err != nil {
+		return nil, err
+	}
+	flushedSegmentInfos, err := getSegmentInfos(initCtx, node.dataCoord, info.GetVchan().GetFlushedSegmentIds())
+	if err != nil {
+		return nil, err
+	}
+
+	// init channel meta
+	channel, err := getChannelWithTickler(initCtx, node, info, tickler, unflushedSegmentInfos, flushedSegmentInfos)
+	if err != nil {
+		return nil, err
+	}
+
+	return getServiceWithChannel(initCtx, node, info, channel, unflushedSegmentInfos, flushedSegmentInfos)
+}
+
+// getSegmentInfos return the SegmentInfo details according to the given ids through RPC to datacoord
+// TODO: add a broker for the rpc
+func getSegmentInfos(ctx context.Context, datacoord types.DataCoordClient, segmentIDs []int64) ([]*datapb.SegmentInfo, error) {
+	infoResp, err := datacoord.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_SegmentInfo),
+			commonpbutil.WithMsgID(0),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+		),
+		SegmentIDs:       segmentIDs,
+		IncludeUnHealthy: true,
+	})
+	if err := merr.CheckRPCCall(infoResp, err); err != nil {
+		log.Error("Fail to get SegmentInfo by ids from datacoord", zap.Error(err))
+		return nil, err
+	}
+
+	return infoResp.Infos, nil
 }

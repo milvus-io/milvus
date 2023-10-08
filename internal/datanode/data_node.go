@@ -359,7 +359,8 @@ func (node *DataNode) Start() error {
 		// Start node watch node
 		go node.StartWatchChannels(node.ctx)
 
-		go node.flowgraphManager.start()
+		node.stopWaiter.Add(1)
+		go node.flowgraphManager.start(&node.stopWaiter)
 
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 	})
