@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestMain(m *testing.M) {
@@ -741,4 +742,29 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 		err := task.parseIndexParams()
 		assert.Error(t, err)
 	})
+}
+
+func newTestSchema() *schemapb.CollectionSchema {
+	fields := []*schemapb.FieldSchema{
+		{FieldID: 0, Name: "FieldID", IsPrimaryKey: false, Description: "field no.1", DataType: schemapb.DataType_Int64},
+	}
+
+	for name, value := range schemapb.DataType_value {
+		dataType := schemapb.DataType(value)
+		if !typeutil.IsIntegerType(dataType) && !typeutil.IsFloatingType(dataType) && !typeutil.IsVectorType(dataType) && !typeutil.IsStringType(dataType) {
+			continue
+		}
+		newField := &schemapb.FieldSchema{
+			FieldID: int64(100 + value), Name: name + "Field", IsPrimaryKey: false, Description: "", DataType: dataType,
+		}
+		fields = append(fields, newField)
+	}
+
+	return &schemapb.CollectionSchema{
+		Name:               "test",
+		Description:        "schema for test used",
+		AutoID:             true,
+		Fields:             fields,
+		EnableDynamicField: true,
+	}
 }
