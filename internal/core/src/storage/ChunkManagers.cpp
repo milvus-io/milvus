@@ -66,6 +66,7 @@ generateConfig(const StorageConfig& storage_config) {
 
 AwsChunkManager::AwsChunkManager(const StorageConfig& storage_config) {
     default_bucket_name_ = storage_config.bucket_name;
+    remote_root_path_ = storage_config.root_path;
 
     InitSDKAPIDefault(storage_config.log_level);
 
@@ -92,12 +93,14 @@ AwsChunkManager::AwsChunkManager(const StorageConfig& storage_config) {
 
     LOG_SEGCORE_INFO_ << "init AwsChunkManager with parameter[endpoint: '"
                       << storage_config.address << "', default_bucket_name:'"
-                      << storage_config.bucket_name << "', use_secure:'"
+                      << storage_config.bucket_name << "', root_path:'"
+                      << storage_config.root_path << "', use_secure:'"
                       << std::boolalpha << storage_config.useSSL << "']";
 }
 
 GcpChunkManager::GcpChunkManager(const StorageConfig& storage_config) {
     default_bucket_name_ = storage_config.bucket_name;
+    remote_root_path_ = storage_config.root_path;
 
     if (storage_config.useIAM) {
         sdk_options_.httpOptions.httpClientFactory_create_fn = []() {
@@ -124,12 +127,14 @@ GcpChunkManager::GcpChunkManager(const StorageConfig& storage_config) {
 
     LOG_SEGCORE_INFO_ << "init GcpChunkManager with parameter[endpoint: '"
                       << storage_config.address << "', default_bucket_name:'"
-                      << storage_config.bucket_name << "', use_secure:'"
+                      << storage_config.bucket_name << "', root_path:'"
+                      << storage_config.root_path << "', use_secure:'"
                       << std::boolalpha << storage_config.useSSL << "']";
 }
 
 AliyunChunkManager::AliyunChunkManager(const StorageConfig& storage_config) {
     default_bucket_name_ = storage_config.bucket_name;
+    remote_root_path_ = storage_config.root_path;
 
     InitSDKAPIDefault(storage_config.log_level);
 
@@ -156,7 +161,8 @@ AliyunChunkManager::AliyunChunkManager(const StorageConfig& storage_config) {
 
     LOG_SEGCORE_INFO_ << "init AliyunChunkManager with parameter[endpoint: '"
                       << storage_config.address << "', default_bucket_name:'"
-                      << storage_config.bucket_name << "', use_secure:'"
+                      << storage_config.bucket_name << "', root_path:'"
+                      << storage_config.root_path << "', use_secure:'"
                       << std::boolalpha << storage_config.useSSL << "']";
 }
 

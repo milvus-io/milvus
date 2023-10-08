@@ -59,7 +59,7 @@ uint64_t
 AzureChunkManager::Read(const std::string& filepath, void* buf, uint64_t size) {
     if (!ObjectExists(default_bucket_name_, filepath)) {
         std::stringstream err_msg;
-        err_msg << "object('" << default_bucket_name_ << "', " << filepath
+        err_msg << "object('" << default_bucket_name_ << "', '" << filepath
                 << "') not exists";
         throw SegcoreError(ObjectNotExist, err_msg.str());
     }

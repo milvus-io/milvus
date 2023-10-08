@@ -327,7 +327,8 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
 
     LOG_SEGCORE_INFO_ << "init MinioChunkManager with parameter[endpoint: '"
                       << storage_config.address << "', default_bucket_name:'"
-                      << storage_config.bucket_name << "', use_secure:'"
+                      << storage_config.bucket_name << "', root_path:'"
+                      << storage_config.root_path << "', use_secure:'"
                       << std::boolalpha << storage_config.useSSL << "']";
 }
 
@@ -360,7 +361,7 @@ uint64_t
 MinioChunkManager::Read(const std::string& filepath, void* buf, uint64_t size) {
     if (!ObjectExists(default_bucket_name_, filepath)) {
         std::stringstream err_msg;
-        err_msg << "object('" << default_bucket_name_ << "', " << filepath
+        err_msg << "object('" << default_bucket_name_ << "', '" << filepath
                 << "') not exists";
         throw SegcoreError(ObjectNotExist, err_msg.str());
     }
