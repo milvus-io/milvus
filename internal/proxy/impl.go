@@ -3495,7 +3495,12 @@ func (node *Proxy) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReq
 	)
 
 	if req.GetCollectionName() != "" {
-		req.CollectionID, _ = globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+		var err error
+		req.CollectionID, err = globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+		if err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
 	}
 
 	r, err := node.queryCoord.GetReplicas(ctx, req)
