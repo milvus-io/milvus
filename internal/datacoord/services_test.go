@@ -2,7 +2,6 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -337,10 +336,10 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 					FieldID: 1,
 					Binlogs: []*datapb.Binlog{
 						{
-							LogPath: "/binlog/file1",
+							LogPath: metautil.BuildInsertLogPath("a", 0, 100, 0, 1, 801),
 						},
 						{
-							LogPath: "/binlog/file2",
+							LogPath: metautil.BuildInsertLogPath("a", 0, 100, 0, 1, 801),
 						},
 					},
 				},
@@ -350,10 +349,10 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 					FieldID: 1,
 					Binlogs: []*datapb.Binlog{
 						{
-							LogPath: "/stats_log/file1",
+							LogPath: metautil.BuildStatsLogPath("a", 0, 100, 0, 1000, 10000),
 						},
 						{
-							LogPath: "/stats_log/file2",
+							LogPath: metautil.BuildStatsLogPath("a", 0, 100, 0, 1000, 10000),
 						},
 					},
 				},
@@ -364,7 +363,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 						{
 							TimestampFrom: 0,
 							TimestampTo:   1,
-							LogPath:       "/stats_log/file1",
+							LogPath:       metautil.BuildDeltaLogPath("a", 0, 100, 0, 100000),
 							LogSize:       1,
 						},
 					},
@@ -413,8 +412,17 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.EqualValues(t, 0, resp.GetSegments()[0].GetID())
 		assert.EqualValues(t, 1, len(resp.GetSegments()[0].GetBinlogs()))
 		assert.EqualValues(t, 1, resp.GetSegments()[0].GetBinlogs()[0].GetFieldID())
-		for i, binlog := range resp.GetSegments()[0].GetBinlogs()[0].GetBinlogs() {
-			assert.Equal(t, fmt.Sprintf("/binlog/file%d", i+1), binlog.GetLogPath())
+		for _, binlog := range resp.GetSegments()[0].GetBinlogs()[0].GetBinlogs() {
+			assert.Equal(t, "", binlog.GetLogPath())
+			assert.Equal(t, int64(801), binlog.GetLogID())
+		}
+		for _, binlog := range resp.GetSegments()[0].GetStatslogs()[0].GetBinlogs() {
+			assert.Equal(t, "", binlog.GetLogPath())
+			assert.Equal(t, int64(10000), binlog.GetLogID())
+		}
+		for _, binlog := range resp.GetSegments()[0].GetDeltalogs()[0].GetBinlogs() {
+			assert.Equal(t, "", binlog.GetLogPath())
+			assert.Equal(t, int64(100000), binlog.GetLogID())
 		}
 	})
 	t.Run("with dropped segments", func(t *testing.T) {

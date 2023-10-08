@@ -870,6 +870,7 @@ func (i *IndexCoord) getIndexedStats(ctx context.Context, collID, indexID Unique
 		}
 	}
 
+	// we don't need log path related info, thus don't need to DecompressBinLog
 	for _, seg := range segInfoResp.Infos {
 		if seg.GetStartPosition().GetTimestamp() <= createTs {
 			if seg.GetStartPosition() == nil {
