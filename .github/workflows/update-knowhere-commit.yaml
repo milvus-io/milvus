@@ -39,7 +39,7 @@ jobs:
         continue-on-error: true
         shell: bash
         run: |
-          sed -i "s#( KNOWHERE_VERSION.*#( KNOWHERE_VERSION ${{ steps.get-knowhere-latest-commit.outputs.knowhere-commit }} )#g" internal/core/thirdparty/knowhere/CMakeLists.txt
+          sed -i "0,/(\ KNOWHERE_VERSION/ s#( KNOWHERE_VERSION.*#( KNOWHERE_VERSION ${{ steps.get-knowhere-latest-commit.outputs.knowhere-commit }} )#g" internal/core/thirdparty/knowhere/CMakeLists.txt
           head -n 17 internal/core/thirdparty/knowhere/CMakeLists.txt
           git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
