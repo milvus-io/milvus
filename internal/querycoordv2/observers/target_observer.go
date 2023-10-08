@@ -131,13 +131,20 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 // Check checks whether the next target is ready,
 // and updates the current target if it is,
 // returns true if current target is not nil
-func (ob *TargetObserver) Check(collectionID int64) bool {
+func (ob *TargetObserver) Check(ctx context.Context, collectionID int64) bool {
 	notifier := make(chan bool)
-	ob.manualCheck <- checkRequest{
-		CollectionID: collectionID,
-		Notifier:     notifier,
+	select {
+	case ob.manualCheck <- checkRequest{CollectionID: collectionID, Notifier: notifier}:
+	case <-ctx.Done():
+		return false
 	}
-	return <-notifier
+
+	select {
+	case result := <-notifier:
+		return result
+	case <-ctx.Done():
+		return false
+	}
 }
 
 func (ob *TargetObserver) check(collectionID int64) {

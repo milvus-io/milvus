@@ -17,6 +17,7 @@
 package observers
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -215,6 +216,101 @@ func (suite *TargetObserverSuite) TearDownSuite() {
 	suite.observer.Stop()
 }
 
+type TargetObserverCheckSuite struct {
+	suite.Suite
+
+	kv kv.MetaKv
+	// dependency
+	meta      *meta.Meta
+	targetMgr *meta.TargetManager
+	distMgr   *meta.DistributionManager
+	broker    *meta.MockBroker
+
+	observer *TargetObserver
+
+	collectionID int64
+	partitionID  int64
+}
+
+func (suite *TargetObserverCheckSuite) SetupSuite() {
+	paramtable.Init()
+}
+
+func (suite *TargetObserverCheckSuite) SetupTest() {
+	var err error
+	config := GenerateEtcdConfig()
+	cli, err := etcd.GetEtcdClient(
+		config.UseEmbedEtcd.GetAsBool(),
+		config.EtcdUseSSL.GetAsBool(),
+		config.Endpoints.GetAsStrings(),
+		config.EtcdTLSCert.GetValue(),
+		config.EtcdTLSKey.GetValue(),
+		config.EtcdTLSCACert.GetValue(),
+		config.EtcdTLSMinVersion.GetValue())
+	suite.Require().NoError(err)
+	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
+
+	// meta
+	store := querycoord.NewCatalog(suite.kv)
+	idAllocator := RandomIncrementIDAllocator()
+	suite.meta = meta.NewMeta(idAllocator, store, session.NewNodeManager())
+
+	suite.broker = meta.NewMockBroker(suite.T())
+	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
+	suite.distMgr = meta.NewDistributionManager()
+	suite.observer = NewTargetObserver(suite.meta, suite.targetMgr, suite.distMgr, suite.broker)
+	suite.collectionID = int64(1000)
+	suite.partitionID = int64(100)
+
+	err = suite.meta.CollectionManager.PutCollection(utils.CreateTestCollection(suite.collectionID, 1))
+	suite.NoError(err)
+	err = suite.meta.CollectionManager.PutPartition(utils.CreateTestPartition(suite.collectionID, suite.partitionID))
+	suite.NoError(err)
+	replicas, err := suite.meta.ReplicaManager.Spawn(suite.collectionID, 1, meta.DefaultResourceGroupName)
+	suite.NoError(err)
+	replicas[0].AddNode(2)
+	err = suite.meta.ReplicaManager.Put(replicas...)
+	suite.NoError(err)
+}
+
+func (suite *TargetObserverCheckSuite) TestCheckCtxDone() {
+	observer := suite.observer
+
+	suite.Run("check_channel_blocked", func() {
+		oldCh := observer.manualCheck
+		defer func() {
+			observer.manualCheck = oldCh
+		}()
+
+		// zero-length channel
+		observer.manualCheck = make(chan checkRequest)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		// cancel context, make test return fast
+		cancel()
+
+		result := observer.Check(ctx, suite.collectionID)
+		suite.False(result)
+	})
+
+	suite.Run("check_return_ctx_timeout", func() {
+		oldCh := observer.manualCheck
+		defer func() {
+			observer.manualCheck = oldCh
+		}()
+
+		// make channel length = 1, task received
+		observer.manualCheck = make(chan checkRequest, 1)
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*200)
+		defer cancel()
+
+		result := observer.Check(ctx, suite.collectionID)
+		suite.False(result)
+	})
+}
+
 func TestTargetObserver(t *testing.T) {
 	suite.Run(t, new(TargetObserverSuite))
+	suite.Run(t, new(TargetObserverCheckSuite))
 }
