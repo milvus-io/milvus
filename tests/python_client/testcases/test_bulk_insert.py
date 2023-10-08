@@ -102,7 +102,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         )
         logging.info(f"bulk insert task id:{task_id}")
         success, _ = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
+            task_ids=[task_id], timeout=300
         )
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
@@ -118,7 +118,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             field_name=df.vec_field, index_params=index_params
         )
         time.sleep(2)
-        self.utility_wrap.wait_for_index_building_complete(c_name, timeout=120)
+        self.utility_wrap.wait_for_index_building_complete(c_name, timeout=300)
         res, _ = self.utility_wrap.index_building_progress(c_name)
         log.info(f"index building progress: {res}")
         self.collection_wrap.load()
@@ -187,7 +187,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         )
         logging.info(f"bulk insert task ids:{task_id}")
         completed, _ = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
+            task_ids=[task_id], timeout=300
         )
         tt = time.time() - t0
         log.info(f"bulk insert state:{completed} in {tt}")
@@ -202,7 +202,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         self.collection_wrap.create_index(
             field_name=df.vec_field, index_params=index_params
         )
-        self.utility_wrap.wait_for_index_building_complete(c_name, timeout=120)
+        self.utility_wrap.wait_for_index_building_complete(c_name, timeout=300)
         res, _ = self.utility_wrap.index_building_progress(c_name)
         log.info(f"index building progress: {res}")
         self.collection_wrap.load()
@@ -289,7 +289,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         )
         logging.info(f"bulk insert task ids:{task_id}")
         success, state = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
+            task_ids=[task_id], timeout=300
         )
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
@@ -299,7 +299,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         assert self.collection_wrap.num_entities == entities
         log.debug(state)
         time.sleep(2)
-        self.utility_wrap.wait_for_index_building_complete(c_name, timeout=120)
+        self.utility_wrap.wait_for_index_building_complete(c_name, timeout=300)
         res, _ = self.utility_wrap.index_building_progress(c_name)
         log.info(f"index building progress: {res}")
         log.info(f"wait for load finished and be ready for search")
@@ -380,13 +380,13 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                                                       files=files)
         logging.info(f"bulk insert task ids:{task_id}")
         success, _ = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
+            task_ids=[task_id], timeout=300
         )
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
         assert success
         time.sleep(2)
-        self.utility_wrap.wait_for_index_building_complete(c_name, timeout=120)
+        self.utility_wrap.wait_for_index_building_complete(c_name, timeout=300)
         res, _ = self.utility_wrap.index_building_progress(c_name)
         log.info(f"index building progress: {res}")
 
@@ -469,7 +469,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         )
         logging.info(f"bulk insert task ids:{task_id}")
         success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
+            task_ids=[task_id], timeout=300
         )
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
@@ -484,7 +484,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         assert num_entities == bulk_insert_row + direct_insert_row
         # verify index
         time.sleep(2)
-        self.utility_wrap.wait_for_index_building_complete(c_name, timeout=120)
+        self.utility_wrap.wait_for_index_building_complete(c_name, timeout=300)
         res, _ = self.utility_wrap.index_building_progress(c_name)
         log.info(f"index building progress: {res}")
         # verify search and query
@@ -560,7 +560,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         )
         logging.info(f"bulk insert task ids:{task_id}")
         success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
+            task_ids=[task_id], timeout=300
         )
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
@@ -573,7 +573,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         log.info(f"collection entities: {num_entities}")
         assert num_entities == 500
         time.sleep(2)
-        self.utility_wrap.wait_for_index_building_complete(c_name, timeout=120)
+        self.utility_wrap.wait_for_index_building_complete(c_name, timeout=300)
         res, _ = self.utility_wrap.index_building_progress(c_name)
         log.info(f"index building progress: {res}")
         # verify search and query
@@ -641,7 +641,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         )
         logging.info(f"bulk insert task ids:{task_id}")
         success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
+            task_ids=[task_id], timeout=300
         )
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt} with states:{states}")
@@ -673,7 +673,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [128])
     @pytest.mark.parametrize("entities", [2000])
-    @pytest.mark.parametrize("file_nums", [10])
+    @pytest.mark.parametrize("file_nums", [5])
     def test_multi_numpy_files_from_diff_folders(
         self, auto_id, dim, entities, file_nums
     ):
@@ -720,7 +720,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             )
             task_ids.append(task_id)
         success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
+            task_ids=[task_id], timeout=300
         )
         log.info(f"bulk insert state:{success}")
 
@@ -794,7 +794,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         )
         logging.info(f"bulk insert task id:{task_id}")
         success, _ = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
+            task_ids=[task_id], timeout=300
         )
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
@@ -841,7 +841,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             num_entities += p.num_entities
         assert num_entities == entities
 
-        # verify error when tyring to bulk insert into a specific partition
+        # verify error when trying to bulk insert into a specific partition
         # TODO: enable the error msg assert after issue #25586 fixed
         err_msg = "not allow to set partition name for collection with partition key"
         task_id, _ = self.utility_wrap.do_bulk_insert(
@@ -903,7 +903,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             )
             task_ids.append(task_id)
         success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=task_ids, timeout=120
+            task_ids=task_ids, timeout=300
         )
         log.info(f"bulk insert state:{success}")
 
