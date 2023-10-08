@@ -168,10 +168,9 @@ proxy:
   # please adjust in embedded Milvus: false
   ginLogging: true # Whether to produce gin logs.
   grpc:
+    # change to smaller value to limit client request and response
     serverMaxRecvSize: 67108864 # 64M
     serverMaxSendSize: 67108864 # 64M
-    clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
-    clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
 
 
 
@@ -386,8 +385,8 @@ grpc:
 
   serverMaxRecvSize: 536870912 # 512MB
   serverMaxSendSize: 536870912 # 512MB
-  clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
-  clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
+  clientMaxRecvSize: 268435456 # 256 MB, 256 * 1024 * 1024
+  clientMaxSendSize: 268435456 # 256 MB, 256 * 1024 * 1024
 
   client:
     dialTimeout: 200
