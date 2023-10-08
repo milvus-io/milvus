@@ -1017,8 +1017,15 @@ func (p *MinioConfig) Init(base *BaseTable) {
 	p.BucketName.Init(base.mgr)
 
 	p.RootPath = ParamItem{
-		Key:          "minio.rootPath",
-		Version:      "2.0.0",
+		Key:     "minio.rootPath",
+		Version: "2.0.0",
+		Formatter: func(rootPath string) string {
+			if rootPath == "" {
+				return ""
+			}
+			rootPath = strings.TrimLeft(rootPath, "/")
+			return path.Clean(rootPath)
+		},
 		PanicIfEmpty: false,
 		Doc:          "The root path where the message is stored in MinIO/S3",
 		Export:       true,

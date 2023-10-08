@@ -139,7 +139,7 @@ AzureBlobChunkManager::GetObjectSize(const std::string& bucket_name,
         }
     }
     std::stringstream err_msg;
-    err_msg << "object('" << bucket_name << "', " << object_name
+    err_msg << "object('" << bucket_name << "', '" << object_name
             << "') not exists";
     throw std::runtime_error(err_msg.str());
 }
