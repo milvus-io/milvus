@@ -189,7 +189,7 @@ func (i *IndexNode) CloseSegcore() {
 }
 
 func (i *IndexNode) initSession() error {
-	i.session = sessionutil.NewSession(i.loopCtx, Params.EtcdCfg.MetaRootPath.GetValue(), i.etcdCli)
+	i.session = sessionutil.NewSession(i.loopCtx, Params.EtcdCfg.MetaRootPath.GetValue(), i.etcdCli, sessionutil.WithEnableDisk(Params.IndexNodeCfg.EnableDisk.GetAsBool()))
 	if i.session == nil {
 		return errors.New("failed to initialize session")
 	}

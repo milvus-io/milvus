@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path"
 	"strconv"
 	"sync"
@@ -94,6 +95,9 @@ type SessionRaw struct {
 	Version            string             `json:"Version"`
 	IndexEngineVersion IndexEngineVersion `json:"IndexEngineVersion,omitempty"`
 	LeaseID            *clientv3.LeaseID  `json:"LeaseID,omitempty"`
+
+	HostName   string `json:"HostName,omitempty"`
+	EnableDisk bool   `json:"EnableDisk,omitempty"`
 }
 
 // Session is a struct to store service's session, including ServerID, ServerName,
@@ -155,6 +159,12 @@ func WithIndexEngineVersion(minimal, current int32) SessionOption {
 	}
 }
 
+func WithEnableDisk(enableDisk bool) SessionOption {
+	return func(s *Session) {
+		s.EnableDisk = enableDisk
+	}
+}
+
 func (s *Session) apply(opts ...SessionOption) {
 	for _, opt := range opts {
 		opt(s)
@@ -189,10 +199,19 @@ func (s *Session) MarshalJSON() ([]byte, error) {
 // metaRoot is a path in etcd to save session information.
 // etcdEndpoints is to init etcdCli when NewSession
 func NewSession(ctx context.Context, metaRoot string, client *clientv3.Client, opts ...SessionOption) *Session {
+	hostName, hostNameErr := os.Hostname()
+	if hostNameErr != nil {
+		log.Error("get host name fail", zap.Error(hostNameErr))
+	}
+
 	session := &Session{
 		ctx:      ctx,
 		metaRoot: metaRoot,
 		Version:  common.Version,
+
+		SessionRaw: SessionRaw{
+			HostName: hostName,
+		},
 
 		// options
 		sessionTTL:        paramtable.Get().CommonCfg.SessionTTL.GetAsInt64(),
