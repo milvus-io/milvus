@@ -504,11 +504,7 @@ func (s *SegmentManager) GetFlushableSegments(ctx context.Context, channel strin
 	ret := make([]UniqueID, 0, len(s.segments))
 	for _, id := range s.segments {
 		info := s.meta.GetHealthySegment(id)
-		if info == nil {
-			continue
-		}
-		if info.InsertChannel != channel {
-			log.Warn("the channel of flushable segments isn't equal", zap.String("insert_channel", info.InsertChannel), zap.String("channel", channel), zap.Int64("segment", id))
+		if info == nil || info.InsertChannel != channel {
 			continue
 		}
 		if s.flushPolicy(info, t) {
