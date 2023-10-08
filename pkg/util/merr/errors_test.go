@@ -109,6 +109,9 @@ func (s *ErrSuite) TestWrap() {
 
 	// Index related
 	s.ErrorIs(WrapErrIndexNotFound("failed to get Index"), ErrIndexNotFound)
+	s.ErrorIs(WrapErrIndexNotFoundForCollection("milvus_hello", "failed to get collection index"), ErrIndexNotFound)
+	s.ErrorIs(WrapErrIndexNotFoundForSegment(100, "failed to get collection index"), ErrIndexNotFound)
+	s.ErrorIs(WrapErrIndexNotSupported("wsnh", "failed to create index"), ErrIndexNotSupported)
 
 	// Node related
 	s.ErrorIs(WrapErrNodeNotFound(1, "failed to get node"), ErrNodeNotFound)

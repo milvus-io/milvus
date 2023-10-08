@@ -23,6 +23,7 @@ import (
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -831,6 +832,12 @@ func GetPrimaryFieldData(datas []*schemapb.FieldData, primaryFieldSchema *schema
 	}
 
 	return primaryFieldData, nil
+}
+
+func GetField(schema *schemapb.CollectionSchema, fieldID int64) *schemapb.FieldSchema {
+	return lo.FindOrElse(schema.GetFields(), nil, func(field *schemapb.FieldSchema) bool {
+		return field.GetFieldID() == fieldID
+	})
 }
 
 func IsPrimaryFieldDataExist(datas []*schemapb.FieldData, primaryFieldSchema *schemapb.FieldSchema) bool {

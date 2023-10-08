@@ -491,13 +491,19 @@ func (dit *describeIndexTask) Execute(ctx context.Context) error {
 	}
 
 	resp, err := dit.datacoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{CollectionID: dit.collectionID, IndexName: dit.IndexName, Timestamp: dit.Timestamp})
-	if err != nil || resp == nil {
+	if err != nil {
 		return err
 	}
+
 	dit.result = &milvuspb.DescribeIndexResponse{}
 	dit.result.Status = resp.GetStatus()
-	if dit.result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return merr.Error(dit.result.GetStatus())
+	err = merr.Error(resp.GetStatus())
+	if err != nil {
+		if errors.Is(err, merr.ErrIndexNotFound) && len(dit.GetIndexName()) == 0 {
+			err = merr.WrapErrIndexNotFoundForCollection(dit.GetCollectionName())
+			dit.result.Status = merr.Status(err)
+		}
+		return err
 	}
 	for _, indexInfo := range resp.IndexInfos {
 		field, err := schemaHelper.GetFieldFromID(indexInfo.FieldID)
