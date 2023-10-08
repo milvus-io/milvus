@@ -2151,7 +2151,7 @@ class TestUpsertInvalid(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_dataframe_data(nb=2)
         partition_name = "partition1"
-        error = {ct.err_code: 1, ct.err_msg: "partition is not exist: partition1"}
+        error = {ct.err_code: 15, ct.err_msg: f"partition={partition_name}: partition not found"}
         collection_w.upsert(data=data, partition_name=partition_name,
                             check_task=CheckTasks.err_res, check_items=error)
 
