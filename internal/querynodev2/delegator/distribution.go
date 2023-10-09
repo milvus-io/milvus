@@ -277,8 +277,8 @@ func (d *distribution) SyncTargetVersion(newVersion int64, growingInTarget []int
 	log.Info("Update readable segment version",
 		zap.Int64("oldVersion", oldValue),
 		zap.Int64("newVersion", newVersion),
-		zap.Int64s("growing", growingInTarget),
-		zap.Int64s("sealed", sealedInTarget),
+		zap.Int("growingSegmentNum", len(growingInTarget)),
+		zap.Int("sealedSegmentNum", len(sealedInTarget)),
 	)
 }
 
