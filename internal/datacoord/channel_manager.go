@@ -498,6 +498,18 @@ func (c *ChannelManager) GetChannels() []*NodeChannelInfo {
 	return c.store.GetNodesChannels()
 }
 
+func (c *ChannelManager) GetChannelsByCollectionID(collectionID UniqueID) []*channel {
+	channels := make([]*channel, 0)
+	for _, nodeChannels := range c.store.GetNodesChannels() {
+		for _, channelInfo := range nodeChannels.Channels {
+			if collectionID == channelInfo.CollectionID {
+				channels = append(channels, channelInfo)
+			}
+		}
+	}
+	return channels
+}
+
 // GetBufferChannels gets buffer channels.
 func (c *ChannelManager) GetBufferChannels() *NodeChannelInfo {
 	c.mu.RLock()

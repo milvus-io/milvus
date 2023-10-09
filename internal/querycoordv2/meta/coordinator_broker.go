@@ -150,7 +150,8 @@ func (broker *CoordinatorBroker) GetRecoveryInfoV2(ctx context.Context, collecti
 	}
 	recoveryInfo, err := broker.dataCoord.GetRecoveryInfoV2(ctx, getRecoveryInfoRequest)
 	if err != nil {
-		log.Warn("get recovery info failed", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs), zap.Error(err))
+		log.Warn("get recovery info failed", zap.Int64("collectionID", collectionID),
+			zap.Int64s("partitionIDs", partitionIDs), zap.Error(err))
 		return nil, nil, err
 	}
 

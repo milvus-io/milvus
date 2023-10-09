@@ -114,8 +114,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.NoError(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.EqualValues(t, 0, len(resp.GetSegments()))
-		assert.EqualValues(t, 1, len(resp.GetChannels()))
-		assert.Nil(t, resp.GetChannels()[0].SeekPosition)
+		assert.EqualValues(t, 0, len(resp.GetChannels()))
 	})
 
 	createSegment := func(id, collectionID, partitionID, numOfRows int64, posTs uint64,
@@ -231,6 +230,10 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
+		ch := &channel{Name: "vchan1", CollectionID: 0}
+		svr.channelManager.AddNode(0)
+		svr.channelManager.Watch(ch)
+
 		req := &datapb.GetRecoveryInfoRequestV2{
 			CollectionID: 0,
 		}
@@ -306,6 +309,10 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.NoError(t, err)
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
 		assert.NoError(t, err)
+
+		ch := &channel{Name: "vchan1", CollectionID: 0}
+		svr.channelManager.AddNode(0)
+		svr.channelManager.Watch(ch)
 
 		req := &datapb.GetRecoveryInfoRequestV2{
 			CollectionID: 0,
@@ -447,6 +454,10 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
 		assert.NoError(t, err)
 
+		ch := &channel{Name: "vchan1", CollectionID: 0}
+		svr.channelManager.AddNode(0)
+		svr.channelManager.Watch(ch)
+
 		req := &datapb.GetRecoveryInfoRequestV2{
 			CollectionID: 0,
 		}
@@ -488,6 +499,10 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.NoError(t, err)
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
 		assert.NoError(t, err)
+
+		ch := &channel{Name: "vchan1", CollectionID: 0}
+		svr.channelManager.AddNode(0)
+		svr.channelManager.Watch(ch)
 
 		req := &datapb.GetRecoveryInfoRequestV2{
 			CollectionID: 0,
@@ -568,6 +583,10 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			IndexFileKeys: nil,
 			IndexSize:     0,
 		})
+
+		ch := &channel{Name: "vchan1", CollectionID: 0}
+		svr.channelManager.AddNode(0)
+		svr.channelManager.Watch(ch)
 
 		req := &datapb.GetRecoveryInfoRequestV2{
 			CollectionID: 0,
