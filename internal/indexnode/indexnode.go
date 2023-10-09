@@ -193,6 +193,7 @@ func (i *IndexNode) initSession() error {
 		return errors.New("failed to initialize session")
 	}
 	i.session.Init(typeutil.IndexNodeRole, i.address, false, true)
+	sessionutil.SaveServerInfo(typeutil.IndexNodeRole, i.session.ServerID)
 	return nil
 }
 

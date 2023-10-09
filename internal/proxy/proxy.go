@@ -173,6 +173,7 @@ func (node *Proxy) initSession() error {
 		return errors.New("new session failed, maybe etcd cannot be connected")
 	}
 	node.session.Init(typeutil.ProxyRole, node.address, false, true)
+	sessionutil.SaveServerInfo(typeutil.ProxyRole, node.session.ServerID)
 	return nil
 }
 

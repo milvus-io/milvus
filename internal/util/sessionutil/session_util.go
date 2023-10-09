@@ -22,7 +22,9 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -38,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const (
@@ -1103,4 +1106,77 @@ func (s *Session) ForceActiveStandby(activateFunc func() error) error {
 		return activateFunc()
 	}
 	return nil
+}
+
+func filterEmptyStrings(s []string) []string {
+	var filtered []string
+	for _, str := range s {
+		if str != "" {
+			filtered = append(filtered, str)
+		}
+	}
+	return filtered
+}
+
+func GetSessions(pid int) []string {
+	fileFullName := GetServerInfoFilePath(pid)
+	if _, err := os.Stat(fileFullName); errors.Is(err, os.ErrNotExist) {
+		log.Warn("not found server info file path", zap.String("filePath", fileFullName), zap.Error(err))
+		return []string{}
+	}
+
+	v, err := os.ReadFile(fileFullName)
+	if err != nil {
+		log.Warn("read server info file path failed", zap.String("filePath", fileFullName), zap.Error(err))
+		return []string{}
+	}
+
+	return filterEmptyStrings(strings.Split(string(v), "\n"))
+}
+
+func RemoveServerInfoFile(pid int) {
+	fullPath := GetServerInfoFilePath(pid)
+	_ = os.Remove(fullPath)
+}
+
+// GetServerInfoFilePath get server info file path, eg: /tmp/milvus/server_id_123456789
+// Notes: this method will not support Windows OS
+// return file path
+func GetServerInfoFilePath(pid int) string {
+	tmpDir := "/tmp/milvus"
+	_ = os.Mkdir(tmpDir, os.ModePerm)
+	fileName := fmt.Sprintf("server_id_%d", pid)
+	filePath := filepath.Join(tmpDir, fileName)
+	return filePath
+}
+
+func saveServerInfoInternal(role string, serverID int64, pid int) {
+	fileFullPath := GetServerInfoFilePath(pid)
+	fd, err := os.OpenFile(fileFullPath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o664)
+	if err != nil {
+		log.Warn("open server info file fail", zap.String("filePath", fileFullPath), zap.Error(err))
+		return
+	}
+	defer fd.Close()
+
+	data := fmt.Sprintf("%s-%d", role, serverID)
+	// remove active session if role is a coordinator
+	if role == typeutil.RootCoordRole || role == typeutil.QueryCoordRole {
+		data = fmt.Sprintf("%s\n%s\n", data, role)
+	} else if role == typeutil.DataCoordRole {
+		// also remove a faked indexcoord seesion if role is a datacoord coord
+		data = fmt.Sprintf("%s\n%s\n%s\n", data, role, typeutil.IndexCoordRole)
+	} else {
+		data = fmt.Sprintf("%s\n", data)
+	}
+	_, err = fd.WriteString(data)
+	if err != nil {
+		log.Warn("write server info file fail", zap.String("filePath", fileFullPath), zap.Error(err))
+	}
+
+	log.Info("save into server info to file", zap.String("content", data), zap.String("filePath", fileFullPath))
+}
+
+func SaveServerInfo(role string, serverID int64) {
+	saveServerInfoInternal(role, serverID, os.Getpid())
 }

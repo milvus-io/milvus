@@ -7,6 +7,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+const (
+	RunCmd      = "run"
+	RoleMixture = "mixture"
+)
+
 var (
 	usageLine = fmt.Sprintf("Usage:\n"+
 		"%s\n%s\n%s\n%s\n", runLine, stopLine, mckLine, serverTypeLine)
