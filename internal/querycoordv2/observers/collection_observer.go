@@ -102,7 +102,7 @@ func (ob *CollectionObserver) Stop() {
 
 func (ob *CollectionObserver) Observe(ctx context.Context) {
 	ob.observeTimeout()
-	ob.observeLoadStatus()
+	ob.observeLoadStatus(ctx)
 }
 
 func (ob *CollectionObserver) observeTimeout() {
@@ -158,7 +158,7 @@ func (ob *CollectionObserver) readyToObserve(collectionID int64) bool {
 	return metaExist && targetExist
 }
 
-func (ob *CollectionObserver) observeLoadStatus() {
+func (ob *CollectionObserver) observeLoadStatus(ctx context.Context) {
 	partitions := ob.meta.CollectionManager.GetAllPartitions()
 	if len(partitions) > 0 {
 		log.Info("observe partitions status", zap.Int("partitionNum", len(partitions)))
@@ -170,7 +170,7 @@ func (ob *CollectionObserver) observeLoadStatus() {
 		}
 		if ob.readyToObserve(partition.CollectionID) {
 			replicaNum := ob.meta.GetReplicaNumber(partition.GetCollectionID())
-			ob.observePartitionLoadStatus(partition, replicaNum)
+			ob.observePartitionLoadStatus(ctx, partition, replicaNum)
 			loading = true
 		}
 	}
@@ -180,7 +180,7 @@ func (ob *CollectionObserver) observeLoadStatus() {
 	}
 }
 
-func (ob *CollectionObserver) observePartitionLoadStatus(partition *meta.Partition, replicaNum int32) {
+func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, partition *meta.Partition, replicaNum int32) {
 	log := log.With(
 		zap.Int64("collectionID", partition.GetCollectionID()),
 		zap.Int64("partitionID", partition.GetPartitionID()),
@@ -230,7 +230,7 @@ func (ob *CollectionObserver) observePartitionLoadStatus(partition *meta.Partiti
 	}
 
 	ob.partitionLoadedCount[partition.GetPartitionID()] = loadedCount
-	if loadPercentage == 100 && ob.targetObserver.Check(partition.GetCollectionID()) && ob.leaderObserver.CheckTargetVersion(partition.GetCollectionID()) {
+	if loadPercentage == 100 && ob.targetObserver.Check(ctx, partition.GetCollectionID()) && ob.leaderObserver.CheckTargetVersion(ctx, partition.GetCollectionID()) {
 		delete(ob.partitionLoadedCount, partition.GetPartitionID())
 	}
 	collectionPercentage, err := ob.meta.CollectionManager.UpdateLoadPercent(partition.PartitionID, loadPercentage)

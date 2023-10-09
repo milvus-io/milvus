@@ -137,13 +137,20 @@ func (o *LeaderObserver) observeCollection(ctx context.Context, collection int64
 	return result
 }
 
-func (ob *LeaderObserver) CheckTargetVersion(collectionID int64) bool {
+func (ob *LeaderObserver) CheckTargetVersion(ctx context.Context, collectionID int64) bool {
 	notifier := make(chan bool)
-	ob.manualCheck <- checkRequest{
-		CollectionID: collectionID,
-		Notifier:     notifier,
+	select {
+	case ob.manualCheck <- checkRequest{CollectionID: collectionID, Notifier: notifier}:
+	case <-ctx.Done():
+		return false
 	}
-	return <-notifier
+
+	select {
+	case result := <-notifier:
+		return result
+	case <-ctx.Done():
+		return false
+	}
 }
 
 func (o *LeaderObserver) checkNeedUpdateTargetVersion(ctx context.Context, leaderView *meta.LeaderView) *querypb.SyncAction {
