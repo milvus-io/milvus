@@ -5,9 +5,10 @@ import (
 	"strconv"
 	"strings"
 
+	parser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
+
 	"github.com/antlr/antlr4/runtime/Go/antlr"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	parser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -130,17 +131,16 @@ func (v *ParserVisitor) VisitFloating(ctx *parser.FloatingContext) interface{} {
 
 // VisitString translates expr to GenericValue.
 func (v *ParserVisitor) VisitString(ctx *parser.StringContext) interface{} {
-	literal := ctx.StringLiteral().GetText()
-	if (strings.HasPrefix(literal, "\"") && strings.HasSuffix(literal, "\"")) ||
-		(strings.HasPrefix(literal, "'") && strings.HasSuffix(literal, "'")) {
-		literal = literal[1 : len(literal)-1]
+	pattern, err := convertEscapeSingle(ctx.StringLiteral().GetText())
+	if err != nil {
+		return err
 	}
 	return &ExprWithType{
 		dataType: schemapb.DataType_VarChar,
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_ValueExpr{
 				ValueExpr: &planpb.ValueExpr{
-					Value: NewString(literal),
+					Value: NewString(pattern),
 				},
 			},
 		},
@@ -427,10 +427,9 @@ func (v *ParserVisitor) VisitLike(ctx *parser.LikeContext) interface{} {
 		return fmt.Errorf("like operation on complicated expr is unsupported")
 	}
 
-	pattern := ctx.StringLiteral().GetText()
-	if (strings.HasPrefix(pattern, "\"") && strings.HasSuffix(pattern, "\"")) ||
-		(strings.HasPrefix(pattern, "'") && strings.HasSuffix(pattern, "'")) {
-		pattern = pattern[1 : len(pattern)-1]
+	pattern, err := convertEscapeSingle(ctx.StringLiteral().GetText())
+	if err != nil {
+		return err
 	}
 
 	op, operand, err := translatePatternMatch(pattern)

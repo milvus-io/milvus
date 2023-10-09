@@ -542,31 +542,21 @@ func Test_handleExpr(t *testing.T) {
 }
 
 // test if handleExpr is thread-safe.
-func Test_handleExpr_17126(t *testing.T) {
+func Test_handleExpr_17126_26662(t *testing.T) {
 	schema := newTestSchema()
 	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
 	assert.NoError(t, err)
-	normal := "Int64Field > 0"
-	abnormal := "1 < Int32Field < (Int16Field)"
+	normal := `VarCharField == "abcd\"defg"`
 
-	n := 4 // default parallel in regression.
-	m := 16
+	n := 400
 	var wg sync.WaitGroup
-	for i := 0; i < n*m; i++ {
+	for i := 0; i < n; i++ {
 		wg.Add(1)
-		i := i
 		go func() {
 			defer wg.Done()
-			if i%2 == 0 {
-				ret := handleExpr(schemaHelper, normal)
-				_, ok := ret.(error)
-				assert.False(t, ok)
-			} else {
-				ret := handleExpr(schemaHelper, abnormal)
-				err, ok := ret.(error)
-				assert.True(t, ok)
-				assert.Error(t, err)
-			}
+			ret := handleExpr(schemaHelper, normal)
+			_, ok := ret.(error)
+			assert.False(t, ok)
 		}()
 	}
 	wg.Wait()
@@ -1564,4 +1554,54 @@ func Test_InvalidAccess(t *testing.T) {
 		RoundDecimal: 0,
 	})
 	assert.Error(t, err)
+}
+
+func Test_EscapeString(t *testing.T) {
+	schema := newTestSchema()
+	expr := ""
+	var err error
+	exprs := []string{
+		`A == "\"" || B == '\"'`,
+		`A == "\n" || B == '\n'`,
+		`A == "\367" || B == '\367'`,
+		`A == "\3678" || B == '\3678'`,
+		`A == "ab'c\'d" || B == 'abc"de\"'`,
+		`A == "'" || B == '"'`,
+		`A == "\'" || B == '\"' || C == '\''`,
+		`A == "\\'" || B == '\\"' || C == '\''`,
+		`A == "\\\'" || B == '\\\"' || C == '\\\''`,
+		`A == "\\\\'" || B == '\\\\"' || C == '\\\''`,
+		`A == "\\\\\'" || B == '\\\\\"' || C == '\\\\\''`,
+		`A == "\\\\\\'" || B == '\\\\\\"' || C == '\\\\\''`,
+		`str2 like 'abc\"def-%'`,
+		`str2 like 'abc"def-%'`,
+		`str4 like "abc\367-%"`,
+		`str4 like "中国"`,
+	}
+	for _, expr = range exprs {
+		_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+			Topk:         0,
+			MetricType:   "",
+			SearchParams: "",
+			RoundDecimal: 0,
+		})
+		assert.NoError(t, err)
+	}
+
+	invalidExprs := []string{
+		`A == "ab
+c" || B == 'ab
+c'`,
+		`A == "\423" || B == '\378'`,
+		`A == "\中国"`,
+	}
+	for _, expr = range invalidExprs {
+		_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+			Topk:         0,
+			MetricType:   "",
+			SearchParams: "",
+			RoundDecimal: 0,
+		})
+		assert.Error(t, err)
+	}
 }
