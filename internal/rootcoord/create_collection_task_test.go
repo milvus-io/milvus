@@ -708,11 +708,11 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 					StateCode: commonpb.StateCode_Healthy,
 				},
 				SubcomponentStates: nil,
-				Status:             succStatus(),
+				Status:             merr.Success(),
 			}, nil
 		}
 		dc.WatchChannelsFunc = func(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error) {
-			return &datapb.WatchChannelsResponse{Status: succStatus()}, nil
+			return &datapb.WatchChannelsResponse{Status: merr.Success()}, nil
 		}
 
 		core := newTestCore(withValidIDAllocator(),

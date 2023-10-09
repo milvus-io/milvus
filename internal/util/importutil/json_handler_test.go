@@ -39,7 +39,7 @@ type mockIDAllocator struct {
 
 func (a *mockIDAllocator) AllocID(ctx context.Context, req *rootcoordpb.AllocIDRequest, opts ...grpc.CallOption) (*rootcoordpb.AllocIDResponse, error) {
 	return &rootcoordpb.AllocIDResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		ID:     int64(1),
 		Count:  req.Count,
 	}, a.allocErr

@@ -109,7 +109,7 @@ func getProxyMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest, n
 	}
 
 	return &milvuspb.GetMetricsResponse{
-		Status:        merr.Status(nil),
+		Status:        merr.Success(),
 		Response:      resp,
 		ComponentName: metricsinfo.ConstructComponentName(typeutil.ProxyRole, paramtable.GetNodeID()),
 	}, nil
@@ -426,7 +426,7 @@ func getSystemInfoMetrics(
 	}
 
 	return &milvuspb.GetMetricsResponse{
-		Status:        merr.Status(nil),
+		Status:        merr.Success(),
 		Response:      resp,
 		ComponentName: metricsinfo.ConstructComponentName(typeutil.ProxyRole, paramtable.GetNodeID()),
 	}, nil

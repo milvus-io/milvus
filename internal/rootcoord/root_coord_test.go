@@ -971,7 +971,7 @@ func TestRootCoord_GetMetrics(t *testing.T) {
 		c := newTestCore(withHealthyCode(),
 			withMetricsCacheManager())
 		c.metricsCacheManager.UpdateSystemInfoMetrics(&milvuspb.GetMetricsResponse{
-			Status:        succStatus(),
+			Status:        merr.Success(),
 			Response:      "cached response",
 			ComponentName: "cached component",
 		})
@@ -1451,36 +1451,36 @@ func TestCore_ReportImport(t *testing.T) {
 				StateCode: commonpb.StateCode_Healthy,
 			},
 			SubcomponentStates: nil,
-			Status:             succStatus(),
+			Status:             merr.Success(),
 		}, nil
 	}
 	dc.WatchChannelsFunc = func(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error) {
-		return &datapb.WatchChannelsResponse{Status: succStatus()}, nil
+		return &datapb.WatchChannelsResponse{Status: merr.Success()}, nil
 	}
 	dc.FlushFunc = func(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
-		return &datapb.FlushResponse{Status: succStatus()}, nil
+		return &datapb.FlushResponse{Status: merr.Success()}, nil
 	}
 
 	mockCallImportServiceErr := false
 	callImportServiceFn := func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 		if mockCallImportServiceErr {
 			return &datapb.ImportTaskResponse{
-				Status: merr.Status(nil),
+				Status: merr.Success(),
 			}, errors.New("mock err")
 		}
 		return &datapb.ImportTaskResponse{
-			Status: merr.Status(nil),
+			Status: merr.Success(),
 		}, nil
 	}
 
 	callGetSegmentStates := func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
 		return &datapb.GetSegmentStatesResponse{
-			Status: merr.Status(nil),
+			Status: merr.Success(),
 		}, nil
 	}
 
 	callUnsetIsImportingState := func(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
-		return merr.Status(nil), nil
+		return merr.Success(), nil
 	}
 
 	t.Run("not healthy", func(t *testing.T) {
@@ -1551,7 +1551,7 @@ func TestCore_Rbac(t *testing.T) {
 	}
 
 	// not healthy.
-	c.stateCode.Store(commonpb.StateCode_Abnormal)
+	c.UpdateStateCode(commonpb.StateCode_Abnormal)
 
 	{
 		resp, err := c.CreateCredential(ctx, &internalpb.CredentialInfo{})
@@ -1647,7 +1647,7 @@ func TestCore_sendMinDdlTsAsTt(t *testing.T) {
 		withDdlTsLockManager(ddlManager),
 		withScheduler(sched))
 
-	c.stateCode.Store(commonpb.StateCode_Healthy)
+	c.UpdateStateCode(commonpb.StateCode_Healthy)
 	c.session.ServerID = TestRootCoordID
 	c.sendMinDdlTsAsTt() // no session.
 	ticker.addSession(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: TestRootCoordID}})
@@ -1721,13 +1721,13 @@ func TestRootcoord_EnableActiveStandby(t *testing.T) {
 
 	err = core.Init()
 	assert.NoError(t, err)
-	assert.Equal(t, commonpb.StateCode_StandBy, core.stateCode.Load().(commonpb.StateCode))
+	assert.Equal(t, commonpb.StateCode_StandBy, core.GetStateCode())
 	err = core.Start()
 	assert.NoError(t, err)
 	core.session.TriggerKill = false
 	err = core.Register()
 	assert.NoError(t, err)
-	assert.Equal(t, commonpb.StateCode_Healthy, core.stateCode.Load().(commonpb.StateCode))
+	assert.Equal(t, commonpb.StateCode_Healthy, core.GetStateCode())
 	resp, err := core.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_DescribeCollection,
@@ -1772,13 +1772,13 @@ func TestRootcoord_DisableActiveStandby(t *testing.T) {
 
 	err = core.Init()
 	assert.NoError(t, err)
-	assert.Equal(t, commonpb.StateCode_Initializing, core.stateCode.Load().(commonpb.StateCode))
+	assert.Equal(t, commonpb.StateCode_Initializing, core.GetStateCode())
 	err = core.Start()
 	assert.NoError(t, err)
 	core.session.TriggerKill = false
 	err = core.Register()
 	assert.NoError(t, err)
-	assert.Equal(t, commonpb.StateCode_Healthy, core.stateCode.Load().(commonpb.StateCode))
+	assert.Equal(t, commonpb.StateCode_Healthy, core.GetStateCode())
 	resp, err := core.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_DescribeCollection,
@@ -2062,8 +2062,7 @@ func TestCore_Stop(t *testing.T) {
 		c := &Core{}
 		err := c.Stop()
 		assert.NoError(t, err)
-		code, ok := c.stateCode.Load().(commonpb.StateCode)
-		assert.True(t, ok)
+		code := c.GetStateCode()
 		assert.Equal(t, commonpb.StateCode_Abnormal, code)
 	})
 
@@ -2073,8 +2072,7 @@ func TestCore_Stop(t *testing.T) {
 		c.ctx, c.cancel = context.WithCancel(context.Background())
 		err := c.Stop()
 		assert.NoError(t, err)
-		code, ok := c.stateCode.Load().(commonpb.StateCode)
-		assert.True(t, ok)
+		code := c.GetStateCode()
 		assert.Equal(t, commonpb.StateCode_Abnormal, code)
 	})
 }

@@ -114,7 +114,7 @@ func (t *QueryTask) Execute() error {
 		Base: &commonpb.MsgBase{
 			SourceID: paramtable.GetNodeID(),
 		},
-		Status:     merr.Status(nil),
+		Status:     merr.Success(),
 		Ids:        reducedResult.Ids,
 		FieldsData: reducedResult.FieldsData,
 		CostAggregation: &internalpb.CostAggregation{

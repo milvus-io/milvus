@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 func TestServerBroker_ReleaseCollection(t *testing.T) {
@@ -228,7 +229,7 @@ func TestServerBroker_GetSegmentIndexState(t *testing.T) {
 		c := newTestCore(withValidDataCoord())
 		c.dataCoord.(*mockDataCoord).GetSegmentIndexStateFunc = func(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
 			return &indexpb.GetSegmentIndexStateResponse{
-				Status: succStatus(),
+				Status: merr.Success(),
 				States: []*indexpb.SegmentIndexState{
 					{
 						SegmentID:  1,
@@ -353,12 +354,13 @@ func TestServerBroker_GcConfirm(t *testing.T) {
 
 	t.Run("non success", func(t *testing.T) {
 		dc := mocks.NewMockDataCoordClient(t)
+		err := errors.New("mock error")
 		dc.On("GcConfirm",
 			mock.Anything, // context.Context
 			mock.Anything, // *datapb.GcConfirmRequest
 			mock.Anything,
 		).Return(
-			&datapb.GcConfirmResponse{Status: failStatus(commonpb.ErrorCode_UnexpectedError, "error mock GcConfirm")},
+			&datapb.GcConfirmResponse{Status: merr.Status(err)},
 			nil)
 		c := newTestCore(withDataCoord(dc))
 		broker := newServerBroker(c)
@@ -372,7 +374,7 @@ func TestServerBroker_GcConfirm(t *testing.T) {
 			mock.Anything, // *datapb.GcConfirmRequest
 			mock.Anything,
 		).Return(
-			&datapb.GcConfirmResponse{Status: succStatus(), GcFinished: true},
+			&datapb.GcConfirmResponse{Status: merr.Success(), GcFinished: true},
 			nil)
 		c := newTestCore(withDataCoord(dc))
 		broker := newServerBroker(c)

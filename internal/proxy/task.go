@@ -511,7 +511,7 @@ func (t *describeCollectionTask) PreExecute(ctx context.Context) error {
 func (t *describeCollectionTask) Execute(ctx context.Context) error {
 	var err error
 	t.result = &milvuspb.DescribeCollectionResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		Schema: &schemapb.CollectionSchema{
 			Name:        "",
 			Description: "",
@@ -1324,7 +1324,7 @@ func (t *flushTask) Execute(ctx context.Context) error {
 		coll2FlushTs[collName] = resp.GetFlushTs()
 	}
 	t.result = &milvuspb.FlushResponse{
-		Status:          merr.Status(nil),
+		Status:          merr.Success(),
 		DbName:          t.GetDbName(),
 		CollSegIDs:      coll2Segments,
 		FlushCollSegIDs: flushColl2Segments,

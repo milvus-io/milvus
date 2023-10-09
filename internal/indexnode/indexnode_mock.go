@@ -85,16 +85,16 @@ func NewIndexNodeMock() *Mock {
 					StateCode: commonpb.StateCode_Healthy,
 				},
 				SubcomponentStates: nil,
-				Status:             merr.Status(nil),
+				Status:             merr.Success(),
 			}, nil
 		},
 		CallGetStatisticsChannel: func(ctx context.Context) (*milvuspb.StringResponse, error) {
 			return &milvuspb.StringResponse{
-				Status: merr.Status(nil),
+				Status: merr.Success(),
 			}, nil
 		},
 		CallCreateJob: func(ctx context.Context, req *indexpb.CreateJobRequest) (*commonpb.Status, error) {
-			return merr.Status(nil), nil
+			return merr.Success(), nil
 		},
 		CallQueryJobs: func(ctx context.Context, in *indexpb.QueryJobsRequest) (*indexpb.QueryJobsResponse, error) {
 			indexInfos := make([]*indexpb.IndexTaskInfo, 0)
@@ -106,17 +106,17 @@ func NewIndexNodeMock() *Mock {
 				})
 			}
 			return &indexpb.QueryJobsResponse{
-				Status:     merr.Status(nil),
+				Status:     merr.Success(),
 				ClusterID:  in.ClusterID,
 				IndexInfos: indexInfos,
 			}, nil
 		},
 		CallDropJobs: func(ctx context.Context, in *indexpb.DropJobsRequest) (*commonpb.Status, error) {
-			return merr.Status(nil), nil
+			return merr.Success(), nil
 		},
 		CallGetJobStats: func(ctx context.Context, in *indexpb.GetJobStatsRequest) (*indexpb.GetJobStatsResponse, error) {
 			return &indexpb.GetJobStatsResponse{
-				Status:           merr.Status(nil),
+				Status:           merr.Success(),
 				TotalJobNum:      1,
 				EnqueueJobNum:    0,
 				InProgressJobNum: 1,
@@ -137,7 +137,7 @@ func NewIndexNodeMock() *Mock {
 		},
 		CallShowConfigurations: func(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 			return &internalpb.ShowConfigurationsResponse{
-				Status: merr.Status(nil),
+				Status: merr.Success(),
 			}, nil
 		},
 	}
@@ -239,7 +239,7 @@ func getMockSystemInfoMetrics(
 	resp, _ := metricsinfo.MarshalComponentInfos(nodeInfos)
 
 	return &milvuspb.GetMetricsResponse{
-		Status:        merr.Status(nil),
+		Status:        merr.Success(),
 		Response:      resp,
 		ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, paramtable.GetNodeID()),
 	}, nil

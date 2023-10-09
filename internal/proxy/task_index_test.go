@@ -58,7 +58,7 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 	rootCoord := newMockRootCoord()
 	queryCoord := getMockQueryCoord()
 	queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
-		Status:        merr.Status(nil),
+		Status:        merr.Success(),
 		CollectionIDs: []int64{},
 	}, nil)
 	datacoord := NewDataCoordMock()
@@ -88,7 +88,7 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 
 	rootCoord.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
 		return &milvuspb.DescribeCollectionResponse{
-			Status:         merr.Status(nil),
+			Status:         merr.Success(),
 			Schema:         newTestSchema(),
 			CollectionID:   collectionID,
 			CollectionName: request.CollectionName,
@@ -97,7 +97,7 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 
 	datacoord.GetIndexStateFunc = func(ctx context.Context, request *indexpb.GetIndexStateRequest, opts ...grpc.CallOption) (*indexpb.GetIndexStateResponse, error) {
 		return &indexpb.GetIndexStateResponse{
-			Status:     merr.Status(nil),
+			Status:     merr.Success(),
 			State:      commonpb.IndexState_Finished,
 			FailReason: "",
 		}, nil
@@ -116,7 +116,7 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 	paramtable.Init()
 	qc := getMockQueryCoord()
 	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
-		Status:        merr.Status(nil),
+		Status:        merr.Success(),
 		CollectionIDs: []int64{},
 	}, nil)
 	dc := NewDataCoordMock()
@@ -177,7 +177,7 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 	t.Run("coll has been loaded", func(t *testing.T) {
 		qc := getMockQueryCoord()
 		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
-			Status:        merr.Status(nil),
+			Status:        merr.Success(),
 			CollectionIDs: []int64{collectionID},
 		}, nil)
 		dit.queryCoord = qc

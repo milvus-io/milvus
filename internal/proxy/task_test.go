@@ -1272,11 +1272,11 @@ func TestDropPartitionTask(t *testing.T) {
 	partitionName := prefix + funcutil.GenRandomStr()
 	qc := getQueryCoordClient()
 	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
-		Status:       merr.Status(nil),
+		Status:       merr.Success(),
 		PartitionIDs: []int64{},
 	}, nil)
 	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}, nil)
 
 	mockCache := NewMockCache(t)
@@ -1632,7 +1632,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 			Condition: NewTaskCondition(ctx),
 			ctx:       ctx,
 			result: &milvuspb.MutationResult{
-				Status:       merr.Status(nil),
+				Status:       merr.Success(),
 				IDs:          nil,
 				SuccIndex:    nil,
 				ErrIndex:     nil,
@@ -1672,7 +1672,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 			idAllocator: idAllocator,
 			ctx:         ctx,
 			result: &milvuspb.MutationResult{
-				Status:       merr.Status(nil),
+				Status:       merr.Success(),
 				IDs:          nil,
 				SuccIndex:    nil,
 				ErrIndex:     nil,
@@ -1717,7 +1717,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 			idAllocator: idAllocator,
 			ctx:         ctx,
 			result: &milvuspb.MutationResult{
-				Status:       merr.Status(nil),
+				Status:       merr.Success(),
 				IDs:          nil,
 				SuccIndex:    nil,
 				ErrIndex:     nil,
@@ -1877,7 +1877,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 			Condition: NewTaskCondition(ctx),
 			ctx:       ctx,
 			result: &milvuspb.MutationResult{
-				Status:       merr.Status(nil),
+				Status:       merr.Success(),
 				IDs:          nil,
 				SuccIndex:    nil,
 				ErrIndex:     nil,
@@ -1962,7 +1962,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 			},
 			ctx: ctx,
 			result: &milvuspb.MutationResult{
-				Status:       merr.Status(nil),
+				Status:       merr.Success(),
 				IDs:          nil,
 				SuccIndex:    nil,
 				ErrIndex:     nil,
@@ -2004,7 +2004,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 			idAllocator: idAllocator,
 			ctx:         ctx,
 			result: &milvuspb.MutationResult{
-				Status:       merr.Status(nil),
+				Status:       merr.Success(),
 				IDs:          nil,
 				SuccIndex:    nil,
 				ErrIndex:     nil,
@@ -2052,7 +2052,7 @@ func TestCreateAlias_all(t *testing.T) {
 			Alias:          "alias1",
 		},
 		ctx:       ctx,
-		result:    merr.Status(nil),
+		result:    merr.Success(),
 		rootCoord: rc,
 	}
 
@@ -2088,7 +2088,7 @@ func TestDropAlias_all(t *testing.T) {
 			Alias: "alias1",
 		},
 		ctx:       ctx,
-		result:    merr.Status(nil),
+		result:    merr.Success(),
 		rootCoord: rc,
 	}
 
@@ -2126,7 +2126,7 @@ func TestAlterAlias_all(t *testing.T) {
 			Alias:          "alias1",
 		},
 		ctx:       ctx,
-		result:    merr.Status(nil),
+		result:    merr.Success(),
 		rootCoord: rc,
 	}
 
@@ -2515,11 +2515,11 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 
 	qc := getQueryCoordClient()
 	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
-		Status:       merr.Status(nil),
+		Status:       merr.Success(),
 		PartitionIDs: []int64{},
 	}, nil)
 	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}, nil)
 
 	dbName := funcutil.GenRandomStr()
@@ -2536,7 +2536,7 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 
 	rc.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
 		return &milvuspb.DescribeCollectionResponse{
-			Status:         merr.Status(nil),
+			Status:         merr.Success(),
 			Schema:         newTestSchema(),
 			CollectionID:   collectionID,
 			CollectionName: request.CollectionName,
@@ -2585,7 +2585,7 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 	t.Run("no vector index", func(t *testing.T) {
 		dc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
 			return &indexpb.DescribeIndexResponse{
-				Status: merr.Status(nil),
+				Status: merr.Success(),
 				IndexInfos: []*indexpb.IndexInfo{
 					{
 						CollectionID:         collectionID,
@@ -2616,11 +2616,11 @@ func Test_loadPartitionTask_Execute(t *testing.T) {
 
 	qc := getQueryCoordClient()
 	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
-		Status:       merr.Status(nil),
+		Status:       merr.Success(),
 		PartitionIDs: []int64{},
 	}, nil)
 	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}, nil)
 
 	dbName := funcutil.GenRandomStr()
@@ -2637,7 +2637,7 @@ func Test_loadPartitionTask_Execute(t *testing.T) {
 
 	rc.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
 		return &milvuspb.DescribeCollectionResponse{
-			Status:         merr.Status(nil),
+			Status:         merr.Success(),
 			Schema:         newTestSchema(),
 			CollectionID:   collectionID,
 			CollectionName: request.CollectionName,
@@ -2686,7 +2686,7 @@ func Test_loadPartitionTask_Execute(t *testing.T) {
 	t.Run("no vector index", func(t *testing.T) {
 		dc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
 			return &indexpb.DescribeIndexResponse{
-				Status: merr.Status(nil),
+				Status: merr.Success(),
 				IndexInfos: []*indexpb.IndexInfo{
 					{
 						CollectionID:         collectionID,
@@ -2716,7 +2716,7 @@ func TestCreateResourceGroupTask(t *testing.T) {
 
 	defer rc.Close()
 	qc := getQueryCoordClient()
-	qc.EXPECT().CreateResourceGroup(mock.Anything, mock.Anything, mock.Anything).Return(merr.Status(nil), nil)
+	qc.EXPECT().CreateResourceGroup(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
 	ctx := context.Background()
 	mgr := newShardClientMgr()
@@ -2755,7 +2755,7 @@ func TestDropResourceGroupTask(t *testing.T) {
 
 	defer rc.Close()
 	qc := getQueryCoordClient()
-	qc.EXPECT().DropResourceGroup(mock.Anything, mock.Anything).Return(merr.Status(nil), nil)
+	qc.EXPECT().DropResourceGroup(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
 	ctx := context.Background()
 	mgr := newShardClientMgr()
@@ -2794,7 +2794,7 @@ func TestTransferNodeTask(t *testing.T) {
 
 	defer rc.Close()
 	qc := getQueryCoordClient()
-	qc.EXPECT().TransferNode(mock.Anything, mock.Anything).Return(merr.Status(nil), nil)
+	qc.EXPECT().TransferNode(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
 	ctx := context.Background()
 	mgr := newShardClientMgr()
@@ -2833,7 +2833,7 @@ func TestTransferNodeTask(t *testing.T) {
 func TestTransferReplicaTask(t *testing.T) {
 	rc := &MockRootCoordClientInterface{}
 	qc := getQueryCoordClient()
-	qc.EXPECT().TransferReplica(mock.Anything, mock.Anything).Return(merr.Status(nil), nil)
+	qc.EXPECT().TransferReplica(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
 	ctx := context.Background()
 	mgr := newShardClientMgr()
@@ -2876,7 +2876,7 @@ func TestListResourceGroupsTask(t *testing.T) {
 	rc := &MockRootCoordClientInterface{}
 	qc := getQueryCoordClient()
 	qc.EXPECT().ListResourceGroups(mock.Anything, mock.Anything).Return(&milvuspb.ListResourceGroupsResponse{
-		Status:         merr.Status(nil),
+		Status:         merr.Success(),
 		ResourceGroups: []string{meta.DefaultResourceGroupName, "rg"},
 	}, nil)
 
@@ -2918,7 +2918,7 @@ func TestDescribeResourceGroupTask(t *testing.T) {
 	rc := &MockRootCoordClientInterface{}
 	qc := getQueryCoordClient()
 	qc.EXPECT().DescribeResourceGroup(mock.Anything, mock.Anything).Return(&querypb.DescribeResourceGroupResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		ResourceGroup: &querypb.ResourceGroupInfo{
 			Name:             "rg",
 			Capacity:         2,
@@ -3010,7 +3010,7 @@ func TestDescribeResourceGroupTaskFailed(t *testing.T) {
 
 	qc.ExpectedCalls = nil
 	qc.EXPECT().DescribeResourceGroup(mock.Anything, mock.Anything).Return(&querypb.DescribeResourceGroupResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		ResourceGroup: &querypb.ResourceGroupInfo{
 			Name:             "rg",
 			Capacity:         2,
@@ -3353,7 +3353,7 @@ func TestPartitionKey(t *testing.T) {
 			Condition: NewTaskCondition(ctx),
 			ctx:       ctx,
 			result: &milvuspb.MutationResult{
-				Status:       merr.Status(nil),
+				Status:       merr.Success(),
 				IDs:          nil,
 				SuccIndex:    nil,
 				ErrIndex:     nil,
@@ -3402,7 +3402,7 @@ func TestPartitionKey(t *testing.T) {
 			},
 
 			result: &milvuspb.MutationResult{
-				Status: merr.Status(nil),
+				Status: merr.Success(),
 				IDs: &schemapb.IDs{
 					IdField: nil,
 				},
@@ -3433,7 +3433,7 @@ func TestPartitionKey(t *testing.T) {
 			},
 			ctx: ctx,
 			result: &milvuspb.MutationResult{
-				Status:       merr.Status(nil),
+				Status:       merr.Success(),
 				IDs:          nil,
 				SuccIndex:    nil,
 				ErrIndex:     nil,

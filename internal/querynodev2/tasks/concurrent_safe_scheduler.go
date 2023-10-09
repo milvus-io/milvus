@@ -12,7 +12,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -59,8 +58,8 @@ type scheduler struct {
 // Add a new task into scheduler,
 // error will be returned if scheduler reaches some limit.
 func (s *scheduler) Add(task Task) (err error) {
-	if !s.lifetime.Add(lifetime.IsWorking) {
-		return merr.WrapErrServiceUnavailable("scheduler closed")
+	if err := s.lifetime.Add(lifetime.IsWorking); err != nil {
+		return err
 	}
 	defer s.lifetime.Done()
 

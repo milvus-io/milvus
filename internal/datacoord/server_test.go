@@ -2415,13 +2415,13 @@ func TestShouldDropChannel(t *testing.T) {
 	}
 	myRoot := &myRootCoord{}
 	myRoot.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocTimestampResponse{
-		Status:    merr.Status(nil),
+		Status:    merr.Success(),
 		Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
 		Count:     1,
 	}, nil)
 
 	myRoot.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		ID:     int64(tsoutil.ComposeTSByTime(time.Now(), 0)),
 		Count:  1,
 	}, nil)
@@ -2468,7 +2468,7 @@ func TestShouldDropChannel(t *testing.T) {
 	t.Run("channel name not in kv, collection exist", func(t *testing.T) {
 		myRoot.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
 			Return(&milvuspb.DescribeCollectionResponse{
-				Status:       merr.Status(nil),
+				Status:       merr.Success(),
 				CollectionID: 0,
 			}, nil).Once()
 		assert.False(t, svr.handler.CheckShouldDropChannel("ch99", 0))
@@ -2477,7 +2477,7 @@ func TestShouldDropChannel(t *testing.T) {
 	t.Run("collection name in kv, collection exist", func(t *testing.T) {
 		myRoot.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
 			Return(&milvuspb.DescribeCollectionResponse{
-				Status:       merr.Status(nil),
+				Status:       merr.Success(),
 				CollectionID: 0,
 			}, nil).Once()
 		assert.False(t, svr.handler.CheckShouldDropChannel("ch1", 0))
@@ -2497,7 +2497,7 @@ func TestShouldDropChannel(t *testing.T) {
 		require.NoError(t, err)
 		myRoot.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
 			Return(&milvuspb.DescribeCollectionResponse{
-				Status:       merr.Status(nil),
+				Status:       merr.Success(),
 				CollectionID: 0,
 			}, nil).Once()
 		assert.True(t, svr.handler.CheckShouldDropChannel("ch1", 0))
@@ -3338,7 +3338,7 @@ type rootCoordSegFlushComplete struct {
 // SegmentFlushCompleted, override default behavior
 func (rc *rootCoordSegFlushComplete) SegmentFlushCompleted(ctx context.Context, req *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
 	if rc.flag {
-		return merr.Status(nil), nil
+		return merr.Success(), nil
 	}
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}, nil
 }
@@ -3415,7 +3415,7 @@ func TestGetFlushState(t *testing.T) {
 		resp, err := svr.GetFlushState(context.TODO(), &datapb.GetFlushStateRequest{SegmentIDs: []int64{1, 2}})
 		assert.NoError(t, err)
 		assert.EqualValues(t, &milvuspb.GetFlushStateResponse{
-			Status:  merr.Status(nil),
+			Status:  merr.Success(),
 			Flushed: true,
 		}, resp)
 	})
@@ -3463,7 +3463,7 @@ func TestGetFlushState(t *testing.T) {
 		resp, err := svr.GetFlushState(context.TODO(), &datapb.GetFlushStateRequest{SegmentIDs: []int64{1, 2}})
 		assert.NoError(t, err)
 		assert.EqualValues(t, &milvuspb.GetFlushStateResponse{
-			Status:  merr.Status(nil),
+			Status:  merr.Success(),
 			Flushed: false,
 		}, resp)
 	})
@@ -3511,7 +3511,7 @@ func TestGetFlushState(t *testing.T) {
 		resp, err := svr.GetFlushState(context.TODO(), &datapb.GetFlushStateRequest{SegmentIDs: []int64{1, 2}})
 		assert.NoError(t, err)
 		assert.EqualValues(t, &milvuspb.GetFlushStateResponse{
-			Status:  merr.Status(nil),
+			Status:  merr.Success(),
 			Flushed: true,
 		}, resp)
 	})
@@ -3547,7 +3547,7 @@ func TestGetFlushState(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.EqualValues(t, &milvuspb.GetFlushStateResponse{
-			Status:  merr.Status(nil),
+			Status:  merr.Success(),
 			Flushed: true,
 		}, resp)
 	})
@@ -3583,7 +3583,7 @@ func TestGetFlushState(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.EqualValues(t, &milvuspb.GetFlushStateResponse{
-			Status:  merr.Status(nil),
+			Status:  merr.Success(),
 			Flushed: false,
 		}, resp)
 	})
@@ -3602,7 +3602,7 @@ func TestGetFlushState(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.EqualValues(t, &milvuspb.GetFlushStateResponse{
-			Status:  merr.Status(nil),
+			Status:  merr.Success(),
 			Flushed: true,
 		}, resp)
 	})
@@ -3671,7 +3671,7 @@ func TestGetFlushAllState(t *testing.T) {
 				svr.rootCoordClient.(*mocks.MockRootCoordClient).EXPECT().ListDatabases(mock.Anything, mock.Anything).
 					Return(&milvuspb.ListDatabasesResponse{
 						DbNames: []string{"db1"},
-						Status:  merr.Status(nil),
+						Status:  merr.Success(),
 					}, nil).Maybe()
 			}
 
@@ -3683,7 +3683,7 @@ func TestGetFlushAllState(t *testing.T) {
 			} else {
 				svr.rootCoordClient.(*mocks.MockRootCoordClient).EXPECT().ShowCollections(mock.Anything, mock.Anything).
 					Return(&milvuspb.ShowCollectionsResponse{
-						Status:        merr.Status(nil),
+						Status:        merr.Success(),
 						CollectionIds: []int64{collection},
 					}, nil).Maybe()
 			}
@@ -3696,7 +3696,7 @@ func TestGetFlushAllState(t *testing.T) {
 			} else {
 				svr.rootCoordClient.(*mocks.MockRootCoordClient).EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
 					Return(&milvuspb.DescribeCollectionResponse{
-						Status:              merr.Status(nil),
+						Status:              merr.Success(),
 						VirtualChannelNames: vchannels,
 					}, nil).Maybe()
 			}
@@ -3753,25 +3753,25 @@ func TestGetFlushAllStateWithDB(t *testing.T) {
 				svr.rootCoordClient.(*mocks.MockRootCoordClient).EXPECT().ListDatabases(mock.Anything, mock.Anything).
 					Return(&milvuspb.ListDatabasesResponse{
 						DbNames: []string{dbName},
-						Status:  merr.Status(nil),
+						Status:  merr.Success(),
 					}, nil).Maybe()
 			} else {
 				svr.rootCoordClient.(*mocks.MockRootCoordClient).EXPECT().ListDatabases(mock.Anything, mock.Anything).
 					Return(&milvuspb.ListDatabasesResponse{
 						DbNames: []string{},
-						Status:  merr.Status(nil),
+						Status:  merr.Success(),
 					}, nil).Maybe()
 			}
 
 			svr.rootCoordClient.(*mocks.MockRootCoordClient).EXPECT().ShowCollections(mock.Anything, mock.Anything).
 				Return(&milvuspb.ShowCollectionsResponse{
-					Status:        merr.Status(nil),
+					Status:        merr.Success(),
 					CollectionIds: []int64{collectionID},
 				}, nil).Maybe()
 
 			svr.rootCoordClient.(*mocks.MockRootCoordClient).EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
 				Return(&milvuspb.DescribeCollectionResponse{
-					Status:              merr.Status(nil),
+					Status:              merr.Success(),
 					VirtualChannelNames: vchannels,
 					CollectionID:        collectionID,
 					CollectionName:      collectionName,

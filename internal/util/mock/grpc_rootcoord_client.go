@@ -50,7 +50,7 @@ func (m *GrpcRootCoordClient) ListDatabases(ctx context.Context, in *milvuspb.Li
 }
 
 func (m *GrpcRootCoordClient) RenameCollection(ctx context.Context, in *milvuspb.RenameCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (m *GrpcRootCoordClient) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest, opts ...grpc.CallOption) (*milvuspb.CheckHealthResponse, error) {
@@ -98,7 +98,7 @@ func (m *GrpcRootCoordClient) GetComponentStates(ctx context.Context, in *milvus
 			ExtraInfo: nil,
 		},
 		SubcomponentStates: nil,
-		Status:             &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		Status:             merr.Success(),
 	}, m.Err
 }
 

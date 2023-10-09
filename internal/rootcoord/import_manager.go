@@ -432,7 +432,7 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 	}
 
 	resp := &milvuspb.ImportResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		Tasks:  make([]int64, 0),
 	}
 
@@ -730,7 +730,7 @@ func (m *importManager) setCollectionPartitionName(dbName string, colID, partID 
 }
 
 func (m *importManager) copyTaskInfo(input *datapb.ImportTaskInfo, output *milvuspb.GetImportStateResponse) {
-	output.Status = merr.Status(nil)
+	output.Status = merr.Success()
 
 	output.Id = input.GetId()
 	output.CollectionId = input.GetCollectionId()
@@ -752,7 +752,7 @@ func (m *importManager) copyTaskInfo(input *datapb.ImportTaskInfo, output *milvu
 // getTaskState looks for task with the given ID and returns its import state.
 func (m *importManager) getTaskState(tID int64) *milvuspb.GetImportStateResponse {
 	resp := &milvuspb.GetImportStateResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		Infos:  make([]*commonpb.KeyValuePair, 0),
 	}
 	// (1) Search in pending tasks list.

@@ -48,7 +48,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
-	"github.com/milvus-io/milvus/pkg/util/errorutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -66,7 +65,7 @@ const SlowReadSpan = time.Second * 5
 // GetComponentStates gets the state of Proxy.
 func (node *Proxy) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	stats := &milvuspb.ComponentStates{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}
 	code := node.GetStateCode()
 	nodeID := common.NotRegisteredID
@@ -86,7 +85,7 @@ func (node *Proxy) GetComponentStates(ctx context.Context, req *milvuspb.GetComp
 // GetStatisticsChannel gets statistics channel of Proxy.
 func (node *Proxy) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		Value:  "",
 	}, nil
 }
@@ -131,7 +130,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 	}
 	log.Info("complete to invalidate collection meta cache")
 
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (node *Proxy) CreateDatabase(ctx context.Context, request *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
@@ -1525,7 +1524,7 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.SuccessLabel).Inc()
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return &milvuspb.GetLoadingProgressResponse{
-		Status:          merr.Status(nil),
+		Status:          merr.Success(),
 		Progress:        loadProgress,
 		RefreshProgress: refreshProgress,
 	}, nil
@@ -1562,7 +1561,7 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 	}
 
 	successResponse := &milvuspb.GetLoadStateResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}
 	defer func() {
 		log.Debug(
@@ -1757,18 +1756,11 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 			zap.Uint64("BeginTs", dit.BeginTs()),
 			zap.Uint64("EndTs", dit.EndTs()))
 
-		errCode := commonpb.ErrorCode_UnexpectedError
-		if dit.result != nil {
-			errCode = dit.result.Status.GetErrorCode()
-		}
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 			metrics.FailLabel).Inc()
 
 		return &milvuspb.DescribeIndexResponse{
-			Status: &commonpb.Status{
-				ErrorCode: errCode,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -1786,7 +1778,6 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 // GetIndexStatistics get the information of index.
 func (node *Proxy) GetIndexStatistics(ctx context.Context, request *milvuspb.GetIndexStatisticsRequest) (*milvuspb.GetIndexStatisticsResponse, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		err := merr.WrapErrServiceNotReady(fmt.Sprintf("proxy %d is unhealthy", paramtable.GetNodeID()))
 		return &milvuspb.GetIndexStatisticsResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -1836,16 +1827,9 @@ func (node *Proxy) GetIndexStatistics(ctx context.Context, request *milvuspb.Get
 
 	if err := dit.WaitToFinish(); err != nil {
 		log.Warn(rpcFailedToWaitToFinish(method), zap.Error(err), zap.Uint64("BeginTs", dit.BeginTs()), zap.Uint64("EndTs", dit.EndTs()))
-		errCode := commonpb.ErrorCode_UnexpectedError
-		if dit.result != nil {
-			errCode = dit.result.Status.GetErrorCode()
-		}
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(node.session.ServerID, 10), method, metrics.FailLabel).Inc()
 		return &milvuspb.GetIndexStatisticsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: errCode,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -2311,7 +2295,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		Condition: NewTaskCondition(ctx),
 		req:       request,
 		result: &milvuspb.MutationResult{
-			Status: merr.Status(nil),
+			Status: merr.Success(),
 			IDs: &schemapb.IDs{
 				IdField: nil,
 			},
@@ -2511,7 +2495,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 // Flush notify data nodes to persist the data of collection.
 func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*milvuspb.FlushResponse, error) {
 	resp := &milvuspb.FlushResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		resp.Status = merr.Status(err)
@@ -2911,7 +2895,7 @@ func (node *Proxy) FlushAll(ctx context.Context, req *milvuspb.FlushAllRequest) 
 	log := log.With(zap.String("db", req.GetDbName()))
 
 	resp := &milvuspb.FlushAllResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		resp.Status = merr.Status(err)
@@ -3019,7 +3003,7 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 		zap.Any("collection", req.CollectionName))
 
 	resp := &milvuspb.GetPersistentSegmentInfoResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		resp.Status = merr.Status(err)
@@ -3107,7 +3091,7 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 		zap.Any("collection", req.CollectionName))
 
 	resp := &milvuspb.GetQuerySegmentInfoResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		resp.Status = merr.Status(err)
@@ -3255,15 +3239,13 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 		zap.String("req", req.Request))
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		err := merr.WrapErrServiceNotReady(fmt.Sprintf("proxy %d is unhealthy", paramtable.GetNodeID()))
 		log.Warn("Proxy.GetMetrics failed",
 			zap.Int64("nodeID", paramtable.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.Error(err))
 
 		return &milvuspb.GetMetricsResponse{
-			Status:   merr.Status(err),
-			Response: "",
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -3275,8 +3257,7 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 			zap.Error(err))
 
 		return &milvuspb.GetMetricsResponse{
-			Status:   merr.Status(err),
-			Response: "",
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -3324,7 +3305,6 @@ func (node *Proxy) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetrics
 		zap.String("req", req.Request))
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		err := merr.WrapErrServiceNotReady(fmt.Sprintf("proxy %d is unhealthy", paramtable.GetNodeID()))
 		log.Warn("Proxy.GetProxyMetrics failed",
 			zap.Error(err))
 
@@ -3389,7 +3369,7 @@ func (node *Proxy) LoadBalance(ctx context.Context, req *milvuspb.LoadBalanceReq
 		return merr.Status(err), nil
 	}
 
-	status := merr.Status(nil)
+	status := merr.Success()
 
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
@@ -3629,7 +3609,7 @@ func (node *Proxy) Import(ctx context.Context, req *milvuspb.ImportRequest) (*mi
 		zap.String("partition name", req.GetPartitionName()),
 		zap.Strings("files", req.GetFiles()))
 	resp := &milvuspb.ImportResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		resp.Status = merr.Status(err)
@@ -3674,7 +3654,7 @@ func (node *Proxy) GetImportState(ctx context.Context, req *milvuspb.GetImportSt
 	log.Debug("received get import state request",
 		zap.Int64("taskID", req.GetTask()))
 	resp := &milvuspb.GetImportStateResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		resp.Status = merr.Status(err)
@@ -3711,7 +3691,7 @@ func (node *Proxy) ListImportTasks(ctx context.Context, req *milvuspb.ListImport
 
 	log.Debug("received list import tasks request")
 	resp := &milvuspb.ListImportTasksResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		resp.Status = merr.Status(err)
@@ -3758,7 +3738,7 @@ func (node *Proxy) InvalidateCredentialCache(ctx context.Context, request *proxy
 	}
 	log.Debug("complete to invalidate credential cache")
 
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 // UpdateCredentialCache update the credential cache of specified username.
@@ -3784,7 +3764,7 @@ func (node *Proxy) UpdateCredentialCache(ctx context.Context, request *proxypb.U
 	}
 	log.Debug("complete to update credential cache")
 
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
@@ -3955,7 +3935,7 @@ func (node *Proxy) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUser
 		}, nil
 	}
 	return &milvuspb.ListCredUsersResponse{
-		Status:    merr.Status(nil),
+		Status:    merr.Success(),
 		Usernames: resp.Usernames,
 	}, nil
 }
@@ -4238,12 +4218,12 @@ func (node *Proxy) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.Refr
 	}
 	log.Debug("RefreshPrivilegeInfoCache success")
 
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 // SetRates limits the rates of requests.
 func (node *Proxy) SetRates(ctx context.Context, request *proxypb.SetRatesRequest) (*commonpb.Status, error) {
-	resp := merr.Status(nil)
+	resp := merr.Success()
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		resp = merr.Status(err)
 		return resp, nil
@@ -4261,11 +4241,10 @@ func (node *Proxy) SetRates(ctx context.Context, request *proxypb.SetRatesReques
 
 func (node *Proxy) CheckHealth(ctx context.Context, request *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		reason := errorutil.UnHealthReason("proxy", node.session.ServerID, "proxy is unhealthy")
 		return &milvuspb.CheckHealthResponse{
 			Status:    merr.Status(err),
 			IsHealthy: false,
-			Reasons:   []string{reason},
+			Reasons:   []string{err.Error()},
 		}, nil
 	}
 
@@ -4314,7 +4293,7 @@ func (node *Proxy) CheckHealth(ctx context.Context, request *milvuspb.CheckHealt
 	err := group.Wait()
 	if err != nil || len(errReasons) != 0 {
 		return &milvuspb.CheckHealthResponse{
-			Status:    merr.Status(nil),
+			Status:    merr.Success(),
 			IsHealthy: false,
 			Reasons:   errReasons,
 		}, nil
@@ -4322,7 +4301,7 @@ func (node *Proxy) CheckHealth(ctx context.Context, request *milvuspb.CheckHealt
 
 	states, reasons := node.multiRateLimiter.GetQuotaStates()
 	return &milvuspb.CheckHealthResponse{
-		Status:      merr.Status(nil),
+		Status:      merr.Success(),
 		QuotaStates: states,
 		Reasons:     reasons,
 		IsHealthy:   true,
@@ -4808,7 +4787,7 @@ func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest
 	GetConnectionManager().register(ctx, int64(ts), request.GetClientInfo())
 
 	return &milvuspb.ConnectResponse{
-		Status:     merr.Status(nil),
+		Status:     merr.Success(),
 		ServerInfo: serverInfo,
 		Identifier: int64(ts),
 	}, nil
@@ -4822,7 +4801,7 @@ func (node *Proxy) ListClientInfos(ctx context.Context, req *proxypb.ListClientI
 	clients := GetConnectionManager().list()
 
 	return &proxypb.ListClientInfosResponse{
-		Status:      merr.Status(nil),
+		Status:      merr.Success(),
 		ClientInfos: clients,
 	}, nil
 }
@@ -4844,7 +4823,7 @@ func (node *Proxy) AllocTimestamp(ctx context.Context, req *milvuspb.AllocTimest
 	log.Info("AllocTimestamp request success", zap.Uint64("timestamp", ts))
 
 	return &milvuspb.AllocTimestampResponse{
-		Status:    merr.Status(nil),
+		Status:    merr.Success(),
 		Timestamp: ts,
 	}, nil
 }
@@ -4852,6 +4831,6 @@ func (node *Proxy) AllocTimestamp(ctx context.Context, req *milvuspb.AllocTimest
 func (node *Proxy) GetVersion(ctx context.Context, request *milvuspb.GetVersionRequest) (*milvuspb.GetVersionResponse, error) {
 	// TODO implement me
 	return &milvuspb.GetVersionResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}, nil
 }

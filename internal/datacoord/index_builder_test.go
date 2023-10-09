@@ -619,7 +619,7 @@ func TestIndexBuilder(t *testing.T) {
 	ic := mocks.NewMockIndexNodeClient(t)
 	ic.EXPECT().GetJobStats(mock.Anything, mock.Anything, mock.Anything).
 		Return(&indexpb.GetJobStatsResponse{
-			Status:           merr.Status(nil),
+			Status:           merr.Success(),
 			TotalJobNum:      1,
 			EnqueueJobNum:    0,
 			InProgressJobNum: 1,
@@ -645,17 +645,17 @@ func TestIndexBuilder(t *testing.T) {
 				})
 			}
 			return &indexpb.QueryJobsResponse{
-				Status:     merr.Status(nil),
+				Status:     merr.Success(),
 				ClusterID:  in.ClusterID,
 				IndexInfos: indexInfos,
 			}, nil
 		})
 
 	ic.EXPECT().CreateJob(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-		Return(merr.Status(nil), nil)
+		Return(merr.Success(), nil)
 
 	ic.EXPECT().DropJobs(mock.Anything, mock.Anything, mock.Anything).
-		Return(merr.Status(nil), nil)
+		Return(merr.Success(), nil)
 	mt := createMetaTable(catalog)
 	nodeManager := &IndexNodeManager{
 		ctx: ctx,
@@ -811,7 +811,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 		ic := mocks.NewMockIndexNodeClient(t)
 		ic.EXPECT().CreateJob(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("error"))
 		ic.EXPECT().GetJobStats(mock.Anything, mock.Anything, mock.Anything).Return(&indexpb.GetJobStatsResponse{
-			Status:    merr.Status(nil),
+			Status:    merr.Success(),
 			TaskSlots: 1,
 		}, nil)
 
@@ -836,7 +836,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 			Reason:    "mock fail",
 		}, nil)
 		ic.EXPECT().GetJobStats(mock.Anything, mock.Anything, mock.Anything).Return(&indexpb.GetJobStatsResponse{
-			Status:    merr.Status(nil),
+			Status:    merr.Success(),
 			TaskSlots: 1,
 		}, nil)
 
@@ -963,7 +963,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 		ib.meta.catalog = ec
 		ic := mocks.NewMockIndexNodeClient(t)
 		ic.EXPECT().QueryJobs(mock.Anything, mock.Anything, mock.Anything).Return(&indexpb.QueryJobsResponse{
-			Status: merr.Status(nil),
+			Status: merr.Success(),
 			IndexInfos: []*indexpb.IndexTaskInfo{
 				{
 					BuildID:        buildID,
@@ -995,7 +995,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 		ib.meta.catalog = ec
 		ic := mocks.NewMockIndexNodeClient(t)
 		ic.EXPECT().QueryJobs(mock.Anything, mock.Anything, mock.Anything).Return(&indexpb.QueryJobsResponse{
-			Status: merr.Status(nil),
+			Status: merr.Success(),
 			IndexInfos: []*indexpb.IndexTaskInfo{
 				{
 					BuildID:        buildID,
@@ -1027,7 +1027,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 		ib.meta.catalog = sc
 		ic := mocks.NewMockIndexNodeClient(t)
 		ic.EXPECT().QueryJobs(mock.Anything, mock.Anything, mock.Anything).Return(&indexpb.QueryJobsResponse{
-			Status:     merr.Status(nil),
+			Status:     merr.Success(),
 			IndexInfos: nil,
 		}, nil)
 		ib.nodeManager = &IndexNodeManager{

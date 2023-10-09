@@ -876,7 +876,7 @@ func (suite *ServiceSuite) TestReleaseCollection() {
 	server := suite.server
 
 	suite.cluster.EXPECT().ReleasePartitions(mock.Anything, mock.Anything, mock.Anything).
-		Return(merr.Status(nil), nil)
+		Return(merr.Success(), nil)
 
 	// Test release all collections
 	for _, collection := range suite.collections {
@@ -916,7 +916,7 @@ func (suite *ServiceSuite) TestReleasePartition() {
 
 	// Test release all partitions
 	suite.cluster.EXPECT().ReleasePartitions(mock.Anything, mock.Anything, mock.Anything).
-		Return(merr.Status(nil), nil)
+		Return(merr.Success(), nil)
 	for _, collection := range suite.collections {
 		req := &querypb.ReleasePartitionsRequest{
 			CollectionID: collection,
@@ -1319,7 +1319,7 @@ func (suite *ServiceSuite) TestGetMetrics() {
 
 	for _, node := range suite.nodes {
 		suite.cluster.EXPECT().GetMetrics(ctx, node, mock.Anything).Return(&milvuspb.GetMetricsResponse{
-			Status:        merr.Status(nil),
+			Status:        merr.Success(),
 			ComponentName: "QueryNode",
 		}, nil)
 	}
@@ -1740,7 +1740,7 @@ func (suite *ServiceSuite) expectLoadPartitions() {
 	suite.broker.EXPECT().DescribeIndex(mock.Anything, mock.Anything).
 		Return(nil, nil)
 	suite.cluster.EXPECT().LoadPartitions(mock.Anything, mock.Anything, mock.Anything).
-		Return(merr.Status(nil), nil)
+		Return(merr.Success(), nil)
 }
 
 func (suite *ServiceSuite) getAllSegments(collection int64) []int64 {

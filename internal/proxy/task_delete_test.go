@@ -335,7 +335,7 @@ func TestDeleteTask_Execute(t *testing.T) {
 		rc := mocks.NewMockRootCoordClient(t)
 		rc.EXPECT().AllocID(mock.Anything, mock.Anything).Return(
 			&rootcoordpb.AllocIDResponse{
-				Status: merr.Status(nil),
+				Status: merr.Success(),
 				ID:     0,
 				Count:  1,
 			}, nil)
@@ -376,7 +376,7 @@ func TestDeleteTask_Execute(t *testing.T) {
 			vChannels:    channels,
 			lb:           lb,
 			result: &milvuspb.MutationResult{
-				Status: merr.Status(nil),
+				Status: merr.Success(),
 				IDs: &schemapb.IDs{
 					IdField: nil,
 				},
@@ -409,7 +409,7 @@ func TestDeleteTask_Execute(t *testing.T) {
 		lb := NewMockLBPolicy(t)
 		rc.EXPECT().AllocID(mock.Anything, mock.Anything).Return(
 			&rootcoordpb.AllocIDResponse{
-				Status: merr.Status(nil),
+				Status: merr.Success(),
 				ID:     0,
 				Count:  1,
 			}, nil)
@@ -426,7 +426,7 @@ func TestDeleteTask_Execute(t *testing.T) {
 			idAllocator:  allocator,
 			lb:           lb,
 			result: &milvuspb.MutationResult{
-				Status: merr.Status(nil),
+				Status: merr.Success(),
 				IDs: &schemapb.IDs{
 					IdField: nil,
 				},
@@ -450,7 +450,7 @@ func TestDeleteTask_Execute(t *testing.T) {
 				server := client.CreateServer()
 
 				server.Send(&internalpb.RetrieveResults{
-					Status: merr.Status(nil),
+					Status: merr.Success(),
 					Ids: &schemapb.IDs{
 						IdField: &schemapb.IDs_IntId{
 							IntId: &schemapb.LongArray{
@@ -482,7 +482,7 @@ func TestDeleteTask_Execute(t *testing.T) {
 		lb := NewMockLBPolicy(t)
 		rc.EXPECT().AllocID(mock.Anything, mock.Anything).Return(
 			&rootcoordpb.AllocIDResponse{
-				Status: merr.Status(nil),
+				Status: merr.Success(),
 				ID:     0,
 				Count:  1,
 			}, nil)
@@ -499,7 +499,7 @@ func TestDeleteTask_Execute(t *testing.T) {
 			idAllocator:  allocator,
 			lb:           lb,
 			result: &milvuspb.MutationResult{
-				Status: merr.Status(nil),
+				Status: merr.Success(),
 				IDs: &schemapb.IDs{
 					IdField: nil,
 				},
@@ -523,7 +523,7 @@ func TestDeleteTask_Execute(t *testing.T) {
 				server := client.CreateServer()
 
 				server.Send(&internalpb.RetrieveResults{
-					Status: merr.Status(nil),
+					Status: merr.Success(),
 					Ids: &schemapb.IDs{
 						IdField: &schemapb.IDs_IntId{
 							IntId: &schemapb.LongArray{
@@ -551,7 +551,7 @@ func TestDeleteTask_Execute(t *testing.T) {
 		lb := NewMockLBPolicy(t)
 		rc.EXPECT().AllocID(mock.Anything, mock.Anything).Return(
 			&rootcoordpb.AllocIDResponse{
-				Status: merr.Status(nil),
+				Status: merr.Success(),
 				ID:     0,
 				Count:  1,
 			}, nil)
@@ -568,7 +568,7 @@ func TestDeleteTask_Execute(t *testing.T) {
 			idAllocator:  allocator,
 			lb:           lb,
 			result: &milvuspb.MutationResult{
-				Status: merr.Status(nil),
+				Status: merr.Success(),
 				IDs: &schemapb.IDs{
 					IdField: nil,
 				},
@@ -592,7 +592,7 @@ func TestDeleteTask_Execute(t *testing.T) {
 				server := client.CreateServer()
 
 				server.Send(&internalpb.RetrieveResults{
-					Status: merr.Status(nil),
+					Status: merr.Success(),
 					Ids: &schemapb.IDs{
 						IdField: &schemapb.IDs_IntId{
 							IntId: &schemapb.LongArray{

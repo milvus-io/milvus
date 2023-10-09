@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 func Test_hasPartitionTask_Prepare(t *testing.T) {
@@ -57,7 +58,9 @@ func Test_hasPartitionTask_Prepare(t *testing.T) {
 
 func Test_hasPartitionTask_Execute(t *testing.T) {
 	t.Run("fail to get collection", func(t *testing.T) {
-		core := newTestCore(withInvalidMeta())
+		metaTable := mockrootcoord.NewIMetaTable(t)
+		metaTable.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, "test coll", mock.Anything).Return(nil, merr.WrapErrCollectionNotFound("test coll"))
+		core := newTestCore(withMeta(metaTable))
 		task := &hasPartitionTask{
 			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.HasPartitionRequest{
@@ -70,7 +73,8 @@ func Test_hasPartitionTask_Execute(t *testing.T) {
 		}
 		err := task.Execute(context.Background())
 		assert.Error(t, err)
-		assert.Equal(t, task.Rsp.GetStatus().GetErrorCode(), commonpb.ErrorCode_CollectionNotExists)
+		assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
+		assert.ErrorIs(t, merr.Error(task.Rsp.GetStatus()), merr.ErrCollectionNotFound)
 		assert.False(t, task.Rsp.GetValue())
 	})
 

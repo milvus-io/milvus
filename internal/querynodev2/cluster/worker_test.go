@@ -356,7 +356,7 @@ func (s *RemoteWorkerSuite) TestQueryStream() {
 
 			for _, id := range ids {
 				err := server.Send(&internalpb.RetrieveResults{
-					Status: merr.Status(nil),
+					Status: merr.Success(),
 					Ids: &schemapb.IDs{
 						IdField: &schemapb.IDs_IntId{
 							IntId: &schemapb.LongArray{Data: []int64{id}},
@@ -418,7 +418,7 @@ func (s *RemoteWorkerSuite) TestQueryStream() {
 				server := client.CreateServer()
 
 				err := server.Send(&internalpb.RetrieveResults{
-					Status: merr.Status(nil),
+					Status: merr.Success(),
 					Ids: &schemapb.IDs{
 						IdField: &schemapb.IDs_IntId{
 							IntId: &schemapb.LongArray{Data: []int64{id}},

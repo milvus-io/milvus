@@ -172,7 +172,7 @@ func (m *mockDataCoord) GetComponentStates(ctx context.Context, req *milvuspb.Ge
 		State: &milvuspb.ComponentInfo{
 			StateCode: commonpb.StateCode_Healthy,
 		},
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		SubcomponentStates: []*milvuspb.ComponentInfo{
 			{
 				StateCode: commonpb.StateCode_Healthy,
@@ -195,7 +195,7 @@ func (m *mockRootCoord) GetComponentStates(ctx context.Context, req *milvuspb.Ge
 		State: &milvuspb.ComponentInfo{
 			StateCode: commonpb.StateCode_Healthy,
 		},
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		SubcomponentStates: []*milvuspb.ComponentInfo{
 			{
 				StateCode: commonpb.StateCode_Healthy,
@@ -315,7 +315,7 @@ func Test_NewServer(t *testing.T) {
 		server.datanode = &MockDataNode{
 			status: &commonpb.Status{},
 			addImportSegmentResp: &datapb.AddImportSegmentResponse{
-				Status: merr.Status(nil),
+				Status: merr.Success(),
 			},
 		}
 		resp, err := server.AddImportSegment(ctx, nil)

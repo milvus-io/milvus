@@ -85,11 +85,11 @@ func TestIndexNodeManager_PeekClient(t *testing.T) {
 				}, nil),
 				8: getMockedGetJobStatsClient(&indexpb.GetJobStatsResponse{
 					TaskSlots: 1,
-					Status:    merr.Status(nil),
+					Status:    merr.Success(),
 				}, nil),
 				9: getMockedGetJobStatsClient(&indexpb.GetJobStatsResponse{
 					TaskSlots: 10,
-					Status:    merr.Status(nil),
+					Status:    merr.Success(),
 				}, nil),
 			},
 		}
@@ -115,7 +115,7 @@ func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
 			lock: sync.RWMutex{},
 			nodeClients: map[UniqueID]types.IndexNodeClient{
 				1: getMockedGetJobStatsClient(&indexpb.GetJobStatsResponse{
-					Status:     merr.Status(nil),
+					Status:     merr.Success(),
 					TaskSlots:  1,
 					JobInfos:   nil,
 					EnableDisk: true,
@@ -133,7 +133,7 @@ func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
 			lock: sync.RWMutex{},
 			nodeClients: map[UniqueID]types.IndexNodeClient{
 				1: getMockedGetJobStatsClient(&indexpb.GetJobStatsResponse{
-					Status:     merr.Status(nil),
+					Status:     merr.Success(),
 					TaskSlots:  1,
 					JobInfos:   nil,
 					EnableDisk: false,

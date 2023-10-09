@@ -532,7 +532,7 @@ func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetCompon
 	}
 
 	return &milvuspb.ComponentStates{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		State:  serviceComponentInfo,
 		// SubcomponentStates: subComponentInfos,
 	}, nil
@@ -540,13 +540,13 @@ func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetCompon
 
 func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}, nil
 }
 
 func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		Value:  Params.CommonCfg.QueryCoordTimeTick.GetValue(),
 	}, nil
 }

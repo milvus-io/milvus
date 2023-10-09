@@ -767,7 +767,7 @@ func reduceSearchResultData(ctx context.Context, subSearchResultData []*schemapb
 		zap.String("metricType", metricType))
 
 	ret := &milvuspb.SearchResults{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		Results: &schemapb.SearchResultData{
 			NumQueries: nq,
 			TopK:       topk,

@@ -167,7 +167,7 @@ func newMockDataNodeClient(id int64, ch chan interface{}) (*mockDataNodeClient, 
 		state: commonpb.StateCode_Initializing,
 		ch:    ch,
 		addImportSegmentResp: &datapb.AddImportSegmentResponse{
-			Status: merr.Status(nil),
+			Status: merr.Success(),
 		},
 	}, nil
 }
@@ -214,13 +214,13 @@ func (c *mockDataNodeClient) FlushSegments(ctx context.Context, in *datapb.Flush
 
 func (c *mockDataNodeClient) ResendSegmentStats(ctx context.Context, req *datapb.ResendSegmentStatsRequest, opts ...grpc.CallOption) (*datapb.ResendSegmentStatsResponse, error) {
 	return &datapb.ResendSegmentStatsResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}, nil
 }
 
 func (c *mockDataNodeClient) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest, opts ...grpc.CallOption) (*internalpb.ShowConfigurationsResponse, error) {
 	return &internalpb.ShowConfigurationsResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}, nil
 }
 
@@ -247,7 +247,7 @@ func (c *mockDataNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMe
 	}
 
 	return &milvuspb.GetMetricsResponse{
-		Status:        merr.Status(nil),
+		Status:        merr.Success(),
 		Response:      resp,
 		ComponentName: metricsinfo.ConstructComponentName(typeutil.DataNodeRole, nodeID),
 	}, nil
@@ -288,11 +288,11 @@ func (c *mockDataNodeClient) FlushChannels(ctx context.Context, req *datapb.Flus
 }
 
 func (c *mockDataNodeClient) NotifyChannelOperation(ctx context.Context, req *datapb.ChannelOperationsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (c *mockDataNodeClient) CheckChannelOperationProgress(ctx context.Context, req *datapb.ChannelWatchInfo, opts ...grpc.CallOption) (*datapb.ChannelOperationProgressResponse, error) {
-	return &datapb.ChannelOperationProgressResponse{Status: merr.Status(nil)}, nil
+	return &datapb.ChannelOperationProgressResponse{Status: merr.Success()}, nil
 }
 
 func (c *mockDataNodeClient) Stop() error {
@@ -357,7 +357,7 @@ func (m *mockRootCoordClient) GetComponentStates(ctx context.Context, req *milvu
 			ExtraInfo: []*commonpb.KeyValuePair{},
 		},
 		SubcomponentStates: []*milvuspb.ComponentInfo{},
-		Status:             merr.Status(nil),
+		Status:             merr.Success(),
 	}, nil
 }
 
@@ -387,7 +387,7 @@ func (m *mockRootCoordClient) DescribeCollection(ctx context.Context, req *milvu
 		}, nil
 	}
 	return &milvuspb.DescribeCollectionResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		Schema: &schemapb.CollectionSchema{
 			Name: "test",
 		},
@@ -402,7 +402,7 @@ func (m *mockRootCoordClient) DescribeCollectionInternal(ctx context.Context, re
 
 func (m *mockRootCoordClient) ShowCollections(ctx context.Context, req *milvuspb.ShowCollectionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowCollectionsResponse, error) {
 	return &milvuspb.ShowCollectionsResponse{
-		Status:          merr.Status(nil),
+		Status:          merr.Success(),
 		CollectionNames: []string{"test"},
 	}, nil
 }
@@ -437,7 +437,7 @@ func (m *mockRootCoordClient) HasPartition(ctx context.Context, req *milvuspb.Ha
 
 func (m *mockRootCoordClient) ShowPartitions(ctx context.Context, req *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error) {
 	return &milvuspb.ShowPartitionsResponse{
-		Status:         merr.Status(nil),
+		Status:         merr.Success(),
 		PartitionNames: []string{"_default"},
 		PartitionIDs:   []int64{0},
 	}, nil
@@ -457,7 +457,7 @@ func (m *mockRootCoordClient) AllocTimestamp(ctx context.Context, req *rootcoord
 	phy := time.Now().UnixNano() / int64(time.Millisecond)
 	ts := tsoutil.ComposeTS(phy, val)
 	return &rootcoordpb.AllocTimestampResponse{
-		Status:    merr.Status(nil),
+		Status:    merr.Success(),
 		Timestamp: ts,
 		Count:     req.Count,
 	}, nil
@@ -469,7 +469,7 @@ func (m *mockRootCoordClient) AllocID(ctx context.Context, req *rootcoordpb.Allo
 	}
 	val := atomic.AddInt64(&m.cnt, int64(req.Count))
 	return &rootcoordpb.AllocIDResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		ID:     val,
 		Count:  req.Count,
 	}, nil
@@ -490,7 +490,7 @@ func (m *mockRootCoordClient) DescribeSegments(ctx context.Context, req *rootcoo
 
 func (m *mockRootCoordClient) GetDdChannel(ctx context.Context, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		Value:  "ddchannel",
 	}, nil
 }
@@ -513,7 +513,7 @@ func (m *mockRootCoordClient) AddNewSegment(ctx context.Context, in *datapb.Segm
 
 func (m *mockRootCoordClient) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest, opts ...grpc.CallOption) (*internalpb.ShowConfigurationsResponse, error) {
 	return &internalpb.ShowConfigurationsResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}, nil
 }
 
@@ -548,7 +548,7 @@ func (m *mockRootCoordClient) GetMetrics(ctx context.Context, req *milvuspb.GetM
 	}
 
 	return &milvuspb.GetMetricsResponse{
-		Status:        merr.Status(nil),
+		Status:        merr.Success(),
 		Response:      resp,
 		ComponentName: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, nodeID),
 	}, nil
@@ -569,7 +569,7 @@ func (m *mockRootCoordClient) ListImportTasks(ctx context.Context, in *milvuspb.
 }
 
 func (m *mockRootCoordClient) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 type mockCompactionHandler struct {

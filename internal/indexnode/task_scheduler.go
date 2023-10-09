@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -222,7 +223,7 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 			if errors.Is(err, errCancel) {
 				log.Ctx(t.Ctx()).Warn("index build task canceled, retry it", zap.String("task", t.Name()))
 				t.SetState(commonpb.IndexState_Retry, err.Error())
-			} else if errors.Is(err, ErrNoSuchKey) {
+			} else if errors.Is(err, merr.ErrIoKeyNotFound) {
 				t.SetState(commonpb.IndexState_Failed, err.Error())
 			} else {
 				t.SetState(commonpb.IndexState_Retry, err.Error())

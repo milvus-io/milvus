@@ -116,7 +116,7 @@ func (node *DataNode) getSystemInfoMetrics(ctx context.Context, req *milvuspb.Ge
 	}
 
 	return &milvuspb.GetMetricsResponse{
-		Status:        merr.Status(nil),
+		Status:        merr.Success(),
 		Response:      resp,
 		ComponentName: metricsinfo.ConstructComponentName(typeutil.DataNodeRole, paramtable.GetNodeID()),
 	}, nil

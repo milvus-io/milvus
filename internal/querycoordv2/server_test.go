@@ -180,7 +180,7 @@ func (suite *ServerSuite) TestRecover() {
 
 func (suite *ServerSuite) TestNodeUp() {
 	node1 := mocks.NewMockQueryNode(suite.T(), suite.server.etcdCli, 100)
-	node1.EXPECT().GetDataDistribution(mock.Anything, mock.Anything).Return(&querypb.GetDataDistributionResponse{Status: merr.Status(nil)}, nil)
+	node1.EXPECT().GetDataDistribution(mock.Anything, mock.Anything).Return(&querypb.GetDataDistributionResponse{Status: merr.Success()}, nil)
 	err := node1.Start()
 	suite.NoError(err)
 	defer node1.Stop()
@@ -204,7 +204,7 @@ func (suite *ServerSuite) TestNodeUp() {
 	suite.server.nodeMgr.Add(session.NewNodeInfo(1001, "localhost"))
 
 	node2 := mocks.NewMockQueryNode(suite.T(), suite.server.etcdCli, 101)
-	node2.EXPECT().GetDataDistribution(mock.Anything, mock.Anything).Return(&querypb.GetDataDistributionResponse{Status: merr.Status(nil)}, nil).Maybe()
+	node2.EXPECT().GetDataDistribution(mock.Anything, mock.Anything).Return(&querypb.GetDataDistributionResponse{Status: merr.Success()}, nil).Maybe()
 	err = node2.Start()
 	suite.NoError(err)
 	defer node2.Stop()
@@ -308,7 +308,7 @@ func (suite *ServerSuite) TestEnableActiveStandby() {
 	mockDataCoord := coordMocks.NewMockDataCoordClient(suite.T())
 
 	mockRootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		Schema: &schemapb.CollectionSchema{},
 	}, nil).Maybe()
 	for _, collection := range suite.collections {
@@ -319,7 +319,7 @@ func (suite *ServerSuite) TestEnableActiveStandby() {
 			CollectionID: collection,
 		}
 		mockRootCoord.EXPECT().ShowPartitions(mock.Anything, req).Return(&milvuspb.ShowPartitionsResponse{
-			Status:       merr.Status(nil),
+			Status:       merr.Success(),
 			PartitionIDs: suite.partitions[collection],
 		}, nil).Maybe()
 		suite.expectGetRecoverInfoByMockDataCoord(collection, mockDataCoord)
@@ -408,8 +408,8 @@ func (suite *ServerSuite) expectGetRecoverInfo(collection int64) {
 }
 
 func (suite *ServerSuite) expectLoadAndReleasePartitions(querynode *mocks.MockQueryNode) {
-	querynode.EXPECT().LoadPartitions(mock.Anything, mock.Anything).Return(merr.Status(nil), nil).Maybe()
-	querynode.EXPECT().ReleasePartitions(mock.Anything, mock.Anything).Return(merr.Status(nil), nil).Maybe()
+	querynode.EXPECT().LoadPartitions(mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
+	querynode.EXPECT().ReleasePartitions(mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
 }
 
 func (suite *ServerSuite) expectGetRecoverInfoByMockDataCoord(collection int64, dataCoord *coordMocks.MockDataCoordClient) {
@@ -443,7 +443,7 @@ func (suite *ServerSuite) expectGetRecoverInfoByMockDataCoord(collection int64, 
 		}
 	}
 	dataCoord.EXPECT().GetRecoveryInfoV2(mock.Anything, getRecoveryInfoRequest).Return(&datapb.GetRecoveryInfoResponseV2{
-		Status:   merr.Status(nil),
+		Status:   merr.Success(),
 		Channels: vChannels,
 		Segments: segmentInfos,
 	}, nil).Maybe()
@@ -532,7 +532,7 @@ func (suite *ServerSuite) hackBroker(server *Server) {
 
 	for _, collection := range suite.collections {
 		mockRootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-			Status: merr.Status(nil),
+			Status: merr.Success(),
 			Schema: &schemapb.CollectionSchema{},
 		}, nil).Maybe()
 		req := &milvuspb.ShowPartitionsRequest{
@@ -542,7 +542,7 @@ func (suite *ServerSuite) hackBroker(server *Server) {
 			CollectionID: collection,
 		}
 		mockRootCoord.EXPECT().ShowPartitions(mock.Anything, req).Return(&milvuspb.ShowPartitionsResponse{
-			Status:       merr.Status(nil),
+			Status:       merr.Success(),
 			PartitionIDs: suite.partitions[collection],
 		}, nil).Maybe()
 	}

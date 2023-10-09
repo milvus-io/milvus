@@ -119,11 +119,11 @@ func (sd *shardDelegator) getLogger(ctx context.Context) *log.MLogger {
 
 // Serviceable returns whether delegator is serviceable now.
 func (sd *shardDelegator) Serviceable() bool {
-	return lifetime.IsWorking(sd.lifetime.GetState())
+	return lifetime.IsWorking(sd.lifetime.GetState()) == nil
 }
 
 func (sd *shardDelegator) Stopped() bool {
-	return !lifetime.NotStopped(sd.lifetime.GetState())
+	return lifetime.NotStopped(sd.lifetime.GetState()) != nil
 }
 
 // Start sets delegator to working state.
@@ -178,8 +178,8 @@ func (sd *shardDelegator) modifyQueryRequest(req *querypb.QueryRequest, scope qu
 // Search preforms search operation on shard.
 func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest) ([]*internalpb.SearchResults, error) {
 	log := sd.getLogger(ctx)
-	if !sd.lifetime.Add(lifetime.IsWorking) {
-		return nil, errors.New("delegator is not serviceable")
+	if err := sd.lifetime.Add(lifetime.IsWorking); err != nil {
+		return nil, err
 	}
 	defer sd.lifetime.Done()
 
@@ -306,8 +306,8 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 // Query performs query operation on shard.
 func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) ([]*internalpb.RetrieveResults, error) {
 	log := sd.getLogger(ctx)
-	if !sd.lifetime.Add(lifetime.IsWorking) {
-		return nil, errors.New("delegator is not serviceable")
+	if err := sd.lifetime.Add(lifetime.IsWorking); err != nil {
+		return nil, err
 	}
 	defer sd.lifetime.Done()
 
@@ -371,8 +371,8 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 // GetStatistics returns statistics aggregated by delegator.
 func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) ([]*internalpb.GetStatisticsResponse, error) {
 	log := sd.getLogger(ctx)
-	if !sd.lifetime.Add(lifetime.IsWorking) {
-		return nil, errors.New("delegator is not serviceable")
+	if err := sd.lifetime.Add(lifetime.IsWorking); err != nil {
+		return nil, err
 	}
 	defer sd.lifetime.Done()
 
@@ -656,7 +656,7 @@ func NewShardDelegator(collectionID UniqueID, replicaID UniqueID, channel string
 	}
 	m := sync.Mutex{}
 	sd.tsCond = sync.NewCond(&m)
-	if sd.lifetime.Add(lifetime.NotStopped) {
+	if sd.lifetime.Add(lifetime.NotStopped) == nil {
 		go sd.watchTSafe()
 	}
 	log.Info("finish build new shardDelegator")

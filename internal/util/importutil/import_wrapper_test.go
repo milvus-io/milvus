@@ -267,7 +267,7 @@ func Test_ImportWrapperRowBased(t *testing.T) {
 	assignSegmentFunc, flushFunc, saveSegmentFunc := createMockCallbackFunctions(t, rowCounter)
 
 	importResult := &rootcoordpb.ImportResult{
-		Status:     merr.Status(nil),
+		Status:     merr.Success(),
 		TaskId:     1,
 		DatanodeId: 1,
 		State:      commonpb.ImportState_ImportStarted,
@@ -345,7 +345,7 @@ func Test_ImportWrapperColumnBased_numpy(t *testing.T) {
 	assignSegmentFunc, flushFunc, saveSegmentFunc := createMockCallbackFunctions(t, rowCounter)
 
 	importResult := &rootcoordpb.ImportResult{
-		Status:     merr.Status(nil),
+		Status:     merr.Success(),
 		TaskId:     1,
 		DatanodeId: 1,
 		State:      commonpb.ImportState_ImportStarted,
@@ -498,7 +498,7 @@ func Test_ImportWrapperRowBased_perf(t *testing.T) {
 	schema := perfSchema(dim)
 
 	importResult := &rootcoordpb.ImportResult{
-		Status:     merr.Status(nil),
+		Status:     merr.Success(),
 		TaskId:     1,
 		DatanodeId: 1,
 		State:      commonpb.ImportState_ImportStarted,
@@ -672,7 +672,7 @@ func Test_ImportWrapperReportFailRowBased(t *testing.T) {
 
 	// success case
 	importResult := &rootcoordpb.ImportResult{
-		Status:     merr.Status(nil),
+		Status:     merr.Success(),
 		TaskId:     1,
 		DatanodeId: 1,
 		State:      commonpb.ImportState_ImportStarted,
@@ -719,7 +719,7 @@ func Test_ImportWrapperReportFailColumnBased_numpy(t *testing.T) {
 
 	// success case
 	importResult := &rootcoordpb.ImportResult{
-		Status:     merr.Status(nil),
+		Status:     merr.Success(),
 		TaskId:     1,
 		DatanodeId: 1,
 		State:      commonpb.ImportState_ImportStarted,
@@ -862,7 +862,7 @@ func Test_ImportWrapperDoBinlogImport(t *testing.T) {
 		return nil
 	}
 	wrapper.importResult = &rootcoordpb.ImportResult{
-		Status:     merr.Status(nil),
+		Status:     merr.Success(),
 		TaskId:     1,
 		DatanodeId: 1,
 		State:      commonpb.ImportState_ImportStarted,
@@ -881,7 +881,7 @@ func Test_ImportWrapperReportPersisted(t *testing.T) {
 	tr := timerecord.NewTimeRecorder("test")
 
 	importResult := &rootcoordpb.ImportResult{
-		Status:     merr.Status(nil),
+		Status:     merr.Success(),
 		TaskId:     1,
 		DatanodeId: 1,
 		State:      commonpb.ImportState_ImportStarted,
@@ -961,7 +961,7 @@ func Test_ImportWrapperFlushFunc(t *testing.T) {
 	assignSegmentFunc, flushFunc, saveSegmentFunc := createMockCallbackFunctions(t, rowCounter)
 
 	importResult := &rootcoordpb.ImportResult{
-		Status:     merr.Status(nil),
+		Status:     merr.Success(),
 		TaskId:     1,
 		DatanodeId: 1,
 		State:      commonpb.ImportState_ImportStarted,

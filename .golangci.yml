@@ -1,5 +1,5 @@
 run:
-  go: '1.18'
+  go: "1.18"
   skip-dirs:
     - build
     - configs
@@ -89,20 +89,20 @@ linters-settings:
     settings:
       ruleguard:
         failOnError: true
-        rules: 'rules.go'
+        rules: "rules.go"
   depguard:
     rules:
       main:
         deny:
-          - pkg: 'errors'
+          - pkg: "errors"
             desc: not allowd, use github.com/cockroachdb/errors
-          - pkg: 'github.com/pkg/errors'
+          - pkg: "github.com/pkg/errors"
             desc: not allowd, use github.com/cockroachdb/errors
-          - pkg: 'github.com/pingcap/errors'
+          - pkg: "github.com/pingcap/errors"
             desc: not allowd, use github.com/cockroachdb/errors
-          - pkg: 'golang.org/x/xerrors'
+          - pkg: "golang.org/x/xerrors"
             desc: not allowd, use github.com/cockroachdb/errors
-          - pkg: 'github.com/go-errors/errors'
+          - pkg: "github.com/go-errors/errors"
             desc: not allowd, use github.com/cockroachdb/errors
   forbidigo:
     forbid:
@@ -112,10 +112,15 @@ linters-settings:
       - '\.(ErrorCode|Reason) = '
       - 'Reason:\s+\w+\.Error\(\)'
       - 'errors.New\((.+)\.GetReason\(\)\)'
+      - 'commonpb\.Status\{[\s\n]*ErrorCode:[\s\n]*.+[\s\S\n]*?\}'
       #- 'fmt\.Print.*' WIP
 
 issues:
   exclude-use-default: false
+  exclude-rules:
+    - path: .+_test\.go
+      linters:
+        - forbidigo
   exclude:
     - should have a package comment
     - should have comment

@@ -224,7 +224,7 @@ func DecodeSearchResults(searchResults []*internalpb.SearchResults) ([]*schemapb
 
 func EncodeSearchResultData(searchResultData *schemapb.SearchResultData, nq int64, topk int64, metricType string) (searchResults *internalpb.SearchResults, err error) {
 	searchResults = &internalpb.SearchResults{
-		Status:     merr.Status(nil),
+		Status:     merr.Success(),
 		NumQueries: nq,
 		TopK:       topk,
 		MetricType: metricType,
@@ -247,7 +247,7 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 	)
 	var (
 		ret = &internalpb.RetrieveResults{
-			Status: merr.Status(nil),
+			Status: merr.Success(),
 			Ids:    &schemapb.IDs{},
 		}
 		skipDupCnt int64

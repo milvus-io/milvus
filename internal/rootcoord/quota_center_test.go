@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc"
@@ -50,16 +51,17 @@ type dataCoordMockForQuota struct {
 }
 
 func (d *dataCoordMockForQuota) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
+	mockErr := errors.New("mock error")
 	if d.retErr {
-		return nil, fmt.Errorf("mock err")
+		return nil, mockErr
 	}
 	if d.retFailStatus {
 		return &milvuspb.GetMetricsResponse{
-			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "mock failure status"),
+			Status: merr.Status(mockErr),
 		}, nil
 	}
 	return &milvuspb.GetMetricsResponse{
-		Status: succStatus(),
+		Status: merr.Success(),
 	}, nil
 }
 
@@ -87,7 +89,7 @@ func TestQuotaCenter(t *testing.T) {
 		qc := mocks.NewMockQueryCoordClient(t)
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().GetCollectionByID(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
-		qc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{Status: succStatus()}, nil)
+		qc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{Status: merr.Success()}, nil)
 		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator, meta)
 		err = quotaCenter.syncMetrics()
 		assert.Error(t, err) // for empty response
@@ -106,7 +108,7 @@ func TestQuotaCenter(t *testing.T) {
 		assert.Error(t, err)
 
 		qc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
-			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "mock failure status"),
+			Status: merr.Status(err),
 		}, nil)
 		quotaCenter = NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator, meta)
 		err = quotaCenter.syncMetrics()

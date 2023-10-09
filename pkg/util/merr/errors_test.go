@@ -70,7 +70,7 @@ func (s *ErrSuite) TestStatusWithCode() {
 
 func (s *ErrSuite) TestWrap() {
 	// Service related
-	s.ErrorIs(WrapErrServiceNotReady("init", "test init..."), ErrServiceNotReady)
+	s.ErrorIs(WrapErrServiceNotReady("test", 0, "test init..."), ErrServiceNotReady)
 	s.ErrorIs(WrapErrServiceUnavailable("test", "test init"), ErrServiceUnavailable)
 	s.ErrorIs(WrapErrServiceMemoryLimitExceeded(110, 100, "MLE"), ErrServiceMemoryLimitExceeded)
 	s.ErrorIs(WrapErrServiceRequestLimitExceeded(100, "too many requests"), ErrServiceRequestLimitExceeded)
@@ -181,6 +181,46 @@ func (s *ErrSuite) TestCombineOnlyNil() {
 func (s *ErrSuite) TestCombineCode() {
 	err := Combine(WrapErrIoFailed("test"), WrapErrCollectionNotFound(1))
 	s.Equal(Code(ErrCollectionNotFound), Code(err))
+}
+
+func (s *ErrSuite) TestIsHealthy() {
+	type testCase struct {
+		code   commonpb.StateCode
+		expect bool
+	}
+
+	cases := []testCase{
+		{commonpb.StateCode_Healthy, true},
+		{commonpb.StateCode_Initializing, false},
+		{commonpb.StateCode_Abnormal, false},
+		{commonpb.StateCode_StandBy, false},
+		{commonpb.StateCode_Stopping, false},
+	}
+	for _, tc := range cases {
+		s.Run(tc.code.String(), func() {
+			s.Equal(tc.expect, IsHealthy(tc.code) == nil)
+		})
+	}
+}
+
+func (s *ErrSuite) TestIsHealthyOrStopping() {
+	type testCase struct {
+		code   commonpb.StateCode
+		expect bool
+	}
+
+	cases := []testCase{
+		{commonpb.StateCode_Healthy, true},
+		{commonpb.StateCode_Initializing, false},
+		{commonpb.StateCode_Abnormal, false},
+		{commonpb.StateCode_StandBy, false},
+		{commonpb.StateCode_Stopping, true},
+	}
+	for _, tc := range cases {
+		s.Run(tc.code.String(), func() {
+			s.Equal(tc.expect, IsHealthyOrStopping(tc.code) == nil)
+		})
+	}
 }
 
 func TestErrors(t *testing.T) {

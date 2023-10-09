@@ -112,7 +112,7 @@ func TestGetDataNodeMetrics(t *testing.T) {
 	// mock parse error
 	mockFailClientCreator = getMockFailedClientCreator(func() (*milvuspb.GetMetricsResponse, error) {
 		return &milvuspb.GetMetricsResponse{
-			Status:   merr.Status(nil),
+			Status:   merr.Success(),
 			Response: `{"error_reason": 1}`,
 		}, nil
 	})
@@ -157,7 +157,7 @@ func TestGetIndexNodeMetrics(t *testing.T) {
 	info, err = svr.getIndexNodeMetrics(ctx, req, &mockMetricIndexNodeClient{
 		mock: func() (*milvuspb.GetMetricsResponse, error) {
 			return &milvuspb.GetMetricsResponse{
-				Status:        merr.Status(nil),
+				Status:        merr.Success(),
 				Response:      "XXXXXXXXXXXXX",
 				ComponentName: "indexnode100",
 			}, nil
@@ -187,7 +187,7 @@ func TestGetIndexNodeMetrics(t *testing.T) {
 			}
 
 			return &milvuspb.GetMetricsResponse{
-				Status:        merr.Status(nil),
+				Status:        merr.Success(),
 				Response:      resp,
 				ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, nodeID),
 			}, nil

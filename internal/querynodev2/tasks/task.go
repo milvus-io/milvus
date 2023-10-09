@@ -166,7 +166,7 @@ func (t *SearchTask) Execute() error {
 				Base: &commonpb.MsgBase{
 					SourceID: paramtable.GetNodeID(),
 				},
-				Status:         merr.Status(nil),
+				Status:         merr.Success(),
 				MetricType:     req.GetReq().GetMetricType(),
 				NumQueries:     t.originNqs[i],
 				TopK:           t.originTopks[i],
@@ -219,7 +219,7 @@ func (t *SearchTask) Execute() error {
 			Base: &commonpb.MsgBase{
 				SourceID: paramtable.GetNodeID(),
 			},
-			Status:         merr.Status(nil),
+			Status:         merr.Success(),
 			MetricType:     req.GetReq().GetMetricType(),
 			NumQueries:     t.originNqs[i],
 			TopK:           t.originTopks[i],

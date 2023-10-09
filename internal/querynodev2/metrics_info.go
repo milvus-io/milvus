@@ -204,7 +204,7 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 	}
 
 	return &milvuspb.GetMetricsResponse{
-		Status:        merr.Status(nil),
+		Status:        merr.Success(),
 		Response:      resp,
 		ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryNodeRole, paramtable.GetNodeID()),
 	}, nil

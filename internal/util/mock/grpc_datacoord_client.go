@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/uniquegenerator"
 )
 
@@ -53,7 +54,7 @@ func (m *GrpcDataCoordClient) GetComponentStates(ctx context.Context, in *milvus
 			ExtraInfo: nil,
 		},
 		SubcomponentStates: nil,
-		Status:             &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		Status:             merr.Success(),
 	}, m.Err
 }
 

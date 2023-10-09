@@ -53,7 +53,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -297,7 +296,7 @@ func (i *IndexNode) GetComponentStates(ctx context.Context, req *milvuspb.GetCom
 	ret := &milvuspb.ComponentStates{
 		State:              stateInfo,
 		SubcomponentStates: nil, // todo add subcomponents states
-		Status:             merr.Status(nil),
+		Status:             merr.Success(),
 	}
 
 	log.RatedInfo(10, "IndexNode Component states",
@@ -312,7 +311,7 @@ func (i *IndexNode) GetTimeTickChannel(ctx context.Context, req *internalpb.GetT
 	log.RatedInfo(10, "get IndexNode time tick channel ...")
 
 	return &milvuspb.StringResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}, nil
 }
 
@@ -320,7 +319,7 @@ func (i *IndexNode) GetTimeTickChannel(ctx context.Context, req *internalpb.GetT
 func (i *IndexNode) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	log.RatedInfo(10, "get IndexNode statistics channel ...")
 	return &milvuspb.StringResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}, nil
 }
 
@@ -330,17 +329,14 @@ func (i *IndexNode) GetNodeID() int64 {
 
 // ShowConfigurations returns the configurations of indexNode matching req.Pattern
 func (i *IndexNode) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
-	if !i.lifetime.Add(commonpbutil.IsHealthyOrStopping) {
+	if err := i.lifetime.Add(merr.IsHealthyOrStopping); err != nil {
 		log.Warn("IndexNode.ShowConfigurations failed",
 			zap.Int64("nodeId", paramtable.GetNodeID()),
 			zap.String("req", req.Pattern),
-			zap.Error(errIndexNodeIsUnhealthy(paramtable.GetNodeID())))
+			zap.Error(err))
 
 		return &internalpb.ShowConfigurationsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgIndexNodeIsUnhealthy(paramtable.GetNodeID()),
-			},
+			Status:        merr.Status(err),
 			Configuations: nil,
 		}, nil
 	}
@@ -355,7 +351,7 @@ func (i *IndexNode) ShowConfigurations(ctx context.Context, req *internalpb.Show
 	}
 
 	return &internalpb.ShowConfigurationsResponse{
-		Status:        merr.Status(nil),
+		Status:        merr.Success(),
 		Configuations: configList,
 	}, nil
 }

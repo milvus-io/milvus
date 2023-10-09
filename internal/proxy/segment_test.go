@@ -55,14 +55,14 @@ func (mockD *mockDataCoord) AssignSegmentID(ctx context.Context, req *datapb.Ass
 				PartitionID:  r.PartitionID,
 				ExpireTime:   mockD.expireTime,
 
-				Status: merr.Status(nil),
+				Status: merr.Success(),
 			}
 			assigns = append(assigns, result)
 		}
 	}
 
 	return &datapb.AssignSegmentIDResponse{
-		Status:           merr.Status(nil),
+		Status:           merr.Success(),
 		SegIDAssignments: assigns,
 	}, nil
 }
@@ -208,7 +208,7 @@ func (mockD *mockDataCoord3) AssignSegmentID(ctx context.Context, req *datapb.As
 	}
 
 	return &datapb.AssignSegmentIDResponse{
-		Status:           merr.Status(nil),
+		Status:           merr.Success(),
 		SegIDAssignments: assigns,
 	}, nil
 }

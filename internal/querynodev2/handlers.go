@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -102,7 +101,7 @@ func (node *QueryNode) loadDeltaLogs(ctx context.Context, req *querypb.LoadSegme
 		return merr.Status(finalErr)
 	}
 
-	return merr.Status(nil)
+	return merr.Success()
 }
 
 func (node *QueryNode) loadIndex(ctx context.Context, req *querypb.LoadSegmentsRequest) *commonpb.Status {
@@ -111,7 +110,7 @@ func (node *QueryNode) loadIndex(ctx context.Context, req *querypb.LoadSegmentsR
 		zap.Int64s("segmentIDs", lo.Map(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })),
 	)
 
-	status := merr.Status(nil)
+	status := merr.Success()
 	log.Info("start to load index")
 
 	for _, info := range req.GetInfos() {
@@ -361,8 +360,8 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 	)
 	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID()
 
-	if !node.lifetime.Add(commonpbutil.IsHealthy) {
-		return nil, merr.WrapErrServiceNotReady(fmt.Sprintf("node id: %d is unhealthy", paramtable.GetNodeID()))
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
+		return nil, err
 	}
 	defer node.lifetime.Done()
 
@@ -495,7 +494,7 @@ func segmentStatsResponse(segStats []segments.SegmentStats) *internalpb.GetStati
 	resultMap["row_count"] = strconv.FormatInt(totalRowNum, 10)
 
 	ret := &internalpb.GetStatisticsResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		Stats:  funcutil.Map2KeyValuePair(resultMap),
 	}
 	return ret
@@ -534,7 +533,7 @@ func reduceStatisticResponse(results []*internalpb.GetStatisticsResponse) (*inte
 	}
 
 	ret := &internalpb.GetStatisticsResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		Stats:  funcutil.Map2KeyValuePair(stringMap),
 	}
 	return ret, nil

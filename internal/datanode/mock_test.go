@@ -205,7 +205,7 @@ func (ds *DataCoordFactory) AssignSegmentID(ctx context.Context, req *datapb.Ass
 		return nil, errors.New("Error")
 	}
 	res := &datapb.AssignSegmentIDResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		SegIDAssignments: []*datapb.SegmentIDAssignment{
 			{
 				SegID: 666,
@@ -252,11 +252,11 @@ func (ds *DataCoordFactory) DropVirtualChannel(ctx context.Context, req *datapb.
 }
 
 func (ds *DataCoordFactory) UpdateSegmentStatistics(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (ds *DataCoordFactory) UpdateChannelCheckpoint(ctx context.Context, req *datapb.UpdateChannelCheckpointRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (ds *DataCoordFactory) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDataNodeTtMsgsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
@@ -268,23 +268,23 @@ func (ds *DataCoordFactory) ReportDataNodeTtMsgs(ctx context.Context, req *datap
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		}, nil
 	}
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (ds *DataCoordFactory) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSegmentRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (ds *DataCoordFactory) UnsetIsImportingState(ctx context.Context, req *datapb.UnsetIsImportingStateRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (ds *DataCoordFactory) MarkSegmentsDropped(ctx context.Context, req *datapb.MarkSegmentsDroppedRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (ds *DataCoordFactory) BroadcastAlteredCollection(ctx context.Context, req *datapb.AlterCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (ds *DataCoordFactory) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest, opts ...grpc.CallOption) (*milvuspb.CheckHealthResponse, error) {
@@ -319,7 +319,7 @@ func (ds *DataCoordFactory) GetSegmentInfo(ctx context.Context, req *datapb.GetS
 		}
 	}
 	return &datapb.GetSegmentInfoResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		Infos:  segmentInfos,
 	}, nil
 }
@@ -1027,7 +1027,7 @@ func (m *RootCoordFactory) DescribeCollectionInternal(ctx context.Context, in *m
 func (m *RootCoordFactory) ShowPartitions(ctx context.Context, req *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error) {
 	if m.ShowPartitionsErr {
 		return &milvuspb.ShowPartitionsResponse{
-			Status: merr.Status(nil),
+			Status: merr.Success(),
 		}, fmt.Errorf("mock show partitions error")
 	}
 
@@ -1041,7 +1041,7 @@ func (m *RootCoordFactory) ShowPartitions(ctx context.Context, req *milvuspb.Sho
 	}
 
 	return &milvuspb.ShowPartitionsResponse{
-		Status:         merr.Status(nil),
+		Status:         merr.Success(),
 		PartitionNames: m.ShowPartitionsNames,
 		PartitionIDs:   m.ShowPartitionsIDs,
 	}, nil
@@ -1051,7 +1051,7 @@ func (m *RootCoordFactory) GetComponentStates(ctx context.Context, req *milvuspb
 	return &milvuspb.ComponentStates{
 		State:              &milvuspb.ComponentInfo{},
 		SubcomponentStates: make([]*milvuspb.ComponentInfo, 0),
-		Status:             merr.Status(nil),
+		Status:             merr.Success(),
 	}, nil
 }
 
@@ -1062,14 +1062,14 @@ func (m *RootCoordFactory) ReportImport(ctx context.Context, req *rootcoordpb.Im
 		}
 	}
 	if m.ReportImportErr {
-		return merr.Status(nil), fmt.Errorf("mock report import error")
+		return merr.Success(), fmt.Errorf("mock report import error")
 	}
 	if m.ReportImportNotSuccess {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		}, nil
 	}
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 // FailMessageStreamFactory mock MessageStreamFactory failure
