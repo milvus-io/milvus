@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
@@ -111,6 +112,7 @@ func FilterInIndexedSegments(handler Handler, indexCoord types.IndexCoord, segme
 
 	segmentMap := make(map[int64]*SegmentInfo)
 	collectionSegments := make(map[int64][]int64)
+	collectionIndexedSegments := make(map[int64][]int64)
 	// TODO(yah01): This can't handle the case of multiple vector fields exist,
 	// modify it if we support multiple vector fields.
 	vecFieldID := make(map[int64]int64)
@@ -119,7 +121,7 @@ func FilterInIndexedSegments(handler Handler, indexCoord types.IndexCoord, segme
 		segmentMap[segment.GetID()] = segment
 		collectionSegments[collectionID] = append(collectionSegments[collectionID], segment.GetID())
 	}
-	for collection := range collectionSegments {
+	for collection, segmentIDs := range collectionSegments {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*2)
 		coll, err := handler.GetCollection(ctx, collection)
 		cancel()
@@ -134,43 +136,26 @@ func FilterInIndexedSegments(handler Handler, indexCoord types.IndexCoord, segme
 				break
 			}
 		}
+		collectionIndexedSegments[collection] = make([]int64, 0, len(segmentIDs))
 	}
 
-	indexedSegmentCh := make(chan []int64, len(segments))
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	group, ctx := errgroup.WithContext(ctx)
-	for _, segment := range segments {
-		segment := segment
+	const (
+		MaxSegmentNumPerRPC = 1000
+	)
 
+	group := &errgroup.Group{}
+	for collectionID, segmentIDs := range collectionSegments {
+		collectionID := collectionID
+		segmentIDs := segmentIDs
 		group.Go(func() error {
-			ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			defer cancel()
-
-			resp, err := indexCoord.GetIndexInfos(ctx, &indexpb.GetIndexInfoRequest{
-				CollectionID: segment.GetCollectionID(),
-				SegmentIDs:   []int64{segment.GetID()},
-			})
-			if err != nil {
-				log.Warn("failed to get index of collection",
-					zap.Int64("collectionID", segment.GetCollectionID()),
-					zap.Int64("segmentID", segment.GetID()),
-					zap.Error(err),
-				)
-				return err
-			}
-			if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-				log.Warn("indexcoord return error when get index",
-					zap.Int64("collectionID", segment.GetCollectionID()),
-					zap.Int64("segmentID", segment.GetID()),
-					zap.String("status", resp.GetStatus().String()),
-					zap.String("reason", resp.GetStatus().GetReason()),
-				)
-				return fmt.Errorf("GetIndex failed for segment %d, status: %s, reason: %s", segment.GetID(), resp.GetStatus().GetErrorCode().String(), resp.GetStatus().GetReason())
-			}
-			indexed := extractSegmentsWithVectorIndex(vecFieldID, resp.GetSegmentInfo())
-			if len(indexed) > 0 {
-				indexedSegmentCh <- indexed
+			segmentBatches := lo.Chunk(segmentIDs, MaxSegmentNumPerRPC)
+			for _, segmentBatch := range segmentBatches {
+				segmentInfos, err := getIndexInfos(indexCoord, collectionID, segmentBatch)
+				if err != nil {
+					return err
+				}
+				indexed := extractSegmentsWithVectorIndex(vecFieldID, segmentInfos)
+				collectionIndexedSegments[collectionID] = append(collectionIndexedSegments[collectionID], indexed...)
 			}
 			return nil
 		})
@@ -180,11 +165,9 @@ func FilterInIndexedSegments(handler Handler, indexCoord types.IndexCoord, segme
 		return nil, err
 	}
 
-	close(indexedSegmentCh)
-
 	indexedSegments := make([]*SegmentInfo, 0)
-	for segments := range indexedSegmentCh {
-		for _, segment := range segments {
+	for _, segmentIDs := range collectionIndexedSegments {
+		for _, segment := range segmentIDs {
 			if info, ok := segmentMap[segment]; ok {
 				delete(segmentMap, segment)
 				indexedSegments = append(indexedSegments, info)
@@ -193,6 +176,34 @@ func FilterInIndexedSegments(handler Handler, indexCoord types.IndexCoord, segme
 	}
 
 	return indexedSegments, nil
+}
+
+func getIndexInfos(indexCoord types.IndexCoord, collectionID int64, segmentIDs []int64) (map[int64]*indexpb.SegmentInfo, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second) // TODO: make it configurable
+	defer cancel()
+	resp, err := indexCoord.GetIndexInfos(ctx, &indexpb.GetIndexInfoRequest{
+		CollectionID: collectionID,
+		SegmentIDs:   segmentIDs,
+	})
+	if err != nil {
+		log.Warn("failed to get index of collection",
+			zap.Int64("collection", collectionID),
+			zap.Int64s("segments", segmentIDs),
+			zap.Error(err),
+		)
+		return nil, err
+	}
+	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		log.Warn("indexcoord return error when get index",
+			zap.Int64("collection", collectionID),
+			zap.Int64s("segments", segmentIDs),
+			zap.String("status", resp.GetStatus().String()),
+			zap.String("reason", resp.GetStatus().GetReason()),
+		)
+		return nil, fmt.Errorf("GetIndex failed for segments, status: %s, reason: %s",
+			resp.GetStatus().GetErrorCode().String(), resp.GetStatus().GetReason())
+	}
+	return resp.GetSegmentInfo(), nil
 }
 
 func extractSegmentsWithVectorIndex(vecFieldID map[int64]int64, segentIndexInfo map[int64]*indexpb.SegmentInfo) []int64 {
