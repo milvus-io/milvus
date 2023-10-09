@@ -114,7 +114,10 @@ generate_load_conf(const milvus::IndexType& index_type,
              std::to_string(0.0002)},
         };
     }
-    return knowhere::Json();
+    return knowhere::Json{
+        {knowhere::meta::METRIC_TYPE, metric_type},
+        {knowhere::meta::DIM, std::to_string(DIM)},
+    };
 }
 
 std::vector<milvus::IndexType>

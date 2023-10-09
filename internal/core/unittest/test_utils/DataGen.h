@@ -902,18 +902,36 @@ SealedCreator(SchemaPtr schema, const GeneratedData& dataset) {
 
 inline std::unique_ptr<milvus::index::VectorIndex>
 GenVecIndexing(int64_t N, int64_t dim, const float* vec) {
-    // {knowhere::IndexParams::nprobe, 10},
     auto conf =
         knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
                        {knowhere::meta::DIM, std::to_string(dim)},
                        {knowhere::indexparam::NLIST, "1024"},
                        {knowhere::meta::DEVICE_ID, 0}};
     auto database = knowhere::GenDataSet(N, dim, vec);
+    milvus::storage::FieldDataMeta field_data_meta{1, 2, 3, 100};
+    milvus::storage::IndexMeta index_meta{3, 100, 1000, 1};
+    milvus::storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = TestRemotePath;
+    auto chunk_manager = milvus::storage::CreateChunkManager(storage_config);
+    milvus::storage::FileManagerContext file_manager_context(
+        field_data_meta, index_meta, chunk_manager);
     auto indexing = std::make_unique<index::VectorMemIndex>(
         knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
         knowhere::metric::L2,
-        knowhere::Version::GetCurrentVersion().VersionNumber());
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
+        file_manager_context);
     indexing->BuildWithDataset(database, conf);
+    auto binary_set = indexing->Upload();
+
+    std::vector<std::string> index_files;
+    for (auto& binary : binary_set.binary_map_) {
+        index_files.emplace_back(binary.first);
+    }
+    conf["index_files"] = index_files;
+    // we need a load stage to use index as the producation does
+    // knowhere would do some data preparation in this stage
+    indexing->Load(conf);
     return indexing;
 }
 

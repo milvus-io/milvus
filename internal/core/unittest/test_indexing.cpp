@@ -415,6 +415,7 @@ TEST_P(IndexTest, BuildAndQuery) {
     for (auto& binary : binary_set.binary_map_) {
         index_files.emplace_back(binary.first);
     }
+    load_conf = generate_load_conf(index_type, metric_type, 0);
     load_conf["index_files"] = index_files;
     ASSERT_NO_THROW(vec_index->Load(load_conf));
     EXPECT_EQ(vec_index->Count(), NB);
@@ -471,6 +472,7 @@ TEST_P(IndexTest, Mmap) {
     for (auto& binary : binary_set.binary_map_) {
         index_files.emplace_back(binary.first);
     }
+    load_conf = generate_load_conf(index_type, metric_type, 0);
     load_conf["index_files"] = index_files;
     load_conf["mmap_filepath"] = "mmap/test_index_mmap_" + index_type;
     vec_index->Load(load_conf);
@@ -514,25 +516,23 @@ TEST_P(IndexTest, GetVector) {
     milvus::index::IndexBasePtr new_index;
     milvus::index::VectorIndex* vec_index = nullptr;
 
+    auto binary_set = index->Upload();
+    index.reset();
+    std::vector<std::string> index_files;
+    for (auto& binary : binary_set.binary_map_) {
+        index_files.emplace_back(binary.first);
+    }
+    new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, file_manager_context);
+    load_conf = generate_load_conf(index_type, metric_type, 0);
+    load_conf["index_files"] = index_files;
+
+    vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
     if (index_type == knowhere::IndexEnum::INDEX_DISKANN) {
-        // TODO ::diskann.query need load first, ugly
-        auto binary_set = index->Serialize(milvus::Config{});
-        index.reset();
-
-        new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
-            create_index_info, file_manager_context);
-
-        vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
-
-        std::vector<std::string> index_files;
-        for (auto& binary : binary_set.binary_map_) {
-            index_files.emplace_back(binary.first);
-        }
-        load_conf["index_files"] = index_files;
         vec_index->Load(binary_set, load_conf);
         EXPECT_EQ(vec_index->Count(), NB);
     } else {
-        vec_index = dynamic_cast<milvus::index::VectorIndex*>(index.get());
+        vec_index->Load(load_conf);
     }
     EXPECT_EQ(vec_index->GetDim(), DIM);
     EXPECT_EQ(vec_index->Count(), NB);
