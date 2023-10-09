@@ -23,12 +23,12 @@ import (
 	"os"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -76,7 +76,7 @@ type Proxy struct {
 	ip         string
 	port       int
 
-	stateCode atomic.Value
+	stateCode atomic.Int32
 
 	etcdCli    *clientv3.Client
 	address    string
@@ -133,6 +133,15 @@ func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	logutil.Logger(ctx).Debug("create a new Proxy instance", zap.Any("state", node.stateCode.Load()))
 	return node, nil
+}
+
+// UpdateStateCode updates the state code of Proxy.
+func (node *Proxy) UpdateStateCode(code commonpb.StateCode) {
+	node.stateCode.Store(int32(code))
+}
+
+func (node *Proxy) GetStateCode() commonpb.StateCode {
+	return commonpb.StateCode(node.stateCode.Load())
 }
 
 // Register registers proxy at etcd

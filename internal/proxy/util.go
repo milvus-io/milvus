@@ -127,24 +127,24 @@ func validateCollectionNameOrAlias(entity, entityType string) error {
 	entity = strings.TrimSpace(entity)
 
 	if entity == "" {
-		return fmt.Errorf("collection %s should not be empty", entityType)
+		return merr.WrapErrParameterInvalidMsg("collection %s should not be empty", entityType)
 	}
 
 	invalidMsg := fmt.Sprintf("Invalid collection %s: %s. ", entityType, entity)
 	if len(entity) > Params.ProxyCfg.MaxNameLength.GetAsInt() {
-		return fmt.Errorf("%s the length of a collection %s must be less than %s characters", invalidMsg, entityType,
+		return merr.WrapErrParameterInvalidMsg("%s the length of a collection %s must be less than %s characters", invalidMsg, entityType,
 			Params.ProxyCfg.MaxNameLength.GetValue())
 	}
 
 	firstChar := entity[0]
 	if firstChar != '_' && !isAlpha(firstChar) {
-		return fmt.Errorf("%s the first character of a collection %s must be an underscore or letter", invalidMsg, entityType)
+		return merr.WrapErrParameterInvalidMsg("%s the first character of a collection %s must be an underscore or letter", invalidMsg, entityType)
 	}
 
 	for i := 1; i < len(entity); i++ {
 		c := entity[i]
 		if c != '_' && !isAlpha(c) && !isNumber(c) {
-			return fmt.Errorf("%s collection %s can only contain numbers, letters and underscores", invalidMsg, entityType)
+			return merr.WrapErrParameterInvalidMsg("%s collection %s can only contain numbers, letters and underscores", invalidMsg, entityType)
 		}
 	}
 	return nil
@@ -157,19 +157,19 @@ func ValidateResourceGroupName(entity string) error {
 
 	invalidMsg := fmt.Sprintf("Invalid resource group name %s.", entity)
 	if len(entity) > Params.ProxyCfg.MaxNameLength.GetAsInt() {
-		return fmt.Errorf("%s the length of a resource group name must be less than %s characters",
+		return merr.WrapErrParameterInvalidMsg("%s the length of a resource group name must be less than %s characters",
 			invalidMsg, Params.ProxyCfg.MaxNameLength.GetValue())
 	}
 
 	firstChar := entity[0]
 	if firstChar != '_' && !isAlpha(firstChar) {
-		return fmt.Errorf("%s the first character of a resource group name must be an underscore or letter", invalidMsg)
+		return merr.WrapErrParameterInvalidMsg("%s the first character of a resource group name must be an underscore or letter", invalidMsg)
 	}
 
 	for i := 1; i < len(entity); i++ {
 		c := entity[i]
 		if c != '_' && !isAlpha(c) && !isNumber(c) {
-			return fmt.Errorf("%s resource group name can only contain numbers, letters and underscores", invalidMsg)
+			return merr.WrapErrParameterInvalidMsg("%s resource group name can only contain numbers, letters and underscores", invalidMsg)
 		}
 	}
 	return nil
@@ -722,27 +722,23 @@ func ValidateUsername(username string) error {
 	username = strings.TrimSpace(username)
 
 	if username == "" {
-		return errors.New("username should not be empty")
+		return merr.WrapErrParameterInvalidMsg("username must be not empty")
 	}
 
-	invalidMsg := "Invalid username: " + username + ". "
 	if len(username) > Params.ProxyCfg.MaxUsernameLength.GetAsInt() {
-		msg := invalidMsg + "The length of username must be less than " + Params.ProxyCfg.MaxUsernameLength.GetValue() + " characters."
-		return errors.New(msg)
+		return merr.WrapErrParameterInvalidMsg("invalid username %s with length %d, the length of username must be less than %d", username, len(username), Params.ProxyCfg.MaxUsernameLength.GetValue())
 	}
 
 	firstChar := username[0]
 	if !isAlpha(firstChar) {
-		msg := invalidMsg + "The first character of username must be a letter."
-		return errors.New(msg)
+		return merr.WrapErrParameterInvalidMsg("invalid user name %s, the first character must be a letter, but got %s", username, firstChar)
 	}
 
 	usernameSize := len(username)
 	for i := 1; i < usernameSize; i++ {
 		c := username[i]
 		if c != '_' && !isAlpha(c) && !isNumber(c) {
-			msg := invalidMsg + "Username should only contain numbers, letters, and underscores."
-			return errors.New(msg)
+			return merr.WrapErrParameterInvalidMsg("invalid user name %s, username must contain only numbers, letters and underscores, but got %s", username, c)
 		}
 	}
 	return nil
@@ -750,9 +746,9 @@ func ValidateUsername(username string) error {
 
 func ValidatePassword(password string) error {
 	if len(password) < Params.ProxyCfg.MinPasswordLength.GetAsInt() || len(password) > Params.ProxyCfg.MaxPasswordLength.GetAsInt() {
-		msg := "The length of password must be great than " + Params.ProxyCfg.MinPasswordLength.GetValue() +
-			" and less than " + Params.ProxyCfg.MaxPasswordLength.GetValue() + " characters."
-		return errors.New(msg)
+		return merr.WrapErrParameterInvalidRange(Params.ProxyCfg.MinPasswordLength.GetAsInt(),
+			Params.ProxyCfg.MaxPasswordLength.GetAsInt(),
+			len(password), "invalid password length")
 	}
 	return nil
 }

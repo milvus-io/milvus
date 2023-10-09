@@ -63,7 +63,6 @@ func (cdt *createDatabaseTask) PreExecute(ctx context.Context) error {
 
 func (cdt *createDatabaseTask) Execute(ctx context.Context) error {
 	var err error
-	cdt.result = &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}
 	cdt.result, err = cdt.rootCoord.CreateDatabase(ctx, cdt.CreateDatabaseRequest)
 	return err
 }
@@ -125,7 +124,6 @@ func (ddt *dropDatabaseTask) PreExecute(ctx context.Context) error {
 
 func (ddt *dropDatabaseTask) Execute(ctx context.Context) error {
 	var err error
-	ddt.result = &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}
 	ddt.result, err = ddt.rootCoord.DropDatabase(ctx, ddt.DropDatabaseRequest)
 
 	if ddt.result != nil && ddt.result.ErrorCode == commonpb.ErrorCode_Success {
@@ -191,11 +189,6 @@ func (ldt *listDatabaseTask) PreExecute(ctx context.Context) error {
 
 func (ldt *listDatabaseTask) Execute(ctx context.Context) error {
 	var err error
-	ldt.result = &milvuspb.ListDatabasesResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		},
-	}
 	ldt.result, err = ldt.rootCoord.ListDatabases(ctx, ldt.ListDatabasesRequest)
 	return err
 }

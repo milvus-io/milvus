@@ -18,7 +18,6 @@ package merr
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/cockroachdb/errors"
@@ -92,6 +91,13 @@ func CheckRPCCall(resp any, err error) error {
 		return Error(resp)
 	}
 	return nil
+}
+
+func Success(reason ...string) *commonpb.Status {
+	status := Status(nil)
+	// NOLINT
+	status.Reason = strings.Join(reason, " ")
+	return status
 }
 
 // Deprecated
@@ -198,7 +204,7 @@ func Error(status *commonpb.Status) error {
 	// use code first
 	code := status.GetCode()
 	if code == 0 {
-		return newMilvusError(fmt.Sprintf("legacy error code:%d, reason: %s", status.GetErrorCode(), status.GetReason()), errUnexpected.errCode, false)
+		return newMilvusError(status.GetReason(), errUnexpected.errCode, false)
 	}
 
 	return newMilvusError(status.GetReason(), code, code&retryableFlag != 0)
@@ -640,6 +646,16 @@ func WrapErrMqInternal(err error, msg ...string) error {
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "; "))
 	}
+	return err
+}
+
+func WrapErrPrivilegeNotAuthenticated(fmt string, args ...any) error {
+	err := errors.Wrapf(ErrPrivilegeNotAuthenticated, fmt, args...)
+	return err
+}
+
+func WrapErrPrivilegeNotPermitted(fmt string, args ...any) error {
+	err := errors.Wrapf(ErrPrivilegeNotPermitted, fmt, args...)
 	return err
 }
 

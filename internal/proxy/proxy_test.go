@@ -479,7 +479,7 @@ func TestProxy(t *testing.T) {
 
 	err = proxy.Start()
 	assert.NoError(t, err)
-	assert.Equal(t, commonpb.StateCode_Healthy, proxy.stateCode.Load().(commonpb.StateCode))
+	assert.Equal(t, commonpb.StateCode_Healthy, proxy.GetStateCode())
 
 	// register proxy
 	err = proxy.Register()
@@ -496,7 +496,7 @@ func TestProxy(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, states.GetStatus().GetErrorCode())
 		assert.Equal(t, paramtable.GetNodeID(), states.State.NodeID)
 		assert.Equal(t, typeutil.ProxyRole, states.State.Role)
-		assert.Equal(t, proxy.stateCode.Load().(commonpb.StateCode), states.State.StateCode)
+		assert.Equal(t, proxy.GetStateCode(), states.State.StateCode)
 	})
 
 	t.Run("get statistics channel", func(t *testing.T) {
@@ -1608,7 +1608,7 @@ func TestProxy(t *testing.T) {
 			CollectionName: collectionName,
 			Files:          []string{"f1.json"},
 		}
-		proxy.stateCode.Store(commonpb.StateCode_Healthy)
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 		resp, err := proxy.Import(context.TODO(), req)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.NoError(t, err)
@@ -1623,7 +1623,7 @@ func TestProxy(t *testing.T) {
 			CollectionName: "bad_collection_name",
 			Files:          []string{"f1.json"},
 		}
-		proxy.stateCode.Store(commonpb.StateCode_Healthy)
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 		resp, err := proxy.Import(context.TODO(), req)
 		assert.NoError(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
@@ -1636,7 +1636,7 @@ func TestProxy(t *testing.T) {
 			CollectionName: "bad_collection_name",
 			Files:          []string{"f1.json"},
 		}
-		proxy.stateCode.Store(commonpb.StateCode_Healthy)
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 		resp, err := proxy.Import(context.TODO(), req)
 		assert.NoError(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
@@ -2295,7 +2295,7 @@ func TestProxy(t *testing.T) {
 	// proxy unhealthy
 	//
 	//notStateCode := "not state code"
-	//proxy.stateCode.Store(notStateCode)
+	//proxy.UpdateStateCode(notStateCode)
 	//
 	//t.Run("GetComponentStates fail", func(t *testing.T) {
 	//	_, err := proxy.GetComponentStates(ctx)
@@ -3942,14 +3942,16 @@ func testProxyRefreshPolicyInfoCache(ctx context.Context, t *testing.T, proxy *P
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-		_, err = proxy.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{})
-		assert.Error(t, err)
+		resp, err = proxy.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{})
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
 
-		_, err = proxy.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
+		resp, err = proxy.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
 			OpType: 100,
 			OpKey:  funcutil.EncodeUserRoleCache("foo", "public"),
 		})
-		assert.Error(t, err)
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
 	})
 	wg.Wait()
 }
@@ -3976,7 +3978,7 @@ func Test_GetCompactionState(t *testing.T) {
 	t.Run("get compaction state", func(t *testing.T) {
 		datacoord := &DataCoordMock{}
 		proxy := &Proxy{dataCoord: datacoord}
-		proxy.stateCode.Store(commonpb.StateCode_Healthy)
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 		resp, err := proxy.GetCompactionState(context.TODO(), nil)
 		assert.EqualValues(t, &milvuspb.GetCompactionStateResponse{}, resp)
 		assert.NoError(t, err)
@@ -3985,7 +3987,7 @@ func Test_GetCompactionState(t *testing.T) {
 	t.Run("get compaction state with unhealthy proxy", func(t *testing.T) {
 		datacoord := &DataCoordMock{}
 		proxy := &Proxy{dataCoord: datacoord}
-		proxy.stateCode.Store(commonpb.StateCode_Abnormal)
+		proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
 		resp, err := proxy.GetCompactionState(context.TODO(), nil)
 		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 		assert.NoError(t, err)
@@ -3996,7 +3998,7 @@ func Test_ManualCompaction(t *testing.T) {
 	t.Run("test manual compaction", func(t *testing.T) {
 		datacoord := &DataCoordMock{}
 		proxy := &Proxy{dataCoord: datacoord}
-		proxy.stateCode.Store(commonpb.StateCode_Healthy)
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 		resp, err := proxy.ManualCompaction(context.TODO(), nil)
 		assert.EqualValues(t, &milvuspb.ManualCompactionResponse{}, resp)
 		assert.NoError(t, err)
@@ -4004,7 +4006,7 @@ func Test_ManualCompaction(t *testing.T) {
 	t.Run("test manual compaction with unhealthy", func(t *testing.T) {
 		datacoord := &DataCoordMock{}
 		proxy := &Proxy{dataCoord: datacoord}
-		proxy.stateCode.Store(commonpb.StateCode_Abnormal)
+		proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
 		resp, err := proxy.ManualCompaction(context.TODO(), nil)
 		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 		assert.NoError(t, err)
@@ -4015,7 +4017,7 @@ func Test_GetCompactionStateWithPlans(t *testing.T) {
 	t.Run("test get compaction state with plans", func(t *testing.T) {
 		datacoord := &DataCoordMock{}
 		proxy := &Proxy{dataCoord: datacoord}
-		proxy.stateCode.Store(commonpb.StateCode_Healthy)
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 		resp, err := proxy.GetCompactionStateWithPlans(context.TODO(), nil)
 		assert.EqualValues(t, &milvuspb.GetCompactionPlansResponse{}, resp)
 		assert.NoError(t, err)
@@ -4023,7 +4025,7 @@ func Test_GetCompactionStateWithPlans(t *testing.T) {
 	t.Run("test get compaction state with plans with unhealthy proxy", func(t *testing.T) {
 		datacoord := &DataCoordMock{}
 		proxy := &Proxy{dataCoord: datacoord}
-		proxy.stateCode.Store(commonpb.StateCode_Abnormal)
+		proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
 		resp, err := proxy.GetCompactionStateWithPlans(context.TODO(), nil)
 		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 		assert.NoError(t, err)
@@ -4046,7 +4048,7 @@ func Test_GetFlushState(t *testing.T) {
 
 		datacoord := &DataCoordMock{}
 		proxy := &Proxy{dataCoord: datacoord}
-		proxy.stateCode.Store(commonpb.StateCode_Healthy)
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 		resp, err := proxy.GetFlushState(context.TODO(), &milvuspb.GetFlushStateRequest{
 			CollectionName: "coll",
 		})
@@ -4057,7 +4059,7 @@ func Test_GetFlushState(t *testing.T) {
 	t.Run("test get flush state with unhealthy proxy", func(t *testing.T) {
 		datacoord := &DataCoordMock{}
 		proxy := &Proxy{dataCoord: datacoord}
-		proxy.stateCode.Store(commonpb.StateCode_Abnormal)
+		proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
 		resp, err := proxy.GetFlushState(context.TODO(), nil)
 		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 		assert.NoError(t, err)
@@ -4066,7 +4068,7 @@ func Test_GetFlushState(t *testing.T) {
 
 func TestProxy_GetComponentStates(t *testing.T) {
 	n := &Proxy{}
-	n.stateCode.Store(commonpb.StateCode_Healthy)
+	n.UpdateStateCode(commonpb.StateCode_Healthy)
 	resp, err := n.GetComponentStates(context.Background(), nil)
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
@@ -4076,14 +4078,6 @@ func TestProxy_GetComponentStates(t *testing.T) {
 	resp, err = n.GetComponentStates(context.Background(), nil)
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-}
-
-func TestProxy_GetComponentStates_state_code(t *testing.T) {
-	p := &Proxy{}
-	p.stateCode.Store("not commonpb.StateCode")
-	states, err := p.GetComponentStates(context.Background(), nil)
-	assert.NoError(t, err)
-	assert.NotEqual(t, commonpb.ErrorCode_Success, states.GetStatus().GetErrorCode())
 }
 
 func TestProxy_Import(t *testing.T) {
@@ -4182,7 +4176,7 @@ func TestProxy_GetImportState(t *testing.T) {
 	rootCoord.state.Store(commonpb.StateCode_Healthy)
 	t.Run("test get import state", func(t *testing.T) {
 		proxy := &Proxy{rootCoord: rootCoord}
-		proxy.stateCode.Store(commonpb.StateCode_Healthy)
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		resp, err := proxy.GetImportState(context.TODO(), req)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
@@ -4190,7 +4184,7 @@ func TestProxy_GetImportState(t *testing.T) {
 	})
 	t.Run("test get import state with unhealthy", func(t *testing.T) {
 		proxy := &Proxy{rootCoord: rootCoord}
-		proxy.stateCode.Store(commonpb.StateCode_Abnormal)
+		proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
 		resp, err := proxy.GetImportState(context.TODO(), req)
 		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 		assert.NoError(t, err)
@@ -4203,7 +4197,7 @@ func TestProxy_ListImportTasks(t *testing.T) {
 	rootCoord.state.Store(commonpb.StateCode_Healthy)
 	t.Run("test list import tasks", func(t *testing.T) {
 		proxy := &Proxy{rootCoord: rootCoord}
-		proxy.stateCode.Store(commonpb.StateCode_Healthy)
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		resp, err := proxy.ListImportTasks(context.TODO(), req)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
@@ -4211,7 +4205,7 @@ func TestProxy_ListImportTasks(t *testing.T) {
 	})
 	t.Run("test list import tasks with unhealthy", func(t *testing.T) {
 		proxy := &Proxy{rootCoord: rootCoord}
-		proxy.stateCode.Store(commonpb.StateCode_Abnormal)
+		proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
 		resp, err := proxy.ListImportTasks(context.TODO(), req)
 		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 		assert.NoError(t, err)
@@ -4248,7 +4242,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 			InMemoryPercentages: []int64{},
 		}, nil)
 		proxy := &Proxy{queryCoord: qc}
-		proxy.stateCode.Store(commonpb.StateCode_Healthy)
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 		stateResp, err := proxy.GetLoadState(context.Background(), &milvuspb.GetLoadStateRequest{CollectionName: "foo"})
 		assert.NoError(t, err)
 		assert.ErrorIs(t, merr.Error(stateResp.GetStatus()), merr.ErrServiceNotReady)
@@ -4263,7 +4257,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(nil, merr.WrapErrCollectionNotLoaded("foo"))
 		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(nil, merr.WrapErrPartitionNotLoaded("p1"))
 		proxy := &Proxy{queryCoord: qc}
-		proxy.stateCode.Store(commonpb.StateCode_Healthy)
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		stateResp, err := proxy.GetLoadState(context.Background(), &milvuspb.GetLoadStateRequest{CollectionName: "foo"})
 		assert.NoError(t, err)
@@ -4304,7 +4298,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 			InMemoryPercentages: []int64{100},
 		}, nil)
 		proxy := &Proxy{queryCoord: qc}
-		proxy.stateCode.Store(commonpb.StateCode_Healthy)
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		stateResp, err := proxy.GetLoadState(context.Background(), &milvuspb.GetLoadStateRequest{CollectionName: "foo", Base: &commonpb.MsgBase{}})
 		assert.NoError(t, err)
@@ -4313,7 +4307,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 
 		stateResp, err = proxy.GetLoadState(context.Background(), &milvuspb.GetLoadStateRequest{CollectionName: ""})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, stateResp.GetStatus().GetErrorCode())
+		assert.ErrorIs(t, merr.Error(stateResp.GetStatus()), merr.ErrParameterInvalid)
 
 		progressResp, err := proxy.GetLoadingProgress(context.Background(), &milvuspb.GetLoadingProgressRequest{CollectionName: "foo"})
 		assert.NoError(t, err)
@@ -4339,7 +4333,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 			InMemoryPercentages: []int64{50},
 		}, nil)
 		proxy := &Proxy{queryCoord: qc}
-		proxy.stateCode.Store(commonpb.StateCode_Healthy)
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		stateResp, err := proxy.GetLoadState(context.Background(), &milvuspb.GetLoadStateRequest{CollectionName: "foo"})
 		assert.NoError(t, err)
@@ -4373,7 +4367,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 			Status: merr.Status(mockErr),
 		}, nil)
 		proxy := &Proxy{queryCoord: qc}
-		proxy.stateCode.Store(commonpb.StateCode_Healthy)
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		stateResp, err := proxy.GetLoadState(context.Background(), &milvuspb.GetLoadStateRequest{CollectionName: "foo"})
 		assert.NoError(t, err)
