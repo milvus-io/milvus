@@ -80,11 +80,15 @@ if [ "${1-}" = "build" ];then
 fi
 
 if [ "${1-}" = "up" ]; then
-    docker-compose -f $ROOT_DIR/docker-compose-devcontainer.yml up -d
+    docker-compose -f $ROOT_DIR/docker-compose-devcontainer.yml up -d $(docker-compose config --services | grep -wv "gpubuilder")
 fi
 
 if [ "${1-}" = "down" ]; then
     docker-compose -f $ROOT_DIR/docker-compose-devcontainer.yml down
+fi
+
+if [ "${1-}" = "gpu" -a  "${2-}" = "up" ]; then
+    docker-compose -f $ROOT_DIR/docker-compose-devcontainer.yml up -d $(docker-compose config --services | grep -wv "builder")
 fi
 
 popd
