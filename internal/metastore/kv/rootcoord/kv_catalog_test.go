@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -1481,7 +1482,7 @@ func TestRBAC_Role(t *testing.T) {
 			otherError  = fmt.Errorf("mock load error")
 		)
 
-		kvmock.EXPECT().Load(notExistKey).Return("", common.NewKeyNotExistError(notExistKey)).Once()
+		kvmock.EXPECT().Load(notExistKey).Return("", merr.WrapErrIoKeyNotFound(notExistKey)).Once()
 		kvmock.EXPECT().Load(errorKey).Return("", otherError).Once()
 		kvmock.EXPECT().Load(mock.Anything).Return("", nil).Once()
 		kvmock.EXPECT().Remove(mock.Anything).Call.Return(nil).Once()
@@ -1525,7 +1526,7 @@ func TestRBAC_Role(t *testing.T) {
 			otherError  = fmt.Errorf("mock load error")
 		)
 
-		kvmock.EXPECT().Load(notExistKey).Return("", common.NewKeyNotExistError(notExistKey)).Once()
+		kvmock.EXPECT().Load(notExistKey).Return("", merr.WrapErrIoKeyNotFound(notExistKey)).Once()
 		kvmock.EXPECT().Load(errorKey).Return("", otherError).Once()
 		kvmock.EXPECT().Load(mock.Anything).Return("", nil).Once()
 		kvmock.EXPECT().Save(mock.Anything, mock.Anything).Call.Return(nil).Once()
@@ -1572,7 +1573,7 @@ func TestRBAC_Role(t *testing.T) {
 			otherError   = fmt.Errorf("mock load error")
 		)
 
-		kvmock.EXPECT().Load(notExistPath).Return("", common.NewKeyNotExistError(notExistName)).Once()
+		kvmock.EXPECT().Load(notExistPath).Return("", merr.WrapErrIoKeyNotFound(notExistName)).Once()
 		kvmock.EXPECT().Load(errorPath).Return("", otherError).Once()
 		kvmock.EXPECT().Load(mock.Anything).Return("", nil).Once()
 		kvmock.EXPECT().Save(mock.Anything, mock.Anything).Call.Return(nil).Once()
@@ -1679,7 +1680,7 @@ func TestRBAC_Role(t *testing.T) {
 		kvmock.EXPECT().Load(errorRoleSavepath).Return("", nil)
 
 		// Catalog.save() returns nil
-		kvmock.EXPECT().Load(noErrorRoleSavepath).Return("", common.NewKeyNotExistError(noErrorRoleSavepath))
+		kvmock.EXPECT().Load(noErrorRoleSavepath).Return("", merr.WrapErrIoKeyNotFound(noErrorRoleSavepath))
 
 		// Catalog.remove() returns error
 		kvmock.EXPECT().Load(errorRoleRemovepath).Return("", errors.New("not exists"))
@@ -2096,19 +2097,19 @@ func TestRBAC_Grant(t *testing.T) {
 			})
 		kvmock.EXPECT().Load(keyNotExistRoleKey).Call.
 			Return("", func(key string) error {
-				return common.NewKeyNotExistError(key)
+				return merr.WrapErrIoKeyNotFound(key)
 			})
 		kvmock.EXPECT().Load(keyNotExistRoleKeyWithDb).Call.
 			Return("", func(key string) error {
-				return common.NewKeyNotExistError(key)
+				return merr.WrapErrIoKeyNotFound(key)
 			})
 		kvmock.EXPECT().Load(errorSaveRoleKey).Call.
 			Return("", func(key string) error {
-				return common.NewKeyNotExistError(key)
+				return merr.WrapErrIoKeyNotFound(key)
 			})
 		kvmock.EXPECT().Load(errorSaveRoleKeyWithDb).Call.
 			Return("", func(key string) error {
-				return common.NewKeyNotExistError(key)
+				return merr.WrapErrIoKeyNotFound(key)
 			})
 		kvmock.EXPECT().Save(keyNotExistRoleKeyWithDb, mock.Anything).Return(nil)
 		kvmock.EXPECT().Save(errorSaveRoleKeyWithDb, mock.Anything).Return(errors.New("mock save error role"))
@@ -2126,11 +2127,11 @@ func TestRBAC_Grant(t *testing.T) {
 			})
 		kvmock.EXPECT().Load(keyNotExistPrivilegeKey).Call.
 			Return("", func(key string) error {
-				return common.NewKeyNotExistError(key)
+				return merr.WrapErrIoKeyNotFound(key)
 			})
 		kvmock.EXPECT().Load(keyNotExistPrivilegeKey2WithDb).Call.
 			Return("", func(key string) error {
-				return common.NewKeyNotExistError(key)
+				return merr.WrapErrIoKeyNotFound(key)
 			})
 		kvmock.EXPECT().Load(mock.Anything).Call.Return("", nil)
 

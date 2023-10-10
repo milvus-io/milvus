@@ -2420,7 +2420,7 @@ func (c *Core) SelectRole(ctx context.Context, in *milvuspb.SelectRoleRequest) (
 
 	if in.Role != nil {
 		if _, err := c.meta.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.Role.Name}, false); err != nil {
-			if common.IsKeyNotExistError(err) {
+			if errors.Is(err, merr.ErrIoKeyNotFound) {
 				return &milvuspb.SelectRoleResponse{
 					Status: merr.Success(),
 				}, nil
@@ -2467,7 +2467,7 @@ func (c *Core) SelectUser(ctx context.Context, in *milvuspb.SelectUserRequest) (
 
 	if in.User != nil {
 		if _, err := c.meta.SelectUser(util.DefaultTenant, &milvuspb.UserEntity{Name: in.User.Name}, false); err != nil {
-			if common.IsKeyNotExistError(err) {
+			if errors.Is(err, merr.ErrIoKeyNotFound) {
 				return &milvuspb.SelectUserResponse{
 					Status: merr.Success(),
 				}, nil
@@ -2688,7 +2688,7 @@ func (c *Core) SelectGrant(ctx context.Context, in *milvuspb.SelectGrantRequest)
 	}
 
 	grantEntities, err := c.meta.SelectGrant(util.DefaultTenant, in.Entity)
-	if common.IsKeyNotExistError(err) {
+	if errors.Is(err, merr.ErrIoKeyNotFound) {
 		return &milvuspb.SelectGrantResponse{
 			Status: merr.Success(),
 		}, nil

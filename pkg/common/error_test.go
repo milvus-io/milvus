@@ -29,9 +29,3 @@ func TestIgnorableError(t *testing.T) {
 	assert.True(t, IsIgnorableError(iErr))
 	assert.False(t, IsIgnorableError(err))
 }
-
-func TestNotExistError(t *testing.T) {
-	err := errors.New("err")
-	assert.Equal(t, false, IsKeyNotExistError(err))
-	assert.Equal(t, true, IsKeyNotExistError(NewKeyNotExistError("foo")))
-}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
@@ -383,7 +384,7 @@ func (kc *Catalog) GetCredential(ctx context.Context, username string) (*model.C
 	k := fmt.Sprintf("%s/%s", CredentialPrefix, username)
 	v, err := kc.Txn.Load(k)
 	if err != nil {
-		if common.IsKeyNotExistError(err) {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
 			log.Debug("not found the user", zap.String("key", k))
 		} else {
 			log.Warn("get credential meta fail", zap.String("key", k), zap.Error(err))
@@ -543,7 +544,7 @@ func (kc *Catalog) DropPartition(ctx context.Context, dbID int64, collectionID t
 func (kc *Catalog) DropCredential(ctx context.Context, username string) error {
 	k := fmt.Sprintf("%s/%s", CredentialPrefix, username)
 	userResults, err := kc.ListUser(ctx, util.DefaultTenant, &milvuspb.UserEntity{Name: username}, true)
-	if err != nil && !common.IsKeyNotExistError(err) {
+	if err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
 		log.Warn("fail to list user", zap.String("key", k), zap.Error(err))
 		return err
 	}
@@ -720,7 +721,7 @@ func (kc *Catalog) ListCredentials(ctx context.Context) ([]string, error) {
 
 func (kc *Catalog) save(k string) error {
 	var err error
-	if _, err = kc.Txn.Load(k); err != nil && !common.IsKeyNotExistError(err) {
+	if _, err = kc.Txn.Load(k); err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
 		return err
 	}
 	if err == nil {
@@ -732,10 +733,10 @@ func (kc *Catalog) save(k string) error {
 
 func (kc *Catalog) remove(k string) error {
 	var err error
-	if _, err = kc.Txn.Load(k); err != nil && !common.IsKeyNotExistError(err) {
+	if _, err = kc.Txn.Load(k); err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
 		return err
 	}
-	if err != nil && common.IsKeyNotExistError(err) {
+	if err != nil && errors.Is(err, merr.ErrIoKeyNotFound) {
 		return common.NewIgnorableError(fmt.Errorf("the key[%s] isn't existed", k))
 	}
 	return kc.Txn.Remove(k)
@@ -753,7 +754,7 @@ func (kc *Catalog) CreateRole(ctx context.Context, tenant string, entity *milvus
 func (kc *Catalog) DropRole(ctx context.Context, tenant string, roleName string) error {
 	k := funcutil.HandleTenantForEtcdKey(RolePrefix, tenant, roleName)
 	roleResults, err := kc.ListRole(ctx, tenant, &milvuspb.RoleEntity{Name: roleName}, true)
-	if err != nil && !common.IsKeyNotExistError(err) {
+	if err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
 		log.Warn("fail to list role", zap.String("key", k), zap.Error(err))
 		return err
 	}
@@ -962,12 +963,12 @@ func (kc *Catalog) AlterGrant(ctx context.Context, tenant string, entity *milvus
 		} else {
 			log.Warn("fail to load grant privilege entity", zap.String("key", k), zap.Any("type", operateType), zap.Error(err))
 			if funcutil.IsRevoke(operateType) {
-				if common.IsKeyNotExistError(err) {
+				if errors.Is(err, merr.ErrIoKeyNotFound) {
 					return common.NewIgnorableError(fmt.Errorf("the grant[%s] isn't existed", k))
 				}
 				return err
 			}
-			if !common.IsKeyNotExistError(err) {
+			if !errors.Is(err, merr.ErrIoKeyNotFound) {
 				return err
 			}
 
@@ -983,7 +984,7 @@ func (kc *Catalog) AlterGrant(ctx context.Context, tenant string, entity *milvus
 	_, err = kc.Txn.Load(k)
 	if err != nil {
 		log.Warn("fail to load the grantee id", zap.String("key", k), zap.Error(err))
-		if !common.IsKeyNotExistError(err) {
+		if !errors.Is(err, merr.ErrIoKeyNotFound) {
 			log.Warn("fail to load the grantee id", zap.String("key", k), zap.Error(err))
 			return err
 		}
