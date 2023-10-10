@@ -86,9 +86,6 @@ type compactionTask struct {
 	inject       *taskInjection
 }
 
-// check if compactionTask implements compactor
-var _ compactor = (*compactionTask)(nil)
-
 func newCompactionTask(
 	ctx context.Context,
 	dl downloader,
