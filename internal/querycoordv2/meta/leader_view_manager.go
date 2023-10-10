@@ -229,3 +229,19 @@ func (mgr *LeaderViewManager) GetLeadersByShard(shard string) map[int64]*LeaderV
 	}
 	return ret
 }
+
+func (mgr *LeaderViewManager) GetLatestLeadersByReplicaShard(replica *Replica, shard string) *LeaderView {
+	mgr.rwmutex.RLock()
+	defer mgr.rwmutex.RUnlock()
+
+	var ret *LeaderView
+	for _, views := range mgr.views {
+		view, ok := views[shard]
+		if ok &&
+			replica.Contains(view.ID) &&
+			(ret == nil || ret.Version < view.Version) {
+			ret = view
+		}
+	}
+	return ret
+}
