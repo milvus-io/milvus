@@ -67,7 +67,7 @@ jobs:
       - name: 'Setup Use USE_ASAN'
         if: steps.changed-files-cpp.outputs.any_changed == 'true'
         run: |
-          echo "useasan=true" >> $GITHUB_ENV
+          echo "useasan=ON" >> $GITHUB_ENV
           echo "Setup USE_ASAN to true since cpp file(s) changed"
       - name: 'Generate CCache Hash'
         env:
