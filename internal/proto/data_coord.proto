@@ -462,6 +462,11 @@ enum CompactionType {
   reserved 1;
   MergeCompaction = 2;
   MixCompaction = 3;
+  // compactionV2
+  SingleCompaction = 4;
+  MinorCompaction = 5;
+  MajorCompaction = 6;
+  Level0DeleteCompaction = 7;
 }
 
 message CompactionStateRequest {
