@@ -16,13 +16,20 @@ def get_image_tag_by_short_name(repository, tag, arch):
     url = f"https://hub.docker.com/v2/repositories/{repository}/tags?name={prefix}&ordering=last_updated"
     response = requests.get(url)
     data = response.json()
+
+    # Get the latest tag with the same arch and prefix
+    sorted_imgaes = sorted(data["results"], key=lambda x: x["last_updated"], reverse=True)
+    candidate_tag = None
+    for tag_info in sorted_imgaes:
+        if tag_info["name"].endswith(arch):
+            candidate_tag = tag_info["name"]
+            break
     # Get the DIGEST of the short tag
-    digest = ""
     url = f"https://hub.docker.com/v2/repositories/{repository}/tags/{tag}"
     response = requests.get(url)
     cur_tag_info = response.json()
     digest = cur_tag_info["images"][0]["digest"]
-    res = []        
+    res = []
     # Iterate through all tags and find the ones with the same DIGEST
     for tag_info in data["results"]:
         if "digest" in tag_info["images"][0] and tag_info["images"][0]["digest"] == digest:
@@ -37,8 +44,11 @@ def get_image_tag_by_short_name(repository, tag, arch):
         image_name = tag_info["name"].split(":")[0]
         if image_name != tag and arch in image_name:
             res.append(image_name)
-    assert len(res) > 0
-    return res[0]
+    if len(res) == 0 or candidate_tag > res[0]:
+        return candidate_tag
+    else:
+        return res[0]
+
 
 if __name__ == "__main__":
     argparse = argparse.ArgumentParser()
