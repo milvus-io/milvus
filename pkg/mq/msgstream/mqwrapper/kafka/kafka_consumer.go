@@ -222,7 +222,7 @@ func (kc *Consumer) GetLatestMsgID() (mqwrapper.MessageID, error) {
 }
 
 func (kc *Consumer) CheckTopicValid(topic string) error {
-	latestMsgID, err := kc.GetLatestMsgID()
+	_, err := kc.GetLatestMsgID()
 	log.With(zap.String("topic", kc.topic))
 	// check topic is existed
 	if err != nil {
@@ -236,12 +236,6 @@ func (kc *Consumer) CheckTopicValid(topic string) error {
 			return err
 		}
 	}
-
-	// check topic is empty
-	if !latestMsgID.AtEarliestPosition() {
-		return merr.WrapErrMqTopicNotEmpty(topic, "topic is not empty")
-	}
-	log.Info("created topic is empty")
 
 	return nil
 }

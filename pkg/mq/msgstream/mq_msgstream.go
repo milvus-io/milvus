@@ -386,9 +386,11 @@ func (ms *mqMsgStream) receiveMsg(consumer mqwrapper.Consumer) {
 				log.Warn("MqMsgStream get msg whose payload is nil")
 				continue
 			}
+			// not need to check the preCreatedTopic is empty, related issue: https://github.com/milvus-io/milvus/issues/27295
+			// if the message not belong to the topic, will skip it
 			tsMsg, err := ms.getTsMsgFromConsumerMsg(msg)
 			if err != nil {
-				log.Error("Failed to getTsMsgFromConsumerMsg", zap.Error(err))
+				log.Warn("Failed to getTsMsgFromConsumerMsg", zap.Error(err))
 				continue
 			}
 			pos := tsMsg.Position()
@@ -739,9 +741,11 @@ func (ms *MqTtMsgStream) consumeToTtMsg(consumer mqwrapper.Consumer) {
 				log.Warn("MqTtMsgStream get msg whose payload is nil")
 				continue
 			}
+			// not need to check the preCreatedTopic is empty, related issue: https://github.com/milvus-io/milvus/issues/27295
+			// if the message not belong to the topic, will skip it
 			tsMsg, err := ms.getTsMsgFromConsumerMsg(msg)
 			if err != nil {
-				log.Error("Failed to getTsMsgFromConsumerMsg", zap.Error(err))
+				log.Warn("Failed to getTsMsgFromConsumerMsg", zap.Error(err))
 				continue
 			}
 

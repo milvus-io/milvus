@@ -28,7 +28,6 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 )
 
@@ -158,16 +157,11 @@ func (pc *Consumer) GetLatestMsgID() (mqwrapper.MessageID, error) {
 }
 
 func (pc *Consumer) CheckTopicValid(topic string) error {
-	latestMsgID, err := pc.GetLatestMsgID()
+	_, err := pc.GetLatestMsgID()
 	// Pulsar creates that topic under the namespace provided in the topic name automatically
 	if err != nil {
 		return err
 	}
-
-	if !latestMsgID.AtEarliestPosition() {
-		return merr.WrapErrMqTopicNotEmpty(topic, "topic is not empty")
-	}
-	log.Info("created topic is empty", zap.String("topic", topic))
 	return nil
 }
 
