@@ -1152,7 +1152,7 @@ class TestCompactionOperation(TestcaseBase):
                                                                        is_dup=False)
         collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
         log.debug(collection_w.index())
-        df = cf.gen_default_dataframe_data()
+        df = cf.gen_default_dataframe_data(start=ct.default_nb*2)
 
         def do_flush():
             collection_w.insert(df)
