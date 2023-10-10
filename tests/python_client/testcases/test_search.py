@@ -2579,13 +2579,11 @@ class TestCollectionSearch(TestcaseBase):
                                                                       is_index=False)[0:4]
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         # 2. create index
-        default_index = {"index_type": "IVF_FLAT",
-                         "params": {"nlist": 128}, "metric_type": "L2"}
+        default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
         collection_w.create_index("float_vector", default_index)
         collection_w.load()
         # 3. search through partitions
-        log.info(
-            "test_search_index_partitions: searching (1000 entities) through partitions")
+        log.info("test_search_index_partitions: searching (1000 entities) through partitions")
         par = collection_w.partitions
         log.info("test_search_index_partitions: partitions: %s" % par)
         search_params = {"metric_type": "L2", "params": {"nprobe": 64}}
@@ -4307,16 +4305,12 @@ class TestSearchBase(TestcaseBase):
         top_k = get_top_k
         nq = ct.default_nq
         dim = ct.default_dim
-        # 1. initialize with data
-        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nq,
+        # 1. initialize with data in 2 partitions
+        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True,
                                                                                   partition_num=1,
                                                                                   dim=dim, is_index=False)[0:5]
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
-        # 2. create patition
-        partition_name = ct.default_partition_name
-        par = collection_w.partitions
-        # collection_w.load()
-        # 3. create different index
+        # 2. create different index
         if params.get("m"):
             if (dim % params["m"]) != 0:
                 params["m"] = dim // 4
@@ -4325,11 +4319,17 @@ class TestSearchBase(TestcaseBase):
                 params["PQM"] = dim // 4
         default_index = {"index_type": index, "params": params, "metric_type": "COSINE"}
         collection_w.create_index("float_vector", default_index)
+
+        # 3. load and search
         collection_w.load()
-        res, _ = collection_w.search(vectors[:nq], default_search_field,
-                                     ct.default_search_params, top_k,
-                                     default_search_exp, [partition_name])
-        assert len(res[0]) <= top_k
+        par = collection_w.partitions
+        collection_w.search(vectors[:nq], default_search_field,
+                            ct.default_search_params, top_k,
+                            default_search_exp, [par[0].name, par[1].name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "limit": top_k,
+                                         "ids": insert_ids})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_ip_flat(self, get_top_k):
