@@ -1342,21 +1342,20 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 	addSegments := make(map[int64][]*querypb.SegmentLoadInfo)
 	for _, action := range req.GetActions() {
 		log := log.With(zap.String("Action",
-			action.GetType().String()),
-			zap.Int64("segmentID", action.SegmentID),
-			zap.Int64("TargetVersion", action.GetTargetVersion()),
-		)
-		log.Info("sync action")
+			action.GetType().String()))
 		switch action.GetType() {
 		case querypb.SyncType_Remove:
+			log.Info("sync action", zap.Int64("segmentID", action.SegmentID))
 			removeActions = append(removeActions, action)
 		case querypb.SyncType_Set:
+			log.Info("sync action", zap.Int64("segmentID", action.SegmentID))
 			if action.GetInfo() == nil {
 				log.Warn("sync request from legacy querycoord without load info, skip")
 				continue
 			}
 			addSegments[action.GetNodeID()] = append(addSegments[action.GetNodeID()], action.GetInfo())
 		case querypb.SyncType_UpdateVersion:
+			log.Info("sync action", zap.Int64("TargetVersion", action.GetTargetVersion()))
 			pipeline := node.pipelineManager.Get(req.GetChannel())
 			if pipeline != nil {
 				droppedInfos := lo.Map(action.GetDroppedInTarget(), func(id int64, _ int) *datapb.SegmentInfo {
