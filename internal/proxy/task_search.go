@@ -796,10 +796,12 @@ func reduceSearchResultData(ctx context.Context, subSearchResultData []*schemapb
 	}
 
 	for i, sData := range subSearchResultData {
+		pkLength := typeutil.GetSizeOfIDs(sData.GetIds())
 		log.Ctx(ctx).Debug("subSearchResultData",
 			zap.Int("result No.", i),
 			zap.Int64("nq", sData.NumQueries),
 			zap.Int64("topk", sData.TopK),
+			zap.Int("length of pks", pkLength),
 			zap.Any("length of FieldsData", len(sData.FieldsData)))
 		if err := checkSearchResultData(sData, nq, topk); err != nil {
 			log.Ctx(ctx).Warn("invalid search results", zap.Error(err))
