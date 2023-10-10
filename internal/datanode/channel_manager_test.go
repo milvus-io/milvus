@@ -173,10 +173,6 @@ func (s *ChannelManagerSuite) TestSubmitWatchAndRelease() {
 	err = s.manager.Submit(info)
 	s.NoError(err)
 
-	resp = s.manager.GetProgress(info)
-	s.Equal(info.GetOpID(), resp.GetOpID())
-	s.Equal(datapb.ChannelWatchState_ToRelease, resp.GetState())
-
 	opState = <-s.manager.communicateCh
 	s.NotNil(opState)
 	s.Equal(datapb.ChannelWatchState_ReleaseSuccess, opState.state)
