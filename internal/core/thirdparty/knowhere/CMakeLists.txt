@@ -12,7 +12,7 @@
 #-------------------------------------------------------------------------------
 
 # Update KNOWHERE_VERSION for the first occurrence
-set( KNOWHERE_VERSION 6225493 )
+set( KNOWHERE_VERSION 12db789 )
 set( GIT_REPOSITORY  "https://github.com/zilliztech/knowhere.git")
 if ( INDEX_ENGINE STREQUAL "cardinal" )
     set( KNOWHERE_VERSION main )
