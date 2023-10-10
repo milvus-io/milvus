@@ -30,7 +30,7 @@ function install_linux_deps() {
     sudo yum install -y epel-release centos-release-scl-rh
     sudo yum install -y wget curl which \
       git make automake python3-devel \
-      devtoolset-11-gcc devtoolset-11-gcc-c++ devtoolset-11-gcc-gfortran \
+      devtoolset-11-gcc devtoolset-11-gcc-c++ devtoolset-11-gcc-gfortran devtoolset-11-libatomic-devel \
       llvm-toolset-11.0-clang llvm-toolset-11.0-clang-tools-extra \
       libaio libuuid-devel zip unzip \
       ccache lcov libtool m4 autoconf automake
