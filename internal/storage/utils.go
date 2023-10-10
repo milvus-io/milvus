@@ -21,6 +21,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"io/fs"
+	"os"
 	"sort"
 	"strconv"
 
@@ -34,10 +36,50 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
+
+// Open opens file as os.Open works,
+// also converts the os errors to Milvus errors
+func Open(filepath string) (*os.File, error) {
+	// NOLINT
+	reader, err := os.Open(filepath)
+	if os.IsNotExist(err) {
+		return nil, merr.WrapErrIoKeyNotFound(filepath)
+	} else if err != nil {
+		return nil, merr.WrapErrIoFailed(filepath, err)
+	}
+
+	return reader, nil
+}
+
+// ReadFile reads file as os.ReadFile works,
+// also converts the os errors to Milvus errors
+func ReadFile(filepath string) ([]byte, error) {
+	// NOLINT
+	data, err := os.ReadFile(filepath)
+	if os.IsNotExist(err) {
+		return nil, merr.WrapErrIoKeyNotFound(filepath)
+	} else if err != nil {
+		return nil, merr.WrapErrIoFailed(filepath, err)
+	}
+
+	return data, nil
+}
+
+// WriteFile writes file as os.WriteFile works，
+// also converts the os errors to Milvus errors
+func WriteFile(filepath string, data []byte, perm fs.FileMode) error {
+	// NOLINT
+	err := os.WriteFile(filepath, data, perm)
+	if err != nil {
+		return merr.WrapErrIoFailed(filepath, err)
+	}
+	return nil
+}
 
 func checkTsField(data *InsertData) bool {
 	tsData, ok := data.Data[common.TimeStampField]

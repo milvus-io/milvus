@@ -150,24 +150,24 @@ func (minioObjectStorage *MinioObjectStorage) GetObject(ctx context.Context, buc
 		err := opts.SetRange(offset, offset+size-1)
 		if err != nil {
 			log.Warn("failed to set range", zap.String("bucket", bucketName), zap.String("path", objectName), zap.Error(err))
-			return nil, err
+			return nil, checkObjectStorageError(objectName, err)
 		}
 	}
 	object, err := minioObjectStorage.Client.GetObject(ctx, bucketName, objectName, opts)
 	if err != nil {
-		return nil, err
+		return nil, checkObjectStorageError(objectName, err)
 	}
 	return object, nil
 }
 
 func (minioObjectStorage *MinioObjectStorage) PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64) error {
 	_, err := minioObjectStorage.Client.PutObject(ctx, bucketName, objectName, reader, objectSize, minio.PutObjectOptions{})
-	return err
+	return checkObjectStorageError(objectName, err)
 }
 
 func (minioObjectStorage *MinioObjectStorage) StatObject(ctx context.Context, bucketName, objectName string) (int64, error) {
 	info, err := minioObjectStorage.Client.StatObject(ctx, bucketName, objectName, minio.StatObjectOptions{})
-	return info.Size, err
+	return info.Size, checkObjectStorageError(objectName, err)
 }
 
 func (minioObjectStorage *MinioObjectStorage) ListObjects(ctx context.Context, bucketName string, prefix string, recursive bool) (map[string]time.Time, error) {

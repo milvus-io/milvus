@@ -27,6 +27,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 // TODO: NewMinioChunkManager is deprecated. Rewrite this unittest.
@@ -516,11 +518,11 @@ func TestMinIOCM(t *testing.T) {
 
 		_, err = testCM.Read(ctx, key)
 		assert.Error(t, err)
-		assert.True(t, errors.Is(err, ErrNoSuchKey))
+		assert.True(t, errors.Is(err, merr.ErrIoKeyNotFound))
 
 		_, err = testCM.ReadAt(ctx, key, 100, 1)
 		assert.Error(t, err)
-		assert.True(t, errors.Is(err, ErrNoSuchKey))
+		assert.True(t, errors.Is(err, merr.ErrIoKeyNotFound))
 	})
 }
 
