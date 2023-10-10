@@ -7250,28 +7250,33 @@ class TestCollectionRangeSearch(TestcaseBase):
                                                                       is_index=False)[0:4]
 
         # 2. create index
-        index_param = {"index_type": "IVF_FLAT",
-                       "metric_type": "L2", "params": {"nlist": 100}}
+        index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
         collection_w.create_index("float_vector", index_param)
         collection_w.load()
 
         # 3. search with expression
         expression = f"0 < {default_int64_field_name} < 5001"
-        log.info(
-            "test_search_with_expression: searching with expression: %s" % expression)
+        log.info("test_search_with_expression: searching with expression: %s" % expression)
 
         nums = 5000
         vectors = [[random.random() for _ in range(dim)] for _ in range(nums)]
-        range_search_params = {"metric_type": "L2", "params": {"radius": 1000,
-                                                               "range_filter": 0}}
+        # calculate the distance to make sure in range(0, 1000)
+        search_params = {"metric_type": "L2"}
         search_res, _ = collection_w.search(vectors, default_search_field,
-                                            range_search_params, default_limit, expression,
-                                            check_task=CheckTasks.check_search_results,
-                                            check_items={
-                                                "nq": nums,
-                                                "ids": insert_ids,
-                                                "limit": default_limit,
-                                            })
+                                            search_params, 500, expression)
+        for i in range(nums):
+            if len(search_res[i]) < 10:
+                assert False
+            for j in range(len(search_res[i])):
+                if search_res[i][j].distance < 0 or search_res[i][j].distance >= 1000:
+                    assert False
+        # range search
+        range_search_params = {"metric_type": "L2", "params": {"radius": 1000, "range_filter": 0}}
+        search_res, _ = collection_w.search(vectors, default_search_field,
+                                            range_search_params, default_limit, expression)
+        for i in range(nums):
+            log.info(i)
+            assert len(search_res[i]) == default_limit
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_with_consistency_bounded(self, nq, dim, auto_id, _async):
