@@ -148,6 +148,9 @@ func oldCode(code int32) commonpb.ErrorCode {
 	case ErrSegmentNotFound.code():
 		return commonpb.ErrorCode_SegmentNotFound
 
+	case ErrChannelLack.code():
+		return commonpb.ErrorCode_MetaFailed
+
 	default:
 		return commonpb.ErrorCode_UnexpectedError
 	}
@@ -185,6 +188,9 @@ func OldCodeToMerr(code commonpb.ErrorCode) error {
 	case commonpb.ErrorCode_SegmentNotFound:
 		return ErrSegmentNotFound
 
+	case commonpb.ErrorCode_MetaFailed:
+		return ErrChannelNotFound
+
 	default:
 		return errUnexpected
 	}
@@ -204,7 +210,7 @@ func Error(status *commonpb.Status) error {
 	// use code first
 	code := status.GetCode()
 	if code == 0 {
-		return newMilvusError(status.GetReason(), errUnexpected.errCode, false)
+		return newMilvusError(status.GetReason(), Code(OldCodeToMerr(status.GetErrorCode())), false)
 	}
 
 	return newMilvusError(status.GetReason(), code, code&retryableFlag != 0)
