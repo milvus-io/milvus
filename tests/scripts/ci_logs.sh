@@ -87,9 +87,9 @@ if [[ ! -d ${RELEASE_LOG_DIR} ]] ;then
 fi 
 # Try to found logs file from mount disk /volume1/ci-logs
 # log_files=$(find ${LOG_DIR} -type f  -name "*${RELEASE_NAME}*" )
-log_files=$(ls ${LOG_DIR} | grep ${RELEASE_NAME} || echo nonexistment)
+log_files=$(ls ${LOG_DIR} | grep ${RELEASE_NAME} || echo nonexistent)
 
-if [ "${log_files}" == "nonexistment" ]; then
+if [ "${log_files}" == "nonexistent" ]; then
   echo "No log files find"
 else
   for log_file in ${log_files}
@@ -105,9 +105,9 @@ fi
 
 # ls ${LOG_DIR} | grep ${RELEASE_NAME}
 
-remain_log_files=$(ls ${LOG_DIR} | grep ${RELEASE_NAME} || echo nonexistment)
+remain_log_files=$(ls ${LOG_DIR} | grep ${RELEASE_NAME} || echo nonexistent)
 
-if [ "${remain_log_files}" == "nonexistment" ]; then
+if [ "${remain_log_files}" == "nonexistent" ]; then
   echo "No remain log files"
 else
   echo "Still have log files & Remove again"
@@ -116,5 +116,5 @@ else
     rm -rf ${LOG_DIR}/${log_file}
   done
   echo "Check if any remain log files  after using rm to delete again "
-  ls ${LOG_DIR} | grep ${RELEASE_NAME}
+  ls ${LOG_DIR} | grep ${RELEASE_NAME} || echo nonexistent
 fi
