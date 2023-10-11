@@ -128,6 +128,9 @@ class ResultAnalyzer:
         df = df.sort_values(by='start_time')
         self.df = df
         self.chaos_info = get_chaos_info()
+        self.chaos_start_time = self.chaos_info['create_time'] if self.chaos_info is not None else None
+        self.chaos_end_time = self.chaos_info['delete_time'] if self.chaos_info is not None else None
+        self.recovery_time = self.chaos_info['recovery_time'] if self.chaos_info is not None else None
 
     def get_stage_success_rate(self):
         df = self.df
@@ -181,7 +184,9 @@ class ResultAnalyzer:
 
     def show_result_table(self):
         table = PrettyTable()
-        table.field_names = ['operation_name', 'before_chaos', 'during_chaos', 'after_chaos']
+        table.field_names = ['operation_name', 'before_chaos',
+                             f'during_chaos\n{self.chaos_start_time}~{self.recovery_time}',
+                             'after_chaos']
         data = self.get_stage_success_rate()
         for operation, values in data.items():
             row = [operation, values['before_chaos'], values['during_chaos'], values['after_chaos']]
