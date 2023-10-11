@@ -321,7 +321,7 @@ class TestQueryParams(TestcaseBase):
 
         # output bool field
         res, _ = self.collection_wrap.query(default_term_expr, output_fields=[
-                                            ct.default_bool_field_name])
+            ct.default_bool_field_name])
         assert set(res[0].keys()) == {
             ct.default_int64_field_name, ct.default_bool_field_name}
 
@@ -2963,7 +2963,7 @@ class TestQueryCount(TestcaseBase):
                                        "output_fields": [ct.default_count_output],
                                        "check_task": CheckTasks.check_query_results,
                                        "check_items": {exp_res: [{count: tmp_nb * 10}]}
-        })
+                                   })
 
         t_compact.start()
         t_count.start()
@@ -2988,6 +2988,34 @@ class TestQueryCount(TestcaseBase):
         collection_w.query(expr=default_term_expr, output_fields=[ct.default_count_output],
                            check_task=CheckTasks.check_query_results,
                            check_items={exp_res: [{count: 2}]})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_count_expr_json(self):
+        """
+        target: test query with part json key value
+        method: 1. insert data and some entities doesn't have number key
+                2. query count with number expr filet
+        expected: succeed
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, enable_dynamic_field=True, with_json=True)[0]
+
+        # 2. insert data
+        array = cf.gen_default_rows_data( with_json=False)
+        for i in range(ct.default_nb):
+            if i % 2 == 0:
+                array[i][json_field] = {"string": str(i), "bool": bool(i)}
+            else:
+                array[i][json_field] = {"string": str(i), "bool": bool(i), "number": i}
+
+        collection_w.insert(array)
+
+        # 3. query
+        collection_w.load()
+        expression = f'{ct.default_json_field_name}["number"] < 100'
+        collection_w.query(expression, output_fields=[ct.default_count_output],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: [{count: 50}]})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_count_with_pagination_param(self):
@@ -3206,7 +3234,7 @@ class TestQueryCount(TestcaseBase):
         expected: verify count
         """
         # create -> insert -> index -> load
-        collection_w,  _vectors, _, insert_ids = self.init_collection_general(insert_data=True)[0:4]
+        collection_w, _vectors, _, insert_ids = self.init_collection_general(insert_data=True)[0:4]
 
         # filter result with expression in collection
         _vectors = _vectors[0]
