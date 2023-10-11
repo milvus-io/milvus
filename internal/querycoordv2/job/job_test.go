@@ -134,10 +134,10 @@ func (suite *JobSuite) SetupSuite() {
 	suite.cluster = session.NewMockCluster(suite.T())
 	suite.cluster.EXPECT().
 		LoadPartitions(mock.Anything, mock.Anything, mock.Anything).
-		Return(merr.Status(nil), nil)
+		Return(merr.Success(), nil)
 	suite.cluster.EXPECT().
 		ReleasePartitions(mock.Anything, mock.Anything, mock.Anything).
-		Return(merr.Status(nil), nil).Maybe()
+		Return(merr.Success(), nil).Maybe()
 }
 
 func (suite *JobSuite) SetupTest() {
@@ -1339,7 +1339,7 @@ func (suite *JobSuite) TestCallReleasePartitionFailed() {
 		return call.Method != "ReleasePartitions"
 	})
 	suite.cluster.EXPECT().ReleasePartitions(mock.Anything, mock.Anything, mock.Anything).
-		Return(merr.Status(nil), nil)
+		Return(merr.Success(), nil)
 }
 
 func (suite *JobSuite) TestSyncNewCreatedPartition() {

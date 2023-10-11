@@ -176,7 +176,7 @@ func TestTimetickManagerSendReport(t *testing.T) {
 		if req.GetBase().Timestamp > uint64(tsInMill) {
 			validTs.Store(true)
 		}
-	}).Return(merr.Status(nil), nil)
+	}).Return(merr.Success(), nil)
 	manager := newTimeTickSender(mockDataCoord, 0)
 	go manager.start(ctx)
 

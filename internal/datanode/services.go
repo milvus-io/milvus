@@ -61,7 +61,7 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 	log.Warn("DataNode WatchDmChannels is not in use")
 
 	// TODO ERROR OF GRPC NOT IN USE
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 // GetComponentStates will return current state of DataNode
@@ -79,7 +79,7 @@ func (node *DataNode) GetComponentStates(ctx context.Context, req *milvuspb.GetC
 			StateCode: node.stateCode.Load().(commonpb.StateCode),
 		},
 		SubcomponentStates: make([]*milvuspb.ComponentInfo, 0),
-		Status:             merr.Status(nil),
+		Status:             merr.Success(),
 	}
 	return states, nil
 }
@@ -94,8 +94,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		fmt.Sprint(paramtable.GetNodeID()),
 		metrics.TotalLabel).Inc()
 
-	if !node.isHealthy() {
-		err := merr.WrapErrServiceNotReady(node.GetStateCode().String())
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		log.Warn("DataNode.FlushSegments failed", zap.Int64("nodeId", paramtable.GetNodeID()), zap.Error(err))
 
 		return merr.Status(err), nil
@@ -160,7 +159,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 	metrics.DataNodeFlushReqCounter.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()),
 		metrics.SuccessLabel).Inc()
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 // ResendSegmentStats resend un-flushed segment stats back upstream to DataCoord by resending DataNode time tick message.
@@ -172,7 +171,7 @@ func (node *DataNode) ResendSegmentStats(ctx context.Context, req *datapb.Resend
 	log.Info("found segment(s) with stats to resend",
 		zap.Int64s("segment IDs", segResent))
 	return &datapb.ResendSegmentStatsResponse{
-		Status:    merr.Status(nil),
+		Status:    merr.Success(),
 		SegResent: segResent,
 	}, nil
 }
@@ -180,22 +179,21 @@ func (node *DataNode) ResendSegmentStats(ctx context.Context, req *datapb.Resend
 // GetTimeTickChannel currently do nothing
 func (node *DataNode) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}, nil
 }
 
 // GetStatisticsChannel currently do nothing
 func (node *DataNode) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}, nil
 }
 
 // ShowConfigurations returns the configurations of DataNode matching req.Pattern
 func (node *DataNode) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	log.Debug("DataNode.ShowConfigurations", zap.String("pattern", req.Pattern))
-	if !node.isHealthy() {
-		err := merr.WrapErrServiceNotReady(node.GetStateCode().String())
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		log.Warn("DataNode.ShowConfigurations failed", zap.Int64("nodeId", paramtable.GetNodeID()), zap.Error(err))
 
 		return &internalpb.ShowConfigurationsResponse{
@@ -213,15 +211,14 @@ func (node *DataNode) ShowConfigurations(ctx context.Context, req *internalpb.Sh
 	}
 
 	return &internalpb.ShowConfigurationsResponse{
-		Status:        merr.Status(nil),
+		Status:        merr.Success(),
 		Configuations: configList,
 	}, nil
 }
 
 // GetMetrics return datanode metrics
 func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	if !node.isHealthy() {
-		err := merr.WrapErrServiceNotReady(node.GetStateCode().String())
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		log.Warn("DataNode.GetMetrics failed", zap.Int64("nodeId", paramtable.GetNodeID()), zap.Error(err))
 
 		return &milvuspb.GetMetricsResponse{
@@ -266,8 +263,7 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 // Compaction handles compaction request from DataCoord
 // returns status as long as compaction task enqueued or invalid
 func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan) (*commonpb.Status, error) {
-	if !node.isHealthy() {
-		err := merr.WrapErrServiceNotReady(node.GetStateCode().String())
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		log.Warn("DataNode.Compaction failed", zap.Int64("nodeId", paramtable.GetNodeID()), zap.Error(err))
 		return merr.Status(err), nil
 	}
@@ -296,14 +292,13 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 
 	node.compactionExecutor.execute(task)
 
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 // GetCompactionState called by DataCoord
 // return status of all compaction plans
 func (node *DataNode) GetCompactionState(ctx context.Context, req *datapb.CompactionStateRequest) (*datapb.CompactionStateResponse, error) {
-	if !node.isHealthy() {
-		err := merr.WrapErrServiceNotReady(node.GetStateCode().String())
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		log.Warn("DataNode.GetCompactionState failed", zap.Int64("nodeId", paramtable.GetNodeID()), zap.Error(err))
 		return &datapb.CompactionStateResponse{
 			Status: merr.Status(err),
@@ -333,7 +328,7 @@ func (node *DataNode) GetCompactionState(ctx context.Context, req *datapb.Compac
 		log.Info("Compaction results", zap.Int64s("planIDs", planIDs))
 	}
 	return &datapb.CompactionStateResponse{
-		Status:  merr.Status(nil),
+		Status:  merr.Success(),
 		Results: results,
 	}, nil
 }
@@ -347,8 +342,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		zap.Int64("numOfRows", req.GetNumOfRows()),
 	)
 
-	if !node.isHealthy() {
-		err := merr.WrapErrServiceNotReady(node.GetStateCode().String())
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		log.Warn("DataNode.SyncSegments failed", zap.Int64("nodeId", paramtable.GetNodeID()), zap.Error(err))
 		return merr.Status(err), nil
 	}
@@ -381,7 +375,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 	}
 	if oneSegment == 0 {
 		log.Ctx(ctx).Warn("no valid segment, maybe the request is a retry")
-		return merr.Status(nil), nil
+		return merr.Success(), nil
 	}
 
 	// oneSegment is definitely in the channel, guaranteed by the check before.
@@ -402,7 +396,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 	defer ds.fg.Unblock()
 	channel.mergeFlushedSegments(ctx, targetSeg, req.GetPlanID(), req.GetCompactedFrom())
 	node.compactionExecutor.injectDone(req.GetPlanID(), true)
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (node *DataNode) NotifyChannelOperation(ctx context.Context, req *datapb.ChannelOperationsRequest) (*commonpb.Status, error) {
@@ -434,7 +428,7 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 	}()
 
 	importResult := &rootcoordpb.ImportResult{
-		Status:     merr.Status(nil),
+		Status:     merr.Success(),
 		TaskId:     req.GetImportTask().TaskId,
 		DatanodeId: paramtable.GetNodeID(),
 		State:      commonpb.ImportState_ImportStarted,
@@ -462,8 +456,7 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 		return merr.Status(err), nil
 	}
 
-	if !node.isHealthy() {
-		err := merr.WrapErrServiceNotReady(node.GetStateCode().String())
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		logFields = append(logFields, zap.Error(err))
 		log.Warn("DataNode import failed, node is not healthy", logFields...)
 		return merr.Status(err), nil
@@ -540,7 +533,7 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 		return returnFailFunc("failed to import files", err)
 	}
 
-	resp := merr.Status(nil)
+	resp := merr.Success()
 	return resp, nil
 }
 
@@ -551,8 +544,7 @@ func (node *DataNode) FlushChannels(ctx context.Context, req *datapb.FlushChanne
 
 	log.Info("DataNode receives FlushChannels request")
 
-	if !node.isHealthy() {
-		err := merr.WrapErrServiceNotReady(node.GetStateCode().String())
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		log.Warn("DataNode.FlushChannels failed", zap.Error(err))
 		return merr.Status(err), nil
 	}
@@ -565,7 +557,7 @@ func (node *DataNode) FlushChannels(ctx context.Context, req *datapb.FlushChanne
 		fg.channel.setFlushTs(req.GetFlushTs())
 	}
 
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (node *DataNode) getPartitions(ctx context.Context, dbName string, collectionName string) (map[string]int64, error) {
@@ -697,7 +689,7 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 	}
 	ds.flushingSegCache.Remove(req.GetSegmentId())
 	return &datapb.AddImportSegmentResponse{
-		Status:     merr.Status(nil),
+		Status:     merr.Success(),
 		ChannelPos: posID,
 	}, nil
 }
@@ -768,7 +760,7 @@ func assignSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest) importutil
 		// ignore the returned error, since even report failed the segments still can be cleaned
 		// retry 10 times, if the rootcoord is down, the report function will cost 20+ seconds
 		importResult := &rootcoordpb.ImportResult{
-			Status:     merr.Status(nil),
+			Status:     merr.Success(),
 			TaskId:     req.GetImportTask().TaskId,
 			DatanodeId: paramtable.GetNodeID(),
 			State:      commonpb.ImportState_ImportStarted,

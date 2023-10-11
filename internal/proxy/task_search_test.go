@@ -1689,7 +1689,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 		},
 		ctx: ctx,
 		result: &milvuspb.SearchResults{
-			Status: merr.Status(nil),
+			Status: merr.Success(),
 		},
 		request: &milvuspb.SearchRequest{
 			Base: &commonpb.MsgBase{
@@ -1736,7 +1736,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 	qn.ExpectedCalls = nil
 	qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	qn.EXPECT().Search(mock.Anything, mock.Anything).Return(&internalpb.SearchResults{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}, nil)
 	assert.NoError(t, task.Execute(ctx))
 }

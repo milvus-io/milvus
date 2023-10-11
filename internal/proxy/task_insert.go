@@ -98,7 +98,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	defer sp.End()
 
 	it.result = &milvuspb.MutationResult{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		IDs: &schemapb.IDs{
 			IdField: nil,
 		},

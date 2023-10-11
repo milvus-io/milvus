@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/indexparams"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
@@ -189,8 +190,8 @@ func (it *indexBuildTask) LoadData(ctx context.Context) error {
 	getValueByPath := func(path string) ([]byte, error) {
 		data, err := it.cm.Read(ctx, path)
 		if err != nil {
-			if errors.Is(err, ErrNoSuchKey) {
-				return nil, ErrNoSuchKey
+			if errors.Is(err, merr.ErrIoKeyNotFound) {
+				return nil, err
 			}
 			return nil, err
 		}
@@ -405,12 +406,12 @@ func (it *indexBuildTask) SaveIndexFiles(ctx context.Context) error {
 func (it *indexBuildTask) parseFieldMetaFromBinlog(ctx context.Context) error {
 	toLoadDataPaths := it.req.GetDataPaths()
 	if len(toLoadDataPaths) == 0 {
-		return ErrEmptyInsertPaths
+		return merr.WrapErrParameterInvalidMsg("data insert path must be not empty")
 	}
 	data, err := it.cm.Read(ctx, toLoadDataPaths[0])
 	if err != nil {
-		if errors.Is(err, ErrNoSuchKey) {
-			return ErrNoSuchKey
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return err
 		}
 		return err
 	}
@@ -421,7 +422,7 @@ func (it *indexBuildTask) parseFieldMetaFromBinlog(ctx context.Context) error {
 		return err
 	}
 	if len(insertData.Data) != 1 {
-		return errors.New("we expect only one field in deserialized insert data")
+		return merr.WrapErrParameterInvalidMsg("we expect only one field in deserialized insert data")
 	}
 
 	it.collectionID = collectionID
@@ -445,7 +446,7 @@ func (it *indexBuildTask) decodeBlobs(ctx context.Context, blobs []*storage.Blob
 	metrics.IndexNodeDecodeFieldLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(it.tr.RecordSpan().Seconds())
 
 	if len(insertData.Data) != 1 {
-		return errors.New("we expect only one field in deserialized insert data")
+		return merr.WrapErrParameterInvalidMsg("we expect only one field in deserialized insert data")
 	}
 	it.collectionID = collectionID
 	it.partitionID = partitionID

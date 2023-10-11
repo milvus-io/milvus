@@ -1041,7 +1041,7 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 			},
 		}, nil)
 		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
-			Status:       merr.Status(nil),
+			Status:       merr.Success(),
 			PartitionIDs: []int64{partID},
 		}, nil)
 		loaded, err := isPartitionLoaded(ctx, qc, collID, []int64{partID})
@@ -1066,7 +1066,7 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 			},
 		}, nil)
 		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
-			Status:       merr.Status(nil),
+			Status:       merr.Success(),
 			PartitionIDs: []int64{partID},
 		}, errors.New("error"))
 		loaded, err := isPartitionLoaded(ctx, qc, collID, []int64{partID})
@@ -1404,7 +1404,7 @@ func Test_InsertTaskCheckPrimaryFieldData(t *testing.T) {
 			},
 		},
 		result: &milvuspb.MutationResult{
-			Status: merr.Status(nil),
+			Status: merr.Success(),
 		},
 	}
 
@@ -1446,7 +1446,7 @@ func Test_InsertTaskCheckPrimaryFieldData(t *testing.T) {
 			},
 		},
 		result: &milvuspb.MutationResult{
-			Status: merr.Status(nil),
+			Status: merr.Success(),
 		},
 	}
 	_, err = checkPrimaryFieldData(case2.schema, case2.result, case2.insertMsg, true)
@@ -1486,7 +1486,7 @@ func Test_InsertTaskCheckPrimaryFieldData(t *testing.T) {
 			},
 		},
 		result: &milvuspb.MutationResult{
-			Status: merr.Status(nil),
+			Status: merr.Success(),
 		},
 	}
 	_, err = checkPrimaryFieldData(case3.schema, case3.result, case3.insertMsg, true)
@@ -1530,7 +1530,7 @@ func Test_InsertTaskCheckPrimaryFieldData(t *testing.T) {
 			},
 		},
 		result: &milvuspb.MutationResult{
-			Status: merr.Status(nil),
+			Status: merr.Success(),
 		},
 	}
 	case4.schema.Fields[0].IsPrimaryKey = true
@@ -1569,7 +1569,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 			},
 		},
 		result: &milvuspb.MutationResult{
-			Status: merr.Status(nil),
+			Status: merr.Success(),
 		},
 	}
 	_, err := checkPrimaryFieldData(case1.schema, case1.result, case1.insertMsg, false)
@@ -1612,7 +1612,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 			},
 		},
 		result: &milvuspb.MutationResult{
-			Status: merr.Status(nil),
+			Status: merr.Success(),
 		},
 	}
 	_, err = checkPrimaryFieldData(case2.schema, case2.result, case2.insertMsg, false)
@@ -1652,7 +1652,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 			},
 		},
 		result: &milvuspb.MutationResult{
-			Status: merr.Status(nil),
+			Status: merr.Success(),
 		},
 	}
 	_, err = checkPrimaryFieldData(case3.schema, case3.result, case3.insertMsg, false)
@@ -1695,7 +1695,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 			},
 		},
 		result: &milvuspb.MutationResult{
-			Status: merr.Status(nil),
+			Status: merr.Success(),
 		},
 	}
 	case4.schema.Fields[0].IsPrimaryKey = true
@@ -1739,7 +1739,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 			},
 		},
 		result: &milvuspb.MutationResult{
-			Status: merr.Status(nil),
+			Status: merr.Success(),
 		},
 	}
 	case5.schema.Fields[0].IsPrimaryKey = true
@@ -1788,7 +1788,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 			},
 		},
 		result: &milvuspb.MutationResult{
-			Status: merr.Status(nil),
+			Status: merr.Success(),
 		},
 	}
 	case6.schema.Fields[0].IsPrimaryKey = true

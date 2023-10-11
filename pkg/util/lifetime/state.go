@@ -16,6 +16,11 @@
 
 package lifetime
 
+import (
+	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+)
+
 // Singal alias for chan struct{}.
 type Signal chan struct{}
 
@@ -36,10 +41,29 @@ const (
 	Stopped
 )
 
-func NotStopped(state State) bool {
-	return state != Stopped
+func (s State) String() string {
+	switch s {
+	case Initializing:
+		return "Initializing"
+	case Working:
+		return "Working"
+	case Stopped:
+		return "Stopped"
+	}
+
+	return "Unknown"
 }
 
-func IsWorking(state State) bool {
-	return state == Working
+func NotStopped(state State) error {
+	if state != Stopped {
+		return nil
+	}
+	return merr.WrapErrServiceNotReady(paramtable.GetRole(), paramtable.GetNodeID(), state.String())
+}
+
+func IsWorking(state State) error {
+	if state == Working {
+		return nil
+	}
+	return merr.WrapErrServiceNotReady(paramtable.GetRole(), paramtable.GetNodeID(), state.String())
 }

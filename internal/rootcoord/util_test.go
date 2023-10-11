@@ -23,7 +23,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -60,20 +59,6 @@ func Test_EqualKeyPairArray(t *testing.T) {
 		},
 	}
 	assert.True(t, EqualKeyPairArray(p1, p2))
-}
-
-func Test_GetFieldSchemaByID(t *testing.T) {
-	coll := &model.Collection{
-		Fields: []*model.Field{
-			{
-				FieldID: 1,
-			},
-		},
-	}
-	_, err := GetFieldSchemaByID(coll, 1)
-	assert.NoError(t, err)
-	_, err = GetFieldSchemaByID(coll, 2)
-	assert.Error(t, err)
 }
 
 func Test_EncodeMsgPositions(t *testing.T) {

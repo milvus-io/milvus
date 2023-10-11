@@ -4237,7 +4237,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 	{
 		qc := getQueryCoordClient()
 		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
-			Status:              merr.Status(merr.WrapErrServiceNotReady("initialization")),
+			Status:              merr.Status(merr.WrapErrServiceNotReady(paramtable.GetRole(), paramtable.GetNodeID(), "initialization")),
 			CollectionIDs:       nil,
 			InMemoryPercentages: []int64{},
 		}, nil)
@@ -4290,7 +4290,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 				ExtraInfo: nil,
 			},
 			SubcomponentStates: nil,
-			Status:             merr.Status(nil),
+			Status:             merr.Success(),
 		}, nil)
 		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 			Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
@@ -4325,7 +4325,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 				ExtraInfo: nil,
 			},
 			SubcomponentStates: nil,
-			Status:             merr.Status(nil),
+			Status:             merr.Success(),
 		}, nil)
 		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 			Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
@@ -4356,7 +4356,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 				ExtraInfo: nil,
 			},
 			SubcomponentStates: nil,
-			Status:             merr.Status(nil),
+			Status:             merr.Success(),
 		}, nil)
 
 		mockErr := merr.WrapErrServiceMemoryLimitExceeded(110, 100)

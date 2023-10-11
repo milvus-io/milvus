@@ -36,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/util/errorutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -180,7 +179,7 @@ func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitions
 	}
 
 	return &querypb.ShowPartitionsResponse{
-		Status:              merr.Status(nil),
+		Status:              merr.Success(),
 		PartitionIDs:        partitions,
 		InMemoryPercentages: percentages,
 		RefreshProgress:     refreshProgresses,
@@ -244,7 +243,7 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 	}
 
 	metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
@@ -285,7 +284,7 @@ func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 	metrics.QueryCoordReleaseLatency.WithLabelValues().Observe(float64(tr.ElapseSpan().Milliseconds()))
 	meta.GlobalFailedLoadCache.Remove(req.GetCollectionID())
 
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
@@ -344,7 +343,7 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 	}
 
 	metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (s *Server) checkResourceGroup(collectionID int64, resourceGroups []string) error {
@@ -410,7 +409,7 @@ func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 	metrics.QueryCoordReleaseLatency.WithLabelValues().Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	meta.GlobalFailedLoadCache.Remove(req.GetCollectionID())
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (s *Server) GetPartitionStates(ctx context.Context, req *querypb.GetPartitionStatesRequest) (*querypb.GetPartitionStatesResponse, error) {
@@ -476,7 +475,7 @@ func (s *Server) GetPartitionStates(ctx context.Context, req *querypb.GetPartiti
 	}
 
 	return &querypb.GetPartitionStatesResponse{
-		Status:                merr.Status(nil),
+		Status:                merr.Success(),
 		PartitionDescriptions: states,
 	}, nil
 }
@@ -517,7 +516,7 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfo
 	}
 
 	return &querypb.GetSegmentInfoResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		Infos:  infos,
 	}, nil
 }
@@ -544,7 +543,7 @@ func (s *Server) SyncNewCreatedPartition(ctx context.Context, req *querypb.SyncN
 		return merr.Status(err), nil
 	}
 
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 // refreshCollection must be called after loading a collection. It looks for new segments that are not loaded yet and
@@ -700,7 +699,7 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 		log.Warn(msg, zap.Error(err))
 		return merr.Status(errors.Wrap(err, msg)), nil
 	}
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
@@ -725,7 +724,7 @@ func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 	}
 
 	return &internalpb.ShowConfigurationsResponse{
-		Status:        merr.Status(nil),
+		Status:        merr.Success(),
 		Configuations: configList,
 	}, nil
 }
@@ -745,7 +744,7 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 	}
 
 	resp := &milvuspb.GetMetricsResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole,
 			paramtable.GetNodeID()),
 	}
@@ -793,7 +792,7 @@ func (s *Server) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReque
 	}
 
 	resp := &milvuspb.GetReplicasResponse{
-		Status:   merr.Status(nil),
+		Status:   merr.Success(),
 		Replicas: make([]*milvuspb.ReplicaInfo, 0),
 	}
 
@@ -845,7 +844,7 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 	}
 
 	resp := &querypb.GetShardLeadersResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}
 
 	percentage := s.meta.CollectionManager.CalculateLoadPercentage(req.GetCollectionID())
@@ -970,16 +969,15 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 
 func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		reason := errorutil.UnHealthReason("querycoord", paramtable.GetNodeID(), "querycoord is unhealthy")
-		return &milvuspb.CheckHealthResponse{Status: merr.Status(err), IsHealthy: false, Reasons: []string{reason}}, nil
+		return &milvuspb.CheckHealthResponse{Status: merr.Status(err), IsHealthy: false, Reasons: []string{err.Error()}}, nil
 	}
 
 	errReasons, err := s.checkNodeHealth(ctx)
 	if err != nil || len(errReasons) != 0 {
-		return &milvuspb.CheckHealthResponse{Status: merr.Status(nil), IsHealthy: false, Reasons: errReasons}, nil
+		return &milvuspb.CheckHealthResponse{Status: merr.Success(), IsHealthy: false, Reasons: errReasons}, nil
 	}
 
-	return &milvuspb.CheckHealthResponse{Status: merr.Status(nil), IsHealthy: true, Reasons: errReasons}, nil
+	return &milvuspb.CheckHealthResponse{Status: merr.Success(), IsHealthy: true, Reasons: errReasons}, nil
 }
 
 func (s *Server) checkNodeHealth(ctx context.Context) ([]string, error) {
@@ -991,13 +989,17 @@ func (s *Server) checkNodeHealth(ctx context.Context) ([]string, error) {
 		node := node
 		group.Go(func() error {
 			resp, err := s.cluster.GetComponentStates(ctx, node.ID())
-			isHealthy, reason := errorutil.UnHealthReasonWithComponentStatesOrErr("querynode", node.ID(), resp, err)
-			if !isHealthy {
+			if err != nil {
+				return err
+			}
+
+			err = merr.AnalyzeState("QueryNode", node.ID(), resp)
+			if err != nil {
 				mu.Lock()
 				defer mu.Unlock()
-				errReasons = append(errReasons, reason)
+				errReasons = append(errReasons, err.Error())
 			}
-			return err
+			return nil
 		})
 	}
 
@@ -1022,7 +1024,7 @@ func (s *Server) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateRe
 		log.Warn("failed to create resource group", zap.Error(err))
 		return merr.Status(err), nil
 	}
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (s *Server) DropResourceGroup(ctx context.Context, req *milvuspb.DropResourceGroupRequest) (*commonpb.Status, error) {
@@ -1048,7 +1050,7 @@ func (s *Server) DropResourceGroup(ctx context.Context, req *milvuspb.DropResour
 		log.Warn("failed to drop resource group", zap.Error(err))
 		return merr.Status(err), nil
 	}
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (s *Server) TransferNode(ctx context.Context, req *milvuspb.TransferNodeRequest) (*commonpb.Status, error) {
@@ -1104,7 +1106,7 @@ func (s *Server) TransferNode(ctx context.Context, req *milvuspb.TransferNodeReq
 
 	utils.AddNodesToCollectionsInRG(s.meta, req.GetTargetResourceGroup(), nodes...)
 
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (s *Server) TransferReplica(ctx context.Context, req *querypb.TransferReplicaRequest) (*commonpb.Status, error) {
@@ -1164,7 +1166,7 @@ func (s *Server) TransferReplica(ctx context.Context, req *querypb.TransferRepli
 		return merr.Status(err), nil
 	}
 
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (s *Server) transferReplica(targetRG string, replicas []*meta.Replica) error {
@@ -1188,7 +1190,7 @@ func (s *Server) ListResourceGroups(ctx context.Context, req *milvuspb.ListResou
 
 	log.Info("list resource group request received")
 	resp := &milvuspb.ListResourceGroupsResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		log.Warn("failed to list resource group", zap.Error(err))
@@ -1207,7 +1209,7 @@ func (s *Server) DescribeResourceGroup(ctx context.Context, req *querypb.Describ
 
 	log.Info("describe resource group request received")
 	resp := &querypb.DescribeResourceGroupResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		log.Warn("failed to describe resource group", zap.Error(err))

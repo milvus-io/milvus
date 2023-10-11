@@ -199,7 +199,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		limiter := limiterMock{rate: 100}
 		handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 			return &milvuspb.MutationResult{
-				Status: merr.Status(nil),
+				Status: merr.Success(),
 			}, nil
 		}
 		serverInfo := &grpc.UnaryServerInfo{FullMethod: "MockFullMethod"}

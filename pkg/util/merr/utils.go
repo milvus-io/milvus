@@ -23,6 +23,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -221,7 +222,31 @@ func Error(status *commonpb.Status) error {
 // otherwise returns ErrServiceNotReady wrapped with current state
 func CheckHealthy(state commonpb.StateCode) error {
 	if state != commonpb.StateCode_Healthy {
-		return WrapErrServiceNotReady(state.String())
+		return WrapErrServiceNotReady(paramtable.GetRole(), paramtable.GetNodeID(), state.String())
+	}
+
+	return nil
+}
+
+func IsHealthy(stateCode commonpb.StateCode) error {
+	if stateCode == commonpb.StateCode_Healthy {
+		return nil
+	}
+	return CheckHealthy(stateCode)
+}
+
+func IsHealthyOrStopping(stateCode commonpb.StateCode) error {
+	if stateCode == commonpb.StateCode_Healthy || stateCode == commonpb.StateCode_Stopping {
+		return nil
+	}
+	return CheckHealthy(stateCode)
+}
+
+func AnalyzeState(role string, nodeID int64, state *milvuspb.ComponentStates) error {
+	if err := Error(state.GetStatus()); err != nil {
+		return errors.Wrapf(err, "%s=%d not healthy", role, nodeID)
+	} else if state := state.GetState().GetStateCode(); state != commonpb.StateCode_Healthy {
+		return WrapErrServiceNotReady(role, nodeID, state.String())
 	}
 
 	return nil
@@ -236,8 +261,8 @@ func CheckTargetID(msg *commonpb.MsgBase) error {
 }
 
 // Service related
-func WrapErrServiceNotReady(stage string, msg ...string) error {
-	err := errors.Wrapf(ErrServiceNotReady, "stage=%s", stage)
+func WrapErrServiceNotReady(role string, sessionID int64, state string, msg ...string) error {
+	err := errors.Wrapf(ErrServiceNotReady, "%s=%d stage=%s", role, sessionID, state)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "; "))
 	}

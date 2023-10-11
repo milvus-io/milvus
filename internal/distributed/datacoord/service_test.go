@@ -544,7 +544,7 @@ func Test_NewServer(t *testing.T) {
 
 		t.Run("update seg stat", func(t *testing.T) {
 			server.dataCoord = &MockDataCoord{
-				updateSegStatResp: merr.Status(nil),
+				updateSegStatResp: merr.Success(),
 			}
 			resp, err := server.UpdateSegmentStatistics(ctx, nil)
 			assert.NoError(t, err)
@@ -553,7 +553,7 @@ func Test_NewServer(t *testing.T) {
 
 		t.Run("UpdateChannelCheckpoint", func(t *testing.T) {
 			server.dataCoord = &MockDataCoord{
-				updateChanPos: merr.Status(nil),
+				updateChanPos: merr.Success(),
 			}
 			resp, err := server.UpdateChannelCheckpoint(ctx, nil)
 			assert.NoError(t, err)
@@ -562,7 +562,7 @@ func Test_NewServer(t *testing.T) {
 
 		t.Run("save import segment", func(t *testing.T) {
 			server.dataCoord = &MockDataCoord{
-				addSegmentResp: merr.Status(nil),
+				addSegmentResp: merr.Success(),
 			}
 			resp, err := server.SaveImportSegment(ctx, nil)
 			assert.NoError(t, err)
@@ -571,7 +571,7 @@ func Test_NewServer(t *testing.T) {
 
 		t.Run("unset isImporting state", func(t *testing.T) {
 			server.dataCoord = &MockDataCoord{
-				unsetIsImportingStateResp: merr.Status(nil),
+				unsetIsImportingStateResp: merr.Success(),
 			}
 			resp, err := server.UnsetIsImportingState(ctx, nil)
 			assert.NoError(t, err)
@@ -580,7 +580,7 @@ func Test_NewServer(t *testing.T) {
 
 		t.Run("mark segments dropped", func(t *testing.T) {
 			server.dataCoord = &MockDataCoord{
-				markSegmentsDroppedResp: merr.Status(nil),
+				markSegmentsDroppedResp: merr.Success(),
 			}
 			resp, err := server.MarkSegmentsDropped(ctx, nil)
 			assert.NoError(t, err)

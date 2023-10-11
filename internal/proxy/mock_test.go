@@ -52,7 +52,7 @@ func (tso *mockTimestampAllocatorInterface) AllocTimestamp(ctx context.Context, 
 
 	tso.lastTs = ts
 	return &rootcoordpb.AllocTimestampResponse{
-		Status:    merr.Status(nil),
+		Status:    merr.Success(),
 		Timestamp: ts,
 		Count:     req.Count,
 	}, nil

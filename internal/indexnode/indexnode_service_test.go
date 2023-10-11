@@ -52,12 +52,12 @@ func TestAbnormalIndexNode(t *testing.T) {
 	assert.ErrorIs(t, merr.Error(jobNumRsp.GetStatus()), merr.ErrServiceNotReady)
 
 	metricsResp, err := in.GetMetrics(ctx, &milvuspb.GetMetricsRequest{})
-	assert.NoError(t, err)
-	assert.Equal(t, metricsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_UnexpectedError)
+	err = merr.CheckRPCCall(metricsResp, err)
+	assert.ErrorIs(t, err, merr.ErrServiceNotReady)
 
 	configurationResp, err := in.ShowConfigurations(ctx, &internalpb.ShowConfigurationsRequest{})
-	assert.NoError(t, err)
-	assert.Equal(t, configurationResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_UnexpectedError)
+	err = merr.CheckRPCCall(configurationResp, err)
+	assert.ErrorIs(t, err, merr.ErrServiceNotReady)
 }
 
 func TestGetMetrics(t *testing.T) {

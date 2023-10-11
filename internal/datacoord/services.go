@@ -39,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/util/errorutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -51,7 +50,7 @@ import (
 // GetTimeTickChannel legacy API, returns time tick channel name
 func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		Value:  Params.CommonCfg.DataCoordTimeTick.GetValue(),
 	}, nil
 }
@@ -144,7 +143,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 		zap.Time("flushTs", tsoutil.PhysicalTime(ts)))
 
 	return &datapb.FlushResponse{
-		Status:          merr.Status(nil),
+		Status:          merr.Success(),
 		DbID:            req.GetDbID(),
 		CollectionID:    req.GetCollectionID(),
 		SegmentIDs:      sealedSegmentIDs,
@@ -215,13 +214,13 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 				CollectionID: r.CollectionID,
 				PartitionID:  r.PartitionID,
 				ExpireTime:   allocation.ExpireTime,
-				Status:       merr.Status(nil),
+				Status:       merr.Success(),
 			}
 			assigns = append(assigns, result)
 		}
 	}
 	return &datapb.AssignSegmentIDResponse{
-		Status:           merr.Status(nil),
+		Status:           merr.Success(),
 		SegIDAssignments: assigns,
 	}, nil
 }
@@ -235,7 +234,7 @@ func (s *Server) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentSta
 	}
 
 	resp := &datapb.GetSegmentStatesResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}
 	for _, segmentID := range req.SegmentIDs {
 		state := &datapb.SegmentStateInfo{
@@ -269,7 +268,7 @@ func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 	}
 
 	resp := &datapb.GetInsertBinlogPathsResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}
 	binlogs := segment.GetBinlogs()
 	fids := make([]UniqueID, 0, len(binlogs))
@@ -302,7 +301,7 @@ func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCol
 	}
 
 	resp := &datapb.GetCollectionStatisticsResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}
 	nums := s.meta.GetNumRowsOfCollection(req.CollectionID)
 	resp.Stats = append(resp.Stats, &commonpb.KeyValuePair{Key: "row_count", Value: strconv.FormatInt(nums, 10)})
@@ -319,7 +318,7 @@ func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPart
 		zap.Int64s("partitionIDs", req.GetPartitionIDs()),
 	)
 	resp := &datapb.GetPartitionStatisticsResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &datapb.GetPartitionStatisticsResponse{
@@ -342,7 +341,7 @@ func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPart
 // GetSegmentInfoChannel legacy API, returns segment info statistics channel
 func (s *Server) GetSegmentInfoChannel(ctx context.Context, req *datapb.GetSegmentInfoChannelRequest) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		Value:  Params.CommonCfg.DataCoordSegmentInfo.GetValue(),
 	}, nil
 }
@@ -352,7 +351,7 @@ func (s *Server) GetSegmentInfoChannel(ctx context.Context, req *datapb.GetSegme
 func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
 	log := log.Ctx(ctx)
 	resp := &datapb.GetSegmentInfoResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &datapb.GetSegmentInfoResponse{
@@ -447,7 +446,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 
 	if segment.State == commonpb.SegmentState_Dropped {
 		log.Info("save to dropped segment, ignore this request")
-		return merr.Status(nil), nil
+		return merr.Success(), nil
 	} else if !isSegmentHealthy(segment) {
 		err := merr.WrapErrSegmentNotFound(segmentID)
 		log.Warn("failed to get segment, the segment not healthy", zap.Error(err))
@@ -490,7 +489,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			}
 		}
 	}
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 // DropVirtualChannel notifies vchannel dropped
@@ -498,7 +497,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error) {
 	log := log.Ctx(ctx)
 	resp := &datapb.DropVirtualChannelResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &datapb.DropVirtualChannelResponse{
@@ -576,7 +575,7 @@ func (s *Server) SetSegmentState(ctx context.Context, req *datapb.SetSegmentStat
 		}, nil
 	}
 	return &datapb.SetSegmentStateResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}, nil
 }
 
@@ -602,7 +601,7 @@ func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetCompon
 			Role:      "datacoord",
 			StateCode: code,
 		},
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}
 	return resp, nil
 }
@@ -619,7 +618,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	)
 	log.Info("get recovery info request received")
 	resp := &datapb.GetRecoveryInfoResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &datapb.GetRecoveryInfoResponse{
@@ -751,7 +750,7 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 	)
 	log.Info("get recovery info request received")
 	resp := &datapb.GetRecoveryInfoResponseV2{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &datapb.GetRecoveryInfoResponseV2{
@@ -828,7 +827,7 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
 	log := log.Ctx(ctx)
 	resp := &datapb.GetFlushedSegmentsResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}
 	collectionID := req.GetCollectionID()
 	partitionID := req.GetPartitionID()
@@ -872,7 +871,7 @@ func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedS
 func (s *Server) GetSegmentsByStates(ctx context.Context, req *datapb.GetSegmentsByStatesRequest) (*datapb.GetSegmentsByStatesResponse, error) {
 	log := log.Ctx(ctx)
 	resp := &datapb.GetSegmentsByStatesResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}
 	collectionID := req.GetCollectionID()
 	partitionID := req.GetPartitionID()
@@ -927,7 +926,7 @@ func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 	}
 
 	return &internalpb.ShowConfigurationsResponse{
-		Status:        merr.Status(nil),
+		Status:        merr.Success(),
 		Configuations: configList,
 	}, nil
 }
@@ -994,7 +993,7 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 	log.Info("received manual compaction")
 
 	resp := &milvuspb.ManualCompactionResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}
 
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
@@ -1027,7 +1026,7 @@ func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompac
 	)
 	log.Info("received get compaction state request")
 	resp := &milvuspb.GetCompactionStateResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}
 
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
@@ -1074,7 +1073,7 @@ func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 	}
 
 	resp := &milvuspb.GetCompactionPlansResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}
 	if !Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 		resp.Status = merr.Status(merr.WrapErrServiceUnavailable("compaction disabled"))
@@ -1148,7 +1147,7 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 	)
 	log.Info("receive watch channels request")
 	resp := &datapb.WatchChannelsResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}
 
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
@@ -1192,7 +1191,7 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 		}, nil
 	}
 
-	resp := &milvuspb.GetFlushStateResponse{Status: merr.Status(nil)}
+	resp := &milvuspb.GetFlushStateResponse{Status: merr.Success()}
 	if len(req.GetSegmentIDs()) > 0 {
 		var unflushed []UniqueID
 		for _, sid := range req.GetSegmentIDs() {
@@ -1256,7 +1255,7 @@ func (s *Server) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAll
 		}, nil
 	}
 
-	resp := &milvuspb.GetFlushAllStateResponse{Status: merr.Status(nil)}
+	resp := &milvuspb.GetFlushAllStateResponse{Status: merr.Success()}
 
 	dbsRsp, err := s.broker.ListDatabases(ctx)
 	if err != nil {
@@ -1310,7 +1309,7 @@ func (s *Server) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*da
 	log := log.Ctx(ctx)
 	log.Info("DataCoord receives import request", zap.Any("req", req))
 	resp := &datapb.ImportTaskResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}
 
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
@@ -1352,7 +1351,7 @@ func (s *Server) UpdateSegmentStatistics(ctx context.Context, req *datapb.Update
 		return merr.Status(err), nil
 	}
 	s.updateSegmentStatistics(req.GetStats())
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 // UpdateChannelCheckpoint updates channel checkpoint in dataCoord.
@@ -1368,7 +1367,7 @@ func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 		return merr.Status(err), nil
 	}
 
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 // ReportDataNodeTtMsgs send datenode timetick messages to dataCoord.
@@ -1393,7 +1392,7 @@ func (s *Server) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDat
 		}
 	}
 
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (s *Server) handleRPCTimetickMessage(ctx context.Context, ttMsg *msgpb.DataNodeTtMsg) error {
@@ -1515,7 +1514,7 @@ func (s *Server) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSe
 		log.Error("failed to SaveBinlogPaths", zap.Error(err))
 		return merr.Status(err), nil
 	}
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 // UnsetIsImportingState unsets the isImporting states of the given segments.
@@ -1577,12 +1576,12 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 			Properties:     properties,
 		}
 		s.meta.AddCollection(collInfo)
-		return merr.Status(nil), nil
+		return merr.Success(), nil
 	}
 
 	clonedColl.Properties = properties
 	s.meta.AddCollection(clonedColl)
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
@@ -1605,27 +1604,30 @@ func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthReque
 			if err != nil {
 				mu.Lock()
 				defer mu.Unlock()
-				errReasons = append(errReasons, errorutil.UnHealthReason("DataNode", nodeID, err.Error()))
+				errReasons = append(errReasons, fmt.Sprintf("failed to get DataNode %d: %v", nodeID, err))
 				return err
 			}
 
 			sta, err := cli.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
-			isHealthy, reason := errorutil.UnHealthReasonWithComponentStatesOrErr("DataNode", nodeID, sta, err)
-			if !isHealthy {
+			if err != nil {
+				return err
+			}
+			err = merr.AnalyzeState("DataNode", nodeID, sta)
+			if err != nil {
 				mu.Lock()
 				defer mu.Unlock()
-				errReasons = append(errReasons, reason)
+				errReasons = append(errReasons, err.Error())
 			}
-			return err
+			return nil
 		})
 	}
 
 	err := group.Wait()
 	if err != nil || len(errReasons) != 0 {
-		return &milvuspb.CheckHealthResponse{Status: merr.Status(nil), IsHealthy: false, Reasons: errReasons}, nil
+		return &milvuspb.CheckHealthResponse{Status: merr.Success(), IsHealthy: false, Reasons: errReasons}, nil
 	}
 
-	return &milvuspb.CheckHealthResponse{Status: merr.Status(nil), IsHealthy: true, Reasons: errReasons}, nil
+	return &milvuspb.CheckHealthResponse{Status: merr.Success(), IsHealthy: true, Reasons: errReasons}, nil
 }
 
 func (s *Server) GcConfirm(ctx context.Context, request *datapb.GcConfirmRequest) (*datapb.GcConfirmResponse, error) {
@@ -1636,7 +1638,7 @@ func (s *Server) GcConfirm(ctx context.Context, request *datapb.GcConfirmRequest
 	}
 
 	resp := &datapb.GcConfirmResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}
 	resp.GcFinished = s.meta.GcConfirm(ctx, request.GetCollectionId(), request.GetPartitionId())
 	return resp, nil

@@ -21,6 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -40,12 +41,12 @@ func (t *hasPartitionTask) Prepare(ctx context.Context) error {
 
 // Execute task execution
 func (t *hasPartitionTask) Execute(ctx context.Context) error {
-	t.Rsp.Status = succStatus()
+	t.Rsp.Status = merr.Success()
 	t.Rsp.Value = false
 	// TODO: why HasPartitionRequest doesn't contain Timestamp but other requests do.
 	coll, err := t.core.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.CollectionName, typeutil.MaxTimestamp)
 	if err != nil {
-		t.Rsp.Status = failStatus(commonpb.ErrorCode_CollectionNotExists, err.Error())
+		t.Rsp.Status = merr.Status(err)
 		return err
 	}
 	for _, part := range coll.Partitions {

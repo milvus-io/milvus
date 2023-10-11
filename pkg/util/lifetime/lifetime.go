@@ -29,15 +29,15 @@ type Lifetime[T any] interface {
 	// GetState returns current state.
 	GetState() T
 	// Add records a task is running, returns false if the lifetime is not healthy.
-	Add(isHealthy IsHealthy[T]) bool
+	Add(isHealthy CheckHealth[T]) error
 	// Done records a task is done.
 	Done()
 	// Wait waits until all tasks are done.
 	Wait()
 }
 
-// IsHealthy function type for lifetime healthy check.
-type IsHealthy[T any] func(T) bool
+// CheckHealth function type for lifetime healthy check.
+type CheckHealth[T any] func(T) error
 
 var _ Lifetime[any] = (*lifetime[any])(nil)
 
@@ -60,7 +60,7 @@ type lifetime[T any] struct {
 	// mut is the rwmutex to control each task and state change event.
 	mut sync.RWMutex
 	// isHealthy is the method to check whether is legal to add a task.
-	isHealthy func(int32) bool
+	isHealthy func(int32) error
 }
 
 // SetState is the method to change lifetime state.
@@ -80,17 +80,17 @@ func (l *lifetime[T]) GetState() T {
 }
 
 // Add records a task is running, returns false if the lifetime is not healthy.
-func (l *lifetime[T]) Add(isHealthy IsHealthy[T]) bool {
+func (l *lifetime[T]) Add(checkHealth CheckHealth[T]) error {
 	l.mut.RLock()
 	defer l.mut.RUnlock()
 
 	// check lifetime healthy
-	if !isHealthy(l.state) {
-		return false
+	if err := checkHealth(l.state); err != nil {
+		return err
 	}
 
 	l.wg.Add(1)
-	return true
+	return nil
 }
 
 // Done records a task is done.

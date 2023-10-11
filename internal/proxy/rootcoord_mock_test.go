@@ -136,7 +136,7 @@ func (coord *RootCoordMock) CreateAlias(ctx context.Context, req *milvuspb.Creat
 	}
 
 	coord.collAlias2ID[req.Alias] = collID
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (coord *RootCoordMock) DropAlias(ctx context.Context, req *milvuspb.DropAliasRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
@@ -159,7 +159,7 @@ func (coord *RootCoordMock) DropAlias(ctx context.Context, req *milvuspb.DropAli
 	}
 
 	delete(coord.collAlias2ID, req.Alias)
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (coord *RootCoordMock) AlterAlias(ctx context.Context, req *milvuspb.AlterAliasRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
@@ -188,7 +188,7 @@ func (coord *RootCoordMock) AlterAlias(ctx context.Context, req *milvuspb.AlterA
 		}, nil
 	}
 	coord.collAlias2ID[req.Alias] = collID
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (coord *RootCoordMock) updateState(state commonpb.StateCode) {
@@ -217,7 +217,7 @@ func (coord *RootCoordMock) GetComponentStates(ctx context.Context, req *milvusp
 			ExtraInfo: nil,
 		},
 		SubcomponentStates: nil,
-		Status:             merr.Status(nil),
+		Status:             merr.Success(),
 	}, nil
 }
 
@@ -232,7 +232,7 @@ func (coord *RootCoordMock) GetStatisticsChannel(ctx context.Context, req *inter
 		}, nil
 	}
 	return &milvuspb.StringResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		Value:  coord.statisticsChannel,
 	}, nil
 }
@@ -252,7 +252,7 @@ func (coord *RootCoordMock) GetTimeTickChannel(ctx context.Context, req *interna
 		}, nil
 	}
 	return &milvuspb.StringResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		Value:  coord.timeTickChannel,
 	}, nil
 }
@@ -356,7 +356,7 @@ func (coord *RootCoordMock) CreateCollection(ctx context.Context, req *milvuspb.
 		coord.collID2Partitions[collID].partitionID2Meta[id] = partitionMeta{}
 	}
 
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (coord *RootCoordMock) DropCollection(ctx context.Context, req *milvuspb.DropCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
@@ -387,7 +387,7 @@ func (coord *RootCoordMock) DropCollection(ctx context.Context, req *milvuspb.Dr
 
 	delete(coord.collID2Partitions, collID)
 
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (coord *RootCoordMock) HasCollection(ctx context.Context, req *milvuspb.HasCollectionRequest, opts ...grpc.CallOption) (*milvuspb.BoolResponse, error) {
@@ -407,7 +407,7 @@ func (coord *RootCoordMock) HasCollection(ctx context.Context, req *milvuspb.Has
 	_, exist := coord.collName2ID[req.CollectionName]
 
 	return &milvuspb.BoolResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		Value:  exist,
 	}, nil
 }
@@ -466,7 +466,7 @@ func (coord *RootCoordMock) DescribeCollection(ctx context.Context, req *milvusp
 	}
 
 	return &milvuspb.DescribeCollectionResponse{
-		Status:               merr.Status(nil),
+		Status:               merr.Success(),
 		Schema:               meta.schema,
 		CollectionID:         collID,
 		ShardsNum:            meta.shardsNum,
@@ -510,7 +510,7 @@ func (coord *RootCoordMock) ShowCollections(ctx context.Context, req *milvuspb.S
 	}
 
 	return &milvuspb.ShowCollectionsResponse{
-		Status:               merr.Status(nil),
+		Status:               merr.Success(),
 		CollectionNames:      names,
 		CollectionIds:        ids,
 		CreatedTimestamps:    createdTimestamps,
@@ -559,7 +559,7 @@ func (coord *RootCoordMock) CreatePartition(ctx context.Context, req *milvuspb.C
 		createdUtcTimestamp: ts,
 	}
 
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (coord *RootCoordMock) DropPartition(ctx context.Context, req *milvuspb.DropPartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
@@ -595,7 +595,7 @@ func (coord *RootCoordMock) DropPartition(ctx context.Context, req *milvuspb.Dro
 	delete(coord.collID2Partitions[collID].partitionName2ID, req.PartitionName)
 	delete(coord.collID2Partitions[collID].partitionID2Name, partitionID)
 
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (coord *RootCoordMock) HasPartition(ctx context.Context, req *milvuspb.HasPartitionRequest, opts ...grpc.CallOption) (*milvuspb.BoolResponse, error) {
@@ -628,7 +628,7 @@ func (coord *RootCoordMock) HasPartition(ctx context.Context, req *milvuspb.HasP
 
 	_, partitionExist := coord.collID2Partitions[collID].partitionName2ID[req.PartitionName]
 	return &milvuspb.BoolResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		Value:  partitionExist,
 	}, nil
 }
@@ -682,7 +682,7 @@ func (coord *RootCoordMock) ShowPartitions(ctx context.Context, req *milvuspb.Sh
 	}
 
 	return &milvuspb.ShowPartitionsResponse{
-		Status:               merr.Status(nil),
+		Status:               merr.Success(),
 		PartitionNames:       names,
 		PartitionIDs:         ids,
 		CreatedTimestamps:    createdTimestamps,
@@ -783,7 +783,7 @@ func (coord *RootCoordMock) AllocTimestamp(ctx context.Context, req *rootcoordpb
 
 	coord.lastTs = ts
 	return &rootcoordpb.AllocTimestampResponse{
-		Status:    merr.Status(nil),
+		Status:    merr.Success(),
 		Timestamp: ts,
 		Count:     req.Count,
 	}, nil
@@ -803,7 +803,7 @@ func (coord *RootCoordMock) AllocID(ctx context.Context, req *rootcoordpb.AllocI
 	}
 	begin, _ := uniquegenerator.GetUniqueIntGeneratorIns().GetInts(int(req.Count))
 	return &rootcoordpb.AllocIDResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		ID:     int64(begin),
 		Count:  req.Count,
 	}, nil
@@ -817,7 +817,7 @@ func (coord *RootCoordMock) UpdateChannelTimeTick(ctx context.Context, req *inte
 			Reason:    fmt.Sprintf("state code = %s", commonpb.StateCode_name[int32(code)]),
 		}, nil
 	}
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (coord *RootCoordMock) DescribeSegment(ctx context.Context, req *milvuspb.DescribeSegmentRequest, opts ...grpc.CallOption) (*milvuspb.DescribeSegmentResponse, error) {
@@ -832,7 +832,7 @@ func (coord *RootCoordMock) DescribeSegment(ctx context.Context, req *milvuspb.D
 		}, nil
 	}
 	return &milvuspb.DescribeSegmentResponse{
-		Status:      merr.Status(nil),
+		Status:      merr.Success(),
 		IndexID:     0,
 		BuildID:     0,
 		EnableIndex: false,
@@ -851,7 +851,7 @@ func (coord *RootCoordMock) ShowSegments(ctx context.Context, req *milvuspb.Show
 		}, nil
 	}
 	return &milvuspb.ShowSegmentsResponse{
-		Status:     merr.Status(nil),
+		Status:     merr.Success(),
 		SegmentIDs: nil,
 	}, nil
 }
@@ -868,7 +868,7 @@ func (coord *RootCoordMock) InvalidateCollectionMetaCache(ctx context.Context, i
 			Reason:    fmt.Sprintf("state code = %s", commonpb.StateCode_name[int32(code)]),
 		}, nil
 	}
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (coord *RootCoordMock) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
@@ -879,7 +879,7 @@ func (coord *RootCoordMock) SegmentFlushCompleted(ctx context.Context, in *datap
 			Reason:    fmt.Sprintf("state code = %s", commonpb.StateCode_name[int32(code)]),
 		}, nil
 	}
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (coord *RootCoordMock) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest, opts ...grpc.CallOption) (*internalpb.ShowConfigurationsResponse, error) {
@@ -940,7 +940,7 @@ func (coord *RootCoordMock) Import(ctx context.Context, req *milvuspb.ImportRequ
 		}, nil
 	}
 	return &milvuspb.ImportResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		Tasks:  make([]int64, 3),
 	}, nil
 }
@@ -958,7 +958,7 @@ func (coord *RootCoordMock) GetImportState(ctx context.Context, req *milvuspb.Ge
 		}, nil
 	}
 	return &milvuspb.GetImportStateResponse{
-		Status:   merr.Status(nil),
+		Status:   merr.Success(),
 		RowCount: 10,
 		IdList:   make([]int64, 3),
 	}, nil
@@ -976,7 +976,7 @@ func (coord *RootCoordMock) ListImportTasks(ctx context.Context, in *milvuspb.Li
 		}, nil
 	}
 	return &milvuspb.ListImportTasksResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		Tasks:  make([]*milvuspb.GetImportStateResponse, 3),
 	}, nil
 }
@@ -989,7 +989,7 @@ func (coord *RootCoordMock) ReportImport(ctx context.Context, req *rootcoordpb.I
 			Reason:    fmt.Sprintf("state code = %s", commonpb.StateCode_name[int32(code)]),
 		}, nil
 	}
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func NewRootCoordMock(opts ...RootCoordMockOption) *RootCoordMock {

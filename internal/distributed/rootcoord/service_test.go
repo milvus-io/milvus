@@ -121,7 +121,7 @@ func (m *mockDataCoord) GetComponentStates(ctx context.Context, req *milvuspb.Ge
 		State: &milvuspb.ComponentInfo{
 			StateCode: commonpb.StateCode_Healthy,
 		},
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		SubcomponentStates: []*milvuspb.ComponentInfo{
 			{
 				StateCode: commonpb.StateCode_Healthy,

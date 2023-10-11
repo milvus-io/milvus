@@ -99,11 +99,3 @@ func UpdateMsgBase(msgBase *commonpb.MsgBase, options ...MsgBaseOptions) *common
 	}
 	return msgBaseRt
 }
-
-func IsHealthy(stateCode commonpb.StateCode) bool {
-	return stateCode == commonpb.StateCode_Healthy
-}
-
-func IsHealthyOrStopping(stateCode commonpb.StateCode) bool {
-	return stateCode == commonpb.StateCode_Healthy || stateCode == commonpb.StateCode_Stopping
-}

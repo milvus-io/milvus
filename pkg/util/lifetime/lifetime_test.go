@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
+
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 type LifetimeSuite struct {
@@ -29,15 +31,20 @@ type LifetimeSuite struct {
 
 func (s *LifetimeSuite) TestNormal() {
 	l := NewLifetime[int32](0)
-	isHealthy := func(state int32) bool { return state == 0 }
+	checkHealth := func(state int32) error {
+		if state == 0 {
+			return nil
+		}
+		return merr.WrapErrServiceNotReady("test", 0, "0")
+	}
 
 	state := l.GetState()
 	s.EqualValues(0, state)
 
-	s.True(l.Add(isHealthy))
+	s.NoError(l.Add(checkHealth))
 
 	l.SetState(1)
-	s.False(l.Add(isHealthy))
+	s.Error(l.Add(checkHealth))
 
 	signal := make(chan struct{})
 	go func() {

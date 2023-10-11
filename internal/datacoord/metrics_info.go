@@ -89,7 +89,7 @@ func (s *Server) getSystemInfoMetrics(
 	}
 
 	resp := &milvuspb.GetMetricsResponse{
-		Status:        merr.Status(nil),
+		Status:        merr.Success(),
 		ComponentName: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, paramtable.GetNodeID()),
 	}
 	var err error

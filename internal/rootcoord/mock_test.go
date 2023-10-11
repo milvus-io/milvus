@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
@@ -383,7 +384,7 @@ func (m mockProxy) GetComponentStates(ctx context.Context, req *milvuspb.GetComp
 func newMockProxy() *mockProxy {
 	r := &mockProxy{}
 	r.InvalidateCollectionMetaCacheFunc = func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
-		return succStatus(), nil
+		return merr.Success(), nil
 	}
 	return r
 }
@@ -412,7 +413,7 @@ func withValidProxyManager() Opt {
 		}
 		p := newMockProxy()
 		p.InvalidateCollectionMetaCacheFunc = func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
-			return succStatus(), nil
+			return merr.Success(), nil
 		}
 		p.GetComponentStatesFunc = func(ctx context.Context) (*milvuspb.ComponentStates, error) {
 			return &milvuspb.ComponentStates{
@@ -431,7 +432,7 @@ func withInvalidProxyManager() Opt {
 		}
 		p := newMockProxy()
 		p.InvalidateCollectionMetaCacheFunc = func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
-			return succStatus(), errors.New("error mock InvalidateCollectionMetaCache")
+			return merr.Success(), errors.New("error mock InvalidateCollectionMetaCache")
 		}
 		p.GetComponentStatesFunc = func(ctx context.Context) (*milvuspb.ComponentStates, error) {
 			return &milvuspb.ComponentStates{
@@ -569,10 +570,11 @@ func withQueryCoord(qc types.QueryCoordClient) Opt {
 
 func withUnhealthyQueryCoord() Opt {
 	qc := &mocks.MockQueryCoordClient{}
+	err := errors.New("mock error")
 	qc.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(
 		&milvuspb.ComponentStates{
 			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Abnormal},
-			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "error mock GetComponentStates"),
+			Status: merr.Status(err),
 		}, retry.Unrecoverable(errors.New("error mock GetComponentStates")),
 	)
 	return withQueryCoord(qc)
@@ -583,7 +585,7 @@ func withInvalidQueryCoord() Opt {
 	qc.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(
 		&milvuspb.ComponentStates{
 			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
-			Status: succStatus(),
+			Status: merr.Success(),
 		}, nil,
 	)
 	qc.EXPECT().ReleaseCollection(mock.Anything, mock.Anything).Return(
@@ -602,16 +604,17 @@ func withFailedQueryCoord() Opt {
 	qc.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(
 		&milvuspb.ComponentStates{
 			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
-			Status: succStatus(),
+			Status: merr.Success(),
 		}, nil,
 	)
+	err := errors.New("mock error")
 	qc.EXPECT().ReleaseCollection(mock.Anything, mock.Anything).Return(
-		failStatus(commonpb.ErrorCode_UnexpectedError, "mock release collection error"), nil,
+		merr.Status(err), nil,
 	)
 
 	qc.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return(
 		&querypb.GetSegmentInfoResponse{
-			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "mock get segment info error"),
+			Status: merr.Status(err),
 		}, nil,
 	)
 
@@ -623,25 +626,25 @@ func withValidQueryCoord() Opt {
 	qc.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(
 		&milvuspb.ComponentStates{
 			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
-			Status: succStatus(),
+			Status: merr.Success(),
 		}, nil,
 	)
 	qc.EXPECT().ReleaseCollection(mock.Anything, mock.Anything).Return(
-		succStatus(), nil,
+		merr.Success(), nil,
 	)
 
 	qc.EXPECT().ReleasePartitions(mock.Anything, mock.Anything).Return(
-		succStatus(), nil,
+		merr.Success(), nil,
 	)
 
 	qc.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return(
 		&querypb.GetSegmentInfoResponse{
-			Status: succStatus(),
+			Status: merr.Success(),
 		}, nil,
 	)
 
 	qc.EXPECT().SyncNewCreatedPartition(mock.Anything, mock.Anything).Return(
-		succStatus(), nil,
+		merr.Success(), nil,
 	)
 
 	return withQueryCoord(qc)
@@ -686,10 +689,11 @@ func withDataCoord(dc types.DataCoordClient) Opt {
 
 func withUnhealthyDataCoord() Opt {
 	dc := newMockDataCoord()
+	err := errors.New("mock error")
 	dc.GetComponentStatesFunc = func(ctx context.Context) (*milvuspb.ComponentStates, error) {
 		return &milvuspb.ComponentStates{
 			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Abnormal},
-			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "error mock GetComponentStates"),
+			Status: merr.Status(err),
 		}, retry.Unrecoverable(errors.New("error mock GetComponentStates"))
 	}
 	return withDataCoord(dc)
@@ -700,7 +704,7 @@ func withInvalidDataCoord() Opt {
 	dc.GetComponentStatesFunc = func(ctx context.Context) (*milvuspb.ComponentStates, error) {
 		return &milvuspb.ComponentStates{
 			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
-			Status: succStatus(),
+			Status: merr.Success(),
 		}, nil
 	}
 	dc.WatchChannelsFunc = func(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error) {
@@ -735,22 +739,23 @@ func withFailedDataCoord() Opt {
 	dc.GetComponentStatesFunc = func(ctx context.Context) (*milvuspb.ComponentStates, error) {
 		return &milvuspb.ComponentStates{
 			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
-			Status: succStatus(),
+			Status: merr.Success(),
 		}, nil
 	}
+	err := errors.New("mock error")
 	dc.WatchChannelsFunc = func(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error) {
 		return &datapb.WatchChannelsResponse{
-			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "mock watch channels error"),
+			Status: merr.Status(err),
 		}, nil
 	}
 	dc.FlushFunc = func(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
 		return &datapb.FlushResponse{
-			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "mock flush error"),
+			Status: merr.Status(err),
 		}, nil
 	}
 	dc.ImportFunc = func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 		return &datapb.ImportTaskResponse{
-			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "mock import error"),
+			Status: merr.Status(err),
 		}, nil
 	}
 	dc.UnsetIsImportingStateFunc = func(ctx context.Context, req *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
@@ -760,15 +765,15 @@ func withFailedDataCoord() Opt {
 		}, nil
 	}
 	dc.broadCastAlteredCollectionFunc = func(ctx context.Context, req *datapb.AlterCollectionRequest) (*commonpb.Status, error) {
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "mock broadcast altered collection error"), nil
+		return merr.Status(err), nil
 	}
 	dc.GetSegmentIndexStateFunc = func(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
 		return &indexpb.GetSegmentIndexStateResponse{
-			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "mock GetSegmentIndexStateFunc fail"),
+			Status: merr.Status(err),
 		}, nil
 	}
 	dc.DropIndexFunc = func(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "mock DropIndexFunc fail"), nil
+		return merr.Status(err), nil
 	}
 	return withDataCoord(dc)
 }
@@ -778,37 +783,37 @@ func withValidDataCoord() Opt {
 	dc.GetComponentStatesFunc = func(ctx context.Context) (*milvuspb.ComponentStates, error) {
 		return &milvuspb.ComponentStates{
 			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
-			Status: succStatus(),
+			Status: merr.Success(),
 		}, nil
 	}
 	dc.WatchChannelsFunc = func(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error) {
 		return &datapb.WatchChannelsResponse{
-			Status: succStatus(),
+			Status: merr.Success(),
 		}, nil
 	}
 	dc.FlushFunc = func(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
 		return &datapb.FlushResponse{
-			Status: succStatus(),
+			Status: merr.Success(),
 		}, nil
 	}
 	dc.ImportFunc = func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 		return &datapb.ImportTaskResponse{
-			Status: succStatus(),
+			Status: merr.Success(),
 		}, nil
 	}
 	dc.UnsetIsImportingStateFunc = func(ctx context.Context, req *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
-		return succStatus(), nil
+		return merr.Success(), nil
 	}
 	dc.broadCastAlteredCollectionFunc = func(ctx context.Context, req *datapb.AlterCollectionRequest) (*commonpb.Status, error) {
-		return succStatus(), nil
+		return merr.Success(), nil
 	}
 	dc.GetSegmentIndexStateFunc = func(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
 		return &indexpb.GetSegmentIndexStateResponse{
-			Status: succStatus(),
+			Status: merr.Success(),
 		}, nil
 	}
 	dc.DropIndexFunc = func(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
-		return succStatus(), nil
+		return merr.Success(), nil
 	}
 	return withDataCoord(dc)
 }

@@ -276,7 +276,7 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	log := log.Ctx(ctx).With(zap.String("collectionName", collectionName))
 
 	it.result = &milvuspb.MutationResult{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		IDs: &schemapb.IDs{
 			IdField: nil,
 		},

@@ -216,7 +216,7 @@ func (g *getStatisticsTask) PostExecute(ctx context.Context) error {
 		return err
 	}
 	g.result = &milvuspb.GetStatisticsResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		Stats:  result,
 	}
 
@@ -248,7 +248,7 @@ func (g *getStatisticsTask) getStatisticsFromDataCoord(ctx context.Context) erro
 		g.resultBuf = typeutil.NewConcurrentSet[*internalpb.GetStatisticsResponse]()
 	}
 	g.resultBuf.Insert(&internalpb.GetStatisticsResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		Stats:  result.Stats,
 	})
 	return nil
@@ -465,7 +465,7 @@ func reduceStatisticResponse(results []map[string]string) ([]*commonpb.KeyValueP
 //			return merr.Error(result.GetStatus())
 //		}
 //		g.toReduceResults = append(g.toReduceResults, &internalpb.GetStatisticsResponse{
-//			Status: merr.Status(nil),
+//			Status: merr.Success(),
 //			Stats:  result.Stats,
 //		})
 //		log.Debug("get partition statistics from DataCoord execute done", zap.Int64("msgID", g.ID()))
@@ -480,7 +480,7 @@ func reduceStatisticResponse(results []map[string]string) ([]*commonpb.KeyValueP
 //		return err
 //	}
 //	g.result = &milvuspb.GetPartitionStatisticsResponse{
-//		Status: merr.Status(nil),
+//		Status: merr.Success(),
 //		Stats:  g.innerResult,
 //	}
 //	return nil
@@ -537,7 +537,7 @@ func reduceStatisticResponse(results []map[string]string) ([]*commonpb.KeyValueP
 //				return merr.Error(result.GetStatus())
 //			}
 //			g.toReduceResults = append(g.toReduceResults, &internalpb.GetStatisticsResponse{
-//				Status: merr.Status(nil),
+//				Status: merr.Success(),
 //				Stats:  result.Stats,
 //			})
 //		} else { // some partitions have been loaded, get some partition statistics from datacoord
@@ -560,7 +560,7 @@ func reduceStatisticResponse(results []map[string]string) ([]*commonpb.KeyValueP
 //				return merr.Error(result.GetStatus())
 //			}
 //			g.toReduceResults = append(g.toReduceResults, &internalpb.GetStatisticsResponse{
-//				Status: merr.Status(nil),
+//				Status: merr.Success(),
 //				Stats:  result.Stats,
 //			})
 //		}
@@ -576,7 +576,7 @@ func reduceStatisticResponse(results []map[string]string) ([]*commonpb.KeyValueP
 //		return err
 //	}
 //	g.result = &milvuspb.GetCollectionStatisticsResponse{
-//		Status: merr.Status(nil),
+//		Status: merr.Success(),
 //		Stats:  g.innerResult,
 //	}
 //	return nil
@@ -659,7 +659,7 @@ func (g *getCollectionStatisticsTask) Execute(ctx context.Context) error {
 		return merr.Error(result.GetStatus())
 	}
 	g.result = &milvuspb.GetCollectionStatisticsResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		Stats:  result.Stats,
 	}
 	return nil
@@ -749,7 +749,7 @@ func (g *getPartitionStatisticsTask) Execute(ctx context.Context) error {
 		return merr.Error(result.GetStatus())
 	}
 	g.result = &milvuspb.GetPartitionStatisticsResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		Stats:  result.Stats,
 	}
 	return nil

@@ -659,7 +659,7 @@ func (s *DelegatorSuite) TestQueryStream() {
 				}
 
 				srv.Send(&internalpb.RetrieveResults{
-					Status: merr.Status(nil),
+					Status: merr.Success(),
 					Ids: &schemapb.IDs{
 						IdField: &schemapb.IDs_IntId{
 							IntId: &schemapb.LongArray{Data: req.GetSegmentIDs()},
@@ -676,7 +676,7 @@ func (s *DelegatorSuite) TestQueryStream() {
 				s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
 				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
 				srv.Send(&internalpb.RetrieveResults{
-					Status: merr.Status(nil),
+					Status: merr.Success(),
 					Ids: &schemapb.IDs{
 						IdField: &schemapb.IDs_IntId{
 							IntId: &schemapb.LongArray{Data: req.GetSegmentIDs()},
@@ -809,7 +809,7 @@ func (s *DelegatorSuite) TestQueryStream() {
 				s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
 				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
 				srv.Send(&internalpb.RetrieveResults{
-					Status: merr.Status(nil),
+					Status: merr.Success(),
 					Ids: &schemapb.IDs{
 						IdField: &schemapb.IDs_IntId{
 							IntId: &schemapb.LongArray{Data: req.GetSegmentIDs()},
@@ -1057,7 +1057,7 @@ func TestDelegatorWatchTsafe(t *testing.T) {
 
 	m := sync.Mutex{}
 	sd.tsCond = sync.NewCond(&m)
-	if sd.lifetime.Add(lifetime.NotStopped) {
+	if sd.lifetime.Add(lifetime.NotStopped) == nil {
 		go sd.watchTSafe()
 	}
 
@@ -1085,7 +1085,7 @@ func TestDelegatorTSafeListenerClosed(t *testing.T) {
 	m := sync.Mutex{}
 	sd.tsCond = sync.NewCond(&m)
 	signal := make(chan struct{})
-	if sd.lifetime.Add(lifetime.NotStopped) {
+	if sd.lifetime.Add(lifetime.NotStopped) == nil {
 		go func() {
 			sd.watchTSafe()
 			close(signal)

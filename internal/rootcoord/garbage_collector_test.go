@@ -462,7 +462,7 @@ func TestGarbageCollector_RemoveCreatingPartition(t *testing.T) {
 			})
 
 		qc := mocks.NewMockQueryCoordClient(t)
-		qc.EXPECT().ReleasePartitions(mock.Anything, mock.Anything).Return(merr.Status(nil), nil)
+		qc.EXPECT().ReleasePartitions(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
 		core := newTestCore(withTtSynchronizer(ticker),
 			withMeta(meta),
@@ -488,7 +488,7 @@ func TestGarbageCollector_RemoveCreatingPartition(t *testing.T) {
 
 		qc := mocks.NewMockQueryCoordClient(t)
 		qc.EXPECT().ReleasePartitions(mock.Anything, mock.Anything, mock.Anything).
-			Return(merr.Status(nil), fmt.Errorf("mock err")).
+			Return(merr.Success(), fmt.Errorf("mock err")).
 			Run(func(ctx context.Context, req *querypb.ReleasePartitionsRequest, opts ...grpc.CallOption) {
 				signal <- struct{}{}
 			})
@@ -521,7 +521,7 @@ func TestGarbageCollector_RemoveCreatingPartition(t *testing.T) {
 			})
 
 		qc := mocks.NewMockQueryCoordClient(t)
-		qc.EXPECT().ReleasePartitions(mock.Anything, mock.Anything, mock.Anything).Return(merr.Status(nil), nil)
+		qc.EXPECT().ReleasePartitions(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
 		core := newTestCore(withTtSynchronizer(ticker),
 			withMeta(meta),

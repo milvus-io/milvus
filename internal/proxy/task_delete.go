@@ -157,7 +157,7 @@ func getPrimaryKeysFromExpr(schema *schemapb.CollectionSchema, termExpr *planpb.
 
 func (dt *deleteTask) PreExecute(ctx context.Context) error {
 	dt.result = &milvuspb.MutationResult{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		IDs: &schemapb.IDs{
 			IdField: nil,
 		},

@@ -19,8 +19,8 @@ package rootcoord
 import (
 	"context"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 type listDatabaseTask struct {
@@ -34,10 +34,10 @@ func (t *listDatabaseTask) Prepare(ctx context.Context) error {
 }
 
 func (t *listDatabaseTask) Execute(ctx context.Context) error {
-	t.Resp.Status = succStatus()
+	t.Resp.Status = merr.Success()
 	ret, err := t.core.meta.ListDatabases(ctx, t.GetTs())
 	if err != nil {
-		t.Resp.Status = failStatus(commonpb.ErrorCode_UnexpectedError, err.Error())
+		t.Resp.Status = merr.Status(err)
 		return err
 	}
 

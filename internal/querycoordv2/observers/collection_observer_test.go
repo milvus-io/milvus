@@ -197,7 +197,7 @@ func (suite *CollectionObserverSuite) SetupTest() {
 
 	mockCluster := session.NewMockCluster(suite.T())
 	suite.leaderObserver = NewLeaderObserver(suite.dist, suite.meta, suite.targetMgr, suite.broker, mockCluster)
-	mockCluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Status(nil), nil).Maybe()
+	mockCluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
 
 	// Test object
 	suite.ob = NewCollectionObserver(

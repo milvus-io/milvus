@@ -87,7 +87,7 @@ func (suite *DistControllerTestSuite) TearDownSuite() {
 func (suite *DistControllerTestSuite) TestStart() {
 	dispatchCalled := atomic.NewBool(false)
 	suite.mockCluster.EXPECT().GetDataDistribution(mock.Anything, mock.Anything, mock.Anything).Return(
-		&querypb.GetDataDistributionResponse{Status: merr.Status(nil), NodeID: 1},
+		&querypb.GetDataDistributionResponse{Status: merr.Success(), NodeID: 1},
 		nil,
 	)
 	suite.mockScheduler.EXPECT().Dispatch(int64(1)).Run(func(node int64) { dispatchCalled.Store(true) })
@@ -115,7 +115,7 @@ func (suite *DistControllerTestSuite) TestStop() {
 	suite.controller.StartDistInstance(context.TODO(), 1)
 	called := atomic.NewBool(false)
 	suite.mockCluster.EXPECT().GetDataDistribution(mock.Anything, mock.Anything, mock.Anything).Maybe().Return(
-		&querypb.GetDataDistributionResponse{Status: merr.Status(nil), NodeID: 1},
+		&querypb.GetDataDistributionResponse{Status: merr.Success(), NodeID: 1},
 		nil,
 	).Run(func(args mock.Arguments) {
 		called.Store(true)
@@ -140,7 +140,7 @@ func (suite *DistControllerTestSuite) TestSyncAll() {
 	suite.mockCluster.EXPECT().GetDataDistribution(mock.Anything, mock.Anything, mock.Anything).Call.Return(
 		func(ctx context.Context, nodeID int64, req *querypb.GetDataDistributionRequest) *querypb.GetDataDistributionResponse {
 			return &querypb.GetDataDistributionResponse{
-				Status: merr.Status(nil),
+				Status: merr.Success(),
 				NodeID: nodeID,
 			}
 		},

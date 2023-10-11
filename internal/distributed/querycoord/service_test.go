@@ -105,7 +105,7 @@ func Test_NewServer(t *testing.T) {
 		}
 
 		mqc := getQueryCoord()
-		successStatus := merr.Status(nil)
+		successStatus := merr.Success()
 
 		t.Run("Run", func(t *testing.T) {
 			server.queryCoord = mqc

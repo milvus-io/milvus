@@ -21,6 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 // hasCollectionTask has collection request task
@@ -39,7 +40,7 @@ func (t *hasCollectionTask) Prepare(ctx context.Context) error {
 
 // Execute task execution
 func (t *hasCollectionTask) Execute(ctx context.Context) error {
-	t.Rsp.Status = succStatus()
+	t.Rsp.Status = merr.Success()
 	ts := getTravelTs(t.Req)
 	// TODO: what if err != nil && common.IsCollectionNotExistError == false, should we consider this RPC as failure?
 	_, err := t.core.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), ts)

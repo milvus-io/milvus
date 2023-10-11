@@ -83,7 +83,7 @@ func TestProxy_metrics(t *testing.T) {
 		resp, _ := metricsinfo.MarshalTopology(rootCoordTopology)
 
 		return &milvuspb.GetMetricsResponse{
-			Status:        merr.Status(nil),
+			Status:        merr.Success(),
 			Response:      resp,
 			ComponentName: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, id),
 		}, nil
@@ -132,7 +132,7 @@ func TestProxy_metrics(t *testing.T) {
 		resp, _ := metricsinfo.MarshalTopology(coordTopology)
 
 		return &milvuspb.GetMetricsResponse{
-			Status:        merr.Status(nil),
+			Status:        merr.Success(),
 			Response:      resp,
 			ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, id),
 		}, nil
@@ -189,7 +189,7 @@ func TestProxy_metrics(t *testing.T) {
 		resp, _ := metricsinfo.MarshalTopology(coordTopology)
 
 		return &milvuspb.GetMetricsResponse{
-			Status:        merr.Status(nil),
+			Status:        merr.Success(),
 			Response:      resp,
 			ComponentName: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, id),
 		}, nil

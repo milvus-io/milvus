@@ -21,6 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -41,14 +42,14 @@ func (t *showCollectionTask) Prepare(ctx context.Context) error {
 
 // Execute task execution
 func (t *showCollectionTask) Execute(ctx context.Context) error {
-	t.Rsp.Status = succStatus()
+	t.Rsp.Status = merr.Success()
 	ts := t.Req.GetTimeStamp()
 	if ts == 0 {
 		ts = typeutil.MaxTimestamp
 	}
 	colls, err := t.core.meta.ListCollections(ctx, t.Req.GetDbName(), ts, true)
 	if err != nil {
-		t.Rsp.Status = failStatus(commonpb.ErrorCode_UnexpectedError, err.Error())
+		t.Rsp.Status = merr.Status(err)
 		return err
 	}
 	for _, meta := range colls {

@@ -69,7 +69,7 @@ func (s *StatisticTaskSuite) SetupTest() {
 		},
 	}, nil).Maybe()
 	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
-		Status:       merr.Status(nil),
+		Status:       merr.Success(),
 		PartitionIDs: []int64{1, 2, 3},
 	}, nil).Maybe()
 
@@ -166,7 +166,7 @@ func (s *StatisticTaskSuite) getStatisticsTask(ctx context.Context) *getStatisti
 		ctx:            ctx,
 		collectionName: s.collectionName,
 		result: &milvuspb.GetStatisticsResponse{
-			Status: merr.Status(nil),
+			Status: merr.Success(),
 		},
 		request: &milvuspb.GetStatisticsRequest{
 			Base: &commonpb.MsgBase{

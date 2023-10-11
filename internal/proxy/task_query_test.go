@@ -141,7 +141,7 @@ func TestQueryTask_all(t *testing.T) {
 		},
 		ctx: ctx,
 		result: &milvuspb.QueryResults{
-			Status:     merr.Status(nil),
+			Status:     merr.Success(),
 			FieldsData: []*schemapb.FieldData{},
 		},
 		request: &milvuspb.QueryRequest{
@@ -184,7 +184,7 @@ func TestQueryTask_all(t *testing.T) {
 
 	result1 := &internalpb.RetrieveResults{
 		Base:   &commonpb.MsgBase{MsgType: commonpb.MsgType_RetrieveResult},
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		Ids: &schemapb.IDs{
 			IdField: &schemapb.IDs_IntId{
 				IntId: &schemapb.LongArray{Data: generateInt64Array(hitNum)},

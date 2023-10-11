@@ -61,7 +61,7 @@ func (p *proxyMock) InvalidateCollectionMetaCache(ctx context.Context, request *
 	}
 	p.collArray = append(p.collArray, request.CollectionName)
 	p.collIDs = append(p.collIDs, request.CollectionID)
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (p *proxyMock) GetCollArray() []string {
@@ -88,11 +88,11 @@ func (p *proxyMock) InvalidateCredentialCache(ctx context.Context, request *prox
 	if p.returnGrpcError {
 		return nil, fmt.Errorf("grpc error")
 	}
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (p *proxyMock) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func TestProxyClientManager_GetProxyClients(t *testing.T) {
@@ -173,7 +173,7 @@ func TestProxyClientManager_InvalidateCollectionMetaCache(t *testing.T) {
 		ctx := context.Background()
 		p1 := newMockProxy()
 		p1.InvalidateCollectionMetaCacheFunc = func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
-			return succStatus(), errors.New("error mock InvalidateCollectionMetaCache")
+			return merr.Success(), errors.New("error mock InvalidateCollectionMetaCache")
 		}
 		pcm := &proxyClientManager{proxyClient: map[int64]types.ProxyClient{
 			TestProxyID: p1,
@@ -185,8 +185,9 @@ func TestProxyClientManager_InvalidateCollectionMetaCache(t *testing.T) {
 	t.Run("mock error code", func(t *testing.T) {
 		ctx := context.Background()
 		p1 := newMockProxy()
+		mockErr := errors.New("mock error")
 		p1.InvalidateCollectionMetaCacheFunc = func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
-			return failStatus(commonpb.ErrorCode_UnexpectedError, "error mock error code"), nil
+			return merr.Status(mockErr), nil
 		}
 		pcm := &proxyClientManager{proxyClient: map[int64]types.ProxyClient{
 			TestProxyID: p1,
@@ -199,7 +200,7 @@ func TestProxyClientManager_InvalidateCollectionMetaCache(t *testing.T) {
 		ctx := context.Background()
 		p1 := newMockProxy()
 		p1.InvalidateCollectionMetaCacheFunc = func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
-			return succStatus(), nil
+			return merr.Success(), nil
 		}
 		pcm := &proxyClientManager{proxyClient: map[int64]types.ProxyClient{
 			TestProxyID: p1,
@@ -221,7 +222,7 @@ func TestProxyClientManager_InvalidateCredentialCache(t *testing.T) {
 		ctx := context.Background()
 		p1 := newMockProxy()
 		p1.InvalidateCredentialCacheFunc = func(ctx context.Context, request *proxypb.InvalidateCredCacheRequest) (*commonpb.Status, error) {
-			return succStatus(), errors.New("error mock InvalidateCredentialCache")
+			return merr.Success(), errors.New("error mock InvalidateCredentialCache")
 		}
 		pcm := &proxyClientManager{proxyClient: map[int64]types.ProxyClient{
 			TestProxyID: p1,
@@ -233,8 +234,9 @@ func TestProxyClientManager_InvalidateCredentialCache(t *testing.T) {
 	t.Run("mock error code", func(t *testing.T) {
 		ctx := context.Background()
 		p1 := newMockProxy()
+		mockErr := errors.New("mock error")
 		p1.InvalidateCredentialCacheFunc = func(ctx context.Context, request *proxypb.InvalidateCredCacheRequest) (*commonpb.Status, error) {
-			return failStatus(commonpb.ErrorCode_UnexpectedError, "error mock error code"), nil
+			return merr.Status(mockErr), nil
 		}
 		pcm := &proxyClientManager{proxyClient: map[int64]types.ProxyClient{
 			TestProxyID: p1,
@@ -247,7 +249,7 @@ func TestProxyClientManager_InvalidateCredentialCache(t *testing.T) {
 		ctx := context.Background()
 		p1 := newMockProxy()
 		p1.InvalidateCredentialCacheFunc = func(ctx context.Context, request *proxypb.InvalidateCredCacheRequest) (*commonpb.Status, error) {
-			return succStatus(), nil
+			return merr.Success(), nil
 		}
 		pcm := &proxyClientManager{proxyClient: map[int64]types.ProxyClient{
 			TestProxyID: p1,
@@ -269,7 +271,7 @@ func TestProxyClientManager_RefreshPolicyInfoCache(t *testing.T) {
 		ctx := context.Background()
 		p1 := newMockProxy()
 		p1.RefreshPolicyInfoCacheFunc = func(ctx context.Context, request *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
-			return succStatus(), errors.New("error mock RefreshPolicyInfoCache")
+			return merr.Success(), errors.New("error mock RefreshPolicyInfoCache")
 		}
 		pcm := &proxyClientManager{proxyClient: map[int64]types.ProxyClient{
 			TestProxyID: p1,
@@ -281,8 +283,9 @@ func TestProxyClientManager_RefreshPolicyInfoCache(t *testing.T) {
 	t.Run("mock error code", func(t *testing.T) {
 		ctx := context.Background()
 		p1 := newMockProxy()
+		mockErr := errors.New("mock error")
 		p1.RefreshPolicyInfoCacheFunc = func(ctx context.Context, request *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
-			return failStatus(commonpb.ErrorCode_UnexpectedError, "error mock error code"), nil
+			return merr.Status(mockErr), nil
 		}
 		pcm := &proxyClientManager{proxyClient: map[int64]types.ProxyClient{
 			TestProxyID: p1,
@@ -295,7 +298,7 @@ func TestProxyClientManager_RefreshPolicyInfoCache(t *testing.T) {
 		ctx := context.Background()
 		p1 := newMockProxy()
 		p1.RefreshPolicyInfoCacheFunc = func(ctx context.Context, request *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
-			return succStatus(), nil
+			return merr.Success(), nil
 		}
 		pcm := &proxyClientManager{proxyClient: map[int64]types.ProxyClient{
 			TestProxyID: p1,

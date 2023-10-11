@@ -58,7 +58,7 @@ import (
 // GetComponentStates returns information about whether the node is healthy
 func (node *QueryNode) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	stats := &milvuspb.ComponentStates{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}
 
 	code := node.lifetime.GetState()
@@ -80,7 +80,7 @@ func (node *QueryNode) GetComponentStates(ctx context.Context, req *milvuspb.Get
 // TimeTickChannel contains many time tick messages, which will be sent by query nodes
 func (node *QueryNode) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		Value:  paramtable.Get().CommonCfg.QueryCoordTimeTick.GetValue(),
 	}, nil
 }
@@ -89,7 +89,7 @@ func (node *QueryNode) GetTimeTickChannel(ctx context.Context, req *internalpb.G
 // Statistics channel contains statistics infos of query nodes, such as segment infos, memory infos
 func (node *QueryNode) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}, nil
 }
 
@@ -102,9 +102,7 @@ func (node *QueryNode) GetStatistics(ctx context.Context, req *querypb.GetStatis
 		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
 		zap.Uint64("timeTravel", req.GetReq().GetTravelTimestamp()))
 
-	if !node.lifetime.Add(commonpbutil.IsHealthy) {
-		msg := fmt.Sprintf("query node %d is not ready", paramtable.GetNodeID())
-		err := merr.WrapErrServiceNotReady(msg)
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
 		return &internalpb.GetStatisticsResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -119,7 +117,7 @@ func (node *QueryNode) GetStatistics(ctx context.Context, req *querypb.GetStatis
 		}, nil
 	}
 	failRet := &internalpb.GetStatisticsResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}
 
 	var toReduceResults []*internalpb.GetStatisticsResponse
@@ -208,9 +206,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 	)
 
 	// check node healthy
-	if !node.lifetime.Add(commonpbutil.IsHealthy) {
-		msg := fmt.Sprintf("query node %d is not ready", paramtable.GetNodeID())
-		err := merr.WrapErrServiceNotReady(msg)
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
 		return merr.Status(err), nil
 	}
 	defer node.lifetime.Done()
@@ -229,7 +225,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 	if !node.subscribingChannels.Insert(channel.GetChannelName()) {
 		msg := "channel subscribing..."
 		log.Warn(msg)
-		return merr.Status(nil), nil
+		return merr.Success(), nil
 	}
 	defer node.subscribingChannels.Remove(channel.GetChannelName())
 
@@ -243,7 +239,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 	_, exist := node.delegators.Get(channel.GetChannelName())
 	if exist {
 		log.Info("channel already subscribed")
-		return merr.Status(nil), nil
+		return merr.Success(), nil
 	}
 
 	node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
@@ -333,7 +329,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 	// delegator after all steps done
 	delegator.Start()
 	log.Info("watch dml channel success")
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmChannelRequest) (*commonpb.Status, error) {
@@ -346,9 +342,7 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 	log.Info("received unsubscribe channel request")
 
 	// check node healthy
-	if !node.lifetime.Add(commonpbutil.IsHealthy) {
-		msg := fmt.Sprintf("query node %d is not ready", paramtable.GetNodeID())
-		err := merr.WrapErrServiceNotReady(msg)
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
 		return merr.Status(err), nil
 	}
 	defer node.lifetime.Done()
@@ -373,7 +367,7 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 	}
 	log.Info("unsubscribed channel")
 
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (node *QueryNode) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
@@ -384,9 +378,7 @@ func (node *QueryNode) LoadPartitions(ctx context.Context, req *querypb.LoadPart
 
 	log.Info("received load partitions request")
 	// check node healthy
-	if !node.lifetime.Add(commonpbutil.IsHealthyOrStopping) {
-		msg := fmt.Sprintf("query node %d is not ready", paramtable.GetNodeID())
-		err := merr.WrapErrServiceNotReady(msg)
+	if err := node.lifetime.Add(merr.IsHealthyOrStopping); err != nil {
 		return merr.Status(err), nil
 	}
 	defer node.lifetime.Done()
@@ -397,7 +389,7 @@ func (node *QueryNode) LoadPartitions(ctx context.Context, req *querypb.LoadPart
 	}
 
 	log.Info("load partitions done")
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 // LoadSegments load historical data into query node, historical data can be vector data or index
@@ -417,9 +409,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		zap.Bool("needTransfer", req.GetNeedTransfer()),
 	)
 	// check node healthy
-	if !node.lifetime.Add(commonpbutil.IsHealthy) {
-		msg := fmt.Sprintf("query node %d is not ready", paramtable.GetNodeID())
-		err := merr.WrapErrServiceNotReady(msg)
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
 		return merr.Status(err), nil
 	}
 	node.lifetime.Done()
@@ -446,7 +436,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 			return merr.Status(err), nil
 		}
 
-		return merr.Status(nil), nil
+		return merr.Success(), nil
 	}
 
 	if req.GetLoadScope() == querypb.LoadScope_Delta {
@@ -477,19 +467,17 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 	log.Info("load segments done...",
 		zap.Int64s("segments", lo.Map(loaded, func(s segments.Segment, _ int) int64 { return s.ID() })))
 
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 // ReleaseCollection clears all data related to this collection on the querynode
 func (node *QueryNode) ReleaseCollection(ctx context.Context, in *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
-	if !node.lifetime.Add(commonpbutil.IsHealthyOrStopping) {
-		msg := fmt.Sprintf("query node %d is not ready", paramtable.GetNodeID())
-		err := merr.WrapErrServiceNotReady(msg)
+	if err := node.lifetime.Add(merr.IsHealthyOrStopping); err != nil {
 		return merr.Status(err), nil
 	}
 	defer node.lifetime.Done()
 
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 // ReleasePartitions clears all data related to this partition on the querynode
@@ -502,9 +490,7 @@ func (node *QueryNode) ReleasePartitions(ctx context.Context, req *querypb.Relea
 	log.Info("received release partitions request")
 
 	// check node healthy
-	if !node.lifetime.Add(commonpbutil.IsHealthy) {
-		msg := fmt.Sprintf("query node %d is not ready", paramtable.GetNodeID())
-		err := merr.WrapErrServiceNotReady(msg)
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
 		return merr.Status(err), nil
 	}
 	defer node.lifetime.Done()
@@ -517,7 +503,7 @@ func (node *QueryNode) ReleasePartitions(ctx context.Context, req *querypb.Relea
 	}
 
 	log.Info("release partitions done")
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 // ReleaseSegments remove the specified segments from query node according segmentIDs, partitionIDs, and collectionID
@@ -535,9 +521,7 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, req *querypb.Release
 	)
 
 	// check node healthy
-	if !node.lifetime.Add(commonpbutil.IsHealthyOrStopping) {
-		msg := fmt.Sprintf("query node %d is not ready", paramtable.GetNodeID())
-		err := merr.WrapErrServiceNotReady(msg)
+	if err := node.lifetime.Add(merr.IsHealthyOrStopping); err != nil {
 		return merr.Status(err), nil
 	}
 	defer node.lifetime.Done()
@@ -578,7 +562,7 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, req *querypb.Release
 			return merr.Status(err), nil
 		}
 
-		return merr.Status(nil), nil
+		return merr.Success(), nil
 	}
 
 	log.Info("start to release segments")
@@ -589,14 +573,12 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, req *querypb.Release
 	}
 	node.manager.Collection.Unref(req.GetCollectionID(), uint32(sealedCount))
 
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 // GetSegmentInfo returns segment information of the collection on the queryNode, and the information includes memSize, numRow, indexName, indexID ...
 func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
-	if !node.lifetime.Add(commonpbutil.IsHealthy) {
-		msg := fmt.Sprintf("query node %d is not ready", paramtable.GetNodeID())
-		err := merr.WrapErrServiceNotReady(msg)
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
 		return &querypb.GetSegmentInfoResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -648,7 +630,7 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *querypb.GetSegmen
 	}
 
 	return &querypb.GetSegmentInfoResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		Infos:  segmentInfos,
 	}, nil
 }
@@ -664,8 +646,8 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 	)
 
 	resp := &internalpb.SearchResults{}
-	if !node.lifetime.Add(commonpbutil.IsHealthy) {
-		resp.Status = merr.Status(merr.WrapErrServiceNotReady(fmt.Sprintf("node id: %d is unhealthy", paramtable.GetNodeID())))
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 	defer node.lifetime.Done()
@@ -742,9 +724,7 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 
 	tr := timerecord.NewTimeRecorderWithTrace(ctx, "SearchRequest")
 
-	if !node.lifetime.Add(commonpbutil.IsHealthy) {
-		msg := fmt.Sprintf("query node %d is not ready", paramtable.GetNodeID())
-		err := merr.WrapErrServiceNotReady(msg)
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
 		return &internalpb.SearchResults{
 			Status: merr.Status(err),
 		}, nil
@@ -760,7 +740,7 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 	}
 
 	failRet := &internalpb.SearchResults{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}
 	collection := node.manager.Collection.Get(req.GetReq().GetCollectionID())
 	if collection == nil {
@@ -840,7 +820,7 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 // only used for delegator query segments from worker
 func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
 	resp := &internalpb.RetrieveResults{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 	}
 	msgID := req.Req.Base.GetMsgID()
 	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID()
@@ -852,8 +832,7 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 		zap.String("scope", req.GetScope().String()),
 	)
 
-	if !node.lifetime.Add(commonpbutil.IsHealthy) {
-		err := merr.WrapErrServiceUnavailable(fmt.Sprintf("node id: %d is unhealthy", paramtable.GetNodeID()))
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
@@ -933,9 +912,7 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 	)
 	tr := timerecord.NewTimeRecorderWithTrace(ctx, "QueryRequest")
 
-	if !node.lifetime.Add(commonpbutil.IsHealthy) {
-		msg := fmt.Sprintf("query node %d is not ready", paramtable.GetNodeID())
-		err := merr.WrapErrServiceNotReady(msg)
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
 		return &internalpb.RetrieveResults{
 			Status: merr.Status(err),
 		}, nil
@@ -1021,9 +998,7 @@ func (node *QueryNode) QueryStream(req *querypb.QueryRequest, srv querypb.QueryN
 		zap.Bool("isCount", req.GetReq().GetIsCount()),
 	)
 
-	if !node.lifetime.Add(commonpbutil.IsHealthy) {
-		msg := fmt.Sprintf("query node %d is not ready", paramtable.GetNodeID())
-		err := merr.WrapErrServiceNotReady(msg)
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
 		concurrentSrv.Send(&internalpb.RetrieveResults{Status: merr.Status(err)})
 		return nil
 	}
@@ -1090,8 +1065,8 @@ func (node *QueryNode) QueryStreamSegments(req *querypb.QueryRequest, srv queryp
 		}
 	}()
 
-	if !node.lifetime.Add(commonpbutil.IsHealthy) {
-		resp.Status = merr.Status(merr.WrapErrServiceUnavailable(fmt.Sprintf("node id: %d is unhealthy", paramtable.GetNodeID())))
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
+		resp.Status = merr.Status(err)
 		concurrentSrv.Send(resp)
 		return nil
 	}
@@ -1127,13 +1102,12 @@ func (node *QueryNode) QueryStreamSegments(req *querypb.QueryRequest, srv queryp
 
 // SyncReplicaSegments syncs replica node & segments states
 func (node *QueryNode) SyncReplicaSegments(ctx context.Context, req *querypb.SyncReplicaSegmentsRequest) (*commonpb.Status, error) {
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 // ShowConfigurations returns the configurations of queryNode matching req.Pattern
 func (node *QueryNode) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
-	if !node.lifetime.Add(commonpbutil.IsHealthy) {
-		err := merr.WrapErrServiceNotReady(fmt.Sprintf("node id: %d is unhealthy", paramtable.GetNodeID()))
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
 		log.Warn("QueryNode.ShowConfigurations failed",
 			zap.Int64("nodeId", paramtable.GetNodeID()),
 			zap.String("req", req.Pattern),
@@ -1156,15 +1130,14 @@ func (node *QueryNode) ShowConfigurations(ctx context.Context, req *internalpb.S
 	}
 
 	return &internalpb.ShowConfigurationsResponse{
-		Status:        merr.Status(nil),
+		Status:        merr.Success(),
 		Configuations: configList,
 	}, nil
 }
 
 // GetMetrics return system infos of the query node, such as total memory, memory usage, cpu usage ...
 func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	if !node.lifetime.Add(commonpbutil.IsHealthy) {
-		err := merr.WrapErrServiceNotReady(fmt.Sprintf("node id: %d is unhealthy", paramtable.GetNodeID()))
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
 		log.Warn("QueryNode.GetMetrics failed",
 			zap.Int64("nodeId", paramtable.GetNodeID()),
 			zap.String("req", req.Request),
@@ -1225,9 +1198,8 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 		zap.Int64("msgID", req.GetBase().GetMsgID()),
 		zap.Int64("nodeID", paramtable.GetNodeID()),
 	)
-	if !node.lifetime.Add(commonpbutil.IsHealthy) {
-		err := merr.WrapErrServiceNotReady(fmt.Sprintf("node id: %d is unhealthy", paramtable.GetNodeID()))
-		log.Warn("QueryNode.GetMetrics failed",
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
+		log.Warn("QueryNode.GetDataDistribution failed",
 			zap.Error(err))
 
 		return &querypb.GetDataDistributionResponse{
@@ -1305,7 +1277,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 	})
 
 	return &querypb.GetDataDistributionResponse{
-		Status:      merr.Status(nil),
+		Status:      merr.Success(),
 		NodeID:      paramtable.GetNodeID(),
 		Segments:    segmentVersionInfos,
 		Channels:    channelVersionInfos,
@@ -1317,9 +1289,7 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", req.GetCollectionID()),
 		zap.String("channel", req.GetChannel()), zap.Int64("currentNodeID", paramtable.GetNodeID()))
 	// check node healthy
-	if !node.lifetime.Add(commonpbutil.IsHealthy) {
-		msg := fmt.Sprintf("query node %d is not ready", paramtable.GetNodeID())
-		err := merr.WrapErrServiceNotReady(msg)
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
 		return merr.Status(err), nil
 	}
 	defer node.lifetime.Done()
@@ -1405,7 +1375,7 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 		}, true)
 	}
 
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 // Delete is used to forward delete message between delegator and workers.
@@ -1417,9 +1387,7 @@ func (node *QueryNode) Delete(ctx context.Context, req *querypb.DeleteRequest) (
 	)
 
 	// check node healthy
-	if !node.lifetime.Add(commonpbutil.IsHealthy) {
-		msg := fmt.Sprintf("query node %d is not ready", paramtable.GetNodeID())
-		err := merr.WrapErrServiceNotReady(msg)
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
 		return merr.Status(err), nil
 	}
 	defer node.lifetime.Done()
@@ -1451,5 +1419,5 @@ func (node *QueryNode) Delete(ctx context.Context, req *querypb.DeleteRequest) (
 		}
 	}
 
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }

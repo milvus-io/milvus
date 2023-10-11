@@ -77,7 +77,7 @@ func (m *ChannelManager) GetProgress(info *datapb.ChannelWatchInfo) *datapb.Chan
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	resp := &datapb.ChannelOperationProgressResponse{
-		Status: merr.Status(nil),
+		Status: merr.Success(),
 		OpID:   info.GetOpID(),
 	}
 

@@ -445,7 +445,7 @@ func TestClientBase_Compression(t *testing.T) {
 			State: &milvuspb.ComponentInfo{
 				NodeID: randID,
 			},
-			Status: merr.Status(nil),
+			Status: merr.Success(),
 		}, nil
 	})
 	assert.NoError(t, err)

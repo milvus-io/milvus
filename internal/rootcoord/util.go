@@ -24,11 +24,9 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -51,16 +49,6 @@ func EqualKeyPairArray(p1 []*commonpb.KeyValuePair, p2 []*commonpb.KeyValuePair)
 		}
 	}
 	return true
-}
-
-// GetFieldSchemaByID return field schema by id
-func GetFieldSchemaByID(coll *model.Collection, fieldID typeutil.UniqueID) (*model.Field, error) {
-	for _, f := range coll.Fields {
-		if f.FieldID == fieldID {
-			return f, nil
-		}
-	}
-	return nil, fmt.Errorf("field id = %d not found", fieldID)
 }
 
 // EncodeMsgPositions serialize []*MsgPosition into string
@@ -104,18 +92,6 @@ func CheckMsgType(got, expect commonpb.MsgType) error {
 		return fmt.Errorf("invalid msg type, expect %s, but got %s", expect, got)
 	}
 	return nil
-}
-
-// Deprecated: use merr.StatusWithErrorCode or merr.Status instead
-func failStatus(code commonpb.ErrorCode, reason string) *commonpb.Status {
-	return &commonpb.Status{
-		ErrorCode: code,
-		Reason:    reason,
-	}
-}
-
-func succStatus() *commonpb.Status {
-	return merr.Status(nil)
 }
 
 type TimeTravelRequest interface {

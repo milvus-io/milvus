@@ -82,7 +82,7 @@ func (node *MockQueryNode) Start() error {
 		err = node.server.Serve(lis)
 	}()
 
-	successStatus := merr.Status(nil)
+	successStatus := merr.Success()
 	node.EXPECT().GetDataDistribution(mock.Anything, mock.Anything).Return(&querypb.GetDataDistributionResponse{
 		Status:   successStatus,
 		NodeID:   node.ID,

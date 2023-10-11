@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -47,12 +46,11 @@ func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest
 		zap.Int64("indexBuildID", req.GetBuildID()),
 	)
 
-	if !i.lifetime.Add(commonpbutil.IsHealthy) {
-		stateCode := i.lifetime.GetState()
+	if err := i.lifetime.Add(merr.IsHealthy); err != nil {
 		log.Warn("index node not ready",
-			zap.String("state", stateCode.String()),
+			zap.Error(err),
 		)
-		return merr.Status(merr.WrapErrServiceNotReady(stateCode.String())), nil
+		return merr.Status(err), nil
 	}
 	defer i.lifetime.Done()
 	log.Info("IndexNode building index ...",
@@ -106,7 +104,7 @@ func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest
 		tr:             timerecord.NewTimeRecorder(fmt.Sprintf("IndexBuildID: %d, ClusterID: %s", req.BuildID, req.ClusterID)),
 		serializedSize: 0,
 	}
-	ret := merr.Status(nil)
+	ret := merr.Success()
 	if err := i.sched.IndexBuildQueue.Enqueue(task); err != nil {
 		log.Warn("IndexNode failed to schedule",
 			zap.Error(err))
@@ -124,11 +122,10 @@ func (i *IndexNode) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest
 	log := log.Ctx(ctx).With(
 		zap.String("clusterID", req.GetClusterID()),
 	).WithRateGroup("in.queryJobs", 1, 60)
-	if !i.lifetime.Add(commonpbutil.IsHealthyOrStopping) {
-		stateCode := i.lifetime.GetState()
-		log.Warn("index node not ready", zap.String("state", stateCode.String()))
+	if err := i.lifetime.Add(merr.IsHealthyOrStopping); err != nil {
+		log.Warn("index node not ready", zap.Error(err))
 		return &indexpb.QueryJobsResponse{
-			Status: merr.Status(merr.WrapErrServiceNotReady(stateCode.String())),
+			Status: merr.Status(err),
 		}, nil
 	}
 	defer i.lifetime.Done()
@@ -145,7 +142,7 @@ func (i *IndexNode) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest
 		}
 	})
 	ret := &indexpb.QueryJobsResponse{
-		Status:     merr.Status(nil),
+		Status:     merr.Success(),
 		ClusterID:  req.GetClusterID(),
 		IndexInfos: make([]*indexpb.IndexTaskInfo, 0, len(req.GetBuildIDs())),
 	}
@@ -177,10 +174,9 @@ func (i *IndexNode) DropJobs(ctx context.Context, req *indexpb.DropJobsRequest) 
 		zap.String("clusterID", req.ClusterID),
 		zap.Int64s("indexBuildIDs", req.BuildIDs),
 	)
-	if !i.lifetime.Add(commonpbutil.IsHealthyOrStopping) {
-		stateCode := i.lifetime.GetState()
-		log.Ctx(ctx).Warn("index node not ready", zap.String("state", stateCode.String()), zap.String("clusterID", req.ClusterID))
-		return merr.Status(merr.WrapErrServiceNotReady(stateCode.String())), nil
+	if err := i.lifetime.Add(merr.IsHealthyOrStopping); err != nil {
+		log.Ctx(ctx).Warn("index node not ready", zap.Error(err), zap.String("clusterID", req.ClusterID))
+		return merr.Status(err), nil
 	}
 	defer i.lifetime.Done()
 	keys := make([]taskKey, 0, len(req.GetBuildIDs()))
@@ -195,15 +191,14 @@ func (i *IndexNode) DropJobs(ctx context.Context, req *indexpb.DropJobsRequest) 
 	}
 	log.Ctx(ctx).Info("drop index build jobs success", zap.String("clusterID", req.GetClusterID()),
 		zap.Int64s("indexBuildIDs", req.GetBuildIDs()))
-	return merr.Status(nil), nil
+	return merr.Success(), nil
 }
 
 func (i *IndexNode) GetJobStats(ctx context.Context, req *indexpb.GetJobStatsRequest) (*indexpb.GetJobStatsResponse, error) {
-	if !i.lifetime.Add(commonpbutil.IsHealthyOrStopping) {
-		stateCode := i.lifetime.GetState()
-		log.Ctx(ctx).Warn("index node not ready", zap.String("state", stateCode.String()))
+	if err := i.lifetime.Add(merr.IsHealthyOrStopping); err != nil {
+		log.Ctx(ctx).Warn("index node not ready", zap.Error(err))
 		return &indexpb.GetJobStatsResponse{
-			Status: merr.Status(merr.WrapErrServiceNotReady(stateCode.String())),
+			Status: merr.Status(err),
 		}, nil
 	}
 	defer i.lifetime.Done()
@@ -224,7 +219,7 @@ func (i *IndexNode) GetJobStats(ctx context.Context, req *indexpb.GetJobStatsReq
 		zap.Int("slot", slots),
 	)
 	return &indexpb.GetJobStatsResponse{
-		Status:           merr.Status(nil),
+		Status:           merr.Success(),
 		TotalJobNum:      int64(active) + int64(unissued),
 		InProgressJobNum: int64(active),
 		EnqueueJobNum:    int64(unissued),
@@ -237,17 +232,14 @@ func (i *IndexNode) GetJobStats(ctx context.Context, req *indexpb.GetJobStatsReq
 // GetMetrics gets the metrics info of IndexNode.
 // TODO(dragondriver): cache the Metrics and set a retention to the cache
 func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	if !i.lifetime.Add(commonpbutil.IsHealthyOrStopping) {
+	if err := i.lifetime.Add(merr.IsHealthyOrStopping); err != nil {
 		log.Ctx(ctx).Warn("IndexNode.GetMetrics failed",
 			zap.Int64("nodeID", paramtable.GetNodeID()),
 			zap.String("req", req.GetRequest()),
-			zap.Error(errIndexNodeIsUnhealthy(paramtable.GetNodeID())))
+			zap.Error(err))
 
 		return &milvuspb.GetMetricsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgIndexNodeIsUnhealthy(paramtable.GetNodeID()),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 	defer i.lifetime.Done()
