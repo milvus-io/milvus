@@ -142,6 +142,10 @@ func TestHookInterceptor(t *testing.T) {
 func TestDefaultHook(t *testing.T) {
 	d := defaultHook{}
 	assert.NoError(t, d.Init(nil))
+	{
+		_, err := d.VerifyAPIKey("key")
+		assert.Error(t, err)
+	}
 	assert.NotPanics(t, func() {
 		d.Release()
 	})

@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -18,6 +19,10 @@ import (
 )
 
 type defaultHook struct{}
+
+func (d defaultHook) VerifyAPIKey(key string) (string, error) {
+	return "", errors.New("default hook, can't verify api key")
+}
 
 func (d defaultHook) Init(params map[string]string) error {
 	return nil

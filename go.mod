@@ -24,7 +24,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/klauspost/compress v1.16.5
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.3.2-0.20231011053327-5f3a9bd32b37
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.3.2-0.20231017024957-5e5a27fd4875
 	github.com/minio/minio-go/v7 v7.0.56
 	github.com/prometheus/client_golang v1.14.0
 	github.com/prometheus/client_model v0.3.0
@@ -57,6 +57,8 @@ require (
 	google.golang.org/grpc/examples v0.0.0-20220617181431-3e7b97febc7f
 	stathat.com/c/consistent v1.0.0
 )
+
+require github.com/milvus-io/milvus/pkg v0.0.0-20230607023836-1593278f9d9c
 
 require (
 	cloud.google.com/go/compute v1.19.0 // indirect
@@ -138,7 +140,6 @@ require (
 	github.com/mattn/go-colorable v0.1.11 // indirect
 	github.com/mattn/go-isatty v0.0.19 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
-	github.com/milvus-io/milvus/pkg v0.0.0-20230607023836-1593278f9d9c // indirect
 	github.com/minio/asm2plan9s v0.0.0-20200509001527-cdd76441f9d8 // indirect
 	github.com/minio/c2goasm v0.0.0-20190812172519-36a3d3bbc4f3 // indirect
 	github.com/minio/highwayhash v1.0.2 // indirect

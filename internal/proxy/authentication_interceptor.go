@@ -15,19 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
-func parseMD(authorization []string) (username, password string) {
-	if len(authorization) < 1 {
-		log.Warn("key not found in header")
-		return
-	}
-	// token format: base64<username:password>
-	// token := strings.TrimPrefix(authorization[0], "Bearer ")
-	token := authorization[0]
-	rawToken, err := crypto.Base64Decode(token)
-	if err != nil {
-		log.Warn("fail to decode the token", zap.Error(err))
-		return
-	}
+func parseMD(rawToken string) (username, password string) {
 	secrets := strings.SplitN(rawToken, util.CredentialSeperator, 2)
 	if len(secrets) < 2 {
 		log.Warn("invalid token format, length of secrets less than 2")
@@ -68,12 +56,45 @@ func AuthenticationInterceptor(ctx context.Context) (context.Context, error) {
 	// 	2. if rpc call from sdk
 	if Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
 		if !validSourceID(ctx, md[strings.ToLower(util.HeaderSourceID)]) {
-			username, password := parseMD(md[strings.ToLower(util.HeaderAuthorize)])
-			if !passwordVerify(ctx, username, password, globalMetaCache) {
-				msg := fmt.Sprintf("username: %s, password: %s", username, password)
-				return nil, merr.WrapErrParameterInvalid("vaild username and password", msg, "auth check failure, please check username and password are correct")
+			authStrArr := md[strings.ToLower(util.HeaderAuthorize)]
+
+			if len(authStrArr) < 1 {
+				log.Warn("key not found in header")
+				return nil, merr.WrapErrParameterInvalidMsg("missing authorization in header")
 			}
-			metrics.UserRPCCounter.WithLabelValues(username).Inc()
+
+			// token format: base64<username:password>
+			// token := strings.TrimPrefix(authorization[0], "Bearer ")
+			token := authStrArr[0]
+			rawToken, err := crypto.Base64Decode(token)
+			if err != nil {
+				log.Warn("fail to decode the token", zap.Error(err))
+				return nil, merr.WrapErrParameterInvalidMsg("invalid token format")
+			}
+
+			if !strings.Contains(rawToken, util.CredentialSeperator) {
+				// apikey authentication
+				if hoo == nil {
+					return nil, merr.WrapErrServiceInternal("internal: Milvus Proxy is not ready yet. please wait")
+				}
+				user, err := hoo.VerifyAPIKey(rawToken)
+				if err != nil {
+					log.Warn("fail to verify apikey", zap.String("api_key", rawToken), zap.Error(err))
+					return nil, merr.WrapErrParameterInvalidMsg("invalid apikey: [%s]", rawToken)
+				}
+				metrics.UserRPCCounter.WithLabelValues(user).Inc()
+				userToken := fmt.Sprintf("%s%s%s", user, util.CredentialSeperator, "___")
+				md[strings.ToLower(util.HeaderAuthorize)] = []string{crypto.Base64Encode(userToken)}
+				ctx = metadata.NewIncomingContext(ctx, md)
+			} else {
+				// username+password authentication
+				username, password := parseMD(rawToken)
+				if !passwordVerify(ctx, username, password, globalMetaCache) {
+					msg := fmt.Sprintf("username: %s, password: %s", username, password)
+					return nil, merr.WrapErrParameterInvalid("vaild username and password", msg, "auth check failure, please check username and password are correct")
+				}
+				metrics.UserRPCCounter.WithLabelValues(username).Inc()
+			}
 		}
 	}
 	return ctx, nil
