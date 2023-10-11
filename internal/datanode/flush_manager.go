@@ -29,7 +29,6 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -819,22 +818,16 @@ func dropVirtualChannelFunc(dsService *dataSyncService, opts ...retry.Option) fl
 		req.Segments = segments
 
 		err := retry.Do(context.Background(), func() error {
-			rsp, err := dsService.dataCoord.DropVirtualChannel(context.Background(), req)
+			resp, err := dsService.dataCoord.DropVirtualChannel(context.Background(), req)
 			// should be network issue, return error and retry
-			if err != nil {
-				return fmt.Errorf(err.Error())
-			}
-
-			// meta error, datanode handles a virtual channel does not belong here
-			if rsp.GetStatus().GetErrorCode() == commonpb.ErrorCode_MetaFailed {
-				log.Warn("meta error found, skip sync and start to drop virtual channel", zap.String("channel", dsService.vchannelName))
+			err = merr.CheckRPCCall(resp, err)
+			if errors.Is(err, merr.ErrChannelNotFound) {
+				log.Warn("skip sync and start to drop virtual channel", zap.String("channel", dsService.vchannelName), zap.Error(err))
 				return nil
+			} else if err != nil {
+				return err
 			}
 
-			// retry for other error
-			if rsp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-				return fmt.Errorf("data service DropVirtualChannel failed, reason = %s", rsp.GetStatus().GetReason())
-			}
 			dsService.channel.transferNewSegments(lo.Map(startPos, func(pos *datapb.SegmentStartPosition, _ int) UniqueID {
 				return pos.GetSegmentID()
 			}))
