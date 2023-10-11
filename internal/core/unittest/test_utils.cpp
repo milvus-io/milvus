@@ -138,29 +138,51 @@ TEST(Util, upper_bound) {
     ASSERT_EQ(10, upper_bound(timestamps, 0, data.size(), 10));
 }
 
+// A simple wrapper that removes a temporary file.
+struct TmpFileWrapper {
+    int fd = -1;
+    std::string filename;
+
+    TmpFileWrapper(const std::string& _filename) : filename{_filename} {
+        fd = open(
+            filename.c_str(), O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR | S_IXUSR);
+    }
+    TmpFileWrapper(const TmpFileWrapper&) = delete;
+    TmpFileWrapper(TmpFileWrapper&&) = delete;
+    TmpFileWrapper& operator =(const TmpFileWrapper&) = delete;
+    TmpFileWrapper& operator =(TmpFileWrapper&&) = delete;
+    ~TmpFileWrapper() {
+        if (fd != -1) {
+            close(fd);
+            remove(filename.c_str());
+        }
+    }
+};
+
 TEST(Util, read_from_fd) {
     auto uuid = boost::uuids::random_generator()();
     auto uuid_string = boost::uuids::to_string(uuid);
     auto file = std::string("/tmp/") + uuid_string;
 
-    auto fd = open(
-        file.c_str(), O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR | S_IXUSR);
-    ASSERT_NE(fd, -1);
+    auto tmp_file = TmpFileWrapper(file);
+    ASSERT_NE(tmp_file.fd, -1);
+
     size_t data_size = 100 * 1024 * 1024;  // 100M
     auto index_data = std::shared_ptr<uint8_t[]>(new uint8_t[data_size]);
     auto max_loop = size_t(INT_MAX) / data_size + 1;  // insert data > 2G
     for (int i = 0; i < max_loop; ++i) {
-        auto size_write = write(fd, index_data.get(), data_size);
+        auto size_write = write(tmp_file.fd, index_data.get(), data_size);
         ASSERT_GE(size_write, 0);
     }
 
     auto read_buf =
         std::shared_ptr<uint8_t[]>(new uint8_t[data_size * max_loop]);
     EXPECT_NO_THROW(milvus::index::ReadDataFromFD(
-        fd, read_buf.get(), data_size * max_loop));
+        tmp_file.fd, read_buf.get(), data_size * max_loop));
 
     // On Linux, read() (and similar system calls) will transfer at most 0x7ffff000 (2,147,479,552) bytes once
     EXPECT_THROW(milvus::index::ReadDataFromFD(
-                     fd, read_buf.get(), data_size * max_loop, INT_MAX),
+                     tmp_file.fd, read_buf.get(), data_size * max_loop, INT_MAX),
                  milvus::SegcoreError);
 }
+
