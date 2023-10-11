@@ -13,6 +13,8 @@ FROM ubuntu:focal-20220426
 
 ARG TARGETARCH
 
+RUN if [ "$TARGETARCH" = "arm64" ]; then apt-get update && apt-get install -y ninja-build; fi
+
 RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-certificates gnupg2 \
     g++ gcc gdb gdbserver git make ccache libssl-dev zlib1g-dev zip unzip \
     clang-format-10 clang-tidy-10 lcov libtool m4 autoconf automake python3 python3-pip \

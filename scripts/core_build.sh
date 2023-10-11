@@ -214,7 +214,10 @@ if [ -z "$BUILD_WITHOUT_AZURE" ]; then
   fi
   pushd ${AZURE_BUILD_DIR}
   env bash ${ROOT_DIR}/scripts/azure_build.sh ${ROOT_DIR}
-  cat vcpkg-bootstrap.log # need to remove
+  if [ ! -e libblob-chunk-manager* ]; then
+    cat vcpkg-bootstrap.log
+    exit 1
+  fi
   popd
   SYSTEM_NAME=$(uname -s)
   if [[ ${SYSTEM_NAME} == "Darwin" ]]; then
