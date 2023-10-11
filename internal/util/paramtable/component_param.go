@@ -757,7 +757,7 @@ func (p *proxyConfig) initMaxRoleNum() {
 }
 
 func (p *proxyConfig) initShardLeaderCacheInterval() {
-	interval := p.Base.ParseIntWithDefault("proxy.shardLeaderCacheInterval", 30)
+	interval := p.Base.ParseIntWithDefault("proxy.shardLeaderCacheInterval", 3)
 	p.ShardLeaderCacheInterval.Store(time.Duration(interval) * time.Second)
 }
 
