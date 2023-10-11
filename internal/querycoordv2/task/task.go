@@ -54,7 +54,7 @@ const (
 var TaskPriorityName = map[Priority]string{
 	TaskPriorityLow:    "Low",
 	TaskPriorityNormal: "Normal",
-	TaskPriorityHigh:   "Hight",
+	TaskPriorityHigh:   "High",
 }
 
 func (p Priority) String() string {
