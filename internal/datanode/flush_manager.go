@@ -467,7 +467,6 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 
 	// binlogs
 	for _, blob := range binLogBlobs {
-		defer func() { logidx++ }()
 		fieldID, err := strconv.ParseInt(blob.GetKey(), 10, 64)
 		if err != nil {
 			log.Error("Flush failed ... cannot parse string to fieldID ..", zap.Error(err))
@@ -485,6 +484,8 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 			LogPath:       key,
 			LogSize:       int64(fieldMemorySize[fieldID]),
 		}
+
+		logidx += 1
 	}
 
 	// pk stats binlog
