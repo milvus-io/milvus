@@ -4492,7 +4492,119 @@ class TestSearchBase(TestcaseBase):
                                      search_params, top_k,
                                      default_search_exp, [par_name])
 
-        assert len(res[0]) <= top_k
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("index, params", zip(ct.all_index_types[:7], ct.default_index_params[:7]))
+    def test_search_cosine_all_indexes(self, index, params):
+        """
+        target: test basic search function, all the search params are correct, test all index params, and build
+        method: search collection with the given vectors and tags, check the result
+        expected: the length of the result is top_k
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True,
+                                                                                  is_index=False)[0:5]
+        # 2. create index
+        default_index = {"index_type": index, "params": params, "metric_type": "COSINE"}
+        collection_w.create_index("float_vector", default_index)
+        collection_w.load()
+
+        # 3. search
+        search_params = {"metric_type": "COSINE"}
+        res, _ = collection_w.search(vectors[:default_nq], default_search_field,
+                                     search_params, default_limit, default_search_exp,
+                                     check_task=CheckTasks.check_search_results,
+                                     check_items={"nq": default_nq,
+                                                  "ids": insert_ids,
+                                                  "limit": default_limit})
+
+        # 4. check cosine distance
+        for i in range(default_nq):
+            for distance in res[i].distances:
+                assert 1 >= distance >= -1
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_cosine_results_same_as_l2(self):
+        """
+        target: test search results of l2 and cosine keep the same
+        method: 1. search L2
+                2. search cosine
+                3. compare the results
+        expected: raise no exception
+        """
+        nb = ct.default_nb
+        # 1. prepare original data and normalized data
+        original_vec = [[random.random() for _ in range(ct.default_dim)] for _ in range(nb)]
+        normalize_vec = preprocessing.normalize(original_vec, axis=1, norm='l2')
+        normalize_vec = normalize_vec.tolist()
+        data = cf.gen_default_dataframe_data()
+
+        # 2. create L2 collection and insert normalized data
+        collection_w1 = self.init_collection_general(prefix, is_index=False)[0]
+        data[ct.default_float_vec_field_name] = normalize_vec
+        collection_w1.insert(data)
+
+        # 2. create index L2
+        default_index = {"index_type": "IVF_SQ8", "params": {"nlist": 64}, "metric_type": "L2"}
+        collection_w1.create_index("float_vector", default_index)
+        collection_w1.load()
+
+        # 3. search L2
+        search_params = {"params": {"nprobe": 10}, "metric_type": "L2"}
+        res_l2, _ = collection_w1.search(vectors[:default_nq], default_search_field,
+                                         search_params, default_limit, default_search_exp)
+
+        # 4. create cosine collection and insert original data
+        collection_w2 = self.init_collection_general(prefix, is_index=False)[0]
+        data[ct.default_float_vec_field_name] = original_vec
+        collection_w2.insert(data)
+
+        # 5. create index cosine
+        default_index = {"index_type": "IVF_SQ8", "params": {"nlist": 64}, "metric_type": "COSINE"}
+        collection_w2.create_index("float_vector", default_index)
+        collection_w2.load()
+
+        # 6. search cosine
+        search_params = {"params": {"nprobe": 10}, "metric_type": "COSINE"}
+        res_cosine, _ = collection_w2.search(vectors[:default_nq], default_search_field,
+                                             search_params, default_limit, default_search_exp)
+
+        # 7. check the search results
+        for i in range(default_nq):
+            assert res_l2[i].ids == res_cosine[i].ids
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_cosine_results_same_as_ip(self):
+        """
+        target: test search results of ip and cosine keep the same
+        method: 1. search IP
+                2. search cosine
+                3. compare the results
+        expected: raise no exception
+        """
+        # 1. create collection and insert data
+        collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
+
+        # 2. search IP
+        default_index = {"index_type": "IVF_SQ8", "params": {"nlist": 64}, "metric_type": "IP"}
+        collection_w.create_index("float_vector", default_index)
+        collection_w.load()
+        search_params = {"params": {"nprobe": 10}, "metric_type": "IP"}
+        res_ip, _ = collection_w.search(vectors[:default_nq], default_search_field,
+                                        search_params, default_limit, default_search_exp)
+
+        # 3. search cosine
+        collection_w.release()
+        collection_w.drop_index()
+        default_index = {"index_type": "IVF_SQ8", "params": {"nlist": 64}, "metric_type": "COSINE"}
+        collection_w.create_index("float_vector", default_index)
+        collection_w.load()
+        search_params = {"params": {"nprobe": 10}, "metric_type": "COSINE"}
+        res_cosine, _ = collection_w.search(vectors[:default_nq], default_search_field,
+                                            search_params, default_limit, default_search_exp)
+
+        # 4. check the search results
+        for i in range(default_nq):
+            assert res_ip[i].ids == res_cosine[i].ids
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_without_connect(self):
@@ -6204,6 +6316,30 @@ class TestCollectionRangeSearch(TestcaseBase):
             assert abs(hits.distances[0] - 1.0) <= epsilon
             # distances_tmp = list(hits.distances)
             # assert distances_tmp.count(1.0) == 1
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_range_search_cosine(self):
+        """
+        target: test range search normal case
+        method: create connection, collection, insert and search
+        expected: search successfully with limit(topK)
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, True)[0]
+        range_filter = random.uniform(0, 1)
+        radius = random.uniform(-1, range_filter)
+
+        # 2. range search
+        range_search_params = {"metric_type": "COSINE",
+                               "params": {"radius": radius, "range_filter": range_filter}}
+        search_res = collection_w.search(vectors[:nq], default_search_field,
+                                         range_search_params, default_limit,
+                                         default_search_exp)[0]
+
+        # 3. check search results
+        for hits in search_res:
+            for distance in hits.distances:
+                assert range_filter >= distance > radius
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_only_range_filter(self):
