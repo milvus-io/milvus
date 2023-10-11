@@ -954,21 +954,22 @@ func (m *mockIndexCoord) DescribeIndex(ctx context.Context, req *indexpb.Describ
 }
 
 func (m *mockIndexCoord) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoRequest) (*indexpb.GetIndexInfoResponse, error) {
-	segmentID := req.GetSegmentIDs()[0]
 	collectionID := req.GetCollectionID()
-	return &indexpb.GetIndexInfoResponse{
-		Status: &commonpb.Status{},
-		SegmentInfo: map[int64]*indexpb.SegmentInfo{
-			segmentID: {
-				EnableIndex:  true,
-				CollectionID: collectionID,
-				SegmentID:    segmentID,
-				IndexInfos: []*indexpb.IndexFilePathInfo{
-					{
-						FieldID: int64(201),
-					},
+	segmentInfos := make(map[int64]*indexpb.SegmentInfo)
+	for _, segment := range req.GetSegmentIDs() {
+		segmentInfos[segment] = &indexpb.SegmentInfo{
+			EnableIndex:  true,
+			CollectionID: collectionID,
+			SegmentID:    segment,
+			IndexInfos: []*indexpb.IndexFilePathInfo{
+				{
+					FieldID: int64(201),
 				},
 			},
-		},
+		}
+	}
+	return &indexpb.GetIndexInfoResponse{
+		Status:      &commonpb.Status{},
+		SegmentInfo: segmentInfos,
 	}, nil
 }
