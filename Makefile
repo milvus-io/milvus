@@ -19,11 +19,17 @@ INSTALL_PATH := $(PWD)/bin
 LIBRARY_PATH := $(PWD)/lib
 OS := $(shell uname -s)
 mode = Release
-disk_index = OFF
-useasan = false
-ifeq (${USE_ASAN}, true)
-useasan = true
+
+use_disk_index = OFF
+ifdef USE_DISK_INDEX
+	use_disk_index = ${USE_DISK_INDEX}
 endif
+
+use_asan = OFF
+ifdef USE_ASAN
+	use_asan =${USE_ASAN}
+endif
+
 use_dynamic_simd = OFF
 ifdef USE_DYNAMIC_SIMD
 	use_dynamic_simd = ${USE_DYNAMIC_SIMD}
@@ -201,19 +207,19 @@ generated-proto: download-milvus-proto build-3rdparty
 
 build-cpp: generated-proto
 	@echo "Building Milvus cpp library ..."
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine})
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine})
 
 build-cpp-gpu: generated-proto
 	@echo "Building Milvus cpp gpu library ... "
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -g -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine})
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -g -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine})
 
 build-cpp-with-unittest: generated-proto
 	@echo "Building Milvus cpp library with unittest ... "
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -u -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine})
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -u -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine})
 
 build-cpp-with-coverage: generated-proto
 	@echo "Building Milvus cpp library with coverage and unittest ..."
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${useasan} -u -c -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine})
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -u -c -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine})
 
 check-proto-product: generated-proto
 	 @(env bash $(PWD)/scripts/check_proto_product.sh)
@@ -406,7 +412,7 @@ generate-mockery-querycoord: getdeps
 
 generate-mockery-querynode: getdeps build-cpp
 	@source $(PWD)/scripts/setenv.sh # setup PKG_CONFIG_PATH
-	$(INSTALL_PATH)/mockery --name=QueryHook --dir=$(PWD)/internal/querynodev2/optimizers --output=$(PWD)/internal/querynodev2/optimizers --filename=mock_query_hook.go --with-expecter --outpkg=optimizers --structname=MockQueryHook --inpackage 
+	$(INSTALL_PATH)/mockery --name=QueryHook --dir=$(PWD)/internal/querynodev2/optimizers --output=$(PWD)/internal/querynodev2/optimizers --filename=mock_query_hook.go --with-expecter --outpkg=optimizers --structname=MockQueryHook --inpackage
 	$(INSTALL_PATH)/mockery --name=Manager --dir=$(PWD)/internal/querynodev2/cluster --output=$(PWD)/internal/querynodev2/cluster --filename=mock_manager.go --with-expecter --outpkg=cluster --structname=MockManager --inpackage
 	$(INSTALL_PATH)/mockery --name=SegmentManager --dir=$(PWD)/internal/querynodev2/segments --output=$(PWD)/internal/querynodev2/segments --filename=mock_segment_manager.go --with-expecter --outpkg=segments --structname=MockSegmentManager --inpackage
 	$(INSTALL_PATH)/mockery --name=CollectionManager --dir=$(PWD)/internal/querynodev2/segments --output=$(PWD)/internal/querynodev2/segments --filename=mock_collection_manager.go --with-expecter --outpkg=segments --structname=MockCollectionManager --inpackage
