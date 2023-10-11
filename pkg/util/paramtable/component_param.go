@@ -1087,7 +1087,7 @@ please adjust in embedded Milvus: false`,
 	p.ShardLeaderCacheInterval = ParamItem{
 		Key:          "proxy.shardLeaderCacheInterval",
 		Version:      "2.2.4",
-		DefaultValue: "10",
+		DefaultValue: "3",
 		Doc:          "time interval to update shard leader cache, in seconds",
 	}
 	p.ShardLeaderCacheInterval.Init(base.mgr)
