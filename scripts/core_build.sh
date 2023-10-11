@@ -228,6 +228,8 @@ if [ -z "$BUILD_WITHOUT_AZURE" ]; then
   ARCHITECTURE=$(uname -m)
   if [[ ${ARCHITECTURE} == "x86_64" ]]; then
     ARCHITECTURE="x64"
+  elif [[ ${ARCHITECTURE} == "aarch64" ]]; then
+    ARCHITECTURE="arm64"
   fi
   VCPKG_TARGET_TRIPLET=${ARCHITECTURE}-${SYSTEM_NAME}
 fi
