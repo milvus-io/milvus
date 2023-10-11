@@ -208,17 +208,17 @@ func SetDiskIndexBuildParams(indexParams map[string]string, fieldDataSize int64)
 	}
 
 	searchCacheBudgetGBRatioStr, ok := indexParams[SearchCacheBudgetRatioKey]
-	if !ok {
-		return fmt.Errorf("index param searchCacheBudgetGBRatio not exist")
-	}
-	SearchCacheBudgetGBRatio, err := strconv.ParseFloat(searchCacheBudgetGBRatioStr, 64)
-	if err != nil {
-		return err
+	// set generate cache size when cache ratio param set
+	if ok {
+		SearchCacheBudgetGBRatio, err := strconv.ParseFloat(searchCacheBudgetGBRatioStr, 64)
+		if err != nil {
+			return err
+		}
+		indexParams[SearchCacheBudgetKey] = fmt.Sprintf("%f", float32(fieldDataSize)*float32(SearchCacheBudgetGBRatio)/(1<<30))
 	}
 	indexParams[PQCodeBudgetKey] = fmt.Sprintf("%f", float32(fieldDataSize)*float32(pqCodeBudgetGBRatio)/(1<<30))
 	indexParams[NumBuildThreadKey] = strconv.Itoa(int(float32(hardware.GetCPUNum()) * float32(buildNumThreadsRatio)))
 	indexParams[BuildDramBudgetKey] = fmt.Sprintf("%f", float32(hardware.GetFreeMemoryCount())/(1<<30))
-	indexParams[SearchCacheBudgetKey] = fmt.Sprintf("%f", float32(fieldDataSize)*float32(SearchCacheBudgetGBRatio)/(1<<30))
 	return nil
 }
 

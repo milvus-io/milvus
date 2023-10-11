@@ -49,7 +49,6 @@ index_engine = knowhere
 
 export GIT_BRANCH=master
 
-AZURE_OPTION := ""
 ifeq (${ENABLE_AZURE}, false)
 	AZURE_OPTION := -Z
 endif
