@@ -61,13 +61,13 @@ if [ ! -d "${CI_LOG_PATH}" ]; then
   mkdir -p ${CI_LOG_PATH}
 fi
 
-echo "prepare e2e test"  
-install_pytest_requirements  
+echo "prepare e2e test"
+install_pytest_requirements
 
 
 # Pytest is not able to have both --timeout & --workers, so do not add --timeout or --workers in the shell script
 if [[ -n "${TEST_TIMEOUT:-}" ]]; then
-  
+
   timeout  "${TEST_TIMEOUT}" pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} \
                                      --html=${CI_LOG_PATH}/report.html  --self-contained-html ${@:-}
 else
@@ -77,10 +77,20 @@ fi
 
 # Run bulk insert test
 if [[ -n "${TEST_TIMEOUT:-}" ]]; then
-  
+
   timeout  "${TEST_TIMEOUT}" pytest testcases/test_bulk_insert.py --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} \
                                      --html=${CI_LOG_PATH}/report_bulk_insert.html  --self-contained-html
 else
   pytest testcases/test_bulk_insert.py --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} \
                                      --html=${CI_LOG_PATH}/report_bulk_insert.html --self-contained-html
+fi
+
+# Run concurrent test with 10 processes
+if [[ -n "${TEST_TIMEOUT:-}" ]]; then
+
+  timeout  "${TEST_TIMEOUT}" pytest testcases/test_concurrent.py --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --count 10 -n 10 \
+                                     --html=${CI_LOG_PATH}/report_concurrent.html  --self-contained-html
+else
+  pytest testcases/test_concurrent.py --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --count 10 -n 10 \
+                                     --html=${CI_LOG_PATH}/report_concurrent.html --self-contained-html
 fi

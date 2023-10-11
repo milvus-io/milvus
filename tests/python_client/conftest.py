@@ -47,6 +47,7 @@ def pytest_addoption(parser):
     parser.addoption('--minio_host', action='store', default="localhost", help="minio service's ip")
     parser.addoption('--uri', action='store', default="", help="uri for high level api")
     parser.addoption('--token', action='store', default="", help="token for high level api")
+    parser.addoption("--request_duration", action="store", default="10m", help="request_duration")
 
 
 @pytest.fixture
@@ -81,7 +82,7 @@ def secure(request):
 
 @pytest.fixture
 def milvus_ns(request):
-    return request.config.getoption("--milvus_ns") 
+    return request.config.getoption("--milvus_ns")
 
 
 @pytest.fixture
@@ -184,6 +185,10 @@ def uri(request):
 @pytest.fixture
 def token(request):
     return request.config.getoption("--token")
+
+@pytest.fixture
+def request_duration(request):
+    return request.config.getoption("--request_duration")
 
 
 """ fixture func """
