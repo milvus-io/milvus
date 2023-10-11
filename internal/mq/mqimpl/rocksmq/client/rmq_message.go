@@ -9,37 +9,41 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package rmq
+package client
 
 import (
-	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/client"
+	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // Check rmqMessage implements ConsumerMessage
-var _ mqwrapper.Message = (*rmqMessage)(nil)
+var _ mqwrapper.Message = (*RmqMessage)(nil)
 
 // rmqMessage wraps the message for rocksmq
-type rmqMessage struct {
-	msg client.Message
+type RmqMessage struct {
+	msgID      typeutil.UniqueID
+	topic      string
+	payload    []byte
+	properties map[string]string
 }
 
 // Topic returns the topic name of rocksmq message
-func (rm *rmqMessage) Topic() string {
-	return rm.msg.Topic
+func (rm *RmqMessage) Topic() string {
+	return rm.topic
 }
 
 // Properties returns the properties of rocksmq message
-func (rm *rmqMessage) Properties() map[string]string {
-	return rm.msg.Properties
+func (rm *RmqMessage) Properties() map[string]string {
+	return rm.properties
 }
 
 // Payload returns the payload of rocksmq message
-func (rm *rmqMessage) Payload() []byte {
-	return rm.msg.Payload
+func (rm *RmqMessage) Payload() []byte {
+	return rm.payload
 }
 
 // ID returns the id of rocksmq message
-func (rm *rmqMessage) ID() mqwrapper.MessageID {
-	return &rmqID{messageID: rm.msg.MsgID}
+func (rm *RmqMessage) ID() mqwrapper.MessageID {
+	return &server.RmqID{MessageID: rm.msgID}
 }

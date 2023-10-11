@@ -15,6 +15,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/client"
+	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
@@ -37,17 +38,16 @@ func (rp *rmqProducer) Send(ctx context.Context, message *mqwrapper.ProducerMess
 	start := timerecord.NewTimeRecorder("send msg to stream")
 	metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.TotalLabel).Inc()
 
-	pm := &client.ProducerMessage{Payload: message.Payload, Properties: message.Properties}
-	id, err := rp.p.Send(pm)
+	id, err := rp.p.Send(message)
 	if err != nil {
 		metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.FailLabel).Inc()
-		return &rmqID{messageID: id}, err
+		return &server.RmqID{MessageID: id}, err
 	}
 
 	elapsed := start.ElapseSpan()
 	metrics.MsgStreamRequestLatency.WithLabelValues(metrics.SendMsgLabel).Observe(float64(elapsed.Milliseconds()))
 	metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.SuccessLabel).Inc()
-	return &rmqID{messageID: id}, nil
+	return &server.RmqID{MessageID: id}, nil
 }
 
 // Close does nothing currently

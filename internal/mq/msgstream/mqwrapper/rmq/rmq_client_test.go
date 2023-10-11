@@ -43,6 +43,7 @@ func TestMain(m *testing.M) {
 	rand.Seed(time.Now().UnixNano())
 	path := "/tmp/milvus/rdb_data"
 	defer os.RemoveAll(path)
+	paramtable.Get().Save("rocksmq.compressionTypes", "0,0,0,0,0")
 	_ = rocksmqimplserver.InitRocksMQ(path)
 	exitCode := m.Run()
 	defer rocksmqimplserver.CloseRocksMQ()
@@ -66,10 +67,10 @@ func TestRmqClient_CreateProducer(t *testing.T) {
 	topic := "TestRmqClient_CreateProducer"
 	proOpts := mqwrapper.ProducerOptions{Topic: topic}
 	producer, err := client.CreateProducer(proOpts)
-
-	defer producer.Close()
 	assert.NoError(t, err)
 	assert.NotNil(t, producer)
+
+	defer producer.Close()
 
 	rmqProducer := producer.(*rmqProducer)
 	defer rmqProducer.Close()
@@ -150,9 +151,9 @@ func TestRmqClient_Subscribe(t *testing.T) {
 	topic := "TestRmqClient_Subscribe"
 	proOpts := mqwrapper.ProducerOptions{Topic: topic}
 	producer, err := client.CreateProducer(proOpts)
-	defer producer.Close()
 	assert.NoError(t, err)
 	assert.NotNil(t, producer)
+	defer producer.Close()
 
 	subName := "subName"
 	consumerOpts := mqwrapper.ConsumerOptions{
@@ -197,7 +198,7 @@ func TestRmqClient_Subscribe(t *testing.T) {
 		assert.FailNow(t, "consumer failed to yield message in 100 milliseconds")
 	case msg := <-consumer.Chan():
 		consumer.Ack(msg)
-		rmqmsg := msg.(*rmqMessage)
+		rmqmsg := msg.(*rocksmqimplclient.RmqMessage)
 		msgPayload := rmqmsg.Payload()
 		assert.NotEmpty(t, msgPayload)
 		msgTopic := rmqmsg.Topic()
@@ -205,7 +206,7 @@ func TestRmqClient_Subscribe(t *testing.T) {
 		msgProp := rmqmsg.Properties()
 		assert.Empty(t, msgProp)
 		msgID := rmqmsg.ID()
-		rID := msgID.(*rmqID)
+		rID := msgID.(*rocksmqimplserver.RmqID)
 		assert.NotZero(t, rID)
 	}
 }

@@ -84,7 +84,7 @@ func (rc *rmqClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Con
 		log.Warn("unexpected subscription consumer options", zap.Error(err))
 		return nil, err
 	}
-	receiveChannel := make(chan client.Message, options.BufSize)
+	receiveChannel := make(chan mqwrapper.Message, options.BufSize)
 
 	cli, err := rc.client.Subscribe(client.ConsumerOptions{
 		Topic:                       options.Topic,
@@ -108,7 +108,7 @@ func (rc *rmqClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Con
 // EarliestMessageID returns the earliest message ID for rmq client
 func (rc *rmqClient) EarliestMessageID() mqwrapper.MessageID {
 	rID := client.EarliestMessageID()
-	return &rmqID{messageID: rID}
+	return &server.RmqID{MessageID: rID}
 }
 
 // StringToMsgID converts string id to MessageID
@@ -117,13 +117,13 @@ func (rc *rmqClient) StringToMsgID(id string) (mqwrapper.MessageID, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &rmqID{messageID: rID}, nil
+	return &server.RmqID{MessageID: rID}, nil
 }
 
 // BytesToMsgID converts a byte array to messageID
 func (rc *rmqClient) BytesToMsgID(id []byte) (mqwrapper.MessageID, error) {
-	rID := DeserializeRmqID(id)
-	return &rmqID{messageID: rID}, nil
+	rID := server.DeserializeRmqID(id)
+	return &server.RmqID{MessageID: rID}, nil
 }
 
 func (rc *rmqClient) Close() {

@@ -38,16 +38,7 @@ type ConsumerOptions struct {
 
 	// Message for this consumer
 	// When a message is received, it will be pushed to this channel for consumption
-	MessageChannel chan Message
-}
-
-// Message is the message content of a consumer message
-type Message struct {
-	Consumer
-	MsgID      UniqueID
-	Topic      string
-	Payload    []byte
-	Properties map[string]string
+	MessageChannel chan mqwrapper.Message
 }
 
 // Consumer interface provide operations for a consumer
@@ -62,7 +53,7 @@ type Consumer interface {
 	MsgMutex() chan struct{}
 
 	// Message channel
-	Chan() <-chan Message
+	Chan() <-chan mqwrapper.Message
 
 	// Seek to the uniqueID position
 	Seek(UniqueID) error //nolint:govet

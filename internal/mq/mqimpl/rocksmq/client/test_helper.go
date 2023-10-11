@@ -22,6 +22,7 @@ import (
 
 	server2 "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func newTopicName() string {
@@ -46,6 +47,7 @@ func newMockClient() *client {
 
 func newRocksMQ(t *testing.T, rmqPath string) server2.RocksMQ {
 	rocksdbPath := rmqPath
+	paramtable.Get().Save("rocksmq.compressionTypes", "0,0,0,0,0")
 	rmq, err := server2.NewRocksMQ(rocksdbPath, nil)
 	assert.NoError(t, err)
 	return rmq

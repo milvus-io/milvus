@@ -16,6 +16,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 )
 
 // assertion make sure implementation
@@ -50,11 +51,23 @@ func (p *producer) Topic() string {
 }
 
 // Send produce message in rocksmq
-func (p *producer) Send(message *ProducerMessage) (UniqueID, error) {
+func (p *producer) Send(message *mqwrapper.ProducerMessage) (UniqueID, error) {
+	// NOTICE: this is the hack.
+	// we should not unmarshal the payload here but we can not extend the payload byte
+	payload := message.Payload
+	header, err := UnmarshalHeader(message.Payload)
+	if err == nil && header != nil && header.Base != nil {
+		// try to marshal properties into message if message is real message
+		header.Base.Properties = message.Properties
+		payload, err = MarshalHeader(header)
+		if err != nil {
+			return 0, err
+		}
+	}
+
 	ids, err := p.c.server.Produce(p.topic, []server.ProducerMessage{
 		{
-			Payload:    message.Payload,
-			Properties: message.Properties,
+			Payload: payload,
 		},
 	})
 	if err != nil {

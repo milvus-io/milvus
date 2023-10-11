@@ -12,7 +12,6 @@
 package server
 
 import (
-	"encoding/json"
 	"fmt"
 	"path"
 	"runtime"
@@ -629,7 +628,6 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 	if UniqueID(msgLen) != idEnd-idStart {
 		return []UniqueID{}, errors.New("Obtained id length is not equal that of message")
 	}
-
 	// Insert data to store system
 	batch := gorocksdb.NewWriteBatch()
 	defer batch.Destroy()
@@ -639,16 +637,6 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 		msgID := idStart + UniqueID(i)
 		key := path.Join(topicName, strconv.FormatInt(msgID, 10))
 		batch.PutCF(rmq.cfh[0], []byte(key), messages[i].Payload)
-		// batch.Put([]byte(key), messages[i].Payload)
-		if messages[i].Properties != nil {
-			properties, err := json.Marshal(messages[i].Properties)
-			if err != nil {
-				log.Warn("properties marshal failed", zap.Int64("msgID", msgID), zap.String("topicName", topicName),
-					zap.Error(err))
-				return nil, err
-			}
-			batch.PutCF(rmq.cfh[1], []byte(key), properties)
-		}
 		msgIDs[i] = msgID
 		msgSizes[msgID] = int64(len(messages[i].Payload))
 	}
@@ -782,9 +770,7 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 	defer readOpts.Destroy()
 	prefix := topicName + "/"
 	iter := rocksdbkv.NewRocksIteratorCFWithUpperBound(rmq.store, rmq.cfh[0], typeutil.AddOne(prefix), readOpts)
-	iterProperty := rocksdbkv.NewRocksIteratorCFWithUpperBound(rmq.store, rmq.cfh[1], typeutil.AddOne(prefix), readOpts)
 	defer iter.Close()
-	defer iterProperty.Close()
 
 	var dataKey string
 	if currentID == DefaultMessageID {
@@ -793,7 +779,6 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 		dataKey = path.Join(topicName, strconv.FormatInt(currentID, 10))
 	}
 	iter.Seek([]byte(dataKey))
-	iterProperty.Seek([]byte(dataKey))
 
 	consumerMessage := make([]ConsumerMessage, 0, n)
 	offset := 0
@@ -801,11 +786,9 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 	for ; iter.Valid() && offset < n; iter.Next() {
 		key := iter.Key()
 		val := iter.Value()
-		strKey := string(key.Data())
 		key.Free()
-		properties := make(map[string]string)
-		var propertiesValue []byte
 
+		strKey := string(key.Data())
 		msgID, err := strconv.ParseInt(strKey[len(topicName)+1:], 10, 64)
 		if err != nil {
 			val.Free()
@@ -813,23 +796,6 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 		}
 		offset++
 
-		if iterProperty.Valid() && string(iterProperty.Key().Data()) == string(iter.Key().Data()) {
-			// the key of properties is the same with the key of payload
-			// to prevent mix message with or without property column family
-			propertiesValue = iterProperty.Value().Data()
-			iterProperty.Next()
-		}
-
-		// between 2.2.0 and 2.3.0, the key of Payload is topic/properties/msgid/Payload
-		// will ingnore the property before 2.3.0, just make sure property empty is ok for 2.3
-
-		// before 2.2.0, there have no properties in ProducerMessage and ConsumerMessage in rocksmq
-		// when produce before 2.2.0, but consume after 2.2.0, propertiesValue will be []
-		if len(propertiesValue) != 0 {
-			if err = json.Unmarshal(propertiesValue, &properties); err != nil {
-				return nil, err
-			}
-		}
 		msg := ConsumerMessage{
 			MsgID: msgID,
 		}
@@ -837,10 +803,8 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 		dataLen := len(origData)
 		if dataLen == 0 {
 			msg.Payload = nil
-			msg.Properties = nil
 		} else {
 			msg.Payload = make([]byte, dataLen)
-			msg.Properties = properties
 			copy(msg.Payload, origData)
 		}
 		consumerMessage = append(consumerMessage, msg)

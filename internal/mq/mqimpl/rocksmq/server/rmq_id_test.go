@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package rmq
+package server
 
 import (
 	"math"
@@ -24,8 +24,8 @@ import (
 )
 
 func TestRmqID_Serialize(t *testing.T) {
-	rid := &rmqID{
-		messageID: 8,
+	rid := &RmqID{
+		MessageID: 8,
 	}
 
 	bin := rid.Serialize()
@@ -34,23 +34,23 @@ func TestRmqID_Serialize(t *testing.T) {
 }
 
 func Test_AtEarliestPosition(t *testing.T) {
-	rid := &rmqID{
-		messageID: 0,
+	rid := &RmqID{
+		MessageID: 0,
 	}
 	assert.True(t, rid.AtEarliestPosition())
 
-	rid = &rmqID{
-		messageID: math.MaxInt64,
+	rid = &RmqID{
+		MessageID: math.MaxInt64,
 	}
 	assert.False(t, rid.AtEarliestPosition())
 }
 
 func TestLessOrEqualThan(t *testing.T) {
-	rid1 := &rmqID{
-		messageID: 0,
+	rid1 := &RmqID{
+		MessageID: 0,
 	}
-	rid2 := &rmqID{
-		messageID: math.MaxInt64,
+	rid2 := &RmqID{
+		MessageID: math.MaxInt64,
 	}
 
 	ret, err := rid1.LessOrEqualThan(rid2.Serialize())
@@ -67,12 +67,12 @@ func TestLessOrEqualThan(t *testing.T) {
 }
 
 func Test_Equal(t *testing.T) {
-	rid1 := &rmqID{
-		messageID: 0,
+	rid1 := &RmqID{
+		MessageID: 0,
 	}
 
-	rid2 := &rmqID{
-		messageID: math.MaxInt64,
+	rid2 := &RmqID{
+		MessageID: math.MaxInt64,
 	}
 
 	{
