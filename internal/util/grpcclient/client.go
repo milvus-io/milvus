@@ -110,7 +110,8 @@ type ClientBase[T interface {
 
 func NewClientBase[T interface {
 	GetComponentStates(ctx context.Context, in *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error)
-}](config *paramtable.GrpcClientConfig, serviceName string) *ClientBase[T] {
+}](config *paramtable.GrpcClientConfig, serviceName string,
+) *ClientBase[T] {
 	return &ClientBase[T]{
 		ClientMaxRecvSize:       config.ClientMaxRecvSize.GetAsInt(),
 		ClientMaxSendSize:       config.ClientMaxSendSize.GetAsInt(),
@@ -367,6 +368,10 @@ func (c *ClientBase[T]) checkErr(ctx context.Context, err error) (needRetry, nee
 		if funcutil.IsGrpcErr(err, codes.Canceled, codes.DeadlineExceeded) {
 			// canceled or deadline exceeded
 			return true, c.needResetCancel()
+		}
+
+		if funcutil.IsGrpcErr(err, codes.Unimplemented) {
+			return false, false
 		}
 		return true, true
 	case IsServerIDMismatchErr(err):

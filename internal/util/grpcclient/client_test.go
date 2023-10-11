@@ -309,6 +309,21 @@ func TestClientBase_Recall(t *testing.T) {
 	})
 }
 
+func TestClientBase_CheckError(t *testing.T) {
+	base := ClientBase[*mockClient]{}
+	base.grpcClient = &mockClient{}
+	base.MaxAttempts = 1
+
+	ctx := context.Background()
+	retry, reset := base.checkErr(ctx, status.Errorf(codes.Canceled, "fake context canceled"))
+	assert.True(t, retry)
+	assert.True(t, reset)
+
+	retry, reset = base.checkErr(ctx, status.Errorf(codes.Unimplemented, "fake context canceled"))
+	assert.False(t, retry)
+	assert.False(t, reset)
+}
+
 type server struct {
 	helloworld.UnimplementedGreeterServer
 	reqCounter   uint
