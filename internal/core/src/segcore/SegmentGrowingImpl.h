@@ -225,7 +225,13 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     bool
     HasIndex(FieldId field_id) const override {
-        return true;
+        auto& field_meta = schema_->operator[](field_id);
+        if (datatype_is_vector(field_meta.get_data_type()) &&
+            segcore_config_.get_enable_growing_segment_index()) {
+            return true;
+        }
+
+        return false;
     }
 
     bool

@@ -231,3 +231,28 @@ TEST(Growing, FillData) {
                   num_inserted);
     }
 }
+
+TEST(Growing, HasIndex) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto random = schema->AddDebugField("random", DataType::DOUBLE);
+    auto vec = schema->AddDebugField(
+        "embeddings", DataType::VECTOR_FLOAT, 128, knowhere::metric::L2);
+    schema->set_primary_field_id(pk);
+
+    std::map<std::string, std::string> index_params = {
+        {"index_type", "IVF_FLAT"}, {"metric_type", "L2"}, {"nlist", "128"}};
+    std::map<std::string, std::string> type_params = {{"dim", "128"}};
+    FieldIndexMeta fieldIndexMeta(
+        vec, std::move(index_params), std::move(type_params));
+    auto& config = SegcoreConfig::default_config();
+    config.set_chunk_rows(1024);
+    config.set_enable_growing_segment_index(true);
+    std::map<FieldId, FieldIndexMeta> filedMap = {{vec, fieldIndexMeta}};
+    IndexMetaPtr metaPtr =
+        std::make_shared<CollectionIndexMeta>(226985, std::move(filedMap));
+    auto segment = CreateGrowingSegment(schema, metaPtr);
+    ASSERT_EQ(segment->HasIndex(pk), false);
+    ASSERT_EQ(segment->HasIndex(random), false);
+    ASSERT_EQ(segment->HasIndex(vec), true);
+}
