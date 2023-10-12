@@ -22,30 +22,25 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 // metaService initialize channel collection in data node from root coord.
 // Initializing channel collection happens on data node starting. It depends on
 // a healthy root coord and a valid root coord grpc client.
 type metaService struct {
-	channel      Channel
 	collectionID UniqueID
-	rootCoord    types.RootCoordClient
+	broker       broker.Broker
 }
 
 // newMetaService creates a new metaService with provided RootCoord and collectionID.
-func newMetaService(rc types.RootCoordClient, collectionID UniqueID) *metaService {
+func newMetaService(broker broker.Broker, collectionID UniqueID) *metaService {
 	return &metaService{
-		rootCoord:    rc,
+		broker:       broker,
 		collectionID: collectionID,
 	}
 }
@@ -53,34 +48,17 @@ func newMetaService(rc types.RootCoordClient, collectionID UniqueID) *metaServic
 // getCollectionSchema get collection schema with provided collection id at specified timestamp.
 func (mService *metaService) getCollectionSchema(ctx context.Context, collID UniqueID, timestamp Timestamp) (*schemapb.CollectionSchema, error) {
 	response, err := mService.getCollectionInfo(ctx, collID, timestamp)
-	if response != nil {
-		return response.GetSchema(), err
+	if err != nil {
+		return nil, err
 	}
-	return nil, err
+	return response.GetSchema(), nil
 }
 
 // getCollectionInfo get collection info with provided collection id at specified timestamp.
 func (mService *metaService) getCollectionInfo(ctx context.Context, collID UniqueID, timestamp Timestamp) (*milvuspb.DescribeCollectionResponse, error) {
-	req := &milvuspb.DescribeCollectionRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
-			commonpbutil.WithMsgID(0), // GOOSE TODO
-			commonpbutil.WithSourceID(paramtable.GetNodeID()),
-		),
-		// please do not specify the collection name alone after database feature.
-		CollectionID: collID,
-		TimeStamp:    timestamp,
-	}
-
-	response, err := mService.rootCoord.DescribeCollectionInternal(ctx, req)
+	response, err := mService.broker.DescribeCollection(ctx, collID, timestamp)
 	if err != nil {
-		log.Error("grpc error when describe", zap.Int64("collectionID", collID), zap.Error(err))
-		return nil, err
-	}
-
-	if response.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		err := merr.Error(response.Status)
-		log.Error("describe collection from rootcoord failed", zap.Int64("collectionID", collID), zap.Error(err))
+		log.Error("failed to describe collection from rootcoord", zap.Int64("collectionID", collID), zap.Error(err))
 		return nil, err
 	}
 

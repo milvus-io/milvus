@@ -306,8 +306,7 @@ func (_c *MockAllocator_Start_Call) RunAndReturn(run func() error) *MockAllocato
 func NewMockAllocator(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockAllocator {
+}) *MockAllocator {
 	mock := &MockAllocator{}
 	mock.Mock.Test(t)
 

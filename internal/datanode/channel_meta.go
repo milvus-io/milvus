@@ -32,9 +32,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
@@ -149,8 +149,8 @@ type addSegmentReq struct {
 
 var _ Channel = &ChannelMeta{}
 
-func newChannel(channelName string, collID UniqueID, schema *schemapb.CollectionSchema, rc types.RootCoordClient, cm storage.ChunkManager) *ChannelMeta {
-	metaService := newMetaService(rc, collID)
+func newChannel(channelName string, collID UniqueID, schema *schemapb.CollectionSchema, broker broker.Broker, cm storage.ChunkManager) *ChannelMeta {
+	metaService := newMetaService(broker, collID)
 
 	channel := ChannelMeta{
 		collectionID: collID,

@@ -25,21 +25,18 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/retry"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
 // timeTickSender is to merge channel states updated by flow graph node and send to datacoord periodically
 // timeTickSender hold a SegmentStats time sequence cache for each channel,
 // after send succeeds will clean the cache earlier than the sended timestamp
 type timeTickSender struct {
-	nodeID    int64
-	dataCoord types.DataCoordClient
+	nodeID int64
+	broker broker.Broker
 
 	mu                  sync.Mutex
 	channelStatesCaches map[string]*segmentStatesSequence // string -> *segmentStatesSequence
@@ -50,10 +47,10 @@ type segmentStatesSequence struct {
 	data map[uint64][]*commonpb.SegmentStats // ts -> segmentStats
 }
 
-func newTimeTickSender(dataCoord types.DataCoordClient, nodeID int64) *timeTickSender {
+func newTimeTickSender(broker broker.Broker, nodeID int64) *timeTickSender {
 	return &timeTickSender{
 		nodeID:              nodeID,
-		dataCoord:           dataCoord,
+		broker:              broker,
 		channelStatesCaches: make(map[string]*segmentStatesSequence, 0),
 	}
 }
@@ -159,23 +156,7 @@ func (m *timeTickSender) sendReport(ctx context.Context) error {
 	toSendMsgs, sendLastTss := m.mergeDatanodeTtMsg()
 	log.RatedDebug(30, "timeTickSender send datanode timetick message", zap.Any("toSendMsgs", toSendMsgs), zap.Any("sendLastTss", sendLastTss))
 	err := retry.Do(ctx, func() error {
-		submitTs := tsoutil.ComposeTSByTime(time.Now(), 0)
-		status, err := m.dataCoord.ReportDataNodeTtMsgs(ctx, &datapb.ReportDataNodeTtMsgsRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(commonpb.MsgType_DataNodeTt),
-				commonpbutil.WithTimeStamp(submitTs),
-				commonpbutil.WithSourceID(m.nodeID),
-			),
-			Msgs: toSendMsgs,
-		})
-		if err == nil {
-			err = merr.Error(status)
-		}
-		if err != nil {
-			log.Warn("error happen when ReportDataNodeTtMsgs", zap.Error(err))
-			return err
-		}
-		return nil
+		return m.broker.ReportTimeTick(ctx, toSendMsgs)
 	}, retry.Attempts(20), retry.Sleep(time.Millisecond*100))
 	if err != nil {
 		log.Error("ReportDataNodeTtMsgs fail after retry", zap.Error(err))

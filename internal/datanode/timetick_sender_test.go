@@ -21,20 +21,25 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/atomic"
-	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 func TestTimetickManagerNormal(t *testing.T) {
 	ctx := context.Background()
-	manager := newTimeTickSender(&DataCoordFactory{}, 0)
+
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().ReportTimeTick(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	manager := newTimeTickSender(broker, 0)
 
 	channelName1 := "channel1"
 	ts := uint64(time.Now().UnixMilli())
@@ -129,26 +134,11 @@ func TestTimetickManagerNormal(t *testing.T) {
 
 func TestTimetickManagerSendErr(t *testing.T) {
 	ctx := context.Background()
-	manager := newTimeTickSender(&DataCoordFactory{ReportDataNodeTtMsgsError: true}, 0)
 
-	channelName1 := "channel1"
-	ts := uint64(time.Now().Unix())
-	var segmentID1 int64 = 28257
-	segmentStats := []*commonpb.SegmentStats{
-		{
-			SegmentID: segmentID1,
-			NumRows:   100,
-		},
-	}
-	// update first time
-	manager.update(channelName1, ts, segmentStats)
-	err := manager.sendReport(ctx)
-	assert.Error(t, err)
-}
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().ReportTimeTick(mock.Anything, mock.Anything).Return(errors.New("mock")).Maybe()
 
-func TestTimetickManagerSendNotSuccess(t *testing.T) {
-	ctx := context.Background()
-	manager := newTimeTickSender(&DataCoordFactory{ReportDataNodeTtMsgsNotSuccess: true}, 0)
+	manager := newTimeTickSender(broker, 0)
 
 	channelName1 := "channel1"
 	ts := uint64(time.Now().Unix())
@@ -169,18 +159,20 @@ func TestTimetickManagerSendReport(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	mockDataCoord := mocks.NewMockDataCoordClient(t)
-	tsInMill := time.Now().UnixMilli()
 
-	validTs := atomic.NewBool(false)
-	mockDataCoord.EXPECT().ReportDataNodeTtMsgs(mock.Anything, mock.Anything).Run(func(ctx context.Context, req *datapb.ReportDataNodeTtMsgsRequest, opt ...grpc.CallOption) {
-		if req.GetBase().Timestamp > uint64(tsInMill) {
-			validTs.Store(true)
-		}
-	}).Return(merr.Success(), nil)
-	manager := newTimeTickSender(mockDataCoord, 0)
+	called := atomic.NewBool(false)
+
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().ReportTimeTick(mock.Anything, mock.Anything).
+		Run(func(_ context.Context, _ []*msgpb.DataNodeTtMsg) {
+			called.Store(true)
+		}).
+		Return(nil)
+	mockDataCoord.EXPECT().ReportDataNodeTtMsgs(mock.Anything, mock.Anything).Return(merr.Status(nil), nil).Maybe()
+	manager := newTimeTickSender(broker, 0)
 	go manager.start(ctx)
 
 	assert.Eventually(t, func() bool {
-		return validTs.Load()
+		return called.Load()
 	}, 2*time.Second, 500*time.Millisecond)
 }

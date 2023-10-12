@@ -819,16 +819,15 @@ func dropVirtualChannelFunc(dsService *dataSyncService, opts ...retry.Option) fl
 		req.Segments = segments
 
 		err := retry.Do(context.Background(), func() error {
-			resp, err := dsService.dataCoord.DropVirtualChannel(context.Background(), req)
-			// should be network issue, return error and retry
-			err = merr.CheckRPCCall(resp, err)
-			if errors.Is(err, merr.ErrChannelNotFound) {
-				log.Warn("skip sync and start to drop virtual channel", zap.String("channel", dsService.vchannelName), zap.Error(err))
-				return nil
-			} else if err != nil {
+			err := dsService.broker.DropVirtualChannel(context.Background(), req)
+			if err != nil {
+				// meta error, datanode handles a virtual channel does not belong here
+				if errors.Is(err, merr.ErrChannelNotFound) {
+					log.Warn("meta error found, skip sync and start to drop virtual channel", zap.String("channel", dsService.vchannelName))
+					return nil
+				}
 				return err
 			}
-
 			dsService.channel.transferNewSegments(lo.Map(startPos, func(pos *datapb.SegmentStartPosition, _ int) UniqueID {
 				return pos.GetSegmentID()
 			}))
@@ -910,14 +909,7 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 			Channel:        dsService.vchannelName,
 		}
 		err := retry.Do(context.Background(), func() error {
-			rsp, err := dsService.dataCoord.SaveBinlogPaths(context.Background(), req)
-			// should be network issue, return error and retry
-			if err != nil {
-				return err
-			}
-
-			err = merr.Error(rsp)
-
+			err := dsService.broker.SaveBinlogPaths(context.Background(), req)
 			// Segment not found during stale segment flush. Segment might get compacted already.
 			// Stop retry and still proceed to the end, ignoring this error.
 			if !pack.flushed && errors.Is(err, merr.ErrSegmentNotFound) {

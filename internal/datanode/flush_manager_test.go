@@ -25,13 +25,15 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
+	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -653,22 +655,28 @@ func TestRendezvousFlushManager_close(t *testing.T) {
 }
 
 func TestFlushNotifyFunc(t *testing.T) {
-	rcf := &RootCoordFactory{
-		pkType: schemapb.DataType_Int64,
-	}
+	meta := NewMetaFactory().GetCollectionMeta(1, "testCollection", schemapb.DataType_Int64)
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).
+		Return(&milvuspb.DescribeCollectionResponse{
+			Status: merr.Status(nil),
+			Schema: meta.GetSchema(),
+		}, nil).Maybe()
+	broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil).Maybe()
+	broker.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).Return(nil).Maybe()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cm := storage.NewLocalChunkManager(storage.RootPath(flushTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
-	channel := newChannel("channel", 1, nil, rcf, cm)
+	channel := newChannel("channel", 1, nil, broker, cm)
 
-	dataCoord := &DataCoordFactory{}
 	flushingCache := newCache()
 	dsService := &dataSyncService{
 		collectionID:     1,
 		channel:          channel,
-		dataCoord:        dataCoord,
+		broker:           broker,
 		flushingSegCache: flushingCache,
 	}
 	notifyFunc := flushNotifyFunc(dsService, retry.Attempts(1))
@@ -693,14 +701,18 @@ func TestFlushNotifyFunc(t *testing.T) {
 	})
 
 	t.Run("datacoord save fails", func(t *testing.T) {
-		dataCoord.SaveBinlogPathStatus = merr.Status(merr.WrapErrCollectionNotFound("collection"))
+		broker.ExpectedCalls = nil
+		broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).
+			Return(merr.WrapErrCollectionNotFound("test_collection"))
 		assert.Panics(t, func() {
 			notifyFunc(&segmentFlushPack{})
 		})
 	})
 
 	t.Run("stale segment not found", func(t *testing.T) {
-		dataCoord.SaveBinlogPathStatus = merr.Status(merr.WrapErrSegmentNotFound(100))
+		broker.ExpectedCalls = nil
+		broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).
+			Return(merr.WrapErrSegmentNotFound(0))
 		assert.NotPanics(t, func() {
 			notifyFunc(&segmentFlushPack{flushed: false})
 		})
@@ -709,14 +721,18 @@ func TestFlushNotifyFunc(t *testing.T) {
 	// issue https://github.com/milvus-io/milvus/issues/17097
 	// meta error, datanode shall not panic, just drop the virtual channel
 	t.Run("datacoord found meta error", func(t *testing.T) {
-		dataCoord.SaveBinlogPathStatus = merr.Status(merr.WrapErrChannelNotFound("channel"))
+		broker.ExpectedCalls = nil
+		broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).
+			Return(merr.WrapErrChannelNotFound("channel"))
 		assert.NotPanics(t, func() {
 			notifyFunc(&segmentFlushPack{})
 		})
 	})
 
 	t.Run("datacoord call error", func(t *testing.T) {
-		dataCoord.SaveBinlogPathError = true
+		broker.ExpectedCalls = nil
+		broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).
+			Return(errors.New("mock"))
 		assert.Panics(t, func() {
 			notifyFunc(&segmentFlushPack{})
 		})
@@ -724,9 +740,15 @@ func TestFlushNotifyFunc(t *testing.T) {
 }
 
 func TestDropVirtualChannelFunc(t *testing.T) {
-	rcf := &RootCoordFactory{
-		pkType: schemapb.DataType_Int64,
-	}
+	meta := NewMetaFactory().GetCollectionMeta(1, "testCollection", schemapb.DataType_Int64)
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).
+		Return(&milvuspb.DescribeCollectionResponse{
+			Status: merr.Status(nil),
+			Schema: meta.GetSchema(),
+		}, nil)
+	broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil).Maybe()
+	broker.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).Return(nil).Maybe()
 	vchanName := "vchan_01"
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -734,14 +756,13 @@ func TestDropVirtualChannelFunc(t *testing.T) {
 	cm := storage.NewLocalChunkManager(storage.RootPath(flushTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
-	channel := newChannel(vchanName, 1, nil, rcf, cm)
+	channel := newChannel(vchanName, 1, nil, broker, cm)
 
-	dataCoord := &DataCoordFactory{}
 	flushingCache := newCache()
 	dsService := &dataSyncService{
 		collectionID:     1,
 		channel:          channel,
-		dataCoord:        dataCoord,
+		broker:           broker,
 		flushingSegCache: flushingCache,
 		vchannelName:     vchanName,
 	}
@@ -787,16 +808,10 @@ func TestDropVirtualChannelFunc(t *testing.T) {
 			})
 		})
 	})
-	t.Run("datacoord drop fails", func(t *testing.T) {
-		dataCoord.DropVirtualChannelStatus = commonpb.ErrorCode_UnexpectedError
-		assert.Panics(t, func() {
-			dropFunc(nil)
-		})
-	})
-
-	t.Run("datacoord call error", func(t *testing.T) {
-		dataCoord.DropVirtualChannelStatus = commonpb.ErrorCode_UnexpectedError
-		dataCoord.DropVirtualChannelError = true
+	t.Run("datacoord_return_error", func(t *testing.T) {
+		broker.ExpectedCalls = nil
+		broker.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).
+			Return(errors.New("mock"))
 		assert.Panics(t, func() {
 			dropFunc(nil)
 		})
@@ -804,9 +819,10 @@ func TestDropVirtualChannelFunc(t *testing.T) {
 
 	// issue https://github.com/milvus-io/milvus/issues/17097
 	// meta error, datanode shall not panic, just drop the virtual channel
-	t.Run("datacoord found meta error", func(t *testing.T) {
-		dataCoord.DropVirtualChannelStatus = commonpb.ErrorCode_MetaFailed
-		dataCoord.DropVirtualChannelError = false
+	t.Run("datacoord_return_channel_not_found", func(t *testing.T) {
+		broker.ExpectedCalls = nil
+		broker.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).
+			Return(merr.WrapErrChannelNotFound("channel"))
 		assert.NotPanics(t, func() {
 			dropFunc(nil)
 		})
