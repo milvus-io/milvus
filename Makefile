@@ -21,8 +21,8 @@ OS := $(shell uname -s)
 mode = Release
 
 use_disk_index = OFF
-ifdef USE_DISK_INDEX
-	use_disk_index = ${USE_DISK_INDEX}
+ifdef disk_index
+	use_disk_index = ${disk_index}
 endif
 
 use_asan = OFF
