@@ -2,14 +2,20 @@ package querycoord
 
 import (
 	"fmt"
+	"strings"
+	"sync"
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/kv"
+	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util"
 )
 
 var ErrInvalidKey = errors.New("invalid load info key")
@@ -24,17 +30,20 @@ const (
 )
 
 type Catalog struct {
-	cli kv.MetaKv
+	cli    kv.MetaKv
+	Col2Db *StrCache
 }
 
 func NewCatalog(cli kv.MetaKv) Catalog {
 	return Catalog{
-		cli: cli,
+		cli:    cli,
+		Col2Db: NewStrCache(cli),
 	}
 }
 
 func (s Catalog) SaveCollection(collection *querypb.CollectionLoadInfo, partitions ...*querypb.PartitionLoadInfo) error {
-	k := EncodeCollectionLoadInfoKey(collection.GetCollectionID())
+	dbID := s.Col2Db.get(fmt.Sprintf("%d", collection.GetCollectionID()))
+	k := EncodeCollectionLoadInfoKey(collection.GetCollectionID(), s.cli.GetType(), dbID)
 	v, err := proto.Marshal(collection)
 	if err != nil {
 		return err
@@ -48,7 +57,8 @@ func (s Catalog) SaveCollection(collection *querypb.CollectionLoadInfo, partitio
 
 func (s Catalog) SavePartition(info ...*querypb.PartitionLoadInfo) error {
 	for _, partition := range info {
-		k := EncodePartitionLoadInfoKey(partition.GetCollectionID(), partition.GetPartitionID())
+		dbID := s.Col2Db.get(fmt.Sprintf("%d", partition.GetCollectionID()))
+		k := EncodePartitionLoadInfoKey(partition.GetCollectionID(), partition.GetPartitionID(), s.cli.GetType(), dbID)
 		v, err := proto.Marshal(partition)
 		if err != nil {
 			return err
@@ -62,7 +72,9 @@ func (s Catalog) SavePartition(info ...*querypb.PartitionLoadInfo) error {
 }
 
 func (s Catalog) SaveReplica(replica *querypb.Replica) error {
-	key := encodeReplicaKey(replica.GetCollectionID(), replica.GetID())
+	dbID := s.Col2Db.get(fmt.Sprintf("%d", replica.GetCollectionID()))
+
+	key := encodeReplicaKey(replica.GetCollectionID(), replica.GetID(), s.cli.GetType(), dbID)
 	value, err := proto.Marshal(replica)
 	if err != nil {
 		return err
@@ -205,46 +217,130 @@ func (s Catalog) ReleaseCollection(collection int64) error {
 	}
 	// remove collection and obtained partitions
 	keys := lo.Map(partitions, func(partition *querypb.PartitionLoadInfo, _ int) string {
-		return EncodePartitionLoadInfoKey(collection, partition.GetPartitionID())
+		dbID := s.Col2Db.get(fmt.Sprintf("%d", partition.GetCollectionID()))
+		return EncodePartitionLoadInfoKey(collection, partition.GetPartitionID(), s.cli.GetType(), dbID)
 	})
-	k := EncodeCollectionLoadInfoKey(collection)
+	dbID := s.Col2Db.get(fmt.Sprintf("%d", collection))
+	k := EncodeCollectionLoadInfoKey(collection, s.cli.GetType(), dbID)
 	keys = append(keys, k)
 	return s.cli.MultiRemove(keys)
 }
 
 func (s Catalog) ReleasePartition(collection int64, partitions ...int64) error {
 	keys := lo.Map(partitions, func(partition int64, _ int) string {
-		return EncodePartitionLoadInfoKey(collection, partition)
+		dbID := s.Col2Db.get(fmt.Sprintf("%d", collection))
+		return EncodePartitionLoadInfoKey(collection, partition, s.cli.GetType(), dbID)
 	})
 	return s.cli.MultiRemove(keys)
 }
 
 func (s Catalog) ReleaseReplicas(collectionID int64) error {
-	key := encodeCollectionReplicaKey(collectionID)
+	dbID := s.Col2Db.get(fmt.Sprintf("%d", collectionID))
+	key := encodeCollectionReplicaKey(collectionID, s.cli.GetType(), dbID)
 	return s.cli.RemoveWithPrefix(key)
 }
 
 func (s Catalog) ReleaseReplica(collection, replica int64) error {
-	key := encodeReplicaKey(collection, replica)
+	dbID := s.Col2Db.get(fmt.Sprintf("%d", collection))
+
+	key := encodeReplicaKey(collection, replica, s.cli.GetType(), dbID)
 	return s.cli.Remove(key)
 }
 
-func EncodeCollectionLoadInfoKey(collection int64) string {
+func EncodeCollectionLoadInfoKey(collection int64, metatype string, dbID string) string {
+	if metatype == util.MetaStoreTypeEtcd {
+		return fmt.Sprintf("%s/%s/%d", CollectionLoadInfoPrefix, dbID, collection)
+	}
 	return fmt.Sprintf("%s/%d", CollectionLoadInfoPrefix, collection)
 }
 
-func EncodePartitionLoadInfoKey(collection, partition int64) string {
+func EncodePartitionLoadInfoKey(collection, partition int64, metatype string, dbID string) string {
+	if metatype == util.MetaStoreTypeEtcd {
+		return fmt.Sprintf("%s/%s/%d/%d", PartitionLoadInfoPrefix, dbID, collection, partition)
+	}
 	return fmt.Sprintf("%s/%d/%d", PartitionLoadInfoPrefix, collection, partition)
 }
 
-func encodeReplicaKey(collection, replica int64) string {
+func encodeReplicaKey(collection, replica int64, metatype string, dbID string) string {
+	if metatype == util.MetaStoreTypeEtcd {
+		return fmt.Sprintf("%s/%s/%d/%d", ReplicaPrefix, dbID, collection, replica)
+	}
 	return fmt.Sprintf("%s/%d/%d", ReplicaPrefix, collection, replica)
+
 }
 
-func encodeCollectionReplicaKey(collection int64) string {
+func encodeCollectionReplicaKey(collection int64, metatype string, dbID string) string {
+	if metatype == util.MetaStoreTypeEtcd {
+		return fmt.Sprintf("%s/%s/%d", ReplicaPrefix, dbID, collection)
+	}
 	return fmt.Sprintf("%s/%d", ReplicaPrefix, collection)
 }
 
 func encodeResourceGroupKey(rgName string) string {
 	return fmt.Sprintf("%s/%s", ResourceGroupPrefix, rgName)
+}
+
+type StrCache struct {
+	mu    sync.Mutex
+	kv    kv.MetaKv
+	cache map[string]string
+}
+
+func NewStrCache(kv kv.MetaKv) *StrCache {
+	new_c := &StrCache{
+		cache: make(map[string]string),
+		kv:    kv,
+	}
+	new_c.update()
+	return new_c
+}
+
+func (c *StrCache) get(key string) string {
+	log.Warn("Getting col-db for: ", zap.String("col_id", key))
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	val, ok := c.cache[key]
+	if ok == false {
+		c.update()
+		val, ok = c.cache[key]
+		if ok == false {
+			panic("Unable to find ColID -> DBID map")
+		}
+		return val
+	}
+	return val
+}
+
+func (c *StrCache) update() {
+	// If we need to grab the nondb collections
+	new_cache := map[string]string{}
+	keys, _, err := c.kv.LoadWithPrefix(rootcoord.CollectionMetaPrefix)
+	if err != nil {
+		return
+	}
+	for _, key := range keys {
+		split_key := strings.Split(key, "/")
+		if len(split_key) == 3 { // Current keys in ColMetaPre are 3 long
+			colID := split_key[len(split_key)-1]
+			new_cache[colID] = fmt.Sprintf("%d", util.NonDBID)
+		} else {
+			log.Warn("unclean split for old keys", zap.Int("len", len(split_key)))
+		}
+	}
+
+	keys, _, err = c.kv.LoadWithPrefix(rootcoord.CollectionInfoMetaPrefix)
+	if err != nil {
+		return
+	}
+	for _, key := range keys {
+		split_key := strings.Split(key, "/")
+		if len(split_key) == 7 { // Current keys in ColInfoMetaPre are 6 long
+			colID := split_key[len(split_key)-1]
+			dbID := split_key[len(split_key)-2]
+			new_cache[colID] = dbID
+		} else {
+			log.Warn("unclean split for new keys", zap.Int("len", len(split_key)))
+		}
+	}
+	c.cache = new_cache
 }
