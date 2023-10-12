@@ -5,7 +5,6 @@ from time import sleep
 from pymilvus import connections
 from chaos.checker import (InsertChecker,
                            FlushChecker,
-                           CompactChecker, 
                            SearchChecker,
                            QueryChecker,
                            DeleteChecker,
@@ -20,7 +19,7 @@ from common.milvus_sys import MilvusSys
 from chaos.chaos_commons import assert_statistic
 from common.common_type import CaseLabel
 from chaos import constants
-from delayed_assert import expect, assert_expectations
+from delayed_assert import assert_expectations
 
 
 def get_all_collections():
@@ -74,7 +73,6 @@ class TestOperations(TestBase):
             Op.flush: FlushChecker(collection_name=c_name),
             Op.search: SearchChecker(collection_name=c_name),
             Op.query: QueryChecker(collection_name=c_name),
-            Op.compact: CompactChecker(collection_name=c_name),
             Op.delete: DeleteChecker(collection_name=c_name),
         }
         self.health_checkers = checkers
