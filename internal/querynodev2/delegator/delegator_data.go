@@ -435,11 +435,16 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	defer sd.deleteMut.Unlock()
 	// apply buffered delete for new segments
 	// no goroutines here since qnv2 has no load merging logic
-	for i, info := range infos {
+	for _, info := range infos {
 		candidate := idCandidates[info.GetSegmentID()]
 		position := info.GetDeltaPosition()
 		if position == nil { // for compatibility of rolling upgrade from 2.2.x to 2.3
-			position = deltaPositions[i]
+			// During rolling upgrade, Querynode(2.3) may receive merged LoadSegmentRequest
+			// from QueryCoord(2.2); In version 2.2.x, only segments with the same dmlChannel
+			// can be merged, and deltaPositions will be merged into a single deltaPosition,
+			// so we should use `deltaPositions[0]` as the seek position for all the segments
+			// within the same LoadSegmentRequest.
+			position = deltaPositions[0]
 		}
 
 		deleteData := &storage.DeleteData{}
