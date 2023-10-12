@@ -22,6 +22,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
@@ -32,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -53,10 +55,12 @@ type Catalog struct {
 	MetaKv               kv.MetaKv
 	ChunkManagerRootPath string
 	metaRootpath         string
+	Col2Db               *StrCache
 }
 
 func NewCatalog(MetaKv kv.MetaKv, chunkManagerRootPath string, metaRootpath string) *Catalog {
-	return &Catalog{MetaKv: MetaKv, ChunkManagerRootPath: chunkManagerRootPath, metaRootpath: metaRootpath}
+	cache := NewStrCache(MetaKv)
+	return &Catalog{MetaKv: MetaKv, ChunkManagerRootPath: chunkManagerRootPath, metaRootpath: metaRootpath, Col2Db: cache}
 }
 
 func (kc *Catalog) ListSegments(ctx context.Context) ([]*datapb.SegmentInfo, error) {
@@ -229,7 +233,8 @@ func (kc *Catalog) applyBinlogInfo(segments []*datapb.SegmentInfo, insertLogs, d
 }
 
 func (kc *Catalog) AddSegment(ctx context.Context, segment *datapb.SegmentInfo) error {
-	kvs, err := buildSegmentAndBinlogsKvs(segment)
+	dbID := kc.Col2Db.get(fmt.Sprintf("%d", segment.GetCollectionID()))
+	kvs, err := buildSegmentAndBinlogsKvs(segment, kc.MetaKv.GetType(), dbID)
 	if err != nil {
 		return err
 	}
@@ -239,7 +244,8 @@ func (kc *Catalog) AddSegment(ctx context.Context, segment *datapb.SegmentInfo) 
 // LoadFromSegmentPath loads segment info from persistent storage by given segment path.
 // # TESTING ONLY #
 func (kc *Catalog) LoadFromSegmentPath(colID, partID, segID typeutil.UniqueID) (*datapb.SegmentInfo, error) {
-	v, err := kc.MetaKv.Load(buildSegmentPath(colID, partID, segID))
+	dbID := kc.Col2Db.get(fmt.Sprintf("%d", colID))
+	v, err := kc.MetaKv.Load(buildSegmentPath(colID, partID, segID, kc.MetaKv.GetType(), dbID))
 	if err != nil {
 		log.Error("(testing only) failed to load segment info by segment path")
 		return nil, err
@@ -279,8 +285,9 @@ func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.Segment
 			}
 			maps.Copy(kvs, binlogs)
 		}
+		dbID := kc.Col2Db.get(fmt.Sprintf("%d", segment.GetCollectionID()))
 
-		k, v, err := buildSegmentKv(cloned)
+		k, v, err := buildSegmentKv(cloned, kc.MetaKv.GetType(), dbID)
 		if err != nil {
 			return err
 		}
@@ -289,9 +296,10 @@ func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.Segment
 
 	for _, b := range binlogs {
 		segment := b.Segment
+		dbID := kc.Col2Db.get(fmt.Sprintf("%d", segment.GetCollectionID()))
 		binlogKvs, err := buildBinlogKvsWithLogID(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(),
 			cloneLogs(segment.GetBinlogs()), cloneLogs(segment.GetDeltalogs()), cloneLogs(segment.GetStatslogs()),
-			len(segment.GetCompactionFrom()) > 0)
+			len(segment.GetCompactionFrom()) > 0, kc.MetaKv.GetType(), dbID)
 		if err != nil {
 			return err
 		}
@@ -304,12 +312,13 @@ func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.Segment
 func (kc *Catalog) handleDroppedSegment(segment *datapb.SegmentInfo) (kvs map[string]string, err error) {
 	var has bool
 	has, err = kc.hasBinlogPrefix(segment)
+	dbID := kc.Col2Db.get(fmt.Sprintf("%d", segment.GetCollectionID()))
 	if err != nil {
 		return
 	}
 	// To be compatible with previous implementation, we have to write binlogs on etcd for correct gc.
 	if !has {
-		kvs, err = buildBinlogKvsWithLogID(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(), cloneLogs(segment.GetBinlogs()), cloneLogs(segment.GetDeltalogs()), cloneLogs(segment.GetStatslogs()), true)
+		kvs, err = buildBinlogKvsWithLogID(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(), cloneLogs(segment.GetBinlogs()), cloneLogs(segment.GetDeltalogs()), cloneLogs(segment.GetStatslogs()), true, kc.MetaKv.GetType(), dbID)
 		if err != nil {
 			return
 		}
@@ -386,19 +395,20 @@ func (kc *Catalog) collectMetrics(s *datapb.SegmentInfo) {
 
 func (kc *Catalog) hasBinlogPrefix(segment *datapb.SegmentInfo) (bool, error) {
 	collectionID, partitionID, segmentID := segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID()
-	prefix := buildFieldBinlogPathPrefix(collectionID, partitionID, segmentID)
+	dbID := kc.Col2Db.get(fmt.Sprintf("%d", collectionID))
+	prefix := buildFieldBinlogPathPrefix(collectionID, partitionID, segmentID, kc.MetaKv.GetType(), dbID)
 	hasBinlogPrefix, err := kc.MetaKv.HasPrefix(prefix)
 	if err != nil {
 		return false, err
 	}
 
-	prefix = buildFieldDeltalogPathPrefix(collectionID, partitionID, segmentID)
+	prefix = buildFieldDeltalogPathPrefix(collectionID, partitionID, segmentID, kc.MetaKv.GetType(), dbID)
 	hasDeltaPrefix, err := kc.MetaKv.HasPrefix(prefix)
 	if err != nil {
 		return false, err
 	}
 
-	prefix = buildFieldStatslogPathPrefix(collectionID, partitionID, segmentID)
+	prefix = buildFieldStatslogPathPrefix(collectionID, partitionID, segmentID, kc.MetaKv.GetType(), dbID)
 	hasStatsPrefix, err := kc.MetaKv.HasPrefix(prefix)
 	if err != nil {
 		return false, err
@@ -414,7 +424,8 @@ func (kc *Catalog) SaveDroppedSegmentsInBatch(ctx context.Context, segments []*d
 
 	kvs := make(map[string]string)
 	for _, s := range segments {
-		key := buildSegmentPath(s.GetCollectionID(), s.GetPartitionID(), s.GetID())
+		dbID := kc.Col2Db.get(fmt.Sprintf("%d", s.GetCollectionID()))
+		key := buildSegmentPath(s.GetCollectionID(), s.GetPartitionID(), s.GetID(), kc.MetaKv.GetType(), dbID)
 		noBinlogsSegment, _, _, _ := CloneSegmentWithExcludeBinlogs(s)
 		// `s` is not mutated above. Also, `noBinlogsSegment` is a cloned version of `s`.
 		segmentutil.ReCalcRowCount(s, noBinlogsSegment)
@@ -436,9 +447,10 @@ func (kc *Catalog) SaveDroppedSegmentsInBatch(ctx context.Context, segments []*d
 }
 
 func (kc *Catalog) DropSegment(ctx context.Context, segment *datapb.SegmentInfo) error {
-	segKey := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
+	dbID := kc.Col2Db.get(fmt.Sprintf("%d", segment.GetCollectionID()))
+	segKey := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(), kc.MetaKv.GetType(), dbID)
 	keys := []string{segKey}
-	binlogKeys := buildBinlogKeys(segment)
+	binlogKeys := buildBinlogKeys(segment, kc.MetaKv.GetType(), dbID)
 	keys = append(keys, binlogKeys...)
 	if err := kc.MetaKv.MultiRemove(keys); err != nil {
 		return err
@@ -533,13 +545,14 @@ func (kc *Catalog) getBinlogsWithPrefix(binlogType storage.BinlogType, collectio
 	segmentID typeutil.UniqueID,
 ) ([]string, []string, error) {
 	var binlogPrefix string
+	dbID := kc.Col2Db.get(fmt.Sprintf("%d", collectionID))
 	switch binlogType {
 	case storage.InsertBinlog:
-		binlogPrefix = buildFieldBinlogPathPrefix(collectionID, partitionID, segmentID)
+		binlogPrefix = buildFieldBinlogPathPrefix(collectionID, partitionID, segmentID, kc.MetaKv.GetType(), dbID)
 	case storage.DeleteBinlog:
-		binlogPrefix = buildFieldDeltalogPathPrefix(collectionID, partitionID, segmentID)
+		binlogPrefix = buildFieldDeltalogPathPrefix(collectionID, partitionID, segmentID, kc.MetaKv.GetType(), dbID)
 	case storage.StatsBinlog:
-		binlogPrefix = buildFieldStatslogPathPrefix(collectionID, partitionID, segmentID)
+		binlogPrefix = buildFieldStatslogPathPrefix(collectionID, partitionID, segmentID, kc.MetaKv.GetType(), dbID)
 	default:
 		return nil, nil, fmt.Errorf("invalid binlog type: %d", binlogType)
 	}
@@ -573,7 +586,8 @@ func (kc *Catalog) unmarshalBinlog(binlogType storage.BinlogType, collectionID, 
 }
 
 func (kc *Catalog) CreateIndex(ctx context.Context, index *model.Index) error {
-	key := BuildIndexKey(index.CollectionID, index.IndexID)
+	dbID := kc.Col2Db.get(fmt.Sprintf("%d", index.CollectionID))
+	key := BuildIndexKey(index.CollectionID, index.IndexID, kc.MetaKv.GetType(), dbID)
 
 	value, err := proto.Marshal(model.MarshalIndexModel(index))
 	if err != nil {
@@ -612,7 +626,8 @@ func (kc *Catalog) ListIndexes(ctx context.Context) ([]*model.Index, error) {
 func (kc *Catalog) AlterIndexes(ctx context.Context, indexes []*model.Index) error {
 	kvs := make(map[string]string)
 	for _, index := range indexes {
-		key := BuildIndexKey(index.CollectionID, index.IndexID)
+		dbID := kc.Col2Db.get(fmt.Sprintf("%d", index.CollectionID))
+		key := BuildIndexKey(index.CollectionID, index.IndexID, kc.MetaKv.GetType(), dbID)
 
 		value, err := proto.Marshal(model.MarshalIndexModel(index))
 		if err != nil {
@@ -636,7 +651,8 @@ func (kc *Catalog) AlterIndexes(ctx context.Context, indexes []*model.Index) err
 }
 
 func (kc *Catalog) DropIndex(ctx context.Context, collID typeutil.UniqueID, dropIdxID typeutil.UniqueID) error {
-	key := BuildIndexKey(collID, dropIdxID)
+	dbID := kc.Col2Db.get(fmt.Sprintf("%d", collID))
+	key := BuildIndexKey(collID, dropIdxID, kc.MetaKv.GetType(), dbID)
 
 	err := kc.MetaKv.Remove(key)
 	if err != nil {
@@ -649,7 +665,8 @@ func (kc *Catalog) DropIndex(ctx context.Context, collID typeutil.UniqueID, drop
 }
 
 func (kc *Catalog) CreateSegmentIndex(ctx context.Context, segIdx *model.SegmentIndex) error {
-	key := BuildSegmentIndexKey(segIdx.CollectionID, segIdx.PartitionID, segIdx.SegmentID, segIdx.BuildID)
+	dbID := kc.Col2Db.get(fmt.Sprintf("%d", segIdx.CollectionID))
+	key := BuildSegmentIndexKey(segIdx.CollectionID, segIdx.PartitionID, segIdx.SegmentID, segIdx.BuildID, kc.MetaKv.GetType(), dbID)
 
 	value, err := proto.Marshal(model.MarshalSegmentIndexModel(segIdx))
 	if err != nil {
@@ -689,7 +706,8 @@ func (kc *Catalog) ListSegmentIndexes(ctx context.Context) ([]*model.SegmentInde
 func (kc *Catalog) AlterSegmentIndexes(ctx context.Context, segIdxes []*model.SegmentIndex) error {
 	kvs := make(map[string]string)
 	for _, segIdx := range segIdxes {
-		key := BuildSegmentIndexKey(segIdx.CollectionID, segIdx.PartitionID, segIdx.SegmentID, segIdx.BuildID)
+		dbID := kc.Col2Db.get(fmt.Sprintf("%d", segIdx.CollectionID))
+		key := BuildSegmentIndexKey(segIdx.CollectionID, segIdx.PartitionID, segIdx.SegmentID, segIdx.BuildID, kc.MetaKv.GetType(), dbID)
 		value, err := proto.Marshal(model.MarshalSegmentIndexModel(segIdx))
 		if err != nil {
 			return err
@@ -700,7 +718,8 @@ func (kc *Catalog) AlterSegmentIndexes(ctx context.Context, segIdxes []*model.Se
 }
 
 func (kc *Catalog) DropSegmentIndex(ctx context.Context, collID, partID, segID, buildID typeutil.UniqueID) error {
-	key := BuildSegmentIndexKey(collID, partID, segID, buildID)
+	dbID := kc.Col2Db.get(fmt.Sprintf("%d", collID))
+	key := BuildSegmentIndexKey(collID, partID, segID, buildID, kc.MetaKv.GetType(), dbID)
 
 	err := kc.MetaKv.Remove(key)
 	if err != nil {
@@ -716,9 +735,10 @@ const allPartitionID = -1
 // GcConfirm returns true if related collection/partition is not found.
 // DataCoord will remove all the meta eventually after GC is finished.
 func (kc *Catalog) GcConfirm(ctx context.Context, collectionID, partitionID typeutil.UniqueID) bool {
-	prefix := buildCollectionPrefix(collectionID)
+	dbID := kc.Col2Db.get(fmt.Sprintf("%d", collectionID))
+	prefix := buildCollectionPrefix(collectionID, kc.MetaKv.GetType(), dbID)
 	if partitionID != allPartitionID {
-		prefix = buildPartitionPrefix(collectionID, partitionID)
+		prefix = buildPartitionPrefix(collectionID, partitionID, kc.MetaKv.GetType(), dbID)
 	}
 	keys, values, err := kc.MetaKv.LoadWithPrefix(prefix)
 	if err != nil {
@@ -818,7 +838,7 @@ func hasSepcialStatslog(logs *datapb.FieldBinlog) bool {
 }
 
 func buildBinlogKvsWithLogID(collectionID, partitionID, segmentID typeutil.UniqueID,
-	binlogs, deltalogs, statslogs []*datapb.FieldBinlog, ignoreNumberCheck bool,
+	binlogs, deltalogs, statslogs []*datapb.FieldBinlog, ignoreNumberCheck bool, metatype string, dbID string,
 ) (map[string]string, error) {
 	checkBinlogs(storage.InsertBinlog, segmentID, binlogs)
 	checkBinlogs(storage.DeleteBinlog, segmentID, deltalogs)
@@ -841,7 +861,7 @@ func buildBinlogKvsWithLogID(collectionID, partitionID, segmentID typeutil.Uniqu
 	}
 
 	fillLogIDByLogPath(binlogs, deltalogs, statslogs)
-	kvs, err := buildBinlogKvs(collectionID, partitionID, segmentID, binlogs, deltalogs, statslogs)
+	kvs, err := buildBinlogKvs(collectionID, partitionID, segmentID, binlogs, deltalogs, statslogs, metatype, dbID)
 	if err != nil {
 		return nil, err
 	}
@@ -849,21 +869,22 @@ func buildBinlogKvsWithLogID(collectionID, partitionID, segmentID typeutil.Uniqu
 	return kvs, nil
 }
 
-func buildSegmentAndBinlogsKvs(segment *datapb.SegmentInfo) (map[string]string, error) {
+func buildSegmentAndBinlogsKvs(segment *datapb.SegmentInfo, metatype string, dbID string) (map[string]string, error) {
 	noBinlogsSegment, binlogs, deltalogs, statslogs := CloneSegmentWithExcludeBinlogs(segment)
+	log.Warn("Metatype and dbid", zap.String("meta", metatype), zap.String("dbID", dbID))
 	// `segment` is not mutated above. Also, `noBinlogsSegment` is a cloned version of `segment`.
 	segmentutil.ReCalcRowCount(segment, noBinlogsSegment)
 
 	// compacted segment has only one statslog
 	ignore := (len(segment.GetCompactionFrom()) > 0)
 	// save binlogs separately
-	kvs, err := buildBinlogKvsWithLogID(noBinlogsSegment.CollectionID, noBinlogsSegment.PartitionID, noBinlogsSegment.ID, binlogs, deltalogs, statslogs, ignore)
+	kvs, err := buildBinlogKvsWithLogID(noBinlogsSegment.CollectionID, noBinlogsSegment.PartitionID, noBinlogsSegment.ID, binlogs, deltalogs, statslogs, ignore, metatype, dbID)
 	if err != nil {
 		return nil, err
 	}
 
 	// save segment info
-	k, v, err := buildSegmentKv(noBinlogsSegment)
+	k, v, err := buildSegmentKv(noBinlogsSegment, metatype, dbID)
 	if err != nil {
 		return nil, err
 	}
@@ -872,29 +893,30 @@ func buildSegmentAndBinlogsKvs(segment *datapb.SegmentInfo) (map[string]string, 
 	return kvs, nil
 }
 
-func buildBinlogKeys(segment *datapb.SegmentInfo) []string {
+func buildBinlogKeys(segment *datapb.SegmentInfo, metatype string, dbID string) []string {
 	var keys []string
+
 	// binlog
 	for _, binlog := range segment.Binlogs {
-		key := buildFieldBinlogPath(segment.CollectionID, segment.PartitionID, segment.ID, binlog.FieldID)
+		key := buildFieldBinlogPath(segment.CollectionID, segment.PartitionID, segment.ID, binlog.FieldID, metatype, dbID)
 		keys = append(keys, key)
 	}
 
 	// deltalog
 	for _, deltalog := range segment.Deltalogs {
-		key := buildFieldDeltalogPath(segment.CollectionID, segment.PartitionID, segment.ID, deltalog.FieldID)
+		key := buildFieldDeltalogPath(segment.CollectionID, segment.PartitionID, segment.ID, deltalog.FieldID, metatype, dbID)
 		keys = append(keys, key)
 	}
 
 	// statslog
 	for _, statslog := range segment.Statslogs {
-		key := buildFieldStatslogPath(segment.CollectionID, segment.PartitionID, segment.ID, statslog.FieldID)
+		key := buildFieldStatslogPath(segment.CollectionID, segment.PartitionID, segment.ID, statslog.FieldID, metatype, dbID)
 		keys = append(keys, key)
 	}
 	return keys
 }
 
-func buildBinlogKvs(collectionID, partitionID, segmentID typeutil.UniqueID, binlogs, deltalogs, statslogs []*datapb.FieldBinlog) (map[string]string, error) {
+func buildBinlogKvs(collectionID, partitionID, segmentID typeutil.UniqueID, binlogs, deltalogs, statslogs []*datapb.FieldBinlog, metatype string, dbID string) (map[string]string, error) {
 	kv := make(map[string]string)
 
 	// binlog kv
@@ -903,7 +925,7 @@ func buildBinlogKvs(collectionID, partitionID, segmentID typeutil.UniqueID, binl
 		if err != nil {
 			return nil, fmt.Errorf("marshal binlogs failed, collectionID:%d, segmentID:%d, fieldID:%d, error:%w", collectionID, segmentID, binlog.FieldID, err)
 		}
-		key := buildFieldBinlogPath(collectionID, partitionID, segmentID, binlog.FieldID)
+		key := buildFieldBinlogPath(collectionID, partitionID, segmentID, binlog.FieldID, metatype, dbID)
 		kv[key] = string(binlogBytes)
 	}
 
@@ -913,7 +935,7 @@ func buildBinlogKvs(collectionID, partitionID, segmentID typeutil.UniqueID, binl
 		if err != nil {
 			return nil, fmt.Errorf("marshal deltalogs failed, collectionID:%d, segmentID:%d, fieldID:%d, error:%w", collectionID, segmentID, deltalog.FieldID, err)
 		}
-		key := buildFieldDeltalogPath(collectionID, partitionID, segmentID, deltalog.FieldID)
+		key := buildFieldDeltalogPath(collectionID, partitionID, segmentID, deltalog.FieldID, metatype, dbID)
 		kv[key] = string(binlogBytes)
 	}
 
@@ -923,7 +945,7 @@ func buildBinlogKvs(collectionID, partitionID, segmentID typeutil.UniqueID, binl
 		if err != nil {
 			return nil, fmt.Errorf("marshal statslogs failed, collectionID:%d, segmentID:%d, fieldID:%d, error:%w", collectionID, segmentID, statslog.FieldID, err)
 		}
-		key := buildFieldStatslogPath(collectionID, partitionID, segmentID, statslog.FieldID)
+		key := buildFieldStatslogPath(collectionID, partitionID, segmentID, statslog.FieldID, metatype, dbID)
 		kv[key] = string(binlogBytes)
 	}
 
@@ -951,49 +973,73 @@ func marshalSegmentInfo(segment *datapb.SegmentInfo) (string, error) {
 	return string(segBytes), nil
 }
 
-func buildSegmentKv(segment *datapb.SegmentInfo) (string, string, error) {
+func buildSegmentKv(segment *datapb.SegmentInfo, metatype string, dbID string) (string, string, error) {
 	segBytes, err := marshalSegmentInfo(segment)
 	if err != nil {
 		return "", "", err
 	}
-	key := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
+	key := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(), metatype, dbID)
 	return key, segBytes, nil
 }
 
 // buildSegmentPath common logic mapping segment info to corresponding key in kv store
-func buildSegmentPath(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID) string {
+func buildSegmentPath(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID, metatype string, dbID string) string {
+	if metatype == util.MetaStoreTypeEtcd {
+		return fmt.Sprintf("%s/%s/%d/%d/%d", SegmentPrefix, dbID, collectionID, partitionID, segmentID)
+	}
 	return fmt.Sprintf("%s/%d/%d/%d", SegmentPrefix, collectionID, partitionID, segmentID)
 }
 
-func buildFieldBinlogPath(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID, fieldID typeutil.UniqueID) string {
+func buildFieldBinlogPath(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID, fieldID typeutil.UniqueID, metatype string, dbID string) string {
+	if metatype == util.MetaStoreTypeEtcd {
+		return fmt.Sprintf("%s/%s/%d/%d/%d/%d", SegmentBinlogPathPrefix, dbID, collectionID, partitionID, segmentID, fieldID)
+	}
 	return fmt.Sprintf("%s/%d/%d/%d/%d", SegmentBinlogPathPrefix, collectionID, partitionID, segmentID, fieldID)
 }
 
 // TODO: There's no need to include fieldID in the delta log path key.
-func buildFieldDeltalogPath(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID, fieldID typeutil.UniqueID) string {
+func buildFieldDeltalogPath(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID, fieldID typeutil.UniqueID, metatype string, dbID string) string {
+	if metatype == util.MetaStoreTypeEtcd {
+		return fmt.Sprintf("%s/%s/%d/%d/%d/%d", SegmentDeltalogPathPrefix, dbID, collectionID, partitionID, segmentID, fieldID)
+	}
 	return fmt.Sprintf("%s/%d/%d/%d/%d", SegmentDeltalogPathPrefix, collectionID, partitionID, segmentID, fieldID)
 }
 
 // TODO: There's no need to include fieldID in the stats log path key.
-func buildFieldStatslogPath(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID, fieldID typeutil.UniqueID) string {
+func buildFieldStatslogPath(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID, fieldID typeutil.UniqueID, metatype string, dbID string) string {
+	if metatype == util.MetaStoreTypeEtcd {
+		return fmt.Sprintf("%s/%s/%d/%d/%d/%d", SegmentStatslogPathPrefix, dbID, collectionID, partitionID, segmentID, fieldID)
+	}
 	return fmt.Sprintf("%s/%d/%d/%d/%d", SegmentStatslogPathPrefix, collectionID, partitionID, segmentID, fieldID)
 }
 
 // buildFlushedSegmentPath common logic mapping segment info to corresponding key of IndexCoord in kv store
 // TODO @cai.zhang: remove this
-func buildFlushedSegmentPath(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID) string {
+func buildFlushedSegmentPath(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID, metatype string, dbID string) string {
+	if metatype == util.MetaStoreTypeEtcd {
+		return fmt.Sprintf("%s/%s/%d/%d/%d", util.FlushedSegmentPrefix, dbID, collectionID, partitionID, segmentID)
+	}
 	return fmt.Sprintf("%s/%d/%d/%d", util.FlushedSegmentPrefix, collectionID, partitionID, segmentID)
 }
 
-func buildFieldBinlogPathPrefix(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID) string {
+func buildFieldBinlogPathPrefix(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID, metatype string, dbID string) string {
+	if metatype == util.MetaStoreTypeEtcd {
+		return fmt.Sprintf("%s/%s/%d/%d/%d", SegmentBinlogPathPrefix, dbID, collectionID, partitionID, segmentID)
+	}
 	return fmt.Sprintf("%s/%d/%d/%d", SegmentBinlogPathPrefix, collectionID, partitionID, segmentID)
 }
 
-func buildFieldDeltalogPathPrefix(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID) string {
+func buildFieldDeltalogPathPrefix(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID, metatype string, dbID string) string {
+	if metatype == util.MetaStoreTypeEtcd {
+		return fmt.Sprintf("%s/%s/%d/%d/%d", SegmentBinlogPathPrefix, dbID, collectionID, partitionID, segmentID)
+	}
 	return fmt.Sprintf("%s/%d/%d/%d", SegmentDeltalogPathPrefix, collectionID, partitionID, segmentID)
 }
 
-func buildFieldStatslogPathPrefix(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID) string {
+func buildFieldStatslogPathPrefix(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID, metatype string, dbID string) string {
+	if metatype == util.MetaStoreTypeEtcd {
+		return fmt.Sprintf("%s/%s/%d/%d/%d", SegmentStatslogPathPrefix, dbID, collectionID, partitionID, segmentID)
+	}
 	return fmt.Sprintf("%s/%d/%d/%d", SegmentStatslogPathPrefix, collectionID, partitionID, segmentID)
 }
 
@@ -1006,18 +1052,96 @@ func buildChannelCPKey(vChannel string) string {
 	return fmt.Sprintf("%s/%s", ChannelCheckpointPrefix, vChannel)
 }
 
-func BuildIndexKey(collectionID, indexID int64) string {
+func BuildIndexKey(collectionID, indexID int64, metatype string, dbID string) string {
+	log.Warn("BuildIndexKey meta and dbid", zap.String("meta", metatype), zap.String("db", dbID))
+	if metatype == util.MetaStoreTypeEtcd {
+		return fmt.Sprintf("%s/%s/%d/%d", util.FieldIndexPrefix, dbID, collectionID, indexID)
+	}
 	return fmt.Sprintf("%s/%d/%d", util.FieldIndexPrefix, collectionID, indexID)
 }
 
-func BuildSegmentIndexKey(collectionID, partitionID, segmentID, buildID int64) string {
+func BuildSegmentIndexKey(collectionID, partitionID, segmentID, buildID int64, metatype string, dbID string) string {
+	if metatype == util.MetaStoreTypeEtcd {
+		return fmt.Sprintf("%s/%s/%d/%d/%d/%d", util.SegmentIndexPrefix, dbID, collectionID, partitionID, segmentID, buildID)
+	}
 	return fmt.Sprintf("%s/%d/%d/%d/%d", util.SegmentIndexPrefix, collectionID, partitionID, segmentID, buildID)
 }
 
-func buildCollectionPrefix(collectionID typeutil.UniqueID) string {
+func buildCollectionPrefix(collectionID typeutil.UniqueID, metatype string, dbID string) string {
+	if metatype == util.MetaStoreTypeEtcd {
+		return fmt.Sprintf("%s/%s/%d", SegmentPrefix, dbID, collectionID)
+	}
 	return fmt.Sprintf("%s/%d", SegmentPrefix, collectionID)
 }
 
-func buildPartitionPrefix(collectionID, partitionID typeutil.UniqueID) string {
+func buildPartitionPrefix(collectionID, partitionID typeutil.UniqueID, metatype string, dbID string) string {
+	if metatype == util.MetaStoreTypeEtcd {
+		return fmt.Sprintf("%s/%s/%d/%d", SegmentPrefix, dbID, collectionID, partitionID)
+	}
 	return fmt.Sprintf("%s/%d/%d", SegmentPrefix, collectionID, partitionID)
+}
+
+type StrCache struct {
+	mu    sync.Mutex
+	kv    kv.MetaKv
+	cache map[string]string
+}
+
+func NewStrCache(kv kv.MetaKv) *StrCache {
+	new_c := &StrCache{
+		cache: make(map[string]string),
+		kv:    kv,
+	}
+	new_c.update()
+	return new_c
+}
+
+func (c *StrCache) get(key string) string {
+	log.Warn("Getting col-db for: ", zap.String("col_id", key))
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	val, ok := c.cache[key]
+	if ok == false {
+		c.update()
+		val, ok = c.cache[key]
+		if ok == false {
+			panic("Unable to find ColID -> DBID map")
+		}
+		return val
+	}
+	return val
+}
+
+func (c *StrCache) update() {
+	// If we need to grab the nondb collections
+	new_cache := map[string]string{}
+	keys, _, err := c.kv.LoadWithPrefix(rootcoord.CollectionMetaPrefix)
+	if err != nil {
+		return
+	}
+	for _, key := range keys {
+		split_key := strings.Split(key, "/")
+		if len(split_key) == 3 { // Current keys in ColMetaPre are 3 long
+			colID := split_key[len(split_key)-1]
+			new_cache[colID] = fmt.Sprintf("%d", util.NonDBID)
+		} else {
+			log.Warn("unclean split for old keys", zap.Int("len", len(split_key)))
+		}
+	}
+
+	keys, _, err = c.kv.LoadWithPrefix(rootcoord.CollectionInfoMetaPrefix)
+	if err != nil {
+		return
+	}
+	for _, key := range keys {
+		split_key := strings.Split(key, "/")
+		if len(split_key) == 7 { // Current keys in ColInfoMetaPre are 6 long
+			colID := split_key[len(split_key)-1]
+			dbID := split_key[len(split_key)-2]
+			new_cache[colID] = dbID
+		} else {
+			log.Warn("unclean split for new keys", zap.Int("len", len(split_key)))
+		}
+	}
+	c.cache = new_cache
 }
