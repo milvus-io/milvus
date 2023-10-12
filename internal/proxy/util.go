@@ -258,19 +258,19 @@ func validateFieldName(fieldName string) error {
 	fieldName = strings.TrimSpace(fieldName)
 
 	if fieldName == "" {
-		return errors.New("field name should not be empty")
+		return merr.WrapErrFieldNameInvalid(fieldName, "field name should not be empty")
 	}
 
 	invalidMsg := "Invalid field name: " + fieldName + ". "
 	if len(fieldName) > Params.ProxyCfg.MaxNameLength.GetAsInt() {
 		msg := invalidMsg + "The length of a field name must be less than " + Params.ProxyCfg.MaxNameLength.GetValue() + " characters."
-		return errors.New(msg)
+		return merr.WrapErrFieldNameInvalid(fieldName, msg)
 	}
 
 	firstChar := fieldName[0]
 	if firstChar != '_' && !isAlpha(firstChar) {
 		msg := invalidMsg + "The first character of a field name must be an underscore or letter."
-		return errors.New(msg)
+		return merr.WrapErrFieldNameInvalid(fieldName, msg)
 	}
 
 	fieldNameSize := len(fieldName)
@@ -278,7 +278,7 @@ func validateFieldName(fieldName string) error {
 		c := fieldName[i]
 		if c != '_' && !isAlpha(c) && !isNumber(c) {
 			msg := invalidMsg + "Field name cannot only contain numbers, letters, and underscores."
-			return errors.New(msg)
+			return merr.WrapErrFieldNameInvalid(fieldName, msg)
 		}
 	}
 	return nil
@@ -323,7 +323,7 @@ func validateMaxLengthPerRow(collectionName string, field *schemapb.FieldSchema)
 			return err
 		}
 		if maxLengthPerRow > defaultMaxVarCharLength || maxLengthPerRow <= 0 {
-			return fmt.Errorf("the maximum length specified for a VarChar shoule be in (0, 65535]")
+			return merr.WrapErrParameterInvalidMsg("the maximum length specified for a VarChar should be in (0, 65535]")
 		}
 		exist = true
 	}
@@ -347,7 +347,7 @@ func validateMaxCapacityPerRow(collectionName string, field *schemapb.FieldSchem
 			return fmt.Errorf("the value of %s must be an integer", common.MaxCapacityKey)
 		}
 		if maxCapacityPerRow > defaultMaxArrayCapacity || maxCapacityPerRow <= 0 {
-			return fmt.Errorf("the maximum capacity specified for a Array shoule be in (0, 4096]")
+			return fmt.Errorf("the maximum capacity specified for a Array should be in (0, 4096]")
 		}
 		exist = true
 	}
@@ -532,7 +532,7 @@ func validateSchema(coll *schemapb.CollectionSchema) error {
 				return fmt.Errorf("there are more than one primary key, field name = %s, %s", coll.Fields[primaryIdx].Name, field.Name)
 			}
 			if field.DataType != schemapb.DataType_Int64 {
-				return fmt.Errorf("type of primary key shoule be int64")
+				return fmt.Errorf("type of primary key should be int64")
 			}
 			primaryIdx = idx
 		}

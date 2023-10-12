@@ -118,8 +118,8 @@ class TestInsertParams(TestcaseBase):
         columns = [ct.default_int64_field_name,
                    ct.default_float_vec_field_name]
         df = pd.DataFrame(columns=columns)
-        error = {ct.err_code: 0,
-                 ct.err_msg: "Cannot infer schema from empty dataframe"}
+        error = {ct.err_code: 1,
+                 ct.err_msg: "The data don't match with schema fields, expect 5 list, got 0"}
         collection_w.insert(
             data=df, check_task=CheckTasks.err_res, check_items=error)
 
@@ -289,6 +289,7 @@ class TestInsertParams(TestcaseBase):
             data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="Currently not check in pymilvus")
     def test_insert_field_value_not_match(self):
         """
         target: test insert data value not match
@@ -414,7 +415,7 @@ class TestInsertParams(TestcaseBase):
             ct.default_float_vec_field_name: float_vec_values,
             ct.default_int64_field_name: int_values
         })
-        error = {ct.err_code: 5, ct.err_msg: 'Missing param in entities'}
+        error = {ct.err_code: 1, ct.err_msg: "The fields don't match with schema fields"}
         collection_w.insert(
             data=df, check_task=CheckTasks.err_res, check_items=error)
 
@@ -1136,7 +1137,7 @@ class TestInsertAsync(TestcaseBase):
                    ct.default_float_vec_field_name]
         df = pd.DataFrame(columns=columns)
         error = {ct.err_code: 0,
-                 ct.err_msg: "Cannot infer schema from empty dataframe"}
+                 ct.err_msg: "The fields don't match with schema fields"}
         collection_w.insert(data=df, _async=True,
                             check_task=CheckTasks.err_res, check_items=error)
 
@@ -1313,7 +1314,7 @@ class TestInsertInvalid(TestcaseBase):
             prefix, is_all_data_type=True)[0]
         data = cf.gen_dataframe_all_data_type(nb=1)
         data[ct.default_int8_field_name] = [invalid_int8]
-        error = {ct.err_code: 1, 'err_msg': "The data type of field int8 doesn't match, "
+        error = {ct.err_code: 1100, 'err_msg': "The data type of field int8 doesn't match, "
                                             "expected: INT8, got INT64"}
         collection_w.insert(
             data, check_task=CheckTasks.err_res, check_items=error)
@@ -1330,7 +1331,7 @@ class TestInsertInvalid(TestcaseBase):
             prefix, is_all_data_type=True)[0]
         data = cf.gen_dataframe_all_data_type(nb=1)
         data[ct.default_int16_field_name] = [invalid_int16]
-        error = {ct.err_code: 1, 'err_msg': "The data type of field int16 doesn't match, "
+        error = {ct.err_code: 1100, 'err_msg': "The data type of field int16 doesn't match, "
                                             "expected: INT16, got INT64"}
         collection_w.insert(
             data, check_task=CheckTasks.err_res, check_items=error)

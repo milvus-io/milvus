@@ -112,8 +112,14 @@ var (
 	// this operation is denied because the user has no permission to do this, user need higher privilege
 	ErrPrivilegeNotPermitted = newMilvusError("privilege not permitted", 1401, false)
 
+	// Alias related
+	ErrAliasNotFound               = newMilvusError("alias not found", 1600, false)
+	ErrAliasCollectionNameConfilct = newMilvusError("alias and collection name conflict", 1601, false)
+	ErrAliasAlreadyExist           = newMilvusError("alias already exist", 1602, false)
+
 	// field related
-	ErrFieldNotFound = newMilvusError("field not found", 1700, false)
+	ErrFieldNotFound    = newMilvusError("field not found", 1700, false)
+	ErrFieldInvalidName = newMilvusError("field name invalid", 1701, false)
 
 	// high-level restful api related
 	ErrNeedAuthenticate          = newMilvusError("user hasn't authenticated", 1800, false)

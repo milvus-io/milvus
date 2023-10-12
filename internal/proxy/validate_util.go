@@ -323,7 +323,7 @@ func (v *validateUtil) checkJSONFieldData(field *schemapb.FieldData, fieldSchema
 	jsonArray := field.GetScalars().GetJsonData().GetData()
 	if jsonArray == nil {
 		msg := fmt.Sprintf("json field '%v' is illegal, array type mismatch", field.GetFieldName())
-		return merr.WrapErrParameterInvalid("need string array", "got nil", msg)
+		return merr.WrapErrParameterInvalid("need json array", "got nil", msg)
 	}
 
 	if v.checkMaxLen {
@@ -434,8 +434,10 @@ func (v *validateUtil) checkArrayElement(array *schemapb.ArrayArray, field *sche
 func (v *validateUtil) checkArrayFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	data := field.GetScalars().GetArrayData()
 	if data == nil {
+		elementTypeStr := fieldSchema.GetElementType().String()
 		msg := fmt.Sprintf("array field '%v' is illegal, array type mismatch", field.GetFieldName())
-		return merr.WrapErrParameterInvalid("need string array", "got nil", msg)
+		expectStr := fmt.Sprintf("need %s array", elementTypeStr)
+		return merr.WrapErrParameterInvalid(expectStr, "got nil", msg)
 	}
 	if v.checkMaxCap {
 		maxCapacity, err := parameterutil.GetMaxCapacity(fieldSchema)
@@ -473,36 +475,29 @@ func verifyLengthPerRow[E interface{ ~string | ~[]byte }](strArr []E, maxLength 
 
 func verifyCapacityPerRow(arrayArray []*schemapb.ScalarField, maxCapacity int64, elementType schemapb.DataType) error {
 	for i, array := range arrayArray {
+		arrayLen := 0
 		switch elementType {
 		case schemapb.DataType_Bool:
-			if int64(len(array.GetBoolData().GetData())) <= maxCapacity {
-				continue
-			}
+			arrayLen = len(array.GetBoolData().GetData())
 		case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
-			if int64(len(array.GetIntData().GetData())) <= maxCapacity {
-				continue
-			}
+			arrayLen = len(array.GetIntData().GetData())
 		case schemapb.DataType_Int64:
-			if int64(len(array.GetLongData().GetData())) <= maxCapacity {
-				continue
-			}
+			arrayLen = len(array.GetLongData().GetData())
 		case schemapb.DataType_String, schemapb.DataType_VarChar:
-			if int64(len(array.GetStringData().GetData())) <= maxCapacity {
-				continue
-			}
+			arrayLen = len(array.GetStringData().GetData())
 		case schemapb.DataType_Float:
-			if int64(len(array.GetFloatData().GetData())) <= maxCapacity {
-				continue
-			}
+			arrayLen = len(array.GetFloatData().GetData())
 		case schemapb.DataType_Double:
-			if int64(len(array.GetDoubleData().GetData())) <= maxCapacity {
-				continue
-			}
+			arrayLen = len(array.GetDoubleData().GetData())
 		default:
 			msg := fmt.Sprintf("array element type: %s is not supported", elementType.String())
 			return merr.WrapErrParameterInvalid("valid array element type", "array element type is not supported", msg)
 		}
-		msg := fmt.Sprintf("the length (%d) of %dth array exceeds max capacity (%d)", len(arrayArray), i, maxCapacity)
+
+		if int64(arrayLen) <= maxCapacity {
+			continue
+		}
+		msg := fmt.Sprintf("the length (%d) of %dth array exceeds max capacity (%d)", arrayLen, i, maxCapacity)
 		return merr.WrapErrParameterInvalid("valid length array", "array length exceeds max capacity", msg)
 	}
 

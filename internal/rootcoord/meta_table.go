@@ -657,7 +657,7 @@ func (mt *MetaTable) listCollectionFromCache(dbName string, onlyAvail bool) ([]*
 
 	db, ok := mt.dbName2Meta[dbName]
 	if !ok {
-		return nil, fmt.Errorf("database:%s not found", dbName)
+		return nil, merr.WrapErrDatabaseNotFound(dbName)
 	}
 
 	collectionFromCache := make([]*model.Collection, 0, len(mt.collID2Meta))
@@ -889,7 +889,7 @@ func (mt *MetaTable) CreateAlias(ctx context.Context, dbName string, alias strin
 	// Since cache always keep the latest version, and the ts should always be the latest.
 
 	if !mt.names.exist(dbName) {
-		return fmt.Errorf("database %s not found", dbName)
+		return merr.WrapErrDatabaseNotFound(dbName)
 	}
 
 	if collID, ok := mt.names.get(dbName, alias); ok {
@@ -899,14 +899,14 @@ func (mt *MetaTable) CreateAlias(ctx context.Context, dbName string, alias strin
 		}
 		// allow alias with dropping&dropped
 		if coll.State != pb.CollectionState_CollectionDropping && coll.State != pb.CollectionState_CollectionDropped {
-			return fmt.Errorf("cannot alter alias, collection already exists with same name: %s", alias)
+			return merr.WrapErrAliasCollectionNameConflict(dbName, alias)
 		}
 	}
 
 	collectionID, ok := mt.names.get(dbName, collectionName)
 	if !ok {
 		// you cannot alias to a non-existent collection.
-		return fmt.Errorf("collection not exists: %s", collectionName)
+		return merr.WrapErrCollectionNotFoundWithDB(dbName, collectionName)
 	}
 
 	// check if alias exists.
@@ -917,14 +917,15 @@ func (mt *MetaTable) CreateAlias(ctx context.Context, dbName string, alias strin
 	} else if ok {
 		// TODO: better to check if aliasedCollectionID exist or is available, though not very possible.
 		aliasedColl := mt.collID2Meta[aliasedCollectionID]
-		return fmt.Errorf("alias exists and already aliased to another collection, alias: %s, collection: %s, other collection: %s", alias, collectionName, aliasedColl.Name)
+		msg := fmt.Sprintf("%s is alias to another collection: %s", alias, aliasedColl.Name)
+		return merr.WrapErrAliasAlreadyExist(dbName, alias, msg)
 	}
 	// alias didn't exist.
 
 	coll, ok := mt.collID2Meta[collectionID]
 	if !ok || !coll.Available() {
 		// you cannot alias to a non-existent collection.
-		return fmt.Errorf("collection not exists: %s", collectionName)
+		return merr.WrapErrCollectionNotFoundWithDB(dbName, collectionName)
 	}
 
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
@@ -993,34 +994,34 @@ func (mt *MetaTable) AlterAlias(ctx context.Context, dbName string, alias string
 	// Since cache always keep the latest version, and the ts should always be the latest.
 
 	if !mt.names.exist(dbName) {
-		return fmt.Errorf("database not found: %s", dbName)
+		return merr.WrapErrDatabaseNotFound(dbName)
 	}
 
 	if collID, ok := mt.names.get(dbName, alias); ok {
 		coll := mt.collID2Meta[collID]
 		// allow alias with dropping&dropped
 		if coll.State != pb.CollectionState_CollectionDropping && coll.State != pb.CollectionState_CollectionDropped {
-			return fmt.Errorf("cannot alter alias, collection already exists with same name: %s", alias)
+			return merr.WrapErrAliasCollectionNameConflict(dbName, alias)
 		}
 	}
 
 	collectionID, ok := mt.names.get(dbName, collectionName)
 	if !ok {
 		// you cannot alias to a non-existent collection.
-		return fmt.Errorf("collection not exists: %s", collectionName)
+		return merr.WrapErrCollectionNotFound(collectionName)
 	}
 
 	coll, ok := mt.collID2Meta[collectionID]
 	if !ok || !coll.Available() {
 		// you cannot alias to a non-existent collection.
-		return fmt.Errorf("collection not exists: %s", collectionName)
+		return merr.WrapErrCollectionNotFound(collectionName)
 	}
 
 	// check if alias exists.
 	_, ok = mt.aliases.get(dbName, alias)
 	if !ok {
 		//
-		return fmt.Errorf("failed to alter alias, alias does not exist: %s", alias)
+		return merr.WrapErrAliasNotFound(dbName, alias)
 	}
 
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
@@ -1102,7 +1103,7 @@ func (mt *MetaTable) GetPartitionNameByID(collID UniqueID, partitionID UniqueID,
 			return partition.PartitionName, nil
 		}
 	}
-	return "", fmt.Errorf("partition not exist: %d", partitionID)
+	return "", merr.WrapErrPartitionNotFound(partitionID)
 }
 
 // GetPartitionByName serve for bulk insert.
@@ -1126,7 +1127,7 @@ func (mt *MetaTable) GetPartitionByName(collID UniqueID, partitionName string, t
 		return common.InvalidPartitionID, err
 	}
 	if !coll.Available() {
-		return common.InvalidPartitionID, fmt.Errorf("collection not exist: %d", collID)
+		return common.InvalidPartitionID, merr.WrapErrCollectionNotFoundWithDB(coll.DBID, collID)
 	}
 	for _, partition := range coll.Partitions {
 		// no need to check time travel logic again, since catalog already did.

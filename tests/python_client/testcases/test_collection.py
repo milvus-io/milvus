@@ -348,7 +348,7 @@ class TestCollectionParams(TestcaseBase):
         field, _ = self.field_schema_wrap.init_field_schema(name=name, dtype=5, is_primary=True)
         vec_field = cf.gen_float_vec_field()
         schema = cf.gen_collection_schema(fields=[field, vec_field])
-        error = {ct.err_code: 1, ct.err_msg: f"bad argument type for built-in"}
+        error = {ct.err_code: 1701, ct.err_msg: f"bad argument type for built-in"}
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -378,7 +378,7 @@ class TestCollectionParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         field, _ = self.field_schema_wrap.init_field_schema(name=None, dtype=DataType.INT64, is_primary=True)
         schema = cf.gen_collection_schema(fields=[field, cf.gen_float_vec_field()])
-        error = {ct.err_code: 65535, ct.err_msg: "the partition key field must not be primary field"}
+        error = {ct.err_code: 1701, ct.err_msg: "field name should not be empty"}
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1092,7 +1092,6 @@ class TestCollectionOperation(TestcaseBase):
         assert self.utility_wrap.has_collection(c_name)[0]
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip("already has same senario")
     def test_collection_all_datatype_fields(self):
         """
         target: test create collection with all dataType fields
@@ -1102,7 +1101,9 @@ class TestCollectionOperation(TestcaseBase):
         self._connect()
         fields = []
         for k, v in DataType.__members__.items():
-            if v and v != DataType.UNKNOWN and v != DataType.STRING and v != DataType.VARCHAR and v != DataType.FLOAT_VECTOR and v != DataType.BINARY_VECTOR:
+            if v and v != DataType.UNKNOWN and v != DataType.STRING\
+            and v != DataType.VARCHAR and v != DataType.FLOAT_VECTOR\
+            and v != DataType.BINARY_VECTOR and v != DataType.ARRAY:
                 field, _ = self.field_schema_wrap.init_field_schema(name=k.lower(), dtype=v)
                 fields.append(field)
         fields.append(cf.gen_float_vec_field())
