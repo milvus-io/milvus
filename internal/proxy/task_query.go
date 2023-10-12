@@ -394,9 +394,12 @@ func (t *queryTask) Execute(ctx context.Context) error {
 	retryCtx, cancel := context.WithCancel(ctx)
 	err := retry.Do(retryCtx, func() error {
 		queryError := executeQuery()
-		if !common.IsRetryableError(queryError) {
-			cancel()
-		}
+		// for branch 2.2, beside the ErrorCode_NotReadyServe/ErrorCode_NotShardLeader, all other failures has been wrapped
+		// with ErrorCode_UnexpectedError, to make sure search/query has chance to deprecated shard leader cache and retry,
+		// disable the retryable error for now, let all query/search failure could retry.
+		// if !common.IsRetryableError(queryError) {
+		// 	cancel()
+		// }
 		if queryError != nil {
 			log.Warn("invalid shard leaders cache, updating shardleader caches and retry query",
 				zap.Error(queryError))
