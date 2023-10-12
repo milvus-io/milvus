@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/kv/predicates"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -82,6 +83,10 @@ func NewRocksdbKVWithOpts(name string, opts *gorocksdb.Options) (*RocksdbKV, err
 		ReadOptions:  ro,
 		name:         name,
 	}, nil
+}
+
+func (kv *RocksdbKV) GetType() string {
+	return util.MetaStoreTypeRocksDB
 }
 
 // Close free resource of rocksdb

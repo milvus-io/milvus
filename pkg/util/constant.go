@@ -25,8 +25,10 @@ import (
 
 // Meta Prefix consts
 const (
-	MetaStoreTypeEtcd = "etcd"
-	MetaStoreTypeTiKV = "tikv"
+	MetaStoreTypeEtcd    = "etcd"
+	MetaStoreTypeTiKV    = "tikv"
+	MetaStoreTypeMemory  = "memory"
+	MetaStoreTypeRocksDB = "rocksdb"
 
 	SegmentMetaPrefix    = "queryCoord-segmentMeta"
 	ChangeInfoMetaPrefix = "queryCoord-sealedSegmentChangeInfo"

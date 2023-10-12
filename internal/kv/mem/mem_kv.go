@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -72,6 +73,10 @@ type memoryKVItem struct {
 }
 
 var _ btree.Item = (*memoryKVItem)(nil)
+
+func (kv *MemoryKV) GetType() string {
+	return util.MetaStoreTypeMemory
+}
 
 // Less returns true if the item is less than the given one.
 func (s memoryKVItem) Less(than btree.Item) bool {

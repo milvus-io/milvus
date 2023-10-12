@@ -40,6 +40,7 @@ func NewCompareFailedError(err error) error {
 
 // BaseKV contains base operations of kv. Include save, load and remove.
 type BaseKV interface {
+	GetType() string
 	Load(key string) (string, error)
 	MultiLoad(keys []string) ([]string, error)
 	LoadWithPrefix(key string) ([]string, []string, error)

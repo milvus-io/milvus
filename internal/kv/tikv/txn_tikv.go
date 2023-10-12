@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
@@ -107,6 +108,10 @@ func NewTiKV(txn *txnkv.Client, rootPath string) *txnTiKV {
 		rootPath: rootPath,
 	}
 	return kv
+}
+
+func (kv *txnTiKV) GetType() string {
+	return util.MetaStoreTypeTiKV
 }
 
 // Close closes the connection to TiKV.

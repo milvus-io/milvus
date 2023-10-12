@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
@@ -52,6 +53,10 @@ func NewEtcdKV(client *clientv3.Client, rootPath string) *etcdKV {
 		rootPath: rootPath,
 	}
 	return kv
+}
+
+func (kv *etcdKV) GetType() string {
+	return util.MetaStoreTypeEtcd
 }
 
 // Close closes the connection to etcd.

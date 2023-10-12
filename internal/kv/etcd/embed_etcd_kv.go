@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -71,6 +72,10 @@ func NewEmbededEtcdKV(cfg *embed.Config, rootPath string) (*EmbedEtcdKV, error) 
 		return nil, errors.New("Embedded etcd took too long to start")
 	}
 	return kv, nil
+}
+
+func (kv *EmbedEtcdKV) GetType() string {
+	return util.MetaStoreTypeEtcd
 }
 
 // Close closes the embedded etcd
