@@ -37,6 +37,8 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	grpcStatus "google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -327,6 +329,40 @@ func TestFlush(t *testing.T) {
 		resp, err := svr.Flush(context.Background(), req)
 		assert.NoError(t, err)
 		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
+	})
+
+	t.Run("test rolling upgrade", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		closeTestServer(t, svr)
+		svr.stateCode.Store(commonpb.StateCode_Healthy)
+		sm := NewSessionManager()
+
+		datanodeClient := mocks.NewMockDataNodeClient(t)
+		datanodeClient.EXPECT().FlushChannels(mock.Anything, mock.Anything).Return(nil,
+			grpcStatus.Error(codes.Unimplemented, "mock grpc unimplemented error"))
+
+		sm.sessions = struct {
+			sync.RWMutex
+			data map[int64]*Session
+		}{data: map[int64]*Session{1: {
+			client: datanodeClient,
+			clientCreator: func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
+				return datanodeClient, nil
+			},
+		}}}
+
+		svr.sessionManager = sm
+		svr.cluster.sessionManager = sm
+
+		err := svr.channelManager.AddNode(1)
+		assert.NoError(t, err)
+		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
+		assert.NoError(t, err)
+
+		resp, err := svr.Flush(context.TODO(), req)
+		assert.NoError(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, Timestamp(0), resp.GetFlushTs())
 	})
 }
 

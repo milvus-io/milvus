@@ -28,6 +28,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc/codes"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -39,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -66,11 +68,11 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetSt
 // this api only guarantees all the segments requested is sealed
 // these segments will be flushed only after the Flush policy is fulfilled
 func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
-	log := log.Ctx(ctx)
-	log.Info("receive flush request",
+	log := log.Ctx(ctx).With(
 		zap.Int64("dbID", req.GetDbID()),
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Bool("isImporting", req.GetIsImport()))
+	log.Info("receive flush request")
 	ctx, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "DataCoord-Flush")
 	defer sp.End()
 
@@ -113,6 +115,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 		}
 	}
 
+	var isUnimplemented bool
 	err = retry.Do(ctx, func() error {
 		for _, channelInfo := range s.channelManager.GetChannels() {
 			nodeID := channelInfo.NodeID
@@ -123,6 +126,10 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 				return channel.Name
 			})
 			err = s.cluster.FlushChannels(ctx, nodeID, ts, channelNames)
+			if err != nil && funcutil.IsGrpcErr(err, codes.Unimplemented) {
+				isUnimplemented = true
+				return nil
+			}
 			if err != nil {
 				return err
 			}
@@ -133,6 +140,13 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 		return &datapb.FlushResponse{
 			Status: merr.Status(err),
 		}, nil
+	}
+
+	if isUnimplemented {
+		// For compatible with rolling upgrade from version 2.2.x,
+		// fall back to the flush logic of version 2.2.x;
+		log.Warn("DataNode FlushChannels unimplemented", zap.Error(err))
+		ts = 0
 	}
 
 	log.Info("flush response with segments",

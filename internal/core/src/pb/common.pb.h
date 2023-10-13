@@ -76,6 +76,9 @@ extern KeyValuePairDefaultTypeInternal _KeyValuePair_default_instance_;
 class MsgBase;
 struct MsgBaseDefaultTypeInternal;
 extern MsgBaseDefaultTypeInternal _MsgBase_default_instance_;
+class MsgBase_PropertiesEntry_DoNotUse;
+struct MsgBase_PropertiesEntry_DoNotUseDefaultTypeInternal;
+extern MsgBase_PropertiesEntry_DoNotUseDefaultTypeInternal _MsgBase_PropertiesEntry_DoNotUse_default_instance_;
 class MsgHeader;
 struct MsgHeaderDefaultTypeInternal;
 extern MsgHeaderDefaultTypeInternal _MsgHeader_default_instance_;
@@ -112,6 +115,7 @@ template<> ::milvus::proto::common::DMLMsgHeader* Arena::CreateMaybeMessage<::mi
 template<> ::milvus::proto::common::KeyDataPair* Arena::CreateMaybeMessage<::milvus::proto::common::KeyDataPair>(Arena*);
 template<> ::milvus::proto::common::KeyValuePair* Arena::CreateMaybeMessage<::milvus::proto::common::KeyValuePair>(Arena*);
 template<> ::milvus::proto::common::MsgBase* Arena::CreateMaybeMessage<::milvus::proto::common::MsgBase>(Arena*);
+template<> ::milvus::proto::common::MsgBase_PropertiesEntry_DoNotUse* Arena::CreateMaybeMessage<::milvus::proto::common::MsgBase_PropertiesEntry_DoNotUse>(Arena*);
 template<> ::milvus::proto::common::MsgHeader* Arena::CreateMaybeMessage<::milvus::proto::common::MsgHeader>(Arena*);
 template<> ::milvus::proto::common::PlaceholderGroup* Arena::CreateMaybeMessage<::milvus::proto::common::PlaceholderGroup>(Arena*);
 template<> ::milvus::proto::common::PlaceholderValue* Arena::CreateMaybeMessage<::milvus::proto::common::PlaceholderValue>(Arena*);
@@ -1850,6 +1854,34 @@ class Address final :
 };
 // -------------------------------------------------------------------
 
+class MsgBase_PropertiesEntry_DoNotUse : public ::PROTOBUF_NAMESPACE_ID::internal::MapEntry<MsgBase_PropertiesEntry_DoNotUse, 
+    std::string, std::string,
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING,
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING> {
+public:
+  typedef ::PROTOBUF_NAMESPACE_ID::internal::MapEntry<MsgBase_PropertiesEntry_DoNotUse, 
+    std::string, std::string,
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING,
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING> SuperType;
+  MsgBase_PropertiesEntry_DoNotUse();
+  explicit PROTOBUF_CONSTEXPR MsgBase_PropertiesEntry_DoNotUse(
+      ::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+  explicit MsgBase_PropertiesEntry_DoNotUse(::PROTOBUF_NAMESPACE_ID::Arena* arena);
+  void MergeFrom(const MsgBase_PropertiesEntry_DoNotUse& other);
+  static const MsgBase_PropertiesEntry_DoNotUse* internal_default_instance() { return reinterpret_cast<const MsgBase_PropertiesEntry_DoNotUse*>(&_MsgBase_PropertiesEntry_DoNotUse_default_instance_); }
+  static bool ValidateKey(std::string* s) {
+    return ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(s->data(), static_cast<int>(s->size()), ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE, "milvus.proto.common.MsgBase.PropertiesEntry.key");
+ }
+  static bool ValidateValue(std::string* s) {
+    return ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(s->data(), static_cast<int>(s->size()), ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE, "milvus.proto.common.MsgBase.PropertiesEntry.value");
+ }
+  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  friend struct ::TableStruct_common_2eproto;
+};
+
+// -------------------------------------------------------------------
+
 class MsgBase final :
     public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.common.MsgBase) */ {
  public:
@@ -1898,7 +1930,7 @@ class MsgBase final :
                &_MsgBase_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    7;
+    8;
 
   friend void swap(MsgBase& a, MsgBase& b) {
     a.Swap(&b);
@@ -1959,6 +1991,8 @@ class MsgBase final :
   protected:
   explicit MsgBase(::PROTOBUF_NAMESPACE_ID::Arena* arena,
                        bool is_message_owned = false);
+  private:
+  static void ArenaDtor(void* object);
   public:
 
   static const ClassData _class_data_;
@@ -1968,15 +2002,34 @@ class MsgBase final :
 
   // nested types ----------------------------------------------------
 
+
   // accessors -------------------------------------------------------
 
   enum : int {
+    kPropertiesFieldNumber = 6,
     kMsgIDFieldNumber = 2,
     kTimestampFieldNumber = 3,
     kSourceIDFieldNumber = 4,
     kTargetIDFieldNumber = 5,
     kMsgTypeFieldNumber = 1,
   };
+  // map<string, string> properties = 6;
+  int properties_size() const;
+  private:
+  int _internal_properties_size() const;
+  public:
+  void clear_properties();
+  private:
+  const ::PROTOBUF_NAMESPACE_ID::Map< std::string, std::string >&
+      _internal_properties() const;
+  ::PROTOBUF_NAMESPACE_ID::Map< std::string, std::string >*
+      _internal_mutable_properties();
+  public:
+  const ::PROTOBUF_NAMESPACE_ID::Map< std::string, std::string >&
+      properties() const;
+  ::PROTOBUF_NAMESPACE_ID::Map< std::string, std::string >*
+      mutable_properties();
+
   // int64 msgID = 2;
   void clear_msgid();
   int64_t msgid() const;
@@ -2030,6 +2083,11 @@ class MsgBase final :
   typedef void InternalArenaConstructable_;
   typedef void DestructorSkippable_;
   struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::MapField<
+        MsgBase_PropertiesEntry_DoNotUse,
+        std::string, std::string,
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING,
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING> properties_;
     int64_t msgid_;
     uint64_t timestamp_;
     int64_t sourceid_;
@@ -2090,7 +2148,7 @@ class MsgHeader final :
                &_MsgHeader_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    8;
+    9;
 
   friend void swap(MsgHeader& a, MsgHeader& b) {
     a.Swap(&b);
@@ -2247,7 +2305,7 @@ class DMLMsgHeader final :
                &_DMLMsgHeader_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    9;
+    10;
 
   friend void swap(DMLMsgHeader& a, DMLMsgHeader& b) {
     a.Swap(&b);
@@ -2420,7 +2478,7 @@ class PrivilegeExt final :
                &_PrivilegeExt_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    10;
+    11;
 
   friend void swap(PrivilegeExt& a, PrivilegeExt& b) {
     a.Swap(&b);
@@ -2601,7 +2659,7 @@ class SegmentStats final :
                &_SegmentStats_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    11;
+    12;
 
   friend void swap(SegmentStats& a, SegmentStats& b) {
     a.Swap(&b);
@@ -2788,7 +2846,7 @@ class ClientInfo final :
                &_ClientInfo_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    13;
+    14;
 
   friend void swap(ClientInfo& a, ClientInfo& b) {
     a.Swap(&b);
@@ -3059,7 +3117,7 @@ class ServerInfo final :
                &_ServerInfo_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    15;
+    16;
 
   friend void swap(ServerInfo& a, ServerInfo& b) {
     a.Swap(&b);
@@ -3888,6 +3946,8 @@ inline void Address::set_port(int64_t value) {
 
 // -------------------------------------------------------------------
 
+// -------------------------------------------------------------------
+
 // MsgBase
 
 // .milvus.proto.common.MsgType msg_type = 1;
@@ -3988,6 +4048,35 @@ inline void MsgBase::_internal_set_targetid(int64_t value) {
 inline void MsgBase::set_targetid(int64_t value) {
   _internal_set_targetid(value);
   // @@protoc_insertion_point(field_set:milvus.proto.common.MsgBase.targetID)
+}
+
+// map<string, string> properties = 6;
+inline int MsgBase::_internal_properties_size() const {
+  return _impl_.properties_.size();
+}
+inline int MsgBase::properties_size() const {
+  return _internal_properties_size();
+}
+inline void MsgBase::clear_properties() {
+  _impl_.properties_.Clear();
+}
+inline const ::PROTOBUF_NAMESPACE_ID::Map< std::string, std::string >&
+MsgBase::_internal_properties() const {
+  return _impl_.properties_.GetMap();
+}
+inline const ::PROTOBUF_NAMESPACE_ID::Map< std::string, std::string >&
+MsgBase::properties() const {
+  // @@protoc_insertion_point(field_map:milvus.proto.common.MsgBase.properties)
+  return _internal_properties();
+}
+inline ::PROTOBUF_NAMESPACE_ID::Map< std::string, std::string >*
+MsgBase::_internal_mutable_properties() {
+  return _impl_.properties_.MutableMap();
+}
+inline ::PROTOBUF_NAMESPACE_ID::Map< std::string, std::string >*
+MsgBase::mutable_properties() {
+  // @@protoc_insertion_point(field_mutable_map:milvus.proto.common.MsgBase.properties)
+  return _internal_mutable_properties();
 }
 
 // -------------------------------------------------------------------
@@ -4929,6 +5018,8 @@ ServerInfo::mutable_reserved() {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------
