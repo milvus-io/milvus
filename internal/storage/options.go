@@ -14,6 +14,7 @@ type config struct {
 	iamEndpoint       string
 	useVirtualHost    bool
 	region            string
+	requestTimeoutMs  int64
 }
 
 func newDefaultConfig() *config {
@@ -92,5 +93,11 @@ func UseVirtualHost(useVirtualHost bool) Option {
 func Region(region string) Option {
 	return func(c *config) {
 		c.region = region
+	}
+}
+
+func RequestTimeout(requestTimeoutMs int64) Option {
+	return func(c *config) {
+		c.requestTimeoutMs = requestTimeoutMs
 	}
 }

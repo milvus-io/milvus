@@ -284,18 +284,19 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 			}
 		} else {
 			storageConfig = &indexpb.StorageConfig{
-				Address:         Params.MinioCfg.Address.GetValue(),
-				AccessKeyID:     Params.MinioCfg.AccessKeyID.GetValue(),
-				SecretAccessKey: Params.MinioCfg.SecretAccessKey.GetValue(),
-				UseSSL:          Params.MinioCfg.UseSSL.GetAsBool(),
-				BucketName:      Params.MinioCfg.BucketName.GetValue(),
-				RootPath:        Params.MinioCfg.RootPath.GetValue(),
-				UseIAM:          Params.MinioCfg.UseIAM.GetAsBool(),
-				IAMEndpoint:     Params.MinioCfg.IAMEndpoint.GetValue(),
-				StorageType:     Params.CommonCfg.StorageType.GetValue(),
-				Region:          Params.MinioCfg.Region.GetValue(),
-				UseVirtualHost:  Params.MinioCfg.UseVirtualHost.GetAsBool(),
-				CloudProvider:   Params.MinioCfg.CloudProvider.GetValue(),
+				Address:          Params.MinioCfg.Address.GetValue(),
+				AccessKeyID:      Params.MinioCfg.AccessKeyID.GetValue(),
+				SecretAccessKey:  Params.MinioCfg.SecretAccessKey.GetValue(),
+				UseSSL:           Params.MinioCfg.UseSSL.GetAsBool(),
+				BucketName:       Params.MinioCfg.BucketName.GetValue(),
+				RootPath:         Params.MinioCfg.RootPath.GetValue(),
+				UseIAM:           Params.MinioCfg.UseIAM.GetAsBool(),
+				IAMEndpoint:      Params.MinioCfg.IAMEndpoint.GetValue(),
+				StorageType:      Params.CommonCfg.StorageType.GetValue(),
+				Region:           Params.MinioCfg.Region.GetValue(),
+				UseVirtualHost:   Params.MinioCfg.UseVirtualHost.GetAsBool(),
+				CloudProvider:    Params.MinioCfg.CloudProvider.GetValue(),
+				RequestTimeoutMs: Params.MinioCfg.RequestTimeoutMs.GetAsInt64(),
 			}
 		}
 		req := &indexpb.CreateJobRequest{

@@ -211,6 +211,7 @@ message StorageConfig {
   bool use_virtual_host = 10;
   string region = 11;
   string cloud_provider = 12;
+  int64 request_timeout_ms = 13;
 }
 
 message CreateJobRequest {

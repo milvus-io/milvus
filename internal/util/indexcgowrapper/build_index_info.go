@@ -73,6 +73,7 @@ func NewBuildIndexInfo(config *indexpb.StorageConfig) (*BuildIndexInfo, error) {
 		useIAM:           C.bool(config.UseIAM),
 		region:           cRegion,
 		useVirtualHost:   C.bool(config.UseVirtualHost),
+		requestTimeoutMs: C.int64_t(config.RequestTimeoutMs),
 	}
 
 	status := C.NewBuildIndexInfo(&cBuildIndexInfo, storageConfig)

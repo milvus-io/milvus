@@ -90,6 +90,7 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 		log_level:        cLogLevel,
 		region:           cRegion,
 		useVirtualHost:   C.bool(params.MinioCfg.UseVirtualHost.GetAsBool()),
+		requestTimeoutMs: C.int64_t(params.MinioCfg.RequestTimeoutMs.GetAsInt64()),
 	}
 
 	status := C.InitRemoteChunkManagerSingleton(storageConfig)

@@ -52,3 +52,5 @@ constexpr const char* RADIUS = knowhere::meta::RADIUS;
 constexpr const char* RANGE_FILTER = knowhere::meta::RANGE_FILTER;
 
 const int64_t DEFAULT_MAX_OUTPUT_SIZE = 67108864;  // bytes, 64MB
+
+const int64_t DEFAULT_CHUNK_MANAGER_REQUEST_TIMEOUT_MS = 3000;

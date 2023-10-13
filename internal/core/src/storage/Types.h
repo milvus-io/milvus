@@ -95,6 +95,7 @@ struct StorageConfig {
     bool useSSL = false;
     bool useIAM = false;
     bool useVirtualHost = false;
+    int64_t requestTimeoutMs = 3000;
 };
 
 }  // namespace milvus::storage

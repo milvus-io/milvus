@@ -31,6 +31,7 @@
 #include "storage/MinioChunkManager.h"
 #include "storage/AliyunSTSClient.h"
 #include "storage/AliyunCredentialsProvider.h"
+#include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "log/Log.h"
 #include "signal.h"
@@ -61,6 +62,11 @@ generateConfig(const StorageConfig& storage_config) {
     if (!storage_config.region.empty()) {
         config.region = ConvertToAwsString(storage_config.region);
     }
+
+    config.requestTimeoutMs = storage_config.requestTimeoutMs == 0
+                                  ? DEFAULT_CHUNK_MANAGER_REQUEST_TIMEOUT_MS
+                                  : storage_config.requestTimeoutMs;
+
     return config;
 }
 
