@@ -36,9 +36,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
+	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -46,7 +46,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
-	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -96,6 +95,7 @@ type DataNode struct {
 	address   string
 	rootCoord types.RootCoordClient
 	dataCoord types.DataCoordClient
+	broker    broker.Broker
 
 	// call once
 	initOnce     sync.Once
@@ -232,6 +232,8 @@ func (node *DataNode) Init() error {
 			return
 		}
 
+		node.broker = broker.NewCoordBroker(node.rootCoord, node.dataCoord)
+
 		err := node.initRateCollector()
 		if err != nil {
 			log.Error("DataNode server init rateCollector failed", zap.Int64("node ID", paramtable.GetNodeID()), zap.Error(err))
@@ -312,26 +314,27 @@ func (node *DataNode) Start() error {
 		}
 		log.Info("start id allocator done", zap.String("role", typeutil.DataNodeRole))
 
-		rep, err := node.rootCoord.AllocTimestamp(node.ctx, &rootcoordpb.AllocTimestampRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(commonpb.MsgType_RequestTSO),
-				commonpbutil.WithMsgID(0),
-				commonpbutil.WithSourceID(paramtable.GetNodeID()),
-			),
-			Count: 1,
-		})
-		if err != nil || rep.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			log.Warn("fail to alloc timestamp", zap.Any("rep", rep), zap.Error(err))
-			startErr = errors.New("DataNode fail to alloc timestamp")
-			return
-		}
+		/*
+			rep, err := node.rootCoord.AllocTimestamp(node.ctx, &rootcoordpb.AllocTimestampRequest{
+				Base: commonpbutil.NewMsgBase(
+					commonpbutil.WithMsgType(commonpb.MsgType_RequestTSO),
+					commonpbutil.WithMsgID(0),
+					commonpbutil.WithSourceID(paramtable.GetNodeID()),
+				),
+				Count: 1,
+			})
+			if err != nil || rep.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+				log.Warn("fail to alloc timestamp", zap.Any("rep", rep), zap.Error(err))
+				startErr = errors.New("DataNode fail to alloc timestamp")
+				return
+			}*/
 
 		connectEtcdFn := func() error {
 			etcdKV := etcdkv.NewEtcdKV(node.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
 			node.watchKv = etcdKV
 			return nil
 		}
-		err = retry.Do(node.ctx, connectEtcdFn, retry.Attempts(ConnectEtcdMaxRetryTime))
+		err := retry.Do(node.ctx, connectEtcdFn, retry.Attempts(ConnectEtcdMaxRetryTime))
 		if err != nil {
 			startErr = errors.New("DataNode fail to connect etcd")
 			return
@@ -351,7 +354,7 @@ func (node *DataNode) Start() error {
 		go node.compactionExecutor.start(node.ctx)
 
 		if Params.DataNodeCfg.DataNodeTimeTickByRPC.GetAsBool() {
-			node.timeTickSender = newTimeTickSender(node.dataCoord, node.session.ServerID)
+			node.timeTickSender = newTimeTickSender(node.broker, node.session.ServerID)
 			go node.timeTickSender.start(node.ctx)
 		}
 

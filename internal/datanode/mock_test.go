@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -32,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -82,17 +84,12 @@ func newIDLEDataNodeMock(ctx context.Context, pkType schemapb.DataType) *DataNod
 	node.SetSession(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}})
 	node.dispClient = msgdispatcher.NewClient(factory, typeutil.DataNodeRole, paramtable.GetNodeID())
 
-	rc := &RootCoordFactory{
-		ID:             0,
-		collectionID:   1,
-		collectionName: "collection-1",
-		pkType:         pkType,
-	}
-	node.rootCoord = rc
+	broker := &broker.MockBroker{}
+	broker.EXPECT().ReportTimeTick(mock.Anything, mock.Anything).Return(nil).Maybe()
+	broker.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return([]*datapb.SegmentInfo{}, nil).Maybe()
 
-	ds := &DataCoordFactory{}
-	node.dataCoord = ds
-	node.timeTickSender = newTimeTickSender(node.dataCoord, 0)
+	node.broker = broker
+	node.timeTickSender = newTimeTickSender(node.broker, 0)
 
 	return node
 }

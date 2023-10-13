@@ -28,13 +28,9 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
@@ -51,7 +47,7 @@ type ttNode struct {
 	vChannelName   string
 	channel        Channel
 	lastUpdateTime *atomic.Time
-	dataCoord      types.DataCoordClient
+	broker         broker.Broker
 
 	updateCPLock  sync.Mutex
 	notifyChannel chan checkPoint
@@ -124,16 +120,9 @@ func (ttn *ttNode) updateChannelCP(channelPos *msgpb.MsgPosition, curTs time.Tim
 	// TODO, change to ETCD operation, avoid datacoord operation
 	ctx, cancel := context.WithTimeout(context.Background(), updateChanCPTimeout)
 	defer cancel()
-	resp, err := ttn.dataCoord.UpdateChannelCheckpoint(ctx, &datapb.UpdateChannelCheckpointRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithSourceID(paramtable.GetNodeID()),
-		),
-		VChannel: ttn.vChannelName,
-		Position: channelPos,
-	})
-	if err = merr.CheckRPCCall(resp, err); err != nil {
-		log.Warn("UpdateChannelCheckpoint failed", zap.String("channel", ttn.vChannelName),
-			zap.Time("channelCPTs", channelCPTs), zap.Error(err))
+
+	err := ttn.broker.UpdateChannelCheckpoint(ctx, ttn.vChannelName, channelPos)
+	if err != nil {
 		return err
 	}
 
@@ -149,7 +138,7 @@ func (ttn *ttNode) updateChannelCP(channelPos *msgpb.MsgPosition, curTs time.Tim
 	return nil
 }
 
-func newTTNode(config *nodeConfig, dc types.DataCoordClient) (*ttNode, error) {
+func newTTNode(config *nodeConfig, broker broker.Broker) (*ttNode, error) {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(Params.DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
 	baseNode.SetMaxParallelism(Params.DataNodeCfg.FlowGraphMaxParallelism.GetAsInt32())
@@ -159,7 +148,7 @@ func newTTNode(config *nodeConfig, dc types.DataCoordClient) (*ttNode, error) {
 		vChannelName:   config.vChannelName,
 		channel:        config.channel,
 		lastUpdateTime: atomic.NewTime(time.Time{}), // set to Zero to update channel checkpoint immediately after fg started
-		dataCoord:      dc,
+		broker:         broker,
 		notifyChannel:  make(chan checkPoint, 1),
 		closeChannel:   make(chan struct{}),
 	}

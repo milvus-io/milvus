@@ -440,6 +440,49 @@ func (_c *MockBroker_SaveBinlogPaths_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
+// SaveImportSegment provides a mock function with given fields: ctx, req
+func (_m *MockBroker) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSegmentRequest) error {
+	ret := _m.Called(ctx, req)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.SaveImportSegmentRequest) error); ok {
+		r0 = rf(ctx, req)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockBroker_SaveImportSegment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveImportSegment'
+type MockBroker_SaveImportSegment_Call struct {
+	*mock.Call
+}
+
+// SaveImportSegment is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *datapb.SaveImportSegmentRequest
+func (_e *MockBroker_Expecter) SaveImportSegment(ctx interface{}, req interface{}) *MockBroker_SaveImportSegment_Call {
+	return &MockBroker_SaveImportSegment_Call{Call: _e.mock.On("SaveImportSegment", ctx, req)}
+}
+
+func (_c *MockBroker_SaveImportSegment_Call) Run(run func(ctx context.Context, req *datapb.SaveImportSegmentRequest)) *MockBroker_SaveImportSegment_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.SaveImportSegmentRequest))
+	})
+	return _c
+}
+
+func (_c *MockBroker_SaveImportSegment_Call) Return(_a0 error) *MockBroker_SaveImportSegment_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBroker_SaveImportSegment_Call) RunAndReturn(run func(context.Context, *datapb.SaveImportSegmentRequest) error) *MockBroker_SaveImportSegment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ShowPartitions provides a mock function with given fields: ctx, dbName, collectionName
 func (_m *MockBroker) ShowPartitions(ctx context.Context, dbName string, collectionName string) (map[string]int64, error) {
 	ret := _m.Called(ctx, dbName, collectionName)
@@ -536,6 +579,49 @@ func (_c *MockBroker_UpdateChannelCheckpoint_Call) Return(_a0 error) *MockBroker
 }
 
 func (_c *MockBroker_UpdateChannelCheckpoint_Call) RunAndReturn(run func(context.Context, string, *msgpb.MsgPosition) error) *MockBroker_UpdateChannelCheckpoint_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateSegmentStatistics provides a mock function with given fields: ctx, req
+func (_m *MockBroker) UpdateSegmentStatistics(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest) error {
+	ret := _m.Called(ctx, req)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.UpdateSegmentStatisticsRequest) error); ok {
+		r0 = rf(ctx, req)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockBroker_UpdateSegmentStatistics_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateSegmentStatistics'
+type MockBroker_UpdateSegmentStatistics_Call struct {
+	*mock.Call
+}
+
+// UpdateSegmentStatistics is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *datapb.UpdateSegmentStatisticsRequest
+func (_e *MockBroker_Expecter) UpdateSegmentStatistics(ctx interface{}, req interface{}) *MockBroker_UpdateSegmentStatistics_Call {
+	return &MockBroker_UpdateSegmentStatistics_Call{Call: _e.mock.On("UpdateSegmentStatistics", ctx, req)}
+}
+
+func (_c *MockBroker_UpdateSegmentStatistics_Call) Run(run func(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest)) *MockBroker_UpdateSegmentStatistics_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.UpdateSegmentStatisticsRequest))
+	})
+	return _c
+}
+
+func (_c *MockBroker_UpdateSegmentStatistics_Call) Return(_a0 error) *MockBroker_UpdateSegmentStatistics_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBroker_UpdateSegmentStatistics_Call) RunAndReturn(run func(context.Context, *datapb.UpdateSegmentStatisticsRequest) error) *MockBroker_UpdateSegmentStatistics_Call {
 	_c.Call.Return(run)
 	return _c
 }

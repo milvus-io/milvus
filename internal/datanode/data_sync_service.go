@@ -23,19 +23,15 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
+	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/conc"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 )
 
@@ -54,6 +50,7 @@ type dataSyncService struct {
 
 	fg *flowgraph.TimeTickedFlowGraph // internal flowgraph processes insert/delta messages
 
+	broker           broker.Broker
 	delBufferManager *DeltaBufferManager
 	flushManager     flushManager // flush manager handles flush process
 
@@ -67,7 +64,6 @@ type dataSyncService struct {
 	idAllocator  allocator.Allocator // id/timestamp allocator
 	msFactory    msgstream.Factory
 	dispClient   msgdispatcher.Client
-	dataCoord    types.DataCoordClient // DataCoord instance to interact with
 	chunkManager storage.ChunkManager
 
 	// test only
@@ -146,7 +142,7 @@ func getChannelWithTickler(initCtx context.Context, node *DataNode, info *datapb
 	)
 
 	// init channel meta
-	channel := newChannel(channelName, collectionID, info.GetSchema(), node.rootCoord, node.chunkManager)
+	channel := newChannel(channelName, collectionID, info.GetSchema(), node.broker, node.chunkManager)
 
 	// tickler will update addSegment progress to watchInfo
 	futures := make([]*conc.Future[any], 0, len(unflushed)+len(flushed))
@@ -224,7 +220,7 @@ func getChannelWithEtcdTickler(initCtx context.Context, node *DataNode, info *da
 	)
 
 	// init channel meta
-	channel := newChannel(channelName, collectionID, info.GetSchema(), node.rootCoord, node.chunkManager)
+	channel := newChannel(channelName, collectionID, info.GetSchema(), node.broker, node.chunkManager)
 
 	// tickler will update addSegment progress to watchInfo
 	tickler.watch()
@@ -333,7 +329,7 @@ func getServiceWithChannel(initCtx context.Context, node *DataNode, info *datapb
 
 		dispClient: node.dispClient,
 		msFactory:  node.factory,
-		dataCoord:  node.dataCoord,
+		broker:     node.broker,
 
 		idAllocator:  config.allocator,
 		channel:      config.channel,
@@ -399,7 +395,7 @@ func getServiceWithChannel(initCtx context.Context, node *DataNode, info *datapb
 		return nil, err
 	}
 
-	ttNode, err := newTTNode(config, node.dataCoord)
+	ttNode, err := newTTNode(config, node.broker)
 	if err != nil {
 		return nil, err
 	}
@@ -417,11 +413,11 @@ func getServiceWithChannel(initCtx context.Context, node *DataNode, info *datapb
 // newServiceWithEtcdTickler stops and returns the initCtx.Err()
 func newServiceWithEtcdTickler(initCtx context.Context, node *DataNode, info *datapb.ChannelWatchInfo, tickler *etcdTickler) (*dataSyncService, error) {
 	// recover segment checkpoints
-	unflushedSegmentInfos, err := getSegmentInfos(initCtx, node.dataCoord, info.GetVchan().GetUnflushedSegmentIds())
+	unflushedSegmentInfos, err := node.broker.GetSegmentInfo(initCtx, info.GetVchan().GetUnflushedSegmentIds())
 	if err != nil {
 		return nil, err
 	}
-	flushedSegmentInfos, err := getSegmentInfos(initCtx, node.dataCoord, info.GetVchan().GetFlushedSegmentIds())
+	flushedSegmentInfos, err := node.broker.GetSegmentInfo(initCtx, info.GetVchan().GetFlushedSegmentIds())
 	if err != nil {
 		return nil, err
 	}
@@ -441,11 +437,11 @@ func newServiceWithEtcdTickler(initCtx context.Context, node *DataNode, info *da
 // NOTE: compactiable for event manager
 func newDataSyncService(initCtx context.Context, node *DataNode, info *datapb.ChannelWatchInfo, tickler *tickler) (*dataSyncService, error) {
 	// recover segment checkpoints
-	unflushedSegmentInfos, err := getSegmentInfos(initCtx, node.dataCoord, info.GetVchan().GetUnflushedSegmentIds())
+	unflushedSegmentInfos, err := node.broker.GetSegmentInfo(initCtx, info.GetVchan().GetUnflushedSegmentIds())
 	if err != nil {
 		return nil, err
 	}
-	flushedSegmentInfos, err := getSegmentInfos(initCtx, node.dataCoord, info.GetVchan().GetFlushedSegmentIds())
+	flushedSegmentInfos, err := node.broker.GetSegmentInfo(initCtx, info.GetVchan().GetFlushedSegmentIds())
 	if err != nil {
 		return nil, err
 	}
@@ -457,24 +453,4 @@ func newDataSyncService(initCtx context.Context, node *DataNode, info *datapb.Ch
 	}
 
 	return getServiceWithChannel(initCtx, node, info, channel, unflushedSegmentInfos, flushedSegmentInfos)
-}
-
-// getSegmentInfos return the SegmentInfo details according to the given ids through RPC to datacoord
-// TODO: add a broker for the rpc
-func getSegmentInfos(ctx context.Context, datacoord types.DataCoordClient, segmentIDs []int64) ([]*datapb.SegmentInfo, error) {
-	infoResp, err := datacoord.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_SegmentInfo),
-			commonpbutil.WithMsgID(0),
-			commonpbutil.WithSourceID(paramtable.GetNodeID()),
-		),
-		SegmentIDs:       segmentIDs,
-		IncludeUnHealthy: true,
-	})
-	if err := merr.CheckRPCCall(infoResp, err); err != nil {
-		log.Error("Fail to get SegmentInfo by ids from datacoord", zap.Error(err))
-		return nil, err
-	}
-
-	return infoResp.Infos, nil
 }

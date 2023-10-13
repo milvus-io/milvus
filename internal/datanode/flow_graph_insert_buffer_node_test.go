@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
+	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -45,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -80,13 +82,17 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 	require.NoError(t, err)
 	Params.Save("etcd.rootPath", "/test/datanode/root")
 
-	Factory := &MetaFactory{}
-	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1", schemapb.DataType_Int64)
-	mockRootCoord := &RootCoordFactory{
-		pkType: schemapb.DataType_Int64,
-	}
+	collMeta := NewMetaFactory().GetCollectionMeta(UniqueID(0), "coll1", schemapb.DataType_Int64)
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).
+		Return(&milvuspb.DescribeCollectionResponse{
+			Status: merr.Status(nil),
+			Schema: collMeta.GetSchema(),
+		}, nil).Maybe()
+	broker.EXPECT().ReportTimeTick(mock.Anything, mock.Anything).
+		Return(nil).Maybe()
 
-	channel := newChannel(insertChannelName, collMeta.ID, collMeta.Schema, mockRootCoord, cm)
+	channel := newChannel(insertChannelName, collMeta.ID, collMeta.Schema, broker, cm)
 	err = channel.addSegment(
 		context.TODO(),
 		addSegmentReq{
@@ -118,8 +124,7 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 		delBufHeap: &PriorityQueue{},
 	}
 
-	dataCoord := &DataCoordFactory{}
-	atimeTickSender := newTimeTickSender(dataCoord, 0)
+	atimeTickSender := newTimeTickSender(broker, 0)
 	iBNode, err := newInsertBufferNode(ctx, flushChan, resendTTChan, delBufManager, fm, newCache(), atimeTickSender, c)
 	assert.NotNil(t, iBNode)
 	require.NoError(t, err)
@@ -179,11 +184,16 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 
 	Factory := &MetaFactory{}
 	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1", schemapb.DataType_Int64)
-	mockRootCoord := &RootCoordFactory{
-		pkType: schemapb.DataType_Int64,
-	}
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).
+		Return(&milvuspb.DescribeCollectionResponse{
+			Status: merr.Status(nil),
+			Schema: collMeta.GetSchema(),
+		}, nil).Maybe()
+	broker.EXPECT().ReportTimeTick(mock.Anything, mock.Anything).
+		Return(nil).Maybe()
 
-	channel := newChannel(insertChannelName, collMeta.ID, collMeta.Schema, mockRootCoord, cm)
+	channel := newChannel(insertChannelName, collMeta.ID, collMeta.Schema, broker, cm)
 
 	err = channel.addSegment(
 		context.TODO(),
@@ -219,8 +229,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 		delBufHeap: &PriorityQueue{},
 	}
 
-	dataCoord := &DataCoordFactory{}
-	atimeTickSender := newTimeTickSender(dataCoord, 0)
+	atimeTickSender := newTimeTickSender(broker, 0)
 	iBNode, err := newInsertBufferNode(ctx, flushChan, resendTTChan, delBufManager, fm, newCache(), atimeTickSender, c)
 	require.NoError(t, err)
 
@@ -341,13 +350,17 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	require.NoError(t, err)
 	Params.Save("etcd.rootPath", "/test/datanode/root")
 
-	Factory := &MetaFactory{}
-	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1", schemapb.DataType_Int64)
-	dataFactory := NewDataFactory()
+	collMeta := NewMetaFactory().GetCollectionMeta(UniqueID(0), "coll1", schemapb.DataType_Int64)
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).
+		Return(&milvuspb.DescribeCollectionResponse{
+			Status: merr.Status(nil),
+			Schema: collMeta.GetSchema(),
+		}, nil).Maybe()
+	broker.EXPECT().ReportTimeTick(mock.Anything, mock.Anything).
+		Return(nil).Maybe()
 
-	mockRootCoord := &RootCoordFactory{
-		pkType: schemapb.DataType_Int64,
-	}
+	dataFactory := NewDataFactory()
 
 	channel := &ChannelMeta{
 		collectionID: collMeta.ID,
@@ -355,7 +368,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 		isHighMemory: atomic.NewBool(false),
 	}
 
-	channel.metaService = newMetaService(mockRootCoord, collMeta.ID)
+	channel.metaService = newMetaService(broker, collMeta.ID)
 
 	factory := dependency.NewDefaultFactory(true)
 
@@ -397,8 +410,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 		channel:    channel,
 		delBufHeap: &PriorityQueue{},
 	}
-	dataCoord := &DataCoordFactory{}
-	atimeTickSender := newTimeTickSender(dataCoord, 0)
+	atimeTickSender := newTimeTickSender(broker, 0)
 	iBNode, err := newInsertBufferNode(ctx, flushChan, resendTTChan, delBufManager, fm, newCache(), atimeTickSender, c)
 	require.NoError(t, err)
 
@@ -587,13 +599,17 @@ func TestInsertBufferNodeRollBF(t *testing.T) {
 	require.NoError(t, err)
 	Params.Save("etcd.rootPath", "/test/datanode/root")
 
-	Factory := &MetaFactory{}
-	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1", schemapb.DataType_Int64)
-	dataFactory := NewDataFactory()
+	collMeta := NewMetaFactory().GetCollectionMeta(UniqueID(0), "coll1", schemapb.DataType_Int64)
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).
+		Return(&milvuspb.DescribeCollectionResponse{
+			Status: merr.Status(nil),
+			Schema: collMeta.GetSchema(),
+		}, nil).Maybe()
+	broker.EXPECT().ReportTimeTick(mock.Anything, mock.Anything).
+		Return(nil).Maybe()
 
-	mockRootCoord := &RootCoordFactory{
-		pkType: schemapb.DataType_Int64,
-	}
+	dataFactory := NewDataFactory()
 
 	channel := &ChannelMeta{
 		collectionID: collMeta.ID,
@@ -601,7 +617,7 @@ func TestInsertBufferNodeRollBF(t *testing.T) {
 		isHighMemory: atomic.NewBool(false),
 	}
 
-	channel.metaService = newMetaService(mockRootCoord, collMeta.ID)
+	channel.metaService = newMetaService(broker, collMeta.ID)
 
 	factory := dependency.NewDefaultFactory(true)
 
@@ -644,8 +660,7 @@ func TestInsertBufferNodeRollBF(t *testing.T) {
 		delBufHeap: &PriorityQueue{},
 	}
 
-	dataCoord := &DataCoordFactory{}
-	atimeTickSender := newTimeTickSender(dataCoord, 0)
+	atimeTickSender := newTimeTickSender(broker, 0)
 	iBNode, err := newInsertBufferNode(ctx, flushChan, resendTTChan, delBufManager, fm, newCache(), atimeTickSender, c)
 	require.NoError(t, err)
 
@@ -737,13 +752,18 @@ type InsertBufferNodeSuite struct {
 
 func (s *InsertBufferNodeSuite) SetupSuite() {
 	insertBufferNodeTestDir := "/tmp/milvus_test/insert_buffer_node"
-	rc := &RootCoordFactory{
-		pkType: schemapb.DataType_Int64,
-	}
+
+	collMeta := NewMetaFactory().GetCollectionMeta(1, "coll1", schemapb.DataType_Int64)
+	broker := broker.NewMockBroker(s.T())
+	broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).
+		Return(&milvuspb.DescribeCollectionResponse{
+			Status: merr.Status(nil),
+			Schema: collMeta.GetSchema(),
+		}, nil).Maybe()
 
 	s.collID = 1
 	s.partID = 10
-	s.channel = newChannel("channel", s.collID, nil, rc, s.cm)
+	s.channel = newChannel("channel", s.collID, nil, broker, s.cm)
 
 	s.delBufManager = &DeltaBufferManager{
 		channel:    s.channel,
@@ -971,7 +991,7 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 	require.NoError(t, err)
 	Params.Save("etcd.rootPath", "/test/datanode/root")
 
-	Factory := &MetaFactory{}
+	factory := &MetaFactory{}
 	tests := []struct {
 		collID      UniqueID
 		pkType      schemapb.DataType
@@ -984,16 +1004,18 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 	for _, test := range tests {
-		collMeta := Factory.GetCollectionMeta(test.collID, "collection", test.pkType)
-		rcf := &RootCoordFactory{
-			pkType: test.pkType,
-		}
-		mockRootCoord := &CompactedRootCoord{
-			RootCoordClient: rcf,
-			compactTs:       100,
-		}
+		collMeta := factory.GetCollectionMeta(test.collID, "collection", test.pkType)
 
-		channel := newChannel(insertChannelName, collMeta.ID, collMeta.Schema, mockRootCoord, cm)
+		broker := broker.NewMockBroker(t)
+		broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Status(nil),
+				Schema: collMeta.GetSchema(),
+			}, nil).Maybe()
+		broker.EXPECT().ReportTimeTick(mock.Anything, mock.Anything).
+			Return(nil).Maybe()
+
+		channel := newChannel(insertChannelName, collMeta.ID, collMeta.Schema, broker, cm)
 		err = channel.addSegment(
 			context.TODO(),
 			addSegmentReq{
@@ -1025,8 +1047,7 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 			delBufHeap: &PriorityQueue{},
 		}
 
-		dataCoord := &DataCoordFactory{}
-		atimeTickSender := newTimeTickSender(dataCoord, 0)
+		atimeTickSender := newTimeTickSender(broker, 0)
 		iBNode, err := newInsertBufferNode(ctx, flushChan, resendTTChan, delBufManager, fm, newCache(), atimeTickSender, c)
 		require.NoError(t, err)
 
@@ -1062,7 +1083,8 @@ func TestInsertBufferNode_updateSegmentStates(te *testing.T) {
 	}
 
 	for _, test := range invalideTests {
-		channel := newChannel("channel", test.channelCollID, nil, &RootCoordFactory{pkType: schemapb.DataType_Int64}, cm)
+		broker := broker.NewMockBroker(te)
+		channel := newChannel("channel", test.channelCollID, nil, broker, cm)
 
 		ibNode := &insertBufferNode{
 			channel: channel,
@@ -1171,7 +1193,17 @@ func TestInsertBufferNode_task_pool_is_full(t *testing.T) {
 	collection := UniqueID(0)
 	segmentID := UniqueID(100)
 
-	channel := newChannel(channelName, collection, nil, &RootCoordFactory{pkType: schemapb.DataType_Int64}, cm)
+	meta := NewMetaFactory().GetCollectionMeta(collection, "test_collection", schemapb.DataType_Int64)
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).
+		Return(&milvuspb.DescribeCollectionResponse{
+			Status:         merr.Status(nil),
+			CollectionID:   1,
+			CollectionName: "test_collection",
+			Schema:         meta.GetSchema(),
+		}, nil)
+
+	channel := newChannel(channelName, collection, nil, broker, cm)
 	err := channel.addSegment(
 		context.TODO(),
 		addSegmentReq{

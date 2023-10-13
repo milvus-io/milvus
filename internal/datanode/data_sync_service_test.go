@@ -27,21 +27,25 @@ import (
 	"testing"
 	"time"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
+	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
@@ -191,6 +195,14 @@ func TestDataSyncService_Start(t *testing.T) {
 	node.chunkManager = storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
 	defer node.chunkManager.RemoveWithPrefix(ctx, node.chunkManager.RootPath())
 
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().ReportTimeTick(mock.Anything, mock.Anything).Return(nil).Maybe()
+	broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil).Maybe()
+	broker.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).Return(nil).Maybe()
+	broker.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	node.broker = broker
+
 	alloc := allocator.NewMockAllocator(t)
 	alloc.EXPECT().Alloc(mock.Anything).Call.Return(int64(22222),
 		func(count uint32) int64 {
@@ -242,21 +254,28 @@ func TestDataSyncService_Start(t *testing.T) {
 		},
 	}
 
-	node.dataCoord.(*DataCoordFactory).UserSegmentInfo = map[int64]*datapb.SegmentInfo{
-		0: {
-			ID:            0,
-			CollectionID:  collMeta.ID,
-			PartitionID:   1,
-			InsertChannel: insertChannelName,
-		},
+	broker.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Call.Return(
+		func(_ context.Context, segmentIDs []int64) []*datapb.SegmentInfo {
+			data := map[int64]*datapb.SegmentInfo{
+				0: {
+					ID:            0,
+					CollectionID:  collMeta.ID,
+					PartitionID:   1,
+					InsertChannel: insertChannelName,
+				},
 
-		1: {
-			ID:            1,
-			CollectionID:  collMeta.ID,
-			PartitionID:   1,
-			InsertChannel: insertChannelName,
-		},
-	}
+				1: {
+					ID:            1,
+					CollectionID:  collMeta.ID,
+					PartitionID:   1,
+					InsertChannel: insertChannelName,
+				},
+			}
+			return lo.FilterMap(segmentIDs, func(id int64, _ int) (*datapb.SegmentInfo, bool) {
+				item, ok := data[id]
+				return item, ok
+			})
+		}, nil)
 
 	sync, err := newServiceWithEtcdTickler(
 		ctx,
@@ -354,6 +373,14 @@ func TestDataSyncService_Close(t *testing.T) {
 	node.chunkManager = storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
 	defer node.chunkManager.RemoveWithPrefix(ctx, node.chunkManager.RootPath())
 
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().ReportTimeTick(mock.Anything, mock.Anything).Return(nil).Maybe()
+	broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil).Maybe()
+	broker.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).Return(nil).Maybe()
+	broker.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	node.broker = broker
+
 	ufs := []*datapb.SegmentInfo{{
 		CollectionID:  collMeta.ID,
 		PartitionID:   1,
@@ -389,28 +416,36 @@ func TestDataSyncService_Close(t *testing.T) {
 	}
 
 	alloc := allocator.NewMockAllocator(t)
-	alloc.EXPECT().AllocOne().Call.Return(int64(11111), nil)
+	alloc.EXPECT().AllocOne().Call.Return(int64(11111), nil).Maybe()
 	alloc.EXPECT().Alloc(mock.Anything).Call.Return(int64(22222),
 		func(count uint32) int64 {
 			return int64(22222 + count)
-		}, nil)
+		}, nil).Maybe()
 	node.allocator = alloc
 
-	node.dataCoord.(*DataCoordFactory).UserSegmentInfo = map[int64]*datapb.SegmentInfo{
-		0: {
-			ID:            0,
-			CollectionID:  collMeta.ID,
-			PartitionID:   1,
-			InsertChannel: insertChannelName,
-		},
+	broker.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Call.Return(
+		func(_ context.Context, segmentIDs []int64) []*datapb.SegmentInfo {
+			data := map[int64]*datapb.SegmentInfo{
+				0: {
+					ID:            0,
+					CollectionID:  collMeta.ID,
+					PartitionID:   1,
+					InsertChannel: insertChannelName,
+				},
 
-		1: {
-			ID:            1,
-			CollectionID:  collMeta.ID,
-			PartitionID:   1,
-			InsertChannel: insertChannelName,
-		},
-	}
+				1: {
+					ID:            1,
+					CollectionID:  collMeta.ID,
+					PartitionID:   1,
+					InsertChannel: insertChannelName,
+				},
+			}
+			segments := lo.FilterMap(segmentIDs, func(id int64, _ int) (*datapb.SegmentInfo, bool) {
+				item, ok := data[id]
+				return item, ok
+			})
+			return segments
+		}, nil).Maybe()
 
 	// No Auto flush
 	paramtable.Get().Reset(Params.DataNodeCfg.FlushInsertBufferSize.Key)
@@ -421,7 +456,7 @@ func TestDataSyncService_Close(t *testing.T) {
 		watchInfo,
 		genTestTickler(),
 	)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.NotNil(t, syncService)
 	syncService.channel.(*ChannelMeta).syncPolicies = []segmentSyncPolicy{
 		syncMemoryTooHigh(),
@@ -600,53 +635,26 @@ func TestBytesReader(t *testing.T) {
 	assert.Equal(t, int8(100), dataInt8)
 }
 
-func TestGetSegmentInfos(t *testing.T) {
-	dataCoord := &DataCoordFactory{}
-	ctx := context.Background()
-	segmentInfos, err := getSegmentInfos(ctx, dataCoord, []int64{1})
-	assert.NoError(t, err)
-	assert.Equal(t, 1, len(segmentInfos))
-
-	dataCoord.GetSegmentInfosError = true
-	segmentInfos2, err := getSegmentInfos(ctx, dataCoord, []int64{1})
-	assert.Error(t, err)
-	assert.Empty(t, segmentInfos2)
-
-	dataCoord.GetSegmentInfosError = false
-	dataCoord.GetSegmentInfosNotSuccess = true
-	segmentInfos3, err := getSegmentInfos(ctx, dataCoord, []int64{1})
-	assert.Error(t, err)
-	assert.Empty(t, segmentInfos3)
-
-	dataCoord.GetSegmentInfosError = false
-	dataCoord.GetSegmentInfosNotSuccess = false
-	dataCoord.UserSegmentInfo = map[int64]*datapb.SegmentInfo{
-		5: {
-			ID:            100,
-			CollectionID:  101,
-			PartitionID:   102,
-			InsertChannel: "by-dev-rootcoord-dml-test_v1",
-		},
-	}
-
-	segmentInfos, err = getSegmentInfos(ctx, dataCoord, []int64{5})
-	assert.NoError(t, err)
-	assert.Equal(t, 1, len(segmentInfos))
-	assert.Equal(t, int64(100), segmentInfos[0].ID)
-}
-
 func TestClearGlobalFlushingCache(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	dataCoord := &DataCoordFactory{}
+	meta := NewMetaFactory().GetCollectionMeta(1, "test_collection", schemapb.DataType_Int64)
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).
+		Return(&milvuspb.DescribeCollectionResponse{
+			Status:         merr.Status(nil),
+			CollectionID:   1,
+			CollectionName: "test_collection",
+			Schema:         meta.GetSchema(),
+		}, nil)
 	cm := storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
-	channel := newChannel("channel", 1, nil, &RootCoordFactory{pkType: schemapb.DataType_Int64}, cm)
+	channel := newChannel("channel", 1, nil, broker, cm)
 	var err error
 
 	cache := newCache()
 	dsService := &dataSyncService{
-		dataCoord:        dataCoord,
+		broker:           broker,
 		channel:          channel,
 		flushingSegCache: cache,
 	}
@@ -722,6 +730,17 @@ func TestGetChannelWithTickler(t *testing.T) {
 	node := newIDLEDataNodeMock(context.Background(), schemapb.DataType_Int64)
 	node.chunkManager = storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
 	defer node.chunkManager.RemoveWithPrefix(context.Background(), node.chunkManager.RootPath())
+
+	meta := NewMetaFactory().GetCollectionMeta(1, "test_collection", schemapb.DataType_Int64)
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).
+		Return(&milvuspb.DescribeCollectionResponse{
+			Status:         merr.Status(nil),
+			CollectionID:   1,
+			CollectionName: "test_collection",
+			Schema:         meta.GetSchema(),
+		}, nil)
+	node.broker = broker
 
 	unflushed := []*datapb.SegmentInfo{
 		{
