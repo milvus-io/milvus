@@ -498,6 +498,118 @@ func Test_parseIndexParams(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("create index on VarChar field", func(t *testing.T) {
+		cit := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.IndexTypeKey,
+						Value: DefaultStringIndexType,
+					},
+				},
+				IndexName: "",
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:      101,
+				Name:         "FieldID",
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_VarChar,
+			},
+		}
+		err := cit.parseIndexParams()
+		assert.NoError(t, err)
+	})
+
+	t.Run("create index on Arithmetic field", func(t *testing.T) {
+		cit := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.IndexTypeKey,
+						Value: DefaultArithmeticIndexType,
+					},
+				},
+				IndexName: "",
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:      101,
+				Name:         "FieldID",
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_Int64,
+			},
+		}
+		err := cit.parseIndexParams()
+		assert.NoError(t, err)
+	})
+
+	// Compatible with the old version <= 2.3.0
+	t.Run("create marisa-trie index on VarChar field", func(t *testing.T) {
+		cit := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.IndexTypeKey,
+						Value: "marisa-trie",
+					},
+				},
+				IndexName: "",
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:      101,
+				Name:         "FieldID",
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_VarChar,
+			},
+		}
+		err := cit.parseIndexParams()
+		assert.NoError(t, err)
+	})
+
+	// Compatible with the old version <= 2.3.0
+	t.Run("create Asceneding index on Arithmetic field", func(t *testing.T) {
+		cit := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.IndexTypeKey,
+						Value: "Asceneding",
+					},
+				},
+				IndexName: "",
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:      101,
+				Name:         "FieldID",
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_Int64,
+			},
+		}
+		err := cit.parseIndexParams()
+		assert.NoError(t, err)
+	})
+
+	t.Run("create unsupported index on Arithmetic field", func(t *testing.T) {
+		cit := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.IndexTypeKey,
+						Value: "invalid_type",
+					},
+				},
+				IndexName: "",
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:      101,
+				Name:         "FieldID",
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_Int64,
+			},
+		}
+		err := cit.parseIndexParams()
+		assert.Error(t, err)
+	})
+
 	t.Run("create index on array field", func(t *testing.T) {
 		cit3 := &createIndexTask{
 			Condition: nil,
