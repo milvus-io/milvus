@@ -693,17 +693,13 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 
 // ResendSegmentStats resend un-flushed segment stats back upstream to DataCoord by resending DataNode time tick message.
 // It returns a list of segments to be sent.
+// Deprecated in 2.2.15, reversed it just for compatibility during rolling back
 func (node *DataNode) ResendSegmentStats(ctx context.Context, req *datapb.ResendSegmentStatsRequest) (*datapb.ResendSegmentStatsResponse, error) {
-	log.Info("start resending segment stats, if any",
-		zap.Int64("DataNode ID", Params.DataNodeCfg.GetNodeID()))
-	segResent := node.flowgraphManager.resendTT()
-	log.Info("found segment(s) with stats to resend",
-		zap.Int64s("segment IDs", segResent))
 	return &datapb.ResendSegmentStatsResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
-		SegResent: segResent,
+		SegResent: make([]int64, 0),
 	}, nil
 }
 

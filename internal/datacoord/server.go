@@ -34,6 +34,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+
 	"github.com/milvus-io/milvus/internal/common"
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	rootcoordclient "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
@@ -363,12 +364,6 @@ func (s *Server) startDataCoord() {
 	}
 	s.startServerLoop()
 
-	// DataCoord (re)starts successfully and starts to collection segment stats
-	// data from all DataNode.
-	// This will prevent DataCoord from missing out any important segment stats
-	// data while offline.
-	log.Info("DataCoord (re)starts successfully and re-collecting segment stats from DataNodes")
-	s.reCollectSegmentStats(s.ctx)
 	s.stateCode.Store(commonpb.StateCode_Healthy)
 }
 
@@ -1021,26 +1016,4 @@ func (s *Server) hasCollection(ctx context.Context, collectionID int64) (bool, e
 		return false, err
 	}
 	return false, statusErr
-}
-
-func (s *Server) reCollectSegmentStats(ctx context.Context) {
-	if s.channelManager == nil {
-		log.Error("null channel manager found, which should NOT happen in non-testing environment")
-		return
-	}
-	nodes := s.sessionManager.getLiveNodeIDs()
-	log.Info("re-collecting segment stats from DataNodes",
-		zap.Int64s("DataNode IDs", nodes))
-
-	reCollectFunc := func() error {
-		err := s.cluster.ReCollectSegmentStats(ctx)
-		if err != nil {
-			return err
-		}
-		return nil
-	}
-
-	if err := retry.Do(ctx, reCollectFunc, retry.Attempts(20), retry.Sleep(time.Millisecond*100), retry.MaxSleepTime(5*time.Second)); err != nil {
-		panic(err)
-	}
 }

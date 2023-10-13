@@ -21,11 +21,12 @@ import (
 	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/samber/lo"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
-	"github.com/samber/lo"
-	"go.uber.org/zap"
 )
 
 // Cluster provides interfaces to interact with datanode cluster
@@ -108,17 +109,6 @@ func (c *Cluster) Flush(ctx context.Context, nodeID int64, channel string,
 // Import sends import requests to DataNodes whose ID==nodeID.
 func (c *Cluster) Import(ctx context.Context, nodeID int64, it *datapb.ImportTaskRequest) {
 	c.sessionManager.Import(ctx, nodeID, it)
-}
-
-// ReCollectSegmentStats triggers a ReCollectSegmentStats call from session manager.
-func (c *Cluster) ReCollectSegmentStats(ctx context.Context) error {
-	for _, node := range c.sessionManager.getLiveNodeIDs() {
-		err := c.sessionManager.ReCollectSegmentStats(ctx, node)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // GetSessions returns all sessions
