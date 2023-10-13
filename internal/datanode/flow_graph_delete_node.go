@@ -146,11 +146,19 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 		dn.flushManager.notifyAllFlushed()
 		log.Info("DeleteNode notifies BackgroundGC to release vchannel", zap.String("vChannelName", dn.channelName))
 		dn.clearSignal <- dn.channelName
+		log.Info("DeleteNode notifies BackgroundGC to release vchannel done", zap.String("vChannelName", dn.channelName))
 	}
 
 	for _, sp := range spans {
 		sp.End()
 	}
+	if !dn.IsValidInMsg(in) {
+		log.Info("lxg input is invalid", zap.String("vChannelName", dn.channelName))
+	}
+	if isCloseMsg(in) {
+		log.Info("lxg debug in is close msg", zap.String("vChannelName", dn.channelName))
+	}
+	log.Info("lxg test delete node operate ok")
 	return in
 }
 
@@ -210,4 +218,11 @@ func newDeleteNode(ctx context.Context, fm flushManager, manager *DeltaBufferMan
 		flushManager:     fm,
 		clearSignal:      sig,
 	}, nil
+}
+
+func isCloseMsg(msgs []Msg) bool {
+	if len(msgs) == 1 {
+		return msgs[0].IsClose()
+	}
+	return false
 }

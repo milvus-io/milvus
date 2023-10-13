@@ -20,7 +20,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"go.uber.org/zap"
 )
 
 // groups maintains string to GroupChecker
@@ -77,11 +79,13 @@ func (gc *GroupChecker) work() {
 
 // Check updates the latest timestamp for provided name
 func (gc *GroupChecker) Check(name string) {
+	log.Info("lxg debug groupchecker insert", zap.String("name", name))
 	gc.lastest.Insert(name, time.Now())
 }
 
 // Remove deletes name from watch list
 func (gc *GroupChecker) Remove(name string) {
+	log.Info("lxg debug groupchecker remove", zap.String("name", name))
 	gc.lastest.GetAndRemove(name)
 }
 

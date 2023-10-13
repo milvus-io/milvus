@@ -81,7 +81,7 @@ type nodeConfig struct {
 	serverID     UniqueID
 }
 
-// start the flow graph in datasyncservice
+// start the flow graph in dataSyncService
 func (dsService *dataSyncService) start() {
 	if dsService.fg != nil {
 		log.Info("dataSyncService starting flow graph", zap.Int64("collectionID", dsService.collectionID),
@@ -357,6 +357,7 @@ func getServiceWithChannel(initCtx context.Context, node *DataNode, info *datapb
 	ds.flushManager = flushManager
 
 	// init flowgraph
+
 	fg := flowgraph.NewTimeTickedFlowGraph(node.ctx)
 	dmStreamNode, err := newDmInputNode(initCtx, node.dispClient, info.GetVchan().GetSeekPosition(), config)
 	if err != nil {
