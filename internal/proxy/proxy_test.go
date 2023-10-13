@@ -2858,8 +2858,9 @@ func TestProxy(t *testing.T) {
 	})
 
 	wg.Add(1)
-	t.Run("Flush fail, dd queue full", func(t *testing.T) {
+	t.Run("Flush fail, dc queue full", func(t *testing.T) {
 		defer wg.Done()
+		proxy.sched.dcQueue.setMaxTaskNum(0)
 		resp, err := proxy.Flush(ctx, &milvuspb.FlushRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())

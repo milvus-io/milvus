@@ -372,6 +372,9 @@ type taskScheduler struct {
 	dmQueue *dmTaskQueue
 	dqQueue *dqTaskQueue
 
+	// data control queue, use for such as flush operation, which control the data status
+	dcQueue *ddTaskQueue
+
 	wg     sync.WaitGroup
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -396,6 +399,8 @@ func newTaskScheduler(ctx context.Context,
 	s.dmQueue = newDmTaskQueue(tsoAllocatorIns)
 	s.dqQueue = newDqTaskQueue(tsoAllocatorIns)
 
+	s.dcQueue = newDdTaskQueue(tsoAllocatorIns)
+
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -407,25 +412,16 @@ func (sched *taskScheduler) scheduleDdTask() task {
 	return sched.ddQueue.PopUnissuedTask()
 }
 
+func (sched *taskScheduler) scheduleDcTask() task {
+	return sched.dcQueue.PopUnissuedTask()
+}
+
 func (sched *taskScheduler) scheduleDmTask() task {
 	return sched.dmQueue.PopUnissuedTask()
 }
 
 func (sched *taskScheduler) scheduleDqTask() task {
 	return sched.dqQueue.PopUnissuedTask()
-}
-
-func (sched *taskScheduler) getTaskByReqID(reqID UniqueID) task {
-	if t := sched.ddQueue.getTaskByReqID(reqID); t != nil {
-		return t
-	}
-	if t := sched.dmQueue.getTaskByReqID(reqID); t != nil {
-		return t
-	}
-	if t := sched.dqQueue.getTaskByReqID(reqID); t != nil {
-		return t
-	}
-	return nil
 }
 
 func (sched *taskScheduler) processTask(t task, q taskQueue) {
@@ -486,6 +482,22 @@ func (sched *taskScheduler) definitionLoop() {
 	}
 }
 
+// controlLoop schedule the data control operation, such as flush
+func (sched *taskScheduler) controlLoop() {
+	defer sched.wg.Done()
+	for {
+		select {
+		case <-sched.ctx.Done():
+			return
+		case <-sched.dcQueue.utChan():
+			if !sched.dcQueue.utEmpty() {
+				t := sched.scheduleDcTask()
+				sched.processTask(t, sched.dcQueue)
+			}
+		}
+	}
+}
+
 func (sched *taskScheduler) manipulationLoop() {
 	defer sched.wg.Done()
 	for {
@@ -522,6 +534,9 @@ func (sched *taskScheduler) queryLoop() {
 func (sched *taskScheduler) Start() error {
 	sched.wg.Add(1)
 	go sched.definitionLoop()
+
+	sched.wg.Add(1)
+	go sched.controlLoop()
 
 	sched.wg.Add(1)
 	go sched.manipulationLoop()
