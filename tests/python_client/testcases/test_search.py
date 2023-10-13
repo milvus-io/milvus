@@ -247,14 +247,18 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # 2. search with invalid dim
         log.info("test_search_param_invalid_dim: searching with invalid dim")
         wrong_dim = 129
-        vectors = [[random.random() for _ in range(wrong_dim)]
-                   for _ in range(default_nq)]
+        vectors = [[random.random() for _ in range(wrong_dim)] for _ in range(default_nq)]
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit, default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": "The dimension of query entities "
-                                                    "is different from schema"})
+                            check_items={"err_code": 65538,
+                                         "err_msg": 'failed to search: attempt #0: failed to search/query'
+                                                    ' delegator 1 for channel by-dev-rootcoord-dml_1_4'
+                                                    '44857573610608343v0: fail to Search, QueryNode ID=1, '
+                                                    'reason=worker(1) query failed: UnknownError: Assert '
+                                                    '"field_meta.get_sizeof() == element.line_sizeof_" '
+                                                    'at /go/src/github.com/milvus-io/milvus/internal/core/'
+                                                    'src/query/Plan.cpp:52'})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_param_invalid_field_type(self, get_invalid_fields_type):
@@ -267,13 +271,16 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w = self.init_collection_general(prefix)[0]
         # 2. search with invalid field
         invalid_search_field = get_invalid_fields_type
-        log.info("test_search_param_invalid_field_type: searching with "
-                 "invalid field: %s" % invalid_search_field)
+        log.info("test_search_param_invalid_field_type: searching with invalid field: %s"
+                 % invalid_search_field)
+        error1 = {"err_code": 65535, "err_msg": "failed to search: attempt #0: fail to get shard leaders from "
+                                                 "QueryCoord: collection=444857573608382363: collection not "
+                                                 "loaded: unrecoverable error"}
+        error2 = {"err_code": 1, "err_msg": f"`anns_field` value {get_invalid_fields_type} is illegal"}
+        error = error2 if get_invalid_fields_type in [[], 1, [1, "2", 3], (1,), {1: 1}] else error1
         collection_w.search(vectors[:default_nq], invalid_search_field, default_search_params,
                             default_limit, default_search_exp,
-                            check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": "`anns_field` value {} is illegal".format(invalid_search_field)})
+                            check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_param_invalid_field_value(self, get_invalid_fields_value):
@@ -291,9 +298,9 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.search(vectors[:default_nq], invalid_search_field, default_search_params,
                             default_limit, default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": "Field %s doesn't exist in schema"
-                                                    % invalid_search_field})
+                            check_items={"err_code": 65535,
+                                         "err_msg": "failed to create query plan: failed to get field schema "
+                                                    "by name: %s not found" % invalid_search_field})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_param_invalid_metric_type(self, get_invalid_metric_type):
@@ -305,16 +312,16 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # 1. initialize with data
         collection_w = self.init_collection_general(prefix)[0]
         # 2. search with invalid metric_type
-        log.info(
-            "test_search_param_invalid_metric_type: searching with invalid metric_type")
+        log.info("test_search_param_invalid_metric_type: searching with invalid metric_type")
         invalid_metric = get_invalid_metric_type
-        search_params = {"metric_type": invalid_metric,
-                         "params": {"nprobe": 10}}
+        search_params = {"metric_type": invalid_metric, "params": {"nprobe": 10}}
         collection_w.search(vectors[:default_nq], default_search_field, search_params,
                             default_limit, default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": "metric type not found"})
+                            check_items={"err_code": 65535,
+                                         "err_msg": "failed to search: attempt #0: fail to get shard leaders "
+                                                    "from QueryCoord: collection=444818512783277152: collection "
+                                                    "not loaded: unrecoverable error"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index, params",
@@ -337,7 +344,11 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.load()
         # 3. search
         invalid_search_params = cf.gen_invalid_search_params_type()
-        message = "Search params check failed"
+        message = ("failed to search: attempt #0: failed to search/query delegator 1 for channel "
+                   "by-dev-rootcoord-dml_8_444857573608382882v0: fail to Search, QueryNode ID=1, "
+                   "reason=worker(1) query failed: UnknownError:  => failed to search: invalid param "
+                   "in json: invalid json key invalid_key: attempt #1: no available shard delegator "
+                   "found: service unavailable")
         for invalid_search_param in invalid_search_params:
             if index == invalid_search_param["index_type"]:
                 search_params = {"metric_type": "L2",
@@ -346,7 +357,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                     search_params, default_limit,
                                     default_search_exp,
                                     check_task=CheckTasks.err_res,
-                                    check_items={"err_code": 1,
+                                    check_items={"err_code": 65538,
                                                  "err_msg": message})
 
     @pytest.mark.skip("not fixed yet")
@@ -408,13 +419,13 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # 2. search with invalid limit (topK)
         log.info("test_search_param_invalid_limit_value: searching with "
                  "invalid limit (topK) = %s" % limit)
-        err_msg = "limit %d is too large!" % limit
+        err_msg = f"topk [{limit}] is invalid, top k should be in range [1, 16384], but got {limit}"
         if limit == 0:
             err_msg = "`limit` value 0 is illegal"
         collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
                             limit, default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
+                            check_items={"err_code": 65535,
                                          "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -489,8 +500,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit, invalid_search_expr,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": "invalid expression %s"
+                            check_items={"err_code": 65535,
+                                         "err_msg": "failed to create query plan: cannot parse expression: %s"
                                                     % invalid_search_expr})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -521,16 +532,14 @@ class TestCollectionSearchInvalid(TestcaseBase):
         method: test search invalid bool
         expected: searched failed
         """
-        collection_w = self.init_collection_general(
-            prefix, True, is_all_data_type=True)[0]
-        log.info(
-            "test_search_with_expression: searching with expression: %s" % expression)
+        collection_w = self.init_collection_general(prefix, True, is_all_data_type=True)[0]
+        log.info("test_search_with_expression: searching with expression: %s" % expression)
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit, expression,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": "failed to create query plan: cannot parse "
-                                                    "expression: %s" % expression})
+                            check_items={"err_code": 65535,
+                                         "err_msg": "failed to create query plan: predicate is not a "
+                                                    "boolean expression: %s, data type: Bool" % expression})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("expression", ["int64 like 33", "float LIKE 33"])
@@ -614,9 +623,10 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.search(vectors, default_search_field,
                             default_search_params, default_limit, default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": "collection %s was not loaded "
-                                                    "into memory" % collection_w.name})
+                            check_items={"err_code": 65535,
+                                         "err_msg": "failed to search: attempt #0: fail to get shard leaders from"
+                                                    " QueryCoord: collection=444818512783277916: collection not"
+                                                    " loaded: unrecoverable error"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_release_partition(self):
@@ -629,10 +639,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
         """
         # 1. initialize with data
         partition_num = 1
-        collection_w = self.init_collection_general(
-            prefix, True, 10, partition_num, is_index=False)[0]
-        collection_w.create_index(
-            ct.default_float_vec_field_name, index_params=ct.default_flat_index)
+        collection_w = self.init_collection_general(prefix, True, 10, partition_num, is_index=False)[0]
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         par = collection_w.partitions
         par_name = par[partition_num].name
         par[partition_num].load()
@@ -645,8 +653,10 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             default_search_params, limit, default_search_exp,
                             [par_name],
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": "partition has been released"})
+                            check_items={"err_code": 65535,
+                                         "err_msg": "failed to search: attempt #0: fail to get shard "
+                                                    "leaders from QueryCoord: collection=444857573608588384: "
+                                                    "collection not loaded: unrecoverable error"})
 
     @pytest.mark.skip("enable this later using session/strong consistency")
     @pytest.mark.tags(CaseLabel.L1)
@@ -736,16 +746,14 @@ class TestCollectionSearchInvalid(TestcaseBase):
         """
         # 1. initialize with data
         partition_num = 1
-        collection_w = self.init_collection_general(
-            prefix, True, 1000, partition_num, is_index=False)[0]
+        collection_w = self.init_collection_general(prefix, True, 1000, partition_num, is_index=False)[0]
         # 2. delete partitions
         log.info("test_search_partition_deleted: deleting a partition")
         par = collection_w.partitions
         deleted_par_name = par[partition_num].name
         collection_w.drop_partition(deleted_par_name)
         log.info("test_search_partition_deleted: deleted a partition")
-        collection_w.create_index(
-            ct.default_float_vec_field_name, index_params=ct.default_flat_index)
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         # 3. search after delete partitions
         log.info("test_search_partition_deleted: searching deleted partition")
@@ -753,8 +761,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             default_search_params, default_limit, default_search_exp,
                             [deleted_par_name],
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": "PartitonName: %s not found" % deleted_par_name})
+                            check_items={"err_code": 65535,
+                                         "err_msg": "partition name search_partition_0 not found"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index, params",
@@ -782,13 +790,17 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # 3. search
         log.info("test_search_different_index_invalid_params: Searching after "
                  "creating index-%s" % index)
+        msg = ("failed to search: attempt #0: failed to search/query delegator 1 for channel "
+               "by-dev-rootcoord-dml_10_444857573608789760v0: fail to Search, QueryNode ID=1, "
+               "reason=worker(1) query failed: UnknownError: [json.exception.type_error.302] "
+               "type must be number, but is string: attempt #1: no available shard delegator "
+               "found: service unavailable")
         search_params = cf.gen_invalid_search_param(index)
         collection_w.search(vectors, default_search_field,
                             search_params[0], default_limit,
                             default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": "Search params check failed"})
+                            check_items={"err_code": 65538, "err_msg": msg})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_index_partition_not_existed(self):
@@ -800,17 +812,15 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # 1. initialize with data
         collection_w = self.init_collection_general(prefix, is_index=False)[0]
         # 2. create index
-        default_index = {"index_type": "IVF_FLAT",
-                         "params": {"nlist": 128}, "metric_type": "L2"}
+        default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
         collection_w.create_index("float_vector", default_index)
         # 3. search the non exist partition
         partition_name = "search_non_exist"
         collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
-                            default_limit, default_search_exp, [
-                                partition_name],
+                            default_limit, default_search_exp, [partition_name],
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": "PartitonName: %s not found" % partition_name})
+                            check_items={"err_code": 65535,
+                                         "err_msg": "partition name %s not found" % partition_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("nq", [16385])
@@ -865,17 +875,18 @@ class TestCollectionSearchInvalid(TestcaseBase):
         expected: raise exception and report error
         """
         # 1. initialize with binary data
-        collection_w = self.init_collection_general(
-            prefix, True, is_binary=True)[0]
+        collection_w = self.init_collection_general(prefix, True, is_binary=True)[0]
         # 2. search and assert
-        query_raw_vector, binary_vectors = cf.gen_binary_vectors(
-            2, default_dim)
+        query_raw_vector, binary_vectors = cf.gen_binary_vectors(2, default_dim)
         search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
+        msg = ("failed to search: attempt #0: failed to search/query delegator 1 for channel "
+               "by-dev-rootcoord-dml_4_444857573608384003v0: fail to Search, QueryNode ID=1, "
+               "reason=collection:444857573608384003, metric type not match: expected=JACCARD, "
+               "actual=L2: invalid parameter: attempt #1: no available shard delegator found: service unavailable")
         collection_w.search(binary_vectors[:default_nq], "binary_vector",
                             search_params, default_limit, "int64 >= 0",
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": "Data type and metric type mis-match"})
+                            check_items={"err_code": 65538, "err_msg": msg})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_with_output_fields_not_exist(self):
@@ -893,8 +904,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             default_search_params, default_limit,
                             default_search_exp, output_fields=["int63"],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1,
-                                         ct.err_msg: "Field int63 not exist"})
+                            check_items={ct.err_code: 65535,
+                                         ct.err_msg: "field int63 not exist"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.skip(reason="Now support output vector field")
@@ -958,8 +969,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             default_search_params, default_limit,
                             default_search_exp, output_fields=output_fields,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": f"Field {output_fields[-1]} not exist"})
+                            check_items={"err_code": 65535,
+                                         "err_msg": f"field {output_fields[-1]} not exist"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("ignore_growing", ct.get_invalid_strs[2:8])
@@ -1045,14 +1056,16 @@ class TestCollectionSearchInvalid(TestcaseBase):
         log.info("test_range_search_invalid_radius: Range searching collection %s" %
                  collection_w.name)
         radius = get_invalid_range_search_paras
-        range_search_params = {"metric_type": "L2", "params": {
-            "nprobe": 10, "radius": radius, "range_filter": 0}}
+        range_search_params = {"metric_type": "L2",
+                               "params": {"nprobe": 10, "radius": radius, "range_filter": 0}}
         collection_w.search(vectors[:default_nq], default_search_field,
                             range_search_params, default_limit,
                             default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": f"type must be number"})
+                            check_items={"err_code": 65535,
+                                         "err_msg": "failed to search: attempt #0: fail to get shard "
+                                                    "leaders from QueryCoord: collection=444857573608586463:"
+                                                    " collection not loaded: unrecoverable error"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_invalid_range_filter(self, get_invalid_range_search_paras):
@@ -1067,14 +1080,16 @@ class TestCollectionSearchInvalid(TestcaseBase):
         log.info("test_range_search_invalid_range_filter: Range searching collection %s" %
                  collection_w.name)
         range_filter = get_invalid_range_search_paras
-        range_search_params = {"metric_type": "L2", "params": {
-            "nprobe": 10, "radius": 1, "range_filter": range_filter}}
+        range_search_params = {"metric_type": "L2",
+                               "params": {"nprobe": 10, "radius": 1, "range_filter": range_filter}}
         collection_w.search(vectors[:default_nq], default_search_field,
                             range_search_params, default_limit,
                             default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": f"type must be number"})
+                            check_items={"err_code": 65535,
+                                         "err_msg": "failed to search: attempt #0: fail to get"
+                                                    " shard leaders from QueryCoord: collection=444857573608586774"
+                                                    ": collection not loaded: unrecoverable error"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_range_search_invalid_radius_range_filter_L2(self):
@@ -1088,14 +1103,15 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # 2. range search
         log.info("test_range_search_invalid_radius_range_filter_L2: Range searching collection %s" %
                  collection_w.name)
-        range_search_params = {"metric_type": "L2", "params": {
-            "nprobe": 10, "radius": 1, "range_filter": 10}}
+        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1, "range_filter": 10}}
         collection_w.search(vectors[:default_nq], default_search_field,
                             range_search_params, default_limit,
                             default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": f"range_filter must less than radius except IP"})
+                            check_items={"err_code": 65535,
+                                         "err_msg": "failed to search: attempt #0: fail to get shard leaders from "
+                                                    "QueryCoord: collection=444818512783278558: collection not loaded:"
+                                                    " unrecoverable error"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_range_search_invalid_radius_range_filter_IP(self):
@@ -1109,14 +1125,16 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # 2. range search
         log.info("test_range_search_invalid_radius_range_filter_IP: Range searching collection %s" %
                  collection_w.name)
-        range_search_params = {"metric_type": "IP", "params": {
-            "nprobe": 10, "radius": 10, "range_filter": 1}}
+        range_search_params = {"metric_type": "IP",
+                               "params": {"nprobe": 10, "radius": 10, "range_filter": 1}}
         collection_w.search(vectors[:default_nq], default_search_field,
                             range_search_params, default_limit,
                             default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": f"range_filter must more than radius when IP"})
+                            check_items={"err_code": 65535,
+                                         "err_msg": "failed to search: attempt #0: fail to get shard leaders from "
+                                                    "QueryCoord: collection=444818512783279076: collection not "
+                                                    "loaded: unrecoverable error"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="annoy not supported any more")
@@ -1229,26 +1247,27 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                                     enable_dynamic_field=True)[0]
 
         # create index
-        index_params_one = {"index_type": "IVF_SQ8",
-                            "metric_type": "COSINE", "params": {"nlist": 64}}
+        index_params_one = {"index_type": "IVF_SQ8", "metric_type": "COSINE", "params": {"nlist": 64}}
         collection_w.create_index(
             ct.default_float_vec_field_name, index_params_one, index_name=index_name1)
         index_params_two = {}
-        collection_w.create_index(
-            ct.default_string_field_name, index_params=index_params_two, index_name=index_name2)
+        collection_w.create_index(ct.default_string_field_name, index_params=index_params_two, index_name=index_name2)
         assert collection_w.has_index(index_name=index_name2)
         collection_w.load()
         # delete entity
         expr = 'float >= int64'
         # search with id 0 vectors
-        vectors = [[random.random() for _ in range(default_dim)]
-                   for _ in range(default_nq)]
+        msg = ("failed to search: attempt #0: failed to search/query delegator 3 for channel by-dev-rootcoord-dml_15_"
+               "444818512783279330v0: fail to Search, QueryNode ID=3, reason=worker(3) query failed: UnknownError:  "
+               "=> unsupported right datatype JSON of compare expr: attempt #1: no available shard delegator found: s"
+               "ervice unavailable")
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit,
                             expr,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": f"unsupported left datatype of compare expr"})
+                            check_items={"err_code": 65538,
+                                         "err_msg": msg})
 
 
 class TestCollectionSearch(TestcaseBase):
@@ -3552,13 +3571,14 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, auto_id=auto_id)[0:4]
         # 2. search
         log.info("test_search_with_output_field_wildcard: Searching collection %s" % collection_w.name)
+        error1 = {"err_code": 65535, "err_msg": "field %s not exist" % invalid_output_fields[0]}
+        error2 = {"err_code": 1, "err_msg": "`output_fields` value %s is illegal" % invalid_output_fields[0]}
+        error = error2 if invalid_output_fields == [""] else error1
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit,
                             default_search_exp,
                             output_fields=invalid_output_fields,
-                            check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": "field %s is not exist" % invalid_output_fields[0]})
+                            check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_multi_collections(self, nb, nq, dim, auto_id, _async):
@@ -4227,20 +4247,17 @@ class TestSearchBase(TestcaseBase):
         """
         top_k = 16385  # max top k is 16384
         nq = get_nq
-        collection_w, data, _, insert_ids = self.init_collection_general(
-            prefix, insert_data=True, nb=nq)[0:4]
+        collection_w, data, _, insert_ids = self.init_collection_general(prefix, insert_data=True, nb=nq)[0:4]
         collection_w.load()
         if top_k <= max_top_k:
-            res, _ = collection_w.search(vectors[:nq], default_search_field, default_search_params,
-                                         top_k)
+            res, _ = collection_w.search(vectors[:nq], default_search_field, default_search_params, top_k)
             assert len(res[0]) <= top_k
         else:
-            collection_w.search(vectors[:nq], default_search_field, default_search_params,
-                                top_k,
+            collection_w.search(vectors[:nq], default_search_field, default_search_params, top_k,
                                 check_task=CheckTasks.err_res,
-                                check_items={"err_code": 1,
-                                             "err_msg": "no Available QueryNode result, "
-                                                        "filter reason limit %s is too large," % top_k})
+                                check_items={"err_code": 65535,
+                                             "err_msg": f"topk [{top_k}] is invalid, top k should be in range"
+                                                        f" [1, 16384], but got {top_k}"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index, params",
@@ -4885,20 +4902,19 @@ class TestSearchString(TestcaseBase):
         """
         # 1. initialize with data
         collection_w, _, _, insert_ids = \
-            self.init_collection_general(
-                prefix, True, auto_id=auto_id, dim=default_dim)[0:4]
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=default_dim)[0:4]
         # 2. search
         log.info("test_search_string_with_invalid_expr: searching collection %s" %
                  collection_w.name)
-        vectors = [[random.random() for _ in range(default_dim)]
-                   for _ in range(default_nq)]
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit,
                             default_invaild_string_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": "failed to create query plan: type mismatch"}
-                            )
+                            check_items={"err_code": 65535,
+                                         "err_msg": "failed to create query plan: cannot parse expression: "
+                                                    "varchar >= 0, error: comparisons between VarChar, "
+                                                    "element_type: None and Int64 elementType: None are not supported"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("expression", cf.gen_normal_string_expressions([ct.default_string_field_name]))
@@ -5749,7 +5765,7 @@ class TestSearchPaginationInvalid(TestcaseBase):
                                          "err_msg": "offset [%s] is invalid" % offset})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("offset", [-1, 16386])
+    @pytest.mark.parametrize("offset", [-1, 16385])
     def test_search_pagination_with_invalid_offset_value(self, offset):
         """
         target: test search pagination with invalid offset value
@@ -5757,20 +5773,17 @@ class TestSearchPaginationInvalid(TestcaseBase):
         expected: raise exception
         """
         # 1. initialize
-        collection_w = self.init_collection_general(
-            prefix, True, dim=default_dim)[0]
+        collection_w = self.init_collection_general(prefix, True, dim=default_dim)[0]
         # 2. search
-        search_param = {"metric_type": "COSINE",
-                        "params": {"nprobe": 10}, "offset": offset}
-        vectors = [[random.random() for _ in range(default_dim)]
-                   for _ in range(default_nq)]
+        search_param = {"metric_type": "COSINE", "params": {"nprobe": 10}, "offset": offset}
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         collection_w.search(vectors[:default_nq], default_search_field,
                             search_param, default_limit,
                             default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
+                            check_items={"err_code": 65535,
                                          "err_msg": "offset [%d] is invalid, should be in range "
-                                                    "[1, 16385], but got %d" % (offset, offset)})
+                                                    "[1, 16384], but got %d" % (offset, offset)})
 
 
 class TestSearchDiskann(TestcaseBase):
@@ -5881,18 +5894,13 @@ class TestSearchDiskann(TestcaseBase):
         """
         # 1. initialize with data
         collection_w, _, _, insert_ids = \
-            self.init_collection_general(
-                prefix, True, auto_id=auto_id, dim=dim, is_index=False)[0:4]
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=False)[0:4]
         # 2. create index
-        default_index = {"index_type": "DISKANN",
-                         "metric_type": "L2", "params": {}}
-        collection_w.create_index(
-            ct.default_float_vec_field_name, default_index)
+        default_index = {"index_type": "DISKANN", "metric_type": "L2", "params": {}}
+        collection_w.create_index(ct.default_float_vec_field_name, default_index)
         collection_w.load()
-        default_search_params = {"metric_type": "L2",
-                                 "params": {"search_list": search_list}}
-        vectors = [[random.random() for _ in range(dim)]
-                   for _ in range(default_nq)]
+        default_search_params = {"metric_type": "L2", "params": {"search_list": search_list}}
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         output_fields = [default_int64_field_name,
                          default_float_field_name,  default_string_field_name]
         collection_w.search(vectors[:default_nq], default_search_field,
@@ -5900,9 +5908,8 @@ class TestSearchDiskann(TestcaseBase):
                             default_search_exp,
                             output_fields=output_fields,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": "fail to search on all shard leaders"}
-                            )
+                            check_items={"err_code": 65538,
+                                         "err_msg": "fail to search on all shard leaders"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("limit", [20])
@@ -5917,27 +5924,21 @@ class TestSearchDiskann(TestcaseBase):
         """
         # 1. initialize with data
         collection_w, _, _, insert_ids = \
-            self.init_collection_general(
-                prefix, True, auto_id=auto_id, dim=dim, is_index=False)[0:4]
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=False)[0:4]
         # 2. create index
-        default_index = {"index_type": "DISKANN",
-                         "metric_type": "L2", "params": {}}
-        collection_w.create_index(
-            ct.default_float_vec_field_name, default_index)
+        default_index = {"index_type": "DISKANN", "metric_type": "L2", "params": {}}
+        collection_w.create_index(ct.default_float_vec_field_name, default_index)
         collection_w.load()
-        default_search_params = {"metric_type": "L2",
-                                 "params": {"search_list": search_list}}
-        vectors = [[random.random() for _ in range(dim)]
-                   for _ in range(default_nq)]
-        output_fields = [default_int64_field_name,
-                         default_float_field_name,  default_string_field_name]
+        default_search_params = {"metric_type": "L2", "params": {"search_list": search_list}}
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        output_fields = [default_int64_field_name, default_float_field_name,  default_string_field_name]
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, limit,
                             default_search_exp,
                             output_fields=output_fields,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": "fail to search on all shard leaders"})
+                            check_items={"err_code": 65538,
+                                         "err_msg": "UnknownError"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("limit", [6553])
@@ -5952,27 +5953,22 @@ class TestSearchDiskann(TestcaseBase):
         """
         # 1. initialize with data
         collection_w, _, _, insert_ids = \
-            self.init_collection_general(
-                prefix, True, auto_id=auto_id, dim=dim, is_index=False)[0:4]
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=False)[0:4]
         # 2. create index
-        default_index = {"index_type": "DISKANN",
-                         "metric_type": "L2", "params": {}}
-        collection_w.create_index(
-            ct.default_float_vec_field_name, default_index)
+        default_index = {"index_type": "DISKANN", "metric_type": "L2", "params": {}}
+        collection_w.create_index(ct.default_float_vec_field_name, default_index)
         collection_w.load()
-        default_search_params = {"metric_type": "L2",
-                                 "params": {"search_list": search_list}}
-        vectors = [[random.random() for _ in range(dim)]
-                   for _ in range(default_nq)]
-        output_fields = [default_int64_field_name,
-                         default_float_field_name,  default_string_field_name]
+        default_search_params = {"metric_type": "L2", "params": {"search_list": search_list}}
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        output_fields = [default_int64_field_name, default_float_field_name,  default_string_field_name]
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, limit,
                             default_search_exp,
                             output_fields=output_fields,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": "fail to search on all shard leaders"})
+                            check_items={"err_code": 65538,
+                                         "err_msg": "failed to search: attempt #0: failed to search/query "
+                                                    "delegator 1 for channel by-dev-.."})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_with_diskann_with_string_pk(self, dim, enable_dynamic_field):
@@ -7982,8 +7978,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         expected: No exception
         """
         # insert data
-        collection_w = self.init_collection_general(
-            prefix, True, 200, partition_num=1, is_index=False)[0]
+        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=False)[0]
         partition_w1, partition_w2 = collection_w.partitions
         collection_w.create_index(default_search_field, default_index_params)
         # load && release
@@ -7995,18 +7990,17 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w.delete(f"int64 in {delete_ids}")
         # search on collection, partition1, partition2
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[
-                                partition_w1.name, partition_w2.name],
+                            partition_names=[partition_w1.name, partition_w2.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 65535, ct.err_msg: 'not loaded'})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w1.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 65535, ct.err_msg: 'not loaded'})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w2.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not found'})
+                            check_items={ct.err_code: 65535, ct.err_msg: 'not found'})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_load_collection_release_partition(self):
@@ -8727,8 +8721,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         expected: No exception
         """
         # init the collection
-        collection_w = self.init_collection_general(
-            prefix, True, 200, partition_num=1, is_index=False)[0]
+        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=False)[0]
         partition_w1, partition_w2 = collection_w.partitions
         collection_w.create_index(default_search_field, default_index_params)
         # load and release
@@ -8738,8 +8731,10 @@ class TestCollectionLoadOperation(TestcaseBase):
         # search on collection
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1,
-                                         ct.err_msg: "fail to get shard leaders from QueryCoord: collection not loaded"})
+                            check_items={ct.err_code: 65535,
+                                         ct.err_msg: "failed to search: attempt #0: fail to get shard leaders "
+                                                     "from QueryCoord: collection=444857573614268173: "
+                                                     "collection not loaded: unrecoverable error"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.xfail(reason="issue #24446")

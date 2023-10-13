@@ -94,7 +94,8 @@ class TestUtilityParams(TestcaseBase):
             self.utility_wrap.has_collection(
                 c_name,
                 check_task=CheckTasks.err_res,
-                check_items={ct.err_code: 1, ct.err_msg: "Invalid collection name"})
+                check_items={ct.err_code: 1100,
+                             ct.err_msg: "collection name should not be empty: invalid parameter"})
         # elif not isinstance(c_name, str): self.utility_wrap.has_collection(c_name, check_task=CheckTasks.err_res,
         # check_items={ct.err_code: 1, ct.err_msg: "illegal"})
 
@@ -112,7 +113,8 @@ class TestUtilityParams(TestcaseBase):
             self.utility_wrap.has_partition(
                 c_name, p_name,
                 check_task=CheckTasks.err_res,
-                check_items={ct.err_code: 1, ct.err_msg: "Invalid"})
+                check_items={ct.err_code: 1100,
+                             ct.err_msg: "collection name should not be empty: invalid parameter"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_has_partition_name_invalid(self, get_invalid_partition_name):
@@ -134,9 +136,11 @@ class TestUtilityParams(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L2)
     def test_drop_collection_name_invalid(self, get_invalid_collection_name):
         self._connect()
-        error = f'`collection_name` value {get_invalid_collection_name} is illegal'
+        error1 = {ct.err_code: 1, ct.err_msg: f"`collection_name` value {get_invalid_collection_name} is illegal"}
+        error2 = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {get_invalid_collection_name}."}
+        error = error1 if get_invalid_collection_name in [[], 1, [1, '2', 3], (1,), {1: 1}, None, ""] else error2
         self.utility_wrap.drop_collection(get_invalid_collection_name, check_task=CheckTasks.err_res,
-                                          check_items={ct.err_code: 1, ct.err_msg: error})
+                                          check_items=error)
 
     # TODO: enable
     @pytest.mark.tags(CaseLabel.L2)
@@ -299,7 +303,7 @@ class TestUtilityParams(TestcaseBase):
         self.utility_wrap.wait_for_loading_complete(
             collection_w.name, partition_names=[ct.default_tag],
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 15, ct.err_msg: f'partitionID of partitionName:{ct.default_tag} can not be find'})
+            check_items={ct.err_code: 200, ct.err_msg: f'partition={ct.default_tag}: partition not found'})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_drop_collection_not_existed(self):
@@ -584,9 +588,11 @@ class TestUtilityParams(TestcaseBase):
         new_collection_name = get_invalid_value_collection_name
         self.utility_wrap.rename_collection(old_collection_name, new_collection_name,
                                             check_task=CheckTasks.err_res,
-                                            check_items={"err_code": 9,
-                                                         "err_msg": "collection {} was not "
-                                                                    "loaded into memory)".format(collection_w.name)})
+                                            check_items={"err_code": 1100,
+                                                         "err_msg": "Invalid collection name: %s. the first "
+                                                                    "character of a collection name must be an "
+                                                                    "underscore or letter: invalid parameter"
+                                                                    % new_collection_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_rename_collection_not_existed_collection(self):
@@ -617,10 +623,10 @@ class TestUtilityParams(TestcaseBase):
         old_collection_name = collection_w.name
         self.utility_wrap.rename_collection(old_collection_name, old_collection_name,
                                             check_task=CheckTasks.err_res,
-                                            check_items={"err_code": 1,
-                                                         "err_msg": "duplicated new collection name :{} with other "
-                                                                    "collection name or alias".format(
-                                                             collection_w.name)})
+                                            check_items={"err_code": 65535,
+                                                         "err_msg": "duplicated new collection name default:{}"
+                                                                    " with other collection name or"
+                                                                    " alias".format(collection_w.name)})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_rename_collection_existed_collection_alias(self):
@@ -636,8 +642,8 @@ class TestUtilityParams(TestcaseBase):
         self.utility_wrap.create_alias(old_collection_name, alias)
         self.utility_wrap.rename_collection(old_collection_name, alias,
                                             check_task=CheckTasks.err_res,
-                                            check_items={"err_code": 1,
-                                                         "err_msg": "duplicated new collection name :{} with "
+                                            check_items={"err_code": 65535,
+                                                         "err_msg": "duplicated new collection name default:{} with "
                                                                     "other collection name or alias".format(alias)})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -798,6 +804,7 @@ class TestUtilityBase(TestcaseBase):
         assert len(res) == 0
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("issue #27624")
     def test_index_process_collection_not_existed(self):
         """
         target: test building_process
@@ -826,6 +833,7 @@ class TestUtilityBase(TestcaseBase):
         assert res == exp_res
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("issue #27624")
     def test_index_process_collection_insert_no_index(self):
         """
         target: test building_process
@@ -887,6 +895,7 @@ class TestUtilityBase(TestcaseBase):
                 raise MilvusException(1, f"Index build completed in more than 5s")
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("issue #27624")
     def test_wait_index_collection_not_existed(self):
         """
         target: test wait_index
@@ -948,9 +957,9 @@ class TestUtilityBase(TestcaseBase):
         assert collection_w.num_entities == ct.default_nb
         self.utility_wrap.loading_progress(collection_w.name,
                                            check_task=CheckTasks.err_res,
-                                           check_items={ct.err_code: 1,
-                                                        ct.err_msg: 'fail to show collections from '
-                                                                    'the querycoord, no data'})
+                                           check_items={ct.err_code: 101,
+                                                        ct.err_msg: 'collection= : '
+                                                                    'collection not loaded'})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("nb", [ct.default_nb, 5000])

@@ -86,7 +86,8 @@ class TestHighLevelApi(TestcaseBase):
         client = self._connect(enable_high_level_api=True)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
-        error = {ct.err_code: 1, ct.err_msg: f"The auto_id can only be specified on field with DataType.INT64"}
+        error = {ct.err_code: 65535, ct.err_msg: f"type param(max_length) should be specified for varChar "
+                                                 f"field of collection {collection_name}"}
         client_w.create_collection(client, collection_name, default_dim, id_type="string", auto_id=True,
                                    check_task=CheckTasks.err_res, check_items=error)
 
@@ -121,7 +122,8 @@ class TestHighLevelApi(TestcaseBase):
         client = self._connect(enable_high_level_api=True)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
-        error = {ct.err_code: 1, ct.err_msg: f"metric type not found or not supported, supported: [L2 IP COSINE]"}
+        error = {ct.err_code: 65535,
+                 ct.err_msg: "metric type not found or not supported, supported: [L2 IP COSINE HAMMING JACCARD]"}
         client_w.create_collection(client, collection_name, default_dim, metric_type="invalid",
                                    check_task=CheckTasks.err_res, check_items=error)
 
