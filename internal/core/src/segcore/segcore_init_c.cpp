@@ -15,6 +15,9 @@
 #include "segcore/segcore_init_c.h"
 
 namespace milvus::segcore {
+
+std::once_flag close_glog_once;
+
 extern "C" void
 SegcoreInit(const char* conf_file) {
     milvus::config::KnowhereInitImpl(conf_file);
@@ -72,9 +75,11 @@ SegcoreSetSimdType(const char* value) {
 
 extern "C" void
 SegcoreCloseGlog() {
-    if (google::IsGoogleLoggingInitialized()) {
-        google::ShutdownGoogleLogging();
-    }
+    std::call_once(close_glog_once, [&]() {
+        if (google::IsGoogleLoggingInitialized()) {
+            google::ShutdownGoogleLogging();
+        }
+    });
 }
 
 extern "C" int32_t
