@@ -151,19 +151,6 @@ if ( APPLE )
             )
 endif ()
 
-# Set SIMD to CMAKE_CXX_FLAGS
-if (OPEN_SIMD)
-    message(STATUS "open simd function, CPU_ARCH:${CPU_ARCH}")
-    if (${CPU_ARCH} STREQUAL "avx")
-      #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}  -ftree-vectorize -mavx2 -mfma -mavx -mf16c ")
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mavx2 -mfma -mavx -mf16c ")
-    elseif (${CPU_ARCH} STREQUAL "sse")
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -msse4.2 ")
-    elseif (${CPU_ARCH} STREQUAL "arm64")
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mcpu=apple-m1+crc ")
-    endif()
-endif ()
-
 # **************************** Coding style check tools ****************************
 find_package( ClangTools )
 set( BUILD_SUPPORT_DIR "${CMAKE_SOURCE_DIR}/build-support" )
