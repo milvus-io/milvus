@@ -28,7 +28,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/blang/semver/v4"
+	semver "github.com/blang/semver/v4"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
@@ -82,6 +82,7 @@ type (
 )
 
 type dataNodeCreatorFunc func(ctx context.Context, addr string, nodeID int64) (types.DataNode, error)
+
 type rootCoordCreatorFunc func(ctx context.Context, metaRootPath string, etcdClient *clientv3.Client) (types.RootCoord, error)
 
 // makes sure Server implements `DataCoord`
@@ -365,6 +366,7 @@ func (s *Server) startDataCoord() {
 	s.startServerLoop()
 
 	s.stateCode.Store(commonpb.StateCode_Healthy)
+	sessionutil.SaveServerInfo(typeutil.DataCoordRole, s.session.ServerID)
 }
 
 func (s *Server) initCluster() error {

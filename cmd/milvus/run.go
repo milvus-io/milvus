@@ -10,102 +10,37 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/cmd/roles"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-const (
-	RunCmd      = "run"
-	roleMixture = "mixture"
-)
-
 type run struct {
-	serverType string
-	// flags
-	svrAlias         string
-	enableRootCoord  bool
-	enableQueryCoord bool
-	enableIndexCoord bool
-	enableDataCoord  bool
-	enableQueryNode  bool
-	enableDataNode   bool
-	enableIndexNode  bool
-	enableProxy      bool
-}
-
-func (c *run) getHelp() string {
-	return runLine + "\n" + serverTypeLine
 }
 
 func (c *run) execute(args []string, flags *flag.FlagSet) {
 	if len(args) < 3 {
-		fmt.Fprintln(os.Stderr, c.getHelp())
+		fmt.Fprintln(os.Stderr, getHelp())
 		return
 	}
 	flags.Usage = func() {
-		fmt.Fprintln(os.Stderr, c.getHelp())
+		fmt.Fprintln(os.Stderr, getHelp())
 	}
-	c.serverType = args[2]
-	c.formatFlags(args, flags)
-
 	// make go ignore SIGPIPE when all cgo thread set mask SIGPIPE
 	signal.Ignore(syscall.SIGPIPE)
 
-	var local = false
-	role := roles.NewMilvusRoles()
-	switch c.serverType {
-	case typeutil.RootCoordRole:
-		role.EnableRootCoord = true
-	case typeutil.ProxyRole:
-		role.EnableProxy = true
-	case typeutil.QueryCoordRole:
-		role.EnableQueryCoord = true
-	case typeutil.QueryNodeRole:
-		role.EnableQueryNode = true
-	case typeutil.DataCoordRole:
-		role.EnableDataCoord = true
-	case typeutil.DataNodeRole:
-		role.EnableDataNode = true
-	case typeutil.IndexCoordRole:
-		role.EnableIndexCoord = true
-	case typeutil.IndexNodeRole:
-		role.EnableIndexNode = true
-	case typeutil.StandaloneRole, typeutil.EmbeddedRole:
-		role.EnableRootCoord = true
-		role.EnableProxy = true
-		role.EnableQueryCoord = true
-		role.EnableQueryNode = true
-		role.EnableDataCoord = true
-		role.EnableDataNode = true
-		role.EnableIndexCoord = true
-		role.EnableIndexNode = true
-		local = true
-	case roleMixture:
-		role.EnableRootCoord = c.enableRootCoord
-		role.EnableQueryCoord = c.enableQueryCoord
-		role.EnableDataCoord = c.enableDataCoord
-		role.EnableIndexCoord = c.enableIndexCoord
-		role.EnableQueryNode = c.enableQueryNode
-		role.EnableDataNode = c.enableDataNode
-		role.EnableIndexNode = c.enableIndexNode
-		role.EnableProxy = c.enableProxy
-	default:
-		fmt.Fprintf(os.Stderr, "Unknown server type = %s\n%s", c.serverType, c.getHelp())
-		os.Exit(-1)
-	}
-
+	serverType := args[2]
+	roles := GetMilvusRoles(args, flags)
 	// setup config for embedded milvus
-	if c.serverType == typeutil.EmbeddedRole {
+
+	if serverType == typeutil.EmbeddedRole {
 		var params paramtable.BaseTable
 		params.GlobalInitWithYaml("embedded-milvus.yaml")
 	}
 
-	runtimeDir := createRuntimeDir(c.serverType)
-	filename := getPidFileName(c.serverType, c.svrAlias)
+	runtimeDir := createRuntimeDir(serverType)
+	filename := getPidFileName(serverType, roles.Alias)
 
 	c.printBanner(flags.Output())
 	c.injectVariablesToEnv()
@@ -114,29 +49,7 @@ func (c *run) execute(args []string, flags *flag.FlagSet) {
 		panic(err)
 	}
 	defer removePidFile(lock)
-	role.Run(local, c.svrAlias)
-}
-
-func (c *run) formatFlags(args []string, flags *flag.FlagSet) {
-	flags.StringVar(&c.svrAlias, "alias", "", "set alias")
-
-	flags.BoolVar(&c.enableRootCoord, typeutil.RootCoordRole, false, "enable root coordinator")
-	flags.BoolVar(&c.enableQueryCoord, typeutil.QueryCoordRole, false, "enable query coordinator")
-	flags.BoolVar(&c.enableIndexCoord, typeutil.IndexCoordRole, false, "enable index coordinator")
-	flags.BoolVar(&c.enableDataCoord, typeutil.DataCoordRole, false, "enable data coordinator")
-
-	flags.BoolVar(&c.enableQueryNode, typeutil.QueryNodeRole, false, "enable query node")
-	flags.BoolVar(&c.enableDataNode, typeutil.DataNodeRole, false, "enable data node")
-	flags.BoolVar(&c.enableIndexNode, typeutil.IndexNodeRole, false, "enable index node")
-	flags.BoolVar(&c.enableProxy, typeutil.ProxyRole, false, "enable proxy node")
-
-	if c.serverType == typeutil.EmbeddedRole {
-		flags.SetOutput(io.Discard)
-	}
-	hardware.InitMaxprocs(c.serverType, flags)
-	if err := flags.Parse(args[3:]); err != nil {
-		os.Exit(-1)
-	}
+	roles.Run()
 }
 
 func (c *run) printBanner(w io.Writer) {

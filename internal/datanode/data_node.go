@@ -213,6 +213,7 @@ func (node *DataNode) initSession() error {
 	}
 	node.session.Init(typeutil.DataNodeRole, Params.DataNodeCfg.IP+":"+strconv.Itoa(Params.DataNodeCfg.Port), false, true)
 	Params.DataNodeCfg.SetNodeID(node.session.ServerID)
+	sessionutil.SaveServerInfo(typeutil.DataNodeRole, node.session.ServerID)
 	Params.SetLogger(Params.DataNodeCfg.GetNodeID())
 	return nil
 }

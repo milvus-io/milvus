@@ -25,6 +25,9 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/cmd/components"
 	"github.com/milvus-io/milvus/internal/datacoord"
 	"github.com/milvus-io/milvus/internal/datanode"
@@ -46,8 +49,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/prometheus/client_golang/prometheus"
-	"go.uber.org/zap"
 )
 
 var Params paramtable.ComponentParam
@@ -142,6 +143,9 @@ type MilvusRoles struct {
 	EnableDataNode   bool `env:"ENABLE_DATA_NODE"`
 	EnableIndexCoord bool `env:"ENABLE_INDEX_COORD"`
 	EnableIndexNode  bool `env:"ENABLE_INDEX_NODE"`
+
+	LocalMode bool
+	Alias     string
 
 	closed chan struct{}
 	once   sync.Once
@@ -273,7 +277,7 @@ func (mr *MilvusRoles) handleSignals() func() {
 }
 
 // Run Milvus components.
-func (mr *MilvusRoles) Run(local bool, alias string) {
+func (mr *MilvusRoles) Run() {
 	// start signal handler, defer close func
 	closeFn := mr.handleSignals()
 	defer closeFn()
@@ -283,6 +287,9 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 	defer cancel()
 
 	mr.printLDPreLoad()
+
+	local := mr.LocalMode
+	alias := mr.Alias
 
 	// only standalone enable localMsg
 	if local {
@@ -399,4 +406,33 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 	}
 
 	log.Info("Milvus components graceful stop done")
+}
+
+func (mr *MilvusRoles) GetRoles() []string {
+	roles := make([]string, 0)
+	if mr.EnableRootCoord {
+		roles = append(roles, typeutil.RootCoordRole)
+	}
+	if mr.EnableProxy {
+		roles = append(roles, typeutil.ProxyRole)
+	}
+	if mr.EnableQueryCoord {
+		roles = append(roles, typeutil.QueryCoordRole)
+	}
+	if mr.EnableQueryNode {
+		roles = append(roles, typeutil.QueryNodeRole)
+	}
+	if mr.EnableDataCoord {
+		roles = append(roles, typeutil.DataCoordRole)
+	}
+	if mr.EnableDataNode {
+		roles = append(roles, typeutil.DataNodeRole)
+	}
+	if mr.EnableIndexCoord {
+		roles = append(roles, typeutil.IndexCoordRole)
+	}
+	if mr.EnableIndexNode {
+		roles = append(roles, typeutil.IndexNodeRole)
+	}
+	return roles
 }

@@ -32,6 +32,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -157,6 +158,7 @@ func (node *Proxy) initSession() error {
 	}
 	node.session.Init(typeutil.ProxyRole, Params.ProxyCfg.NetworkAddress, false, true)
 	Params.ProxyCfg.SetNodeID(node.session.ServerID)
+	sessionutil.SaveServerInfo(typeutil.ProxyRole, node.session.ServerID)
 	Params.SetLogger(node.session.ServerID)
 	return nil
 }

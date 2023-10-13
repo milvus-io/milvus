@@ -17,11 +17,56 @@
 package main
 
 import (
+	"log"
 	"os"
+	"os/exec"
+
+	"golang.org/x/exp/slices"
 
 	"github.com/milvus-io/milvus/cmd/milvus"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
 
 func main() {
-	milvus.RunMilvus(os.Args)
+	idx := slices.Index(os.Args, "--run-with-subprocess")
+
+	// execute command as a subprocess if the command contains "--run-with-subprocess"
+	if idx > 0 {
+		args := slices.Delete(os.Args, idx, idx+1)
+		log.Println("run subprocess with cmd:", args)
+
+		/* #nosec G204 */
+		cmd := exec.Command(args[0], args[1:]...)
+
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		// No need to extra wait for the process
+		err := cmd.Run()
+
+		var params paramtable.ComponentParam
+		params.Init()
+
+		if len(args) >= 3 {
+			metaPath := params.EtcdCfg.MetaRootPath
+			endpoints := params.EtcdCfg.Endpoints
+
+			sessionSuffix := sessionutil.GetSessions(cmd.Process.Pid)
+			defer sessionutil.RemoveServerInfoFile(cmd.Process.Pid)
+
+			// clean session
+			if err := milvus.CleanSession(metaPath, endpoints, sessionSuffix); err != nil {
+				log.Println("clean session failed", err.Error())
+			}
+		}
+
+		if err != nil {
+			log.Println("subprocess exit, ", err.Error())
+		} else {
+			log.Println("exit code:", cmd.ProcessState.ExitCode())
+		}
+	} else {
+		milvus.RunMilvus(os.Args)
+	}
 }

@@ -36,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/common"
 	pnc "github.com/milvus-io/milvus/internal/distributed/proxy/client"
@@ -673,6 +672,7 @@ func (c *Core) startInternal() error {
 
 	c.startServerLoop()
 	c.UpdateStateCode(commonpb.StateCode_Healthy)
+	sessionutil.SaveServerInfo(typeutil.RootCoordRole, c.session.ServerID)
 	logutil.Logger(c.ctx).Info("rootcoord startup successfully")
 
 	return nil

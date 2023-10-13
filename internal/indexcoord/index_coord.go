@@ -37,6 +37,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -314,6 +315,7 @@ func (i *IndexCoord) startIndexCoord() {
 		cb()
 	}
 	i.UpdateStateCode(commonpb.StateCode_Healthy)
+	sessionutil.SaveServerInfo(typeutil.IndexCoordRole, i.session.ServerID)
 }
 
 // Stop stops the IndexCoord component.
