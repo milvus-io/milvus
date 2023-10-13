@@ -2523,7 +2523,7 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 
 	log.Debug(rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(ft); err != nil {
+	if err := node.sched.dcQueue.Enqueue(ft); err != nil {
 		log.Warn(
 			rpcFailedToEnqueue(method),
 			zap.Error(err))
