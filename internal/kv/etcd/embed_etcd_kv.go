@@ -31,7 +31,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/kv/predicates"
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
@@ -131,6 +130,7 @@ func (kv *EmbedEtcdKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+
 	keys := make([]string, 0, resp.Count)
 	values := make([]string, 0, resp.Count)
 	for _, kv := range resp.Kvs {
@@ -219,7 +219,7 @@ func (kv *EmbedEtcdKV) Load(key string) (string, error) {
 		return "", err
 	}
 	if resp.Count <= 0 {
-		return "", common.NewKeyNotExistError(key)
+		return "", merr.WrapErrIoKeyNotFound(key)
 	}
 
 	return string(resp.Kvs[0].Value), nil
@@ -235,7 +235,7 @@ func (kv *EmbedEtcdKV) LoadBytes(key string) ([]byte, error) {
 		return nil, err
 	}
 	if resp.Count <= 0 {
-		return nil, common.NewKeyNotExistError(key)
+		return nil, merr.WrapErrIoKeyNotFound(key)
 	}
 
 	return resp.Kvs[0].Value, nil

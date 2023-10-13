@@ -23,7 +23,6 @@ import (
 	"github.com/google/btree"
 
 	"github.com/milvus-io/milvus/internal/kv/predicates"
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -84,7 +83,7 @@ func (kv *MemoryKV) Load(key string) (string, error) {
 	defer kv.RUnlock()
 	item := kv.tree.Get(memoryKVItem{key: key})
 	if item == nil {
-		return "", common.NewKeyNotExistError(key)
+		return "", merr.WrapErrIoKeyNotFound(key)
 	}
 	return item.(memoryKVItem).value.String(), nil
 }
@@ -95,7 +94,7 @@ func (kv *MemoryKV) LoadBytes(key string) ([]byte, error) {
 	defer kv.RUnlock()
 	item := kv.tree.Get(memoryKVItem{key: key})
 	if item == nil {
-		return []byte{}, common.NewKeyNotExistError(key)
+		return nil, merr.WrapErrIoKeyNotFound(key)
 	}
 	return item.(memoryKVItem).value.ByteSlice(), nil
 }

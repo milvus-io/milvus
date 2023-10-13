@@ -34,7 +34,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/kv/predicates"
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -141,7 +140,7 @@ func (kv *txnTiKV) Has(key string) (bool, error) {
 	_, err := kv.getTiKVMeta(ctx, key)
 	if err != nil {
 		// Dont error out if not present unless failed call to tikv
-		if common.IsKeyNotExistError(err) {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
 			return false, nil
 		}
 		loggingErr = errors.Wrap(err, fmt.Sprintf("Failed to read key: %s", key))
@@ -199,7 +198,7 @@ func (kv *txnTiKV) Load(key string) (string, error) {
 
 	val, err := kv.getTiKVMeta(ctx, key)
 	if err != nil {
-		if common.IsKeyNotExistError(err) {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
 			loggingErr = err
 		} else {
 			loggingErr = errors.Wrap(err, fmt.Sprintf("Failed to read key %s", key))
@@ -649,7 +648,7 @@ func (kv *txnTiKV) getTiKVMeta(ctx context.Context, key string) (string, error) 
 		metrics.MetaOpCounter.WithLabelValues(metrics.MetaGetLabel, metrics.FailLabel).Inc()
 		if err == tikverr.ErrNotExist {
 			// If key is missing
-			return "", common.NewKeyNotExistError(key)
+			return "", merr.WrapErrIoKeyNotFound(key)
 		}
 		// If call to tikv fails
 		return "", errors.Wrap(err, fmt.Sprintf("Failed to get value for key %s in getTiKVMeta", key))

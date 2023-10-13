@@ -27,7 +27,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/kv/predicates"
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -207,7 +206,7 @@ func (kv *etcdKV) Load(key string) (string, error) {
 		return "", err
 	}
 	if resp.Count <= 0 {
-		return "", common.NewKeyNotExistError(key)
+		return "", merr.WrapErrIoKeyNotFound(key)
 	}
 	CheckElapseAndWarn(start, "Slow etcd operation load", zap.String("key", key))
 	return string(resp.Kvs[0].Value), nil
@@ -221,10 +220,10 @@ func (kv *etcdKV) LoadBytes(key string) ([]byte, error) {
 	defer cancel()
 	resp, err := kv.getEtcdMeta(ctx, key)
 	if err != nil {
-		return []byte{}, err
+		return nil, err
 	}
 	if resp.Count <= 0 {
-		return []byte{}, common.NewKeyNotExistError(key)
+		return nil, merr.WrapErrIoKeyNotFound(key)
 	}
 	CheckElapseAndWarn(start, "Slow etcd operation load", zap.String("key", key))
 	return resp.Kvs[0].Value, nil
