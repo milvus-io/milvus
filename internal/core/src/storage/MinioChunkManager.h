@@ -36,6 +36,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <fmt/core.h>
 
 #include "common/EasyAssert.h"
 #include "storage/ChunkManager.h"
@@ -44,6 +45,27 @@
 namespace milvus::storage {
 
 enum class RemoteStorageType { S3 = 0, GOOGLE_CLOUD = 1, ALIYUN_CLOUD = 2 };
+
+template <typename... Args>
+
+static SegcoreError
+ThrowS3Error(const std::string& func,
+             const Aws::S3::S3Error& err,
+             const std::string& fmtString,
+             Args&&... args) {
+    std::ostringstream oss;
+    const auto& message = fmt::format(fmtString, std::forward<Args>(args)...);
+    oss << "Error in " << func << "[errcode:" << int(err.GetResponseCode())
+        << ", exception:" << err.GetExceptionName()
+        << ", errmessage:" << err.GetMessage() << ", params:" << message << "]";
+    throw SegcoreError(S3Error, oss.str());
+}
+
+static bool
+IsNotFound(const Aws::S3::S3Errors& s3err) {
+    return (s3err == Aws::S3::S3Errors::NO_SUCH_KEY ||
+            s3err == Aws::S3::S3Errors::RESOURCE_NOT_FOUND);
+}
 
 /**
  * @brief user defined aws logger, redirect aws log to segcore log
@@ -168,8 +190,9 @@ class MinioChunkManager : public ChunkManager {
                     const std::string& object_name,
                     void* buf,
                     uint64_t size);
+
     std::vector<std::string>
-    ListObjects(const char* bucket_name, const char* prefix = nullptr);
+    ListObjects(const std::string& bucket_name, const std::string& prefix = "");
 
     void
     InitSDKAPIDefault(const std::string& log_level);
