@@ -140,15 +140,21 @@ func (cit *createIndexTask) parseIndexParams() error {
 	if !isVecIndex {
 		specifyIndexType, exist := indexParamsMap[common.IndexTypeKey]
 		if cit.fieldSchema.DataType == schemapb.DataType_VarChar {
-			if exist && specifyIndexType != DefaultStringIndexType {
+			if !exist {
+				indexParamsMap[common.IndexTypeKey] = DefaultStringIndexType
+			}
+
+			if exist && !validateStringIndexType(specifyIndexType) {
 				return merr.WrapErrParameterInvalid(DefaultStringIndexType, specifyIndexType, "index type not match")
 			}
-			indexParamsMap[common.IndexTypeKey] = DefaultStringIndexType
 		} else if typeutil.IsArithmetic(cit.fieldSchema.DataType) {
-			if exist && specifyIndexType != DefaultIndexType {
-				return merr.WrapErrParameterInvalid(DefaultIndexType, specifyIndexType, "index type not match")
+			if !exist {
+				indexParamsMap[common.IndexTypeKey] = DefaultArithmeticIndexType
 			}
-			indexParamsMap[common.IndexTypeKey] = DefaultIndexType
+
+			if exist && !validateArithmeticIndexType(specifyIndexType) {
+				return merr.WrapErrParameterInvalid(DefaultArithmeticIndexType, specifyIndexType, "index type not match")
+			}
 		} else {
 			return merr.WrapErrParameterInvalid("supported field",
 				fmt.Sprintf("create index on %s field", cit.fieldSchema.DataType.String()),

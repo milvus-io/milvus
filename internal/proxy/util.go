@@ -60,8 +60,8 @@ const (
 
 	defaultMaxArrayCapacity = 4096
 
-	// DefaultIndexType name of default index type for scalar field
-	DefaultIndexType = "STL_SORT"
+	// DefaultArithmeticIndexType name of default index type for scalar field
+	DefaultArithmeticIndexType = "STL_SORT"
 
 	// DefaultStringIndexType name of default index type for varChar/string field
 	DefaultStringIndexType = "Trie"
@@ -242,6 +242,16 @@ func validatePartitionTag(partitionTag string, strictCheck bool) error {
 	}
 
 	return nil
+}
+
+func validateStringIndexType(indexType string) bool {
+	// compatible with the index type marisa-trie of attu versions prior to 2.3.0
+	return indexType == DefaultStringIndexType || indexType == "marisa-trie"
+}
+
+func validateArithmeticIndexType(indexType string) bool {
+	// compatible with the index type Asceneding of attu versions prior to 2.3.0
+	return indexType == DefaultArithmeticIndexType || indexType == "Asceneding"
 }
 
 func validateFieldName(fieldName string) error {
