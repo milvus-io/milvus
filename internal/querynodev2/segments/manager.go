@@ -42,6 +42,12 @@ import (
 
 type SegmentFilter func(segment Segment) bool
 
+func WithSkipEmpty() SegmentFilter {
+	return func(segment Segment) bool {
+		return segment.InsertCount() > 0
+	}
+}
+
 func WithPartition(partitionID UniqueID) SegmentFilter {
 	return func(segment Segment) bool {
 		return segment.Partition() == partitionID
@@ -284,6 +290,8 @@ func (mgr *segmentManager) GetAndPinBy(filters ...SegmentFilter) ([]Segment, err
 	mgr.mu.RLock()
 	defer mgr.mu.RUnlock()
 
+	filters = append(filters, WithSkipEmpty())
+
 	ret := make([]Segment, 0)
 	var err error
 	defer func() {
@@ -319,6 +327,8 @@ func (mgr *segmentManager) GetAndPinBy(filters ...SegmentFilter) ([]Segment, err
 func (mgr *segmentManager) GetAndPin(segments []int64, filters ...SegmentFilter) ([]Segment, error) {
 	mgr.mu.RLock()
 	defer mgr.mu.RUnlock()
+
+	filters = append(filters, WithSkipEmpty())
 
 	lockedSegments := make([]Segment, 0, len(segments))
 	var err error
