@@ -224,6 +224,7 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize),
+		grpc.MaxConcurrentStreams(Params.ServerMaxConcurrentRequests),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			ot.UnaryServerInterceptor(opts...),
 			grpc_auth.UnaryServerInterceptor(proxy.AuthenticationInterceptor),
@@ -318,6 +319,7 @@ func (s *Server) startInternalGrpc(grpcPort int, errChan chan error) {
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize),
+		grpc.MaxConcurrentStreams(Params.ServerMaxConcurrentRequests),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			ot.UnaryServerInterceptor(opts...),
 			logutil.UnaryTraceLoggerInterceptor,

@@ -29,6 +29,9 @@ const (
 	// DefaultServerMaxRecvSize defines the maximum size of data per grpc request can receive by server side.
 	DefaultServerMaxRecvSize = 512 * 1024 * 1024
 
+	// DefaultServerMaxConcurrentRequests defines the maximum number of concurrent requests.
+	DefaultServerMaxConcurrentRequests = 10 * 1000
+
 	// DefaultClientMaxSendSize defines the maximum size of data per grpc request can send by client side.
 	DefaultClientMaxSendSize = 256 * 1024 * 1024
 
@@ -113,8 +116,9 @@ func (p *grpcConfig) GetInternalAddress() string {
 type GrpcServerConfig struct {
 	grpcConfig
 
-	ServerMaxSendSize int
-	ServerMaxRecvSize int
+	ServerMaxSendSize           int
+	ServerMaxRecvSize           int
+	ServerMaxConcurrentRequests uint32
 }
 
 // InitOnce initialize grpc server config once
@@ -129,6 +133,7 @@ func (p *GrpcServerConfig) Init(domain string) {
 
 	p.InitServerMaxSendSize()
 	p.InitServerMaxRecvSize()
+	p.InitServerMaxConcurrentRequests()
 }
 
 func (p *GrpcServerConfig) InitServerMaxSendSize() {
@@ -173,6 +178,20 @@ func (p *GrpcServerConfig) InitServerMaxRecvSize() {
 
 	log.Debug("initServerMaxRecvSize",
 		zap.String("role", p.Domain), zap.Int("grpc.serverMaxRecvSize", p.ServerMaxRecvSize))
+}
+
+func (p *GrpcServerConfig) InitServerMaxConcurrentRequests() {
+	valueStr, _ := p.LoadWithPriority([]string{p.Domain + ".grpc.serverMaxConcurrentRequests", "grpc.serverMaxConcurrentRequests"})
+	value, err := strconv.ParseUint(valueStr, 10, 32)
+	if err != nil {
+		log.Warn("Failed to parse grpc.serverMaxConcurrentRequests, set to default", zap.String("role", p.Domain), zap.String("grpc.serverMaxConcurrentRequests", valueStr), zap.Error(err))
+		p.ServerMaxConcurrentRequests = DefaultServerMaxConcurrentRequests
+	} else {
+		p.ServerMaxConcurrentRequests = uint32(value)
+	}
+
+	log.Debug("initServerMaxConcurrentRequests",
+		zap.String("role", p.Domain), zap.Uint32("grpc.serverMaxConcurrentRequests", p.ServerMaxConcurrentRequests))
 }
 
 // GrpcClientConfig is configuration for grpc client.
