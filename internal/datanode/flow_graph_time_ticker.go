@@ -46,19 +46,29 @@ type mergedTimeTickerSender struct {
 	closeOnce sync.Once
 }
 
-func newMergedTimeTickerSender(send sendTimeTick) *mergedTimeTickerSender {
-	mt := &mergedTimeTickerSender{
+var (
+	uniqueMergedTimeTickerSender    *mergedTimeTickerSender
+	getUniqueMergedTimeTickerSender sync.Once
+)
+
+func newUniqueMergedTimeTickerSender(send sendTimeTick) *mergedTimeTickerSender {
+	return &mergedTimeTickerSender{
 		ts:         0, // 0 for not tt send
 		segmentIDs: make(map[int64]struct{}),
 		cond:       sync.NewCond(&sync.Mutex{}),
 		send:       send,
 		closeCh:    make(chan struct{}),
 	}
-	mt.wg.Add(2)
-	go mt.tick()
-	go mt.work()
+}
 
-	return mt
+func getOrCreateMergedTimeTickerSender(send sendTimeTick) *mergedTimeTickerSender {
+	getUniqueMergedTimeTickerSender.Do(func() {
+		uniqueMergedTimeTickerSender = newUniqueMergedTimeTickerSender(send)
+	})
+	uniqueMergedTimeTickerSender.wg.Add(2)
+	go uniqueMergedTimeTickerSender.tick()
+	go uniqueMergedTimeTickerSender.work()
+	return uniqueMergedTimeTickerSender
 }
 
 func (mt *mergedTimeTickerSender) bufferTs(ts Timestamp, segmentIDs []int64) {
