@@ -17,7 +17,10 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net"
@@ -1005,6 +1008,7 @@ func TestProxy(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
+	var insertedIds []int64
 	wg.Add(1)
 	t.Run("insert", func(t *testing.T) {
 		defer wg.Done()
@@ -1016,6 +1020,13 @@ func TestProxy(t *testing.T) {
 		assert.Equal(t, rowNum, len(resp.SuccIndex))
 		assert.Equal(t, 0, len(resp.ErrIndex))
 		assert.Equal(t, int64(rowNum), resp.InsertCnt)
+
+		switch field := resp.GetIDs().GetIdField().(type) {
+		case *schemapb.IDs_IntId:
+			insertedIds = field.IntId.GetData()
+		default:
+			t.Fatalf("Unexpected ID type")
+		}
 	})
 
 	// TODO(dragondriver): proxy.Delete()
@@ -1326,6 +1337,135 @@ func TestProxy(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	nprobe := 10
+	topk := 10
+	roundDecimal := 6
+	expr := fmt.Sprintf("%s > 0", int64Field)
+	constructVectorsPlaceholderGroup := func() *commonpb.PlaceholderGroup {
+		values := make([][]byte, 0, nq)
+		for i := 0; i < nq; i++ {
+			bs := make([]byte, 0, dim*4)
+			for j := 0; j < dim; j++ {
+				var buffer bytes.Buffer
+				f := rand.Float32()
+				err := binary.Write(&buffer, common.Endian, f)
+				assert.NoError(t, err)
+				bs = append(bs, buffer.Bytes()...)
+			}
+			values = append(values, bs)
+		}
+
+		return &commonpb.PlaceholderGroup{
+			Placeholders: []*commonpb.PlaceholderValue{
+				{
+					Tag:    "$0",
+					Type:   commonpb.PlaceholderType_FloatVector,
+					Values: values,
+				},
+			},
+		}
+	}
+
+	constructSearchRequest := func() *milvuspb.SearchRequest {
+		plg := constructVectorsPlaceholderGroup()
+		plgBs, err := proto.Marshal(plg)
+		assert.NoError(t, err)
+
+		params := make(map[string]string)
+		params["nprobe"] = strconv.Itoa(nprobe)
+		b, err := json.Marshal(params)
+		assert.NoError(t, err)
+		searchParams := []*commonpb.KeyValuePair{
+			{Key: MetricTypeKey, Value: metric.L2},
+			{Key: SearchParamsKey, Value: string(b)},
+			{Key: AnnsFieldKey, Value: floatVecField},
+			{Key: TopKKey, Value: strconv.Itoa(topk)},
+			{Key: RoundDecimalKey, Value: strconv.Itoa(roundDecimal)},
+		}
+
+		return &milvuspb.SearchRequest{
+			Base:                nil,
+			DbName:              dbName,
+			CollectionName:      collectionName,
+			PartitionNames:      nil,
+			Dsl:                 expr,
+			PlaceholderGroup:    plgBs,
+			DslType:             commonpb.DslType_BoolExprV1,
+			OutputFields:        nil,
+			SearchParams:        searchParams,
+			TravelTimestamp:     0,
+			GuaranteeTimestamp:  0,
+			SearchByPrimaryKeys: false,
+		}
+	}
+
+	wg.Add(1)
+	t.Run("search", func(t *testing.T) {
+		defer wg.Done()
+		req := constructSearchRequest()
+
+		resp, err := proxy.Search(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	constructPrimaryKeysPlaceholderGroup := func() *commonpb.PlaceholderGroup {
+		expr := fmt.Sprintf("%v in [%v]", int64Field, insertedIds[0])
+		exprBytes := []byte(expr)
+
+		return &commonpb.PlaceholderGroup{
+			Placeholders: []*commonpb.PlaceholderValue{
+				{
+					Tag:    "$0",
+					Type:   commonpb.PlaceholderType_None,
+					Values: [][]byte{exprBytes},
+				},
+			},
+		}
+	}
+
+	constructSearchByPksRequest := func() *milvuspb.SearchRequest {
+		plg := constructPrimaryKeysPlaceholderGroup()
+		plgBs, err := proto.Marshal(plg)
+		assert.NoError(t, err)
+
+		params := make(map[string]string)
+		params["nprobe"] = strconv.Itoa(nprobe)
+		b, err := json.Marshal(params)
+		assert.NoError(t, err)
+		searchParams := []*commonpb.KeyValuePair{
+			{Key: MetricTypeKey, Value: metric.L2},
+			{Key: SearchParamsKey, Value: string(b)},
+			{Key: AnnsFieldKey, Value: floatVecField},
+			{Key: TopKKey, Value: strconv.Itoa(topk)},
+			{Key: RoundDecimalKey, Value: strconv.Itoa(roundDecimal)},
+		}
+
+		return &milvuspb.SearchRequest{
+			Base:                nil,
+			DbName:              dbName,
+			CollectionName:      collectionName,
+			PartitionNames:      nil,
+			Dsl:                 "",
+			PlaceholderGroup:    plgBs,
+			DslType:             commonpb.DslType_BoolExprV1,
+			OutputFields:        nil,
+			SearchParams:        searchParams,
+			TravelTimestamp:     0,
+			GuaranteeTimestamp:  0,
+			SearchByPrimaryKeys: true,
+		}
+	}
+
+	wg.Add(1)
+	t.Run("search by primary keys", func(t *testing.T) {
+		defer wg.Done()
+		req := constructSearchByPksRequest()
+		resp, err := proxy.Search(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
 	// nprobe := 10
