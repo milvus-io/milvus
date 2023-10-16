@@ -28,6 +28,9 @@ const (
 	// DefaultServerMaxRecvSize defines the maximum size of data per grpc request can receive by server side.
 	DefaultServerMaxRecvSize = 512 * 1024 * 1024
 
+	// DefaultServerMaxConcurrentRequests defines the maximum number of concurrent requests.
+	DefaultServerMaxConcurrentRequests = 10 * 1000
+
 	// DefaultClientMaxSendSize defines the maximum size of data per grpc request can send by client side.
 	DefaultClientMaxSendSize = 256 * 1024 * 1024
 
@@ -134,8 +137,9 @@ func (p *grpcConfig) GetInternalAddress() string {
 type GrpcServerConfig struct {
 	grpcConfig
 
-	ServerMaxSendSize ParamItem `refreshable:"false"`
-	ServerMaxRecvSize ParamItem `refreshable:"false"`
+	ServerMaxSendSize           ParamItem `refreshable:"false"`
+	ServerMaxRecvSize           ParamItem `refreshable:"false"`
+	ServerMaxConcurrentRequests ParamItem `refreshable:"false"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 }
@@ -186,6 +190,23 @@ func (p *GrpcServerConfig) Init(domain string, base *BaseTable) {
 		Export: true,
 	}
 	p.ServerMaxRecvSize.Init(base.mgr)
+
+	maxConcurrentRequests := strconv.FormatInt(DefaultServerMaxConcurrentRequests, 10)
+	p.ServerMaxConcurrentRequests = ParamItem{
+		Key:          p.Domain + ".grpc.serverMaxConcurrentRequests",
+		DefaultValue: maxConcurrentRequests,
+		FallbackKeys: []string{"grpc.serverMaxConcurrentRequests"},
+		Formatter: func(v string) string {
+			_, err := strconv.Atoi(v)
+			if err != nil {
+				log.Warn("Failed to parse grpc.serverMaxConcurrentRequests, set to default", zap.String("role", p.Domain), zap.String("grpc.serverMaxConcurrentRequests", v), zap.Error(err))
+				return maxConcurrentRequests
+			}
+			return v
+		},
+		Export: true,
+	}
+	p.ServerMaxConcurrentRequests.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "grpc.gracefulStopTimeout",
