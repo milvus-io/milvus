@@ -164,12 +164,18 @@ func (c *client) deliver(consumer *consumer) {
 			break
 		}
 		for _, msg := range msgs {
+			// This is the hack, we put property into pl
+			properties := make(map[string]string, 0)
+			pl, err := UnmarshalHeader(msg.Payload)
+			if err == nil && pl != nil && pl.Base != nil {
+				properties = pl.Base.Properties
+			}
 			select {
-			case consumer.messageCh <- Message{
-				MsgID:      msg.MsgID,
-				Payload:    msg.Payload,
-				Properties: msg.Properties,
-				Topic:      consumer.Topic(),
+			case consumer.messageCh <- &RmqMessage{
+				msgID:      msg.MsgID,
+				payload:    msg.Payload,
+				properties: properties,
+				topic:      consumer.Topic(),
 			}:
 			case <-c.closeCh:
 				return

@@ -17,6 +17,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 )
 
 type consumer struct {
@@ -29,7 +30,7 @@ type consumer struct {
 
 	msgMutex  chan struct{}
 	initCh    chan struct{}
-	messageCh chan Message
+	messageCh chan mqwrapper.Message
 }
 
 func newConsumer(c *client, options ConsumerOptions) (*consumer, error) {
@@ -47,7 +48,7 @@ func newConsumer(c *client, options ConsumerOptions) (*consumer, error) {
 
 	messageCh := options.MessageChannel
 	if options.MessageChannel == nil {
-		messageCh = make(chan Message, 1)
+		messageCh = make(chan mqwrapper.Message, 1)
 	}
 	// only used for
 	initCh := make(chan struct{}, 1)
@@ -79,7 +80,7 @@ func getExistedConsumer(c *client, options ConsumerOptions, msgMutex chan struct
 
 	messageCh := options.MessageChannel
 	if options.MessageChannel == nil {
-		messageCh = make(chan Message, 1)
+		messageCh = make(chan mqwrapper.Message, 1)
 	}
 
 	return &consumer{
@@ -108,7 +109,7 @@ func (c *consumer) MsgMutex() chan struct{} {
 }
 
 // Chan start consume goroutine and return message channel
-func (c *consumer) Chan() <-chan Message {
+func (c *consumer) Chan() <-chan mqwrapper.Message {
 	c.startOnce.Do(func() {
 		c.client.wg.Add(1)
 		go c.client.consume(c)

@@ -14,39 +14,38 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package rmq
+package server
 
 import (
-	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 )
 
 // rmqID wraps message ID for rocksmq
-type rmqID struct {
-	messageID server.UniqueID
+type RmqID struct {
+	MessageID UniqueID
 }
 
 // Check if rmqID implements MessageID interface
-var _ mqwrapper.MessageID = &rmqID{}
+var _ mqwrapper.MessageID = &RmqID{}
 
 // Serialize convert rmq message id to []byte
-func (rid *rmqID) Serialize() []byte {
-	return SerializeRmqID(rid.messageID)
+func (rid *RmqID) Serialize() []byte {
+	return SerializeRmqID(rid.MessageID)
 }
 
-func (rid *rmqID) AtEarliestPosition() bool {
-	return rid.messageID <= 0
+func (rid *RmqID) AtEarliestPosition() bool {
+	return rid.MessageID <= 0
 }
 
-func (rid *rmqID) LessOrEqualThan(msgID []byte) (bool, error) {
+func (rid *RmqID) LessOrEqualThan(msgID []byte) (bool, error) {
 	rMsgID := DeserializeRmqID(msgID)
-	return rid.messageID <= rMsgID, nil
+	return rid.MessageID <= rMsgID, nil
 }
 
-func (rid *rmqID) Equal(msgID []byte) (bool, error) {
+func (rid *RmqID) Equal(msgID []byte) (bool, error) {
 	rMsgID := DeserializeRmqID(msgID)
-	return rid.messageID == rMsgID, nil
+	return rid.MessageID == rMsgID, nil
 }
 
 // SerializeRmqID is used to serialize a message ID to byte array

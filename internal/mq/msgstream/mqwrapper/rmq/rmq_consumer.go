@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 
 	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/client"
+	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 )
 
@@ -57,7 +58,7 @@ func (rc *Consumer) Chan() <-chan mqwrapper.Message {
 						skip := atomic.LoadInt32(&rc.skip)
 						if skip != 1 {
 							select {
-							case rc.msgChannel <- &rmqMessage{msg: msg}:
+							case rc.msgChannel <- msg:
 							case <-rc.closeCh:
 								// if consumer closed, enter close branch below
 							}
@@ -78,7 +79,7 @@ func (rc *Consumer) Chan() <-chan mqwrapper.Message {
 
 // Seek is used to seek the position in rocksmq topic
 func (rc *Consumer) Seek(id mqwrapper.MessageID, inclusive bool) error {
-	msgID := id.(*rmqID).messageID
+	msgID := id.(*server.RmqID).MessageID
 	// skip the first message when consume
 	if !inclusive {
 		atomic.StoreInt32(&rc.skip, 1)
@@ -98,7 +99,7 @@ func (rc *Consumer) Close() {
 
 func (rc *Consumer) GetLatestMsgID() (mqwrapper.MessageID, error) {
 	msgID, err := rc.c.GetLatestMsgID()
-	return &rmqID{messageID: msgID}, err
+	return &server.RmqID{MessageID: msgID}, err
 }
 
 func (rc *Consumer) CheckTopicValid(topic string) error {

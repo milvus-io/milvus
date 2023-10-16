@@ -17,10 +17,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -187,7 +191,7 @@ func TestClient_SeekLatest(t *testing.T) {
 	})
 	assert.NotNil(t, producer)
 	assert.NoError(t, err)
-	msg := &ProducerMessage{
+	msg := &mqwrapper.ProducerMessage{
 		Payload:    make([]byte, 10),
 		Properties: map[string]string{},
 	}
@@ -197,7 +201,7 @@ func TestClient_SeekLatest(t *testing.T) {
 	msgChan := consumer1.Chan()
 	msgRead, ok := <-msgChan
 	assert.Equal(t, ok, true)
-	assert.Equal(t, msgRead.MsgID, id)
+	assert.Equal(t, msgRead.ID(), &server.RmqID{MessageID: id})
 
 	consumer1.Close()
 
@@ -217,10 +221,10 @@ func TestClient_SeekLatest(t *testing.T) {
 	for loop {
 		select {
 		case msg := <-msgChan:
-			assert.Equal(t, len(msg.Payload), 8)
+			assert.Equal(t, len(msg.Payload()), 8)
 			loop = false
 		case <-ticker.C:
-			msg := &ProducerMessage{
+			msg := &mqwrapper.ProducerMessage{
 				Payload: make([]byte, 8),
 			}
 			_, err = producer.Send(msg)
@@ -261,7 +265,7 @@ func TestClient_consume(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
 
-	msg := &ProducerMessage{
+	msg := &mqwrapper.ProducerMessage{
 		Payload: make([]byte, 10),
 	}
 	id, err := producer.Send(msg)
@@ -270,5 +274,80 @@ func TestClient_consume(t *testing.T) {
 	msgChan := consumer.Chan()
 	msgConsume, ok := <-msgChan
 	assert.Equal(t, ok, true)
-	assert.Equal(t, id, msgConsume.MsgID)
+	assert.Equal(t, &server.RmqID{MessageID: id}, msgConsume.ID())
+}
+
+func TestRocksmq_Properties(t *testing.T) {
+	os.MkdirAll(rmqPath, os.ModePerm)
+	rmqPathTest := rmqPath + "/test_client4"
+	rmq := newRocksMQ(t, rmqPathTest)
+	defer removePath(rmqPath)
+	client, err := NewClient(Options{
+		Server: rmq,
+	})
+	assert.NoError(t, err)
+	defer client.Close()
+	topicName := newTopicName()
+	producer, err := client.CreateProducer(ProducerOptions{
+		Topic: topicName,
+	})
+	assert.NotNil(t, producer)
+	assert.NoError(t, err)
+
+	opt := ConsumerOptions{
+		Topic:                       topicName,
+		SubscriptionName:            newConsumerName(),
+		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
+	}
+	consumer, err := client.Subscribe(opt)
+	assert.NoError(t, err)
+	assert.NotNil(t, consumer)
+
+	timeTickMsg := &msgpb.TimeTickMsg{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_TimeTick,
+			MsgID:     UniqueID(0),
+			Timestamp: 100,
+			SourceID:  0,
+		},
+	}
+	msgb, errMarshal := proto.Marshal(timeTickMsg)
+	assert.NoError(t, errMarshal)
+	assert.True(t, len(msgb) > 0)
+	header, err := UnmarshalHeader(msgb)
+	assert.NoError(t, err)
+	assert.NotNil(t, header)
+	msg := &mqwrapper.ProducerMessage{
+		Payload:    msgb,
+		Properties: map[string]string{common.TraceIDKey: "a"},
+	}
+
+	_, err = producer.Send(msg)
+	assert.NoError(t, err)
+
+	msg = &mqwrapper.ProducerMessage{
+		Payload:    msgb,
+		Properties: map[string]string{common.TraceIDKey: "b"},
+	}
+	_, err = producer.Send(msg)
+	assert.NoError(t, err)
+
+	msgChan := consumer.Chan()
+	msgConsume, ok := <-msgChan
+	assert.True(t, ok)
+	assert.Equal(t, len(msgConsume.Properties()), 1)
+	assert.Equal(t, msgConsume.Properties()[common.TraceIDKey], "a")
+	assert.NoError(t, err)
+
+	msgConsume, ok = <-msgChan
+	assert.True(t, ok)
+	assert.Equal(t, len(msgConsume.Properties()), 1)
+	assert.Equal(t, msgConsume.Properties()[common.TraceIDKey], "b")
+	assert.NoError(t, err)
+
+	timeTickMsg2 := &msgpb.TimeTickMsg{}
+	proto.Unmarshal(msgConsume.Payload(), timeTickMsg2)
+
+	assert.Equal(t, timeTickMsg2.Base.MsgType, commonpb.MsgType_TimeTick)
+	assert.Equal(t, timeTickMsg2.Base.Timestamp, uint64(100))
 }
