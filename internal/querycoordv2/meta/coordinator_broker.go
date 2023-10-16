@@ -26,9 +26,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
@@ -147,6 +149,11 @@ func (broker *CoordinatorBroker) GetRecoveryInfoV2(ctx context.Context, collecti
 		return nil, nil, err
 	}
 
+	path := params.Params.MinioCfg.RootPath.GetValue()
+	// refill log ID with log path
+	for _, segmentInfo := range recoveryInfo.Segments {
+		datacoord.DecompressBinLog(path, segmentInfo)
+	}
 	return recoveryInfo.Channels, recoveryInfo.Segments, nil
 }
 

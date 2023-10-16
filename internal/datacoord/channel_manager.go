@@ -491,8 +491,8 @@ func (c *ChannelManager) fillChannelWatchInfoWithState(op *ChannelOp, state data
 	return channelsWithTimer
 }
 
-// GetChannels gets channels info of registered nodes.
-func (c *ChannelManager) GetChannels() []*NodeChannelInfo {
+// GetAssignedChannels gets channels info of registered nodes.
+func (c *ChannelManager) GetAssignedChannels() []*NodeChannelInfo {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -501,13 +501,14 @@ func (c *ChannelManager) GetChannels() []*NodeChannelInfo {
 
 func (c *ChannelManager) GetChannelsByCollectionID(collectionID UniqueID) []*channel {
 	channels := make([]*channel, 0)
-	for _, nodeChannels := range c.store.GetNodesChannels() {
+	for _, nodeChannels := range c.store.GetChannels() {
 		for _, channelInfo := range nodeChannels.Channels {
 			if collectionID == channelInfo.CollectionID {
 				channels = append(channels, channelInfo)
 			}
 		}
 	}
+	log.Info("get channel", zap.Any("collection", collectionID), zap.Any("channel", channels))
 	return channels
 }
 
@@ -899,7 +900,7 @@ func (c *ChannelManager) getChannelByNodeAndName(nodeID UniqueID, channelName st
 }
 
 func (c *ChannelManager) getNodeIDByChannelName(chName string) (bool, UniqueID) {
-	for _, nodeChannel := range c.GetChannels() {
+	for _, nodeChannel := range c.GetAssignedChannels() {
 		for _, ch := range nodeChannel.Channels {
 			if ch.Name == chName {
 				return true, nodeChannel.NodeID
