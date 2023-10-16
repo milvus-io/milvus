@@ -894,6 +894,19 @@ func GetCurDBNameFromContextOrDefault(ctx context.Context) string {
 	return dbNameData[0]
 }
 
+func NewContextWithMetadata(ctx context.Context, username string, dbName string) context.Context {
+	originValue := fmt.Sprintf("%s%s%s", username, util.CredentialSeperator, username)
+	authKey := strings.ToLower(util.HeaderAuthorize)
+	authValue := crypto.Base64Encode(originValue)
+	dbKey := strings.ToLower(util.HeaderDBName)
+	contextMap := map[string]string{
+		authKey: authValue,
+		dbKey:   dbName,
+	}
+	md := metadata.New(contextMap)
+	return metadata.NewIncomingContext(ctx, md)
+}
+
 func GetRole(username string) ([]string, error) {
 	if globalMetaCache == nil {
 		return []string{}, merr.WrapErrServiceUnavailable("internal: Milvus Proxy is not ready yet. please wait")

@@ -101,7 +101,7 @@ TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
 int
 test_worker(string s) {
     std::cout << s << std::endl;
-    sleep(4);
+    std::this_thread::sleep_for(std::chrono::seconds(4));
     std::cout << s << std::endl;
     return 1;
 }

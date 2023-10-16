@@ -116,6 +116,7 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 }
 
 func authenticate(c *gin.Context) {
+	c.Set(httpserver.ContextUsername, "")
 	if !proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
 		return
 	}

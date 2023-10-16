@@ -103,6 +103,7 @@ func initHTTPServer(proxy types.ProxyComponent, needAuth bool) *gin.Engine {
 func genAuthMiddleWare(needAuth bool) gin.HandlerFunc {
 	if needAuth {
 		return func(c *gin.Context) {
+			c.Set(ContextUsername, "")
 			username, password, ok := ParseUsernamePassword(c)
 			if !ok {
 				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
@@ -1317,6 +1318,7 @@ func Test_Handles_VectorCollectionsDescribe(t *testing.T) {
 	h := NewHandlers(mp)
 	testEngine := gin.New()
 	app := testEngine.Group("/", func(c *gin.Context) {
+		c.Set(ContextUsername, "")
 		username, _, ok := ParseUsernamePassword(c)
 		if ok {
 			c.Set(ContextUsername, username)
