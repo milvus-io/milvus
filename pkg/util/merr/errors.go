@@ -19,6 +19,10 @@ package merr
 import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"google.golang.org/grpc/codes"
+	grpcStatus "google.golang.org/grpc/status"
+
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const (
@@ -162,23 +166,24 @@ func (e milvusError) Is(err error) bool {
 	return false
 }
 
+func (e milvusError) IsGrpcErr(targets ...codes.Code) bool {
+	set := typeutil.NewSet[codes.Code](targets...)
+	s, ok := grpcStatus.FromError(&e)
+	if ok {
+		return set.Len() == 0 || set.Contain(s.Code())
+	}
+	return false
+}
+
 type multiErrors struct {
 	errs []error
 }
 
 func (e multiErrors) Unwrap() error {
-	if len(e.errs) <= 1 {
-		return nil
+	if len(e.errs) > 1 {
+		return e.errs[0]
 	}
-	// To make merr work for multi errors,
-	// we need cause of multi errors, which defined as the last error
-	if len(e.errs) == 2 {
-		return e.errs[1]
-	}
-
-	return multiErrors{
-		errs: e.errs[1:],
-	}
+	return nil
 }
 
 func (e multiErrors) Error() string {
@@ -198,10 +203,30 @@ func (e multiErrors) Is(err error) bool {
 	return false
 }
 
+func (e multiErrors) IsGrpcErr(targets ...codes.Code) bool {
+	set := typeutil.NewSet[codes.Code](targets...)
+	for _, item := range e.errs {
+		switch err := item.(type) {
+		case interface {
+			IsGrpcErr(targets ...codes.Code) bool
+		}:
+			return err.IsGrpcErr(targets...)
+		}
+		s, ok := grpcStatus.FromError(item)
+		if ok {
+			return set.Len() == 0 || set.Contain(s.Code())
+		}
+	}
+	return false
+}
+
 func Combine(errs ...error) error {
 	errs = lo.Filter(errs, func(err error, _ int) bool { return err != nil })
 	if len(errs) == 0 {
 		return nil
+	}
+	if len(errs) == 1 {
+		return errs[0]
 	}
 	return multiErrors{
 		errs,

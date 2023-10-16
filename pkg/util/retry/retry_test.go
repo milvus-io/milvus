@@ -20,7 +20,11 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/lingdor/stackerror"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
+	"github.com/milvus-io/milvus/pkg/tracer"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -144,4 +148,38 @@ func TestWrap(t *testing.T) {
 	fmt.Println(err2)
 	assert.True(t, errors.Is(err2, merr.ErrSegmentNotFound))
 	assert.False(t, IsRecoverable(err2))
+}
+
+func TestErrorValidation(t *testing.T) {
+	t.Run("test unrecoverable", func(t *testing.T) {
+		grpcErr := status.Error(codes.Unimplemented, "mock err")
+		err := Unrecoverable(grpcErr)
+		assert.True(t, funcutil.IsGrpcErr(err, codes.Unimplemented))
+	})
+	t.Run("test stack trace", func(t *testing.T) {
+		grpcErr := status.Error(codes.Unimplemented, "mock err")
+		traceErr := merr.Combine(errors.Errorf("stack trace: %s", tracer.StackTrace()), grpcErr)
+		assert.True(t, funcutil.IsGrpcErr(traceErr, codes.Unimplemented))
+	})
+	t.Run("test combine nil", func(t *testing.T) {
+		grpcErr := status.Error(codes.Unimplemented, "mock err")
+		var nilErr error
+		traceErr := merr.Combine(nilErr, grpcErr)
+		assert.True(t, funcutil.IsGrpcErr(traceErr, codes.Unimplemented))
+	})
+	t.Run("test retry.Do", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+		err := Do(ctx, func() error {
+			grpcErr := status.Error(codes.Unimplemented, "mock err")
+			return Unrecoverable(grpcErr)
+		})
+		assert.True(t, funcutil.IsGrpcErr(err, codes.Unimplemented))
+
+		err = Do(ctx, func() error {
+			grpcErr := status.Error(codes.Unimplemented, "mock err")
+			return grpcErr
+		}, Attempts(3), MaxSleepTime(3*time.Millisecond))
+		assert.True(t, funcutil.IsGrpcErr(err, codes.Unimplemented))
+	})
 }

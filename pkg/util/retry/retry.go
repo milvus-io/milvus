@@ -46,7 +46,7 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 				log.Error("retry func failed", zap.Uint("retry time", i), zap.Error(err))
 			}
 
-			err = errors.Wrapf(err, "attempt #%d", i)
+			err = merr.Combine(err, errors.Errorf("attempt #%d", i))
 			el = merr.Combine(el, err)
 
 			if !IsRecoverable(err) {
