@@ -804,13 +804,13 @@ func (s *DataNodeServicesSuite) TestResendSegmentStats() {
 	resp, err := s.node.ResendSegmentStats(s.ctx, req)
 	s.Assert().NoError(err)
 	s.Assert().True(merr.Ok(resp.GetStatus()))
-	s.Assert().ElementsMatch([]UniqueID{0, 1, 2}, resp.GetSegResent())
+	s.Assert().Empty(resp.GetSegResent())
 
 	// Duplicate call.
 	resp, err = s.node.ResendSegmentStats(s.ctx, req)
 	s.Assert().NoError(err)
 	s.Assert().True(merr.Ok(resp.GetStatus()))
-	s.Assert().ElementsMatch([]UniqueID{0, 1, 2}, resp.GetSegResent())
+	s.Assert().Empty(resp.GetSegResent())
 }
 
 func (s *DataNodeServicesSuite) TestFlushChannels() {

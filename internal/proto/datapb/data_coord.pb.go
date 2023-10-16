@@ -7346,6 +7346,7 @@ type DataNodeClient interface {
 	SyncSegments(ctx context.Context, in *SyncSegmentsRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	// https://wiki.lfaidata.foundation/display/MIL/MEP+24+--+Support+bulk+load
 	Import(ctx context.Context, in *ImportTaskRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	// Deprecated
 	ResendSegmentStats(ctx context.Context, in *ResendSegmentStatsRequest, opts ...grpc.CallOption) (*ResendSegmentStatsResponse, error)
 	AddImportSegment(ctx context.Context, in *AddImportSegmentRequest, opts ...grpc.CallOption) (*AddImportSegmentResponse, error)
 	FlushChannels(ctx context.Context, in *FlushChannelsRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
@@ -7510,6 +7511,7 @@ type DataNodeServer interface {
 	SyncSegments(context.Context, *SyncSegmentsRequest) (*commonpb.Status, error)
 	// https://wiki.lfaidata.foundation/display/MIL/MEP+24+--+Support+bulk+load
 	Import(context.Context, *ImportTaskRequest) (*commonpb.Status, error)
+	// Deprecated
 	ResendSegmentStats(context.Context, *ResendSegmentStatsRequest) (*ResendSegmentStatsResponse, error)
 	AddImportSegment(context.Context, *AddImportSegmentRequest) (*AddImportSegmentResponse, error)
 	FlushChannels(context.Context, *FlushChannelsRequest) (*commonpb.Status, error)

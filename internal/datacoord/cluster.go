@@ -136,17 +136,6 @@ func (c *Cluster) Import(ctx context.Context, nodeID int64, it *datapb.ImportTas
 	c.sessionManager.Import(ctx, nodeID, it)
 }
 
-// ReCollectSegmentStats triggers a ReCollectSegmentStats call from session manager.
-func (c *Cluster) ReCollectSegmentStats(ctx context.Context) error {
-	for _, node := range c.sessionManager.getLiveNodeIDs() {
-		err := c.sessionManager.ReCollectSegmentStats(ctx, node)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // GetSessions returns all sessions
 func (c *Cluster) GetSessions() []*Session {
 	return c.sessionManager.GetSessions()
