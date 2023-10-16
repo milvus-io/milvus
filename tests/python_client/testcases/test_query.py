@@ -61,7 +61,7 @@ class TestQueryParams(TestcaseBase):
         """
         collection_w, entities = self.init_collection_general(prefix, insert_data=True, nb=10)[0:2]
         term_expr = f'{default_int_field_name} in {entities[:default_pos]}'
-        error = {ct.err_code: 1, ct.err_msg: "unexpected token Identifier"}
+        error = {ct.err_code: 65535, ct.err_msg: "cannot parse expression: int64 in .."}
         collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -228,7 +228,7 @@ class TestQueryParams(TestcaseBase):
         expected: raise exception
         """
         collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
-        error = {ct.err_code: 1, ct.err_msg: "Invalid expression!"}
+        error = {ct.err_code: 65535, ct.err_msg: "cannot parse expression: 12-s, error: field s not exist"}
         exprs = ["12-s", "中文", "a", " "]
         for expr in exprs:
             collection_w.query(expr, check_task=CheckTasks.err_res, check_items=error)
@@ -254,7 +254,8 @@ class TestQueryParams(TestcaseBase):
         """
         collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix))
         term_expr = 'field in [1, 2]'
-        error = {ct.err_code: 1, ct.err_msg: "fieldName(field) not found"}
+        error = {ct.err_code: 65535,
+                 ct.err_msg: "cannot parse expression: field in [1, 2], error: field field not exist"}
         collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -309,26 +310,23 @@ class TestQueryParams(TestcaseBase):
         """
         self._connect()
         df = cf.gen_default_dataframe_data()
-        bool_values = pd.Series(
-            data=[True if i % 2 == 0 else False for i in range(ct.default_nb)], dtype="bool")
+        bool_values = pd.Series(data=[True if i % 2 == 0 else False for i in range(ct.default_nb)], dtype="bool")
         df.insert(2, ct.default_bool_field_name, bool_values)
         self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
                                                       primary_field=ct.default_int64_field_name)
         assert self.collection_wrap.num_entities == ct.default_nb
-        self.collection_wrap.create_index(
-            ct.default_float_vec_field_name, index_params=ct.default_flat_index)
+        self.collection_wrap.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         self.collection_wrap.load()
 
         # output bool field
-        res, _ = self.collection_wrap.query(default_term_expr, output_fields=[
-            ct.default_bool_field_name])
-        assert set(res[0].keys()) == {
-            ct.default_int64_field_name, ct.default_bool_field_name}
+
+        res, _ = self.collection_wrap.query(default_term_expr, output_fields=[ct.default_bool_field_name])
+        assert set(res[0].keys()) == {ct.default_int64_field_name, ct.default_bool_field_name}
 
         # not support filter bool field with expr 'bool in [0/ 1]'
         not_support_expr = f'{ct.default_bool_field_name} in [0]'
-        error = {ct.err_code: 1,
-                 ct.err_msg: 'error: value \"0\" in list cannot be casted to Bool'}
+        error = {ct.err_code: 65535,
+                 ct.err_msg: "cannot parse expression: bool in [0], error: value '0' in list cannot be casted to Bool"}
         self.collection_wrap.query(not_support_expr, output_fields=[ct.default_bool_field_name],
                                    check_task=CheckTasks.err_res, check_items=error)
 
@@ -417,11 +415,13 @@ class TestQueryParams(TestcaseBase):
         """
         collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
         expr_1 = f'{ct.default_int64_field_name} inn [1, 2]'
-        error_1 = {ct.err_code: 1, ct.err_msg: f'unexpected token Identifier("inn")'}
+        error_1 = {ct.err_code: 65535, ct.err_msg: "cannot parse expression: int64 inn [1, 2], "
+                                                   "error: invalid expression: int64 inn [1, 2]"}
         collection_w.query(expr_1, check_task=CheckTasks.err_res, check_items=error_1)
 
         expr_3 = f'{ct.default_int64_field_name} in not [1, 2]'
-        error_3 = {ct.err_code: 1, ct.err_msg: 'right operand of the InExpr must be array'}
+        error_3 = {ct.err_code: 65535, ct.err_msg: "cannot parse expression: int64 in not [1, 2], "
+                                                   "error: line 1:9 no viable alternative at input 'innot'"}
         collection_w.query(expr_3, check_task=CheckTasks.err_res, check_items=error_3)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -522,7 +522,8 @@ class TestQueryParams(TestcaseBase):
                  f'{ct.default_int64_field_name} in "in"',
                  f'{ct.default_int64_field_name} in (mn)']
         collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
-        error = {ct.err_code: 1, ct.err_msg: "right operand of the InExpr must be array"}
+        error = {ct.err_code: 65535, ct.err_msg: "cannot parse expression: int64 in 1, "
+                                                 "error: line 1:9 no viable alternative at input 'in1'"}
         for expr in exprs:
             collection_w.query(expr, check_task=CheckTasks.err_res, check_items=error)
 
@@ -548,7 +549,9 @@ class TestQueryParams(TestcaseBase):
         """
         collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix))
         int_values = [[1., 2.], [1, 2.]]
-        error = {ct.err_code: 1, ct.err_msg: "type mismatch"}
+        error = {ct.err_code: 65535,
+                 ct.err_msg: "cannot parse expression: int64 in [1.0, 2.0], error: value '1.0' "
+                             "in list cannot be casted to Int64"}
         for values in int_values:
             term_expr = f'{ct.default_int64_field_name} in {values}'
             collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
@@ -562,7 +565,9 @@ class TestQueryParams(TestcaseBase):
         """
         collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
         constants = [[1], (), {}]
-        error = {ct.err_code: 1, ct.err_msg: "unsupported leaf node"}
+        error = {ct.err_code: 65535,
+                 ct.err_msg: "cannot parse expression: int64 in [[1]], error: value '[1]' in "
+                             "list cannot be casted to Int64"}
         for constant in constants:
             term_expr = f'{ct.default_int64_field_name} in [{constant}]'
             collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
@@ -982,8 +987,8 @@ class TestQueryParams(TestcaseBase):
         # 3. query
         collection_w.load()
         expression = f"{expr_prefix}({json_field}['list'], {get_not_list})"
-        error = {ct.err_code: 1, ct.err_msg: f"cannot parse expression {expression}, error: "
-                                             f"error: {expr_prefix} operation element must be an array"}
+        error = {ct.err_code: 65535, ct.err_msg: f"cannot parse expression: {expression}, "
+                                                 f"error: contains_any operation element must be an array"}
         collection_w.query(expression, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1397,7 +1402,7 @@ class TestQueryParams(TestcaseBase):
         expected: raise exception
         """
         collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
-        error = {ct.err_code: 1, ct.err_msg: 'Field int not exist'}
+        error = {ct.err_code: 65535, ct.err_msg: 'field int not exist'}
         output_fields = [["int"], [ct.default_int64_field_name, "int"]]
         for fields in output_fields:
             collection_w.query(default_term_expr, output_fields=fields,
@@ -1470,7 +1475,7 @@ class TestQueryParams(TestcaseBase):
         collection_w.load()
 
         # query with invalid output_fields
-        error = {ct.err_code: 1, ct.err_msg: f"Field {output_fields[-1]} not exist"}
+        error = {ct.err_code: 65535, ct.err_msg: f"field {output_fields[-1]} not exist"}
         collection_w.query(default_term_expr, output_fields=output_fields,
                            check_task=CheckTasks.err_res, check_items=error)
 
@@ -1504,7 +1509,9 @@ class TestQueryParams(TestcaseBase):
         df = cf.gen_default_dataframe_data()
         partition_w.insert(df)
         assert partition_w.num_entities == ct.default_nb
-        error = {ct.err_code: 1, ct.err_msg: f'collection {collection_w.name} was not loaded into memory'}
+        error = {ct.err_code: 65535, ct.err_msg: "failed to query: attempt #0: fail to get shard leaders from "
+                                                 "QueryCoord: collection=444857573608181561: collection"
+                                                 " not loaded: unrecoverable error"}
         collection_w.query(default_term_expr, partition_names=[partition_w.name],
                            check_task=CheckTasks.err_res, check_items=error)
 
@@ -1563,7 +1570,7 @@ class TestQueryParams(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         partition_names = cf.gen_unique_str()
-        error = {ct.err_code: 1, ct.err_msg: f'PartitionName: {partition_names} not found'}
+        error = {ct.err_code: 65535, ct.err_msg: f'partition name {partition_names} not found'}
         collection_w.query(default_term_expr, partition_names=[partition_names],
                            check_task=CheckTasks.err_res, check_items=error)
 
@@ -1818,9 +1825,9 @@ class TestQueryParams(TestcaseBase):
         term_expr = f'{ct.default_int64_field_name} in {int_values[10: pos + 10]}'
         collection_w.query(term_expr, offset=10, limit=limit,
                            check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 1,
-                                        ct.err_msg: "limit [%s] is invalid, should be in range "
-                                                    "[1, 16384], but got %s" % (limit, limit)})
+                           check_items={ct.err_code: 65535,
+                                        ct.err_msg: f"invalid max query result window, (offset+limit) "
+                                                    f"should be in range [1, 16384], but got {limit}"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("offset", ["12 s", " ", [0, 1], {2}])
@@ -1855,9 +1862,9 @@ class TestQueryParams(TestcaseBase):
         term_expr = f'{ct.default_int64_field_name} in {int_values[10: pos + 10]}'
         collection_w.query(term_expr, offset=offset, limit=10,
                            check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 1,
-                                        ct.err_msg: "offset [%s] is invalid, should be in range "
-                                                    "[1, 16384], but got %s" % (offset, offset)})
+                           check_items={ct.err_code: 65535,
+                                        ct.err_msg: f"invalid max query result window, (offset+limit) "
+                                                    f"should be in range [1, 16384], but got {offset}"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_during_upsert(self):
@@ -1933,7 +1940,10 @@ class TestQueryOperation(TestcaseBase):
 
         # query without load
         collection_w.query(default_term_expr, check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 1, ct.err_msg: clem.CollNotLoaded % collection_name})
+                           check_items={ct.err_code: 65535,
+                                        ct.err_msg: "failed to query: attempt #0: fail to get shard leaders"
+                                                    " from QueryCoord: collection=444857573609193909: "
+                                                    "collection not loaded: unrecoverable error"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("term_expr", [f'{ct.default_int64_field_name} in [0]'])
@@ -2342,7 +2352,9 @@ class TestQueryString(TestcaseBase):
         """
         collection_w = self.init_collection_general(prefix, insert_data=True)[0]
         collection_w.query(expression, check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 1, ct.err_msg: "type mismatch"})
+                           check_items={ct.err_code: 65535,
+                                        ct.err_msg: f"cannot parse expression: {expression}, error: value "
+                                                    f"'0' in list cannot be casted to VarChar"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_string_expr_with_binary(self):
@@ -2385,8 +2397,9 @@ class TestQueryString(TestcaseBase):
         expression = 'float like "0%"'
         collection_w.query(expression,
                            check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 1,
-                                        ct.err_msg: "like operation on non-string field is unsupported"})
+                           check_items={ct.err_code: 65535,
+                                        ct.err_msg: f"cannot parse expression: {expression}, error: like "
+                                                    f"operation on non-string or no-json field is unsupported"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_compare_two_fields(self):
@@ -2414,7 +2427,9 @@ class TestQueryString(TestcaseBase):
                                                     primary_field=ct.default_string_field_name)[0]
         expression = 'varchar == int64'
         collection_w.query(expression, check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 1, ct.err_msg: f' cannot parse expression:{expression}'})
+                           check_items={ct.err_code: 65535, ct.err_msg:
+                               f"cannot parse expression: {expression}, error: comparisons between VarChar, "
+                               f"element_type: None and Int64 elementType: None are not supported"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(reason="issue 24637")
@@ -2664,8 +2679,10 @@ class TestQueryCount(TestcaseBase):
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
         collection_w.query(expr=default_term_expr, output_fields=[ct.default_count_output],
                            check_task=CheckTasks.err_res,
-                           check_items={"err_code": 1,
-                                        "err_msg": f"has not been loaded to memory or load failed"})
+                           check_items={"err_code": 65535,
+                                        "err_msg": "failed to query: attempt #0: fail to get shard leaders from "
+                                                   "QueryCoord: collection=444857573609396129: collection not loaded:"
+                                                   " unrecoverable error"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_count_duplicate_ids(self):
@@ -2727,13 +2744,11 @@ class TestQueryCount(TestcaseBase):
         collection_w.query(expr=default_expr, output_fields=[ct.default_count_output],
                            partition_names=[ct.default_partition_name],
                            check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: [{count: 0}]}
-                           )
+                           check_items={exp_res: [{count: 0}]})
         collection_w.query(expr=default_expr, output_fields=[ct.default_count_output],
                            partition_names=[p1.name, ct.default_partition_name],
                            check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: [{count: half}]}
-                           )
+                           check_items={exp_res: [{count: half}]})
 
         # drop p1 partition
         p1.release()
@@ -2741,14 +2756,12 @@ class TestQueryCount(TestcaseBase):
         collection_w.query(expr=default_expr, output_fields=[ct.default_count_output],
                            partition_names=[p1.name],
                            check_task=CheckTasks.err_res,
-                           check_items={"err_code": 1,
-                                        "err_msg": f'partition name: {p1.name} not found'}
-                           )
+                           check_items={"err_code": 65535,
+                                        "err_msg": f'partition name {p1.name} not found'})
         collection_w.query(expr=default_expr, output_fields=[ct.default_count_output],
                            partition_names=[ct.default_partition_name],
                            check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: [{count: 0}]}
-                           )
+                           check_items={exp_res: [{count: 0}]})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_count_partition_duplicate(self):
@@ -3070,8 +3083,9 @@ class TestQueryCount(TestcaseBase):
 
         # release collection and alias drop partition
         collection_w_alias.drop_partition(p_name, check_task=CheckTasks.err_res,
-                                          check_items={ct.err_code: 1,
-                                                       ct.err_msg: "cannot drop the collection via alias"})
+                                          check_items={ct.err_code: 65535,
+                                                       ct.err_msg: "partition cannot be dropped, "
+                                                                   "partition is loaded, please release it first"})
         self.partition_wrap.init_partition(collection_w_alias.collection, p_name)
         self.partition_wrap.release()
 

@@ -424,8 +424,9 @@ class TestAliasOperationInvalid(TestcaseBase):
         collection_2 = self.init_collection_wrap(name=c_2_name, schema=default_schema,
                                                  check_task=CheckTasks.check_collection_property,
                                                  check_items={exp_name: c_2_name, exp_schema: default_schema})
-        error = {ct.err_code: 1,
-                 ct.err_msg: "Create alias failed: duplicate collection alias"}
+        error = {ct.err_code: 65535,
+                 ct.err_msg: f"alias exists and already aliased to another collection, alias: {alias_a_name}, "
+                             f"collection: {c_1_name}, other collection: {c_2_name}"}
         self.utility_wrap.create_alias(collection_2.name, alias_a_name,
                                        check_task=CheckTasks.err_res,
                                        check_items=error)
@@ -453,8 +454,8 @@ class TestAliasOperationInvalid(TestcaseBase):
         # collection_w.create_alias(alias_name)
 
         alias_not_exist_name = cf.gen_unique_str(prefix)
-        error = {ct.err_code: 1,
-                 ct.err_msg: "Alter alias failed: alias does not exist"}
+        error = {ct.err_code: 65535,
+                 ct.err_msg: f"failed to alter alias, alias does not exist: {alias_not_exist_name}"}
         self.utility_wrap.alter_alias(collection_w.name, alias_not_exist_name,
                                       check_task=CheckTasks.err_res,
                                       check_items=error)

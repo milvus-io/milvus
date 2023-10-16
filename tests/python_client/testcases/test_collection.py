@@ -114,7 +114,11 @@ class TestCollectionParams(TestcaseBase):
         expected: raise exception
         """
         self._connect()
-        error = {ct.err_code: 1, ct.err_msg: "`collection_name` value {} is illegal".format(name)}
+        error1 = {ct.err_code: 1, ct.err_msg: "`collection_name` value {} is illegal".format(name)}
+        error2 = {ct.err_code: 1100, ct.err_msg: "Invalid collection name: 1ns_. the first character of a"
+                                                 " collection name must be an underscore or letter: invalid"
+                                                 " parameter".format(name)}
+        error = error1 if name not in ["1ns_", "qw$_o90"] else error2
         self.collection_wrap.init_collection(name, schema=default_schema, check_task=CheckTasks.err_res,
                                              check_items=error)
 
@@ -315,7 +319,7 @@ class TestCollectionParams(TestcaseBase):
         """
         self._connect()
         fields = get_invalid_type_fields
-        error = {ct.err_code: 0, ct.err_msg: "The fields of schema must be type list"}
+        error = {ct.err_code: 1, ct.err_msg: "The fields of schema must be type list."}
         self.collection_schema_wrap.init_collection_schema(fields=fields,
                                                            check_task=CheckTasks.err_res, check_items=error)
 
@@ -374,7 +378,7 @@ class TestCollectionParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         field, _ = self.field_schema_wrap.init_field_schema(name=None, dtype=DataType.INT64, is_primary=True)
         schema = cf.gen_collection_schema(fields=[field, cf.gen_float_vec_field()])
-        error = {ct.err_code: 1, ct.err_msg: "You should specify the name of field"}
+        error = {ct.err_code: 65535, ct.err_msg: "the partition key field must not be primary field"}
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -820,7 +824,7 @@ class TestCollectionParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         float_vec_field = cf.gen_float_vec_field(dim=get_invalid_dim)
         schema = cf.gen_collection_schema(fields=[cf.gen_int64_field(is_primary=True), float_vec_field])
-        error = {ct.err_code: 1, ct.err_msg: f'invalid dim: {get_invalid_dim}'}
+        error = {ct.err_code: 65535, ct.err_msg: "strconv.ParseInt: parsing \"[]\": invalid syntax"}
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1088,6 +1092,7 @@ class TestCollectionOperation(TestcaseBase):
         assert self.utility_wrap.has_collection(c_name)[0]
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip("already has same senario")
     def test_collection_all_datatype_fields(self):
         """
         target: test create collection with all dataType fields
@@ -1738,7 +1743,7 @@ class TestCreateCollectionInvalid(TestcaseBase):
             field_name_tmp = gen_unique_str("field_name")
             field_schema_temp = cf.gen_int64_field(field_name_tmp)
             field_schema_list.append(field_schema_temp)
-        error = {ct.err_code: 1, ct.err_msg: "'maximum field\'s number should be limited to 64'"}
+        error = {ct.err_code: 65535, ct.err_msg: "maximum field's number should be limited to 64"}
         schema, _ = self.collection_schema_wrap.init_collection_schema(fields=field_schema_list)
         self.init_collection_wrap(name=c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
@@ -2219,8 +2224,8 @@ class TestLoadCollection(TestcaseBase):
         c_name = cf.gen_unique_str()
         collection_wr = self.init_collection_wrap(name=c_name)
         collection_wr.drop()
-        error = {ct.err_code: 4,
-                 ct.err_msg: "DescribeCollection failed: can't find collection: %s" % c_name}
+        error = {ct.err_code: 100,
+                 ct.err_msg: "collection= : collection not found"}
         collection_wr.load(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2234,8 +2239,8 @@ class TestLoadCollection(TestcaseBase):
         c_name = cf.gen_unique_str()
         collection_wr = self.init_collection_wrap(name=c_name)
         collection_wr.drop()
-        error = {ct.err_code: 4,
-                 ct.err_msg: "DescribeCollection failed: can't find collection: %s" % c_name}
+        error = {ct.err_code: 100,
+                 ct.err_msg: "collection= : collection not found"}
         collection_wr.release(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2433,7 +2438,12 @@ class TestLoadCollection(TestcaseBase):
         self.init_partition_wrap(collection_w, partition2)
         collection_w.load()
         partition_w.release()
-        error = {ct.err_code: 1, ct.err_msg: 'not loaded into memory'}
+        error = {ct.err_code: 65538,
+                 ct.err_msg: 'failed to query: attempt #0: failed to search/query delegator 1'
+                             ' for channel by-dev-rootcoord-dml_0_444857573607352620v0: fail '
+                             'to Query, QueryNode ID = 1, reason=partition=[444857573607352660]:'
+                             ' partition not loaded: attempt #1: no available shard delegator '
+                             'found: service unavailable'}
         collection_w.query(default_term_expr, partition_names=[partition1],
                            check_task=CheckTasks.err_res, check_items=error)
         collection_w.release()
@@ -2458,7 +2468,12 @@ class TestLoadCollection(TestcaseBase):
         partition_w1.release()
         collection_w.release()
         partition_w1.load()
-        error = {ct.err_code: 1, ct.err_msg: 'not loaded into memory'}
+        error = {ct.err_code: 65538,
+                 ct.err_msg: 'failed to query: attempt #0: failed to search/query delegator '
+                             '1 for channel by-dev-rootcoord-dml_14_444857573607352608v0: fail'
+                             ' to Query, QueryNode ID = 1, reason=partition=[444857573607352653]:'
+                             ' partition not loaded: attempt #1: no available shard delegator '
+                             'found: service unavailable'}
         collection_w.query(default_term_expr, partition_names=[partition2],
                            check_task=CheckTasks.err_res, check_items=error)
         partition_w2.load()
@@ -2516,7 +2531,10 @@ class TestLoadCollection(TestcaseBase):
         partition_w1.release()
         partition_w1.drop()
         partition_w2.release()
-        error = {ct.err_code: 1, ct.err_msg: 'not loaded into memory'}
+        error = {ct.err_code: 65538, ct.err_msg: 'failed to query: attempt #0: failed to search/query delegator 1 '
+                                                 'for channel by-dev-rootcoord-xx: fail to Query, QueryNode ID = 1,'
+                                                 ' reason=partition=[ ]: partition not loaded: attempt #1: no '
+                                                 'available shard delegator found: service unavailable'}
         collection_w.query(default_term_expr, partition_names=[partition2],
                            check_task=CheckTasks.err_res, check_items=error)
         collection_w.load()
@@ -2595,8 +2613,8 @@ class TestLoadCollection(TestcaseBase):
         collection_wr.load()
         collection_wr.release()
         collection_wr.drop()
-        error = {ct.err_code: 4,
-                 ct.err_msg: "DescribeCollection failed: can't find collection: %s" % c_name}
+        error = {ct.err_code: 100,
+                 ct.err_msg: "collection=444857573607352784: collection not found"}
         collection_wr.load(check_task=CheckTasks.err_res, check_items=error)
         collection_wr.release(check_task=CheckTasks.err_res, check_items=error)
 
@@ -2613,8 +2631,8 @@ class TestLoadCollection(TestcaseBase):
         collection_wr.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_wr.load()
         collection_wr.drop()
-        error = {ct.err_code: 4,
-                 ct.err_msg: "can't find collection"}
+        error = {ct.err_code: 100,
+                 ct.err_msg: "collection=444857573607351711: collection not found"}
         collection_wr.release(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -2726,7 +2744,8 @@ class TestLoadCollection(TestcaseBase):
         assert collection_w.num_entities == ct.default_nb
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
 
-        error = {ct.err_code: 1, ct.err_msg: f"no enough nodes to create replicas"}
+        error = {ct.err_code: 65535,
+                 ct.err_msg: "failed to load collection: failed to spawn replica for collection: nodes not enough"}
         collection_w.load(replica_number=3, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.ClusterOnly)
@@ -2994,8 +3013,9 @@ class TestLoadCollection(TestcaseBase):
         assert collection_w.num_entities == ct.default_nb
 
         collection_w.get_replicas(check_task=CheckTasks.err_res,
-                                  check_items={"err_code": 15,
-                                               "err_msg": "collection not found, maybe not loaded"})
+                                  check_items={"err_code": 400,
+                                               "err_msg": "failed to get replicas by collection: "
+                                                          "replica=444857573607352187: replica not found"})
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_count_multi_replicas(self):
@@ -3054,13 +3074,15 @@ class TestDescribeCollection(TestcaseBase):
         description = \
             {'collection_name': c_name, 'auto_id': False, 'num_shards': ct.default_shards_num, 'description': '',
              'fields': [{'field_id': 100, 'name': 'int64', 'description': '', 'type': 5,
-                         'params': {}, 'is_primary': True},
-                        {'field_id': 101, 'name': 'float', 'description': '', 'type': 10, 'params': {}},
+                         'params': {}, 'is_primary': True, 'element_type': 0,},
+                        {'field_id': 101, 'name': 'float', 'description': '', 'type': 10, 'params': {},
+                         'element_type': 0,},
                         {'field_id': 102, 'name': 'varchar', 'description': '', 'type': 21,
-                         'params': {'max_length': 65535}},
-                        {'field_id': 103, 'name': 'json_field', 'description': '', 'type': 23, 'params': {}},
+                         'params': {'max_length': 65535}, 'element_type': 0,},
+                        {'field_id': 103, 'name': 'json_field', 'description': '', 'type': 23, 'params': {},
+                         'element_type': 0,},
                         {'field_id': 104, 'name': 'float_vector', 'description': '', 'type': 101,
-                         'params': {'dim': 128}}],
+                         'params': {'dim': 128}, 'element_type': 0}],
              'aliases': [], 'consistency_level': 0, 'properties': [], 'num_partitions': 1}
         res = collection_w.describe()[0]
         del res['collection_id']
@@ -3090,7 +3112,9 @@ class TestReleaseAdvanced(TestcaseBase):
         search_res, _ = collection_wr.search(vectors, default_search_field, default_search_params,
                                              default_limit, _async=True)
         collection_wr.release()
-        error = {ct.err_code: 1, ct.err_msg: 'collection %s was not loaded into memory' % c_name}
+        error = {ct.err_code: 65535, ct.err_msg: "failed to search: attempt #0: fail to get shard leaders from"
+                                                 " QueryCoord: collection=444818512783071471: collection not"
+                                                 " loaded: unrecoverable error"}
         collection_wr.search(vectors, default_search_field, default_search_params, default_limit,
                              check_task=CheckTasks.err_res, check_items=error)
 
@@ -3117,8 +3141,10 @@ class TestReleaseAdvanced(TestcaseBase):
                             default_search_params, limit, default_search_exp,
                             [par_name],
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": "partition has been released"})
+                            check_items={"err_code": 65535,
+                                         "err_msg": "failed to search: attempt #0: fail to get shard leaders "
+                                                    "from QueryCoord: collection=444857573607353390: collection "
+                                                    "not loaded: unrecoverable error"})
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_release_indexed_collection_during_searching(self):
@@ -3139,7 +3165,9 @@ class TestReleaseAdvanced(TestcaseBase):
                             default_search_params, limit, default_search_exp,
                             [par_name], _async=True)
         collection_w.release()
-        error = {ct.err_code: 1, ct.err_msg: 'collection %s was not loaded into memory' % collection_w.name}
+        error = {ct.err_code: 65535, ct.err_msg: "failed to search: attempt #0: fail to get shard leaders from "
+                                                 "QueryCoord: collection=444818512783071824: collection not "
+                                                 "loaded: unrecoverable error"}
         collection_w.search(vectors, default_search_field,
                             default_search_params, limit, default_search_exp,
                             [par_name],
@@ -3189,8 +3217,8 @@ class TestLoadPartition(TestcaseBase):
         # for metric_type in ct.binary_metrics:
         binary_index["metric_type"] = metric_type
         if binary_index["index_type"] == "BIN_IVF_FLAT" and metric_type in ct.structure_metrics:
-            error = {ct.err_code: 1, ct.err_msg: 'Invalid metric_type: SUBSTRUCTURE, '
-                                                 'which does not match the index type: BIN_IVF_FLAT'}
+            error = {ct.err_code: 65535,
+                     ct.err_msg: "metric type not found or not supported, supported: [HAMMING JACCARD]"}
             collection_w.create_index(ct.default_binary_vec_field_name, binary_index,
                                       check_task=CheckTasks.err_res, check_items=error)
             collection_w.create_index(ct.default_binary_vec_field_name, ct.default_bin_flat_index)
@@ -3371,7 +3399,11 @@ class TestLoadPartition(TestcaseBase):
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         partition_w1.load()
         partition_w1.load()
-        error = {ct.err_code: 1, ct.err_msg: 'not loaded into memory'}
+        error = {ct.err_code: 65538,
+                 ct.err_msg: 'failed to query: attempt #0: failed to search/query delegator 1 for'
+                             ' channel by-dev-rootcoord-dml_10_444857573607353001v0: fail to Query, '
+                             'QueryNode ID = 1, reason=partition=[444857573607353015]: partition not '
+                             'loaded: attempt #1: no available shard delegator found: service unavailable'}
         collection_w.query(default_term_expr, partition_names=[partition2],
                            check_task=CheckTasks.err_res, check_items=error)
         collection_w.load()
@@ -3426,7 +3458,9 @@ class TestLoadPartition(TestcaseBase):
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         partition_w1.load()
         collection_w.release()
-        error = {ct.err_code: 1, ct.err_msg: 'not loaded into memory'}
+        error = {ct.err_code: 65535, ct.err_msg: "failed to query: attempt #0: fail to get shard leaders from "
+                                                 "QueryCoord: collection=444818512783073123: collection not"
+                                                 " loaded: unrecoverable error"}
         collection_w.query(default_term_expr, partition_names=[partition1],
                            check_task=CheckTasks.err_res, check_items=error)
         partition_w1.load()
@@ -3465,7 +3499,9 @@ class TestLoadPartition(TestcaseBase):
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         partition_w1.load()
         partition_w1.release()
-        error = {ct.err_code: 1, ct.err_msg: 'not loaded into memory'}
+        error = {ct.err_code: 65535,
+                 ct.err_msg: 'failed to query: attempt #0: fail to get shard leaders from QueryCoord: '
+                             'collection=444857573607352292: collection not loaded: unrecoverable error'}
         collection_w.query(default_term_expr, partition_names=[partition1],
                            check_task=CheckTasks.err_res, check_items=error)
         partition_w1.load()
@@ -3528,7 +3564,9 @@ class TestLoadPartition(TestcaseBase):
         partition_w1.load()
         partition_w1.release()
         partition_w2.release()
-        error = {ct.err_code: 1, ct.err_msg: 'not loaded into memory'}
+        error = {ct.err_code: 65535,
+                 ct.err_msg: 'failed to query: attempt #0: fail to get shard leaders from QueryCoord:'
+                             ' collection=444857573607353795: collection not loaded: unrecoverable error'}
         collection_w.query(default_term_expr, partition_names=[partition1, partition2],
                            check_task=CheckTasks.err_res, check_items=error)
         collection_w.load()
@@ -3571,7 +3609,7 @@ class TestLoadPartition(TestcaseBase):
         partition_w1.load()
         partition_w1.release()
         partition_w1.drop()
-        error = {ct.err_code: 1, ct.err_msg: 'name not found'}
+        error = {ct.err_code: 65535, ct.err_msg: f'partition name {partition1} not found'}
         collection_w.query(default_term_expr, partition_names=[partition1, partition2],
                            check_task=CheckTasks.err_res, check_items=error)
         partition_w2.drop()
@@ -3654,7 +3692,10 @@ class TestLoadPartition(TestcaseBase):
         partition_w1.load()
         partition_w2.drop()
         partition_w1.release()
-        error = {ct.err_code: 1, ct.err_msg: 'not loaded into memory'}
+        error = {ct.err_code: 65535,
+                 ct.err_msg: 'failed to query: attempt #0: fail to get shard leaders from'
+                             ' QueryCoord: collection=444857573607353891: collection not'
+                             ' loaded: unrecoverable error'}
         collection_w.query(default_term_expr, partition_names=[partition1],
                            check_task=CheckTasks.err_res, check_items=error)
         partition_w1.load()
@@ -3767,7 +3808,7 @@ class TestCollectionString(TestcaseBase):
         max_length = 100000
         string_field = cf.gen_string_field(max_length=max_length)
         schema = cf.gen_collection_schema([int_field, string_field, vec_field])
-        error = {ct.err_code: 1, ct.err_msg: "invalid max_length: %s" % max_length}
+        error = {ct.err_code: 65535, ct.err_msg: "the maximum length specified for a VarChar should be in (0, 65535]"}
         self.collection_wrap.init_collection(name=c_name, schema=schema,
                                              check_task=CheckTasks.err_res, check_items=error)
 

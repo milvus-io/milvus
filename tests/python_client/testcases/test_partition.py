@@ -177,8 +177,10 @@ class TestPartitionParams(TestcaseBase):
         partition_name = cf.gen_str_by_length(256)
         self.partition_wrap.init_partition(collection_w.collection, partition_name,
                                            check_task=CheckTasks.err_res,
-                                           check_items={ct.err_code: 1, 'err_msg': "is illegal"}
-                                           )
+                                           check_items={ct.err_code: 65535,
+                                                        ct.err_msg: f"Invalid partition name: {partition_name}. "
+                                                                    f"The length of a partition name must be less "
+                                                                    f"than 255 characters."})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("partition_name", ["_Partiti0n", "pArt1_ti0n"])
@@ -208,10 +210,13 @@ class TestPartitionParams(TestcaseBase):
         collection_w = self.init_collection_wrap()
 
         # create partition
+        error1 = {ct.err_code: 1, ct.err_msg: f"`partition_name` value {partition_name} is illegal"}
+        error2 = {ct.err_code: 65535, ct.err_msg: f"Invalid partition name: {partition_name}. Partition name can"
+                                                  f" only contain numbers, letters and underscores."}
+        error = error1 if partition_name in [None, [], 1, [1, "2", 3], (1,), {1: 1}] else error2
         self.partition_wrap.init_partition(collection_w.collection, partition_name,
                                            check_task=CheckTasks.err_res,
-                                           check_items={ct.err_code: 1, 'err_msg': "is illegal"}
-                                           )
+                                           check_items=error)
         # TODO: need an error code issue #5144 and assert independently
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -370,7 +375,8 @@ class TestPartitionParams(TestcaseBase):
         assert partition_w.num_entities == ct.default_nb
 
         # load with 2 replicas
-        error = {ct.err_code: 1, ct.err_msg: f"no enough nodes to create replicas"}
+        error = {ct.err_code: 65535,
+                 ct.err_msg: "failed to load partitions: failed to spawn replica for collection: nodes not enough"}
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         partition_w.load(replica_number=3, check_task=CheckTasks.err_res, check_items=error)
 
@@ -499,7 +505,10 @@ class TestPartitionParams(TestcaseBase):
                                       anns_field=ct.default_float_vec_field_name,
                                       params={"nprobe": 32}, limit=1,
                                       check_task=ct.CheckTasks.err_res,
-                                      check_items={ct.err_code: 1, ct.err_msg: "partitions have been released"})
+                                      check_items={ct.err_code: 65535,
+                                                   ct.err_msg: "failed to search: attempt #0: fail to get shard "
+                                                               "leaders from QueryCoord: collection=4448185127832"
+                                                               "79866: collection not loaded: unrecoverable error"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("data", [cf.gen_default_dataframe_data(10),
@@ -665,8 +674,9 @@ class TestPartitionOperations(TestcaseBase):
         self.partition_wrap.init_partition(
             collection_w.collection, p_name,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1,
-                         ct.err_msg: "maximum partition's number should be limit to 4096"})
+            check_items={ct.err_code: 65535,
+                         ct.err_msg: "partition number (4096) exceeds max configuration (4096), "
+                                     "collection: {}".format(collection_w.name)})
 
         # TODO: Try to verify load collection with a large number of partitions. #11651
 

@@ -583,8 +583,8 @@ class TestDeleteOperation(TestcaseBase):
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
 
         # raise exception
-        error = {ct.err_code: 15,
-                 ct.err_msg: f"partitionID of partitionName:{ct.default_tag} can not be find"}
+        error = {ct.err_code: 200,
+                 ct.err_msg: f"Failed to get partition id: partition={ct.default_tag}: partition not found"}
         collection_w.delete(tmp_expr, partition_name=ct.default_tag,
                             check_task=CheckTasks.err_res, check_items=error)
 
@@ -678,8 +678,9 @@ class TestDeleteOperation(TestcaseBase):
         assert res.delete_count == 1
 
         # query without loading and raise exception
-        error = {ct.err_code: 1,
-                 ct.err_msg: f"collection {collection_w.name} was not loaded into memory"}
+        error = {ct.err_code: 65535,
+                 ct.err_msg: "failed to query: attempt #0: fail to get shard leaders from QueryCoord:"
+                             " collection=444857573607556205: collection not loaded: unrecoverable error"}
         collection_w.query(expr=tmp_expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
