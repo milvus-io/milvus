@@ -130,10 +130,10 @@ class Array {
           size_t size,
           DataType element_type,
           std::vector<uint64_t>&& element_offsets)
-        : size_(size),
-          element_type_(element_type),
+        : length_(element_offsets.size()),
+          size_(size),
           offsets_(std::move(element_offsets)),
-          length_(element_offsets.size()) {
+          element_type_(element_type) {
         delete[] data_;
         data_ = new char[size];
         std::copy(data, data + size, data_);

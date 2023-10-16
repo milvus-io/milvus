@@ -17,8 +17,6 @@
 package pipeline
 
 import (
-	"github.com/golang/protobuf/proto"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/querynodev2/collector"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -42,11 +40,11 @@ func (msg *insertNodeMsg) append(taskMsg msgstream.TsMsg) error {
 	case commonpb.MsgType_Insert:
 		insertMsg := taskMsg.(*InsertMsg)
 		msg.insertMsgs = append(msg.insertMsgs, insertMsg)
-		collector.Rate.Add(metricsinfo.InsertConsumeThroughput, float64(proto.Size(&insertMsg.InsertRequest)))
+		collector.Rate.Add(metricsinfo.InsertConsumeThroughput, float64(insertMsg.Size()))
 	case commonpb.MsgType_Delete:
 		deleteMsg := taskMsg.(*DeleteMsg)
 		msg.deleteMsgs = append(msg.deleteMsgs, deleteMsg)
-		collector.Rate.Add(metricsinfo.DeleteConsumeThroughput, float64(proto.Size(&deleteMsg.DeleteRequest)))
+		collector.Rate.Add(metricsinfo.DeleteConsumeThroughput, float64(deleteMsg.Size()))
 	default:
 		return merr.WrapErrParameterInvalid("msgType is Insert or Delete", "not")
 	}
