@@ -949,7 +949,7 @@ func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 // it may include SystemMetrics, Topology metrics, etc.
 func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	log := log.Ctx(ctx)
-	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+	if err := merr.CheckHealthyStandby(s.GetStateCode()); err != nil {
 		return &milvuspb.GetMetricsResponse{
 			Status: merr.Status(err),
 		}, nil
