@@ -367,7 +367,6 @@ class TestIndexOperation(TestcaseBase):
         pass
     
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip("issue #27624")
     def test_index_drop_index(self):
         """
         target: test index.drop
@@ -401,7 +400,6 @@ class TestIndexAdvanced(TestcaseBase):
     """ Test case of index interface """
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip("issue #27624")
     def test_index_drop_multi_collections(self):
         """
         target: test index.drop
@@ -692,7 +690,6 @@ class TestNewIndexBase(TestcaseBase):
                                                ct.err_msg: "CreateIndex failed: creating multiple indexes on same field is not supported"})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip("issue #27624")
     def test_create_index_repeatedly_new(self):
         """
         target: check if index can be created repeatedly, with the different create_index params
@@ -862,7 +859,6 @@ class TestNewIndexBase(TestcaseBase):
                                                ct.err_msg: "CreateIndex failed: creating multiple indexes on same field is not supported"})
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip("issue #27624")
     def test_create_different_index_repeatedly_ip(self):
         """
         target: check if index can be created repeatedly, with the different create_index params
@@ -889,7 +885,6 @@ class TestNewIndexBase(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip("issue #27624")
     def test_drop_index(self, get_simple_index):
         """
         target: test drop index interface
@@ -909,7 +904,6 @@ class TestNewIndexBase(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     # TODO #7372
-    @pytest.mark.skip("issue #27624")
     def test_drop_index_repeatedly(self, get_simple_index):
         """
         target: test drop index repeatedly
@@ -944,7 +938,6 @@ class TestNewIndexBase(TestcaseBase):
                                 check_items={ct.err_code: 0, ct.err_msg: "should create connect first."})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip("issue #27624")
     def test_create_drop_index_repeatedly(self, get_simple_index):
         """
         target: test create / drop index repeatedly, use the same index params
@@ -962,7 +955,6 @@ class TestNewIndexBase(TestcaseBase):
                 assert len(collection_w.indexes) == 0
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip("issue #27624")
     def test_drop_index_ip(self, get_simple_index):
         """
         target: test drop index interface
@@ -980,7 +972,6 @@ class TestNewIndexBase(TestcaseBase):
             assert len(collection_w.indexes) == 0
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip("issue #27624")
     def test_drop_index_repeatedly_ip(self, get_simple_index):
         """
         target: test drop index repeatedly
@@ -1047,7 +1038,6 @@ class TestNewIndexBase(TestcaseBase):
         assert len(collection_w.indexes) == 1
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip("issue #27624")
     def test_drop_index_collection_not_create_ip(self):
         """
         target: test drop index interface when index not created
@@ -1199,7 +1189,6 @@ class TestNewIndexBinary(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip("issue #27624")
     def test_drop_index(self):
         """
         target: test drop index interface
@@ -1217,7 +1206,6 @@ class TestNewIndexBinary(TestcaseBase):
         assert len(collection_w.indexes) == 0
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip("issue #27624")
     def test_drop_index_partition(self):
         """
         target: test drop index interface
@@ -1377,7 +1365,6 @@ class TestNewIndexAsync(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L0)
     # @pytest.mark.timeout(BUILD_TIMEOUT)
-    @pytest.mark.skip("issue #27624")
     def test_create_index_drop(self, _async):
         """
         target: test create index interface
@@ -1581,7 +1568,6 @@ class TestIndexString(TestcaseBase):
         assert len(collection_w.indexes) == 2
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip("issue #27624")
     def test_drop_index_with_string_field(self):
         """
         target: test drop index with string field
@@ -1600,7 +1586,6 @@ class TestIndexString(TestcaseBase):
         assert len(collection_w.indexes) == 0
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip("issue #27624")
     def test_collection_drop_index_with_string(self):
         """
         target: test drop index with string field
@@ -1617,7 +1602,6 @@ class TestIndexString(TestcaseBase):
         assert len(collection_w.indexes) == 0
     
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip("issue #27624")
     def test_index_with_string_field_empty(self):
         """
         target: test drop index with string field
@@ -1723,7 +1707,6 @@ class TestIndexDiskann(TestcaseBase):
                                                          "limit": default_limit})
     
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip("issue #27624")
     def test_create_diskann_index_drop_with_async(self, _async):
         """
         target: test create index interface
@@ -1745,7 +1728,6 @@ class TestIndexDiskann(TestcaseBase):
         assert len(collection_w.indexes) == 0
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip("issue #27624")
     def test_create_diskann_index_with_partition(self):
         """
         target: test create index with diskann
@@ -1773,7 +1755,6 @@ class TestIndexDiskann(TestcaseBase):
         assert len(collection_w.indexes) == 0
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip("issue #27624")
     def test_drop_diskann_index_with_normal(self):
         """
         target: test drop diskann index normal
@@ -1794,7 +1775,6 @@ class TestIndexDiskann(TestcaseBase):
         assert collection_w.has_index(index_name=index_name1)[0] == False
     
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip("issue #27624")
     def test_drop_diskann_index_and_create_again(self):
         """
         target: test drop diskann index normal
@@ -1837,7 +1817,6 @@ class TestIndexDiskann(TestcaseBase):
         assert collection_w.has_index(index_name="c")[0] == True
    
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip("issue #27624")
     def test_drop_diskann_index_with_partition(self):
         """
         target: test drop diskann index normal

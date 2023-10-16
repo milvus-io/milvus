@@ -804,7 +804,6 @@ class TestUtilityBase(TestcaseBase):
         assert len(res) == 0
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip("issue #27624")
     def test_index_process_collection_not_existed(self):
         """
         target: test building_process
@@ -833,7 +832,6 @@ class TestUtilityBase(TestcaseBase):
         assert res == exp_res
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip("issue #27624")
     def test_index_process_collection_insert_no_index(self):
         """
         target: test building_process
@@ -845,7 +843,7 @@ class TestUtilityBase(TestcaseBase):
         cw = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data(nb)
         cw.insert(data=data)
-        error = {ct.err_code: 25, ct.err_msg: "there is no index on collection"}
+        error = {ct.err_code: 700, ct.err_msg: f"{c_name}: index not found"}
         self.utility_wrap.index_building_progress(c_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -895,7 +893,6 @@ class TestUtilityBase(TestcaseBase):
                 raise MilvusException(1, f"Index build completed in more than 5s")
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip("issue #27624")
     def test_wait_index_collection_not_existed(self):
         """
         target: test wait_index
