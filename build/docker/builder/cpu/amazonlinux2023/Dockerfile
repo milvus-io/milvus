@@ -19,6 +19,7 @@ RUN yum install -y wget g++ gcc gdb libatomic libstdc++-static git make zip unzi
     rm -rf /var/cache/yum/*
 
 RUN pip3 install conan==1.58.0
+RUN go env -w GOPROXY="https://proxy.golang.com.cn,direct"
 
 RUN echo "target arch $TARGETARCH"
 RUN wget -qO- "https://cmake.org/files/v3.24/cmake-3.24.4-linux-`uname -m`.tar.gz" | tar --strip-components=1 -xz -C /usr/local
