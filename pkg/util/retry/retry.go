@@ -56,7 +56,7 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 			select {
 			case <-time.After(c.sleep):
 			case <-ctx.Done():
-				return merr.Combine(el, ctx.Err())
+				return merr.Combine(ctx.Err(), el)
 			}
 
 			c.sleep *= 2
@@ -76,7 +76,7 @@ var errUnrecoverable = errors.New("unrecoverable error")
 // Unrecoverable method wrap an error to unrecoverableError. This will make retry
 // quick return.
 func Unrecoverable(err error) error {
-	return merr.Combine(err, errUnrecoverable)
+	return merr.Combine(errUnrecoverable, err)
 }
 
 // IsRecoverable is used to judge whether the error is wrapped by unrecoverableError.
