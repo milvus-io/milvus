@@ -380,6 +380,10 @@ func TestComponentParam(t *testing.T) {
 		bulkinsertTimeout := &Params.BulkInsertTimeoutSeconds
 		t.Logf("BulkInsertTimeoutSeconds: %v", bulkinsertTimeout)
 		assert.Equal(t, "18000", Params.BulkInsertTimeoutSeconds.GetValue())
+
+		channelWorkPoolSize := Params.ChannelWorkPoolSize.GetAsInt()
+		t.Logf("channelWorkPoolSize: %d", channelWorkPoolSize)
+		assert.Equal(t, -1, Params.ChannelWorkPoolSize.GetAsInt())
 	})
 
 	t.Run("test indexNodeConfig", func(t *testing.T) {

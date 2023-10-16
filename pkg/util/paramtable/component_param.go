@@ -2391,6 +2391,9 @@ type dataNodeConfig struct {
 
 	// Skip BF
 	SkipBFStatsLoad ParamItem `refreshable:"true"`
+
+	// channel
+	ChannelWorkPoolSize ParamItem `refreshable:"true"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -2545,6 +2548,14 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		DefaultValue: "18000",
 	}
 	p.BulkInsertTimeoutSeconds.Init(base.mgr)
+
+	p.ChannelWorkPoolSize = ParamItem{
+		Key:          "datanode.channel.workPoolSize",
+		Version:      "2.3.2",
+		PanicIfEmpty: false,
+		DefaultValue: "-1",
+	}
+	p.ChannelWorkPoolSize.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
