@@ -336,6 +336,11 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 		},
 	}
 
+	channels := []*datapb.VchannelInfo{
+		{CollectionID: 1, ChannelName: "v2"},
+		{CollectionID: 1, ChannelName: "v3"},
+	}
+
 	for _, c := range cases {
 		suite.Run(c.name, func() {
 			suite.SetupSuite()
@@ -363,7 +368,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 					PartitionID: 1,
 				},
 			}
-			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(nil, segments, nil)
+			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(channels, segments, nil)
 			collection := utils.CreateTestCollection(1, 1)
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded
@@ -372,10 +377,10 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 			balancer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 			balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, append(c.nodes, c.notExistedNodes...)))
 			suite.broker.ExpectedCalls = nil
-			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(nil, segments, nil)
-			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
-			balancer.targetMgr.UpdateCollectionCurrentTarget(1)
-			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
+			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(channels, segments, nil)
+			balancer.targetMgr.UpdateNextTarget(int64(1))
+			balancer.targetMgr.UpdateCurrentTarget(1)
+			balancer.targetMgr.UpdateNextTarget(int64(1))
 			suite.mockScheduler.Mock.On("GetNodeChannelDelta", mock.Anything).Return(0)
 			for node, s := range c.distributions {
 				balancer.dist.SegmentDistManager.Update(node, s...)
@@ -556,6 +561,11 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOnPartStopping() {
 		},
 	}
 
+	channels := []*datapb.VchannelInfo{
+		{CollectionID: 1, ChannelName: "v2"},
+		{CollectionID: 1, ChannelName: "v3"},
+	}
+
 	for _, c := range cases {
 		suite.Run(c.name, func() {
 			suite.SetupSuite()
@@ -569,12 +579,12 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOnPartStopping() {
 			balancer.meta.CollectionManager.PutCollection(collection)
 			balancer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 			balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, append(c.nodes, c.notExistedNodes...)))
-			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(nil, c.segmentInCurrent, nil)
-			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
-			balancer.targetMgr.UpdateCollectionCurrentTarget(1)
+			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(channels, c.segmentInCurrent, nil)
+			balancer.targetMgr.UpdateNextTarget(int64(1))
+			balancer.targetMgr.UpdateCurrentTarget(1)
 			suite.broker.ExpectedCalls = nil
-			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(nil, c.segmentInNext, nil)
-			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
+			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(channels, c.segmentInNext, nil)
+			balancer.targetMgr.UpdateNextTarget(int64(1))
 			suite.mockScheduler.Mock.On("GetNodeChannelDelta", mock.Anything).Return(0)
 			for node, s := range c.distributions {
 				balancer.dist.SegmentDistManager.Update(node, s...)
@@ -675,16 +685,21 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOutboundNodes() {
 				},
 			}
 
+			channels := []*datapb.VchannelInfo{
+				{CollectionID: 1, ChannelName: "v2"},
+				{CollectionID: 1, ChannelName: "v3"},
+			}
+
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded
 			collection.LoadType = querypb.LoadType_LoadCollection
 			balancer.meta.CollectionManager.PutCollection(collection)
 			balancer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 			balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, append(c.nodes, c.notExistedNodes...)))
-			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(nil, segments, nil)
-			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
-			balancer.targetMgr.UpdateCollectionCurrentTarget(1)
-			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
+			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(channels, segments, nil)
+			balancer.targetMgr.UpdateNextTarget(int64(1))
+			balancer.targetMgr.UpdateCurrentTarget(1)
+			balancer.targetMgr.UpdateNextTarget(int64(1))
 			for node, s := range c.distributions {
 				balancer.dist.SegmentDistManager.Update(node, s...)
 			}

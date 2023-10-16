@@ -61,7 +61,7 @@ func (c *ChannelChecker) Description() string {
 
 func (c *ChannelChecker) readyToCheck(collectionID int64) bool {
 	metaExist := (c.meta.GetCollection(collectionID) != nil)
-	targetExist := c.targetMgr.IsNextTargetExist(collectionID) || c.targetMgr.IsCurrentTargetExist(collectionID)
+	targetExist := c.targetMgr.IsTargetExist(collectionID, meta.NextTarget) || c.targetMgr.IsTargetExist(collectionID, meta.CurrentTarget)
 
 	return metaExist && targetExist
 }

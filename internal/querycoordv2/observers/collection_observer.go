@@ -149,7 +149,7 @@ func (ob *CollectionObserver) observeTimeout() {
 
 func (ob *CollectionObserver) readyToObserve(collectionID int64) bool {
 	metaExist := (ob.meta.GetCollection(collectionID) != nil)
-	targetExist := ob.targetMgr.IsNextTargetExist(collectionID) || ob.targetMgr.IsCurrentTargetExist(collectionID)
+	targetExist := ob.targetMgr.IsTargetExist(collectionID, meta.NextTarget) || ob.targetMgr.IsTargetExist(collectionID, meta.CurrentTarget)
 
 	return metaExist && targetExist
 }
@@ -182,7 +182,7 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 		zap.Int64("partitionID", partition.GetPartitionID()),
 	)
 
-	segmentTargets := ob.targetMgr.GetHistoricalSegmentsByPartition(partition.GetCollectionID(), partition.GetPartitionID(), meta.NextTarget)
+	segmentTargets := ob.targetMgr.GetSealedSegmentByPartition(partition.GetCollectionID(), partition.GetPartitionID(), meta.NextTarget)
 	channelTargets := ob.targetMgr.GetDmChannelsByCollection(partition.GetCollectionID(), meta.NextTarget)
 
 	targetNum := len(segmentTargets) + len(channelTargets)

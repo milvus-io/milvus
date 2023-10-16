@@ -226,7 +226,7 @@ func (suite *JobSuite) TestLoadCollection() {
 		err := job.Wait()
 		suite.NoError(err)
 		suite.EqualValues(1, suite.meta.GetReplicaNumber(collection))
-		suite.targetMgr.UpdateCollectionCurrentTarget(collection)
+		suite.targetMgr.UpdateCurrentTarget(collection)
 		suite.assertCollectionLoaded(collection)
 	}
 
@@ -413,7 +413,7 @@ func (suite *JobSuite) TestLoadCollectionWithDiffIndex() {
 		err := job.Wait()
 		suite.NoError(err)
 		suite.EqualValues(1, suite.meta.GetReplicaNumber(collection))
-		suite.targetMgr.UpdateCollectionCurrentTarget(collection)
+		suite.targetMgr.UpdateCurrentTarget(collection)
 		suite.assertCollectionLoaded(collection)
 	}
 
@@ -474,7 +474,7 @@ func (suite *JobSuite) TestLoadPartition() {
 		err := job.Wait()
 		suite.NoError(err)
 		suite.EqualValues(1, suite.meta.GetReplicaNumber(collection))
-		suite.targetMgr.UpdateCollectionCurrentTarget(collection)
+		suite.targetMgr.UpdateCurrentTarget(collection)
 		suite.assertCollectionLoaded(collection)
 	}
 
@@ -684,7 +684,7 @@ func (suite *JobSuite) TestDynamicLoad() {
 	suite.scheduler.Add(job)
 	err := job.Wait()
 	suite.NoError(err)
-	suite.targetMgr.UpdateCollectionCurrentTarget(collection)
+	suite.targetMgr.UpdateCurrentTarget(collection)
 	suite.assertPartitionLoaded(collection, p0, p1, p2)
 
 	// loaded: p0, p1, p2
@@ -704,13 +704,13 @@ func (suite *JobSuite) TestDynamicLoad() {
 	suite.scheduler.Add(job)
 	err = job.Wait()
 	suite.NoError(err)
-	suite.targetMgr.UpdateCollectionCurrentTarget(collection)
+	suite.targetMgr.UpdateCurrentTarget(collection)
 	suite.assertPartitionLoaded(collection, p0, p1)
 	job = newLoadPartJob(p2)
 	suite.scheduler.Add(job)
 	err = job.Wait()
 	suite.NoError(err)
-	suite.targetMgr.UpdateCollectionCurrentTarget(collection)
+	suite.targetMgr.UpdateCurrentTarget(collection)
 	suite.assertPartitionLoaded(collection, p2)
 
 	// loaded: p0, p1
@@ -721,13 +721,13 @@ func (suite *JobSuite) TestDynamicLoad() {
 	suite.scheduler.Add(job)
 	err = job.Wait()
 	suite.NoError(err)
-	suite.targetMgr.UpdateCollectionCurrentTarget(collection)
+	suite.targetMgr.UpdateCurrentTarget(collection)
 	suite.assertPartitionLoaded(collection, p0, p1)
 	job = newLoadPartJob(p1, p2)
 	suite.scheduler.Add(job)
 	err = job.Wait()
 	suite.NoError(err)
-	suite.targetMgr.UpdateCollectionCurrentTarget(collection)
+	suite.targetMgr.UpdateCurrentTarget(collection)
 	suite.assertPartitionLoaded(collection, p2)
 
 	// loaded: p0, p1
@@ -738,13 +738,13 @@ func (suite *JobSuite) TestDynamicLoad() {
 	suite.scheduler.Add(job)
 	err = job.Wait()
 	suite.NoError(err)
-	suite.targetMgr.UpdateCollectionCurrentTarget(collection)
+	suite.targetMgr.UpdateCurrentTarget(collection)
 	suite.assertPartitionLoaded(collection, p0, p1)
 	colJob := newLoadColJob()
 	suite.scheduler.Add(colJob)
 	err = colJob.Wait()
 	suite.NoError(err)
-	suite.targetMgr.UpdateCollectionCurrentTarget(collection)
+	suite.targetMgr.UpdateCurrentTarget(collection)
 	suite.assertPartitionLoaded(collection, p2)
 }
 
@@ -810,7 +810,7 @@ func (suite *JobSuite) TestLoadPartitionWithDiffIndex() {
 		err := job.Wait()
 		suite.NoError(err)
 		suite.EqualValues(1, suite.meta.GetReplicaNumber(collection))
-		suite.targetMgr.UpdateCollectionCurrentTarget(collection)
+		suite.targetMgr.UpdateCurrentTarget(collection)
 		suite.assertCollectionLoaded(collection)
 	}
 
@@ -1423,7 +1423,7 @@ func (suite *JobSuite) loadAll() {
 			suite.True(suite.meta.Exist(collection))
 			suite.NotNil(suite.meta.GetCollection(collection))
 			suite.NotNil(suite.meta.GetPartitionsByCollection(collection))
-			suite.targetMgr.UpdateCollectionCurrentTarget(collection)
+			suite.targetMgr.UpdateCurrentTarget(collection)
 		} else {
 			req := &querypb.LoadPartitionsRequest{
 				CollectionID: collection,
@@ -1447,7 +1447,7 @@ func (suite *JobSuite) loadAll() {
 			suite.True(suite.meta.Exist(collection))
 			suite.NotNil(suite.meta.GetCollection(collection))
 			suite.NotNil(suite.meta.GetPartitionsByCollection(collection))
-			suite.targetMgr.UpdateCollectionCurrentTarget(collection)
+			suite.targetMgr.UpdateCurrentTarget(collection)
 		}
 	}
 }
@@ -1484,7 +1484,7 @@ func (suite *JobSuite) assertCollectionLoaded(collection int64) {
 	}
 	for _, segments := range suite.segments[collection] {
 		for _, segment := range segments {
-			suite.NotNil(suite.targetMgr.GetHistoricalSegment(collection, segment, meta.CurrentTarget))
+			suite.NotNil(suite.targetMgr.GetSealedSegment(collection, segment, meta.CurrentTarget))
 		}
 	}
 }
@@ -1501,7 +1501,7 @@ func (suite *JobSuite) assertPartitionLoaded(collection int64, partitionIDs ...i
 		}
 		suite.NotNil(suite.meta.GetPartition(partitionID))
 		for _, segment := range segments {
-			suite.NotNil(suite.targetMgr.GetHistoricalSegment(collection, segment, meta.CurrentTarget))
+			suite.NotNil(suite.targetMgr.GetSealedSegment(collection, segment, meta.CurrentTarget))
 		}
 	}
 }
@@ -1514,7 +1514,7 @@ func (suite *JobSuite) assertCollectionReleased(collection int64) {
 	}
 	for _, partitions := range suite.segments[collection] {
 		for _, segment := range partitions {
-			suite.Nil(suite.targetMgr.GetHistoricalSegment(collection, segment, meta.CurrentTarget))
+			suite.Nil(suite.targetMgr.GetSealedSegment(collection, segment, meta.CurrentTarget))
 		}
 	}
 }
@@ -1524,7 +1524,7 @@ func (suite *JobSuite) assertPartitionReleased(collection int64, partitionIDs ..
 		suite.Nil(suite.meta.GetPartition(partition))
 		segments := suite.segments[collection][partition]
 		for _, segment := range segments {
-			suite.Nil(suite.targetMgr.GetHistoricalSegment(collection, segment, meta.CurrentTarget))
+			suite.Nil(suite.targetMgr.GetSealedSegment(collection, segment, meta.CurrentTarget))
 		}
 	}
 }

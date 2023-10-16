@@ -121,8 +121,8 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegments() {
 		&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{info}}, nil)
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
-	observer.target.UpdateCollectionNextTarget(int64(1))
-	observer.target.UpdateCollectionCurrentTarget(1)
+	observer.target.UpdateNextTarget(int64(1))
+	observer.target.UpdateCurrentTarget(1)
 	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 2, 1, "test-insert-channel"))
 	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
 	view := utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{})
@@ -211,9 +211,9 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncLoadedSegments() {
 		&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{info}}, nil)
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
-	observer.target.UpdateCollectionNextTarget(int64(1))
-	observer.target.UpdateCollectionCurrentTarget(1)
-	observer.target.UpdateCollectionNextTarget(int64(1))
+	observer.target.UpdateNextTarget(int64(1))
+	observer.target.UpdateCurrentTarget(1)
+	observer.target.UpdateNextTarget(int64(1))
 	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 2, 1, "test-insert-channel"),
 		utils.CreateTestSegment(1, 1, 2, 2, 1, "test-insert-channel"))
 	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
@@ -289,8 +289,8 @@ func (suite *LeaderObserverTestSuite) TestIgnoreBalancedSegment() {
 
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
-	observer.target.UpdateCollectionNextTarget(int64(1))
-	observer.target.UpdateCollectionCurrentTarget(1)
+	observer.target.UpdateNextTarget(int64(1))
+	observer.target.UpdateCurrentTarget(1)
 	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 1, 1, "test-insert-channel"))
 	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
 
@@ -343,8 +343,8 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
 	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, int64(1)).Return(schema, nil)
-	observer.target.UpdateCollectionNextTarget(int64(1))
-	observer.target.UpdateCollectionCurrentTarget(1)
+	observer.target.UpdateNextTarget(int64(1))
+	observer.target.UpdateCurrentTarget(1)
 	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 1, 1, "test-insert-channel"))
 	observer.dist.SegmentDistManager.Update(4, utils.CreateTestSegment(1, 1, 1, 4, 2, "test-insert-channel"))
 	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
@@ -421,8 +421,8 @@ func (suite *LeaderObserverTestSuite) TestSyncRemovedSegments() {
 
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, nil, nil)
-	observer.target.UpdateCollectionNextTarget(int64(1))
-	observer.target.UpdateCollectionCurrentTarget(1)
+	observer.target.UpdateNextTarget(int64(1))
+	observer.target.UpdateCurrentTarget(1)
 
 	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
 	view := utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{3: 2}, map[int64]*meta.Segment{})
@@ -493,7 +493,7 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncRemovedSegments() {
 	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, int64(1)).Return(schema, nil)
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
-	observer.target.UpdateCollectionNextTarget(int64(1))
+	observer.target.UpdateNextTarget(int64(1))
 
 	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
 	observer.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{3: 2, 2: 2}, map[int64]*meta.Segment{}))
@@ -574,8 +574,8 @@ func (suite *LeaderObserverTestSuite) TestSyncTargetVersion() {
 	}
 
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nextTargetChannels, nextTargetSegments, nil)
-	suite.observer.target.UpdateCollectionNextTarget(collectionID)
-	suite.observer.target.UpdateCollectionCurrentTarget(collectionID)
+	suite.observer.target.UpdateNextTarget(collectionID)
+	suite.observer.target.UpdateCurrentTarget(collectionID)
 	TargetVersion := suite.observer.target.GetCollectionTargetVersion(collectionID, meta.CurrentTarget)
 
 	view := utils.CreateTestLeaderView(1, collectionID, "channel-1", nil, nil)

@@ -66,7 +66,7 @@ func (c *SegmentChecker) Description() string {
 
 func (c *SegmentChecker) readyToCheck(collectionID int64) bool {
 	metaExist := (c.meta.GetCollection(collectionID) != nil)
-	targetExist := c.targetMgr.IsNextTargetExist(collectionID) || c.targetMgr.IsCurrentTargetExist(collectionID)
+	targetExist := c.targetMgr.IsTargetExist(collectionID, meta.NextTarget) || c.targetMgr.IsTargetExist(collectionID, meta.CurrentTarget)
 
 	return metaExist && targetExist
 }
@@ -111,7 +111,7 @@ func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica
 	}
 
 	// compare with targets to find the lack and redundancy of segments
-	lacks, redundancies := c.getHistoricalSegmentDiff(replica.GetCollectionID(), replica.GetID())
+	lacks, redundancies := c.getSealedSegmentDiff(replica.GetCollectionID(), replica.GetID())
 	tasks := c.createSegmentLoadTasks(ctx, lacks, replica)
 	task.SetReason("lacks of segment", tasks...)
 	ret = append(ret, tasks...)
@@ -129,7 +129,7 @@ func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica
 	ret = append(ret, tasks...)
 
 	// compare with target to find the lack and redundancy of segments
-	_, redundancies = c.getStreamingSegmentDiff(replica.GetCollectionID(), replica.GetID())
+	_, redundancies = c.getGrowingSegmentDiff(replica.GetCollectionID(), replica.GetID())
 	tasks = c.createSegmentReduceTasks(ctx, redundancies, replica.GetID(), querypb.DataScope_Streaming)
 	task.SetReason("streaming segment not exists in target", tasks...)
 	ret = append(ret, tasks...)
@@ -137,8 +137,8 @@ func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica
 	return ret
 }
 
-// GetStreamingSegmentDiff get streaming segment diff between leader view and target
-func (c *SegmentChecker) getStreamingSegmentDiff(collectionID int64,
+// GetStreamingSegmentDiff get growing segment diff between leader view and target
+func (c *SegmentChecker) getGrowingSegmentDiff(collectionID int64,
 	replicaID int64,
 ) (toLoad []*datapb.SegmentInfo, toRelease []*meta.Segment) {
 	replica := c.meta.Get(replicaID)
@@ -171,8 +171,8 @@ func (c *SegmentChecker) getStreamingSegmentDiff(collectionID int64,
 			continue
 		}
 
-		nextTargetSegmentIDs := c.targetMgr.GetStreamingSegmentsByCollection(collectionID, meta.NextTarget)
-		currentTargetSegmentIDs := c.targetMgr.GetStreamingSegmentsByCollection(collectionID, meta.CurrentTarget)
+		nextTargetSegmentIDs := c.targetMgr.GetGrowingSegmentsByCollection(collectionID, meta.NextTarget)
+		currentTargetSegmentIDs := c.targetMgr.GetGrowingSegmentsByCollection(collectionID, meta.CurrentTarget)
 		currentTargetChannelMap := c.targetMgr.GetDmChannelsByCollection(collectionID, meta.CurrentTarget)
 
 		// get segment which exist on leader view, but not on current target and next target
@@ -196,8 +196,8 @@ func (c *SegmentChecker) getStreamingSegmentDiff(collectionID int64,
 	return
 }
 
-// GetHistoricalSegmentDiff get historical segment diff between target and dist
-func (c *SegmentChecker) getHistoricalSegmentDiff(
+// GetHistoricalSegmentDiff get sealed segment diff between target and dist
+func (c *SegmentChecker) getSealedSegmentDiff(
 	collectionID int64,
 	replicaID int64,
 ) (toLoad []*datapb.SegmentInfo, toRelease []*meta.Segment) {
@@ -206,7 +206,7 @@ func (c *SegmentChecker) getHistoricalSegmentDiff(
 		log.Info("replica does not exist, skip it")
 		return
 	}
-	dist := c.getHistoricalSegmentsDist(replica)
+	dist := c.getSealedSegmentsDist(replica)
 	sort.Slice(dist, func(i, j int) bool {
 		return dist[i].Version < dist[j].Version
 	})
@@ -215,8 +215,8 @@ func (c *SegmentChecker) getHistoricalSegmentDiff(
 		distMap[s.GetID()] = s.Node
 	}
 
-	nextTargetMap := c.targetMgr.GetHistoricalSegmentsByCollection(collectionID, meta.NextTarget)
-	currentTargetMap := c.targetMgr.GetHistoricalSegmentsByCollection(collectionID, meta.CurrentTarget)
+	nextTargetMap := c.targetMgr.GetSealedSegmentByCollection(collectionID, meta.NextTarget)
+	currentTargetMap := c.targetMgr.GetSealedSegmentByCollection(collectionID, meta.CurrentTarget)
 
 	// Segment which exist on next target, but not on dist
 	for segmentID, segment := range nextTargetMap {
@@ -256,7 +256,7 @@ func (c *SegmentChecker) getHistoricalSegmentDiff(
 	return
 }
 
-func (c *SegmentChecker) getHistoricalSegmentsDist(replica *meta.Replica) []*meta.Segment {
+func (c *SegmentChecker) getSealedSegmentsDist(replica *meta.Replica) []*meta.Segment {
 	ret := make([]*meta.Segment, 0)
 	for _, node := range replica.GetNodes() {
 		ret = append(ret, c.dist.SegmentDistManager.GetByCollectionAndNode(replica.CollectionID, node)...)
@@ -271,7 +271,7 @@ func (c *SegmentChecker) findRepeatedHistoricalSegments(replicaID int64) []*meta
 		log.Info("replica does not exist, skip it")
 		return segments
 	}
-	dist := c.getHistoricalSegmentsDist(replica)
+	dist := c.getSealedSegmentsDist(replica)
 	versions := make(map[int64]*meta.Segment)
 	for _, s := range dist {
 		maxVer, ok := versions[s.GetID()]

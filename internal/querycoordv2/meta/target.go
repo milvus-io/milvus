@@ -22,45 +22,82 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // CollectionTarget collection target is immutable,
 type CollectionTarget struct {
-	segments   map[int64]*datapb.SegmentInfo
-	dmChannels map[string]*DmChannel
-	version    int64
+	sealedSegments map[int64]*datapb.SegmentInfo
+	dmChannels     map[string]*DmChannel
+	version        int64
 }
 
 func NewCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[string]*DmChannel) *CollectionTarget {
 	return &CollectionTarget{
-		segments:   segments,
-		dmChannels: dmChannels,
-		version:    time.Now().UnixNano(),
+		sealedSegments: segments,
+		dmChannels:     dmChannels,
+		version:        time.Now().UnixNano(),
 	}
 }
 
-func (p *CollectionTarget) GetAllSegments() map[int64]*datapb.SegmentInfo {
-	return p.segments
+func (p *CollectionTarget) GetSealedSegments() map[int64]*datapb.SegmentInfo {
+	return p.sealedSegments
 }
 
 func (p *CollectionTarget) GetTargetVersion() int64 {
 	return p.version
 }
 
-func (p *CollectionTarget) GetAllDmChannels() map[string]*DmChannel {
+func (p *CollectionTarget) GetDmChannels() map[string]*DmChannel {
 	return p.dmChannels
 }
 
-func (p *CollectionTarget) GetAllSegmentIDs() []int64 {
-	return lo.Keys(p.segments)
+func (p *CollectionTarget) GetSealedSegmentIDs() []int64 {
+	return lo.Keys(p.sealedSegments)
 }
 
-func (p *CollectionTarget) GetAllDmChannelNames() []string {
+func (p *CollectionTarget) GetGrowingSegmentIDs() typeutil.UniqueSet {
+	growings := typeutil.NewUniqueSet()
+	for _, channel := range p.GetDmChannels() {
+		growings.Insert(channel.GetUnflushedSegmentIds()...)
+	}
+	return growings
+}
+
+func (p *CollectionTarget) GetDmChannelNames() []string {
 	return lo.Keys(p.dmChannels)
 }
 
 func (p *CollectionTarget) IsEmpty() bool {
-	return len(p.dmChannels)+len(p.segments) == 0
+	return len(p.dmChannels) == 0
+}
+
+func (p *CollectionTarget) Equals(t *CollectionTarget) bool {
+	if t == nil {
+		return false
+	}
+
+	// check channels first
+	for _, ch := range t.GetDmChannelNames() {
+		if p.dmChannels[ch] == nil {
+			return true
+		}
+	}
+	// then check growing segment
+	growingSet := p.GetGrowingSegmentIDs()
+	for id := range t.GetGrowingSegmentIDs() {
+		if !growingSet.Contain(id) {
+			return true
+		}
+	}
+
+	// check sealed segment in last
+	for _, sealed := range t.GetSealedSegmentIDs() {
+		if p.sealedSegments[sealed] == nil {
+			return true
+		}
+	}
+	return false
 }
 
 type target struct {

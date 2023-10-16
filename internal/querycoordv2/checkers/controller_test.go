@@ -111,7 +111,7 @@ func (suite *CheckerControllerSuite) TestBasic() {
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
-	suite.targetManager.UpdateCollectionNextTarget(int64(1))
+	suite.targetManager.UpdateNextTarget(int64(1))
 
 	// set dist
 	suite.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))

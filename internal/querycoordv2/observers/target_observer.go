@@ -148,7 +148,7 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 // Check whether provided collection is has current target.
 // If not, submit a async task into dispatcher.
 func (ob *TargetObserver) Check(ctx context.Context, collectionID int64) bool {
-	result := ob.targetMgr.IsCurrentTargetExist(collectionID)
+	result := ob.targetMgr.IsTargetExist(collectionID, meta.CurrentTarget)
 	if !result {
 		ob.dispatcher.AddTask(collectionID)
 	}
@@ -176,7 +176,7 @@ func (ob *TargetObserver) check(ctx context.Context, collectionID int64) {
 
 func (ob *TargetObserver) init(collectionID int64) {
 	// pull next target first if not exist
-	if !ob.targetMgr.IsNextTargetExist(collectionID) {
+	if !ob.targetMgr.IsTargetExist(collectionID, meta.NextTarget) {
 		ob.updateNextTarget(collectionID)
 	}
 
@@ -234,7 +234,7 @@ func (ob *TargetObserver) clean() {
 }
 
 func (ob *TargetObserver) shouldUpdateNextTarget(collectionID int64) bool {
-	return !ob.targetMgr.IsNextTargetExist(collectionID) || ob.isNextTargetExpired(collectionID)
+	return !ob.targetMgr.IsTargetExist(collectionID, meta.NextTarget) || ob.isNextTargetExpired(collectionID) || !ob.targetMgr.IsTargetChanged(collectionID)
 }
 
 func (ob *TargetObserver) isNextTargetExpired(collectionID int64) bool {
@@ -249,7 +249,7 @@ func (ob *TargetObserver) updateNextTarget(collectionID int64) error {
 	log := log.With(zap.Int64("collectionID", collectionID))
 
 	log.Info("observer trigger update next target")
-	err := ob.targetMgr.UpdateCollectionNextTarget(collectionID)
+	err := ob.targetMgr.UpdateNextTarget(collectionID)
 	if err != nil {
 		log.Warn("failed to update next target for collection",
 			zap.Error(err))
@@ -264,16 +264,15 @@ func (ob *TargetObserver) updateNextTargetTimestamp(collectionID int64) {
 }
 
 func (ob *TargetObserver) shouldUpdateCurrentTarget(collectionID int64) bool {
-	replicaNum := ob.meta.CollectionManager.GetReplicaNumber(collectionID)
-
-	// check channel first
-	channelNames := ob.targetMgr.GetDmChannelsByCollection(collectionID, meta.NextTarget)
-	if len(channelNames) == 0 {
-		// next target is empty, no need to update
+	if !ob.targetMgr.IsTargetChanged(collectionID) {
+		// if next target has same content with current target, skip update current target
 		return false
 	}
 
-	for _, channel := range channelNames {
+	replicaNum := ob.meta.CollectionManager.GetReplicaNumber(collectionID)
+	channels := ob.targetMgr.GetDmChannelsByCollection(collectionID, meta.NextTarget)
+
+	for _, channel := range channels {
 		group := utils.GroupNodesByReplica(ob.meta.ReplicaManager,
 			collectionID,
 			ob.distMgr.LeaderViewManager.GetChannelDist(channel.GetChannelName()))
@@ -283,7 +282,7 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(collectionID int64) bool {
 	}
 
 	// and last check historical segment
-	historicalSegments := ob.targetMgr.GetHistoricalSegmentsByCollection(collectionID, meta.NextTarget)
+	historicalSegments := ob.targetMgr.GetSealedSegmentByCollection(collectionID, meta.NextTarget)
 	for _, segment := range historicalSegments {
 		group := utils.GroupNodesByReplica(ob.meta.ReplicaManager,
 			collectionID,
@@ -298,7 +297,7 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(collectionID int64) bool {
 
 func (ob *TargetObserver) updateCurrentTarget(collectionID int64) {
 	log.Info("observer trigger update current target", zap.Int64("collectionID", collectionID))
-	if ob.targetMgr.UpdateCollectionCurrentTarget(collectionID) {
+	if ob.targetMgr.UpdateCurrentTarget(collectionID) {
 		ob.mut.Lock()
 		defer ob.mut.Unlock()
 		notifiers := ob.readyNotifiers[collectionID]

@@ -59,10 +59,10 @@ func NewTargetManager(broker Broker, meta *Meta) *TargetManager {
 	}
 }
 
-// UpdateCollectionCurrentTarget updates the current target to next target,
+// UpdateCurrentTarget updates the current target to next target,
 // WARN: DO NOT call this method for an existing collection as target observer running, or it will lead to a double-update,
 // which may make the current target not available
-func (mgr *TargetManager) UpdateCollectionCurrentTarget(collectionID int64) bool {
+func (mgr *TargetManager) UpdateCurrentTarget(collectionID int64) bool {
 	mgr.rwMutex.Lock()
 	defer mgr.rwMutex.Unlock()
 	log := log.With(zap.Int64("collectionID", collectionID))
@@ -78,17 +78,17 @@ func (mgr *TargetManager) UpdateCollectionCurrentTarget(collectionID int64) bool
 	mgr.next.removeCollectionTarget(collectionID)
 
 	log.Debug("finish to update current target for collection",
-		zap.Int64s("segments", newTarget.GetAllSegmentIDs()),
-		zap.Strings("channels", newTarget.GetAllDmChannelNames()),
+		zap.Int64s("segments", newTarget.GetSealedSegmentIDs()),
+		zap.Strings("channels", newTarget.GetDmChannelNames()),
 		zap.Int64("version", newTarget.GetTargetVersion()),
 	)
 	return true
 }
 
-// UpdateCollectionNextTarget updates the next target with new target pulled from DataCoord,
+// UpdateNextTarget updates the next target with new target pulled from DataCoord,
 // WARN: DO NOT call this method for an existing collection as target observer running, or it will lead to a double-update,
 // which may make the current target not available
-func (mgr *TargetManager) UpdateCollectionNextTarget(collectionID int64) error {
+func (mgr *TargetManager) UpdateNextTarget(collectionID int64) error {
 	mgr.rwMutex.Lock()
 	partitions := mgr.meta.GetPartitionsByCollection(collectionID)
 	partitionIDs := lo.Map(partitions, func(partition *Partition, i int) int64 {
@@ -109,15 +109,15 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(collectionID int64) error {
 		log.Debug("skip empty next targets for collection")
 		return nil
 	}
-	allocatedTarget.segments = segments
+	allocatedTarget.sealedSegments = segments
 	allocatedTarget.dmChannels = channels
 
 	mgr.rwMutex.Lock()
 	defer mgr.rwMutex.Unlock()
 	mgr.next.updateCollectionTarget(collectionID, allocatedTarget)
 	log.Debug("finish to update next targets for collection",
-		zap.Int64s("segments", allocatedTarget.GetAllSegmentIDs()),
-		zap.Strings("channels", allocatedTarget.GetAllDmChannelNames()))
+		zap.Int64s("segments", allocatedTarget.GetSealedSegmentIDs()),
+		zap.Strings("channels", allocatedTarget.GetDmChannelNames()))
 
 	return nil
 }
@@ -272,12 +272,12 @@ func (mgr *TargetManager) RemovePartition(collectionID int64, partitionIDs ...in
 
 	oldCurrentTarget := mgr.current.getCollectionTarget(collectionID)
 	if oldCurrentTarget != nil {
-		newTarget := mgr.removePartitionFromCollectionTarget(oldCurrentTarget, partitionSet)
+		newTarget := mgr.removePartition(oldCurrentTarget, partitionSet)
 		if newTarget != nil {
 			mgr.current.updateCollectionTarget(collectionID, newTarget)
 			log.Info("finish to remove partition from current target for collection",
-				zap.Int64s("segments", newTarget.GetAllSegmentIDs()),
-				zap.Strings("channels", newTarget.GetAllDmChannelNames()))
+				zap.Int64s("segments", newTarget.GetSealedSegmentIDs()),
+				zap.Strings("channels", newTarget.GetDmChannelNames()))
 		} else {
 			log.Info("all partitions have been released, release the collection next target now")
 			mgr.current.removeCollectionTarget(collectionID)
@@ -286,12 +286,12 @@ func (mgr *TargetManager) RemovePartition(collectionID int64, partitionIDs ...in
 
 	oleNextTarget := mgr.next.getCollectionTarget(collectionID)
 	if oleNextTarget != nil {
-		newTarget := mgr.removePartitionFromCollectionTarget(oleNextTarget, partitionSet)
+		newTarget := mgr.removePartition(oleNextTarget, partitionSet)
 		if newTarget != nil {
 			mgr.next.updateCollectionTarget(collectionID, newTarget)
 			log.Info("finish to remove partition from next target for collection",
-				zap.Int64s("segments", newTarget.GetAllSegmentIDs()),
-				zap.Strings("channels", newTarget.GetAllDmChannelNames()))
+				zap.Int64s("segments", newTarget.GetSealedSegmentIDs()),
+				zap.Strings("channels", newTarget.GetDmChannelNames()))
 		} else {
 			log.Info("all partitions have been released, release the collection current target now")
 			mgr.next.removeCollectionTarget(collectionID)
@@ -299,9 +299,9 @@ func (mgr *TargetManager) RemovePartition(collectionID int64, partitionIDs ...in
 	}
 }
 
-func (mgr *TargetManager) removePartitionFromCollectionTarget(oldTarget *CollectionTarget, partitionSet typeutil.UniqueSet) *CollectionTarget {
+func (mgr *TargetManager) removePartition(oldTarget *CollectionTarget, partitionSet typeutil.UniqueSet) *CollectionTarget {
 	segments := make(map[int64]*datapb.SegmentInfo)
-	for _, segment := range oldTarget.GetAllSegments() {
+	for _, segment := range oldTarget.GetSealedSegments() {
 		if !partitionSet.Contain(segment.GetPartitionID()) {
 			segments[segment.GetID()] = segment
 		}
@@ -309,7 +309,7 @@ func (mgr *TargetManager) removePartitionFromCollectionTarget(oldTarget *Collect
 
 	// clear partition streaming segment
 	channels := make(map[string]*DmChannel)
-	for _, channel := range oldTarget.GetAllDmChannels() {
+	for _, channel := range oldTarget.GetDmChannels() {
 		channels[channel.GetChannelName()] = channel
 	}
 
@@ -324,7 +324,7 @@ func (mgr *TargetManager) getTarget(scope TargetScope) *target {
 	return mgr.next
 }
 
-func (mgr *TargetManager) GetStreamingSegmentsByCollection(collectionID int64,
+func (mgr *TargetManager) GetGrowingSegmentsByCollection(collectionID int64,
 	scope TargetScope,
 ) typeutil.UniqueSet {
 	mgr.rwMutex.RLock()
@@ -338,14 +338,14 @@ func (mgr *TargetManager) GetStreamingSegmentsByCollection(collectionID int64,
 	}
 
 	segments := typeutil.NewUniqueSet()
-	for _, channel := range collectionTarget.GetAllDmChannels() {
+	for _, channel := range collectionTarget.GetDmChannels() {
 		segments.Insert(channel.GetUnflushedSegmentIds()...)
 	}
 
 	return segments
 }
 
-func (mgr *TargetManager) GetStreamingSegmentsByChannel(collectionID int64,
+func (mgr *TargetManager) GetGrowingSegmentsByChannel(collectionID int64,
 	channelName string,
 	scope TargetScope,
 ) typeutil.UniqueSet {
@@ -360,52 +360,13 @@ func (mgr *TargetManager) GetStreamingSegmentsByChannel(collectionID int64,
 	}
 
 	segments := typeutil.NewUniqueSet()
-	for _, channel := range collectionTarget.GetAllDmChannels() {
+	for _, channel := range collectionTarget.GetDmChannels() {
 		if channel.ChannelName == channelName {
 			segments.Insert(channel.GetUnflushedSegmentIds()...)
 		}
 	}
 
 	return segments
-}
-
-func (mgr *TargetManager) GetHistoricalSegmentsByCollection(collectionID int64,
-	scope TargetScope,
-) map[int64]*datapb.SegmentInfo {
-	mgr.rwMutex.RLock()
-	defer mgr.rwMutex.RUnlock()
-
-	targetMap := mgr.getTarget(scope)
-	collectionTarget := targetMap.getCollectionTarget(collectionID)
-
-	if collectionTarget == nil {
-		return nil
-	}
-	return collectionTarget.GetAllSegments()
-}
-
-func (mgr *TargetManager) GetHistoricalSegmentsByChannel(collectionID int64,
-	channelName string,
-	scope TargetScope,
-) map[int64]*datapb.SegmentInfo {
-	mgr.rwMutex.RLock()
-	defer mgr.rwMutex.RUnlock()
-
-	targetMap := mgr.getTarget(scope)
-	collectionTarget := targetMap.getCollectionTarget(collectionID)
-
-	if collectionTarget == nil {
-		return nil
-	}
-
-	ret := make(map[int64]*datapb.SegmentInfo)
-	for k, v := range collectionTarget.GetAllSegments() {
-		if v.GetInsertChannel() == channelName {
-			ret[k] = v
-		}
-	}
-
-	return ret
 }
 
 func (mgr *TargetManager) GetDroppedSegmentsByChannel(collectionID int64,
@@ -430,7 +391,84 @@ func (mgr *TargetManager) GetDroppedSegmentsByChannel(collectionID int64,
 	return channel.GetDroppedSegmentIds()
 }
 
-func (mgr *TargetManager) GetHistoricalSegmentsByPartition(collectionID int64,
+func (mgr *TargetManager) GetDmChannelsByCollection(collectionID int64, scope TargetScope) map[string]*DmChannel {
+	mgr.rwMutex.RLock()
+	defer mgr.rwMutex.RUnlock()
+
+	targetMap := mgr.getTarget(scope)
+	collectionTarget := targetMap.getCollectionTarget(collectionID)
+
+	if collectionTarget == nil {
+		return nil
+	}
+	return collectionTarget.GetDmChannels()
+}
+
+func (mgr *TargetManager) GetDmChannel(collectionID int64, channel string, scope TargetScope) *DmChannel {
+	mgr.rwMutex.RLock()
+	defer mgr.rwMutex.RUnlock()
+
+	targetMap := mgr.getTarget(scope)
+	collectionTarget := targetMap.getCollectionTarget(collectionID)
+
+	if collectionTarget == nil {
+		return nil
+	}
+	return collectionTarget.GetDmChannels()[channel]
+}
+
+func (mgr *TargetManager) GetSealedSegment(collectionID int64, id int64, scope TargetScope) *datapb.SegmentInfo {
+	mgr.rwMutex.RLock()
+	defer mgr.rwMutex.RUnlock()
+	targetMap := mgr.getTarget(scope)
+	collectionTarget := targetMap.getCollectionTarget(collectionID)
+
+	if collectionTarget == nil {
+		return nil
+	}
+	return collectionTarget.GetSealedSegments()[id]
+}
+
+func (mgr *TargetManager) GetSealedSegmentByChannel(collectionID int64,
+	channelName string,
+	scope TargetScope,
+) map[int64]*datapb.SegmentInfo {
+	mgr.rwMutex.RLock()
+	defer mgr.rwMutex.RUnlock()
+
+	targetMap := mgr.getTarget(scope)
+	collectionTarget := targetMap.getCollectionTarget(collectionID)
+
+	if collectionTarget == nil {
+		return nil
+	}
+
+	ret := make(map[int64]*datapb.SegmentInfo)
+	for k, v := range collectionTarget.GetSealedSegments() {
+		if v.GetInsertChannel() == channelName {
+			ret[k] = v
+		}
+	}
+
+	return ret
+}
+
+func (mgr *TargetManager) GetSealedSegmentByCollection(collectionID int64,
+	scope TargetScope,
+) map[int64]*datapb.SegmentInfo {
+	mgr.rwMutex.RLock()
+	defer mgr.rwMutex.RUnlock()
+
+	targetMap := mgr.getTarget(scope)
+	collectionTarget := targetMap.getCollectionTarget(collectionID)
+
+	if collectionTarget == nil {
+		return nil
+	}
+	return collectionTarget.GetSealedSegments()
+}
+
+func (mgr *TargetManager) GetSealedSegmentByPartition(collectionID int64,
 	partitionID int64, scope TargetScope,
 ) map[int64]*datapb.SegmentInfo {
 	mgr.rwMutex.RLock()
@@ -444,51 +482,13 @@ func (mgr *TargetManager) GetHistoricalSegmentsByPartition(collectionID int64,
 	}
 
 	segments := make(map[int64]*datapb.SegmentInfo)
-	for _, s := range collectionTarget.GetAllSegments() {
+	for _, s := range collectionTarget.GetSealedSegments() {
 		if s.GetPartitionID() == partitionID {
 			segments[s.GetID()] = s
 		}
 	}
 
 	return segments
-}
-
-func (mgr *TargetManager) GetDmChannelsByCollection(collectionID int64, scope TargetScope) map[string]*DmChannel {
-	mgr.rwMutex.RLock()
-	defer mgr.rwMutex.RUnlock()
-
-	targetMap := mgr.getTarget(scope)
-	collectionTarget := targetMap.getCollectionTarget(collectionID)
-
-	if collectionTarget == nil {
-		return nil
-	}
-	return collectionTarget.GetAllDmChannels()
-}
-
-func (mgr *TargetManager) GetDmChannel(collectionID int64, channel string, scope TargetScope) *DmChannel {
-	mgr.rwMutex.RLock()
-	defer mgr.rwMutex.RUnlock()
-
-	targetMap := mgr.getTarget(scope)
-	collectionTarget := targetMap.getCollectionTarget(collectionID)
-
-	if collectionTarget == nil {
-		return nil
-	}
-	return collectionTarget.GetAllDmChannels()[channel]
-}
-
-func (mgr *TargetManager) GetHistoricalSegment(collectionID int64, id int64, scope TargetScope) *datapb.SegmentInfo {
-	mgr.rwMutex.RLock()
-	defer mgr.rwMutex.RUnlock()
-	targetMap := mgr.getTarget(scope)
-	collectionTarget := targetMap.getCollectionTarget(collectionID)
-
-	if collectionTarget == nil {
-		return nil
-	}
-	return collectionTarget.GetAllSegments()[id]
 }
 
 func (mgr *TargetManager) GetCollectionTargetVersion(collectionID int64, scope TargetScope) int64 {
@@ -503,14 +503,25 @@ func (mgr *TargetManager) GetCollectionTargetVersion(collectionID int64, scope T
 	return collectionTarget.GetTargetVersion()
 }
 
-func (mgr *TargetManager) IsCurrentTargetExist(collectionID int64) bool {
-	newChannels := mgr.GetDmChannelsByCollection(collectionID, CurrentTarget)
+func (mgr *TargetManager) IsTargetExist(collectionID int64, scope TargetScope) bool {
+	channels := mgr.GetDmChannelsByCollection(collectionID, scope)
 
-	return len(newChannels) > 0
+	return len(channels) > 0
 }
 
-func (mgr *TargetManager) IsNextTargetExist(collectionID int64) bool {
-	newChannels := mgr.GetDmChannelsByCollection(collectionID, NextTarget)
+// HasContentChange checks whether next target and current target have changes
+func (mgr *TargetManager) IsTargetChanged(collectionID int64) bool {
+	mgr.rwMutex.RLock()
+	defer mgr.rwMutex.RUnlock()
+	nextTarget := mgr.next.getCollectionTarget(collectionID)
+	if nextTarget == nil || nextTarget.IsEmpty() {
+		return false
+	}
 
-	return len(newChannels) > 0
+	currentTarget := mgr.current.getCollectionTarget(collectionID)
+	if currentTarget == nil || currentTarget.IsEmpty() {
+		return true
+	}
+
+	return currentTarget.Equals(nextTarget)
 }

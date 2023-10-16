@@ -122,7 +122,7 @@ func (b *ScoreBasedBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAss
 		segments := b.dist.SegmentDistManager.GetByCollectionAndNode(replica.GetCollectionID(), nid)
 		// Only balance segments in targets
 		segments = lo.Filter(segments, func(segment *meta.Segment, _ int) bool {
-			return b.targetMgr.GetHistoricalSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil
+			return b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil
 		})
 
 		if isStopping, err := b.nodeManager.IsStoppingNode(nid); err != nil {

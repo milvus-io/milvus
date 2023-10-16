@@ -132,7 +132,7 @@ func (suite *SegmentCheckerTestSuite) TestLoadSegments() {
 
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
-	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
+	checker.targetMgr.UpdateNextTarget(int64(1))
 
 	// set dist
 	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
@@ -177,7 +177,7 @@ func (suite *SegmentCheckerTestSuite) TestSkipCheckReplica() {
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
-	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
+	checker.targetMgr.UpdateNextTarget(int64(1))
 
 	// set dist
 	checker.dist.ChannelDistManager.Update(1, utils.CreateTestChannel(1, 1, 1, "test-insert-channel"))
@@ -205,7 +205,7 @@ func (suite *SegmentCheckerTestSuite) TestReleaseSegments() {
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, nil, nil)
-	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
+	checker.targetMgr.UpdateNextTarget(int64(1))
 
 	// set dist
 	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
@@ -246,7 +246,7 @@ func (suite *SegmentCheckerTestSuite) TestReleaseRepeatedSegments() {
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
-	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
+	checker.targetMgr.UpdateNextTarget(int64(1))
 
 	// set dist
 	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
@@ -293,8 +293,8 @@ func (suite *SegmentCheckerTestSuite) TestSkipReleaseSealedSegments() {
 	segments := []*datapb.SegmentInfo{}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
-	checker.targetMgr.UpdateCollectionNextTarget(collectionID)
-	checker.targetMgr.UpdateCollectionCurrentTarget(collectionID)
+	checker.targetMgr.UpdateNextTarget(collectionID)
+	checker.targetMgr.UpdateCurrentTarget(collectionID)
 	readableVersion := checker.targetMgr.GetCollectionTargetVersion(collectionID, meta.CurrentTarget)
 
 	// set dist
@@ -349,8 +349,8 @@ func (suite *SegmentCheckerTestSuite) TestReleaseGrowingSegments() {
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
-	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
-	checker.targetMgr.UpdateCollectionCurrentTarget(int64(1))
+	checker.targetMgr.UpdateNextTarget(int64(1))
+	checker.targetMgr.UpdateCurrentTarget(int64(1))
 
 	growingSegments := make(map[int64]*meta.Segment)
 	growingSegments[2] = utils.CreateTestSegment(1, 1, 2, 2, 0, "test-insert-channel")
@@ -408,8 +408,8 @@ func (suite *SegmentCheckerTestSuite) TestSkipReleaseGrowingSegments() {
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
-	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
-	checker.targetMgr.UpdateCollectionCurrentTarget(int64(1))
+	checker.targetMgr.UpdateNextTarget(int64(1))
+	checker.targetMgr.UpdateCurrentTarget(int64(1))
 
 	growingSegments := make(map[int64]*meta.Segment)
 	growingSegments[2] = utils.CreateTestSegment(1, 1, 2, 2, 0, "test-insert-channel")
