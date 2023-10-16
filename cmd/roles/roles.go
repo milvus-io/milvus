@@ -138,9 +138,11 @@ type MilvusRoles struct {
 	EnableIndexNode  bool `env:"ENABLE_INDEX_NODE"`
 
 	Local    bool
+	Alias    string
 	Embedded bool
-	closed   chan struct{}
-	once     sync.Once
+
+	closed chan struct{}
+	once   sync.Once
 }
 
 // NewMilvusRoles creates a new MilvusRoles with private fields initialized.
@@ -293,7 +295,7 @@ func (mr *MilvusRoles) handleSignals() func() {
 }
 
 // Run Milvus components.
-func (mr *MilvusRoles) Run(alias string) {
+func (mr *MilvusRoles) Run() {
 	// start signal handler, defer close func
 	closeFn := mr.handleSignals()
 	defer closeFn()
@@ -423,4 +425,33 @@ func (mr *MilvusRoles) Run(alias string) {
 	}
 
 	log.Info("Milvus components graceful stop done")
+}
+
+func (mr *MilvusRoles) GetRoles() []string {
+	roles := make([]string, 0)
+	if mr.EnableRootCoord {
+		roles = append(roles, typeutil.RootCoordRole)
+	}
+	if mr.EnableProxy {
+		roles = append(roles, typeutil.ProxyRole)
+	}
+	if mr.EnableQueryCoord {
+		roles = append(roles, typeutil.QueryCoordRole)
+	}
+	if mr.EnableQueryNode {
+		roles = append(roles, typeutil.QueryNodeRole)
+	}
+	if mr.EnableDataCoord {
+		roles = append(roles, typeutil.DataCoordRole)
+	}
+	if mr.EnableDataNode {
+		roles = append(roles, typeutil.DataNodeRole)
+	}
+	if mr.EnableIndexCoord {
+		roles = append(roles, typeutil.IndexCoordRole)
+	}
+	if mr.EnableIndexNode {
+		roles = append(roles, typeutil.IndexNodeRole)
+	}
+	return roles
 }

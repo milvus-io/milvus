@@ -424,6 +424,7 @@ func (s *Server) startQueryCoord() error {
 	s.startServerLoop()
 	s.afterStart()
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
+	sessionutil.SaveServerInfo(typeutil.QueryCoordRole, s.session.ServerID)
 	return nil
 }
 

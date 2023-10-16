@@ -27,4 +27,4 @@ if [[ "$OSTYPE" == "linux-gnu"* ]]; then
 fi
 
 echo "Starting standalone..."
-nohup ./bin/milvus run standalone > /tmp/standalone.log 2>&1 &
+nohup ./bin/milvus run standalone --run-with-subprocess > /tmp/standalone.log 2>&1 &

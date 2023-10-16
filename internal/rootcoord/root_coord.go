@@ -679,6 +679,7 @@ func (c *Core) startInternal() error {
 
 	c.startServerLoop()
 	c.UpdateStateCode(commonpb.StateCode_Healthy)
+	sessionutil.SaveServerInfo(typeutil.RootCoordRole, c.session.ServerID)
 	logutil.Logger(c.ctx).Info("rootcoord startup successfully")
 
 	return nil

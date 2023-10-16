@@ -401,6 +401,7 @@ func (s *Server) startDataCoord() {
 	log.Info("DataCoord (re)starts successfully and re-collecting segment stats from DataNodes")
 	s.reCollectSegmentStats(s.ctx)
 	s.stateCode.Store(commonpb.StateCode_Healthy)
+	sessionutil.SaveServerInfo(typeutil.DataCoordRole, s.session.ServerID)
 }
 
 func (s *Server) initCluster() error {

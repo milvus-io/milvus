@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestGetServerIDConcurrently(t *testing.T) {
@@ -697,6 +698,43 @@ func TestSessionEventType_String(t *testing.T) {
 			assert.Equalf(t, tt.want, tt.t.String(), "String()")
 		})
 	}
+}
+
+func TestServerInfoOp(t *testing.T) {
+	t.Run("test with specified pid", func(t *testing.T) {
+		pid := 9999999
+		serverID := int64(999)
+
+		filePath := GetServerInfoFilePath(pid)
+		defer os.RemoveAll(filePath)
+
+		saveServerInfoInternal(typeutil.QueryCoordRole, serverID, pid)
+		saveServerInfoInternal(typeutil.DataCoordRole, serverID, pid)
+		saveServerInfoInternal(typeutil.ProxyRole, serverID, pid)
+
+		sessions := GetSessions(pid)
+		assert.Equal(t, 6, len(sessions))
+		assert.ElementsMatch(t, sessions, []string{
+			"querycoord", "querycoord-999",
+			"datacoord", "datacoord-999",
+			"indexcoord",
+			"proxy-999",
+		})
+
+		RemoveServerInfoFile(pid)
+		sessions = GetSessions(pid)
+		assert.Equal(t, 0, len(sessions))
+	})
+
+	t.Run("test with os pid", func(t *testing.T) {
+		serverID := int64(9999)
+		filePath := GetServerInfoFilePath(os.Getpid())
+		defer os.RemoveAll(filePath)
+
+		SaveServerInfo(typeutil.QueryCoordRole, serverID)
+		sessions := GetSessions(os.Getpid())
+		assert.Equal(t, 2, len(sessions))
+	})
 }
 
 func TestSession_apply(t *testing.T) {
