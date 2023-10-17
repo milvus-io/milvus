@@ -119,6 +119,7 @@ func authenticate(c *gin.Context) {
 	if !proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
 		return
 	}
+	// TODO fubang
 	username, password, ok := httpserver.ParseUsernamePassword(c)
 	if ok {
 		if proxy.PasswordVerify(c, username, password) {

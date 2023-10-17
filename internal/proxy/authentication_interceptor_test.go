@@ -2,8 +2,10 @@ package proxy
 
 import (
 	"context"
+	"strings"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc/metadata"
 
@@ -16,7 +18,12 @@ import (
 // validAuth validates the authentication
 func TestValidAuth(t *testing.T) {
 	validAuth := func(ctx context.Context, authorization []string) bool {
-		username, password := parseMD(authorization)
+		if len(authorization) < 1 {
+			return false
+		}
+		token := authorization[0]
+		rawToken, _ := crypto.Base64Decode(token)
+		username, password := parseMD(rawToken)
 		if username == "" || password == "" {
 			return false
 		}
@@ -84,4 +91,63 @@ func TestAuthenticationInterceptor(t *testing.T) {
 	ctx = metadata.NewIncomingContext(ctx, md)
 	_, err = AuthenticationInterceptor(ctx)
 	assert.NoError(t, err)
+
+	{
+		// wrong authorization style
+		md = metadata.Pairs(util.HeaderAuthorize, "123456")
+		ctx = metadata.NewIncomingContext(ctx, md)
+		_, err = AuthenticationInterceptor(ctx)
+		assert.Error(t, err)
+	}
+
+	{
+		// invalid user
+		md = metadata.Pairs(util.HeaderAuthorize, crypto.Base64Encode("mockUser2:mockPass"))
+		ctx = metadata.NewIncomingContext(ctx, md)
+		_, err = AuthenticationInterceptor(ctx)
+		assert.Error(t, err)
+	}
+
+	{
+		// default hook
+		md = metadata.Pairs(util.HeaderAuthorize, crypto.Base64Encode("mockapikey"))
+		ctx = metadata.NewIncomingContext(ctx, md)
+		_, err = AuthenticationInterceptor(ctx)
+		assert.Error(t, err)
+	}
+
+	{
+		// verify apikey error
+		hoo = mockAPIHook{mockErr: errors.New("err")}
+		md = metadata.Pairs(util.HeaderAuthorize, crypto.Base64Encode("mockapikey"))
+		ctx = metadata.NewIncomingContext(ctx, md)
+		_, err = AuthenticationInterceptor(ctx)
+		assert.Error(t, err)
+	}
+
+	{
+		hoo = mockAPIHook{mockErr: nil, apiUser: "mockUser"}
+		md = metadata.Pairs(util.HeaderAuthorize, crypto.Base64Encode("mockapikey"))
+		ctx = metadata.NewIncomingContext(ctx, md)
+		authCtx, err := AuthenticationInterceptor(ctx)
+		assert.NoError(t, err)
+		md, ok := metadata.FromIncomingContext(authCtx)
+		assert.True(t, ok)
+		authStrArr := md[strings.ToLower(util.HeaderAuthorize)]
+		token := authStrArr[0]
+		rawToken, err := crypto.Base64Decode(token)
+		assert.NoError(t, err)
+		user, _ := parseMD(rawToken)
+		assert.Equal(t, "mockUser", user)
+	}
+}
+
+type mockAPIHook struct {
+	defaultHook
+	mockErr error
+	apiUser string
+}
+
+func (m mockAPIHook) VerifyAPIKey(apiKey string) (string, error) {
+	return m.apiUser, m.mockErr
 }
