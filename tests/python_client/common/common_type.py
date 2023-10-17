@@ -22,6 +22,7 @@ default_diskann_index = {"index_type": "DISKANN", "metric_type": "COSINE", "para
 default_diskann_search_params = {"metric_type": "COSINE", "params": {"search_list": 30}}
 max_top_k = 16384
 max_partition_num = 4096
+max_role_num = 10
 default_partition_num = 64   # default num_partitions for partition key feature
 default_segment_row_limit = 1000
 default_server_segment_row_limit = 1024 * 512
