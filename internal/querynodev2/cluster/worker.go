@@ -107,17 +107,13 @@ func (w *remoteWorker) Delete(ctx context.Context, req *querypb.DeleteRequest) e
 		zap.Int64("workerID", req.GetBase().GetTargetID()),
 	)
 	status, err := w.client.Delete(ctx, req)
-	if err != nil {
-		log.Warn("failed to call Delete via grpc worker",
-			zap.Error(err),
-		)
+	if err := merr.CheckRPCCall(status, err); err != nil {
+		if funcutil.IsGrpcErr(err, codes.Unimplemented) {
+			log.Warn("invoke legacy querynode Delete method, ignore error", zap.Error(err))
+			return nil
+		}
+		log.Warn("failed to call Delete, worker return error", zap.Error(err))
 		return err
-	} else if status.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("failed to call Delete, worker return error",
-			zap.String("errorCode", status.GetErrorCode().String()),
-			zap.String("reason", status.GetReason()),
-		)
-		return merr.Error(status)
 	}
 	return nil
 }
