@@ -102,6 +102,7 @@ func (c *Cluster) Flush(ctx context.Context, nodeID int64, channel string,
 		),
 		CollectionID: ch.CollectionID,
 		SegmentIDs:   lo.Map(segments, getSegmentID),
+		ChannelName:  channel,
 	}
 
 	c.sessionManager.Flush(ctx, nodeID, req)

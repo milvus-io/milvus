@@ -266,6 +266,7 @@ message FlushSegmentsRequest {
   int64 dbID = 2;
   int64 collectionID = 3;
   repeated int64 segmentIDs = 4; // segments to flush
+  string channelName = 5; // vchannel name to flush
 }
 
 message SegmentMsg{
