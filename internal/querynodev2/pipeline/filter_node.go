@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -108,7 +107,7 @@ func (fNode *filterNode) filtrate(c *Collection, msg msgstream.TsMsg) error {
 	switch msg.Type() {
 	case commonpb.MsgType_Insert:
 		insertMsg := msg.(*msgstream.InsertMsg)
-		metrics.QueryNodeConsumeCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).Add(float64(proto.Size(insertMsg)))
+		metrics.QueryNodeConsumeCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).Add(float64(insertMsg.Size()))
 		for _, policy := range fNode.InsertMsgPolicys {
 			err := policy(fNode, c, insertMsg)
 			if err != nil {
@@ -118,7 +117,7 @@ func (fNode *filterNode) filtrate(c *Collection, msg msgstream.TsMsg) error {
 
 	case commonpb.MsgType_Delete:
 		deleteMsg := msg.(*msgstream.DeleteMsg)
-		metrics.QueryNodeConsumeCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).Add(float64(proto.Size(deleteMsg)))
+		metrics.QueryNodeConsumeCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).Add(float64(deleteMsg.Size()))
 		for _, policy := range fNode.DeleteMsgPolicys {
 			err := policy(fNode, c, deleteMsg)
 			if err != nil {

@@ -2279,8 +2279,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	// InsertCnt always equals to the number of entities in the request
 	it.result.InsertCnt = int64(request.NumRows)
 
-	receiveSize := proto.Size(it.insertMsg)
-	rateCol.Add(internalpb.RateType_DMLInsert.String(), float64(receiveSize))
+	rateCol.Add(internalpb.RateType_DMLInsert.String(), float64(it.insertMsg.Size()))
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 		metrics.SuccessLabel).Inc()
@@ -2469,10 +2468,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		setErrorIndex()
 	}
 
-	insertReceiveSize := proto.Size(it.upsertMsg.InsertMsg)
-	deleteReceiveSize := proto.Size(it.upsertMsg.DeleteMsg)
-
-	rateCol.Add(internalpb.RateType_DMLUpsert.String(), float64(insertReceiveSize+deleteReceiveSize))
+	rateCol.Add(internalpb.RateType_DMLUpsert.String(), float64(it.upsertMsg.DeleteMsg.Size()+it.upsertMsg.DeleteMsg.Size()))
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 		metrics.SuccessLabel).Inc()

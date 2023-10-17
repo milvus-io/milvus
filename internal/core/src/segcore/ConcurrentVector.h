@@ -381,13 +381,10 @@ class ConcurrentVector<BinaryVector>
     : public ConcurrentVectorImpl<uint8_t, false> {
  public:
     explicit ConcurrentVector(int64_t dim, int64_t size_per_chunk)
-        : binary_dim_(dim), ConcurrentVectorImpl(dim / 8, size_per_chunk) {
+        : ConcurrentVectorImpl(dim / 8, size_per_chunk) {
         AssertInfo(dim % 8 == 0,
                    fmt::format("dim is not a multiple of 8, dim={}", dim));
     }
-
- private:
-    int64_t binary_dim_;
 };
 
 template <>
