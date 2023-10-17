@@ -18,7 +18,7 @@ package eventlog
 
 import (
 	"encoding/json"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -55,7 +55,7 @@ func (s *HandlerSuite) TestServerHTTP() {
 
 	res := w.Result()
 	defer res.Body.Close()
-	data, err := ioutil.ReadAll(res.Body)
+	data, err := io.ReadAll(res.Body)
 	s.Require().NoError(err)
 
 	resp := eventLogResponse{}

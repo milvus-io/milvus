@@ -2,7 +2,6 @@ package indexnode
 
 import (
 	"fmt"
-	"io/ioutil"
 	"net/url"
 	"os"
 	"sync"
@@ -25,7 +24,7 @@ var (
 
 func startEmbedEtcd() {
 	startSvr.Do(func() {
-		dir, err := ioutil.TempDir(os.TempDir(), "milvus_ut_etcd")
+		dir, err := os.MkdirTemp(os.TempDir(), "milvus_ut_etcd")
 		if err != nil {
 			panic(err)
 		}

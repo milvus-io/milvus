@@ -3,7 +3,7 @@ package backend
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
+	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -432,7 +432,7 @@ func (b etcd210) Backup(meta *meta.Meta, backupFile string) error {
 		return err
 	}
 	console.Warning(fmt.Sprintf("backup to: %s", backupFile))
-	return ioutil.WriteFile(backupFile, backup, 0o600)
+	return os.WriteFile(backupFile, backup, 0o600)
 }
 
 func (b etcd210) BackupV2(file string) error {
@@ -487,11 +487,11 @@ func (b etcd210) BackupV2(file string) error {
 	}
 
 	console.Warning(fmt.Sprintf("backup to: %s", file))
-	return ioutil.WriteFile(file, backup, 0o600)
+	return os.WriteFile(file, backup, 0o600)
 }
 
 func (b etcd210) Restore(backupFile string) error {
-	backup, err := ioutil.ReadFile(backupFile)
+	backup, err := os.ReadFile(backupFile)
 	if err != nil {
 		return err
 	}

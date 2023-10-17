@@ -32,9 +32,9 @@ package log
 
 import (
 	"fmt"
-	"io/ioutil"
 	"math"
 	"net"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -226,7 +226,7 @@ func TestRotateLog(t *testing.T) {
 				logger.Info(string(data))
 				data = data[:0]
 			}
-			files, _ := ioutil.ReadDir(tempDir)
+			files, _ := os.ReadDir(tempDir)
 			assert.Len(t, files, c.expectedFileNum)
 		})
 	}
