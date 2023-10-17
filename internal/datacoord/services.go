@@ -95,7 +95,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 	sealedSegmentIDs, err := s.segmentManager.SealAllSegments(ctx, req.GetCollectionID(), req.GetSegmentIDs(), req.GetIsImport())
 	if err != nil {
 		return &datapb.FlushResponse{
-			Status: merr.Status(errors.Wrapf(err, "failed to flush colleciont %d",
+			Status: merr.Status(errors.Wrapf(err, "failed to flush collection %d",
 				req.GetCollectionID())),
 		}, nil
 	}
