@@ -17,89 +17,35 @@ func (_m *MockRWChannelStore) EXPECT() *MockRWChannelStore_Expecter {
 	return &MockRWChannelStore_Expecter{mock: &_m.Mock}
 }
 
-// Add provides a mock function with given fields: nodeID
-func (_m *MockRWChannelStore) Add(nodeID int64) {
+// AddNode provides a mock function with given fields: nodeID
+func (_m *MockRWChannelStore) AddNode(nodeID int64) {
 	_m.Called(nodeID)
 }
 
-// MockRWChannelStore_Add_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Add'
-type MockRWChannelStore_Add_Call struct {
+// MockRWChannelStore_AddNode_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddNode'
+type MockRWChannelStore_AddNode_Call struct {
 	*mock.Call
 }
 
-// Add is a helper method to define mock.On call
+// AddNode is a helper method to define mock.On call
 //   - nodeID int64
-func (_e *MockRWChannelStore_Expecter) Add(nodeID interface{}) *MockRWChannelStore_Add_Call {
-	return &MockRWChannelStore_Add_Call{Call: _e.mock.On("Add", nodeID)}
+func (_e *MockRWChannelStore_Expecter) AddNode(nodeID interface{}) *MockRWChannelStore_AddNode_Call {
+	return &MockRWChannelStore_AddNode_Call{Call: _e.mock.On("AddNode", nodeID)}
 }
 
-func (_c *MockRWChannelStore_Add_Call) Run(run func(nodeID int64)) *MockRWChannelStore_Add_Call {
+func (_c *MockRWChannelStore_AddNode_Call) Run(run func(nodeID int64)) *MockRWChannelStore_AddNode_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(int64))
 	})
 	return _c
 }
 
-func (_c *MockRWChannelStore_Add_Call) Return() *MockRWChannelStore_Add_Call {
+func (_c *MockRWChannelStore_AddNode_Call) Return() *MockRWChannelStore_AddNode_Call {
 	_c.Call.Return()
 	return _c
 }
 
-func (_c *MockRWChannelStore_Add_Call) RunAndReturn(run func(int64)) *MockRWChannelStore_Add_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// Delete provides a mock function with given fields: nodeID
-func (_m *MockRWChannelStore) Delete(nodeID int64) ([]RWChannel, error) {
-	ret := _m.Called(nodeID)
-
-	var r0 []RWChannel
-	var r1 error
-	if rf, ok := ret.Get(0).(func(int64) ([]RWChannel, error)); ok {
-		return rf(nodeID)
-	}
-	if rf, ok := ret.Get(0).(func(int64) []RWChannel); ok {
-		r0 = rf(nodeID)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]RWChannel)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(int64) error); ok {
-		r1 = rf(nodeID)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockRWChannelStore_Delete_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Delete'
-type MockRWChannelStore_Delete_Call struct {
-	*mock.Call
-}
-
-// Delete is a helper method to define mock.On call
-//   - nodeID int64
-func (_e *MockRWChannelStore_Expecter) Delete(nodeID interface{}) *MockRWChannelStore_Delete_Call {
-	return &MockRWChannelStore_Delete_Call{Call: _e.mock.On("Delete", nodeID)}
-}
-
-func (_c *MockRWChannelStore_Delete_Call) Run(run func(nodeID int64)) *MockRWChannelStore_Delete_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64))
-	})
-	return _c
-}
-
-func (_c *MockRWChannelStore_Delete_Call) Return(_a0 []RWChannel, _a1 error) *MockRWChannelStore_Delete_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockRWChannelStore_Delete_Call) RunAndReturn(run func(int64) ([]RWChannel, error)) *MockRWChannelStore_Delete_Call {
+func (_c *MockRWChannelStore_AddNode_Call) RunAndReturn(run func(int64)) *MockRWChannelStore_AddNode_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -143,49 +89,6 @@ func (_c *MockRWChannelStore_GetBufferChannelInfo_Call) Return(_a0 *NodeChannelI
 }
 
 func (_c *MockRWChannelStore_GetBufferChannelInfo_Call) RunAndReturn(run func() *NodeChannelInfo) *MockRWChannelStore_GetBufferChannelInfo_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// GetChannels provides a mock function with given fields:
-func (_m *MockRWChannelStore) GetChannels() []*NodeChannelInfo {
-	ret := _m.Called()
-
-	var r0 []*NodeChannelInfo
-	if rf, ok := ret.Get(0).(func() []*NodeChannelInfo); ok {
-		r0 = rf()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*NodeChannelInfo)
-		}
-	}
-
-	return r0
-}
-
-// MockRWChannelStore_GetChannels_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetChannels'
-type MockRWChannelStore_GetChannels_Call struct {
-	*mock.Call
-}
-
-// GetChannels is a helper method to define mock.On call
-func (_e *MockRWChannelStore_Expecter) GetChannels() *MockRWChannelStore_GetChannels_Call {
-	return &MockRWChannelStore_GetChannels_Call{Call: _e.mock.On("GetChannels")}
-}
-
-func (_c *MockRWChannelStore_GetChannels_Call) Run(run func()) *MockRWChannelStore_GetChannels_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockRWChannelStore_GetChannels_Call) Return(_a0 []*NodeChannelInfo) *MockRWChannelStore_GetChannels_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockRWChannelStore_GetChannels_Call) RunAndReturn(run func() []*NodeChannelInfo) *MockRWChannelStore_GetChannels_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -276,6 +179,65 @@ func (_c *MockRWChannelStore_GetNodeChannelCount_Call) RunAndReturn(run func(int
 	return _c
 }
 
+// GetNodeChannelsBy provides a mock function with given fields: nodeSelector, channelSelectors
+func (_m *MockRWChannelStore) GetNodeChannelsBy(nodeSelector NodeSelector, channelSelectors ...ChannelSelector) []*NodeChannelInfo {
+	_va := make([]interface{}, len(channelSelectors))
+	for _i := range channelSelectors {
+		_va[_i] = channelSelectors[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, nodeSelector)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 []*NodeChannelInfo
+	if rf, ok := ret.Get(0).(func(NodeSelector, ...ChannelSelector) []*NodeChannelInfo); ok {
+		r0 = rf(nodeSelector, channelSelectors...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*NodeChannelInfo)
+		}
+	}
+
+	return r0
+}
+
+// MockRWChannelStore_GetNodeChannelsBy_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetNodeChannelsBy'
+type MockRWChannelStore_GetNodeChannelsBy_Call struct {
+	*mock.Call
+}
+
+// GetNodeChannelsBy is a helper method to define mock.On call
+//   - nodeSelector NodeSelector
+//   - channelSelectors ...ChannelSelector
+func (_e *MockRWChannelStore_Expecter) GetNodeChannelsBy(nodeSelector interface{}, channelSelectors ...interface{}) *MockRWChannelStore_GetNodeChannelsBy_Call {
+	return &MockRWChannelStore_GetNodeChannelsBy_Call{Call: _e.mock.On("GetNodeChannelsBy",
+		append([]interface{}{nodeSelector}, channelSelectors...)...)}
+}
+
+func (_c *MockRWChannelStore_GetNodeChannelsBy_Call) Run(run func(nodeSelector NodeSelector, channelSelectors ...ChannelSelector)) *MockRWChannelStore_GetNodeChannelsBy_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]ChannelSelector, len(args)-1)
+		for i, a := range args[1:] {
+			if a != nil {
+				variadicArgs[i] = a.(ChannelSelector)
+			}
+		}
+		run(args[0].(NodeSelector), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockRWChannelStore_GetNodeChannelsBy_Call) Return(_a0 []*NodeChannelInfo) *MockRWChannelStore_GetNodeChannelsBy_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockRWChannelStore_GetNodeChannelsBy_Call) RunAndReturn(run func(NodeSelector, ...ChannelSelector) []*NodeChannelInfo) *MockRWChannelStore_GetNodeChannelsBy_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetNodes provides a mock function with given fields:
 func (_m *MockRWChannelStore) GetNodes() []int64 {
 	ret := _m.Called()
@@ -362,6 +324,48 @@ func (_c *MockRWChannelStore_GetNodesChannels_Call) RunAndReturn(run func() []*N
 	return _c
 }
 
+// HasChannel provides a mock function with given fields: channel
+func (_m *MockRWChannelStore) HasChannel(channel string) bool {
+	ret := _m.Called(channel)
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(string) bool); ok {
+		r0 = rf(channel)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockRWChannelStore_HasChannel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HasChannel'
+type MockRWChannelStore_HasChannel_Call struct {
+	*mock.Call
+}
+
+// HasChannel is a helper method to define mock.On call
+//   - channel string
+func (_e *MockRWChannelStore_Expecter) HasChannel(channel interface{}) *MockRWChannelStore_HasChannel_Call {
+	return &MockRWChannelStore_HasChannel_Call{Call: _e.mock.On("HasChannel", channel)}
+}
+
+func (_c *MockRWChannelStore_HasChannel_Call) Run(run func(channel string)) *MockRWChannelStore_HasChannel_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockRWChannelStore_HasChannel_Call) Return(_a0 bool) *MockRWChannelStore_HasChannel_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockRWChannelStore_HasChannel_Call) RunAndReturn(run func(string) bool) *MockRWChannelStore_HasChannel_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Reload provides a mock function with given fields:
 func (_m *MockRWChannelStore) Reload() error {
 	ret := _m.Called()
@@ -399,6 +403,85 @@ func (_c *MockRWChannelStore_Reload_Call) Return(_a0 error) *MockRWChannelStore_
 }
 
 func (_c *MockRWChannelStore_Reload_Call) RunAndReturn(run func() error) *MockRWChannelStore_Reload_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RemoveNode provides a mock function with given fields: nodeID
+func (_m *MockRWChannelStore) RemoveNode(nodeID int64) {
+	_m.Called(nodeID)
+}
+
+// MockRWChannelStore_RemoveNode_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveNode'
+type MockRWChannelStore_RemoveNode_Call struct {
+	*mock.Call
+}
+
+// RemoveNode is a helper method to define mock.On call
+//   - nodeID int64
+func (_e *MockRWChannelStore_Expecter) RemoveNode(nodeID interface{}) *MockRWChannelStore_RemoveNode_Call {
+	return &MockRWChannelStore_RemoveNode_Call{Call: _e.mock.On("RemoveNode", nodeID)}
+}
+
+func (_c *MockRWChannelStore_RemoveNode_Call) Run(run func(nodeID int64)) *MockRWChannelStore_RemoveNode_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64))
+	})
+	return _c
+}
+
+func (_c *MockRWChannelStore_RemoveNode_Call) Return() *MockRWChannelStore_RemoveNode_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockRWChannelStore_RemoveNode_Call) RunAndReturn(run func(int64)) *MockRWChannelStore_RemoveNode_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SetLegacyChannelByNode provides a mock function with given fields: nodeIDs
+func (_m *MockRWChannelStore) SetLegacyChannelByNode(nodeIDs ...int64) {
+	_va := make([]interface{}, len(nodeIDs))
+	for _i := range nodeIDs {
+		_va[_i] = nodeIDs[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, _va...)
+	_m.Called(_ca...)
+}
+
+// MockRWChannelStore_SetLegacyChannelByNode_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetLegacyChannelByNode'
+type MockRWChannelStore_SetLegacyChannelByNode_Call struct {
+	*mock.Call
+}
+
+// SetLegacyChannelByNode is a helper method to define mock.On call
+//   - nodeIDs ...int64
+func (_e *MockRWChannelStore_Expecter) SetLegacyChannelByNode(nodeIDs ...interface{}) *MockRWChannelStore_SetLegacyChannelByNode_Call {
+	return &MockRWChannelStore_SetLegacyChannelByNode_Call{Call: _e.mock.On("SetLegacyChannelByNode",
+		append([]interface{}{}, nodeIDs...)...)}
+}
+
+func (_c *MockRWChannelStore_SetLegacyChannelByNode_Call) Run(run func(nodeIDs ...int64)) *MockRWChannelStore_SetLegacyChannelByNode_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]int64, len(args)-0)
+		for i, a := range args[0:] {
+			if a != nil {
+				variadicArgs[i] = a.(int64)
+			}
+		}
+		run(variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockRWChannelStore_SetLegacyChannelByNode_Call) Return() *MockRWChannelStore_SetLegacyChannelByNode_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockRWChannelStore_SetLegacyChannelByNode_Call) RunAndReturn(run func(...int64)) *MockRWChannelStore_SetLegacyChannelByNode_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -441,6 +524,54 @@ func (_c *MockRWChannelStore_Update_Call) Return(_a0 error) *MockRWChannelStore_
 }
 
 func (_c *MockRWChannelStore_Update_Call) RunAndReturn(run func(*ChannelOpSet) error) *MockRWChannelStore_Update_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateState provides a mock function with given fields: isSuccessful, channels
+func (_m *MockRWChannelStore) UpdateState(isSuccessful bool, channels ...RWChannel) {
+	_va := make([]interface{}, len(channels))
+	for _i := range channels {
+		_va[_i] = channels[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, isSuccessful)
+	_ca = append(_ca, _va...)
+	_m.Called(_ca...)
+}
+
+// MockRWChannelStore_UpdateState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateState'
+type MockRWChannelStore_UpdateState_Call struct {
+	*mock.Call
+}
+
+// UpdateState is a helper method to define mock.On call
+//   - isSuccessful bool
+//   - channels ...RWChannel
+func (_e *MockRWChannelStore_Expecter) UpdateState(isSuccessful interface{}, channels ...interface{}) *MockRWChannelStore_UpdateState_Call {
+	return &MockRWChannelStore_UpdateState_Call{Call: _e.mock.On("UpdateState",
+		append([]interface{}{isSuccessful}, channels...)...)}
+}
+
+func (_c *MockRWChannelStore_UpdateState_Call) Run(run func(isSuccessful bool, channels ...RWChannel)) *MockRWChannelStore_UpdateState_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]RWChannel, len(args)-1)
+		for i, a := range args[1:] {
+			if a != nil {
+				variadicArgs[i] = a.(RWChannel)
+			}
+		}
+		run(args[0].(bool), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockRWChannelStore_UpdateState_Call) Return() *MockRWChannelStore_UpdateState_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockRWChannelStore_UpdateState_Call) RunAndReturn(run func(bool, ...RWChannel)) *MockRWChannelStore_UpdateState_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -18,787 +18,465 @@ package datacoord
 
 import (
 	"testing"
-	"time"
 
 	"github.com/samber/lo"
-	"github.com/stretchr/testify/assert"
-	"stathat.com/c/consistent"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
+	"go.uber.org/zap"
 
-	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
-func TestBufferChannelAssignPolicy(t *testing.T) {
-	kv := memkv.NewMemoryKV()
-
-	channels := []RWChannel{getChannel("chan1", 1)}
-	store := &ChannelStore{
-		store: kv,
-		channelsInfo: map[int64]*NodeChannelInfo{
-			1:        {1, []RWChannel{}},
-			bufferID: {bufferID, channels},
-		},
-	}
-
-	updates := BufferChannelAssignPolicy(store, 1).Collect()
-	assert.NotNil(t, updates)
-	assert.Equal(t, 2, len(updates))
-	assert.ElementsMatch(t,
-		NewChannelOpSet(
-			NewAddOp(1, channels...),
-			NewDeleteOp(bufferID, channels...),
-		).Collect(),
-		updates)
+func TestPolicySuite(t *testing.T) {
+	suite.Run(t, new(PolicySuite))
 }
 
-func getChannel(name string, collID int64) *channelMeta {
-	return &channelMeta{Name: name, CollectionID: collID}
+func getChannel(name string, collID int64) *StateChannel {
+	return &StateChannel{
+		Name:         name,
+		CollectionID: collID,
+		Info:         &datapb.ChannelWatchInfo{},
+	}
 }
 
 func getChannels(ch2Coll map[string]int64) []RWChannel {
 	return lo.MapToSlice(ch2Coll, func(name string, coll int64) RWChannel {
-		return &channelMeta{Name: name, CollectionID: coll}
+		return getChannel(name, coll)
 	})
 }
 
-func TestConsistentHashRegisterPolicy(t *testing.T) {
-	t.Run("first register", func(t *testing.T) {
-		kv := memkv.NewMemoryKV()
-		ch2Coll := map[string]int64{
-			"chan1": 1,
-			"chan2": 2,
-		}
-		channels := getChannels(ch2Coll)
-		store := &ChannelStore{
-			store: kv,
-			channelsInfo: map[int64]*NodeChannelInfo{
-				bufferID: {bufferID, channels},
-				1:        {1, []RWChannel{}},
-			},
-		}
+type PolicySuite struct {
+	suite.Suite
 
-		hashring := consistent.New()
-		policy := ConsistentHashRegisterPolicy(hashring)
-
-		up, _ := policy(store, 1)
-		updates := up.Collect()
-
-		assert.NotNil(t, updates)
-		assert.Equal(t, 2, len(updates))
-		assert.EqualValues(t, &ChannelOp{Type: Delete, NodeID: bufferID, Channels: channels}, updates[0])
-		assert.EqualValues(t, &ChannelOp{Type: Add, NodeID: 1, Channels: channels}, updates[1])
-	})
-
-	t.Run("rebalance after register", func(t *testing.T) {
-		kv := memkv.NewMemoryKV()
-
-		ch2Coll := map[string]int64{
-			"chan1": 1,
-			"chan2": 2,
-		}
-		channels := getChannels(ch2Coll)
-
-		store := &ChannelStore{
-			store:        kv,
-			channelsInfo: map[int64]*NodeChannelInfo{1: {1, channels}, 2: {2, []RWChannel{}}},
-		}
-
-		hashring := consistent.New()
-		hashring.Add(formatNodeID(1))
-		policy := ConsistentHashRegisterPolicy(hashring)
-
-		_, up := policy(store, 2)
-		updates := up.Collect()
-
-		assert.NotNil(t, updates)
-		assert.Equal(t, 1, len(updates))
-		// No Delete operation will be generated
-
-		assert.Equal(t, 1, len(updates[0].GetChannelNames()))
-		channel := updates[0].GetChannelNames()[0]
-
-		// Not stable whether to balance chan-1 or chan-2
-		if channel == "chan-1" {
-			assert.EqualValues(t, &ChannelOp{Type: Add, NodeID: 1, Channels: []RWChannel{channels[0]}}, updates[0])
-		}
-
-		if channel == "chan-2" {
-			assert.EqualValues(t, &ChannelOp{Type: Add, NodeID: 1, Channels: []RWChannel{channels[1]}}, updates[0])
-		}
-	})
+	mockStore *MockRWChannelStore
 }
 
-func TestAverageAssignPolicy(t *testing.T) {
-	type args struct {
-		store    ROChannelStore
-		channels []RWChannel
-	}
-	tests := []struct {
-		name string
-		args args
-		want *ChannelOpSet
-	}{
-		{
-			"test assign empty cluster",
-			args{
-				&ChannelStore{
-					memkv.NewMemoryKV(),
-					map[int64]*NodeChannelInfo{},
-				},
-				[]RWChannel{getChannel("chan1", 1)},
-			},
-			NewChannelOpSet(NewAddOp(bufferID, getChannel("chan1", 1))),
-		},
-		{
-			"test watch same channel",
-			args{
-				&ChannelStore{
-					memkv.NewMemoryKV(),
-					map[int64]*NodeChannelInfo{
-						1: {1, []RWChannel{getChannel("chan1", 1)}},
-					},
-				},
-				[]RWChannel{getChannel("chan1", 1)},
-			},
-			NewChannelOpSet(),
-		},
-		{
-			"test normal assign",
-			args{
-				&ChannelStore{
-					memkv.NewMemoryKV(),
-					map[int64]*NodeChannelInfo{
-						1: {1, []RWChannel{getChannel("chan1", 1), getChannel("chan2", 1)}},
-						2: {2, []RWChannel{getChannel("chan3", 1)}},
-					},
-				},
-				[]RWChannel{getChannel("chan4", 1)},
-			},
-			NewChannelOpSet(NewAddOp(2, getChannel("chan4", 1))),
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := AverageAssignPolicy(tt.args.store, tt.args.channels)
-			assert.EqualValues(t, tt.want.Collect(), got.Collect())
-		})
-	}
+func (s *PolicySuite) SetupTest() {
+	s.mockStore = NewMockRWChannelStore(s.T())
 }
 
-func TestConsistentHashChannelAssignPolicy(t *testing.T) {
-	type args struct {
-		hashring *consistent.Consistent
-		store    ROChannelStore
-		channels []RWChannel
-	}
-	tests := []struct {
-		name string
-		args args
-		want *ChannelOpSet
-	}{
-		{
-			"test assign empty cluster",
-			args{
-				consistent.New(),
-				&ChannelStore{
-					memkv.NewMemoryKV(),
-					map[int64]*NodeChannelInfo{},
-				},
-				[]RWChannel{getChannel("chan1", 1)},
-			},
-			NewChannelOpSet(NewAddOp(bufferID, getChannel("chan1", 1))),
-		},
-		{
-			"test watch same channel",
-			args{
-				consistent.New(),
-				&ChannelStore{
-					memkv.NewMemoryKV(),
-					map[int64]*NodeChannelInfo{
-						1: {1, []RWChannel{getChannel("chan1", 1), getChannel("chan2", 1)}},
-					},
-				},
-				[]RWChannel{getChannel("chan1", 1)},
-			},
-			NewChannelOpSet(),
-		},
-		{
-			"test normal watch",
-			args{
-				consistent.New(),
-				&ChannelStore{
-					memkv.NewMemoryKV(),
-					map[int64]*NodeChannelInfo{1: {1, nil}, 2: {2, nil}, 3: {3, nil}},
-				},
-				[]RWChannel{getChannel("chan1", 1), getChannel("chan2", 1), getChannel("chan3", 1)},
-			},
-			NewChannelOpSet(
-				NewAddOp(2, getChannel("chan1", 1)),
-				NewAddOp(1, getChannel("chan2", 1)),
-				NewAddOp(3, getChannel("chan3", 1)),
-			),
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			policy := ConsistentHashChannelAssignPolicy(tt.args.hashring)
-			got := policy(tt.args.store, tt.args.channels).Collect()
-			want := tt.want.Collect()
-			assert.Equal(t, len(want), len(got))
-			for _, op := range want {
-				assert.Contains(t, got, op)
+func (s *PolicySuite) TestBufferChannelAssignPolicy() {
+	s.Run("Test no channels in bufferID", func() {
+		s.SetupTest()
+		s.mockStore.EXPECT().GetBufferChannelInfo().Return(nil)
+
+		opSet := BufferChannelAssignPolicy(s.mockStore, 1)
+		s.Nil(opSet)
+	})
+
+	s.Run("Test channels remain in bufferID", func() {
+		s.SetupTest()
+		ch2Colls := map[string]int64{
+			"ch1": 1,
+			"ch2": 1,
+			"ch3": 2,
+		}
+		info := &NodeChannelInfo{NodeID: bufferID, Channels: getChannels(ch2Colls)}
+		s.mockStore.EXPECT().GetBufferChannelInfo().Return(info)
+
+		var testNodeID int64 = 100
+		opSet := BufferChannelAssignPolicy(s.mockStore, testNodeID)
+		s.NotNil(opSet)
+		s.Equal(2, opSet.Len())
+		s.Equal(3, opSet.GetChannelNumber())
+
+		for _, op := range opSet.Collect() {
+			s.ElementsMatch([]string{"ch1", "ch2", "ch3"}, op.GetChannelNames())
+			s.True(op.Type == Delete || op.Type == Watch)
+			if op.Type == Delete {
+				s.EqualValues(bufferID, op.NodeID)
 			}
-		})
-	}
-}
 
-func TestAvgAssignUnregisteredChannels(t *testing.T) {
-	type args struct {
-		store  ROChannelStore
-		nodeID int64
-	}
-	tests := []struct {
-		name string
-		args args
-		want *ChannelOpSet
-	}{
-		{
-			"test deregister the last node",
-			args{
-				&ChannelStore{
-					memkv.NewMemoryKV(),
-					map[int64]*NodeChannelInfo{
-						1: {1, []RWChannel{getChannel("chan1", 1)}},
-					},
-				},
-				1,
-			},
-			NewChannelOpSet(
-				NewDeleteOp(1, getChannel("chan1", 1)),
-				NewAddOp(bufferID, getChannel("chan1", 1)),
-			),
-		},
-		{
-			"test rebalance channels after deregister",
-			args{
-				&ChannelStore{
-					memkv.NewMemoryKV(),
-					map[int64]*NodeChannelInfo{
-						1: {1, []RWChannel{getChannel("chan1", 1)}},
-						2: {2, []RWChannel{getChannel("chan2", 1)}},
-						3: {3, []RWChannel{}},
-					},
-				},
-				2,
-			},
-			NewChannelOpSet(
-				NewDeleteOp(2, getChannel("chan2", 1)),
-				NewAddOp(3, getChannel("chan2", 1)),
-			),
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := AvgAssignUnregisteredChannels(tt.args.store, tt.args.nodeID)
-			assert.EqualValues(t, tt.want.Collect(), got.Collect())
-		})
-	}
-}
-
-func TestConsistentHashDeregisterPolicy(t *testing.T) {
-	type args struct {
-		hashring *consistent.Consistent
-		store    ROChannelStore
-		nodeID   int64
-	}
-	tests := []struct {
-		name string
-		args args
-		want *ChannelOpSet
-	}{
-		{
-			"test deregister the last node",
-			args{
-				consistent.New(),
-				&ChannelStore{
-					memkv.NewMemoryKV(),
-					map[int64]*NodeChannelInfo{
-						1: {1, []RWChannel{getChannel("chan1", 1)}},
-					},
-				},
-				1,
-			},
-			NewChannelOpSet(
-				NewDeleteOp(1, getChannel("chan1", 1)),
-				NewAddOp(bufferID, getChannel("chan1", 1)),
-			),
-		},
-		{
-			"rebalance after deregister",
-			args{
-				consistent.New(),
-				&ChannelStore{
-					memkv.NewMemoryKV(),
-					map[int64]*NodeChannelInfo{
-						1: {1, []RWChannel{getChannel("chan2", 1)}},
-						2: {2, []RWChannel{getChannel("chan1", 1)}},
-						3: {3, []RWChannel{getChannel("chan3", 1)}},
-					},
-				},
-				2,
-			},
-			NewChannelOpSet(
-				NewDeleteOp(2, getChannel("chan1", 1)),
-				NewAddOp(1, getChannel("chan1", 1)),
-			),
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			policy := ConsistentHashDeregisterPolicy(tt.args.hashring)
-			got := policy(tt.args.store, tt.args.nodeID)
-			assert.EqualValues(t, tt.want.Collect(), got.Collect())
-		})
-	}
-}
-
-func TestRoundRobinReassignPolicy(t *testing.T) {
-	type args struct {
-		store     ROChannelStore
-		reassigns []*NodeChannelInfo
-	}
-	tests := []struct {
-		name string
-		args args
-		want *ChannelOpSet
-	}{
-		{
-			"test only one node",
-			args{
-				&ChannelStore{
-					memkv.NewMemoryKV(),
-					map[int64]*NodeChannelInfo{
-						1: {1, []RWChannel{getChannel("chan1", 1)}},
-					},
-				},
-				[]*NodeChannelInfo{{1, []RWChannel{getChannel("chan1", 1)}}},
-			},
-			NewChannelOpSet(),
-		},
-		{
-			"test normal reassigning",
-			args{
-				&ChannelStore{
-					memkv.NewMemoryKV(),
-					map[int64]*NodeChannelInfo{
-						1: {1, []RWChannel{getChannel("chan1", 1), getChannel("chan2", 1)}},
-						2: {2, []RWChannel{}},
-					},
-				},
-				[]*NodeChannelInfo{{1, []RWChannel{getChannel("chan1", 1), getChannel("chan2", 1)}}},
-			},
-			NewChannelOpSet(
-				NewDeleteOp(1, getChannel("chan1", 1), getChannel("chan2", 1)),
-				NewAddOp(2, getChannel("chan1", 1), getChannel("chan2", 1)),
-			),
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := RoundRobinReassignPolicy(tt.args.store, tt.args.reassigns)
-			assert.EqualValues(t, tt.want.Collect(), got.Collect())
-		})
-	}
-}
-
-func TestBgCheckForChannelBalance(t *testing.T) {
-	type args struct {
-		channels  []*NodeChannelInfo
-		timestamp time.Time
-	}
-
-	tests := []struct {
-		name    string
-		args    args
-		want    []*NodeChannelInfo
-		wantErr error
-	}{
-		{
-			"test even distribution",
-			args{
-				[]*NodeChannelInfo{
-					{1, []RWChannel{getChannel("chan1", 1), getChannel("chan2", 1)}},
-					{2, []RWChannel{getChannel("chan1", 2), getChannel("chan2", 2)}},
-					{3, []RWChannel{getChannel("chan1", 3), getChannel("chan2", 3)}},
-				},
-				time.Now(),
-			},
-			// there should be no reallocate
-			[]*NodeChannelInfo{},
-			nil,
-		},
-		{
-			"test uneven with conservative effect",
-			args{
-				[]*NodeChannelInfo{
-					{1, []RWChannel{getChannel("chan1", 1), getChannel("chan2", 1)}},
-					{2, []RWChannel{}},
-				},
-				time.Now(),
-			},
-			// as we deem that the node having only one channel more than average as even, so there's no reallocation
-			// for this test case
-			[]*NodeChannelInfo{},
-			nil,
-		},
-		{
-			"test uneven with zero",
-			args{
-				[]*NodeChannelInfo{
-					{1, []RWChannel{
-						getChannel("chan1", 1),
-						getChannel("chan2", 1),
-						getChannel("chan3", 1),
-					}},
-					{2, []RWChannel{}},
-				},
-				time.Now(),
-			},
-			[]*NodeChannelInfo{{1, []RWChannel{getChannel("chan1", 1)}}},
-			nil,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			policy := BgBalanceCheck
-			got, err := policy(tt.args.channels, tt.args.timestamp)
-			assert.Equal(t, tt.wantErr, err)
-			assert.EqualValues(t, tt.want, got)
-		})
-	}
-}
-
-func TestAvgReassignPolicy(t *testing.T) {
-	type args struct {
-		store     ROChannelStore
-		reassigns []*NodeChannelInfo
-	}
-	tests := []struct {
-		name string
-		args args
-		want *ChannelOpSet
-	}{
-		{
-			"test_only_one_node",
-			args{
-				&ChannelStore{
-					memkv.NewMemoryKV(),
-					map[int64]*NodeChannelInfo{
-						1: {1, []RWChannel{getChannel("chan1", 1)}},
-					},
-				},
-				[]*NodeChannelInfo{{1, []RWChannel{getChannel("chan1", 1)}}},
-			},
-			// as there's no available nodes except the input node, there's no reassign plan generated
-			NewChannelOpSet(),
-		},
-		{
-			"test_zero_avg",
-			args{
-				&ChannelStore{
-					memkv.NewMemoryKV(),
-					map[int64]*NodeChannelInfo{
-						1: {1, []RWChannel{getChannel("chan1", 1)}},
-						2: {2, []RWChannel{}},
-						3: {2, []RWChannel{}},
-						4: {2, []RWChannel{}},
-					},
-				},
-				[]*NodeChannelInfo{{1, []RWChannel{getChannel("chan1", 1)}}},
-			},
-			// as we use ceil to calculate the wanted average number, there should be one reassign
-			// though the average num less than 1
-			NewChannelOpSet(
-				NewDeleteOp(1, getChannel("chan1", 1)),
-				NewAddOp(2, getChannel("chan1", 1)),
-			),
-		},
-		{
-			"test_normal_reassigning_for_one_available_nodes",
-			args{
-				&ChannelStore{
-					memkv.NewMemoryKV(),
-					map[int64]*NodeChannelInfo{
-						1: {1, []RWChannel{getChannel("chan1", 1), getChannel("chan2", 1)}},
-						2: {2, []RWChannel{}},
-					},
-				},
-				[]*NodeChannelInfo{{1, []RWChannel{getChannel("chan1", 1), getChannel("chan2", 1)}}},
-			},
-			NewChannelOpSet(
-				NewDeleteOp(1, getChannel("chan1", 1), getChannel("chan2", 1)),
-				NewAddOp(2, getChannel("chan1", 1), getChannel("chan2", 1)),
-			),
-		},
-		{
-			"test_normal_reassigning_for_multiple_available_nodes",
-			args{
-				&ChannelStore{
-					memkv.NewMemoryKV(),
-					map[int64]*NodeChannelInfo{
-						1: {1, []RWChannel{
-							getChannel("chan1", 1),
-							getChannel("chan2", 1),
-							getChannel("chan3", 1),
-							getChannel("chan4", 1),
-						}},
-						2: {2, []RWChannel{}},
-						3: {3, []RWChannel{}},
-						4: {4, []RWChannel{}},
-					},
-				},
-				[]*NodeChannelInfo{{1, []RWChannel{
-					getChannel("chan1", 1),
-					getChannel("chan2", 1),
-					getChannel("chan3", 1),
-				}}},
-			},
-			NewChannelOpSet(
-				NewDeleteOp(1, []RWChannel{
-					getChannel("chan1", 1),
-					getChannel("chan2", 1),
-					getChannel("chan3", 1),
-				}...),
-				NewAddOp(2, getChannel("chan1", 1)),
-				NewAddOp(3, getChannel("chan2", 1)),
-				NewAddOp(4, getChannel("chan3", 1)),
-			),
-		},
-		{
-			"test_reassigning_for_extreme_case",
-			args{
-				&ChannelStore{
-					memkv.NewMemoryKV(),
-					map[int64]*NodeChannelInfo{
-						1: {1, []RWChannel{
-							getChannel("chan1", 1),
-							getChannel("chan2", 1),
-							getChannel("chan3", 1),
-							getChannel("chan4", 1),
-							getChannel("chan5", 1),
-							getChannel("chan6", 1),
-							getChannel("chan7", 1),
-							getChannel("chan8", 1),
-							getChannel("chan9", 1),
-							getChannel("chan10", 1),
-							getChannel("chan11", 1),
-							getChannel("chan12", 1),
-						}},
-						2: {2, []RWChannel{
-							getChannel("chan13", 1),
-							getChannel("chan14", 1),
-						}},
-						3: {3, []RWChannel{getChannel("chan15", 1)}},
-						4: {4, []RWChannel{}},
-					},
-				},
-				[]*NodeChannelInfo{{1, []RWChannel{
-					getChannel("chan1", 1),
-					getChannel("chan2", 1),
-					getChannel("chan3", 1),
-					getChannel("chan4", 1),
-					getChannel("chan5", 1),
-					getChannel("chan6", 1),
-					getChannel("chan7", 1),
-					getChannel("chan8", 1),
-					getChannel("chan9", 1),
-					getChannel("chan10", 1),
-					getChannel("chan11", 1),
-					getChannel("chan12", 1),
-				}}},
-			},
-			NewChannelOpSet(
-				NewDeleteOp(1, []RWChannel{
-					getChannel("chan1", 1),
-					getChannel("chan2", 1),
-					getChannel("chan3", 1),
-					getChannel("chan4", 1),
-					getChannel("chan5", 1),
-					getChannel("chan6", 1),
-					getChannel("chan7", 1),
-					getChannel("chan8", 1),
-					getChannel("chan9", 1),
-					getChannel("chan10", 1),
-					getChannel("chan11", 1),
-					getChannel("chan12", 1),
-				}...),
-				NewAddOp(4, []RWChannel{
-					getChannel("chan1", 1),
-					getChannel("chan2", 1),
-					getChannel("chan3", 1),
-					getChannel("chan4", 1),
-					getChannel("chan5", 1),
-				}...),
-				NewAddOp(3, []RWChannel{
-					getChannel("chan6", 1),
-					getChannel("chan7", 1),
-					getChannel("chan8", 1),
-					getChannel("chan9", 1),
-				}...),
-				NewAddOp(2, []RWChannel{
-					getChannel("chan10", 1),
-					getChannel("chan11", 1),
-					getChannel("chan12", 1),
-				}...),
-			),
-		},
-	}
-	for _, tt := range tests {
-		if tt.name == "test_reassigning_for_extreme_case" ||
-			tt.name == "test_normal_reassigning_for_multiple_available_nodes" {
-			continue
+			if op.Type == Watch {
+				s.EqualValues(testNodeID, op.NodeID)
+			}
 		}
-		t.Run(tt.name, func(t *testing.T) {
-			got := AverageReassignPolicy(tt.args.store, tt.args.reassigns)
-			assert.ElementsMatch(t, tt.want.Collect(), got.Collect())
-		})
-	}
+	})
 }
 
-func TestAvgBalanceChannelPolicy(t *testing.T) {
-	type args struct {
-		store ROChannelStore
+func (s *PolicySuite) TestAvarageAssignPolicy() {
+	ch2Coll := map[string]int64{
+		"ch1": 100,
+		"ch2": 100,
 	}
-	tests := []struct {
-		name string
-		args args
-		want *ChannelOpSet
-	}{
-		{
-			"test_only_one_node",
-			args{
-				&ChannelStore{
-					memkv.NewMemoryKV(),
-					map[int64]*NodeChannelInfo{
-						1: {
-							1, []RWChannel{
-								getChannel("chan1", 1),
-								getChannel("chan2", 1),
-								getChannel("chan3", 1),
-								getChannel("chan4", 1),
-							},
-						},
-						2: {2, []RWChannel{}},
-					},
-				},
-			},
-			NewChannelOpSet(NewAddOp(1, getChannel("chan1", 1))),
-		},
-	}
+	var testNodeID int64 = 9
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := AvgBalanceChannelPolicy(tt.args.store, time.Now())
-			assert.EqualValues(t, tt.want.Collect(), got.Collect())
+	s.Run("no balance after register", func() {
+		s.SetupTest()
+		s.mockStore.EXPECT().GetBufferChannelInfo().Return(nil)
+		s.mockStore.EXPECT().GetNodesChannels().Return([]*NodeChannelInfo{
+			{NodeID: testNodeID},
 		})
-	}
+
+		bufferOp, balanceOp := AvgAssignRegisterPolicy(s.mockStore, testNodeID)
+		s.Nil(bufferOp)
+		s.Nil(balanceOp)
+	})
+	s.Run("balance bufferID channels after register", func() {
+		s.SetupTest()
+		s.mockStore.EXPECT().GetBufferChannelInfo().Return(
+			&NodeChannelInfo{NodeID: bufferID, Channels: getChannels(ch2Coll)},
+		)
+
+		bufferOp, balanceOp := AvgAssignRegisterPolicy(s.mockStore, testNodeID)
+		s.Nil(balanceOp)
+		s.NotNil(bufferOp)
+		s.Equal(2, bufferOp.Len())
+		s.Equal(2, bufferOp.GetChannelNumber())
+
+		for _, op := range bufferOp.Collect() {
+			s.ElementsMatch(lo.Keys(ch2Coll), op.GetChannelNames())
+			s.True(op.Type == Delete || op.Type == Watch)
+			if op.Type == Delete {
+				s.EqualValues(bufferID, op.NodeID)
+			}
+
+			if op.Type == Watch {
+				s.EqualValues(testNodeID, op.NodeID)
+			}
+		}
+		log.Info("got bufferOp", zap.Any("op", bufferOp))
+	})
+
+	s.Run("balance after register", func() {
+		s.SetupTest()
+		s.mockStore.EXPECT().GetBufferChannelInfo().Return(nil)
+		s.mockStore.EXPECT().GetNodesChannels().Return([]*NodeChannelInfo{
+			{NodeID: 1, Channels: getChannels(ch2Coll)},
+			{NodeID: testNodeID},
+		})
+
+		bufferOp, balanceOp := AvgAssignRegisterPolicy(s.mockStore, testNodeID)
+		s.Nil(bufferOp)
+		s.NotNil(balanceOp)
+		s.Equal(1, balanceOp.Len())
+		s.Equal(1, balanceOp.GetChannelNumber())
+
+		for _, op := range balanceOp.Collect() {
+			s.Equal(Release, op.Type)
+			s.EqualValues(1, op.NodeID)
+		}
+		log.Info("got balanceOp", zap.Any("op", balanceOp))
+	})
 }
 
-func TestAvgAssignRegisterPolicy(t *testing.T) {
-	type args struct {
-		store  ROChannelStore
-		nodeID int64
+func (s *PolicySuite) TestAverageAssignPolicy() {
+	ch2Coll := map[string]int64{
+		"ch1": 1,
+		"ch2": 1,
+		"ch3": 2,
 	}
-	tests := []struct {
-		name            string
-		args            args
-		bufferedUpdates *ChannelOpSet
-		balanceUpdates  *ChannelOpSet
-	}{
-		{
-			"test empty",
-			args{
-				&ChannelStore{
-					memkv.NewMemoryKV(),
-					map[int64]*NodeChannelInfo{
-						1: {NodeID: 1, Channels: make([]RWChannel, 0)},
-					},
-				},
-				1,
-			},
-			NewChannelOpSet(),
-			NewChannelOpSet(),
-		},
-		{
-			"test with buffer channel",
-			args{
-				&ChannelStore{
-					memkv.NewMemoryKV(),
-					map[int64]*NodeChannelInfo{
-						bufferID: {bufferID, []RWChannel{getChannel("ch1", 1)}},
-						1:        {NodeID: 1, Channels: []RWChannel{}},
-					},
-				},
-				1,
-			},
-			NewChannelOpSet(
-				NewDeleteOp(bufferID, getChannel("ch1", 1)),
-				NewAddOp(1, getChannel("ch1", 1)),
-			),
-			NewChannelOpSet(),
-		},
-		{
-			"test with avg assign",
-			args{
-				&ChannelStore{
-					memkv.NewMemoryKV(),
-					map[int64]*NodeChannelInfo{
-						1: {1, []RWChannel{getChannel("ch1", 1), getChannel("ch2", 1)}},
-						3: {3, []RWChannel{}},
-					},
-				},
-				3,
-			},
-			NewChannelOpSet(),
-			NewChannelOpSet(NewAddOp(1, getChannel("ch1", 1))),
-		},
-		{
-			"test with avg equals to zero",
-			args{
-				&ChannelStore{
-					memkv.NewMemoryKV(),
-					map[int64]*NodeChannelInfo{
-						1: {1, []RWChannel{getChannel("ch1", 1)}},
-						2: {2, []RWChannel{getChannel("ch3", 1)}},
-						3: {3, []RWChannel{}},
-					},
-				},
-				3,
-			},
-			NewChannelOpSet(),
-			NewChannelOpSet(),
-		},
-		{
-			"test node with empty channel",
-			args{
-				&ChannelStore{
-					memkv.NewMemoryKV(),
-					map[int64]*NodeChannelInfo{
-						1: {1, []RWChannel{getChannel("ch1", 1), getChannel("ch2", 1), getChannel("ch3", 1)}},
-						2: {2, []RWChannel{}},
-						3: {3, []RWChannel{}},
-					},
-				},
-				3,
-			},
-			NewChannelOpSet(),
-			NewChannelOpSet(NewAddOp(1, getChannel("ch1", 1))),
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			bufferedUpdates, balanceUpdates := AvgAssignRegisterPolicy(tt.args.store, tt.args.nodeID)
-			assert.EqualValues(t, tt.bufferedUpdates.Collect(), bufferedUpdates.Collect())
-			assert.EqualValues(t, tt.balanceUpdates.Collect(), balanceUpdates.Collect())
+	channels := getChannels(ch2Coll)
+
+	s.Run("no new channels", func() {
+		s.SetupTest()
+		s.mockStore.EXPECT().HasChannel(mock.Anything).Return(true)
+
+		opSet := AverageAssignPolicy(s.mockStore, channels)
+		s.Nil(opSet)
+	})
+
+	s.Run("no datanodes", func() {
+		s.SetupTest()
+		s.mockStore.EXPECT().HasChannel(mock.Anything).Return(false)
+		s.mockStore.EXPECT().GetNodesChannels().Return(nil)
+		channels := getChannels(ch2Coll)
+
+		opSet := AverageAssignPolicy(s.mockStore, channels)
+		s.NotNil(opSet)
+		s.Equal(1, opSet.Len())
+
+		op := opSet.Collect()[0]
+		s.EqualValues(bufferID, op.NodeID)
+		s.Equal(Watch, op.Type)
+		s.ElementsMatch(lo.Keys(ch2Coll), op.GetChannelNames())
+	})
+
+	s.Run("one datanode", func() {
+		// Test three channels assigned one datanode
+		s.SetupTest()
+		s.mockStore.EXPECT().HasChannel(mock.Anything).Return(false)
+		s.mockStore.EXPECT().GetNodesChannels().Return([]*NodeChannelInfo{
+			{NodeID: 1, Channels: getChannels(map[string]int64{"channel": 1})},
 		})
+		channels := getChannels(ch2Coll)
+
+		opSet := AverageAssignPolicy(s.mockStore, channels)
+		s.NotNil(opSet)
+		s.Equal(1, opSet.Len())
+		s.Equal(3, opSet.GetChannelNumber())
+
+		for _, op := range opSet.Collect() {
+			s.Equal(Watch, op.Type)
+
+			s.EqualValues(1, op.NodeID)
+			s.Equal(3, len(op.GetChannelNames()))
+			s.ElementsMatch(lo.Keys(ch2Coll), op.GetChannelNames())
+		}
+		log.Info("test OpSet", zap.Any("opset", opSet))
+	})
+
+	s.Run("three datanode", func() {
+		// Test three channels assigned evenly to three datanodes
+		s.SetupTest()
+		s.mockStore.EXPECT().HasChannel(mock.Anything).Return(false)
+		s.mockStore.EXPECT().GetNodesChannels().Return([]*NodeChannelInfo{
+			{NodeID: 1},
+			{NodeID: 2},
+			{NodeID: 3},
+		})
+
+		opSet := AverageAssignPolicy(s.mockStore, channels)
+		s.NotNil(opSet)
+		s.Equal(3, opSet.Len())
+		s.Equal(3, opSet.GetChannelNumber())
+
+		s.ElementsMatch([]int64{1, 2, 3}, lo.Map(opSet.Collect(), func(op *ChannelOp, _ int) int64 {
+			return op.NodeID
+		}))
+		for _, op := range opSet.Collect() {
+			s.True(lo.Contains([]int64{1, 2, 3}, op.NodeID))
+			s.Equal(1, len(op.GetChannelNames()))
+			s.Equal(Watch, op.Type)
+			s.True(lo.Contains(lo.Keys(ch2Coll), op.GetChannelNames()[0]))
+		}
+		log.Info("test OpSet", zap.Any("opset", opSet))
+	})
+}
+
+func (s *PolicySuite) TestAvgAssignUnregisteredChannels() {
+	ch2Coll := map[string]int64{
+		"ch1": 1,
+		"ch2": 1,
+		"ch3": 2,
 	}
+	info := &NodeChannelInfo{
+		NodeID:   1,
+		Channels: getChannels(ch2Coll),
+	}
+
+	s.Run("deregistering last node", func() {
+		s.SetupTest()
+		s.mockStore.EXPECT().GetNode(mock.Anything).Return(info)
+		s.mockStore.EXPECT().GetNodeChannelsBy(mock.Anything, mock.Anything).Return(nil)
+
+		opSet := AvgAssignUnregisteredChannels(s.mockStore, info.NodeID)
+		s.NotNil(opSet)
+		s.Equal(2, opSet.Len())
+
+		for _, op := range opSet.Collect() {
+			s.ElementsMatch(lo.Keys(ch2Coll), op.GetChannelNames())
+			if op.Type == Delete {
+				s.EqualValues(info.NodeID, op.NodeID)
+			}
+
+			if op.Type == Watch {
+				s.EqualValues(bufferID, op.NodeID)
+			}
+		}
+		log.Info("test OpSet", zap.Any("opset", opSet))
+	})
+
+	s.Run("assign channels after deregistering", func() {
+		s.SetupTest()
+		s.mockStore.EXPECT().GetNode(mock.Anything).Return(info)
+		s.mockStore.EXPECT().GetNodeChannelsBy(mock.Anything, mock.Anything).Return([]*NodeChannelInfo{
+			{NodeID: 100},
+		})
+
+		opSet := AvgAssignUnregisteredChannels(s.mockStore, info.NodeID)
+		s.NotNil(opSet)
+		s.Equal(2, opSet.Len())
+		for _, op := range opSet.Collect() {
+			s.ElementsMatch(lo.Keys(ch2Coll), op.GetChannelNames())
+			s.True(op.Type == Delete || op.Type == Watch)
+			if op.Type == Delete {
+				s.EqualValues(info.NodeID, op.NodeID)
+			}
+
+			if op.Type == Watch {
+				s.EqualValues(100, op.NodeID)
+			}
+		}
+		log.Info("test OpSet", zap.Any("opset", opSet))
+	})
+
+	s.Run("test average", func() {
+		s.SetupTest()
+		s.mockStore.EXPECT().GetNode(mock.Anything).Return(info)
+		s.mockStore.EXPECT().GetNodeChannelsBy(mock.Anything, mock.Anything).Return([]*NodeChannelInfo{
+			{NodeID: 100},
+			{NodeID: 101},
+			{NodeID: 102},
+		})
+
+		opSet := AvgAssignUnregisteredChannels(s.mockStore, info.NodeID)
+		s.NotNil(opSet)
+		s.Equal(4, opSet.Len())
+
+		nodeCh := make(map[int64]string)
+		for _, op := range opSet.Collect() {
+			s.True(op.Type == Delete || op.Type == Watch)
+			if op.Type == Delete {
+				s.EqualValues(info.NodeID, op.NodeID)
+				s.ElementsMatch(lo.Keys(ch2Coll), op.GetChannelNames())
+			}
+
+			if op.Type == Watch {
+				s.Equal(1, len(op.GetChannelNames()))
+				nodeCh[op.NodeID] = op.GetChannelNames()[0]
+			}
+		}
+
+		s.ElementsMatch([]int64{100, 101, 102}, lo.Keys(nodeCh))
+		s.ElementsMatch(lo.Keys(ch2Coll), lo.Values(nodeCh))
+		log.Info("test OpSet", zap.Any("opset", opSet))
+	})
+}
+
+func (s *PolicySuite) TestAvgBalanceChannelPolicy() {
+	s.Run("test even distribution", func() {
+		s.SetupTest()
+		// even distribution should have not results
+		evenDist := []*NodeChannelInfo{
+			{100, []RWChannel{getChannel("ch1", 1), getChannel("ch2", 1)}},
+			{101, []RWChannel{getChannel("ch3", 2), getChannel("ch4", 2)}},
+			{102, []RWChannel{getChannel("ch5", 3), getChannel("ch6", 3)}},
+		}
+
+		s.mockStore.EXPECT().GetNodeChannelsBy(mock.Anything, mock.Anything).Return(evenDist)
+		opSet := AvgBalanceChannelPolicy(s.mockStore)
+		s.Nil(opSet)
+	})
+	s.Run("test uneven with conservative effect", func() {
+		s.SetupTest()
+		// as we deem that the node having only one channel more than average as even, so there's no reallocation
+		// for this test case
+		// even distribution should have not results
+		uneven := []*NodeChannelInfo{
+			{100, []RWChannel{getChannel("ch1", 1), getChannel("ch2", 1)}},
+			{NodeID: 101},
+		}
+
+		s.mockStore.EXPECT().GetNodeChannelsBy(mock.Anything, mock.Anything).Return(uneven)
+		opSet := AvgBalanceChannelPolicy(s.mockStore)
+		s.Nil(opSet)
+	})
+	s.Run("test uneven with zero", func() {
+		s.SetupTest()
+		uneven := []*NodeChannelInfo{
+			{100, []RWChannel{getChannel("ch1", 1), getChannel("ch2", 1), getChannel("ch3", 1)}},
+			{NodeID: 101},
+		}
+
+		s.mockStore.EXPECT().GetNodeChannelsBy(mock.Anything, mock.Anything).Return(uneven)
+		opSet := AvgBalanceChannelPolicy(s.mockStore)
+		s.NotNil(opSet)
+		s.Equal(1, opSet.Len())
+
+		for _, op := range opSet.Collect() {
+			s.Equal(Release, op.Type)
+			s.EqualValues(100, op.NodeID)
+			s.Equal(1, len(op.GetChannelNames()))
+			s.True(lo.Contains([]string{"ch1", "ch2", "ch3"}, op.GetChannelNames()[0]))
+		}
+		log.Info("test OpSet", zap.Any("opset", opSet))
+	})
+}
+
+func (s *PolicySuite) TestAvgReassignPolicy() {
+	s.Run("test only one node", func() {
+		s.SetupTest()
+		ch2Coll := map[string]int64{
+			"ch1": 1,
+			"ch2": 1,
+			"ch3": 2,
+			"ch4": 2,
+			"ch5": 3,
+		}
+		fiveChannels := getChannels(ch2Coll)
+		storedInfo := []*NodeChannelInfo{{100, fiveChannels}}
+		s.mockStore.EXPECT().GetNodesChannels().Return(storedInfo)
+
+		opSet := AverageReassignPolicy(s.mockStore, storedInfo)
+		s.Nil(opSet)
+	})
+	s.Run("test zero average", func() {
+		// as we use ceil to calculate the wanted average number, there should be one reassign
+		// though the average num less than 1
+		s.SetupTest()
+		storedInfo := []*NodeChannelInfo{
+			{100, []RWChannel{getChannel("ch1", 1)}},
+			{NodeID: 102},
+			{NodeID: 103},
+			{NodeID: 104},
+		}
+
+		s.mockStore.EXPECT().GetNodesChannels().Return(storedInfo)
+		s.mockStore.EXPECT().GetNodeChannelCount(mock.Anything).RunAndReturn(func(nodeID int64) int {
+			for _, info := range storedInfo {
+				if info.NodeID == nodeID {
+					return len(info.Channels)
+				}
+			}
+			return 0
+		})
+
+		opSet := AverageReassignPolicy(s.mockStore, storedInfo[0:1])
+		s.NotNil(opSet)
+		s.Equal(2, opSet.Len())
+
+		for _, op := range opSet.Collect() {
+			s.Equal(1, len(op.GetChannelNames()))
+			s.Equal("ch1", op.GetChannelNames()[0])
+
+			s.True(op.Type == Delete || op.Type == Watch)
+		}
+		log.Info("test OpSet", zap.Any("opset", opSet))
+	})
+	s.Run("test reassign one to one", func() {
+		s.SetupTest()
+		storedInfo := []*NodeChannelInfo{
+			{NodeID: 100, Channels: []RWChannel{
+				getChannel("ch1", 1),
+				getChannel("ch2", 1),
+				getChannel("ch3", 1),
+				getChannel("ch4", 1),
+			}},
+			{NodeID: 101},
+			{NodeID: 102},
+		}
+
+		s.mockStore.EXPECT().GetNodesChannels().Return(storedInfo)
+		s.mockStore.EXPECT().GetNodeChannelCount(mock.Anything).RunAndReturn(func(nodeID int64) int {
+			for _, info := range storedInfo {
+				if info.NodeID == nodeID {
+					return len(info.Channels)
+				}
+			}
+			return 0
+		})
+
+		opSet := AverageReassignPolicy(s.mockStore, storedInfo[0:1])
+		s.NotNil(opSet)
+		s.Equal(3, opSet.Len())
+
+		for _, op := range opSet.Collect() {
+			s.True(op.Type == Delete || op.Type == Watch)
+			if op.Type == Delete {
+				s.ElementsMatch([]string{"ch1", "ch2", "ch3", "ch4"}, op.GetChannelNames())
+				s.EqualValues(100, op.NodeID)
+			}
+
+			if op.Type == Watch {
+				s.Equal(2, len(op.GetChannelNames()))
+				s.True(lo.Contains([]int64{102, 101}, op.NodeID))
+			}
+		}
+		log.Info("test OpSet", zap.Any("opset", opSet))
+	})
+
+	// TODO
+	s.Run("test exetreme", func() {})
 }

@@ -69,8 +69,8 @@ func (suite *ClusterSuite) TestStartup() {
 		{NodeID: 4, Address: "addr4"},
 	}
 	suite.mockSession.EXPECT().AddSession(mock.Anything).Return().Times(len(nodes))
-	suite.mockChManager.EXPECT().Startup(mock.Anything, mock.Anything).
-		RunAndReturn(func(ctx context.Context, nodeIDs []int64) error {
+	suite.mockChManager.EXPECT().Startup(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, nodeIDs []int64, legacys []int64) error {
 			suite.ElementsMatch(lo.Map(nodes, func(info *NodeInfo, _ int) int64 { return info.NodeID }), nodeIDs)
 			return nil
 		}).Once()
@@ -124,7 +124,7 @@ func (suite *ClusterSuite) TestWatch() {
 		}).Once()
 
 	cluster := NewClusterImpl(suite.mockSession, suite.mockChManager)
-	err := cluster.Watch(context.Background(), ch, collectionID)
+	err := cluster.Watch(context.Background(), getChannel(ch, collectionID))
 	suite.NoError(err)
 }
 
@@ -134,7 +134,7 @@ func (suite *ClusterSuite) TestFlush() {
 			return nodeID != 1
 		}).Twice()
 
-	suite.mockChManager.EXPECT().GetCollectionIDByChannel(mock.Anything).Return(true, 100).Once()
+	suite.mockChManager.EXPECT().GetChannel(mock.Anything, mock.Anything).Return(getChannel("ch-1", 1), true).Once()
 	suite.mockSession.EXPECT().Flush(mock.Anything, mock.Anything, mock.Anything).Once()
 
 	cluster := NewClusterImpl(suite.mockSession, suite.mockChManager)
@@ -187,7 +187,7 @@ func (suite *ClusterSuite) TestImport() {
 func (suite *ClusterSuite) TestAddImportSegment() {
 	suite.Run("channel not fount", func() {
 		suite.SetupTest()
-		suite.mockChManager.EXPECT().GetNodeIDByChannelName(mock.Anything).Return(false, 0)
+		suite.mockChManager.EXPECT().GetNodeIDByChannelName(mock.Anything).Return(0, false)
 		cluster := NewClusterImpl(suite.mockSession, suite.mockChManager)
 		resp, err := cluster.AddImportSegment(context.Background(), &datapb.AddImportSegmentRequest{
 			ChannelName: "ch-1",
@@ -199,7 +199,7 @@ func (suite *ClusterSuite) TestAddImportSegment() {
 
 	suite.Run("normal", func() {
 		suite.SetupTest()
-		suite.mockChManager.EXPECT().GetNodeIDByChannelName(mock.Anything).Return(true, 0)
+		suite.mockChManager.EXPECT().GetNodeIDByChannelName(mock.Anything).Return(0, true)
 		suite.mockSession.EXPECT().AddImportSegment(mock.Anything, mock.Anything, mock.Anything).Return(&datapb.AddImportSegmentResponse{}, nil)
 
 		cluster := NewClusterImpl(suite.mockSession, suite.mockChManager)

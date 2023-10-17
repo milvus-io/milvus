@@ -26,6 +26,10 @@ type writeNode struct {
 	metacache   metacache.MetaCache
 }
 
+func (wN *writeNode) Name() string {
+	return "writeNode"
+}
+
 func (wNode *writeNode) Operate(in []Msg) []Msg {
 	fgMsg := in[0].(*flowGraphMsg)
 
@@ -104,7 +108,6 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 		wNode.wbManager.DropChannel(wNode.channelName)
 	}
 
-	// send delete msg to DeleteNode
 	return []Msg{&res}
 }
 

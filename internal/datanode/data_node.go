@@ -87,6 +87,7 @@ type DataNode struct {
 	Role             string
 	stateCode        atomic.Value // commonpb.StateCode_Initializing
 	flowgraphManager FlowgraphManager
+	channelManager   *ChannelManager
 	eventManagerMap  *typeutil.ConcurrentMap[string, *channelEventManager]
 
 	syncMgr            syncmgr.SyncManager
@@ -138,9 +139,8 @@ func NewDataNode(ctx context.Context, factory dependency.Factory) *DataNode {
 		segmentCache:       newCache(),
 		compactionExecutor: newCompactionExecutor(),
 
-		eventManagerMap:  typeutil.NewConcurrentMap[string, *channelEventManager](),
-		flowgraphManager: newFlowgraphManager(),
-		clearSignal:      make(chan string, 100),
+		eventManagerMap: typeutil.NewConcurrentMap[string, *channelEventManager](),
+		clearSignal:     make(chan string, 100),
 
 		reportImportRetryTimes: 10,
 	}
@@ -286,29 +286,12 @@ func (node *DataNode) Init() error {
 		node.writeBufferManager = writebuffer.NewManager(syncMgr)
 
 		node.channelCheckpointUpdater = newChannelCheckpointUpdater(node)
+		node.channelManager = NewChannelManager(node)
+		node.flowgraphManager = node.channelManager.fgManager
 
 		log.Info("init datanode done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", node.address))
 	})
 	return initError
-}
-
-// handleChannelEvt handles event from kv watch event
-func (node *DataNode) handleChannelEvt(evt *clientv3.Event) {
-	var e *event
-	switch evt.Type {
-	case clientv3.EventTypePut: // datacoord shall put channels needs to be watched here
-		e = &event{
-			eventType: putEventType,
-			version:   evt.Kv.Version,
-		}
-
-	case clientv3.EventTypeDelete:
-		e = &event{
-			eventType: deleteEventType,
-			version:   evt.Kv.Version,
-		}
-	}
-	node.handleWatchInfo(e, string(evt.Kv.Key), evt.Kv.Value)
 }
 
 // tryToReleaseFlowgraph tries to release a flowgraph
@@ -382,9 +365,10 @@ func (node *DataNode) Start() error {
 			node.timeTickSender.start()
 		}
 
-		node.stopWaiter.Add(1)
+		node.channelManager.Start()
+		// node.stopWaiter.Add(1)
 		// Start node watch node
-		go node.StartWatchChannels(node.ctx)
+		// go node.StartWatchChannels(node.ctx)
 
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 	})
@@ -420,6 +404,7 @@ func (node *DataNode) Stop() error {
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		// Delay the cancellation of ctx to ensure that the session is automatically recycled after closed the flow graph
 		node.cancel()
+		node.channelManager.Close()
 
 		node.eventManagerMap.Range(func(_ string, m *channelEventManager) bool {
 			m.Close()

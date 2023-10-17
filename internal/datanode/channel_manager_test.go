@@ -24,11 +24,44 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func TestChannelManagerSuite(t *testing.T) {
 	suite.Run(t, new(ChannelManagerSuite))
+}
+
+func TestOpRunnerSuite(t *testing.T) {
+	suite.Run(t, new(OpRunnerSuite))
+}
+
+func (s *OpRunnerSuite) SetupTest() {
+	ctx := context.Background()
+	s.node = newIDLEDataNodeMock(ctx, schemapb.DataType_Int64)
+}
+
+func (s *OpRunnerSuite) TestWatchWithTimer() {
+	var (
+		channel string = "ch-1"
+		commuCh        = make(chan *opState)
+	)
+	info := getWatchInfoByOpID(100, channel, datapb.ChannelWatchState_ToWatch)
+	mockReleaseFunc := func(channel string) {
+		log.Info("mock release func")
+	}
+	runner := NewOpRunner(channel, s.node, mockReleaseFunc, commuCh)
+	err := runner.Enqueue(info)
+	s.Require().NoError(err)
+
+	opState := runner.watchWithTimer(info)
+	s.NotNil(opState.fg)
+	s.Equal(channel, opState.channel)
+}
+
+type OpRunnerSuite struct {
+	suite.Suite
+	node *DataNode
 }
 
 type ChannelManagerSuite struct {

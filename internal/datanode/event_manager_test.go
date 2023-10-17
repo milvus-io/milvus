@@ -74,6 +74,9 @@ func TestWatchChannel(t *testing.T) {
 	node.timeTickSender.Stop()
 	node.timeTickSender = newTimeTickSender(node.broker, 0)
 
+	node.stopWaiter.Add(1)
+	go node.StartWatchChannels(node.ctx)
+
 	t.Run("test watch channel", func(t *testing.T) {
 		kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
 		oldInvalidCh := "datanode-etcd-test-by-dev-rootcoord-dml-channel-invalid"

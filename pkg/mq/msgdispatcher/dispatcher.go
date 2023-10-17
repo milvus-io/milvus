@@ -91,6 +91,7 @@ func NewDispatcher(ctx context.Context,
 	log := log.With(zap.String("pchannel", pchannel),
 		zap.String("subName", subName), zap.Bool("isMain", isMain))
 	log.Info("creating dispatcher...")
+
 	stream, err := factory.NewTtMsgStream(ctx)
 	if err != nil {
 		return nil, err

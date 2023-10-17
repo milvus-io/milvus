@@ -188,9 +188,6 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 			log.Warn("cannot get collection schema", zap.Error(err))
 		}
 
-		// Add the channel to cluster for watching.
-		s.cluster.Watch(ctx, r.ChannelName, r.CollectionID)
-
 		segmentAllocations := make([]*Allocation, 0)
 		if r.GetIsImport() {
 			// Have segment manager allocate and return the segment allocation info.
@@ -1207,7 +1204,7 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 		}, nil
 	}
 	for _, channelName := range req.GetChannelNames() {
-		ch := &channelMeta{
+		ch := &StateChannel{
 			Name:            channelName,
 			CollectionID:    req.GetCollectionID(),
 			StartPositions:  req.GetStartPositions(),

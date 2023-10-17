@@ -360,15 +360,27 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 }
 
 func (node *DataNode) NotifyChannelOperation(ctx context.Context, req *datapb.ChannelOperationsRequest) (*commonpb.Status, error) {
-	log.Warn("DataNode NotifyChannelOperation is unimplemented")
-	return merr.Status(merr.ErrServiceUnavailable), nil
+	log.Ctx(ctx).Info("DataNode receives NotifyChannelOperation",
+		zap.Int("operation count", len(req.GetInfos())))
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		log.Warn("DataNode.SyncSegments failed", zap.Int64("nodeId", paramtable.GetNodeID()), zap.Error(err))
+		return merr.Status(err), nil
+	}
+
+	for _, info := range req.GetInfos() {
+		err := node.channelManager.Submit(info)
+		if err != nil {
+			log.Warn("Submit error", zap.Error(err))
+			return merr.Status(err), nil
+		}
+	}
+
+	return merr.Status(nil), nil
 }
 
 func (node *DataNode) CheckChannelOperationProgress(ctx context.Context, req *datapb.ChannelWatchInfo) (*datapb.ChannelOperationProgressResponse, error) {
-	log.Warn("DataNode CheckChannelOperationProgress is unimplemented")
-	return &datapb.ChannelOperationProgressResponse{
-		Status: merr.Status(merr.ErrServiceUnavailable),
-	}, nil
+	return node.channelManager.GetProgress(req), nil
 }
 
 // Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments

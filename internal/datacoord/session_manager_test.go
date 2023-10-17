@@ -35,7 +35,7 @@ func (s *SessionManagerSuite) SetupTest() {
 		return s.dn, nil
 	}))
 
-	s.m.AddSession(&NodeInfo{1000, "addr-1"})
+	s.m.AddSession(&NodeInfo{1000, "addr-1", true})
 	s.MetricsEqual(metrics.DataCoordNumDataNodes, 1)
 }
 

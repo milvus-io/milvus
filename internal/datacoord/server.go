@@ -117,7 +117,7 @@ type Server struct {
 	allocator        allocator
 	cluster          Cluster
 	sessionManager   SessionManager
-	channelManager   *ChannelManagerImpl
+	channelManager   ChannelManager
 	rootCoordClient  types.RootCoordClient
 	garbageCollector *garbageCollector
 	gcOpt            GcOption
@@ -337,6 +337,7 @@ func (s *Server) initDataCoord() error {
 	log.Info("init rootcoord client done")
 
 	s.broker = broker.NewCoordinatorBroker(s.rootCoordClient)
+	s.allocator = newRootCoordAllocator(s.rootCoordClient)
 
 	storageCli, err := s.newChunkManagerFactory()
 	if err != nil {
@@ -354,8 +355,6 @@ func (s *Server) initDataCoord() error {
 		return err
 	}
 	log.Info("init datanode cluster done")
-
-	s.allocator = newRootCoordAllocator(s.rootCoordClient)
 
 	s.initIndexNodeManager()
 
@@ -459,13 +458,13 @@ func (s *Server) initCluster() error {
 		return nil
 	}
 
+	s.sessionManager = NewSessionManagerImpl(withSessionCreator(s.dataNodeCreator))
+
 	var err error
-	s.channelManager, err = NewChannelManager(s.watchClient, s.handler, withMsgstreamFactory(s.factory),
-		withStateChecker(), withBgChecker())
+	s.channelManager, err = NewChannelManager(s.watchClient, s.handler, s.sessionManager, s.allocator, withChecker())
 	if err != nil {
 		return err
 	}
-	s.sessionManager = NewSessionManagerImpl(withSessionCreator(s.dataNodeCreator))
 	s.cluster = NewClusterImpl(s.sessionManager, s.channelManager)
 	return nil
 }
@@ -544,11 +543,21 @@ func (s *Server) initServiceDiscovery() error {
 	log.Info("DataCoord success to get DataNode sessions", zap.Any("sessions", sessions))
 
 	datanodes := make([]*NodeInfo, 0, len(sessions))
+	legacyVersion, err := semver.Parse("2.3.3")
+	if err != nil {
+		log.Warn("DataCoord failed to init service discovery", zap.Error(err))
+	}
+
 	for _, session := range sessions {
 		info := &NodeInfo{
 			NodeID:  session.ServerID,
 			Address: session.Address,
 		}
+
+		if session.Version.LTE(legacyVersion) {
+			info.IsLegacy = true
+		}
+
 		datanodes = append(datanodes, info)
 	}
 

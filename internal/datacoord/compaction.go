@@ -111,17 +111,16 @@ type compactionPlanHandler struct {
 
 	meta      CompactionMeta
 	allocator allocator
-	chManager *ChannelManagerImpl
-	scheduler Scheduler
+	chManager ChannelManager
 	sessions  SessionManager
+	scheduler Scheduler
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
 	stopWg   sync.WaitGroup
 }
 
-func newCompactionPlanHandler(sessions SessionManager, cm *ChannelManagerImpl, meta CompactionMeta, allocator allocator,
-) *compactionPlanHandler {
+func newCompactionPlanHandler(sessions SessionManager, cm ChannelManager, meta CompactionMeta, allocator allocator) *compactionPlanHandler {
 	return &compactionPlanHandler{
 		plans:     make(map[int64]*compactionTask),
 		chManager: cm,

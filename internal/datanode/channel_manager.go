@@ -87,6 +87,7 @@ func (m *ChannelManager) GetProgress(info *datapb.ChannelWatchInfo) *datapb.Chan
 	case datapb.ChannelWatchState_ToWatch:
 		if m.fgManager.HasFlowgraphWithOpID(channel, info.GetOpID()) {
 			resp.State = datapb.ChannelWatchState_WatchSuccess
+			resp.Progress = 100
 			return resp
 		}
 
@@ -328,22 +329,24 @@ func (r *opRunner) watchWithTimer(info *datapb.ChannelWatchInfo) *opState {
 		timer := time.NewTimer(watchTimeout)
 		defer timer.Stop()
 
-		log.Info("Start timer for ToWatch operation", zap.Duration("timeout", watchTimeout))
+		log := log.With(zap.Duration("timeout", watchTimeout))
+		log.Info("Start timer for ToWatch operation")
 		for {
 			select {
 			case <-timer.C:
 				// watch timeout
 				tickler.close()
 				cancel()
-				log.Info("Stop timer for ToWatch operation timeout", zap.Duration("timeout", watchTimeout))
+				log.Info("Stop timer for ToWatch operation timeout")
 				return
 
 			case <-tickler.progressSig:
+				log.Info("Reset timer for tickler updated")
 				timer.Reset(watchTimeout)
 
 			case <-successSig:
 				// watch success
-				log.Info("Stop timer for ToWatch operation succeeded", zap.Duration("timeout", watchTimeout))
+				log.Info("Stop timer for ToWatch operation succeeded")
 				return
 			}
 		}
