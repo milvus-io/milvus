@@ -29,6 +29,9 @@ RUN mkdir /tmp/ccache && cd /tmp/ccache &&\
     rpm -i hiredis-1.0.2-1.el9.`uname -m`.rpm ccache-4.5.1-2.el9.`uname -m`.rpm &&\
     rm -rf /tmp/ccache
 
+# Install Rust
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain 1.73.0
+ENV PATH /root/.cargo/bin:$PATH
 
 # refer: https://code.visualstudio.com/docs/remote/containers-advanced#_avoiding-extension-reinstalls-on-container-rebuild
 RUN mkdir -p /home/milvus/.vscode-server/extensions \
