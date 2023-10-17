@@ -4899,6 +4899,29 @@ class TestUtilityNegativeRbac(TestcaseBase):
         self.database_wrap.using_database(ct.default_db)
         collection_w.flush(check_task=CheckTasks.check_permission_deny)
 
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_create_over_max_roles(self, host, port):
+        """
+        target: test create roles over max num
+        method: test create role with random name
+        expected: raise exception
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        # 2 original roles: admin, public
+        for i in range(ct.max_role_num - 2):
+            role_name = "role_" + str(i)
+            self.utility_wrap.init_role(role_name, check_task=CheckTasks.check_role_property,
+                                        check_items={exp_name: role_name})
+            self.utility_wrap.create_role()
+            assert self.utility_wrap.role_is_exist()[0]
+
+        # now total 10 roles, create a new one will report error
+        self.utility_wrap.init_role("role_11")
+        error = {ct.err_code: 35,
+                 ct.err_msg: "unable to create role because the number of roles has reached the limit"}
+        self.utility_wrap.create_role(check_task=CheckTasks.err_res, check_items=error)
+
 
 @pytest.mark.tags(CaseLabel.L3)
 class TestUtilityFlushAll(TestcaseBase):

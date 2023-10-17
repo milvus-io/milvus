@@ -1665,13 +1665,11 @@ class TestUpsertValid(TestcaseBase):
         """
         upsert_nb = 1000
         collection_w = self.init_collection_general(pre_upsert, True)[0]
-        upsert_data, float_values = cf.gen_default_data_for_upsert(
-            upsert_nb, start=start)
+        upsert_data, float_values = cf.gen_default_data_for_upsert(upsert_nb, start=start)
         collection_w.upsert(data=upsert_data)
         exp = f"int64 >= {start} && int64 <= {upsert_nb + start}"
         res = collection_w.query(exp, output_fields=[default_float_name])[0]
-        assert [res[i][default_float_name]
-                for i in range(upsert_nb)] == float_values.to_list()
+        assert [res[i][default_float_name] for i in range(upsert_nb)] == float_values.to_list()
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_upsert_with_primary_key_string(self):
@@ -1683,13 +1681,10 @@ class TestUpsertValid(TestcaseBase):
         expected: raise no exception
         """
         c_name = cf.gen_unique_str(pre_upsert)
-        fields = [cf.gen_string_field(), cf.gen_float_vec_field(
-            dim=ct.default_dim)]
-        schema = cf.gen_collection_schema(
-            fields=fields, primary_field=ct.default_string_field_name)
+        fields = [cf.gen_string_field(), cf.gen_float_vec_field(dim=ct.default_dim)]
+        schema = cf.gen_collection_schema(fields=fields, primary_field=ct.default_string_field_name)
         collection_w = self.init_collection_wrap(name=c_name, schema=schema)
-        vectors = [[random.random() for _ in range(ct.default_dim)]
-                   for _ in range(2)]
+        vectors = [[random.random() for _ in range(ct.default_dim)] for _ in range(2)]
         collection_w.insert([["a", "b"], vectors])
         collection_w.upsert([[" a", "b  "], vectors])
         assert collection_w.num_entities == 4
@@ -1705,14 +1700,12 @@ class TestUpsertValid(TestcaseBase):
         """
         nb = 500
         c_name = cf.gen_unique_str(pre_upsert)
-        collection_w = self.init_collection_general(
-            c_name, True, is_binary=True)[0]
+        collection_w = self.init_collection_general(c_name, True, is_binary=True)[0]
         binary_vectors = cf.gen_binary_vectors(nb, ct.default_dim)[1]
         data = [[i for i in range(nb)], [np.float32(i) for i in range(nb)],
                 [str(i) for i in range(nb)], binary_vectors]
         collection_w.upsert(data)
-        res = collection_w.query(
-            "int64 >= 0", [ct.default_binary_vec_field_name])[0]
+        res = collection_w.query("int64 >= 0", [ct.default_binary_vec_field_name])[0]
         assert binary_vectors[0] == res[0][ct. default_binary_vec_field_name][0]
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1742,8 +1735,7 @@ class TestUpsertValid(TestcaseBase):
                 3. upsert data=None
         expected: raise no exception
         """
-        collection_w = self.init_collection_general(
-            pre_upsert, insert_data=True, is_index=False)[0]
+        collection_w = self.init_collection_general(pre_upsert, insert_data=True, is_index=False)[0]
         assert collection_w.num_entities == ct.default_nb
         collection_w.upsert(data=None)
         assert collection_w.num_entities == ct.default_nb
@@ -1762,8 +1754,7 @@ class TestUpsertValid(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         collection_w.create_partition("partition_new")
         cf.insert_data(collection_w)
-        collection_w.create_index(
-            ct.default_float_vec_field_name, default_index_params)
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
         collection_w.load()
 
         # check the ids which will be upserted is in partition _default
@@ -1772,10 +1763,8 @@ class TestUpsertValid(TestcaseBase):
         res0 = collection_w.query(expr, [default_float_name], ["_default"])[0]
         assert len(res0) == upsert_nb
         collection_w.flush()
-        res1 = collection_w.query(
-            expr, [default_float_name], ["partition_new"])[0]
-        assert collection_w.partition('partition_new')[
-            0].num_entities == ct.default_nb // 2
+        res1 = collection_w.query(expr, [default_float_name], ["partition_new"])[0]
+        assert collection_w.partition('partition_new')[0].num_entities == ct.default_nb // 2
 
         # upsert ids in partition _default
         data, float_values = cf.gen_default_data_for_upsert(upsert_nb)
@@ -1784,13 +1773,10 @@ class TestUpsertValid(TestcaseBase):
         # check the result in partition _default(upsert successfully) and others(no missing, nothing new)
         collection_w.flush()
         res0 = collection_w.query(expr, [default_float_name], ["_default"])[0]
-        res2 = collection_w.query(
-            expr, [default_float_name], ["partition_new"])[0]
+        res2 = collection_w.query(expr, [default_float_name], ["partition_new"])[0]
         assert res1 == res2
-        assert [res0[i][default_float_name]
-                for i in range(upsert_nb)] == float_values.to_list()
-        assert collection_w.partition('partition_new')[
-            0].num_entities == ct.default_nb // 2
+        assert [res0[i][default_float_name] for i in range(upsert_nb)] == float_values.to_list()
+        assert collection_w.partition('partition_new')[0].num_entities == ct.default_nb // 2
 
     @pytest.mark.tags(CaseLabel.L2)
     # @pytest.mark.skip(reason="issue #22592")
@@ -1810,15 +1796,13 @@ class TestUpsertValid(TestcaseBase):
 
         # insert data and load collection
         cf.insert_data(collection_w)
-        collection_w.create_index(
-            ct.default_float_vec_field_name, default_index_params)
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
         collection_w.load()
 
         # check the ids which will be upserted is not in partition 'partition_1'
         upsert_nb = 100
         expr = f"int64 >= 0 && int64 <= {upsert_nb}"
-        res = collection_w.query(
-            expr, [default_float_name], ["partition_1"])[0]
+        res = collection_w.query(expr, [default_float_name], ["partition_1"])[0]
         assert len(res) == 0
 
         # upsert in partition 'partition_1'
@@ -1826,10 +1810,8 @@ class TestUpsertValid(TestcaseBase):
         collection_w.upsert(data, "partition_1")
 
         # check the upserted data in 'partition_1'
-        res1 = collection_w.query(
-            expr, [default_float_name], ["partition_1"])[0]
-        assert [res1[i][default_float_name]
-                for i in range(upsert_nb)] == float_values.to_list()
+        res1 = collection_w.query(expr, [default_float_name], ["partition_1"])[0]
+        assert [res1[i][default_float_name] for i in range(upsert_nb)] == float_values.to_list()
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_upsert_same_pk_concurrently(self):
@@ -1843,8 +1825,7 @@ class TestUpsertValid(TestcaseBase):
         # initialize a collection
         upsert_nb = 1000
         collection_w = self.init_collection_general(pre_upsert, True)[0]
-        data1, float_values1 = cf.gen_default_data_for_upsert(
-            upsert_nb, size=1000)
+        data1, float_values1 = cf.gen_default_data_for_upsert(upsert_nb, size=1000)
         data2, float_values2 = cf.gen_default_data_for_upsert(upsert_nb)
 
         # upsert at the same time
@@ -1864,8 +1845,7 @@ class TestUpsertValid(TestcaseBase):
 
         # check the result
         exp = f"int64 >= 0 && int64 <= {upsert_nb}"
-        res = collection_w.query(
-            exp, [default_float_name], consistency_level="Strong")[0]
+        res = collection_w.query(exp, [default_float_name], consistency_level="Strong")[0]
         res = [res[i][default_float_name] for i in range(upsert_nb)]
         if not (res == float_values1.to_list() or res == float_values2.to_list()):
             assert False
@@ -1910,12 +1890,30 @@ class TestUpsertValid(TestcaseBase):
             data = cf.gen_default_list_data(upsert_nb, start=i * step)
             collection_w.upsert(data)
         # load
-        collection_w.create_index(
-            ct.default_float_vec_field_name, default_index_params)
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
         collection_w.load()
         # check the result
         res = collection_w.query(expr="", output_fields=["count(*)"])[0]
         assert res[0]["count(*)"] == upsert_nb * 10 - step * 9
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_upsert_enable_dynamic_field(self):
+        """
+        target: test upsert when enable dynamic field is True
+        method: 1. create a collection and insert data
+                2. upsert
+        expected: not raise exception
+        """
+        upsert_nb = ct.default_nb
+        start = ct.default_nb // 2
+        collection_w = self.init_collection_general(pre_upsert, True, enable_dynamic_field=True)[0]
+        upsert_data = cf.gen_default_rows_data(start=start)
+        for i in range(start, start + upsert_nb):
+            upsert_data[i - start]["new"] = [i, i + 1]
+        collection_w.upsert(data=upsert_data)
+        exp = f"int64 >= {start} && int64 <= {upsert_nb + start}"
+        res = collection_w.query(exp, output_fields=["new"])[0]
+        assert len(res[0]["new"]) == 2
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.skip("not support default_value now")
@@ -2034,8 +2032,7 @@ class TestUpsertInvalid(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         error = {ct.err_code: 1, ct.err_msg: "The fields don't match with schema fields, expected: "
                                              "['int64', 'float', 'varchar', 'float_vector']"}
-        collection_w.upsert(
-            data=data, check_task=CheckTasks.err_res, check_items=error)
+        collection_w.upsert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_upsert_pk_type_invalid(self):
@@ -2050,8 +2047,7 @@ class TestUpsertInvalid(TestcaseBase):
                 cf.gen_vectors(2, ct.default_dim)]
         error = {ct.err_code: 1, ct.err_msg: "The data type of field int64 doesn't match, "
                                              "expected: INT64, got VARCHAR"}
-        collection_w.upsert(
-            data=data, check_task=CheckTasks.err_res, check_items=error)
+        collection_w.upsert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_upsert_data_unmatch(self):
@@ -2067,8 +2063,7 @@ class TestUpsertInvalid(TestcaseBase):
         data = [1, "a", 2.0, vector]
         error = {ct.err_code: 1, ct.err_msg: "The fields don't match with schema fields, "
                                              "expected: ['int64', 'float', 'varchar', 'float_vector']"}
-        collection_w.upsert(
-            data=[data], check_task=CheckTasks.err_res, check_items=error)
+        collection_w.upsert(data=[data], check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("vector", [[], [1.0, 2.0], "a", 1.0, None])
@@ -2084,8 +2079,7 @@ class TestUpsertInvalid(TestcaseBase):
         data = [2.0, "a", vector]
         error = {ct.err_code: 1, ct.err_msg: "The fields don't match with schema fields, "
                                              "expected: ['int64', 'float', 'varchar', 'float_vector']"}
-        collection_w.upsert(
-            data=[data], check_task=CheckTasks.err_res, check_items=error)
+        collection_w.upsert(data=[data], check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("dim", [120, 129, 200])
@@ -2096,13 +2090,11 @@ class TestUpsertInvalid(TestcaseBase):
                 2. upsert with mismatched dim
         expected: raise exception
         """
-        collection_w = self.init_collection_general(
-            pre_upsert, True, is_binary=True)[0]
+        collection_w = self.init_collection_general(pre_upsert, True, is_binary=True)[0]
         data = cf.gen_default_binary_dataframe_data(dim=dim)[0]
         error = {ct.err_code: 1,
                  ct.err_msg: f"Collection field dim is 128, but entities field dim is {dim}"}
-        collection_w.upsert(
-            data=data, check_task=CheckTasks.err_res, check_items=error)
+        collection_w.upsert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("dim", [127, 129, 200])
@@ -2117,8 +2109,7 @@ class TestUpsertInvalid(TestcaseBase):
         data = cf.gen_default_data_for_upsert(dim=dim)[0]
         error = {ct.err_code: 1,
                  ct.err_msg: f"Collection field dim is 128, but entities field dim is {dim}"}
-        collection_w.upsert(
-            data=data, check_task=CheckTasks.err_res, check_items=error)
+        collection_w.upsert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("partition_name", ct.get_invalid_strs[7:13])
@@ -2183,17 +2174,16 @@ class TestUpsertInvalid(TestcaseBase):
                 2. upsert data no pk
         expected: raise exception
         """
-        collection_w = self.init_collection_general(
-            pre_upsert, auto_id=True, is_index=False)[0]
+        collection_w = self.init_collection_general(pre_upsert, auto_id=True, is_index=False)[0]
         error = {ct.err_code: 1,
                  ct.err_msg: "Upsert don't support autoid == true"}
         float_vec_values = cf.gen_vectors(ct.default_nb, ct.default_dim)
         data = [[np.float32(i) for i in range(ct.default_nb)], [str(i) for i in range(ct.default_nb)],
                 float_vec_values]
-        collection_w.upsert(
-            data=data, check_task=CheckTasks.err_res, check_items=error)
+        collection_w.upsert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("not support default_value now")
     @pytest.mark.parametrize("default_value", [[], None])
     def test_upsert_array_using_default_value(self, default_value):
         """
@@ -2212,6 +2202,7 @@ class TestUpsertInvalid(TestcaseBase):
                             check_items={ct.err_code: 1, ct.err_msg: "Field varchar don't match in entities[0]"})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("not support default_value now")
     @pytest.mark.parametrize("default_value", [[], None])
     def test_upsert_tuple_using_default_value(self, default_value):
         """
