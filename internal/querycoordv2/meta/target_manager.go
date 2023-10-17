@@ -20,13 +20,13 @@ import (
 	"context"
 	"sync"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -192,7 +192,7 @@ func (mgr *TargetManager) PullNextTargetV2(broker Broker, collectionID int64, ch
 		vChannelInfos, segmentInfos, err := broker.GetRecoveryInfoV2(context.TODO(), collectionID)
 		if err != nil {
 			// if meet rpc error, for compatibility with previous versions, try pull next target v1
-			if funcutil.IsGrpcErr(err, codes.Unimplemented) {
+			if errors.Is(err, merr.ErrServiceUnimplemented) {
 				segments, dmChannels, err = mgr.PullNextTargetV1(broker, collectionID, chosenPartitionIDs...)
 				return err
 			}

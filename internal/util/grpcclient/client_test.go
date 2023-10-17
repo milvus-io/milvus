@@ -315,11 +315,11 @@ func TestClientBase_CheckError(t *testing.T) {
 	base.MaxAttempts = 1
 
 	ctx := context.Background()
-	retry, reset := base.checkErr(ctx, status.Errorf(codes.Canceled, "fake context canceled"))
+	retry, reset, _ := base.checkErr(ctx, status.Errorf(codes.Canceled, "fake context canceled"))
 	assert.True(t, retry)
 	assert.True(t, reset)
 
-	retry, reset = base.checkErr(ctx, status.Errorf(codes.Unimplemented, "fake context canceled"))
+	retry, reset, _ = base.checkErr(ctx, status.Errorf(codes.Unimplemented, "fake context canceled"))
 	assert.False(t, retry)
 	assert.False(t, reset)
 }
