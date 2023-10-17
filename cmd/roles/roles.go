@@ -250,6 +250,7 @@ func (mr *MilvusRoles) setupLogger() {
 
 // Register serves prometheus http service
 func setupPrometheusHTTPServer(r *internalmetrics.MilvusRegistry) {
+	log.Info("setupPrometheusHTTPServer")
 	http.Register(&http.Handler{
 		Path:    "/metrics",
 		Handler: promhttp.HandlerFor(r, promhttp.HandlerOpts{}),
@@ -338,6 +339,7 @@ func (mr *MilvusRoles) Run() {
 	}
 
 	http.ServeHTTP()
+	setupPrometheusHTTPServer(Registry)
 
 	var wg sync.WaitGroup
 	local := mr.Local
@@ -380,7 +382,6 @@ func (mr *MilvusRoles) Run() {
 
 	mr.setupLogger()
 	tracer.Init()
-	setupPrometheusHTTPServer(Registry)
 
 	paramtable.SetCreateTime(time.Now())
 	paramtable.SetUpdateTime(time.Now())
