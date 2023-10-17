@@ -19,7 +19,6 @@ package accesslog
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path"
 	"sync"
@@ -320,7 +319,7 @@ func (l *RotateLogger) newBackupName() string {
 }
 
 func (l *RotateLogger) oldLogFiles() ([]logInfo, error) {
-	files, err := ioutil.ReadDir(l.dir())
+	files, err := os.ReadDir(l.dir())
 	if err != nil {
 		return nil, fmt.Errorf("can't read log file directory: %s", err)
 	}

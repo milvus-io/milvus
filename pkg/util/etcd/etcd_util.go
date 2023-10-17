@@ -20,7 +20,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"io/ioutil"
 	"net/url"
 	"os"
 	"time"
@@ -75,7 +74,7 @@ func GetRemoteEtcdSSLClient(endpoints []string, certFile string, keyFile string,
 	if err != nil {
 		return nil, errors.Wrap(err, "load etcd cert key pair error")
 	}
-	caCert, err := ioutil.ReadFile(caCertFile)
+	caCert, err := os.ReadFile(caCertFile)
 	if err != nil {
 		return nil, errors.Wrapf(err, "load etcd CACert file error, filename = %s", caCertFile)
 	}
@@ -182,7 +181,7 @@ func buildKvGroup(keys, values []string) (map[string]string, error) {
 // StartTestEmbedEtcdServer returns a newly created embed etcd server.
 // ### USED FOR UNIT TEST ONLY ###
 func StartTestEmbedEtcdServer() (*embed.Etcd, string, error) {
-	dir, err := ioutil.TempDir(os.TempDir(), "milvus_ut")
+	dir, err := os.MkdirTemp(os.TempDir(), "milvus_ut")
 	if err != nil {
 		return nil, "", err
 	}

@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"reflect"
 	"regexp"
@@ -589,7 +588,7 @@ func (n *NumpyAdapter) ReadString(count int) ([]string, error) {
 			// the character "a" occupys 2*4=8 bytes(0x97,0x00,0x00,0x00,0x00,0x00,0x00,0x00),
 			// the "bb" occupys 8 bytes(0x97,0x00,0x00,0x00,0x98,0x00,0x00,0x00)
 			// for non-ascii characters, the unicode could be 1 ~ 4 bytes, each character occupys 4 bytes, too
-			raw, err := ioutil.ReadAll(io.LimitReader(n.reader, utf8.UTFMax*int64(maxLen)*int64(batchRead)))
+			raw, err := io.ReadAll(io.LimitReader(n.reader, utf8.UTFMax*int64(maxLen)*int64(batchRead)))
 			if err != nil {
 				log.Warn("Numpy adapter: failed to read utf32 bytes from numpy file",
 					zap.Int("readDone", readDone), zap.Error(err))
@@ -610,7 +609,7 @@ func (n *NumpyAdapter) ReadString(count int) ([]string, error) {
 		} else {
 			// in the numpy file with ansi encoding, the dType could be like "S2", maxLen is 2, each string occupys 2 bytes
 			// bytes.Index(buf, []byte{0}) tell us which position is the end of the string
-			buf, err := ioutil.ReadAll(io.LimitReader(n.reader, int64(maxLen)*int64(batchRead)))
+			buf, err := io.ReadAll(io.LimitReader(n.reader, int64(maxLen)*int64(batchRead)))
 			if err != nil {
 				log.Warn("Numpy adapter: failed to read ascii bytes from numpy file",
 					zap.Int("readDone", readDone), zap.Error(err))

@@ -95,15 +95,17 @@ linters-settings:
       main:
         deny:
           - pkg: "errors"
-            desc: not allowd, use github.com/cockroachdb/errors
+            desc: not allowed, use github.com/cockroachdb/errors
           - pkg: "github.com/pkg/errors"
-            desc: not allowd, use github.com/cockroachdb/errors
+            desc: not allowed, use github.com/cockroachdb/errors
           - pkg: "github.com/pingcap/errors"
-            desc: not allowd, use github.com/cockroachdb/errors
+            desc: not allowed, use github.com/cockroachdb/errors
           - pkg: "golang.org/x/xerrors"
-            desc: not allowd, use github.com/cockroachdb/errors
+            desc: not allowed, use github.com/cockroachdb/errors
           - pkg: "github.com/go-errors/errors"
-            desc: not allowd, use github.com/cockroachdb/errors
+            desc: not allowed, use github.com/cockroachdb/errors
+          - pkg: "io/ioutil"
+            desc: ioutil is deprecated after 1.16, 1.17, use os and io package instead
   forbidigo:
     forbid:
       - '^time\.Tick$'

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"math/rand"
 	"net/url"
 	"os"
@@ -448,7 +447,7 @@ type SessionWithVersionSuite struct {
 
 // SetupSuite setup suite env
 func (suite *SessionWithVersionSuite) SetupSuite() {
-	dir, err := ioutil.TempDir(os.TempDir(), "milvus_ut")
+	dir, err := os.MkdirTemp(os.TempDir(), "milvus_ut")
 	suite.Require().NoError(err)
 	suite.tmpDir = dir
 	suite.T().Log("using tmp dir:", dir)
@@ -782,7 +781,7 @@ type SessionSuite struct {
 
 func (s *SessionSuite) SetupSuite() {
 	paramtable.Init()
-	dir, err := ioutil.TempDir(os.TempDir(), "milvus_ut")
+	dir, err := os.MkdirTemp(os.TempDir(), "milvus_ut")
 	s.Require().NoError(err)
 	s.tmpDir = dir
 	s.T().Log("using tmp dir:", dir)

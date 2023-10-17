@@ -22,7 +22,6 @@ import (
 	"crypto/x509"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"os"
@@ -247,7 +246,7 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 		}
 
 		certPool := x509.NewCertPool()
-		rootBuf, err := ioutil.ReadFile(Params.CaPemPath.GetValue())
+		rootBuf, err := os.ReadFile(Params.CaPemPath.GetValue())
 		if err != nil {
 			log.Warn("failed read ca pem", zap.Error(err))
 			errChan <- err
@@ -468,7 +467,7 @@ func (s *Server) init() error {
 				}
 
 				certPool := x509.NewCertPool()
-				rootBuf, err := ioutil.ReadFile(Params.CaPemPath.GetValue())
+				rootBuf, err := os.ReadFile(Params.CaPemPath.GetValue())
 				if err != nil {
 					log.Error("failed read ca pem", zap.Error(err))
 					return err
