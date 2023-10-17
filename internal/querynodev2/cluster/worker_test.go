@@ -178,6 +178,19 @@ func (s *RemoteWorkerSuite) TestDelete() {
 
 		s.Error(err)
 	})
+
+	s.Run("legacy_querynode_unimplemented", func() {
+		defer func() { s.mockClient.ExpectedCalls = nil }()
+
+		s.mockClient.EXPECT().Delete(mock.Anything, mock.AnythingOfType("*querypb.DeleteRequest")).
+			Return(nil, status.Errorf(codes.Unimplemented, "mocked grpc unimplemented"))
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		err := s.worker.Delete(ctx, &querypb.DeleteRequest{})
+
+		s.NoError(err)
+	})
 }
 
 func (s *RemoteWorkerSuite) TestSearch() {
