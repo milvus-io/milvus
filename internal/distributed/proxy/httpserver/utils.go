@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/parameterutil.go"
 )
@@ -29,21 +30,21 @@ import (
 func ParseUsernamePassword(c *gin.Context) (string, string, bool) {
 	username, password, ok := c.Request.BasicAuth()
 	if !ok {
-		auth := c.Request.Header.Get("Authorization")
-		if auth != "" {
-			token := strings.TrimPrefix(auth, "Bearer ")
-			if token != auth {
-				i := strings.IndexAny(token, ":")
-				if i != -1 {
-					username = token[:i]
-					password = token[i+1:]
-				}
-			}
+		token := GetAuthorization(c)
+		i := strings.IndexAny(token, util.CredentialSeperator)
+		if i != -1 {
+			username = token[:i]
+			password = token[i+1:]
 		}
 	} else {
 		c.Header("WWW-Authenticate", `Basic realm="restricted", charset="UTF-8"`)
 	}
 	return username, password, username != "" && password != ""
+}
+
+func GetAuthorization(c *gin.Context) string {
+	auth := c.Request.Header.Get("Authorization")
+	return strings.TrimPrefix(auth, "Bearer ")
 }
 
 // find the primary field of collection

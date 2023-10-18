@@ -118,7 +118,7 @@ func TestAuthenticationInterceptor(t *testing.T) {
 
 	{
 		// verify apikey error
-		hoo = mockAPIHook{mockErr: errors.New("err")}
+		SetMockAPIHook("", errors.New("err"))
 		md = metadata.Pairs(util.HeaderAuthorize, crypto.Base64Encode("mockapikey"))
 		ctx = metadata.NewIncomingContext(ctx, md)
 		_, err = AuthenticationInterceptor(ctx)
@@ -126,7 +126,7 @@ func TestAuthenticationInterceptor(t *testing.T) {
 	}
 
 	{
-		hoo = mockAPIHook{mockErr: nil, apiUser: "mockUser"}
+		SetMockAPIHook("mockUser", nil)
 		md = metadata.Pairs(util.HeaderAuthorize, crypto.Base64Encode("mockapikey"))
 		ctx = metadata.NewIncomingContext(ctx, md)
 		authCtx, err := AuthenticationInterceptor(ctx)
@@ -140,14 +140,5 @@ func TestAuthenticationInterceptor(t *testing.T) {
 		user, _ := parseMD(rawToken)
 		assert.Equal(t, "mockUser", user)
 	}
-}
-
-type mockAPIHook struct {
-	defaultHook
-	mockErr error
-	apiUser string
-}
-
-func (m mockAPIHook) VerifyAPIKey(apiKey string) (string, error) {
-	return m.apiUser, m.mockErr
+	hoo = defaultHook{}
 }
