@@ -918,6 +918,18 @@ func PasswordVerify(ctx context.Context, username, rawPwd string) bool {
 	return passwordVerify(ctx, username, rawPwd, globalMetaCache)
 }
 
+func VerifyAPIKey(rawToken string) (string, error) {
+	if hoo == nil {
+		return "", merr.WrapErrServiceInternal("internal: Milvus Proxy is not ready yet. please wait")
+	}
+	user, err := hoo.VerifyAPIKey(rawToken)
+	if err != nil {
+		log.Warn("fail to verify apikey", zap.String("api_key", rawToken), zap.Error(err))
+		return "", merr.WrapErrParameterInvalidMsg("invalid apikey: [%s]", rawToken)
+	}
+	return user, nil
+}
+
 // PasswordVerify verify password
 func passwordVerify(ctx context.Context, username, rawPwd string, globalMetaCache Cache) bool {
 	// it represents the cache miss if Sha256Password is empty within credInfo, which shall be updated first connection.

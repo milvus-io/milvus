@@ -22,12 +22,14 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"net/http/httptest"
 	"os"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -40,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/federpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
@@ -1350,4 +1353,26 @@ func TestNotImplementedAPIs(t *testing.T) {
 			assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
 		})
 	})
+}
+
+func TestHttpAuthenticate(t *testing.T) {
+	paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	defer paramtable.Get().Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key)
+	ctx, _ := gin.CreateTestContext(nil)
+	ctx.Request = httptest.NewRequest("GET", "/test", nil)
+	{
+		assert.Panics(t, func() {
+			ctx.Request.Header.Set("Authorization", "Bearer 123456")
+			authenticate(ctx)
+		})
+	}
+
+	{
+		proxy.SetMockAPIHook("foo", nil)
+		defer proxy.SetMockAPIHook("", nil)
+		ctx.Request.Header.Set("Authorization", "Bearer 123456")
+		authenticate(ctx)
+		ctxName, _ := ctx.Get(httpserver.ContextUsername)
+		assert.Equal(t, "foo", ctxName)
+	}
 }

@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -62,6 +63,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/tracer"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/interceptor"
@@ -127,6 +129,15 @@ func authenticate(c *gin.Context) {
 			c.Set(httpserver.ContextUsername, username)
 			return
 		}
+	}
+	rawToken := httpserver.GetAuthorization(c)
+	if rawToken != "" && !strings.Contains(rawToken, util.CredentialSeperator) {
+		user, err := proxy.VerifyAPIKey(rawToken)
+		if err == nil {
+			c.Set(httpserver.ContextUsername, user)
+			return
+		}
+		log.Warn("fail to verify apikey", zap.Error(err))
 	}
 	c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{httpserver.HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), httpserver.HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
 }

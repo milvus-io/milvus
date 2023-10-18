@@ -73,14 +73,10 @@ func AuthenticationInterceptor(ctx context.Context) (context.Context, error) {
 			}
 
 			if !strings.Contains(rawToken, util.CredentialSeperator) {
-				// apikey authentication
-				if hoo == nil {
-					return nil, merr.WrapErrServiceInternal("internal: Milvus Proxy is not ready yet. please wait")
-				}
-				user, err := hoo.VerifyAPIKey(rawToken)
+				user, err := VerifyAPIKey(rawToken)
 				if err != nil {
-					log.Warn("fail to verify apikey", zap.String("api_key", rawToken), zap.Error(err))
-					return nil, merr.WrapErrParameterInvalidMsg("invalid apikey: [%s]", rawToken)
+					log.Warn("fail to verify apikey", zap.Error(err))
+					return nil, err
 				}
 				metrics.UserRPCCounter.WithLabelValues(user).Inc()
 				userToken := fmt.Sprintf("%s%s%s", user, util.CredentialSeperator, "___")

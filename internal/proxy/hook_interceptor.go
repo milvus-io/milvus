@@ -144,3 +144,25 @@ func getCurrentUser(ctx context.Context) string {
 	}
 	return username
 }
+
+// MockAPIHook is a mock hook for api key verification, ONLY FOR TEST
+type MockAPIHook struct {
+	defaultHook
+	mockErr error
+	apiUser string
+}
+
+func (m MockAPIHook) VerifyAPIKey(apiKey string) (string, error) {
+	return m.apiUser, m.mockErr
+}
+
+func SetMockAPIHook(apiUser string, mockErr error) {
+	if apiUser == "" && mockErr == nil {
+		hoo = defaultHook{}
+		return
+	}
+	hoo = MockAPIHook{
+		mockErr: mockErr,
+		apiUser: apiUser,
+	}
+}
