@@ -117,12 +117,12 @@ func checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool 
 	if notEq {
 		return false
 	}
-	if len(fieldIndex.IndexParams) != len(req.IndexParams) {
+	if len(fieldIndex.UserIndexParams) != len(req.GetUserIndexParams()) {
 		return false
 	}
-	for _, param1 := range fieldIndex.IndexParams {
+	for _, param1 := range fieldIndex.UserIndexParams {
 		exist := false
-		for _, param2 := range req.IndexParams {
+		for _, param2 := range req.GetUserIndexParams() {
 			if param2.Key == param1.Key && param2.Value == param1.Value {
 				exist = true
 			}
