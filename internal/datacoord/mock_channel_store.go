@@ -51,19 +51,19 @@ func (_c *MockRWChannelStore_Add_Call) RunAndReturn(run func(int64)) *MockRWChan
 }
 
 // Delete provides a mock function with given fields: nodeID
-func (_m *MockRWChannelStore) Delete(nodeID int64) ([]*channel, error) {
+func (_m *MockRWChannelStore) Delete(nodeID int64) ([]RWChannel, error) {
 	ret := _m.Called(nodeID)
 
-	var r0 []*channel
+	var r0 []RWChannel
 	var r1 error
-	if rf, ok := ret.Get(0).(func(int64) ([]*channel, error)); ok {
+	if rf, ok := ret.Get(0).(func(int64) ([]RWChannel, error)); ok {
 		return rf(nodeID)
 	}
-	if rf, ok := ret.Get(0).(func(int64) []*channel); ok {
+	if rf, ok := ret.Get(0).(func(int64) []RWChannel); ok {
 		r0 = rf(nodeID)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*channel)
+			r0 = ret.Get(0).([]RWChannel)
 		}
 	}
 
@@ -94,12 +94,12 @@ func (_c *MockRWChannelStore_Delete_Call) Run(run func(nodeID int64)) *MockRWCha
 	return _c
 }
 
-func (_c *MockRWChannelStore_Delete_Call) Return(_a0 []*channel, _a1 error) *MockRWChannelStore_Delete_Call {
+func (_c *MockRWChannelStore_Delete_Call) Return(_a0 []RWChannel, _a1 error) *MockRWChannelStore_Delete_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockRWChannelStore_Delete_Call) RunAndReturn(run func(int64) ([]*channel, error)) *MockRWChannelStore_Delete_Call {
+func (_c *MockRWChannelStore_Delete_Call) RunAndReturn(run func(int64) ([]RWChannel, error)) *MockRWChannelStore_Delete_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -404,11 +404,11 @@ func (_c *MockRWChannelStore_Reload_Call) RunAndReturn(run func() error) *MockRW
 }
 
 // Update provides a mock function with given fields: op
-func (_m *MockRWChannelStore) Update(op ChannelOpSet) error {
+func (_m *MockRWChannelStore) Update(op *ChannelOpSet) error {
 	ret := _m.Called(op)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(ChannelOpSet) error); ok {
+	if rf, ok := ret.Get(0).(func(*ChannelOpSet) error); ok {
 		r0 = rf(op)
 	} else {
 		r0 = ret.Error(0)
@@ -423,14 +423,14 @@ type MockRWChannelStore_Update_Call struct {
 }
 
 // Update is a helper method to define mock.On call
-//   - op ChannelOpSet
+//   - op *ChannelOpSet
 func (_e *MockRWChannelStore_Expecter) Update(op interface{}) *MockRWChannelStore_Update_Call {
 	return &MockRWChannelStore_Update_Call{Call: _e.mock.On("Update", op)}
 }
 
-func (_c *MockRWChannelStore_Update_Call) Run(run func(op ChannelOpSet)) *MockRWChannelStore_Update_Call {
+func (_c *MockRWChannelStore_Update_Call) Run(run func(op *ChannelOpSet)) *MockRWChannelStore_Update_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(ChannelOpSet))
+		run(args[0].(*ChannelOpSet))
 	})
 	return _c
 }
@@ -440,7 +440,7 @@ func (_c *MockRWChannelStore_Update_Call) Return(_a0 error) *MockRWChannelStore_
 	return _c
 }
 
-func (_c *MockRWChannelStore_Update_Call) RunAndReturn(run func(ChannelOpSet) error) *MockRWChannelStore_Update_Call {
+func (_c *MockRWChannelStore_Update_Call) RunAndReturn(run func(*ChannelOpSet) error) *MockRWChannelStore_Update_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -242,7 +242,7 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 				chManager: &ChannelManager{
 					store: &ChannelStore{
 						channelsInfo: map[int64]*NodeChannelInfo{
-							1: {NodeID: 1, Channels: []*channel{{Name: "ch1"}}},
+							1: {NodeID: 1, Channels: []RWChannel{&channelMeta{Name: "ch1"}}},
 						},
 					},
 				},
@@ -262,8 +262,8 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 				chManager: &ChannelManager{
 					store: &ChannelStore{
 						channelsInfo: map[int64]*NodeChannelInfo{
-							1:        {NodeID: 1, Channels: []*channel{}},
-							bufferID: {NodeID: bufferID, Channels: []*channel{}},
+							1:        {NodeID: 1, Channels: []RWChannel{}},
+							bufferID: {NodeID: bufferID, Channels: []RWChannel{}},
 						},
 					},
 				},
@@ -289,7 +289,7 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 			Params.Save(Params.DataCoordCfg.CompactionCheckIntervalInSeconds.Key, "1")
 			c.start()
 			err := c.execCompactionPlan(tt.args.signal, tt.args.plan)
-			assert.ErrorIs(t, tt.err, err)
+			require.ErrorIs(t, tt.err, err)
 
 			task := c.getCompaction(tt.args.plan.PlanID)
 			if !tt.wantErr {
@@ -329,7 +329,7 @@ func Test_compactionPlanHandler_execWithParallels(t *testing.T) {
 		chManager: &ChannelManager{
 			store: &ChannelStore{
 				channelsInfo: map[int64]*NodeChannelInfo{
-					1: {NodeID: 1, Channels: []*channel{{Name: "ch1"}}},
+					1: {NodeID: 1, Channels: []RWChannel{&channelMeta{Name: "ch1"}}},
 				},
 			},
 		},
