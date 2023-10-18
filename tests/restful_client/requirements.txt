@@ -1,5 +1,5 @@
 requests==2.31.0
-urllib3==1.26.16
+urllib3==1.26.18
 loguru~=0.5.3
 pytest~=7.2.0
 pyyaml~=6.0
