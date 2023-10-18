@@ -243,7 +243,8 @@ func TestInsertCodec(t *testing.T) {
 				},
 			},
 			Float16VectorField: &Float16VectorFieldData{
-				Data: []byte{0, 255, 0, 255, 0, 255, 0, 255},
+				// length = 2 * Dim * numRows(2) = 16
+				Data: []byte{0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255},
 				Dim:  4,
 			},
 		},
@@ -290,7 +291,8 @@ func TestInsertCodec(t *testing.T) {
 				Dim:  4,
 			},
 			Float16VectorField: &Float16VectorFieldData{
-				Data: []byte{0, 255, 0, 255, 0, 255, 0, 255},
+				// length = 2 * Dim * numRows(2) = 16
+				Data: []byte{0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255},
 				Dim:  4,
 			},
 			ArrayField: &ArrayFieldData{
@@ -374,7 +376,12 @@ func TestInsertCodec(t *testing.T) {
 	assert.Equal(t, []string{"1", "2", "3", "4"}, resultData.Data[StringField].(*StringFieldData).Data)
 	assert.Equal(t, []byte{0, 255, 0, 255}, resultData.Data[BinaryVectorField].(*BinaryVectorFieldData).Data)
 	assert.Equal(t, []float32{0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 6, 7, 4, 5, 6, 7}, resultData.Data[FloatVectorField].(*FloatVectorFieldData).Data)
-	assert.Equal(t, []byte{0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255}, resultData.Data[Float16VectorField].(*Float16VectorFieldData).Data)
+	assert.Equal(t, []byte{
+		0, 255, 0, 255, 0, 255, 0, 255,
+		0, 255, 0, 255, 0, 255, 0, 255,
+		0, 255, 0, 255, 0, 255, 0, 255,
+		0, 255, 0, 255, 0, 255, 0, 255,
+	}, resultData.Data[Float16VectorField].(*Float16VectorFieldData).Data)
 
 	int32ArrayList := [][]int32{{1, 2, 3}, {4, 5, 6}, {3, 2, 1}, {6, 5, 4}}
 	resultArrayList := [][]int32{}
