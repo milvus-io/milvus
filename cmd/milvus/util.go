@@ -2,15 +2,20 @@ package milvus
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path"
 	"runtime"
+	"strconv"
+	"strings"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/gofrs/flock"
+	"github.com/samber/lo"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
@@ -205,11 +210,6 @@ func CleanSession(metaPath string, etcdEndpoints []string, sessionSuffix []strin
 		return nil
 	}
 
-	keys := getSessionPaths(metaPath, sessionSuffix)
-	if len(keys) == 0 {
-		return nil
-	}
-
 	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
 	if err != nil {
 		return err
@@ -218,6 +218,12 @@ func CleanSession(metaPath string, etcdEndpoints []string, sessionSuffix []strin
 
 	ctx, cancel := context.WithTimeout(context.TODO(), 5*time.Second)
 	defer cancel()
+
+	keys := getSessionPaths(ctx, etcdCli, metaPath, sessionSuffix)
+	if len(keys) == 0 {
+		return nil
+	}
+
 	for _, key := range keys {
 		_, _ = etcdCli.Delete(ctx, key, clientv3.WithPrefix())
 	}
@@ -225,12 +231,79 @@ func CleanSession(metaPath string, etcdEndpoints []string, sessionSuffix []strin
 	return nil
 }
 
-func getSessionPaths(metaPath string, sessionSuffix []string) []string {
+func getSessionPaths(ctx context.Context, client *clientv3.Client, metaPath string, sessionSuffix []string) []string {
 	sessionKeys := make([]string, 0)
 	sessionPathPrefix := path.Join(metaPath, sessionutil.DefaultServiceRoot)
-	for _, suffix := range sessionSuffix {
+	newSessionSuffixSet := addActiveKeySuffix(ctx, client, sessionPathPrefix, sessionSuffix)
+	for _, suffix := range newSessionSuffixSet {
 		key := path.Join(sessionPathPrefix, suffix)
 		sessionKeys = append(sessionKeys, key)
 	}
 	return sessionKeys
+}
+
+// filterUnmatchedKey skip active keys that don't match completed key, the latest active key may from standby server
+func addActiveKeySuffix(ctx context.Context, client *clientv3.Client, sessionPathPrefix string, sessionSuffix []string) []string {
+	suffixSet := lo.SliceToMap(sessionSuffix, func(t string) (string, struct{}) {
+		return t, struct{}{}
+	})
+
+	for _, suffix := range sessionSuffix {
+		if strings.Contains(suffix, "-") && (strings.HasPrefix(suffix, typeutil.RootCoordRole) ||
+			strings.HasPrefix(suffix, typeutil.QueryCoordRole) || strings.HasPrefix(suffix, typeutil.DataCoordRole) ||
+			strings.HasPrefix(suffix, typeutil.IndexCoordRole)) {
+			res := strings.Split(suffix, "-")
+			if len(res) != 2 {
+				// skip illegal keys
+				log.Warn("skip illegal key", zap.String("suffix", suffix))
+				continue
+			}
+
+			serverType := res[0]
+			targetServerID, err := strconv.ParseInt(res[1], 10, 64)
+			if err != nil {
+				log.Warn("get server id failed from key", zap.String("suffix", suffix), zap.Error(err))
+				continue
+			}
+
+			key := path.Join(sessionPathPrefix, serverType)
+			serverID, err := getServerID(ctx, client, key)
+			if err != nil {
+				log.Warn("get server id failed from key", zap.String("suffix", suffix), zap.Error(err))
+				continue
+			}
+
+			if serverID == targetServerID {
+				log.Info("add active serverID key", zap.String("suffix", suffix), zap.String("key", key))
+				suffixSet[serverType] = struct{}{}
+			}
+
+			// also remove a faked indexcoord seesion if role is a datacoord
+			if strings.HasPrefix(suffix, typeutil.DataCoordRole) {
+				suffixSet[typeutil.IndexCoordRole] = struct{}{}
+			}
+		}
+	}
+
+	return lo.MapToSlice(suffixSet, func(key string, v struct{}) string { return key })
+}
+
+func getServerID(ctx context.Context, client *clientv3.Client, key string) (int64, error) {
+	resp, err := client.Get(ctx, key)
+	if err != nil {
+		return 0, err
+	}
+
+	if len(resp.Kvs) == 0 {
+		return 0, errors.New("not found value")
+	}
+
+	value := resp.Kvs[0].Value
+	session := &sessionutil.SessionRaw{}
+	err = json.Unmarshal(value, &session)
+	if err != nil {
+		return 0, err
+	}
+
+	return session.ServerID, nil
 }

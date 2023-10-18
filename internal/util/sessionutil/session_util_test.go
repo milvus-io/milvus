@@ -712,11 +712,10 @@ func TestServerInfoOp(t *testing.T) {
 		saveServerInfoInternal(typeutil.ProxyRole, serverID, pid)
 
 		sessions := GetSessions(pid)
-		assert.Equal(t, 6, len(sessions))
+		assert.Equal(t, 3, len(sessions))
 		assert.ElementsMatch(t, sessions, []string{
-			"querycoord", "querycoord-999",
-			"datacoord", "datacoord-999",
-			"indexcoord",
+			"querycoord-999",
+			"datacoord-999",
 			"proxy-999",
 		})
 
@@ -732,7 +731,7 @@ func TestServerInfoOp(t *testing.T) {
 
 		SaveServerInfo(typeutil.QueryCoordRole, serverID)
 		sessions := GetSessions(os.Getpid())
-		assert.Equal(t, 2, len(sessions))
+		assert.Equal(t, 1, len(sessions))
 	})
 }
 

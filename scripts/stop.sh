@@ -15,11 +15,11 @@
 # limitations under the License.
 
 echo "Stopping milvus..."
-PROCESS=$(ps -e | grep milvus | grep -v grep | grep -v run-with-subprocess | awk '{print $1}')
+PROCESS=$(ps -e | grep milvus | grep -v grep | grep run-with-subprocess | awk '{print $1}')
 if [ -z "$PROCESS" ]; then
   echo "No milvus process"
   exit 0
 fi
-kill -9 $PROCESS
+kill -15 $PROCESS
 echo "Milvus stopped"
 
