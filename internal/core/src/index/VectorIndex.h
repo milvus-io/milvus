@@ -65,12 +65,12 @@ class VectorIndex : public IndexBase {
     virtual std::vector<uint8_t>
     GetVector(const DatasetPtr dataset) const = 0;
 
-    IndexType
+    const IndexType&
     GetIndexType() const {
         return index_type_;
     }
 
-    MetricType
+    const MetricType&
     GetMetricType() const {
         return metric_type_;
     }

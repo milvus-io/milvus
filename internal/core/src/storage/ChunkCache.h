@@ -28,7 +28,7 @@ class ChunkCache {
     explicit ChunkCache(std::string path,
                         const std::string& read_ahead_policy,
                         ChunkManagerPtr cm)
-        : path_prefix_(std::move(path)), cm_(cm) {
+        : path_prefix_(std::move(path)), cm_(std::move(cm)) {
         auto iter = ReadAheadPolicy_Map.find(read_ahead_policy);
         AssertInfo(iter != ReadAheadPolicy_Map.end(),
                    fmt::format("unrecognized read ahead policy: {}, "
@@ -48,9 +48,6 @@ class ChunkCache {
 
     void
     Remove(const std::string& filepath);
-
-    void
-    Prefetch(const std::string& filepath);
 
  private:
     std::shared_ptr<ColumnBase>

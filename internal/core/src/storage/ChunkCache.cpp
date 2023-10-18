@@ -34,24 +34,6 @@ ChunkCache::Read(const std::string& filepath) {
     auto field_data = object_data[0];
 
     auto column = Mmap(path, field_data);
-    columns_.emplace(path, column);
-    return column;
-}
-
-void
-ChunkCache::Remove(const std::string& filepath) {
-    auto path = std::filesystem::path(path_prefix_) / filepath;
-    columns_.erase(path);
-}
-
-void
-ChunkCache::Prefetch(const std::string& filepath) {
-    auto path = std::filesystem::path(path_prefix_) / filepath;
-    ColumnTable::const_accessor ca;
-    if (!columns_.find(ca, path)) {
-        return;
-    }
-    auto column = ca->second;
     auto ok =
         madvise(reinterpret_cast<void*>(const_cast<char*>(column->Data())),
                 column->ByteSize(),
@@ -60,6 +42,15 @@ ChunkCache::Prefetch(const std::string& filepath) {
                fmt::format("failed to madvise to the data file {}, err: {}",
                            path.c_str(),
                            strerror(errno)));
+
+    columns_.emplace(std::move(path), column);
+    return column;
+}
+
+void
+ChunkCache::Remove(const std::string& filepath) {
+    auto path = std::filesystem::path(path_prefix_) / filepath;
+    columns_.erase(path);
 }
 
 std::shared_ptr<ColumnBase>
