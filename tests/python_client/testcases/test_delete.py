@@ -1840,6 +1840,7 @@ class TestDeleteString(TestcaseBase):
         df[2] = [""for _ in range(nb)] 
 
         collection_w.insert(df)
+        collection_w.flush()
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         assert collection_w.num_entities == nb
@@ -1992,6 +1993,7 @@ class TestDeleteComplexExpr(TestcaseBase):
             data = cf.gen_default_dataframe_data()
             data[ct.default_json_field_name] = [{"list": listMix[i]} for i in range(ct.default_nb)]
         collection_w.insert(data)
+        collection_w.flush()
         collection_w.load()
 
         # delete with expressions
@@ -2031,6 +2033,7 @@ class TestDeleteComplexExpr(TestcaseBase):
             data = cf.gen_default_dataframe_data()
             data[ct.default_json_field_name] = [{"list": listMix[i]} for i in range(ct.default_nb)]
         collection_w.insert(data)
+        collection_w.flush()
         collection_w.load()
 
         # delete with expressions
@@ -2074,6 +2077,7 @@ class TestDeleteComplexExpr(TestcaseBase):
             "float_vector": vectors
         })
         collection_w.insert(data)
+        collection_w.flush()
         collection_w.create_index("float_vector")
         collection_w.load()
 
