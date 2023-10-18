@@ -42,6 +42,7 @@ var (
 	ErrServiceDiskLimitExceeded    = newMilvusError("disk limit exceeded", 7, false)
 	ErrServiceRateLimit            = newMilvusError("rate limit exceeded", 8, true)
 	ErrServiceForceDeny            = newMilvusError("force deny", 9, false)
+	ErrServiceUnimplemented        = newMilvusError("service unimplemented", 10, false)
 
 	// Collection related
 	ErrCollectionNotFound         = newMilvusError("collection not found", 100, false)

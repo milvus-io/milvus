@@ -338,6 +338,11 @@ func WrapErrServiceForceDeny(op string, reason error, method string) error {
 	return err
 }
 
+func WrapErrServiceUnimplemented(grpcErr error) error {
+	err := errors.Wrapf(ErrServiceUnimplemented, "err: %s", grpcErr.Error())
+	return err
+}
+
 // database related
 func WrapErrDatabaseNotFound(database any, msg ...string) error {
 	err := wrapWithField(ErrDatabaseNotFound, "database", database)

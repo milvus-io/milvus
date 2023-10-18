@@ -339,7 +339,7 @@ func TestFlush(t *testing.T) {
 
 		datanodeClient := mocks.NewMockDataNodeClient(t)
 		datanodeClient.EXPECT().FlushChannels(mock.Anything, mock.Anything).Return(nil,
-			grpcStatus.Error(codes.Unimplemented, "mock grpc unimplemented error"))
+			merr.WrapErrServiceUnimplemented(grpcStatus.Error(codes.Unimplemented, "mock grpc unimplemented error")))
 
 		sm.sessions = struct {
 			sync.RWMutex

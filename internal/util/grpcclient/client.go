@@ -359,7 +359,7 @@ func (c *ClientBase[T]) needResetCancel() (needReset bool) {
 	return false
 }
 
-func (c *ClientBase[T]) checkErr(ctx context.Context, err error) (needRetry, needReset bool) {
+func (c *ClientBase[T]) checkErr(ctx context.Context, err error) (needRetry, needReset bool, retErr error) {
 	log := log.Ctx(ctx).With(zap.String("clientRole", c.GetRole()))
 	switch {
 	case funcutil.IsGrpcErr(err):
@@ -367,21 +367,21 @@ func (c *ClientBase[T]) checkErr(ctx context.Context, err error) (needRetry, nee
 		log.Warn("call received grpc error", zap.Error(err))
 		if funcutil.IsGrpcErr(err, codes.Canceled, codes.DeadlineExceeded) {
 			// canceled or deadline exceeded
-			return true, c.needResetCancel()
+			return true, c.needResetCancel(), err
 		}
 
 		if funcutil.IsGrpcErr(err, codes.Unimplemented) {
-			return false, false
+			return false, false, merr.WrapErrServiceUnimplemented(err)
 		}
-		return true, true
+		return true, true, err
 	case IsServerIDMismatchErr(err):
 		fallthrough
 	case IsCrossClusterRoutingErr(err):
-		return true, true
+		return true, true, err
 	default:
 		log.Warn("fail to grpc call because of unknown error", zap.Error(err))
 		// Unknown err
-		return false, false
+		return false, false, err
 	}
 }
 
@@ -418,7 +418,8 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 		var err error
 		ret, err = caller(client)
 		if err != nil {
-			needRetry, needReset := c.checkErr(ctx, err)
+			var needRetry, needReset bool
+			needRetry, needReset, err = c.checkErr(ctx, err)
 			if !needRetry {
 				// stop retry
 				err = retry.Unrecoverable(err)

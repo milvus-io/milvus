@@ -78,6 +78,7 @@ func (s *ErrSuite) TestWrap() {
 	s.ErrorIs(WrapErrServiceCrossClusterRouting("ins-0", "ins-1"), ErrServiceCrossClusterRouting)
 	s.ErrorIs(WrapErrServiceDiskLimitExceeded(110, 100, "DLE"), ErrServiceDiskLimitExceeded)
 	s.ErrorIs(WrapErrNodeNotMatch(0, 1, "SIM"), ErrNodeNotMatch)
+	s.ErrorIs(WrapErrServiceUnimplemented(errors.New("mock grpc err")), ErrServiceUnimplemented)
 
 	// Collection related
 	s.ErrorIs(WrapErrCollectionNotFound("test_collection", "failed to get collection"), ErrCollectionNotFound)

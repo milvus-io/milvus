@@ -28,7 +28,6 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/grpc/codes"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -40,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -126,7 +124,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 				return channel.Name
 			})
 			err = s.cluster.FlushChannels(ctx, nodeID, ts, channelNames)
-			if err != nil && funcutil.IsGrpcErr(err, codes.Unimplemented) {
+			if err != nil && errors.Is(err, merr.ErrServiceUnimplemented) {
 				isUnimplemented = true
 				return nil
 			}
