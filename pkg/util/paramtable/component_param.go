@@ -973,7 +973,7 @@ So adjust at your risk!`,
 	p.MaxTaskNum = ParamItem{
 		Key:          "proxy.maxTaskNum",
 		Version:      "2.2.0",
-		DefaultValue: "1024",
+		DefaultValue: "10000",
 		Doc:          "max task number of proxy task queue",
 		Export:       true,
 	}
