@@ -47,7 +47,7 @@ case "${unameOut}" in
       export RPATH=$LD_LIBRARY_PATH;;
     Darwin*)
       # detect llvm version by valid list
-      for llvm_version in 17 16 15 14 NOT_FOUND ; do
+      for llvm_version in 16 15 14 NOT_FOUND ; do
         if brew ls --versions llvm@${llvm_version} > /dev/null; then
           break
         fi
