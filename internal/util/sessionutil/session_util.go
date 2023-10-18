@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	semver "github.com/blang/semver/v4"
+	"github.com/blang/semver/v4"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -24,7 +24,6 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 const (
@@ -1047,20 +1046,13 @@ func saveServerInfoInternal(role string, serverID int64, pid int) {
 	}
 	defer fd.Close()
 
-	data := fmt.Sprintf("%s-%d", role, serverID)
-	// remove active session if role is a coordinator
-	if role == typeutil.RootCoordRole || role == typeutil.QueryCoordRole ||
-		role == typeutil.DataCoordRole || role == typeutil.IndexCoordRole {
-		data = fmt.Sprintf("%s\n%s\n", data, role)
-	} else {
-		data = fmt.Sprintf("%s\n", data)
-	}
+	data := fmt.Sprintf("%s-%d\n", role, serverID)
 	_, err = fd.WriteString(data)
 	if err != nil {
 		log.Warn("write server info file fail", zap.String("filePath", fileFullPath), zap.Error(err))
 	}
 
-	log.Info("save into server info to file", zap.String("content", data), zap.String("filePath", fileFullPath))
+	log.Info("save server info into file", zap.String("content", data), zap.String("filePath", fileFullPath))
 }
 
 func SaveServerInfo(role string, serverID int64) {

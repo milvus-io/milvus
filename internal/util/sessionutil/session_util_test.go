@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	semver "github.com/blang/semver/v4"
+	"github.com/blang/semver/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -913,11 +913,11 @@ func TestServerInfoOp(t *testing.T) {
 		saveServerInfoInternal(typeutil.ProxyRole, serverID, pid)
 
 		sessions := GetSessions(pid)
-		assert.Equal(t, 7, len(sessions))
+		assert.Equal(t, 4, len(sessions))
 		assert.ElementsMatch(t, sessions, []string{
-			"querycoord", "querycoord-999",
-			"datacoord", "datacoord-999",
-			"indexcoord", "indexcoord-999",
+			"querycoord-999",
+			"datacoord-999",
+			"indexcoord-999",
 			"proxy-999"})
 
 		RemoveServerInfoFile(pid)
@@ -932,6 +932,6 @@ func TestServerInfoOp(t *testing.T) {
 
 		SaveServerInfo(typeutil.QueryCoordRole, serverID)
 		sessions := GetSessions(os.Getpid())
-		assert.Equal(t, 2, len(sessions))
+		assert.Equal(t, 1, len(sessions))
 	})
 }
