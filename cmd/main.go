@@ -20,6 +20,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
 
 	"golang.org/x/exp/slices"
@@ -43,29 +44,52 @@ func main() {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 
-		// No need to extra wait for the process
-		err := cmd.Run()
-
-		// clean session
-		paramtable.Init()
-		params := paramtable.Get()
-		if len(args) >= 3 {
-			metaPath := params.EtcdCfg.MetaRootPath.GetValue()
-			endpoints := params.EtcdCfg.Endpoints.GetValue()
-			etcdEndpoints := strings.Split(endpoints, ",")
-
-			sessionSuffix := sessionutil.GetSessions(cmd.Process.Pid)
-			defer sessionutil.RemoveServerInfoFile(cmd.Process.Pid)
-
-			if err := milvus.CleanSession(metaPath, etcdEndpoints, sessionSuffix); err != nil {
-				log.Println("clean session failed", err.Error())
-			}
+		if err := cmd.Start(); err != nil {
+			// Command not found on PATH, not executable, &c.
+			log.Fatal(err)
 		}
 
-		if err != nil {
-			log.Println("subprocess exit, ", err.Error())
-		} else {
-			log.Println("exit code:", cmd.ProcessState.ExitCode())
+		// wait for the command to finish
+		waitCh := make(chan error, 1)
+		go func() {
+			waitCh <- cmd.Wait()
+			close(waitCh)
+		}()
+
+		sc := make(chan os.Signal, 1)
+		signal.Notify(sc)
+
+		// Need a for loop to handle multiple signals
+		for {
+			select {
+			case sig := <-sc:
+				if err := cmd.Process.Signal(sig); err != nil {
+					log.Println("error sending signal", sig, err)
+				}
+			case err := <-waitCh:
+				// clean session
+				paramtable.Init()
+				params := paramtable.Get()
+				if len(args) >= 3 {
+					metaPath := params.EtcdCfg.MetaRootPath.GetValue()
+					endpoints := params.EtcdCfg.Endpoints.GetValue()
+					etcdEndpoints := strings.Split(endpoints, ",")
+
+					sessionSuffix := sessionutil.GetSessions(cmd.Process.Pid)
+					defer sessionutil.RemoveServerInfoFile(cmd.Process.Pid)
+
+					if err := milvus.CleanSession(metaPath, etcdEndpoints, sessionSuffix); err != nil {
+						log.Println("clean session failed", err.Error())
+					}
+				}
+
+				if err != nil {
+					log.Println("subprocess exit, ", err.Error())
+				} else {
+					log.Println("exit code:", cmd.ProcessState.ExitCode())
+				}
+				return
+			}
 		}
 	} else {
 		milvus.RunMilvus(os.Args)

@@ -40,7 +40,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const (
@@ -1159,22 +1158,13 @@ func saveServerInfoInternal(role string, serverID int64, pid int) {
 	}
 	defer fd.Close()
 
-	data := fmt.Sprintf("%s-%d", role, serverID)
-	// remove active session if role is a coordinator
-	if role == typeutil.RootCoordRole || role == typeutil.QueryCoordRole {
-		data = fmt.Sprintf("%s\n%s\n", data, role)
-	} else if role == typeutil.DataCoordRole {
-		// also remove a faked indexcoord seesion if role is a datacoord coord
-		data = fmt.Sprintf("%s\n%s\n%s\n", data, role, typeutil.IndexCoordRole)
-	} else {
-		data = fmt.Sprintf("%s\n", data)
-	}
+	data := fmt.Sprintf("%s-%d\n", role, serverID)
 	_, err = fd.WriteString(data)
 	if err != nil {
 		log.Warn("write server info file fail", zap.String("filePath", fileFullPath), zap.Error(err))
 	}
 
-	log.Info("save into server info to file", zap.String("content", data), zap.String("filePath", fileFullPath))
+	log.Info("save server info into file", zap.String("content", data), zap.String("filePath", fileFullPath))
 }
 
 func SaveServerInfo(role string, serverID int64) {
