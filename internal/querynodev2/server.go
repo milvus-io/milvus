@@ -54,6 +54,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
+	"github.com/milvus-io/milvus/internal/registry"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -398,6 +399,8 @@ func (node *QueryNode) Start() error {
 		mmapDirPath := paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue()
 		mmapEnabled := len(mmapDirPath) > 0
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		registry.GetInMemoryResolver().RegisterQueryNode(paramtable.GetNodeID(), node)
 		log.Info("query node start successfully",
 			zap.Int64("queryNodeID", paramtable.GetNodeID()),
 			zap.String("Address", node.address),
