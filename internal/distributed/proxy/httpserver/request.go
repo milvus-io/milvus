@@ -34,7 +34,8 @@ type GetReq struct {
 type DeleteReq struct {
 	DbName         string      `json:"dbName"`
 	CollectionName string      `json:"collectionName" validate:"required"`
-	ID             interface{} `json:"id" validate:"required"`
+	ID             interface{} `json:"id"`
+	Filter         string      `json:"filter"`
 }
 
 type InsertReq struct {
@@ -44,6 +45,18 @@ type InsertReq struct {
 }
 
 type SingleInsertReq struct {
+	DbName         string                 `json:"dbName"`
+	CollectionName string                 `json:"collectionName" validate:"required"`
+	Data           map[string]interface{} `json:"data" validate:"required"`
+}
+
+type UpsertReq struct {
+	DbName         string                   `json:"dbName"`
+	CollectionName string                   `json:"collectionName" validate:"required"`
+	Data           []map[string]interface{} `json:"data" validate:"required"`
+}
+
+type SingleUpsertReq struct {
 	DbName         string                 `json:"dbName"`
 	CollectionName string                 `json:"collectionName" validate:"required"`
 	Data           map[string]interface{} `json:"data" validate:"required"`

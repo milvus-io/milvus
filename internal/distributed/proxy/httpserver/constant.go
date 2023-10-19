@@ -7,6 +7,7 @@ const (
 	VectorCollectionsDescribePath = "/vector/collections/describe"
 	VectorCollectionsDropPath     = "/vector/collections/drop"
 	VectorInsertPath              = "/vector/insert"
+	VectorUpsertPath              = "/vector/upsert"
 	VectorSearchPath              = "/vector/search"
 	VectorGetPath                 = "/vector/get"
 	VectorQueryPath               = "/vector/query"
