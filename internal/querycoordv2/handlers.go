@@ -22,7 +22,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -332,9 +331,9 @@ func (s *Server) fillReplicaInfo(replica *meta.Replica, withShardNodes bool) (*m
 			leaderInfo = s.nodeMgr.Get(leader)
 		}
 		if leaderInfo == nil {
-			msg := fmt.Sprintf("failed to get shard leader for shard %s, the collection not loaded or leader is offline", channel)
+			msg := fmt.Sprintf("failed to get shard leader for shard %s", channel)
 			log.Warn(msg)
-			return nil, errors.Wrap(merr.WrapErrNodeNotFound(leader), msg)
+			return nil, merr.WrapErrNodeNotFound(leader, msg)
 		}
 
 		shard := &milvuspb.ShardReplica{

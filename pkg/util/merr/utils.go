@@ -213,7 +213,6 @@ func Error(status *commonpb.Status) error {
 	if code == 0 {
 		return newMilvusError(status.GetReason(), Code(OldCodeToMerr(status.GetErrorCode())), false)
 	}
-
 	return newMilvusError(status.GetReason(), code, code&retryableFlag != 0)
 }
 
@@ -403,6 +402,30 @@ func WrapErrCollectionResourceLimitExceeded(msg ...string) error {
 
 func WrapErrCollectionNotFullyLoaded(collection any, msg ...string) error {
 	err := wrapWithField(ErrCollectionNotFullyLoaded, "collection", collection)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+func WrapErrAliasNotFound(db any, alias any, msg ...string) error {
+	err := errors.Wrapf(ErrAliasNotFound, "alias %v:%v", db, alias)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+func WrapErrAliasCollectionNameConflict(db any, alias any, msg ...string) error {
+	err := errors.Wrapf(ErrAliasCollectionNameConfilct, "alias %v:%v", db, alias)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+func WrapErrAliasAlreadyExist(db any, alias any, msg ...string) error {
+	err := errors.Wrapf(ErrAliasAlreadyExist, "alias %v:%v already exist", db, alias)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "; "))
 	}
@@ -719,6 +742,14 @@ func WrapErrSegcore(code int32, msg ...string) error {
 // field related
 func WrapErrFieldNotFound[T any](field T, msg ...string) error {
 	err := errors.Wrapf(ErrFieldNotFound, "field=%v", field)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+func WrapErrFieldNameInvalid(field any, msg ...string) error {
+	err := wrapWithField(ErrFieldInvalidName, "field", field)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "; "))
 	}

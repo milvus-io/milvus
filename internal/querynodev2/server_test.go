@@ -97,14 +97,14 @@ func (suite *QueryNodeSuite) TestBasic() {
 	err = suite.node.Init()
 	suite.NoError(err)
 
-	// node shoule be unhealthy before node start
+	// node should be unhealthy before node start
 	suite.False(suite.node.lifetime.GetState() == commonpb.StateCode_Healthy)
 
 	// start node
 	err = suite.node.Start()
 	suite.NoError(err)
 
-	// node shoule be healthy after node start
+	// node should be healthy after node start
 	suite.True(suite.node.lifetime.GetState() == commonpb.StateCode_Healthy)
 
 	// register node to etcd

@@ -811,23 +811,24 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, col
 			return nil
 		}
 		// do not retry unless got NoReplicaAvailable from querycoord
+		err2 := merr.Error(resp.GetStatus())
 		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_NoReplicaAvailable {
-			return retry.Unrecoverable(fmt.Errorf("fail to get shard leaders from QueryCoord: %s", resp.GetStatus().GetReason()))
+			return retry.Unrecoverable(err2)
 		}
-		return fmt.Errorf("fail to get shard leaders from QueryCoord: %s", resp.GetStatus().GetReason())
+		return err2
 	})
 	if err != nil {
 		return nil, err
 	}
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return nil, fmt.Errorf("fail to get shard leaders from QueryCoord: %s", resp.GetStatus().GetReason())
+		return nil, merr.Error(resp.GetStatus())
 	}
 
 	shards := parseShardLeaderList2QueryNode(resp.GetShards())
 
 	info, err = m.getFullCollectionInfo(ctx, database, collectionName, collectionID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get shards, collectionName %s, colectionID %d not found", collectionName, collectionID)
+		return nil, err
 	}
 	// lock leader
 	info.leaderMutex.Lock()
