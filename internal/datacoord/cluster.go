@@ -71,8 +71,8 @@ func (c *Cluster) UnRegister(node *NodeInfo) error {
 }
 
 // Watch tries to add a channel in datanode cluster
-func (c *Cluster) Watch(ch string, collectionID UniqueID) error {
-	return c.channelManager.Watch(&channel{Name: ch, CollectionID: collectionID})
+func (c *Cluster) Watch(ctx context.Context, ch string, collectionID UniqueID) error {
+	return c.channelManager.Watch(ctx, &channel{Name: ch, CollectionID: collectionID})
 }
 
 // Flush sends flush requests to dataNodes specified

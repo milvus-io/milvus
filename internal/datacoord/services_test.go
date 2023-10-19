@@ -232,7 +232,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 
 		ch := &channel{Name: "vchan1", CollectionID: 0}
 		svr.channelManager.AddNode(0)
-		svr.channelManager.Watch(ch)
+		svr.channelManager.Watch(context.Background(), ch)
 
 		req := &datapb.GetRecoveryInfoRequestV2{
 			CollectionID: 0,
@@ -312,7 +312,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 
 		ch := &channel{Name: "vchan1", CollectionID: 0}
 		svr.channelManager.AddNode(0)
-		svr.channelManager.Watch(ch)
+		svr.channelManager.Watch(context.Background(), ch)
 
 		req := &datapb.GetRecoveryInfoRequestV2{
 			CollectionID: 0,
@@ -405,7 +405,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 
 		err = svr.channelManager.AddNode(0)
 		assert.NoError(t, err)
-		err = svr.channelManager.Watch(&channel{Name: "vchan1", CollectionID: 0})
+		err = svr.channelManager.Watch(context.Background(), &channel{Name: "vchan1", CollectionID: 0})
 		assert.NoError(t, err)
 
 		sResp, err := svr.SaveBinlogPaths(context.TODO(), binlogReq)
@@ -456,7 +456,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 
 		ch := &channel{Name: "vchan1", CollectionID: 0}
 		svr.channelManager.AddNode(0)
-		svr.channelManager.Watch(ch)
+		svr.channelManager.Watch(context.Background(), ch)
 
 		req := &datapb.GetRecoveryInfoRequestV2{
 			CollectionID: 0,
@@ -502,7 +502,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 
 		ch := &channel{Name: "vchan1", CollectionID: 0}
 		svr.channelManager.AddNode(0)
-		svr.channelManager.Watch(ch)
+		svr.channelManager.Watch(context.Background(), ch)
 
 		req := &datapb.GetRecoveryInfoRequestV2{
 			CollectionID: 0,
@@ -586,7 +586,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 
 		ch := &channel{Name: "vchan1", CollectionID: 0}
 		svr.channelManager.AddNode(0)
-		svr.channelManager.Watch(ch)
+		svr.channelManager.Watch(context.Background(), ch)
 
 		req := &datapb.GetRecoveryInfoRequestV2{
 			CollectionID: 0,

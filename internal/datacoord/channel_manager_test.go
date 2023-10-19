@@ -120,7 +120,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		}()
 
 		chManager.AddNode(nodeID)
-		chManager.Watch(&channel{Name: cName, CollectionID: collectionID})
+		chManager.Watch(ctx, &channel{Name: cName, CollectionID: collectionID})
 
 		key := path.Join(prefix, strconv.FormatInt(nodeID, 10), cName)
 		waitAndStore(t, watchkv, key, datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess)
@@ -150,7 +150,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		}()
 
 		chManager.AddNode(nodeID)
-		chManager.Watch(&channel{Name: cName, CollectionID: collectionID})
+		chManager.Watch(ctx, &channel{Name: cName, CollectionID: collectionID})
 
 		key := path.Join(prefix, strconv.FormatInt(nodeID, 10), cName)
 		waitAndStore(t, watchkv, key, datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchFailure)
@@ -181,7 +181,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		}()
 
 		chManager.AddNode(nodeID)
-		chManager.Watch(&channel{Name: cName, CollectionID: collectionID})
+		chManager.Watch(ctx, &channel{Name: cName, CollectionID: collectionID})
 
 		// simulating timeout behavior of startOne, cuz 20s is a long wait
 		e := &ackEvent{
@@ -417,7 +417,7 @@ func TestChannelManager(t *testing.T) {
 		assert.False(t, chManager.Match(nodeToAdd, channel1))
 		assert.False(t, chManager.Match(nodeToAdd, channel2))
 
-		err = chManager.Watch(&channel{Name: "channel-3", CollectionID: collectionID})
+		err = chManager.Watch(context.TODO(), &channel{Name: "channel-3", CollectionID: collectionID})
 		assert.NoError(t, err)
 
 		assert.True(t, chManager.Match(nodeToAdd, "channel-3"))
@@ -459,7 +459,7 @@ func TestChannelManager(t *testing.T) {
 		assert.True(t, chManager.Match(nodeID, channel1))
 		assert.True(t, chManager.Match(nodeID, channel2))
 
-		err = chManager.Watch(&channel{Name: "channel-3", CollectionID: collectionID})
+		err = chManager.Watch(context.TODO(), &channel{Name: "channel-3", CollectionID: collectionID})
 		assert.NoError(t, err)
 
 		waitAndCheckState(t, watchkv, datapb.ChannelWatchState_ToWatch, nodeID, "channel-3", collectionID)
@@ -478,13 +478,13 @@ func TestChannelManager(t *testing.T) {
 		chManager, err := NewChannelManager(watchkv, newMockHandler())
 		require.NoError(t, err)
 
-		err = chManager.Watch(&channel{Name: bufferCh, CollectionID: collectionID})
+		err = chManager.Watch(context.TODO(), &channel{Name: bufferCh, CollectionID: collectionID})
 		assert.NoError(t, err)
 
 		waitAndCheckState(t, watchkv, datapb.ChannelWatchState_ToWatch, bufferID, bufferCh, collectionID)
 
 		chManager.store.Add(nodeID)
-		err = chManager.Watch(&channel{Name: chanToAdd, CollectionID: collectionID})
+		err = chManager.Watch(context.TODO(), &channel{Name: chanToAdd, CollectionID: collectionID})
 		assert.NoError(t, err)
 		waitAndCheckState(t, watchkv, datapb.ChannelWatchState_ToWatch, nodeID, chanToAdd, collectionID)
 
@@ -758,7 +758,7 @@ func TestChannelManager(t *testing.T) {
 		assert.False(t, chManager.stateTimer.hasRunningTimers())
 
 		// 3. watch one channel
-		chManager.Watch(&channel{Name: cName, CollectionID: collectionID})
+		chManager.Watch(ctx, &channel{Name: cName, CollectionID: collectionID})
 		assert.False(t, chManager.isSilent())
 		assert.True(t, chManager.stateTimer.hasRunningTimers())
 		key := path.Join(prefix, strconv.FormatInt(nodeID, 10), cName)
@@ -1016,7 +1016,7 @@ func TestChannelManager_BalanceBehaviour(t *testing.T) {
 		assert.True(t, chManager.Match(2, "channel-1"))
 
 		chManager.AddNode(3)
-		chManager.Watch(&channel{Name: "channel-4", CollectionID: collectionID})
+		chManager.Watch(ctx, &channel{Name: "channel-4", CollectionID: collectionID})
 		key = path.Join(prefix, "3", "channel-4")
 		waitAndStore(t, watchkv, key, datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess)
 

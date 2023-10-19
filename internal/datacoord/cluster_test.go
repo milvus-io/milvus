@@ -235,7 +235,7 @@ func (suite *ClusterSuite) TestRegister() {
 		sessionManager := NewSessionManager()
 		channelManager, err := NewChannelManager(kv, newMockHandler())
 		suite.NoError(err)
-		err = channelManager.Watch(&channel{
+		err = channelManager.Watch(context.TODO(), &channel{
 			Name:         "ch1",
 			CollectionID: 0,
 		})
@@ -347,7 +347,7 @@ func (suite *ClusterSuite) TestUnregister() {
 		nodes := []*NodeInfo{nodeInfo1, nodeInfo2}
 		err = cluster.Startup(ctx, nodes)
 		suite.NoError(err)
-		err = cluster.Watch("ch1", 1)
+		err = cluster.Watch(ctx, "ch1", 1)
 		suite.NoError(err)
 		err = cluster.UnRegister(nodeInfo1)
 		suite.NoError(err)
@@ -382,7 +382,7 @@ func (suite *ClusterSuite) TestUnregister() {
 		}
 		err = cluster.Startup(ctx, []*NodeInfo{nodeInfo})
 		suite.NoError(err)
-		err = cluster.Watch("ch_1", 1)
+		err = cluster.Watch(ctx, "ch_1", 1)
 		suite.NoError(err)
 		err = cluster.UnRegister(nodeInfo)
 		suite.NoError(err)
@@ -431,7 +431,7 @@ func TestWatchIfNeeded(t *testing.T) {
 
 		err = cluster.Startup(ctx, []*NodeInfo{info})
 		assert.NoError(t, err)
-		err = cluster.Watch("ch1", 1)
+		err = cluster.Watch(ctx, "ch1", 1)
 		assert.NoError(t, err)
 		channels := channelManager.GetChannels()
 		assert.EqualValues(t, 1, len(channels))
@@ -441,13 +441,15 @@ func TestWatchIfNeeded(t *testing.T) {
 	t.Run("watch channel to empty cluster", func(t *testing.T) {
 		defer kv.RemoveWithPrefix("")
 
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
 		sessionManager := NewSessionManager()
 		channelManager, err := NewChannelManager(kv, newMockHandler())
 		assert.NoError(t, err)
 		cluster := NewCluster(sessionManager, channelManager)
 		defer cluster.Close()
 
-		err = cluster.Watch("ch1", 1)
+		err = cluster.Watch(ctx, "ch1", 1)
 		assert.NoError(t, err)
 
 		channels := channelManager.GetChannels()
@@ -499,7 +501,7 @@ func TestConsistentHashPolicy(t *testing.T) {
 
 	channels := []string{"ch1", "ch2", "ch3"}
 	for _, c := range channels {
-		err = cluster.Watch(c, 1)
+		err = cluster.Watch(context.TODO(), c, 1)
 		assert.NoError(t, err)
 		idstr, err := hash.Get(c)
 		assert.NoError(t, err)
@@ -563,7 +565,7 @@ func TestCluster_Flush(t *testing.T) {
 	err = cluster.Startup(ctx, nodes)
 	assert.NoError(t, err)
 
-	err = cluster.Watch("chan-1", 1)
+	err = cluster.Watch(context.Background(), "chan-1", 1)
 	assert.NoError(t, err)
 
 	// flush empty should impact nothing
@@ -610,7 +612,7 @@ func TestCluster_Import(t *testing.T) {
 	err = cluster.Startup(ctx, nodes)
 	assert.NoError(t, err)
 
-	err = cluster.Watch("chan-1", 1)
+	err = cluster.Watch(ctx, "chan-1", 1)
 	assert.NoError(t, err)
 
 	assert.NotPanics(t, func() {
