@@ -72,7 +72,12 @@ func InitAccessLogger(logCfg *paramtable.AccessLogConfig, minioCfg *paramtable.M
 			return nil, err
 		}
 
-		writeSyncer = zapcore.AddSync(lg)
+		if logCfg.CacheSize.GetAsInt() > 0 {
+			blg := NewCacheLogger(lg, logCfg.CacheSize.GetAsInt())
+			writeSyncer = zapcore.AddSync(blg)
+		} else {
+			writeSyncer = zapcore.AddSync(lg)
+		}
 	} else {
 		stdout, _, err := zap.Open([]string{"stdout"}...)
 		if err != nil {

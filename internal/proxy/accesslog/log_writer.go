@@ -17,8 +17,10 @@
 package accesslog
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"sync"
@@ -37,15 +39,34 @@ var (
 	timeFormat                    = ".2006-01-02T15-04-05.000"
 )
 
+type CacheLogger struct {
+	mu     sync.Mutex
+	writer io.Writer
+}
+
+func NewCacheLogger(writer io.Writer, cacheSize int) *CacheLogger {
+	return &CacheLogger{
+		writer: bufio.NewWriterSize(writer, cacheSize),
+	}
+}
+
+func (l *CacheLogger) Write(p []byte) (n int, err error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	return l.writer.Write(p)
+}
+
 // a rotated file logger for zap.log and could upload sealed log file to minIO
 type RotateLogger struct {
 	// local path is the path to save log before update to minIO
 	// use os.TempDir()/accesslog if empty
 	localPath string
 	fileName  string
-	// the interval time of update log to minIO
+	// the time interval of  rotate and update log to minIO
+	// only used when minIO enable
 	rotatedTime int64
-	// the max size(Mb) of log file
+	// the max size(MB) of log file
 	// if local file large than maxSize will update immediately
 	// close if empty(zero)
 	maxSize int
@@ -77,6 +98,7 @@ func NewRotateLogger(logCfg *paramtable.AccessLogConfig, minioCfg *paramtable.Mi
 	if logCfg.MinioEnable.GetAsBool() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+
 		log.Debug("remtepath", zap.Any("remote", logCfg.RemotePath.GetValue()))
 		log.Debug("maxBackups", zap.Any("maxBackups", logCfg.MaxBackups.GetValue()))
 		handler, err := NewMinioHandler(ctx, minioCfg, logCfg.RemotePath.GetValue(), logCfg.MaxBackups.GetAsInt())
@@ -218,6 +240,7 @@ func (l *RotateLogger) closeFile() error {
 	return err
 }
 
+// Remove old log when log num over maxBackups
 func (l *RotateLogger) millRunOnce() error {
 	files, err := l.oldLogFiles()
 	if err != nil {
