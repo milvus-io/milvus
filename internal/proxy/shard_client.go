@@ -8,7 +8,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	qnClient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
+	"github.com/milvus-io/milvus/internal/registry"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
 )
@@ -119,7 +119,7 @@ func withShardClientCreator(creator queryNodeCreatorFunc) shardClientMgrOpt {
 }
 
 func defaultQueryNodeClientCreator(ctx context.Context, addr string, nodeID int64) (types.QueryNodeClient, error) {
-	return qnClient.NewClient(ctx, addr, nodeID)
+	return registry.GetInMemoryResolver().ResolveQueryNode(ctx, addr, nodeID)
 }
 
 // NewShardClientMgr creates a new shardClientMgr
