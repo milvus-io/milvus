@@ -9,6 +9,7 @@ import (
 	qnClient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/wrappers"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -23,6 +24,7 @@ func GetInMemoryResolver() *InMemResolver {
 	if r == nil {
 		once.Do(func() {
 			newResolver := &InMemResolver{
+				rootcoords: typeutil.NewConcurrentMap[int64, types.RootCoord](),
 				queryNodes: typeutil.NewConcurrentMap[int64, types.QueryNode](),
 			}
 			resolver.Store(newResolver)
@@ -33,11 +35,16 @@ func GetInMemoryResolver() *InMemResolver {
 }
 
 type InMemResolver struct {
+	rootcoords *typeutil.ConcurrentMap[int64, types.RootCoord]
 	queryNodes *typeutil.ConcurrentMap[int64, types.QueryNode]
 }
 
 func (r *InMemResolver) RegisterQueryNode(id int64, qn types.QueryNode) {
 	r.queryNodes.Insert(id, qn)
+}
+
+func (r *InMemResolver) RegisterRootCoord(id int64, rc types.RootCoord) {
+	r.rootcoords.Insert(id, rc)
 }
 
 func (r *InMemResolver) ResolveQueryNode(ctx context.Context, addr string, nodeID int64) (types.QueryNodeClient, error) {
@@ -46,4 +53,12 @@ func (r *InMemResolver) ResolveQueryNode(ctx context.Context, addr string, nodeI
 		return qnClient.NewClient(ctx, addr, nodeID)
 	}
 	return wrappers.WrapQueryNodeServerAsClient(qn), nil
+}
+
+func (r *InMemResolver) ResolveRootCoord(ctx context.Context, addr string, nodeID int64) (types.RootCoordClient, error) {
+	rc, ok := r.rootcoords.Get(nodeID)
+	if !ok {
+		return nil, merr.WrapErrServiceInternal("rootcoord not in-memory")
+	}
+	return wrappers.WrapRootCoordServerAsClient(rc), nil
 }

@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/registry"
 	tso2 "github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -679,6 +680,7 @@ func (c *Core) startInternal() error {
 
 	c.startServerLoop()
 	c.UpdateStateCode(commonpb.StateCode_Healthy)
+	registry.GetInMemoryResolver().RegisterRootCoord(c.session.ServerID, c)
 	sessionutil.SaveServerInfo(typeutil.RootCoordRole, c.session.ServerID)
 	logutil.Logger(c.ctx).Info("rootcoord startup successfully")
 

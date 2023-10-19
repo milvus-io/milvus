@@ -51,7 +51,6 @@ import (
 	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver"
 	qcc "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
-	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/distributed/utils"
 	management "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -61,6 +60,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	switchers "github.com/milvus-io/milvus/internal/util/switcher"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util"
@@ -521,7 +521,7 @@ func (s *Server) init() error {
 	if s.rootCoordClient == nil {
 		var err error
 		log.Debug("create RootCoord client for Proxy")
-		s.rootCoordClient, err = rcc.NewClient(s.ctx, proxy.Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli)
+		s.rootCoordClient, err = switchers.NewRootCoordSwitcher(s.ctx, proxy.Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli)
 		if err != nil {
 			log.Warn("failed to create RootCoord client for Proxy", zap.Error(err))
 			return err

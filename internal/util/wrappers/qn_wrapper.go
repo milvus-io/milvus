@@ -29,6 +29,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 )
 
+var _ types.QueryNodeClient = (*qnServerWrapper)(nil)
+
 type qnServerWrapper struct {
 	types.QueryNode
 }
