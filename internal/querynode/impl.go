@@ -663,8 +663,8 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, in *querypb.ReleaseS
 		case querypb.DataScope_Historical:
 			delta += node.metaReplica.removeSegment(id, segmentTypeSealed)
 		case querypb.DataScope_All:
-			node.metaReplica.removeSegment(id, segmentTypeGrowing)
-			delta += node.metaReplica.removeSegment(id, segmentTypeSealed)
+			node.metaReplica.removeSegment(id, segmentTypeSealed)
+			delta += node.metaReplica.removeSegment(id, segmentTypeGrowing)
 		}
 	}
 
