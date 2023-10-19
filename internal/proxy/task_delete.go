@@ -355,6 +355,7 @@ func (dt *deleteTask) simpleDelete(ctx context.Context, termExp *planpb.Expr_Ter
 	if err != nil {
 		return err
 	}
+	dt.result.IDs = primaryKeys
 	return nil
 }
 
