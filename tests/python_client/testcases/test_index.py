@@ -1,3 +1,4 @@
+import random
 from time import sleep
 import pytest
 import copy
@@ -1882,7 +1883,7 @@ class TestIndexDiskann(TestcaseBase):
         for t in threads:
             t.join()
 
-    @pytest.mark.skip(reason = "diskann dim range is set to be [1, 32768)")
+    @pytest.mark.skip(reason="diskann dim range is set to be [1, 32768)")
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("dim", [2, 4, 8])
     def test_create_index_with_small_dim(self, dim):
@@ -1961,3 +1962,50 @@ class TestAutoIndex(TestcaseBase):
         collection_w.create_index(binary_field_name, {})
         actual_index_params = collection_w.index()[0].params
         assert default_autoindex_params == actual_index_params
+
+
+@pytest.mark.tags(CaseLabel.GPU)
+class TestScaNNIndex(TestcaseBase):
+    """ Test case of Auto index """
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_scann_index(self):
+        """
+        target: test create scann index
+        method: create index with only one field name
+        expected: create successfully
+        """
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        index_params = {"index_type": "SCANN", "metric_type": "L2",
+                        "params": {"nlist": 1024, "with_raw_data": True}}
+        collection_w.create_index(default_field_name, index_params)
+        assert collection_w.has_index()[0] is True
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("nlist", [0, 65537])
+    def test_create_scann_index_nlist_invalid(self, nlist):
+        """
+        target: test create scann index invalid
+        method: create index with invalid nlist
+        expected: report error
+        """
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        index_params = {"index_type": "SCANN", "metric_type": "L2", "params": {"nlist": nlist}}
+        error = {ct.err_code: 65535, ct.err_msg: "nlist out of range: [1, 65536]"}
+        collection_w.create_index(default_field_name, index_params,
+                                  check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("dim", [1, 127])
+    def test_create_scann_index_dim_invalid(self, dim):
+        """
+        target: test create scann index invalid
+        method: create index on vector dim % 2 == 1
+        expected: report error
+        """
+        collection_w = self.init_collection_general(prefix, is_index=False, dim=dim)[0]
+        index_params = {"index_type": "SCANN", "metric_type": "L2", "params": {"nlist": 1024}}
+        error = {ct.err_code: 65535,
+                 ct.err_msg: f"dimension must be able to be divided by 2, dimension: {dim}"}
+        collection_w.create_index(default_field_name, index_params,
+                                  check_task=CheckTasks.err_res, check_items=error)
