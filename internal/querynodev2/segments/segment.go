@@ -366,7 +366,7 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 		return nil, merr.WrapErrSegmentNotLoaded(s.segmentID, "segment released")
 	}
 
-	log := log.With(
+	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", s.Collection()),
 		zap.Int64("partitionID", s.Partition()),
 		zap.Int64("segmentID", s.ID()),
