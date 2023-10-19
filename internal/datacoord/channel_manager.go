@@ -431,7 +431,8 @@ func (c *ChannelManager) unsubAttempt(ncInfo *NodeChannelInfo) {
 }
 
 // Watch tries to add the channel to cluster. Watch is a no op if the channel already exists.
-func (c *ChannelManager) Watch(ch *channel) error {
+func (c *ChannelManager) Watch(ctx context.Context, ch *channel) error {
+	log := log.Ctx(ctx)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 

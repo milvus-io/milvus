@@ -91,7 +91,7 @@ func (lb *LBPolicyImpl) Start(ctx context.Context) {
 
 // try to select the best node from the available nodes
 func (lb *LBPolicyImpl) selectNode(ctx context.Context, workload ChannelWorkload, excludeNodes typeutil.UniqueSet) (int64, error) {
-	log := log.With(
+	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", workload.collectionID),
 		zap.String("collectionName", workload.collectionName),
 		zap.String("channelName", workload.channel),

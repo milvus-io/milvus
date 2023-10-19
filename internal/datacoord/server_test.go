@@ -356,7 +356,7 @@ func TestFlush(t *testing.T) {
 
 		err := svr.channelManager.AddNode(1)
 		assert.NoError(t, err)
-		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
+		err = svr.channelManager.Watch(context.TODO(), &channel{Name: "ch1", CollectionID: 0})
 		assert.NoError(t, err)
 
 		resp, err := svr.Flush(context.TODO(), req)
@@ -1306,12 +1306,13 @@ func TestSaveBinlogPaths(t *testing.T) {
 			assert.NoError(t, err)
 		}
 
+		ctx := context.Background()
+
 		err := svr.channelManager.AddNode(0)
 		assert.NoError(t, err)
-		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
+		err = svr.channelManager.Watch(ctx, &channel{Name: "ch1", CollectionID: 0})
 		assert.NoError(t, err)
 
-		ctx := context.Background()
 		resp, err := svr.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
 			Base: &commonpb.MsgBase{
 				Timestamp: uint64(time.Now().Unix()),
@@ -1393,12 +1394,12 @@ func TestSaveBinlogPaths(t *testing.T) {
 			assert.NoError(t, err)
 		}
 
+		ctx := context.Background()
 		err := svr.channelManager.AddNode(0)
 		assert.NoError(t, err)
-		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
+		err = svr.channelManager.Watch(ctx, &channel{Name: "ch1", CollectionID: 0})
 		assert.NoError(t, err)
 
-		ctx := context.Background()
 		resp, err := svr.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
 			Base: &commonpb.MsgBase{
 				Timestamp: uint64(time.Now().Unix()),
@@ -1471,12 +1472,12 @@ func TestSaveBinlogPaths(t *testing.T) {
 			assert.NoError(t, err)
 		}
 
+		ctx := context.Background()
 		err := svr.channelManager.AddNode(0)
 		assert.NoError(t, err)
-		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
+		err = svr.channelManager.Watch(ctx, &channel{Name: "ch1", CollectionID: 0})
 		assert.NoError(t, err)
 
-		ctx := context.Background()
 		resp, err := svr.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
 			Base: &commonpb.MsgBase{
 				Timestamp: uint64(time.Now().Unix()),
@@ -1525,12 +1526,12 @@ func TestSaveBinlogPaths(t *testing.T) {
 			ID: 0,
 		})
 
+		ctx := context.Background()
 		err := svr.channelManager.AddNode(0)
 		assert.NoError(t, err)
-		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
+		err = svr.channelManager.Watch(ctx, &channel{Name: "ch1", CollectionID: 0})
 		assert.NoError(t, err)
 
-		ctx := context.Background()
 		resp, err := svr.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
 			Base: &commonpb.MsgBase{
 				Timestamp: uint64(time.Now().Unix()),
@@ -1575,7 +1576,7 @@ func TestSaveBinlogPaths(t *testing.T) {
 		defer closeTestServer(t, svr)
 		err := svr.channelManager.AddNode(0)
 		require.Nil(t, err)
-		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
+		err = svr.channelManager.Watch(context.TODO(), &channel{Name: "ch1", CollectionID: 0})
 		require.Nil(t, err)
 		s := &datapb.SegmentInfo{
 			ID:            1,
@@ -1690,12 +1691,12 @@ func TestDropVirtualChannel(t *testing.T) {
 
 		svr.meta.AddSegment(context.TODO(), NewSegmentInfo(os))
 
+		ctx := context.Background()
 		err := svr.channelManager.AddNode(0)
 		require.Nil(t, err)
-		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
+		err = svr.channelManager.Watch(ctx, &channel{Name: "ch1", CollectionID: 0})
 		require.Nil(t, err)
 
-		ctx := context.Background()
 		req := &datapb.DropVirtualChannelRequest{
 			Base: &commonpb.MsgBase{
 				Timestamp: uint64(time.Now().Unix()),
@@ -1765,7 +1766,7 @@ func TestDropVirtualChannel(t *testing.T) {
 
 		<-spyCh
 
-		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
+		err = svr.channelManager.Watch(ctx, &channel{Name: "ch1", CollectionID: 0})
 		require.Nil(t, err)
 
 		// resend
@@ -1779,7 +1780,7 @@ func TestDropVirtualChannel(t *testing.T) {
 		defer closeTestServer(t, svr)
 		err := svr.channelManager.AddNode(0)
 		require.Nil(t, err)
-		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
+		err = svr.channelManager.Watch(context.TODO(), &channel{Name: "ch1", CollectionID: 0})
 		require.Nil(t, err)
 
 		resp, err := svr.DropVirtualChannel(context.Background(), &datapb.DropVirtualChannelRequest{
@@ -2844,7 +2845,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 
 		err = svr.channelManager.AddNode(0)
 		assert.NoError(t, err)
-		err = svr.channelManager.Watch(&channel{Name: "vchan1", CollectionID: 0})
+		err = svr.channelManager.Watch(context.TODO(), &channel{Name: "vchan1", CollectionID: 0})
 		assert.NoError(t, err)
 
 		sResp, err := svr.SaveBinlogPaths(context.TODO(), binlogReq)
@@ -3926,7 +3927,7 @@ func TestDataCoord_Import(t *testing.T) {
 		})
 		err := svr.channelManager.AddNode(0)
 		assert.NoError(t, err)
-		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
+		err = svr.channelManager.Watch(svr.ctx, &channel{Name: "ch1", CollectionID: 0})
 		assert.NoError(t, err)
 
 		resp, err := svr.Import(svr.ctx, &datapb.ImportTaskRequest{
@@ -3945,7 +3946,7 @@ func TestDataCoord_Import(t *testing.T) {
 
 		err := svr.channelManager.AddNode(0)
 		assert.NoError(t, err)
-		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
+		err = svr.channelManager.Watch(svr.ctx, &channel{Name: "ch1", CollectionID: 0})
 		assert.NoError(t, err)
 
 		resp, err := svr.Import(svr.ctx, &datapb.ImportTaskRequest{
@@ -4089,7 +4090,7 @@ func TestDataCoord_SaveImportSegment(t *testing.T) {
 		})
 		err := svr.channelManager.AddNode(110)
 		assert.NoError(t, err)
-		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 100})
+		err = svr.channelManager.Watch(context.TODO(), &channel{Name: "ch1", CollectionID: 100})
 		assert.NoError(t, err)
 
 		status, err := svr.SaveImportSegment(context.TODO(), &datapb.SaveImportSegmentRequest{
@@ -4126,7 +4127,7 @@ func TestDataCoord_SaveImportSegment(t *testing.T) {
 
 		err := svr.channelManager.AddNode(110)
 		assert.NoError(t, err)
-		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 100})
+		err = svr.channelManager.Watch(context.TODO(), &channel{Name: "ch1", CollectionID: 100})
 		assert.NoError(t, err)
 
 		status, err := svr.SaveImportSegment(context.TODO(), &datapb.SaveImportSegmentRequest{

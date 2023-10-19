@@ -193,7 +193,7 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 		}
 
 		// Add the channel to cluster for watching.
-		s.cluster.Watch(r.ChannelName, r.CollectionID)
+		s.cluster.Watch(ctx, r.ChannelName, r.CollectionID)
 
 		segmentAllocations := make([]*Allocation, 0)
 		if r.GetIsImport() {
@@ -1175,7 +1175,7 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 			Schema:          req.GetSchema(),
 			CreateTimestamp: req.GetCreateTimestamp(),
 		}
-		err := s.channelManager.Watch(ch)
+		err := s.channelManager.Watch(ctx, ch)
 		if err != nil {
 			log.Warn("fail to watch channelName", zap.Error(err))
 			resp.Status = merr.Status(err)
