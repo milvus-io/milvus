@@ -93,7 +93,7 @@ type QueryNode struct {
 	stateCode atomic.Value
 	stopOnce  sync.Once
 
-	//call once
+	// call once
 	initOnce sync.Once
 
 	// internal components
@@ -122,7 +122,7 @@ type QueryNode struct {
 
 	// shard cluster service, handle shard leader functions
 	ShardClusterService *ShardClusterService
-	//shard query service, handles shard-level query & search
+	// shard query service, handles shard-level query & search
 	queryShardService *queryShardService
 
 	// pool for load/release channel
@@ -233,8 +233,8 @@ func (node *QueryNode) Register() error {
 		}
 	})
 
-	//TODO Reset the logger
-	//Params.initLogCfg()
+	// TODO Reset the logger
+	// Params.initLogCfg()
 	return nil
 }
 
@@ -307,7 +307,7 @@ func (node *QueryNode) InitMetrics() error {
 func (node *QueryNode) Init() error {
 	var initError error = nil
 	node.initOnce.Do(func() {
-		//ctx := context.Background()
+		// ctx := context.Background()
 		log.Info("QueryNode session info", zap.String("metaPath", Params.EtcdCfg.MetaRootPath))
 		err := node.initSession()
 		if err != nil {
@@ -439,7 +439,8 @@ func (node *QueryNode) Stop() error {
 				)
 			}
 
-			for !node.queryShardService.Empty() {
+			// wait until all channel released.
+			for len(node.dataSyncService.dmlChannel2FlowGraph) != 0 {
 				select {
 				case <-timeout:
 					log.Warn("migrate channel data timed out", zap.Int("channelNum", node.queryShardService.Num()))
