@@ -183,7 +183,7 @@ func (s *RemoteWorkerSuite) TestDelete() {
 		defer func() { s.mockClient.ExpectedCalls = nil }()
 
 		s.mockClient.EXPECT().Delete(mock.Anything, mock.AnythingOfType("*querypb.DeleteRequest")).
-			Return(nil, status.Errorf(codes.Unimplemented, "mocked grpc unimplemented"))
+			Return(nil, merr.WrapErrServiceUnimplemented(status.Errorf(codes.Unimplemented, "mocked grpc unimplemented")))
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -258,7 +258,7 @@ func (s *RemoteWorkerSuite) TestSearch() {
 
 		grpcErr := status.Error(codes.Unimplemented, "method not implemented")
 		s.mockClient.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
-			Return(result, grpcErr)
+			Return(result, merr.WrapErrServiceUnimplemented(grpcErr))
 		s.mockClient.EXPECT().Search(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
 			Return(result, err)
 
@@ -337,7 +337,7 @@ func (s *RemoteWorkerSuite) TestQuery() {
 
 		grpcErr := status.Error(codes.Unimplemented, "method not implemented")
 		s.mockClient.EXPECT().QuerySegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
-			Return(result, grpcErr)
+			Return(result, merr.WrapErrServiceUnimplemented(grpcErr))
 		s.mockClient.EXPECT().Query(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
 			Return(result, err)
 

@@ -22,8 +22,8 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -108,7 +107,7 @@ func (w *remoteWorker) Delete(ctx context.Context, req *querypb.DeleteRequest) e
 	)
 	status, err := w.client.Delete(ctx, req)
 	if err := merr.CheckRPCCall(status, err); err != nil {
-		if funcutil.IsGrpcErr(err, codes.Unimplemented) {
+		if errors.Is(err, merr.ErrServiceUnimplemented) {
 			log.Warn("invoke legacy querynode Delete method, ignore error", zap.Error(err))
 			return nil
 		}
@@ -120,7 +119,7 @@ func (w *remoteWorker) Delete(ctx context.Context, req *querypb.DeleteRequest) e
 
 func (w *remoteWorker) SearchSegments(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
 	ret, err := w.client.SearchSegments(ctx, req)
-	if err != nil && funcutil.IsGrpcErr(err, codes.Unimplemented) {
+	if err != nil && errors.Is(err, merr.ErrServiceUnimplemented) {
 		// for compatible with rolling upgrade from version before v2.2.9
 		return w.client.Search(ctx, req)
 	}
@@ -130,7 +129,7 @@ func (w *remoteWorker) SearchSegments(ctx context.Context, req *querypb.SearchRe
 
 func (w *remoteWorker) QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
 	ret, err := w.client.QuerySegments(ctx, req)
-	if err != nil && funcutil.IsGrpcErr(err, codes.Unimplemented) {
+	if err != nil && errors.Is(err, merr.ErrServiceUnimplemented) {
 		// for compatible with rolling upgrade from version before v2.2.9
 		return w.client.Query(ctx, req)
 	}
