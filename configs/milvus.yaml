@@ -418,6 +418,11 @@ dataNode:
     watermarkCluster: 0.5 # memory watermark for cluster, upon reaching this watermark, segments will be synced.
   timetick:
     byRPC: true
+  channel:
+    # specify the size of global work pool of all channels
+    # if this parameter <= 0, will set it as the maximum number of CPUs that can be executing
+    # suggest to set it bigger on large collection numbers to avoid blocking
+    workPoolSize: -1
 
 # Configures the system log output.
 log:

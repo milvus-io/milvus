@@ -32,7 +32,11 @@ func getOrCreateIOPool() *conc.Pool[any] {
 }
 
 func initStatsPool() {
-	statsPool = conc.NewPool[any](runtime.GOMAXPROCS(0), conc.WithPreAlloc(false), conc.WithNonBlocking(false))
+	poolSize := Params.DataNodeCfg.ChannelWorkPoolSize.GetAsInt()
+	if poolSize <= 0 {
+		poolSize = runtime.GOMAXPROCS(0)
+	}
+	statsPool = conc.NewPool[any](poolSize, conc.WithPreAlloc(false), conc.WithNonBlocking(false))
 }
 
 func getOrCreateStatsPool() *conc.Pool[any] {
