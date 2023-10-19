@@ -514,14 +514,14 @@ class ApiUtilityWrapper:
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
 
-    def rename_collection(self, old_collection_name, new_collection_name, timeout=None, check_task=None,
-                          check_items=None, **kwargs):
+    def rename_collection(self, old_collection_name, new_collection_name, new_db_name="", timeout=None,
+                          check_task=None, check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([self.ut.rename_collection, old_collection_name, new_collection_name, timeout],
-                                 **kwargs)
+        res, check = api_request([self.ut.rename_collection, old_collection_name, new_collection_name, new_db_name,
+                                  timeout], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,
                                        old_collection_name=old_collection_name, new_collection_name=new_collection_name,
-                                       timeout=timeout, **kwargs).run()
+                                       new_db_name=new_db_name, timeout=timeout, **kwargs).run()
         return res, check_result
 
     def flush_all(self, using="default", timeout=None, check_task=None, check_items=None, **kwargs):
