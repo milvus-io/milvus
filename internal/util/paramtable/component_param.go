@@ -718,7 +718,7 @@ func (p *proxyConfig) initMaxDimension() {
 }
 
 func (p *proxyConfig) initMaxTaskNum() {
-	p.MaxTaskNum = p.Base.ParseInt64WithDefault("proxy.maxTaskNum", 1024)
+	p.MaxTaskNum = p.Base.ParseInt64WithDefault("proxy.maxTaskNum", 10000)
 }
 
 func (p *proxyConfig) initGinLogging() {

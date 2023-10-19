@@ -22,11 +22,13 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
+	"github.com/milvus-io/milvus/internal/util/concurrency"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/opentracing/opentracing-go"
 	oplog "github.com/opentracing/opentracing-go/log"
@@ -532,6 +534,7 @@ func (sched *taskScheduler) manipulationLoop() {
 func (sched *taskScheduler) queryLoop() {
 	defer sched.wg.Done()
 
+	pool, _ := concurrency.NewPool(int(Params.ProxyCfg.MaxTaskNum), concurrency.WithExpiryDuration(time.Minute))
 	for {
 		select {
 		case <-sched.ctx.Done():
@@ -539,7 +542,10 @@ func (sched *taskScheduler) queryLoop() {
 		case <-sched.dqQueue.utChan():
 			if !sched.dqQueue.utEmpty() {
 				t := sched.scheduleDqTask()
-				go sched.processTask(t, sched.dqQueue)
+				pool.Submit(func() (interface{}, error) {
+					sched.processTask(t, sched.dqQueue)
+					return nil, nil
+				})
 			}
 		}
 	}
