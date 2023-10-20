@@ -133,7 +133,7 @@ class TestActionSecondDeployment(TestDeployBase):
             is_vector_indexed = False
             index_infos = [index.to_dict() for index in collection_w.indexes]
             for index_info in index_infos:
-                if "metric_type" in index_info.keys():
+                if "metric_type" in index_info.keys() or "metric_type" in index_info["index_param"]:
                     is_vector_indexed = True
                     break
             if is_vector_indexed is False:
@@ -143,7 +143,7 @@ class TestActionSecondDeployment(TestDeployBase):
 
         # search and query
         if "empty" in name:
-            # if the collection is empty, the search result should be empty, so no need to check            
+            # if the collection is empty, the search result should be empty, so no need to check
             check_task = None
         else:
             check_task = CheckTasks.check_search_results
