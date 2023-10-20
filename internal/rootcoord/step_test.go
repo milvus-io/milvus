@@ -95,3 +95,23 @@ func Test_confirmGCStep_Execute(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
+func TestSkip(t *testing.T) {
+	{
+		s := &unwatchChannelsStep{isSkip: true}
+		_, err := s.Execute(context.Background())
+		assert.NoError(t, err)
+	}
+
+	{
+		s := &deleteCollectionDataStep{isSkip: true}
+		_, err := s.Execute(context.Background())
+		assert.NoError(t, err)
+	}
+
+	{
+		s := &deletePartitionDataStep{isSkip: true}
+		_, err := s.Execute(context.Background())
+		assert.NoError(t, err)
+	}
+}

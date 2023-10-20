@@ -63,7 +63,7 @@ type flushTaskRunner struct {
 	segmentID  UniqueID
 	insertLogs map[UniqueID]*datapb.Binlog
 	statsLogs  map[UniqueID]*datapb.Binlog
-	deltaLogs  []*datapb.Binlog //[]*DelDataBuf
+	deltaLogs  []*datapb.Binlog // []*DelDataBuf
 	pos        *msgpb.MsgPosition
 	flushed    bool
 	dropped    bool
@@ -156,7 +156,7 @@ func (t *flushTaskRunner) runFlushInsert(task flushInsertTask,
 func (t *flushTaskRunner) runFlushDel(task flushDeleteTask, deltaLogs *DelDataBuf, opts ...retry.Option) {
 	t.deleteOnce.Do(func() {
 		if deltaLogs == nil {
-			t.deltaLogs = nil //[]*DelDataBuf{}
+			t.deltaLogs = nil // []*DelDataBuf{}
 		} else {
 			t.deltaLogs = []*datapb.Binlog{
 				{

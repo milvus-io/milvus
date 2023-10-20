@@ -59,7 +59,7 @@ type Consumer interface {
 	// Get Message channel, once you chan you can not seek again
 	Chan() <-chan Message
 
-	// Seek to the uniqueID position
+	// Seek to the uniqueID position, the second bool param indicates whether the message is included in the position
 	Seek(MessageID, bool) error //nolint:govet
 
 	// Ack make sure that msg is received

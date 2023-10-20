@@ -179,6 +179,9 @@ func (c *Core) sendTimeTick(t Timestamp, reason string) error {
 }
 
 func (c *Core) sendMinDdlTsAsTt() {
+	if !paramtable.Get().CommonCfg.TTMsgEnabled.GetAsBool() {
+		return
+	}
 	code := c.GetStateCode()
 	if code != commonpb.StateCode_Healthy {
 		log.Warn("rootCoord is not healthy, skip send timetick")

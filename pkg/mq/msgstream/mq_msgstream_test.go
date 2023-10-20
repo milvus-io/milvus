@@ -111,6 +111,13 @@ func TestStream_PulsarMsgStream_Insert(t *testing.T) {
 	inputStream := getPulsarInputStream(ctx, pulsarAddress, producerChannels)
 	outputStream := getPulsarOutputStream(ctx, pulsarAddress, consumerChannels, consumerSubName)
 
+	{
+		inputStream.EnableProduce(false)
+		err := inputStream.Produce(&msgPack)
+		require.Error(t, err)
+	}
+
+	inputStream.EnableProduce(true)
 	err := inputStream.Produce(&msgPack)
 	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
 
@@ -177,6 +184,13 @@ func TestStream_PulsarMsgStream_BroadCast(t *testing.T) {
 	inputStream := getPulsarInputStream(ctx, pulsarAddress, producerChannels)
 	outputStream := getPulsarOutputStream(ctx, pulsarAddress, consumerChannels, consumerSubName)
 
+	{
+		inputStream.EnableProduce(false)
+		_, err := inputStream.Broadcast(&msgPack)
+		require.Error(t, err)
+	}
+
+	inputStream.EnableProduce(true)
 	_, err := inputStream.Broadcast(&msgPack)
 	require.NoErrorf(t, err, fmt.Sprintf("broadcast error = %v", err))
 

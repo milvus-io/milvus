@@ -1649,6 +1649,11 @@ func TestCore_sendMinDdlTsAsTt(t *testing.T) {
 
 	c.UpdateStateCode(commonpb.StateCode_Healthy)
 	c.session.ServerID = TestRootCoordID
+
+	_ = paramtable.Get().Save(paramtable.Get().CommonCfg.TTMsgEnabled.Key, "false")
+	c.sendMinDdlTsAsTt() // disable ts msg
+	_ = paramtable.Get().Save(paramtable.Get().CommonCfg.TTMsgEnabled.Key, "true")
+
 	c.sendMinDdlTsAsTt() // no session.
 	ticker.addSession(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: TestRootCoordID}})
 	c.sendMinDdlTsAsTt()

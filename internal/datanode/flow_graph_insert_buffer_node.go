@@ -464,6 +464,7 @@ func (ibNode *insertBufferNode) Sync(fgMsg *flowGraphMsg, seg2Upload []UniqueID,
 		).WithRateGroup("ibNode.sync", 1, 60)
 		// check if segment is syncing
 		segment := ibNode.channel.getSegment(task.segmentID)
+
 		if !task.dropped && !task.flushed && segment.isSyncing() {
 			log.RatedInfo(10, "segment is syncing, skip it")
 			continue
@@ -739,7 +740,8 @@ func newInsertBufferNode(
 	wTt.AsProducer([]string{Params.CommonCfg.DataCoordTimeTick.GetValue()})
 	metrics.DataNodeNumProducers.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
 	log.Info("datanode AsProducer", zap.String("TimeTickChannelName", Params.CommonCfg.DataCoordTimeTick.GetValue()))
-	var wTtMsgStream msgstream.MsgStream = wTt
+	wTtMsgStream := wTt
+	wTtMsgStream.EnableProduce(true)
 
 	mt := newMergedTimeTickerSender(func(ts Timestamp, segmentIDs []int64) error {
 		stats := make([]*commonpb.SegmentStats, 0, len(segmentIDs))

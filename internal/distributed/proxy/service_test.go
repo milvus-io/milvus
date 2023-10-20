@@ -508,7 +508,11 @@ func (m *MockProxy) AllocTimestamp(ctx context.Context, req *milvuspb.AllocTimes
 	return nil, nil
 }
 
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+func (m *MockProxy) ReplicateMessage(ctx context.Context, req *milvuspb.ReplicateMessageRequest) (*milvuspb.ReplicateMessageResponse, error) {
+	return nil, nil
+}
+
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 type WaitOption struct {
 	Duration      time.Duration `json:"duration"`

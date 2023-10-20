@@ -100,6 +100,7 @@ func (t *dropCollectionTask) Execute(ctx context.Context) error {
 	redoTask.AddAsyncStep(&deleteCollectionDataStep{
 		baseStep: baseStep{core: t.core},
 		coll:     collMeta,
+		isSkip:   t.Req.GetBase().GetReplicateInfo().GetIsReplicate(),
 	})
 	redoTask.AddAsyncStep(&removeDmlChannelsStep{
 		baseStep:  baseStep{core: t.core},

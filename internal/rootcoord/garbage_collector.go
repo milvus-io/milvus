@@ -61,6 +61,7 @@ func (c *bgGarbageCollector) ReDropCollection(collMeta *model.Collection, ts Tim
 	redo.AddAsyncStep(&deleteCollectionDataStep{
 		baseStep: baseStep{core: c.s},
 		coll:     collMeta,
+		isSkip:   !Params.CommonCfg.TTMsgEnabled.GetAsBool(),
 	})
 	redo.AddAsyncStep(&removeDmlChannelsStep{
 		baseStep:  baseStep{core: c.s},
@@ -93,6 +94,7 @@ func (c *bgGarbageCollector) RemoveCreatingCollection(collMeta *model.Collection
 			virtualChannels:  collMeta.VirtualChannelNames,
 			physicalChannels: collMeta.PhysicalChannelNames,
 		},
+		isSkip: !Params.CommonCfg.TTMsgEnabled.GetAsBool(),
 	})
 	redo.AddAsyncStep(&removeDmlChannelsStep{
 		baseStep:  baseStep{core: c.s},
@@ -117,6 +119,7 @@ func (c *bgGarbageCollector) ReDropPartition(dbID int64, pChannels []string, par
 		baseStep:  baseStep{core: c.s},
 		pchans:    pChannels,
 		partition: partition,
+		isSkip:    !Params.CommonCfg.TTMsgEnabled.GetAsBool(),
 	})
 	redo.AddAsyncStep(&removeDmlChannelsStep{
 		baseStep:  baseStep{core: c.s},

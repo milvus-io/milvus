@@ -636,6 +636,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	})
 	wg.Wait()
 	s1.LivenessCheck(ctx1, func() {
+		log.Debug("Session 1 livenessCheck callback")
 		flag = true
 		close(signal)
 		s1.cancelKeepAlive()
@@ -675,8 +676,10 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 		t.FailNow()
 	}
 	assert.True(t, flag)
+	log.Debug("session s1 stop")
 
 	wg.Wait()
+	log.Debug("session s2 wait done")
 	assert.False(t, s2.isStandby.Load().(bool))
 	s2.Stop()
 }

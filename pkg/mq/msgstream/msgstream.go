@@ -67,6 +67,8 @@ type MsgStream interface {
 
 	GetLatestMsgID(channel string) (MessageID, error)
 	CheckTopicValid(channel string) error
+
+	EnableProduce(can bool)
 }
 
 type Factory interface {

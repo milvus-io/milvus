@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
@@ -58,6 +59,8 @@ type createIndexTask struct {
 	rootCoord types.RootCoordClient
 	datacoord types.DataCoordClient
 	result    *commonpb.Status
+
+	replicateMsgStream msgstream.MsgStream
 
 	isAutoIndex    bool
 	newIndexParams []*commonpb.KeyValuePair
@@ -101,7 +104,9 @@ func (cit *createIndexTask) SetTs(ts Timestamp) {
 }
 
 func (cit *createIndexTask) OnEnqueue() error {
-	cit.req.Base = commonpbutil.NewMsgBase()
+	if cit.req.Base == nil {
+		cit.req.Base = commonpbutil.NewMsgBase()
+	}
 	return nil
 }
 
@@ -414,7 +419,8 @@ func (cit *createIndexTask) Execute(ctx context.Context) error {
 	if cit.result.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(cit.result.Reason)
 	}
-	return err
+	SendReplicateMessagePack(ctx, cit.replicateMsgStream, cit.req)
+	return nil
 }
 
 func (cit *createIndexTask) PostExecute(ctx context.Context) error {
@@ -669,6 +675,8 @@ type dropIndexTask struct {
 	result     *commonpb.Status
 
 	collectionID UniqueID
+
+	replicateMsgStream msgstream.MsgStream
 }
 
 func (dit *dropIndexTask) TraceCtx() context.Context {
@@ -704,7 +712,9 @@ func (dit *dropIndexTask) SetTs(ts Timestamp) {
 }
 
 func (dit *dropIndexTask) OnEnqueue() error {
-	dit.Base = commonpbutil.NewMsgBase()
+	if dit.Base == nil {
+		dit.Base = commonpbutil.NewMsgBase()
+	}
 	return nil
 }
 
@@ -743,6 +753,13 @@ func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
 }
 
 func (dit *dropIndexTask) Execute(ctx context.Context) error {
+	ctxLog := log.Ctx(ctx)
+	ctxLog.Info("proxy drop index", zap.Int64("collID", dit.collectionID),
+		zap.String("field_name", dit.FieldName),
+		zap.String("index_name", dit.IndexName),
+		zap.String("db_name", dit.DbName),
+	)
+
 	var err error
 	dit.result, err = dit.dataCoord.DropIndex(ctx, &indexpb.DropIndexRequest{
 		CollectionID: dit.collectionID,
@@ -750,13 +767,18 @@ func (dit *dropIndexTask) Execute(ctx context.Context) error {
 		IndexName:    dit.IndexName,
 		DropAll:      false,
 	})
+	if err != nil {
+		ctxLog.Warn("drop index failed", zap.Error(err))
+		return err
+	}
 	if dit.result == nil {
 		return errors.New("drop index resp is nil")
 	}
 	if dit.result.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(dit.result.Reason)
 	}
-	return err
+	SendReplicateMessagePack(ctx, dit.replicateMsgStream, dit.DropIndexRequest)
+	return nil
 }
 
 func (dit *dropIndexTask) PostExecute(ctx context.Context) error {

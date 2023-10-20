@@ -81,3 +81,14 @@ func defaultInsertRepackFunc(
 	}
 	return pack, nil
 }
+
+func replicatePackFunc(
+	tsMsgs []msgstream.TsMsg,
+	hashKeys [][]int32,
+) (map[int32]*msgstream.MsgPack, error) {
+	return map[int32]*msgstream.MsgPack{
+		0: {
+			Msgs: tsMsgs,
+		},
+	}, nil
+}

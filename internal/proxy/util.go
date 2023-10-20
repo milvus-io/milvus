@@ -1504,3 +1504,76 @@ func checkDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstre
 	insertMsg.FieldsData = append(insertMsg.FieldsData, dynamicData)
 	return nil
 }
+
+func SendReplicateMessagePack(ctx context.Context, replicateMsgStream msgstream.MsgStream, request interface{ GetBase() *commonpb.MsgBase }) {
+	if replicateMsgStream == nil || request == nil {
+		log.Warn("replicate msg stream or request is nil", zap.Any("request", request))
+		return
+	}
+	msgBase := request.GetBase()
+	ts := msgBase.GetTimestamp()
+	if msgBase.GetReplicateInfo().GetIsReplicate() {
+		ts = msgBase.GetReplicateInfo().GetMsgTimestamp()
+	}
+	getBaseMsg := func(ctx context.Context, ts uint64) msgstream.BaseMsg {
+		return msgstream.BaseMsg{
+			Ctx:            ctx,
+			HashValues:     []uint32{0},
+			BeginTimestamp: ts,
+			EndTimestamp:   ts,
+		}
+	}
+
+	var tsMsg msgstream.TsMsg
+	switch r := request.(type) {
+	case *milvuspb.CreateDatabaseRequest:
+		tsMsg = &msgstream.CreateDatabaseMsg{
+			BaseMsg:               getBaseMsg(ctx, ts),
+			CreateDatabaseRequest: *r,
+		}
+	case *milvuspb.DropDatabaseRequest:
+		tsMsg = &msgstream.DropDatabaseMsg{
+			BaseMsg:             getBaseMsg(ctx, ts),
+			DropDatabaseRequest: *r,
+		}
+	case *milvuspb.FlushRequest:
+		tsMsg = &msgstream.FlushMsg{
+			BaseMsg:      getBaseMsg(ctx, ts),
+			FlushRequest: *r,
+		}
+	case *milvuspb.LoadCollectionRequest:
+		tsMsg = &msgstream.LoadCollectionMsg{
+			BaseMsg:               getBaseMsg(ctx, ts),
+			LoadCollectionRequest: *r,
+		}
+	case *milvuspb.ReleaseCollectionRequest:
+		tsMsg = &msgstream.ReleaseCollectionMsg{
+			BaseMsg:                  getBaseMsg(ctx, ts),
+			ReleaseCollectionRequest: *r,
+		}
+	case *milvuspb.CreateIndexRequest:
+		tsMsg = &msgstream.CreateIndexMsg{
+			BaseMsg:            getBaseMsg(ctx, ts),
+			CreateIndexRequest: *r,
+		}
+	case *milvuspb.DropIndexRequest:
+		tsMsg = &msgstream.DropIndexMsg{
+			BaseMsg:          getBaseMsg(ctx, ts),
+			DropIndexRequest: *r,
+		}
+	default:
+		log.Warn("unknown request", zap.Any("request", request))
+		return
+	}
+	msgPack := &msgstream.MsgPack{
+		BeginTs: ts,
+		EndTs:   ts,
+		Msgs:    []msgstream.TsMsg{tsMsg},
+	}
+	msgErr := replicateMsgStream.Produce(msgPack)
+	// ignore the error if the msg stream failed to produce the msg,
+	// because it can be manually fixed in this error
+	if msgErr != nil {
+		log.Warn("send replicate msg failed", zap.Any("pack", msgPack), zap.Error(msgErr))
+	}
+}

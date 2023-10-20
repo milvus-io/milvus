@@ -2052,3 +2052,38 @@ func Test_validateMaxCapacityPerRow(t *testing.T) {
 		assert.Error(t, err)
 	})
 }
+
+func TestSendReplicateMessagePack(t *testing.T) {
+	ctx := context.Background()
+	mockStream := msgstream.NewMockMsgStream(t)
+
+	t.Run("empty case", func(t *testing.T) {
+		SendReplicateMessagePack(ctx, nil, nil)
+	})
+
+	t.Run("produce fail", func(t *testing.T) {
+		mockStream.EXPECT().Produce(mock.Anything).Return(errors.New("produce error")).Once()
+		SendReplicateMessagePack(ctx, mockStream, &milvuspb.CreateDatabaseRequest{
+			Base: &commonpb.MsgBase{ReplicateInfo: &commonpb.ReplicateInfo{
+				IsReplicate:  true,
+				MsgTimestamp: 100,
+			}},
+		})
+	})
+
+	t.Run("unknown request", func(t *testing.T) {
+		SendReplicateMessagePack(ctx, mockStream, &milvuspb.ListDatabasesRequest{})
+	})
+
+	t.Run("normal case", func(t *testing.T) {
+		mockStream.EXPECT().Produce(mock.Anything).Return(nil)
+
+		SendReplicateMessagePack(ctx, mockStream, &milvuspb.CreateDatabaseRequest{})
+		SendReplicateMessagePack(ctx, mockStream, &milvuspb.DropDatabaseRequest{})
+		SendReplicateMessagePack(ctx, mockStream, &milvuspb.FlushRequest{})
+		SendReplicateMessagePack(ctx, mockStream, &milvuspb.LoadCollectionRequest{})
+		SendReplicateMessagePack(ctx, mockStream, &milvuspb.ReleaseCollectionRequest{})
+		SendReplicateMessagePack(ctx, mockStream, &milvuspb.CreateIndexRequest{})
+		SendReplicateMessagePack(ctx, mockStream, &milvuspb.DropIndexRequest{})
+	})
+}

@@ -464,6 +464,7 @@ common:
     rootCoordTimeTick: rootcoord-timetick
     rootCoordStatistics: rootcoord-statistics
     rootCoordDml: rootcoord-dml
+    replicateMsg: replicate-msg
     rootCoordDelta: rootcoord-delta
     search: search
     searchResult: searchResult
@@ -528,6 +529,7 @@ common:
     threshold:
       info: 500 # minimum milliseconds for printing durations in info level
       warn: 1000 # minimum milliseconds for printing durations in warn level
+  ttMsgEnabled: true # Whether the instance disable sending ts messages
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:

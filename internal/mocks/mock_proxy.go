@@ -4445,6 +4445,61 @@ func (_c *MockProxy_RenameCollection_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
+// ReplicateMessage provides a mock function with given fields: ctx, req
+func (_m *MockProxy) ReplicateMessage(ctx context.Context, req *milvuspb.ReplicateMessageRequest) (*milvuspb.ReplicateMessageResponse, error) {
+	ret := _m.Called(ctx, req)
+
+	var r0 *milvuspb.ReplicateMessageResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ReplicateMessageRequest) (*milvuspb.ReplicateMessageResponse, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ReplicateMessageRequest) *milvuspb.ReplicateMessageResponse); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ReplicateMessageResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ReplicateMessageRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_ReplicateMessage_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReplicateMessage'
+type MockProxy_ReplicateMessage_Call struct {
+	*mock.Call
+}
+
+// ReplicateMessage is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *milvuspb.ReplicateMessageRequest
+func (_e *MockProxy_Expecter) ReplicateMessage(ctx interface{}, req interface{}) *MockProxy_ReplicateMessage_Call {
+	return &MockProxy_ReplicateMessage_Call{Call: _e.mock.On("ReplicateMessage", ctx, req)}
+}
+
+func (_c *MockProxy_ReplicateMessage_Call) Run(run func(ctx context.Context, req *milvuspb.ReplicateMessageRequest)) *MockProxy_ReplicateMessage_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.ReplicateMessageRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_ReplicateMessage_Call) Return(_a0 *milvuspb.ReplicateMessageResponse, _a1 error) *MockProxy_ReplicateMessage_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_ReplicateMessage_Call) RunAndReturn(run func(context.Context, *milvuspb.ReplicateMessageRequest) (*milvuspb.ReplicateMessageResponse, error)) *MockProxy_ReplicateMessage_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Search provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) Search(_a0 context.Context, _a1 *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 	ret := _m.Called(_a0, _a1)

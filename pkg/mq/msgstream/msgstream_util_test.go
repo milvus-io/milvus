@@ -20,7 +20,11 @@ import (
 	"context"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+
+	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 )
 
 func TestPulsarMsgUtil(t *testing.T) {
@@ -35,4 +39,44 @@ func TestPulsarMsgUtil(t *testing.T) {
 	msgStream.AsProducer([]string{"test"})
 
 	UnsubscribeChannels(ctx, pmsFactory, "sub", []string{"test"})
+}
+
+func TestGetLatestMsgID(t *testing.T) {
+	factory := NewMockMqFactory()
+	ctx := context.Background()
+	{
+		factory.NewMsgStreamFunc = func(ctx context.Context) (MsgStream, error) {
+			return nil, errors.New("mock")
+		}
+		_, err := GetChannelLatestMsgID(ctx, factory, "test")
+		assert.Error(t, err)
+	}
+	stream := NewMockMsgStream(t)
+	factory.NewMsgStreamFunc = func(ctx context.Context) (MsgStream, error) {
+		return stream, nil
+	}
+	stream.EXPECT().Close().Return()
+
+	{
+		stream.EXPECT().AsConsumer(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock")).Once()
+		_, err := GetChannelLatestMsgID(ctx, factory, "test")
+		assert.Error(t, err)
+	}
+
+	{
+		stream.EXPECT().AsConsumer(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+		stream.EXPECT().GetLatestMsgID(mock.Anything).Return(nil, errors.New("mock")).Once()
+		_, err := GetChannelLatestMsgID(ctx, factory, "test")
+		assert.Error(t, err)
+	}
+
+	{
+		mockMsgID := mqwrapper.NewMockMessageID(t)
+		mockMsgID.EXPECT().Serialize().Return([]byte("mock")).Once()
+		stream.EXPECT().AsConsumer(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+		stream.EXPECT().GetLatestMsgID(mock.Anything).Return(mockMsgID, nil).Once()
+		id, err := GetChannelLatestMsgID(ctx, factory, "test")
+		assert.NoError(t, err)
+		assert.Equal(t, []byte("mock"), id)
+	}
 }

@@ -105,6 +105,7 @@ var (
 	ErrMqTopicNotFound = newMilvusError("topic not found", 1300, false)
 	ErrMqTopicNotEmpty = newMilvusError("topic not empty", 1301, false)
 	ErrMqInternal      = newMilvusError("message queue internal error", 1302, false)
+	ErrDenyProduceMsg  = newMilvusError("deny to write the message to mq", 1303, false)
 
 	// Privilege related
 	// this operation is denied because the user not authorized, user need to login in first
@@ -129,6 +130,12 @@ var (
 	ErrInvalidInsertData         = newMilvusError("fail to deal the insert data", 1804, false)
 	ErrInvalidSearchResult       = newMilvusError("fail to parse search result", 1805, false)
 	ErrCheckPrimaryKey           = newMilvusError("please check the primary key and its' type can only in [int, string]", 1806, false)
+
+	// replicate related
+	ErrDenyReplicateMessage = newMilvusError("deny to use the replicate message in the normal instance", 1900, false)
+	ErrInvalidMsgBytes      = newMilvusError("invalid replicate msg bytes", 1901, false)
+	ErrNoAssignSegmentID    = newMilvusError("no assign segment id", 1902, false)
+	ErrInvalidStreamObj     = newMilvusError("invalid stream object", 1903, false)
 
 	// Segcore related
 	ErrSegcore = newMilvusError("segcore error", 2000, false)

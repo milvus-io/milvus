@@ -349,8 +349,7 @@ func (t *createCollectionTask) Prepare(ctx context.Context) error {
 	return t.assignChannels()
 }
 
-func (t *createCollectionTask) genCreateCollectionMsg(ctx context.Context) *ms.MsgPack {
-	ts := t.GetTs()
+func (t *createCollectionTask) genCreateCollectionMsg(ctx context.Context, ts uint64) *ms.MsgPack {
 	collectionID := t.collID
 	partitionIDs := t.partIDs
 	// error won't happen here.
@@ -382,21 +381,36 @@ func (t *createCollectionTask) genCreateCollectionMsg(ctx context.Context) *ms.M
 	return &msgPack
 }
 
-func (t *createCollectionTask) addChannelsAndGetStartPositions(ctx context.Context) (map[string][]byte, error) {
+func (t *createCollectionTask) addChannelsAndGetStartPositions(ctx context.Context, ts uint64) (map[string][]byte, error) {
 	t.core.chanTimeTick.addDmlChannels(t.channels.physicalChannels...)
-	msg := t.genCreateCollectionMsg(ctx)
+	msg := t.genCreateCollectionMsg(ctx, ts)
 	return t.core.chanTimeTick.broadcastMarkDmlChannels(t.channels.physicalChannels, msg)
+}
+
+func (t *createCollectionTask) getCreateTs() (uint64, error) {
+	replicateInfo := t.Req.GetBase().GetReplicateInfo()
+	if !replicateInfo.GetIsReplicate() {
+		return t.GetTs(), nil
+	}
+	if replicateInfo.GetMsgTimestamp() == 0 {
+		log.Warn("the cdc timestamp is not set in the request for the backup instance")
+		return 0, merr.WrapErrParameterInvalidMsg("the cdc timestamp is not set in the request for the backup instance")
+	}
+	return replicateInfo.GetMsgTimestamp(), nil
 }
 
 func (t *createCollectionTask) Execute(ctx context.Context) error {
 	collID := t.collID
 	partIDs := t.partIDs
-	ts := t.GetTs()
+	ts, err := t.getCreateTs()
+	if err != nil {
+		return err
+	}
 
 	vchanNames := t.channels.virtualChannels
 	chanNames := t.channels.physicalChannels
 
-	startPositions, err := t.addChannelsAndGetStartPositions(ctx)
+	startPositions, err := t.addChannelsAndGetStartPositions(ctx, ts)
 	if err != nil {
 		// ugly here, since we must get start positions first.
 		t.core.chanTimeTick.removeDmlChannels(t.channels.physicalChannels...)
@@ -445,7 +459,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 			return fmt.Errorf("create duplicate collection with different parameters, collection: %s", t.Req.GetCollectionName())
 		}
 		// make creating collection idempotent.
-		log.Warn("add duplicate collection", zap.String("collection", t.Req.GetCollectionName()), zap.Uint64("ts", t.GetTs()))
+		log.Warn("add duplicate collection", zap.String("collection", t.Req.GetCollectionName()), zap.Uint64("ts", ts))
 		return nil
 	}
 
@@ -475,6 +489,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		baseStep:     baseStep{core: t.core},
 		collectionID: collID,
 		channels:     t.channels,
+		isSkip:       !Params.CommonCfg.TTMsgEnabled.GetAsBool(),
 	})
 	undoTask.AddStep(&watchChannelsStep{
 		baseStep: baseStep{core: t.core},
