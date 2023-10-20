@@ -823,6 +823,33 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                          "err_msg": "partition name %s not found" % partition_name})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("reorder_k", [100])
+    def test_search_scann_with_invalid_reorder_k(self, reorder_k):
+        """
+        target: test search with invalid nq
+        method: search with invalid nq
+        expected: raise exception and report the error
+        """
+        # initialize with data
+        collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
+        index_params = {"index_type": "SCANN", "metric_type": "L2", "params": {"nlist": 1024}}
+        collection_w.create_index(default_search_field, index_params)
+        # search
+        search_params = {"metric_type": "L2", "params": {"nprobe": 10, "reorder_k": reorder_k}}
+        collection_w.load()
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            search_params, reorder_k + 1,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 65538,
+                                         "err_msg": "failed to search: attempt #0: failed to search/query "
+                                                    "delegator 1 for channel by-dev-rootcoord-dml_12_44501"
+                                                    "8735380972010v0: fail to Search, QueryNode ID=1, reaso"
+                                                    "n=worker(1) query failed: UnknownError:  => failed to "
+                                                    "search: out of range in json: reorder_k(100) should be"
+                                                    " larger than k(101): attempt #1: no available shard de"
+                                                    "legator found: service unavailable"})
+
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("nq", [16385])
     def test_search_with_invalid_nq(self, nq):
         """
@@ -3977,8 +4004,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w.insert(data)
 
         # 3. search with param ignore_growing=True
-        search_params = {"metric_type": "COSINE", "params": {
-            "nprobe": 10}, "ignore_growing": True}
+        search_params = {"metric_type": "COSINE", "params": {"nprobe": 10}, "ignore_growing": True}
         vector = [[random.random() for _ in range(dim)] for _ in range(nq)]
         res = collection_w.search(vector[:nq], default_search_field, search_params, default_limit,
                                   default_search_exp, _async=_async,
@@ -4209,6 +4235,58 @@ class TestCollectionSearch(TestcaseBase):
         assert res[ct.default_double_field_name] == 3.1415
         assert res[ct.default_bool_field_name] is False
         assert res[ct.default_string_field_name] == "abc"
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("index, params", zip(ct.all_index_types[1:4], ct.default_index_params[1:4]))
+    def test_search_repeatedly_ivf_index_same_limit(self, index, params):
+        """
+        target: test create collection repeatedly
+        method: search twice, check the results is the same
+        expected: search results are as expected
+        """
+        nb = 5000
+        limit = 30
+        # 1. create a collection
+        collection_w = self.init_collection_general(prefix, True, nb, is_index=False)[0]
+
+        # 2. insert data again
+        index_params = {"metric_type": "COSINE", "index_type": index, "params": params}
+        collection_w.create_index(default_search_field, index_params)
+
+        # 3. search with param ignore_growing=True
+        collection_w.load()
+        search_params = cf.gen_search_param(index, "COSINE")[0]
+        vector = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        res1 = collection_w.search(vector[:default_nq], default_search_field, search_params, limit)[0]
+        res2 = collection_w.search(vector[:default_nq], default_search_field, search_params, limit)[0]
+        for i in range(default_nq):
+            res1[i].ids == res2[i].ids
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("index, params", zip(ct.all_index_types[1:4], ct.default_index_params[1:4]))
+    def test_search_repeatedly_ivf_index_different_limit(self, index, params):
+        """
+        target: test create collection repeatedly
+        method: search twice, check the results is the same
+        expected: search results are as expected
+        """
+        nb = 5000
+        limit = random.randint(10, 100)
+        # 1. create a collection
+        collection_w = self.init_collection_general(prefix, True, nb, is_index=False)[0]
+
+        # 2. insert data again
+        index_params = {"metric_type": "COSINE", "index_type": index, "params": params}
+        collection_w.create_index(default_search_field, index_params)
+
+        # 3. search with param ignore_growing=True
+        collection_w.load()
+        search_params = cf.gen_search_param(index, "COSINE")[0]
+        vector = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        res1 = collection_w.search(vector, default_search_field, search_params, limit)[0]
+        res2 = collection_w.search(vector, default_search_field, search_params, limit * 2)[0]
+        for i in range(default_nq):
+            res1[i].ids == res2[i].ids[limit:]
 
 
 class TestSearchBase(TestcaseBase):
@@ -6837,6 +6915,9 @@ class TestCollectionRangeSearch(TestcaseBase):
             search_param["params"]["range_filter"] = 0
             if index.startswith("IVF_"):
                 search_param["params"].pop("nprobe")
+            if index == "SCANN":
+                search_param["params"].pop("nprobe")
+                search_param["params"].pop("reorder_k")
             log.info("Searching with search params: {}".format(search_param))
             collection_w.search(vectors[:default_nq], default_search_field,
                                 search_param, default_limit,
