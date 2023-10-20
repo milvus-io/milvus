@@ -523,6 +523,11 @@ func dropPartition(collMeta *pb.CollectionInfo, partitionID typeutil.UniqueID) {
 
 func (kc *Catalog) DropPartition(ctx context.Context, dbID int64, collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, ts typeutil.Timestamp) error {
 	collMeta, err := kc.loadCollection(ctx, dbID, collectionID, ts)
+	if errors.Is(err, merr.ErrCollectionNotFound) {
+		// collection's gc happened before partition's.
+		return nil
+	}
+
 	if err != nil {
 		return err
 	}
