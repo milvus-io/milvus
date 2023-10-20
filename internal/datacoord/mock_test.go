@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
@@ -582,6 +583,7 @@ func (m *mockRootCoordService) InvalidateCollectionMetaCache(ctx context.Context
 func (m *mockRootCoordService) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
+
 func (m *mockRootCoordService) AddNewSegment(ctx context.Context, in *datapb.SegmentMsg) (*commonpb.Status, error) {
 	panic("not implemented") // TODO: Implement
 }

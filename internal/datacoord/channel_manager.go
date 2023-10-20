@@ -22,6 +22,11 @@ import (
 	"sync"
 	"time"
 
+	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+	"stathat.com/c/consistent"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
@@ -31,11 +36,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/logutil"
-
-	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
-	"stathat.com/c/consistent"
 )
 
 // ChannelManager manages the allocation and the balance between channels and data nodes.
@@ -756,17 +756,25 @@ func (c *ChannelManager) Release(nodeID UniqueID, channelName string) error {
 
 // Reassign reassigns a channel to another DataNode.
 func (c *ChannelManager) Reassign(originNodeID UniqueID, channelName string) error {
+	c.mu.RLock()
+	ch := c.getChannelByNodeAndName(originNodeID, channelName)
+	if ch == nil {
+		c.mu.RUnlock()
+		return fmt.Errorf("fail to find matching nodeID: %d with channelName: %s", originNodeID, channelName)
+	}
+	c.mu.RUnlock()
+
+	reallocates := &NodeChannelInfo{originNodeID, []*channel{ch}}
+	isDropped := c.isMarkedDrop(channelName, ch.CollectionID)
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
-	ch := c.getChannelByNodeAndName(originNodeID, channelName)
+	ch = c.getChannelByNodeAndName(originNodeID, channelName)
 	if ch == nil {
 		return fmt.Errorf("fail to find matching nodeID: %d with channelName: %s", originNodeID, channelName)
 	}
 
-	reallocates := &NodeChannelInfo{originNodeID, []*channel{ch}}
-
-	if c.isMarkedDrop(channelName, ch.CollectionID) {
+	if isDropped {
 		if err := c.remove(originNodeID, ch); err != nil {
 			return fmt.Errorf("failed to remove watch info: %v,%s", ch, err.Error())
 		}
@@ -795,13 +803,13 @@ func (c *ChannelManager) Reassign(originNodeID UniqueID, channelName string) err
 
 // CleanupAndReassign tries to clean up datanode's subscription, and then reassigns the channel to another DataNode.
 func (c *ChannelManager) CleanupAndReassign(nodeID UniqueID, channelName string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
+	c.mu.RLock()
 	chToCleanUp := c.getChannelByNodeAndName(nodeID, channelName)
 	if chToCleanUp == nil {
+		c.mu.RUnlock()
 		return fmt.Errorf("failed to find matching channel: %s and node: %d", channelName, nodeID)
 	}
+	c.mu.RUnlock()
 
 	if c.msgstreamFactory == nil {
 		log.Warn("msgstream factory is not set, unable to clean up topics")
@@ -812,12 +820,19 @@ func (c *ChannelManager) CleanupAndReassign(nodeID UniqueID, channelName string)
 	}
 
 	reallocates := &NodeChannelInfo{nodeID, []*channel{chToCleanUp}}
+	isDropped := c.isMarkedDrop(channelName, chToCleanUp.CollectionID)
 
-	if c.isMarkedDrop(channelName, chToCleanUp.CollectionID) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	chToCleanUp = c.getChannelByNodeAndName(nodeID, channelName)
+	if chToCleanUp == nil {
+		return fmt.Errorf("failed to find matching channel: %s and node: %d", channelName, nodeID)
+	}
+
+	if isDropped {
 		if err := c.remove(nodeID, chToCleanUp); err != nil {
 			return fmt.Errorf("failed to remove watch info: %v,%s", chToCleanUp, err.Error())
 		}
-
 		log.Info("try to cleanup removal flag ", zap.String("channel name", channelName))
 		if err := c.h.FinishDropChannel(channelName); err != nil {
 			return fmt.Errorf("FinishDropChannel failed, err=%w", err)
