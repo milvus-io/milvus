@@ -916,16 +916,20 @@ func TestRocksmq_GetLatestMsg(t *testing.T) {
 
 	name := "/tmp/rocksmq_data"
 	defer os.RemoveAll(name)
+
 	kvName := name + "_meta_kv"
 	_ = os.RemoveAll(kvName)
 	defer os.RemoveAll(kvName)
+
 	paramtable.Get().Save("rocksmq.compressionTypes", "0,0,0,0,0")
 	rmq, err := NewRocksMQ(name, idAllocator)
 	assert.NoError(t, err)
+	defer rmq.Close()
 
 	channelName := newChanName()
 	err = rmq.CreateTopic(channelName)
 	assert.NoError(t, err)
+	defer rmq.DestroyTopic(channelName)
 
 	// Consume loopNum message once
 	groupName := "last_msg_test"
@@ -1235,11 +1239,14 @@ func TestRocksmq_Info(t *testing.T) {
 	defer os.RemoveAll(kvName)
 	params := paramtable.Get()
 	params.Save(params.RocksmqCfg.PageSize.Key, "10")
+	params.Save(params.RocksmqCfg.InfoInterval.Key, "1")
 	paramtable.Get().Save("rocksmq.compressionTypes", "0,0,0,0,0")
 	rmq, err := NewRocksMQ(name, idAllocator)
 	assert.NoError(t, err)
 	defer rmq.Close()
 
+	// sleep 1 seconed for wait rocksdb info
+	time.Sleep(time.Second)
 	topicName := "test_testinfo"
 	groupName := "test"
 	rmq.CreateTopic(topicName)

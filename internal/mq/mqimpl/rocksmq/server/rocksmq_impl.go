@@ -126,6 +126,10 @@ type rocksmq struct {
 	retentionInfo *retentionInfo
 	readers       sync.Map
 	state         RmqState
+
+	closeCh   chan struct{}
+	closeOnce sync.Once
+	wg        sync.WaitGroup
 }
 
 func parseCompressionType(params *paramtable.ComponentParam) ([]gorocksdb.CompressionType, error) {
@@ -253,6 +257,7 @@ func NewRocksMQ(name string, idAllocator allocator.Interface) (*rocksmq, error) 
 		consumers:   sync.Map{},
 		readers:     sync.Map{},
 		topicLastID: sync.Map{},
+		closeCh:     make(chan struct{}),
 	}
 
 	ri, err := initRetentionInfo(kv, db)
@@ -266,25 +271,32 @@ func NewRocksMQ(name string, idAllocator allocator.Interface) (*rocksmq, error) 
 	}
 	atomic.StoreInt64(&rmq.state, RmqStateHealthy)
 	// TODO add this to monitor metrics
+	rmq.wg.Add(1)
 	go func() {
+		ticker := time.NewTicker(params.RocksmqCfg.InfoInterval.GetAsDuration(time.Second))
+		defer rmq.wg.Done()
 		for {
-			time.Sleep(10 * time.Minute)
-
-			log.Info("Rocksmq stats",
-				zap.String("cache", kv.DB.GetProperty("rocksdb.block-cache-usage")),
-				zap.String("rockskv memtable ", kv.DB.GetProperty("rocksdb.size-all-mem-tables")),
-				zap.String("rockskv table readers", kv.DB.GetProperty("rocksdb.estimate-table-readers-mem")),
-				zap.String("rockskv pinned", kv.DB.GetProperty("rocksdb.block-cache-pinned-usage")),
-				zap.String("store memtable ", db.GetProperty("rocksdb.size-all-mem-tables")),
-				zap.String("store table readers", db.GetProperty("rocksdb.estimate-table-readers-mem")),
-				zap.String("store pinned", db.GetProperty("rocksdb.block-cache-pinned-usage")),
-				zap.String("store l0 file num", db.GetProperty("rocksdb.num-files-at-level0")),
-				zap.String("store l1 file num", db.GetProperty("rocksdb.num-files-at-level1")),
-				zap.String("store l2 file num", db.GetProperty("rocksdb.num-files-at-level2")),
-				zap.String("store l3 file num", db.GetProperty("rocksdb.num-files-at-level3")),
-				zap.String("store l4 file num", db.GetProperty("rocksdb.num-files-at-level4")),
-			)
-			rmq.Info()
+			select {
+			case <-ticker.C:
+				log.Info("Rocksmq stats",
+					zap.String("cache", kv.DB.GetProperty("rocksdb.block-cache-usage")),
+					zap.String("rockskv memtable ", kv.DB.GetProperty("rocksdb.size-all-mem-tables")),
+					zap.String("rockskv table readers", kv.DB.GetProperty("rocksdb.estimate-table-readers-mem")),
+					zap.String("rockskv pinned", kv.DB.GetProperty("rocksdb.block-cache-pinned-usage")),
+					zap.String("store memtable ", db.GetProperty("rocksdb.size-all-mem-tables")),
+					zap.String("store table readers", db.GetProperty("rocksdb.estimate-table-readers-mem")),
+					zap.String("store pinned", db.GetProperty("rocksdb.block-cache-pinned-usage")),
+					zap.String("store l0 file num", db.GetProperty("rocksdb.num-files-at-level0")),
+					zap.String("store l1 file num", db.GetProperty("rocksdb.num-files-at-level1")),
+					zap.String("store l2 file num", db.GetProperty("rocksdb.num-files-at-level2")),
+					zap.String("store l3 file num", db.GetProperty("rocksdb.num-files-at-level3")),
+					zap.String("store l4 file num", db.GetProperty("rocksdb.num-files-at-level4")),
+				)
+				rmq.Info()
+			case <-rmq.closeCh:
+				log.Info("close print rocksmq info and status")
+				return
+			}
 		}
 	}()
 
@@ -300,24 +312,28 @@ func (rmq *rocksmq) isClosed() bool {
 // 2. Destroy all consumer groups and topics
 // 3. Close rocksdb instance
 func (rmq *rocksmq) Close() {
-	atomic.StoreInt64(&rmq.state, RmqStateStopped)
-	rmq.stopRetention()
-	rmq.consumers.Range(func(k, v interface{}) bool {
-		// TODO what happened if the server crashed? who handled the destroy consumer group? should we just handled it when rocksmq created?
-		// or we should not even make consumer info persistent?
-		for _, consumer := range v.([]*Consumer) {
-			err := rmq.destroyConsumerGroupInternal(consumer.Topic, consumer.GroupName)
-			if err != nil {
-				log.Warn("Failed to destroy consumer group in rocksmq!", zap.Any("topic", consumer.Topic), zap.Any("groupName", consumer.GroupName), zap.Any("error", err))
+	rmq.closeOnce.Do(func() {
+		close(rmq.closeCh)
+		atomic.StoreInt64(&rmq.state, RmqStateStopped)
+		rmq.stopRetention()
+		rmq.consumers.Range(func(k, v interface{}) bool {
+			// TODO what happened if the server crashed? who handled the destroy consumer group? should we just handled it when rocksmq created?
+			// or we should not even make consumer info persistent?
+			for _, consumer := range v.([]*Consumer) {
+				err := rmq.destroyConsumerGroupInternal(consumer.Topic, consumer.GroupName)
+				if err != nil {
+					log.Warn("Failed to destroy consumer group in rocksmq!", zap.Any("topic", consumer.Topic), zap.Any("groupName", consumer.GroupName), zap.Any("error", err))
+				}
 			}
-		}
-		return true
+			return true
+		})
+		rmq.wg.Wait()
+		rmq.storeMu.Lock()
+		defer rmq.storeMu.Unlock()
+		rmq.kv.Close()
+		rmq.store.Close()
+		log.Info("Successfully close rocksmq")
 	})
-	rmq.storeMu.Lock()
-	defer rmq.storeMu.Unlock()
-	rmq.kv.Close()
-	rmq.store.Close()
-	log.Info("Successfully close rocksmq")
 }
 
 // print rmq consumer Info
@@ -396,7 +412,7 @@ func (rmq *rocksmq) CreateTopic(topicName string) error {
 		return err
 	}
 	if val != "" {
-		log.Warn("rocksmq topic already exists ", zap.String("topic", topicName))
+		log.Warn("rocksmq topic already exists", zap.String("topic", topicName))
 		return nil
 	}
 

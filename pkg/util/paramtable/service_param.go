@@ -713,8 +713,10 @@ type RocksmqConfig struct {
 	RetentionTimeInMinutes ParamItem `refreshable:"false"`
 	// RetentionSizeInMB is the size of retention
 	RetentionSizeInMB ParamItem `refreshable:"false"`
-	// CompactionInterval is the Interval we trigger compaction,
+	// CompactionInterval is the interval we trigger compaction,
 	CompactionInterval ParamItem `refreshable:"false"`
+	// InfoInterval in the interval we print mq info
+	InfoInterval ParamItem `refreshable:"false"`
 	// TickerTimeInSeconds is the time of expired check, default 10 minutes
 	TickerTimeInSeconds ParamItem `refreshable:"false"`
 	// CompressionTypes is compression type of each level
@@ -778,6 +780,13 @@ please adjust in embedded Milvus: /tmp/milvus/rdb_data`,
 		Export:       true,
 	}
 	r.CompactionInterval.Init(base.mgr)
+
+	r.InfoInterval = ParamItem{
+		Key:          "rocksmq.infoInterval",
+		DefaultValue: "600",
+		Version:      "2.3.0",
+	}
+	r.InfoInterval.Init(base.mgr)
 
 	r.TickerTimeInSeconds = ParamItem{
 		Key:          "rocksmq.timtickerInterval",
