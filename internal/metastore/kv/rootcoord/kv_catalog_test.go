@@ -666,15 +666,27 @@ func TestCatalog_DropPartitionV2(t *testing.T) {
 	t.Run("failed to load collection", func(t *testing.T) {
 		ctx := context.Background()
 
-		snapshot := kv.NewMockSnapshotKV()
-		snapshot.LoadFunc = func(key string, ts typeutil.Timestamp) (string, error) {
-			return "", errors.New("mock")
-		}
+		snapshot := mocks.NewSnapShotKV(t)
+		snapshot.On("Load",
+			mock.Anything, mock.Anything).Return("not in codec format", nil)
 
 		kc := Catalog{Snapshot: snapshot}
 
 		err := kc.DropPartition(ctx, 0, 100, 101, 0)
 		assert.Error(t, err)
+	})
+
+	t.Run("failed to load collection, no key found", func(t *testing.T) {
+		ctx := context.Background()
+
+		snapshot := mocks.NewSnapShotKV(t)
+		snapshot.On("Load",
+			mock.Anything, mock.Anything).Return("", merr.WrapErrIoKeyNotFound("partition"))
+
+		kc := Catalog{Snapshot: snapshot}
+
+		err := kc.DropPartition(ctx, 0, 100, 101, 0)
+		assert.NoError(t, err)
 	})
 
 	t.Run("partition version after 210", func(t *testing.T) {
