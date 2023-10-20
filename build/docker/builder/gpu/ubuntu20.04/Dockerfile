@@ -11,7 +11,7 @@
 
 FROM nvidia/cuda:11.8.0-devel-ubuntu20.04
 
-RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-certificates gnupg2 && \
+RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-certificates gnupg2 ninja-build && \
     wget -qO- "https://cmake.org/files/v3.24/cmake-3.24.0-linux-x86_64.tar.gz" | tar --strip-components=1 -xz -C /usr/local && \
     apt-get update && apt-get install -y --no-install-recommends \
     g++ gcc gfortran git make ccache libssl-dev zlib1g-dev zip unzip \
