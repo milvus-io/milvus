@@ -34,7 +34,7 @@ const (
 	ReturnTrue        = 3
 	ReturnFalse       = 4
 
-	URIPrefix = "/v1"
+	URIPrefixV1 = "/v1"
 )
 
 var StatusSuccess = commonpb.Status{
@@ -76,10 +76,14 @@ var DefaultFalseResp = milvuspb.BoolResponse{
 	Value:  false,
 }
 
+func versional(path string) string {
+	return URIPrefixV1 + path
+}
+
 func initHTTPServer(proxy types.ProxyComponent, needAuth bool) *gin.Engine {
 	h := NewHandlers(proxy)
 	ginHandler := gin.Default()
-	app := ginHandler.Group("/v1", genAuthMiddleWare(needAuth))
+	app := ginHandler.Group(URIPrefixV1, genAuthMiddleWare(needAuth))
 	NewHandlers(h.proxy).RegisterRoutesToV1(app)
 	return ginHandler
 }
@@ -139,7 +143,7 @@ func TestVectorAuthenticate(t *testing.T) {
 	testEngine := initHTTPServer(mp, true)
 
 	t.Run("need authentication", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/v1/vector/collections", nil)
+		req := httptest.NewRequest(http.MethodGet, versional(VectorCollectionsPath), nil)
 		w := httptest.NewRecorder()
 		testEngine.ServeHTTP(w, req)
 		assert.Equal(t, w.Code, http.StatusUnauthorized)
@@ -147,7 +151,7 @@ func TestVectorAuthenticate(t *testing.T) {
 	})
 
 	t.Run("username or password incorrect", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/v1/vector/collections", nil)
+		req := httptest.NewRequest(http.MethodGet, versional(VectorCollectionsPath), nil)
 		req.SetBasicAuth(util.UserRoot, util.UserRoot)
 		w := httptest.NewRecorder()
 		testEngine.ServeHTTP(w, req)
@@ -156,7 +160,7 @@ func TestVectorAuthenticate(t *testing.T) {
 	})
 
 	t.Run("root's password correct", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/v1/vector/collections", nil)
+		req := httptest.NewRequest(http.MethodGet, versional(VectorCollectionsPath), nil)
 		req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
 		w := httptest.NewRecorder()
 		testEngine.ServeHTTP(w, req)
@@ -165,7 +169,7 @@ func TestVectorAuthenticate(t *testing.T) {
 	})
 
 	t.Run("username and password both provided", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/v1/vector/collections", nil)
+		req := httptest.NewRequest(http.MethodGet, versional(VectorCollectionsPath), nil)
 		req.SetBasicAuth("test", util.UserRoot)
 		w := httptest.NewRecorder()
 		testEngine.ServeHTTP(w, req)
@@ -210,7 +214,7 @@ func TestVectorListCollection(t *testing.T) {
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
 			testEngine := initHTTPServer(tt.mp, true)
-			req := httptest.NewRequest(http.MethodGet, "/v1/vector/collections", nil)
+			req := httptest.NewRequest(http.MethodGet, versional(VectorCollectionsPath), nil)
 			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
@@ -269,7 +273,7 @@ func TestVectorCollectionsDescribe(t *testing.T) {
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
 			testEngine := initHTTPServer(tt.mp, true)
-			req := httptest.NewRequest(http.MethodGet, "/v1/vector/collections/describe?collectionName="+DefaultCollectionName, nil)
+			req := httptest.NewRequest(http.MethodGet, versional(VectorCollectionsDescribePath)+"?collectionName="+DefaultCollectionName, nil)
 			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
@@ -279,7 +283,7 @@ func TestVectorCollectionsDescribe(t *testing.T) {
 	}
 	t.Run("need collectionName", func(t *testing.T) {
 		testEngine := initHTTPServer(mocks.NewMockProxy(t), true)
-		req := httptest.NewRequest(http.MethodGet, "/v1/vector/collections/describe?"+DefaultCollectionName, nil)
+		req := httptest.NewRequest(http.MethodGet, versional(VectorCollectionsDescribePath)+"?"+DefaultCollectionName, nil)
 		req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
 		w := httptest.NewRecorder()
 		testEngine.ServeHTTP(w, req)
@@ -348,7 +352,7 @@ func TestVectorCreateCollection(t *testing.T) {
 			testEngine := initHTTPServer(tt.mp, true)
 			jsonBody := []byte(`{"collectionName": "` + DefaultCollectionName + `", "dimension": 2}`)
 			bodyReader := bytes.NewReader(jsonBody)
-			req := httptest.NewRequest(http.MethodPost, "/v1/vector/collections/create", bodyReader)
+			req := httptest.NewRequest(http.MethodPost, versional(VectorCollectionsCreatePath), bodyReader)
 			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
@@ -401,7 +405,7 @@ func TestVectorDropCollection(t *testing.T) {
 			testEngine := initHTTPServer(tt.mp, true)
 			jsonBody := []byte(`{"collectionName": "` + DefaultCollectionName + `"}`)
 			bodyReader := bytes.NewReader(jsonBody)
-			req := httptest.NewRequest(http.MethodPost, "/v1/vector/collections/drop", bodyReader)
+			req := httptest.NewRequest(http.MethodPost, versional(VectorCollectionsDropPath), bodyReader)
 			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
@@ -481,14 +485,14 @@ func TestQuery(t *testing.T) {
 func genQueryRequest() *http.Request {
 	jsonBody := []byte(`{"collectionName": "` + DefaultCollectionName + `" , "filter": "book_id in [1,2,3]"}`)
 	bodyReader := bytes.NewReader(jsonBody)
-	req := httptest.NewRequest(http.MethodPost, "/v1/vector/query", bodyReader)
+	req := httptest.NewRequest(http.MethodPost, versional(VectorQueryPath), bodyReader)
 	return req
 }
 
 func genGetRequest() *http.Request {
 	jsonBody := []byte(`{"collectionName": "` + DefaultCollectionName + `" , "id": [1,2,3]}`)
 	bodyReader := bytes.NewReader(jsonBody)
-	req := httptest.NewRequest(http.MethodPost, "/v1/vector/get", bodyReader)
+	req := httptest.NewRequest(http.MethodPost, versional(VectorGetPath), bodyReader)
 	return req
 }
 
@@ -538,12 +542,40 @@ func TestDelete(t *testing.T) {
 			testEngine := initHTTPServer(tt.mp, true)
 			jsonBody := []byte(`{"collectionName": "` + DefaultCollectionName + `" , "id": [1,2,3]}`)
 			bodyReader := bytes.NewReader(jsonBody)
-			req := httptest.NewRequest(http.MethodPost, "/v1/vector/delete", bodyReader)
+			req := httptest.NewRequest(http.MethodPost, versional(VectorDeletePath), bodyReader)
 			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
 			assert.Equal(t, w.Code, tt.exceptCode)
 			assert.Equal(t, w.Body.String(), tt.expectedBody)
+			resp := map[string]interface{}{}
+			err := json.Unmarshal(w.Body.Bytes(), &resp)
+			assert.Equal(t, err, nil)
+		})
+	}
+}
+
+func TestDeleteForFilter(t *testing.T) {
+	jsonBodyList := [][]byte{
+		[]byte(`{"collectionName": "` + DefaultCollectionName + `" , "id": [1,2,3]}`),
+		[]byte(`{"collectionName": "` + DefaultCollectionName + `" , "filter": "id in [1,2,3]"}`),
+		[]byte(`{"collectionName": "` + DefaultCollectionName + `" , "id": [1,2,3], "filter": "id in [1,2,3]"}`),
+	}
+	for _, jsonBody := range jsonBodyList {
+		t.Run("delete success", func(t *testing.T) {
+			mp := mocks.NewMockProxy(t)
+			mp, _ = wrapWithDescribeColl(t, mp, ReturnSuccess, 1, nil)
+			mp.EXPECT().Delete(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
+				Status: &StatusSuccess,
+			}, nil).Once()
+			testEngine := initHTTPServer(mp, true)
+			bodyReader := bytes.NewReader(jsonBody)
+			req := httptest.NewRequest(http.MethodPost, versional(VectorDeletePath), bodyReader)
+			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+			assert.Equal(t, w.Code, 200)
+			assert.Equal(t, w.Body.String(), "{\"code\":200,\"data\":{}}")
 			resp := map[string]interface{}{}
 			err := json.Unmarshal(w.Body.Bytes(), &resp)
 			assert.Equal(t, err, nil)
@@ -620,16 +652,16 @@ func TestInsert(t *testing.T) {
 		expectedBody: "{\"code\":200,\"data\":{\"insertCount\":3,\"insertIds\":[\"1\",\"2\",\"3\"]}}",
 	})
 
+	rows := generateSearchResult()
+	data, _ := json.Marshal(map[string]interface{}{
+		HTTPCollectionName: DefaultCollectionName,
+		HTTPReturnData:     rows[0],
+	})
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
 			testEngine := initHTTPServer(tt.mp, true)
-			rows := generateSearchResult()
-			data, _ := json.Marshal(map[string]interface{}{
-				HTTPCollectionName: DefaultCollectionName,
-				HTTPReturnData:     rows[0],
-			})
 			bodyReader := bytes.NewReader(data)
-			req := httptest.NewRequest(http.MethodPost, "/v1/vector/insert", bodyReader)
+			req := httptest.NewRequest(http.MethodPost, versional(VectorInsertPath), bodyReader)
 			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
@@ -646,7 +678,7 @@ func TestInsert(t *testing.T) {
 		mp, _ = wrapWithDescribeColl(t, mp, ReturnSuccess, 1, nil)
 		testEngine := initHTTPServer(mp, true)
 		bodyReader := bytes.NewReader([]byte(`{"collectionName": "` + DefaultCollectionName + `", "data": {}}`))
-		req := httptest.NewRequest(http.MethodPost, "/v1/vector/insert", bodyReader)
+		req := httptest.NewRequest(http.MethodPost, versional(VectorInsertPath), bodyReader)
 		req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
 		w := httptest.NewRecorder()
 		testEngine.ServeHTTP(w, req)
@@ -686,7 +718,7 @@ func TestInsertForDataType(t *testing.T) {
 				HTTPReturnData:     rows,
 			})
 			bodyReader := bytes.NewReader(data)
-			req := httptest.NewRequest(http.MethodPost, "/v1/vector/insert", bodyReader)
+			req := httptest.NewRequest(http.MethodPost, versional(VectorInsertPath), bodyReader)
 			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
@@ -713,7 +745,7 @@ func TestInsertForDataType(t *testing.T) {
 				HTTPReturnData:     rows,
 			})
 			bodyReader := bytes.NewReader(data)
-			req := httptest.NewRequest(http.MethodPost, "/v1/vector/insert", bodyReader)
+			req := httptest.NewRequest(http.MethodPost, versional(VectorInsertPath), bodyReader)
 			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
@@ -721,6 +753,113 @@ func TestInsertForDataType(t *testing.T) {
 			assert.Equal(t, w.Body.String(), PrintErr(merr.ErrInvalidInsertData))
 		})
 	}
+}
+
+func TestUpsert(t *testing.T) {
+	paramtable.Init()
+	testCases := []testCase{}
+	_, testCases = wrapWithDescribeColl(t, nil, ReturnFail, 1, testCases)
+	_, testCases = wrapWithDescribeColl(t, nil, ReturnWrongStatus, 1, testCases)
+
+	mp2 := mocks.NewMockProxy(t)
+	mp2, _ = wrapWithDescribeColl(t, mp2, ReturnSuccess, 1, nil)
+	mp2.EXPECT().Upsert(mock.Anything, mock.Anything).Return(nil, ErrDefault).Once()
+	testCases = append(testCases, testCase{
+		name:         "insert fail",
+		mp:           mp2,
+		exceptCode:   200,
+		expectedBody: PrintErr(ErrDefault),
+	})
+
+	err := merr.WrapErrCollectionNotFound(DefaultCollectionName)
+	mp3 := mocks.NewMockProxy(t)
+	mp3, _ = wrapWithDescribeColl(t, mp3, ReturnSuccess, 1, nil)
+	mp3.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
+		Status: merr.Status(err),
+	}, nil).Once()
+	testCases = append(testCases, testCase{
+		name:         "insert fail",
+		mp:           mp3,
+		exceptCode:   200,
+		expectedBody: PrintErr(err),
+	})
+
+	mp4 := mocks.NewMockProxy(t)
+	mp4, _ = wrapWithDescribeColl(t, mp4, ReturnSuccess, 1, nil)
+	mp4.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
+		Status: &StatusSuccess,
+	}, nil).Once()
+	testCases = append(testCases, testCase{
+		name:         "id type invalid",
+		mp:           mp4,
+		exceptCode:   200,
+		expectedBody: PrintErr(merr.ErrCheckPrimaryKey),
+	})
+
+	mp5 := mocks.NewMockProxy(t)
+	mp5, _ = wrapWithDescribeColl(t, mp5, ReturnSuccess, 1, nil)
+	mp5.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
+		Status:    &StatusSuccess,
+		IDs:       getIntIds(),
+		UpsertCnt: 3,
+	}, nil).Once()
+	testCases = append(testCases, testCase{
+		name:         "upsert success",
+		mp:           mp5,
+		exceptCode:   200,
+		expectedBody: "{\"code\":200,\"data\":{\"upsertCount\":3,\"upsertIds\":[1,2,3]}}",
+	})
+
+	mp6 := mocks.NewMockProxy(t)
+	mp6, _ = wrapWithDescribeColl(t, mp6, ReturnSuccess, 1, nil)
+	mp6.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
+		Status:    &StatusSuccess,
+		IDs:       getStrIds(),
+		UpsertCnt: 3,
+	}, nil).Once()
+	testCases = append(testCases, testCase{
+		name:         "upsert success",
+		mp:           mp6,
+		exceptCode:   200,
+		expectedBody: "{\"code\":200,\"data\":{\"upsertCount\":3,\"upsertIds\":[\"1\",\"2\",\"3\"]}}",
+	})
+
+	rows := generateSearchResult()
+	data, _ := json.Marshal(map[string]interface{}{
+		HTTPCollectionName: DefaultCollectionName,
+		HTTPReturnData:     rows[0],
+	})
+	for _, tt := range testCases {
+		t.Run(tt.name, func(t *testing.T) {
+			testEngine := initHTTPServer(tt.mp, true)
+			bodyReader := bytes.NewReader(data)
+			req := httptest.NewRequest(http.MethodPost, versional(VectorUpsertPath), bodyReader)
+			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+			assert.Equal(t, w.Code, tt.exceptCode)
+			assert.Equal(t, w.Body.String(), tt.expectedBody)
+			resp := map[string]interface{}{}
+			err := json.Unmarshal(w.Body.Bytes(), &resp)
+			assert.Equal(t, err, nil)
+		})
+	}
+
+	t.Run("wrong request body", func(t *testing.T) {
+		mp := mocks.NewMockProxy(t)
+		mp, _ = wrapWithDescribeColl(t, mp, ReturnSuccess, 1, nil)
+		testEngine := initHTTPServer(mp, true)
+		bodyReader := bytes.NewReader([]byte(`{"collectionName": "` + DefaultCollectionName + `", "data": {}}`))
+		req := httptest.NewRequest(http.MethodPost, versional(VectorUpsertPath), bodyReader)
+		req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+		assert.Equal(t, w.Code, 200)
+		assert.Equal(t, w.Body.String(), PrintErr(merr.ErrInvalidInsertData))
+		resp := map[string]interface{}{}
+		err := json.Unmarshal(w.Body.Bytes(), &resp)
+		assert.Equal(t, err, nil)
+	})
 }
 
 func getIntIds() *schemapb.IDs {
@@ -795,7 +934,7 @@ func TestSearch(t *testing.T) {
 				"vector":           rows,
 			})
 			bodyReader := bytes.NewReader(data)
-			req := httptest.NewRequest(http.MethodPost, "/v1/vector/search", bodyReader)
+			req := httptest.NewRequest(http.MethodPost, versional(VectorSearchPath), bodyReader)
 			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
@@ -933,28 +1072,31 @@ func TestHttpRequestFormat(t *testing.T) {
 	}
 	paths := [][]string{
 		{
-			URIPrefix + VectorCollectionsCreatePath,
-			URIPrefix + VectorCollectionsDropPath,
-			URIPrefix + VectorGetPath,
-			URIPrefix + VectorSearchPath,
-			URIPrefix + VectorQueryPath,
-			URIPrefix + VectorInsertPath,
-			URIPrefix + VectorDeletePath,
+			versional(VectorCollectionsCreatePath),
+			versional(VectorCollectionsDropPath),
+			versional(VectorGetPath),
+			versional(VectorSearchPath),
+			versional(VectorQueryPath),
+			versional(VectorInsertPath),
+			versional(VectorUpsertPath),
+			versional(VectorDeletePath),
 		}, {
-			URIPrefix + VectorCollectionsDropPath,
-			URIPrefix + VectorGetPath,
-			URIPrefix + VectorSearchPath,
-			URIPrefix + VectorQueryPath,
-			URIPrefix + VectorInsertPath,
-			URIPrefix + VectorDeletePath,
+			versional(VectorCollectionsDropPath),
+			versional(VectorGetPath),
+			versional(VectorSearchPath),
+			versional(VectorQueryPath),
+			versional(VectorInsertPath),
+			versional(VectorUpsertPath),
+			versional(VectorDeletePath),
 		}, {
-			URIPrefix + VectorCollectionsCreatePath,
+			versional(VectorCollectionsCreatePath),
 		}, {
-			URIPrefix + VectorGetPath,
-			URIPrefix + VectorSearchPath,
-			URIPrefix + VectorQueryPath,
-			URIPrefix + VectorInsertPath,
-			URIPrefix + VectorDeletePath,
+			versional(VectorGetPath),
+			versional(VectorSearchPath),
+			versional(VectorQueryPath),
+			versional(VectorInsertPath),
+			versional(VectorUpsertPath),
+			versional(VectorDeletePath),
 		},
 	}
 	for i, pathArr := range paths {
@@ -982,9 +1124,10 @@ func TestAuthorization(t *testing.T) {
 	}
 	paths := map[string][]string{
 		errorStr: {
-			URIPrefix + VectorGetPath,
-			URIPrefix + VectorInsertPath,
-			URIPrefix + VectorDeletePath,
+			versional(VectorGetPath),
+			versional(VectorInsertPath),
+			versional(VectorUpsertPath),
+			versional(VectorDeletePath),
 		},
 	}
 	for res, pathArr := range paths {
@@ -1005,7 +1148,7 @@ func TestAuthorization(t *testing.T) {
 
 	paths = map[string][]string{
 		errorStr: {
-			URIPrefix + VectorCollectionsCreatePath,
+			versional(VectorCollectionsCreatePath),
 		},
 	}
 	for res, pathArr := range paths {
@@ -1026,7 +1169,7 @@ func TestAuthorization(t *testing.T) {
 
 	paths = map[string][]string{
 		errorStr: {
-			URIPrefix + VectorCollectionsDropPath,
+			versional(VectorCollectionsDropPath),
 		},
 	}
 	for res, pathArr := range paths {
@@ -1047,8 +1190,8 @@ func TestAuthorization(t *testing.T) {
 
 	paths = map[string][]string{
 		errorStr: {
-			URIPrefix + VectorCollectionsPath,
-			URIPrefix + VectorCollectionsDescribePath + "?collectionName=" + DefaultCollectionName,
+			versional(VectorCollectionsPath),
+			versional(VectorCollectionsDescribePath) + "?collectionName=" + DefaultCollectionName,
 		},
 	}
 	for res, pathArr := range paths {
@@ -1067,8 +1210,8 @@ func TestAuthorization(t *testing.T) {
 	}
 	paths = map[string][]string{
 		errorStr: {
-			URIPrefix + VectorQueryPath,
-			URIPrefix + VectorSearchPath,
+			versional(VectorQueryPath),
+			versional(VectorSearchPath),
 		},
 	}
 	for res, pathArr := range paths {
@@ -1095,7 +1238,7 @@ func TestDatabaseNotFound(t *testing.T) {
 		mp := mocks.NewMockProxy(t)
 		mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(nil, ErrDefault).Once()
 		testEngine := initHTTPServer(mp, true)
-		req := httptest.NewRequest(http.MethodGet, URIPrefix+VectorCollectionsPath+"?dbName=test", nil)
+		req := httptest.NewRequest(http.MethodGet, versional(VectorCollectionsPath)+"?dbName=test", nil)
 		req.Header.Set("authorization", "Bearer root:Milvus")
 		w := httptest.NewRecorder()
 		testEngine.ServeHTTP(w, req)
@@ -1110,7 +1253,7 @@ func TestDatabaseNotFound(t *testing.T) {
 			Status: merr.Status(err),
 		}, nil).Once()
 		testEngine := initHTTPServer(mp, true)
-		req := httptest.NewRequest(http.MethodGet, URIPrefix+VectorCollectionsPath+"?dbName=test", nil)
+		req := httptest.NewRequest(http.MethodGet, versional(VectorCollectionsPath)+"?dbName=test", nil)
 		req.Header.Set("authorization", "Bearer root:Milvus")
 		w := httptest.NewRecorder()
 		testEngine.ServeHTTP(w, req)
@@ -1131,7 +1274,7 @@ func TestDatabaseNotFound(t *testing.T) {
 				CollectionNames: nil,
 			}, nil).Once()
 		testEngine := initHTTPServer(mp, true)
-		req := httptest.NewRequest(http.MethodGet, URIPrefix+VectorCollectionsPath+"?dbName=test", nil)
+		req := httptest.NewRequest(http.MethodGet, versional(VectorCollectionsPath)+"?dbName=test", nil)
 		req.Header.Set("authorization", "Bearer root:Milvus")
 		w := httptest.NewRecorder()
 		testEngine.ServeHTTP(w, req)
@@ -1142,8 +1285,8 @@ func TestDatabaseNotFound(t *testing.T) {
 	errorStr := PrintErr(merr.ErrDatabaseNotFound)
 	paths := map[string][]string{
 		errorStr: {
-			URIPrefix + VectorCollectionsPath + "?dbName=test",
-			URIPrefix + VectorCollectionsDescribePath + "?dbName=test&collectionName=" + DefaultCollectionName,
+			versional(VectorCollectionsPath) + "?dbName=test",
+			versional(VectorCollectionsDescribePath) + "?dbName=test&collectionName=" + DefaultCollectionName,
 		},
 	}
 	for res, pathArr := range paths {
@@ -1168,13 +1311,14 @@ func TestDatabaseNotFound(t *testing.T) {
 	requestBody := `{"dbName": "test", "collectionName": "` + DefaultCollectionName + `", "vector": [0.1, 0.2], "filter": "id in [2]", "id": [2], "dimension": 2, "data":[{"book_id":1,"book_intro":[0.1,0.11],"distance":0.01,"word_count":1000},{"book_id":2,"book_intro":[0.2,0.22],"distance":0.04,"word_count":2000},{"book_id":3,"book_intro":[0.3,0.33],"distance":0.09,"word_count":3000}]}`
 	paths = map[string][]string{
 		requestBody: {
-			URIPrefix + VectorCollectionsCreatePath,
-			URIPrefix + VectorCollectionsDropPath,
-			URIPrefix + VectorInsertPath,
-			URIPrefix + VectorDeletePath,
-			URIPrefix + VectorQueryPath,
-			URIPrefix + VectorGetPath,
-			URIPrefix + VectorSearchPath,
+			versional(VectorCollectionsCreatePath),
+			versional(VectorCollectionsDropPath),
+			versional(VectorInsertPath),
+			versional(VectorUpsertPath),
+			versional(VectorDeletePath),
+			versional(VectorQueryPath),
+			versional(VectorGetPath),
+			versional(VectorSearchPath),
 		},
 	}
 	for request, pathArr := range paths {
