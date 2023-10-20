@@ -662,6 +662,13 @@ SegmentSealedImpl::GetFieldDataPath(FieldId field_id, int64_t offset) const {
     return {data_path, offset_in_binlog};
 }
 
+std::tuple<std::string, std::shared_ptr<ColumnBase>> static ReadFromChunkCache(
+    const storage::ChunkCachePtr& cc, const std::string& data_path) {
+    auto column = cc->Read(data_path);
+    cc->Prefetch(data_path);
+    return {data_path, column};
+}
+
 std::unique_ptr<DataArray>
 SegmentSealedImpl::get_vector(FieldId field_id,
                               const int64_t* ids,
@@ -669,73 +676,82 @@ SegmentSealedImpl::get_vector(FieldId field_id,
     auto& field_meta = schema_->operator[](field_id);
     AssertInfo(field_meta.is_vector(), "vector field is not vector type");
 
-    if (get_bit(index_ready_bitset_, field_id)) {
-        AssertInfo(vector_indexings_.is_ready(field_id),
-                   "vector index is not ready");
-        auto field_indexing = vector_indexings_.get_field_indexing(field_id);
-        auto vec_index =
-            dynamic_cast<index::VectorIndex*>(field_indexing->indexing_.get());
-
-        auto index_type = vec_index->GetIndexType();
-        auto metric_type = vec_index->GetMetricType();
-        auto has_raw_data = vec_index->HasRawData();
-
-        if (has_raw_data) {
-            // If index has raw data, get vector from memory.
-            auto ids_ds = GenIdsDataset(count, ids);
-            auto vector = vec_index->GetVector(ids_ds);
-            return segcore::CreateVectorDataArrayFrom(
-                vector.data(), count, field_meta);
-        } else {
-            // If index doesn't have raw data, get vector from chunk cache.
-            auto cc =
-                storage::ChunkCacheSingleton::GetInstance().GetChunkCache();
-
-            // group by data_path
-            auto id_to_data_path =
-                std::unordered_map<std::int64_t,
-                                   std::tuple<std::string, int64_t>>{};
-            auto path_to_column =
-                std::unordered_map<std::string, std::shared_ptr<ColumnBase>>{};
-            for (auto i = 0; i < count; i++) {
-                const auto& tuple = GetFieldDataPath(field_id, ids[i]);
-                id_to_data_path.emplace(ids[i], tuple);
-                path_to_column.emplace(std::get<0>(tuple), nullptr);
-            }
-
-            // read and prefetch
-            for (const auto& iter : path_to_column) {
-                auto data_path = iter.first;
-                const auto& column = cc->Read(data_path);
-                cc->Prefetch(data_path);
-                path_to_column[data_path] = column;
-            }
-
-            // assign to data array
-            auto dim = field_meta.get_dim();
-            auto row_bytes = field_meta.is_vector() ? dim * 4 : dim / 8;
-            auto buf = std::vector<char>(count * row_bytes);
-            for (auto i = 0; i < count; i++) {
-                AssertInfo(id_to_data_path.count(ids[i]) != 0, "id not found");
-                const auto& [data_path, offset_in_binlog] =
-                    id_to_data_path.at(ids[i]);
-                AssertInfo(path_to_column.count(data_path) != 0,
-                           "column not found");
-                const auto& column = path_to_column.at(data_path);
-                AssertInfo(
-                    offset_in_binlog * row_bytes < column->ByteSize(),
-                    fmt::format("column idx out of range, idx: {}, size: {}",
-                                offset_in_binlog * row_bytes,
-                                column->ByteSize()));
-                auto vector = &column->Data()[offset_in_binlog * row_bytes];
-                std::memcpy(buf.data() + i * row_bytes, vector, row_bytes);
-            }
-            return segcore::CreateVectorDataArrayFrom(
-                buf.data(), count, field_meta);
-        }
+    if (!get_bit(index_ready_bitset_, field_id)) {
+        return fill_with_empty(field_id, count);
     }
 
-    return fill_with_empty(field_id, count);
+    AssertInfo(vector_indexings_.is_ready(field_id),
+               "vector index is not ready");
+    auto field_indexing = vector_indexings_.get_field_indexing(field_id);
+    auto vec_index =
+        dynamic_cast<index::VectorIndex*>(field_indexing->indexing_.get());
+    AssertInfo(vec_index, "invalid vector indexing");
+
+    auto index_type = vec_index->GetIndexType();
+    auto metric_type = vec_index->GetMetricType();
+    auto has_raw_data = vec_index->HasRawData();
+
+    if (has_raw_data) {
+        // If index has raw data, get vector from memory.
+        auto ids_ds = GenIdsDataset(count, ids);
+        auto vector = vec_index->GetVector(ids_ds);
+        return segcore::CreateVectorDataArrayFrom(
+            vector.data(), count, field_meta);
+    } else {
+        // If index doesn't have raw data, get vector from chunk cache.
+        auto cc = storage::ChunkCacheSingleton::GetInstance().GetChunkCache();
+
+        // group by data_path
+        auto id_to_data_path =
+            std::unordered_map<std::int64_t,
+                               std::tuple<std::string, int64_t>>{};
+        auto path_to_column =
+            std::unordered_map<std::string, std::shared_ptr<ColumnBase>>{};
+        for (auto i = 0; i < count; i++) {
+            const auto& tuple = GetFieldDataPath(field_id, ids[i]);
+            id_to_data_path.emplace(ids[i], tuple);
+            path_to_column.emplace(std::get<0>(tuple), nullptr);
+        }
+
+        // read and prefetch
+        auto& pool =
+            ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
+        std::vector<
+            std::future<std::tuple<std::string, std::shared_ptr<ColumnBase>>>>
+            futures;
+        futures.reserve(path_to_column.size());
+        for (const auto& iter : path_to_column) {
+            const auto& data_path = iter.first;
+            futures.emplace_back(
+                pool.Submit(ReadFromChunkCache, cc, data_path));
+        }
+
+        for (int i = 0; i < futures.size(); ++i) {
+            const auto& [data_path, column] = futures[i].get();
+            path_to_column[data_path] = column;
+        }
+
+        // assign to data array
+        auto dim = field_meta.get_dim();
+        auto row_bytes = field_meta.is_vector() ? dim * 4 : dim / 8;
+        auto buf = std::vector<char>(count * row_bytes);
+        for (auto i = 0; i < count; i++) {
+            AssertInfo(id_to_data_path.count(ids[i]) != 0, "id not found");
+            const auto& [data_path, offset_in_binlog] =
+                id_to_data_path.at(ids[i]);
+            AssertInfo(path_to_column.count(data_path) != 0,
+                       "column not found");
+            const auto& column = path_to_column.at(data_path);
+            AssertInfo(offset_in_binlog * row_bytes < column->ByteSize(),
+                       fmt::format("column idx out of range, idx: {}, size: {}",
+                                   offset_in_binlog * row_bytes,
+                                   column->ByteSize()));
+            auto vector = &column->Data()[offset_in_binlog * row_bytes];
+            std::memcpy(buf.data() + i * row_bytes, vector, row_bytes);
+        }
+        return segcore::CreateVectorDataArrayFrom(
+            buf.data(), count, field_meta);
+    }
 }
 
 void
