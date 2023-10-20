@@ -74,7 +74,6 @@ TEST(ChunkCacheTest, Read) {
     const auto& column = cc->Read(file_name);
     Assert(column->ByteSize() == dim * N * 4);
 
-    cc->Prefetch(file_name);
     auto actual = (float*)column->Data();
     for (auto i = 0; i < N; i++) {
         AssertInfo(data[i] == actual[i],
@@ -141,7 +140,6 @@ TEST(ChunkCacheTest, TestMultithreads) {
         const auto& column = cc->Read(file_name);
         Assert(column->ByteSize() == dim * N * 4);
 
-        cc->Prefetch(file_name);
         auto actual = (float*)column->Data();
         for (auto i = 0; i < N; i++) {
             AssertInfo(data[i] == actual[i],
