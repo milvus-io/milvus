@@ -96,6 +96,14 @@ def gen_json_field(name=ct.default_json_field_name, description=ct.default_desc,
     return json_field
 
 
+def gen_array_field(name=ct.default_array_field_name, element_type=DataType.INT64, max_capacity=ct.default_max_capacity,
+                    description=ct.default_desc, is_primary=False, **kwargs):
+    array_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.ARRAY,
+                                                               element_type=element_type, max_capacity=max_capacity,
+                                                               description=description, is_primary=is_primary, **kwargs)
+    return array_field
+
+
 def gen_int8_field(name=ct.default_int8_field_name, description=ct.default_desc, is_primary=False, **kwargs):
     int8_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.INT8, description=description,
                                                               is_primary=is_primary, **kwargs)
@@ -161,6 +169,34 @@ def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.
     else:
         fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_json_field(),
                   gen_float_vec_field(dim=dim)]
+        if with_json is False:
+            fields.remove(gen_json_field())
+
+    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
+                                                                    primary_field=primary_field, auto_id=auto_id,
+                                                                    enable_dynamic_field=enable_dynamic_field, **kwargs)
+    return schema
+
+
+def gen_array_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name, auto_id=False,
+                                dim=ct.default_dim, enable_dynamic_field=False, max_capacity=ct.default_max_capacity,
+                                max_length=100, with_json=False, **kwargs):
+    if enable_dynamic_field:
+        if primary_field is ct.default_int64_field_name:
+            fields = [gen_int64_field(), gen_float_vec_field(dim=dim)]
+        elif primary_field is ct.default_string_field_name:
+            fields = [gen_string_field(), gen_float_vec_field(dim=dim)]
+        else:
+            log.error("Primary key only support int or varchar")
+            assert False
+    else:
+        fields = [gen_int64_field(), gen_float_vec_field(dim=dim), gen_json_field(),
+                  gen_array_field(name=ct.default_int32_array_field_name, element_type=DataType.INT32,
+                                  max_capacity=max_capacity),
+                  gen_array_field(name=ct.default_float_array_field_name, element_type=DataType.FLOAT,
+                                  max_capacity=max_capacity),
+                  gen_array_field(name=ct.default_string_array_field_name, element_type=DataType.VARCHAR,
+                                  max_capacity=max_capacity, max_length=max_length)]
         if with_json is False:
             fields.remove(gen_json_field())
 
@@ -357,6 +393,33 @@ def gen_default_data_for_upsert(nb=ct.default_nb, dim=ct.default_dim, start=0, s
         ct.default_float_vec_field_name: float_vec_values
     })
     return df, float_values
+
+
+def gen_array_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0,
+                             array_length=ct.default_max_capacity, with_json=False, random_primary_key=False):
+    if not random_primary_key:
+        int_values = pd.Series(data=[i for i in range(start, start + nb)])
+    else:
+        int_values = pd.Series(data=random.sample(range(start, start + nb), nb))
+    float_vec_values = gen_vectors(nb, dim)
+    json_values = [{"number": i, "float": i * 1.0} for i in range(start, start + nb)]
+
+    int32_values = pd.Series(data=[[np.int32(j) for j in range(i, i + array_length)] for i in range(start, start + nb)])
+    float_values = pd.Series(data=[[np.float32(j) for j in range(i, i + array_length)] for i in range(start, start + nb)])
+    string_values = pd.Series(data=[[str(j) for j in range(i, i + array_length)] for i in range(start, start + nb)])
+
+    df = pd.DataFrame({
+        ct.default_int64_field_name: int_values,
+        ct.default_float_vec_field_name: float_vec_values,
+        ct.default_json_field_name: json_values,
+        ct.default_int32_array_field_name: int32_values,
+        ct.default_float_array_field_name: float_values,
+        ct.default_string_array_field_name: string_values,
+    })
+    if with_json is False:
+        df.drop(ct.default_json_field_name, axis=1, inplace=True)
+
+    return df
 
 
 def gen_dataframe_multi_vec_fields(vec_fields, nb=ct.default_nb):
@@ -683,6 +746,25 @@ def gen_data_by_type(field, nb=None, start=None):
         if nb is None:
             return [random.random() for i in range(dim)]
         return [[random.random() for i in range(dim)] for _ in range(nb)]
+    if data_type == DataType.ARRAY:
+        max_capacity = field.params['max_capacity']
+        element_type = field.element_type
+        if element_type == DataType.INT32:
+            if nb is None:
+                return [random.randint(-2147483648, 2147483647) for _ in range(max_capacity)]
+            return [[random.randint(-2147483648, 2147483647) for _ in range(max_capacity)] for _ in range(nb)]
+        if element_type == DataType.FLOAT:
+            if nb is None:
+                return [np.float32(random.random()) for _ in range(max_capacity)]
+            return [[np.float32(random.random()) for _ in range(max_capacity)] for _ in range(nb)]
+        if element_type == DataType.VARCHAR:
+            max_length = field.params['max_length']
+            max_length = min(20, max_length - 1)
+            length = random.randint(0, max_length)
+            if nb is None:
+                return ["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(max_capacity)]
+            return [["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(max_capacity)] for _ in range(nb)]
+
     return None
 
 
@@ -986,6 +1068,21 @@ def gen_json_field_expressions():
     return expressions
 
 
+def gen_array_field_expressions():
+    expressions = [
+        "int32_array[0] > 0",
+        "0 <= int32_array[0] < 400 or 1000 > float_array[1] >= 500",
+        "int32_array[1] not in [1, 2, 3]",
+        "int32_array[1] in [1, 2, 3] and string_array[1] != '2'",
+        "int32_array == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]",
+        "int32_array[1] + 1 == 3 && int32_array[0] - 1 != 1",
+        "int32_array[1] % 100 == 0 && string_array[1] in ['1', '2']",
+        "int32_array[1] in [300/2, -10*30+800, (200-100)*2] "
+        "or (float_array[1] <= -4**5/2 || 100 <= int32_array[1] < 200)"
+    ]
+    return expressions
+
+
 def gen_field_compare_expressions(fields1=None, fields2=None):
     if fields1 is None:
         fields1 = ["int64_1"]
@@ -1237,6 +1334,35 @@ def assert_json_contains(expr, list_data):
                 result_ids.append(i)
     else:
         log.warning("unknown expr: %s" % expr)
+    return result_ids
+
+
+def assert_array_contains(expr, list_data):
+    nb = len(list_data)
+    result_ids = []
+    exp_ids = eval(expr.split(', ', 1)[1].split(')', 1)[0])
+    reverse = True if "not array" or "not ARRAY" in expr else False
+    expr_prefix = expr.split('(', 1)[0]
+    if "array_contains_any" or "ARRAY_CONTAINS_ANY" in expr_prefix:
+        for i in range(nb):
+            set_list_data = set(tuple(element) if isinstance(element, list) else element for element in list_data[i])
+            if set(exp_ids) & set_list_data:
+                result_ids.append(i)
+    elif "array_contains_all" or "ARRAY_CONTAINS_ALL" in expr_prefix:
+        for i in range(nb):
+            set_list_data = set(tuple(element) if isinstance(element, list) else element for element in list_data[i])
+            if set(exp_ids).issubset(set_list_data):
+                result_ids.append(i)
+    elif "array_contains" or "ARRAY_CONTAINS" in expr_prefix:
+        for i in range(nb):
+            if exp_ids in list_data[i]:
+                result_ids.append(i)
+    else:
+        log.warning("unknown expr: %s" % expr)
+
+    if reverse:
+        result_ids = [x for x in result_ids if x not in range(nb)]
+
     return result_ids
 
 

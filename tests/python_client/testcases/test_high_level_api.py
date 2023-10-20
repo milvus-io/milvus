@@ -42,6 +42,8 @@ default_vector_field_name = "vector"
 default_float_field_name = ct.default_float_field_name
 default_bool_field_name = ct.default_bool_field_name
 default_string_field_name = ct.default_string_field_name
+default_int32_array_field_name = ct.default_int32_array_field_name
+default_string_array_field_name = ct.default_string_array_field_name
 
 
 class TestHighLevelApi(TestcaseBase):
@@ -194,6 +196,41 @@ class TestHighLevelApi(TestcaseBase):
                                     "with_vec": True,
                                     "primary_field": default_primary_key_field_name})
         client_w.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_high_level_array_insert_search(self):
+        """
+        target: test search (high level api) normal case
+        method: create connection, collection, insert and search
+        expected: search/query successfully
+        """
+        client = self._connect(enable_high_level_api=True)
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        client_w.create_collection(client, collection_name, default_dim)
+        collections = client_w.list_collections(client)[0]
+        assert collection_name in collections
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random((1, default_dim))[0]),
+            default_float_field_name: i * 1.0,
+            default_int32_array_field_name: [i, i+1, i+2],
+            default_string_array_field_name: [str(i), str(i + 1), str(i + 2)]
+        } for i in range(default_nb)]
+        client_w.insert(client, collection_name, rows)
+        client_w.flush(client, collection_name)
+        assert client_w.num_entities(client, collection_name)[0] == default_nb
+        # 3. search
+        vectors_to_search = rng.random((1, default_dim))
+        insert_ids = [i for i in range(default_nb)]
+        client_w.search(client, collection_name, vectors_to_search,
+                        check_task=CheckTasks.check_search_results,
+                        check_items={"enable_high_level_api": True,
+                                     "nq": len(vectors_to_search),
+                                     "ids": insert_ids,
+                                     "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="issue 25110")

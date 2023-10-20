@@ -1018,6 +1018,50 @@ class TestQueryParams(TestcaseBase):
         res = collection_w.query(expression, limit=limit, offset=offset)[0]
         assert len(res) == limit - offset
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("Too many are not supported")
+    @pytest.mark.parametrize("expression", cf.gen_normal_expressions_field("array_length(float_array)")[1:])
+    def test_query_expr_array_length(self, expression, enable_dynamic_field):
+        """
+        target: test query with expression using json_contains_any
+        method: query with expression using json_contains_any
+        expected: succeed
+        """
+        # 1. create a collection
+        nb = ct.default_nb
+        max_capacity = 1000
+        schema = cf.gen_array_collection_schema(max_capacity=max_capacity)
+        collection_w = self.init_collection_wrap(schema=schema, enable_dynamic_field=enable_dynamic_field)
+
+        # 2. insert data
+        data = []
+        length = []
+        for i in range(nb):
+            array_length = random.randint(0, max_capacity)
+            length.append(array_length)
+            arr = {ct.default_int64_field_name: i,
+                   ct.default_float_vec_field_name: cf.gen_vectors(1, ct.default_dim)[0],
+                   ct.default_int32_array_field_name: [],
+                   ct.default_float_array_field_name: [np.float32(i) for i in range(array_length)],
+                   ct.default_string_array_field_name: []}
+            data.append(arr)
+        collection_w.insert(data)
+
+        # 3. load and query
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
+        collection_w.load()
+        res = collection_w.query(expression)[0]
+
+        # 4. check
+        expression = expression.replace("&&", "and").replace("||", "or")
+        expression = expression.replace("array_length(float_array)", "array_length")
+        filter_ids = []
+        for i in range(nb):
+            array_length = length[i]
+            if not expression or eval(expression):
+                filter_ids.append(i)
+        assert len(res) == len(filter_ids)
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_expr_empty_without_limit(self):
         """
