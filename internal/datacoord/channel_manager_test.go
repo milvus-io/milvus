@@ -26,6 +26,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/kv"
@@ -566,6 +567,113 @@ func TestChannelManager(t *testing.T) {
 
 		// channel is added to remainTest because there's only one node left
 		waitAndCheckState(t, watchkv, datapb.ChannelWatchState_ToWatch, remainTest.nodeID, remainTest.chName, collectionID)
+	})
+
+	t.Run("test Reassign with get channel fail", func(t *testing.T) {
+		chManager, err := NewChannelManager(watchkv, newMockHandler())
+		require.NoError(t, err)
+
+		err = chManager.Reassign(1, "not-exists-channelName")
+		assert.Error(t, err)
+	})
+
+	t.Run("test Reassign with dropped channel", func(t *testing.T) {
+		collectionID := UniqueID(5)
+		handler := NewNMockHandler(t)
+		handler.EXPECT().
+			CheckShouldDropChannel(mock.Anything, mock.Anything).
+			Return(true)
+		handler.EXPECT().FinishDropChannel(mock.Anything).Return(nil)
+		chManager, err := NewChannelManager(watchkv, handler)
+		require.NoError(t, err)
+
+		chManager.store.Add(1)
+		ops := getOpsWithWatchInfo(1, &channel{Name: "chan", CollectionID: collectionID})
+		err = chManager.store.Update(ops)
+		require.NoError(t, err)
+
+		assert.Equal(t, 1, chManager.store.GetNodeChannelCount(1))
+		err = chManager.Reassign(1, "chan")
+		assert.NoError(t, err)
+		assert.Equal(t, 0, chManager.store.GetNodeChannelCount(1))
+	})
+
+	t.Run("test Reassign-channel not found", func(t *testing.T) {
+		var chManager *ChannelManager
+		var err error
+		handler := NewNMockHandler(t)
+		handler.EXPECT().
+			CheckShouldDropChannel(mock.Anything, mock.Anything).
+			Run(func(channel string, collectionID int64) {
+				channels, err := chManager.store.Delete(1)
+				assert.NoError(t, err)
+				assert.Equal(t, 1, len(channels))
+			}).Return(true).Once()
+
+		chManager, err = NewChannelManager(watchkv, handler)
+		require.NoError(t, err)
+
+		chManager.store.Add(1)
+		ops := getOpsWithWatchInfo(1, &channel{Name: "chan", CollectionID: 1})
+		err = chManager.store.Update(ops)
+		require.NoError(t, err)
+
+		assert.Equal(t, 1, chManager.store.GetNodeChannelCount(1))
+		err = chManager.Reassign(1, "chan")
+		assert.Error(t, err)
+	})
+
+	t.Run("test CleanupAndReassign-channel not found", func(t *testing.T) {
+		var chManager *ChannelManager
+		var err error
+		handler := NewNMockHandler(t)
+		handler.EXPECT().
+			CheckShouldDropChannel(mock.Anything, mock.Anything).
+			Run(func(channel string, collectionID int64) {
+				channels, err := chManager.store.Delete(1)
+				assert.NoError(t, err)
+				assert.Equal(t, 1, len(channels))
+			}).Return(true).Once()
+
+		chManager, err = NewChannelManager(watchkv, handler)
+		require.NoError(t, err)
+
+		chManager.store.Add(1)
+		ops := getOpsWithWatchInfo(1, &channel{Name: "chan", CollectionID: 1})
+		err = chManager.store.Update(ops)
+		require.NoError(t, err)
+
+		assert.Equal(t, 1, chManager.store.GetNodeChannelCount(1))
+		err = chManager.CleanupAndReassign(1, "chan")
+		assert.Error(t, err)
+	})
+
+	t.Run("test CleanupAndReassign with get channel fail", func(t *testing.T) {
+		chManager, err := NewChannelManager(watchkv, newMockHandler())
+		require.NoError(t, err)
+
+		err = chManager.CleanupAndReassign(1, "not-exists-channelName")
+		assert.Error(t, err)
+	})
+
+	t.Run("test CleanupAndReassign with dropped channel", func(t *testing.T) {
+		handler := NewNMockHandler(t)
+		handler.EXPECT().
+			CheckShouldDropChannel(mock.Anything, mock.Anything).
+			Return(true)
+		handler.EXPECT().FinishDropChannel(mock.Anything).Return(nil)
+		chManager, err := NewChannelManager(watchkv, handler)
+		require.NoError(t, err)
+
+		chManager.store.Add(1)
+		ops := getOpsWithWatchInfo(1, &channel{Name: "chan", CollectionID: 1})
+		err = chManager.store.Update(ops)
+		require.NoError(t, err)
+
+		assert.Equal(t, 1, chManager.store.GetNodeChannelCount(1))
+		err = chManager.CleanupAndReassign(1, "chan")
+		assert.NoError(t, err)
+		assert.Equal(t, 0, chManager.store.GetNodeChannelCount(1))
 	})
 
 	t.Run("test DeleteNode", func(t *testing.T) {
