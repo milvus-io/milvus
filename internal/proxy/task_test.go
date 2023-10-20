@@ -2608,6 +2608,43 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 		err := lct.Execute(ctx)
 		assert.Error(t, err)
 	})
+
+	t.Run("not all vector fields with index", func(t *testing.T) {
+		vecFields := make([]*schemapb.FieldSchema, 0)
+		for _, field := range newTestSchema().GetFields() {
+			if isVectorType(field.GetDataType()) {
+				vecFields = append(vecFields, field)
+			}
+		}
+
+		assert.GreaterOrEqual(t, len(vecFields), 2)
+
+		dc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
+			return &indexpb.DescribeIndexResponse{
+				Status: merr.Success(),
+				IndexInfos: []*indexpb.IndexInfo{
+					{
+						CollectionID:         collectionID,
+						FieldID:              vecFields[0].FieldID,
+						IndexName:            indexName,
+						IndexID:              indexID,
+						TypeParams:           nil,
+						IndexParams:          nil,
+						IndexedRows:          1025,
+						TotalRows:            1025,
+						State:                commonpb.IndexState_Finished,
+						IndexStateFailReason: "",
+						IsAutoIndex:          false,
+						UserIndexParams:      nil,
+					},
+				},
+			}, nil
+		}
+
+		err := lct.Execute(ctx)
+		assert.Error(t, err)
+		assert.Equal(t, merr.Code(err), merr.Code(merr.ErrIndexNotFound))
+	})
 }
 
 func Test_loadPartitionTask_Execute(t *testing.T) {
