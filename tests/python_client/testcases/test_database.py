@@ -523,6 +523,95 @@ class TestDatabaseOperation(TestcaseBase):
         colls, _ = self.utility_wrap.list_collections()
         assert collection_w.name in colls
 
+    def test_create_same_collection_name_different_db(self):
+        """
+        target: test create same collection name in different db
+        method: 1. create a db and create 1 collection in db
+                2. create the collection in another db
+        expected: exception
+        """
+        # check default db is empty
+        self._connect()
+        assert self.utility_wrap.list_collections()[0] == []
+
+        # create a collection in default db
+        c_name = "collection_same"
+        self.init_collection_wrap(c_name)
+        assert self.utility_wrap.list_collections()[0] == [c_name]
+
+        # create a new database
+        db_name = cf.gen_unique_str("db")
+        self.database_wrap.create_database(db_name)
+        self.database_wrap.using_database(db_name)
+
+        # create a collection in new db using same name
+        self.init_collection_wrap(c_name)
+        assert self.utility_wrap.list_collections()[0] == [c_name]
+
+    def test_rename_existed_collection_name_new_db(self):
+        """
+        target: test create same collection name in different db
+        method: 1. create a db and create 1 collection in db
+                2. create the collection in another db
+        expected: exception
+        """
+        # check default db is empty
+        self._connect()
+        assert self.utility_wrap.list_collections()[0] == []
+
+        # create a collection in default db
+        c_name1 = "collection_1"
+        self.init_collection_wrap(c_name1)
+        assert self.utility_wrap.list_collections()[0] == [c_name1]
+
+        # create a new database
+        db_name = cf.gen_unique_str("db")
+        self.database_wrap.create_database(db_name)
+        self.database_wrap.using_database(db_name)
+
+        # create a collection in new db
+        c_name2 = "collection_2"
+        self.init_collection_wrap(c_name2)
+        assert self.utility_wrap.list_collections()[0] == [c_name2]
+
+        # rename the collection and move it to default db
+        error = {ct.err_code: 65535, ct.err_msg: "duplicated new collection name default:collection_1 "
+                                                 "with other collection name or alias"}
+        self.utility_wrap.rename_collection(c_name2, c_name1, "default",
+                                            check_task=CheckTasks.err_res, check_items=error)
+
+    def test_rename_collection_in_new_db(self):
+        """
+        target: test rename collection in new created db
+        method: 1. create a db and create 1 collection in db
+                2. rename the collection
+        expected: exception
+        """
+        self._connect()
+        # check default db is empty
+        assert self.utility_wrap.list_collections()[0] == []
+
+        # create a new database
+        db_name = cf.gen_unique_str("db")
+        self.database_wrap.create_database(db_name)
+        self.database_wrap.using_database(db_name)
+
+        # create 1 collection in new db
+        old_name = "old_collection"
+        self.init_collection_wrap(old_name)
+        assert self.utility_wrap.list_collections()[0] == [old_name]
+
+        # rename the collection
+        new_name = "new_collection"
+        self.utility_wrap.rename_collection(old_name, new_name)
+
+        # check the collection still in new db
+        assert self.utility_wrap.list_collections()[0] == [new_name]
+
+        # check the collection not in default db
+        self.database_wrap.using_database("default")
+        assert self.utility_wrap.list_collections()[0] == []
+
 
 @pytest.mark.tags(CaseLabel.RBAC)
 class TestDatabaseOtherApi(TestcaseBase):
