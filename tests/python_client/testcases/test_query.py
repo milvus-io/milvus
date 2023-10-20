@@ -1509,9 +1509,7 @@ class TestQueryParams(TestcaseBase):
         df = cf.gen_default_dataframe_data()
         partition_w.insert(df)
         assert partition_w.num_entities == ct.default_nb
-        error = {ct.err_code: 65535, ct.err_msg: "failed to query: attempt #0: fail to get shard leaders from "
-                                                 "QueryCoord: collection=444857573608181561: collection"
-                                                 " not loaded: unrecoverable error"}
+        error = {ct.err_code: 65535, ct.err_msg: "collection not loaded"}
         collection_w.query(default_term_expr, partition_names=[partition_w.name],
                            check_task=CheckTasks.err_res, check_items=error)
 
@@ -1941,9 +1939,7 @@ class TestQueryOperation(TestcaseBase):
         # query without load
         collection_w.query(default_term_expr, check_task=CheckTasks.err_res,
                            check_items={ct.err_code: 65535,
-                                        ct.err_msg: "failed to query: attempt #0: fail to get shard leaders"
-                                                    " from QueryCoord: collection=444857573609193909: "
-                                                    "collection not loaded: unrecoverable error"})
+                                        ct.err_msg: "collection not loaded"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("term_expr", [f'{ct.default_int64_field_name} in [0]'])
@@ -2680,9 +2676,7 @@ class TestQueryCount(TestcaseBase):
         collection_w.query(expr=default_term_expr, output_fields=[ct.default_count_output],
                            check_task=CheckTasks.err_res,
                            check_items={"err_code": 65535,
-                                        "err_msg": "failed to query: attempt #0: fail to get shard leaders from "
-                                                   "QueryCoord: collection=444857573609396129: collection not loaded:"
-                                                   " unrecoverable error"})
+                                        "err_msg": "collection not loaded"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_count_duplicate_ids(self):

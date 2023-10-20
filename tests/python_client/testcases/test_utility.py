@@ -955,8 +955,7 @@ class TestUtilityBase(TestcaseBase):
         self.utility_wrap.loading_progress(collection_w.name,
                                            check_task=CheckTasks.err_res,
                                            check_items={ct.err_code: 101,
-                                                        ct.err_msg: 'collection= : '
-                                                                    'collection not loaded'})
+                                                        ct.err_msg: 'collection not loaded'})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("nb", [ct.default_nb, 5000])

@@ -403,7 +403,8 @@ class TestPartitionParams(TestcaseBase):
         partition_w.load(replica_number=1)
         collection_w.query(expr=f"{ct.default_int64_field_name} in [0]", check_task=CheckTasks.check_query_results,
                            check_items={'exp_res': [{'int64': 0}]})
-        error = {ct.err_code: 5, ct.err_msg: f"Should release first then reload with the new number of replicas"}
+        error = {ct.err_code: 1100, ct.err_msg: "failed to load partitions: can't change the replica number for "
+                                                "loaded partitions: expected=1, actual=2: invalid parameter"}
         partition_w.load(replica_number=2, check_task=CheckTasks.err_res, check_items=error)
 
         partition_w.release()
@@ -506,9 +507,7 @@ class TestPartitionParams(TestcaseBase):
                                       params={"nprobe": 32}, limit=1,
                                       check_task=ct.CheckTasks.err_res,
                                       check_items={ct.err_code: 65535,
-                                                   ct.err_msg: "failed to search: attempt #0: fail to get shard "
-                                                               "leaders from QueryCoord: collection=4448185127832"
-                                                               "79866: collection not loaded: unrecoverable error"})
+                                                   ct.err_msg: "collection not loaded"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("data", [cf.gen_default_dataframe_data(10),
