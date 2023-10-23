@@ -486,6 +486,7 @@ class InsertFlushChecker(Checker):
                     self.initial_entities += constants.DELTA_PER_INS
                 else:
                     self._fail += 1
+                sleep(constants.WAIT_PER_OP * 6)
 
 
 class FlushChecker(Checker):
@@ -520,7 +521,7 @@ class FlushChecker(Checker):
     def keep_running(self):
         while self._keep_running:
             self.run_task()
-            sleep(constants.WAIT_PER_OP / 10)
+            sleep(constants.WAIT_PER_OP * 6)
 
 
 class InsertChecker(Checker):
@@ -626,7 +627,7 @@ class CreateChecker(Checker):
     def keep_running(self):
         while self._keep_running:
             self.run_task()
-            sleep(constants.WAIT_PER_OP / 10)
+            sleep(constants.WAIT_PER_OP)
 
 
 class IndexChecker(Checker):
@@ -662,7 +663,7 @@ class IndexChecker(Checker):
     def keep_running(self):
         while self._keep_running:
             self.run_task()
-            sleep(constants.WAIT_PER_OP / 10)
+            sleep(constants.WAIT_PER_OP * 6)
 
 
 class QueryChecker(Checker):
@@ -854,7 +855,7 @@ class DropChecker(Checker):
                     self.c_wrap.init_collection(name=c_name)
                 except Exception as e:
                     log.error(f"Failed to init new collection: {e}")
-            sleep(constants.WAIT_PER_OP / 10)
+            sleep(constants.WAIT_PER_OP)
 
 
 class LoadBalanceChecker(Checker):
