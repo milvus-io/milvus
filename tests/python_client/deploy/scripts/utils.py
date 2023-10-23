@@ -11,7 +11,7 @@ logger.remove()
 logger.add(sys.stderr, format= "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
     "<level>{level: <8}</level> | "
     "<cyan>{thread.name}</cyan> |"
-    "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>", 
+    "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
     level="INFO")
 
 pymilvus_version = pymilvus.__version__
@@ -95,7 +95,7 @@ def create_collections_and_insert_data(prefix, flush=True, count=3000, collectio
     for index_name in all_index_types[:collection_cnt]:
         logger.info("\nCreate collection...")
         col_name = prefix + index_name
-        collection = Collection(name=col_name, schema=default_schema) 
+        collection = Collection(name=col_name, schema=default_schema)
         logger.info(f"collection name: {col_name}")
         logger.info(f"begin insert, count: {count} nb: {nb}")
         times = int(count // nb)
@@ -118,7 +118,7 @@ def create_collections_and_insert_data(prefix, flush=True, count=3000, collectio
                 collection.num_entities
             if j == times - 3:
                 collection.compact()
-                
+
 
         logger.info(f"end insert, time: {total_time:.4f}")
         if flush:
@@ -183,9 +183,17 @@ def create_index(prefix):
         index["params"] = index_params_map[index_name]
         if index_name in ["BIN_FLAT", "BIN_IVF_FLAT"]:
             index["metric_type"] = "HAMMING"
-        t0 = time.time()
-        c.create_index(field_name="float_vector", index_params=index)
-        logger.info(f"create index time: {time.time() - t0:.4f}")
+        index_info_list = [x.to_dict() for x in c.indexes]
+        logger.info(index_info_list)
+        is_indexed = False
+        for index_info in index_info_list:
+            if "metric_type" in index_info.keys() or "metric_type" in index_info["index_param"]:
+                is_indexed = True
+                logger.info(f"collection {col_name} has been indexed with {index_info}")
+        if not is_indexed:
+            t0 = time.time()
+            c.create_index(field_name="float_vector", index_params=index)
+            logger.info(f"create index time: {time.time() - t0:.4f}")
         if replica_number > 0:
             c.load(replica_number=replica_number)
 
