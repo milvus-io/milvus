@@ -26,7 +26,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/blang/semver/v4"
+	semver "github.com/blang/semver/v4"
 	"github.com/cockroachdb/errors"
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"

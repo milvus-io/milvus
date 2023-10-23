@@ -39,8 +39,8 @@ type Handler interface {
 	GetQueryVChanPositions(ch *channel, partitionIDs ...UniqueID) *datapb.VchannelInfo
 	// GetDataVChanPositions gets the information recovery needed of a channel for DataNode
 	GetDataVChanPositions(ch *channel, partitionID UniqueID) *datapb.VchannelInfo
-	CheckShouldDropChannel(channel string, collectionID UniqueID) bool
-	FinishDropChannel(channel string) error
+	CheckShouldDropChannel(ch string) bool
+	FinishDropChannel(ch string) error
 	GetCollection(ctx context.Context, collectionID UniqueID) (*collectionInfo, error)
 }
 
@@ -403,20 +403,8 @@ func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID
 }
 
 // CheckShouldDropChannel returns whether specified channel is marked to be removed
-func (h *ServerHandler) CheckShouldDropChannel(channel string, collectionID UniqueID) bool {
-	if h.s.meta.catalog.ShouldDropChannel(h.s.ctx, channel) {
-		return true
-	}
-	// collectionID parse from channelName
-	has, err := h.HasCollection(h.s.ctx, collectionID)
-	if err != nil {
-		log.Info("datacoord ServerHandler CheckShouldDropChannel hasCollection failed", zap.Error(err))
-		return false
-	}
-	log.Info("datacoord ServerHandler CheckShouldDropChannel hasCollection", zap.Bool("shouldDropChannel", !has),
-		zap.String("channel", channel))
-
-	return !has
+func (h *ServerHandler) CheckShouldDropChannel(channel string) bool {
+	return h.s.meta.catalog.ShouldDropChannel(h.s.ctx, channel)
 }
 
 // FinishDropChannel cleans up the remove flag for channels
