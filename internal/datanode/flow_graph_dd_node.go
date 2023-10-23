@@ -183,10 +183,9 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 
 		case commonpb.MsgType_Insert:
 			imsg := msg.(*msgstream.InsertMsg)
+			// Channels are shared between collections, filtering messages not belong to
+			// the current collection.
 			if imsg.CollectionID != ddn.collectionID {
-				log.Warn("filter invalid insert message, collection mis-match",
-					zap.Int64("Get collID", imsg.CollectionID),
-					zap.Int64("Expected collID", ddn.collectionID))
 				continue
 			}
 
