@@ -11,7 +11,7 @@ import (
 func TestKeyLock(t *testing.T) {
 	keys := []string{"Milvus", "Blazing", "Fast"}
 
-	keyLock := NewKeyLock()
+	keyLock := NewKeyLock[string]()
 
 	keyLock.Lock(keys[0])
 	keyLock.Lock(keys[1])
@@ -46,7 +46,7 @@ func TestKeyLock(t *testing.T) {
 func TestKeyRLock(t *testing.T) {
 	keys := []string{"Milvus", "Blazing", "Fast"}
 
-	keyLock := NewKeyLock()
+	keyLock := NewKeyLock[string]()
 
 	keyLock.RLock(keys[0])
 	keyLock.RLock(keys[0])
