@@ -18,6 +18,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -29,6 +30,9 @@
 #include "SegmentSealed.h"
 #include "TimestampIndex.h"
 #include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
+#include "common/Json.h"
+#include "common/Span.h"
 #include "mmap/Column.h"
 #include "index/ScalarIndex.h"
 #include "sys/mman.h"
@@ -189,21 +193,49 @@ class SegmentSealedImpl : public SegmentSealed {
                         int64_t count,
                         void* dst_raw);
 
+    template <typename T>
+    T
+    ReadAt(int64_t offset, FieldId field_id) const {
+        auto column_iter = fields_.find(field_id);
+        if (column_iter == fields_.end()) {
+            auto scalar_index_iter = scalar_indexings_.find(field_id);
+            AssertInfo(scalar_index_iter != scalar_indexings_.end(),
+                       fmt::format("field {} column is empty", field_id.get()));
+            auto pk_index = dynamic_cast<const index::ScalarIndex<T>*>(
+                scalar_index_iter->second.get());
+            return pk_index->Reverse_Lookup(offset);
+        }
+
+        auto column = column_iter->second;
+        if constexpr (std::is_same_v<T, std::string> ||
+                      std::is_same_v<T, Json>) {
+            auto var_column =
+                std::dynamic_pointer_cast<VariableColumn<T>>(column);
+            return T(var_column->RawAt(offset));
+        }
+
+        auto column_data = reinterpret_cast<const T*>(column->Data());
+        return column_data[offset];
+    }
+
     std::unique_ptr<DataArray>
     fill_with_empty(FieldId field_id, int64_t count) const;
 
     void
     update_row_count(int64_t row_count) {
-        // if (row_count_opt_.has_value()) {
-        //     AssertInfo(row_count_opt_.value() == row_count, "load data has different row count from other columns");
-        // } else {
         num_rows_ = row_count;
-        // }
     }
 
     void
     mask_with_timestamps(BitsetType& bitset_chunk,
                          Timestamp timestamp) const override;
+
+    std::shared_ptr<DeletedRecord::TmpBitmap>
+    get_deleted_bitmap(int64_t del_barrier,
+                       int64_t insert_barrier,
+                       DeletedRecord& delete_record,
+                       const InsertRecord<true>& insert_record,
+                       Timestamp query_timestamp) const;
 
     void
     vector_search(SearchInfo& search_info,
@@ -226,6 +258,25 @@ class SegmentSealedImpl : public SegmentSealed {
     const DeletedRecord&
     get_deleted_record() const {
         return deleted_record_;
+    }
+
+    PkType
+    PrimaryKeyAt(int64_t offset) const {
+        auto& schema = *this->schema_;
+        auto pk_id = schema.get_primary_field_id().value();
+        auto& pk_field = schema[pk_id];
+        switch (pk_field.get_data_type()) {
+            case milvus::DataType::INT64:
+                return ReadAt<int64_t>(offset, pk_id);
+            case milvus::DataType::VARCHAR:
+            case milvus::DataType::STRING:
+                return ReadAt<std::string>(offset, pk_id);
+
+            default:
+                PanicInfo(ErrorCode::Unsupported,
+                          fmt::format("unsupported primary key type: {}",
+                                      datatype_name(pk_field.get_data_type())));
+        }
     }
 
     std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>

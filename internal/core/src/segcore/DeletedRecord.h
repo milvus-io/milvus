@@ -39,7 +39,7 @@ struct DeletedRecord {
     DeletedRecord()
         : lru_(std::make_shared<TmpBitmap>()),
           timestamps_(deprecated_size_per_chunk),
-          pks_(deprecated_size_per_chunk) {
+          pk_offsets_(deprecated_size_per_chunk) {
         lru_->bitmap_ptr = std::make_shared<BitsetType>();
     }
 
@@ -82,10 +82,10 @@ struct DeletedRecord {
     }
 
     void
-    push(const std::vector<PkType>& pks, const Timestamp* timestamps) {
+    push(const std::vector<int64_t>& pk_offsets, const Timestamp* timestamps) {
         std::lock_guard lck(buffer_mutex_);
 
-        auto size = pks.size();
+        auto size = pk_offsets.size();
         ssize_t divide_point = 0;
         auto n = n_.load();
         // Truncate the overlapping prefix
@@ -102,19 +102,19 @@ struct DeletedRecord {
         }
 
         size -= divide_point;
-        pks_.set_data_raw(n, pks.data() + divide_point, size);
+        pk_offsets_.set_data_raw(n, pk_offsets.data() + divide_point, size);
         timestamps_.set_data_raw(n, timestamps + divide_point, size);
         n_ += size;
+    }
+
+    const ConcurrentVector<int64_t>&
+    offsets() const {
+        return pk_offsets_;
     }
 
     const ConcurrentVector<Timestamp>&
     timestamps() const {
         return timestamps_;
-    }
-
-    const ConcurrentVector<PkType>&
-    pks() const {
-        return pks_;
     }
 
     int64_t
@@ -129,7 +129,7 @@ struct DeletedRecord {
     std::shared_mutex buffer_mutex_;
     std::atomic<int64_t> n_ = 0;
     ConcurrentVector<Timestamp> timestamps_;
-    ConcurrentVector<PkType> pks_;
+    ConcurrentVector<int64_t> pk_offsets_;
 };
 
 inline auto

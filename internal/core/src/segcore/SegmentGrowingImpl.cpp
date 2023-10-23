@@ -59,6 +59,78 @@ SegmentGrowingImpl::mask_with_delete(BitsetType& bitset,
     bitset |= delete_bitset;
 }
 
+std::shared_ptr<DeletedRecord::TmpBitmap>
+SegmentGrowingImpl::get_deleted_bitmap(int64_t del_barrier,
+                                       int64_t insert_barrier,
+                                       DeletedRecord& delete_record,
+                                       const InsertRecord<false>& insert_record,
+                                       Timestamp query_timestamp) const {
+    // if insert_barrier and del_barrier have not changed, use cache data directly
+    bool hit_cache = false;
+    int64_t old_del_barrier = 0;
+    auto current = delete_record.clone_lru_entry(
+        insert_barrier, del_barrier, old_del_barrier, hit_cache);
+    if (hit_cache) {
+        return current;
+    }
+
+    auto bitmap = current->bitmap_ptr;
+
+    int64_t start, end;
+    if (del_barrier < old_del_barrier) {
+        // in this case, ts of delete record[current_del_barrier : old_del_barrier] > query_timestamp
+        // so these deletion records do not take effect in query/search
+        // so bitmap corresponding to those pks in delete record[current_del_barrier:old_del_barrier] will be reset to 0
+        // for example, current_del_barrier = 2, query_time = 120, the bitmap will be reset to [0, 1, 1, 0, 0, 0, 0, 0]
+        start = del_barrier;
+        end = old_del_barrier;
+    } else {
+        // the cache is not enough, so update bitmap using new pks in delete record[old_del_barrier:current_del_barrier]
+        // for example, current_del_barrier = 4, query_time = 300, bitmap will be updated to [0, 1, 1, 0, 1, 1, 0, 0]
+        start = old_del_barrier;
+        end = del_barrier;
+    }
+
+    // Avoid invalid calculations when there are a lot of repeated delete pks
+    auto& pk_field =
+        this->get_schema()[this->schema_->get_primary_field_id().value()];
+    std::unordered_map<PkType, Timestamp> delete_timestamps;
+    for (auto del_index = start; del_index < end; ++del_index) {
+        auto offset = delete_record.offsets()[del_index];
+        auto pk = this->insert_record_.primary_key_at(offset, pk_field);
+        auto timestamp = delete_record.timestamps()[del_index];
+
+        delete_timestamps[pk] = timestamp > delete_timestamps[pk]
+                                    ? timestamp
+                                    : delete_timestamps[pk];
+    }
+
+    for (auto& [pk, timestamp] : delete_timestamps) {
+        auto segOffsets = insert_record.search_pk(pk, insert_barrier);
+        for (auto offset : segOffsets) {
+            int64_t insert_row_offset = offset.get();
+
+            // The deletion record do not take effect in search/query,
+            // and reset bitmap to 0
+            if (timestamp > query_timestamp) {
+                bitmap->reset(insert_row_offset);
+                continue;
+            }
+            // Insert after delete with same pk, delete will not task effect on this insert record,
+            // and reset bitmap to 0
+            if (insert_record.timestamps_[insert_row_offset] >= timestamp) {
+                bitmap->reset(insert_row_offset);
+                continue;
+            }
+            // insert data corresponding to the insert_row_offset will be ignored in search/query
+            bitmap->set(insert_row_offset);
+        }
+    }
+
+    delete_record.insert_lru_entry(current);
+    return current;
+}
+
 void
 SegmentGrowingImpl::try_remove_chunks(FieldId fieldId) {
     //remove the chunk data to reduce memory consumption
@@ -235,32 +307,23 @@ SegmentGrowingImpl::Delete(int64_t reserved_begin,
     std::vector<PkType> pks(size);
     ParsePksFromIDs(pks, field_meta.get_data_type(), *ids);
 
-    // filter out the deletions that the primary key not exists
-    auto end = std::remove_if(pks.begin(), pks.end(), [&](const PkType& pk) {
-        return !insert_record_.contain(pk);
-    });
-    size = end - pks.begin();
-    if (size == 0) {
-        return SegcoreError::success();
-    }
-
     // step 1: sort timestamp
-    std::vector<std::tuple<Timestamp, PkType>> ordering(size);
-    for (int i = 0; i < size; i++) {
-        ordering[i] = std::make_tuple(timestamps_raw[i], pks[i]);
-    }
-    std::sort(ordering.begin(), ordering.end());
-    std::vector<PkType> sort_pks(size);
-    std::vector<Timestamp> sort_timestamps(size);
+    auto delete_records =
+        LookupPrimaryKeys(this->insert_record_, pks, timestamps_raw);
 
-    for (int i = 0; i < size; i++) {
-        auto [t, pk] = ordering[i];
-        sort_timestamps[i] = t;
-        sort_pks[i] = pk;
+    std::sort(delete_records.begin(), delete_records.end());
+    auto n = delete_records.size();
+    std::vector<int64_t> sort_pk_offsets;
+    std::vector<Timestamp> sort_timestamps;
+    sort_pk_offsets.reserve(n);
+    sort_timestamps.reserve(n);
+
+    for (auto [ts, offset] : delete_records) {
+        sort_pk_offsets.emplace_back(offset);
+        sort_timestamps.emplace_back(ts);
     }
 
-    // step 2: fill delete record
-    deleted_record_.push(sort_pks, sort_timestamps.data());
+    deleted_record_.push(sort_pk_offsets, sort_timestamps.data());
     return SegcoreError::success();
 }
 
@@ -292,7 +355,16 @@ SegmentGrowingImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     auto timestamps = reinterpret_cast<const Timestamp*>(info.timestamps);
 
     // step 2: fill pks and timestamps
-    deleted_record_.push(pks, timestamps);
+    auto delete_records = LookupPrimaryKeys(insert_record_, pks, timestamps);
+    std::vector<int64_t> extracted_offsets;
+    std::vector<Timestamp> extracted_timestamps;
+    extracted_offsets.reserve(delete_records.size());
+    extracted_timestamps.reserve(delete_records.size());
+    for (auto [ts, offset] : delete_records) {
+        extracted_offsets.emplace_back(offset);
+        extracted_timestamps.emplace_back(ts);
+    }
+    deleted_record_.push(extracted_offsets, extracted_timestamps.data());
 }
 
 SpanBase

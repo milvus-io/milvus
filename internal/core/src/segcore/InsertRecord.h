@@ -22,6 +22,7 @@
 
 #include "TimestampIndex.h"
 #include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "fmt/format.h"
@@ -161,6 +162,10 @@ class OffsetOrderedArray : public OffsetMap {
 
     std::vector<int64_t>
     find(const PkType& pk) const override {
+        if (array_.empty()) {
+            return {};
+        }
+
         check_search();
 
         const T& target = std::get<T>(pk);
@@ -390,6 +395,19 @@ struct InsertRecord {
         return res_offsets;
     }
 
+    std::vector<SegOffset>
+    search_pk(const PkType& pk, int64_t insert_barrier) const {
+        std::shared_lock lck(shared_mutex_);
+        std::vector<SegOffset> res_offsets;
+        auto offset_iter = pk2offset_->find(pk);
+        for (auto offset : offset_iter) {
+            if (offset < insert_barrier) {
+                res_offsets.emplace_back(offset);
+            }
+        }
+        return res_offsets;
+    }
+
     void
     insert_pks(milvus::DataType data_type,
                const std::shared_ptr<ColumnBase>& data) {
@@ -456,23 +474,42 @@ struct InsertRecord {
         }
     }
 
-    std::vector<SegOffset>
-    search_pk(const PkType& pk, int64_t insert_barrier) const {
-        std::shared_lock lck(shared_mutex_);
-        std::vector<SegOffset> res_offsets;
-        auto offset_iter = pk2offset_->find(pk);
-        for (auto offset : offset_iter) {
-            if (offset < insert_barrier) {
-                res_offsets.emplace_back(offset);
-            }
-        }
-        return res_offsets;
-    }
-
     void
     insert_pk(const PkType& pk, int64_t offset) {
         std::lock_guard lck(shared_mutex_);
         pk2offset_->insert(pk, offset);
+    }
+
+    // For growing segment only,
+    // Milvus won't build scalar index for growing segment,
+    // so all data should be in InsertRecord.
+    template <typename T>
+    T
+    read_at(int64_t offset, FieldId field_id) const {
+        auto column = fields_data_.at(field_id).get();
+        auto column_vec = dynamic_cast<const ConcurrentVector<T>*>(column);
+        AssertInfo(column_vec,
+                   fmt::format("data lost for field {}", field_id.get()));
+
+        auto& column_data = *column_vec;
+        return column_data[offset];
+    }
+
+    PkType
+    primary_key_at(int64_t offset, const FieldMeta& field_meta) const {
+        switch (field_meta.get_data_type()) {
+            case milvus::DataType::INT64:
+                return read_at<int64_t>(offset, field_meta.get_id());
+            case milvus::DataType::VARCHAR:
+            case milvus::DataType::STRING:
+                return read_at<std::string>(offset, field_meta.get_id());
+
+            default:
+                PanicInfo(
+                    ErrorCode::Unsupported,
+                    fmt::format("unsupported primary key type: {}",
+                                datatype_name(field_meta.get_data_type())));
+        }
     }
 
     bool

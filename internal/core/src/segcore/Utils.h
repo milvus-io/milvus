@@ -22,6 +22,7 @@
 
 #include "common/QueryResult.h"
 #include "common/Types.h"
+#include "mmap/Column.h"
 #include "segcore/DeletedRecord.h"
 #include "segcore/InsertRecord.h"
 #include "index/Index.h"
@@ -79,76 +80,6 @@ MergeDataArray(
     std::vector<std::pair<milvus::SearchResult*, int64_t>>& result_offsets,
     const FieldMeta& field_meta);
 
-template <bool is_sealed>
-std::shared_ptr<DeletedRecord::TmpBitmap>
-get_deleted_bitmap(int64_t del_barrier,
-                   int64_t insert_barrier,
-                   DeletedRecord& delete_record,
-                   const InsertRecord<is_sealed>& insert_record,
-                   Timestamp query_timestamp) {
-    // if insert_barrier and del_barrier have not changed, use cache data directly
-    bool hit_cache = false;
-    int64_t old_del_barrier = 0;
-    auto current = delete_record.clone_lru_entry(
-        insert_barrier, del_barrier, old_del_barrier, hit_cache);
-    if (hit_cache) {
-        return current;
-    }
-
-    auto bitmap = current->bitmap_ptr;
-
-    int64_t start, end;
-    if (del_barrier < old_del_barrier) {
-        // in this case, ts of delete record[current_del_barrier : old_del_barrier] > query_timestamp
-        // so these deletion records do not take effect in query/search
-        // so bitmap corresponding to those pks in delete record[current_del_barrier:old_del_barrier] will be reset to 0
-        // for example, current_del_barrier = 2, query_time = 120, the bitmap will be reset to [0, 1, 1, 0, 0, 0, 0, 0]
-        start = del_barrier;
-        end = old_del_barrier;
-    } else {
-        // the cache is not enough, so update bitmap using new pks in delete record[old_del_barrier:current_del_barrier]
-        // for example, current_del_barrier = 4, query_time = 300, bitmap will be updated to [0, 1, 1, 0, 1, 1, 0, 0]
-        start = old_del_barrier;
-        end = del_barrier;
-    }
-
-    // Avoid invalid calculations when there are a lot of repeated delete pks
-    std::unordered_map<PkType, Timestamp> delete_timestamps;
-    for (auto del_index = start; del_index < end; ++del_index) {
-        auto pk = delete_record.pks()[del_index];
-        auto timestamp = delete_record.timestamps()[del_index];
-
-        delete_timestamps[pk] = timestamp > delete_timestamps[pk]
-                                    ? timestamp
-                                    : delete_timestamps[pk];
-    }
-
-    for (auto& [pk, timestamp] : delete_timestamps) {
-        auto segOffsets = insert_record.search_pk(pk, insert_barrier);
-        for (auto offset : segOffsets) {
-            int64_t insert_row_offset = offset.get();
-
-            // The deletion record do not take effect in search/query,
-            // and reset bitmap to 0
-            if (timestamp > query_timestamp) {
-                bitmap->reset(insert_row_offset);
-                continue;
-            }
-            // Insert after delete with same pk, delete will not task effect on this insert record,
-            // and reset bitmap to 0
-            if (insert_record.timestamps_[insert_row_offset] >= timestamp) {
-                bitmap->reset(insert_row_offset);
-                continue;
-            }
-            // insert data corresponding to the insert_row_offset will be ignored in search/query
-            bitmap->set(insert_row_offset);
-        }
-    }
-
-    delete_record.insert_lru_entry(current);
-    return current;
-}
-
 std::unique_ptr<DataArray>
 ReverseDataFromIndex(const index::IndexBase* index,
                      const int64_t* seg_offsets,
@@ -158,6 +89,26 @@ ReverseDataFromIndex(const index::IndexBase* index,
 void
 LoadFieldDatasFromRemote(std::vector<std::string>& remote_files,
                          storage::FieldDataChannelPtr channel);
+
+template <bool is_sealed>
+std::vector<std::pair<Timestamp, int64_t>>
+LookupPrimaryKeys(const InsertRecord<is_sealed>& insert_record,
+                  const std::vector<PkType>& pks,
+                  const Timestamp* tss) {
+    std::vector<std::pair<Timestamp, int64_t>> delete_records;
+    delete_records.reserve(pks.size());
+
+    for (int i = 0; i < pks.size(); i++) {
+        auto pk_offsets = insert_record.search_pk(pks[i], tss[i]);
+        if (pk_offsets.empty()) {
+            continue;
+        }
+
+        delete_records.emplace_back(tss[i], pk_offsets.back().get());
+    }
+
+    return delete_records;
+}
 
 /**
  * Returns an index pointing to the first element in the range [first, last) such that `value < element` is true
