@@ -730,18 +730,12 @@ func (kc *Catalog) GcConfirm(ctx context.Context, collectionID, partitionID type
 
 func fillLogPathByLogID(chunkManagerRootPath string, binlogType storage.BinlogType, collectionID, partitionID,
 	segmentID typeutil.UniqueID, fieldBinlog *datapb.FieldBinlog,
-) error {
+) {
 	for _, binlog := range fieldBinlog.Binlogs {
-		path, err := buildLogPath(chunkManagerRootPath, binlogType, collectionID, partitionID,
+		path := buildLogPath(chunkManagerRootPath, binlogType, collectionID, partitionID,
 			segmentID, fieldBinlog.GetFieldID(), binlog.GetLogID())
-		if err != nil {
-			return err
-		}
-
 		binlog.LogPath = path
 	}
-
-	return nil
 }
 
 func fillLogIDByLogPath(multiFieldBinlogs ...[]*datapb.FieldBinlog) error {
@@ -768,42 +762,85 @@ func fillLogIDByLogPath(multiFieldBinlogs ...[]*datapb.FieldBinlog) error {
 	return nil
 }
 
-// build a binlog path on the storage by metadata
-func buildLogPath(chunkManagerRootPath string, binlogType storage.BinlogType, collectionID, partitionID, segmentID, filedID, logID typeutil.UniqueID) (string, error) {
-	switch binlogType {
-	case storage.InsertBinlog:
-		path := metautil.BuildInsertLogPath(chunkManagerRootPath, collectionID, partitionID, segmentID, filedID, logID)
-		return path, nil
-	case storage.DeleteBinlog:
-		path := metautil.BuildDeltaLogPath(chunkManagerRootPath, collectionID, partitionID, segmentID, logID)
-		return path, nil
-	case storage.StatsBinlog:
-		path := metautil.BuildStatsLogPath(chunkManagerRootPath, collectionID, partitionID, segmentID, filedID, logID)
-		return path, nil
-	default:
-		return "", fmt.Errorf("invalid binlog type: %d", binlogType)
+func CompressBinLog(fieldBinLogs []*datapb.FieldBinlog) ([]*datapb.FieldBinlog, error) {
+	compressedFieldBinLogs := make([]*datapb.FieldBinlog, 0)
+	for _, fieldBinLog := range fieldBinLogs {
+		compressedFieldBinLog := &datapb.FieldBinlog{}
+		compressedFieldBinLog.FieldID = fieldBinLog.FieldID
+		for _, binlog := range fieldBinLog.Binlogs {
+			logPath := binlog.LogPath
+			idx := strings.LastIndex(logPath, "/")
+			if idx == -1 {
+				return nil, fmt.Errorf("invailed binlog path: %s", logPath)
+			}
+			logPathStr := logPath[(idx + 1):]
+			logID, err := strconv.ParseInt(logPathStr, 10, 64)
+			if err != nil {
+				return nil, err
+			}
+			binlog := &datapb.Binlog{
+				EntriesNum: binlog.EntriesNum,
+				// remove timestamp since it's not necessary
+				LogSize: binlog.LogSize,
+				LogID:   logID,
+			}
+			compressedFieldBinLog.Binlogs = append(compressedFieldBinLog.Binlogs, binlog)
+		}
+		compressedFieldBinLogs = append(compressedFieldBinLogs, compressedFieldBinLog)
 	}
+	return compressedFieldBinLogs, nil
 }
 
-func checkBinlogs(binlogType storage.BinlogType, segmentID typeutil.UniqueID, logs []*datapb.FieldBinlog) {
-	check := func(getSegmentID func(logPath string) typeutil.UniqueID) {
+func DecompressBinLog(path string, info *datapb.SegmentInfo) error {
+	for _, fieldBinLogs := range info.GetBinlogs() {
+		fillLogPathByLogID(path, storage.InsertBinlog, info.CollectionID, info.PartitionID, info.ID, fieldBinLogs)
+	}
+
+	for _, deltaLogs := range info.GetDeltalogs() {
+		fillLogPathByLogID(path, storage.DeleteBinlog, info.CollectionID, info.PartitionID, info.ID, deltaLogs)
+	}
+
+	for _, statsLogs := range info.GetStatslogs() {
+		fillLogPathByLogID(path, storage.StatsBinlog, info.CollectionID, info.PartitionID, info.ID, statsLogs)
+	}
+	return nil
+}
+
+// build a binlog path on the storage by metadata
+func buildLogPath(chunkManagerRootPath string, binlogType storage.BinlogType, collectionID, partitionID, segmentID, filedID, logID typeutil.UniqueID) string {
+	switch binlogType {
+	case storage.InsertBinlog:
+		return metautil.BuildInsertLogPath(chunkManagerRootPath, collectionID, partitionID, segmentID, filedID, logID)
+	case storage.DeleteBinlog:
+		return metautil.BuildDeltaLogPath(chunkManagerRootPath, collectionID, partitionID, segmentID, logID)
+	case storage.StatsBinlog:
+		return metautil.BuildStatsLogPath(chunkManagerRootPath, collectionID, partitionID, segmentID, filedID, logID)
+	}
+	// should not happen
+	log.Panic("invalid binlog type", zap.Any("type", binlogType))
+	return ""
+}
+
+func checkBinlogs(binlogType storage.BinlogType, segmentID typeutil.UniqueID, logs []*datapb.FieldBinlog) error {
+	check := func(getSegmentID func(logPath string) typeutil.UniqueID) error {
 		for _, fieldBinlog := range logs {
 			for _, binlog := range fieldBinlog.Binlogs {
 				if segmentID != getSegmentID(binlog.LogPath) {
-					log.Panic("the segment path doesn't match the segmentID", zap.Int64("segmentID", segmentID), zap.String("path", binlog.LogPath))
+					return fmt.Errorf("the segment path doesn't match the segmentID, segmentID %d, path %s", segmentID, binlog.LogPath)
 				}
 			}
 		}
+		return nil
 	}
 	switch binlogType {
 	case storage.InsertBinlog:
-		check(metautil.GetSegmentIDFromInsertLogPath)
+		return check(metautil.GetSegmentIDFromInsertLogPath)
 	case storage.DeleteBinlog:
-		check(metautil.GetSegmentIDFromDeltaLogPath)
+		return check(metautil.GetSegmentIDFromDeltaLogPath)
 	case storage.StatsBinlog:
-		check(metautil.GetSegmentIDFromStatsLogPath)
+		return check(metautil.GetSegmentIDFromStatsLogPath)
 	default:
-		log.Panic("invalid binlog type")
+		return fmt.Errorf("the segment path doesn't match the segmentID, segmentID %d, type %d", segmentID, binlogType)
 	}
 }
 
@@ -820,9 +857,18 @@ func hasSepcialStatslog(logs *datapb.FieldBinlog) bool {
 func buildBinlogKvsWithLogID(collectionID, partitionID, segmentID typeutil.UniqueID,
 	binlogs, deltalogs, statslogs []*datapb.FieldBinlog, ignoreNumberCheck bool,
 ) (map[string]string, error) {
-	checkBinlogs(storage.InsertBinlog, segmentID, binlogs)
+	err := checkBinlogs(storage.InsertBinlog, segmentID, binlogs)
+	if err != nil {
+		return nil, err
+	}
 	checkBinlogs(storage.DeleteBinlog, segmentID, deltalogs)
+	if err != nil {
+		return nil, err
+	}
 	checkBinlogs(storage.StatsBinlog, segmentID, statslogs)
+	if err != nil {
+		return nil, err
+	}
 	// check stats log and bin log size match
 	// num of stats log may one more than num of binlogs if segment flushed and merged stats log
 	if !ignoreNumberCheck && len(binlogs) != 0 && len(statslogs) != 0 && !hasSepcialStatslog(statslogs[0]) {

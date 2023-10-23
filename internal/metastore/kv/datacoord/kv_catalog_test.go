@@ -277,9 +277,9 @@ func Test_AddSegments(t *testing.T) {
 		metakv.EXPECT().MultiSave(mock.Anything).Return(errors.New("error")).Maybe()
 
 		catalog := NewCatalog(metakv, rootPath, "")
-		assert.Panics(t, func() {
-			catalog.AddSegment(context.TODO(), invalidSegment)
-		})
+
+		err := catalog.AddSegment(context.TODO(), invalidSegment)
+		assert.Error(t, err)
 	})
 
 	t.Run("save error", func(t *testing.T) {
@@ -327,11 +327,10 @@ func Test_AlterSegments(t *testing.T) {
 		metakv.EXPECT().MultiSave(mock.Anything).Return(errors.New("error")).Maybe()
 
 		catalog := NewCatalog(metakv, rootPath, "")
-		assert.Panics(t, func() {
-			catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{invalidSegment}, metastore.BinlogsIncrement{
-				Segment: invalidSegment,
-			})
+		err := catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{invalidSegment}, metastore.BinlogsIncrement{
+			Segment: invalidSegment,
 		})
+		assert.Error(t, err)
 	})
 
 	t.Run("save error", func(t *testing.T) {
@@ -1059,6 +1058,54 @@ func TestCatalog_DropSegmentIndex(t *testing.T) {
 	})
 }
 
+func TestCatalog_Compress(t *testing.T) {
+	segmentInfo := getSegment(rootPath, 0, 1, 2, 3, 10000)
+	val, err := proto.Marshal(segmentInfo)
+	assert.NoError(t, err)
+
+	compressedSegmentInfo := proto.Clone(segmentInfo).(*datapb.SegmentInfo)
+	compressedSegmentInfo.Binlogs, err = CompressBinLog(compressedSegmentInfo.Binlogs)
+	assert.NoError(t, err)
+	compressedSegmentInfo.Deltalogs, err = CompressBinLog(compressedSegmentInfo.Deltalogs)
+	assert.NoError(t, err)
+	compressedSegmentInfo.Statslogs, err = CompressBinLog(compressedSegmentInfo.Statslogs)
+	assert.NoError(t, err)
+
+	valCompressed, err := proto.Marshal(compressedSegmentInfo)
+	assert.NoError(t, err)
+
+	assert.True(t, len(valCompressed) < len(val))
+
+	// make sure the compact
+	unmarshaledSegmentInfo := &datapb.SegmentInfo{}
+	proto.Unmarshal(val, unmarshaledSegmentInfo)
+
+	unmarshaledSegmentInfoCompressed := &datapb.SegmentInfo{}
+	proto.Unmarshal(valCompressed, unmarshaledSegmentInfoCompressed)
+	DecompressBinLog(rootPath, unmarshaledSegmentInfoCompressed)
+
+	assert.Equal(t, len(unmarshaledSegmentInfo.GetBinlogs()), len(unmarshaledSegmentInfoCompressed.GetBinlogs()))
+	for i := 0; i < 1000; i++ {
+		assert.Equal(t, unmarshaledSegmentInfo.GetBinlogs()[0].Binlogs[i].LogPath, unmarshaledSegmentInfoCompressed.GetBinlogs()[0].Binlogs[i].LogPath)
+	}
+
+	// test compress erorr path
+	fakeBinlogs := make([]*datapb.Binlog, 1)
+	fakeBinlogs[0] = &datapb.Binlog{
+		EntriesNum: 10000,
+		LogPath:    "test",
+	}
+	fieldBinLogs := make([]*datapb.FieldBinlog, 1)
+	fieldBinLogs[0] = &datapb.FieldBinlog{
+		FieldID: 106,
+		Binlogs: fakeBinlogs,
+	}
+	compressedSegmentInfo.Binlogs, err = CompressBinLog(fieldBinLogs)
+	assert.Error(t, err)
+
+	// test decompress error path
+}
+
 func BenchmarkCatalog_List1000Segments(b *testing.B) {
 	paramtable.Init()
 	etcdCli, err := etcd.GetEtcdClient(
@@ -1140,6 +1187,58 @@ func addSegment(rootPath string, collectionID, partitionID, segmentID, fieldID i
 			},
 		},
 	}
+
+	statslogs = []*datapb.FieldBinlog{
+		{
+			FieldID: 1,
+			Binlogs: []*datapb.Binlog{
+				{
+					EntriesNum: 5,
+					LogPath:    metautil.BuildStatsLogPath(rootPath, collectionID, partitionID, segmentID, fieldID, int64(rand.Int())),
+				},
+			},
+		},
+	}
+
+	return &datapb.SegmentInfo{
+		ID:           segmentID,
+		CollectionID: collectionID,
+		PartitionID:  partitionID,
+		NumOfRows:    10000,
+		State:        commonpb.SegmentState_Flushed,
+		Binlogs:      binlogs,
+		Deltalogs:    deltalogs,
+		Statslogs:    statslogs,
+	}
+}
+
+func getSegment(rootPath string, collectionID, partitionID, segmentID, fieldID int64, binlogNum int) *datapb.SegmentInfo {
+	binLogPaths := make([]*datapb.Binlog, binlogNum)
+	for i := 0; i < binlogNum; i++ {
+		binLogPaths[i] = &datapb.Binlog{
+			EntriesNum: 10000,
+			LogPath:    metautil.BuildInsertLogPath(rootPath, collectionID, partitionID, segmentID, fieldID, int64(i)),
+		}
+	}
+	binlogs = []*datapb.FieldBinlog{
+		{
+			FieldID: fieldID,
+			Binlogs: binLogPaths,
+		},
+	}
+
+	deltalogs = []*datapb.FieldBinlog{
+		{
+			FieldID: fieldID,
+			Binlogs: []*datapb.Binlog{
+				{
+					EntriesNum: 5,
+					LogPath:    metautil.BuildDeltaLogPath(rootPath, collectionID, partitionID, segmentID, int64(rand.Int())),
+				},
+			},
+		},
+	}
+
 	statslogs = []*datapb.FieldBinlog{
 		{
 			FieldID: 1,

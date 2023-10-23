@@ -4209,6 +4209,7 @@ var globalTestTikv = tikv.SetupLocalTxn()
 func newTestServer(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 	var err error
 	paramtable.Get().Save(Params.CommonCfg.DataCoordTimeTick.Key, Params.CommonCfg.DataCoordTimeTick.GetValue()+strconv.Itoa(rand.Int()))
+	paramtable.Get().Save(Params.RocksmqCfg.CompressionTypes.Key, "0,0,0,0,0")
 	factory := dependency.NewDefaultFactory(true)
 	etcdCli, err := etcd.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),

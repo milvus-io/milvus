@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
@@ -115,7 +116,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 
 	var isUnimplemented bool
 	err = retry.Do(ctx, func() error {
-		for _, channelInfo := range s.channelManager.GetChannels() {
+		for _, channelInfo := range s.channelManager.GetAssignedChannels() {
 			nodeID := channelInfo.NodeID
 			channels := lo.Filter(channelInfo.Channels, func(channel *channel, _ int) bool {
 				return channel.CollectionID == req.GetCollectionID()
@@ -817,15 +818,37 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 			rowCount = segment.NumOfRows
 		}
 
+		// save the traffic of sending
+		binLogs, err := datacoord.CompressBinLog(segment.Binlogs)
+		if err != nil {
+			log.Warn("failed to compress segment", zap.Int64("segmentID", id), zap.Error(err))
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
+
+		deltaLogs, err := datacoord.CompressBinLog(segment.Deltalogs)
+		if err != nil {
+			log.Warn("failed to compress segment", zap.Int64("segmentID", id), zap.Error(err))
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
+
+		statLogs, err := datacoord.CompressBinLog(segment.Statslogs)
+		if err != nil {
+			log.Warn("failed to compress segment", zap.Int64("segmentID", id), zap.Error(err))
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
+
 		segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
 			ID:            segment.ID,
 			PartitionID:   segment.PartitionID,
 			CollectionID:  segment.CollectionID,
 			InsertChannel: segment.InsertChannel,
 			NumOfRows:     rowCount,
-			Binlogs:       segment.Binlogs,
-			Statslogs:     segment.Statslogs,
-			Deltalogs:     segment.Deltalogs,
+			Binlogs:       binLogs,
+			Statslogs:     statLogs,
+			Deltalogs:     deltaLogs,
 		})
 	}
 
@@ -1223,7 +1246,7 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 	}
 
 	channels := make([]string, 0)
-	for _, channelInfo := range s.channelManager.GetChannels() {
+	for _, channelInfo := range s.channelManager.GetAssignedChannels() {
 		filtered := lo.Filter(channelInfo.Channels, func(channel *channel, _ int) bool {
 			return channel.CollectionID == req.GetCollectionID()
 		})
