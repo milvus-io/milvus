@@ -678,9 +678,7 @@ class TestDeleteOperation(TestcaseBase):
         assert res.delete_count == 1
 
         # query without loading and raise exception
-        error = {ct.err_code: 65535,
-                 ct.err_msg: "failed to query: attempt #0: fail to get shard leaders from QueryCoord:"
-                             " collection=444857573607556205: collection not loaded: unrecoverable error"}
+        error = {ct.err_code: 65535, ct.err_msg: "collection not loaded"}
         collection_w.query(expr=tmp_expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)

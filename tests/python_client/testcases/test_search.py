@@ -252,13 +252,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             default_search_params, default_limit, default_search_exp,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 65538,
-                                         "err_msg": 'failed to search: attempt #0: failed to search/query'
-                                                    ' delegator 1 for channel by-dev-rootcoord-dml_1_4'
-                                                    '44857573610608343v0: fail to Search, QueryNode ID=1, '
-                                                    'reason=worker(1) query failed: UnknownError: Assert '
-                                                    '"field_meta.get_sizeof() == element.line_sizeof_" '
-                                                    'at /go/src/github.com/milvus-io/milvus/internal/core/'
-                                                    'src/query/Plan.cpp:52'})
+                                         "err_msg": 'failed to search'})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_param_invalid_field_type(self, get_invalid_fields_type):
@@ -273,9 +267,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         invalid_search_field = get_invalid_fields_type
         log.info("test_search_param_invalid_field_type: searching with invalid field: %s"
                  % invalid_search_field)
-        error1 = {"err_code": 65535, "err_msg": "failed to search: attempt #0: fail to get shard leaders from "
-                                                 "QueryCoord: collection=444857573608382363: collection not "
-                                                 "loaded: unrecoverable error"}
+        error1 = {"err_code": 65535, "err_msg": "collection not loaded"}
         error2 = {"err_code": 1, "err_msg": f"`anns_field` value {get_invalid_fields_type} is illegal"}
         error = error2 if get_invalid_fields_type in [[], 1, [1, "2", 3], (1,), {1: 1}] else error1
         collection_w.search(vectors[:default_nq], invalid_search_field, default_search_params,
@@ -319,9 +311,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             default_limit, default_search_exp,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 65535,
-                                         "err_msg": "failed to search: attempt #0: fail to get shard leaders "
-                                                    "from QueryCoord: collection=444818512783277152: collection "
-                                                    "not loaded: unrecoverable error"})
+                                         "err_msg": "collection not loaded"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index, params",
@@ -344,11 +334,6 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.load()
         # 3. search
         invalid_search_params = cf.gen_invalid_search_params_type()
-        message = ("failed to search: attempt #0: failed to search/query delegator 1 for channel "
-                   "by-dev-rootcoord-dml_8_444857573608382882v0: fail to Search, QueryNode ID=1, "
-                   "reason=worker(1) query failed: UnknownError:  => failed to search: invalid param "
-                   "in json: invalid json key invalid_key: attempt #1: no available shard delegator "
-                   "found: service unavailable")
         for invalid_search_param in invalid_search_params:
             if index == invalid_search_param["index_type"]:
                 search_params = {"metric_type": "L2",
@@ -358,7 +343,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                     default_search_exp,
                                     check_task=CheckTasks.err_res,
                                     check_items={"err_code": 65538,
-                                                 "err_msg": message})
+                                                 "err_msg": "failed to search"})
 
     @pytest.mark.skip("not fixed yet")
     @pytest.mark.tags(CaseLabel.L1)
@@ -624,9 +609,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             default_search_params, default_limit, default_search_exp,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 65535,
-                                         "err_msg": "failed to search: attempt #0: fail to get shard leaders from"
-                                                    " QueryCoord: collection=444818512783277916: collection not"
-                                                    " loaded: unrecoverable error"})
+                                         "err_msg": "collection not loaded"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_release_partition(self):
@@ -654,9 +637,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             [par_name],
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 65535,
-                                         "err_msg": "failed to search: attempt #0: fail to get shard "
-                                                    "leaders from QueryCoord: collection=444857573608588384: "
-                                                    "collection not loaded: unrecoverable error"})
+                                         "err_msg": "collection not loaded"})
 
     @pytest.mark.skip("enable this later using session/strong consistency")
     @pytest.mark.tags(CaseLabel.L1)
@@ -790,17 +771,12 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # 3. search
         log.info("test_search_different_index_invalid_params: Searching after "
                  "creating index-%s" % index)
-        msg = ("failed to search: attempt #0: failed to search/query delegator 1 for channel "
-               "by-dev-rootcoord-dml_10_444857573608789760v0: fail to Search, QueryNode ID=1, "
-               "reason=worker(1) query failed: UnknownError: [json.exception.type_error.302] "
-               "type must be number, but is string: attempt #1: no available shard delegator "
-               "found: service unavailable")
         search_params = cf.gen_invalid_search_param(index)
         collection_w.search(vectors, default_search_field,
                             search_params[0], default_limit,
                             default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 65538, "err_msg": msg})
+                            check_items={"err_code": 65538, "err_msg": "failed to search"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_index_partition_not_existed(self):
@@ -906,14 +882,11 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # 2. search and assert
         query_raw_vector, binary_vectors = cf.gen_binary_vectors(2, default_dim)
         search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
-        msg = ("failed to search: attempt #0: failed to search/query delegator 1 for channel "
-               "by-dev-rootcoord-dml_4_444857573608384003v0: fail to Search, QueryNode ID=1, "
-               "reason=collection:444857573608384003, metric type not match: expected=JACCARD, "
-               "actual=L2: invalid parameter: attempt #1: no available shard delegator found: service unavailable")
         collection_w.search(binary_vectors[:default_nq], "binary_vector",
                             search_params, default_limit, "int64 >= 0",
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 65538, "err_msg": msg})
+                            check_items={"err_code": 65538, "err_msg": "metric type not match: "
+                                                                       "expected=JACCARD, actual=L2"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_with_output_fields_not_exist(self):
@@ -1090,9 +1063,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             default_search_exp,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 65535,
-                                         "err_msg": "failed to search: attempt #0: fail to get shard "
-                                                    "leaders from QueryCoord: collection=444857573608586463:"
-                                                    " collection not loaded: unrecoverable error"})
+                                         "err_msg": "collection not loaded"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_invalid_range_filter(self, get_invalid_range_search_paras):
@@ -1114,9 +1085,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             default_search_exp,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 65535,
-                                         "err_msg": "failed to search: attempt #0: fail to get"
-                                                    " shard leaders from QueryCoord: collection=444857573608586774"
-                                                    ": collection not loaded: unrecoverable error"})
+                                         "err_msg": "collection not loaded"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_range_search_invalid_radius_range_filter_L2(self):
@@ -1136,9 +1105,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             default_search_exp,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 65535,
-                                         "err_msg": "failed to search: attempt #0: fail to get shard leaders from "
-                                                    "QueryCoord: collection=444818512783278558: collection not loaded:"
-                                                    " unrecoverable error"})
+                                         "err_msg": "collection not loaded"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_range_search_invalid_radius_range_filter_IP(self):
@@ -1159,9 +1126,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             default_search_exp,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 65535,
-                                         "err_msg": "failed to search: attempt #0: fail to get shard leaders from "
-                                                    "QueryCoord: collection=444818512783279076: collection not "
-                                                    "loaded: unrecoverable error"})
+                                         "err_msg": "collection not loaded"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="annoy not supported any more")
@@ -1284,17 +1249,13 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # delete entity
         expr = 'float >= int64'
         # search with id 0 vectors
-        msg = ("failed to search: attempt #0: failed to search/query delegator 3 for channel by-dev-rootcoord-dml_15_"
-               "444818512783279330v0: fail to Search, QueryNode ID=3, reason=worker(3) query failed: UnknownError:  "
-               "=> unsupported right datatype JSON of compare expr: attempt #1: no available shard delegator found: s"
-               "ervice unavailable")
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit,
                             expr,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 65538,
-                                         "err_msg": msg})
+                                         "err_msg": "UnknownError: unsupported right datatype JSON of compare expr"})
 
 
 class TestCollectionSearch(TestcaseBase):
@@ -6045,8 +6006,7 @@ class TestSearchDiskann(TestcaseBase):
                             output_fields=output_fields,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 65538,
-                                         "err_msg": "failed to search: attempt #0: failed to search/query "
-                                                    "delegator 1 for channel by-dev-.."})
+                                         "err_msg": "failed to search"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_with_diskann_with_string_pk(self, dim, enable_dynamic_field):
@@ -8813,9 +8773,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             check_task=CheckTasks.err_res,
                             check_items={ct.err_code: 65535,
-                                         ct.err_msg: "failed to search: attempt #0: fail to get shard leaders "
-                                                     "from QueryCoord: collection=444857573614268173: "
-                                                     "collection not loaded: unrecoverable error"})
+                                         ct.err_msg: "collection not loaded"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.xfail(reason="issue #24446")

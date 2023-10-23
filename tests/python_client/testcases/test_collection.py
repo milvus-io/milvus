@@ -2439,12 +2439,7 @@ class TestLoadCollection(TestcaseBase):
         self.init_partition_wrap(collection_w, partition2)
         collection_w.load()
         partition_w.release()
-        error = {ct.err_code: 65538,
-                 ct.err_msg: 'failed to query: attempt #0: failed to search/query delegator 1'
-                             ' for channel by-dev-rootcoord-dml_0_444857573607352620v0: fail '
-                             'to Query, QueryNode ID = 1, reason=partition=[444857573607352660]:'
-                             ' partition not loaded: attempt #1: no available shard delegator '
-                             'found: service unavailable'}
+        error = {ct.err_code: 65538, ct.err_msg: 'partition not loaded'}
         collection_w.query(default_term_expr, partition_names=[partition1],
                            check_task=CheckTasks.err_res, check_items=error)
         collection_w.release()
@@ -2469,12 +2464,7 @@ class TestLoadCollection(TestcaseBase):
         partition_w1.release()
         collection_w.release()
         partition_w1.load()
-        error = {ct.err_code: 65538,
-                 ct.err_msg: 'failed to query: attempt #0: failed to search/query delegator '
-                             '1 for channel by-dev-rootcoord-dml_14_444857573607352608v0: fail'
-                             ' to Query, QueryNode ID = 1, reason=partition=[444857573607352653]:'
-                             ' partition not loaded: attempt #1: no available shard delegator '
-                             'found: service unavailable'}
+        error = {ct.err_code: 65538, ct.err_msg: 'partition not loaded'}
         collection_w.query(default_term_expr, partition_names=[partition2],
                            check_task=CheckTasks.err_res, check_items=error)
         partition_w2.load()
@@ -2532,10 +2522,7 @@ class TestLoadCollection(TestcaseBase):
         partition_w1.release()
         partition_w1.drop()
         partition_w2.release()
-        error = {ct.err_code: 65538, ct.err_msg: 'failed to query: attempt #0: failed to search/query delegator 1 '
-                                                 'for channel by-dev-rootcoord-xx: fail to Query, QueryNode ID = 1,'
-                                                 ' reason=partition=[ ]: partition not loaded: attempt #1: no '
-                                                 'available shard delegator found: service unavailable'}
+        error = {ct.err_code: 65538, ct.err_msg: 'partition not loaded'}
         collection_w.query(default_term_expr, partition_names=[partition2],
                            check_task=CheckTasks.err_res, check_items=error)
         collection_w.load()
@@ -2614,8 +2601,7 @@ class TestLoadCollection(TestcaseBase):
         collection_wr.load()
         collection_wr.release()
         collection_wr.drop()
-        error = {ct.err_code: 100,
-                 ct.err_msg: "collection=444857573607352784: collection not found"}
+        error = {ct.err_code: 100, ct.err_msg: "collection not found"}
         collection_wr.load(check_task=CheckTasks.err_res, check_items=error)
         collection_wr.release(check_task=CheckTasks.err_res, check_items=error)
 
@@ -2632,8 +2618,7 @@ class TestLoadCollection(TestcaseBase):
         collection_wr.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_wr.load()
         collection_wr.drop()
-        error = {ct.err_code: 100,
-                 ct.err_msg: "collection=444857573607351711: collection not found"}
+        error = {ct.err_code: 100, ct.err_msg: "collection not found"}
         collection_wr.release(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -2776,7 +2761,8 @@ class TestLoadCollection(TestcaseBase):
         assert loading_progress == {'loading_progress': '100%'}
 
         # verify load different replicas thrown an exception
-        error = {ct.err_code: 5, ct.err_msg: f"Should release first then reload with the new number of replicas"}
+        error = {ct.err_code: 1100, ct.err_msg: "failed to load collection: can't change the replica number for "
+                                                "loaded collection: expected=1, actual=2: invalid parameter"}
         collection_w.load(replica_number=2, check_task=CheckTasks.err_res, check_items=error)
         one_replica, _ = collection_w.get_replicas()
         assert len(one_replica.groups) == 1
@@ -2862,7 +2848,7 @@ class TestLoadCollection(TestcaseBase):
                            check_task=CheckTasks.check_query_results,
                            check_items={'exp_res': df_2.iloc[:1, :1].to_dict('records')})
 
-        error = {ct.err_code: 1, ct.err_msg: f"not loaded into memory"}
+        error = {ct.err_code: 65538, ct.err_msg: "partition not loaded"}
         collection_w.query(expr=f"{ct.default_int64_field_name} in [0]",
                            partition_names=[ct.default_partition_name, ct.default_tag],
                            check_task=CheckTasks.err_res, check_items=error)
@@ -3016,7 +3002,7 @@ class TestLoadCollection(TestcaseBase):
         collection_w.get_replicas(check_task=CheckTasks.err_res,
                                   check_items={"err_code": 400,
                                                "err_msg": "failed to get replicas by collection: "
-                                                          "replica=444857573607352187: replica not found"})
+                                                          "replica not found"})
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_count_multi_replicas(self):
@@ -3113,9 +3099,7 @@ class TestReleaseAdvanced(TestcaseBase):
         search_res, _ = collection_wr.search(vectors, default_search_field, default_search_params,
                                              default_limit, _async=True)
         collection_wr.release()
-        error = {ct.err_code: 65535, ct.err_msg: "failed to search: attempt #0: fail to get shard leaders from"
-                                                 " QueryCoord: collection=444818512783071471: collection not"
-                                                 " loaded: unrecoverable error"}
+        error = {ct.err_code: 65535, ct.err_msg: "collection not loaded"}
         collection_wr.search(vectors, default_search_field, default_search_params, default_limit,
                              check_task=CheckTasks.err_res, check_items=error)
 
@@ -3143,9 +3127,7 @@ class TestReleaseAdvanced(TestcaseBase):
                             [par_name],
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 65535,
-                                         "err_msg": "failed to search: attempt #0: fail to get shard leaders "
-                                                    "from QueryCoord: collection=444857573607353390: collection "
-                                                    "not loaded: unrecoverable error"})
+                                         "err_msg": "collection not loaded"})
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_release_indexed_collection_during_searching(self):
@@ -3166,9 +3148,7 @@ class TestReleaseAdvanced(TestcaseBase):
                             default_search_params, limit, default_search_exp,
                             [par_name], _async=True)
         collection_w.release()
-        error = {ct.err_code: 65535, ct.err_msg: "failed to search: attempt #0: fail to get shard leaders from "
-                                                 "QueryCoord: collection=444818512783071824: collection not "
-                                                 "loaded: unrecoverable error"}
+        error = {ct.err_code: 65535, ct.err_msg: "collection not loaded"}
         collection_w.search(vectors, default_search_field,
                             default_search_params, limit, default_search_exp,
                             [par_name],
@@ -3401,10 +3381,7 @@ class TestLoadPartition(TestcaseBase):
         partition_w1.load()
         partition_w1.load()
         error = {ct.err_code: 65538,
-                 ct.err_msg: 'failed to query: attempt #0: failed to search/query delegator 1 for'
-                             ' channel by-dev-rootcoord-dml_10_444857573607353001v0: fail to Query, '
-                             'QueryNode ID = 1, reason=partition=[444857573607353015]: partition not '
-                             'loaded: attempt #1: no available shard delegator found: service unavailable'}
+                 ct.err_msg: 'partition not loaded'}
         collection_w.query(default_term_expr, partition_names=[partition2],
                            check_task=CheckTasks.err_res, check_items=error)
         collection_w.load()
@@ -3459,9 +3436,7 @@ class TestLoadPartition(TestcaseBase):
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         partition_w1.load()
         collection_w.release()
-        error = {ct.err_code: 65535, ct.err_msg: "failed to query: attempt #0: fail to get shard leaders from "
-                                                 "QueryCoord: collection=444818512783073123: collection not"
-                                                 " loaded: unrecoverable error"}
+        error = {ct.err_code: 65535, ct.err_msg: "collection not loaded"}
         collection_w.query(default_term_expr, partition_names=[partition1],
                            check_task=CheckTasks.err_res, check_items=error)
         partition_w1.load()
@@ -3501,8 +3476,7 @@ class TestLoadPartition(TestcaseBase):
         partition_w1.load()
         partition_w1.release()
         error = {ct.err_code: 65535,
-                 ct.err_msg: 'failed to query: attempt #0: fail to get shard leaders from QueryCoord: '
-                             'collection=444857573607352292: collection not loaded: unrecoverable error'}
+                 ct.err_msg: 'collection not loaded'}
         collection_w.query(default_term_expr, partition_names=[partition1],
                            check_task=CheckTasks.err_res, check_items=error)
         partition_w1.load()
@@ -3566,8 +3540,7 @@ class TestLoadPartition(TestcaseBase):
         partition_w1.release()
         partition_w2.release()
         error = {ct.err_code: 65535,
-                 ct.err_msg: 'failed to query: attempt #0: fail to get shard leaders from QueryCoord:'
-                             ' collection=444857573607353795: collection not loaded: unrecoverable error'}
+                 ct.err_msg: 'collection not loaded'}
         collection_w.query(default_term_expr, partition_names=[partition1, partition2],
                            check_task=CheckTasks.err_res, check_items=error)
         collection_w.load()
@@ -3694,9 +3667,7 @@ class TestLoadPartition(TestcaseBase):
         partition_w2.drop()
         partition_w1.release()
         error = {ct.err_code: 65535,
-                 ct.err_msg: 'failed to query: attempt #0: fail to get shard leaders from'
-                             ' QueryCoord: collection=444857573607353891: collection not'
-                             ' loaded: unrecoverable error'}
+                 ct.err_msg: 'collection not loaded'}
         collection_w.query(default_term_expr, partition_names=[partition1],
                            check_task=CheckTasks.err_res, check_items=error)
         partition_w1.load()
