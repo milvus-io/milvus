@@ -654,24 +654,30 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, in *querypb.ReleaseS
 
 	log.Info("start to release segments", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", in.SegmentIDs))
 
-	var delta int64
-
 	for _, id := range in.SegmentIDs {
 		switch in.GetScope() {
 		case querypb.DataScope_Streaming:
 			node.metaReplica.removeSegment(id, segmentTypeGrowing)
 		case querypb.DataScope_Historical:
-			delta += node.metaReplica.removeSegment(id, segmentTypeSealed)
-		case querypb.DataScope_All:
 			node.metaReplica.removeSegment(id, segmentTypeSealed)
-			delta += node.metaReplica.removeSegment(id, segmentTypeGrowing)
+		case querypb.DataScope_All:
+			node.metaReplica.removeSegment(id, segmentTypeGrowing)
+			node.metaReplica.removeSegment(id, segmentTypeSealed)
 		}
 	}
 
-	// reduce queryshard in use
-	if delta > 0 {
-		node.queryShardService.removeQueryShard(in.GetShard(), delta)
+	segments, err := node.metaReplica.getSegmentIDsByVChannel(nil, in.GetShard(), segmentTypeSealed)
+	if err != nil {
+		// unreachable path
+		log.Warn("failed to check segments with VChannel", zap.Error(err))
+		return failStatus, nil
 	}
+
+	if len(segments) == 0 {
+		// when all segment released, and data sync service has been removed, reduce queryshard in use
+		node.queryShardService.removeQueryShard(in.GetShard(), 1)
+	}
+
 	// note that argument is dmlchannel name
 	node.dataSyncService.removeEmptyFlowGraphByChannel(in.GetCollectionID(), in.GetShard())
 
