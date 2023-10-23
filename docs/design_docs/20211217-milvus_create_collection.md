@@ -86,7 +86,7 @@ type createCollectionTask struct {
    }
    ```
 
-   - `PostExecute`, `CreateCollectonTask` does nothing at this phase, and return directly.
+   - `PostExecute`, `CreateCollectionTask` does nothing at this phase, and return directly.
 
 4. `RootCoord` would wrap the `CreateCollection` request into `CreateCollectionReqTask`, and then call function `executeTask`. `executeTask` would return until the `context` is done or `CreateCollectionReqTask.Execute` is returned.
 
@@ -104,7 +104,7 @@ type CreateCollectionReqTask struct {
 }
 ```
 
-5. `CreateCollectionReqTask.Execute` would alloc `CollecitonID` and default `PartitionID`, and set `Virtual Channel` and `Physical Channel`, which are used by `MsgStream`, then write the `Collection`'s meta into `metaTable`
+5. `CreateCollectionReqTask.Execute` would alloc `CollectionID` and default `PartitionID`, and set `Virtual Channel` and `Physical Channel`, which are used by `MsgStream`, then write the `Collection`'s meta into `metaTable`
 
 6. After `Collection`'s meta written into `metaTable`, `Milvus` would consider this collection has been created successfully.
 

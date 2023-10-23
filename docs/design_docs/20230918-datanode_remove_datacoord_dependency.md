@@ -61,7 +61,7 @@ The rules system shall follow is:
 
 {% note %}
 
-**Note:** Segments meta shall be updated *BEFORE* changing the channel checkpoint in case of datanode crashing during the prodedure. Under this premise, reconsuming from the old checkpoint shall recover all the data and duplidated entires will be discarded by segment checkpoints.
+**Note:** Segments meta shall be updated *BEFORE* changing the channel checkpoint in case of datanode crashing during the prodedure. Under this premise, reconsuming from the old checkpoint shall recover all the data and duplidated entries will be discarded by segment checkpoints.
 
 {% endnote %}
 
@@ -78,7 +78,7 @@ The winning option is to:
 
 **Note:** `Datacoord` reloads from metastore periodically.
 Optimization 1: reload channel checkpoint first, then reload segment meta if newly read revision is greater than in-memory one.
-Optimization 2: After `L0 segemnt` is implemented, datacoord shall refresh growing segments only.
+Optimization 2: After `L0 segment` is implemented, datacoord shall refresh growing segments only.
 
 {% endnote %}
 

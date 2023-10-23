@@ -74,7 +74,7 @@ Supposing we have segments `s1, s2, s3`, corresponding positions `p1, p2, p3`
 const filter_threshold = recovery_time
 // mp means msgPack
 for mp := seeking(p1) {
-    if mp.position.endtime < filter_threshod {
+    if mp.position.endtime < filter_threshold {
         if mp.position < p3 {
             filter s3
         }

@@ -105,7 +105,7 @@ type MilvusService interface {
 	CreatePartition(ctx context.Context, request *milvuspb.CreatePartitionRequest) (*commonpb.Status, error)
 	DropPartition(ctx context.Context, request *milvuspb.DropPartitionRequest) (*commonpb.Status, error)
 	HasPartition(ctx context.Context, request *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error)
-	LoadPartitions(ctx context.Context, request *milvuspb.LoadPartitonRequest) (*commonpb.Status, error)
+	LoadPartitions(ctx context.Context, request *milvuspb.LoadPartitionRequest) (*commonpb.Status, error)
 	ReleasePartitions(ctx context.Context, request *milvuspb.ReleasePartitionRequest) (*commonpb.Status, error)
 	GetPartitionStatistics(ctx context.Context, request *milvuspb.PartitionStatsRequest) (*milvuspb.PartitionStatsResponse, error)
 	ShowPartitions(ctx context.Context, request *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error)
@@ -225,7 +225,7 @@ type CollectionSchema struct {
 	Fields      []*FieldSchema
 }
 
-type LoadPartitonRequest struct {
+type LoadPartitionRequest struct {
 	Base         *commonpb.MsgBase
 	DbID         UniqueID
 	CollectionID UniqueID

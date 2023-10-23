@@ -27,7 +27,7 @@ pipeline {
     }
 
     stages {
-        stage('Generat Image Tag') {
+        stage('Generate Image Tag') {
             steps {
                 script {
                     def date = sh(returnStdout: true, script: 'date +%Y%m%d').trim()

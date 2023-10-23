@@ -288,7 +288,7 @@ start the cluster on your host machine
 
 ```shell
 $ ./build/builder.sh make install // build milvus
-$ ./build/build_image.sh // build milvus lastest docker image
+$ ./build/build_image.sh // build milvus latest docker image
 $ docker images // check if milvus latest image is ready
 REPOSITORY                 TAG                                 IMAGE ID       CREATED          SIZE
 milvusdb/milvus            latest                              63c62ff7c1b7   52 minutes ago   570MB

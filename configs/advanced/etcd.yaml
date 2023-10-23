@@ -15,7 +15,7 @@
 # limitations under the License.
 
 # This is the configuration file for the etcd server.
-# Only standalone users with embeded etcd should change this file, others could just keep this file As Is.
+# Only standalone users with embedded etcd should change this file, others could just keep this file As Is.
 # All the etcd client should be added to milvus.yaml if necessary
 
 # Human-readable name for this member.
