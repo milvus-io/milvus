@@ -51,36 +51,48 @@ type TargetObserver struct {
 	distMgr   *meta.DistributionManager
 	broker    meta.Broker
 
-	initChan             chan initRequest
-	manualCheck          chan checkRequest
-	nextTargetLastUpdate map[int64]time.Time
+	initChan    chan initRequest
+	manualCheck chan checkRequest
+	// nextTargetLastUpdate map[int64]time.Time
+	nextTargetLastUpdate *typeutil.ConcurrentMap[int64, time.Time]
 	updateChan           chan targetUpdateRequest
 	mut                  sync.Mutex                // Guard readyNotifiers
 	readyNotifiers       map[int64][]chan struct{} // CollectionID -> Notifiers
+
+	dispatcher *taskDispatcher[int64]
 
 	stopOnce sync.Once
 }
 
 func NewTargetObserver(meta *meta.Meta, targetMgr *meta.TargetManager, distMgr *meta.DistributionManager, broker meta.Broker) *TargetObserver {
-	return &TargetObserver{
+	result := &TargetObserver{
 		meta:                 meta,
 		targetMgr:            targetMgr,
 		distMgr:              distMgr,
 		broker:               broker,
 		manualCheck:          make(chan checkRequest, 10),
-		nextTargetLastUpdate: make(map[int64]time.Time),
+		nextTargetLastUpdate: typeutil.NewConcurrentMap[int64, time.Time](),
 		updateChan:           make(chan targetUpdateRequest),
 		readyNotifiers:       make(map[int64][]chan struct{}),
 		initChan:             make(chan initRequest),
 	}
+
+	dispatcher := newTaskDispatcher(result.check)
+	result.dispatcher = dispatcher
+	return result
 }
 
 func (ob *TargetObserver) Start() {
 	ctx, cancel := context.WithCancel(context.Background())
 	ob.cancel = cancel
 
+	ob.dispatcher.Start()
+
 	ob.wg.Add(1)
-	go ob.schedule(ctx)
+	go func() {
+		defer ob.wg.Done()
+		ob.schedule(ctx)
+	}()
 
 	// after target observer start, update target for all collection
 	ob.initChan <- initRequest{}
@@ -92,11 +104,12 @@ func (ob *TargetObserver) Stop() {
 			ob.cancel()
 		}
 		ob.wg.Wait()
+
+		ob.dispatcher.Stop()
 	})
 }
 
 func (ob *TargetObserver) schedule(ctx context.Context) {
-	defer ob.wg.Done()
 	log.Info("Start update next target loop")
 
 	ticker := time.NewTicker(params.Params.QueryCoordCfg.UpdateNextTargetInterval.GetAsDuration(time.Second))
@@ -111,16 +124,11 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 			for _, collectionID := range ob.meta.GetAll() {
 				ob.init(collectionID)
 			}
+			log.Info("target observer init done")
 
 		case <-ticker.C:
 			ob.clean()
-			for _, collectionID := range ob.meta.GetAll() {
-				ob.check(collectionID)
-			}
-
-		case req := <-ob.manualCheck:
-			ob.check(req.CollectionID)
-			req.Notifier <- ob.targetMgr.IsCurrentTargetExist(req.CollectionID)
+			ob.dispatcher.AddTask(ob.meta.GetAll()...)
 
 		case req := <-ob.updateChan:
 			err := ob.updateNextTarget(req.CollectionID)
@@ -137,26 +145,17 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 	}
 }
 
-// Check checks whether the next target is ready,
-// and updates the current target if it is,
-// returns true if current target is not nil
+// Check whether provided collection is has current target.
+// If not, submit a async task into dispatcher.
 func (ob *TargetObserver) Check(ctx context.Context, collectionID int64) bool {
-	notifier := make(chan bool)
-	select {
-	case ob.manualCheck <- checkRequest{CollectionID: collectionID, Notifier: notifier}:
-	case <-ctx.Done():
-		return false
+	result := ob.targetMgr.IsCurrentTargetExist(collectionID)
+	if !result {
+		ob.dispatcher.AddTask(collectionID)
 	}
-
-	select {
-	case result := <-notifier:
-		return result
-	case <-ctx.Done():
-		return false
-	}
+	return result
 }
 
-func (ob *TargetObserver) check(collectionID int64) {
+func (ob *TargetObserver) check(ctx context.Context, collectionID int64) {
 	if !ob.meta.Exist(collectionID) {
 		ob.ReleaseCollection(collectionID)
 		ob.targetMgr.RemoveCollection(collectionID)
@@ -215,11 +214,12 @@ func (ob *TargetObserver) ReleaseCollection(collectionID int64) {
 func (ob *TargetObserver) clean() {
 	collectionSet := typeutil.NewUniqueSet(ob.meta.GetAll()...)
 	// for collection which has been removed from target, try to clear nextTargetLastUpdate
-	for collection := range ob.nextTargetLastUpdate {
-		if !collectionSet.Contain(collection) {
-			delete(ob.nextTargetLastUpdate, collection)
+	ob.nextTargetLastUpdate.Range(func(collectionID int64, _ time.Time) bool {
+		if !collectionSet.Contain(collectionID) {
+			ob.nextTargetLastUpdate.Remove(collectionID)
 		}
-	}
+		return true
+	})
 
 	ob.mut.Lock()
 	defer ob.mut.Unlock()
@@ -238,7 +238,11 @@ func (ob *TargetObserver) shouldUpdateNextTarget(collectionID int64) bool {
 }
 
 func (ob *TargetObserver) isNextTargetExpired(collectionID int64) bool {
-	return time.Since(ob.nextTargetLastUpdate[collectionID]) > params.Params.QueryCoordCfg.NextTargetSurviveTime.GetAsDuration(time.Second)
+	lastUpdated, has := ob.nextTargetLastUpdate.Get(collectionID)
+	if !has {
+		return true
+	}
+	return time.Since(lastUpdated) > params.Params.QueryCoordCfg.NextTargetSurviveTime.GetAsDuration(time.Second)
 }
 
 func (ob *TargetObserver) updateNextTarget(collectionID int64) error {
@@ -256,7 +260,7 @@ func (ob *TargetObserver) updateNextTarget(collectionID int64) error {
 }
 
 func (ob *TargetObserver) updateNextTargetTimestamp(collectionID int64) {
-	ob.nextTargetLastUpdate[collectionID] = time.Now()
+	ob.nextTargetLastUpdate.Insert(collectionID, time.Now())
 }
 
 func (ob *TargetObserver) shouldUpdateCurrentTarget(collectionID int64) bool {
