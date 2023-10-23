@@ -51,6 +51,7 @@ const (
 	DefaultKnowhereThreadPoolNumRatioInBuild = 1
 	DefaultMinioRegion                       = ""
 	DefaultMinioUseVirtualHost               = "false"
+	DefaultMinioRequestTimeout               = "3000"
 )
 
 // Const of Global Config List

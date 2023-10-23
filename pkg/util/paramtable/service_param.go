@@ -932,19 +932,20 @@ func (r *NatsmqConfig) Init(base *BaseTable) {
 // /////////////////////////////////////////////////////////////////////////////
 // --- minio ---
 type MinioConfig struct {
-	Address         ParamItem `refreshable:"false"`
-	Port            ParamItem `refreshable:"false"`
-	AccessKeyID     ParamItem `refreshable:"false"`
-	SecretAccessKey ParamItem `refreshable:"false"`
-	UseSSL          ParamItem `refreshable:"false"`
-	BucketName      ParamItem `refreshable:"false"`
-	RootPath        ParamItem `refreshable:"false"`
-	UseIAM          ParamItem `refreshable:"false"`
-	CloudProvider   ParamItem `refreshable:"false"`
-	IAMEndpoint     ParamItem `refreshable:"false"`
-	LogLevel        ParamItem `refreshable:"false"`
-	Region          ParamItem `refreshable:"false"`
-	UseVirtualHost  ParamItem `refreshable:"false"`
+	Address          ParamItem `refreshable:"false"`
+	Port             ParamItem `refreshable:"false"`
+	AccessKeyID      ParamItem `refreshable:"false"`
+	SecretAccessKey  ParamItem `refreshable:"false"`
+	UseSSL           ParamItem `refreshable:"false"`
+	BucketName       ParamItem `refreshable:"false"`
+	RootPath         ParamItem `refreshable:"false"`
+	UseIAM           ParamItem `refreshable:"false"`
+	CloudProvider    ParamItem `refreshable:"false"`
+	IAMEndpoint      ParamItem `refreshable:"false"`
+	LogLevel         ParamItem `refreshable:"false"`
+	Region           ParamItem `refreshable:"false"`
+	UseVirtualHost   ParamItem `refreshable:"false"`
+	RequestTimeoutMs ParamItem `refreshable:"false"`
 }
 
 func (p *MinioConfig) Init(base *BaseTable) {
@@ -1094,4 +1095,13 @@ Leave it empty if you want to use AWS default endpoint`,
 		Export:       true,
 	}
 	p.UseVirtualHost.Init(base.mgr)
+
+	p.RequestTimeoutMs = ParamItem{
+		Key:          "minio.requestTimeoutMs",
+		Version:      "2.3.2",
+		DefaultValue: DefaultMinioRequestTimeout,
+		Doc:          "minio timeout for request time in milliseconds",
+		Export:       true,
+	}
+	p.RequestTimeoutMs.Init(base.mgr)
 }

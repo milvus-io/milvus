@@ -314,6 +314,7 @@ NewBuildIndexInfo(CBuildIndexInfo* c_build_index_info,
         storage_config.useIAM = c_storage_config.useIAM;
         storage_config.region = c_storage_config.region;
         storage_config.useVirtualHost = c_storage_config.useVirtualHost;
+        storage_config.requestTimeoutMs = c_storage_config.requestTimeoutMs;
 
         *c_build_index_info = build_index_info.release();
         auto status = CStatus();

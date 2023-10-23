@@ -35,6 +35,7 @@ func (m *chunkMgrFactory) NewChunkManager(ctx context.Context, config *indexpb.S
 		storage.CloudProvider(config.GetCloudProvider()),
 		storage.IAMEndpoint(config.GetIAMEndpoint()),
 		storage.UseVirtualHost(config.GetUseVirtualHost()),
+		storage.RequestTimeout(config.GetRequestTimeoutMs()),
 		storage.Region(config.GetRegion()),
 		storage.CreateBucket(true),
 	)

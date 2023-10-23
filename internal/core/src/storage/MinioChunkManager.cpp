@@ -34,6 +34,7 @@
 #include "common/EasyAssert.h"
 #include "log/Log.h"
 #include "signal.h"
+#include "common/Consts.h"
 
 namespace milvus::storage {
 
@@ -300,6 +301,10 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
         config.scheme = Aws::Http::Scheme::HTTP;
         config.verifySSL = false;
     }
+
+    config.requestTimeoutMs = storage_config.requestTimeoutMs == 0
+                                  ? DEFAULT_CHUNK_MANAGER_REQUEST_TIMEOUT_MS
+                                  : storage_config.requestTimeoutMs;
 
     if (!storage_config.region.empty()) {
         config.region = ConvertToAwsString(storage_config.region);
