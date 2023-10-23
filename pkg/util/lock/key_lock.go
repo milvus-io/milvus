@@ -45,19 +45,19 @@ func newRefLock() *RefLock {
 	return &c
 }
 
-type KeyLock struct {
+type KeyLock[K comparable] struct {
 	keyLocksMutex sync.Mutex
-	refLocks      map[string]*RefLock
+	refLocks      map[K]*RefLock
 }
 
-func NewKeyLock() *KeyLock {
-	keyLock := KeyLock{
-		refLocks: make(map[string]*RefLock),
+func NewKeyLock[K comparable]() *KeyLock[K] {
+	keyLock := KeyLock[K]{
+		refLocks: make(map[K]*RefLock),
 	}
 	return &keyLock
 }
 
-func (k *KeyLock) Lock(key string) {
+func (k *KeyLock[K]) Lock(key K) {
 	k.keyLocksMutex.Lock()
 	// update the key map
 	if keyLock, ok := k.refLocks[key]; ok {
@@ -76,12 +76,12 @@ func (k *KeyLock) Lock(key string) {
 	}
 }
 
-func (k *KeyLock) Unlock(lockedKey string) {
+func (k *KeyLock[K]) Unlock(lockedKey K) {
 	k.keyLocksMutex.Lock()
 	defer k.keyLocksMutex.Unlock()
 	keyLock, ok := k.refLocks[lockedKey]
 	if !ok {
-		log.Warn("Unlocking non-existing key", zap.String("key", lockedKey))
+		log.Warn("Unlocking non-existing key", zap.Any("key", lockedKey))
 		return
 	}
 	keyLock.unref()
@@ -91,7 +91,7 @@ func (k *KeyLock) Unlock(lockedKey string) {
 	keyLock.mutex.Unlock()
 }
 
-func (k *KeyLock) RLock(key string) {
+func (k *KeyLock[K]) RLock(key K) {
 	k.keyLocksMutex.Lock()
 	// update the key map
 	if keyLock, ok := k.refLocks[key]; ok {
@@ -110,12 +110,12 @@ func (k *KeyLock) RLock(key string) {
 	}
 }
 
-func (k *KeyLock) RUnlock(lockedKey string) {
+func (k *KeyLock[K]) RUnlock(lockedKey K) {
 	k.keyLocksMutex.Lock()
 	defer k.keyLocksMutex.Unlock()
 	keyLock, ok := k.refLocks[lockedKey]
 	if !ok {
-		log.Warn("Unlocking non-existing key", zap.String("key", lockedKey))
+		log.Warn("Unlocking non-existing key", zap.Any("key", lockedKey))
 		return
 	}
 	keyLock.unref()
@@ -125,7 +125,7 @@ func (k *KeyLock) RUnlock(lockedKey string) {
 	keyLock.mutex.RUnlock()
 }
 
-func (k *KeyLock) size() int {
+func (k *KeyLock[K]) size() int {
 	k.keyLocksMutex.Lock()
 	defer k.keyLocksMutex.Unlock()
 	return len(k.refLocks)
