@@ -28,7 +28,7 @@ jobs:
   mac:
     name: Code Checker MacOS 12
     runs-on: macos-12
-    timeout-minutes: 300 
+    timeout-minutes: 300
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -73,7 +73,7 @@ jobs:
           fi
           ls -alh /var/tmp/ccache
           brew install libomp ninja openblas ccache pkg-config
-          pip3 install conan==1.58.0
+          pip3 install conan==1.61.0
           if [[ ! -d "/usr/local/opt/llvm" ]]; then
             ln -s /usr/local/opt/llvm@14 /usr/local/opt/llvm
           fi
