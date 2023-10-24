@@ -1905,24 +1905,6 @@ func TestGetChannelSeekPosition(t *testing.T) {
 	}
 }
 
-func TestDescribeCollection(t *testing.T) {
-	t.Run("TestNotExistCollections", func(t *testing.T) {
-		svr := newTestServer(t, nil)
-		defer closeTestServer(t, svr)
-		has, err := svr.handler.(*ServerHandler).HasCollection(context.TODO(), -1)
-		assert.NoError(t, err)
-		assert.False(t, has)
-	})
-
-	t.Run("TestExistCollections", func(t *testing.T) {
-		svr := newTestServer(t, nil)
-		defer closeTestServer(t, svr)
-		has, err := svr.handler.(*ServerHandler).HasCollection(context.TODO(), 1314)
-		assert.NoError(t, err)
-		assert.True(t, has)
-	})
-}
-
 func TestGetDataVChanPositions(t *testing.T) {
 	svr := newTestServer(t, nil)
 	defer closeTestServer(t, svr)
@@ -2463,12 +2445,7 @@ func TestShouldDropChannel(t *testing.T) {
 		Count:  1,
 	}, nil)
 
-	var crt rootCoordCreatorFunc = func(ctx context.Context, metaRoot string, etcdClient *clientv3.Client) (types.RootCoordClient, error) {
-		return myRoot, nil
-	}
-
-	opt := WithRootCoordCreator(crt)
-	svr := newTestServer(t, nil, opt)
+	svr := newTestServer(t, nil)
 	defer closeTestServer(t, svr)
 	schema := newTestSchema()
 	svr.meta.AddCollection(&collectionInfo{
@@ -2492,52 +2469,14 @@ func TestShouldDropChannel(t *testing.T) {
 		},
 	})
 
-	t.Run("channel name not in kv, collection not exist", func(t *testing.T) {
-		// myRoot.code = commonpb.ErrorCode_CollectionNotExists
-		myRoot.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:       merr.Status(merr.WrapErrCollectionNotFound(-1)),
-				CollectionID: -1,
-			}, nil).Once()
-		assert.True(t, svr.handler.CheckShouldDropChannel("ch99", -1))
+	t.Run("channel name not in kv ", func(t *testing.T) {
+		assert.False(t, svr.handler.CheckShouldDropChannel("ch99"))
 	})
 
-	t.Run("channel name not in kv, collection exist", func(t *testing.T) {
-		myRoot.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:       merr.Success(),
-				CollectionID: 0,
-			}, nil).Once()
-		assert.False(t, svr.handler.CheckShouldDropChannel("ch99", 0))
-	})
-
-	t.Run("collection name in kv, collection exist", func(t *testing.T) {
-		myRoot.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:       merr.Success(),
-				CollectionID: 0,
-			}, nil).Once()
-		assert.False(t, svr.handler.CheckShouldDropChannel("ch1", 0))
-	})
-
-	t.Run("collection name in kv, collection not exist", func(t *testing.T) {
-		myRoot.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:       merr.Status(merr.WrapErrCollectionNotFound(-1)),
-				CollectionID: -1,
-			}, nil).Once()
-		assert.True(t, svr.handler.CheckShouldDropChannel("ch1", -1))
-	})
-
-	t.Run("channel in remove flag, collection exist", func(t *testing.T) {
+	t.Run("channel in remove flag", func(t *testing.T) {
 		err := svr.meta.catalog.MarkChannelDeleted(context.TODO(), "ch1")
 		require.NoError(t, err)
-		myRoot.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:       merr.Success(),
-				CollectionID: 0,
-			}, nil).Once()
-		assert.True(t, svr.handler.CheckShouldDropChannel("ch1", 0))
+		assert.True(t, svr.handler.CheckShouldDropChannel("ch1"))
 	})
 }
 

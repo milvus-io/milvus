@@ -581,7 +581,7 @@ func TestChannelManager(t *testing.T) {
 		collectionID := UniqueID(5)
 		handler := NewNMockHandler(t)
 		handler.EXPECT().
-			CheckShouldDropChannel(mock.Anything, mock.Anything).
+			CheckShouldDropChannel(mock.Anything).
 			Return(true)
 		handler.EXPECT().FinishDropChannel(mock.Anything).Return(nil)
 		chManager, err := NewChannelManager(watchkv, handler)
@@ -603,8 +603,8 @@ func TestChannelManager(t *testing.T) {
 		var err error
 		handler := NewNMockHandler(t)
 		handler.EXPECT().
-			CheckShouldDropChannel(mock.Anything, mock.Anything).
-			Run(func(channel string, collectionID int64) {
+			CheckShouldDropChannel(mock.Anything).
+			Run(func(channel string) {
 				channels, err := chManager.store.Delete(1)
 				assert.NoError(t, err)
 				assert.Equal(t, 1, len(channels))
@@ -628,8 +628,8 @@ func TestChannelManager(t *testing.T) {
 		var err error
 		handler := NewNMockHandler(t)
 		handler.EXPECT().
-			CheckShouldDropChannel(mock.Anything, mock.Anything).
-			Run(func(channel string, collectionID int64) {
+			CheckShouldDropChannel(mock.Anything).
+			Run(func(channel string) {
 				channels, err := chManager.store.Delete(1)
 				assert.NoError(t, err)
 				assert.Equal(t, 1, len(channels))
@@ -659,7 +659,7 @@ func TestChannelManager(t *testing.T) {
 	t.Run("test CleanupAndReassign with dropped channel", func(t *testing.T) {
 		handler := NewNMockHandler(t)
 		handler.EXPECT().
-			CheckShouldDropChannel(mock.Anything, mock.Anything).
+			CheckShouldDropChannel(mock.Anything).
 			Return(true)
 		handler.EXPECT().FinishDropChannel(mock.Anything).Return(nil)
 		chManager, err := NewChannelManager(watchkv, handler)

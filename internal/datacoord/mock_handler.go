@@ -22,13 +22,13 @@ func (_m *NMockHandler) EXPECT() *NMockHandler_Expecter {
 	return &NMockHandler_Expecter{mock: &_m.Mock}
 }
 
-// CheckShouldDropChannel provides a mock function with given fields: channel, collectionID
-func (_m *NMockHandler) CheckShouldDropChannel(channel string, collectionID int64) bool {
-	ret := _m.Called(channel, collectionID)
+// CheckShouldDropChannel provides a mock function with given fields: ch
+func (_m *NMockHandler) CheckShouldDropChannel(ch string) bool {
+	ret := _m.Called(ch)
 
 	var r0 bool
-	if rf, ok := ret.Get(0).(func(string, int64) bool); ok {
-		r0 = rf(channel, collectionID)
+	if rf, ok := ret.Get(0).(func(string) bool); ok {
+		r0 = rf(ch)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
@@ -42,15 +42,14 @@ type NMockHandler_CheckShouldDropChannel_Call struct {
 }
 
 // CheckShouldDropChannel is a helper method to define mock.On call
-//   - channel string
-//   - collectionID int64
-func (_e *NMockHandler_Expecter) CheckShouldDropChannel(channel interface{}, collectionID interface{}) *NMockHandler_CheckShouldDropChannel_Call {
-	return &NMockHandler_CheckShouldDropChannel_Call{Call: _e.mock.On("CheckShouldDropChannel", channel, collectionID)}
+//   - ch string
+func (_e *NMockHandler_Expecter) CheckShouldDropChannel(ch interface{}) *NMockHandler_CheckShouldDropChannel_Call {
+	return &NMockHandler_CheckShouldDropChannel_Call{Call: _e.mock.On("CheckShouldDropChannel", ch)}
 }
 
-func (_c *NMockHandler_CheckShouldDropChannel_Call) Run(run func(channel string, collectionID int64)) *NMockHandler_CheckShouldDropChannel_Call {
+func (_c *NMockHandler_CheckShouldDropChannel_Call) Run(run func(ch string)) *NMockHandler_CheckShouldDropChannel_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(int64))
+		run(args[0].(string))
 	})
 	return _c
 }
@@ -60,18 +59,18 @@ func (_c *NMockHandler_CheckShouldDropChannel_Call) Return(_a0 bool) *NMockHandl
 	return _c
 }
 
-func (_c *NMockHandler_CheckShouldDropChannel_Call) RunAndReturn(run func(string, int64) bool) *NMockHandler_CheckShouldDropChannel_Call {
+func (_c *NMockHandler_CheckShouldDropChannel_Call) RunAndReturn(run func(string) bool) *NMockHandler_CheckShouldDropChannel_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// FinishDropChannel provides a mock function with given fields: channel
-func (_m *NMockHandler) FinishDropChannel(channel string) error {
-	ret := _m.Called(channel)
+// FinishDropChannel provides a mock function with given fields: ch
+func (_m *NMockHandler) FinishDropChannel(ch string) error {
+	ret := _m.Called(ch)
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string) error); ok {
-		r0 = rf(channel)
+		r0 = rf(ch)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -85,12 +84,12 @@ type NMockHandler_FinishDropChannel_Call struct {
 }
 
 // FinishDropChannel is a helper method to define mock.On call
-//   - channel string
-func (_e *NMockHandler_Expecter) FinishDropChannel(channel interface{}) *NMockHandler_FinishDropChannel_Call {
-	return &NMockHandler_FinishDropChannel_Call{Call: _e.mock.On("FinishDropChannel", channel)}
+//   - ch string
+func (_e *NMockHandler_Expecter) FinishDropChannel(ch interface{}) *NMockHandler_FinishDropChannel_Call {
+	return &NMockHandler_FinishDropChannel_Call{Call: _e.mock.On("FinishDropChannel", ch)}
 }
 
-func (_c *NMockHandler_FinishDropChannel_Call) Run(run func(channel string)) *NMockHandler_FinishDropChannel_Call {
+func (_c *NMockHandler_FinishDropChannel_Call) Run(run func(ch string)) *NMockHandler_FinishDropChannel_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(string))
 	})
