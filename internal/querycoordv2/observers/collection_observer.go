@@ -182,7 +182,7 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 		zap.Int64("partitionID", partition.GetPartitionID()),
 	)
 
-	segmentTargets := ob.targetMgr.GetHistoricalSegmentsByPartition(partition.GetCollectionID(), partition.GetPartitionID(), meta.NextTarget)
+	segmentTargets := ob.targetMgr.GetSealedSegmentsByPartition(partition.GetCollectionID(), partition.GetPartitionID(), meta.NextTarget)
 	channelTargets := ob.targetMgr.GetDmChannelsByCollection(partition.GetCollectionID(), meta.NextTarget)
 
 	targetNum := len(segmentTargets) + len(channelTargets)

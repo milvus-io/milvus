@@ -283,8 +283,8 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(collectionID int64) bool {
 	}
 
 	// and last check historical segment
-	historicalSegments := ob.targetMgr.GetHistoricalSegmentsByCollection(collectionID, meta.NextTarget)
-	for _, segment := range historicalSegments {
+	SealedSegments := ob.targetMgr.GetSealedSegmentsByCollection(collectionID, meta.NextTarget)
+	for _, segment := range SealedSegments {
 		group := utils.GroupNodesByReplica(ob.meta.ReplicaManager,
 			collectionID,
 			ob.distMgr.LeaderViewManager.GetSealedSegmentDist(segment.GetID()))

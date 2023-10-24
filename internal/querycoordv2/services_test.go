@@ -1659,7 +1659,7 @@ func (suite *ServiceSuite) assertLoaded(collection int64) {
 	}
 	for _, partitions := range suite.segments[collection] {
 		for _, segment := range partitions {
-			suite.NotNil(suite.targetMgr.GetHistoricalSegment(collection, segment, meta.NextTarget))
+			suite.NotNil(suite.targetMgr.GetSealedSegment(collection, segment, meta.NextTarget))
 		}
 	}
 }
@@ -1675,7 +1675,7 @@ func (suite *ServiceSuite) assertPartitionLoaded(collection int64, partitions ..
 			continue
 		}
 		for _, segment := range segments {
-			suite.NotNil(suite.targetMgr.GetHistoricalSegment(collection, segment, meta.CurrentTarget))
+			suite.NotNil(suite.targetMgr.GetSealedSegment(collection, segment, meta.CurrentTarget))
 		}
 	}
 }
@@ -1687,8 +1687,8 @@ func (suite *ServiceSuite) assertReleased(collection int64) {
 	}
 	for _, partitions := range suite.segments[collection] {
 		for _, segment := range partitions {
-			suite.Nil(suite.targetMgr.GetHistoricalSegment(collection, segment, meta.CurrentTarget))
-			suite.Nil(suite.targetMgr.GetHistoricalSegment(collection, segment, meta.NextTarget))
+			suite.Nil(suite.targetMgr.GetSealedSegment(collection, segment, meta.CurrentTarget))
+			suite.Nil(suite.targetMgr.GetSealedSegment(collection, segment, meta.NextTarget))
 		}
 	}
 }

@@ -126,7 +126,7 @@ func (suite *TargetObserverSuite) SetupTest() {
 
 func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
 	suite.Eventually(func() bool {
-		return len(suite.targetMgr.GetHistoricalSegmentsByCollection(suite.collectionID, meta.NextTarget)) == 2 &&
+		return len(suite.targetMgr.GetSealedSegmentsByCollection(suite.collectionID, meta.NextTarget)) == 2 &&
 			len(suite.targetMgr.GetDmChannelsByCollection(suite.collectionID, meta.NextTarget)) == 2
 	}, 5*time.Second, 1*time.Second)
 
@@ -168,7 +168,7 @@ func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
 		GetRecoveryInfoV2(mock.Anything, mock.Anything).
 		Return(suite.nextTargetChannels, suite.nextTargetSegments, nil)
 	suite.Eventually(func() bool {
-		return len(suite.targetMgr.GetHistoricalSegmentsByCollection(suite.collectionID, meta.NextTarget)) == 3 &&
+		return len(suite.targetMgr.GetSealedSegmentsByCollection(suite.collectionID, meta.NextTarget)) == 3 &&
 			len(suite.targetMgr.GetDmChannelsByCollection(suite.collectionID, meta.NextTarget)) == 2
 	}, 7*time.Second, 1*time.Second)
 	suite.broker.AssertExpectations(suite.T())
@@ -206,7 +206,7 @@ func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
 		default:
 		}
 		return isReady &&
-			len(suite.targetMgr.GetHistoricalSegmentsByCollection(suite.collectionID, meta.CurrentTarget)) == 3 &&
+			len(suite.targetMgr.GetSealedSegmentsByCollection(suite.collectionID, meta.CurrentTarget)) == 3 &&
 			len(suite.targetMgr.GetDmChannelsByCollection(suite.collectionID, meta.CurrentTarget)) == 2
 	}, 7*time.Second, 1*time.Second)
 }

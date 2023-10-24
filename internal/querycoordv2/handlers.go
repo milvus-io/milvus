@@ -62,7 +62,7 @@ func (s *Server) checkAnyReplicaAvailable(collectionID int64) bool {
 
 func (s *Server) getCollectionSegmentInfo(collection int64) []*querypb.SegmentInfo {
 	segments := s.dist.SegmentDistManager.GetByCollection(collection)
-	currentTargetSegmentsMap := s.targetMgr.GetHistoricalSegmentsByCollection(collection, meta.CurrentTarget)
+	currentTargetSegmentsMap := s.targetMgr.GetSealedSegmentsByCollection(collection, meta.CurrentTarget)
 	infos := make(map[int64]*querypb.SegmentInfo)
 	for _, segment := range segments {
 		if _, existCurrentTarget := currentTargetSegmentsMap[segment.GetID()]; !existCurrentTarget {
@@ -109,7 +109,7 @@ func (s *Server) balanceSegments(ctx context.Context, req *querypb.LoadBalanceRe
 	// Only balance segments in targets
 	segments := s.dist.SegmentDistManager.GetByCollectionAndNode(req.GetCollectionID(), srcNode)
 	segments = lo.Filter(segments, func(segment *meta.Segment, _ int) bool {
-		return s.targetMgr.GetHistoricalSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil
+		return s.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil
 	})
 	allSegments := make(map[int64]*meta.Segment)
 	for _, segment := range segments {
