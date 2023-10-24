@@ -53,7 +53,7 @@ services:
       context: .
       dockerfile: build/docker/builder/gpu/${OS_NAME}/Dockerfile
       cache_from:
-        - ${IMAGE_REPO}/milvus-env:$${OS_NAME}-${LATEST_DATE_VERSION}
+        - ${IMAGE_REPO}/milvus-env:gpu-${OS_NAME}-${LATEST_GPU_DATE_VERSION}
     # user: {{ CURRENT_ID }}
     shm_size: 2G
     # expose 19530 port so we can directly access milvus inside build container
