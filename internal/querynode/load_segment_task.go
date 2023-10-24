@@ -244,7 +244,7 @@ func (l *loadSegmentsTask) watchDeltaChannel(deltaChannels []string, delta int64
 			log.Error("failed to convert delta channel to dml", zap.String("channel", channel), zap.Error(err))
 			panic(err)
 		}
-		err = l.node.queryShardService.addQueryShard(collectionID, dmlChannel, l.req.GetReplicaID(), delta)
+		err = l.node.queryShardService.addQueryShard(collectionID, dmlChannel, l.req.GetReplicaID(), 1)
 		if err != nil {
 			log.Error("failed to add shard Service to query shard", zap.String("channel", channel), zap.Error(err))
 			panic(err)
