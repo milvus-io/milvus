@@ -158,7 +158,7 @@ class ResultAnalyzer:
             data_before_chaos = group[group['start_time'] < chaos_start_time].agg(
                 {'success_rate': 'mean', 'failed_count': 'sum', 'success_count': 'sum'})
             data_during_chaos = group[
-                (group['start_time'] >= chaos_start_time) & (group['start_time'] <= recovery_time)].agg(
+                (group['start_time'] >= chaos_start_time) & (group['start_time'] <= chaos_end_time)].agg(
                 {'success_rate': 'mean', 'failed_count': 'sum', 'success_count': 'sum'})
             data_after_chaos = group[group['start_time'] > recovery_time].agg(
                 {'success_rate': 'mean', 'failed_count': 'sum', 'success_count': 'sum'})
