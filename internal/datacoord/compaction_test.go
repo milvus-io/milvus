@@ -23,10 +23,11 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
+	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -34,12 +35,177 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
+
+func TestSchedulerSuite(t *testing.T) {
+	suite.Run(t, new(SchedulerSuite))
+}
+
+type SchedulerSuite struct {
+	suite.Suite
+	scheduler *scheduler
+}
+
+func (s *SchedulerSuite) SetupTest() {
+	s.scheduler = newScheduler()
+	s.scheduler.parallelTasks = map[int64][]*compactionTask{
+		100: {
+			{dataNodeID: 100, plan: &datapb.CompactionPlan{PlanID: 1, Channel: "ch-1", Type: datapb.CompactionType_MinorCompaction}},
+			{dataNodeID: 100, plan: &datapb.CompactionPlan{PlanID: 2, Channel: "ch-1", Type: datapb.CompactionType_MinorCompaction}},
+		},
+		101: {
+			{dataNodeID: 101, plan: &datapb.CompactionPlan{PlanID: 3, Channel: "ch-2", Type: datapb.CompactionType_MinorCompaction}},
+		},
+		102: {
+			{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 4, Channel: "ch-3", Type: datapb.CompactionType_Level0DeleteCompaction}},
+		},
+	}
+	s.scheduler.taskNumber.Add(4)
+}
+
+func (s *SchedulerSuite) TestScheduleEmpty() {
+	emptySch := newScheduler()
+
+	tasks := emptySch.schedule()
+	s.Empty(tasks)
+
+	s.Equal(0, emptySch.getExecutingTaskNum())
+	s.Empty(emptySch.queuingTasks)
+	s.Empty(emptySch.parallelTasks)
+}
+
+func (s *SchedulerSuite) TestScheduleParallelTaskFull() {
+	// dataNode 100's paralleTasks is full
+	tests := []struct {
+		description string
+		tasks       []*compactionTask
+		expectedOut []UniqueID // planID
+	}{
+		{"with L0 tasks", []*compactionTask{
+			{dataNodeID: 100, plan: &datapb.CompactionPlan{PlanID: 10, Channel: "ch-10", Type: datapb.CompactionType_Level0DeleteCompaction}},
+			{dataNodeID: 100, plan: &datapb.CompactionPlan{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MinorCompaction}},
+		}, []UniqueID{}},
+		{"without L0 tasks", []*compactionTask{
+			{dataNodeID: 100, plan: &datapb.CompactionPlan{PlanID: 10, Channel: "ch-10", Type: datapb.CompactionType_MinorCompaction}},
+			{dataNodeID: 100, plan: &datapb.CompactionPlan{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MinorCompaction}},
+		}, []UniqueID{}},
+		{"empty tasks", []*compactionTask{}, []UniqueID{}},
+	}
+
+	for _, test := range tests {
+		s.Run(test.description, func() {
+			s.SetupTest()
+			s.Require().Equal(4, s.scheduler.getExecutingTaskNum())
+
+			// submit the testing tasks
+			s.scheduler.submit(test.tasks...)
+			s.Equal(4+len(test.tasks), s.scheduler.getExecutingTaskNum())
+
+			gotTasks := s.scheduler.schedule()
+			s.Equal(test.expectedOut, lo.Map(gotTasks, func(t *compactionTask, _ int) int64 {
+				return t.plan.PlanID
+			}))
+		})
+	}
+}
+
+func (s *SchedulerSuite) TestScheduleNodeWith1ParallelTask() {
+	// dataNode 101's paralleTasks has 1 task running, not L0 task
+	tests := []struct {
+		description string
+		tasks       []*compactionTask
+		expectedOut []UniqueID // planID
+	}{
+		{"with L0 tasks diff channel", []*compactionTask{
+			{dataNodeID: 101, plan: &datapb.CompactionPlan{PlanID: 10, Channel: "ch-10", Type: datapb.CompactionType_Level0DeleteCompaction}},
+			{dataNodeID: 101, plan: &datapb.CompactionPlan{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MinorCompaction}},
+		}, []UniqueID{10}},
+		{"with L0 tasks same channel", []*compactionTask{
+			{dataNodeID: 101, plan: &datapb.CompactionPlan{PlanID: 10, Channel: "ch-2", Type: datapb.CompactionType_Level0DeleteCompaction}},
+			{dataNodeID: 101, plan: &datapb.CompactionPlan{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MinorCompaction}},
+		}, []UniqueID{11}},
+		{"without L0 tasks", []*compactionTask{
+			{dataNodeID: 101, plan: &datapb.CompactionPlan{PlanID: 14, Channel: "ch-2", Type: datapb.CompactionType_MinorCompaction}},
+			{dataNodeID: 101, plan: &datapb.CompactionPlan{PlanID: 13, Channel: "ch-11", Type: datapb.CompactionType_MinorCompaction}},
+		}, []UniqueID{14}},
+		{"empty tasks", []*compactionTask{}, []UniqueID{}},
+	}
+
+	for _, test := range tests {
+		s.Run(test.description, func() {
+			s.SetupTest()
+			s.Require().Equal(4, s.scheduler.getExecutingTaskNum())
+
+			// submit the testing tasks
+			s.scheduler.submit(test.tasks...)
+			s.Equal(4+len(test.tasks), s.scheduler.getExecutingTaskNum())
+
+			gotTasks := s.scheduler.schedule()
+			s.Equal(test.expectedOut, lo.Map(gotTasks, func(t *compactionTask, _ int) int64 {
+				return t.plan.PlanID
+			}))
+
+			// the second schedule returns empty for full paralleTasks
+			gotTasks = s.scheduler.schedule()
+			s.Empty(gotTasks)
+
+			s.Equal(4+len(test.tasks), s.scheduler.getExecutingTaskNum())
+		})
+	}
+}
+
+func (s *SchedulerSuite) TestScheduleNodeWithL0Executing() {
+	// dataNode 102's paralleTasks has running L0 tasks
+	// nothing of the same channel will be able to schedule
+	tests := []struct {
+		description string
+		tasks       []*compactionTask
+		expectedOut []UniqueID // planID
+	}{
+		{"with L0 tasks diff channel", []*compactionTask{
+			{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 10, Channel: "ch-10", Type: datapb.CompactionType_Level0DeleteCompaction}},
+			{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MinorCompaction}},
+		}, []UniqueID{10}},
+		{"with L0 tasks same channel", []*compactionTask{
+			{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 10, Channel: "ch-3", Type: datapb.CompactionType_Level0DeleteCompaction}},
+			{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MinorCompaction}},
+			{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 13, Channel: "ch-3", Type: datapb.CompactionType_MinorCompaction}},
+		}, []UniqueID{11}},
+		{"without L0 tasks", []*compactionTask{
+			{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 14, Channel: "ch-3", Type: datapb.CompactionType_MinorCompaction}},
+			{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 13, Channel: "ch-11", Type: datapb.CompactionType_MinorCompaction}},
+		}, []UniqueID{13}},
+		{"empty tasks", []*compactionTask{}, []UniqueID{}},
+	}
+
+	for _, test := range tests {
+		s.Run(test.description, func() {
+			s.SetupTest()
+			s.Require().Equal(4, s.scheduler.getExecutingTaskNum())
+
+			// submit the testing tasks
+			s.scheduler.submit(test.tasks...)
+			s.Equal(4+len(test.tasks), s.scheduler.getExecutingTaskNum())
+
+			gotTasks := s.scheduler.schedule()
+			s.Equal(test.expectedOut, lo.Map(gotTasks, func(t *compactionTask, _ int) int64 {
+				return t.plan.PlanID
+			}))
+
+			// the second schedule returns empty for full paralleTasks
+			if len(gotTasks) > 0 {
+				gotTasks = s.scheduler.schedule()
+				s.Empty(gotTasks)
+			}
+
+			s.Equal(4+len(test.tasks), s.scheduler.getExecutingTaskNum())
+		})
+	}
+}
 
 func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 	type fields struct {
@@ -93,20 +259,11 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 			"test exec compaction failed",
 			fields{
 				plans: map[int64]*compactionTask{},
-				sessions: &SessionManager{
-					sessions: struct {
-						sync.RWMutex
-						data map[int64]*Session
-					}{
-						data: map[int64]*Session{
-							1: {client: &mockDataNodeClient{ch: make(chan interface{}, 1), compactionResp: &commonpb.Status{ErrorCode: commonpb.ErrorCode_CacheFailed}}},
-						},
-					},
-				},
 				chManager: &ChannelManager{
 					store: &ChannelStore{
 						channelsInfo: map[int64]*NodeChannelInfo{
-							1: {NodeID: 1, Channels: []*channel{{Name: "ch1"}}},
+							1:        {NodeID: 1, Channels: []*channel{}},
+							bufferID: {NodeID: bufferID, Channels: []*channel{}},
 						},
 					},
 				},
@@ -117,79 +274,36 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 				plan:   &datapb.CompactionPlan{PlanID: 1, Channel: "ch1", Type: datapb.CompactionType_MergeCompaction},
 			},
 			true,
-			nil,
-		},
-		{
-			"test_allocate_ts_failed",
-			fields{
-				plans: map[int64]*compactionTask{},
-				sessions: &SessionManager{
-					sessions: struct {
-						sync.RWMutex
-						data map[int64]*Session
-					}{
-						data: map[int64]*Session{
-							1: {client: &mockDataNodeClient{ch: make(chan interface{}, 1), compactionResp: &commonpb.Status{ErrorCode: commonpb.ErrorCode_CacheFailed}}},
-						},
-					},
-				},
-				chManager: &ChannelManager{
-					store: &ChannelStore{
-						channelsInfo: map[int64]*NodeChannelInfo{
-							1: {NodeID: 1, Channels: []*channel{{Name: "ch1"}}},
-						},
-					},
-				},
-				allocatorFactory: func() allocator {
-					a := &NMockAllocator{}
-					start := time.Now()
-					a.EXPECT().allocTimestamp(mock.Anything).Call.Return(func(_ context.Context) Timestamp {
-						return tsoutil.ComposeTSByTime(time.Now(), 0)
-					}, func(_ context.Context) error {
-						if time.Since(start) > time.Second*2 {
-							return nil
-						}
-						return errors.New("mocked")
-					})
-					return a
-				},
-			},
-			args{
-				signal: &compactionSignal{id: 100},
-				plan:   &datapb.CompactionPlan{PlanID: 1, Channel: "ch1", Type: datapb.CompactionType_MergeCompaction},
-			},
-			true,
-			nil,
+			errChannelNotWatched,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := &compactionPlanHandler{
-				plans:      tt.fields.plans,
-				sessions:   tt.fields.sessions,
-				chManager:  tt.fields.chManager,
-				parallelCh: make(map[int64]chan struct{}),
-				allocator:  tt.fields.allocatorFactory(),
+				plans:     tt.fields.plans,
+				sessions:  tt.fields.sessions,
+				chManager: tt.fields.chManager,
+				allocator: tt.fields.allocatorFactory(),
+				scheduler: newScheduler(),
 			}
 			Params.Save(Params.DataCoordCfg.CompactionCheckIntervalInSeconds.Key, "1")
 			c.start()
 			err := c.execCompactionPlan(tt.args.signal, tt.args.plan)
-			assert.Equal(t, tt.err, err)
-			if err == nil {
-				task := c.getCompaction(tt.args.plan.PlanID)
-				if !tt.wantErr {
-					assert.Equal(t, tt.args.plan, task.plan)
-					assert.Equal(t, tt.args.signal, task.triggerInfo)
-					assert.Equal(t, 1, c.executingTaskNum)
-				} else {
-					assert.Eventually(t,
-						func() bool {
-							c.mu.RLock()
-							defer c.mu.RUnlock()
-							return c.executingTaskNum == 0 && len(c.parallelCh[1]) == 0
-						},
-						5*time.Second, 100*time.Millisecond)
-				}
+			assert.ErrorIs(t, tt.err, err)
+
+			task := c.getCompaction(tt.args.plan.PlanID)
+			if !tt.wantErr {
+				assert.Equal(t, tt.args.plan, task.plan)
+				assert.Equal(t, tt.args.signal, task.triggerInfo)
+				assert.Equal(t, 1, c.scheduler.getExecutingTaskNum())
+			} else {
+				assert.Eventually(t,
+					func() bool {
+						c.scheduler.mu.RLock()
+						defer c.scheduler.mu.RUnlock()
+						return c.scheduler.getExecutingTaskNum() == 0 && len(c.scheduler.parallelTasks[1]) == 0
+					},
+					5*time.Second, 100*time.Millisecond)
 			}
 			c.stop()
 		})
@@ -198,7 +312,7 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 
 func Test_compactionPlanHandler_execWithParallels(t *testing.T) {
 	mockDataNode := &mocks.MockDataNodeClient{}
-	paramtable.Get().Save(Params.DataCoordCfg.CompactionCheckIntervalInSeconds.Key, "1")
+	paramtable.Get().Save(Params.DataCoordCfg.CompactionCheckIntervalInSeconds.Key, "0.001")
 	defer paramtable.Get().Reset(Params.DataCoordCfg.CompactionCheckIntervalInSeconds.Key)
 	c := &compactionPlanHandler{
 		plans: map[int64]*compactionTask{},
@@ -219,16 +333,14 @@ func Test_compactionPlanHandler_execWithParallels(t *testing.T) {
 				},
 			},
 		},
-		parallelCh: make(map[int64]chan struct{}),
-		allocator:  newMockAllocator(),
+		allocator: newMockAllocator(),
+		scheduler: newScheduler(),
 	}
 
 	signal := &compactionSignal{id: 100}
 	plan1 := &datapb.CompactionPlan{PlanID: 1, Channel: "ch1", Type: datapb.CompactionType_MergeCompaction}
 	plan2 := &datapb.CompactionPlan{PlanID: 2, Channel: "ch1", Type: datapb.CompactionType_MergeCompaction}
 	plan3 := &datapb.CompactionPlan{PlanID: 3, Channel: "ch1", Type: datapb.CompactionType_MergeCompaction}
-
-	c.parallelCh[1] = make(chan struct{}, 2)
 
 	var mut sync.RWMutex
 	called := 0
@@ -238,38 +350,39 @@ func Test_compactionPlanHandler_execWithParallels(t *testing.T) {
 			mut.Lock()
 			defer mut.Unlock()
 			called++
-		}).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil).Times(3)
-	go func() {
-		c.execCompactionPlan(signal, plan1)
-		c.execCompactionPlan(signal, plan2)
-		c.execCompactionPlan(signal, plan3)
-	}()
+		}).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil).Times(2)
 
-	// wait for dispatch signal
-	<-c.parallelCh[1]
-	<-c.parallelCh[1]
-	<-c.parallelCh[1]
+	err := c.execCompactionPlan(signal, plan1)
+	require.NoError(t, err)
+	err = c.execCompactionPlan(signal, plan2)
+	require.NoError(t, err)
+	err = c.execCompactionPlan(signal, plan3)
+	require.NoError(t, err)
+
+	assert.Equal(t, 3, c.scheduler.getExecutingTaskNum())
+
+	// parallel for the same node are 2
+	tasks := c.scheduler.schedule()
+	assert.Equal(t, 1, len(tasks))
+	assert.Equal(t, int64(1), tasks[0].plan.PlanID)
+	assert.Equal(t, int64(1), tasks[0].dataNodeID)
+	c.notifyTasks(tasks)
+
+	tasks = c.scheduler.schedule()
+	assert.Equal(t, 1, len(tasks))
+	assert.Equal(t, int64(2), tasks[0].plan.PlanID)
+	assert.Equal(t, int64(1), tasks[0].dataNodeID)
+	c.notifyTasks(tasks)
 
 	// wait for compaction called
 	assert.Eventually(t, func() bool {
 		mut.RLock()
 		defer mut.RUnlock()
-		return called == 3
-	}, time.Second, time.Millisecond*10)
+		return called == 2
+	}, 3*time.Second, time.Millisecond*100)
 
-	tasks := c.getCompactionTasksBySignalID(0)
-	max, min := uint64(0), uint64(0)
-	for _, v := range tasks {
-		if max < v.plan.GetStartTime() {
-			max = v.plan.GetStartTime()
-		}
-		if min > v.plan.GetStartTime() {
-			min = v.plan.GetStartTime()
-		}
-	}
-
-	log.Debug("start time", zap.Uint64("min", min), zap.Uint64("max", max))
-	assert.Less(t, uint64(2), max-min)
+	tasks = c.scheduler.schedule()
+	assert.Equal(t, 0, len(tasks))
 }
 
 func getInsertLogPath(rootPath string, segmentID typeutil.UniqueID) string {
@@ -524,10 +637,11 @@ func TestCompactionPlanHandler_completeCompaction(t *testing.T) {
 
 		flushCh := make(chan UniqueID, 1)
 		c := &compactionPlanHandler{
-			plans:    plans,
-			sessions: sessions,
-			meta:     meta,
-			flushCh:  flushCh,
+			plans:     plans,
+			sessions:  sessions,
+			meta:      meta,
+			flushCh:   flushCh,
+			scheduler: newScheduler(),
 		}
 
 		err := c.completeCompaction(&compactionResult)
@@ -625,10 +739,11 @@ func TestCompactionPlanHandler_completeCompaction(t *testing.T) {
 
 		flushCh := make(chan UniqueID, 1)
 		c := &compactionPlanHandler{
-			plans:    plans,
-			sessions: sessions,
-			meta:     meta,
-			flushCh:  flushCh,
+			plans:     plans,
+			sessions:  sessions,
+			meta:      meta,
+			flushCh:   flushCh,
+			scheduler: newScheduler(),
 		}
 
 		err := c.completeCompaction(&compactionResult)
@@ -812,13 +927,10 @@ func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := &compactionPlanHandler{
-				plans:      tt.fields.plans,
-				sessions:   tt.fields.sessions,
-				meta:       tt.fields.meta,
-				parallelCh: make(map[int64]chan struct{}),
-			}
-			for range tt.failed {
-				c.acquireQueue(2)
+				plans:     tt.fields.plans,
+				sessions:  tt.fields.sessions,
+				meta:      tt.fields.meta,
+				scheduler: newScheduler(),
 			}
 
 			err := c.updateCompaction(tt.args.ts)
@@ -839,9 +951,9 @@ func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 				assert.NotEqual(t, failed, task.state)
 			}
 
-			c.mu.Lock()
-			assert.Equal(t, 0, len(c.parallelCh[2]))
-			c.mu.Unlock()
+			c.scheduler.mu.Lock()
+			assert.Equal(t, 0, len(c.scheduler.parallelTasks[2]))
+			c.scheduler.mu.Unlock()
 		})
 	}
 }
@@ -869,13 +981,13 @@ func Test_newCompactionPlanHandler(t *testing.T) {
 				nil,
 			},
 			&compactionPlanHandler{
-				plans:      map[int64]*compactionTask{},
-				sessions:   &SessionManager{},
-				chManager:  &ChannelManager{},
-				meta:       &meta{},
-				allocator:  newMockAllocator(),
-				flushCh:    nil,
-				parallelCh: make(map[int64]chan struct{}),
+				plans:     map[int64]*compactionTask{},
+				sessions:  &SessionManager{},
+				chManager: &ChannelManager{},
+				meta:      &meta{},
+				allocator: newMockAllocator(),
+				flushCh:   nil,
+				scheduler: newScheduler(),
 			},
 		},
 	}
