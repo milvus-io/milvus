@@ -226,7 +226,15 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 	}
 
 	ob.partitionLoadedCount[partition.GetPartitionID()] = loadedCount
-	if loadPercentage == 100 && ob.targetObserver.Check(ctx, partition.GetCollectionID()) && ob.leaderObserver.CheckTargetVersion(ctx, partition.GetCollectionID()) {
+	if loadPercentage == 100 {
+		if !ob.targetObserver.Check(ctx, partition.GetCollectionID()) {
+			log.Warn("failed to manual check current target, skip update load status")
+			return
+		}
+		if !ob.leaderObserver.CheckTargetVersion(ctx, partition.GetCollectionID()) {
+			log.Warn("failed to manual check leader target version ,skip update load status")
+			return
+		}
 		delete(ob.partitionLoadedCount, partition.GetPartitionID())
 	}
 	collectionPercentage, err := ob.meta.CollectionManager.UpdateLoadPercent(partition.PartitionID, loadPercentage)

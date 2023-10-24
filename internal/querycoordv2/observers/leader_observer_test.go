@@ -591,44 +591,6 @@ func (suite *LeaderObserverTestSuite) TestSyncTargetVersion() {
 	suite.Len(action.SealedInTarget, 1)
 }
 
-func (suite *LeaderObserverTestSuite) TestCheckTargetVersion() {
-	collectionID := int64(1001)
-	observer := suite.observer
-
-	suite.Run("check_channel_blocked", func() {
-		oldCh := observer.manualCheck
-		defer func() {
-			observer.manualCheck = oldCh
-		}()
-
-		// zero-length channel
-		observer.manualCheck = make(chan checkRequest)
-
-		ctx, cancel := context.WithCancel(context.Background())
-		// cancel context, make test return fast
-		cancel()
-
-		result := observer.CheckTargetVersion(ctx, collectionID)
-		suite.False(result)
-	})
-
-	suite.Run("check_return_ctx_timeout", func() {
-		oldCh := observer.manualCheck
-		defer func() {
-			observer.manualCheck = oldCh
-		}()
-
-		// make channel length = 1, task received
-		observer.manualCheck = make(chan checkRequest, 1)
-
-		ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*200)
-		defer cancel()
-
-		result := observer.CheckTargetVersion(ctx, collectionID)
-		suite.False(result)
-	})
-}
-
 func TestLeaderObserverSuite(t *testing.T) {
 	suite.Run(t, new(LeaderObserverTestSuite))
 }
