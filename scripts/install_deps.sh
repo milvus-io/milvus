@@ -24,7 +24,7 @@ function install_linux_deps() {
       clang-format-10 clang-tidy-10 lcov libtool m4 autoconf automake python3 python3-pip \
       pkg-config uuid-dev libaio-dev libgoogle-perftools-dev
 
-    sudo pip3 install conan==1.58.0
+    sudo pip3 install conan==1.61.0
   elif [[ -x "$(command -v yum)" ]]; then
     # for CentOS devtoolset-11
     sudo yum install -y epel-release centos-release-scl-rh
@@ -35,7 +35,7 @@ function install_linux_deps() {
       libaio libuuid-devel zip unzip \
       ccache lcov libtool m4 autoconf automake
 
-    sudo pip3 install conan==1.58.0
+    sudo pip3 install conan==1.61.0
     echo "source scl_source enable devtoolset-11" | sudo tee -a /etc/profile.d/devtoolset-11.sh
     echo "source scl_source enable llvm-toolset-11.0" | sudo tee -a /etc/profile.d/llvm-toolset-11.sh
     echo "export CLANG_TOOLS_PATH=/opt/rh/llvm-toolset-11.0/root/usr/bin" | sudo tee -a /etc/profile.d/llvm-toolset-11.sh
@@ -49,7 +49,7 @@ function install_linux_deps() {
   if [ ! $cmake_version ] || [ `expr $cmake_version \>= 3.24` -eq 0 ]; then
     echo "cmake version $cmake_version is less than 3.24, wait to installing ..."
     wget -qO- "https://cmake.org/files/v3.24/cmake-3.24.0-linux-x86_64.tar.gz" | sudo tar --strip-components=1 -xz -C /usr/local
-  else	
+  else
     echo "cmake version is $cmake_version"
   fi
 }
@@ -60,7 +60,7 @@ function install_mac_deps() {
   export PATH="/usr/local/opt/grep/libexec/gnubin:$PATH"
   brew update && brew upgrade && brew cleanup
 
-  pip3 install conan==1.58.0
+  pip3 install conan==1.61.0
 
   if [[ $(arch) == 'arm64' ]]; then
     brew install openssl
