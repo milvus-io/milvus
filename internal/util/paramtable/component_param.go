@@ -1608,7 +1608,7 @@ func (p *dataCoordConfig) initCompactionRPCTimeout() {
 }
 
 func (p *dataCoordConfig) initCompactionMaxParalellTask() {
-	p.CompactionMaxParallelTasks = p.Base.ParseIntWithDefault("dataCoord.compaction.maxParallelTaskNum", 100)
+	p.CompactionMaxParallelTasks = p.Base.ParseIntWithDefault("dataCoord.compaction.maxParallelTaskNum", 10)
 }
 
 func (p *dataCoordConfig) initEnableAutoCompaction() {
