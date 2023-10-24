@@ -370,11 +370,11 @@ func (mr *MilvusRoles) Run() {
 	<-mr.closed
 
 	var wg sync.WaitGroup
-	// stop coordinators first
-	//	var component
 	coordinators := []component{rootCoord, queryCoord, dataCoord, indexCoord}
-	for _, coord := range coordinators {
+	for idx, coord := range coordinators {
+		log.Warn("stop processing")
 		if coord != nil {
+			log.Warn("stop coord", zap.Int("idx", idx), zap.Any("coord", coord))
 			wg.Add(1)
 			go func(coord component) {
 				defer wg.Done()
@@ -385,24 +385,24 @@ func (mr *MilvusRoles) Run() {
 	wg.Wait()
 	log.Info("All coordinators have stopped")
 
-	// stop nodes
-	nodes := []component{queryNode, indexNode, dataNode}
-	for _, node := range nodes {
-		if node != nil {
-			wg.Add(1)
-			go func(node component) {
-				defer wg.Done()
-				node.Stop()
-			}(node)
-		}
+	if queryNode != nil {
+		queryNode.Stop()
+		log.Info("queryNode stopped!")
 	}
-	wg.Wait()
-	log.Info("All nodes have stopped")
 
-	// stop proxy
+	if dataNode != nil {
+		dataNode.Stop()
+		log.Info("dataNode stopped!")
+	}
+
+	if indexNode != nil {
+		indexNode.Stop()
+		log.Info("indexNode stopped!")
+	}
+
 	if proxy != nil {
 		proxy.Stop()
-		log.Info("proxy stopped")
+		log.Info("proxy stopped!")
 	}
 
 	log.Info("Milvus components graceful stop done")
