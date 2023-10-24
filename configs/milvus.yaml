@@ -333,7 +333,7 @@ dataCoord:
   compaction:
     enableAutoCompaction: true
     rpcTimeout: 10 # compaction rpc request timeout in seconds
-    maxParallelTaskNum: 100 # max parallel compaction task number
+    maxParallelTaskNum: 10 # max parallel compaction task number
     indexBasedCompaction: true
 
   gc:
