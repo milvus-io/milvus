@@ -1036,7 +1036,7 @@ please adjust in embedded Milvus: false`,
 	p.AccessLog.Enable = ParamItem{
 		Key:          "proxy.accessLog.enable",
 		Version:      "2.2.0",
-		DefaultValue: "true",
+		DefaultValue: "false",
 		Doc:          "if use access log",
 	}
 	p.AccessLog.Enable.Init(base.mgr)
@@ -1060,7 +1060,7 @@ please adjust in embedded Milvus: false`,
 		Key:          "proxy.accessLog.filename",
 		Version:      "2.2.0",
 		DefaultValue: "milvus_access_log.log",
-		Doc:          "Log filename, leave empty to disable file log.",
+		Doc:          "Log filename, leave empty to use stdout.",
 		Export:       true,
 	}
 	p.AccessLog.Filename.Init(base.mgr)
@@ -1084,7 +1084,7 @@ please adjust in embedded Milvus: false`,
 	p.AccessLog.RotatedTime = ParamItem{
 		Key:          "proxy.accessLog.rotatedTime",
 		Version:      "2.2.0",
-		DefaultValue: "3600",
+		DefaultValue: "0",
 		Doc:          "Max time for single access log file in seconds",
 	}
 	p.AccessLog.RotatedTime.Init(base.mgr)
