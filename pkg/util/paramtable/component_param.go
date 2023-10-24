@@ -2188,7 +2188,7 @@ the number of binlog file reaches to max value.`,
 	p.CompactionMaxParallelTasks = ParamItem{
 		Key:          "dataCoord.compaction.maxParallelTaskNum",
 		Version:      "2.2.12",
-		DefaultValue: "100",
+		DefaultValue: "10",
 		Export:       true,
 	}
 	p.CompactionMaxParallelTasks.Init(base.mgr)
