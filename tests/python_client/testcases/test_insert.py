@@ -405,17 +405,18 @@ class TestInsertParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         nb = 10
         int_values = pd.Series(data=[i for i in range(nb)])
-        float_values = pd.Series(data=[float(i)
-                                 for i in range(nb)], dtype="float32")
+        float_values = pd.Series(data=[float(i) for i in range(nb)], dtype="float32")
         float_vec_values = cf.gen_vectors(nb, ct.default_dim)
         df = pd.DataFrame({
             ct.default_float_field_name: float_values,
             ct.default_float_vec_field_name: float_vec_values,
             ct.default_int64_field_name: int_values
         })
-        error = {ct.err_code: 1, ct.err_msg: "The fields don't match with schema fields"}
-        collection_w.insert(
-            data=df, check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 1,
+                 ct.err_msg: "The fields don't match with schema fields, expected: ['int64', 'float', "
+                             "'varchar', 'json_field', 'float_vector'], got ['float', 'float_vector', "
+                             "'int64']"}
+        collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_inconsistent_data(self):

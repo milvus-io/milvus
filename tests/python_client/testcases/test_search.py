@@ -1523,8 +1523,7 @@ class TestCollectionSearch(TestcaseBase):
             insert_res, _ = collection_w.insert(insert_data[0])
             insert_ids.extend(insert_res.primary_keys)
         # search
-        vectors = [[random.random() for _ in range(dim)]
-                   for _ in range(default_nq)]
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         search_res, _ = collection_w.search(vectors[:nq], default_search_field,
                                             default_search_params, default_limit,
                                             default_search_exp, _async=_async,
@@ -3220,9 +3219,8 @@ class TestCollectionSearch(TestcaseBase):
         if _async:
             res.done()
             res = res.result()
-        assert len(res[0][0].entity._row_data) != 0
         assert (default_int64_field_name and default_float_field_name and default_bool_field_name) \
-            in res[0][0].entity._row_data
+            in res[0][0].fields
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("field", ct.all_scalar_data_types[:3])
@@ -3482,7 +3480,7 @@ class TestCollectionSearch(TestcaseBase):
                                       output_fields=[binary_field_name])[0]
 
             # 4. check the result vectors should be equal to the inserted
-            assert res[0][0].entity.binary_vector == [data[binary_field_name][res[0][0].id]]
+            assert res[0][0].entity.binary_vector == data[binary_field_name][res[0][0].id]
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("metrics", ct.structure_metrics)
@@ -3515,7 +3513,7 @@ class TestCollectionSearch(TestcaseBase):
                                   output_fields=[binary_field_name])[0]
 
         # 4. check the result vectors should be equal to the inserted
-        assert res[0][0].entity.binary_vector == [data[binary_field_name][res[0][0].id]]
+        assert res[0][0].entity.binary_vector == data[binary_field_name][res[0][0].id]
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("dim", [32, 128, 768])
@@ -7441,7 +7439,7 @@ class TestCollectionRangeSearch(TestcaseBase):
             res.done()
             res = res.result()
         assert len(res[0][0].entity._row_data) != 0
-        assert default_int64_field_name in res[0][0].entity._row_data
+        assert default_int64_field_name in res[0][0].fields
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_concurrent_multi_threads(self, nb, nq, dim, auto_id, _async):
