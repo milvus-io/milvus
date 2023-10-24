@@ -184,8 +184,8 @@ func (o *LeaderObserver) checkNeedUpdateTargetVersion(ctx context.Context, leade
 		zap.Int64("newVersion", targetVersion),
 	)
 
-	sealedSegments := o.target.GetHistoricalSegmentsByChannel(leaderView.CollectionID, leaderView.Channel, meta.CurrentTarget)
-	growingSegments := o.target.GetStreamingSegmentsByChannel(leaderView.CollectionID, leaderView.Channel, meta.CurrentTarget)
+	sealedSegments := o.target.GetSealedSegmentsByChannel(leaderView.CollectionID, leaderView.Channel, meta.CurrentTarget)
+	growingSegments := o.target.GetGrowingSegmentsByChannel(leaderView.CollectionID, leaderView.Channel, meta.CurrentTarget)
 	droppedSegments := o.target.GetDroppedSegmentsByChannel(leaderView.CollectionID, leaderView.Channel, meta.CurrentTarget)
 
 	return &querypb.SyncAction{
@@ -202,9 +202,9 @@ func (o *LeaderObserver) findNeedLoadedSegments(leaderView *meta.LeaderView, dis
 	dists = utils.FindMaxVersionSegments(dists)
 	for _, s := range dists {
 		version, ok := leaderView.Segments[s.GetID()]
-		currentTarget := o.target.GetHistoricalSegment(s.CollectionID, s.GetID(), meta.CurrentTarget)
+		currentTarget := o.target.GetSealedSegment(s.CollectionID, s.GetID(), meta.CurrentTarget)
 		existInCurrentTarget := currentTarget != nil
-		existInNextTarget := o.target.GetHistoricalSegment(s.CollectionID, s.GetID(), meta.NextTarget) != nil
+		existInNextTarget := o.target.GetSealedSegment(s.CollectionID, s.GetID(), meta.NextTarget) != nil
 
 		if !existInCurrentTarget && !existInNextTarget {
 			continue
@@ -246,8 +246,8 @@ func (o *LeaderObserver) findNeedRemovedSegments(leaderView *meta.LeaderView, di
 	}
 	for sid, s := range leaderView.Segments {
 		_, ok := distMap[sid]
-		existInCurrentTarget := o.target.GetHistoricalSegment(leaderView.CollectionID, sid, meta.CurrentTarget) != nil
-		existInNextTarget := o.target.GetHistoricalSegment(leaderView.CollectionID, sid, meta.NextTarget) != nil
+		existInCurrentTarget := o.target.GetSealedSegment(leaderView.CollectionID, sid, meta.CurrentTarget) != nil
+		existInNextTarget := o.target.GetSealedSegment(leaderView.CollectionID, sid, meta.NextTarget) != nil
 		if ok || existInCurrentTarget || existInNextTarget {
 			continue
 		}

@@ -876,7 +876,7 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		return resp, nil
 	}
 
-	currentTargets := s.targetMgr.GetHistoricalSegmentsByCollection(req.GetCollectionID(), meta.CurrentTarget)
+	currentTargets := s.targetMgr.GetSealedSegmentsByCollection(req.GetCollectionID(), meta.CurrentTarget)
 	for _, channel := range channels {
 		log := log.With(zap.String("channel", channel.GetChannelName()))
 

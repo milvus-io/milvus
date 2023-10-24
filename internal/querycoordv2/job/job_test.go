@@ -1484,7 +1484,7 @@ func (suite *JobSuite) assertCollectionLoaded(collection int64) {
 	}
 	for _, segments := range suite.segments[collection] {
 		for _, segment := range segments {
-			suite.NotNil(suite.targetMgr.GetHistoricalSegment(collection, segment, meta.CurrentTarget))
+			suite.NotNil(suite.targetMgr.GetSealedSegment(collection, segment, meta.CurrentTarget))
 		}
 	}
 }
@@ -1501,7 +1501,7 @@ func (suite *JobSuite) assertPartitionLoaded(collection int64, partitionIDs ...i
 		}
 		suite.NotNil(suite.meta.GetPartition(partitionID))
 		for _, segment := range segments {
-			suite.NotNil(suite.targetMgr.GetHistoricalSegment(collection, segment, meta.CurrentTarget))
+			suite.NotNil(suite.targetMgr.GetSealedSegment(collection, segment, meta.CurrentTarget))
 		}
 	}
 }
@@ -1514,7 +1514,7 @@ func (suite *JobSuite) assertCollectionReleased(collection int64) {
 	}
 	for _, partitions := range suite.segments[collection] {
 		for _, segment := range partitions {
-			suite.Nil(suite.targetMgr.GetHistoricalSegment(collection, segment, meta.CurrentTarget))
+			suite.Nil(suite.targetMgr.GetSealedSegment(collection, segment, meta.CurrentTarget))
 		}
 	}
 }
@@ -1524,7 +1524,7 @@ func (suite *JobSuite) assertPartitionReleased(collection int64, partitionIDs ..
 		suite.Nil(suite.meta.GetPartition(partition))
 		segments := suite.segments[collection][partition]
 		for _, segment := range segments {
-			suite.Nil(suite.targetMgr.GetHistoricalSegment(collection, segment, meta.CurrentTarget))
+			suite.Nil(suite.targetMgr.GetSealedSegment(collection, segment, meta.CurrentTarget))
 		}
 	}
 }

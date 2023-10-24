@@ -502,7 +502,7 @@ func (scheduler *taskScheduler) GetNodeSegmentCntDelta(nodeID int64) int {
 				continue
 			}
 			segmentAction := action.(*SegmentAction)
-			segment := scheduler.targetMgr.GetHistoricalSegment(task.CollectionID(), segmentAction.SegmentID(), meta.NextTarget)
+			segment := scheduler.targetMgr.GetSealedSegment(task.CollectionID(), segmentAction.SegmentID(), meta.NextTarget)
 			if action.Type() == ActionTypeGrow {
 				delta += int(segment.GetNumOfRows())
 			} else {
@@ -586,9 +586,9 @@ func (scheduler *taskScheduler) isRelated(task Task, node int64) bool {
 			taskType := GetTaskType(task)
 			var segment *datapb.SegmentInfo
 			if taskType == TaskTypeMove || taskType == TaskTypeUpdate {
-				segment = scheduler.targetMgr.GetHistoricalSegment(task.CollectionID(), task.SegmentID(), meta.CurrentTarget)
+				segment = scheduler.targetMgr.GetSealedSegment(task.CollectionID(), task.SegmentID(), meta.CurrentTarget)
 			} else {
-				segment = scheduler.targetMgr.GetHistoricalSegment(task.CollectionID(), task.SegmentID(), meta.NextTarget)
+				segment = scheduler.targetMgr.GetSealedSegment(task.CollectionID(), task.SegmentID(), meta.NextTarget)
 			}
 			if segment == nil {
 				continue
@@ -779,9 +779,9 @@ func (scheduler *taskScheduler) checkSegmentTaskStale(task *SegmentTask) error {
 			taskType := GetTaskType(task)
 			var segment *datapb.SegmentInfo
 			if taskType == TaskTypeMove || taskType == TaskTypeUpdate {
-				segment = scheduler.targetMgr.GetHistoricalSegment(task.CollectionID(), task.SegmentID(), meta.CurrentTarget)
+				segment = scheduler.targetMgr.GetSealedSegment(task.CollectionID(), task.SegmentID(), meta.CurrentTarget)
 			} else {
-				segment = scheduler.targetMgr.GetHistoricalSegment(task.CollectionID(), task.SegmentID(), meta.NextTarget)
+				segment = scheduler.targetMgr.GetSealedSegment(task.CollectionID(), task.SegmentID(), meta.NextTarget)
 			}
 			if segment == nil {
 				log.Warn("task stale due to the segment to load not exists in targets",

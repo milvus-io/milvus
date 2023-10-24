@@ -82,7 +82,7 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 	)
 	var tasks []task.Task
 
-	segments := c.getHistoricalSegmentsDist(replica)
+	segments := c.getSealedSegmentsDist(replica)
 	idSegments := make(map[int64]*meta.Segment)
 
 	targets := make(map[int64][]int64) // segmentID => FieldID
@@ -133,7 +133,7 @@ func (c *IndexChecker) checkSegment(ctx context.Context, segment *meta.Segment, 
 	return result
 }
 
-func (c *IndexChecker) getHistoricalSegmentsDist(replica *meta.Replica) []*meta.Segment {
+func (c *IndexChecker) getSealedSegmentsDist(replica *meta.Replica) []*meta.Segment {
 	var ret []*meta.Segment
 	for _, node := range replica.GetNodes() {
 		ret = append(ret, c.dist.SegmentDistManager.GetByCollectionAndNode(replica.CollectionID, node)...)

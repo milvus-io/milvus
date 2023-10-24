@@ -114,10 +114,10 @@ func (dh *distHandler) updateSegmentsDistribution(resp *querypb.GetDataDistribut
 	updates := make([]*meta.Segment, 0, len(resp.GetSegments()))
 	for _, s := range resp.GetSegments() {
 		// for collection which is already loaded
-		segmentInfo := dh.target.GetHistoricalSegment(s.GetCollection(), s.GetID(), meta.CurrentTarget)
+		segmentInfo := dh.target.GetSealedSegment(s.GetCollection(), s.GetID(), meta.CurrentTarget)
 		if segmentInfo == nil {
 			// for collection which is loading
-			segmentInfo = dh.target.GetHistoricalSegment(s.GetCollection(), s.GetID(), meta.NextTarget)
+			segmentInfo = dh.target.GetSealedSegment(s.GetCollection(), s.GetID(), meta.NextTarget)
 		}
 		var segment *meta.Segment
 		if segmentInfo == nil {

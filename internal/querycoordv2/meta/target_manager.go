@@ -324,7 +324,7 @@ func (mgr *TargetManager) getTarget(scope TargetScope) *target {
 	return mgr.next
 }
 
-func (mgr *TargetManager) GetStreamingSegmentsByCollection(collectionID int64,
+func (mgr *TargetManager) GetGrowingSegmentsByCollection(collectionID int64,
 	scope TargetScope,
 ) typeutil.UniqueSet {
 	mgr.rwMutex.RLock()
@@ -345,7 +345,7 @@ func (mgr *TargetManager) GetStreamingSegmentsByCollection(collectionID int64,
 	return segments
 }
 
-func (mgr *TargetManager) GetStreamingSegmentsByChannel(collectionID int64,
+func (mgr *TargetManager) GetGrowingSegmentsByChannel(collectionID int64,
 	channelName string,
 	scope TargetScope,
 ) typeutil.UniqueSet {
@@ -369,7 +369,7 @@ func (mgr *TargetManager) GetStreamingSegmentsByChannel(collectionID int64,
 	return segments
 }
 
-func (mgr *TargetManager) GetHistoricalSegmentsByCollection(collectionID int64,
+func (mgr *TargetManager) GetSealedSegmentsByCollection(collectionID int64,
 	scope TargetScope,
 ) map[int64]*datapb.SegmentInfo {
 	mgr.rwMutex.RLock()
@@ -384,7 +384,7 @@ func (mgr *TargetManager) GetHistoricalSegmentsByCollection(collectionID int64,
 	return collectionTarget.GetAllSegments()
 }
 
-func (mgr *TargetManager) GetHistoricalSegmentsByChannel(collectionID int64,
+func (mgr *TargetManager) GetSealedSegmentsByChannel(collectionID int64,
 	channelName string,
 	scope TargetScope,
 ) map[int64]*datapb.SegmentInfo {
@@ -430,7 +430,7 @@ func (mgr *TargetManager) GetDroppedSegmentsByChannel(collectionID int64,
 	return channel.GetDroppedSegmentIds()
 }
 
-func (mgr *TargetManager) GetHistoricalSegmentsByPartition(collectionID int64,
+func (mgr *TargetManager) GetSealedSegmentsByPartition(collectionID int64,
 	partitionID int64, scope TargetScope,
 ) map[int64]*datapb.SegmentInfo {
 	mgr.rwMutex.RLock()
@@ -479,7 +479,7 @@ func (mgr *TargetManager) GetDmChannel(collectionID int64, channel string, scope
 	return collectionTarget.GetAllDmChannels()[channel]
 }
 
-func (mgr *TargetManager) GetHistoricalSegment(collectionID int64, id int64, scope TargetScope) *datapb.SegmentInfo {
+func (mgr *TargetManager) GetSealedSegment(collectionID int64, id int64, scope TargetScope) *datapb.SegmentInfo {
 	mgr.rwMutex.RLock()
 	defer mgr.rwMutex.RUnlock()
 	targetMap := mgr.getTarget(scope)
