@@ -29,9 +29,8 @@ TEST(FloatVecIndex, All) {
     std::tie(type_params, index_params) =
         generate_params(index_type, metric_type);
     std::string type_params_str, index_params_str;
-    bool ok;
-    ok = google::protobuf::TextFormat::PrintToString(type_params,
-                                                     &type_params_str);
+    bool ok = google::protobuf::TextFormat::PrintToString(type_params,
+                                                          &type_params_str);
     assert(ok);
     ok = google::protobuf::TextFormat::PrintToString(index_params,
                                                      &index_params_str);
@@ -46,7 +45,7 @@ TEST(FloatVecIndex, All) {
     CIndex copy_index;
 
     {
-        status = CreateIndex(
+        status = CreateIndexV0(
             dtype, type_params_str.c_str(), index_params_str.c_str(), &index);
         ASSERT_EQ(milvus::Success, status.error_code);
     }
@@ -59,10 +58,10 @@ TEST(FloatVecIndex, All) {
         ASSERT_EQ(milvus::Success, status.error_code);
     }
     {
-        status = CreateIndex(dtype,
-                             type_params_str.c_str(),
-                             index_params_str.c_str(),
-                             &copy_index);
+        status = CreateIndexV0(dtype,
+                               type_params_str.c_str(),
+                               index_params_str.c_str(),
+                               &copy_index);
         ASSERT_EQ(milvus::Success, status.error_code);
     }
     {
@@ -105,7 +104,7 @@ TEST(BinaryVecIndex, All) {
     CIndex copy_index;
 
     {
-        status = CreateIndex(
+        status = CreateIndexV0(
             dtype, type_params_str.c_str(), index_params_str.c_str(), &index);
         ASSERT_EQ(milvus::Success, status.error_code);
     }
@@ -118,10 +117,10 @@ TEST(BinaryVecIndex, All) {
         ASSERT_EQ(milvus::Success, status.error_code);
     }
     {
-        status = CreateIndex(dtype,
-                             type_params_str.c_str(),
-                             index_params_str.c_str(),
-                             &copy_index);
+        status = CreateIndexV0(dtype,
+                               type_params_str.c_str(),
+                               index_params_str.c_str(),
+                               &copy_index);
         ASSERT_EQ(milvus::Success, status.error_code);
     }
     {
@@ -162,10 +161,10 @@ TEST(CBoolIndexTest, All) {
         CIndex copy_index;
 
         {
-            status = CreateIndex(dtype,
-                                 type_params_str.c_str(),
-                                 index_params_str.c_str(),
-                                 &index);
+            status = CreateIndexV0(dtype,
+                                   type_params_str.c_str(),
+                                   index_params_str.c_str(),
+                                   &index);
             ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
@@ -178,10 +177,10 @@ TEST(CBoolIndexTest, All) {
             ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
-            status = CreateIndex(dtype,
-                                 type_params_str.c_str(),
-                                 index_params_str.c_str(),
-                                 &copy_index);
+            status = CreateIndexV0(dtype,
+                                   type_params_str.c_str(),
+                                   index_params_str.c_str(),
+                                   &copy_index);
             ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
@@ -199,7 +198,7 @@ TEST(CBoolIndexTest, All) {
         { DeleteBinarySet(binary_set); }
     }
 
-    delete[](char*)(half_ds->GetTensor());
+    delete[] (char*)(half_ds->GetTensor());
 }
 
 // TODO: more scalar type.
@@ -220,10 +219,10 @@ TEST(CInt64IndexTest, All) {
         CIndex copy_index;
 
         {
-            status = CreateIndex(dtype,
-                                 type_params_str.c_str(),
-                                 index_params_str.c_str(),
-                                 &index);
+            status = CreateIndexV0(dtype,
+                                   type_params_str.c_str(),
+                                   index_params_str.c_str(),
+                                   &index);
             ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
@@ -235,10 +234,10 @@ TEST(CInt64IndexTest, All) {
             ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
-            status = CreateIndex(dtype,
-                                 type_params_str.c_str(),
-                                 index_params_str.c_str(),
-                                 &copy_index);
+            status = CreateIndexV0(dtype,
+                                   type_params_str.c_str(),
+                                   index_params_str.c_str(),
+                                   &copy_index);
             ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
@@ -279,10 +278,10 @@ TEST(CStringIndexTest, All) {
         CIndex copy_index;
 
         {
-            status = CreateIndex(dtype,
-                                 type_params_str.c_str(),
-                                 index_params_str.c_str(),
-                                 &index);
+            status = CreateIndexV0(dtype,
+                                   type_params_str.c_str(),
+                                   index_params_str.c_str(),
+                                   &index);
             ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
@@ -295,10 +294,10 @@ TEST(CStringIndexTest, All) {
             ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
-            status = CreateIndex(dtype,
-                                 type_params_str.c_str(),
-                                 index_params_str.c_str(),
-                                 &copy_index);
+            status = CreateIndexV0(dtype,
+                                   type_params_str.c_str(),
+                                   index_params_str.c_str(),
+                                   &copy_index);
             ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
@@ -316,6 +315,6 @@ TEST(CStringIndexTest, All) {
         { DeleteBinarySet(binary_set); }
     }
 
-    delete[](char*)(str_ds->GetTensor());
+    delete[] (char*)(str_ds->GetTensor());
 }
 #endif

@@ -73,7 +73,7 @@ func NewCgoIndex(dtype schemapb.DataType, typeParams, indexParams map[string]str
 
 	var indexPtr C.CIndex
 	cintDType := uint32(dtype)
-	status := C.CreateIndex(cintDType, typeParamsPointer, indexParamsPointer, &indexPtr)
+	status := C.CreateIndexV0(cintDType, typeParamsPointer, indexParamsPointer, &indexPtr)
 	if err := HandleCStatus(&status, "failed to create index"); err != nil {
 		return nil, err
 	}
@@ -94,7 +94,7 @@ func NewCgoIndex(dtype schemapb.DataType, typeParams, indexParams map[string]str
 
 func CreateIndex(ctx context.Context, buildIndexInfo *BuildIndexInfo) (CodecIndex, error) {
 	var indexPtr C.CIndex
-	status := C.CreateIndexV2(&indexPtr, buildIndexInfo.cBuildIndexInfo)
+	status := C.CreateIndex(&indexPtr, buildIndexInfo.cBuildIndexInfo)
 	if err := HandleCStatus(&status, "failed to create index"); err != nil {
 		return nil, err
 	}

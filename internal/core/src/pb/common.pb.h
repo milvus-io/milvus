@@ -76,6 +76,9 @@ extern KeyValuePairDefaultTypeInternal _KeyValuePair_default_instance_;
 class MsgBase;
 struct MsgBaseDefaultTypeInternal;
 extern MsgBaseDefaultTypeInternal _MsgBase_default_instance_;
+class MsgBase_PropertiesEntry_DoNotUse;
+struct MsgBase_PropertiesEntry_DoNotUseDefaultTypeInternal;
+extern MsgBase_PropertiesEntry_DoNotUseDefaultTypeInternal _MsgBase_PropertiesEntry_DoNotUse_default_instance_;
 class MsgHeader;
 struct MsgHeaderDefaultTypeInternal;
 extern MsgHeaderDefaultTypeInternal _MsgHeader_default_instance_;
@@ -88,9 +91,9 @@ extern PlaceholderValueDefaultTypeInternal _PlaceholderValue_default_instance_;
 class PrivilegeExt;
 struct PrivilegeExtDefaultTypeInternal;
 extern PrivilegeExtDefaultTypeInternal _PrivilegeExt_default_instance_;
-class ReplicateEntity;
-struct ReplicateEntityDefaultTypeInternal;
-extern ReplicateEntityDefaultTypeInternal _ReplicateEntity_default_instance_;
+class ReplicateInfo;
+struct ReplicateInfoDefaultTypeInternal;
+extern ReplicateInfoDefaultTypeInternal _ReplicateInfo_default_instance_;
 class SegmentStats;
 struct SegmentStatsDefaultTypeInternal;
 extern SegmentStatsDefaultTypeInternal _SegmentStats_default_instance_;
@@ -115,11 +118,12 @@ template<> ::milvus::proto::common::DMLMsgHeader* Arena::CreateMaybeMessage<::mi
 template<> ::milvus::proto::common::KeyDataPair* Arena::CreateMaybeMessage<::milvus::proto::common::KeyDataPair>(Arena*);
 template<> ::milvus::proto::common::KeyValuePair* Arena::CreateMaybeMessage<::milvus::proto::common::KeyValuePair>(Arena*);
 template<> ::milvus::proto::common::MsgBase* Arena::CreateMaybeMessage<::milvus::proto::common::MsgBase>(Arena*);
+template<> ::milvus::proto::common::MsgBase_PropertiesEntry_DoNotUse* Arena::CreateMaybeMessage<::milvus::proto::common::MsgBase_PropertiesEntry_DoNotUse>(Arena*);
 template<> ::milvus::proto::common::MsgHeader* Arena::CreateMaybeMessage<::milvus::proto::common::MsgHeader>(Arena*);
 template<> ::milvus::proto::common::PlaceholderGroup* Arena::CreateMaybeMessage<::milvus::proto::common::PlaceholderGroup>(Arena*);
 template<> ::milvus::proto::common::PlaceholderValue* Arena::CreateMaybeMessage<::milvus::proto::common::PlaceholderValue>(Arena*);
 template<> ::milvus::proto::common::PrivilegeExt* Arena::CreateMaybeMessage<::milvus::proto::common::PrivilegeExt>(Arena*);
-template<> ::milvus::proto::common::ReplicateEntity* Arena::CreateMaybeMessage<::milvus::proto::common::ReplicateEntity>(Arena*);
+template<> ::milvus::proto::common::ReplicateInfo* Arena::CreateMaybeMessage<::milvus::proto::common::ReplicateInfo>(Arena*);
 template<> ::milvus::proto::common::SegmentStats* Arena::CreateMaybeMessage<::milvus::proto::common::SegmentStats>(Arena*);
 template<> ::milvus::proto::common::ServerInfo* Arena::CreateMaybeMessage<::milvus::proto::common::ServerInfo>(Arena*);
 template<> ::milvus::proto::common::ServerInfo_ReservedEntry_DoNotUse* Arena::CreateMaybeMessage<::milvus::proto::common::ServerInfo_ReservedEntry_DoNotUse>(Arena*);
@@ -1854,6 +1858,34 @@ class Address final :
 };
 // -------------------------------------------------------------------
 
+class MsgBase_PropertiesEntry_DoNotUse : public ::PROTOBUF_NAMESPACE_ID::internal::MapEntry<MsgBase_PropertiesEntry_DoNotUse, 
+    std::string, std::string,
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING,
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING> {
+public:
+  typedef ::PROTOBUF_NAMESPACE_ID::internal::MapEntry<MsgBase_PropertiesEntry_DoNotUse, 
+    std::string, std::string,
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING,
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING> SuperType;
+  MsgBase_PropertiesEntry_DoNotUse();
+  explicit PROTOBUF_CONSTEXPR MsgBase_PropertiesEntry_DoNotUse(
+      ::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+  explicit MsgBase_PropertiesEntry_DoNotUse(::PROTOBUF_NAMESPACE_ID::Arena* arena);
+  void MergeFrom(const MsgBase_PropertiesEntry_DoNotUse& other);
+  static const MsgBase_PropertiesEntry_DoNotUse* internal_default_instance() { return reinterpret_cast<const MsgBase_PropertiesEntry_DoNotUse*>(&_MsgBase_PropertiesEntry_DoNotUse_default_instance_); }
+  static bool ValidateKey(std::string* s) {
+    return ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(s->data(), static_cast<int>(s->size()), ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE, "milvus.proto.common.MsgBase.PropertiesEntry.key");
+ }
+  static bool ValidateValue(std::string* s) {
+    return ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(s->data(), static_cast<int>(s->size()), ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE, "milvus.proto.common.MsgBase.PropertiesEntry.value");
+ }
+  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  friend struct ::TableStruct_common_2eproto;
+};
+
+// -------------------------------------------------------------------
+
 class MsgBase final :
     public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.common.MsgBase) */ {
  public:
@@ -1902,7 +1934,7 @@ class MsgBase final :
                &_MsgBase_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    7;
+    8;
 
   friend void swap(MsgBase& a, MsgBase& b) {
     a.Swap(&b);
@@ -1963,6 +1995,8 @@ class MsgBase final :
   protected:
   explicit MsgBase(::PROTOBUF_NAMESPACE_ID::Arena* arena,
                        bool is_message_owned = false);
+  private:
+  static void ArenaDtor(void* object);
   public:
 
   static const ClassData _class_data_;
@@ -1972,33 +2006,52 @@ class MsgBase final :
 
   // nested types ----------------------------------------------------
 
+
   // accessors -------------------------------------------------------
 
   enum : int {
-    kReplicateFieldNumber = 6,
+    kPropertiesFieldNumber = 6,
+    kReplicateInfoFieldNumber = 7,
     kMsgIDFieldNumber = 2,
     kTimestampFieldNumber = 3,
     kSourceIDFieldNumber = 4,
     kTargetIDFieldNumber = 5,
     kMsgTypeFieldNumber = 1,
   };
-  // .milvus.proto.common.ReplicateEntity replicate = 6;
-  bool has_replicate() const;
+  // map<string, string> properties = 6;
+  int properties_size() const;
   private:
-  bool _internal_has_replicate() const;
+  int _internal_properties_size() const;
   public:
-  void clear_replicate();
-  const ::milvus::proto::common::ReplicateEntity& replicate() const;
-  PROTOBUF_NODISCARD ::milvus::proto::common::ReplicateEntity* release_replicate();
-  ::milvus::proto::common::ReplicateEntity* mutable_replicate();
-  void set_allocated_replicate(::milvus::proto::common::ReplicateEntity* replicate);
+  void clear_properties();
   private:
-  const ::milvus::proto::common::ReplicateEntity& _internal_replicate() const;
-  ::milvus::proto::common::ReplicateEntity* _internal_mutable_replicate();
+  const ::PROTOBUF_NAMESPACE_ID::Map< std::string, std::string >&
+      _internal_properties() const;
+  ::PROTOBUF_NAMESPACE_ID::Map< std::string, std::string >*
+      _internal_mutable_properties();
   public:
-  void unsafe_arena_set_allocated_replicate(
-      ::milvus::proto::common::ReplicateEntity* replicate);
-  ::milvus::proto::common::ReplicateEntity* unsafe_arena_release_replicate();
+  const ::PROTOBUF_NAMESPACE_ID::Map< std::string, std::string >&
+      properties() const;
+  ::PROTOBUF_NAMESPACE_ID::Map< std::string, std::string >*
+      mutable_properties();
+
+  // .milvus.proto.common.ReplicateInfo replicateInfo = 7;
+  bool has_replicateinfo() const;
+  private:
+  bool _internal_has_replicateinfo() const;
+  public:
+  void clear_replicateinfo();
+  const ::milvus::proto::common::ReplicateInfo& replicateinfo() const;
+  PROTOBUF_NODISCARD ::milvus::proto::common::ReplicateInfo* release_replicateinfo();
+  ::milvus::proto::common::ReplicateInfo* mutable_replicateinfo();
+  void set_allocated_replicateinfo(::milvus::proto::common::ReplicateInfo* replicateinfo);
+  private:
+  const ::milvus::proto::common::ReplicateInfo& _internal_replicateinfo() const;
+  ::milvus::proto::common::ReplicateInfo* _internal_mutable_replicateinfo();
+  public:
+  void unsafe_arena_set_allocated_replicateinfo(
+      ::milvus::proto::common::ReplicateInfo* replicateinfo);
+  ::milvus::proto::common::ReplicateInfo* unsafe_arena_release_replicateinfo();
 
   // int64 msgID = 2;
   void clear_msgid();
@@ -2053,7 +2106,12 @@ class MsgBase final :
   typedef void InternalArenaConstructable_;
   typedef void DestructorSkippable_;
   struct Impl_ {
-    ::milvus::proto::common::ReplicateEntity* replicate_;
+    ::PROTOBUF_NAMESPACE_ID::internal::MapField<
+        MsgBase_PropertiesEntry_DoNotUse,
+        std::string, std::string,
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING,
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING> properties_;
+    ::milvus::proto::common::ReplicateInfo* replicateinfo_;
     int64_t msgid_;
     uint64_t timestamp_;
     int64_t sourceid_;
@@ -2066,24 +2124,24 @@ class MsgBase final :
 };
 // -------------------------------------------------------------------
 
-class ReplicateEntity final :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.common.ReplicateEntity) */ {
+class ReplicateInfo final :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.common.ReplicateInfo) */ {
  public:
-  inline ReplicateEntity() : ReplicateEntity(nullptr) {}
-  ~ReplicateEntity() override;
-  explicit PROTOBUF_CONSTEXPR ReplicateEntity(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+  inline ReplicateInfo() : ReplicateInfo(nullptr) {}
+  ~ReplicateInfo() override;
+  explicit PROTOBUF_CONSTEXPR ReplicateInfo(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
 
-  ReplicateEntity(const ReplicateEntity& from);
-  ReplicateEntity(ReplicateEntity&& from) noexcept
-    : ReplicateEntity() {
+  ReplicateInfo(const ReplicateInfo& from);
+  ReplicateInfo(ReplicateInfo&& from) noexcept
+    : ReplicateInfo() {
     *this = ::std::move(from);
   }
 
-  inline ReplicateEntity& operator=(const ReplicateEntity& from) {
+  inline ReplicateInfo& operator=(const ReplicateInfo& from) {
     CopyFrom(from);
     return *this;
   }
-  inline ReplicateEntity& operator=(ReplicateEntity&& from) noexcept {
+  inline ReplicateInfo& operator=(ReplicateInfo&& from) noexcept {
     if (this == &from) return *this;
     if (GetOwningArena() == from.GetOwningArena()
   #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
@@ -2106,20 +2164,20 @@ class ReplicateEntity final :
   static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
     return default_instance().GetMetadata().reflection;
   }
-  static const ReplicateEntity& default_instance() {
+  static const ReplicateInfo& default_instance() {
     return *internal_default_instance();
   }
-  static inline const ReplicateEntity* internal_default_instance() {
-    return reinterpret_cast<const ReplicateEntity*>(
-               &_ReplicateEntity_default_instance_);
+  static inline const ReplicateInfo* internal_default_instance() {
+    return reinterpret_cast<const ReplicateInfo*>(
+               &_ReplicateInfo_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    8;
+    9;
 
-  friend void swap(ReplicateEntity& a, ReplicateEntity& b) {
+  friend void swap(ReplicateInfo& a, ReplicateInfo& b) {
     a.Swap(&b);
   }
-  inline void Swap(ReplicateEntity* other) {
+  inline void Swap(ReplicateInfo* other) {
     if (other == this) return;
   #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
     if (GetOwningArena() != nullptr &&
@@ -2132,7 +2190,7 @@ class ReplicateEntity final :
       ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
     }
   }
-  void UnsafeArenaSwap(ReplicateEntity* other) {
+  void UnsafeArenaSwap(ReplicateInfo* other) {
     if (other == this) return;
     GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
     InternalSwap(other);
@@ -2140,14 +2198,14 @@ class ReplicateEntity final :
 
   // implements Message ----------------------------------------------
 
-  ReplicateEntity* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
-    return CreateMaybeMessage<ReplicateEntity>(arena);
+  ReplicateInfo* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<ReplicateInfo>(arena);
   }
   using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
-  void CopyFrom(const ReplicateEntity& from);
+  void CopyFrom(const ReplicateInfo& from);
   using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
-  void MergeFrom( const ReplicateEntity& from) {
-    ReplicateEntity::MergeImpl(*this, from);
+  void MergeFrom( const ReplicateInfo& from) {
+    ReplicateInfo::MergeImpl(*this, from);
   }
   private:
   static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
@@ -2165,15 +2223,15 @@ class ReplicateEntity final :
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
   void SetCachedSize(int size) const final;
-  void InternalSwap(ReplicateEntity* other);
+  void InternalSwap(ReplicateInfo* other);
 
   private:
   friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
   static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "milvus.proto.common.ReplicateEntity";
+    return "milvus.proto.common.ReplicateInfo";
   }
   protected:
-  explicit ReplicateEntity(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+  explicit ReplicateInfo(::PROTOBUF_NAMESPACE_ID::Arena* arena,
                        bool is_message_owned = false);
   public:
 
@@ -2187,8 +2245,18 @@ class ReplicateEntity final :
   // accessors -------------------------------------------------------
 
   enum : int {
+    kMsgTimestampFieldNumber = 2,
     kIsReplicateFieldNumber = 1,
   };
+  // uint64 msgTimestamp = 2;
+  void clear_msgtimestamp();
+  uint64_t msgtimestamp() const;
+  void set_msgtimestamp(uint64_t value);
+  private:
+  uint64_t _internal_msgtimestamp() const;
+  void _internal_set_msgtimestamp(uint64_t value);
+  public:
+
   // bool isReplicate = 1;
   void clear_isreplicate();
   bool isreplicate() const;
@@ -2198,7 +2266,7 @@ class ReplicateEntity final :
   void _internal_set_isreplicate(bool value);
   public:
 
-  // @@protoc_insertion_point(class_scope:milvus.proto.common.ReplicateEntity)
+  // @@protoc_insertion_point(class_scope:milvus.proto.common.ReplicateInfo)
  private:
   class _Internal;
 
@@ -2206,6 +2274,7 @@ class ReplicateEntity final :
   typedef void InternalArenaConstructable_;
   typedef void DestructorSkippable_;
   struct Impl_ {
+    uint64_t msgtimestamp_;
     bool isreplicate_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   };
@@ -2262,7 +2331,7 @@ class MsgHeader final :
                &_MsgHeader_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    9;
+    10;
 
   friend void swap(MsgHeader& a, MsgHeader& b) {
     a.Swap(&b);
@@ -2419,7 +2488,7 @@ class DMLMsgHeader final :
                &_DMLMsgHeader_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    10;
+    11;
 
   friend void swap(DMLMsgHeader& a, DMLMsgHeader& b) {
     a.Swap(&b);
@@ -2592,7 +2661,7 @@ class PrivilegeExt final :
                &_PrivilegeExt_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    11;
+    12;
 
   friend void swap(PrivilegeExt& a, PrivilegeExt& b) {
     a.Swap(&b);
@@ -2773,7 +2842,7 @@ class SegmentStats final :
                &_SegmentStats_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    12;
+    13;
 
   friend void swap(SegmentStats& a, SegmentStats& b) {
     a.Swap(&b);
@@ -2960,7 +3029,7 @@ class ClientInfo final :
                &_ClientInfo_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    14;
+    15;
 
   friend void swap(ClientInfo& a, ClientInfo& b) {
     a.Swap(&b);
@@ -3231,7 +3300,7 @@ class ServerInfo final :
                &_ServerInfo_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    16;
+    17;
 
   friend void swap(ServerInfo& a, ServerInfo& b) {
     a.Swap(&b);
@@ -4060,6 +4129,8 @@ inline void Address::set_port(int64_t value) {
 
 // -------------------------------------------------------------------
 
+// -------------------------------------------------------------------
+
 // MsgBase
 
 // .milvus.proto.common.MsgType msg_type = 1;
@@ -4162,45 +4233,74 @@ inline void MsgBase::set_targetid(int64_t value) {
   // @@protoc_insertion_point(field_set:milvus.proto.common.MsgBase.targetID)
 }
 
-// .milvus.proto.common.ReplicateEntity replicate = 6;
-inline bool MsgBase::_internal_has_replicate() const {
-  return this != internal_default_instance() && _impl_.replicate_ != nullptr;
+// map<string, string> properties = 6;
+inline int MsgBase::_internal_properties_size() const {
+  return _impl_.properties_.size();
 }
-inline bool MsgBase::has_replicate() const {
-  return _internal_has_replicate();
+inline int MsgBase::properties_size() const {
+  return _internal_properties_size();
 }
-inline void MsgBase::clear_replicate() {
-  if (GetArenaForAllocation() == nullptr && _impl_.replicate_ != nullptr) {
-    delete _impl_.replicate_;
+inline void MsgBase::clear_properties() {
+  _impl_.properties_.Clear();
+}
+inline const ::PROTOBUF_NAMESPACE_ID::Map< std::string, std::string >&
+MsgBase::_internal_properties() const {
+  return _impl_.properties_.GetMap();
+}
+inline const ::PROTOBUF_NAMESPACE_ID::Map< std::string, std::string >&
+MsgBase::properties() const {
+  // @@protoc_insertion_point(field_map:milvus.proto.common.MsgBase.properties)
+  return _internal_properties();
+}
+inline ::PROTOBUF_NAMESPACE_ID::Map< std::string, std::string >*
+MsgBase::_internal_mutable_properties() {
+  return _impl_.properties_.MutableMap();
+}
+inline ::PROTOBUF_NAMESPACE_ID::Map< std::string, std::string >*
+MsgBase::mutable_properties() {
+  // @@protoc_insertion_point(field_mutable_map:milvus.proto.common.MsgBase.properties)
+  return _internal_mutable_properties();
+}
+
+// .milvus.proto.common.ReplicateInfo replicateInfo = 7;
+inline bool MsgBase::_internal_has_replicateinfo() const {
+  return this != internal_default_instance() && _impl_.replicateinfo_ != nullptr;
+}
+inline bool MsgBase::has_replicateinfo() const {
+  return _internal_has_replicateinfo();
+}
+inline void MsgBase::clear_replicateinfo() {
+  if (GetArenaForAllocation() == nullptr && _impl_.replicateinfo_ != nullptr) {
+    delete _impl_.replicateinfo_;
   }
-  _impl_.replicate_ = nullptr;
+  _impl_.replicateinfo_ = nullptr;
 }
-inline const ::milvus::proto::common::ReplicateEntity& MsgBase::_internal_replicate() const {
-  const ::milvus::proto::common::ReplicateEntity* p = _impl_.replicate_;
-  return p != nullptr ? *p : reinterpret_cast<const ::milvus::proto::common::ReplicateEntity&>(
-      ::milvus::proto::common::_ReplicateEntity_default_instance_);
+inline const ::milvus::proto::common::ReplicateInfo& MsgBase::_internal_replicateinfo() const {
+  const ::milvus::proto::common::ReplicateInfo* p = _impl_.replicateinfo_;
+  return p != nullptr ? *p : reinterpret_cast<const ::milvus::proto::common::ReplicateInfo&>(
+      ::milvus::proto::common::_ReplicateInfo_default_instance_);
 }
-inline const ::milvus::proto::common::ReplicateEntity& MsgBase::replicate() const {
-  // @@protoc_insertion_point(field_get:milvus.proto.common.MsgBase.replicate)
-  return _internal_replicate();
+inline const ::milvus::proto::common::ReplicateInfo& MsgBase::replicateinfo() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.common.MsgBase.replicateInfo)
+  return _internal_replicateinfo();
 }
-inline void MsgBase::unsafe_arena_set_allocated_replicate(
-    ::milvus::proto::common::ReplicateEntity* replicate) {
+inline void MsgBase::unsafe_arena_set_allocated_replicateinfo(
+    ::milvus::proto::common::ReplicateInfo* replicateinfo) {
   if (GetArenaForAllocation() == nullptr) {
-    delete reinterpret_cast<::PROTOBUF_NAMESPACE_ID::MessageLite*>(_impl_.replicate_);
+    delete reinterpret_cast<::PROTOBUF_NAMESPACE_ID::MessageLite*>(_impl_.replicateinfo_);
   }
-  _impl_.replicate_ = replicate;
-  if (replicate) {
+  _impl_.replicateinfo_ = replicateinfo;
+  if (replicateinfo) {
     
   } else {
     
   }
-  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:milvus.proto.common.MsgBase.replicate)
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:milvus.proto.common.MsgBase.replicateInfo)
 }
-inline ::milvus::proto::common::ReplicateEntity* MsgBase::release_replicate() {
+inline ::milvus::proto::common::ReplicateInfo* MsgBase::release_replicateinfo() {
   
-  ::milvus::proto::common::ReplicateEntity* temp = _impl_.replicate_;
-  _impl_.replicate_ = nullptr;
+  ::milvus::proto::common::ReplicateInfo* temp = _impl_.replicateinfo_;
+  _impl_.replicateinfo_ = nullptr;
 #ifdef PROTOBUF_FORCE_COPY_IN_RELEASE
   auto* old =  reinterpret_cast<::PROTOBUF_NAMESPACE_ID::MessageLite*>(temp);
   temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
@@ -4212,68 +4312,88 @@ inline ::milvus::proto::common::ReplicateEntity* MsgBase::release_replicate() {
 #endif  // !PROTOBUF_FORCE_COPY_IN_RELEASE
   return temp;
 }
-inline ::milvus::proto::common::ReplicateEntity* MsgBase::unsafe_arena_release_replicate() {
-  // @@protoc_insertion_point(field_release:milvus.proto.common.MsgBase.replicate)
+inline ::milvus::proto::common::ReplicateInfo* MsgBase::unsafe_arena_release_replicateinfo() {
+  // @@protoc_insertion_point(field_release:milvus.proto.common.MsgBase.replicateInfo)
   
-  ::milvus::proto::common::ReplicateEntity* temp = _impl_.replicate_;
-  _impl_.replicate_ = nullptr;
+  ::milvus::proto::common::ReplicateInfo* temp = _impl_.replicateinfo_;
+  _impl_.replicateinfo_ = nullptr;
   return temp;
 }
-inline ::milvus::proto::common::ReplicateEntity* MsgBase::_internal_mutable_replicate() {
+inline ::milvus::proto::common::ReplicateInfo* MsgBase::_internal_mutable_replicateinfo() {
   
-  if (_impl_.replicate_ == nullptr) {
-    auto* p = CreateMaybeMessage<::milvus::proto::common::ReplicateEntity>(GetArenaForAllocation());
-    _impl_.replicate_ = p;
+  if (_impl_.replicateinfo_ == nullptr) {
+    auto* p = CreateMaybeMessage<::milvus::proto::common::ReplicateInfo>(GetArenaForAllocation());
+    _impl_.replicateinfo_ = p;
   }
-  return _impl_.replicate_;
+  return _impl_.replicateinfo_;
 }
-inline ::milvus::proto::common::ReplicateEntity* MsgBase::mutable_replicate() {
-  ::milvus::proto::common::ReplicateEntity* _msg = _internal_mutable_replicate();
-  // @@protoc_insertion_point(field_mutable:milvus.proto.common.MsgBase.replicate)
+inline ::milvus::proto::common::ReplicateInfo* MsgBase::mutable_replicateinfo() {
+  ::milvus::proto::common::ReplicateInfo* _msg = _internal_mutable_replicateinfo();
+  // @@protoc_insertion_point(field_mutable:milvus.proto.common.MsgBase.replicateInfo)
   return _msg;
 }
-inline void MsgBase::set_allocated_replicate(::milvus::proto::common::ReplicateEntity* replicate) {
+inline void MsgBase::set_allocated_replicateinfo(::milvus::proto::common::ReplicateInfo* replicateinfo) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
   if (message_arena == nullptr) {
-    delete _impl_.replicate_;
+    delete _impl_.replicateinfo_;
   }
-  if (replicate) {
+  if (replicateinfo) {
     ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
-        ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(replicate);
+        ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(replicateinfo);
     if (message_arena != submessage_arena) {
-      replicate = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
-          message_arena, replicate, submessage_arena);
+      replicateinfo = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, replicateinfo, submessage_arena);
     }
     
   } else {
     
   }
-  _impl_.replicate_ = replicate;
-  // @@protoc_insertion_point(field_set_allocated:milvus.proto.common.MsgBase.replicate)
+  _impl_.replicateinfo_ = replicateinfo;
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.common.MsgBase.replicateInfo)
 }
 
 // -------------------------------------------------------------------
 
-// ReplicateEntity
+// ReplicateInfo
 
 // bool isReplicate = 1;
-inline void ReplicateEntity::clear_isreplicate() {
+inline void ReplicateInfo::clear_isreplicate() {
   _impl_.isreplicate_ = false;
 }
-inline bool ReplicateEntity::_internal_isreplicate() const {
+inline bool ReplicateInfo::_internal_isreplicate() const {
   return _impl_.isreplicate_;
 }
-inline bool ReplicateEntity::isreplicate() const {
-  // @@protoc_insertion_point(field_get:milvus.proto.common.ReplicateEntity.isReplicate)
+inline bool ReplicateInfo::isreplicate() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.common.ReplicateInfo.isReplicate)
   return _internal_isreplicate();
 }
-inline void ReplicateEntity::_internal_set_isreplicate(bool value) {
+inline void ReplicateInfo::_internal_set_isreplicate(bool value) {
   
   _impl_.isreplicate_ = value;
 }
-inline void ReplicateEntity::set_isreplicate(bool value) {
+inline void ReplicateInfo::set_isreplicate(bool value) {
   _internal_set_isreplicate(value);
-  // @@protoc_insertion_point(field_set:milvus.proto.common.ReplicateEntity.isReplicate)
+  // @@protoc_insertion_point(field_set:milvus.proto.common.ReplicateInfo.isReplicate)
+}
+
+// uint64 msgTimestamp = 2;
+inline void ReplicateInfo::clear_msgtimestamp() {
+  _impl_.msgtimestamp_ = uint64_t{0u};
+}
+inline uint64_t ReplicateInfo::_internal_msgtimestamp() const {
+  return _impl_.msgtimestamp_;
+}
+inline uint64_t ReplicateInfo::msgtimestamp() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.common.ReplicateInfo.msgTimestamp)
+  return _internal_msgtimestamp();
+}
+inline void ReplicateInfo::_internal_set_msgtimestamp(uint64_t value) {
+  
+  _impl_.msgtimestamp_ = value;
+}
+inline void ReplicateInfo::set_msgtimestamp(uint64_t value) {
+  _internal_set_msgtimestamp(value);
+  // @@protoc_insertion_point(field_set:milvus.proto.common.ReplicateInfo.msgTimestamp)
 }
 
 // -------------------------------------------------------------------
@@ -5215,6 +5335,8 @@ ServerInfo::mutable_reserved() {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------
