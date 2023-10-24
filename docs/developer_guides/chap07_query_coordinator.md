@@ -134,7 +134,7 @@ type PartitionStatesResponse struct {
 - _LoadPartitions_
 
 ```go
-type LoadPartitonRequest struct {
+type LoadPartitionRequest struct {
 	Base         *commonpb.MsgBase
 	DbID         UniqueID
 	CollectionID UniqueID

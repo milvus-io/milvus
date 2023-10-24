@@ -111,7 +111,7 @@ mq:
 pulsar:
   address: localhost # Address of pulsar
   port: 6650 # Port of Pulsar
-  webport: 80 # Web port of pulsar, if you connect direcly without proxy, should use 8080
+  webport: 80 # Web port of pulsar, if you connect directly without proxy, should use 8080
   maxMessageSize: 5242880 # 5 * 1024 * 1024 Bytes, Maximum size of each message in pulsar.
   tenant: public
   namespace: default
@@ -346,7 +346,7 @@ dataCoord:
     balanceInterval: 360 #The interval for the channelBalancer on datacoord to check balance status
   segment:
     maxSize: 512 # Maximum size of a segment in MB
-    diskSegmentMaxSize: 2048 # Maximun size of a segment in MB for collection which has Disk index
+    diskSegmentMaxSize: 2048 # Maximum size of a segment in MB for collection which has Disk index
     sealProportion: 0.23
     # The time of the assignment expiration in ms
     # Warning! this parameter is an expert variable and closely related to data integrity. Without specific

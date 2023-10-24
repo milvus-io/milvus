@@ -31,7 +31,7 @@ ConstantExpr :=
   | UnaryArithOp ConstantExpr
 
 Constant :=
-    INTERGER
+    INTEGER
   | FLOAT_NUMBER
 
 UnaryArithOp :=
@@ -64,7 +64,7 @@ CmpOp :=
   | "=="
   | "!="
 
-INTERGER := 整数
+INTEGER := 整数
 FLOAT_NUM := 浮点数
 IDENTIFIER := 列名
 ```

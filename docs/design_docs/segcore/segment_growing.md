@@ -2,13 +2,13 @@
 
 Growing segment has the following additional interfaces:
 
-1. `PreInsert(size) -> reseveredOffset`: serial interface, which reserves space for future insertion and returns the `reseveredOffset`.
+1. `PreInsert(size) -> reservedOffset`: serial interface, which reserves space for future insertion and returns the `reservedOffset`.
 
-2. `Insert(reseveredOffset, size, ...Data...)`: write `...Data...` into range `[reseveredOffset, reseveredOffset + size)`. This interface is allowed to be called concurrently.
+2. `Insert(reservedOffset, size, ...Data...)`: write `...Data...` into range `[reservedOffset, reservedOffset + size)`. This interface is allowed to be called concurrently.
 
    1. `...Data...` contains row_ids, timestamps two system attributes, and other columns
    2. data columns can be stored either row-based or column-based.
-   3. `PreDelete & Delete(reseveredOffset, row_ids, timestamps)` is a delete interface similar to insert interface.
+   3. `PreDelete & Delete(reservedOffset, row_ids, timestamps)` is a delete interface similar to insert interface.
 
 Growing segment stores data in the form of chunk. The number of rows in each chunk is restricted by configs.
 
