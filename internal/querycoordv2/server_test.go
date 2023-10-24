@@ -167,6 +167,10 @@ func (suite *ServerSuite) TestRecover() {
 	err := suite.server.Stop()
 	suite.NoError(err)
 
+	//  stopping querynode
+	downNode := suite.nodes[0]
+	downNode.Stopping()
+
 	suite.server, err = suite.newQueryCoord()
 	suite.NoError(err)
 	suite.hackServer()
@@ -176,6 +180,8 @@ func (suite *ServerSuite) TestRecover() {
 	for _, collection := range suite.collections {
 		suite.True(suite.server.meta.Exist(collection))
 	}
+
+	suite.True(suite.server.nodeMgr.IsStoppingNode(suite.nodes[0].ID))
 }
 
 func (suite *ServerSuite) TestNodeUp() {
