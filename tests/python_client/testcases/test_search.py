@@ -1,3 +1,4 @@
+import numpy as np
 from pymilvus.orm.types import CONSISTENCY_STRONG, CONSISTENCY_BOUNDED, CONSISTENCY_SESSION, CONSISTENCY_EVENTUALLY
 from common.constants import *
 from utils.util_pymilvus import *
@@ -549,6 +550,63 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                             check_items={"err_code": 1,
                                                          "err_msg": "failed to create query plan: cannot parse "
                                                                     "expression: %s" % expression})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_with_expression_invalid_array_one(self):
+        """
+        target: test search with invalid array expressions
+        method: test search with invalid array expressions:
+                the order of array > the length of array
+        expected: searched successfully with correct limit(topK)
+        """
+        # 1. create a collection
+        nb = ct.default_nb
+        schema = cf.gen_array_collection_schema()
+        collection_w = self.init_collection_wrap(schema=schema)
+        data = cf.get_row_data_by_schema(schema=schema)
+        data[1][ct.default_int32_array_field_name] = [1]
+        collection_w.insert(data)
+        collection_w.create_index("float_vector", ct.default_index)
+        collection_w.load()
+
+        # 2. search
+        expression = "int32_array[101] > 0"
+        msg = ("failed to search: attempt #0: failed to search/query delegator 1 for channel "
+               "by-dev-rootcoord-dml_: fail to Search, QueryNode ID=1, reason=worker(1) query"
+               " failed: UnknownError: Assert \")index >= 0 && index < length_\" at /go/src/"
+               "github.com/milvus-io/milvus/internal/core/src/common/Array.h:454 => index out"
+               " of range, index=101, length=100: attempt #1: no available shard delegator "
+               "found: service unavailable")
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, nb, expression,
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 65538,
+                                         ct.err_msg: msg})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_with_expression_invalid_array_two(self):
+        """
+        target: test search with invalid array expressions
+        method: test search with invalid array expressions
+        expected: searched successfully with correct limit(topK)
+        """
+        # 1. create a collection
+        nb = ct.default_nb
+        schema = cf.gen_array_collection_schema()
+        collection_w = self.init_collection_wrap(schema=schema)
+        data = cf.get_row_data_by_schema(schema=schema)
+        collection_w.insert(data)
+        collection_w.create_index("float_vector", ct.default_index)
+        collection_w.load()
+
+        # 2. search
+        expression = "int32_array[0] - 1 < 1"
+        error = {ct.err_code: 65535,
+                 ct.err_msg: f"failed to create query plan: cannot parse expression: {expression}, "
+                             f"error: LessThan is not supported in execution backend"}
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, nb, expression,
+                            check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_partition_invalid_type(self, get_invalid_partition):
@@ -3018,6 +3076,57 @@ class TestCollectionSearch(TestcaseBase):
         for hits in search_res:
             ids = hits.ids
             assert set(ids).issubset(filter_ids_set)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("expression", cf.gen_array_field_expressions())
+    def test_search_with_expression_array(self, expression, _async, enable_dynamic_field):
+        """
+        target: test search with different expressions
+        method: test search with different expressions
+        expected: searched successfully with correct limit(topK)
+        """
+        # 1. create a collection
+        nb = ct.default_nb
+        schema = cf.gen_array_collection_schema()
+        collection_w = self.init_collection_wrap(schema=schema, enable_dynamic_field=enable_dynamic_field)
+
+        # 2. insert data
+        array_length = 10
+        data = []
+        for i in range(nb):
+            arr = {ct.default_int64_field_name: i,
+                   ct.default_float_vec_field_name: cf.gen_vectors(1, ct.default_dim)[0],
+                   ct.default_int32_array_field_name: [np.int32(i) for i in range(array_length)],
+                   ct.default_float_array_field_name: [np.float32(i) for i in range(array_length)],
+                   ct.default_string_array_field_name: [str(i) for i in range(array_length)]}
+            data.append(arr)
+        collection_w.insert(data)
+
+        # 3. filter result with expression in collection
+        expression = expression.replace("&&", "and").replace("||", "or")
+        filter_ids = []
+        for i in range(nb):
+            int32_array = data[i][ct.default_int32_array_field_name]
+            float_array = data[i][ct.default_float_array_field_name]
+            string_array = data[i][ct.default_string_array_field_name]
+            if not expression or eval(expression):
+                filter_ids.append(i)
+
+        # 4. create index
+        collection_w.create_index("float_vector", ct.default_index)
+        collection_w.load()
+
+        # 5. search with expression
+        log.info("test_search_with_expression: searching with expression: %s" % expression)
+        search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
+                                            default_search_params, nb, expression, _async=_async)
+        if _async:
+            search_res.done()
+            search_res = search_res.result()
+
+        for hits in search_res:
+            ids = hits.ids
+            assert set(ids) == set(filter_ids)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.xfail(reason="issue 24514")

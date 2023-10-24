@@ -247,6 +247,21 @@ class TestIndexOperation(TestcaseBase):
                                        ct.err_msg: f"there is no vector index on collection: {collection_w.name}, "
                                                    f"please create index firstly"})
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_index_create_on_array_field(self):
+        """
+        target: Test create index on array field
+        method: create index on array field
+        expected: raise exception
+        """
+        schema = cf.gen_array_collection_schema()
+        collection_w = self.init_collection_wrap(schema=schema)
+        error = {ct.err_code: 1100,
+                 ct.err_msg: "create index on json field is not supported: expected=supported field, "
+                             "actual=create index on Array field: invalid parameter"}
+        collection_w.create_index(ct.default_string_array_field_name, {},
+                                  check_task=CheckTasks.err_res, check_items=error)
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_collection_empty(self):
         """

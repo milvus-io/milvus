@@ -4,6 +4,7 @@ import numpy
 import pandas as pd
 import pytest
 
+from pymilvus import DataType
 from base.client_base import TestcaseBase
 from common import common_func as cf
 from common import common_type as ct
@@ -3820,7 +3821,7 @@ class TestCollectionString(TestcaseBase):
 class TestCollectionJSON(TestcaseBase):
     """
     ******************************************************************
-      The following cases are used to test about string 
+      The following cases are used to test about json
     ******************************************************************
     """
     @pytest.mark.tags(CaseLabel.L1)
@@ -3895,3 +3896,189 @@ class TestCollectionJSON(TestcaseBase):
         self.collection_wrap.init_collection(name=c_name, schema=schema,
                                              check_task=CheckTasks.check_collection_property,
                                              check_items={exp_name: c_name, exp_schema: schema})
+
+
+class TestCollectionARRAY(TestcaseBase):
+    """
+    ******************************************************************
+      The following cases are used to test about array
+    ******************************************************************
+    """
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_collection_array_field_element_type_not_exist(self):
+        """
+        target: test create collection with ARRAY field without element type
+        method: create collection with one array field without element type
+        expected: Raise exception
+        """
+        int_field = cf.gen_int64_field(is_primary=True)
+        vec_field = cf.gen_float_vec_field()
+        array_field = cf.gen_array_field(element_type=None)
+        array_schema = cf.gen_collection_schema([int_field, vec_field, array_field])
+        self.init_collection_wrap(schema=array_schema, check_task=CheckTasks.err_res,
+                                  check_items={ct.err_code: 65535, ct.err_msg: "element data type None is not valid"})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    # @pytest.mark.skip("issue #27522")
+    @pytest.mark.parametrize("element_type", [1001, 'a', [], (), {1}, DataType.BINARY_VECTOR,
+                                              DataType.FLOAT_VECTOR, DataType.JSON, DataType.ARRAY])
+    def test_collection_array_field_element_type_invalid(self, element_type):
+        """
+        target: Create a field with invalid element_type
+        method: Create a field with invalid element_type
+                1. Type not in DataType: 1, 'a', ...
+                2. Type in DataType: binary_vector, float_vector, json_field, array_field
+        expected: Raise exception
+        """
+        int_field = cf.gen_int64_field(is_primary=True)
+        vec_field = cf.gen_float_vec_field()
+        array_field = cf.gen_array_field(element_type=element_type)
+        array_schema = cf.gen_collection_schema([int_field, vec_field, array_field])
+        error = {ct.err_code: 65535, ct.err_msg: "element data type None is not valid"}
+        if element_type in ['a', {1}]:
+            error = {ct.err_code: 1, ct.err_msg: "Unexpected error"}
+        self.init_collection_wrap(schema=array_schema, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_collection_array_field_no_capacity(self):
+        """
+        target: Create a field without giving max_capacity
+        method: Create a field without giving max_capacity
+        expected: Raise exception
+        """
+        int_field = cf.gen_int64_field(is_primary=True)
+        vec_field = cf.gen_float_vec_field()
+        array_field = cf.gen_array_field(max_capacity=None)
+        array_schema = cf.gen_collection_schema([int_field, vec_field, array_field])
+        self.init_collection_wrap(schema=array_schema, check_task=CheckTasks.err_res,
+                                  check_items={ct.err_code: 65535,
+                                               ct.err_msg: "the value of max_capacity must be an integer"})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("max_capacity", [[], 'a', (), -1, 4097])
+    def test_collection_array_field_invalid_capacity(self, max_capacity):
+        """
+        target: Create a field with invalid max_capacity
+        method: Create a field with invalid max_capacity
+                1. Type invalid: [], 'a', ()
+                2. Value invalid: <0, >max_capacity(4096)
+        expected: Raise exception
+        """
+        int_field = cf.gen_int64_field(is_primary=True)
+        vec_field = cf.gen_float_vec_field()
+        array_field = cf.gen_array_field(max_capacity=max_capacity)
+        array_schema = cf.gen_collection_schema([int_field, vec_field, array_field])
+        self.init_collection_wrap(schema=array_schema, check_task=CheckTasks.err_res,
+                                  check_items={ct.err_code: 65535,
+                                               ct.err_msg: "the maximum capacity specified for a "
+                                                           "Array should be in (0, 4096]"})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_collection_string_array_without_max_length(self):
+        """
+        target: Create string array without giving max length
+        method: Create string array without giving max length
+        expected: Raise exception
+        """
+        int_field = cf.gen_int64_field(is_primary=True)
+        vec_field = cf.gen_float_vec_field()
+        array_field = cf.gen_array_field(element_type=DataType.VARCHAR)
+        array_schema = cf.gen_collection_schema([int_field, vec_field, array_field])
+        self.init_collection_wrap(schema=array_schema, check_task=CheckTasks.err_res,
+                                  check_items={ct.err_code: 65535,
+                                               ct.err_msg: "type param(max_length) should be specified for "
+                                                           "varChar field of collection"})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("max_length", [[], 'a', (), -1, 65536])
+    def test_collection_string_array_max_length_invalid(self, max_length):
+        """
+        target: Create string array with invalid max length
+        method: Create string array with invalid max length
+                1. Type invalid: [], 'a', ()
+                2. Value invalid: <0, >max_length(65535)
+        expected: Raise exception
+        """
+        int_field = cf.gen_int64_field(is_primary=True)
+        vec_field = cf.gen_float_vec_field()
+        array_field = cf.gen_array_field(element_type=DataType.VARCHAR, max_length=max_length)
+        array_schema = cf.gen_collection_schema([int_field, vec_field, array_field])
+        self.init_collection_wrap(schema=array_schema, check_task=CheckTasks.err_res,
+                                  check_items={ct.err_code: 65535,
+                                               ct.err_msg: "the maximum length specified for a VarChar "
+                                                           "should be in (0, 65535]"})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_collection_array_field_all_datatype(self):
+        """
+        target: test create collection with ARRAY field all data type
+        method: 1. Create field respectively: int8, int16, int32, int64, varchar, bool, float, double
+                2. Insert data respectively: int8, int16, int32, int64, varchar, bool, float, double
+        expected: Raise exception
+        """
+        # Create field respectively
+        nb = ct.default_nb
+        pk_field = cf.gen_int64_field(is_primary=True)
+        vec_field = cf.gen_float_vec_field()
+        int8_array = cf.gen_array_field(name="int8_array", element_type=DataType.INT8, max_capacity=nb)
+        int16_array = cf.gen_array_field(name="int16_array", element_type=DataType.INT16, max_capacity=nb)
+        int32_array = cf.gen_array_field(name="int32_array", element_type=DataType.INT32, max_capacity=nb)
+        int64_array = cf.gen_array_field(name="int64_array", element_type=DataType.INT64, max_capacity=nb)
+        bool_array = cf.gen_array_field(name="bool_array", element_type=DataType.BOOL, max_capacity=nb)
+        float_array = cf.gen_array_field(name="float_array", element_type=DataType.FLOAT, max_capacity=nb)
+        double_array = cf.gen_array_field(name="double_array", element_type=DataType.DOUBLE, max_capacity=nb)
+        string_array = cf.gen_array_field(name="string_array", element_type=DataType.VARCHAR, max_capacity=nb,
+                                          max_length=100)
+        array_schema = cf.gen_collection_schema([pk_field, vec_field, int8_array, int16_array, int32_array,
+                                                 int64_array, bool_array, float_array, double_array, string_array])
+        collection_w = self.init_collection_wrap(schema=array_schema,
+                                                 check_task=CheckTasks.check_collection_property,
+                                                 check_items={exp_schema: array_schema})
+
+        # check array in collection.describe()
+        res = collection_w.describe()[0]
+        log.info(res)
+        fields = [
+            {"field_id": 100, "name": "int64", "description": "", "type": 5, "params": {},
+             "element_type": 0, "is_primary": True},
+            {"field_id": 101, "name": "float_vector", "description": "", "type": 101,
+             "params": {"dim": ct.default_dim}, "element_type": 0},
+            {"field_id": 102, "name": "int8_array", "description": "", "type": 22,
+             "params": {"max_capacity": "2000"}, "element_type": 2},
+            {"field_id": 103, "name": "int16_array", "description": "", "type": 22,
+             "params": {"max_capacity": "2000"}, "element_type": 3},
+            {"field_id": 104, "name": "int32_array", "description": "", "type": 22,
+             "params": {"max_capacity": "2000"}, "element_type": 4},
+            {"field_id": 105, "name": "int64_array", "description": "", "type": 22,
+             "params": {"max_capacity": "2000"}, "element_type": 5},
+            {"field_id": 106, "name": "bool_array", "description": "", "type": 22,
+             "params": {"max_capacity": "2000"}, "element_type": 1},
+            {"field_id": 107, "name": "float_array", "description": "", "type": 22,
+             "params": {"max_capacity": "2000"}, "element_type": 10},
+            {"field_id": 108, "name": "double_array", "description": "", "type": 22,
+             "params": {"max_capacity": "2000"}, "element_type": 11},
+            {"field_id": 109, "name": "string_array", "description": "", "type": 22,
+             "params": {"max_length": "100", "max_capacity": "2000"}, "element_type": 21}
+        ]
+        assert res["fields"] == fields
+
+        # Insert data respectively
+        nb = 10
+        pk_values = [i for i in range(nb)]
+        float_vec = cf.gen_vectors(nb, ct.default_dim)
+        int8_values = [[numpy.int8(j) for j in range(nb)] for i in range(nb)]
+        int16_values = [[numpy.int16(j) for j in range(nb)] for i in range(nb)]
+        int32_values = [[numpy.int32(j) for j in range(nb)] for i in range(nb)]
+        int64_values = [[numpy.int64(j) for j in range(nb)] for i in range(nb)]
+        bool_values = [[numpy.bool_(j) for j in range(nb)] for i in range(nb)]
+        float_values = [[numpy.float32(j) for j in range(nb)] for i in range(nb)]
+        double_values = [[numpy.double(j) for j in range(nb)] for i in range(nb)]
+        string_values = [[str(j) for j in range(nb)] for i in range(nb)]
+        data = [pk_values, float_vec, int8_values, int16_values, int32_values, int64_values,
+                bool_values, float_values, double_values, string_values]
+        collection_w.insert(data)
+
+        # check insert successfully
+        collection_w.flush()
+        collection_w.num_entities == nb

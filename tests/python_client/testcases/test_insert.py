@@ -58,8 +58,7 @@ class TestInsertParams(TestcaseBase):
         df = cf.gen_default_dataframe_data(ct.default_nb)
         mutation_res, _ = collection_w.insert(data=df)
         assert mutation_res.insert_count == ct.default_nb
-        assert mutation_res.primary_keys == df[ct.default_int64_field_name].values.tolist(
-        )
+        assert mutation_res.primary_keys == df[ct.default_int64_field_name].values.tolist()
         assert collection_w.num_entities == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -204,8 +203,7 @@ class TestInsertParams(TestcaseBase):
         df, _ = cf.gen_default_binary_dataframe_data(ct.default_nb)
         mutation_res, _ = collection_w.insert(data=df)
         assert mutation_res.insert_count == ct.default_nb
-        assert mutation_res.primary_keys == df[ct.default_int64_field_name].values.tolist(
-        )
+        assert mutation_res.primary_keys == df[ct.default_int64_field_name].values.tolist()
         assert collection_w.num_entities == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -2221,3 +2219,172 @@ class TestUpsertInvalid(TestcaseBase):
         data = (int_values, default_value, string_values, vectors)
         collection_w.upsert(data, check_task=CheckTasks.err_res,
                             check_items={ct.err_code: 1, ct.err_msg: "Field varchar don't match in entities[0]"})
+
+
+class TestInsertArray(TestcaseBase):
+    """ Test case of Insert array """
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("auto_id", [True, False])
+    def test_insert_array_dataframe(self, auto_id):
+        """
+        target: test insert DataFrame data
+        method: Insert data in the form of dataframe
+        expected: assert num entities
+        """
+        schema = cf.gen_array_collection_schema(auto_id=auto_id)
+        collection_w = self.init_collection_wrap(schema=schema)
+        data = cf.gen_array_dataframe_data()
+        if auto_id:
+            data = data.drop(ct.default_int64_field_name, axis=1)
+        collection_w.insert(data=data)
+        collection_w.flush()
+        assert collection_w.num_entities == ct.default_nb
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("auto_id", [True, False])
+    def test_insert_array_list(self, auto_id):
+        """
+        target: test insert list data
+        method: Insert data in the form of a list
+        expected: assert num entities
+        """
+        schema = cf.gen_array_collection_schema(auto_id=auto_id)
+        collection_w = self.init_collection_wrap(schema=schema)
+
+        nb = ct.default_nb
+        arr_len = ct.default_max_capacity
+        pk_values = [i for i in range(nb)]
+        float_vec = cf.gen_vectors(nb, ct.default_dim)
+        int32_values = [[np.int32(j) for j in range(i, i+arr_len)] for i in range(nb)]
+        float_values = [[np.float32(j) for j in range(i, i+arr_len)] for i in range(nb)]
+        string_values = [[str(j) for j in range(i, i+arr_len)] for i in range(nb)]
+
+        data = [pk_values, float_vec, int32_values, float_values, string_values]
+        if auto_id:
+            del data[0]
+        # log.info(data[0][1])
+        collection_w.insert(data=data)
+        assert collection_w.num_entities == nb
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_insert_array_rows(self):
+        """
+        target: test insert row data
+        method: Insert data in the form of rows
+        expected: assert num entities
+        """
+        schema = cf.gen_array_collection_schema()
+        collection_w = self.init_collection_wrap(schema=schema)
+
+        data = cf.get_row_data_by_schema(schema=schema)
+        collection_w.insert(data=data)
+        assert collection_w.num_entities == ct.default_nb
+
+        collection_w.upsert(data[:2])
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_insert_array_empty_list(self):
+        """
+        target: test insert DataFrame data
+        method: Insert data with the length of array = 0
+        expected: assert num entities
+        """
+        nb = ct.default_nb
+        schema = cf.gen_array_collection_schema()
+        collection_w = self.init_collection_wrap(schema=schema)
+        data = cf.gen_array_dataframe_data()
+        data[ct.default_int32_array_field_name] = [[] for _ in range(nb)]
+        collection_w.insert(data=data)
+        assert collection_w.num_entities == ct.default_nb
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_insert_array_length_differ(self):
+        """
+        target: test insert row data
+        method: Insert data with every row's array length differ
+        expected: assert num entities
+        """
+        nb = ct.default_nb
+        schema = cf.gen_array_collection_schema()
+        collection_w = self.init_collection_wrap(schema=schema)
+        array = []
+        for i in range(nb):
+            arr_len1 = random.randint(0, ct.default_max_capacity)
+            arr_len2 = random.randint(0, ct.default_max_capacity)
+            arr = {
+                ct.default_int64_field_name: i,
+                ct.default_float_vec_field_name: [random.random() for _ in range(ct.default_dim)],
+                ct.default_int32_array_field_name: [np.int32(j) for j in range(arr_len1)],
+                ct.default_float_array_field_name: [np.float32(j) for j in range(arr_len2)],
+                ct.default_string_array_field_name: [str(j) for j in range(ct.default_max_capacity)],
+            }
+            array.append(arr)
+
+        collection_w.insert(array)
+        assert collection_w.num_entities == nb
+
+        data = cf.get_row_data_by_schema(nb=2, schema=schema)
+        collection_w.upsert(data)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_insert_array_length_invalid(self):
+        """
+        target: Insert actual array length > max_capacity
+        method: Insert actual array length > max_capacity
+        expected: raise error
+        """
+        # init collection
+        schema = cf.gen_array_collection_schema()
+        collection_w = self.init_collection_wrap(schema=schema)
+        # Insert actual array length > max_capacity
+        arr_len = ct.default_max_capacity + 1
+        data = cf.get_row_data_by_schema(schema=schema)
+        data[1][ct.default_float_array_field_name] = [np.float32(i) for i in range(arr_len)]
+        err_msg = (f"the length (101) of 1th array exceeds max capacity ({ct.default_max_capacity}): "
+                   f"expected=valid length array, actual=array length exceeds max capacity: invalid parameter")
+        collection_w.insert(data=data, check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1100, ct.err_msg: err_msg})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_insert_array_type_invalid(self):
+        """
+        target: Insert array type invalid
+        method: 1. Insert string values to an int array
+                2. upsert float values to a string array
+        expected: raise error
+        """
+        # init collection
+        arr_len = 10
+        schema = cf.gen_array_collection_schema()
+        collection_w = self.init_collection_wrap(schema=schema)
+        data = cf.get_row_data_by_schema(schema=schema)
+
+        # 1. Insert string values to an int array
+        data[1][ct.default_int32_array_field_name] = [str(i) for i in range(arr_len)]
+        err_msg = "The data in the same column must be of the same type."
+        collection_w.insert(data=data, check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: err_msg})
+
+        # 2. upsert float values to a string array
+        data = cf.get_row_data_by_schema(schema=schema)
+        data[1][ct.default_string_array_field_name] = [np.float32(i) for i in range(arr_len)]
+        collection_w.upsert(data=data, check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: err_msg})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_insert_array_mixed_value(self):
+        """
+        target: Insert array consisting of mixed values
+        method: Insert array consisting of mixed values
+        expected: raise error
+        """
+        # init collection
+        schema = cf.gen_array_collection_schema()
+        collection_w = self.init_collection_wrap(schema=schema)
+        # Insert array consisting of mixed values
+        data = cf.get_row_data_by_schema(schema=schema)
+        data[1][ct.default_string_array_field_name] = ["a", 1, [2.0, 3.0], False]
+        collection_w.insert(data=data, check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1,
+                                         ct.err_msg: "The data in the same column must be of the same type."})

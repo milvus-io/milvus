@@ -1,6 +1,7 @@
 import random
 import time
 import pandas as pd
+import numpy as np
 import pytest
 
 from base.client_base import TestcaseBase
@@ -1892,6 +1893,52 @@ class TestDeleteComplexExpr(TestcaseBase):
         # query to check
         collection_w.query(f"int64 in {filter_ids}", check_task=CheckTasks.check_query_empty)
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("expression", cf.gen_array_field_expressions())
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    def test_delete_array_expressions(self, expression, enable_dynamic_field):
+        """
+        target: test delete entities using normal expression
+        method: delete using normal expression
+        expected: delete successfully
+        """
+        # 1. create a collection
+        nb = ct.default_nb
+        schema = cf.gen_array_collection_schema()
+        collection_w = self.init_collection_wrap(schema=schema, enable_dynamic_field=enable_dynamic_field)
+
+        # 2. insert data
+        array_length = 100
+        data = []
+        for i in range(nb):
+            arr = {ct.default_int64_field_name: i,
+                   ct.default_float_vec_field_name: cf.gen_vectors(1, ct.default_dim)[0],
+                   ct.default_int32_array_field_name: [np.int32(i) for i in range(array_length)],
+                   ct.default_float_array_field_name: [np.float32(i) for i in range(array_length)],
+                   ct.default_string_array_field_name: [str(i) for i in range(array_length)]}
+            data.append(arr)
+        collection_w.insert(data)
+        collection_w.flush()
+
+        # 3. filter result with expression in collection
+        expression = expression.replace("&&", "and").replace("||", "or")
+        filter_ids = []
+        for i in range(nb):
+            int32_array = data[i][ct.default_int32_array_field_name]
+            float_array = data[i][ct.default_float_array_field_name]
+            string_array = data[i][ct.default_string_array_field_name]
+            if not expression or eval(expression):
+                filter_ids.append(i)
+
+        # 4. delete by array expression
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
+        collection_w.load()
+        res = collection_w.delete(expression)[0]
+        assert res.delete_count == len(filter_ids)
+
+        # 5. query to check
+        collection_w.query(expression, check_task=CheckTasks.check_query_empty)
+
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("field_name", ["varchar", "json_field['string']", "NewStr"])
     @pytest.mark.parametrize("like", ["like", "LIKE"])
@@ -1981,7 +2028,7 @@ class TestDeleteComplexExpr(TestcaseBase):
         collection_w = self.init_collection_general(prefix, False, enable_dynamic_field=enable_dynamic_field)[0]
 
         # insert
-        listMix = [[i, i + 2] for i in range(ct.default_nb)] # only int
+        listMix = [[i, i + 2] for i in range(ct.default_nb)]  # only int
         if enable_dynamic_field:
             data = cf.gen_default_rows_data()
             for i in range(ct.default_nb):
