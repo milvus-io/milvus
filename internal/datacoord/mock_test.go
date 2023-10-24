@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
@@ -869,7 +868,7 @@ func (h *mockHandler) GetDataVChanPositions(channel *channel, partitionID Unique
 	}
 }
 
-func (h *mockHandler) CheckShouldDropChannel(channel string, collectionID UniqueID) bool {
+func (h *mockHandler) CheckShouldDropChannel(channel string) bool {
 	return false
 }
 

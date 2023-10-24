@@ -20,6 +20,9 @@ import (
 	"context"
 	"time"
 
+	"github.com/samber/lo"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -28,18 +31,17 @@ import (
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/samber/lo"
-	"go.uber.org/zap"
 )
 
 // Handler handles some channel method for ChannelManager
+//go:generate mockery --name=Handler --dir=. --filename=mock_handler.go --output=. --structname=NMockHandler --with-expecter --inpackage
 type Handler interface {
 	// GetQueryVChanPositions gets the information recovery needed of a channel for QueryCoord
 	GetQueryVChanPositions(channel *channel, partitionID ...UniqueID) (*datapb.VchannelInfo, error)
 	// GetDataVChanPositions gets the information recovery needed of a channel for DataNode
 	GetDataVChanPositions(channel *channel, partitionID UniqueID) *datapb.VchannelInfo
-	CheckShouldDropChannel(channel string, collectionID UniqueID) bool
-	FinishDropChannel(channel string) error
+	CheckShouldDropChannel(ch string) bool
+	FinishDropChannel(ch string) error
 	GetCollection(ctx context.Context, collectionID UniqueID) (*collectionInfo, error)
 }
 
@@ -392,20 +394,8 @@ func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID
 }
 
 // CheckShouldDropChannel returns whether specified channel is marked to be removed
-func (h *ServerHandler) CheckShouldDropChannel(channel string, collectionID UniqueID) bool {
-	if h.s.meta.catalog.ShouldDropChannel(h.s.ctx, channel) {
-		return true
-	}
-	// collectionID parse from channelName
-	has, err := h.HasCollection(h.s.ctx, collectionID)
-	if err != nil {
-		log.Info("datacoord ServerHandler CheckShouldDropChannel hasCollection failed", zap.Error(err))
-		return false
-	}
-	log.Info("datacoord ServerHandler CheckShouldDropChannel hasCollection", zap.Bool("shouldDropChannel", !has),
-		zap.String("channel", channel))
-
-	return !has
+func (h *ServerHandler) CheckShouldDropChannel(channel string) bool {
+	return h.s.meta.catalog.ShouldDropChannel(h.s.ctx, channel)
 }
 
 // FinishDropChannel cleans up the remove flag for channels
