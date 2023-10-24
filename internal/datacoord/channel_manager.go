@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
@@ -243,7 +244,7 @@ func (c *ChannelManager) unwatchDroppedChannels() {
 	nodeChannels := c.store.GetChannels()
 	for _, nodeChannel := range nodeChannels {
 		for _, ch := range nodeChannel.Channels {
-			if !c.h.CheckShouldDropChannel(ch.Name, ch.CollectionID) {
+			if !c.h.CheckShouldDropChannel(ch.Name) {
 				continue
 			}
 			err := c.remove(nodeChannel.NodeID, ch)
@@ -765,7 +766,7 @@ func (c *ChannelManager) Reassign(originNodeID UniqueID, channelName string) err
 	c.mu.RUnlock()
 
 	reallocates := &NodeChannelInfo{originNodeID, []*channel{ch}}
-	isDropped := c.isMarkedDrop(channelName, ch.CollectionID)
+	isDropped := c.isMarkedDrop(channelName)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -820,7 +821,7 @@ func (c *ChannelManager) CleanupAndReassign(nodeID UniqueID, channelName string)
 	}
 
 	reallocates := &NodeChannelInfo{nodeID, []*channel{chToCleanUp}}
-	isDropped := c.isMarkedDrop(channelName, chToCleanUp.CollectionID)
+	isDropped := c.isMarkedDrop(channelName)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -886,8 +887,8 @@ func (c *ChannelManager) getNodeIDByChannelName(chName string) (bool, UniqueID) 
 	return false, 0
 }
 
-func (c *ChannelManager) isMarkedDrop(channelName string, collectionID UniqueID) bool {
-	return c.h.CheckShouldDropChannel(channelName, collectionID)
+func (c *ChannelManager) isMarkedDrop(channelName string) bool {
+	return c.h.CheckShouldDropChannel(channelName)
 }
 
 func getReleaseOp(nodeID UniqueID, ch *channel) ChannelOpSet {
