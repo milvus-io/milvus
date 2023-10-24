@@ -1315,54 +1315,31 @@ def index_to_dict(index):
 
 
 def assert_json_contains(expr, list_data):
+    opposite = False
+    if expr.startswith("not"):
+        opposite = True
+        expr = expr.split("not ", 1)[1]
     result_ids = []
     expr_prefix = expr.split('(', 1)[0]
     exp_ids = eval(expr.split(', ', 1)[1].split(')', 1)[0])
-    if expr_prefix in ["json_contains", "JSON_CONTAINS"]:
+    if expr_prefix in ["json_contains", "JSON_CONTAINS", "array_contains", "ARRAY_CONTAINS"]:
         for i in range(len(list_data)):
             if exp_ids in list_data[i]:
                 result_ids.append(i)
-    elif expr_prefix in ["json_contains_all", "JSON_CONTAINS_ALL"]:
+    elif expr_prefix in ["json_contains_all", "JSON_CONTAINS_ALL", "array_contains_all", "ARRAY_CONTAINS_ALL"]:
         for i in range(len(list_data)):
             set_list_data = set(tuple(element) if isinstance(element, list) else element for element in list_data[i])
             if set(exp_ids).issubset(set_list_data):
                 result_ids.append(i)
-    elif expr_prefix in ["json_contains_any", "JSON_CONTAINS_ANY"]:
+    elif expr_prefix in ["json_contains_any", "JSON_CONTAINS_ANY", "array_contains_any", "ARRAY_CONTAINS_ANY"]:
         for i in range(len(list_data)):
             set_list_data = set(tuple(element) if isinstance(element, list) else element for element in list_data[i])
             if set(exp_ids) & set_list_data:
                 result_ids.append(i)
     else:
         log.warning("unknown expr: %s" % expr)
-    return result_ids
-
-
-def assert_array_contains(expr, list_data):
-    nb = len(list_data)
-    result_ids = []
-    exp_ids = eval(expr.split(', ', 1)[1].split(')', 1)[0])
-    reverse = True if "not array" or "not ARRAY" in expr else False
-    expr_prefix = expr.split('(', 1)[0]
-    if "array_contains_any" or "ARRAY_CONTAINS_ANY" in expr_prefix:
-        for i in range(nb):
-            set_list_data = set(tuple(element) if isinstance(element, list) else element for element in list_data[i])
-            if set(exp_ids) & set_list_data:
-                result_ids.append(i)
-    elif "array_contains_all" or "ARRAY_CONTAINS_ALL" in expr_prefix:
-        for i in range(nb):
-            set_list_data = set(tuple(element) if isinstance(element, list) else element for element in list_data[i])
-            if set(exp_ids).issubset(set_list_data):
-                result_ids.append(i)
-    elif "array_contains" or "ARRAY_CONTAINS" in expr_prefix:
-        for i in range(nb):
-            if exp_ids in list_data[i]:
-                result_ids.append(i)
-    else:
-        log.warning("unknown expr: %s" % expr)
-
-    if reverse:
-        result_ids = [x for x in result_ids if x not in range(nb)]
-
+    if opposite:
+        result_ids = [i for i in range(len(list_data)) if i not in result_ids]
     return result_ids
 
 

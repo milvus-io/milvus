@@ -9135,6 +9135,144 @@ class TestCollectionSearchJSON(TestcaseBase):
                                 check_items={"nq": default_nq,
                                              "limit": limit // 2})
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("expr_prefix", ["array_contains", "ARRAY_CONTAINS"])
+    def test_search_expr_array_contains(self, expr_prefix):
+        """
+        target: test query with expression using json_contains
+        method: query with expression using json_contains
+        expected: succeed
+        """
+        # 1. create a collection
+        schema = cf.gen_array_collection_schema()
+        collection_w = self.init_collection_wrap(schema=schema)
+
+        # 2. insert data
+        string_field_value = [[str(j) for j in range(i, i+3)] for i in range(ct.default_nb)]
+        data = cf.gen_array_dataframe_data()
+        data[ct.default_string_array_field_name] = string_field_value
+        collection_w.insert(data)
+        collection_w.create_index(ct.default_float_vec_field_name, {})
+
+        # 3. search
+        collection_w.load()
+        expression = f"{expr_prefix}({ct.default_string_array_field_name}, '1000')"
+        res = collection_w.search(vectors[:default_nq], default_search_field, {},
+                                  limit=ct.default_nb, expr=expression)[0]
+        exp_ids = cf.assert_json_contains(expression, string_field_value)
+        assert set(res[0].ids) == set(exp_ids)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("expr_prefix", ["array_contains", "ARRAY_CONTAINS"])
+    def test_search_expr_not_array_contains(self, expr_prefix):
+        """
+        target: test query with expression using json_contains
+        method: query with expression using json_contains
+        expected: succeed
+        """
+        # 1. create a collection
+        schema = cf.gen_array_collection_schema()
+        collection_w = self.init_collection_wrap(schema=schema)
+
+        # 2. insert data
+        string_field_value = [[str(j) for j in range(i, i + 3)] for i in range(ct.default_nb)]
+        data = cf.gen_array_dataframe_data()
+        data[ct.default_string_array_field_name] = string_field_value
+        collection_w.insert(data)
+        collection_w.create_index(ct.default_float_vec_field_name, {})
+
+        # 3. search
+        collection_w.load()
+        expression = f"not {expr_prefix}({ct.default_string_array_field_name}, '1000')"
+        res = collection_w.search(vectors[:default_nq], default_search_field, {},
+                                  limit=ct.default_nb, expr=expression)[0]
+        exp_ids = cf.assert_json_contains(expression, string_field_value)
+        assert set(res[0].ids) == set(exp_ids)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("expr_prefix", ["array_contains_all", "ARRAY_CONTAINS_ALL"])
+    def test_search_expr_array_contains_all(self, expr_prefix):
+        """
+        target: test query with expression using json_contains
+        method: query with expression using json_contains
+        expected: succeed
+        """
+        # 1. create a collection
+        schema = cf.gen_array_collection_schema()
+        collection_w = self.init_collection_wrap(schema=schema)
+
+        # 2. insert data
+        string_field_value = [[str(j) for j in range(i, i + 3)] for i in range(ct.default_nb)]
+        data = cf.gen_array_dataframe_data()
+        data[ct.default_string_array_field_name] = string_field_value
+        collection_w.insert(data)
+        collection_w.create_index(ct.default_float_vec_field_name, {})
+
+        # 3. search
+        collection_w.load()
+        expression = f"{expr_prefix}({ct.default_string_array_field_name}, ['1000'])"
+        res = collection_w.search(vectors[:default_nq], default_search_field, {},
+                                  limit=ct.default_nb, expr=expression)[0]
+        exp_ids = cf.assert_json_contains(expression, string_field_value)
+        assert set(res[0].ids) == set(exp_ids)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("expr_prefix", ["array_contains_any", "ARRAY_CONTAINS_ANY",
+                                             "not array_contains_any", "not ARRAY_CONTAINS_ANY"])
+    def test_search_expr_array_contains_any(self, expr_prefix):
+        """
+        target: test query with expression using json_contains
+        method: query with expression using json_contains
+        expected: succeed
+        """
+        # 1. create a collection
+        schema = cf.gen_array_collection_schema()
+        collection_w = self.init_collection_wrap(schema=schema)
+
+        # 2. insert data
+        string_field_value = [[str(j) for j in range(i, i + 3)] for i in range(ct.default_nb)]
+        data = cf.gen_array_dataframe_data()
+        data[ct.default_string_array_field_name] = string_field_value
+        collection_w.insert(data)
+        collection_w.create_index(ct.default_float_vec_field_name, {})
+
+        # 3. search
+        collection_w.load()
+        expression = f"{expr_prefix}({ct.default_string_array_field_name}, ['1000'])"
+        res = collection_w.search(vectors[:default_nq], default_search_field, {},
+                                  limit=ct.default_nb, expr=expression)[0]
+        exp_ids = cf.assert_json_contains(expression, string_field_value)
+        assert set(res[0].ids) == set(exp_ids)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("expr_prefix", ["array_contains_all", "ARRAY_CONTAINS_ALL",
+                                             "array_contains_any", "ARRAY_CONTAINS_ANY"])
+    def test_search_expr_array_contains_invalid(self, expr_prefix):
+        """
+        target: test query with expression using json_contains
+        method: query with expression using json_contains(a, b) b not list
+        expected: report error
+        """
+        # 1. create a collection
+        schema = cf.gen_array_collection_schema()
+        collection_w = self.init_collection_wrap(schema=schema)
+
+        # 2. insert data
+        data = cf.gen_array_dataframe_data()
+        collection_w.insert(data)
+        collection_w.create_index(ct.default_float_vec_field_name, {})
+
+        # 3. search
+        collection_w.load()
+        expression = f"{expr_prefix}({ct.default_string_array_field_name}, '1000')"
+        collection_w.search(vectors[:default_nq], default_search_field, {},
+                            limit=ct.default_nb, expr=expression,
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 65535,
+                                         ct.err_msg: "failed to create query plan: cannot parse "
+                                                     "expression: %s, error: contains_any operation "
+                                                     "element must be an array" % expression})
+
 
 class TestSearchIterator(TestcaseBase):
     """ Test case of search iterator """

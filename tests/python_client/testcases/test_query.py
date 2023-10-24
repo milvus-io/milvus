@@ -573,7 +573,8 @@ class TestQueryParams(TestcaseBase):
             collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("expr_prefix", ["json_contains", "JSON_CONTAINS"])
+    @pytest.mark.parametrize("expr_prefix", ["json_contains", "JSON_CONTAINS",
+                                             "array_contains", "ARRAY_CONTAINS"])
     def test_query_expr_json_contains(self, enable_dynamic_field, expr_prefix):
         """
         target: test query with expression using json_contains
@@ -581,8 +582,7 @@ class TestQueryParams(TestcaseBase):
         expected: succeed
         """
         # 1. initialize with data
-        collection_w = self.init_collection_general(
-            prefix, enable_dynamic_field=enable_dynamic_field)[0]
+        collection_w = self.init_collection_general(prefix, enable_dynamic_field=enable_dynamic_field)[0]
 
         # 2. insert data
         array = cf.gen_default_rows_data()
@@ -608,8 +608,7 @@ class TestQueryParams(TestcaseBase):
         expected: succeed
         """
         # 1. initialize with data
-        collection_w = self.init_collection_general(
-            prefix, enable_dynamic_field=True)[0]
+        collection_w = self.init_collection_general(prefix, enable_dynamic_field=True)[0]
 
         # 2. insert data
         limit = ct.default_nb // 4
@@ -656,7 +655,8 @@ class TestQueryParams(TestcaseBase):
         assert len(res) == limit // 2
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("expr_prefix", ["json_contains_all", "JSON_CONTAINS_ALL"])
+    @pytest.mark.parametrize("expr_prefix", ["json_contains_all", "JSON_CONTAINS_ALL",
+                                             "array_contains_all", "ARRAY_CONTAINS_ALL"])
     def test_query_expr_all_datatype_json_contains_all(self, enable_dynamic_field, expr_prefix):
         """
         target: test query with expression using json_contains
@@ -865,7 +865,8 @@ class TestQueryParams(TestcaseBase):
         assert len(res) == ct.default_nb // 2
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("expr_prefix", ["json_contains_any", "JSON_CONTAINS_ANY"])
+    @pytest.mark.parametrize("expr_prefix", ["json_contains_any", "JSON_CONTAINS_ANY",
+                                             "array_contains_any", "ARRAY_CONTAINS_ANY"])
     def test_query_expr_list_all_datatype_json_contains_any(self, expr_prefix):
         """
         target: test query with expression using json_contains_any
@@ -1019,48 +1020,70 @@ class TestQueryParams(TestcaseBase):
         assert len(res) == limit - offset
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip("Too many are not supported")
-    @pytest.mark.parametrize("expression", cf.gen_normal_expressions_field("array_length(float_array)")[1:])
-    def test_query_expr_array_length(self, expression, enable_dynamic_field):
+    @pytest.mark.parametrize("array_length", ["ARRAY_LENGTH", "array_length"])
+    @pytest.mark.parametrize("op", ["==", "!="])
+    def test_query_expr_array_length(self, array_length, op, enable_dynamic_field):
         """
-        target: test query with expression using json_contains_any
-        method: query with expression using json_contains_any
+        target: test query with expression using array_length
+        method: query with expression using array_length
+                array_length only support == , !=
         expected: succeed
         """
         # 1. create a collection
-        nb = ct.default_nb
-        max_capacity = 1000
-        schema = cf.gen_array_collection_schema(max_capacity=max_capacity)
+        schema = cf.gen_array_collection_schema()
         collection_w = self.init_collection_wrap(schema=schema, enable_dynamic_field=enable_dynamic_field)
 
         # 2. insert data
-        data = []
+        data = cf.gen_array_dataframe_data()
         length = []
-        for i in range(nb):
-            array_length = random.randint(0, max_capacity)
-            length.append(array_length)
-            arr = {ct.default_int64_field_name: i,
-                   ct.default_float_vec_field_name: cf.gen_vectors(1, ct.default_dim)[0],
-                   ct.default_int32_array_field_name: [],
-                   ct.default_float_array_field_name: [np.float32(i) for i in range(array_length)],
-                   ct.default_string_array_field_name: []}
-            data.append(arr)
+        for i in range(ct.default_nb):
+            ran_int = random.randint(50, 53)
+            length.append(ran_int)
+
+        data[ct.default_float_array_field_name] = \
+            [[np.float32(j) for j in range(length[i])] for i in range(ct.default_nb)]
         collection_w.insert(data)
 
         # 3. load and query
         collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
         collection_w.load()
+        expression = f"{array_length}({ct.default_float_array_field_name}) {op} 51"
         res = collection_w.query(expression)[0]
 
         # 4. check
-        expression = expression.replace("&&", "and").replace("||", "or")
-        expression = expression.replace("array_length(float_array)", "array_length")
+        expression = expression.replace(f"{array_length}(float_array)", "array_length")
         filter_ids = []
-        for i in range(nb):
+        for i in range(ct.default_nb):
             array_length = length[i]
             if not expression or eval(expression):
                 filter_ids.append(i)
         assert len(res) == len(filter_ids)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("op", [">", "<=", "+ 1 =="])
+    def test_query_expr_invalid_array_length(self, op):
+        """
+        target: test query with expression using array_length
+        method: query with expression using array_length
+                array_length only support == , !=
+        expected: raise error
+        """
+        # 1. create a collection
+        schema = cf.gen_array_collection_schema()
+        collection_w = self.init_collection_wrap(schema=schema)
+
+        # 2. insert data
+        data = cf.gen_array_dataframe_data()
+        collection_w.insert(data)
+
+        # 3. load and query
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
+        collection_w.load()
+        expression = f"array_length({ct.default_float_array_field_name}) {op} 51"
+        collection_w.query(expression, check_task=CheckTasks.err_res,
+                           check_items={ct.err_code: 65535,
+                                        ct.err_msg: "cannot parse expression: %s, error %s "
+                                                    "is not supported" % (expression, op)})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_expr_empty_without_limit(self):
