@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	_ "github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util"

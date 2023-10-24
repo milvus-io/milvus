@@ -46,7 +46,7 @@ const (
 	DefaultMaxAttempts                = 10
 	DefaultInitialBackoff     float64 = 0.2
 	DefaultMaxBackoff         float64 = 10
-	DefaultCompressionEnabled bool    = true
+	DefaultCompressionEnabled bool    = false
 
 	ProxyInternalPort = 19529
 	ProxyExternalPort = 19530
