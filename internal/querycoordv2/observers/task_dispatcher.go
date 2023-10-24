@@ -70,7 +70,7 @@ func (d *taskDispatcher[K]) Stop() {
 func (d *taskDispatcher[K]) AddTask(keys ...K) {
 	var added bool
 	for _, key := range keys {
-		added = added || d.tasks.Insert(key)
+		added = d.tasks.Insert(key) || added
 	}
 	if added {
 		d.notify()
