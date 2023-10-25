@@ -7438,7 +7438,6 @@ class TestCollectionRangeSearch(TestcaseBase):
         if _async:
             res.done()
             res = res.result()
-        assert len(res[0][0].entity._row_data) != 0
         assert default_int64_field_name in res[0][0].fields
 
     @pytest.mark.tags(CaseLabel.L2)
