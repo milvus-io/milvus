@@ -96,7 +96,12 @@ func genEmptyArrayFieldData(field *schemapb.FieldSchema) *schemapb.FieldData {
 		FieldName: field.GetName(),
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{Data: nil}},
+				Data: &schemapb.ScalarField_ArrayData{
+					ArrayData: &schemapb.ArrayArray{
+						Data:        nil,
+						ElementType: field.GetElementType(),
+					},
+				},
 			},
 		},
 		FieldId:   field.GetFieldID(),
