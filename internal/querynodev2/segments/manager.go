@@ -344,27 +344,24 @@ func (mgr *segmentManager) GetAndPin(segments []int64, filters ...SegmentFilter)
 		growing, growingExist := mgr.growingSegments[id]
 		sealed, sealedExist := mgr.sealedSegments[id]
 
-		growingExist = growingExist && filter(growing, filters...)
-		sealedExist = sealedExist && filter(sealed, filters...)
+		if !growingExist && !sealedExist {
+			err = merr.WrapErrSegmentNotLoaded(id, "segment not found")
+			return nil, err
+		}
 
-		if growingExist {
+		if growingExist && filter(growing, filters...) {
 			err = growing.RLock()
 			if err != nil {
 				return nil, err
 			}
 			lockedSegments = append(lockedSegments, growing)
 		}
-		if sealedExist {
+		if sealedExist && filter(sealed, filters...) {
 			err = sealed.RLock()
 			if err != nil {
 				return nil, err
 			}
 			lockedSegments = append(lockedSegments, sealed)
-		}
-
-		if !growingExist && !sealedExist {
-			err = merr.WrapErrSegmentNotLoaded(id, "segment not found")
-			return nil, err
 		}
 	}
 	return lockedSegments, nil

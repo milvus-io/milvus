@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -32,11 +33,11 @@ func (s *ManagerSuite) SetupSuite() {
 	s.partitionIDs = []int64{10, 11, 12}
 	s.channels = []string{"dml1", "dml2", "dml3"}
 	s.types = []SegmentType{SegmentTypeSealed, SegmentTypeGrowing, SegmentTypeSealed}
+
+	s.mgr = NewSegmentManager()
 }
 
 func (s *ManagerSuite) SetupTest() {
-	s.mgr = NewSegmentManager()
-
 	for i, id := range s.segmentIDs {
 		schema := GenTestCollectionSchema("manager-suite", schemapb.DataType_Int64)
 		segment, err := NewSegment(
@@ -143,6 +144,20 @@ func (s *ManagerSuite) TestIncreaseVersion() {
 
 	s.True(action(segment), "version lt execute CAS")
 	segment.AssertExpectations(s.T())
+}
+
+func (s *ManagerSuite) TestGetAndPin() {
+	// test pin loaded empty segment
+	segments, err := s.mgr.GetAndPin(s.segmentIDs, WithType(SegmentTypeGrowing))
+	s.NoError(err)
+	s.Len(segments, 0)
+	segments, err = s.mgr.GetAndPin(s.segmentIDs, WithType(SegmentTypeSealed))
+	s.NoError(err)
+	s.Len(segments, 0)
+
+	// test pin not loaded segment
+	_, err = s.mgr.GetAndPin([]int64{11, 22, 33})
+	s.ErrorIs(err, merr.ErrSegmentNotLoaded)
 }
 
 func TestManager(t *testing.T) {

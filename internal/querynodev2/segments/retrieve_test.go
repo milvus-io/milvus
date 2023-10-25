@@ -235,7 +235,7 @@ func (suite *RetrieveSuite) TestRetrieveNonExistSegment() {
 	}
 
 	res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req)
-	suite.Error(err)
+	suite.ErrorIs(err, merr.ErrSegmentNotLoaded)
 	suite.Len(res, 0)
 	suite.manager.Segment.Unpin(segments)
 }
@@ -255,7 +255,7 @@ func (suite *RetrieveSuite) TestRetrieveNilSegment() {
 	}
 
 	res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req)
-	suite.ErrorIs(err, merr.ErrSegmentNotLoaded)
+	suite.NoError(err)
 	suite.Len(res, 0)
 	suite.manager.Segment.Unpin(segments)
 }
