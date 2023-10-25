@@ -31,10 +31,10 @@ import (
 )
 
 func main() {
-	idx := slices.Index(os.Args, "--run-with-subprocess")
+	idx := slices.Index(os.Args, "--run-without-subprocess")
 
-	// execute command as a subprocess if the command contains "--run-with-subprocess"
-	if idx > 0 {
+	// execute command as a subprocess if --run-without-subprocess is not sets
+	if idx < 0 {
 		args := slices.Delete(os.Args, idx, idx+1)
 		log.Println("run subprocess with cmd:", args)
 
