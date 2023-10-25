@@ -108,6 +108,32 @@ class SegmentInterface {
     HasRawData(int64_t field_id) const = 0;
 };
 
+union MinValue {
+    int8_t int8Value;
+    int16_t int16Value;
+    int32_t int32Value;
+    int64_t int64Value;
+    float floatValue;
+    double doubleValue;
+};
+
+union MaxValue {
+    int8_t int8Value;
+    int16_t int16Value;
+    int32_t int32Value;
+    int64_t int64Value;
+    float floatValue;
+    double doubleValue;
+};
+
+struct FieldChunkMetrics {
+    MinValue min;
+    MaxValue max;
+    bool hasValue_;
+
+    FieldChunkMetrics() : hasValue_(false){};
+};
+
 // internal API for DSL calculation
 // only for implementation
 class SegmentInternalInterface : public SegmentInterface {
@@ -117,6 +143,20 @@ class SegmentInternalInterface : public SegmentInterface {
     chunk_data(FieldId field_id, int64_t chunk_id) const {
         return static_cast<Span<T>>(chunk_data_impl(field_id, chunk_id));
     }
+
+    void
+    MaybeLoadFieldChunkMetrics(const FieldId fieldId,
+                               int64_t chunkId,
+                               const milvus::DataType dataType,
+                               const void* chunk_data,
+                               int64_t count);
+
+    template <typename T>
+    std::pair<T, T>
+    ProcessFieldMetrics(const T* data, int64_t count);
+
+    FieldChunkMetrics
+    get_field_chunk_metrics(FieldId fieldId, int64_t chunkId) const;
 
     template <typename T>
     const index::ScalarIndex<T>&
@@ -280,7 +320,9 @@ class SegmentInternalInterface : public SegmentInterface {
     mutable std::shared_mutex mutex_;
     // fieldID -> std::pair<num_rows, avg_size>
     std::unordered_map<FieldId, std::pair<int64_t, int64_t>>
-        variable_fields_avg_size_;  // bytes
+        variable_fields_avg_size_;  // bytes;
+    std::unordered_map<FieldId, std::unordered_map<int64_t, FieldChunkMetrics>>
+        fieldChunkMetrics;
 };
 
 }  // namespace milvus::segcore

@@ -90,17 +90,48 @@ class ExecExprVisitor : public ExprVisitor {
     }
 
  public:
-    template <typename T, typename IndexFunc, typename ElementFunc>
+    template <typename T,
+              typename IndexFunc,
+              typename ElementFunc,
+              typename InRangeFunc>
     auto
     ExecRangeVisitorImpl(FieldId field_id,
                          IndexFunc func,
-                         ElementFunc element_func) -> BitsetType;
+                         ElementFunc element_func,
+                         InRangeFunc in_range_func) -> BitsetType;
 
     template <typename T, typename IndexFunc, typename ElementFunc>
     auto
     ExecDataRangeVisitorImpl(FieldId field_id,
                              IndexFunc index_func,
                              ElementFunc element_func) -> BitsetType;
+
+    template <typename T>
+    struct IsAllowedType {
+        static constexpr bool isNumericType =
+            std::is_same<T, int8_t>::value || std::is_same<T, int16_t>::value ||
+            std::is_same<T, int32_t>::value ||
+            std::is_same<T, int64_t>::value || std::is_same<T, float>::value ||
+            std::is_same<T, double>::value;
+
+        static constexpr bool isDisallowedType =
+            std::is_same<T, std::string>::value ||
+            std::is_same<T, milvus::Json>::value;
+
+        static constexpr bool value = isNumericType && !isDisallowedType;
+    };
+
+    template <typename T, typename InRangeFunc>
+    std::enable_if_t<ExecExprVisitor::IsAllowedType<T>::value, bool>
+    InChunkRange(InRangeFunc inRange,
+                 segcore::FieldChunkMetrics& fieldChunkMetrics,
+                 DataType dataType) const;
+
+    template <typename T, typename InRangeFunc>
+    std::enable_if_t<!ExecExprVisitor::IsAllowedType<T>::value, bool>
+    InChunkRange(InRangeFunc inRange,
+                 segcore::FieldChunkMetrics& fieldChunkMetrics,
+                 DataType dataType) const;
 
     template <typename T>
     auto

@@ -1381,3 +1381,98 @@ TEST(Sealed, LoadArrayFieldDataWithMMap) {
     SealedLoadFieldData(dataset, *segment, {}, true);
     segment->Search(plan.get(), ph_group.get());
 }
+
+TEST(Sealed, LoadAndGetFieldChunkMetrics) {
+    auto schema = std::make_shared<Schema>();
+    auto dim = 128;
+    auto metrics_type = "L2";
+    auto fake_vec_fid = schema->AddDebugField(
+        "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto i32_fid = schema->AddDebugField("int32_field", DataType::INT32);
+    auto i16_fid = schema->AddDebugField("int16_field", DataType::INT16);
+    auto i8_fid = schema->AddDebugField("int8_field", DataType::INT8);
+    auto float_fid = schema->AddDebugField("float_field", DataType::FLOAT);
+    auto double_fid = schema->AddDebugField("double_field", DataType::DOUBLE);
+    size_t N = 10;
+    auto dataset = DataGen(schema, N);
+    auto segment = CreateSealedSegment(schema);
+    std::cout << "pk_fid:" << pk_fid.get() << std::endl;
+
+    //test for int64
+    std::vector<int64_t> pks = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    auto pk_field_data = storage::CreateFieldData(DataType::INT64, 1, 10);
+    pk_field_data->FillFieldData(pks.data(), N);
+    segment->MaybeLoadFieldChunkMetrics(
+        pk_fid, 0, DataType::INT64, pk_field_data->Data(), N);
+    auto fieldChunkMetrics = segment->get_field_chunk_metrics(pk_fid, 0);
+    ASSERT_EQ(fieldChunkMetrics.min.int64Value, 1);
+    ASSERT_EQ(fieldChunkMetrics.max.int64Value, 10);
+    ASSERT_TRUE(fieldChunkMetrics.hasValue_);
+
+    //test for int32
+    std::vector<int32_t> int32s = {2, 2, 3, 4, 5, 6, 7, 8, 9, 12};
+    auto int32_field_data = storage::CreateFieldData(DataType::INT32, 1, 10);
+    int32_field_data->FillFieldData(int32s.data(), N);
+    segment->MaybeLoadFieldChunkMetrics(
+        i32_fid, 0, DataType::INT32, int32_field_data->Data(), N);
+    fieldChunkMetrics = segment->get_field_chunk_metrics(i32_fid, 0);
+    ASSERT_EQ(fieldChunkMetrics.min.int32Value, 2);
+    ASSERT_EQ(fieldChunkMetrics.max.int32Value, 12);
+    ASSERT_TRUE(fieldChunkMetrics.hasValue_);
+
+    //test for int16
+    std::vector<int16_t> int16s = {2, 2, 3, 4, 5, 6, 7, 8, 9, 12};
+    auto int16_field_data = storage::CreateFieldData(DataType::INT16, 1, 10);
+    int16_field_data->FillFieldData(int16s.data(), N);
+    segment->MaybeLoadFieldChunkMetrics(
+        i16_fid, 0, DataType::INT16, int16_field_data->Data(), N);
+    fieldChunkMetrics = segment->get_field_chunk_metrics(i16_fid, 0);
+    ASSERT_EQ(fieldChunkMetrics.min.int16Value, 2);
+    ASSERT_EQ(fieldChunkMetrics.max.int16Value, 12);
+    ASSERT_TRUE(fieldChunkMetrics.hasValue_);
+
+    //test for int8
+    std::vector<int8_t> int8s = {2, 2, 3, 4, 5, 6, 7, 8, 9, 12};
+    auto int8_field_data = storage::CreateFieldData(DataType::INT8, 1, 10);
+    int8_field_data->FillFieldData(int8s.data(), N);
+    segment->MaybeLoadFieldChunkMetrics(
+        i8_fid, 0, DataType::INT8, int8_field_data->Data(), N);
+    fieldChunkMetrics = segment->get_field_chunk_metrics(i8_fid, 0);
+    ASSERT_EQ(fieldChunkMetrics.min.int8Value, 2);
+    ASSERT_EQ(fieldChunkMetrics.max.int8Value, 12);
+    ASSERT_TRUE(fieldChunkMetrics.hasValue_);
+
+    // test for float
+    std::vector<float> floats = {
+        1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0};
+    auto float_field_data = storage::CreateFieldData(DataType::FLOAT, 1, 10);
+    float_field_data->FillFieldData(floats.data(), N);
+    segment->MaybeLoadFieldChunkMetrics(
+        float_fid, 0, DataType::FLOAT, float_field_data->Data(), N);
+    fieldChunkMetrics = segment->get_field_chunk_metrics(float_fid, 0);
+    ASSERT_EQ(fieldChunkMetrics.min.floatValue, 1.0f);
+    ASSERT_EQ(fieldChunkMetrics.max.floatValue, 10.0f);
+    ASSERT_TRUE(fieldChunkMetrics.hasValue_);
+
+    // test for double
+    std::vector<double> doubles = {
+        1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0};
+    auto double_field_data = storage::CreateFieldData(DataType::DOUBLE, 1, 10);
+    double_field_data->FillFieldData(doubles.data(), N);
+    segment->MaybeLoadFieldChunkMetrics(
+        double_fid, 0, DataType::DOUBLE, double_field_data->Data(), N);
+    fieldChunkMetrics = segment->get_field_chunk_metrics(double_fid, 0);
+    ASSERT_EQ(fieldChunkMetrics.min.doubleValue, 1.0);
+    ASSERT_EQ(fieldChunkMetrics.max.doubleValue, 10.0);
+    ASSERT_TRUE(fieldChunkMetrics.hasValue_);
+
+    //test for empty input data
+    std::vector<double> emptyDoubles = {};
+    double_field_data = storage::CreateFieldData(DataType::DOUBLE, 1, 0);
+    double_field_data->FillFieldData(emptyDoubles.data(), 0);
+    segment->MaybeLoadFieldChunkMetrics(
+        double_fid, 0, DataType::DOUBLE, double_field_data->Data(), 0);
+    fieldChunkMetrics = segment->get_field_chunk_metrics(double_fid, 0);
+    ASSERT_FALSE(fieldChunkMetrics.hasValue_);
+}

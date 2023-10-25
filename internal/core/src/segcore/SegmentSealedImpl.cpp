@@ -344,6 +344,8 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
             while (data.channel->pop(field_data)) {
                 column->AppendBatch(field_data);
             }
+            MaybeLoadFieldChunkMetrics(
+                field_id, 0, data_type, column->Span().data(), num_rows);
         }
 
         AssertInfo(column->NumRows() == num_rows,

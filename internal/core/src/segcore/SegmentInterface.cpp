@@ -293,4 +293,107 @@ SegmentInternalInterface::timestamp_filter(BitsetType& bitset,
     }
 }
 
+FieldChunkMetrics
+SegmentInternalInterface::get_field_chunk_metrics(FieldId fieldId,
+                                                  int64_t chunkId) const {
+    auto fieldMetrics = fieldChunkMetrics.find(fieldId);
+    if (fieldMetrics != fieldChunkMetrics.end()) {
+        auto chunkMetrics = fieldMetrics->second.find(chunkId);
+        if (chunkMetrics != fieldMetrics->second.end()) {
+            return chunkMetrics->second;
+        }
+    }
+    return {};
+}
+
+void
+SegmentInternalInterface::MaybeLoadFieldChunkMetrics(
+    const milvus::FieldId fieldId,
+    int64_t chunkId,
+    const milvus::DataType dataType,
+    const void* chunk_data,
+    int64_t count) {
+    FieldChunkMetrics chunkMetrics;
+    if (count > 0) {
+        chunkMetrics.hasValue_ = true;
+        switch (dataType) {
+            case DataType::INT8: {
+                const int8_t* typedData =
+                    static_cast<const int8_t*>(chunk_data);
+                std::pair<int8_t, int8_t> minMax =
+                    ProcessFieldMetrics<int8_t>(typedData, count);
+                chunkMetrics.min.int8Value = minMax.first;
+                chunkMetrics.max.int8Value = minMax.second;
+                break;
+            }
+            case DataType::INT16: {
+                const int16_t* typedData =
+                    static_cast<const int16_t*>(chunk_data);
+                std::pair<int16_t, int16_t> minMax =
+                    ProcessFieldMetrics<int16_t>(typedData, count);
+                chunkMetrics.min.int16Value = minMax.first;
+                chunkMetrics.max.int16Value = minMax.second;
+                break;
+            }
+            case DataType::INT32: {
+                const int32_t* typedData =
+                    static_cast<const int32_t*>(chunk_data);
+                std::pair<int32_t, int32_t> minMax =
+                    ProcessFieldMetrics<int32_t>(typedData, count);
+                chunkMetrics.min.int32Value = minMax.first;
+                chunkMetrics.max.int32Value = minMax.second;
+                break;
+            }
+            case DataType::INT64: {
+                const int64_t* typedData =
+                    static_cast<const int64_t*>(chunk_data);
+                std::pair<int64_t, int64_t> minMax =
+                    ProcessFieldMetrics<int64_t>(typedData, count);
+                chunkMetrics.min.int64Value = minMax.first;
+                chunkMetrics.max.int64Value = minMax.second;
+                break;
+            }
+            case DataType::FLOAT: {
+                const float* typedData = static_cast<const float*>(chunk_data);
+                std::pair<float, float> minMax =
+                    ProcessFieldMetrics<float>(typedData, count);
+                chunkMetrics.min.floatValue = minMax.first;
+                chunkMetrics.max.floatValue = minMax.second;
+                break;
+            }
+            case DataType::DOUBLE: {
+                const double* typedData =
+                    static_cast<const double*>(chunk_data);
+                std::pair<double, double> minMax =
+                    ProcessFieldMetrics<double>(typedData, count);
+                chunkMetrics.min.doubleValue = minMax.first;
+                chunkMetrics.max.doubleValue = minMax.second;
+                break;
+            }
+        }
+    }
+    fieldChunkMetrics[fieldId][chunkId] = chunkMetrics;
+}
+
+template <typename T>
+std::pair<T, T>
+SegmentInternalInterface::ProcessFieldMetrics(const T* data, int64_t count) {
+    //double check to avoid crush
+    if (data == nullptr || count == 0) {
+        return {T(), T()};
+    }
+    T minValue = data[0];
+    T maxValue = data[0];
+    for (size_t i = 0; i < count; i++) {
+        T value = data[i];
+        if (value < minValue) {
+            minValue = value;
+        }
+        if (value > maxValue) {
+            maxValue = value;
+        }
+    }
+    return {minValue, maxValue};
+}
+
 }  // namespace milvus::segcore
