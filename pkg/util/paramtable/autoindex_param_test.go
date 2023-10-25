@@ -65,6 +65,18 @@ func TestAutoIndexParams_build(t *testing.T) {
 		assert.Equal(t, "IVF_FLAT", CParams.AutoIndexConfig.IndexType.GetValue())
 		assert.Equal(t, strconv.Itoa(map2["nlist"].(int)), CParams.AutoIndexConfig.IndexParams.GetAsJSONMap()["nlist"])
 	})
+
+	t.Run("test parsePrepareParams success", func(t *testing.T) {
+		var err error
+		map1 := map[string]any{
+			"key1": 25,
+		}
+		var jsonStrBytes []byte
+		jsonStrBytes, err = json.Marshal(map1)
+		assert.NoError(t, err)
+		bt.Save(CParams.AutoIndexConfig.IndexParams.Key, string(jsonStrBytes))
+		assert.Equal(t, strconv.Itoa(map1["key1"].(int)), CParams.AutoIndexConfig.IndexParams.GetAsJSONMap()["key1"])
+	})
 }
 
 func Test_autoIndexConfig_panicIfNotValid(t *testing.T) {
