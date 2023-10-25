@@ -200,8 +200,10 @@ proxy:
   ginLogging: true
   maxTaskNum: 1024 # max task number of proxy task queue
   accessLog:
-    localPath: /tmp/milvus_accesslog
-    filename: milvus_access_log.log # Log filename, leave empty to disable file log.
+    enable: false
+    filename: "" # Log filename, leave empty to use stdout.
+    # localPath: /tmp/milvus_accesslog // log file rootpath
+    # maxSize: 64 # max log file size of singal log file to trigger rotate.
   http:
     enabled: true # Whether to enable the http server
     debug_mode: false # Whether to enable http server debug mode

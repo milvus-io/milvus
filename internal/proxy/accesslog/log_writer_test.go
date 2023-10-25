@@ -42,6 +42,8 @@ func TestRotateLogger_Basic(t *testing.T) {
 	var Params paramtable.ComponentParam
 	Params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 	testPath := "/tmp/accesstest"
+	Params.Save(Params.ProxyCfg.AccessLog.Enable.Key, "true")
+	Params.Save(Params.ProxyCfg.AccessLog.Filename.Key, "test_access")
 	Params.Save(Params.ProxyCfg.AccessLog.LocalPath.Key, testPath)
 	Params.Save(Params.ProxyCfg.AccessLog.MinioEnable.Key, "true")
 	Params.Save(Params.ProxyCfg.AccessLog.RemotePath.Key, "access_log/")
@@ -71,6 +73,8 @@ func TestRotateLogger_TimeRotate(t *testing.T) {
 	var Params paramtable.ComponentParam
 	Params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 	testPath := "/tmp/accesstest"
+	Params.Save(Params.ProxyCfg.AccessLog.Enable.Key, "true")
+	Params.Save(Params.ProxyCfg.AccessLog.Filename.Key, "test_access")
 	Params.Save(Params.ProxyCfg.AccessLog.LocalPath.Key, testPath)
 	Params.Save(Params.ProxyCfg.AccessLog.MinioEnable.Key, "true")
 	Params.Save(Params.ProxyCfg.AccessLog.RemotePath.Key, "access_log/")
@@ -99,6 +103,8 @@ func TestRotateLogger_SizeRotate(t *testing.T) {
 	var Params paramtable.ComponentParam
 	Params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 	testPath := "/tmp/accesstest"
+	Params.Save(Params.ProxyCfg.AccessLog.Enable.Key, "true")
+	Params.Save(Params.ProxyCfg.AccessLog.Filename.Key, "test_access")
 	Params.Save(Params.ProxyCfg.AccessLog.LocalPath.Key, testPath)
 	Params.Save(Params.ProxyCfg.AccessLog.MinioEnable.Key, "true")
 	Params.Save(Params.ProxyCfg.AccessLog.RemotePath.Key, "access_log/")
@@ -133,6 +139,8 @@ func TestRotateLogger_LocalRetention(t *testing.T) {
 	var Params paramtable.ComponentParam
 	Params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 	testPath := "/tmp/accesstest"
+	Params.Save(Params.ProxyCfg.AccessLog.Enable.Key, "true")
+	Params.Save(Params.ProxyCfg.AccessLog.Filename.Key, "test_access")
 	Params.Save(Params.ProxyCfg.AccessLog.LocalPath.Key, testPath)
 	Params.Save(Params.ProxyCfg.AccessLog.MaxBackups.Key, "1")
 	defer os.RemoveAll(testPath)
@@ -153,6 +161,8 @@ func TestRotateLogger_BasicError(t *testing.T) {
 	var Params paramtable.ComponentParam
 	Params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 	testPath := ""
+	Params.Save(Params.ProxyCfg.AccessLog.Enable.Key, "true")
+	Params.Save(Params.ProxyCfg.AccessLog.Filename.Key, "test_access")
 	Params.Save(Params.ProxyCfg.AccessLog.LocalPath.Key, testPath)
 
 	logger, err := NewRotateLogger(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)
@@ -177,6 +187,8 @@ func TestRotateLogger_InitError(t *testing.T) {
 	var params paramtable.ComponentParam
 	params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 	testPath := ""
+	params.Save(params.ProxyCfg.AccessLog.Enable.Key, "true")
+	params.Save(params.ProxyCfg.AccessLog.Filename.Key, "test_access")
 	params.Save(params.ProxyCfg.AccessLog.LocalPath.Key, testPath)
 	params.Save(params.ProxyCfg.AccessLog.MinioEnable.Key, "true")
 	params.Save(params.MinioCfg.Address.Key, "")
