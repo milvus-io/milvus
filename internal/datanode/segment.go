@@ -103,7 +103,7 @@ func (s *Segment) setReleased(b bool) {
 }
 
 func (s *Segment) isValid() bool {
-	return s.getType() != datapb.SegmentType_Compacted
+	return s != nil && s.getType() != datapb.SegmentType_Compacted
 }
 
 func (s *Segment) notFlushed() bool {
