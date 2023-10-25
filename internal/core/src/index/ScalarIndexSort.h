@@ -82,6 +82,10 @@ class ScalarIndexSort : public ScalarIndex<T> {
     BinarySet
     Upload(const Config& config = {}) override;
 
+ private:
+    bool
+    ShouldSkip(const T lower_value, const T upper_value, const OpType op);
+
  public:
     const std::vector<IndexStructure<T>>&
     GetData() {

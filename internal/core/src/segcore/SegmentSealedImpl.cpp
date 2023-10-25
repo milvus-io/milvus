@@ -295,6 +295,7 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                         }
                     }
                     var_column->Seal();
+                    LoadStringSkipIndex(field_id, 0, *var_column);
                     column = std::move(var_column);
                     break;
                 }
@@ -350,6 +351,8 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
             while (data.channel->pop(field_data)) {
                 column->AppendBatch(field_data);
             }
+            LoadPrimitiveSkipIndex(
+                field_id, 0, data_type, column->Span().data(), num_rows);
         }
 
         AssertInfo(column->NumRows() == num_rows,

@@ -293,4 +293,26 @@ SegmentInternalInterface::timestamp_filter(BitsetType& bitset,
     }
 }
 
+const SkipIndex&
+SegmentInternalInterface::GetSkipIndex() const {
+    return skipIndex_;
+}
+
+void
+SegmentInternalInterface::LoadPrimitiveSkipIndex(milvus::FieldId field_id,
+                                                 int64_t chunk_id,
+                                                 milvus::DataType data_type,
+                                                 const void* chunk_data,
+                                                 int64_t count) {
+    skipIndex_.LoadPrimitive(field_id, chunk_id, data_type, chunk_data, count);
+}
+
+void
+SegmentInternalInterface::LoadStringSkipIndex(
+    milvus::FieldId field_id,
+    int64_t chunk_id,
+    const milvus::VariableColumn<std::string>& var_column) {
+    skipIndex_.LoadString(field_id, chunk_id, var_column);
+}
+
 }  // namespace milvus::segcore

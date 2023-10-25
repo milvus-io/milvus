@@ -33,6 +33,8 @@
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
 #include "index/IndexInfo.h"
+#include "SkipIndex.h"
+#include "mmap/Column.h"
 
 namespace milvus::segcore {
 
@@ -166,6 +168,21 @@ class SegmentInternalInterface : public SegmentInterface {
                        int64_t num_rows,
                        int64_t field_size) override;
 
+    const SkipIndex&
+    GetSkipIndex() const;
+
+    void
+    LoadPrimitiveSkipIndex(FieldId field_id,
+                           int64_t chunk_id,
+                           DataType data_type,
+                           const void* chunk_data,
+                           int64_t count);
+
+    void
+    LoadStringSkipIndex(FieldId field_id,
+                        int64_t chunk_id,
+                        const milvus::VariableColumn<std::string>& var_column);
+
  public:
     virtual void
     vector_search(SearchInfo& search_info,
@@ -280,7 +297,8 @@ class SegmentInternalInterface : public SegmentInterface {
     mutable std::shared_mutex mutex_;
     // fieldID -> std::pair<num_rows, avg_size>
     std::unordered_map<FieldId, std::pair<int64_t, int64_t>>
-        variable_fields_avg_size_;  // bytes
+        variable_fields_avg_size_;  // bytes;
+    SkipIndex skipIndex_;
 };
 
 }  // namespace milvus::segcore

@@ -43,7 +43,7 @@ example() {
 class AckResponder {
  public:
     // specify that segment [seg_begin, seg_end) has been processed
-    // WARN: segments shouldn't overlap
+    // WARN: segments shouldn't Overlap
     void
     AddSegment(int64_t seg_begin, int64_t seg_end) {
         std::lock_guard lck(mutex_);

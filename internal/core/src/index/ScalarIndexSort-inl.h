@@ -236,6 +236,9 @@ ScalarIndexSort<T>::Range(const T value, const OpType op) {
     TargetBitmap bitset(data_.size());
     auto lb = data_.begin();
     auto ub = data_.end();
+    if (ShouldSkip(value, value, op)) {
+        return bitset;
+    }
     switch (op) {
         case OpType::LessThan:
             ub = std::lower_bound(
@@ -276,6 +279,9 @@ ScalarIndexSort<T>::Range(T lower_bound_value,
          !(lb_inclusive && ub_inclusive))) {
         return bitset;
     }
+    if (ShouldSkip(lower_bound_value, upper_bound_value, OpType::Range)) {
+        return bitset;
+    }
     auto lb = data_.begin();
     auto ub = data_.end();
     if (lb_inclusive) {
@@ -307,4 +313,48 @@ ScalarIndexSort<T>::Reverse_Lookup(size_t idx) const {
     auto offset = idx_to_offsets_[idx];
     return data_[offset].a_;
 }
+
+template <typename T>
+inline bool
+ScalarIndexSort<T>::ShouldSkip(const T lower_value,
+                               const T upper_value,
+                               const milvus::OpType op) {
+    if (!data_.empty()) {
+        auto lower_bound = data_.begin();
+        auto upper_bound = data_.rbegin();
+        bool shouldSkip = false;
+        switch (op) {
+            case OpType::LessThan: {
+                shouldSkip = upper_value <= lower_bound->a_;
+                break;
+            }
+            case OpType::LessEqual: {
+                shouldSkip = upper_value < lower_bound->a_;
+                break;
+            }
+            case OpType::GreaterThan: {
+                shouldSkip = lower_value >= upper_bound->a_;
+                break;
+            }
+            case OpType::GreaterEqual: {
+                shouldSkip = lower_value > upper_bound->a_;
+                break;
+            }
+            case OpType::Range: {
+                shouldSkip = (lower_value > upper_bound->a_) ||
+                             (upper_value < lower_bound->a_);
+                break;
+            }
+            default:
+                throw SegcoreError(
+                    OpTypeInvalid,
+                    fmt::format("Invalid OperatorType for "
+                                "checking scalar index optimization: {}",
+                                op));
+        }
+        return shouldSkip;
+    }
+    return true;
+}
+
 }  // namespace milvus::index
