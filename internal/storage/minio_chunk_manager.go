@@ -27,17 +27,13 @@ import (
 
 	"github.com/cockroachdb/errors"
 	minio "github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
 	"go.uber.org/zap"
 	"golang.org/x/exp/mmap"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/milvus-io/milvus/internal/storage/aliyun"
-	"github.com/milvus-io/milvus/internal/storage/gcp"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
@@ -78,73 +74,10 @@ func NewMinioChunkManager(ctx context.Context, opts ...Option) (*MinioChunkManag
 }
 
 func newMinioChunkManagerWithConfig(ctx context.Context, c *config) (*MinioChunkManager, error) {
-	var creds *credentials.Credentials
-	newMinioFn := minio.New
-	bucketLookupType := minio.BucketLookupAuto
-
-	if c.useVirtualHost {
-		bucketLookupType = minio.BucketLookupDNS
-	}
-
-	switch c.cloudProvider {
-	case CloudProviderAliyun:
-		// auto doesn't work for aliyun, so we set to dns deliberately
-		bucketLookupType = minio.BucketLookupDNS
-		if c.useIAM {
-			newMinioFn = aliyun.NewMinioClient
-		} else {
-			creds = credentials.NewStaticV4(c.accessKeyID, c.secretAccessKeyID, "")
-		}
-	case CloudProviderGCP:
-		newMinioFn = gcp.NewMinioClient
-		if !c.useIAM {
-			creds = credentials.NewStaticV2(c.accessKeyID, c.secretAccessKeyID, "")
-		}
-	default: // aws, minio
-		if c.useIAM {
-			creds = credentials.NewIAM("")
-		} else {
-			creds = credentials.NewStaticV4(c.accessKeyID, c.secretAccessKeyID, "")
-		}
-	}
-	minioOpts := &minio.Options{
-		BucketLookup: bucketLookupType,
-		Creds:        creds,
-		Secure:       c.useSSL,
-		Region:       c.region,
-	}
-	minIOClient, err := newMinioFn(c.address, minioOpts)
-	// options nil or invalid formatted endpoint, don't need to retry
+	minIOClient, err := newMinioClient(ctx, c)
 	if err != nil {
 		return nil, err
 	}
-	var bucketExists bool
-	// check valid in first query
-	checkBucketFn := func() error {
-		bucketExists, err = minIOClient.BucketExists(ctx, c.bucketName)
-		if err != nil {
-			log.Warn("failed to check blob bucket exist", zap.String("bucket", c.bucketName), zap.Error(err))
-			return err
-		}
-		if !bucketExists {
-			if c.createBucket {
-				log.Info("blob bucket not exist, create bucket.", zap.Any("bucket name", c.bucketName))
-				err := minIOClient.MakeBucket(ctx, c.bucketName, minio.MakeBucketOptions{})
-				if err != nil {
-					log.Warn("failed to create blob bucket", zap.String("bucket", c.bucketName), zap.Error(err))
-					return err
-				}
-			} else {
-				return fmt.Errorf("bucket %s not Existed", c.bucketName)
-			}
-		}
-		return nil
-	}
-	err = retry.Do(ctx, checkBucketFn, retry.Attempts(CheckBucketRetryAttempts))
-	if err != nil {
-		return nil, err
-	}
-
 	mcm := &MinioChunkManager{
 		Client:     minIOClient,
 		bucketName: c.bucketName,

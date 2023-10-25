@@ -9,7 +9,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
-const OSSDefaultAddress = "oss.aliyuncs.com"
+const (
+	OSSAddressFeatureString = "aliyuncs.com"
+	OSSDefaultAddress       = "oss.aliyuncs.com"
+)
 
 // NewMinioClient returns a minio.Client which is compatible for aliyun OSS
 func NewMinioClient(address string, opts *minio.Options) (*minio.Client, error) {

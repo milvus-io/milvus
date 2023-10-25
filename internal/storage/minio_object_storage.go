@@ -20,9 +20,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
-	minio "github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"go.uber.org/zap"
 
@@ -36,11 +37,16 @@ type MinioObjectStorage struct {
 	*minio.Client
 }
 
-func newMinioObjectStorageWithConfig(ctx context.Context, c *config) (*MinioObjectStorage, error) {
+func newMinioClient(ctx context.Context, c *config) (*minio.Client, error) {
 	var creds *credentials.Credentials
 	newMinioFn := minio.New
 	bucketLookupType := minio.BucketLookupAuto
 
+	if c.useVirtualHost {
+		bucketLookupType = minio.BucketLookupDNS
+	}
+
+	matchedDefault := false
 	switch c.cloudProvider {
 	case CloudProviderAliyun:
 		// auto doesn't work for aliyun, so we set to dns deliberately
@@ -56,6 +62,34 @@ func newMinioObjectStorageWithConfig(ctx context.Context, c *config) (*MinioObje
 			creds = credentials.NewStaticV2(c.accessKeyID, c.secretAccessKeyID, "")
 		}
 	default: // aws, minio
+		matchedDefault = true
+	}
+
+	// Compatibility logic. If the cloud provider is not specified in the request,
+	// it shall be inferred based on the service address.
+	if matchedDefault {
+		matchedDefault = false
+		switch {
+		case strings.Contains(c.address, gcp.GcsDefaultAddress):
+			newMinioFn = gcp.NewMinioClient
+			if !c.useIAM {
+				creds = credentials.NewStaticV2(c.accessKeyID, c.secretAccessKeyID, "")
+			}
+		case strings.Contains(c.address, aliyun.OSSAddressFeatureString):
+			// auto doesn't work for aliyun, so we set to dns deliberately
+			bucketLookupType = minio.BucketLookupDNS
+			if c.useIAM {
+				newMinioFn = aliyun.NewMinioClient
+			} else {
+				creds = credentials.NewStaticV4(c.accessKeyID, c.secretAccessKeyID, "")
+			}
+		default:
+			matchedDefault = true
+		}
+	}
+
+	if matchedDefault {
+		// aws, minio
 		if c.useIAM {
 			creds = credentials.NewIAM("")
 		} else {
@@ -66,6 +100,7 @@ func newMinioObjectStorageWithConfig(ctx context.Context, c *config) (*MinioObje
 		BucketLookup: bucketLookupType,
 		Creds:        creds,
 		Secure:       c.useSSL,
+		Region:       c.region,
 	}
 	minIOClient, err := newMinioFn(c.address, minioOpts)
 	// options nil or invalid formatted endpoint, don't need to retry
@@ -98,7 +133,14 @@ func newMinioObjectStorageWithConfig(ctx context.Context, c *config) (*MinioObje
 	if err != nil {
 		return nil, err
 	}
+	return minIOClient, nil
+}
 
+func newMinioObjectStorageWithConfig(ctx context.Context, c *config) (*MinioObjectStorage, error) {
+	minIOClient, err := newMinioClient(ctx, c)
+	if err != nil {
+		return nil, err
+	}
 	return &MinioObjectStorage{minIOClient}, nil
 }
 
