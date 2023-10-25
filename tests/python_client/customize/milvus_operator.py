@@ -58,7 +58,7 @@ class MilvusOperator(object):
         Return: custom resource object instance
         """
         new_configs = self._update_configs(configs, template)
-        print(new_configs)
+        log.debug(new_configs)
         namespace = new_configs['metadata'].get('namespace', 'default')
         # apply custom resource object to deploy milvus
         cus_res = CusResource(kind=self.plural, group=self.group,

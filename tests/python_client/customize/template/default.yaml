@@ -1,29 +1,32 @@
-apiVersion: milvus.io/v1alpha1
-kind: MilvusCluster
+apiVersion: milvus.io/v1beta1
+kind: Milvus
 metadata:
   name: my-release
+  namespace: chaos-testing
   labels:
     app: milvus
 spec:
+  config:
+    log:
+      level: debug
+    common:
+      simdType: avx
+  components: {}
   dependencies:
     etcd:
       inCluster:
         deletionPolicy: Delete
         pvcDeletion: true
-    pulsar:
-      inCluster:
-        deletionPolicy: Delete
-        pvcDeletion: true
         values:
-          proxy:
-            configData:
-              httpNumThreads: "100"
+          metrics:
+            podMonitor:
+              enabled: true
     storage:
       inCluster:
         deletionPolicy: Delete
         pvcDeletion: true
-  config:
-    log:
-      level: debug
-  components: {}
+        values:
+          metrics:
+            podMonitor:
+              enabled: true
   
