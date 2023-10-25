@@ -31,6 +31,7 @@ type autoIndexConfig struct {
 	Enable ParamItem `refreshable:"true"`
 
 	IndexParams           ParamItem  `refreshable:"true"`
+	PrepareParams         ParamItem  `refreshable:"true"`
 	ExtraParams           ParamItem  `refreshable:"true"`
 	IndexType             ParamItem  `refreshable:"true"`
 	AutoIndexTypeName     ParamItem  `refreshable:"true"`
@@ -53,6 +54,12 @@ func (p *autoIndexConfig) init(base *BaseTable) {
 		DefaultValue: `{"M": 18,"efConstruction": 240,"index_type": "HNSW", "metric_type": "IP"}`,
 	}
 	p.IndexParams.Init(base.mgr)
+
+	p.PrepareParams = ParamItem{
+		Key:     "autoIndex.params.prepare",
+		Version: "2.3.2",
+	}
+	p.PrepareParams.Init(base.mgr)
 
 	p.ExtraParams = ParamItem{
 		Key:     "autoIndex.params.extra",

@@ -208,7 +208,7 @@ func SetDiskIndexBuildParams(indexParams map[string]string, fieldDataSize int64)
 	}
 
 	searchCacheBudgetGBRatioStr, ok := indexParams[SearchCacheBudgetRatioKey]
-	// set generate cache size when cache ratio param set
+	// set generate cache size when cache ratio param not set
 	if ok {
 		SearchCacheBudgetGBRatio, err := strconv.ParseFloat(searchCacheBudgetGBRatioStr, 64)
 		if err != nil {
@@ -277,5 +277,15 @@ func SetDiskIndexLoadParams(params *paramtable.ComponentParam, indexParams map[s
 	}
 	indexParams[BeamWidthKey] = strconv.Itoa(beamWidth)
 
+	return nil
+}
+
+func AppendPrepareLoadParams(params *paramtable.ComponentParam, indexParams map[string]string) error {
+	if params.AutoIndexConfig.Enable.GetAsBool() { // `enable` only for cloud instance.
+		// override prepare params by
+		for k, v := range params.AutoIndexConfig.PrepareParams.GetAsJSONMap() {
+			indexParams[k] = v
+		}
+	}
 	return nil
 }

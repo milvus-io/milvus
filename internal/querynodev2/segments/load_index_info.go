@@ -80,6 +80,11 @@ func (li *LoadIndexInfo) appendLoadIndexInfo(indexInfo *querypb.FieldIndexInfo, 
 		}
 	}
 
+	err = indexparams.AppendPrepareLoadParams(paramtable.Get(), indexParams)
+	if err != nil {
+		return err
+	}
+
 	for key, value := range indexParams {
 		err = li.appendIndexParam(key, value)
 		if err != nil {
