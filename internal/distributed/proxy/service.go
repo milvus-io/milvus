@@ -30,23 +30,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/util/merr"
-
-	"google.golang.org/grpc/credentials"
-
-	"github.com/milvus-io/milvus/internal/management"
-	"github.com/soheilhy/cmux"
-
 	"github.com/gin-gonic/gin"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_auth "github.com/grpc-ecosystem/go-grpc-middleware/auth"
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	opentracing "github.com/opentracing/opentracing-go"
+	"github.com/soheilhy/cmux"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
@@ -59,6 +54,7 @@ import (
 	qcc "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/management"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proxy"
@@ -72,6 +68,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 var Params paramtable.GrpcServerConfig
@@ -665,6 +662,7 @@ func (s *Server) start() error {
 // Stop stop the Proxy Server
 func (s *Server) Stop() error {
 	log.Info("Proxy stop", zap.String("internal address", Params.GetInternalAddress()), zap.String("external address", Params.GetInternalAddress()))
+	s.proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
 	var err error
 	if s.closer != nil {
 		if err = s.closer.Close(); err != nil {
