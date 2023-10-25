@@ -62,7 +62,7 @@ class IndexBase {
     bool
     IsMmapSupported() const {
         return index_type_ == knowhere::IndexEnum::INDEX_HNSW ||
-               //    index_type_ == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT ||    IVF_FLAT is not supported as it doesn't stores the vectors
+               index_type_ == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT ||
                index_type_ == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC ||
                index_type_ == knowhere::IndexEnum::INDEX_FAISS_IVFPQ ||
                index_type_ == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8 ||
