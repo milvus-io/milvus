@@ -828,7 +828,7 @@ func GetPrimaryFieldData(datas []*schemapb.FieldData, primaryFieldSchema *schema
 	}
 
 	if primaryFieldData == nil {
-		return nil, fmt.Errorf("can't find data for primary field %v", primaryFieldName)
+		return nil, fmt.Errorf("can't find data for primary field: %v", primaryFieldName)
 	}
 
 	return primaryFieldData, nil
