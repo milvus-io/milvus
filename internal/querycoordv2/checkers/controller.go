@@ -32,20 +32,39 @@ import (
 )
 
 const (
-	segmentChecker = "segment_checker"
-	channelChecker = "channel_checker"
-	balanceChecker = "balance_checker"
-	indexChecker   = "index_checker"
+	segmentCheckerName = "segment_checker"
+	channelCheckerName = "channel_checker"
+	balanceCheckerName = "balance_checker"
+	indexCheckerName   = "index_checker"
+)
+
+type checkerType int32
+
+const (
+	channelChecker checkerType = iota + 1
+	segmentChecker
+	balanceChecker
+	indexChecker
 )
 
 var (
 	checkRoundTaskNumLimit = 256
-	checkerOrder           = []string{channelChecker, segmentChecker, balanceChecker, indexChecker}
+	checkerOrder           = []string{channelCheckerName, segmentCheckerName, balanceCheckerName, indexCheckerName}
+	checkerNames           = map[checkerType]string{
+		segmentChecker: segmentCheckerName,
+		channelChecker: channelCheckerName,
+		balanceChecker: balanceCheckerName,
+		indexChecker:   indexCheckerName,
+	}
 )
+
+func (s checkerType) String() string {
+	return checkerNames[s]
+}
 
 type CheckerController struct {
 	cancel         context.CancelFunc
-	manualCheckChs map[string]chan struct{}
+	manualCheckChs map[checkerType]chan struct{}
 	meta           *meta.Meta
 	dist           *meta.DistributionManager
 	targetMgr      *meta.TargetManager
@@ -54,7 +73,7 @@ type CheckerController struct {
 	balancer       balance.Balance
 
 	scheduler task.Scheduler
-	checkers  map[string]Checker
+	checkers  map[checkerType]Checker
 
 	stopOnce sync.Once
 }
@@ -70,19 +89,14 @@ func NewCheckerController(
 ) *CheckerController {
 	// CheckerController runs checkers with the order,
 	// the former checker has higher priority
-	checkers := map[string]Checker{
+	checkers := map[checkerType]Checker{
 		channelChecker: NewChannelChecker(meta, dist, targetMgr, balancer),
 		segmentChecker: NewSegmentChecker(meta, dist, targetMgr, balancer, nodeMgr),
 		balanceChecker: NewBalanceChecker(meta, balancer, nodeMgr, scheduler),
 		indexChecker:   NewIndexChecker(meta, dist, broker),
 	}
 
-	id := 0
-	for _, checkerName := range checkerOrder {
-		checkers[checkerName].SetID(int64(id + 1))
-	}
-
-	manualCheckChs := map[string]chan struct{}{
+	manualCheckChs := map[checkerType]chan struct{}{
 		channelChecker: make(chan struct{}, 1),
 		segmentChecker: make(chan struct{}, 1),
 		balanceChecker: make(chan struct{}, 1),
@@ -103,13 +117,13 @@ func (controller *CheckerController) Start() {
 	ctx, cancel := context.WithCancel(context.Background())
 	controller.cancel = cancel
 
-	for checkerType := range controller.checkers {
-		go controller.startChecker(ctx, checkerType)
+	for checker := range controller.checkers {
+		go controller.startChecker(ctx, checker)
 	}
 }
 
-func getCheckerInterval(checkerType string) time.Duration {
-	switch checkerType {
+func getCheckerInterval(checker checkerType) time.Duration {
+	switch checker {
 	case segmentChecker:
 		return Params.QueryCoordCfg.SegmentCheckInterval.GetAsDuration(time.Millisecond)
 	case channelChecker:
@@ -123,8 +137,8 @@ func getCheckerInterval(checkerType string) time.Duration {
 	}
 }
 
-func (controller *CheckerController) startChecker(ctx context.Context, checkerType string) {
-	interval := getCheckerInterval(checkerType)
+func (controller *CheckerController) startChecker(ctx context.Context, checker checkerType) {
+	interval := getCheckerInterval(checker)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -132,15 +146,15 @@ func (controller *CheckerController) startChecker(ctx context.Context, checkerTy
 		select {
 		case <-ctx.Done():
 			log.Info("Checker stopped",
-				zap.String("type", checkerType))
+				zap.String("type", checker.String()))
 			return
 
 		case <-ticker.C:
-			controller.check(ctx, checkerType)
+			controller.check(ctx, checker)
 
-		case <-controller.manualCheckChs[checkerType]:
+		case <-controller.manualCheckChs[checker]:
 			ticker.Stop()
-			controller.check(ctx, checkerType)
+			controller.check(ctx, checker)
 			ticker.Reset(interval)
 		}
 	}
@@ -164,8 +178,8 @@ func (controller *CheckerController) Check() {
 }
 
 // check is the real implementation of Check
-func (controller *CheckerController) check(ctx context.Context, checkerType string) {
-	checker := controller.checkers[checkerType]
+func (controller *CheckerController) check(ctx context.Context, checkType checkerType) {
+	checker := controller.checkers[checkType]
 	tasks := checker.Check(ctx)
 
 	for _, task := range tasks {
