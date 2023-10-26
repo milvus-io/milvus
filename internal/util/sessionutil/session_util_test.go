@@ -57,7 +57,7 @@ func TestGetServerIDConcurrently(t *testing.T) {
 	var wg sync.WaitGroup
 	muList := sync.Mutex{}
 
-	s := NewSession(ctx, metaRoot, etcdCli)
+	s := NewSessionWithEtcd(ctx, metaRoot, etcdCli)
 	res := make([]int64, 0)
 
 	getIDFunc := func() {
@@ -96,7 +96,35 @@ func TestInit(t *testing.T) {
 	defer etcdKV.Close()
 	defer etcdKV.RemoveWithPrefix("")
 
-	s := NewSession(ctx, metaRoot, etcdCli)
+	s := NewSessionWithEtcd(ctx, metaRoot, etcdCli)
+	s.Init("inittest", "testAddr", false, false)
+	assert.NotEqual(t, int64(0), s.LeaseID)
+	assert.NotEqual(t, int64(0), s.ServerID)
+	s.Register()
+	sessions, _, err := s.GetSessions("inittest")
+	assert.NoError(t, err)
+	assert.Contains(t, sessions, "inittest-"+strconv.FormatInt(s.ServerID, 10))
+}
+
+func TestInitNoArgs(t *testing.T) {
+	ctx := context.Background()
+	paramtable.Init()
+	params := paramtable.Get()
+
+	endpoints := params.EtcdCfg.Endpoints.GetValue()
+	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
+
+	etcdEndpoints := strings.Split(endpoints, ",")
+	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+	require.NoError(t, err)
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, metaRoot)
+	err = etcdKV.RemoveWithPrefix("")
+	assert.NoError(t, err)
+
+	defer etcdKV.Close()
+	defer etcdKV.RemoveWithPrefix("")
+
+	s := NewSession(ctx)
 	s.Init("inittest", "testAddr", false, false)
 	assert.NotEqual(t, int64(0), s.LeaseID)
 	assert.NotEqual(t, int64(0), s.ServerID)
@@ -125,7 +153,7 @@ func TestUpdateSessions(t *testing.T) {
 	var wg sync.WaitGroup
 	muList := sync.Mutex{}
 
-	s := NewSession(ctx, metaRoot, etcdCli, WithResueNodeID(false))
+	s := NewSessionWithEtcd(ctx, metaRoot, etcdCli, WithResueNodeID(false))
 
 	sessions, rev, err := s.GetSessions("test")
 	assert.NoError(t, err)
@@ -137,7 +165,7 @@ func TestUpdateSessions(t *testing.T) {
 	getIDFunc := func() {
 		etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
 		require.NoError(t, err)
-		singleS := NewSession(ctx, metaRoot, etcdCli, WithResueNodeID(false))
+		singleS := NewSessionWithEtcd(ctx, metaRoot, etcdCli, WithResueNodeID(false))
 		singleS.Init("test", "testAddr", false, false)
 		singleS.Register()
 		muList.Lock()
@@ -194,7 +222,7 @@ func TestSessionLivenessCheck(t *testing.T) {
 	etcdEndpoints := strings.Split(endpoints, ",")
 	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
 	require.NoError(t, err)
-	s := NewSession(context.Background(), metaRoot, etcdCli)
+	s := NewSessionWithEtcd(context.Background(), metaRoot, etcdCli)
 	s.Register()
 	ch := make(chan struct{})
 	s.liveCh = ch
@@ -218,7 +246,7 @@ func TestSessionLivenessCheck(t *testing.T) {
 
 	// test context done, liveness exit, callback shouldn't trigger
 	metaRoot = fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
-	s1 := NewSession(context.Background(), metaRoot, etcdCli)
+	s1 := NewSessionWithEtcd(context.Background(), metaRoot, etcdCli)
 	s1.Register()
 	ctx, cancel := context.WithCancel(context.Background())
 	flag.Store(false)
@@ -232,7 +260,7 @@ func TestSessionLivenessCheck(t *testing.T) {
 
 	// test context done, liveness start failed, callback should trigger
 	metaRoot = fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
-	s2 := NewSession(context.Background(), metaRoot, etcdCli)
+	s2 := NewSessionWithEtcd(context.Background(), metaRoot, etcdCli)
 	s2.Register()
 	ctx, cancel = context.WithCancel(context.Background())
 	signal = make(chan struct{}, 1)
@@ -262,7 +290,7 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/by-dev/session-ut")
 	defer etcdKV.Close()
 	defer etcdKV.RemoveWithPrefix("/by-dev/session-ut")
-	s := NewSession(ctx, metaRoot, etcdCli)
+	s := NewSessionWithEtcd(ctx, metaRoot, etcdCli)
 	defer s.Revoke(time.Second)
 
 	getWatcher := func(s *Session, rewatch Rewatch) *sessionWatcher {
@@ -370,7 +398,7 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 	})
 
 	t.Run("err handled but list failed", func(t *testing.T) {
-		s := NewSession(ctx, "/by-dev/session-ut", etcdCli)
+		s := NewSessionWithEtcd(ctx, "/by-dev/session-ut", etcdCli)
 		s.etcdCli.Close()
 		w := getWatcher(s, func(sessions map[string]*Session) error {
 			return nil
@@ -487,21 +515,21 @@ func (suite *SessionWithVersionSuite) SetupTest() {
 	suite.metaRoot = "sessionWithVersion"
 	suite.serverName = "sessionComp"
 
-	s1 := NewSession(ctx, suite.metaRoot, client, WithResueNodeID(false))
+	s1 := NewSessionWithEtcd(ctx, suite.metaRoot, client, WithResueNodeID(false))
 	s1.Version.Major, s1.Version.Minor, s1.Version.Patch = 0, 0, 0
 	s1.Init(suite.serverName, "s1", false, false)
 	s1.Register()
 
 	suite.sessions = append(suite.sessions, s1)
 
-	s2 := NewSession(ctx, suite.metaRoot, client, WithResueNodeID(false))
+	s2 := NewSessionWithEtcd(ctx, suite.metaRoot, client, WithResueNodeID(false))
 	s2.Version.Major, s2.Version.Minor, s2.Version.Patch = 2, 1, 0
 	s2.Init(suite.serverName, "s2", false, false)
 	s2.Register()
 
 	suite.sessions = append(suite.sessions, s2)
 
-	s3 := NewSession(ctx, suite.metaRoot, client, WithResueNodeID(false))
+	s3 := NewSessionWithEtcd(ctx, suite.metaRoot, client, WithResueNodeID(false))
 	s3.Version.Major, s3.Version.Minor, s3.Version.Patch = 2, 2, 0
 	s3.Version.Build = []string{"dev"}
 	s3.Init(suite.serverName, "s3", false, false)
@@ -526,7 +554,7 @@ func (suite *SessionWithVersionSuite) TearDownTest() {
 }
 
 func (suite *SessionWithVersionSuite) TestGetSessionsWithRangeVersion() {
-	s := NewSession(context.Background(), suite.metaRoot, suite.client, WithResueNodeID(false))
+	s := NewSessionWithEtcd(context.Background(), suite.metaRoot, suite.client, WithResueNodeID(false))
 
 	suite.Run(">1.0.0", func() {
 		r, err := semver.ParseRange(">1.0.0")
@@ -570,7 +598,7 @@ func (suite *SessionWithVersionSuite) TestGetSessionsWithRangeVersion() {
 }
 
 func (suite *SessionWithVersionSuite) TestWatchServicesWithVersionRange() {
-	s := NewSession(context.Background(), suite.metaRoot, suite.client, WithResueNodeID(false))
+	s := NewSessionWithEtcd(context.Background(), suite.metaRoot, suite.client, WithResueNodeID(false))
 
 	suite.Run(">1.0.0 <=2.1.0", func() {
 		r, err := semver.ParseRange(">1.0.0 <=2.1.0")
@@ -624,7 +652,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 
 	// register session 1, will be active
 	ctx1 := context.Background()
-	s1 := NewSession(ctx1, metaRoot, etcdCli, WithResueNodeID(false))
+	s1 := NewSessionWithEtcd(ctx1, metaRoot, etcdCli, WithResueNodeID(false))
 	s1.Init("inittest", "testAddr", true, true)
 	s1.SetEnableActiveStandBy(true)
 	s1.Register()
@@ -645,7 +673,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 
 	// register session 2, will be standby
 	ctx2 := context.Background()
-	s2 := NewSession(ctx2, metaRoot, etcdCli, WithResueNodeID(false))
+	s2 := NewSessionWithEtcd(ctx2, metaRoot, etcdCli, WithResueNodeID(false))
 	s2.Init("inittest", "testAddr", true, true)
 	s2.SetEnableActiveStandBy(true)
 	s2.Register()
@@ -762,9 +790,9 @@ func TestIntegrationMode(t *testing.T) {
 	err = etcdKV.RemoveWithPrefix("")
 	assert.NoError(t, err)
 
-	s1 := NewSession(ctx, metaRoot, etcdCli)
+	s1 := NewSessionWithEtcd(ctx, metaRoot, etcdCli)
 	assert.Equal(t, false, s1.reuseNodeID)
-	s2 := NewSession(ctx, metaRoot, etcdCli)
+	s2 := NewSessionWithEtcd(ctx, metaRoot, etcdCli)
 	assert.Equal(t, false, s2.reuseNodeID)
 	s1.Init("inittest1", "testAddr1", false, false)
 	s1.Init("inittest2", "testAddr2", false, false)
@@ -857,10 +885,10 @@ func (s *SessionSuite) TestDisconnected() {
 
 func (s *SessionSuite) TestGoingStop() {
 	ctx := context.Background()
-	sdisconnect := NewSession(ctx, s.metaRoot, s.client)
+	sdisconnect := NewSessionWithEtcd(ctx, s.metaRoot, s.client)
 	sdisconnect.SetDisconnected(true)
 
-	sess := NewSession(ctx, s.metaRoot, s.client)
+	sess := NewSessionWithEtcd(ctx, s.metaRoot, s.client)
 	sess.Init("test", "normal", false, false)
 	sess.Register()
 
@@ -889,12 +917,12 @@ func (s *SessionSuite) TestGoingStop() {
 
 func (s *SessionSuite) TestRevoke() {
 	ctx := context.Background()
-	disconnected := NewSession(ctx, s.metaRoot, s.client, WithResueNodeID(false))
+	disconnected := NewSessionWithEtcd(ctx, s.metaRoot, s.client, WithResueNodeID(false))
 	disconnected.Init("test", "disconnected", false, false)
 	disconnected.Register()
 	disconnected.SetDisconnected(true)
 
-	sess := NewSession(ctx, s.metaRoot, s.client, WithResueNodeID(false))
+	sess := NewSessionWithEtcd(ctx, s.metaRoot, s.client, WithResueNodeID(false))
 	sess.Init("test", "normal", false, false)
 	sess.Register()
 
@@ -927,12 +955,12 @@ func (s *SessionSuite) TestRevoke() {
 func (s *SessionSuite) TestForceActiveWithLeaseID() {
 	ctx := context.Background()
 	role := "test"
-	sess1 := NewSession(ctx, s.metaRoot, s.client, WithResueNodeID(false))
+	sess1 := NewSessionWithEtcd(ctx, s.metaRoot, s.client, WithResueNodeID(false))
 	sess1.Init(role, "normal1", false, false)
 	sess1.Register()
 	sess1.ProcessActiveStandBy(nil)
 
-	sess2 := NewSession(ctx, s.metaRoot, s.client, WithResueNodeID(false))
+	sess2 := NewSessionWithEtcd(ctx, s.metaRoot, s.client, WithResueNodeID(false))
 	sess2.Init(role, "normal2", false, false)
 	sess2.Register()
 	sess2.ForceActiveStandby(nil)
@@ -953,14 +981,14 @@ func (s *SessionSuite) TestForceActiveWithLeaseID() {
 func (s *SessionSuite) TestForceActiveWithDelete() {
 	ctx := context.Background()
 	role := "test"
-	sess1 := NewSession(ctx, s.metaRoot, s.client, WithResueNodeID(false))
+	sess1 := NewSessionWithEtcd(ctx, s.metaRoot, s.client, WithResueNodeID(false))
 	sess1.Init(role, "normal1", false, false)
 	sessionJSON, err := json.Marshal(sess1)
 	s.NoError(err)
 	s.client.Put(ctx, path.Join(s.metaRoot, DefaultServiceRoot, fmt.Sprintf("%s-%d", role, 1)), string(sessionJSON))
 	s.client.Put(ctx, path.Join(s.metaRoot, DefaultServiceRoot, role), string(sessionJSON))
 
-	sess2 := NewSession(ctx, s.metaRoot, s.client, WithResueNodeID(false))
+	sess2 := NewSessionWithEtcd(ctx, s.metaRoot, s.client, WithResueNodeID(false))
 	sess2.Init(role, "normal2", false, false)
 	sess2.Register()
 	sess2.ForceActiveStandby(nil)
@@ -980,7 +1008,7 @@ func (s *SessionSuite) TestForceActiveWithDelete() {
 
 func (s *SessionSuite) TestKeepAliveRetryActiveCancel() {
 	ctx := context.Background()
-	session := NewSession(ctx, s.metaRoot, s.client)
+	session := NewSessionWithEtcd(ctx, s.metaRoot, s.client)
 	session.Init("test", "normal", false, false)
 
 	// Register
@@ -1000,7 +1028,7 @@ func (s *SessionSuite) TestKeepAliveRetryActiveCancel() {
 
 func (s *SessionSuite) TestKeepAliveRetryChannelClose() {
 	ctx := context.Background()
-	session := NewSession(ctx, s.metaRoot, s.client)
+	session := NewSessionWithEtcd(ctx, s.metaRoot, s.client)
 	session.Init("test", "normal", false, false)
 
 	// Register
@@ -1027,7 +1055,7 @@ func (s *SessionSuite) TestKeepAliveRetryChannelClose() {
 
 func (s *SessionSuite) TestSafeCloseLiveCh() {
 	ctx := context.Background()
-	session := NewSession(ctx, s.metaRoot, s.client)
+	session := NewSessionWithEtcd(ctx, s.metaRoot, s.client)
 	session.Init("test", "normal", false, false)
 	session.liveCh = make(chan struct{})
 	session.safeCloseLiveCh()

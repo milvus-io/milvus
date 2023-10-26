@@ -308,7 +308,7 @@ func (c *Core) SetTiKVClient(client *txnkv.Client) {
 }
 
 func (c *Core) initSession() error {
-	c.session = sessionutil.NewSession(c.ctx, Params.EtcdCfg.MetaRootPath.GetValue(), c.etcdCli)
+	c.session = sessionutil.NewSession(c.ctx)
 	if c.session == nil {
 		return fmt.Errorf("session is nil, the etcd client connection may have failed")
 	}

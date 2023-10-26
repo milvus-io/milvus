@@ -201,7 +201,7 @@ func (node *DataNode) Register() error {
 }
 
 func (node *DataNode) initSession() error {
-	node.session = sessionutil.NewSession(node.ctx, Params.EtcdCfg.MetaRootPath.GetValue(), node.etcdCli)
+	node.session = sessionutil.NewSession(node.ctx)
 	if node.session == nil {
 		return errors.New("failed to initialize session")
 	}
