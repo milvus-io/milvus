@@ -17,6 +17,7 @@
 package pipeline
 
 import (
+	"context"
 	"testing"
 
 	"github.com/samber/lo"
@@ -93,7 +94,7 @@ func (suite *DeleteNodeSuite) TestBasic() {
 		})
 	// init dependency
 	suite.tSafeManager = tsafe.NewTSafeReplica()
-	suite.tSafeManager.Add(suite.channel, 0)
+	suite.tSafeManager.Add(context.Background(), suite.channel, 0)
 	// build delete node and data
 	node := newDeleteNode(suite.collectionID, suite.channel, suite.manager, suite.tSafeManager, suite.delegator, 8)
 	in := suite.buildDeleteNodeMsg()
