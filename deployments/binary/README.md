@@ -30,7 +30,7 @@ $ ./minio server /minio
 To start Milvus standalone, you need a Milvus binary file. Currently you can get the latest version of Milvus binary file through the Milvus docker image. (We will upload Milvus binary files in the future)
 
 ```shell
-$ docker run -d --name milvus milvusdb/milvus:v2.3.0 /bin/bash
+$ docker run -d --name milvus milvusdb/milvus:v2.3.2 /bin/bash
 $ docker cp milvus:/milvus .
 ```
 
