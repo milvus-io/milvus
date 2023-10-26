@@ -36,6 +36,7 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
+	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -208,11 +209,17 @@ func (s *Session) MarshalJSON() ([]byte, error) {
 	return json.Marshal(s.SessionRaw)
 }
 
-// NewSession is a helper to build Session object.
+// Create a new Session object. Will use global etcd client
+func NewSession(ctx context.Context, opts ...SessionOption) *Session {
+	client, path := kvfactory.GetEtcdAndPath()
+	return NewSessionWithEtcd(ctx, path, client, opts...)
+}
+
+// NewSessionWithEtcd is a helper to build a Session object.
 // ServerID, ServerName, Address, Exclusive will be assigned after Init().
 // metaRoot is a path in etcd to save session information.
 // etcdEndpoints is to init etcdCli when NewSession
-func NewSession(ctx context.Context, metaRoot string, client *clientv3.Client, opts ...SessionOption) *Session {
+func NewSessionWithEtcd(ctx context.Context, metaRoot string, client *clientv3.Client, opts ...SessionOption) *Session {
 	hostName, hostNameErr := os.Hostname()
 	if hostNameErr != nil {
 		log.Error("get host name fail", zap.Error(hostNameErr))

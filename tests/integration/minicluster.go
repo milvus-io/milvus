@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
@@ -151,6 +152,9 @@ func StartMiniCluster(ctx context.Context, opts ...Option) (cluster *MiniCluster
 		KeyPrefix:       cluster.params[EtcdRootPath],
 		RefreshInterval: 2 * time.Second,
 	}))
+
+	// Reset the default client due to param changes for test
+	kvfactory.CloseEtcdClient()
 
 	if cluster.factory == nil {
 		params.Save(params.LocalStorageCfg.Path.Key, "/tmp/milvus/")
@@ -1204,7 +1208,7 @@ func (cluster *MiniCluster) GetRootCoordClient() types.RootCoordClient {
 		return cluster.RootCoordClient
 	}
 
-	client, err := rootcoordclient.NewClient(cluster.ctx, GetMetaRootPath(cluster.params[EtcdRootPath]), cluster.EtcdCli)
+	client, err := rootcoordclient.NewClient(cluster.ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -1219,7 +1223,7 @@ func (cluster *MiniCluster) GetDataCoordClient() types.DataCoordClient {
 		return cluster.DataCoordClient
 	}
 
-	client, err := datacoordclient.NewClient(cluster.ctx, GetMetaRootPath(cluster.params[EtcdRootPath]), cluster.EtcdCli)
+	client, err := datacoordclient.NewClient(cluster.ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -1234,7 +1238,7 @@ func (cluster *MiniCluster) GetQueryCoordClient() types.QueryCoordClient {
 		return cluster.QueryCoordClient
 	}
 
-	client, err := querycoordclient.NewClient(cluster.ctx, GetMetaRootPath(cluster.params[EtcdRootPath]), cluster.EtcdCli)
+	client, err := querycoordclient.NewClient(cluster.ctx)
 	if err != nil {
 		panic(err)
 	}

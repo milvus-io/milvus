@@ -165,7 +165,7 @@ func (s *Server) Register() error {
 
 func (s *Server) initSession() error {
 	// Init QueryCoord session
-	s.session = sessionutil.NewSession(s.ctx, Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli)
+	s.session = sessionutil.NewSession(s.ctx)
 	if s.session == nil {
 		return fmt.Errorf("failed to create session")
 	}

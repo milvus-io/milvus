@@ -30,7 +30,6 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/util/mock"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
@@ -58,16 +57,7 @@ func TestMain(m *testing.M) {
 func Test_NewClient(t *testing.T) {
 	ctx := context.Background()
 
-	etcdCli, err := etcd.GetEtcdClient(
-		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		Params.EtcdCfg.Endpoints.GetAsStrings(),
-		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
-	assert.NoError(t, err)
-	client, err := NewClient(ctx, proxy.Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli)
+	client, err := NewClient(ctx)
 	assert.NoError(t, err)
 	assert.NotNil(t, client)
 

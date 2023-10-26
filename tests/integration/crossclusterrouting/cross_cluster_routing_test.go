@@ -112,14 +112,13 @@ func (s *CrossClusterRoutingSuite) SetupTest() {
 		etcdConfig.EtcdTLSCACert.GetValue(),
 		etcdConfig.EtcdTLSMinVersion.GetValue())
 	s.NoError(err)
-	metaRoot := paramtable.Get().EtcdCfg.MetaRootPath.GetValue()
 
 	// setup clients
-	s.rootCoordClient, err = grpcrootcoordclient.NewClient(s.ctx, metaRoot, s.client)
+	s.rootCoordClient, err = grpcrootcoordclient.NewClient(s.ctx)
 	s.NoError(err)
-	s.dataCoordClient, err = grpcdatacoordclient.NewClient(s.ctx, metaRoot, s.client)
+	s.dataCoordClient, err = grpcdatacoordclient.NewClient(s.ctx)
 	s.NoError(err)
-	s.queryCoordClient, err = grpcquerycoordclient.NewClient(s.ctx, metaRoot, s.client)
+	s.queryCoordClient, err = grpcquerycoordclient.NewClient(s.ctx)
 	s.NoError(err)
 	s.proxyClient, err = grpcproxyclient.NewClient(s.ctx, paramtable.Get().ProxyGrpcClientCfg.GetInternalAddress(), 1)
 	s.NoError(err)

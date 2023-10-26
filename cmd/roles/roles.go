@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/http/healthz"
 	rocksmqimpl "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	internalmetrics "github.com/milvus-io/milvus/internal/util/metrics"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -412,6 +413,9 @@ func (mr *MilvusRoles) Run() {
 		proxy.Stop()
 		log.Info("proxy stopped!")
 	}
+
+	// close reused etcd client
+	kvfactory.CloseEtcdClient()
 
 	log.Info("Milvus components graceful stop done")
 }

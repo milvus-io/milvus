@@ -60,7 +60,7 @@ func NewMockQueryNode(t *testing.T, etcdCli *clientv3.Client, nodeID int64) *Moc
 		MockQueryNodeServer: NewMockQueryNodeServer(t),
 		ctx:                 ctx,
 		cancel:              cancel,
-		session:             sessionutil.NewSession(ctx, Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli),
+		session:             sessionutil.NewSessionWithEtcd(ctx, Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli),
 		channels:            make(map[int64][]string),
 		segments:            make(map[int64]map[string][]int64),
 		ID:                  nodeID,
