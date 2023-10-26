@@ -36,7 +36,6 @@ import (
 )
 
 type SegmentChecker struct {
-	baseChecker
 	meta      *meta.Meta
 	dist      *meta.DistributionManager
 	targetMgr *meta.TargetManager
@@ -58,6 +57,10 @@ func NewSegmentChecker(
 		balancer:  balancer,
 		nodeMgr:   nodeMgr,
 	}
+}
+
+func (c *SegmentChecker) ID() task.Source {
+	return segmentChecker
 }
 
 func (c *SegmentChecker) Description() string {

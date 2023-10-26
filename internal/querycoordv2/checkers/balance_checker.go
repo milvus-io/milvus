@@ -36,7 +36,6 @@ import (
 
 // BalanceChecker checks the cluster distribution and generates balance tasks.
 type BalanceChecker struct {
-	baseChecker
 	balance.Balance
 	meta                                 *meta.Meta
 	nodeManager                          *session.NodeManager
@@ -52,6 +51,10 @@ func NewBalanceChecker(meta *meta.Meta, balancer balance.Balance, nodeMgr *sessi
 		normalBalanceCollectionsCurrentRound: typeutil.NewUniqueSet(),
 		scheduler:                            scheduler,
 	}
+}
+
+func (b *BalanceChecker) ID() task.Source {
+	return balanceChecker
 }
 
 func (b *BalanceChecker) Description() string {
