@@ -23,7 +23,13 @@ def get_image_tag_by_short_name(repository, tag, arch):
     for tag_info in sorted_images:
         # print(tag_info)
         if arch in [x["architecture"] for x in tag_info["images"]]:
-            candidate_tag = tag_info["name"]
+            if tag == "2.2.0-latest": # special case for 2.2.0-latest, for 2.2.0 branch, there is no arm amd and gpu as suffix
+                candidate_tag = tag_info["name"]
+            else:
+                if arch in tag_info["name"]:
+                    candidate_tag = tag_info["name"]
+                else:
+                    continue
             if candidate_tag == tag:
                 continue
             else:
@@ -50,7 +56,7 @@ def get_image_tag_by_short_name(repository, tag, arch):
         if image_name != tag and arch in image_name:
             res.append(image_name)
     # print(res)
-    if len(res) == 0 or candidate_tag > res[0]:
+    if len(res) == 0 or (candidate_tag is not None and candidate_tag > res[0]):
         if candidate_tag is None:
             return tag
         return candidate_tag
