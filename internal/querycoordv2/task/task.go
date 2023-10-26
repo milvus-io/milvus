@@ -64,9 +64,11 @@ func (p Priority) String() string {
 // All task priorities from low to high
 var TaskPriorities = []Priority{TaskPriorityLow, TaskPriorityNormal, TaskPriorityHigh}
 
+type Source fmt.Stringer
+
 type Task interface {
 	Context() context.Context
-	SourceID() UniqueID
+	Source() Source
 	ID() UniqueID
 	CollectionID() UniqueID
 	ReplicaID() UniqueID
@@ -98,13 +100,13 @@ type baseTask struct {
 	doneCh   chan struct{}
 	canceled *atomic.Bool
 
-	sourceID     UniqueID // RequestID
 	id           UniqueID // Set by scheduler
 	collectionID UniqueID
 	replicaID    UniqueID
 	shard        string
 	loadType     querypb.LoadType
 
+	source   Source
 	status   *atomic.Int32
 	priority Priority
 	err      error
@@ -116,12 +118,12 @@ type baseTask struct {
 	span trace.Span
 }
 
-func newBaseTask(ctx context.Context, sourceID, collectionID, replicaID UniqueID, shard string) *baseTask {
+func newBaseTask(ctx context.Context, source Source, collectionID, replicaID UniqueID, shard string) *baseTask {
 	ctx, cancel := context.WithCancel(ctx)
 	ctx, span := otel.Tracer("QueryCoord").Start(ctx, "QueryCoord-BaseTask")
 
 	return &baseTask{
-		sourceID:     sourceID,
+		source:       source,
 		collectionID: collectionID,
 		replicaID:    replicaID,
 		shard:        shard,
@@ -140,8 +142,8 @@ func (task *baseTask) Context() context.Context {
 	return task.ctx
 }
 
-func (task *baseTask) SourceID() UniqueID {
-	return task.sourceID
+func (task *baseTask) Source() Source {
+	return task.source
 }
 
 func (task *baseTask) ID() UniqueID {
@@ -260,10 +262,10 @@ func (task *baseTask) String() string {
 		}
 	}
 	return fmt.Sprintf(
-		"[id=%d] [type=%s] [source=%d] [reason=%s] [collectionID=%d] [replicaID=%d] [priority=%s] [actionsCount=%d] [actions=%s]",
+		"[id=%d] [type=%s] [source=%s] [reason=%s] [collectionID=%d] [replicaID=%d] [priority=%s] [actionsCount=%d] [actions=%s]",
 		task.id,
 		GetTaskType(task).String(),
-		task.sourceID,
+		task.source.String(),
 		task.reason,
 		task.collectionID,
 		task.replicaID,
@@ -284,7 +286,7 @@ type SegmentTask struct {
 // empty actions is not allowed
 func NewSegmentTask(ctx context.Context,
 	timeout time.Duration,
-	sourceID,
+	source Source,
 	collectionID,
 	replicaID UniqueID,
 	actions ...Action,
@@ -308,7 +310,7 @@ func NewSegmentTask(ctx context.Context,
 		}
 	}
 
-	base := newBaseTask(ctx, sourceID, collectionID, replicaID, shard)
+	base := newBaseTask(ctx, source, collectionID, replicaID, shard)
 	base.actions = actions
 	return &SegmentTask{
 		baseTask:  base,
@@ -341,7 +343,7 @@ type ChannelTask struct {
 // empty actions is not allowed
 func NewChannelTask(ctx context.Context,
 	timeout time.Duration,
-	sourceID,
+	source Source,
 	collectionID,
 	replicaID UniqueID,
 	actions ...Action,
@@ -363,7 +365,7 @@ func NewChannelTask(ctx context.Context,
 		}
 	}
 
-	base := newBaseTask(ctx, sourceID, collectionID, replicaID, channel)
+	base := newBaseTask(ctx, source, collectionID, replicaID, channel)
 	base.actions = actions
 	return &ChannelTask{
 		baseTask: base,

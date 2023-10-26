@@ -35,7 +35,6 @@ var _ Checker = (*IndexChecker)(nil)
 
 // IndexChecker perform segment index check.
 type IndexChecker struct {
-	baseChecker
 	meta   *meta.Meta
 	dist   *meta.DistributionManager
 	broker meta.Broker
@@ -51,6 +50,10 @@ func NewIndexChecker(
 		dist:   dist,
 		broker: broker,
 	}
+}
+
+func (c *IndexChecker) ID() task.Source {
+	return indexChecker
 }
 
 func (c *IndexChecker) Description() string {
