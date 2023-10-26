@@ -537,7 +537,8 @@ func (node *DataNode) FlushChannels(ctx context.Context, req *datapb.FlushChanne
 	for _, channel := range req.GetChannels() {
 		fg, ok := node.flowgraphManager.getFlowgraphService(channel)
 		if !ok {
-			return merr.Status(merr.WrapErrChannelNotFound(channel)), nil
+			msg := "may channel has not watched yet"
+			return merr.Status(merr.WrapErrChannelNotFound(channel, msg)), nil
 		}
 		fg.channel.setFlushTs(req.GetFlushTs())
 	}
