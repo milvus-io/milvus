@@ -35,7 +35,7 @@ pull_request_rules:
       - or:
           - base=sql_beta
           - base=master
-          - base~=^2\.3\(.\d+){0,1}$
+          - base~=^2\.3(\.\d+){0,1}$
       - 'status-success=Build and test AMD64 Ubuntu 20.04'
       - 'status-success=Code Checker AMD64 Ubuntu 20.04'
       - 'status-success=Code Checker MacOS 12'
