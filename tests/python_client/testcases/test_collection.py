@@ -419,7 +419,7 @@ class TestCollectionParams(TestcaseBase):
         expected: exception
         """
         self._connect()
-        error = {ct.err_code: 0, ct.err_msg: "Primary field must in dataframe."}
+        error = {ct.err_code: 1, ct.err_msg: "Schema must have a primary key field."}
         self.collection_schema_wrap.init_collection_schema(fields=[], primary_field=ct.default_int64_field_name,
                                                            check_task=CheckTasks.err_res, check_items=error)
 
@@ -448,7 +448,7 @@ class TestCollectionParams(TestcaseBase):
         expected: raise exception
         """
         self._connect()
-        error = {ct.err_code: 0, ct.err_msg: "Primary field must in dataframe"}
+        error = {ct.err_code: 1, ct.err_msg: "Schema must have a primary key field."}
         self.collection_schema_wrap.init_collection_schema([field], check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -509,7 +509,7 @@ class TestCollectionParams(TestcaseBase):
         int_fields, _ = self.field_schema_wrap.init_field_schema(name=ct.default_int64_field_name, dtype=DataType.INT64)
         vec_fields, _ = self.field_schema_wrap.init_field_schema(name=ct.default_float_vec_field_name,
                                                                  dtype=DataType.FLOAT_VECTOR, dim=ct.default_dim)
-        error = {ct.err_code: 0, ct.err_msg: "Primary field must in dataframe."}
+        error = {ct.err_code: 1, ct.err_msg: "Schema must have a primary key field."}
         self.collection_schema_wrap.init_collection_schema([int_fields, vec_fields],
                                                            check_task=CheckTasks.err_res, check_items=error)
 
@@ -523,7 +523,7 @@ class TestCollectionParams(TestcaseBase):
         self._connect()
         fields = [cf.gen_int64_field(is_primary=False), cf.gen_float_field(is_primary=False),
                   cf.gen_float_vec_field(is_primary=False)]
-        error = {ct.err_code: 0, ct.err_msg: "Primary field must in dataframe."}
+        error = {ct.err_code: 1, ct.err_msg: "Schema must have a primary key field."}
         self.collection_schema_wrap.init_collection_schema(fields, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -550,7 +550,7 @@ class TestCollectionParams(TestcaseBase):
         """
         self._connect()
         fields = [cf.gen_int64_field(), cf.gen_float_vec_field()]
-        error = {ct.err_code: 0, ct.err_msg: "Primary field must in dataframe."}
+        error = {ct.err_code: 1, ct.err_msg: "Schema must have a primary key field."}
         self.collection_schema_wrap.init_collection_schema(fields=fields, primary_field=primary_field,
                                                            check_task=CheckTasks.err_res, check_items=error)
 
@@ -578,7 +578,7 @@ class TestCollectionParams(TestcaseBase):
         self._connect()
         fake_field = cf.gen_unique_str()
         fields = [cf.gen_int64_field(), cf.gen_float_vec_field()]
-        error = {ct.err_code: 0, ct.err_msg: "Primary field must in dataframe."}
+        error = {ct.err_code: 1, ct.err_msg: "Schema must have a primary key field."}
 
         self.collection_schema_wrap.init_collection_schema(fields, primary_field=fake_field,
                                                            check_task=CheckTasks.err_res, check_items=error)
@@ -3062,8 +3062,7 @@ class TestDescribeCollection(TestcaseBase):
         description = \
             {'collection_name': c_name, 'auto_id': False, 'num_shards': ct.default_shards_num, 'description': '',
              'fields': [{'field_id': 100, 'name': 'int64', 'description': '', 'type': 5, 'params': {},
-                         'is_primary': True, 'element_type': 0, "auto_id": False, "is_partition_key": False,
-                         "is_dynamic": False},
+                         'is_primary': True, 'element_type': 0},
                         {'field_id': 101, 'name': 'float', 'description': '', 'type': 10, 'params': {},
                          'element_type': 0},
                         {'field_id': 102, 'name': 'varchar', 'description': '', 'type': 21,
@@ -3072,8 +3071,7 @@ class TestDescribeCollection(TestcaseBase):
                          'element_type': 0},
                         {'field_id': 104, 'name': 'float_vector', 'description': '', 'type': 101,
                          'params': {'dim': 128}, 'element_type': 0}],
-             'aliases': [], 'consistency_level': 0, 'properties': [], 'num_partitions': 1,
-             "enable_dynamic_field": False}
+             'aliases': [], 'consistency_level': 0, 'properties': [], 'num_partitions': 1}
         res = collection_w.describe()[0]
         del res['collection_id']
         log.info(res)
