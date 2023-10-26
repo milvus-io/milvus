@@ -50,12 +50,13 @@ type deleteTask struct {
 	lb          LBPolicy
 
 	// delete info
-	schema       *schemapb.CollectionSchema
-	ts           Timestamp
-	msgID        UniqueID
-	collectionID UniqueID
-	partitionID  UniqueID
-	count        int
+	schema           *schemapb.CollectionSchema
+	ts               Timestamp
+	msgID            UniqueID
+	collectionID     UniqueID
+	partitionID      UniqueID
+	count            int
+	partitionKeyMode bool
 }
 
 func (dt *deleteTask) TraceCtx() context.Context {
@@ -175,11 +176,11 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 	}
 	dt.collectionID = collID
 
-	partitionKeyMode, err := isPartitionKeyMode(ctx, dt.req.GetDbName(), dt.req.GetCollectionName())
+	dt.partitionKeyMode, err = isPartitionKeyMode(ctx, dt.req.GetDbName(), dt.req.GetCollectionName())
 	if err != nil {
 		return ErrWithLog(log, "Failed to get partition key mode", err)
 	}
-	if partitionKeyMode && len(dt.req.PartitionName) != 0 {
+	if dt.partitionKeyMode && len(dt.req.PartitionName) != 0 {
 		return errors.New("not support manually specifying the partition names if partition key mode is used")
 	}
 
@@ -262,9 +263,25 @@ func (dt *deleteTask) PostExecute(ctx context.Context) error {
 
 func (dt *deleteTask) getStreamingQueryAndDelteFunc(stream msgstream.MsgStream, plan *planpb.PlanNode) executeFunc {
 	return func(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channelIDs ...string) error {
-		partationIDs := []int64{}
-		if dt.partitionID != common.InvalidFieldID {
-			partationIDs = append(partationIDs, dt.partitionID)
+		var partationIDs []int64
+
+		// optimize query when partitionKey on
+		if dt.partitionKeyMode {
+			expr, err := ParseExprFromPlan(plan)
+			if err != nil {
+				return err
+			}
+			partitionKeys := ParsePartitionKeys(expr)
+			hashedPartitionNames, err := assignPartitionKeys(ctx, dt.req.GetDbName(), dt.req.GetCollectionName(), partitionKeys)
+			if err != nil {
+				return err
+			}
+			partationIDs, err = getPartitionIDs(ctx, dt.req.GetDbName(), dt.req.GetCollectionName(), hashedPartitionNames)
+			if err != nil {
+				return err
+			}
+		} else if dt.partitionID != common.InvalidFieldID {
+			partationIDs = []int64{dt.partitionID}
 		}
 
 		log := log.Ctx(ctx).With(
