@@ -77,7 +77,7 @@ func constructCollectionSchema(
 	collectionName string,
 ) *schemapb.CollectionSchema {
 	pk := &schemapb.FieldSchema{
-		FieldID:      0,
+		FieldID:      100,
 		Name:         int64Field,
 		IsPrimaryKey: true,
 		Description:  "",
@@ -87,7 +87,7 @@ func constructCollectionSchema(
 		AutoID:       true,
 	}
 	fVec := &schemapb.FieldSchema{
-		FieldID:      0,
+		FieldID:      101,
 		Name:         floatVecField,
 		IsPrimaryKey: false,
 		Description:  "",

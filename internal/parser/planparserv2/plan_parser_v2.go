@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/antlr/antlr4/runtime/Go/antlr"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -157,4 +158,49 @@ func CreateSearchPlan(schemaPb *schemapb.CollectionSchema, exprStr string, vecto
 		},
 	}
 	return planNode, nil
+}
+
+func CreateRequeryPlan(pkField *schemapb.FieldSchema, ids *schemapb.IDs) *planpb.PlanNode {
+	var values []*planpb.GenericValue
+	switch ids.GetIdField().(type) {
+	case *schemapb.IDs_IntId:
+		values = lo.Map(ids.GetIntId().GetData(), func(id int64, _ int) *planpb.GenericValue {
+			return &planpb.GenericValue{
+				Val: &planpb.GenericValue_Int64Val{
+					Int64Val: id,
+				},
+			}
+		})
+	case *schemapb.IDs_StrId:
+		values = lo.Map(ids.GetStrId().GetData(), func(id string, _ int) *planpb.GenericValue {
+			return &planpb.GenericValue{
+				Val: &planpb.GenericValue_StringVal{
+					StringVal: id,
+				},
+			}
+		})
+	}
+
+	return &planpb.PlanNode{
+		Node: &planpb.PlanNode_Query{
+			Query: &planpb.QueryPlanNode{
+				Predicates: &planpb.Expr{
+					Expr: &planpb.Expr_TermExpr{
+						TermExpr: &planpb.TermExpr{
+							ColumnInfo: &planpb.ColumnInfo{
+								FieldId:        pkField.GetFieldID(),
+								DataType:       pkField.GetDataType(),
+								IsPrimaryKey:   true,
+								IsAutoID:       pkField.GetAutoID(),
+								IsPartitionKey: pkField.GetIsPartitionKey(),
+							},
+							Values: values,
+						},
+					},
+				},
+				IsCount: false,
+				Limit:   int64(len(values)),
+			},
+		},
+	}
 }
