@@ -38,7 +38,7 @@ type TargetObserverSuite struct {
 	suite.Suite
 
 	kv *etcdkv.EtcdKV
-	//dependency
+	// dependency
 	meta      *meta.Meta
 	targetMgr *meta.TargetManager
 	distMgr   *meta.DistributionManager
@@ -80,7 +80,6 @@ func (suite *TargetObserverSuite) SetupTest() {
 	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
 	suite.distMgr = meta.NewDistributionManager()
 	suite.observer = NewTargetObserver(suite.meta, suite.targetMgr, suite.distMgr, suite.broker)
-	suite.observer.Start(context.TODO())
 	suite.collectionID = int64(1000)
 	suite.partitionID = int64(100)
 
@@ -115,6 +114,7 @@ func (suite *TargetObserverSuite) SetupTest() {
 	}
 
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything, mock.Anything).Return(suite.nextTargetChannels, suite.nextTargetSegments, nil)
+	suite.observer.Start(context.TODO())
 }
 
 func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
