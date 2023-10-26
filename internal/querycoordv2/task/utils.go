@@ -36,6 +36,17 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+// idSource helper type for using id as task source
+type idSource int64
+
+func (s idSource) String() string {
+	return fmt.Sprintf("ID-%d", s)
+}
+
+func WrapIDSource(id int64) Source {
+	return idSource(id)
+}
+
 func Wait(ctx context.Context, timeout time.Duration, tasks ...Task) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

@@ -104,7 +104,7 @@ func (ex *Executor) Execute(task Task, step int) bool {
 		zap.Int64("collectionID", task.CollectionID()),
 		zap.Int64("replicaID", task.ReplicaID()),
 		zap.Int("step", step),
-		zap.Int64("source", task.SourceID()),
+		zap.String("source", task.Source().String()),
 	)
 
 	go func() {
@@ -169,7 +169,7 @@ func (ex *Executor) processMergeTask(mergeTask *LoadSegmentsTask) {
 		zap.String("shard", task.Shard()),
 		zap.Int64s("segmentIDs", segments),
 		zap.Int64("nodeID", action.Node()),
-		zap.Int64("source", task.SourceID()),
+		zap.String("source", task.Source().String()),
 	)
 
 	// Get shard leader for the given replica and segment
@@ -231,7 +231,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		zap.Int64("replicaID", task.ReplicaID()),
 		zap.Int64("segmentID", task.segmentID),
 		zap.Int64("node", action.Node()),
-		zap.Int64("source", task.SourceID()),
+		zap.String("source", task.Source().String()),
 	)
 
 	var err error
@@ -312,7 +312,7 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 		zap.Int64("replicaID", task.ReplicaID()),
 		zap.Int64("segmentID", task.segmentID),
 		zap.Int64("node", action.Node()),
-		zap.Int64("source", task.SourceID()),
+		zap.String("source", task.Source().String()),
 	)
 
 	ctx := task.Context()
@@ -384,7 +384,7 @@ func (ex *Executor) subDmChannel(task *ChannelTask, step int) error {
 		zap.Int64("replicaID", task.ReplicaID()),
 		zap.String("channel", task.Channel()),
 		zap.Int64("node", action.Node()),
-		zap.Int64("source", task.SourceID()),
+		zap.String("source", task.Source().String()),
 	)
 
 	var err error
@@ -467,7 +467,7 @@ func (ex *Executor) unsubDmChannel(task *ChannelTask, step int) error {
 		zap.Int64("replicaID", task.ReplicaID()),
 		zap.String("channel", task.Channel()),
 		zap.Int64("node", action.Node()),
-		zap.Int64("source", task.SourceID()),
+		zap.String("source", task.Source().String()),
 	)
 
 	var err error
