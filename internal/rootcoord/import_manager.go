@@ -586,12 +586,7 @@ func (m *importManager) updateTaskInfo(ir *rootcoordpb.ImportResult) (*datapb.Im
 			// Meta persist should be done before memory objs change.
 			toPersistImportTaskInfo = cloneImportTaskInfo(v)
 			toPersistImportTaskInfo.State.StateCode = ir.GetState()
-			// if is started state, append the new created segment id
-			if v.GetState().GetStateCode() == commonpb.ImportState_ImportStarted {
-				toPersistImportTaskInfo.State.Segments = append(toPersistImportTaskInfo.State.Segments, ir.GetSegments()...)
-			} else {
-				toPersistImportTaskInfo.State.Segments = ir.GetSegments()
-			}
+			toPersistImportTaskInfo.State.Segments = mergeArray(toPersistImportTaskInfo.State.Segments, ir.GetSegments())
 			toPersistImportTaskInfo.State.RowCount = ir.GetRowCount()
 			toPersistImportTaskInfo.State.RowIds = ir.GetAutoIds()
 			for _, kv := range ir.GetInfos() {
@@ -1086,4 +1081,21 @@ func cloneImportTaskInfo(taskInfo *datapb.ImportTaskInfo) *datapb.ImportTaskInfo
 		StartTs:        taskInfo.GetStartTs(),
 	}
 	return cloned
+}
+
+func mergeArray(arr1 []int64, arr2 []int64) []int64 {
+	reduce := make(map[int64]int)
+	doReduce := func(arr []int64) {
+		for _, v := range arr {
+			reduce[v] = 1
+		}
+	}
+	doReduce(arr1)
+	doReduce(arr2)
+
+	result := make([]int64, 0, len(reduce))
+	for k := range reduce {
+		result = append(result, k)
+	}
+	return result
 }
