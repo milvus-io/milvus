@@ -573,7 +573,7 @@ func (t *searchTask) Requery() error {
 		return err
 	}
 	ids := t.result.GetResults().GetIds()
-	expr := IDs2Expr(pkField.GetName(), ids)
+	plan := planparserv2.CreateRequeryPlan(pkField, ids)
 
 	queryReq := &milvuspb.QueryRequest{
 		Base: &commonpb.MsgBase{
@@ -581,13 +581,28 @@ func (t *searchTask) Requery() error {
 		},
 		DbName:             t.request.GetDbName(),
 		CollectionName:     t.request.GetCollectionName(),
-		Expr:               expr,
+		Expr:               "",
 		OutputFields:       t.request.GetOutputFields(),
 		PartitionNames:     t.request.GetPartitionNames(),
 		GuaranteeTimestamp: t.request.GetGuaranteeTimestamp(),
 		QueryParams:        t.request.GetSearchParams(),
 	}
-	queryResult, err := t.node.Query(t.ctx, queryReq)
+	qt := &queryTask{
+		ctx:       t.ctx,
+		Condition: NewTaskCondition(t.ctx),
+		RetrieveRequest: &internalpb.RetrieveRequest{
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
+				commonpbutil.WithSourceID(paramtable.GetNodeID()),
+			),
+			ReqID: paramtable.GetNodeID(),
+		},
+		request: queryReq,
+		plan:    plan,
+		qc:      t.node.(*Proxy).queryCoord,
+		lb:      t.node.(*Proxy).lbPolicy,
+	}
+	queryResult, err := t.node.(*Proxy).query(t.ctx, qt)
 	if err != nil {
 		return err
 	}

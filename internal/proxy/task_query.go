@@ -210,9 +210,12 @@ func (t *queryTask) createPlan(ctx context.Context) error {
 		return err
 	}
 
-	plan, err := planparserv2.CreateRetrievePlan(schema, t.request.Expr)
-	if err != nil {
-		return err
+	var err error
+	if t.plan == nil {
+		t.plan, err = planparserv2.CreateRetrievePlan(schema, t.request.Expr)
+		if err != nil {
+			return err
+		}
 	}
 
 	t.request.OutputFields, t.userOutputFields, err = translateOutputFields(t.request.OutputFields, schema, true)
@@ -226,8 +229,7 @@ func (t *queryTask) createPlan(ctx context.Context) error {
 	}
 	outputFieldIDs = append(outputFieldIDs, common.TimeStampField)
 	t.RetrieveRequest.OutputFieldsId = outputFieldIDs
-	plan.OutputFieldIds = outputFieldIDs
-	t.plan = plan
+	t.plan.OutputFieldIds = outputFieldIDs
 	log.Ctx(ctx).Debug("translate output fields to field ids",
 		zap.Int64s("OutputFieldsID", t.OutputFieldsId),
 		zap.String("requestType", "query"))
