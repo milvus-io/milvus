@@ -116,21 +116,16 @@ func Test_JSONParserParseRows_IntPK(t *testing.T) {
 		content.Rows = append(content.Rows, row)
 	}
 
-	binContent, err := json.Marshal(content)
-	assert.NoError(t, err)
-	strContent := string(binContent)
-	reader := strings.NewReader(strContent)
+	verifyRows := func(ioReader *IOReader) {
+		consumer := &mockJSONRowConsumer{
+			handleErr:   nil,
+			rows:        make([]map[int64]interface{}, 0),
+			handleCount: 0,
+		}
 
-	consumer := &mockJSONRowConsumer{
-		handleErr:   nil,
-		rows:        make([]map[int64]interface{}, 0),
-		handleCount: 0,
-	}
-
-	t.Run("parse success", func(t *testing.T) {
 		// set bufRowCount = 4, means call handle() after reading 4 rows
 		parser.bufRowCount = 4
-		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(len(strContent))}, consumer)
+		err = parser.ParseRows(ioReader, consumer)
 		assert.NoError(t, err)
 		assert.Equal(t, len(content.Rows), len(consumer.rows))
 		for i := 0; i < len(consumer.rows); i++ {
@@ -193,6 +188,22 @@ func Test_JSONParserParseRows_IntPK(t *testing.T) {
 				assert.InDelta(t, contenctRow.FieldFloatVector[k], float32(fval), 10e-6)
 			}
 		}
+	}
+
+	consumer := &mockJSONRowConsumer{
+		handleErr:   nil,
+		rows:        make([]map[int64]interface{}, 0),
+		handleCount: 0,
+	}
+
+	t.Run("parse old format success", func(t *testing.T) {
+		binContent, err := json.Marshal(content)
+		assert.NoError(t, err)
+		strContent := string(binContent)
+		reader := strings.NewReader(strContent)
+
+		ioReader := &IOReader{r: reader, fileSize: int64(len(strContent))}
+		verifyRows(ioReader)
 
 		// empty content
 		reader = strings.NewReader(`{}`)
@@ -207,8 +218,25 @@ func Test_JSONParserParseRows_IntPK(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("parse new format success", func(t *testing.T) {
+		binContent, err := json.Marshal(content.Rows)
+		assert.NoError(t, err)
+		strContent := string(binContent)
+		reader := strings.NewReader(strContent)
+		fmt.Println(strContent)
+
+		ioReader := &IOReader{r: reader, fileSize: int64(len(strContent))}
+		verifyRows(ioReader)
+
+		// empty list
+		reader = strings.NewReader(`[]`)
+		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(2)}, consumer)
+		assert.NoError(t, err)
+	})
+
 	t.Run("error cases", func(t *testing.T) {
 		// handler is nil
+		reader := strings.NewReader("")
 		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(0)}, nil)
 		assert.Error(t, err)
 
@@ -257,11 +285,6 @@ func Test_JSONParserParseRows_IntPK(t *testing.T) {
 			"rows": ["]
 		}`)
 		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(10)}, consumer)
-		assert.Error(t, err)
-
-		// not valid json format
-		reader = strings.NewReader(`[]`)
-		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(2)}, consumer)
 		assert.Error(t, err)
 
 		// empty file
