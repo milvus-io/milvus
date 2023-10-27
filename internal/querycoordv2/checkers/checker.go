@@ -23,20 +23,7 @@ import (
 )
 
 type Checker interface {
-	ID() int64
-	SetID(id int64)
+	ID() task.Source
 	Description() string
 	Check(ctx context.Context) []task.Task
-}
-
-type baseChecker struct {
-	id int64
-}
-
-func (checker *baseChecker) ID() int64 {
-	return checker.id
-}
-
-func (checker *baseChecker) SetID(id int64) {
-	checker.id = id
 }

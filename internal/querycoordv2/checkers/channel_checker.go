@@ -34,7 +34,6 @@ import (
 
 // TODO(sunby): have too much similar codes with SegmentChecker
 type ChannelChecker struct {
-	baseChecker
 	meta      *meta.Meta
 	dist      *meta.DistributionManager
 	targetMgr *meta.TargetManager
@@ -53,6 +52,10 @@ func NewChannelChecker(
 		targetMgr: targetMgr,
 		balancer:  balancer,
 	}
+}
+
+func (c *ChannelChecker) ID() task.Source {
+	return channelChecker
 }
 
 func (c *ChannelChecker) Description() string {

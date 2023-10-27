@@ -421,7 +421,7 @@ func (scheduler *taskScheduler) promote(task Task) error {
 		zap.Int64("taskID", task.ID()),
 		zap.Int64("collectionID", task.CollectionID()),
 		zap.Int64("replicaID", task.ReplicaID()),
-		zap.Int64("source", task.SourceID()),
+		zap.String("source", task.Source().String()),
 	)
 
 	if err := scheduler.check(task); err != nil {
@@ -643,7 +643,7 @@ func (scheduler *taskScheduler) process(task Task) bool {
 		zap.Int64("collectionID", task.CollectionID()),
 		zap.Int64("replicaID", task.ReplicaID()),
 		zap.String("type", GetTaskType(task).String()),
-		zap.Int64("source", task.SourceID()),
+		zap.String("source", task.Source().String()),
 	)
 
 	actions, step := task.Actions(), task.Step()
@@ -733,7 +733,7 @@ func (scheduler *taskScheduler) checkStale(task Task) error {
 		zap.Int64("taskID", task.ID()),
 		zap.Int64("collectionID", task.CollectionID()),
 		zap.Int64("replicaID", task.ReplicaID()),
-		zap.Int64("source", task.SourceID()),
+		zap.String("source", task.Source().String()),
 	)
 
 	switch task := task.(type) {
@@ -770,7 +770,7 @@ func (scheduler *taskScheduler) checkSegmentTaskStale(task *SegmentTask) error {
 		zap.Int64("taskID", task.ID()),
 		zap.Int64("collectionID", task.CollectionID()),
 		zap.Int64("replicaID", task.ReplicaID()),
-		zap.Int64("source", task.SourceID()),
+		zap.String("source", task.Source().String()),
 	)
 
 	for _, action := range task.Actions() {
@@ -814,7 +814,7 @@ func (scheduler *taskScheduler) checkChannelTaskStale(task *ChannelTask) error {
 		zap.Int64("taskID", task.ID()),
 		zap.Int64("collectionID", task.CollectionID()),
 		zap.Int64("replicaID", task.ReplicaID()),
-		zap.Int64("source", task.SourceID()),
+		zap.String("source", task.Source().String()),
 	)
 
 	for _, action := range task.Actions() {
