@@ -29,10 +29,10 @@
 
 using namespace milvus;
 CStatus
-CreateIndex(enum CDataType dtype,
-            const char* serialized_type_params,
-            const char* serialized_index_params,
-            CIndex* res_index) {
+CreateIndexV0(enum CDataType dtype,
+              const char* serialized_type_params,
+              const char* serialized_index_params,
+              CIndex* res_index) {
     auto status = CStatus();
     try {
         AssertInfo(res_index, "failed to create index, passed index was null");
@@ -73,7 +73,7 @@ CreateIndex(enum CDataType dtype,
 }
 
 CStatus
-CreateIndexV2(CIndex* res_index, CBuildIndexInfo c_build_index_info) {
+CreateIndex(CIndex* res_index, CBuildIndexInfo c_build_index_info) {
     try {
         auto build_index_info = (BuildIndexInfo*)c_build_index_info;
         auto field_type = build_index_info->field_type;

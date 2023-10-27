@@ -21,10 +21,13 @@ extern "C" {
 #include "indexbuilder/type_c.h"
 
 CStatus
-CreateIndex(enum CDataType dtype,
-            const char* serialized_type_params,
-            const char* serialized_index_params,
-            CIndex* res_index);
+CreateIndexV0(enum CDataType dtype,
+              const char* serialized_type_params,
+              const char* serialized_index_params,
+              CIndex* res_index);
+
+CStatus
+CreateIndex(CIndex* res_index, CBuildIndexInfo c_build_index_info);
 
 CStatus
 DeleteIndex(CIndex index);
@@ -89,9 +92,6 @@ AppendInsertFilePath(CBuildIndexInfo c_build_index_info, const char* file_path);
 CStatus
 AppendIndexEngineVersionToBuildInfo(CBuildIndexInfo c_load_index_info,
                                     int32_t c_index_engine_version);
-
-CStatus
-CreateIndexV2(CIndex* res_index, CBuildIndexInfo c_build_index_info);
 
 CStatus
 SerializeIndexAndUpLoad(CIndex index, CBinarySet* c_binary_set);
