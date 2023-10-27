@@ -22,6 +22,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
 
@@ -36,6 +37,8 @@ type MetaCacheSuite struct {
 	growingSegments []int64
 	newSegments     []int64
 	cache           MetaCache
+
+	bfsFactory PkStatsFactory
 }
 
 func (s *MetaCacheSuite) SetupSuite() {
@@ -46,6 +49,9 @@ func (s *MetaCacheSuite) SetupSuite() {
 	s.growingSegments = []int64{5, 6, 7, 8}
 	s.newSegments = []int64{9, 10, 11, 12}
 	s.invaliedSeg = 111
+	s.bfsFactory = func(*datapb.SegmentInfo) *BloomFilterSet {
+		return newBloomFilterSet()
+	}
 }
 
 func (s *MetaCacheSuite) SetupTest() {
@@ -53,6 +59,7 @@ func (s *MetaCacheSuite) SetupTest() {
 		return &datapb.SegmentInfo{
 			ID:          s.flushedSegments[i],
 			PartitionID: s.partitionIDs[i],
+			State:       commonpb.SegmentState_Flushed,
 		}
 	})
 
@@ -60,6 +67,7 @@ func (s *MetaCacheSuite) SetupTest() {
 		return &datapb.SegmentInfo{
 			ID:          s.growingSegments[i],
 			PartitionID: s.partitionIDs[i],
+			State:       commonpb.SegmentState_Growing,
 		}
 	})
 
@@ -68,7 +76,7 @@ func (s *MetaCacheSuite) SetupTest() {
 		ChannelName:       s.vchannel,
 		FlushedSegments:   flushSegmentInfos,
 		UnflushedSegments: growingSegmentInfos,
-	})
+	}, s.bfsFactory)
 }
 
 func (s *MetaCacheSuite) TestNewSegment() {
@@ -86,10 +94,10 @@ func (s *MetaCacheSuite) TestNewSegment() {
 	}
 }
 
-func (s *MetaCacheSuite) TestUpdateSegment() {
+func (s *MetaCacheSuite) TestCompactSegments() {
 	for i, seg := range s.newSegments {
 		// compaction from flushed[i], unflushed[i] and invalidSeg to new[i]
-		s.cache.UpdateSegment(seg, s.partitionIDs[i], s.flushedSegments[i], s.growingSegments[i], s.invaliedSeg)
+		s.cache.CompactSegments(seg, s.partitionIDs[i], s.flushedSegments[i], s.growingSegments[i], s.invaliedSeg)
 	}
 
 	for i, partitionID := range s.partitionIDs {
@@ -99,6 +107,14 @@ func (s *MetaCacheSuite) TestUpdateSegment() {
 			s.Equal(seg, s.newSegments[i])
 		}
 	}
+}
+
+func (s *MetaCacheSuite) TestUpdateSegments() {
+	s.cache.UpdateSegments(UpdateState(commonpb.SegmentState_Flushed), WithSegmentID(5))
+	segments := s.cache.GetSegmentsBy(WithSegmentID(5))
+	s.Require().Equal(1, len(segments))
+	segment := segments[0]
+	s.Equal(commonpb.SegmentState_Flushed, segment.State())
 }
 
 func TestMetaCacheSuite(t *testing.T) {
