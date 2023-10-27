@@ -2030,6 +2030,7 @@ type dataCoordConfig struct {
 	IndexTaskSchedulerInterval ParamItem `refreshable:"false"`
 
 	MinSegmentNumRowsToEnableIndex ParamItem `refreshable:"true"`
+	BrokerTimeout                  ParamItem `refreshable:"false"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -2385,6 +2386,16 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		DefaultValue: "1000",
 	}
 	p.IndexTaskSchedulerInterval.Init(base.mgr)
+
+	p.BrokerTimeout = ParamItem{
+		Key:          "dataCoord.brokerTimeout",
+		Version:      "2.3.0",
+		DefaultValue: "5000",
+		PanicIfEmpty: true,
+		Doc:          "5000ms, dataCoord broker rpc timeout",
+		Export:       true,
+	}
+	p.BrokerTimeout.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

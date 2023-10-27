@@ -31,10 +31,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
-const (
-	brokerRPCTimeout = 5 * time.Second
-)
-
 type Broker interface {
 	DescribeCollectionInternal(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error)
 	ShowPartitionsInternal(ctx context.Context, collectionID int64) ([]int64, error)
@@ -54,7 +50,7 @@ func NewCoordinatorBroker(rootCoord types.RootCoordClient) *CoordinatorBroker {
 }
 
 func (b *CoordinatorBroker) DescribeCollectionInternal(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
-	ctx, cancel := context.WithTimeout(ctx, brokerRPCTimeout)
+	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 	resp, err := b.rootCoord.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{
 		Base: commonpbutil.NewMsgBase(
@@ -75,7 +71,7 @@ func (b *CoordinatorBroker) DescribeCollectionInternal(ctx context.Context, coll
 }
 
 func (b *CoordinatorBroker) ShowPartitionsInternal(ctx context.Context, collectionID int64) ([]int64, error) {
-	ctx, cancel := context.WithTimeout(ctx, brokerRPCTimeout)
+	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 	resp, err := b.rootCoord.ShowPartitionsInternal(ctx, &milvuspb.ShowPartitionsRequest{
 		Base: commonpbutil.NewMsgBase(
@@ -97,7 +93,7 @@ func (b *CoordinatorBroker) ShowPartitionsInternal(ctx context.Context, collecti
 }
 
 func (b *CoordinatorBroker) ShowCollections(ctx context.Context, dbName string) (*milvuspb.ShowCollectionsResponse, error) {
-	ctx, cancel := context.WithTimeout(ctx, brokerRPCTimeout)
+	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 	resp, err := b.rootCoord.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
 		Base: commonpbutil.NewMsgBase(
@@ -117,7 +113,7 @@ func (b *CoordinatorBroker) ShowCollections(ctx context.Context, dbName string) 
 }
 
 func (b *CoordinatorBroker) ListDatabases(ctx context.Context) (*milvuspb.ListDatabasesResponse, error) {
-	ctx, cancel := context.WithTimeout(ctx, brokerRPCTimeout)
+	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 	resp, err := b.rootCoord.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{
 		Base: commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ListDatabases)),
@@ -131,7 +127,7 @@ func (b *CoordinatorBroker) ListDatabases(ctx context.Context) (*milvuspb.ListDa
 
 // HasCollection communicates with RootCoord and check whether this collection exist from the user's perspective.
 func (b *CoordinatorBroker) HasCollection(ctx context.Context, collectionID int64) (bool, error) {
-	ctx, cancel := context.WithTimeout(ctx, brokerRPCTimeout)
+	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 	resp, err := b.rootCoord.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		Base: commonpbutil.NewMsgBase(
