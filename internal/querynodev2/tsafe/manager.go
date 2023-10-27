@@ -17,6 +17,7 @@
 package tsafe
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -31,8 +32,8 @@ import (
 type Manager interface {
 	Get(vChannel string) (Timestamp, error)
 	Set(vChannel string, timestamp Timestamp) error
-	Add(vChannel string, timestamp Timestamp)
-	Remove(vChannel string)
+	Add(ctx context.Context, vChannel string, timestamp Timestamp)
+	Remove(ctx context.Context, vChannel string)
 	Watch() Listener
 	WatchChannel(channel string) Listener
 
@@ -58,15 +59,15 @@ func (t *tSafeManager) WatchChannel(channel string) Listener {
 	return l
 }
 
-func (t *tSafeManager) Add(vChannel string, timestamp uint64) {
+func (t *tSafeManager) Add(ctx context.Context, vChannel string, timestamp uint64) {
 	ts, _ := tsoutil.ParseTS(timestamp)
-	log.Info("add tSafe done",
-		zap.String("channel", vChannel), zap.Time("timestamp", ts))
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if _, ok := t.tSafes[vChannel]; !ok {
 		t.tSafes[vChannel] = newTSafe(vChannel, timestamp)
 	}
+	log.Ctx(ctx).Info("add tSafe done",
+		zap.String("channel", vChannel), zap.Time("timestamp", ts))
 }
 
 func (t *tSafeManager) Get(vChannel string) (Timestamp, error) {
@@ -91,9 +92,7 @@ func (t *tSafeManager) Set(vChannel string, timestamp Timestamp) error {
 	return nil
 }
 
-func (t *tSafeManager) Remove(vChannel string) {
-	log.Info("remove tSafe replica",
-		zap.String("vChannel", vChannel))
+func (t *tSafeManager) Remove(ctx context.Context, vChannel string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	tsafe, ok := t.tSafes[vChannel]
@@ -105,6 +104,8 @@ func (t *tSafeManager) Remove(vChannel string) {
 	}
 	delete(t.tSafes, vChannel)
 	delete(t.listeners, vChannel)
+	log.Ctx(ctx).Info("remove tSafe replica",
+		zap.String("vChannel", vChannel))
 }
 
 func (t *tSafeManager) Min() (string, Timestamp) {

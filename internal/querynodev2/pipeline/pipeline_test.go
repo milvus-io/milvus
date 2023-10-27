@@ -17,6 +17,7 @@
 package pipeline
 
 import (
+	"context"
 	"testing"
 
 	"github.com/samber/lo"
@@ -101,7 +102,7 @@ func (suite *PipelineTestSuite) SetupTest() {
 	// init dependency
 	//	init tsafeManager
 	suite.tSafeManager = tsafe.NewTSafeReplica()
-	suite.tSafeManager.Add(suite.channel, 0)
+	suite.tSafeManager.Add(context.Background(), suite.channel, 0)
 }
 
 func (suite *PipelineTestSuite) TestBasic() {
