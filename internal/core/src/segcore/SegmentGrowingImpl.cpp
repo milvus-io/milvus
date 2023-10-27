@@ -17,6 +17,7 @@
 #include <thread>
 #include <boost/iterator/counting_iterator.hpp>
 #include <type_traits>
+#include <variant>
 
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
@@ -236,19 +237,24 @@ SegmentGrowingImpl::Delete(int64_t reserved_begin,
     ParsePksFromIDs(pks, field_meta.get_data_type(), *ids);
 
     // filter out the deletions that the primary key not exists
-    auto end = std::remove_if(pks.begin(), pks.end(), [&](const PkType& pk) {
-        return !insert_record_.contain(pk);
-    });
-    size = end - pks.begin();
+    std::vector<std::tuple<Timestamp, PkType>> ordering(size);
+    for (int i = 0; i < size; i++) {
+        ordering[i] = std::make_tuple(timestamps_raw[i], pks[i]);
+    }
+    auto end =
+        std::remove_if(ordering.begin(),
+                       ordering.end(),
+                       [&](const std::tuple<Timestamp, PkType>& record) {
+                           return !insert_record_.contain(std::get<1>(record));
+                       });
+    size = end - ordering.begin();
+    ordering.resize(size);
     if (size == 0) {
         return SegcoreError::success();
     }
 
     // step 1: sort timestamp
-    std::vector<std::tuple<Timestamp, PkType>> ordering(size);
-    for (int i = 0; i < size; i++) {
-        ordering[i] = std::make_tuple(timestamps_raw[i], pks[i]);
-    }
+
     std::sort(ordering.begin(), ordering.end());
     std::vector<PkType> sort_pks(size);
     std::vector<Timestamp> sort_timestamps(size);
