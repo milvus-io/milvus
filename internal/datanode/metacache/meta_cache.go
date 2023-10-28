@@ -19,78 +19,69 @@ package metacache
 import (
 	"sync"
 
-	"github.com/pingcap/log"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 type MetaCache interface {
 	NewSegment(segmentID, partitionID int64)
-	UpdateSegment(newSegmentID, partitionID int64, dropSegmentIDs ...int64)
+	UpdateSegments(action SegmentAction, filters ...SegmentFilter)
+	CompactSegments(newSegmentID, partitionID int64, oldSegmentIDs ...int64)
+	GetSegmentsBy(filters ...SegmentFilter) []*SegmentInfo
 	GetSegmentIDsBy(filters ...SegmentFilter) []int64
 }
 
-type SegmentFilter func(info *SegmentInfo) bool
+var _ MetaCache = (*metaCacheImpl)(nil)
 
-type SegmentInfo struct {
-	segmentID   int64
-	partitionID int64
-}
+type PkStatsFactory func(vchannel *datapb.SegmentInfo) *BloomFilterSet
 
-func newSegmentInfo(segmentID, partitionID int64) *SegmentInfo {
-	return &SegmentInfo{
-		segmentID:   segmentID,
-		partitionID: partitionID,
-	}
-}
-
-func WithPartitionID(partitionID int64) func(info *SegmentInfo) bool {
-	return func(info *SegmentInfo) bool {
-		return info.partitionID == partitionID
-	}
-}
-
-var _ MetaCache = (*MetaCacheImpl)(nil)
-
-type MetaCacheImpl struct {
+type metaCacheImpl struct {
 	collectionID int64
 	vChannelName string
 	segmentInfos map[int64]*SegmentInfo
-	mu           sync.Mutex
+	mu           sync.RWMutex
 }
 
-func NewMetaCache(vchannel *datapb.VchannelInfo) MetaCache {
-	cache := &MetaCacheImpl{
+func NewMetaCache(vchannel *datapb.VchannelInfo, factory PkStatsFactory) MetaCache {
+	cache := &metaCacheImpl{
 		collectionID: vchannel.GetCollectionID(),
 		vChannelName: vchannel.GetChannelName(),
 		segmentInfos: make(map[int64]*SegmentInfo),
 	}
 
-	cache.init(vchannel)
+	cache.init(vchannel, factory)
 	return cache
 }
 
-func (c *MetaCacheImpl) init(vchannel *datapb.VchannelInfo) {
+func (c *metaCacheImpl) init(vchannel *datapb.VchannelInfo, factory PkStatsFactory) {
 	for _, seg := range vchannel.FlushedSegments {
-		c.segmentInfos[seg.GetID()] = newSegmentInfo(seg.GetID(), seg.GetPartitionID())
+		c.segmentInfos[seg.GetID()] = newSegmentInfo(seg, factory(seg))
 	}
 
 	for _, seg := range vchannel.UnflushedSegments {
-		c.segmentInfos[seg.GetID()] = newSegmentInfo(seg.GetID(), seg.GetPartitionID())
+		c.segmentInfos[seg.GetID()] = newSegmentInfo(seg, factory(seg))
 	}
 }
 
-func (c *MetaCacheImpl) NewSegment(segmentID, partitionID int64) {
+func (c *metaCacheImpl) NewSegment(segmentID, partitionID int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	if _, ok := c.segmentInfos[segmentID]; !ok {
-		c.segmentInfos[segmentID] = newSegmentInfo(segmentID, partitionID)
+		c.segmentInfos[segmentID] = &SegmentInfo{
+			segmentID:        segmentID,
+			partitionID:      partitionID,
+			state:            commonpb.SegmentState_Growing,
+			startPosRecorded: false,
+		}
 	}
 }
 
-func (c *MetaCacheImpl) UpdateSegment(newSegmentID, partitionID int64, dropSegmentIDs ...int64) {
+func (c *metaCacheImpl) CompactSegments(newSegmentID, partitionID int64, dropSegmentIDs ...int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -106,15 +97,53 @@ func (c *MetaCacheImpl) UpdateSegment(newSegmentID, partitionID int64, dropSegme
 	}
 
 	if _, ok := c.segmentInfos[newSegmentID]; !ok {
-		c.segmentInfos[newSegmentID] = newSegmentInfo(newSegmentID, partitionID)
+		c.segmentInfos[newSegmentID] = &SegmentInfo{
+			segmentID:        newSegmentID,
+			partitionID:      partitionID,
+			state:            commonpb.SegmentState_Flushed,
+			startPosRecorded: true,
+		}
 	}
 }
 
-func (c *MetaCacheImpl) GetSegmentIDsBy(filters ...SegmentFilter) []int64 {
+func (c *metaCacheImpl) GetSegmentsBy(filters ...SegmentFilter) []*SegmentInfo {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	filter := c.mergeFilters(filters...)
+
+	var segments []*SegmentInfo
+	for _, info := range c.segmentInfos {
+		if filter(info) {
+			segments = append(segments, info)
+		}
+	}
+	return segments
+}
+
+func (c *metaCacheImpl) GetSegmentIDsBy(filters ...SegmentFilter) []int64 {
+	segments := c.GetSegmentsBy(filters...)
+	return lo.Map(segments, func(info *SegmentInfo, _ int) int64 { return info.SegmentID() })
+}
+
+func (c *metaCacheImpl) UpdateSegments(action SegmentAction, filters ...SegmentFilter) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	filter := func(info *SegmentInfo) bool {
+	filter := c.mergeFilters(filters...)
+
+	for id, info := range c.segmentInfos {
+		if !filter(info) {
+			continue
+		}
+		nInfo := info.Clone()
+		action(nInfo)
+		c.segmentInfos[id] = nInfo
+	}
+}
+
+func (c *metaCacheImpl) mergeFilters(filters ...SegmentFilter) SegmentFilter {
+	return func(info *SegmentInfo) bool {
 		for _, filter := range filters {
 			if !filter(info) {
 				return false
@@ -122,12 +151,4 @@ func (c *MetaCacheImpl) GetSegmentIDsBy(filters ...SegmentFilter) []int64 {
 		}
 		return true
 	}
-
-	segments := []int64{}
-	for _, info := range c.segmentInfos {
-		if filter(info) {
-			segments = append(segments, info.segmentID)
-		}
-	}
-	return segments
 }
