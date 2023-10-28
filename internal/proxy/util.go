@@ -1017,7 +1017,7 @@ func translateOutputFields(outputFields []string, schema *schemapb.CollectionSch
 							expr.GetColumnExpr().GetInfo().GetNestedPath()[0] == outputFieldName {
 							return nil
 						}
-						return fmt.Errorf("not suppot getting subkeys of json field yet")
+						return fmt.Errorf("not support getting subkeys of json field yet")
 					})
 					if err != nil {
 						log.Info("parse output field name failed", zap.String("field name", outputFieldName))
