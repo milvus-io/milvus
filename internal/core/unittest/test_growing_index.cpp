@@ -37,7 +37,7 @@ TEST(GrowingIndex, Correctness) {
         vec, std::move(index_params), std::move(type_params));
     auto& config = SegcoreConfig::default_config();
     config.set_chunk_rows(1024);
-    config.set_enable_growing_segment_index(true);
+    config.set_enable_interim_segment_index(true);
     std::map<FieldId, FieldIndexMeta> filedMap = {{vec, fieldIndexMeta}};
     IndexMetaPtr metaPtr =
         std::make_shared<CollectionIndexMeta>(226985, std::move(filedMap));
@@ -161,7 +161,7 @@ TEST_P(GrowingIndexGetVectorTest, GetVector) {
         vec, std::move(index_params), std::move(type_params));
     auto& config = SegcoreConfig::default_config();
     config.set_chunk_rows(1024);
-    config.set_enable_growing_segment_index(true);
+    config.set_enable_interim_segment_index(true);
     std::map<FieldId, FieldIndexMeta> filedMap = {{vec, fieldIndexMeta}};
     IndexMetaPtr metaPtr =
         std::make_shared<CollectionIndexMeta>(100000, std::move(filedMap));

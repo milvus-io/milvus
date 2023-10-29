@@ -297,10 +297,10 @@ func TestComponentParam(t *testing.T) {
 		chunkRows := Params.ChunkRows.GetAsInt64()
 		assert.Equal(t, int64(1024), chunkRows)
 
-		nlist := Params.GrowingIndexNlist.GetAsInt64()
+		nlist := Params.InterimIndexNlist.GetAsInt64()
 		assert.Equal(t, int64(128), nlist)
 
-		nprobe := Params.GrowingIndexNProbe.GetAsInt64()
+		nprobe := Params.InterimIndexNProbe.GetAsInt64()
 		assert.Equal(t, int64(16), nprobe)
 
 		assert.Equal(t, true, Params.GroupEnabled.GetAsBool())
@@ -319,17 +319,17 @@ func TestComponentParam(t *testing.T) {
 		chunkRows = Params.ChunkRows.GetAsInt64()
 		assert.Equal(t, int64(8192), chunkRows)
 
-		enableGrowingIndex := Params.EnableGrowingSegmentIndex.GetAsBool()
-		assert.Equal(t, true, enableGrowingIndex)
+		enableInterimIndex := Params.EnableTempSegmentIndex.GetAsBool()
+		assert.Equal(t, true, enableInterimIndex)
 
-		params.Save("queryNode.segcore.growing.enableIndex", "true")
-		enableGrowingIndex = Params.EnableGrowingSegmentIndex.GetAsBool()
-		assert.Equal(t, true, enableGrowingIndex)
+		params.Save("queryNode.segcore.interimIndex.enableIndex", "true")
+		enableInterimIndex = Params.EnableTempSegmentIndex.GetAsBool()
+		assert.Equal(t, true, enableInterimIndex)
 
-		nlist = Params.GrowingIndexNlist.GetAsInt64()
+		nlist = Params.InterimIndexNlist.GetAsInt64()
 		assert.Equal(t, int64(128), nlist)
 
-		nprobe = Params.GrowingIndexNProbe.GetAsInt64()
+		nprobe = Params.InterimIndexNProbe.GetAsInt64()
 		assert.Equal(t, int64(16), nprobe)
 
 		params.Remove("queryNode.segcore.growing.nlist")

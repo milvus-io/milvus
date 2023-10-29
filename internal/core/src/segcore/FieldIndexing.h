@@ -243,7 +243,7 @@ class IndexingRecord {
         for (auto& [field_id, field_meta] : schema_.get_fields()) {
             ++offset_id;
             if (field_meta.is_vector() &&
-                segcore_config_.get_enable_growing_segment_index()) {
+                segcore_config_.get_enable_interim_segment_index()) {
                 // TODO: skip binary small index now, reenable after config.yaml is ready
                 if (field_meta.get_data_type() == DataType::VECTOR_BINARY) {
                     continue;

@@ -22,7 +22,7 @@ void
 SegcoreSetChunkRows(const int64_t);
 
 void
-SegcoreSetEnableGrowingSegmentIndex(const bool);
+SegcoreSetEnableTempSegmentIndex(const bool);
 
 void
 SegcoreSetNlist(const int64_t);

@@ -75,7 +75,7 @@ Search_GrowingIndex(benchmark::State& state) {
     FieldIndexMeta fieldIndexMeta(schema->get_field_id(FieldName("fakevec")),
                                   std::move(index_params),
                                   std::move(type_params));
-    segconf.set_enable_growing_segment_index(true);
+    segconf.set_enable_interim_segment_index(true);
     std::map<FieldId, FieldIndexMeta> filedMap = {
         {schema->get_field_id(FieldName("fakevec")), fieldIndexMeta}};
     IndexMetaPtr metaPtr =
