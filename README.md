@@ -552,7 +552,7 @@ Subscribe to Milvus mailing lists:
 Follow Milvus on social media:
 
 - [Medium](https://medium.com/@milvusio)
-- [Twitter](https://twitter.com/milvusio)
+- [𝕏 (Twitter)](https://twitter.com/milvusio)
 - [Youtube](https://www.youtube.com/channel/UCMCo_F7pKjMHBlfyxwOPw-g)
 
 ## Reference
