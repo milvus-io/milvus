@@ -207,6 +207,7 @@ func (t *queryTask) createPlan(ctx context.Context) error {
 	if cntMatch {
 		var err error
 		t.plan, err = createCntPlan(t.request.GetExpr(), schema)
+		t.userOutputFields = []string{"count(*)"}
 		return err
 	}
 

@@ -6,7 +6,9 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
-type cntReducer struct{}
+type cntReducer struct {
+	collectionName string
+}
 
 func (r *cntReducer) Reduce(results []*internalpb.RetrieveResults) (*milvuspb.QueryResults, error) {
 	cnt := int64(0)
@@ -17,5 +19,7 @@ func (r *cntReducer) Reduce(results []*internalpb.RetrieveResults) (*milvuspb.Qu
 		}
 		cnt += c
 	}
-	return funcutil.WrapCntToQueryResults(cnt), nil
+	res := funcutil.WrapCntToQueryResults(cnt)
+	res.CollectionName = r.collectionName
+	return res, nil
 }
