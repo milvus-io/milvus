@@ -30,7 +30,7 @@ type BloomFilterSet struct {
 	history []*storage.PkStatistics
 }
 
-func newBloomFilterSet() *BloomFilterSet {
+func NewBloomFilterSet() *BloomFilterSet {
 	return &BloomFilterSet{}
 }
 

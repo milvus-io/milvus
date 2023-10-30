@@ -31,7 +31,7 @@ type BloomFilterSetSuite struct {
 }
 
 func (s *BloomFilterSetSuite) SetupTest() {
-	s.bfs = newBloomFilterSet()
+	s.bfs = NewBloomFilterSet()
 }
 
 func (s *BloomFilterSetSuite) TearDownSuite() {
