@@ -66,8 +66,6 @@ func (kv *etcdKV) GetPath(key string) string {
 func (kv *etcdKV) WalkWithPrefix(prefix string, paginationSize int, fn func([]byte, []byte) error) error {
 	start := time.Now()
 	prefix = path.Join(kv.rootPath, prefix)
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
 
 	batch := int64(paginationSize)
 	opts := []clientv3.OpOption{
@@ -78,6 +76,8 @@ func (kv *etcdKV) WalkWithPrefix(prefix string, paginationSize int, fn func([]by
 
 	key := prefix
 	for {
+		ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
+		defer cancel()
 		resp, err := kv.getEtcdMeta(ctx, key, opts...)
 		if err != nil {
 			return err
