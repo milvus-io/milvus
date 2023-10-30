@@ -61,8 +61,12 @@ class ChunkCache {
         oneapi::tbb::concurrent_hash_map<std::string,
                                          std::shared_ptr<ColumnBase>>;
 
+    using MmapFileLocks =
+        oneapi::tbb::concurrent_hash_map<std::string,
+                                         std::unique_ptr<std::mutex>>;
+
  private:
-    mutable std::mutex mutex_;
+    MmapFileLocks mmap_file_locks_;
     int read_ahead_policy_;
     std::string path_prefix_;
     ChunkManagerPtr cm_;
