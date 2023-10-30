@@ -33,9 +33,8 @@ namespace milvus {
 
 class ThreadPool {
  public:
-    explicit ThreadPool(const int thread_core_coefficient,
-                        const std::string& name)
-        : shutdown_(false), name_(name) {
+    explicit ThreadPool(const int thread_core_coefficient, std::string name)
+        : shutdown_(false), name_(std::move(name)) {
         idle_threads_size_ = 0;
         current_threads_size_ = 0;
         min_threads_size_ = CPU_NUM;
@@ -67,6 +66,11 @@ class ThreadPool {
     GetThreadNum() {
         std::lock_guard<std::mutex> lock(mutex_);
         return current_threads_size_;
+    }
+
+    size_t
+    GetMaxThreadNum() {
+        return max_threads_size_;
     }
 
     template <typename F, typename... Args>
