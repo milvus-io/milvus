@@ -31,8 +31,8 @@ type SegmentSuite struct {
 }
 
 func (s *SegmentSuite) TestBasic() {
-	bfs := newBloomFilterSet()
-	segment := newSegmentInfo(s.info, bfs)
+	bfs := NewBloomFilterSet()
+	segment := NewSegmentInfo(s.info, bfs)
 	s.Equal(s.info.GetID(), segment.SegmentID())
 	s.Equal(s.info.GetPartitionID(), segment.PartitionID())
 	s.Equal(s.info.GetNumOfRows(), segment.NumOfRows())
@@ -43,8 +43,8 @@ func (s *SegmentSuite) TestBasic() {
 }
 
 func (s *SegmentSuite) TestClone() {
-	bfs := newBloomFilterSet()
-	segment := newSegmentInfo(s.info, bfs)
+	bfs := NewBloomFilterSet()
+	segment := NewSegmentInfo(s.info, bfs)
 	cloned := segment.Clone()
 	s.Equal(segment.SegmentID(), cloned.SegmentID())
 	s.Equal(segment.PartitionID(), cloned.PartitionID())

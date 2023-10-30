@@ -50,7 +50,7 @@ func (s *MetaCacheSuite) SetupSuite() {
 	s.newSegments = []int64{9, 10, 11, 12}
 	s.invaliedSeg = 111
 	s.bfsFactory = func(*datapb.SegmentInfo) *BloomFilterSet {
-		return newBloomFilterSet()
+		return NewBloomFilterSet()
 	}
 }
 

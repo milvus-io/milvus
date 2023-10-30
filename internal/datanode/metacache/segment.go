@@ -75,7 +75,7 @@ func (s *SegmentInfo) Clone() *SegmentInfo {
 	}
 }
 
-func newSegmentInfo(info *datapb.SegmentInfo, bfs *BloomFilterSet) *SegmentInfo {
+func NewSegmentInfo(info *datapb.SegmentInfo, bfs *BloomFilterSet) *SegmentInfo {
 	return &SegmentInfo{
 		segmentID:        info.GetID(),
 		partitionID:      info.GetPartitionID(),

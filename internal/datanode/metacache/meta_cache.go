@@ -59,11 +59,11 @@ func NewMetaCache(vchannel *datapb.VchannelInfo, factory PkStatsFactory) MetaCac
 
 func (c *metaCacheImpl) init(vchannel *datapb.VchannelInfo, factory PkStatsFactory) {
 	for _, seg := range vchannel.FlushedSegments {
-		c.segmentInfos[seg.GetID()] = newSegmentInfo(seg, factory(seg))
+		c.segmentInfos[seg.GetID()] = NewSegmentInfo(seg, factory(seg))
 	}
 
 	for _, seg := range vchannel.UnflushedSegments {
-		c.segmentInfos[seg.GetID()] = newSegmentInfo(seg, factory(seg))
+		c.segmentInfos[seg.GetID()] = NewSegmentInfo(seg, factory(seg))
 	}
 }
 
