@@ -594,3 +594,4 @@ Milvus is adopted by following opensource project:
 - [Haystack](https://github.com/deepset-ai/haystack) an open source NLP framework that leverages Transformer models
 - [Langchain](https://github.com/hwchase17/langchain) Building applications with LLMs through composability
 - [GPTCache](https://github.com/zilliztech/GPTCache) a library for creating semantic cache to store responses from LLM queries.
+  
