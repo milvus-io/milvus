@@ -24,7 +24,6 @@ import (
 // fn is the func to run.
 // Option can control the retry times and timeout.
 func Do(ctx context.Context, fn func() error, opts ...Option) error {
-
 	c := newDefaultConfig()
 
 	for _, opt := range opts {
@@ -45,6 +44,12 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 			el = append(el, err)
 
 			if ok := IsUnRecoverable(err); ok {
+				return el
+			}
+
+			deadline, ok := ctx.Deadline()
+			if ok && time.Until(deadline) < c.sleep {
+				// to avoid sleep until ctx done
 				return el
 			}
 
