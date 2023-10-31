@@ -347,7 +347,7 @@ MinioChunkManager::Remove(const std::string& filepath) {
 
 std::vector<std::string>
 MinioChunkManager::ListWithPrefix(const std::string& filepath) {
-    return ListObjects(default_bucket_name_.c_str(), filepath.c_str());
+    return ListObjects(default_bucket_name_, filepath);
 }
 
 uint64_t
@@ -393,7 +393,7 @@ MinioChunkManager::ListBuckets() {
         ThrowS3Error("ListBuckets", err, "params");
     }
     for (auto&& b : outcome.GetResult().GetBuckets()) {
-        buckets.emplace_back(b.GetName().c_str());
+        buckets.emplace_back(b.GetName());
     }
     return buckets;
 }
@@ -623,7 +623,7 @@ MinioChunkManager::ListObjects(const std::string& bucket_name,
     }
     auto objects = outcome.GetResult().GetContents();
     for (auto& obj : objects) {
-        objects_vec.emplace_back(obj.GetKey().c_str());
+        objects_vec.emplace_back(obj.GetKey());
     }
     return objects_vec;
 }

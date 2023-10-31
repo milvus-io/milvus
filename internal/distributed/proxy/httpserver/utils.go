@@ -724,7 +724,7 @@ func genDynamicFields(fields []string, list []*schemapb.FieldData) []string {
 	return dynamicFields
 }
 
-func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemapb.FieldData, ids *schemapb.IDs, scores []float32) ([]map[string]interface{}, error) {
+func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemapb.FieldData, ids *schemapb.IDs, scores []float32, enableInt64 bool) ([]map[string]interface{}, error) {
 	var queryResp []map[string]interface{}
 
 	columnNum := len(fieldDataList)
@@ -791,7 +791,11 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 				case schemapb.DataType_Int32:
 					row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetIntData().Data[i]
 				case schemapb.DataType_Int64:
-					row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetLongData().Data[i]
+					if enableInt64 {
+						row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetLongData().Data[i]
+					} else {
+						row[fieldDataList[j].FieldName] = strconv.FormatInt(fieldDataList[j].GetScalars().GetLongData().Data[i], 10)
+					}
 				case schemapb.DataType_Float:
 					row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetFloatData().Data[i]
 				case schemapb.DataType_Double:
@@ -840,7 +844,11 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 			switch ids.IdField.(type) {
 			case *schemapb.IDs_IntId:
 				int64Pks := ids.GetIntId().GetData()
-				row[DefaultPrimaryFieldName] = int64Pks[i]
+				if enableInt64 {
+					row[DefaultPrimaryFieldName] = int64Pks[i]
+				} else {
+					row[DefaultPrimaryFieldName] = strconv.FormatInt(int64Pks[i], 10)
+				}
 			case *schemapb.IDs_StrId:
 				stringPks := ids.GetStrId().GetData()
 				row[DefaultPrimaryFieldName] = stringPks[i]
@@ -855,4 +863,12 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 	}
 
 	return queryResp, nil
+}
+
+func formatInt64(intArray []int64) []string {
+	stringArray := make([]string, 0)
+	for _, i := range intArray {
+		stringArray = append(stringArray, strconv.FormatInt(i, 10))
+	}
+	return stringArray
 }
