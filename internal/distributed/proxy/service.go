@@ -58,6 +58,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -259,7 +260,7 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 		}
 
 		certPool := x509.NewCertPool()
-		rootBuf, err := os.ReadFile(Params.CaPemPath.GetValue())
+		rootBuf, err := storage.ReadFile(Params.CaPemPath.GetValue())
 		if err != nil {
 			log.Warn("failed read ca pem", zap.Error(err))
 			errChan <- err
@@ -480,7 +481,7 @@ func (s *Server) init() error {
 				}
 
 				certPool := x509.NewCertPool()
-				rootBuf, err := os.ReadFile(Params.CaPemPath.GetValue())
+				rootBuf, err := storage.ReadFile(Params.CaPemPath.GetValue())
 				if err != nil {
 					log.Error("failed read ca pem", zap.Error(err))
 					return err

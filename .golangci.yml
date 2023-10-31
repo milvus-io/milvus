@@ -115,6 +115,9 @@ linters-settings:
       - 'Reason:\s+\w+\.Error\(\)'
       - 'errors.New\((.+)\.GetReason\(\)\)'
       - 'commonpb\.Status\{[\s\n]*ErrorCode:[\s\n]*.+[\s\S\n]*?\}'
+      - 'os\.Open\(.+\)'
+      - 'os\.ReadFile\(.+\)'
+      - 'os\.WriteFile\(.+\)'
       #- 'fmt\.Print.*' WIP
 
 issues:

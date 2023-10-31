@@ -151,7 +151,7 @@ func (mcm *RemoteChunkManager) MultiWrite(ctx context.Context, kvs map[string][]
 func (mcm *RemoteChunkManager) Exist(ctx context.Context, filePath string) (bool, error) {
 	_, err := mcm.getObjectSize(ctx, mcm.bucketName, filePath)
 	if err != nil {
-		if IsErrNoSuchKey(err) {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
 			return false, nil
 		}
 		log.Warn("failed to stat object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
@@ -172,11 +172,8 @@ func (mcm *RemoteChunkManager) Read(ctx context.Context, filePath string) ([]byt
 	// Prefetch object data
 	var empty []byte
 	_, err = object.Read(empty)
+	err = checkObjectStorageError(filePath, err)
 	if err != nil {
-		errResponse := minio.ToErrorResponse(err)
-		if errResponse.Code == "NoSuchKey" {
-			return nil, WrapErrNoSuchKey(filePath)
-		}
 		log.Warn("failed to read object", zap.String("path", filePath), zap.Error(err))
 		return nil, err
 	}
@@ -186,11 +183,8 @@ func (mcm *RemoteChunkManager) Read(ctx context.Context, filePath string) ([]byt
 		return nil, err
 	}
 	data, err := Read(object, size)
+	err = checkObjectStorageError(filePath, err)
 	if err != nil {
-		errResponse := minio.ToErrorResponse(err)
-		if errResponse.Code == "NoSuchKey" {
-			return nil, WrapErrNoSuchKey(filePath)
-		}
 		log.Warn("failed to read object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
 		return nil, err
 	}
@@ -243,11 +237,8 @@ func (mcm *RemoteChunkManager) ReadAt(ctx context.Context, filePath string, off 
 	defer object.Close()
 
 	data, err := Read(object, length)
+	err = checkObjectStorageError(filePath, err)
 	if err != nil {
-		errResponse := minio.ToErrorResponse(err)
-		if errResponse.Code == "NoSuchKey" {
-			return nil, WrapErrNoSuchKey(filePath)
-		}
 		log.Warn("failed to read object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
 		return nil, err
 	}
@@ -363,21 +354,11 @@ func (mcm *RemoteChunkManager) getObject(ctx context.Context, bucketName, object
 	reader, err := mcm.client.GetObject(ctx, bucketName, objectName, offset, size)
 	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataGetLabel, metrics.TotalLabel).Inc()
 	if err == nil && reader != nil {
-		metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataGetLabel).Observe(float64(start.ElapseSpan().Milliseconds()))
+		metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataGetLabel).
+			Observe(float64(start.ElapseSpan().Milliseconds()))
 		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataGetLabel, metrics.SuccessLabel).Inc()
 	} else {
 		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataGetLabel, metrics.FailLabel).Inc()
-	}
-
-	switch err := err.(type) {
-	case *azcore.ResponseError:
-		if err.ErrorCode == string(bloberror.BlobNotFound) {
-			return nil, WrapErrNoSuchKey(objectName)
-		}
-	case minio.ErrorResponse:
-		if err.Code == "NoSuchKey" {
-			return nil, WrapErrNoSuchKey(objectName)
-		}
 	}
 
 	return reader, err
@@ -389,7 +370,8 @@ func (mcm *RemoteChunkManager) putObject(ctx context.Context, bucketName, object
 	err := mcm.client.PutObject(ctx, bucketName, objectName, reader, objectSize)
 	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataPutLabel, metrics.TotalLabel).Inc()
 	if err == nil {
-		metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataPutLabel).Observe(float64(start.ElapseSpan().Milliseconds()))
+		metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataPutLabel).
+			Observe(float64(start.ElapseSpan().Milliseconds()))
 		metrics.PersistentDataOpCounter.WithLabelValues(metrics.MetaPutLabel, metrics.SuccessLabel).Inc()
 	} else {
 		metrics.PersistentDataOpCounter.WithLabelValues(metrics.MetaPutLabel, metrics.FailLabel).Inc()
@@ -404,21 +386,11 @@ func (mcm *RemoteChunkManager) getObjectSize(ctx context.Context, bucketName, ob
 	info, err := mcm.client.StatObject(ctx, bucketName, objectName)
 	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataStatLabel, metrics.TotalLabel).Inc()
 	if err == nil {
-		metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataStatLabel).Observe(float64(start.ElapseSpan().Milliseconds()))
+		metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataStatLabel).
+			Observe(float64(start.ElapseSpan().Milliseconds()))
 		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataStatLabel, metrics.SuccessLabel).Inc()
 	} else {
 		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataStatLabel, metrics.FailLabel).Inc()
-	}
-
-	switch err := err.(type) {
-	case *azcore.ResponseError:
-		if err.ErrorCode == string(bloberror.BlobNotFound) {
-			return info, WrapErrNoSuchKey(objectName)
-		}
-	case minio.ErrorResponse:
-		if err.Code == "NoSuchKey" {
-			return info, WrapErrNoSuchKey(objectName)
-		}
 	}
 
 	return info, err
@@ -430,7 +402,8 @@ func (mcm *RemoteChunkManager) listObjects(ctx context.Context, bucketName strin
 	res, err := mcm.client.ListObjects(ctx, bucketName, prefix, recursive)
 	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataListLabel, metrics.TotalLabel).Inc()
 	if err == nil {
-		metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataListLabel).Observe(float64(start.ElapseSpan().Milliseconds()))
+		metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataListLabel).
+			Observe(float64(start.ElapseSpan().Milliseconds()))
 		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataListLabel, metrics.SuccessLabel).Inc()
 	} else {
 		log.Warn("failed to list with prefix", zap.String("bucket", mcm.bucketName), zap.String("prefix", prefix), zap.Error(err))
@@ -445,11 +418,32 @@ func (mcm *RemoteChunkManager) removeObject(ctx context.Context, bucketName, obj
 	err := mcm.client.RemoveObject(ctx, bucketName, objectName)
 	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataRemoveLabel, metrics.TotalLabel).Inc()
 	if err == nil {
-		metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataRemoveLabel).Observe(float64(start.ElapseSpan().Milliseconds()))
+		metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataRemoveLabel).
+			Observe(float64(start.ElapseSpan().Milliseconds()))
 		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataRemoveLabel, metrics.SuccessLabel).Inc()
 	} else {
 		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataRemoveLabel, metrics.FailLabel).Inc()
 	}
 
 	return err
+}
+
+func checkObjectStorageError(fileName string, err error) error {
+	if err == nil {
+		return nil
+	}
+
+	switch err := err.(type) {
+	case *azcore.ResponseError:
+		if err.ErrorCode == string(bloberror.BlobNotFound) {
+			return merr.WrapErrIoKeyNotFound(fileName, err.Error())
+		}
+		return merr.WrapErrIoFailed(fileName, err)
+	case minio.ErrorResponse:
+		if err.Code == "NoSuchKey" {
+			return merr.WrapErrIoKeyNotFound(fileName, err.Error())
+		}
+		return merr.WrapErrIoFailed(fileName, err)
+	}
+	return merr.WrapErrIoFailed(fileName, err)
 }

@@ -1183,7 +1183,7 @@ func (s *ChannelMetaMockSuite) TestAddSegment_SkipBFLoad() {
 		s.cm.EXPECT().MultiRead(mock.Anything, []string{"rootPath/stats/1/0/100/10001"}).
 			Run(func(_ context.Context, _ []string) {
 				<-ch
-			}).Return(nil, storage.WrapErrNoSuchKey("rootPath/stats/1/0/100/10001"))
+			}).Return(nil, merr.WrapErrIoKeyNotFound("rootPath/stats/1/0/100/10001"))
 
 		err := s.channel.addSegment(
 			context.TODO(),
