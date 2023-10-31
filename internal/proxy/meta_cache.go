@@ -44,7 +44,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -797,26 +796,9 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, col
 		CollectionID: info.collID,
 	}
 
-	// retry until service available or context timeout
-	var resp *querypb.GetShardLeadersResponse
-	childCtx, cancel := context.WithTimeout(ctx, time.Second*10)
-	defer cancel()
 	tr := timerecord.NewTimeRecorder("UpdateShardCache")
-	err = retry.Do(childCtx, func() error {
-		resp, err = m.queryCoord.GetShardLeaders(ctx, req)
-		if err != nil {
-			return retry.Unrecoverable(err)
-		}
-		if resp.GetStatus().GetErrorCode() == commonpb.ErrorCode_Success {
-			return nil
-		}
-		// do not retry unless got NoReplicaAvailable from querycoord
-		err2 := merr.Error(resp.GetStatus())
-		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_NoReplicaAvailable {
-			return retry.Unrecoverable(err2)
-		}
-		return err2
-	})
+	var resp *querypb.GetShardLeadersResponse
+	resp, err = m.queryCoord.GetShardLeaders(ctx, req)
 	if err != nil {
 		return nil, err
 	}
