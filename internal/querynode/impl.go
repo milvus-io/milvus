@@ -654,15 +654,16 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, in *querypb.ReleaseS
 
 	log.Info("start to release segments", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", in.SegmentIDs))
 
+	releaseSealed := int64(0)
 	for _, id := range in.SegmentIDs {
 		switch in.GetScope() {
 		case querypb.DataScope_Streaming:
 			node.metaReplica.removeSegment(id, segmentTypeGrowing)
 		case querypb.DataScope_Historical:
-			node.metaReplica.removeSegment(id, segmentTypeSealed)
+			releaseSealed += node.metaReplica.removeSegment(id, segmentTypeSealed)
 		case querypb.DataScope_All:
 			node.metaReplica.removeSegment(id, segmentTypeGrowing)
-			node.metaReplica.removeSegment(id, segmentTypeSealed)
+			releaseSealed += node.metaReplica.removeSegment(id, segmentTypeSealed)
 		}
 	}
 
@@ -673,8 +674,10 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, in *querypb.ReleaseS
 		return failStatus, nil
 	}
 
-	if len(segments) == 0 {
-		// when all segment released, and data sync service has been removed, reduce queryshard in use
+	// only remove query shard service in worker when all sealed segment has been removed.
+	// `releaseSealed > 0` make sure that releaseSegment happens in worker.
+	// `len(segments) == 0` make sure that all sealed segment in worker has been removed.
+	if releaseSealed > 0 && len(segments) == 0 {
 		node.queryShardService.removeQueryShard(in.GetShard(), 1)
 	}
 
