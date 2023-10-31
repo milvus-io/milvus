@@ -27,13 +27,12 @@ bool ThreadPools::has_setup_coefficients = false;
 
 void
 ThreadPools::ShutDown() {
-    for (auto itr = thread_pool_map.begin(); itr != thread_pool_map.end();
-         ++itr) {
+    for (auto& itr : thread_pool_map) {
         LOG_SEGCORE_INFO_ << "Start shutting down threadPool with priority:"
-                          << itr->first;
-        itr->second->ShutDown();
+                          << itr.first;
+        itr.second->ShutDown();
         LOG_SEGCORE_INFO_ << "Finish shutting down threadPool with priority:"
-                          << itr->first;
+                          << itr.first;
     }
 }
 

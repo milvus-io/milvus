@@ -37,9 +37,9 @@ ThreadPool::ShutDown() {
         shutdown_ = true;
     }
     condition_lock_.notify_all();
-    for (auto iter = threads_.begin(); iter != threads_.end(); ++iter) {
-        if (iter->second.joinable()) {
-            iter->second.join();
+    for (auto& thread : threads_) {
+        if (thread.second.joinable()) {
+            thread.second.join();
         }
     }
     LOG_SEGCORE_INFO_ << "Finish shutting down " << name_;
