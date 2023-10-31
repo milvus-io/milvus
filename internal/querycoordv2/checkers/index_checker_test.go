@@ -72,7 +72,7 @@ func (suite *IndexCheckerSuite) SetupTest() {
 	distManager := meta.NewDistributionManager()
 	suite.broker = meta.NewMockBroker(suite.T())
 
-	suite.checker = NewIndexChecker(suite.meta, distManager, suite.broker)
+	suite.checker = NewIndexChecker(suite.meta, distManager, suite.broker, suite.nodeMgr)
 }
 
 func (suite *IndexCheckerSuite) TearDownTest() {
@@ -117,6 +117,12 @@ func (suite *IndexCheckerSuite) TestLoadIndex() {
 	suite.EqualValues(200, t.ReplicaID())
 	suite.Equal(task.ActionTypeUpdate, action.Type())
 	suite.EqualValues(2, action.SegmentID())
+
+	// test skip load index for stopping node
+	suite.nodeMgr.Stopping(1)
+	suite.nodeMgr.Stopping(2)
+	tasks = checker.Check(context.Background())
+	suite.Require().Len(tasks, 0)
 }
 
 func (suite *IndexCheckerSuite) TestIndexInfoNotMatch() {
