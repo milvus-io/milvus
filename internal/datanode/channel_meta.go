@@ -368,7 +368,7 @@ func (c *ChannelMeta) retryableLoadError(err error) bool {
 	case errors.Is(err, merr.ErrParameterInvalid):
 		// statslog corrupted
 		return false
-	case errors.Is(err, storage.ErrNoSuchKey):
+	case errors.Is(err, merr.ErrIoKeyNotFound):
 		// statslog not found
 		return false
 	default:

@@ -3,7 +3,6 @@ package backend
 import (
 	"context"
 	"fmt"
-	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -22,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -432,7 +432,7 @@ func (b etcd210) Backup(meta *meta.Meta, backupFile string) error {
 		return err
 	}
 	console.Warning(fmt.Sprintf("backup to: %s", backupFile))
-	return os.WriteFile(backupFile, backup, 0o600)
+	return storage.WriteFile(backupFile, backup, 0o600)
 }
 
 func (b etcd210) BackupV2(file string) error {
@@ -487,11 +487,11 @@ func (b etcd210) BackupV2(file string) error {
 	}
 
 	console.Warning(fmt.Sprintf("backup to: %s", file))
-	return os.WriteFile(file, backup, 0o600)
+	return storage.WriteFile(file, backup, 0o600)
 }
 
 func (b etcd210) Restore(backupFile string) error {
-	backup, err := os.ReadFile(backupFile)
+	backup, err := storage.ReadFile(backupFile)
 	if err != nil {
 		return err
 	}

@@ -18,7 +18,6 @@ package storage
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"os"
 	"time"
@@ -31,6 +30,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/container"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/service"
 
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 )
 
@@ -63,7 +63,7 @@ func newAzureObjectStorageWithConfig(ctx context.Context, c *config) (*AzureObje
 		return nil, err
 	}
 	if c.bucketName == "" {
-		return nil, fmt.Errorf("invalid bucket name")
+		return nil, merr.WrapErrParameterInvalidMsg("invalid empty bucket name")
 	}
 	// check valid in first query
 	checkBucketFn := func() error {
@@ -99,20 +99,20 @@ func (AzureObjectStorage *AzureObjectStorage) GetObject(ctx context.Context, buc
 	}
 	object, err := AzureObjectStorage.Client.NewContainerClient(bucketName).NewBlockBlobClient(objectName).DownloadStream(ctx, &opts)
 	if err != nil {
-		return nil, err
+		return nil, checkObjectStorageError(objectName, err)
 	}
 	return object.Body, nil
 }
 
 func (AzureObjectStorage *AzureObjectStorage) PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64) error {
 	_, err := AzureObjectStorage.Client.NewContainerClient(bucketName).NewBlockBlobClient(objectName).UploadStream(ctx, reader, &azblob.UploadStreamOptions{})
-	return err
+	return checkObjectStorageError(objectName, err)
 }
 
 func (AzureObjectStorage *AzureObjectStorage) StatObject(ctx context.Context, bucketName, objectName string) (int64, error) {
 	info, err := AzureObjectStorage.Client.NewContainerClient(bucketName).NewBlockBlobClient(objectName).GetProperties(ctx, &blob.GetPropertiesOptions{})
 	if err != nil {
-		return 0, err
+		return 0, checkObjectStorageError(objectName, err)
 	}
 	return *info.ContentLength, nil
 }
@@ -125,7 +125,7 @@ func (AzureObjectStorage *AzureObjectStorage) ListObjects(ctx context.Context, b
 	if pager.More() {
 		pageResp, err := pager.NextPage(context.Background())
 		if err != nil {
-			return nil, err
+			return nil, checkObjectStorageError(prefix, err)
 		}
 		for _, blob := range pageResp.Segment.BlobItems {
 			objects[*blob.Name] = *blob.Properties.LastModified
@@ -136,5 +136,5 @@ func (AzureObjectStorage *AzureObjectStorage) ListObjects(ctx context.Context, b
 
 func (AzureObjectStorage *AzureObjectStorage) RemoveObject(ctx context.Context, bucketName, objectName string) error {
 	_, err := AzureObjectStorage.Client.NewContainerClient(bucketName).NewBlockBlobClient(objectName).Delete(ctx, &blob.DeleteOptions{})
-	return err
+	return checkObjectStorageError(objectName, err)
 }

@@ -648,11 +648,11 @@ func WrapErrIoKeyNotFound(key string, msg ...string) error {
 	return err
 }
 
-func WrapErrIoFailed(key string, msg ...string) error {
-	err := errors.Wrapf(ErrIoFailed, "key=%s", key)
-	if len(msg) > 0 {
-		err = errors.Wrap(err, strings.Join(msg, "; "))
+func WrapErrIoFailed(key string, err error) error {
+	if err == nil {
+		return nil
 	}
+	err = errors.Wrapf(ErrIoFailed, "key=%s: %v", key, err)
 	return err
 }
 

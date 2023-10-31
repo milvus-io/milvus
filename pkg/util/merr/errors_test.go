@@ -18,6 +18,7 @@ package merr
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -121,7 +122,7 @@ func (s *ErrSuite) TestWrap() {
 
 	// IO related
 	s.ErrorIs(WrapErrIoKeyNotFound("test_key", "failed to read"), ErrIoKeyNotFound)
-	s.ErrorIs(WrapErrIoFailed("test_key", "failed to read"), ErrIoFailed)
+	s.ErrorIs(WrapErrIoFailed("test_key", os.ErrClosed), ErrIoFailed)
 
 	// Parameter related
 	s.ErrorIs(WrapErrParameterInvalid(8, 1, "failed to create"), ErrParameterInvalid)
@@ -180,7 +181,7 @@ func (s *ErrSuite) TestCombineOnlyNil() {
 }
 
 func (s *ErrSuite) TestCombineCode() {
-	err := Combine(WrapErrIoFailed("test"), WrapErrCollectionNotFound(1))
+	err := Combine(WrapErrPartitionNotFound(10), WrapErrCollectionNotFound(1))
 	s.Equal(Code(ErrCollectionNotFound), Code(err))
 }
 

@@ -36,6 +36,7 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/storage"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -1131,7 +1132,7 @@ func GetSessions(pid int) []string {
 		return []string{}
 	}
 
-	v, err := os.ReadFile(fileFullName)
+	v, err := storage.ReadFile(fileFullName)
 	if err != nil {
 		log.Warn("read server info file path failed", zap.String("filePath", fileFullName), zap.Error(err))
 		return []string{}
