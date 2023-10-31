@@ -25,12 +25,14 @@
 #include "index/StringIndexSort.h"
 #include "index/VectorMemIndex.h"
 #include "query/SearchOnIndex.h"
+#include "segcore/Collection.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealedImpl.h"
 #include "segcore/Utils.h"
 #include "knowhere/comp/index_param.h"
 
 #include "PbHelper.h"
+#include "segcore/collection_c.h"
 
 using boost::algorithm::starts_with;
 
@@ -1010,6 +1012,13 @@ GenRandomIds(int rows, int64_t seed = 42) {
     auto ids_ds = GenIdsDataset(rows, ids);
     ids_ds->SetIsOwner(true);
     return ids_ds;
+}
+
+inline CCollection
+NewCollection(const char* schema_proto_blob) {
+    auto proto = std::string(schema_proto_blob);
+    auto collection = std::make_unique<milvus::segcore::Collection>(proto);
+    return (void*)collection.release();
 }
 
 }  // namespace milvus::segcore

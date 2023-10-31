@@ -195,16 +195,21 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 		CCollection
 		NewCollection(const char* schema_proto_blob);
 	*/
-	schemaBlob := proto.MarshalTextString(schema)
-	cSchemaBlob := C.CString(schemaBlob)
-	defer C.free(unsafe.Pointer(cSchemaBlob))
+	schemaBlob, err := proto.Marshal(schema)
+	if err != nil {
+		log.Warn("marshal schema failed", zap.Error(err))
+		return nil
+	}
 
-	collection := C.NewCollection(cSchemaBlob)
+	collection := C.NewCollection(unsafe.Pointer(&schemaBlob[0]), (C.int64_t)(len(schemaBlob)))
 
 	if indexMeta != nil && len(indexMeta.GetIndexMetas()) > 0 && indexMeta.GetMaxIndexRowCount() > 0 {
-		indexMetaBlob := proto.MarshalTextString(indexMeta)
-		cIndexMetaBlob := C.CString(indexMetaBlob)
-		C.SetIndexMeta(collection, cIndexMetaBlob)
+		indexMetaBlob, err := proto.Marshal(indexMeta)
+		if err != nil {
+			log.Warn("marshal index meta failed", zap.Error(err))
+			return nil
+		}
+		C.SetIndexMeta(collection, unsafe.Pointer(&indexMetaBlob[0]), (C.int64_t)(len(indexMetaBlob)))
 	}
 
 	return &Collection{
