@@ -182,7 +182,7 @@ pipeline {
                                 old_image_repository_modified = "${params.old_image_repository}"
                             }
 
-                            sh "helm repo add milvus https://milvus-io.github.io/milvus-helm"
+                            sh "helm repo add milvus https://zilliztech.github.io/milvus-helm"
                             sh "helm repo update"
                             if ("${params.deploy_task}" == "upgrade"){
                                 if ("${params.milvus_mode}" == "standalone") {

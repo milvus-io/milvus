@@ -55,7 +55,7 @@ jobs:
       - name: Deploy Milvus
         shell: bash
         run: |
-          helm repo add milvus https://milvus-io.github.io/milvus-helm
+          helm repo add milvus https://zilliztech.github.io/milvus-helm
           helm repo update
           # install milvus with latest image
           helm install --wait --timeout 360s chaos-testing milvus/milvus --set cluster.enabled=true --set image.all.repository=milvusdb/milvus --set image.all.tag=master-latest -n=chaos-testing

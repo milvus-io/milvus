@@ -23,7 +23,7 @@
 set -x
 
 
-MILVUS_HELM_REPO="${MILVUS_HELM_REPO:-https://milvus-io.github.io/milvus-helm/}"
+MILVUS_HELM_REPO="${MILVUS_HELM_REPO:-https://zilliztech.github.io/milvus-helm/}"
 MILVUS_HELM_RELEASE_NAME="${MILVUS_HELM_RELEASE_NAME:-milvus-testing}"
 MILVUS_CLUSTER_ENABLED="${MILVUS_CLUSTER_ENABLED:-false}"
 MILVUS_IMAGE_REPO="${MILVUS_IMAGE_REPO:-milvusdb/milvus}"
@@ -56,9 +56,9 @@ fi
 
 
 # Use helm repo to install milvus charts 
-helm repo add milvus ${MILVUS_HELM_REPO}
+helm repo add zilliztech ${MILVUS_HELM_REPO}
 helm repo update
-MILVUS_HELM_CHART_PATH="milvus/milvus"
+MILVUS_HELM_CHART_PATH="zilliztech/milvus"
 
 # Create namespace when it does not exist
 kubectl create namespace "${MILVUS_HELM_NAMESPACE}" > /dev/null 2>&1 || true

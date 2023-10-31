@@ -194,7 +194,7 @@ pipeline {
                                 old_image_repository_modified = "${params.old_image_repository}"
                             }
 
-                            sh "helm repo add milvus https://milvus-io.github.io/milvus-helm"
+                            sh "helm repo add milvus https://zilliztech.github.io/milvus-helm"
                             sh "helm repo update"
                             if ("${params.milvus_mode}" == "standalone") {
                                 sh "helm install --wait --timeout 720s ${env.RELEASE_NAME} milvus/milvus  --set image.all.repository=${old_image_repository_modified} --set image.all.tag=${old_image_tag_modified} -f standalone-values.yaml;"    
