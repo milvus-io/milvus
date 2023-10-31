@@ -20,23 +20,26 @@ import (
 	"bytes"
 	"container/list"
 	"context"
+	"fmt"
 	"io"
 	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
-	minio "github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 	"go.uber.org/zap"
 	"golang.org/x/exp/mmap"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/storage/aliyun"
+	"github.com/milvus-io/milvus/pkg/storage/gcp"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
-
-var CheckBucketRetryAttempts uint = 20
 
 // MinioChunkManager is responsible for read and write data stored in minio.
 type MinioChunkManager struct {
@@ -47,30 +50,80 @@ type MinioChunkManager struct {
 	rootPath   string
 }
 
-var _ ChunkManager = (*MinioChunkManager)(nil)
+func NewMinioChunkManagerWithConfig(ctx context.Context, c *Config) (*MinioChunkManager, error) {
+	var creds *credentials.Credentials
+	newMinioFn := minio.New
+	bucketLookupType := minio.BucketLookupAuto
 
-// NewMinioChunkManager create a new local manager object.
-// Deprecated: Do not call this directly! Use factory.NewPersistentStorageChunkManager instead.
-func NewMinioChunkManager(ctx context.Context, opts ...Option) (*MinioChunkManager, error) {
-	c := newDefaultConfig()
-	for _, opt := range opts {
-		opt(c)
+	if c.UseVirtualHost {
+		bucketLookupType = minio.BucketLookupDNS
 	}
 
-	return newMinioChunkManagerWithConfig(ctx, c)
-}
-
-func newMinioChunkManagerWithConfig(ctx context.Context, c *config) (*MinioChunkManager, error) {
-	minIOClient, err := newMinioClient(ctx, c)
+	switch c.CloudProvider {
+	case CloudProviderAliyun:
+		// auto doesn't work for aliyun, so we set to dns deliberately
+		bucketLookupType = minio.BucketLookupDNS
+		if c.UseIAM {
+			newMinioFn = aliyun.NewMinioClient
+		} else {
+			creds = credentials.NewStaticV4(c.AccessKeyID, c.SecretAccessKeyID, "")
+		}
+	case CloudProviderGCP:
+		newMinioFn = gcp.NewMinioClient
+		if !c.UseIAM {
+			creds = credentials.NewStaticV2(c.AccessKeyID, c.SecretAccessKeyID, "")
+		}
+	default: // aws, minio
+		if c.UseIAM {
+			creds = credentials.NewIAM("")
+		} else {
+			creds = credentials.NewStaticV4(c.AccessKeyID, c.SecretAccessKeyID, "")
+		}
+	}
+	minioOpts := &minio.Options{
+		BucketLookup: bucketLookupType,
+		Creds:        creds,
+		Secure:       c.UseSSL,
+		Region:       c.Region,
+	}
+	minIOClient, err := newMinioFn(c.Address, minioOpts)
+	// options nil or invalid formatted endpoint, don't need to retry
 	if err != nil {
 		return nil, err
 	}
+	var bucketExists bool
+	// check valid in first query
+	checkBucketFn := func() error {
+		bucketExists, err = minIOClient.BucketExists(ctx, c.BucketName)
+		if err != nil {
+			log.Warn("failed to check blob bucket exist", zap.String("bucket", c.BucketName), zap.Error(err))
+			return err
+		}
+		if !bucketExists {
+			if c.CreateBucket {
+				log.Info("blob bucket not exist, create bucket.", zap.Any("bucket name", c.BucketName))
+				err := minIOClient.MakeBucket(ctx, c.BucketName, minio.MakeBucketOptions{})
+				if err != nil {
+					log.Warn("failed to create blob bucket", zap.String("bucket", c.BucketName), zap.Error(err))
+					return err
+				}
+			} else {
+				return fmt.Errorf("bucket %s not Existed", c.BucketName)
+			}
+		}
+		return nil
+	}
+	err = retry.Do(ctx, checkBucketFn, retry.Attempts(CheckBucketRetryAttempts))
+	if err != nil {
+		return nil, err
+	}
+
 	mcm := &MinioChunkManager{
 		Client:     minIOClient,
-		bucketName: c.bucketName,
+		bucketName: c.BucketName,
 	}
-	mcm.rootPath = mcm.normalizeRootPath(c.rootPath)
-	log.Info("minio chunk manager init success.", zap.String("bucketname", c.bucketName), zap.String("root", mcm.RootPath()))
+	mcm.rootPath = mcm.normalizeRootPath(c.RootPath)
+	log.Info("minio chunk manager init success.", zap.String("bucketname", c.BucketName), zap.String("root", mcm.RootPath()))
 	return mcm, nil
 }
 
@@ -82,7 +135,7 @@ func (mcm *MinioChunkManager) normalizeRootPath(rootPath string) string {
 
 // SetVar set the variable value of mcm
 func (mcm *MinioChunkManager) SetVar(bucketName string, rootPath string) {
-	log.Info("minio chunkmanager ", zap.String("bucketName", bucketName), zap.String("rootpath", rootPath))
+	log.Info("minio chunkmanager ", zap.String("BucketName", bucketName), zap.String("rootpath", rootPath))
 	mcm.bucketName = bucketName
 	mcm.rootPath = rootPath
 }
@@ -321,7 +374,7 @@ func (mcm *MinioChunkManager) RemoveWithPrefix(ctx context.Context, prefix strin
 // calling `ListWithPrefix` with `prefix` = a && `recursive` = false will only returns [a, ab]
 // If caller needs all objects without level limitation, `recursive` shall be true.
 func (mcm *MinioChunkManager) ListWithPrefix(ctx context.Context, prefix string, recursive bool) ([]string, []time.Time, error) {
-	// cannot use ListObjects(ctx, bucketName, Opt{Prefix:prefix, Recursive:true})
+	// cannot use ListObjects(ctx, BucketName, Opt{Prefix:prefix, Recursive:true})
 	// if minio has lots of objects under the provided path
 	// recursive = true may timeout during the recursive browsing the objects.
 	// See also: https://github.com/milvus-io/milvus/issues/19095

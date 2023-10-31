@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	pkgStorage "github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -630,16 +631,16 @@ func GenTestVectorFiledData(dType schemapb.DataType, fieldName string, fieldID i
 
 func NewTestChunkManagerFactory(params *paramtable.ComponentParam, rootPath string) *storage.ChunkManagerFactory {
 	return storage.NewChunkManagerFactory("minio",
-		storage.RootPath(rootPath),
-		storage.Address(params.MinioCfg.Address.GetValue()),
-		storage.AccessKeyID(params.MinioCfg.AccessKeyID.GetValue()),
-		storage.SecretAccessKeyID(params.MinioCfg.SecretAccessKey.GetValue()),
-		storage.UseSSL(params.MinioCfg.UseSSL.GetAsBool()),
-		storage.BucketName(params.MinioCfg.BucketName.GetValue()),
-		storage.UseIAM(params.MinioCfg.UseIAM.GetAsBool()),
-		storage.CloudProvider(params.MinioCfg.CloudProvider.GetValue()),
-		storage.IAMEndpoint(params.MinioCfg.IAMEndpoint.GetValue()),
-		storage.CreateBucket(true))
+		pkgStorage.RootPath(rootPath),
+		pkgStorage.Address(params.MinioCfg.Address.GetValue()),
+		pkgStorage.AccessKeyID(params.MinioCfg.AccessKeyID.GetValue()),
+		pkgStorage.SecretAccessKeyID(params.MinioCfg.SecretAccessKey.GetValue()),
+		pkgStorage.UseSSL(params.MinioCfg.UseSSL.GetAsBool()),
+		pkgStorage.BucketName(params.MinioCfg.BucketName.GetValue()),
+		pkgStorage.UseIAM(params.MinioCfg.UseIAM.GetAsBool()),
+		pkgStorage.CloudProvider(params.MinioCfg.CloudProvider.GetValue()),
+		pkgStorage.IAMEndpoint(params.MinioCfg.IAMEndpoint.GetValue()),
+		pkgStorage.CreateBucket(true))
 }
 
 func SaveBinLog(ctx context.Context,
@@ -648,7 +649,7 @@ func SaveBinLog(ctx context.Context,
 	segmentID int64,
 	msgLength int,
 	schema *schemapb.CollectionSchema,
-	chunkManager storage.ChunkManager,
+	chunkManager pkgStorage.ChunkManager,
 ) ([]*datapb.FieldBinlog, []*datapb.FieldBinlog, error) {
 	binLogs, statsLogs, err := genStorageBlob(collectionID,
 		partitionID,
@@ -846,7 +847,7 @@ func genTimestampFieldData(numRows int) []int64 {
 func SaveDeltaLog(collectionID int64,
 	partitionID int64,
 	segmentID int64,
-	cm storage.ChunkManager,
+	cm pkgStorage.ChunkManager,
 ) ([]*datapb.FieldBinlog, error) {
 	binlogWriter := storage.NewDeleteBinlogWriter(schemapb.DataType_String, collectionID, partitionID, segmentID)
 	eventWriter, _ := binlogWriter.NextDeleteEventWriter()
@@ -895,7 +896,7 @@ func SaveDeltaLog(collectionID int64,
 	return fieldBinlog, cm.MultiWrite(context.Background(), kvs)
 }
 
-func GenAndSaveIndex(collectionID, partitionID, segmentID, fieldID int64, msgLength int, indexType, metricType string, cm storage.ChunkManager) (*querypb.FieldIndexInfo, error) {
+func GenAndSaveIndex(collectionID, partitionID, segmentID, fieldID int64, msgLength int, indexType, metricType string, cm pkgStorage.ChunkManager) (*querypb.FieldIndexInfo, error) {
 	typeParams, indexParams := genIndexParams(indexType, metricType)
 
 	index, err := indexcgowrapper.NewCgoIndex(schemapb.DataType_FloatVector, typeParams, indexParams)

@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/common"
+	pkgStorage "github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -73,7 +74,7 @@ func (suite *HandlersSuite) SetupTest() {
 
 	// mock factory
 	suite.factory = dependency.NewMockFactory(suite.T())
-	suite.chunkManagerFactory = storage.NewChunkManagerFactory("local", storage.RootPath("/tmp/milvus_test"))
+	suite.chunkManagerFactory = storage.NewChunkManagerFactory("local", pkgStorage.RootPath("/tmp/milvus_test"))
 
 	// new node
 	suite.node = NewQueryNode(context.Background(), suite.factory)

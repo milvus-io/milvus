@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	pkgStorage "github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -28,7 +29,7 @@ type mqEnable struct {
 	Kafka   bool
 }
 
-// DefaultFactory is a factory that produces instances of storage.ChunkManager and message queue.
+// DefaultFactory is a factory that produces instances of pkgStorage.ChunkManager and message queue.
 type DefaultFactory struct {
 	standAlone          bool
 	chunkManagerFactory storage.Factory
@@ -41,7 +42,7 @@ func NewDefaultFactory(standAlone bool) *DefaultFactory {
 		standAlone:       standAlone,
 		msgStreamFactory: smsgstream.NewRocksmqFactory("/tmp/milvus/rocksmq/", &paramtable.Get().ServiceParam),
 		chunkManagerFactory: storage.NewChunkManagerFactory("local",
-			storage.RootPath("/tmp/milvus")),
+			pkgStorage.RootPath("/tmp/milvus")),
 	}
 }
 
@@ -146,12 +147,12 @@ func (f *DefaultFactory) NewMsgStreamDisposer(ctx context.Context) func([]string
 	return f.msgStreamFactory.NewMsgStreamDisposer(ctx)
 }
 
-func (f *DefaultFactory) NewPersistentStorageChunkManager(ctx context.Context) (storage.ChunkManager, error) {
+func (f *DefaultFactory) NewPersistentStorageChunkManager(ctx context.Context) (pkgStorage.ChunkManager, error) {
 	return f.chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
 }
 
 type Factory interface {
 	msgstream.Factory
 	Init(p *paramtable.ComponentParam)
-	NewPersistentStorageChunkManager(ctx context.Context) (storage.ChunkManager, error)
+	NewPersistentStorageChunkManager(ctx context.Context) (pkgStorage.ChunkManager, error)
 }

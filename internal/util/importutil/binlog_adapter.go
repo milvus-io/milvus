@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	pkgStorage "github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -47,12 +48,12 @@ type SegmentFilesHolder struct {
 // 3. split data according to shard number
 // 4. call the callFlushFunc function to flush data into new binlog file if data size reaches blockSize.
 type BinlogAdapter struct {
-	ctx            context.Context      // for canceling parse process
-	collectionInfo *CollectionInfo      // collection details including schema
-	chunkManager   storage.ChunkManager // storage interfaces to read binlog files
-	callFlushFunc  ImportFlushFunc      // call back function to flush segment
-	blockSize      int64                // maximum size of a read block(unit:byte)
-	maxTotalSize   int64                // maximum size of in-memory segments(unit:byte)
+	ctx            context.Context         // for canceling parse process
+	collectionInfo *CollectionInfo         // collection details including schema
+	chunkManager   pkgStorage.ChunkManager // storage interfaces to read binlog files
+	callFlushFunc  ImportFlushFunc         // call back function to flush segment
+	blockSize      int64                   // maximum size of a read block(unit:byte)
+	maxTotalSize   int64                   // maximum size of in-memory segments(unit:byte)
 
 	// a timestamp to define the start time point of restore, data before this time point will be ignored
 	// set this value to 0, all the data will be imported
@@ -71,7 +72,7 @@ func NewBinlogAdapter(ctx context.Context,
 	collectionInfo *CollectionInfo,
 	blockSize int64,
 	maxTotalSize int64,
-	chunkManager storage.ChunkManager,
+	chunkManager pkgStorage.ChunkManager,
 	flushFunc ImportFlushFunc,
 	tsStartPoint uint64,
 	tsEndPoint uint64,

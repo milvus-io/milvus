@@ -5,36 +5,37 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type ChunkManagerFactory struct {
 	persistentStorage string
-	config            *config
+	config            *storage.Config
 }
 
 func NewChunkManagerFactoryWithParam(params *paramtable.ComponentParam) *ChunkManagerFactory {
 	if params.CommonCfg.StorageType.GetValue() == "local" {
-		return NewChunkManagerFactory("local", RootPath(params.LocalStorageCfg.Path.GetValue()))
+		return NewChunkManagerFactory("local", storage.RootPath(params.LocalStorageCfg.Path.GetValue()))
 	}
 	return NewChunkManagerFactory(params.CommonCfg.StorageType.GetValue(),
-		RootPath(params.MinioCfg.RootPath.GetValue()),
-		Address(params.MinioCfg.Address.GetValue()),
-		AccessKeyID(params.MinioCfg.AccessKeyID.GetValue()),
-		SecretAccessKeyID(params.MinioCfg.SecretAccessKey.GetValue()),
-		UseSSL(params.MinioCfg.UseSSL.GetAsBool()),
-		BucketName(params.MinioCfg.BucketName.GetValue()),
-		UseIAM(params.MinioCfg.UseIAM.GetAsBool()),
-		CloudProvider(params.MinioCfg.CloudProvider.GetValue()),
-		IAMEndpoint(params.MinioCfg.IAMEndpoint.GetValue()),
-		UseVirtualHost(params.MinioCfg.UseVirtualHost.GetAsBool()),
-		Region(params.MinioCfg.Region.GetValue()),
-		RequestTimeout(params.MinioCfg.RequestTimeoutMs.GetAsInt64()),
-		CreateBucket(true))
+		storage.RootPath(params.MinioCfg.RootPath.GetValue()),
+		storage.Address(params.MinioCfg.Address.GetValue()),
+		storage.AccessKeyID(params.MinioCfg.AccessKeyID.GetValue()),
+		storage.SecretAccessKeyID(params.MinioCfg.SecretAccessKey.GetValue()),
+		storage.UseSSL(params.MinioCfg.UseSSL.GetAsBool()),
+		storage.BucketName(params.MinioCfg.BucketName.GetValue()),
+		storage.UseIAM(params.MinioCfg.UseIAM.GetAsBool()),
+		storage.CloudProvider(params.MinioCfg.CloudProvider.GetValue()),
+		storage.IAMEndpoint(params.MinioCfg.IAMEndpoint.GetValue()),
+		storage.UseVirtualHost(params.MinioCfg.UseVirtualHost.GetAsBool()),
+		storage.Region(params.MinioCfg.Region.GetValue()),
+		storage.RequestTimeout(params.MinioCfg.RequestTimeoutMs.GetAsInt64()),
+		storage.CreateBucket(true))
 }
 
-func NewChunkManagerFactory(persistentStorage string, opts ...Option) *ChunkManagerFactory {
-	c := newDefaultConfig()
+func NewChunkManagerFactory(persistentStorage string, opts ...storage.Option) *ChunkManagerFactory {
+	c := storage.NewDefaultConfig()
 	for _, opt := range opts {
 		opt(c)
 	}
@@ -44,23 +45,23 @@ func NewChunkManagerFactory(persistentStorage string, opts ...Option) *ChunkMana
 	}
 }
 
-func (f *ChunkManagerFactory) newChunkManager(ctx context.Context, engine string) (ChunkManager, error) {
+func (f *ChunkManagerFactory) newChunkManager(ctx context.Context, engine string) (storage.ChunkManager, error) {
 	switch engine {
 	case "local":
-		return NewLocalChunkManager(RootPath(f.config.rootPath)), nil
+		return storage.NewLocalChunkManager(storage.RootPath(f.config.RootPath)), nil
 	case "minio":
-		return newMinioChunkManagerWithConfig(ctx, f.config)
+		return storage.NewMinioChunkManagerWithConfig(ctx, f.config)
 	case "remote":
-		return NewRemoteChunkManager(ctx, f.config)
+		return storage.NewRemoteChunkManager(ctx, f.config)
 	default:
 		return nil, errors.New("no chunk manager implemented with engine: " + engine)
 	}
 }
 
-func (f *ChunkManagerFactory) NewPersistentStorageChunkManager(ctx context.Context) (ChunkManager, error) {
+func (f *ChunkManagerFactory) NewPersistentStorageChunkManager(ctx context.Context) (storage.ChunkManager, error) {
 	return f.newChunkManager(ctx, f.persistentStorage)
 }
 
 type Factory interface {
-	NewPersistentStorageChunkManager(ctx context.Context) (ChunkManager, error)
+	NewPersistentStorageChunkManager(ctx context.Context) (storage.ChunkManager, error)
 }

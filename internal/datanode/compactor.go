@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	pkgStorage "github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
@@ -82,7 +83,7 @@ type compactionTask struct {
 
 	done         chan struct{}
 	tr           *timerecord.TimeRecorder
-	chunkManager storage.ChunkManager
+	chunkManager pkgStorage.ChunkManager
 	inject       *taskInjection
 }
 
@@ -94,7 +95,7 @@ func newCompactionTask(
 	fm flushManager,
 	alloc allocator.Allocator,
 	plan *datapb.CompactionPlan,
-	chunkManager storage.ChunkManager,
+	chunkManager pkgStorage.ChunkManager,
 ) *compactionTask {
 	ctx1, cancel := context.WithCancel(ctx)
 	return &compactionTask{

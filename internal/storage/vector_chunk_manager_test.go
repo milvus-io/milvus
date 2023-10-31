@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -116,12 +117,24 @@ func initBinlogFile(schema *etcdpb.CollectionMeta) []*Blob {
 
 func buildVectorChunkManager(ctx context.Context, localPath string, localCacheEnable bool) (*VectorChunkManager, error) {
 	bucketName := "vector-chunk-manager"
-
-	rcm, err := newMinIOChunkManager(ctx, bucketName, "")
+	rcm, err := storage.NewMinioChunkManagerWithConfig(ctx, &storage.Config{
+		Address:           Params.MinioCfg.Address.GetValue(),
+		BucketName:        bucketName,
+		AccessKeyID:       Params.MinioCfg.AccessKeyID.GetValue(),
+		SecretAccessKeyID: Params.MinioCfg.SecretAccessKey.GetValue(),
+		UseSSL:            Params.MinioCfg.UseSSL.GetAsBool(),
+		CreateBucket:      true,
+		RootPath:          "",
+		UseIAM:            false,
+		CloudProvider:     "aws",
+		IamEndpoint:       "",
+		UseVirtualHost:    false,
+		Region:            "",
+	})
 	if err != nil {
 		return nil, err
 	}
-	lcm := NewLocalChunkManager(RootPath(localPath))
+	lcm := storage.NewLocalChunkManager(storage.RootPath(localPath))
 
 	vcm, err := NewVectorChunkManager(ctx, lcm, rcm, 16, localCacheEnable)
 	if err != nil {
@@ -150,10 +163,23 @@ func TestNewVectorChunkManager(t *testing.T) {
 	ctx := context.Background()
 	bucketName := "vector-chunk-manager"
 
-	rcm, err := newMinIOChunkManager(ctx, bucketName, "")
+	rcm, err := storage.NewMinioChunkManagerWithConfig(ctx, &storage.Config{
+		Address:           Params.MinioCfg.Address.GetValue(),
+		BucketName:        bucketName,
+		AccessKeyID:       Params.MinioCfg.AccessKeyID.GetValue(),
+		SecretAccessKeyID: Params.MinioCfg.SecretAccessKey.GetValue(),
+		UseSSL:            Params.MinioCfg.UseSSL.GetAsBool(),
+		CreateBucket:      true,
+		RootPath:          "",
+		UseIAM:            false,
+		CloudProvider:     "aws",
+		IamEndpoint:       "",
+		UseVirtualHost:    false,
+		Region:            "",
+	})
 	assert.NoError(t, err)
 	assert.NotNil(t, rcm)
-	lcm := NewLocalChunkManager(RootPath(localPath))
+	lcm := storage.NewLocalChunkManager(storage.RootPath(localPath))
 
 	vcm, err := NewVectorChunkManager(ctx, lcm, rcm, 16, true)
 	assert.Equal(t, "", vcm.RootPath())
@@ -307,7 +333,7 @@ func TestVectorChunkManager_Remove(t *testing.T) {
 
 type mockFailedChunkManager struct {
 	fail bool
-	ChunkManager
+	storage.ChunkManager
 }
 
 func (m *mockFailedChunkManager) Remove(ctx context.Context, key string) error {

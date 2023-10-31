@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	pkgStorage "github.com/milvus-io/milvus/pkg/storage"
 )
 
 var binlogTestDir = "/tmp/milvus_test/test_binlog_io"
@@ -49,7 +50,7 @@ var validGeneratorFn = func(count int, done <-chan struct{}) <-chan UniqueID {
 func TestBinlogIOInterfaceMethods(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cm := storage.NewLocalChunkManager(storage.RootPath(binlogTestDir))
+	cm := pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(binlogTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	t.Run("Test download", func(t *testing.T) {
@@ -160,7 +161,7 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 	})
 }
 
-func prepareBlob(cm storage.ChunkManager, key string) ([]byte, string, error) {
+func prepareBlob(cm pkgStorage.ChunkManager, key string) ([]byte, string, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -177,7 +178,7 @@ func prepareBlob(cm storage.ChunkManager, key string) ([]byte, string, error) {
 func TestBinlogIOInnerMethods(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cm := storage.NewLocalChunkManager(storage.RootPath(binlogTestDir))
+	cm := pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(binlogTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	t.Run("Test genDeltaBlobs", func(t *testing.T) {
@@ -276,7 +277,7 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 	t.Run("Test genInsertBlobs error", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		cm := storage.NewLocalChunkManager(storage.RootPath(binlogTestDir))
+		cm := pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(binlogTestDir))
 		defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 		t.Run("serialize error", func(t *testing.T) {
@@ -357,14 +358,14 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 }
 
 type mockCm struct {
-	storage.ChunkManager
+	pkgStorage.ChunkManager
 	errRead         bool
 	errSave         bool
 	MultiReadReturn [][]byte
 	ReadReturn      []byte
 }
 
-var _ storage.ChunkManager = (*mockCm)(nil)
+var _ pkgStorage.ChunkManager = (*mockCm)(nil)
 
 func (mk *mockCm) RootPath() string {
 	return "mock_test"

@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	pkgStorage "github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/retry"
@@ -24,7 +25,7 @@ import (
 )
 
 type SyncTask struct {
-	chunkManager storage.ChunkManager
+	chunkManager pkgStorage.ChunkManager
 	allocator    allocator.Interface
 
 	insertData *storage.InsertData

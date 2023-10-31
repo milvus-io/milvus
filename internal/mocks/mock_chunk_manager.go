@@ -9,7 +9,7 @@ import (
 
 	mock "github.com/stretchr/testify/mock"
 
-	storage "github.com/milvus-io/milvus/internal/storage"
+	storage "github.com/milvus-io/milvus/pkg/storage"
 
 	time "time"
 )

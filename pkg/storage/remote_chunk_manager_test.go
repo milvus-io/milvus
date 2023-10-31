@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 // TODO: NewRemoteChunkManager is deprecated. Rewrite this unittest.
@@ -38,27 +39,28 @@ func newAzureChunkManager(ctx context.Context, bucketName string, rootPath strin
 }
 
 func newRemoteChunkManager(ctx context.Context, cloudProvider string, bucketName string, rootPath string) (ChunkManager, error) {
-	factory := NewChunkManagerFactory("remote",
-		RootPath(rootPath),
-		Address(Params.MinioCfg.Address.GetValue()),
-		AccessKeyID(Params.MinioCfg.AccessKeyID.GetValue()),
-		SecretAccessKeyID(Params.MinioCfg.SecretAccessKey.GetValue()),
-		UseSSL(Params.MinioCfg.UseSSL.GetAsBool()),
-		BucketName(bucketName),
-		UseIAM(Params.MinioCfg.UseIAM.GetAsBool()),
-		CloudProvider(cloudProvider),
-		IAMEndpoint(Params.MinioCfg.IAMEndpoint.GetValue()),
-		CreateBucket(true))
-	return factory.NewPersistentStorageChunkManager(ctx)
+	return NewRemoteChunkManager(ctx, &Config{
+		RootPath:          rootPath,
+		Address:           Params.MinioCfg.Address.GetValue(),
+		AccessKeyID:       Params.MinioCfg.AccessKeyID.GetValue(),
+		SecretAccessKeyID: Params.MinioCfg.SecretAccessKey.GetValue(),
+		UseSSL:            Params.MinioCfg.UseSSL.GetAsBool(),
+		BucketName:        bucketName,
+		UseIAM:            Params.MinioCfg.UseIAM.GetAsBool(),
+		CloudProvider:     cloudProvider,
+		IamEndpoint:       Params.MinioCfg.IAMEndpoint.GetValue(),
+		CreateBucket:      true,
+	})
 }
 
 func TestInitRemoteChunkManager(t *testing.T) {
+	paramtable.Init()
 	ctx := context.Background()
-	client, err := NewRemoteChunkManager(ctx, &config{
-		bucketName:    Params.MinioCfg.BucketName.GetValue(),
-		createBucket:  true,
-		useIAM:        false,
-		cloudProvider: "azure",
+	client, err := NewRemoteChunkManager(ctx, &Config{
+		BucketName:    Params.MinioCfg.BucketName.GetValue(),
+		CreateBucket:  true,
+		UseIAM:        false,
+		CloudProvider: "azure",
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, client)

@@ -28,8 +28,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/storage"
+	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	pkgStorage "github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
@@ -43,7 +44,7 @@ type SegmentLoaderSuite struct {
 	// Dependencies
 	manager      *Manager
 	rootPath     string
-	chunkManager storage.ChunkManager
+	chunkManager pkgStorage.ChunkManager
 
 	// Data
 	collectionID int64
@@ -597,7 +598,7 @@ type SegmentLoaderDetailSuite struct {
 	collectionManager *MockCollectionManager
 
 	rootPath     string
-	chunkManager storage.ChunkManager
+	chunkManager pkgStorage.ChunkManager
 
 	// Data
 	collectionID int64

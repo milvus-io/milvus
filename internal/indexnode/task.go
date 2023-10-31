@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	pkgStorage "github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/indexparams"
@@ -83,7 +84,7 @@ type indexBuildTask struct {
 	cancel context.CancelFunc
 	ctx    context.Context
 
-	cm                  storage.ChunkManager
+	cm                  pkgStorage.ChunkManager
 	index               indexcgowrapper.CodecIndex
 	savePaths           []string
 	req                 *indexpb.CreateJobRequest

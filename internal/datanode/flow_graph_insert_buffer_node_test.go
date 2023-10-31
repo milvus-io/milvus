@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	pkgStorage "github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
@@ -73,7 +74,7 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
+	cm := pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(insertNodeTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 	insertChannelName := "datanode-01-test-flowgraphinsertbuffernode-create"
 
@@ -175,7 +176,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 
 	insertChannelName := "datanode-01-test-flowgraphinsertbuffernode-operate"
 
-	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
+	cm := pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(insertNodeTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 	testPath := "/test/datanode/root/meta"
 	err := clearEtcd(testPath)
@@ -376,7 +377,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	fpMut := sync.Mutex{}
 	wg := sync.WaitGroup{}
 
-	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
+	cm := pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(insertNodeTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 	alloc := allocator.NewMockAllocator(t)
 	alloc.EXPECT().Alloc(mock.Anything).Call.Return(int64(22222),
@@ -625,7 +626,7 @@ func TestInsertBufferNodeRollBF(t *testing.T) {
 	fpMut := sync.Mutex{}
 	wg := sync.WaitGroup{}
 
-	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
+	cm := pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(insertNodeTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 	alloc := allocator.NewMockAllocator(t)
 	alloc.EXPECT().Alloc(mock.Anything).Call.Return(int64(22222),
@@ -745,7 +746,7 @@ type InsertBufferNodeSuite struct {
 
 	collID UniqueID
 	partID UniqueID
-	cm     *storage.LocalChunkManager
+	cm     *pkgStorage.LocalChunkManager
 
 	originalConfig int64
 }
@@ -769,7 +770,7 @@ func (s *InsertBufferNodeSuite) SetupSuite() {
 		channel:    s.channel,
 		delBufHeap: &PriorityQueue{},
 	}
-	s.cm = storage.NewLocalChunkManager(storage.RootPath(insertBufferNodeTestDir))
+	s.cm = pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(insertBufferNodeTestDir))
 
 	s.originalConfig = Params.DataNodeCfg.FlushInsertBufferSize.GetAsInt64()
 	// change flushing size to 2
@@ -1001,7 +1002,7 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 		{0, schemapb.DataType_VarChar, "varCharPrimaryData"},
 	}
 
-	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
+	cm := pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(insertNodeTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 	for _, test := range tests {
 		collMeta := factory.GetCollectionMeta(test.collID, "collection", test.pkType)
@@ -1070,7 +1071,7 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 func TestInsertBufferNode_updateSegmentStates(te *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
+	cm := pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(insertNodeTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 	invalideTests := []struct {
 		channelCollID UniqueID
@@ -1183,7 +1184,7 @@ func TestInsertBufferNode_task_pool_is_full(t *testing.T) {
 	ctx := context.Background()
 	flushCh := make(chan flushMsg, 100)
 
-	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
+	cm := pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(insertNodeTestDir))
 	defer func() {
 		err := cm.RemoveWithPrefix(ctx, cm.RootPath())
 		assert.NoError(t, err)

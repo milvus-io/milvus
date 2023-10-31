@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	pkgStorage "github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -42,11 +43,11 @@ import (
 
 // GcOption garbage collection options
 type GcOption struct {
-	cli              storage.ChunkManager // client
-	enabled          bool                 // enable switch
-	checkInterval    time.Duration        // each interval
-	missingTolerance time.Duration        // key missing in meta tolerance time
-	dropTolerance    time.Duration        // dropped segment related key tolerance time
+	cli              pkgStorage.ChunkManager // client
+	enabled          bool                    // enable switch
+	checkInterval    time.Duration           // each interval
+	missingTolerance time.Duration           // key missing in meta tolerance time
+	dropTolerance    time.Duration           // dropped segment related key tolerance time
 }
 
 // garbageCollector handles garbage files in object storage

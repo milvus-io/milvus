@@ -27,9 +27,9 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/storage/aliyun"
-	"github.com/milvus-io/milvus/internal/storage/gcp"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/storage/aliyun"
+	"github.com/milvus-io/milvus/pkg/storage/gcp"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 )
 
@@ -37,29 +37,29 @@ type MinioObjectStorage struct {
 	*minio.Client
 }
 
-func newMinioClient(ctx context.Context, c *config) (*minio.Client, error) {
+func newMinioClient(ctx context.Context, c *Config) (*minio.Client, error) {
 	var creds *credentials.Credentials
 	newMinioFn := minio.New
 	bucketLookupType := minio.BucketLookupAuto
 
-	if c.useVirtualHost {
+	if c.UseVirtualHost {
 		bucketLookupType = minio.BucketLookupDNS
 	}
 
 	matchedDefault := false
-	switch c.cloudProvider {
+	switch c.CloudProvider {
 	case CloudProviderAliyun:
 		// auto doesn't work for aliyun, so we set to dns deliberately
 		bucketLookupType = minio.BucketLookupDNS
-		if c.useIAM {
+		if c.UseIAM {
 			newMinioFn = aliyun.NewMinioClient
 		} else {
-			creds = credentials.NewStaticV4(c.accessKeyID, c.secretAccessKeyID, "")
+			creds = credentials.NewStaticV4(c.AccessKeyID, c.SecretAccessKeyID, "")
 		}
 	case CloudProviderGCP:
 		newMinioFn = gcp.NewMinioClient
-		if !c.useIAM {
-			creds = credentials.NewStaticV2(c.accessKeyID, c.secretAccessKeyID, "")
+		if !c.UseIAM {
+			creds = credentials.NewStaticV2(c.AccessKeyID, c.SecretAccessKeyID, "")
 		}
 	default: // aws, minio
 		matchedDefault = true
@@ -70,18 +70,18 @@ func newMinioClient(ctx context.Context, c *config) (*minio.Client, error) {
 	if matchedDefault {
 		matchedDefault = false
 		switch {
-		case strings.Contains(c.address, gcp.GcsDefaultAddress):
+		case strings.Contains(c.Address, gcp.GcsDefaultAddress):
 			newMinioFn = gcp.NewMinioClient
-			if !c.useIAM {
-				creds = credentials.NewStaticV2(c.accessKeyID, c.secretAccessKeyID, "")
+			if !c.UseIAM {
+				creds = credentials.NewStaticV2(c.AccessKeyID, c.SecretAccessKeyID, "")
 			}
-		case strings.Contains(c.address, aliyun.OSSAddressFeatureString):
+		case strings.Contains(c.Address, aliyun.OSSAddressFeatureString):
 			// auto doesn't work for aliyun, so we set to dns deliberately
 			bucketLookupType = minio.BucketLookupDNS
-			if c.useIAM {
+			if c.UseIAM {
 				newMinioFn = aliyun.NewMinioClient
 			} else {
-				creds = credentials.NewStaticV4(c.accessKeyID, c.secretAccessKeyID, "")
+				creds = credentials.NewStaticV4(c.AccessKeyID, c.SecretAccessKeyID, "")
 			}
 		default:
 			matchedDefault = true
@@ -90,19 +90,19 @@ func newMinioClient(ctx context.Context, c *config) (*minio.Client, error) {
 
 	if matchedDefault {
 		// aws, minio
-		if c.useIAM {
+		if c.UseIAM {
 			creds = credentials.NewIAM("")
 		} else {
-			creds = credentials.NewStaticV4(c.accessKeyID, c.secretAccessKeyID, "")
+			creds = credentials.NewStaticV4(c.AccessKeyID, c.SecretAccessKeyID, "")
 		}
 	}
 	minioOpts := &minio.Options{
 		BucketLookup: bucketLookupType,
 		Creds:        creds,
-		Secure:       c.useSSL,
-		Region:       c.region,
+		Secure:       c.UseSSL,
+		Region:       c.Region,
 	}
-	minIOClient, err := newMinioFn(c.address, minioOpts)
+	minIOClient, err := newMinioFn(c.Address, minioOpts)
 	// options nil or invalid formatted endpoint, don't need to retry
 	if err != nil {
 		return nil, err
@@ -110,21 +110,21 @@ func newMinioClient(ctx context.Context, c *config) (*minio.Client, error) {
 	var bucketExists bool
 	// check valid in first query
 	checkBucketFn := func() error {
-		bucketExists, err = minIOClient.BucketExists(ctx, c.bucketName)
+		bucketExists, err = minIOClient.BucketExists(ctx, c.BucketName)
 		if err != nil {
-			log.Warn("failed to check blob bucket exist", zap.String("bucket", c.bucketName), zap.Error(err))
+			log.Warn("failed to check blob bucket exist", zap.String("bucket", c.BucketName), zap.Error(err))
 			return err
 		}
 		if !bucketExists {
-			if c.createBucket {
-				log.Info("blob bucket not exist, create bucket.", zap.Any("bucket name", c.bucketName))
-				err := minIOClient.MakeBucket(ctx, c.bucketName, minio.MakeBucketOptions{})
+			if c.CreateBucket {
+				log.Info("blob bucket not exist, create bucket.", zap.Any("bucket name", c.BucketName))
+				err := minIOClient.MakeBucket(ctx, c.BucketName, minio.MakeBucketOptions{})
 				if err != nil {
-					log.Warn("failed to create blob bucket", zap.String("bucket", c.bucketName), zap.Error(err))
+					log.Warn("failed to create blob bucket", zap.String("bucket", c.BucketName), zap.Error(err))
 					return err
 				}
 			} else {
-				return fmt.Errorf("bucket %s not Existed", c.bucketName)
+				return fmt.Errorf("bucket %s not Existed", c.BucketName)
 			}
 		}
 		return nil
@@ -136,7 +136,7 @@ func newMinioClient(ctx context.Context, c *config) (*minio.Client, error) {
 	return minIOClient, nil
 }
 
-func newMinioObjectStorageWithConfig(ctx context.Context, c *config) (*MinioObjectStorage, error) {
+func newMinioObjectStorageWithConfig(ctx context.Context, c *Config) (*MinioObjectStorage, error) {
 	minIOClient, err := newMinioClient(ctx, c)
 	if err != nil {
 		return nil, err

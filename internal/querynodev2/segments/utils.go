@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	pkgStorage "github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -124,7 +125,7 @@ func getPKsFromColumnBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.C
 	return pks, nil
 }
 
-func fillBinVecFieldData(ctx context.Context, vcm storage.ChunkManager, dataPath string, fieldData *schemapb.FieldData, i int, offset int64, endian binary.ByteOrder) error {
+func fillBinVecFieldData(ctx context.Context, vcm pkgStorage.ChunkManager, dataPath string, fieldData *schemapb.FieldData, i int, offset int64, endian binary.ByteOrder) error {
 	dim := fieldData.GetVectors().GetDim()
 	rowBytes := dim / 8
 	content, err := vcm.ReadAt(ctx, dataPath, offset*rowBytes, rowBytes)
@@ -137,7 +138,7 @@ func fillBinVecFieldData(ctx context.Context, vcm storage.ChunkManager, dataPath
 	return nil
 }
 
-func fillFloatVecFieldData(ctx context.Context, vcm storage.ChunkManager, dataPath string, fieldData *schemapb.FieldData, i int, offset int64, endian binary.ByteOrder) error {
+func fillFloatVecFieldData(ctx context.Context, vcm pkgStorage.ChunkManager, dataPath string, fieldData *schemapb.FieldData, i int, offset int64, endian binary.ByteOrder) error {
 	dim := fieldData.GetVectors().GetDim()
 	rowBytes := dim * 4
 	content, err := vcm.ReadAt(ctx, dataPath, offset*rowBytes, rowBytes)
@@ -155,7 +156,7 @@ func fillFloatVecFieldData(ctx context.Context, vcm storage.ChunkManager, dataPa
 	return nil
 }
 
-func fillBoolFieldData(ctx context.Context, vcm storage.ChunkManager, dataPath string, fieldData *schemapb.FieldData, i int, offset int64, endian binary.ByteOrder) error {
+func fillBoolFieldData(ctx context.Context, vcm pkgStorage.ChunkManager, dataPath string, fieldData *schemapb.FieldData, i int, offset int64, endian binary.ByteOrder) error {
 	// read whole file.
 	// TODO: optimize here.
 	content, err := vcm.Read(ctx, dataPath)
@@ -171,7 +172,7 @@ func fillBoolFieldData(ctx context.Context, vcm storage.ChunkManager, dataPath s
 	return nil
 }
 
-func fillStringFieldData(ctx context.Context, vcm storage.ChunkManager, dataPath string, fieldData *schemapb.FieldData, i int, offset int64, endian binary.ByteOrder) error {
+func fillStringFieldData(ctx context.Context, vcm pkgStorage.ChunkManager, dataPath string, fieldData *schemapb.FieldData, i int, offset int64, endian binary.ByteOrder) error {
 	// read whole file.
 	// TODO: optimize here.
 	content, err := vcm.Read(ctx, dataPath)
@@ -187,7 +188,7 @@ func fillStringFieldData(ctx context.Context, vcm storage.ChunkManager, dataPath
 	return nil
 }
 
-func fillInt8FieldData(ctx context.Context, vcm storage.ChunkManager, dataPath string, fieldData *schemapb.FieldData, i int, offset int64, endian binary.ByteOrder) error {
+func fillInt8FieldData(ctx context.Context, vcm pkgStorage.ChunkManager, dataPath string, fieldData *schemapb.FieldData, i int, offset int64, endian binary.ByteOrder) error {
 	// read by offset.
 	rowBytes := int64(1)
 	content, err := vcm.ReadAt(ctx, dataPath, offset*rowBytes, rowBytes)
@@ -202,7 +203,7 @@ func fillInt8FieldData(ctx context.Context, vcm storage.ChunkManager, dataPath s
 	return nil
 }
 
-func fillInt16FieldData(ctx context.Context, vcm storage.ChunkManager, dataPath string, fieldData *schemapb.FieldData, i int, offset int64, endian binary.ByteOrder) error {
+func fillInt16FieldData(ctx context.Context, vcm pkgStorage.ChunkManager, dataPath string, fieldData *schemapb.FieldData, i int, offset int64, endian binary.ByteOrder) error {
 	// read by offset.
 	rowBytes := int64(2)
 	content, err := vcm.ReadAt(ctx, dataPath, offset*rowBytes, rowBytes)
@@ -217,7 +218,7 @@ func fillInt16FieldData(ctx context.Context, vcm storage.ChunkManager, dataPath 
 	return nil
 }
 
-func fillInt32FieldData(ctx context.Context, vcm storage.ChunkManager, dataPath string, fieldData *schemapb.FieldData, i int, offset int64, endian binary.ByteOrder) error {
+func fillInt32FieldData(ctx context.Context, vcm pkgStorage.ChunkManager, dataPath string, fieldData *schemapb.FieldData, i int, offset int64, endian binary.ByteOrder) error {
 	// read by offset.
 	rowBytes := int64(4)
 	content, err := vcm.ReadAt(ctx, dataPath, offset*rowBytes, rowBytes)
@@ -227,7 +228,7 @@ func fillInt32FieldData(ctx context.Context, vcm storage.ChunkManager, dataPath 
 	return funcutil.ReadBinary(endian, content, &(fieldData.GetScalars().GetIntData().GetData()[i]))
 }
 
-func fillInt64FieldData(ctx context.Context, vcm storage.ChunkManager, dataPath string, fieldData *schemapb.FieldData, i int, offset int64, endian binary.ByteOrder) error {
+func fillInt64FieldData(ctx context.Context, vcm pkgStorage.ChunkManager, dataPath string, fieldData *schemapb.FieldData, i int, offset int64, endian binary.ByteOrder) error {
 	// read by offset.
 	rowBytes := int64(8)
 	content, err := vcm.ReadAt(ctx, dataPath, offset*rowBytes, rowBytes)
@@ -237,7 +238,7 @@ func fillInt64FieldData(ctx context.Context, vcm storage.ChunkManager, dataPath 
 	return funcutil.ReadBinary(endian, content, &(fieldData.GetScalars().GetLongData().GetData()[i]))
 }
 
-func fillFloatFieldData(ctx context.Context, vcm storage.ChunkManager, dataPath string, fieldData *schemapb.FieldData, i int, offset int64, endian binary.ByteOrder) error {
+func fillFloatFieldData(ctx context.Context, vcm pkgStorage.ChunkManager, dataPath string, fieldData *schemapb.FieldData, i int, offset int64, endian binary.ByteOrder) error {
 	// read by offset.
 	rowBytes := int64(4)
 	content, err := vcm.ReadAt(ctx, dataPath, offset*rowBytes, rowBytes)
@@ -247,7 +248,7 @@ func fillFloatFieldData(ctx context.Context, vcm storage.ChunkManager, dataPath 
 	return funcutil.ReadBinary(endian, content, &(fieldData.GetScalars().GetFloatData().GetData()[i]))
 }
 
-func fillDoubleFieldData(ctx context.Context, vcm storage.ChunkManager, dataPath string, fieldData *schemapb.FieldData, i int, offset int64, endian binary.ByteOrder) error {
+func fillDoubleFieldData(ctx context.Context, vcm pkgStorage.ChunkManager, dataPath string, fieldData *schemapb.FieldData, i int, offset int64, endian binary.ByteOrder) error {
 	// read by offset.
 	rowBytes := int64(8)
 	content, err := vcm.ReadAt(ctx, dataPath, offset*rowBytes, rowBytes)
@@ -257,7 +258,7 @@ func fillDoubleFieldData(ctx context.Context, vcm storage.ChunkManager, dataPath
 	return funcutil.ReadBinary(endian, content, &(fieldData.GetScalars().GetDoubleData().GetData()[i]))
 }
 
-func fillFieldData(ctx context.Context, vcm storage.ChunkManager, dataPath string, fieldData *schemapb.FieldData, i int, offset int64, endian binary.ByteOrder) error {
+func fillFieldData(ctx context.Context, vcm pkgStorage.ChunkManager, dataPath string, fieldData *schemapb.FieldData, i int, offset int64, endian binary.ByteOrder) error {
 	switch fieldData.Type {
 	case schemapb.DataType_BinaryVector:
 		return fillBinVecFieldData(ctx, vcm, dataPath, fieldData, i, offset, endian)

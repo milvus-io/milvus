@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	pkgStorage "github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -67,7 +68,7 @@ func (suite *QueryNodeSuite) SetupTest() {
 
 	// mock factory
 	suite.factory = dependency.NewMockFactory(suite.T())
-	suite.chunkManagerFactory = storage.NewChunkManagerFactory("local", storage.RootPath("/tmp/milvus_test"))
+	suite.chunkManagerFactory = storage.NewChunkManagerFactory("local", pkgStorage.RootPath("/tmp/milvus_test"))
 	// new node
 	suite.node = NewQueryNode(context.Background(), suite.factory)
 	// init etcd

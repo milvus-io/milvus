@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	storage "github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util/cache"
 )
 
@@ -36,8 +37,8 @@ var defaultLocalCacheSize = 64
 
 // VectorChunkManager is responsible for read and write vector data.
 type VectorChunkManager struct {
-	cacheStorage  ChunkManager
-	vectorStorage ChunkManager
+	cacheStorage  storage.ChunkManager
+	vectorStorage storage.ChunkManager
 	cache         cache.LoadingCache[string, *mmap.ReaderAt]
 
 	insertCodec *InsertCodec
@@ -48,10 +49,8 @@ type VectorChunkManager struct {
 	cacheSizeMutex sync.Mutex
 }
 
-var _ ChunkManager = (*VectorChunkManager)(nil)
-
 // NewVectorChunkManager create a new vector manager object.
-func NewVectorChunkManager(ctx context.Context, cacheStorage ChunkManager, vectorStorage ChunkManager, cacheLimit int64, cacheEnable bool) (*VectorChunkManager, error) {
+func NewVectorChunkManager(ctx context.Context, cacheStorage storage.ChunkManager, vectorStorage storage.ChunkManager, cacheLimit int64, cacheEnable bool) (*VectorChunkManager, error) {
 	insertCodec := NewInsertCodec()
 	vcm := &VectorChunkManager{
 		cacheStorage:  cacheStorage,
@@ -249,7 +248,7 @@ func (vcm *VectorChunkManager) Mmap(ctx context.Context, filePath string) (*mmap
 	return nil, errors.New("the file mmap has not been cached")
 }
 
-func (vcm *VectorChunkManager) Reader(ctx context.Context, filePath string) (FileReader, error) {
+func (vcm *VectorChunkManager) Reader(ctx context.Context, filePath string) (storage.FileReader, error) {
 	return nil, errors.New("this method has not been implemented")
 }
 

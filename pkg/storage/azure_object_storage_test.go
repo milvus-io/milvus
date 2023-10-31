@@ -20,42 +20,41 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"os"
 	"testing"
 
-	"github.com/minio/minio-go/v7"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
-func TestMinioObjectStorage(t *testing.T) {
+func TestAzureObjectStorage(t *testing.T) {
+	paramtable.Init()
 	ctx := context.Background()
-	config := config{
-		address:           Params.MinioCfg.Address.GetValue(),
-		accessKeyID:       Params.MinioCfg.AccessKeyID.GetValue(),
-		secretAccessKeyID: Params.MinioCfg.SecretAccessKey.GetValue(),
-		rootPath:          Params.MinioCfg.RootPath.GetValue(),
-
-		bucketName:    Params.MinioCfg.BucketName.GetValue(),
-		createBucket:  true,
-		useIAM:        false,
-		cloudProvider: "minio",
+	bucketName := Params.MinioCfg.BucketName.GetValue()
+	config := Config{
+		BucketName:    bucketName,
+		CreateBucket:  true,
+		UseIAM:        false,
+		CloudProvider: "azure",
 	}
 
 	t.Run("test initialize", func(t *testing.T) {
 		var err error
-		bucketName := config.bucketName
-		config.bucketName = ""
-		_, err = newMinioObjectStorageWithConfig(ctx, &config)
+		config.BucketName = ""
+		_, err = newAzureObjectStorageWithConfig(ctx, &config)
 		assert.Error(t, err)
-		config.bucketName = bucketName
-		_, err = newMinioObjectStorageWithConfig(ctx, &config)
+		config.BucketName = bucketName
+		_, err = newAzureObjectStorageWithConfig(ctx, &config)
 		assert.Equal(t, err, nil)
 	})
 
 	t.Run("test load", func(t *testing.T) {
-		testCM, err := newMinioObjectStorageWithConfig(ctx, &config)
+		testCM, err := newAzureObjectStorageWithConfig(ctx, &config)
 		assert.Equal(t, err, nil)
-		defer testCM.RemoveBucket(ctx, config.bucketName)
+		defer testCM.DeleteContainer(ctx, config.BucketName, &azblob.DeleteContainerOptions{})
 
 		prepareTests := []struct {
 			key   string
@@ -69,7 +68,7 @@ func TestMinioObjectStorage(t *testing.T) {
 		}
 
 		for _, test := range prepareTests {
-			err := testCM.PutObject(ctx, config.bucketName, test.key, bytes.NewReader(test.value), int64(len(test.value)))
+			err := testCM.PutObject(ctx, config.BucketName, test.key, bytes.NewReader(test.value), int64(len(test.value)))
 			require.NoError(t, err)
 		}
 
@@ -92,27 +91,27 @@ func TestMinioObjectStorage(t *testing.T) {
 		for _, test := range loadTests {
 			t.Run(test.description, func(t *testing.T) {
 				if test.isvalid {
-					got, err := testCM.GetObject(ctx, config.bucketName, test.loadKey, 0, 1024)
+					got, err := testCM.GetObject(ctx, config.BucketName, test.loadKey, 0, 1024)
 					assert.NoError(t, err)
 					contentData, err := io.ReadAll(got)
 					assert.NoError(t, err)
 					assert.Equal(t, len(contentData), len(test.expectedValue))
 					assert.Equal(t, test.expectedValue, contentData)
-					statSize, err := testCM.StatObject(ctx, config.bucketName, test.loadKey)
+					statSize, err := testCM.StatObject(ctx, config.BucketName, test.loadKey)
 					assert.NoError(t, err)
 					assert.Equal(t, statSize, int64(len(contentData)))
-					_, err = testCM.GetObject(ctx, config.bucketName, test.loadKey, 1, 1023)
+					_, err = testCM.GetObject(ctx, config.BucketName, test.loadKey, 1, 1023)
 					assert.NoError(t, err)
 				} else {
-					got, err := testCM.GetObject(ctx, config.bucketName, test.loadKey, 0, 1024)
-					assert.NoError(t, err)
-					_, err = io.ReadAll(got)
-					errResponse := minio.ToErrorResponse(err)
 					if test.loadKey == "/" {
-						assert.Equal(t, errResponse.Code, "XMinioInvalidObjectName")
-					} else {
-						assert.Equal(t, errResponse.Code, "NoSuchKey")
+						got, err := testCM.GetObject(ctx, config.BucketName, test.loadKey, 0, 1024)
+						assert.Error(t, err)
+						assert.Empty(t, got)
+						return
 					}
+					got, err := testCM.GetObject(ctx, config.BucketName, test.loadKey, 0, 1024)
+					assert.Error(t, err)
+					assert.Empty(t, got)
 				}
 			})
 		}
@@ -131,38 +130,39 @@ func TestMinioObjectStorage(t *testing.T) {
 
 		for _, test := range loadWithPrefixTests {
 			t.Run(test.description, func(t *testing.T) {
-				gotk, err := testCM.ListObjects(ctx, config.bucketName, test.prefix, false)
+				gotk, err := testCM.ListObjects(ctx, config.BucketName, test.prefix, false)
 				assert.NoError(t, err)
 				assert.Equal(t, len(test.expectedValue), len(gotk))
 				for key := range gotk {
-					err := testCM.RemoveObject(ctx, config.bucketName, key)
+					err := testCM.RemoveObject(ctx, config.BucketName, key)
 					assert.NoError(t, err)
 				}
 			})
 		}
 	})
 
-	t.Run("test useIAM", func(t *testing.T) {
+	t.Run("test UseIAM", func(t *testing.T) {
 		var err error
-		config.useIAM = true
-		_, err = newMinioObjectStorageWithConfig(ctx, &config)
+		config.UseIAM = true
+		_, err = newAzureObjectStorageWithConfig(ctx, &config)
 		assert.Error(t, err)
-		config.useIAM = false
+		os.Setenv("AZURE_CLIENT_ID", "00000000-0000-0000-0000-00000000000")
+		os.Setenv("AZURE_TENANT_ID", "00000000-0000-0000-0000-00000000000")
+		os.Setenv("AZURE_FEDERATED_TOKEN_FILE", "/var/run/secrets/tokens/azure-identity-token")
+		_, err = newAzureObjectStorageWithConfig(ctx, &config)
+		assert.Error(t, err)
+		config.UseIAM = false
 	})
 
-	t.Run("test cloud provider", func(t *testing.T) {
+	t.Run("test key secret", func(t *testing.T) {
 		var err error
-		cloudProvider := config.cloudProvider
-		config.cloudProvider = "aliyun"
-		config.useIAM = true
-		_, err = newMinioObjectStorageWithConfig(ctx, &config)
+		connectionString := os.Getenv("AZURE_STORAGE_CONNECTION_STRING")
+		os.Setenv("AZURE_STORAGE_CONNECTION_STRING", "")
+		config.AccessKeyID = "devstoreaccount1"
+		config.SecretAccessKeyID = "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
+		config.Address = "core.windows.net"
+		_, err = newAzureObjectStorageWithConfig(ctx, &config)
 		assert.Error(t, err)
-		config.useIAM = false
-		_, err = newMinioObjectStorageWithConfig(ctx, &config)
-		assert.Error(t, err)
-		config.cloudProvider = "gcp"
-		_, err = newMinioObjectStorageWithConfig(ctx, &config)
-		assert.NoError(t, err)
-		config.cloudProvider = cloudProvider
+		os.Setenv("AZURE_STORAGE_CONNECTION_STRING", connectionString)
 	})
 }

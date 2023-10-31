@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
+	pkgStorage "github.com/milvus-io/milvus/pkg/storage"
 )
 
 // BinlogFile class is a wrapper of storage.BinlogReader, to read binlog file, block by block.
@@ -33,11 +34,11 @@ import (
 // A binlog is designed to support multiple blocks, but so far each binlog always contains only one block.
 // Typically, an insert log file size is 16MB.
 type BinlogFile struct {
-	chunkManager storage.ChunkManager  // storage interfaces to read binlog files
-	reader       *storage.BinlogReader // binlog reader
+	chunkManager pkgStorage.ChunkManager // storage interfaces to read binlog files
+	reader       *storage.BinlogReader   // binlog reader
 }
 
-func NewBinlogFile(chunkManager storage.ChunkManager) (*BinlogFile, error) {
+func NewBinlogFile(chunkManager pkgStorage.ChunkManager) (*BinlogFile, error) {
 	if chunkManager == nil {
 		log.Warn("Binlog file: chunk manager pointer is nil")
 		return nil, errors.New("chunk manager pointer is nil")

@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	pkgStorage "github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
@@ -101,7 +102,7 @@ func (r *LoadResource) Sub(resource LoadResource) {
 
 func NewLoader(
 	manager *Manager,
-	cm storage.ChunkManager,
+	cm pkgStorage.ChunkManager,
 ) *segmentLoader {
 	cpuNum := runtime.GOMAXPROCS(0)
 	ioPoolSize := cpuNum * 8
@@ -157,7 +158,7 @@ func (r *loadResult) SetResult(status loadStatus) {
 // segmentLoader is only responsible for loading the field data from binlog
 type segmentLoader struct {
 	manager *Manager
-	cm      storage.ChunkManager
+	cm      pkgStorage.ChunkManager
 
 	mut sync.Mutex
 	// The channel will be closed as the segment loaded

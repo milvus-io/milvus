@@ -38,22 +38,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
-const (
-	CloudProviderGCP    = "gcp"
-	CloudProviderAWS    = "aws"
-	CloudProviderAliyun = "aliyun"
-
-	CloudProviderAzure = "azure"
-)
-
-type ObjectStorage interface {
-	GetObject(ctx context.Context, bucketName, objectName string, offset int64, size int64) (FileReader, error)
-	PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64) error
-	StatObject(ctx context.Context, bucketName, objectName string) (int64, error)
-	ListObjects(ctx context.Context, bucketName string, prefix string, recursive bool) (map[string]time.Time, error)
-	RemoveObject(ctx context.Context, bucketName, objectName string) error
-}
-
 // RemoteChunkManager is responsible for read and write data stored in minio.
 type RemoteChunkManager struct {
 	client ObjectStorage
@@ -63,12 +47,10 @@ type RemoteChunkManager struct {
 	rootPath   string
 }
 
-var _ ChunkManager = (*RemoteChunkManager)(nil)
-
-func NewRemoteChunkManager(ctx context.Context, c *config) (*RemoteChunkManager, error) {
+func NewRemoteChunkManager(ctx context.Context, c *Config) (*RemoteChunkManager, error) {
 	var client ObjectStorage
 	var err error
-	if c.cloudProvider == CloudProviderAzure {
+	if c.CloudProvider == CloudProviderAzure {
 		client, err = newAzureObjectStorageWithConfig(ctx, c)
 	} else {
 		client, err = newMinioObjectStorageWithConfig(ctx, c)
@@ -78,10 +60,10 @@ func NewRemoteChunkManager(ctx context.Context, c *config) (*RemoteChunkManager,
 	}
 	mcm := &RemoteChunkManager{
 		client:     client,
-		bucketName: c.bucketName,
-		rootPath:   strings.TrimLeft(c.rootPath, "/"),
+		bucketName: c.BucketName,
+		rootPath:   strings.TrimLeft(c.RootPath, "/"),
 	}
-	log.Info("remote chunk manager init success.", zap.String("remote", c.cloudProvider), zap.String("bucketname", c.bucketName), zap.String("root", mcm.RootPath()))
+	log.Info("remote chunk manager init success.", zap.String("remote", c.CloudProvider), zap.String("bucketname", c.BucketName), zap.String("root", mcm.RootPath()))
 	return mcm, nil
 }
 
@@ -307,7 +289,7 @@ func (mcm *RemoteChunkManager) RemoveWithPrefix(ctx context.Context, prefix stri
 // calling `ListWithPrefix` with `prefix` = a && `recursive` = false will only returns [a, ab]
 // If caller needs all objects without level limitation, `recursive` shall be true.
 func (mcm *RemoteChunkManager) ListWithPrefix(ctx context.Context, prefix string, recursive bool) ([]string, []time.Time, error) {
-	// cannot use ListObjects(ctx, bucketName, Opt{Prefix:prefix, Recursive:true})
+	// cannot use ListObjects(ctx, BucketName, Opt{Prefix:prefix, Recursive:true})
 	// if minio has lots of objects under the provided path
 	// recursive = true may timeout during the recursive browsing the objects.
 	// See also: https://github.com/milvus-io/milvus/issues/19095

@@ -29,7 +29,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
+
+var Params = paramtable.Get()
 
 // TODO: NewMinioChunkManager is deprecated. Rewrite this unittest.
 func newMinIOChunkManager(ctx context.Context, bucketName string, rootPath string) (*MinioChunkManager, error) {
@@ -37,20 +40,20 @@ func newMinIOChunkManager(ctx context.Context, bucketName string, rootPath strin
 	accessKeyID := Params.MinioCfg.AccessKeyID.GetValue()
 	secretAccessKey := Params.MinioCfg.SecretAccessKey.GetValue()
 	useSSL := Params.MinioCfg.UseSSL.GetAsBool()
-	client, err := NewMinioChunkManager(ctx,
-		RootPath(rootPath),
-		Address(endPoint),
-		AccessKeyID(accessKeyID),
-		SecretAccessKeyID(secretAccessKey),
-		UseSSL(useSSL),
-		BucketName(bucketName),
-		UseIAM(false),
-		CloudProvider("aws"),
-		IAMEndpoint(""),
-		CreateBucket(true),
-		UseVirtualHost(false),
-		Region(""),
-	)
+	client, err := NewMinioChunkManagerWithConfig(ctx, &Config{
+		Address:           endPoint,
+		BucketName:        bucketName,
+		AccessKeyID:       accessKeyID,
+		SecretAccessKeyID: secretAccessKey,
+		UseSSL:            useSSL,
+		CreateBucket:      true,
+		RootPath:          rootPath,
+		UseIAM:            false,
+		CloudProvider:     "aws",
+		IamEndpoint:       "",
+		UseVirtualHost:    false,
+		Region:            "",
+	})
 	return client, err
 }
 
@@ -64,18 +67,19 @@ func getMinioAddress() string {
 }
 
 func TestMinIOCMFail(t *testing.T) {
+	paramtable.Init()
 	ctx := context.Background()
 	accessKeyID := Params.MinioCfg.AccessKeyID.GetValue()
 	secretAccessKey := Params.MinioCfg.SecretAccessKey.GetValue()
 	useSSL := Params.MinioCfg.UseSSL.GetAsBool()
-	client, err := NewMinioChunkManager(ctx,
-		Address("9.9.9.9:invalid"),
-		AccessKeyID(accessKeyID),
-		SecretAccessKeyID(secretAccessKey),
-		UseSSL(useSSL),
-		BucketName("test"),
-		CreateBucket(true),
-	)
+	client, err := NewMinioChunkManagerWithConfig(ctx, &Config{
+		Address:           "9.9.9.9:invalid",
+		AccessKeyID:       accessKeyID,
+		SecretAccessKeyID: secretAccessKey,
+		UseSSL:            useSSL,
+		BucketName:        "test",
+		CreateBucket:      true,
+	})
 	assert.Error(t, err)
 	assert.Nil(t, client)
 }

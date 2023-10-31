@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	pkgStorage "github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -76,7 +77,7 @@ var mockChunkMgrIns = &mockChunkmgr{}
 
 type mockStorageFactory struct{}
 
-func (m *mockStorageFactory) NewChunkManager(context.Context, *indexpb.StorageConfig) (storage.ChunkManager, error) {
+func (m *mockStorageFactory) NewChunkManager(context.Context, *indexpb.StorageConfig) (pkgStorage.ChunkManager, error) {
 	return mockChunkMgrIns, nil
 }
 
@@ -85,7 +86,7 @@ type mockChunkmgr struct {
 	indexedData sync.Map
 }
 
-var _ storage.ChunkManager = &mockChunkmgr{}
+var _ pkgStorage.ChunkManager = &mockChunkmgr{}
 
 // var _ dependency.Factory = &mockFactory{}
 
@@ -126,7 +127,7 @@ func (c *mockChunkmgr) Read(ctx context.Context, filePath string) ([]byte, error
 	return value.(*storage.Blob).Value, nil
 }
 
-func (c *mockChunkmgr) Reader(ctx context.Context, filePath string) (storage.FileReader, error) {
+func (c *mockChunkmgr) Reader(ctx context.Context, filePath string) (pkgStorage.FileReader, error) {
 	// TODO
 	return nil, errNotImplErr
 }
@@ -218,11 +219,11 @@ type mockFactory struct {
 	chunkMgr *mockChunkmgr
 }
 
-func (f *mockFactory) NewCacheStorageChunkManager(context.Context) (storage.ChunkManager, error) {
+func (f *mockFactory) NewCacheStorageChunkManager(context.Context) (pkgStorage.ChunkManager, error) {
 	return nil, errNotImplErr
 }
 
-func (f *mockFactory) NewPersistentStorageChunkManager(context.Context) (storage.ChunkManager, error) {
+func (f *mockFactory) NewPersistentStorageChunkManager(context.Context) (pkgStorage.ChunkManager, error) {
 	if f.chunkMgr != nil {
 		return f.chunkMgr, nil
 	}

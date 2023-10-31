@@ -38,16 +38,14 @@ type LocalChunkManager struct {
 	localPath string
 }
 
-var _ ChunkManager = (*LocalChunkManager)(nil)
-
 // NewLocalChunkManager create a new local manager object.
 func NewLocalChunkManager(opts ...Option) *LocalChunkManager {
-	c := newDefaultConfig()
+	c := NewDefaultConfig()
 	for _, opt := range opts {
 		opt(c)
 	}
 	return &LocalChunkManager{
-		localPath: c.rootPath,
+		localPath: c.RootPath,
 	}
 }
 

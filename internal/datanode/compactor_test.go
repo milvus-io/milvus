@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
+	pkgStorage "github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
@@ -51,7 +52,7 @@ var compactTestDir = "/tmp/milvus_test/compact"
 func TestCompactionTaskInnerMethods(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cm := storage.NewLocalChunkManager(storage.RootPath(compactTestDir))
+	cm := pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(compactTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 	t.Run("Test getSegmentMeta", func(t *testing.T) {
 		f := MetaFactory{}
@@ -726,7 +727,7 @@ func getInt64DeltaBlobs(segID UniqueID, pks []UniqueID, tss []Timestamp) ([]*Blo
 func TestCompactorInterfaceMethods(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cm := storage.NewLocalChunkManager(storage.RootPath(compactTestDir))
+	cm := pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(compactTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 	notEmptySegmentBinlogs := []*datapb.CompactionSegmentBinlogs{{
 		SegmentID:           100,

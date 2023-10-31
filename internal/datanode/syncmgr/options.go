@@ -7,6 +7,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	pkgStorage "github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -20,7 +21,7 @@ func NewSyncTask() *SyncTask {
 	}
 }
 
-func (t *SyncTask) WithChunkManager(cm storage.ChunkManager) *SyncTask {
+func (t *SyncTask) WithChunkManager(cm pkgStorage.ChunkManager) *SyncTask {
 	t.chunkManager = cm
 	return t
 }

@@ -38,10 +38,10 @@ type AzureObjectStorage struct {
 	*service.Client
 }
 
-func newAzureObjectStorageWithConfig(ctx context.Context, c *config) (*AzureObjectStorage, error) {
+func newAzureObjectStorageWithConfig(ctx context.Context, c *Config) (*AzureObjectStorage, error) {
 	var client *service.Client
 	var err error
-	if c.useIAM {
+	if c.UseIAM {
 		cred, credErr := azidentity.NewWorkloadIdentityCredential(&azidentity.WorkloadIdentityCredentialOptions{
 			ClientID:      os.Getenv("AZURE_CLIENT_ID"),
 			TenantID:      os.Getenv("AZURE_TENANT_ID"),
@@ -50,29 +50,29 @@ func newAzureObjectStorageWithConfig(ctx context.Context, c *config) (*AzureObje
 		if credErr != nil {
 			return nil, credErr
 		}
-		client, err = service.NewClient("https://"+c.accessKeyID+".blob."+c.address+"/", cred, &service.ClientOptions{})
+		client, err = service.NewClient("https://"+c.AccessKeyID+".blob."+c.Address+"/", cred, &service.ClientOptions{})
 	} else {
 		connectionString := os.Getenv("AZURE_STORAGE_CONNECTION_STRING")
 		if connectionString == "" {
-			connectionString = "DefaultEndpointsProtocol=https;AccountName=" + c.accessKeyID +
-				";AccountKey=" + c.secretAccessKeyID + ";EndpointSuffix=" + c.address
+			connectionString = "DefaultEndpointsProtocol=https;AccountName=" + c.AccessKeyID +
+				";AccountKey=" + c.SecretAccessKeyID + ";EndpointSuffix=" + c.Address
 		}
 		client, err = service.NewClientFromConnectionString(connectionString, &service.ClientOptions{})
 	}
 	if err != nil {
 		return nil, err
 	}
-	if c.bucketName == "" {
+	if c.BucketName == "" {
 		return nil, merr.WrapErrParameterInvalidMsg("invalid empty bucket name")
 	}
 	// check valid in first query
 	checkBucketFn := func() error {
-		_, err := client.NewContainerClient(c.bucketName).GetProperties(ctx, &container.GetPropertiesOptions{})
+		_, err := client.NewContainerClient(c.BucketName).GetProperties(ctx, &container.GetPropertiesOptions{})
 		if err != nil {
 			switch err := err.(type) {
 			case *azcore.ResponseError:
-				if c.createBucket && err.ErrorCode == string(bloberror.ContainerNotFound) {
-					_, createErr := client.NewContainerClient(c.bucketName).Create(ctx, &azblob.CreateContainerOptions{})
+				if c.CreateBucket && err.ErrorCode == string(bloberror.ContainerNotFound) {
+					_, createErr := client.NewContainerClient(c.BucketName).Create(ctx, &azblob.CreateContainerOptions{})
 					if createErr != nil {
 						return createErr
 					}

@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	pkgStorage "github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 )
@@ -164,7 +165,7 @@ func newTestChannel() *ChannelMeta {
 func TestRendezvousFlushManager(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cm := storage.NewLocalChunkManager(storage.RootPath(flushTestDir))
+	cm := pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(flushTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	size := 1000
@@ -218,7 +219,7 @@ func TestRendezvousFlushManager(t *testing.T) {
 func TestRendezvousFlushManager_Inject(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cm := storage.NewLocalChunkManager(storage.RootPath(flushTestDir))
+	cm := pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(flushTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	size := 1000
@@ -337,7 +338,7 @@ func TestRendezvousFlushManager_Inject(t *testing.T) {
 func TestRendezvousFlushManager_getSegmentMeta(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	cm := storage.NewLocalChunkManager(storage.RootPath(flushTestDir))
+	cm := pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(flushTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	channel := newTestChannel()
@@ -368,7 +369,7 @@ func TestRendezvousFlushManager_getSegmentMeta(t *testing.T) {
 func TestRendezvousFlushManager_waitForAllFlushQueue(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cm := storage.NewLocalChunkManager(storage.RootPath(flushTestDir))
+	cm := pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(flushTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	channel := newTestChannel()
@@ -448,7 +449,7 @@ func TestRendezvousFlushManager_dropMode(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	t.Run("test drop mode", func(t *testing.T) {
-		cm := storage.NewLocalChunkManager(storage.RootPath(flushTestDir))
+		cm := pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(flushTestDir))
 		defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 		var mut sync.Mutex
@@ -527,7 +528,7 @@ func TestRendezvousFlushManager_dropMode(t *testing.T) {
 	})
 
 	t.Run("test drop mode with injection", func(t *testing.T) {
-		cm := storage.NewLocalChunkManager(storage.RootPath(flushTestDir))
+		cm := pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(flushTestDir))
 		defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 		var mut sync.Mutex
@@ -611,7 +612,7 @@ func TestRendezvousFlushManager_dropMode(t *testing.T) {
 func TestRendezvousFlushManager_close(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cm := storage.NewLocalChunkManager(storage.RootPath(flushTestDir))
+	cm := pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(flushTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	size := 1000
@@ -667,7 +668,7 @@ func TestFlushNotifyFunc(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cm := storage.NewLocalChunkManager(storage.RootPath(flushTestDir))
+	cm := pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(flushTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	channel := newChannel("channel", 1, nil, broker, cm)
@@ -753,7 +754,7 @@ func TestDropVirtualChannelFunc(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cm := storage.NewLocalChunkManager(storage.RootPath(flushTestDir))
+	cm := pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(flushTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	channel := newChannel(vchanName, 1, nil, broker, cm)

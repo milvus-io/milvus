@@ -30,14 +30,15 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
+	pkgStorage "github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
-func createLocalChunkManager(t *testing.T) storage.ChunkManager {
+func createLocalChunkManager(t *testing.T) pkgStorage.ChunkManager {
 	ctx := context.Background()
 	// NewDefaultFactory() use "/tmp/milvus" as default root path, and cannot specify root path
 	// NewChunkManagerFactory() can specify the root path
-	f := storage.NewChunkManagerFactory("local", storage.RootPath(TempFilesPath))
+	f := storage.NewChunkManagerFactory("local", pkgStorage.RootPath(TempFilesPath))
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
 
@@ -73,7 +74,7 @@ func findSchema(schema *schemapb.CollectionSchema, dt schemapb.DataType) *schema
 	return nil
 }
 
-func createSampleNumpyFiles(t *testing.T, cm storage.ChunkManager) []string {
+func createSampleNumpyFiles(t *testing.T, cm pkgStorage.ChunkManager) []string {
 	ctx := context.Background()
 	files := make([]string, 0)
 

@@ -6,38 +6,39 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	pkgStorage "github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type StorageFactory interface {
-	NewChunkManager(ctx context.Context, config *indexpb.StorageConfig) (storage.ChunkManager, error)
+	NewChunkManager(ctx context.Context, config *indexpb.StorageConfig) (pkgStorage.ChunkManager, error)
 }
 
 type chunkMgrFactory struct {
-	cached *typeutil.ConcurrentMap[string, storage.ChunkManager]
+	cached *typeutil.ConcurrentMap[string, pkgStorage.ChunkManager]
 }
 
 func NewChunkMgrFactory() *chunkMgrFactory {
 	return &chunkMgrFactory{
-		cached: typeutil.NewConcurrentMap[string, storage.ChunkManager](),
+		cached: typeutil.NewConcurrentMap[string, pkgStorage.ChunkManager](),
 	}
 }
 
-func (m *chunkMgrFactory) NewChunkManager(ctx context.Context, config *indexpb.StorageConfig) (storage.ChunkManager, error) {
+func (m *chunkMgrFactory) NewChunkManager(ctx context.Context, config *indexpb.StorageConfig) (pkgStorage.ChunkManager, error) {
 	chunkManagerFactory := storage.NewChunkManagerFactory(config.GetStorageType(),
-		storage.RootPath(config.GetRootPath()),
-		storage.Address(config.GetAddress()),
-		storage.AccessKeyID(config.GetAccessKeyID()),
-		storage.SecretAccessKeyID(config.GetSecretAccessKey()),
-		storage.UseSSL(config.GetUseSSL()),
-		storage.BucketName(config.GetBucketName()),
-		storage.UseIAM(config.GetUseIAM()),
-		storage.CloudProvider(config.GetCloudProvider()),
-		storage.IAMEndpoint(config.GetIAMEndpoint()),
-		storage.UseVirtualHost(config.GetUseVirtualHost()),
-		storage.RequestTimeout(config.GetRequestTimeoutMs()),
-		storage.Region(config.GetRegion()),
-		storage.CreateBucket(true),
+		pkgStorage.RootPath(config.GetRootPath()),
+		pkgStorage.Address(config.GetAddress()),
+		pkgStorage.AccessKeyID(config.GetAccessKeyID()),
+		pkgStorage.SecretAccessKeyID(config.GetSecretAccessKey()),
+		pkgStorage.UseSSL(config.GetUseSSL()),
+		pkgStorage.BucketName(config.GetBucketName()),
+		pkgStorage.UseIAM(config.GetUseIAM()),
+		pkgStorage.CloudProvider(config.GetCloudProvider()),
+		pkgStorage.IAMEndpoint(config.GetIAMEndpoint()),
+		pkgStorage.UseVirtualHost(config.GetUseVirtualHost()),
+		pkgStorage.RequestTimeout(config.GetRequestTimeoutMs()),
+		pkgStorage.Region(config.GetRegion()),
+		pkgStorage.CreateBucket(true),
 	)
 	return chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
 }

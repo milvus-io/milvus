@@ -64,6 +64,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
+	pkgStorage "github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util/gc"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
@@ -121,8 +122,8 @@ type QueryNode struct {
 	session *sessionutil.Session
 	eventCh <-chan *sessionutil.SessionEvent
 
-	cacheChunkManager storage.ChunkManager
-	vectorStorage     storage.ChunkManager
+	cacheChunkManager pkgStorage.ChunkManager
+	vectorStorage     pkgStorage.ChunkManager
 
 	/*
 		// Pool for search/query
@@ -283,7 +284,7 @@ func (node *QueryNode) Init() error {
 		node.factory.Init(paramtable.Get())
 
 		localRootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
-		localChunkManager := storage.NewLocalChunkManager(storage.RootPath(localRootPath))
+		localChunkManager := pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(localRootPath))
 		localUsedSize, err := segments.GetLocalUsedSize(localRootPath)
 		if err != nil {
 			log.Warn("get local used size failed", zap.Error(err))

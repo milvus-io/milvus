@@ -29,18 +29,19 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	pkgStorage "github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type NumpyColumnReader struct {
-	fieldName string             // name of the target column
-	fieldID   storage.FieldID    // ID of the target column
-	dataType  schemapb.DataType  // data type of the target column
-	rowCount  int                // how many rows need to be read
-	dimension int                // only for vector
-	file      storage.FileReader // file to be read
-	reader    *NumpyAdapter      // data reader
+	fieldName string                // name of the target column
+	fieldID   storage.FieldID       // ID of the target column
+	dataType  schemapb.DataType     // data type of the target column
+	rowCount  int                   // how many rows need to be read
+	dimension int                   // only for vector
+	file      pkgStorage.FileReader // file to be read
+	reader    *NumpyAdapter         // data reader
 }
 
 func closeReaders(columnReaders []*NumpyColumnReader) {
@@ -55,14 +56,14 @@ func closeReaders(columnReaders []*NumpyColumnReader) {
 }
 
 type NumpyParser struct {
-	ctx                context.Context        // for canceling parse process
-	collectionInfo     *CollectionInfo        // collection details including schema
-	rowIDAllocator     *allocator.IDAllocator // autoid allocator
-	blockSize          int64                  // maximum size of a read block(unit:byte)
-	chunkManager       storage.ChunkManager   // storage interfaces to browse/read the files
-	autoIDRange        []int64                // auto-generated id range, for example: [1, 10, 20, 25] means id from 1 to 10 and 20 to 25
-	callFlushFunc      ImportFlushFunc        // call back function to flush segment
-	updateProgressFunc func(percent int64)    // update working progress percent value
+	ctx                context.Context         // for canceling parse process
+	collectionInfo     *CollectionInfo         // collection details including schema
+	rowIDAllocator     *allocator.IDAllocator  // autoid allocator
+	blockSize          int64                   // maximum size of a read block(unit:byte)
+	chunkManager       pkgStorage.ChunkManager // storage interfaces to browse/read the files
+	autoIDRange        []int64                 // auto-generated id range, for example: [1, 10, 20, 25] means id from 1 to 10 and 20 to 25
+	callFlushFunc      ImportFlushFunc         // call back function to flush segment
+	updateProgressFunc func(percent int64)     // update working progress percent value
 }
 
 // NewNumpyParser is helper function to create a NumpyParser
@@ -70,7 +71,7 @@ func NewNumpyParser(ctx context.Context,
 	collectionInfo *CollectionInfo,
 	idAlloc *allocator.IDAllocator,
 	blockSize int64,
-	chunkManager storage.ChunkManager,
+	chunkManager pkgStorage.ChunkManager,
 	flushFunc ImportFlushFunc,
 	updateProgressFunc func(percent int64),
 ) (*NumpyParser, error) {

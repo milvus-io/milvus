@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
+	pkgStorage "github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
@@ -66,7 +67,7 @@ func (mc *MockChunkManager) Path(ctx context.Context, filePath string) (string, 
 	return "", nil
 }
 
-func (mc *MockChunkManager) Reader(ctx context.Context, filePath string) (storage.FileReader, error) {
+func (mc *MockChunkManager) Reader(ctx context.Context, filePath string) (pkgStorage.FileReader, error) {
 	return nil, mc.readerErr
 }
 
@@ -181,7 +182,7 @@ func createMockCallbackFunctions(t *testing.T, rowCounter *rowCounterTest) (Assi
 func Test_ImportWrapperNew(t *testing.T) {
 	// NewDefaultFactory() use "/tmp/milvus" as default root path, and cannot specify root path
 	// NewChunkManagerFactory() can specify the root path
-	f := storage.NewChunkManagerFactory("local", storage.RootPath(TempFilesPath))
+	f := storage.NewChunkManagerFactory("local", pkgStorage.RootPath(TempFilesPath))
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
@@ -241,7 +242,7 @@ func Test_ImportWrapperRowBased(t *testing.T) {
 
 	// NewDefaultFactory() use "/tmp/milvus" as default root path, and cannot specify root path
 	// NewChunkManagerFactory() can specify the root path
-	f := storage.NewChunkManagerFactory("local", storage.RootPath(TempFilesPath))
+	f := storage.NewChunkManagerFactory("local", pkgStorage.RootPath(TempFilesPath))
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
@@ -333,7 +334,7 @@ func Test_ImportWrapperColumnBased_numpy(t *testing.T) {
 
 	// NewDefaultFactory() use "/tmp/milvus" as default root path, and cannot specify root path
 	// NewChunkManagerFactory() can specify the root path
-	f := storage.NewChunkManagerFactory("local", storage.RootPath(TempFilesPath))
+	f := storage.NewChunkManagerFactory("local", pkgStorage.RootPath(TempFilesPath))
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
@@ -434,7 +435,7 @@ func Test_ImportWrapperRowBased_perf(t *testing.T) {
 
 	// NewDefaultFactory() use "/tmp/milvus" as default root path, and cannot specify root path
 	// NewChunkManagerFactory() can specify the root path
-	f := storage.NewChunkManagerFactory("local", storage.RootPath(TempFilesPath))
+	f := storage.NewChunkManagerFactory("local", pkgStorage.RootPath(TempFilesPath))
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
@@ -645,7 +646,7 @@ func Test_ImportWrapperReportFailRowBased(t *testing.T) {
 
 	// NewDefaultFactory() use "/tmp/milvus" as default root path, and cannot specify root path
 	// NewChunkManagerFactory() can specify the root path
-	f := storage.NewChunkManagerFactory("local", storage.RootPath(TempFilesPath))
+	f := storage.NewChunkManagerFactory("local", pkgStorage.RootPath(TempFilesPath))
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
@@ -706,7 +707,7 @@ func Test_ImportWrapperReportFailColumnBased_numpy(t *testing.T) {
 
 	// NewDefaultFactory() use "/tmp/milvus" as default root path, and cannot specify root path
 	// NewChunkManagerFactory() can specify the root path
-	f := storage.NewChunkManagerFactory("local", storage.RootPath(TempFilesPath))
+	f := storage.NewChunkManagerFactory("local", pkgStorage.RootPath(TempFilesPath))
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
@@ -755,7 +756,7 @@ func Test_ImportWrapperIsBinlogImport(t *testing.T) {
 
 	// NewDefaultFactory() use "/tmp/milvus" as default root path, and cannot specify root path
 	// NewChunkManagerFactory() can specify the root path
-	f := storage.NewChunkManagerFactory("local", storage.RootPath(TempFilesPath))
+	f := storage.NewChunkManagerFactory("local", pkgStorage.RootPath(TempFilesPath))
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)

@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
+	pkgStorage "github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -38,7 +39,7 @@ type RetrieveSuite struct {
 
 	// Dependencies
 	rootPath     string
-	chunkManager storage.ChunkManager
+	chunkManager pkgStorage.ChunkManager
 
 	// Data
 	manager      *Manager

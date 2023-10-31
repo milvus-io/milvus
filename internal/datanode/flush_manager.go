@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	pkgStorage "github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
@@ -268,7 +269,7 @@ type dropHandler struct {
 // rendezvousFlushManager makes sure insert & del buf all flushed
 type rendezvousFlushManager struct {
 	allocator.Allocator
-	storage.ChunkManager
+	pkgStorage.ChunkManager
 	Channel
 
 	// segment id => flush queue
@@ -661,7 +662,7 @@ func (m *rendezvousFlushManager) close() {
 }
 
 type flushBufferInsertTask struct {
-	storage.ChunkManager
+	pkgStorage.ChunkManager
 	data map[string][]byte
 }
 
@@ -692,7 +693,7 @@ func (t *flushBufferInsertTask) flushInsertData() error {
 }
 
 type flushBufferDeleteTask struct {
-	storage.ChunkManager
+	pkgStorage.ChunkManager
 	data map[string][]byte
 }
 
@@ -715,7 +716,7 @@ func (t *flushBufferDeleteTask) flushDeleteData() error {
 }
 
 // NewRendezvousFlushManager create rendezvousFlushManager with provided allocator and kv
-func NewRendezvousFlushManager(allocator allocator.Allocator, cm storage.ChunkManager, channel Channel, f notifyMetaFunc, drop flushAndDropFunc) *rendezvousFlushManager {
+func NewRendezvousFlushManager(allocator allocator.Allocator, cm pkgStorage.ChunkManager, channel Channel, f notifyMetaFunc, drop flushAndDropFunc) *rendezvousFlushManager {
 	fm := &rendezvousFlushManager{
 		Allocator:    allocator,
 		ChunkManager: cm,

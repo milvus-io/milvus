@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	pkgStorage "github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -130,7 +131,7 @@ type ChannelMeta struct {
 	syncPolicies []segmentSyncPolicy
 
 	metaService  *metaService
-	chunkManager storage.ChunkManager
+	chunkManager pkgStorage.ChunkManager
 	workerPool   *conc.Pool[any]
 
 	closed *atomic.Bool
@@ -149,7 +150,7 @@ type addSegmentReq struct {
 
 var _ Channel = &ChannelMeta{}
 
-func newChannel(channelName string, collID UniqueID, schema *schemapb.CollectionSchema, broker broker.Broker, cm storage.ChunkManager) *ChannelMeta {
+func newChannel(channelName string, collID UniqueID, schema *schemapb.CollectionSchema, broker broker.Broker, cm pkgStorage.ChunkManager) *ChannelMeta {
 	metaService := newMetaService(broker, collID)
 
 	channel := ChannelMeta{

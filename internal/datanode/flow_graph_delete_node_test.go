@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	pkgStorage "github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 )
@@ -183,7 +184,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		}
 		tss = []uint64{1, 1, 1, 1, 1}
 	)
-	cm := storage.NewLocalChunkManager(storage.RootPath(deleteNodeTestDir))
+	cm := pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(deleteNodeTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	t.Run("Test get segment by varChar primary keys", func(te *testing.T) {
@@ -505,7 +506,7 @@ func TestFlowGraphDeleteNode_showDelBuf(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	cm := storage.NewLocalChunkManager(storage.RootPath(deleteNodeTestDir))
+	cm := pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(deleteNodeTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	fm := NewRendezvousFlushManager(allocator.NewMockAllocator(t), cm, nil, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)

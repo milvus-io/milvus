@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
+	pkgStorage "github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 )
@@ -49,14 +50,14 @@ var channelMetaNodeTestDir = "/tmp/milvus_test/channel_meta"
 
 func TestNewChannel(t *testing.T) {
 	broker := broker.NewMockBroker(t)
-	cm := storage.NewLocalChunkManager(storage.RootPath(channelMetaNodeTestDir))
+	cm := pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(channelMetaNodeTestDir))
 	defer cm.RemoveWithPrefix(context.Background(), cm.RootPath())
 	channel := newChannel("channel", 0, nil, broker, cm)
 	assert.NotNil(t, channel)
 }
 
 type mockDataCM struct {
-	storage.ChunkManager
+	pkgStorage.ChunkManager
 }
 
 func (kv *mockDataCM) MultiRead(ctx context.Context, keys []string) ([][]byte, error) {
@@ -71,7 +72,7 @@ func (kv *mockDataCM) MultiRead(ctx context.Context, keys []string) ([][]byte, e
 }
 
 type mockPkfilterMergeError struct {
-	storage.ChunkManager
+	pkgStorage.ChunkManager
 }
 
 func (kv *mockPkfilterMergeError) MultiRead(ctx context.Context, keys []string) ([][]byte, error) {
@@ -88,7 +89,7 @@ func (kv *mockPkfilterMergeError) MultiRead(ctx context.Context, keys []string) 
 }
 
 type mockDataCMError struct {
-	storage.ChunkManager
+	pkgStorage.ChunkManager
 }
 
 func (kv *mockDataCMError) MultiRead(ctx context.Context, keys []string) ([][]byte, error) {
@@ -96,7 +97,7 @@ func (kv *mockDataCMError) MultiRead(ctx context.Context, keys []string) ([][]by
 }
 
 type mockDataCMStatsError struct {
-	storage.ChunkManager
+	pkgStorage.ChunkManager
 }
 
 func (kv *mockDataCMStatsError) MultiRead(ctx context.Context, keys []string) ([][]byte, error) {
@@ -117,7 +118,7 @@ func TestChannelMeta_InnerFunction(t *testing.T) {
 	var (
 		broker  = broker.NewMockBroker(t)
 		collID  = UniqueID(1)
-		cm      = storage.NewLocalChunkManager(storage.RootPath(channelMetaNodeTestDir))
+		cm      = pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(channelMetaNodeTestDir))
 		channel = newChannel("insert-01", collID, nil, broker, cm)
 	)
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
@@ -228,7 +229,7 @@ func TestChannelMeta_segmentFlushed(t *testing.T) {
 	defer cancel()
 	broker := broker.NewMockBroker(t)
 	collID := UniqueID(1)
-	cm := storage.NewLocalChunkManager(storage.RootPath(channelMetaNodeTestDir))
+	cm := pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(channelMetaNodeTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	t.Run("Test coll mot match", func(t *testing.T) {
@@ -295,7 +296,7 @@ func TestChannelMeta_InterfaceMethod(t *testing.T) {
 	defer cancel()
 	broker := broker.NewMockBroker(t)
 	f := MetaFactory{}
-	cm := storage.NewLocalChunkManager(storage.RootPath(channelMetaNodeTestDir))
+	cm := pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(channelMetaNodeTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	t.Run("Test addFlushedSegmentWithPKs", func(t *testing.T) {
@@ -818,7 +819,7 @@ func TestChannelMeta_UpdatePKRange(t *testing.T) {
 			Schema: meta.GetSchema(),
 		}, nil)
 
-	cm := storage.NewLocalChunkManager(storage.RootPath(channelMetaNodeTestDir))
+	cm := pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(channelMetaNodeTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 	channel := newChannel("chanName", collID, nil, broker, cm)
 	channel.chunkManager = &mockDataCM{}
@@ -876,7 +877,7 @@ func TestChannelMeta_ChannelCP(t *testing.T) {
 	mockPChannel := "fake-by-dev-rootcoord-dml-1"
 
 	collID := UniqueID(1)
-	cm := storage.NewLocalChunkManager(storage.RootPath(channelMetaNodeTestDir))
+	cm := pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(channelMetaNodeTestDir))
 	defer func() {
 		err := cm.RemoveWithPrefix(ctx, cm.RootPath())
 		assert.NoError(t, err)
@@ -986,7 +987,7 @@ type ChannelMetaSuite struct {
 	collID    UniqueID
 	partID    UniqueID
 	vchanName string
-	cm        *storage.LocalChunkManager
+	cm        *pkgStorage.LocalChunkManager
 }
 
 func (s *ChannelMetaSuite) SetupSuite() {
@@ -999,7 +1000,7 @@ func (s *ChannelMetaSuite) SetupSuite() {
 			Schema: meta.GetSchema(),
 		}, nil).Maybe()
 	s.collID = 1
-	s.cm = storage.NewLocalChunkManager(storage.RootPath(channelMetaNodeTestDir))
+	s.cm = pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(channelMetaNodeTestDir))
 	s.channel = newChannel("channel", s.collID, nil, broker, s.cm)
 	s.vchanName = "channel"
 }

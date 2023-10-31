@@ -10,13 +10,14 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	pkgStorage "github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type SegmentSuite struct {
 	suite.Suite
 	rootPath     string
-	chunkManager storage.ChunkManager
+	chunkManager pkgStorage.ChunkManager
 
 	// Data
 	manager      *Manager

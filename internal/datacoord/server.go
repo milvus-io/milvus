@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	pkgStorage "github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
@@ -455,7 +456,7 @@ func (s *Server) stopCompactionTrigger() {
 	s.compactionTrigger.stop()
 }
 
-func (s *Server) newChunkManagerFactory() (storage.ChunkManager, error) {
+func (s *Server) newChunkManagerFactory() (pkgStorage.ChunkManager, error) {
 	chunkManagerFactory := storage.NewChunkManagerFactoryWithParam(Params)
 	cli, err := chunkManagerFactory.NewPersistentStorageChunkManager(s.ctx)
 	if err != nil {
@@ -465,7 +466,7 @@ func (s *Server) newChunkManagerFactory() (storage.ChunkManager, error) {
 	return cli, err
 }
 
-func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
+func (s *Server) initGarbageCollection(cli pkgStorage.ChunkManager) {
 	s.garbageCollector = newGarbageCollector(s.meta, s.handler, GcOption{
 		cli:              cli,
 		enabled:          Params.DataCoordCfg.EnableGarbageCollection.GetAsBool(),
@@ -543,7 +544,7 @@ func (s *Server) initSegmentManager() error {
 	return nil
 }
 
-func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
+func (s *Server) initMeta(chunkManager pkgStorage.ChunkManager) error {
 	if s.meta != nil {
 		return nil
 	}
@@ -571,7 +572,7 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	return retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime))
 }
 
-func (s *Server) initIndexBuilder(manager storage.ChunkManager) {
+func (s *Server) initIndexBuilder(manager pkgStorage.ChunkManager) {
 	if s.indexBuilder == nil {
 		s.indexBuilder = newIndexBuilder(s.ctx, s.meta, s.indexNodeManager, manager, s.indexEngineVersionManager)
 	}

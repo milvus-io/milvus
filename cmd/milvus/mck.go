@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
+	pkgStorage "github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -53,7 +54,7 @@ type mck struct {
 	segmentIDMap        map[int64]*datapb.SegmentInfo
 	partitionIDMap      map[int64]struct{}
 	metaKV              kv.MetaKv
-	minioChunkManager   storage.ChunkManager
+	minioChunkManager   pkgStorage.ChunkManager
 
 	etcdIP          string
 	ectdRootPath    string

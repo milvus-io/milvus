@@ -40,11 +40,11 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	pkgStorage "github.com/milvus-io/milvus/pkg/storage"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -151,7 +151,7 @@ func TestDataSyncService_newDataSyncService(t *testing.T) {
 			"add un-flushed and flushed segments",
 		},
 	}
-	cm := storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
+	cm := pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(dataSyncServiceTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	node := newIDLEDataNodeMock(ctx, schemapb.DataType_Int64)
@@ -192,7 +192,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	defer cancel()
 
 	node := newIDLEDataNodeMock(context.Background(), schemapb.DataType_Int64)
-	node.chunkManager = storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
+	node.chunkManager = pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(dataSyncServiceTestDir))
 	defer node.chunkManager.RemoveWithPrefix(ctx, node.chunkManager.RootPath())
 
 	broker := broker.NewMockBroker(t)
@@ -370,7 +370,7 @@ func TestDataSyncService_Close(t *testing.T) {
 		collMeta    = metaFactory.GetCollectionMeta(UniqueID(0), "coll1", schemapb.DataType_Int64)
 		node        = newIDLEDataNodeMock(context.Background(), schemapb.DataType_Int64)
 	)
-	node.chunkManager = storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
+	node.chunkManager = pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(dataSyncServiceTestDir))
 	defer node.chunkManager.RemoveWithPrefix(ctx, node.chunkManager.RootPath())
 
 	broker := broker.NewMockBroker(t)
@@ -647,7 +647,7 @@ func TestClearGlobalFlushingCache(t *testing.T) {
 			CollectionName: "test_collection",
 			Schema:         meta.GetSchema(),
 		}, nil)
-	cm := storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
+	cm := pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(dataSyncServiceTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 	channel := newChannel("channel", 1, nil, broker, cm)
 	var err error
@@ -728,7 +728,7 @@ func TestGetChannelWithTickler(t *testing.T) {
 	channelName := "by-dev-rootcoord-dml-0"
 	info := getWatchInfoByOpID(100, channelName, datapb.ChannelWatchState_ToWatch)
 	node := newIDLEDataNodeMock(context.Background(), schemapb.DataType_Int64)
-	node.chunkManager = storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
+	node.chunkManager = pkgStorage.NewLocalChunkManager(pkgStorage.RootPath(dataSyncServiceTestDir))
 	defer node.chunkManager.RemoveWithPrefix(context.Background(), node.chunkManager.RootPath())
 
 	meta := NewMetaFactory().GetCollectionMeta(1, "test_collection", schemapb.DataType_Int64)

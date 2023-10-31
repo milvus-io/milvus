@@ -29,7 +29,7 @@ import (
 )
 
 const (
-	// TODO silverxia maybe need set from config
+	// TODO silverxia maybe need set from Config
 	BloomFilterSize       uint    = 100000
 	MaxBloomFalsePositive float64 = 0.005
 )
