@@ -32,10 +32,10 @@ SegcoreSetChunkRows(const int64_t value) {
 }
 
 extern "C" void
-SegcoreSetEnableGrowingSegmentIndex(const bool value) {
+SegcoreSetEnableTempSegmentIndex(const bool value) {
     milvus::segcore::SegcoreConfig& config =
         milvus::segcore::SegcoreConfig::default_config();
-    config.set_enable_growing_segment_index(value);
+    config.set_enable_interim_segment_index(value);
 }
 
 extern "C" void

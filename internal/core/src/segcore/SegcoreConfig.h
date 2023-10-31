@@ -64,20 +64,20 @@ class SegcoreConfig {
     }
 
     void
-    set_enable_growing_segment_index(bool enable_growing_segment_index) {
-        enable_growing_segment_index_ = enable_growing_segment_index;
+    set_enable_interim_segment_index(bool enable_interim_segment_index) {
+        this->enable_interim_segment_index_ = enable_interim_segment_index;
     }
 
     bool
-    get_enable_growing_segment_index() const {
-        return enable_growing_segment_index_;
+    get_enable_interim_segment_index() const {
+        return enable_interim_segment_index_;
     }
 
  private:
-    bool enable_growing_segment_index_ = false;
-    int64_t chunk_rows_ = 32 * 1024;
-    int64_t nlist_ = 100;
-    int64_t nprobe_ = 4;
+    inline static bool enable_interim_segment_index_ = false;
+    inline static int64_t chunk_rows_ = 32 * 1024;
+    inline static int64_t nlist_ = 100;
+    inline static int64_t nprobe_ = 4;
 };
 
 }  // namespace milvus::segcore

@@ -41,8 +41,8 @@ NewSegment(CCollection collection, SegmentType seg_type, int64_t segment_id) {
         }
         case Sealed:
         case Indexing:
-            segment = milvus::segcore::CreateSealedSegment(col->get_schema(),
-                                                           segment_id);
+            segment = milvus::segcore::CreateSealedSegment(
+                col->get_schema(), col->GetIndexMeta(), segment_id);
             break;
         default:
             LOG_SEGCORE_ERROR_ << "invalid segment type "

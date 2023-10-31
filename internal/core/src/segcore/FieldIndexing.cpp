@@ -31,8 +31,10 @@ VectorFieldIndexing::VectorFieldIndexing(const FieldMeta& field_meta,
     : FieldIndexing(field_meta, segcore_config),
       build(false),
       sync_with_index(false),
-      config_(std::make_unique<VecIndexConfig>(
-          segment_max_row_count, field_index_meta, segcore_config)) {
+      config_(std::make_unique<VecIndexConfig>(segment_max_row_count,
+                                               field_index_meta,
+                                               segcore_config,
+                                               SegmentType::Growing)) {
     index_ = std::make_unique<index::VectorMemIndex>(
         config_->GetIndexType(),
         config_->GetMetricType(),
