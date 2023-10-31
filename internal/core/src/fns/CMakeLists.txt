@@ -14,25 +14,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-if(MILVUS_GPU_VERSION STREQUAL "ON")
-    project(core CXX C CUDA)
-else()
-    project(core CXX C)
-endif()
+find_package(OpenMP REQUIRED)
 
-include_directories(${MILVUS_ENGINE_SRC})
-include_directories(${MILVUS_THIRDPARTY_SRC})
+set(FURTHEST_NEIGHBOR_SEARCH_FILES
+    kmeans.cpp 
+    kgraph.cpp 
+)
 
-add_subdirectory( pb )
-add_subdirectory( log )
-add_subdirectory( config )
-add_subdirectory( common )
-add_subdirectory( storage )
-add_subdirectory( index )
-add_subdirectory( query )
-add_subdirectory( segcore )
-add_subdirectory( indexbuilder )
-add_subdirectory( fns )
+add_library(milvus_fnsearcher SHARED ${FURTHEST_NEIGHBOR_SEARCH_FILES})
+
 if(USE_DYNAMIC_SIMD)
-    add_subdirectory( simd )
+        target_link_libraries(milvus_fnsearcher milvus_index milvus_simd)
+else() 
+        target_link_libraries(milvus_fnsearcher milvus_index)
 endif()
+
+install(TARGETS milvus_fnsearcher DESTINATION "${CMAKE_INSTALL_LIBDIR}")

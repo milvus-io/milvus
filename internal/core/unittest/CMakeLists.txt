@@ -57,6 +57,7 @@ set(MILVUS_TEST_FILES
         test_always_true_expr.cpp
         test_plan_proto.cpp
         test_chunk_cache.cpp
+        test_fns.cpp
         )
 
 if ( BUILD_DISK_ANN STREQUAL "ON" )
@@ -125,6 +126,7 @@ target_link_libraries(all_tests
         milvus_storage
         milvus_indexbuilder
         pthread
+        milvus_fnsearcher
         )
 
 install(TARGETS all_tests DESTINATION unittest)
