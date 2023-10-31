@@ -367,6 +367,9 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 	diskCap := paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsUint64()
 
 	poolCap := runtime.NumCPU() * paramtable.Get().CommonCfg.HighPriorityThreadCoreCoefficient.GetAsInt()
+	if poolCap > 256 {
+		poolCap = 256
+	}
 	if loader.committedResource.WorkNum >= poolCap {
 		return resource, 0, merr.WrapErrServiceRequestLimitExceeded(int32(poolCap))
 	} else if loader.committedResource.MemorySize+memoryUsage >= totalMemory {
