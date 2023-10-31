@@ -31,6 +31,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/blang/semver/v4"
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 
@@ -386,6 +387,10 @@ func (s *Server) Start() error {
 
 func (s *Server) startQueryCoord() error {
 	log.Info("start watcher...")
+	// querynode with version higher than 2.3.0 may panic due to watch without indexmeta
+	// see also https://github.com/milvus-io/milvus/issues/28022
+	validVersion := semver.MustParseRange("<2.3.0")
+	s.session.GetSessionsWithVersionRange(typeutil.QueryNodeRole, validVersion)
 	sessions, revision, err := s.session.GetSessions(typeutil.QueryNodeRole)
 	if err != nil {
 		return err
@@ -602,8 +607,10 @@ func (s *Server) recoverCollectionTargets(ctx context.Context, collection int64)
 
 func (s *Server) watchNodes(revision int64) {
 	defer s.wg.Done()
-
-	eventChan := s.session.WatchServices(typeutil.QueryNodeRole, revision+1, nil)
+	// querynode with version higher than 2.3.0 may panic due to watch without indexmeta
+	// see also https://github.com/milvus-io/milvus/issues/28022
+	validVersion := semver.MustParseRange("<2.3.0")
+	eventChan := s.session.WatchServicesWithVersionRange(typeutil.QueryNodeRole, validVersion, revision+1, nil)
 	for {
 		select {
 		case <-s.ctx.Done():
