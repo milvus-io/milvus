@@ -468,11 +468,11 @@ class TestPartitionParams(TestcaseBase):
         target: verify release partition
         method: 1. create a collection and two partitions
                 2. insert data into each partition
-                3. flush and load the partition1
+                3. flush and load the collection
                 4. release partition1
-                5. release partition2
+                5. search partition1
         expected: 1. the 1st partition is released
-                  2. the 2nd partition is released
+                  2. search the 1st partition failed
         """
         # create collection
 
@@ -489,6 +489,7 @@ class TestPartitionParams(TestcaseBase):
 
         # load two partitions
         partition_w1.load()
+        partition_w2.load()
 
         # search  partition1
         search_vectors = cf.gen_vectors(1, ct.default_dim)
@@ -498,16 +499,15 @@ class TestPartitionParams(TestcaseBase):
         assert len(res1) == 1
 
         # release the first partition
-        partition_w1.release()
-        partition_w2.release()
+        partition_w1.release()    
 
         # check result
         res1, _ = partition_w1.search(data=search_vectors,
                                       anns_field=ct.default_float_vec_field_name,
                                       params={"nprobe": 32}, limit=1,
                                       check_task=ct.CheckTasks.err_res,
-                                      check_items={ct.err_code: 65535,
-                                                   ct.err_msg: "collection not loaded"})
+                                      check_items={ct.err_code: 65538,
+                                                   ct.err_msg: "partition not loaded"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("data", [cf.gen_default_dataframe_data(10),
