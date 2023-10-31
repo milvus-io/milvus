@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -279,6 +280,9 @@ func (suite *ServiceSuite) TestWatchDmChannelsInt64() {
 			PartitionIDs: suite.partitionIDs,
 			MetricType:   defaultMetricType,
 		},
+		IndexInfoList: []*indexpb.IndexInfo{
+			{},
+		},
 	}
 
 	// mocks
@@ -328,6 +332,9 @@ func (suite *ServiceSuite) TestWatchDmChannelsVarchar() {
 			PartitionIDs: suite.partitionIDs,
 			MetricType:   defaultMetricType,
 		},
+		IndexInfoList: []*indexpb.IndexInfo{
+			{},
+		},
 	}
 
 	// mocks
@@ -374,6 +381,9 @@ func (suite *ServiceSuite) TestWatchDmChannels_Failed() {
 		LoadMeta: &querypb.LoadMetaInfo{
 			MetricType: defaultMetricType,
 		},
+		IndexInfoList: []*indexpb.IndexInfo{
+			{},
+		},
 	}
 
 	// test channel is unsubscribing
@@ -392,6 +402,12 @@ func (suite *ServiceSuite) TestWatchDmChannels_Failed() {
 	status, err = suite.node.WatchDmChannels(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+
+	// empty index
+	req.IndexInfoList = nil
+	status, err = suite.node.WatchDmChannels(ctx, req)
+	err = merr.CheckRPCCall(status, err)
+	suite.ErrorIs(err, merr.ErrIndexNotFound)
 
 	// target not match
 	req.Base.TargetID = -1
