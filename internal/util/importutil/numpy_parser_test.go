@@ -497,8 +497,8 @@ func Test_NumpyParserReadData(t *testing.T) {
 		assert.Nil(t, fieldData)
 	})
 
-	readEmptyFunc := func(filedName string, data interface{}) {
-		filePath := TempFilesPath + filedName + ".npy"
+	readEmptyFunc := func(fieldName string, data interface{}) {
+		filePath := TempFilesPath + fieldName + ".npy"
 		err = CreateNumpyFile(filePath, data)
 		assert.NoError(t, err)
 
@@ -517,8 +517,8 @@ func Test_NumpyParserReadData(t *testing.T) {
 		assert.NoError(t, err)
 	}
 
-	readBatchFunc := func(filedName string, data interface{}, dataLen int, getValue func(k int) interface{}) {
-		filePath := TempFilesPath + filedName + ".npy"
+	readBatchFunc := func(fieldName string, data interface{}, dataLen int, getValue func(k int) interface{}) {
+		filePath := TempFilesPath + fieldName + ".npy"
 		err = CreateNumpyFile(filePath, data)
 		assert.NoError(t, err)
 
@@ -545,8 +545,8 @@ func Test_NumpyParserReadData(t *testing.T) {
 		}
 	}
 
-	readErrorFunc := func(filedName string, data interface{}) {
-		filePath := TempFilesPath + filedName + ".npy"
+	readErrorFunc := func(fieldName string, data interface{}) {
+		filePath := TempFilesPath + fieldName + ".npy"
 		err = CreateNumpyFile(filePath, data)
 		assert.NoError(t, err)
 
@@ -614,9 +614,9 @@ func Test_NumpyParserReadData(t *testing.T) {
 		readErrorFunc("FieldDouble", data)
 	})
 
-	specialReadEmptyFunc := func(filedName string, data interface{}) {
+	specialReadEmptyFunc := func(fieldName string, data interface{}) {
 		ctx := context.Background()
-		filePath := TempFilesPath + filedName + ".npy"
+		filePath := TempFilesPath + fieldName + ".npy"
 		content, err := CreateNumpyData(data)
 		assert.NoError(t, err)
 		err = cm.Write(ctx, filePath, content)

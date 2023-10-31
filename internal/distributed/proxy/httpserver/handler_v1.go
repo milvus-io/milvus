@@ -78,7 +78,7 @@ func (h *Handlers) describeCollection(ctx context.Context, c *gin.Context, dbNam
 	}
 	primaryField, ok := getPrimaryField(response.Schema)
 	if ok && primaryField.AutoID && !response.Schema.AutoID {
-		log.Warn("primary filed autoID VS schema autoID", zap.String("collectionName", collectionName), zap.Bool("primary Field", primaryField.AutoID), zap.Bool("schema", response.Schema.AutoID))
+		log.Warn("primary field autoID VS schema autoID", zap.String("collectionName", collectionName), zap.Bool("primary Field", primaryField.AutoID), zap.Bool("schema", response.Schema.AutoID))
 		response.Schema.AutoID = EnableAutoID
 	}
 	return response, nil

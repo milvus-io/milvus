@@ -57,12 +57,12 @@ TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
 
     // collection_id: 1, partition_id: 2, segment_id: 3
     // field_id: 100, index_build_id: 1000, index_version: 1
-    FieldDataMeta filed_data_meta = {1, 2, 3, 100};
+    FieldDataMeta field_data_meta = {1, 2, 3, 100};
     IndexMeta index_meta = {3, 100, 1000, 1, "index"};
 
     int64_t slice_size = milvus::FILE_SLICE_SIZE;
     auto diskAnnFileManager = std::make_shared<DiskFileManagerImpl>(
-        storage::FileManagerContext(filed_data_meta, index_meta, cm_));
+        storage::FileManagerContext(field_data_meta, index_meta, cm_));
     auto ok = diskAnnFileManager->AddFile(indexFilePath);
     EXPECT_EQ(ok, true);
 

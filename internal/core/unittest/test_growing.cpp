@@ -134,9 +134,9 @@ TEST(Growing, FillData) {
     auto& config = SegcoreConfig::default_config();
     config.set_chunk_rows(1024);
     config.set_enable_growing_segment_index(true);
-    std::map<FieldId, FieldIndexMeta> filedMap = {{vec, fieldIndexMeta}};
+    std::map<FieldId, FieldIndexMeta> fieldMap = {{vec, fieldIndexMeta}};
     IndexMetaPtr metaPtr =
-        std::make_shared<CollectionIndexMeta>(100000, std::move(filedMap));
+        std::make_shared<CollectionIndexMeta>(100000, std::move(fieldMap));
     auto segment_growing = CreateGrowingSegment(schema, metaPtr);
     auto segment = dynamic_cast<SegmentGrowingImpl*>(segment_growing.get());
 

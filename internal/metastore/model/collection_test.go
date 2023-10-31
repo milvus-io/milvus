@@ -66,7 +66,7 @@ var (
 			Name:        colName,
 			Description: "none",
 			AutoID:      false,
-			Fields:      []*schemapb.FieldSchema{filedSchemaPb},
+			Fields:      []*schemapb.FieldSchema{fieldSchemaPb},
 		},
 		CreateTime:                 1,
 		PartitionIDs:               []int64{partID},

@@ -34,7 +34,7 @@ type BlobInfo struct {
 // InsertData example row_schema: {float_field, int_field, float_vector_field, string_field}
 // Data {<0, row_id>, <1, timestamp>, <100, float_field>, <101, int_field>, <102, float_vector_field>, <103, string_field>}
 //
-// system filed id:
+// system field id:
 // 0: unique row id
 // 1: timestamp
 // 100: first user field id

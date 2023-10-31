@@ -807,14 +807,14 @@ func DecompressBinLog(path string, info *datapb.SegmentInfo) error {
 }
 
 // build a binlog path on the storage by metadata
-func buildLogPath(chunkManagerRootPath string, binlogType storage.BinlogType, collectionID, partitionID, segmentID, filedID, logID typeutil.UniqueID) string {
+func buildLogPath(chunkManagerRootPath string, binlogType storage.BinlogType, collectionID, partitionID, segmentID, fieldID, logID typeutil.UniqueID) string {
 	switch binlogType {
 	case storage.InsertBinlog:
-		return metautil.BuildInsertLogPath(chunkManagerRootPath, collectionID, partitionID, segmentID, filedID, logID)
+		return metautil.BuildInsertLogPath(chunkManagerRootPath, collectionID, partitionID, segmentID, fieldID, logID)
 	case storage.DeleteBinlog:
 		return metautil.BuildDeltaLogPath(chunkManagerRootPath, collectionID, partitionID, segmentID, logID)
 	case storage.StatsBinlog:
-		return metautil.BuildStatsLogPath(chunkManagerRootPath, collectionID, partitionID, segmentID, filedID, logID)
+		return metautil.BuildStatsLogPath(chunkManagerRootPath, collectionID, partitionID, segmentID, fieldID, logID)
 	}
 	// should not happen
 	log.Panic("invalid binlog type", zap.Any("type", binlogType))
