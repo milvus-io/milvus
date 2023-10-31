@@ -464,7 +464,7 @@ func fillDynamicData(blockData BlockData, collectionSchema *schemapb.CollectionS
 
 // tryFlushBlocks does the two things:
 // 1. if accumulate data of a block exceed blockSize, call callFlushFunc to generate new binlog file
-// 2. if total accumulate data exceed maxTotalSize, call callFlushFUnc to flush the biggest block
+// 2. if total accumulate data exceed maxTotalSize, call callFlushFunc to flush the biggest block
 func tryFlushBlocks(ctx context.Context,
 	shardsData []ShardData,
 	collectionSchema *schemapb.CollectionSchema,
