@@ -181,7 +181,7 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 	}
 
 	// reduce result
-	tr.CtxElapse(ctx, fmt.Sprintf("start reduce query result, traceID = %s, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
+	tr.CtxElapse(ctx, fmt.Sprintf("start reduce query result, traceID = %s, fromShardLeader = %t, vChannel = %s, segmentIDs = %v",
 		traceID,
 		req.GetFromShardLeader(),
 		channel,
@@ -409,7 +409,7 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 	}
 
 	// reduce result
-	tr.CtxElapse(ctx, fmt.Sprintf("start reduce query result, traceID = %s, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
+	tr.CtxElapse(ctx, fmt.Sprintf("start reduce query result, traceID = %s, fromShardLeader = %t, vChannel = %s, segmentIDs = %v",
 		traceID,
 		req.GetFromShardLeader(),
 		channel,

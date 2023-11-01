@@ -882,7 +882,7 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 		return resp, nil
 	}
 
-	tr.CtxElapse(ctx, fmt.Sprintf("do query done, traceID = %s, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
+	tr.CtxElapse(ctx, fmt.Sprintf("do query done, traceID = %s, fromShardLeader = %t, vChannel = %s, segmentIDs = %v",
 		traceID,
 		req.GetFromShardLeader(),
 		channel,
@@ -1094,7 +1094,7 @@ func (node *QueryNode) QueryStreamSegments(req *querypb.QueryRequest, srv queryp
 		return nil
 	}
 
-	tr.CtxElapse(ctx, fmt.Sprintf("do query done, traceID = %s, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
+	tr.CtxElapse(ctx, fmt.Sprintf("do query done, traceID = %s, fromShardLeader = %t, vChannel = %s, segmentIDs = %v",
 		traceID,
 		req.GetFromShardLeader(),
 		channel,
