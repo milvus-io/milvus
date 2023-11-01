@@ -178,7 +178,6 @@ func TestImpl_WatchDmChannels(t *testing.T) {
 	})
 
 	t.Run("mock release after loaded", func(t *testing.T) {
-
 		mockTSReplica := &MockTSafeReplicaInterface{}
 
 		oldTSReplica := node.tSafeReplica
@@ -319,6 +318,25 @@ func TestImpl_LoadSegments(t *testing.T) {
 	}
 
 	t.Run("normal run", func(t *testing.T) {
+		status, err := node.LoadSegments(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	})
+
+	t.Run("segment already loaded", func(t *testing.T) {
+		node.metaReplica.addCollection(1, schema)
+		err := node.metaReplica.addPartition(1, 0)
+		assert.NoError(t, err)
+		err = node.metaReplica.addSegment(1, 1, 1, "channel-1", 0, nil, commonpb.SegmentState_Sealed)
+		assert.NoError(t, err)
+		req.Infos = []*queryPb.SegmentLoadInfo{
+			{
+				SegmentID:    1,
+				PartitionID:  1,
+				CollectionID: 1,
+			},
+		}
+		req.NeedTransfer = false
 		status, err := node.LoadSegments(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
@@ -1137,7 +1155,6 @@ func TestImpl_SyncReplicaSegments(t *testing.T) {
 		assert.Equal(t, common.InvalidNodeID, segment.nodeID)
 		assert.Equal(t, defaultPartitionID, segment.partitionID)
 		assert.Equal(t, segmentStateLoaded, segment.state)
-
 	})
 }
 
