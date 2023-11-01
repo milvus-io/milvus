@@ -225,8 +225,8 @@ func NewRocksMQ(name string, idAllocator allocator.Interface) (*rocksmq, error) 
 
 	// db, err := gorocksdb.OpenDb(opts, name)
 	// use properties as the column families to store trace id
-	giveColumnFamilies := []string{"default"}
-	db, cfHandles, err := gorocksdb.OpenDbColumnFamilies(optsStore, name, giveColumnFamilies, []*gorocksdb.Options{optsStore})
+	giveColumnFamilies := []string{"default", "properties"}
+	db, cfHandles, err := gorocksdb.OpenDbColumnFamilies(optsStore, name, giveColumnFamilies, []*gorocksdb.Options{optsStore, optsStore})
 	if err != nil {
 		return nil, err
 	}
