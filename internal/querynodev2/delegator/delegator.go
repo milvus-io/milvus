@@ -206,8 +206,12 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
-	sealed, growing, version := sd.distribution.GetSegments(true, req.GetReq().GetPartitionIDs()...)
-	defer sd.distribution.FinishUsage(version)
+	sealed, growing, version, err := sd.distribution.PinReadableSegments(req.GetReq().GetPartitionIDs()...)
+	if err != nil {
+		log.Warn("delegator failed to search, current distribution is not serviceable")
+		return nil, merr.WrapErrChannelNotAvailable(sd.vchannelName, "distribution is not servcieable")
+	}
+	defer sd.distribution.Unpin(version)
 	existPartitions := sd.collection.GetPartitions()
 	growing = lo.Filter(growing, func(segment SegmentEntry, _ int) bool {
 		return funcutil.SliceContain(existPartitions, segment.PartitionID)
@@ -270,8 +274,12 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 		fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
-	sealed, growing, version := sd.distribution.GetSegments(true, req.GetReq().GetPartitionIDs()...)
-	defer sd.distribution.FinishUsage(version)
+	sealed, growing, version, err := sd.distribution.PinReadableSegments(req.GetReq().GetPartitionIDs()...)
+	if err != nil {
+		log.Warn("delegator failed to query, current distribution is not serviceable")
+		return merr.WrapErrChannelNotAvailable(sd.vchannelName, "distribution is not servcieable")
+	}
+	defer sd.distribution.Unpin(version)
 	existPartitions := sd.collection.GetPartitions()
 	growing = lo.Filter(growing, func(segment SegmentEntry, _ int) bool {
 		return funcutil.SliceContain(existPartitions, segment.PartitionID)
@@ -334,8 +342,12 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
-	sealed, growing, version := sd.distribution.GetSegments(true, req.GetReq().GetPartitionIDs()...)
-	defer sd.distribution.FinishUsage(version)
+	sealed, growing, version, err := sd.distribution.PinReadableSegments(req.GetReq().GetPartitionIDs()...)
+	if err != nil {
+		log.Warn("delegator failed to query, current distribution is not serviceable")
+		return nil, merr.WrapErrChannelNotAvailable(sd.vchannelName, "distribution is not servcieable")
+	}
+	defer sd.distribution.Unpin(version)
 	existPartitions := sd.collection.GetPartitions()
 	growing = lo.Filter(growing, func(segment SegmentEntry, _ int) bool {
 		return funcutil.SliceContain(existPartitions, segment.PartitionID)
@@ -377,21 +389,25 @@ func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetSta
 	defer sd.lifetime.Done()
 
 	if !funcutil.SliceContain(req.GetDmlChannels(), sd.vchannelName) {
-		log.Warn("deletgator received query request not belongs to it",
+		log.Warn("delegator received GetStatistics request not belongs to it",
 			zap.Strings("reqChannels", req.GetDmlChannels()),
 		)
-		return nil, fmt.Errorf("dml channel not match, delegator channel %s, search channels %v", sd.vchannelName, req.GetDmlChannels())
+		return nil, fmt.Errorf("dml channel not match, delegator channel %s, GetStatistics channels %v", sd.vchannelName, req.GetDmlChannels())
 	}
 
 	// wait tsafe
 	err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
 	if err != nil {
-		log.Warn("delegator query failed to wait tsafe", zap.Error(err))
+		log.Warn("delegator GetStatistics failed to wait tsafe", zap.Error(err))
 		return nil, err
 	}
 
-	sealed, growing, version := sd.distribution.GetSegments(true, req.Req.GetPartitionIDs()...)
-	defer sd.distribution.FinishUsage(version)
+	sealed, growing, version, err := sd.distribution.PinReadableSegments(req.Req.GetPartitionIDs()...)
+	if err != nil {
+		log.Warn("delegator failed to GetStatistics, current distribution is not servicable")
+		return nil, merr.WrapErrChannelNotAvailable(sd.vchannelName, "distribution is not serviceable")
+	}
+	defer sd.distribution.Unpin(version)
 
 	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, func(req *querypb.GetStatisticsRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.GetStatisticsRequest {
 		nodeReq := proto.Clone(req).(*querypb.GetStatisticsRequest)
