@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"container/list"
 	"context"
 	"fmt"
 	"io"
@@ -170,20 +171,43 @@ func (minioObjectStorage *MinioObjectStorage) StatObject(ctx context.Context, bu
 	return info.Size, checkObjectStorageError(objectName, err)
 }
 
-func (minioObjectStorage *MinioObjectStorage) ListObjects(ctx context.Context, bucketName string, prefix string, recursive bool) (map[string]time.Time, error) {
-	res := minioObjectStorage.Client.ListObjects(ctx, bucketName, minio.ListObjectsOptions{
-		Prefix:    prefix,
-		Recursive: recursive,
-	})
+func (minioObjectStorage *MinioObjectStorage) ListObjects(ctx context.Context, bucketName string, prefix string, recursive bool) ([]string, []time.Time, error) {
+	var objectsKeys []string
+	var modTimes []time.Time
+	tasks := list.New()
+	tasks.PushBack(prefix)
+	for tasks.Len() > 0 {
+		e := tasks.Front()
+		pre := e.Value.(string)
+		tasks.Remove(e)
 
-	objects := map[string]time.Time{}
-	for object := range res {
-		if !recursive && object.Err != nil {
-			return map[string]time.Time{}, object.Err
+		res := minioObjectStorage.Client.ListObjects(ctx, bucketName, minio.ListObjectsOptions{
+			Prefix:    pre,
+			Recursive: false,
+		})
+
+		objects := map[string]time.Time{}
+		for object := range res {
+			if object.Err != nil {
+				log.Warn("failed to list with prefix", zap.String("bucket", bucketName), zap.String("prefix", prefix), zap.Error(object.Err))
+				return []string{}, []time.Time{}, object.Err
+			}
+			objects[object.Key] = object.LastModified
 		}
-		objects[object.Key] = object.LastModified
+		for object, lastModified := range objects {
+			// with tailing "/", object is a "directory"
+			if strings.HasSuffix(object, "/") && recursive {
+				// enqueue when recursive is true
+				if object != pre {
+					tasks.PushBack(object)
+				}
+				continue
+			}
+			objectsKeys = append(objectsKeys, object)
+			modTimes = append(modTimes, lastModified)
+		}
 	}
-	return objects, nil
+	return objectsKeys, modTimes, nil
 }
 
 func (minioObjectStorage *MinioObjectStorage) RemoveObject(ctx context.Context, bucketName, objectName string) error {

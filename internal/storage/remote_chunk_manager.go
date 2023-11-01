@@ -18,7 +18,6 @@ package storage
 
 import (
 	"bytes"
-	"container/list"
 	"context"
 	"io"
 	"strings"
@@ -50,7 +49,7 @@ type ObjectStorage interface {
 	GetObject(ctx context.Context, bucketName, objectName string, offset int64, size int64) (FileReader, error)
 	PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64) error
 	StatObject(ctx context.Context, bucketName, objectName string) (int64, error)
-	ListObjects(ctx context.Context, bucketName string, prefix string, recursive bool) (map[string]time.Time, error)
+	ListObjects(ctx context.Context, bucketName string, prefix string, recursive bool) ([]string, []time.Time, error)
 	RemoveObject(ctx context.Context, bucketName, objectName string) error
 }
 
@@ -270,13 +269,9 @@ func (mcm *RemoteChunkManager) MultiRemove(ctx context.Context, keys []string) e
 
 // RemoveWithPrefix removes all objects with the same prefix @prefix from minio.
 func (mcm *RemoteChunkManager) RemoveWithPrefix(ctx context.Context, prefix string) error {
-	objects, err := mcm.listObjects(ctx, mcm.bucketName, prefix, true)
+	removeKeys, _, err := mcm.listObjects(ctx, mcm.bucketName, prefix, true)
 	if err != nil {
 		return err
-	}
-	removeKeys := make([]string, 0)
-	for key := range objects {
-		removeKeys = append(removeKeys, key)
 	}
 	i := 0
 	maxGoroutine := 10
@@ -312,38 +307,9 @@ func (mcm *RemoteChunkManager) ListWithPrefix(ctx context.Context, prefix string
 	// recursive = true may timeout during the recursive browsing the objects.
 	// See also: https://github.com/milvus-io/milvus/issues/19095
 
-	var objectsKeys []string
-	var modTimes []time.Time
-
-	tasks := list.New()
-	tasks.PushBack(prefix)
-	for tasks.Len() > 0 {
-		e := tasks.Front()
-		pre := e.Value.(string)
-		tasks.Remove(e)
-
-		// TODO add concurrent call if performance matters
-		// only return current level per call
-		objects, err := mcm.listObjects(ctx, mcm.bucketName, pre, false)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		for object, lastModified := range objects {
-			// with tailing "/", object is a "directory"
-			if strings.HasSuffix(object, "/") && recursive {
-				// enqueue when recursive is true
-				if object != pre {
-					tasks.PushBack(object)
-				}
-				continue
-			}
-			objectsKeys = append(objectsKeys, object)
-			modTimes = append(modTimes, lastModified)
-		}
-	}
-
-	return objectsKeys, modTimes, nil
+	// TODO add concurrent call if performance matters
+	// only return current level per call
+	return mcm.listObjects(ctx, mcm.bucketName, prefix, recursive)
 }
 
 func (mcm *RemoteChunkManager) getObject(ctx context.Context, bucketName, objectName string,
@@ -396,10 +362,10 @@ func (mcm *RemoteChunkManager) getObjectSize(ctx context.Context, bucketName, ob
 	return info, err
 }
 
-func (mcm *RemoteChunkManager) listObjects(ctx context.Context, bucketName string, prefix string, recursive bool) (map[string]time.Time, error) {
+func (mcm *RemoteChunkManager) listObjects(ctx context.Context, bucketName string, prefix string, recursive bool) ([]string, []time.Time, error) {
 	start := timerecord.NewTimeRecorder("listObjects")
 
-	res, err := mcm.client.ListObjects(ctx, bucketName, prefix, recursive)
+	blobNames, lastModifiedTime, err := mcm.client.ListObjects(ctx, bucketName, prefix, recursive)
 	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataListLabel, metrics.TotalLabel).Inc()
 	if err == nil {
 		metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataListLabel).
@@ -409,7 +375,7 @@ func (mcm *RemoteChunkManager) listObjects(ctx context.Context, bucketName strin
 		log.Warn("failed to list with prefix", zap.String("bucket", mcm.bucketName), zap.String("prefix", prefix), zap.Error(err))
 		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataListLabel, metrics.FailLabel).Inc()
 	}
-	return res, err
+	return blobNames, lastModifiedTime, err
 }
 
 func (mcm *RemoteChunkManager) removeObject(ctx context.Context, bucketName, objectName string) error {

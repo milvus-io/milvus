@@ -117,21 +117,43 @@ func (AzureObjectStorage *AzureObjectStorage) StatObject(ctx context.Context, bu
 	return *info.ContentLength, nil
 }
 
-func (AzureObjectStorage *AzureObjectStorage) ListObjects(ctx context.Context, bucketName string, prefix string, recursive bool) (map[string]time.Time, error) {
-	pager := AzureObjectStorage.Client.NewContainerClient(bucketName).NewListBlobsFlatPager(&azblob.ListBlobsFlatOptions{
-		Prefix: &prefix,
-	})
-	objects := map[string]time.Time{}
-	if pager.More() {
-		pageResp, err := pager.NextPage(context.Background())
-		if err != nil {
-			return nil, checkObjectStorageError(prefix, err)
+func (AzureObjectStorage *AzureObjectStorage) ListObjects(ctx context.Context, bucketName string, prefix string, recursive bool) ([]string, []time.Time, error) {
+	var objectsKeys []string
+	var modTimes []time.Time
+	if recursive {
+		pager := AzureObjectStorage.Client.NewContainerClient(bucketName).NewListBlobsFlatPager(&azblob.ListBlobsFlatOptions{
+			Prefix: &prefix,
+		})
+		if pager.More() {
+			pageResp, err := pager.NextPage(context.Background())
+			if err != nil {
+				return []string{}, []time.Time{}, checkObjectStorageError(prefix, err)
+			}
+			for _, blob := range pageResp.Segment.BlobItems {
+				objectsKeys = append(objectsKeys, *blob.Name)
+				modTimes = append(modTimes, *blob.Properties.LastModified)
+			}
 		}
-		for _, blob := range pageResp.Segment.BlobItems {
-			objects[*blob.Name] = *blob.Properties.LastModified
+	} else {
+		pager := AzureObjectStorage.Client.NewContainerClient(bucketName).NewListBlobsHierarchyPager("/", &container.ListBlobsHierarchyOptions{
+			Prefix: &prefix,
+		})
+		if pager.More() {
+			pageResp, err := pager.NextPage(context.Background())
+			if err != nil {
+				return []string{}, []time.Time{}, checkObjectStorageError(prefix, err)
+			}
+			for _, blob := range pageResp.Segment.BlobItems {
+				objectsKeys = append(objectsKeys, *blob.Name)
+				modTimes = append(modTimes, *blob.Properties.LastModified)
+			}
+			for _, blob := range pageResp.Segment.BlobPrefixes {
+				objectsKeys = append(objectsKeys, *blob.Name)
+				modTimes = append(modTimes, time.Now())
+			}
 		}
 	}
-	return objects, nil
+	return objectsKeys, modTimes, nil
 }
 
 func (AzureObjectStorage *AzureObjectStorage) RemoveObject(ctx context.Context, bucketName, objectName string) error {
