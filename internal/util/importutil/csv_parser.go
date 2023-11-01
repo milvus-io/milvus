@@ -39,6 +39,7 @@ type CSVParser struct {
 	bufRowCount        int                 // max rows in a buffer
 	fieldsName         []string            // fieldsName(header name) in the csv file
 	updateProgressFunc func(percent int64) // update working progress percent value
+	inputOffset        int                 // approximate byte offset of input csv file
 }
 
 func NewCSVParser(ctx context.Context, collectionInfo *CollectionInfo, updateProgressFunc func(percent int64)) (*CSVParser, error) {
@@ -53,6 +54,7 @@ func NewCSVParser(ctx context.Context, collectionInfo *CollectionInfo, updatePro
 		bufRowCount:        1024,
 		fieldsName:         make([]string, 0),
 		updateProgressFunc: updateProgressFunc,
+		inputOffset:        0,
 	}
 	parser.SetBufSize()
 	return parser, nil
@@ -171,6 +173,8 @@ func (p *CSVParser) verifyRow(raw []string) (map[storage.FieldID]string, error) 
 			log.Warn("CSV parser: the primary key is auto-generated, no need to provide", zap.String("fieldName", fieldName))
 			return nil, fmt.Errorf("the primary key '%s' is auto-generated, no need to provide", fieldName)
 		}
+		// update input offset
+		p.inputOffset += len([]byte(raw[i]))
 
 		if ok {
 			row[fieldID] = raw[i]
@@ -236,9 +240,9 @@ func (p *CSVParser) ParseRows(reader *IOReader, handle CSVRowHandler) error {
 	oldPercent := int64(0)
 	updateProgress := func() {
 		if p.updateProgressFunc != nil && reader.fileSize > 0 {
-			percent := (r.InputOffset() * ProgressValueForPersist) / reader.fileSize
+			percent := ((int64)(p.inputOffset) * ProgressValueForPersist) / reader.fileSize
 			if percent > oldPercent { // avoid too many log
-				log.Debug("CSV parser: working progress", zap.Int64("offset", r.InputOffset()),
+				log.Debug("CSV parser: working progress", zap.Int64("offset", (int64)(p.inputOffset)),
 					zap.Int64("fileSize", reader.fileSize), zap.Int64("percent", percent))
 			}
 			oldPercent = percent
@@ -254,6 +258,10 @@ func (p *CSVParser) ParseRows(reader *IOReader, handle CSVRowHandler) error {
 		} else if err != nil {
 			log.Warn("CSV Parser: failed to parse the field value", zap.Error(err))
 			return fmt.Errorf("failed to read the field value, error: %w", err)
+		}
+		// update input offset
+		for _, field := range fieldsName {
+			p.inputOffset += len([]byte(field))
 		}
 		p.fieldsName = fieldsName
 		// read buffer
