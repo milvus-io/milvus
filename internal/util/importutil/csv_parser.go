@@ -18,7 +18,6 @@ package importutil
 
 import (
 	"context"
-	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -231,7 +230,7 @@ func (p *CSVParser) ParseRows(reader *IOReader, handle CSVRowHandler) error {
 	if bom != '\ufeff' {
 		RuneScanner.UnreadRune()
 	}
-	r := csv.NewReader(reader.r)
+	r := NewReader(reader.r)
 
 	oldPercent := int64(0)
 	updateProgress := func() {
