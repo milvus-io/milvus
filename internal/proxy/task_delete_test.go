@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -608,6 +609,233 @@ func TestDeleteTask_Execute(t *testing.T) {
 
 		assert.NoError(t, dt.Execute(context.Background()))
 		assert.Equal(t, int64(3), dt.result.DeleteCnt)
+	})
+
+	schema.Fields[1].IsPartitionKey = true
+	partitionMaps := make(map[string]int64)
+	partitionMaps["test_0"] = 1
+	partitionMaps["test_1"] = 2
+	partitionMaps["test_2"] = 3
+
+	t.Run("complex delete with partitionKey mode success", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		mockMgr := NewMockChannelsMgr(t)
+		rc := mocks.NewMockRootCoordClient(t)
+		qn := mocks.NewMockQueryNodeClient(t)
+		lb := NewMockLBPolicy(t)
+
+		mockCache := NewMockCache(t)
+		mockCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(
+			partitionMaps, nil)
+		mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(
+			schema, nil)
+		globalMetaCache = mockCache
+		defer func() { globalMetaCache = nil }()
+
+		rc.EXPECT().AllocID(mock.Anything, mock.Anything).Return(
+			&rootcoordpb.AllocIDResponse{
+				Status: merr.Success(),
+				ID:     0,
+				Count:  1,
+			}, nil)
+		allocator, err := allocator.NewIDAllocator(ctx, rc, paramtable.GetNodeID())
+		allocator.Start()
+		assert.NoError(t, err)
+
+		dt := deleteTask{
+			chMgr:            mockMgr,
+			schema:           schema,
+			collectionID:     collectionID,
+			partitionID:      int64(-1),
+			vChannels:        channels,
+			idAllocator:      allocator,
+			lb:               lb,
+			partitionKeyMode: true,
+			result: &milvuspb.MutationResult{
+				Status: merr.Success(),
+				IDs: &schemapb.IDs{
+					IdField: nil,
+				},
+			},
+			req: &milvuspb.DeleteRequest{
+				CollectionName: collectionName,
+				PartitionName:  "",
+				DbName:         dbName,
+				Expr:           "non_pk in [2, 3]",
+			},
+		}
+		stream := msgstream.NewMockMsgStream(t)
+		mockMgr.EXPECT().getOrCreateDmlStream(mock.Anything).Return(stream, nil)
+		lb.EXPECT().Execute(mock.Anything, mock.Anything).Call.Return(func(ctx context.Context, workload CollectionWorkLoad) error {
+			return workload.exec(ctx, 1, qn)
+		})
+
+		qn.EXPECT().QueryStream(mock.Anything, mock.Anything).Call.Return(
+			func(ctx context.Context, in *querypb.QueryRequest, opts ...grpc.CallOption) querypb.QueryNode_QueryStreamClient {
+				client := streamrpc.NewLocalQueryClient(ctx)
+				server := client.CreateServer()
+				assert.Greater(t, len(in.Req.PartitionIDs), 0)
+				server.Send(&internalpb.RetrieveResults{
+					Status: merr.Success(),
+					Ids: &schemapb.IDs{
+						IdField: &schemapb.IDs_IntId{
+							IntId: &schemapb.LongArray{
+								Data: []int64{0, 1, 2},
+							},
+						},
+					},
+				})
+				server.FinishSend(nil)
+				return client
+			}, nil)
+
+		stream.EXPECT().Produce(mock.Anything).Return(nil)
+		assert.NoError(t, dt.Execute(context.Background()))
+		assert.Equal(t, int64(3), dt.result.DeleteCnt)
+	})
+}
+
+func TestDeleteTask_StreamingQueryAndDelteFunc(t *testing.T) {
+	collectionName := "test_delete"
+	collectionID := int64(111)
+	channels := []string{"test_channel"}
+	dbName := "test_1"
+
+	schema := &schemapb.CollectionSchema{
+		Name:        "test_delete",
+		Description: "",
+		AutoID:      false,
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      common.StartOfUserFieldID,
+				Name:         "pk",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:      common.StartOfUserFieldID + 1,
+				Name:         "non_pk",
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_Int64,
+			},
+		},
+	}
+
+	// test partitionKey mode
+	schema.Fields[1].IsPartitionKey = true
+	partitionMaps := make(map[string]int64)
+	partitionMaps["test_0"] = 1
+	partitionMaps["test_1"] = 2
+	partitionMaps["test_2"] = 3
+	t.Run("partitionKey mode parse plan failed", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		dt := deleteTask{
+			schema:           schema,
+			collectionID:     collectionID,
+			partitionID:      int64(-1),
+			vChannels:        channels,
+			partitionKeyMode: true,
+			result: &milvuspb.MutationResult{
+				Status: merr.Success(),
+				IDs: &schemapb.IDs{
+					IdField: nil,
+				},
+			},
+			req: &milvuspb.DeleteRequest{
+				CollectionName: collectionName,
+				PartitionName:  "",
+				DbName:         dbName,
+				Expr:           "non_pk in [2, 3]",
+			},
+		}
+		stream := msgstream.NewMockMsgStream(t)
+		qn := mocks.NewMockQueryNodeClient(t)
+		queryFunc := dt.getStreamingQueryAndDelteFunc(stream, nil)
+		assert.Error(t, queryFunc(ctx, 1, qn))
+	})
+
+	t.Run("partitionKey mode get meta failed", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		dt := deleteTask{
+			schema:           schema,
+			collectionID:     collectionID,
+			partitionID:      int64(-1),
+			vChannels:        channels,
+			partitionKeyMode: true,
+			result: &milvuspb.MutationResult{
+				Status: merr.Success(),
+				IDs: &schemapb.IDs{
+					IdField: nil,
+				},
+			},
+			req: &milvuspb.DeleteRequest{
+				CollectionName: collectionName,
+				PartitionName:  "",
+				DbName:         dbName,
+				Expr:           "non_pk in [2, 3]",
+			},
+		}
+		stream := msgstream.NewMockMsgStream(t)
+		qn := mocks.NewMockQueryNodeClient(t)
+
+		mockCache := NewMockCache(t)
+		mockCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(
+			nil, fmt.Errorf("mock error"))
+		globalMetaCache = mockCache
+		defer func() { globalMetaCache = nil }()
+
+		plan, err := planparserv2.CreateRetrievePlan(dt.schema, dt.req.Expr)
+		assert.NoError(t, err)
+		queryFunc := dt.getStreamingQueryAndDelteFunc(stream, plan)
+		assert.Error(t, queryFunc(ctx, 1, qn))
+	})
+
+	t.Run("partitionKey mode get partition ID failed", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		dt := deleteTask{
+			schema:           schema,
+			collectionID:     collectionID,
+			partitionID:      int64(-1),
+			vChannels:        channels,
+			partitionKeyMode: true,
+			result: &milvuspb.MutationResult{
+				Status: merr.Success(),
+				IDs: &schemapb.IDs{
+					IdField: nil,
+				},
+			},
+			req: &milvuspb.DeleteRequest{
+				CollectionName: collectionName,
+				PartitionName:  "",
+				DbName:         dbName,
+				Expr:           "non_pk in [2, 3]",
+			},
+		}
+		stream := msgstream.NewMockMsgStream(t)
+		qn := mocks.NewMockQueryNodeClient(t)
+
+		mockCache := NewMockCache(t)
+		mockCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(
+			partitionMaps, nil).Once()
+		mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(
+			schema, nil)
+		mockCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(
+			nil, fmt.Errorf("mock error"))
+		globalMetaCache = mockCache
+		defer func() { globalMetaCache = nil }()
+
+		plan, err := planparserv2.CreateRetrievePlan(dt.schema, dt.req.Expr)
+		assert.NoError(t, err)
+		queryFunc := dt.getStreamingQueryAndDelteFunc(stream, plan)
+		assert.Error(t, queryFunc(ctx, 1, qn))
 	})
 }
 
