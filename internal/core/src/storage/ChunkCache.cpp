@@ -40,7 +40,6 @@ ChunkCache::Read(const std::string& filepath) {
                            strerror(errno)));
 
     columns_.emplace(path, column);
-    mmap_file_locks_.erase(path);
     return column;
 }
 
@@ -71,13 +70,7 @@ ChunkCache::Prefetch(const std::string& filepath) {
 std::shared_ptr<ColumnBase>
 ChunkCache::Mmap(const std::filesystem::path& path,
                  const FieldDataPtr& field_data) {
-    MmapFileLocks::accessor acc;
-    if (!mmap_file_locks_.find(acc, path)) {
-        mmap_file_locks_.insert(
-            acc, std::make_pair(path, std::make_unique<std::mutex>()));
-    }
-    std::unique_lock lck(*acc->second.get());
-    acc.release();
+    std::unique_lock lck(mutex_);
 
     auto dir = path.parent_path();
     std::filesystem::create_directories(dir);
