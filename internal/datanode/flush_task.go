@@ -62,7 +62,7 @@ type flushTaskRunner struct {
 
 	segmentID  UniqueID
 	insertLogs map[UniqueID]*datapb.Binlog
-	statsLogs  map[UniqueID]*datapb.Binlog
+	statsLogs  map[UniqueID][]*datapb.Binlog
 	deltaLogs  []*datapb.Binlog // []*DelDataBuf
 	pos        *msgpb.MsgPosition
 	flushed    bool
@@ -125,7 +125,7 @@ func (t *flushTaskRunner) init(f notifyMetaFunc, postFunc taskPostFunc, signal <
 
 // runFlushInsert executes flush insert task with once and retry
 func (t *flushTaskRunner) runFlushInsert(task flushInsertTask,
-	binlogs, statslogs map[UniqueID]*datapb.Binlog, flushed bool, dropped bool, pos *msgpb.MsgPosition, opts ...retry.Option,
+	binlogs map[UniqueID]*datapb.Binlog, statslogs map[UniqueID][]*datapb.Binlog, flushed bool, dropped bool, pos *msgpb.MsgPosition, opts ...retry.Option,
 ) {
 	t.insertOnce.Do(func() {
 		t.insertLogs = binlogs

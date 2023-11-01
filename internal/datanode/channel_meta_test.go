@@ -783,7 +783,7 @@ func TestChannelMeta_loadStats(t *testing.T) {
 		assert.NoError(t, err)
 
 		// load flushed stats log
-		blob, err = iCodec.SerializePkStatsList([]*storage.PrimaryKeyStats{stats}, 10)
+		blob, err = iCodec.SerializePkStatsList([]*storage.PrimaryKeyStats{stats}, 106, 10)
 		assert.NoError(t, err)
 		cm.MultiReadReturn = [][]byte{blob.Value}
 
@@ -793,7 +793,7 @@ func TestChannelMeta_loadStats(t *testing.T) {
 				FieldID: 106,
 				Binlogs: []*datapb.Binlog{{
 					//<StatsLogPath>/<collectionID>/<partitionID>/<segmentID>/<FieldID>/<logIdx>
-					LogPath: path.Join(common.SegmentStatslogPath, metautil.JoinIDPath(1, 2, 2, 106), storage.CompoundStatsType.LogIdx()),
+					LogPath: path.Join(common.SegmentStatslogPath, metautil.JoinIDPath(1, 2, 2, 106, storage.CompoundStatsType.GetLogID())),
 				}},
 			}}, 0)
 		assert.NoError(t, err)

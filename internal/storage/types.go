@@ -13,7 +13,6 @@ package storage
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"time"
 
@@ -27,11 +26,12 @@ const (
 
 	// CompundStatsType log save multiple stats
 	// and bloom filters to one file
+	// with special log ID
 	CompoundStatsType
 )
 
-func (s StatsLogType) LogIdx() string {
-	return fmt.Sprintf("%d", s)
+func (s StatsLogType) GetLogID() int64 {
+	return int64(s)
 }
 
 type FileReader interface {

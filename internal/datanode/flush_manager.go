@@ -30,6 +30,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -68,7 +69,7 @@ type flushManager interface {
 type segmentFlushPack struct {
 	segmentID  UniqueID
 	insertLogs map[UniqueID]*datapb.Binlog
-	statsLogs  map[UniqueID]*datapb.Binlog
+	statsLogs  map[UniqueID][]*datapb.Binlog
 	deltaLogs  []*datapb.Binlog
 	pos        *msgpb.MsgPosition
 	flushed    bool
@@ -182,7 +183,7 @@ func (q *orderFlushQueue) postTask(pack *segmentFlushPack, postInjection postInj
 }
 
 // enqueueInsertBuffer put insert buffer data into queue
-func (q *orderFlushQueue) enqueueInsertFlush(task flushInsertTask, binlogs, statslogs map[UniqueID]*datapb.Binlog, flushed bool, dropped bool, pos *msgpb.MsgPosition) {
+func (q *orderFlushQueue) enqueueInsertFlush(task flushInsertTask, binlogs map[UniqueID]*datapb.Binlog, statslogs map[UniqueID][]*datapb.Binlog, flushed bool, dropped bool, pos *msgpb.MsgPosition) {
 	q.getFlushTaskRunner(pos).runFlushInsert(task, binlogs, statslogs, flushed, dropped, pos)
 }
 
@@ -291,7 +292,9 @@ func (m *rendezvousFlushManager) getFlushQueue(segmentID UniqueID) *orderFlushQu
 	return queue
 }
 
-func (m *rendezvousFlushManager) handleInsertTask(segmentID UniqueID, task flushInsertTask, binlogs, statslogs map[UniqueID]*datapb.Binlog, flushed bool, dropped bool, pos *msgpb.MsgPosition) {
+func (m *rendezvousFlushManager) handleInsertTask(segmentID UniqueID, task flushInsertTask,
+	binlogs map[UniqueID]*datapb.Binlog, statslogs map[UniqueID][]*datapb.Binlog, flushed bool, dropped bool, pos *msgpb.MsgPosition,
+) {
 	log.Info("handling insert task",
 		zap.Int64("segmentID", segmentID),
 		zap.Bool("flushed", flushed),
@@ -366,60 +369,49 @@ func (m *rendezvousFlushManager) serializeBinLog(segmentID, partID int64, data *
 	return blobs, fieldMemorySize, nil
 }
 
-func (m *rendezvousFlushManager) serializePkStatsLog(segmentID int64, flushed bool, data *BufferData, inCodec *storage.InsertCodec) (*Blob, *storage.PrimaryKeyStats, error) {
+// only serialize stats gen from new insert data
+func (m *rendezvousFlushManager) serializePKStatsLog(segmentID int64, pkField *schemapb.FieldSchema, data *BufferData, inCodec *storage.InsertCodec) ([]*Blob, *storage.PrimaryKeyStats, int64, error) {
 	var err error
 	var stats *storage.PrimaryKeyStats
 
-	pkField := getPKField(inCodec.Schema)
-	if pkField == nil {
-		log.Error("No pk field in schema", zap.Int64("segmentID", segmentID), zap.Int64("collectionID", inCodec.Schema.GetID()))
-		return nil, nil, fmt.Errorf("no primary key in meta")
+	if data == nil || data.buffer == nil {
+		return []*Blob{}, nil, 0, nil
 	}
 
-	var insertData storage.FieldData
-	rowNum := int64(0)
-	if data != nil && data.buffer != nil {
-		insertData = data.buffer.Data[pkField.FieldID]
-		rowNum = int64(insertData.RowNum())
-		if insertData.RowNum() > 0 {
-			// gen stats of buffer insert data
-			stats = storage.NewPrimaryKeyStats(pkField.FieldID, int64(pkField.DataType), rowNum)
-			stats.UpdateByMsgs(insertData)
-		}
-	}
+	insertData := data.buffer.Data[pkField.FieldID]
+	rowNum := int64(insertData.RowNum())
 
-	// get all stats log as a list, serialize to blob
-	// if flushed
-	if flushed {
-		seg := m.getSegment(segmentID)
-		if seg == nil {
-			return nil, nil, merr.WrapErrSegmentNotFound(segmentID)
-		}
+	// gen stats of buffer insert data
+	stats = storage.NewPrimaryKeyStats(pkField.FieldID, int64(pkField.DataType), rowNum)
+	stats.UpdateByMsgs(insertData)
 
-		statsList, oldRowNum := seg.getHistoricalStats(pkField)
-		if stats != nil {
-			statsList = append(statsList, stats)
-		}
-
-		blob, err := inCodec.SerializePkStatsList(statsList, oldRowNum+rowNum)
-		if err != nil {
-			return nil, nil, err
-		}
-		return blob, stats, nil
-	}
-
-	if rowNum == 0 {
-		return nil, nil, nil
-	}
-
-	// only serialize stats gen from new insert data
-	// if not flush
 	blob, err := inCodec.SerializePkStats(stats, rowNum)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 
-	return blob, stats, nil
+	return []*Blob{blob}, stats, 0, nil
+}
+
+func (m *rendezvousFlushManager) serializeMergedPkStatsLog(segmentID, newRowNum int64,
+	pkField *schemapb.FieldSchema, currentStats *storage.PrimaryKeyStats, inCodec *storage.InsertCodec,
+) (*Blob, error) {
+	// get all stats log as a list, serialize to blob
+	seg := m.getSegment(segmentID)
+	if seg == nil {
+		return nil, merr.WrapErrSegmentNotFound(segmentID)
+	}
+
+	statsList, oldRowNum := seg.getHistoricalStats(pkField)
+	if currentStats != nil {
+		statsList = append(statsList, currentStats)
+	}
+
+	blob, err := inCodec.SerializePkStatsList(statsList, pkField.GetFieldID(), oldRowNum+newRowNum)
+	if err != nil {
+		return nil, err
+	}
+	return blob, nil
 }
 
 // isFull return true if the task pool is full
@@ -432,24 +424,31 @@ func (m *rendezvousFlushManager) isFull() bool {
 // This method will be retired on errors. Final errors will be propagated upstream and logged.
 func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID UniqueID, flushed bool, dropped bool, pos *msgpb.MsgPosition) (*storage.PrimaryKeyStats, error) {
 	field2Insert := make(map[UniqueID]*datapb.Binlog)
-	field2Stats := make(map[UniqueID]*datapb.Binlog)
+	field2Stats := make(map[UniqueID][]*datapb.Binlog)
 	kvs := make(map[string][]byte)
-
 	tr := timerecord.NewTimeRecorder("flushDuration")
 	// get segment info
 	collID, partID, meta, err := m.getSegmentMeta(segmentID, pos)
 	if err != nil {
 		return nil, err
 	}
+	log.With(zap.Int64("segmentID", segmentID), zap.Int64("collectionID", collID))
 	inCodec := storage.NewInsertCodecWithSchema(meta)
+
 	// build bin log blob
 	binLogBlobs, fieldMemorySize, err := m.serializeBinLog(segmentID, partID, data, inCodec)
 	if err != nil {
 		return nil, err
 	}
 
-	// build stats log blob
-	pkStatsBlob, stats, err := m.serializePkStatsLog(segmentID, flushed, data, inCodec)
+	// build pk stats log blob
+	pkField := getPKField(inCodec.Schema)
+	if pkField == nil {
+		log.Error("No pk field in schema")
+		return nil, fmt.Errorf("no primary key in meta")
+	}
+
+	statsBlobs, stats, rowNum, err := m.serializePKStatsLog(segmentID, pkField, data, inCodec)
 	if err != nil {
 		return nil, err
 	}
@@ -457,7 +456,7 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 	// allocate
 	// alloc for stats log if have new stats log and not flushing
 	var logidx int64
-	allocNum := uint32(len(binLogBlobs) + boolToInt(!flushed && pkStatsBlob != nil))
+	allocNum := uint32(len(binLogBlobs) + len(statsBlobs))
 	if allocNum != 0 {
 		logidx, _, err = m.Alloc(allocNum)
 		if err != nil {
@@ -489,8 +488,8 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 	}
 
 	// pk stats binlog
-	if pkStatsBlob != nil {
-		fieldID, err := strconv.ParseInt(pkStatsBlob.GetKey(), 10, 64)
+	for _, statsBlob := range statsBlobs {
+		fieldID, err := strconv.ParseInt(statsBlob.GetKey(), 10, 64)
 		if err != nil {
 			log.Error("Flush failed ... cannot parse string to fieldID ..", zap.Error(err))
 			return nil, err
@@ -499,21 +498,54 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 		// use storage.FlushedStatsLogIdx as logidx if flushed
 		// else use last idx we allocated
 		var key string
-		if flushed {
-			k := metautil.JoinIDPath(collID, partID, segmentID, fieldID)
-			key = path.Join(m.ChunkManager.RootPath(), common.SegmentStatslogPath, k, storage.CompoundStatsType.LogIdx())
-		} else {
-			k := metautil.JoinIDPath(collID, partID, segmentID, fieldID, logidx)
-			key = path.Join(m.ChunkManager.RootPath(), common.SegmentStatslogPath, k)
-		}
+		k := metautil.JoinIDPath(collID, partID, segmentID, fieldID, logidx)
+		key = path.Join(m.ChunkManager.RootPath(), common.SegmentStatslogPath, k)
 
-		kvs[key] = pkStatsBlob.Value
-		field2Stats[fieldID] = &datapb.Binlog{
+		kvs[key] = statsBlob.Value[:]
+		binlog := &datapb.Binlog{
 			EntriesNum:    0,
 			TimestampFrom: 0, // TODO
 			TimestampTo:   0, // TODO,
 			LogPath:       key,
-			LogSize:       int64(len(pkStatsBlob.Value)),
+			LogSize:       int64(len(statsBlob.Value)),
+		}
+
+		if _, ok := field2Stats[fieldID]; !ok {
+			field2Stats[fieldID] = []*datapb.Binlog{binlog}
+		} else {
+			field2Stats[fieldID] = append(field2Stats[fieldID], binlog)
+		}
+	}
+
+	// if flushed merge current stats with historical stats
+	if flushed {
+		mergedPKStatusBlobs, err := m.serializeMergedPkStatsLog(segmentID, rowNum, pkField, stats, inCodec)
+		if err != nil {
+			log.Warn("build mergerd status log for flushed segment failed")
+			return nil, err
+		}
+
+		fieldID := pkField.GetFieldID()
+
+		// use storage.FlushedStatsLogIdx as logidx if flushed
+		// else use last idx we allocated
+		var key string
+		k := metautil.JoinIDPath(collID, partID, segmentID, fieldID, storage.CompoundStatsType.GetLogID())
+		key = path.Join(m.ChunkManager.RootPath(), common.SegmentStatslogPath, k)
+
+		kvs[key] = mergedPKStatusBlobs.Value[:]
+		binlog := &datapb.Binlog{
+			EntriesNum:    0,
+			TimestampFrom: 0, // TODO
+			TimestampTo:   0, // TODO,
+			LogPath:       key,
+			LogSize:       int64(len(mergedPKStatusBlobs.Value)),
+		}
+
+		if _, ok := field2Stats[fieldID]; !ok {
+			field2Stats[fieldID] = []*datapb.Binlog{binlog}
+		} else {
+			field2Stats[fieldID] = append(field2Stats[fieldID], binlog)
 		}
 	}
 
@@ -773,15 +805,17 @@ func dropVirtualChannelFunc(dsService *dataSyncService, opts ...retry.Option) fl
 					fieldBinlogs.Binlogs = append(fieldBinlogs.Binlogs, v)
 				}
 			}
-			for k, v := range pack.statsLogs {
-				fieldStatsLogs := getFieldBinlogs(k, segment.Field2StatslogPaths)
-				if fieldStatsLogs == nil {
-					segment.Field2StatslogPaths = append(segment.Field2StatslogPaths, &datapb.FieldBinlog{
-						FieldID: k,
-						Binlogs: []*datapb.Binlog{v},
-					})
-				} else {
-					fieldStatsLogs.Binlogs = append(fieldStatsLogs.Binlogs, v)
+			for filedID, logs := range pack.statsLogs {
+				for _, log := range logs {
+					fieldStatsLogs := getFieldBinlogs(filedID, segment.Field2StatslogPaths)
+					if fieldStatsLogs == nil {
+						segment.Field2StatslogPaths = append(segment.Field2StatslogPaths, &datapb.FieldBinlog{
+							FieldID: filedID,
+							Binlogs: []*datapb.Binlog{log},
+						})
+					} else {
+						fieldStatsLogs.Binlogs = append(fieldStatsLogs.Binlogs, log)
+					}
 				}
 			}
 			segment.Deltalogs = append(segment.Deltalogs, &datapb.FieldBinlog{
@@ -862,8 +896,10 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 		for k, v := range pack.insertLogs {
 			fieldInsert = append(fieldInsert, &datapb.FieldBinlog{FieldID: k, Binlogs: []*datapb.Binlog{v}})
 		}
-		for k, v := range pack.statsLogs {
-			fieldStats = append(fieldStats, &datapb.FieldBinlog{FieldID: k, Binlogs: []*datapb.Binlog{v}})
+		for k, vlist := range pack.statsLogs {
+			for _, v := range vlist {
+				fieldStats = append(fieldStats, &datapb.FieldBinlog{FieldID: k, Binlogs: []*datapb.Binlog{v}})
+			}
 		}
 		deltaInfos[0] = &datapb.FieldBinlog{Binlogs: pack.deltaLogs}
 

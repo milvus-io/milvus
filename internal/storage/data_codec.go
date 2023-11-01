@@ -142,12 +142,8 @@ func (insertCodec *InsertCodec) SerializePkStats(stats *PrimaryKeyStats, rowNum 
 }
 
 // Serialize Pk stats list to one blob
-func (insertCodec *InsertCodec) SerializePkStatsList(stats []*PrimaryKeyStats, rowNum int64) (*Blob, error) {
-	if len(stats) == 0 {
-		return nil, nil
-	}
-
-	blobKey := fmt.Sprintf("%d", stats[0].FieldID)
+func (insertCodec *InsertCodec) SerializePkStatsList(stats []*PrimaryKeyStats, fieldID, rowNum int64) (*Blob, error) {
+	blobKey := fmt.Sprintf("%d", fieldID)
 	statsWriter := &StatsWriter{}
 	err := statsWriter.GenerateList(stats)
 	if err != nil {

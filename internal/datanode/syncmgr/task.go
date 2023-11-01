@@ -264,7 +264,7 @@ func (t *SyncTask) serializeMergedPkStats(fieldID int64, stats *storage.PrimaryK
 		statsList = append(statsList, stats)
 	}
 
-	blob, err := t.getInCodec().SerializePkStatsList(statsList, oldRowNum+rowNum)
+	blob, err := t.getInCodec().SerializePkStatsList(statsList, fieldID, oldRowNum+rowNum)
 	if err != nil {
 		return err
 	}

@@ -582,36 +582,38 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 			deltaLog.LogPath = blobPath
 		}
 
-		for _, statsLog := range pack.statsLogs {
-			splits := strings.Split(statsLog.LogPath, "/")
-			if len(splits) < 2 {
-				pack.err = fmt.Errorf("bad stats log path: %s", statsLog.LogPath)
-				return
-			}
-			logID, err := strconv.ParseInt(splits[len(splits)-1], 10, 64)
-			if err != nil {
-				pack.err = err
-				return
-			}
-			fieldID, err := strconv.ParseInt(splits[len(splits)-2], 10, 64)
-			if err != nil {
-				pack.err = err
-				return
-			}
-			blobKey := metautil.JoinIDPath(collectionID, partID, targetSegID, fieldID, logID)
-			blobPath := path.Join(t.chunkManager.RootPath(), common.SegmentStatslogPath, blobKey)
+		for _, statsLogs := range pack.statsLogs {
+			for _, statsLog := range statsLogs {
+				splits := strings.Split(statsLog.LogPath, "/")
+				if len(splits) < 2 {
+					pack.err = fmt.Errorf("bad stats log path: %s", statsLog.LogPath)
+					return
+				}
+				logID, err := strconv.ParseInt(splits[len(splits)-1], 10, 64)
+				if err != nil {
+					pack.err = err
+					return
+				}
+				fieldID, err := strconv.ParseInt(splits[len(splits)-2], 10, 64)
+				if err != nil {
+					pack.err = err
+					return
+				}
+				blobKey := metautil.JoinIDPath(collectionID, partID, targetSegID, fieldID, logID)
+				blobPath := path.Join(t.chunkManager.RootPath(), common.SegmentStatslogPath, blobKey)
 
-			blob, err := t.chunkManager.Read(t.ctx, statsLog.LogPath)
-			if err != nil {
-				pack.err = err
-				return
+				blob, err := t.chunkManager.Read(t.ctx, statsLog.LogPath)
+				if err != nil {
+					pack.err = err
+					return
+				}
+				err = t.chunkManager.Write(t.ctx, blobPath, blob)
+				if err != nil {
+					pack.err = err
+					return
+				}
+				statsLog.LogPath = blobPath
 			}
-			err = t.chunkManager.Write(t.ctx, blobPath, blob)
-			if err != nil {
-				pack.err = err
-				return
-			}
-			statsLog.LogPath = blobPath
 		}
 	})
 	defer func() {
