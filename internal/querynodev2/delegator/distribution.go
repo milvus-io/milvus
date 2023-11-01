@@ -24,6 +24,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -101,8 +102,26 @@ func NewDistribution() *distribution {
 	return dist
 }
 
-// GetAllSegments returns segments in current snapshot, filter readable segment when readable is true
-func (d *distribution) GetSegments(readable bool, partitions ...int64) (sealed []SnapshotItem, growing []SegmentEntry, version int64) {
+func (d *distribution) PinReadableSegments(partitions ...int64) (sealed []SnapshotItem, growing []SegmentEntry, version int64, err error) {
+	d.mut.RLock()
+	defer d.mut.RUnlock()
+
+	if !d.Serviceable() {
+		return nil, nil, -1, merr.WrapErrServiceInternal("channel distribution is not serviceable")
+	}
+
+	current := d.current.Load()
+	sealed, growing = current.Get(partitions...)
+	version = current.version
+	targetVersion := current.GetTargetVersion()
+	filterReadable := func(entry SegmentEntry, _ int) bool {
+		return entry.TargetVersion == targetVersion || entry.TargetVersion == initialTargetVersion
+	}
+	sealed, growing = d.filterSegments(sealed, growing, filterReadable)
+	return
+}
+
+func (d *distribution) PinOnlineSegments(partitions ...int64) (sealed []SnapshotItem, growing []SegmentEntry, version int64) {
 	d.mut.RLock()
 	defer d.mut.RUnlock()
 
@@ -110,25 +129,20 @@ func (d *distribution) GetSegments(readable bool, partitions ...int64) (sealed [
 	sealed, growing = current.Get(partitions...)
 	version = current.version
 
-	if readable {
-		TargetVersion := current.GetTargetVersion()
-		sealed, growing = d.filterReadableSegments(sealed, growing, TargetVersion)
-		return
+	filterOnline := func(entry SegmentEntry, _ int) bool {
+		return !d.offlines.Contain(entry.SegmentID)
 	}
+	sealed, growing = d.filterSegments(sealed, growing, filterOnline)
 
 	return
 }
 
-func (d *distribution) filterReadableSegments(sealed []SnapshotItem, growing []SegmentEntry, targetVersion int64) ([]SnapshotItem, []SegmentEntry) {
-	filterReadable := func(entry SegmentEntry, _ int) bool {
-		return entry.TargetVersion == targetVersion || entry.TargetVersion == initialTargetVersion
-	}
-
-	growing = lo.Filter(growing, filterReadable)
+func (d *distribution) filterSegments(sealed []SnapshotItem, growing []SegmentEntry, filter func(SegmentEntry, int) bool) ([]SnapshotItem, []SegmentEntry) {
+	growing = lo.Filter(growing, filter)
 	sealed = lo.Map(sealed, func(item SnapshotItem, _ int) SnapshotItem {
 		return SnapshotItem{
 			NodeID:   item.NodeID,
-			Segments: lo.Filter(item.Segments, filterReadable),
+			Segments: lo.Filter(item.Segments, filter),
 		}
 	})
 
@@ -142,16 +156,19 @@ func (d *distribution) PeekSegments(readable bool, partitions ...int64) (sealed 
 	sealed, growing = current.Peek(partitions...)
 
 	if readable {
-		TargetVersion := current.GetTargetVersion()
-		sealed, growing = d.filterReadableSegments(sealed, growing, TargetVersion)
+		targetVersion := current.GetTargetVersion()
+		filterReadable := func(entry SegmentEntry, _ int) bool {
+			return entry.TargetVersion == targetVersion || entry.TargetVersion == initialTargetVersion
+		}
+		sealed, growing = d.filterSegments(sealed, growing, filterReadable)
 		return
 	}
 
 	return
 }
 
-// FinishUsage notifies snapshot one reference is released.
-func (d *distribution) FinishUsage(version int64) {
+// Unpin notifies snapshot one reference is released.
+func (d *distribution) Unpin(version int64) {
 	snapshot, ok := d.snapshots.Get(version)
 	if ok {
 		snapshot.Done(d.getCleanup(snapshot.version))
