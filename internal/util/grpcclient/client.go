@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // GrpcClient abstracts client of grpc
@@ -105,7 +106,7 @@ type ClientBase[T interface {
 	maxCancelError int32
 
 	NodeID atomic.Int64
-	sess   *sessionutil.Session
+	sess   sessionutil.SessionInterface
 }
 
 func NewClientBase[T interface {
@@ -321,9 +322,10 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 }
 
 func (c *ClientBase[T]) verifySession(ctx context.Context) error {
-	if funcutil.CheckCtxValid(ctx) {
+	if !funcutil.CheckCtxValid(ctx) {
 		return nil
 	}
+
 	log := log.Ctx(ctx).With(zap.String("clientRole", c.GetRole()))
 	if time.Since(c.lastSessionCheck.Load()) < c.minSessionCheckInterval {
 		log.Debug("skip session check, verify too frequent")
@@ -410,6 +412,17 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 	defer cancel()
 	err := retry.Do(ctx, func() error {
 		if generic.IsZero(client) {
+			switch c.GetRole() {
+			case typeutil.DataNodeRole, typeutil.IndexNodeRole, typeutil.QueryNodeRole:
+				// if session doesn't exist, no need to reset connection for datanode/indexnode/querynode
+				err := c.verifySession(ctx)
+				if err != nil && errors.Is(err, merr.ErrNodeNotFound) {
+					log.Warn("failed to verify node session", zap.Error(err))
+					// stop retry
+					return retry.Unrecoverable(err)
+				}
+			}
+
 			err := errors.Wrap(clientErr, "empty grpc client")
 			log.Warn("grpc client is nil, maybe fail to get client in the retry state", zap.Error(err))
 			resetClientFunc()
@@ -428,6 +441,7 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 				log.Warn("start to reset connection because of specific reasons", zap.Error(err))
 				resetClientFunc()
 			} else {
+				// err occurs but no need to reset connection, try to verify session
 				err := c.verifySession(ctx)
 				if err != nil {
 					log.Warn("failed to verify session, reset connection", zap.Error(err))

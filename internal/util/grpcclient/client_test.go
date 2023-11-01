@@ -28,6 +28,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/examples/helloworld/helloworld"
@@ -37,6 +38,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -90,6 +92,29 @@ func TestClientBase_connect(t *testing.T) {
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, errMock))
 	})
+}
+
+func TestClientBase_NodeSessionNotExist(t *testing.T) {
+	base := ClientBase[*mockClient]{
+		maxCancelError: 10,
+		MaxAttempts:    3,
+	}
+	base.SetGetAddrFunc(func() (string, error) {
+		return "", errors.New("mocked address error")
+	})
+	base.role = typeutil.QueryNodeRole
+	mockSession := sessionutil.NewMockSession(t)
+	mockSession.EXPECT().GetSessions(mock.Anything).Return(nil, 0, nil)
+	base.sess = mockSession
+	base.grpcClientMtx.Lock()
+	base.grpcClient = nil
+	base.grpcClientMtx.Unlock()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, err := base.Call(ctx, func(client *mockClient) (any, error) {
+		return struct{}{}, nil
+	})
+	assert.True(t, errors.Is(err, merr.ErrNodeNotFound))
 }
 
 func TestClientBase_Call(t *testing.T) {
