@@ -33,6 +33,7 @@ target_link_libraries(milvus_common
         yaml-cpp
         boost_bitset_ext
         simdjson
+        opendal
         ${CONAN_LIBS}
         )
 

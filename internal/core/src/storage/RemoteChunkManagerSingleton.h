@@ -20,6 +20,7 @@
 #include <shared_mutex>
 
 #include "storage/Util.h"
+#include "opendal.h"
 
 namespace milvus::storage {
 

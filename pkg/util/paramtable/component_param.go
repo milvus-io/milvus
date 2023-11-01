@@ -480,8 +480,8 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	p.StorageType = ParamItem{
 		Key:          "common.storageType",
 		Version:      "2.0.0",
-		DefaultValue: "minio",
-		Doc:          "please adjust in embedded Milvus: local",
+		DefaultValue: "opendal",
+		Doc:          "please adjust in embedded Milvus: local, available values are [local, minio, remote, opendal]]",
 		Export:       true,
 	}
 	p.StorageType.Init(base.mgr)

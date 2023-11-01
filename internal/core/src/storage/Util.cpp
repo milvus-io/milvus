@@ -22,6 +22,7 @@
 #include "common/EasyAssert.h"
 #include "common/Consts.h"
 #include "fmt/format.h"
+#include "storage/ChunkManager.h"
 #ifdef AZURE_BUILD_DIR
 #include "storage/AzureChunkManager.h"
 #endif
@@ -31,6 +32,7 @@
 #include "storage/ThreadPools.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/MinioChunkManager.h"
+#include "storage/OpenDALChunkManager.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/DiskFileManagerImpl.h"
 
@@ -39,7 +41,8 @@ namespace milvus::storage {
 std::map<std::string, ChunkManagerType> ChunkManagerType_Map = {
     {"local", ChunkManagerType::Local},
     {"minio", ChunkManagerType::Minio},
-    {"remote", ChunkManagerType::Remote}};
+    {"remote", ChunkManagerType::Remote},
+    {"opendal", ChunkManagerType::OpenDAL}};
 
 enum class CloudProviderType : int8_t {
     UNKNOWN = 0,
@@ -448,45 +451,6 @@ EncodeAndUploadFieldSlice(ChunkManager* chunk_manager,
     return std::make_pair(std::move(object_key), serialized_index_size);
 }
 
-// /**
-//  * Returns the current resident set size (physical memory use) measured
-//  * in bytes, or zero if the value cannot be determined on this OS.
-//  */
-// size_t
-// getCurrentRSS() {
-// #if defined(_WIN32)
-//     /* Windows -------------------------------------------------- */
-//     PROCESS_MEMORY_COUNTERS info;
-//     GetProcessMemoryInfo(GetCurrentProcess(), &info, sizeof(info));
-//     return (size_t)info.WorkingSetSize;
-
-// #elif defined(__APPLE__) && defined(__MACH__)
-//     /* OSX ------------------------------------------------------ */
-//     struct mach_task_basic_info info;
-//     mach_msg_type_number_t infoCount = MACH_TASK_BASIC_INFO_COUNT;
-//     if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info, &infoCount) != KERN_SUCCESS)
-//         return (size_t)0L; /* Can't access? */
-//     return (size_t)info.resident_size;
-
-// #elif defined(__linux__) || defined(__linux) || defined(linux) || defined(__gnu_linux__)
-//     /* Linux ---------------------------------------------------- */
-//     long rss = 0L;
-//     FILE* fp = NULL;
-//     if ((fp = fopen("/proc/self/statm", "r")) == NULL)
-//         return (size_t)0L; /* Can't open? */
-//     if (fscanf(fp, "%*s%ld", &rss) != 1) {
-//         fclose(fp);
-//         return (size_t)0L; /* Can't read? */
-//     }
-//     fclose(fp);
-//     return (size_t)rss * (size_t)sysconf(_SC_PAGESIZE);
-
-// #else
-//     /* AIX, BSD, Solaris, and Unknown OS ------------------------ */
-//     return (size_t)0L; /* Unsupported. */
-// #endif
-// }
-
 std::vector<FieldDataPtr>
 GetObjectData(ChunkManager* remote_chunk_manager,
               const std::vector<std::string>& remote_files) {
@@ -607,6 +571,9 @@ CreateChunkManager(const StorageConfig& storage_config) {
                     return std::make_shared<MinioChunkManager>(storage_config);
                 }
             }
+        }
+        case ChunkManagerType::OpenDAL: {
+            return std::make_shared<OpenDALChunkManager>(storage_config);
         }
 
         default: {

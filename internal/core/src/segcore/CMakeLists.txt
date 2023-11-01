@@ -41,18 +41,6 @@ set(SEGCORE_FILES
         ConcurrentVector.cpp)
 add_library(milvus_segcore SHARED ${SEGCORE_FILES})
 
-find_library(TBB NAMES tbb)
-set(PLATFORM_LIBS dl)
-
-if (MSYS)
-  set(PLATFORM_LIBS )
-endif()
-
-target_link_libraries(milvus_segcore
-        milvus_query
-        ${PLATFORM_LIBS}
-        ${TBB}
-        ${OpenMP_CXX_FLAGS}
-        )
+target_link_libraries(milvus_segcore milvus_query ${OpenMP_CXX_FLAGS})
 
 install(TARGETS milvus_segcore DESTINATION "${CMAKE_INSTALL_LIBDIR}")
