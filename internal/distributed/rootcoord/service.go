@@ -311,6 +311,13 @@ func (s *Server) Stop() error {
 	if s.tikvCli != nil {
 		defer s.tikvCli.Close()
 	}
+
+	s.cancel()
+	if s.grpcServer != nil {
+		utils.GracefulStopGRPCServer(s.grpcServer)
+	}
+	s.wg.Wait()
+
 	if s.dataCoord != nil {
 		if err := s.dataCoord.Close(); err != nil {
 			log.Error("Failed to close dataCoord client", zap.Error(err))
@@ -326,12 +333,6 @@ func (s *Server) Stop() error {
 			log.Error("Failed to close close rootCoord", zap.Error(err))
 		}
 	}
-	log.Debug("Rootcoord begin to stop grpc server")
-	s.cancel()
-	if s.grpcServer != nil {
-		utils.GracefulStopGRPCServer(s.grpcServer)
-	}
-	s.wg.Wait()
 	return nil
 }
 

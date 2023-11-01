@@ -15,7 +15,7 @@
 # limitations under the License.
 
 function get_milvus_process() {
-    echo $(ps -e | grep milvus | grep -v grep | awk '{print $1}')
+    echo $(ps -e | grep milvus | grep -v grep |  grep run-with-subprocess | awk '{print $1}')
 }
 
 echo "Stopping milvus..."
