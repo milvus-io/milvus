@@ -4,7 +4,7 @@ milvus_mode=${2:-"cluster"}
 ns=${3:-"chaos-testing"}
 bash uninstall_milvus.sh ${release} ${ns}|| true
 
-helm repo add milvus https://milvus-io.github.io/milvus-helm/
+helm repo add milvus https://zilliztech.github.io/milvus-helm/
 helm repo update
 if [[ ${milvus_mode} == "cluster" ]];
 then

@@ -289,7 +289,7 @@ jobs:
         shell: bash
         working-directory: tests/python_client/deploy
         run: |
-          helm repo add milvus https://milvus-io.github.io/milvus-helm
+          helm repo add milvus https://zilliztech.github.io/milvus-helm
           helm repo update
 
           # if the task is reinstall, install milvus with latest image in repo milvusdb/milvus
