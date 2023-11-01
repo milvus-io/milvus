@@ -536,11 +536,7 @@ Attu provides an intuitive and efficient GUI for Milvus.
 
 ## Community
 
-Join the Milvus community on [Slack](https://milvus.io/slack) to share your suggestions, advice, and questions with our engineering team.
-
-<a href="https://milvus.io/slack">
-    <img src="https://assets.zilliz.com/readme_slack_4a07c4c92f.png" alt="Milvus Slack Channel"  height="150" width="500">
-</a>
+Join the Milvus community on [[Discord]([https://discord.com/invite/wR3aFW7n)] to share your suggestions, advice, and questions with our engineering team.
 
 You can also check out our [FAQ page](https://milvus.io/docs/performance_faq.md) to discover solutions or answers to your issues or questions.
 
