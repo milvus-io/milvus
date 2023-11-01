@@ -92,7 +92,7 @@ func TestOrderFlushQueue_Execute(t *testing.T) {
 			wg.Done()
 		}(ids[i])
 		go func(id []byte) {
-			q.enqueueInsertFlush(&emptyFlushTask{}, map[UniqueID]*datapb.Binlog{}, map[UniqueID]*datapb.Binlog{}, false, false, &msgpb.MsgPosition{
+			q.enqueueInsertFlush(&emptyFlushTask{}, map[UniqueID]*datapb.Binlog{}, map[UniqueID][]*datapb.Binlog{}, false, false, &msgpb.MsgPosition{
 				MsgID: id,
 			})
 			wg.Done()
@@ -131,7 +131,7 @@ func TestOrderFlushQueue_Order(t *testing.T) {
 		q.enqueueDelFlush(&emptyFlushTask{}, &DelDataBuf{}, &msgpb.MsgPosition{
 			MsgID: ids[i],
 		})
-		q.enqueueInsertFlush(&emptyFlushTask{}, map[UniqueID]*datapb.Binlog{}, map[UniqueID]*datapb.Binlog{}, false, false, &msgpb.MsgPosition{
+		q.enqueueInsertFlush(&emptyFlushTask{}, map[UniqueID]*datapb.Binlog{}, map[UniqueID][]*datapb.Binlog{}, false, false, &msgpb.MsgPosition{
 			MsgID: ids[i],
 		})
 		wg.Done()
@@ -211,8 +211,8 @@ func TestRendezvousFlushManager(t *testing.T) {
 	}
 	assert.Eventually(t, func() bool { return counter.Load() == int64(size) }, 3*time.Second, 100*time.Millisecond)
 
-	_, _, err := m.serializePkStatsLog(0, false, nil, &storage.InsertCodec{Schema: &etcdpb.CollectionMeta{Schema: &schemapb.CollectionSchema{}, ID: 0}})
-	assert.Error(t, err)
+	_, _, _, err := m.serializePKStatsLog(0, nil, nil, &storage.InsertCodec{Schema: &etcdpb.CollectionMeta{Schema: &schemapb.CollectionSchema{}, ID: 0}})
+	assert.NoError(t, err)
 }
 
 func TestRendezvousFlushManager_Inject(t *testing.T) {
@@ -685,7 +685,7 @@ func TestFlushNotifyFunc(t *testing.T) {
 		assert.NotPanics(t, func() {
 			notifyFunc(&segmentFlushPack{
 				insertLogs: map[UniqueID]*datapb.Binlog{1: {LogPath: "/dev/test/id"}},
-				statsLogs:  map[UniqueID]*datapb.Binlog{1: {LogPath: "/dev/test/id-stats"}},
+				statsLogs:  map[UniqueID][]*datapb.Binlog{1: {{LogPath: "/dev/test/id-stats"}}},
 				deltaLogs:  []*datapb.Binlog{{LogPath: "/dev/test/del"}},
 				flushed:    true,
 			})
@@ -786,7 +786,7 @@ func TestDropVirtualChannelFunc(t *testing.T) {
 				{
 					segmentID:  1,
 					insertLogs: map[UniqueID]*datapb.Binlog{1: {LogPath: "/dev/test/id"}},
-					statsLogs:  map[UniqueID]*datapb.Binlog{1: {LogPath: "/dev/test/id-stats"}},
+					statsLogs:  map[UniqueID][]*datapb.Binlog{1: {{LogPath: "/dev/test/id-stats"}}},
 					deltaLogs:  []*datapb.Binlog{{LogPath: "/dev/test/del"}},
 					pos: &msgpb.MsgPosition{
 						ChannelName: vchanName,
@@ -797,7 +797,7 @@ func TestDropVirtualChannelFunc(t *testing.T) {
 				{
 					segmentID:  1,
 					insertLogs: map[UniqueID]*datapb.Binlog{1: {LogPath: "/dev/test/idi_2"}},
-					statsLogs:  map[UniqueID]*datapb.Binlog{1: {LogPath: "/dev/test/id-stats-2"}},
+					statsLogs:  map[UniqueID][]*datapb.Binlog{1: {{LogPath: "/dev/test/id-stats-2"}}},
 					deltaLogs:  []*datapb.Binlog{{LogPath: "/dev/test/del-2"}},
 					pos: &msgpb.MsgPosition{
 						ChannelName: vchanName,

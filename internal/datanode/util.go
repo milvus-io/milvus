@@ -18,10 +18,14 @@ package datanode
 
 import (
 	"context"
+	"fmt"
+	"path"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -56,6 +60,27 @@ func startTracer(msg msgstream.TsMsg, name string) (context.Context, trace.Span)
 		return ctx, sp
 	}
 	return otel.Tracer(typeutil.DataNodeRole).Start(ctx, name)
+}
+
+func filterPKStatsBinlogs(pkField int64, statsBinlogs []*datapb.FieldBinlog) ([]string, storage.StatsLogType) {
+	bloomFilterFiles := []string{}
+	for _, binlog := range statsBinlogs {
+		if binlog.FieldID != pkField {
+			continue
+		}
+		for _, binlog := range binlog.GetBinlogs() {
+			_, logID := path.Split(binlog.GetLogPath())
+			// if special status log exist
+			// only load one file
+			switch logID {
+			case fmt.Sprint(storage.CompoundStatsType.GetLogID()):
+				return []string{binlog.GetLogPath()}, storage.CompoundStatsType
+			default:
+				bloomFilterFiles = append(bloomFilterFiles, binlog.GetLogPath())
+			}
+		}
+	}
+	return bloomFilterFiles, storage.DefaultStatsType
 }
 
 func boolToInt(value bool) int {

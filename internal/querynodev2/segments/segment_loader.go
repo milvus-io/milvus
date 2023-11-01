@@ -628,11 +628,11 @@ func (loader *segmentLoader) filterPKStatsBinlogs(fieldBinlogs []*datapb.FieldBi
 	for _, fieldBinlog := range fieldBinlogs {
 		if fieldBinlog.FieldID == pkFieldID {
 			for _, binlog := range fieldBinlog.GetBinlogs() {
-				_, logidx := path.Split(binlog.GetLogPath())
+				_, logID := path.Split(binlog.GetLogPath())
 				// if special status log exist
 				// only load one file
-				switch logidx {
-				case storage.CompoundStatsType.LogIdx():
+				switch logID {
+				case fmt.Sprint(storage.CompoundStatsType.GetLogID()):
 					return []string{binlog.GetLogPath()}, storage.CompoundStatsType
 				default:
 					result = append(result, binlog.GetLogPath())

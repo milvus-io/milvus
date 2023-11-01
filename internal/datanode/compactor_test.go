@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/broker"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -1024,12 +1025,321 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 	})
 }
 
+func TestCompactorInjection(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cm := storage.NewLocalChunkManager(storage.RootPath(compactTestDir))
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
+
+	paramtable.Get().Save(Params.CommonCfg.EntityExpirationTTL.Key, "0") // Turn off auto expiration
+	var collID, partID, segID1, segID2 UniqueID = 1, 10, 200, 201
+	var collName string = "test_compact_coll_name"
+
+	alloc := allocator.NewMockAllocator(t)
+	alloc.EXPECT().AllocOne().Call.Return(int64(19530), nil)
+	alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Call.Return(validGeneratorFn, nil)
+
+	meta := NewMetaFactory().GetCollectionMeta(collID, "test_compact_coll_name", schemapb.DataType_Int64)
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).
+		Return(&milvuspb.DescribeCollectionResponse{
+			Status:         merr.Status(nil),
+			Schema:         meta.GetSchema(),
+			CollectionID:   collID,
+			CollectionName: collName,
+			ShardsNum:      common.DefaultShardsNum,
+		}, nil)
+	mockbIO := &binlogIO{cm, alloc}
+	channel := newChannel("channelname", collID, nil, broker, cm)
+
+	channel.addFlushedSegmentWithPKs(segID1, collID, partID, 2, &storage.Int64FieldData{Data: []UniqueID{1}})
+	channel.addFlushedSegmentWithPKs(segID2, collID, partID, 2, &storage.Int64FieldData{Data: []UniqueID{1}})
+	require.True(t, channel.hasSegment(segID1, true))
+	require.True(t, channel.hasSegment(segID2, true))
+
+	// the same pk for segmentI and segmentII
+	pks := [2]primaryKey{newInt64PrimaryKey(1), newInt64PrimaryKey(2)}
+	iData1 := genInsertDataWithPKs(pks, schemapb.DataType_Int64)
+	iData2 := genInsertDataWithPKs(pks, schemapb.DataType_Int64)
+
+	pk1 := newInt64PrimaryKey(1)
+	dData1 := &DeleteData{
+		Pks:      []primaryKey{pk1},
+		Tss:      []Timestamp{20000},
+		RowCount: 1,
+	}
+	// empty dData2
+	dData2 := &DeleteData{
+		Pks:      []primaryKey{},
+		Tss:      []Timestamp{},
+		RowCount: 0,
+	}
+
+	stats1 := storage.NewPrimaryKeyStats(1, int64(schemapb.DataType_Int64), 1)
+	iPaths1, sPaths1, err := mockbIO.uploadStatsLog(context.TODO(), segID1, partID, iData1, stats1, 1, meta)
+	require.NoError(t, err)
+	dPaths1, err := mockbIO.uploadDeltaLog(context.TODO(), segID1, partID, dData1, meta)
+	require.NoError(t, err)
+	require.Equal(t, 12, len(iPaths1))
+
+	iFlushPaths1, sFlushPaths1, err := mockbIO.uploadStatsLog(context.TODO(), segID1, partID, iData1, stats1, 1, meta)
+	require.NoError(t, err)
+	require.Equal(t, 12, len(iFlushPaths1))
+
+	stats2 := storage.NewPrimaryKeyStats(1, int64(schemapb.DataType_Int64), 1)
+	iPaths2, sPaths2, err := mockbIO.uploadStatsLog(context.TODO(), segID2, partID, iData2, stats2, 1, meta)
+	require.NoError(t, err)
+	dPaths2, err := mockbIO.uploadDeltaLog(context.TODO(), segID2, partID, dData2, meta)
+	require.NoError(t, err)
+	require.Equal(t, 12, len(iPaths2))
+
+	plan := &datapb.CompactionPlan{
+		PlanID: 20080,
+		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+			{
+				SegmentID:           segID1,
+				FieldBinlogs:        lo.Values(iPaths1),
+				Field2StatslogPaths: lo.Values(sPaths1),
+				Deltalogs:           dPaths1,
+			},
+			{
+				SegmentID:           segID2,
+				FieldBinlogs:        lo.Values(iPaths2),
+				Field2StatslogPaths: lo.Values(sPaths2),
+				Deltalogs:           dPaths2,
+			},
+		},
+		StartTime:        0,
+		TimeoutInSeconds: 10,
+		Type:             datapb.CompactionType_MergeCompaction,
+		Channel:          "channelname",
+	}
+
+	mockfm := &mockFlushManager{
+		segpacks: map[int64]*segmentFlushPack{segID1: {
+			segmentID: segID1,
+			insertLogs: lo.MapValues(iFlushPaths1, func(binlog *datapb.FieldBinlog, id int64) *datapb.Binlog {
+				return binlog.GetBinlogs()[0]
+			}),
+			statsLogs: lo.MapValues(sFlushPaths1, func(binlog *datapb.FieldBinlog, id int64) []*datapb.Binlog {
+				return binlog.GetBinlogs()
+			}),
+		}},
+	}
+
+	task := newCompactionTask(context.TODO(), mockbIO, mockbIO, channel, mockfm, alloc, plan, cm)
+	result, err := task.compact()
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+
+	assert.Equal(t, plan.GetPlanID(), result.GetPlanID())
+	assert.Equal(t, UniqueID(19530), result.GetSegmentID())
+	assert.Equal(t, int64(2), result.GetNumOfRows())
+	assert.NotEmpty(t, result.InsertLogs)
+	assert.NotEmpty(t, result.Field2StatslogPaths)
+
+	assert.Equal(t, 0, mockfm.injectCount())
+	task.injectDone(true)
+	time.Sleep(500 * time.Millisecond)
+	assert.Equal(t, 1, mockfm.injectCount())
+}
+
+func TestCompactorInjectionError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cm := storage.NewLocalChunkManager(storage.RootPath(compactTestDir))
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
+
+	paramtable.Get().Save(Params.CommonCfg.EntityExpirationTTL.Key, "0") // Turn off auto expiration
+	var collID, partID, segID1, segID2, targetSeg UniqueID = 1, 10, 300, 301, 19530
+	var collName string = "test_compact_coll_name"
+
+	alloc := allocator.NewMockAllocator(t)
+	alloc.EXPECT().AllocOne().Call.Return(targetSeg, nil)
+	alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Call.Return(validGeneratorFn, nil)
+
+	meta := NewMetaFactory().GetCollectionMeta(collID, "test_compact_coll_name", schemapb.DataType_Int64)
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).
+		Return(&milvuspb.DescribeCollectionResponse{
+			Status:         merr.Status(nil),
+			Schema:         meta.GetSchema(),
+			CollectionID:   collID,
+			CollectionName: collName,
+			ShardsNum:      common.DefaultShardsNum,
+		}, nil)
+	mockbIO := &binlogIO{cm, alloc}
+	channel := newChannel("channelname", collID, nil, broker, cm)
+
+	channel.addFlushedSegmentWithPKs(segID1, collID, partID, 2, &storage.Int64FieldData{Data: []UniqueID{1}})
+	channel.addFlushedSegmentWithPKs(segID2, collID, partID, 2, &storage.Int64FieldData{Data: []UniqueID{1}})
+	require.True(t, channel.hasSegment(segID1, true))
+	require.True(t, channel.hasSegment(segID2, true))
+
+	// the same pk for segmentI and segmentII
+	pks := [2]primaryKey{newInt64PrimaryKey(1), newInt64PrimaryKey(2)}
+	iData1 := genInsertDataWithPKs(pks, schemapb.DataType_Int64)
+	iData2 := genInsertDataWithPKs(pks, schemapb.DataType_Int64)
+
+	pk1 := newInt64PrimaryKey(1)
+	dData1 := &DeleteData{
+		Pks:      []primaryKey{pk1},
+		Tss:      []Timestamp{20000},
+		RowCount: 1,
+	}
+	// empty dData2
+	dData2 := &DeleteData{
+		Pks:      []primaryKey{},
+		Tss:      []Timestamp{},
+		RowCount: 0,
+	}
+
+	stats1 := storage.NewPrimaryKeyStats(1, int64(schemapb.DataType_Int64), 1)
+	iPaths1, sPaths1, err := mockbIO.uploadStatsLog(context.TODO(), segID1, partID, iData1, stats1, 1, meta)
+	require.NoError(t, err)
+	dPaths1, err := mockbIO.uploadDeltaLog(context.TODO(), segID1, partID, dData1, meta)
+	require.NoError(t, err)
+	require.Equal(t, 12, len(iPaths1))
+
+	stats2 := storage.NewPrimaryKeyStats(1, int64(schemapb.DataType_Int64), 1)
+	iPaths2, sPaths2, err := mockbIO.uploadStatsLog(context.TODO(), segID2, partID, iData2, stats2, 1, meta)
+	require.NoError(t, err)
+	dPaths2, err := mockbIO.uploadDeltaLog(context.TODO(), segID2, partID, dData2, meta)
+	require.NoError(t, err)
+	require.Equal(t, 12, len(iPaths2))
+
+	plan := &datapb.CompactionPlan{
+		PlanID: 20080,
+		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+			{
+				SegmentID:           segID1,
+				FieldBinlogs:        lo.Values(iPaths1),
+				Field2StatslogPaths: lo.Values(sPaths1),
+				Deltalogs:           dPaths1,
+			},
+			{
+				SegmentID:           segID2,
+				FieldBinlogs:        lo.Values(iPaths2),
+				Field2StatslogPaths: lo.Values(sPaths2),
+				Deltalogs:           dPaths2,
+			},
+		},
+		StartTime:        0,
+		TimeoutInSeconds: 10,
+		Type:             datapb.CompactionType_MergeCompaction,
+		Channel:          "channelname",
+	}
+
+	t.Run("invalid log path", func(t *testing.T) {
+		mockfm := &mockFlushManager{
+			segpacks: map[int64]*segmentFlushPack{segID1: {
+				segmentID: segID1,
+				statsLogs: map[int64][]*datapb.Binlog{
+					106: {&datapb.Binlog{
+						LogPath: "????", // invalid log path
+					}},
+				},
+			}},
+		}
+
+		task := newCompactionTask(context.TODO(), mockbIO, mockbIO, channel, mockfm, alloc, plan, cm)
+		_, err = task.compact()
+		assert.NoError(t, err)
+		assert.Error(t, mockfm.segpacks[segID1].err)
+	})
+
+	t.Run("invalid log id", func(t *testing.T) {
+		mockfm := &mockFlushManager{
+			segpacks: map[int64]*segmentFlushPack{segID1: {
+				segmentID: segID1,
+				statsLogs: map[int64][]*datapb.Binlog{
+					106: {&datapb.Binlog{
+						LogPath: "test/????", // invalid log id
+					}},
+				},
+			}},
+		}
+
+		task := newCompactionTask(context.TODO(), mockbIO, mockbIO, channel, mockfm, alloc, plan, cm)
+		_, err := task.compact()
+		assert.NoError(t, err)
+		assert.Error(t, mockfm.segpacks[segID1].err)
+	})
+
+	t.Run("invalid fieldID", func(t *testing.T) {
+		mockfm := &mockFlushManager{
+			segpacks: map[int64]*segmentFlushPack{segID1: {
+				segmentID: segID1,
+				statsLogs: map[int64][]*datapb.Binlog{
+					106: {&datapb.Binlog{
+						LogPath: "test/????/1001", // invalid fieldID
+					}},
+				},
+			}},
+		}
+
+		task := newCompactionTask(context.TODO(), mockbIO, mockbIO, channel, mockfm, alloc, plan, cm)
+		_, err = task.compact()
+		assert.NoError(t, err)
+		assert.Error(t, mockfm.segpacks[segID1].err)
+	})
+	iFlushPaths1, sFlushPaths1, err := mockbIO.uploadStatsLog(context.TODO(), segID1, partID, iData1, stats1, 1, meta)
+	require.NoError(t, err)
+	require.Equal(t, 12, len(iFlushPaths1))
+	t.Run("read chunk manager failed", func(t *testing.T) {
+		mockCm := mocks.NewChunkManager(t)
+		mockCm.EXPECT().RootPath().Return("mockRoot/")
+		mockCm.EXPECT().Read(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error"))
+
+		mockfm := &mockFlushManager{
+			segpacks: map[int64]*segmentFlushPack{segID1: {
+				segmentID: segID1,
+				insertLogs: lo.MapValues(iFlushPaths1, func(binlog *datapb.FieldBinlog, id int64) *datapb.Binlog {
+					return binlog.GetBinlogs()[0]
+				}),
+				statsLogs: lo.MapValues(sFlushPaths1, func(binlog *datapb.FieldBinlog, id int64) []*datapb.Binlog {
+					return binlog.GetBinlogs()
+				}),
+			}},
+		}
+
+		task := newCompactionTask(context.TODO(), mockbIO, mockbIO, channel, mockfm, alloc, plan, mockCm)
+		_, err = task.compact()
+		assert.NoError(t, err)
+		assert.Error(t, mockfm.segpacks[segID1].err)
+	})
+
+	t.Run("write chunk manager failed", func(t *testing.T) {
+		mockCm := mocks.NewChunkManager(t)
+		mockCm.EXPECT().RootPath().Return("mockRoot/")
+		mockCm.EXPECT().Read(mock.Anything, mock.Anything).Return(nil, nil)
+		mockCm.EXPECT().Write(mock.Anything, mock.Anything, mock.Anything).Return(fmt.Errorf("mock error"))
+
+		mockfm := &mockFlushManager{
+			segpacks: map[int64]*segmentFlushPack{segID1: {
+				segmentID: segID1,
+				insertLogs: lo.MapValues(iFlushPaths1, func(binlog *datapb.FieldBinlog, id int64) *datapb.Binlog {
+					return binlog.GetBinlogs()[0]
+				}),
+				statsLogs: lo.MapValues(sFlushPaths1, func(binlog *datapb.FieldBinlog, id int64) []*datapb.Binlog {
+					return binlog.GetBinlogs()
+				}),
+			}},
+		}
+
+		task := newCompactionTask(context.TODO(), mockbIO, mockbIO, channel, mockfm, alloc, plan, mockCm)
+		_, err = task.compact()
+		assert.NoError(t, err)
+	})
+}
+
 type mockFlushManager struct {
 	sleepSeconds     int32
 	returnError      bool
 	recordFlushedSeg bool
 	flushedSegIDs    []UniqueID
 	full             bool
+	segpacks         map[int64]*segmentFlushPack
 	injectOverCount  struct {
 		sync.RWMutex
 		value int
@@ -1062,6 +1372,11 @@ func (mfm *mockFlushManager) isFull() bool {
 func (mfm *mockFlushManager) injectFlush(injection *taskInjection, segments ...UniqueID) {
 	go func() {
 		time.Sleep(time.Second * time.Duration(mfm.sleepSeconds))
+		for _, segment := range segments {
+			if pack, ok := mfm.segpacks[segment]; ok {
+				injection.postInjection(pack)
+			}
+		}
 		// injection.injected <- struct{}{}
 		close(injection.injected)
 		<-injection.injectOver

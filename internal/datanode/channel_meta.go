@@ -19,7 +19,6 @@ package datanode
 import (
 	"context"
 	"math"
-	"path"
 	"sync"
 	"time"
 
@@ -394,30 +393,7 @@ func (c *ChannelMeta) loadStats(ctx context.Context, segmentID int64, collection
 		}
 	}
 
-	// filter stats binlog files which is pk field stats log
-	bloomFilterFiles := []string{}
-	logType := storage.DefaultStatsType
-
-	for _, binlog := range statsBinlogs {
-		if binlog.FieldID != pkField {
-			continue
-		}
-	Loop:
-		for _, log := range binlog.GetBinlogs() {
-			_, logidx := path.Split(log.GetLogPath())
-			// if special status log exist
-			// only load one file
-			switch logidx {
-			case storage.CompoundStatsType.LogIdx():
-				bloomFilterFiles = []string{log.GetLogPath()}
-				logType = storage.CompoundStatsType
-				break Loop
-			default:
-				bloomFilterFiles = append(bloomFilterFiles, log.GetLogPath())
-			}
-		}
-	}
-
+	bloomFilterFiles, logType := filterPKStatsBinlogs(pkField, statsBinlogs)
 	// no stats log to parse, initialize a new BF
 	if len(bloomFilterFiles) == 0 {
 		log.Warn("no stats files to load")

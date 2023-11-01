@@ -847,7 +847,7 @@ func checkBinlogs(binlogType storage.BinlogType, segmentID typeutil.UniqueID, lo
 func hasSepcialStatslog(logs *datapb.FieldBinlog) bool {
 	for _, statslog := range logs.Binlogs {
 		_, logidx := path.Split(statslog.LogPath)
-		if logidx == storage.CompoundStatsType.LogIdx() {
+		if logidx == fmt.Sprint(storage.CompoundStatsType.GetLogID()) {
 			return true
 		}
 	}
