@@ -19,6 +19,7 @@ package storage
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"testing"
@@ -127,12 +128,64 @@ func TestAzureObjectStorage(t *testing.T) {
 
 		for _, test := range loadWithPrefixTests {
 			t.Run(test.description, func(t *testing.T) {
-				gotk, err := testCM.ListObjects(ctx, config.bucketName, test.prefix, false)
+				gotk, _, err := testCM.ListObjects(ctx, config.bucketName, test.prefix, false)
 				assert.NoError(t, err)
 				assert.Equal(t, len(test.expectedValue), len(gotk))
-				for key := range gotk {
+				for _, key := range gotk {
 					err := testCM.RemoveObject(ctx, config.bucketName, key)
 					assert.NoError(t, err)
+				}
+			})
+		}
+	})
+
+	t.Run("test list", func(t *testing.T) {
+		testCM, err := newAzureObjectStorageWithConfig(ctx, &config)
+		assert.Equal(t, err, nil)
+		defer testCM.DeleteContainer(ctx, config.bucketName, &azblob.DeleteContainerOptions{})
+
+		prepareTests := []struct {
+			valid bool
+			key   string
+			value []byte
+		}{
+			{false, "abc/", []byte("123")},
+			{true, "abc/d", []byte("1234")},
+			{false, "abc/d/e", []byte("12345")},
+			{true, "abc/e/d", []byte("12354")},
+			{true, "key_/1/1", []byte("111")},
+			{true, "key_/1/2", []byte("222")},
+			{false, "key_/1/2/3", []byte("333")},
+			{true, "key_/2/3", []byte("333")},
+		}
+
+		for _, test := range prepareTests {
+			err := testCM.PutObject(ctx, config.bucketName, test.key, bytes.NewReader(test.value), int64(len(test.value)))
+			require.Nil(t, err)
+			if !test.valid {
+				err := testCM.RemoveObject(ctx, config.bucketName, test.key)
+				require.Nil(t, err)
+			}
+		}
+
+		insertWithPrefixTests := []struct {
+			recursive     bool
+			prefix        string
+			expectedValue []string
+		}{
+			{true, "abc/", []string{"abc/d", "abc/e/d"}},
+			{true, "key_/", []string{"key_/1/1", "key_/1/2", "key_/2/3"}},
+			{false, "abc/", []string{"abc/d", "abc/e/"}},
+			{false, "key_/", []string{"key_/1/", "key_/2/"}},
+		}
+
+		for _, test := range insertWithPrefixTests {
+			t.Run(fmt.Sprintf("prefix: %s, recursive: %t", test.prefix, test.recursive), func(t *testing.T) {
+				gotk, _, err := testCM.ListObjects(ctx, config.bucketName, test.prefix, test.recursive)
+				assert.NoError(t, err)
+				assert.Equal(t, len(test.expectedValue), len(gotk))
+				for _, key := range gotk {
+					assert.Contains(t, test.expectedValue, key)
 				}
 			})
 		}
