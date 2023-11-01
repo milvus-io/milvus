@@ -32,6 +32,7 @@ type SegmentInfo struct {
 	startPosRecorded bool
 	numOfRows        int64
 	bfs              *BloomFilterSet
+	compactTo        int64
 }
 
 func (s *SegmentInfo) SegmentID() int64 {
@@ -62,6 +63,10 @@ func (s *SegmentInfo) GetHistory() []*storage.PkStatistics {
 	return s.bfs.GetHistory()
 }
 
+func (s *SegmentInfo) CompactTo() int64 {
+	return s.compactTo
+}
+
 func (s *SegmentInfo) Clone() *SegmentInfo {
 	return &SegmentInfo{
 		segmentID:        s.segmentID,
@@ -72,6 +77,7 @@ func (s *SegmentInfo) Clone() *SegmentInfo {
 		startPosRecorded: s.startPosRecorded,
 		numOfRows:        s.numOfRows,
 		bfs:              s.bfs,
+		compactTo:        s.compactTo,
 	}
 }
 

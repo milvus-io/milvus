@@ -75,6 +75,21 @@ func (t *SyncTask) Run() error {
 	log := t.getLogger()
 	var err error
 
+	infos := t.metacache.GetSegmentsBy(metacache.WithSegmentID(t.segmentID))
+	if len(infos) == 0 {
+		log.Warn("failed to sync data, segment not found in metacache")
+		t.handleError(err)
+		return merr.WrapErrSegmentNotFound(t.segmentID)
+	}
+
+	segment := infos[0]
+	if segment.CompactTo() > 0 {
+		log.Info("syncing segment compacted, update segment id", zap.Int64("compactTo", segment.CompactTo()))
+		// update sync task segment id
+		// it's ok to use compactTo segmentID here, since there shall be no insert for compacted segment
+		t.segmentID = segment.CompactTo()
+	}
+
 	err = t.serializeInsertData()
 	if err != nil {
 		log.Warn("failed to serialize insert data", zap.Error(err))

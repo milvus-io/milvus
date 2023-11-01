@@ -34,6 +34,8 @@ type SyncMeta struct {
 
 type SyncManager interface {
 	SyncData(ctx context.Context, task *SyncTask) error
+	Block(segmentID int64)
+	Unblock(segmentID int64)
 }
 
 type syncManager struct {
@@ -61,4 +63,12 @@ func (mgr syncManager) SyncData(ctx context.Context, task *SyncTask) error {
 	mgr.Submit(task.segmentID, task)
 
 	return nil
+}
+
+func (mgr syncManager) Block(segmentID int64) {
+	mgr.keyLock.Lock(segmentID)
+}
+
+func (mgr syncManager) Unblock(segmentID int64) {
+	mgr.keyLock.Unlock(segmentID)
 }

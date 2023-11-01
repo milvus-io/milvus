@@ -73,6 +73,12 @@ func RollStats() SegmentAction {
 	}
 }
 
+func CompactTo(compactTo int64) SegmentAction {
+	return func(info *SegmentInfo) {
+		info.compactTo = compactTo
+	}
+}
+
 // MergeSegmentAction is the util function to merge multiple SegmentActions into one.
 func MergeSegmentAction(actions ...SegmentAction) SegmentAction {
 	return func(info *SegmentInfo) {
