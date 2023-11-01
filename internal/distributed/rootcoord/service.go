@@ -238,12 +238,12 @@ func (s *Server) startGrpc(port int) error {
 
 func (s *Server) startGrpcLoop(port int) {
 	defer s.wg.Done()
-	var kaep = keepalive.EnforcementPolicy{
+	kaep := keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
 		PermitWithoutStream: true,            // Allow pings even when there are no active streams
 	}
 
-	var kasp = keepalive.ServerParameters{
+	kasp := keepalive.ServerParameters{
 		Time:    60 * time.Second, // Ping the client if it is idle for 60 seconds to ensure the connection is still active
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
@@ -319,6 +319,15 @@ func (s *Server) Stop() error {
 	if s.etcdCli != nil {
 		defer s.etcdCli.Close()
 	}
+
+	log.Info("Rootcoord begin to stop grpc server")
+	s.cancel()
+	if s.grpcServer != nil {
+		log.Info("Graceful stop grpc server...")
+		s.grpcServer.GracefulStop()
+	}
+	s.wg.Wait()
+
 	if s.indexCoord != nil {
 		if err := s.indexCoord.Stop(); err != nil {
 			log.Error("Failed to close indexCoord client", zap.Error(err))
@@ -339,13 +348,7 @@ func (s *Server) Stop() error {
 			log.Error("Failed to close close rootCoord", zap.Error(err))
 		}
 	}
-	log.Info("Rootcoord begin to stop grpc server")
-	s.cancel()
-	if s.grpcServer != nil {
-		log.Info("Graceful stop grpc server...")
-		s.grpcServer.GracefulStop()
-	}
-	s.wg.Wait()
+
 	return nil
 }
 

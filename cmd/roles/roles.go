@@ -98,7 +98,8 @@ func runComponent[T component](ctx context.Context,
 	params *paramtable.ComponentParam,
 	extraInit func(),
 	creator func(context.Context, dependency.Factory) (T, error),
-	metricRegister func(*prometheus.Registry)) component {
+	metricRegister func(*prometheus.Registry),
+) component {
 	var role T
 
 	sign := make(chan struct{})
@@ -336,9 +337,12 @@ func (mr *MilvusRoles) Run() {
 		rootCoord = mr.runRootCoord(ctx, local)
 	}
 
-	if mr.EnableProxy {
-		pctx := log.WithModule(ctx, "Proxy")
-		proxy = mr.runProxy(pctx, local, alias)
+	if mr.EnableDataCoord {
+		dataCoord = mr.runDataCoord(ctx, local)
+	}
+
+	if mr.EnableIndexCoord {
+		indexCoord = mr.runIndexCoord(ctx, local)
 	}
 
 	if mr.EnableQueryCoord {
@@ -349,54 +353,40 @@ func (mr *MilvusRoles) Run() {
 		queryNode = mr.runQueryNode(ctx, local, alias)
 	}
 
-	if mr.EnableDataCoord {
-		dataCoord = mr.runDataCoord(ctx, local)
-	}
-
 	if mr.EnableDataNode {
 		dataNode = mr.runDataNode(ctx, local, alias)
-	}
-
-	if mr.EnableIndexCoord {
-		indexCoord = mr.runIndexCoord(ctx, local)
 	}
 
 	if mr.EnableIndexNode {
 		indexNode = mr.runIndexNode(ctx, local, alias)
 	}
 
+	if mr.EnableProxy {
+		pctx := log.WithModule(ctx, "Proxy")
+		proxy = mr.runProxy(pctx, local, alias)
+	}
+
 	metrics.Register(Registry)
 
 	<-mr.closed
 
-	var wg sync.WaitGroup
 	// stop coordinators first
 	//	var component
-	coordinators := []component{rootCoord, queryCoord, dataCoord, indexCoord}
+	coordinators := []component{rootCoord, dataCoord, indexCoord, queryCoord}
 	for _, coord := range coordinators {
 		if coord != nil {
-			wg.Add(1)
-			go func(coord component) {
-				defer wg.Done()
-				coord.Stop()
-			}(coord)
+			coord.Stop()
 		}
 	}
-	wg.Wait()
 	log.Info("All coordinators have stopped")
 
 	// stop nodes
-	nodes := []component{queryNode, indexNode, dataNode}
+	nodes := []component{queryNode, dataNode, indexNode}
 	for _, node := range nodes {
 		if node != nil {
-			wg.Add(1)
-			go func(node component) {
-				defer wg.Done()
-				node.Stop()
-			}(node)
+			node.Stop()
 		}
 	}
-	wg.Wait()
 	log.Info("All nodes have stopped")
 
 	// stop proxy
