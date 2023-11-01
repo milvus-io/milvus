@@ -434,6 +434,24 @@ func (s *DelegatorSuite) TestSearch() {
 		s.Error(err)
 	})
 
+	s.Run("distribution_not_serviceable", func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		sd, ok := s.delegator.(*shardDelegator)
+		s.Require().True(ok)
+		sd.distribution.AddOfflines(1001)
+
+		_, err := s.delegator.Search(ctx, &querypb.SearchRequest{
+			Req: &internalpb.SearchRequest{
+				Base: commonpbutil.NewMsgBase(),
+			},
+			DmlChannels: []string{s.vchannelName},
+		})
+
+		s.Error(err)
+	})
+
 	s.Run("cluster_not_serviceable", func() {
 		s.delegator.Close()
 
@@ -598,6 +616,22 @@ func (s *DelegatorSuite) TestQuery() {
 		_, err := s.delegator.Query(ctx, &querypb.QueryRequest{
 			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{"non_exist_channel"},
+		})
+
+		s.Error(err)
+	})
+
+	s.Run("distribution_not_serviceable", func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		sd, ok := s.delegator.(*shardDelegator)
+		s.Require().True(ok)
+		sd.distribution.AddOfflines(1001)
+
+		_, err := s.delegator.Query(ctx, &querypb.QueryRequest{
+			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+			DmlChannels: []string{s.vchannelName},
 		})
 
 		s.Error(err)
@@ -865,6 +899,25 @@ func (s *DelegatorSuite) TestQueryStream() {
 		s.Error(err)
 	})
 
+	s.Run("distribution_not_serviceable", func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		sd, ok := s.delegator.(*shardDelegator)
+		s.Require().True(ok)
+		sd.distribution.AddOfflines(1001)
+
+		client := streamrpc.NewLocalQueryClient(ctx)
+		server := client.CreateServer()
+
+		// run stream function
+		err := s.delegator.QueryStream(ctx, &querypb.QueryRequest{
+			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+			DmlChannels: []string{s.vchannelName},
+		}, server)
+		s.Error(err)
+	})
+
 	s.Run("cluster_not_serviceable", func() {
 		s.delegator.Close()
 
@@ -1018,6 +1071,22 @@ func (s *DelegatorSuite) TestGetStats() {
 		_, err := s.delegator.GetStatistics(ctx, &querypb.GetStatisticsRequest{
 			Req:         &internalpb.GetStatisticsRequest{Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{"non_exist_channel"},
+		})
+
+		s.Error(err)
+	})
+
+	s.Run("distribution_not_serviceable", func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		sd, ok := s.delegator.(*shardDelegator)
+		s.Require().True(ok)
+		sd.distribution.AddOfflines(1001)
+
+		_, err := s.delegator.GetStatistics(ctx, &querypb.GetStatisticsRequest{
+			Req:         &internalpb.GetStatisticsRequest{Base: commonpbutil.NewMsgBase()},
+			DmlChannels: []string{s.vchannelName},
 		})
 
 		s.Error(err)

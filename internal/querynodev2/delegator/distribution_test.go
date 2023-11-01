@@ -177,11 +177,12 @@ func (s *DistributionSuite) TestAddDistribution() {
 			s.SetupTest()
 			defer s.TearDownTest()
 			s.dist.AddGrowing(tc.growing...)
-			_, _, version := s.dist.GetSegments(false)
+			_, _, version, err := s.dist.PinReadableSegments()
+			s.Require().NoError(err)
 			s.dist.AddDistributions(tc.input...)
 			sealed, _ := s.dist.PeekSegments(false)
 			s.compareSnapshotItems(tc.expected, sealed)
-			s.dist.FinishUsage(version)
+			s.dist.Unpin(version)
 		})
 	}
 }
@@ -246,8 +247,9 @@ func (s *DistributionSuite) TestAddGrowing() {
 			defer s.TearDownTest()
 
 			s.dist.AddGrowing(tc.input...)
-			_, growing, version := s.dist.GetSegments(false)
-			defer s.dist.FinishUsage(version)
+			_, growing, version, err := s.dist.PinReadableSegments()
+			s.Require().NoError(err)
+			defer s.dist.Unpin(version)
 
 			s.ElementsMatch(tc.expected, growing)
 		})
@@ -433,7 +435,9 @@ func (s *DistributionSuite) TestRemoveDistribution() {
 
 			var version int64
 			if tc.withMockRead {
-				_, _, version = s.dist.GetSegments(false)
+				var err error
+				_, _, version, err = s.dist.PinReadableSegments()
+				s.Require().NoError(err)
 			}
 
 			ch := s.dist.RemoveDistributions(tc.removalSealed, tc.removalGrowing)
@@ -446,7 +450,7 @@ func (s *DistributionSuite) TestRemoveDistribution() {
 				default:
 				}
 
-				s.dist.FinishUsage(version)
+				s.dist.Unpin(version)
 			}
 			// check ch close very soon
 			timeout := time.NewTimer(time.Second)
@@ -457,8 +461,8 @@ func (s *DistributionSuite) TestRemoveDistribution() {
 			case <-ch:
 			}
 
-			sealed, growing, version := s.dist.GetSegments(false)
-			defer s.dist.FinishUsage(version)
+			sealed, growing, version := s.dist.PinOnlineSegments()
+			defer s.dist.Unpin(version)
 			s.compareSnapshotItems(tc.expectSealed, sealed)
 			s.ElementsMatch(tc.expectGrowing, growing)
 		})
@@ -468,13 +472,15 @@ func (s *DistributionSuite) TestRemoveDistribution() {
 func (s *DistributionSuite) TestPeek() {
 	type testCase struct {
 		tag      string
+		readable bool
 		input    []SegmentEntry
 		expected []SnapshotItem
 	}
 
 	cases := []testCase{
 		{
-			tag: "one node",
+			tag:      "one_node",
+			readable: false,
 			input: []SegmentEntry{
 				{
 					NodeID:    1,
@@ -504,7 +510,8 @@ func (s *DistributionSuite) TestPeek() {
 			},
 		},
 		{
-			tag: "multiple nodes",
+			tag:      "multiple_nodes",
+			readable: false,
 			input: []SegmentEntry{
 				{
 					NodeID:    1,
@@ -548,6 +555,34 @@ func (s *DistributionSuite) TestPeek() {
 				},
 			},
 		},
+		{
+			tag:      "peek_readable",
+			readable: true,
+			input: []SegmentEntry{
+				{
+					NodeID:    1,
+					SegmentID: 1,
+				},
+				{
+					NodeID:    2,
+					SegmentID: 2,
+				},
+				{
+					NodeID:    1,
+					SegmentID: 3,
+				},
+			},
+			expected: []SnapshotItem{
+				{
+					NodeID:   1,
+					Segments: []SegmentEntry{},
+				},
+				{
+					NodeID:   2,
+					Segments: []SegmentEntry{},
+				},
+			},
+		},
 	}
 
 	for _, tc := range cases {
@@ -558,7 +593,7 @@ func (s *DistributionSuite) TestPeek() {
 			// peek during lock
 			s.dist.AddDistributions(tc.input...)
 			s.dist.mut.Lock()
-			sealed, _ := s.dist.PeekSegments(false)
+			sealed, _ := s.dist.PeekSegments(tc.readable)
 			s.compareSnapshotItems(tc.expected, sealed)
 			s.dist.mut.Unlock()
 		})
@@ -668,11 +703,12 @@ func (s *DistributionSuite) Test_SyncTargetVersion() {
 	s.dist.AddDistributions(sealed...)
 	s.dist.SyncTargetVersion(2, []int64{2, 3}, []int64{6}, []int64{})
 
-	s1, s2, _ := s.dist.GetSegments(true)
+	s1, s2, _, err := s.dist.PinReadableSegments()
+	s.Require().NoError(err)
 	s.Len(s1[0].Segments, 1)
 	s.Len(s2, 2)
 
-	s1, s2, _ = s.dist.GetSegments(false)
+	s1, s2, _ = s.dist.PinOnlineSegments()
 	s.Len(s1[0].Segments, 3)
 	s.Len(s2, 3)
 
@@ -684,8 +720,8 @@ func (s *DistributionSuite) Test_SyncTargetVersion() {
 	s.False(s.dist.Serviceable())
 
 	s.dist.SyncTargetVersion(2, []int64{}, []int64{333}, []int64{1, 2, 3})
-	_, segments, _ := s.dist.GetSegments(true)
-	s.Len(segments, 0)
+	_, _, _, err = s.dist.PinReadableSegments()
+	s.Error(err)
 }
 
 func TestDistributionSuite(t *testing.T) {
