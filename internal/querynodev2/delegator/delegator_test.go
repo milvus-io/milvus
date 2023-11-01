@@ -155,7 +155,7 @@ func (s *DelegatorSuite) SetupTest() {
 
 	var err error
 	//	s.delegator, err = NewShardDelegator(s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.tsafeManager, s.loader)
-	s.delegator, err = NewShardDelegator(s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.tsafeManager, s.loader, &msgstream.MockMqFactory{
+	s.delegator, err = NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.tsafeManager, s.loader, &msgstream.MockMqFactory{
 		NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
 			return s.mq, nil
 		},
@@ -1046,7 +1046,7 @@ func TestDelegatorWatchTsafe(t *testing.T) {
 	channelName := "default_dml_channel"
 
 	tsafeManager := tsafe.NewTSafeReplica()
-	tsafeManager.Add(channelName, 100)
+	tsafeManager.Add(context.Background(), channelName, 100)
 	sd := &shardDelegator{
 		tsafeManager: tsafeManager,
 		vchannelName: channelName,
@@ -1073,7 +1073,7 @@ func TestDelegatorTSafeListenerClosed(t *testing.T) {
 	channelName := "default_dml_channel"
 
 	tsafeManager := tsafe.NewTSafeReplica()
-	tsafeManager.Add(channelName, 100)
+	tsafeManager.Add(context.Background(), channelName, 100)
 	sd := &shardDelegator{
 		tsafeManager: tsafeManager,
 		vchannelName: channelName,
@@ -1098,7 +1098,7 @@ func TestDelegatorTSafeListenerClosed(t *testing.T) {
 	case <-time.After(time.Millisecond * 10):
 	}
 
-	tsafeManager.Remove(channelName)
+	tsafeManager.Remove(context.Background(), channelName)
 
 	select {
 	case <-signal:

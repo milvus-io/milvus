@@ -17,6 +17,7 @@
 package tsafe
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -43,7 +44,7 @@ func (suite *TSafeTestSuite) SetupTest() {
 
 // test Basic use of TSafeReplica
 func (suite *TSafeTestSuite) TestBasic() {
-	suite.tSafeReplica.Add(suite.channel, ZeroTimestamp)
+	suite.tSafeReplica.Add(context.Background(), suite.channel, ZeroTimestamp)
 	t, err := suite.tSafeReplica.Get(suite.channel)
 	suite.NoError(err)
 	suite.Equal(ZeroTimestamp, t)
@@ -75,12 +76,12 @@ func (suite *TSafeTestSuite) TestBasic() {
 }
 
 func (suite *TSafeTestSuite) TestRemoveAndInvalid() {
-	suite.tSafeReplica.Add(suite.channel, ZeroTimestamp)
+	suite.tSafeReplica.Add(context.Background(), suite.channel, ZeroTimestamp)
 	t, err := suite.tSafeReplica.Get(suite.channel)
 	suite.NoError(err)
 	suite.Equal(ZeroTimestamp, t)
 
-	suite.tSafeReplica.Remove(suite.channel)
+	suite.tSafeReplica.Remove(context.Background(), suite.channel)
 	_, err = suite.tSafeReplica.Get(suite.channel)
 	suite.Error(err)
 

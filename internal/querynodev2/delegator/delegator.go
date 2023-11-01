@@ -618,11 +618,11 @@ func (sd *shardDelegator) Close() {
 }
 
 // NewShardDelegator creates a new ShardDelegator instance with all fields initialized.
-func NewShardDelegator(collectionID UniqueID, replicaID UniqueID, channel string, version int64,
+func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID UniqueID, channel string, version int64,
 	workerManager cluster.Manager, manager *segments.Manager, tsafeManager tsafe.Manager, loader segments.Loader,
 	factory msgstream.Factory, startTs uint64,
 ) (ShardDelegator, error) {
-	log := log.With(zap.Int64("collectionID", collectionID),
+	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID),
 		zap.Int64("replicaID", replicaID),
 		zap.String("channel", channel),
 		zap.Int64("version", version),
