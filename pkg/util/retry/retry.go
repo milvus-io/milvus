@@ -53,6 +53,12 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 				return el
 			}
 
+			deadline, ok := ctx.Deadline()
+			if ok && time.Until(deadline) < c.sleep {
+				// to avoid sleep until ctx done
+				return el
+			}
+
 			select {
 			case <-time.After(c.sleep):
 			case <-ctx.Done():
