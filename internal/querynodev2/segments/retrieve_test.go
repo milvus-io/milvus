@@ -21,14 +21,17 @@ import (
 	"io"
 	"testing"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -258,6 +261,86 @@ func (suite *RetrieveSuite) TestRetrieveNilSegment() {
 	suite.ErrorIs(err, merr.ErrSegmentNotLoaded)
 	suite.Len(res, 0)
 	suite.manager.Segment.Unpin(segments)
+}
+
+func (suite *RetrieveSuite) TestRetrieveNilSegment2() {
+	plan, err := genSimpleRetrievePlan(suite.collection)
+	suite.NoError(err)
+
+	// mimic a segment
+	segment := NewMockSegment(suite.T())
+	segment.On("ID").Return(int64(10000))
+	segment.On("Type").Return(commonpb.SegmentState_Sealed)
+	segment.On("Collection").Return(suite.collectionID)
+	segment.On("Partition").Return(suite.sealed.partitionID)
+	segment.On("Indexes").Return(suite.sealed.Indexes())
+	segment.On("RowNum").Return(suite.sealed.RowNum())
+	segment.On("RLock").Return(nil)
+	segment.On("RUnlock").Return(nil)
+
+	suite.manager.Segment.Put(SegmentTypeSealed, segment)
+
+	segment.On("Retrieve", mock.Anything, mock.Anything).Return(conc.NewErrFuture[any](merr.WrapErrSegmentNotLoaded(10000, "segment released")))
+
+	req := &querypb.QueryRequest{
+		Req: &internalpb.RetrieveRequest{
+			CollectionID: suite.collectionID,
+			PartitionIDs: []int64{suite.partitionID},
+		},
+		SegmentIDs: []int64{10000},
+		Scope:      querypb.DataScope_Historical,
+	}
+
+	res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req)
+
+	suite.ErrorIs(err, merr.ErrSegmentNotLoaded)
+	suite.Len(res, 0)
+	suite.manager.Segment.Unpin(segments)
+}
+
+func (suite *RetrieveSuite) TestRetrieveStreamNilSegment() {
+	plan, err := genSimpleRetrievePlan(suite.collection)
+	suite.NoError(err)
+
+	// mimic a segment
+	segment := NewMockSegment(suite.T())
+	segment.On("ID").Return(int64(10000))
+	segment.On("Type").Return(commonpb.SegmentState_Sealed)
+	segment.On("Collection").Return(suite.collectionID)
+	segment.On("Partition").Return(suite.sealed.partitionID)
+	segment.On("Indexes").Return(suite.sealed.Indexes())
+	segment.On("RowNum").Return(suite.sealed.RowNum())
+	segment.On("RLock").Return(nil)
+	segment.On("RUnlock").Return(nil)
+
+	suite.manager.Segment.Put(SegmentTypeSealed, segment)
+
+	segment.On("Retrieve", mock.Anything, mock.Anything).Return(conc.NewErrFuture[any](merr.WrapErrSegmentNotLoaded(10000, "segment released")))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client := streamrpc.NewLocalQueryClient(ctx)
+	server := client.CreateServer()
+
+	req := &querypb.QueryRequest{
+		Req: &internalpb.RetrieveRequest{
+			CollectionID: suite.collectionID,
+			PartitionIDs: []int64{suite.partitionID},
+		},
+		SegmentIDs: []int64{10000},
+		Scope:      querypb.DataScope_Historical,
+	}
+
+	go func() {
+		segments, err := RetrieveStream(ctx, suite.manager, plan, req, server)
+		suite.Error(err)
+		suite.manager.Segment.Unpin(segments)
+		server.FinishSend(err)
+	}()
+
+	_, err = client.Recv()
+	suite.Error(err)
 }
 
 func TestRetrieve(t *testing.T) {

@@ -19,7 +19,6 @@ package segments
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -27,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
@@ -35,88 +35,93 @@ import (
 // retrieveOnSegments performs retrieve on listed segments
 // all segment ids are validated before calling this function
 func retrieveOnSegments(ctx context.Context, segments []Segment, segType SegmentType, plan *RetrievePlan) ([]*segcorepb.RetrieveResults, error) {
-	var (
-		resultCh = make(chan *segcorepb.RetrieveResults, len(segments))
-		errs     = make([]error, len(segments))
-		wg       sync.WaitGroup
-	)
-
 	label := metrics.SealedSegmentLabel
 	if segType == commonpb.SegmentState_Growing {
 		label = metrics.GrowingSegmentLabel
 	}
 
-	for i, segment := range segments {
-		wg.Add(1)
-		go func(seg Segment, i int) {
-			defer wg.Done()
-			tr := timerecord.NewTimeRecorder("retrieveOnSegments")
-			result, err := seg.Retrieve(ctx, plan)
-			if err != nil {
-				errs[i] = err
-				return
-			}
-			errs[i] = nil
-			resultCh <- result
-			metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
-				metrics.QueryLabel, label).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		}(segment, i)
-	}
-	wg.Wait()
-	close(resultCh)
+	tr := timerecord.NewTimeRecorder("retrieveOnSegments")
+	retrieveFutures := make([]*conc.Future[any], 0, len(segments))
 
-	for _, err := range errs {
-		if err != nil {
-			return nil, err
-		}
+	for _, segment := range segments {
+		future := segment.Retrieve(ctx, plan)
+		retrieveFutures = append(retrieveFutures, future)
 	}
 
+	var errorList error
 	var retrieveResults []*segcorepb.RetrieveResults
-	for result := range resultCh {
-		retrieveResults = append(retrieveResults, result)
+	for _, future := range retrieveFutures {
+		result, err := future.Await()
+		if err != nil {
+			// can not early out because we have to handle search result here
+			errorList = merr.Combine(errorList, err)
+			continue
+		}
+		retrieveResults = append(retrieveResults, result.(*segcorepb.RetrieveResults))
 	}
+
+	// TODO we should add failed count for retrieve results.
+
+	// retrieve doesn't need to free result cause it does extra copy in future.
+	// TODO we should defer the copy after reduce so this could save extra copy
+	if errorList != nil {
+		metrics.QueryNodeSQFailCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+			metrics.QueryLabel, label).Inc()
+		return nil, errorList
+	}
+
+	metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+		metrics.QueryLabel, label).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	return retrieveResults, nil
 }
 
 func retrieveOnSegmentsWithStream(ctx context.Context, segments []Segment, segType SegmentType, plan *RetrievePlan, svr streamrpc.QueryStreamServer) error {
-	var (
-		errs = make([]error, len(segments))
-		wg   sync.WaitGroup
-	)
-
 	label := metrics.SealedSegmentLabel
 	if segType == commonpb.SegmentState_Growing {
 		label = metrics.GrowingSegmentLabel
 	}
 
-	for i, segment := range segments {
-		wg.Add(1)
-		go func(segment Segment, i int) {
-			defer wg.Done()
-			seg := segment.(*LocalSegment)
-			tr := timerecord.NewTimeRecorder("retrieveOnSegmentsWithStream")
-			result, err := seg.Retrieve(ctx, plan)
-			if err != nil {
-				errs[i] = err
-				return
-			}
-
-			if err = svr.Send(&internalpb.RetrieveResults{
-				Status:     merr.Success(),
-				Ids:        result.GetIds(),
-				FieldsData: result.GetFieldsData(),
-			}); err != nil {
-				errs[i] = err
-			}
-
-			errs[i] = nil
-			metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
-				metrics.QueryLabel, label).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		}(segment, i)
+	tr := timerecord.NewTimeRecorder("retrieveOnSegmentsWithStream")
+	var errorList error
+	retrieveFutures := make([]*conc.Future[any], 0, len(segments))
+	for _, segment := range segments {
+		future := segment.Retrieve(ctx, plan)
+		retrieveFutures = append(retrieveFutures, future)
 	}
-	wg.Wait()
-	return merr.Combine(errs...)
+
+	for _, future := range retrieveFutures {
+		result, err := future.Await()
+		if err != nil {
+			// can not early out because we have to handle search result here
+			errorList = merr.Combine(errorList, err)
+			continue
+		}
+
+		retrieveResult := result.(*segcorepb.RetrieveResults)
+		err = svr.Send(&internalpb.RetrieveResults{
+			Status:     merr.Success(),
+			Ids:        retrieveResult.GetIds(),
+			FieldsData: retrieveResult.GetFieldsData(),
+		})
+
+		if err != nil {
+			errorList = merr.Combine(errorList, err)
+		}
+	}
+
+	// retrieve doesn't need to free result cause it does extra copy in future.
+	// TODO we should defer the copy after reduce so this could save extra copy
+	if errorList != nil {
+		metrics.QueryNodeSQFailCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+			metrics.QueryLabelStreaming, label).Inc()
+		return errorList
+	}
+
+	metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+		metrics.QueryLabelStreaming, label).Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	return nil
 }
 
 // retrieve will retrieve all the validate target segments

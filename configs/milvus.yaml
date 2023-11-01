@@ -278,18 +278,17 @@ queryNode:
     readAheadPolicy: willneed # The read ahead policy of chunk cache, options: `normal, random, sequential, willneed, dontneed`
   grouping:
     enabled: true
-    maxNQ: 1000
+    maxNQ: 100
     topKMergeRatio: 20
   scheduler:
     receiveChanSize: 10240
     unsolvedQueueSize: 10240
     # maxReadConcurrentRatio is the concurrency ratio of read task (search task and query task).
     # Max read concurrency would be the value of runtime.NumCPU * maxReadConcurrentRatio.
-    # It defaults to 2.0, which means max read concurrency would be the value of runtime.NumCPU * 2.
-    # Max read concurrency must greater than or equal to 1, and less than or equal to runtime.NumCPU * 100.
-    # (0, 100]
+    # It defaults to 1.0, which means max read concurrency would be the value of runtime.NumCPU .
+    # Max read concurrency must greater than or equal to 1, and less than or equal to runtime.NumCPU * 8.
+    # (0, 8.0]
     maxReadConcurrentRatio: 1
-    cpuRatio: 10 # ratio used to estimate read task cpu usage.
     maxTimestampLag: 86400
     # read task schedule policy: fifo(by default), user-task-polling.
     scheduleReadPolicy:

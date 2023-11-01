@@ -3,9 +3,10 @@
 package segments
 
 import (
-	context "context"
-
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	conc "github.com/milvus-io/milvus/pkg/util/conc"
+
+	context "context"
 
 	mock "github.com/stretchr/testify/mock"
 
@@ -716,29 +717,19 @@ func (_c *MockSegment_Release_Call) RunAndReturn(run func()) *MockSegment_Releas
 }
 
 // Retrieve provides a mock function with given fields: ctx, plan
-func (_m *MockSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segcorepb.RetrieveResults, error) {
+func (_m *MockSegment) Retrieve(ctx context.Context, plan *RetrievePlan) *conc.Future[interface{}] {
 	ret := _m.Called(ctx, plan)
 
-	var r0 *segcorepb.RetrieveResults
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *RetrievePlan) (*segcorepb.RetrieveResults, error)); ok {
-		return rf(ctx, plan)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *RetrievePlan) *segcorepb.RetrieveResults); ok {
+	var r0 *conc.Future[interface{}]
+	if rf, ok := ret.Get(0).(func(context.Context, *RetrievePlan) *conc.Future[interface{}]); ok {
 		r0 = rf(ctx, plan)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*segcorepb.RetrieveResults)
+			r0 = ret.Get(0).(*conc.Future[interface{}])
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *RetrievePlan) error); ok {
-		r1 = rf(ctx, plan)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
+	return r0
 }
 
 // MockSegment_Retrieve_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Retrieve'
@@ -760,12 +751,12 @@ func (_c *MockSegment_Retrieve_Call) Run(run func(ctx context.Context, plan *Ret
 	return _c
 }
 
-func (_c *MockSegment_Retrieve_Call) Return(_a0 *segcorepb.RetrieveResults, _a1 error) *MockSegment_Retrieve_Call {
-	_c.Call.Return(_a0, _a1)
+func (_c *MockSegment_Retrieve_Call) Return(_a0 *conc.Future[interface{}]) *MockSegment_Retrieve_Call {
+	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockSegment_Retrieve_Call) RunAndReturn(run func(context.Context, *RetrievePlan) (*segcorepb.RetrieveResults, error)) *MockSegment_Retrieve_Call {
+func (_c *MockSegment_Retrieve_Call) RunAndReturn(run func(context.Context, *RetrievePlan) *conc.Future[interface{}]) *MockSegment_Retrieve_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -812,29 +803,19 @@ func (_c *MockSegment_RowNum_Call) RunAndReturn(run func() int64) *MockSegment_R
 }
 
 // Search provides a mock function with given fields: ctx, searchReq
-func (_m *MockSegment) Search(ctx context.Context, searchReq *SearchRequest) (*SearchResult, error) {
+func (_m *MockSegment) Search(ctx context.Context, searchReq *SearchRequest) *conc.Future[interface{}] {
 	ret := _m.Called(ctx, searchReq)
 
-	var r0 *SearchResult
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *SearchRequest) (*SearchResult, error)); ok {
-		return rf(ctx, searchReq)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *SearchRequest) *SearchResult); ok {
+	var r0 *conc.Future[interface{}]
+	if rf, ok := ret.Get(0).(func(context.Context, *SearchRequest) *conc.Future[interface{}]); ok {
 		r0 = rf(ctx, searchReq)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*SearchResult)
+			r0 = ret.Get(0).(*conc.Future[interface{}])
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *SearchRequest) error); ok {
-		r1 = rf(ctx, searchReq)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
+	return r0
 }
 
 // MockSegment_Search_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Search'
@@ -856,12 +837,12 @@ func (_c *MockSegment_Search_Call) Run(run func(ctx context.Context, searchReq *
 	return _c
 }
 
-func (_c *MockSegment_Search_Call) Return(_a0 *SearchResult, _a1 error) *MockSegment_Search_Call {
-	_c.Call.Return(_a0, _a1)
+func (_c *MockSegment_Search_Call) Return(_a0 *conc.Future[interface{}]) *MockSegment_Search_Call {
+	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockSegment_Search_Call) RunAndReturn(run func(context.Context, *SearchRequest) (*SearchResult, error)) *MockSegment_Search_Call {
+func (_c *MockSegment_Search_Call) RunAndReturn(run func(context.Context, *SearchRequest) *conc.Future[interface{}]) *MockSegment_Search_Call {
 	_c.Call.Return(run)
 	return _c
 }

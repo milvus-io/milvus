@@ -20,12 +20,16 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -153,6 +157,31 @@ func (suite *SearchSuite) TestSearchGrowing() {
 	)
 	suite.NoError(err)
 	suite.Len(res, 1)
+	suite.manager.Segment.Unpin(segments)
+}
+
+func (suite *RetrieveSuite) TestSearchNilSegment() {
+	// mimic a segment
+	segment := NewMockSegment(suite.T())
+	segment.On("ID").Return(int64(10000))
+	segment.On("Type").Return(commonpb.SegmentState_Sealed)
+	segment.On("Collection").Return(suite.collectionID)
+	segment.On("Partition").Return(suite.sealed.partitionID)
+	segment.On("Indexes").Return(suite.sealed.Indexes())
+	segment.On("RowNum").Return(suite.sealed.RowNum())
+	segment.On("ExistIndex", mock.Anything).Return(true)
+	segment.On("RLock").Return(nil)
+	segment.On("RUnlock").Return(nil)
+
+	suite.manager.Segment.Put(SegmentTypeSealed, segment)
+
+	segment.On("Search", mock.Anything, mock.Anything).Return(conc.NewErrFuture[any](merr.WrapErrSegmentNotLoaded(10000, "segment released")))
+
+	searchReq, err := genSearchPlanAndRequests(suite.collection, []int64{suite.sealed.ID()}, IndexFaissIDMap, 1)
+	suite.NoError(err)
+
+	_, segments, err := SearchHistorical(context.TODO(), suite.manager, searchReq, suite.collectionID, nil, []int64{10000})
+	suite.ErrorIs(err, merr.ErrSegmentNotLoaded)
 	suite.manager.Segment.Unpin(segments)
 }
 

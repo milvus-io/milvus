@@ -1,7 +1,5 @@
 package tasks
 
-// TODO: rename this file into search_task.go
-
 import (
 	"bytes"
 	"context"

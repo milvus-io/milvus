@@ -174,8 +174,8 @@ type RetrievePlan struct {
 }
 
 func NewRetrievePlan(col *Collection, expr []byte, timestamp Timestamp, msgID UniqueID) (*RetrievePlan, error) {
-	col.mu.RLock()
-	defer col.mu.RUnlock()
+	col.RLock()
+	defer col.RUnlock()
 
 	if col.collectionPtr == nil {
 		return nil, merr.WrapErrCollectionNotFound(col.id, "collection released")

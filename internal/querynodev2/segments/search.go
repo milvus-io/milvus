@@ -19,13 +19,14 @@ package segments
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
@@ -33,59 +34,49 @@ import (
 // searchOnSegments performs search on listed segments
 // all segment ids are validated before calling this function
 func searchSegments(ctx context.Context, segments []Segment, segType SegmentType, searchReq *SearchRequest) ([]*SearchResult, error) {
-	var (
-		// results variables
-		resultCh = make(chan *SearchResult, len(segments))
-		errs     = make([]error, len(segments))
-		wg       sync.WaitGroup
-
-		// For log only
-		mu                   sync.Mutex
-		segmentsWithoutIndex []int64
-	)
-
+	var segmentsWithoutIndex []int64
 	searchLabel := metrics.SealedSegmentLabel
 	if segType == commonpb.SegmentState_Growing {
 		searchLabel = metrics.GrowingSegmentLabel
 	}
 
+	tr := timerecord.NewTimeRecorder("searchOnSegments")
 	// calling segment search in goroutines
-	for i, segment := range segments {
-		wg.Add(1)
-		go func(seg Segment, i int) {
-			defer wg.Done()
-			if !seg.ExistIndex(searchReq.searchFieldID) {
-				mu.Lock()
-				segmentsWithoutIndex = append(segmentsWithoutIndex, seg.ID())
-				mu.Unlock()
-			}
-			// record search time
-			tr := timerecord.NewTimeRecorder("searchOnSegments")
-			searchResult, err := seg.Search(ctx, searchReq)
-			errs[i] = err
-			resultCh <- searchResult
-			// update metrics
-			elapsed := tr.ElapseSpan().Milliseconds()
-			metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
-				metrics.SearchLabel, searchLabel).Observe(float64(elapsed))
-			metrics.QueryNodeSegmentSearchLatencyPerVector.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
-				metrics.SearchLabel, searchLabel).Observe(float64(elapsed) / float64(searchReq.getNumOfQuery()))
-		}(segment, i)
+	searchFutures := make([]*conc.Future[any], 0, len(segments))
+	for _, segment := range segments {
+		if !segment.ExistIndex(searchReq.searchFieldID) {
+			segmentsWithoutIndex = append(segmentsWithoutIndex, segment.ID())
+		}
+		searchFuture := segment.Search(ctx, searchReq)
+		searchFutures = append(searchFutures, searchFuture)
 	}
-	wg.Wait()
-	close(resultCh)
 
 	searchResults := make([]*SearchResult, 0, len(segments))
-	for result := range resultCh {
-		searchResults = append(searchResults, result)
+
+	var errorList error
+	for _, future := range searchFutures {
+		searchResult, err := future.Await()
+		if err != nil {
+			// can not early out because we have to handle search result here
+			errorList = merr.Combine(errorList, err)
+			continue
+		}
+		searchResults = append(searchResults, searchResult.(*SearchResult))
 	}
 
-	for _, err := range errs {
-		if err != nil {
-			DeleteSearchResults(searchResults)
-			return nil, err
-		}
+	if errorList != nil {
+		DeleteSearchResults(searchResults)
+		metrics.QueryNodeSQFailCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+			metrics.SearchLabel, searchLabel).Inc()
+		return nil, errorList
 	}
+
+	// reported metrics, this metrics is the overall time consumption
+	elapsed := tr.ElapseSpan().Milliseconds()
+	metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+		metrics.SearchLabel, searchLabel).Observe(float64(elapsed))
+	metrics.QueryNodeSegmentSearchLatencyPerVector.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+		metrics.SearchLabel, searchLabel).Observe(float64(elapsed) / float64(searchReq.getNumOfQuery()))
 
 	if len(segmentsWithoutIndex) > 0 {
 		log.Ctx(ctx).Debug("search growing/sealed segments without indexes", zap.Int64s("segmentIDs", segmentsWithoutIndex))

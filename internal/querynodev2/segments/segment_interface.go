@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	storage "github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -61,8 +62,8 @@ type Segment interface {
 	MayPkExist(pk storage.PrimaryKey) bool
 
 	// Read operations
-	Search(ctx context.Context, searchReq *SearchRequest) (*SearchResult, error)
-	Retrieve(ctx context.Context, plan *RetrievePlan) (*segcorepb.RetrieveResults, error)
+	Search(ctx context.Context, searchReq *SearchRequest) *conc.Future[any]
+	Retrieve(ctx context.Context, plan *RetrievePlan) *conc.Future[any]
 
 	Release()
 }

@@ -149,8 +149,6 @@ func TestDiskIndexParams(t *testing.T) {
 		assert.True(t, ok)
 		_, ok = indexParams[BuildDramBudgetKey]
 		assert.True(t, ok)
-		_, ok = indexParams[NumBuildThreadKey]
-		assert.True(t, ok)
 		_, ok = indexParams[SearchCacheBudgetKey]
 		assert.False(t, ok)
 	})
@@ -173,16 +171,6 @@ func TestDiskIndexParams(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, fmt.Sprintf("%f", float32(getRowDataSizeOfFloatVector(100, 128))*float32(searchCacheBudgetRatio)/(1<<30)), searchCacheBudget)
 
-		numLoadThread, ok := indexParams[NumLoadThreadKey]
-		assert.True(t, ok)
-		numLoadThreadRatio, err := strconv.ParseFloat(params.CommonCfg.LoadNumThreadRatio.GetValue(), 64)
-		assert.NoError(t, err)
-		expectedNumLoadThread := int(float32(hardware.GetCPUNum()) * float32(numLoadThreadRatio))
-		if expectedNumLoadThread > MaxLoadThread {
-			expectedNumLoadThread = MaxLoadThread
-		}
-		assert.Equal(t, strconv.Itoa(expectedNumLoadThread), numLoadThread)
-
 		beamWidth, ok := indexParams[BeamWidthKey]
 		assert.True(t, ok)
 		beamWidthRatio, err := strconv.ParseFloat(params.CommonCfg.BeamWidthRatio.GetValue(), 64)
@@ -194,16 +182,6 @@ func TestDiskIndexParams(t *testing.T) {
 		assert.Equal(t, strconv.Itoa(expectedBeamWidth), beamWidth)
 
 		params.Save(params.CommonCfg.SearchCacheBudgetGBRatio.Key, "w1")
-		err = SetDiskIndexLoadParams(&params, indexParams, 100)
-		assert.Error(t, err)
-
-		params.Save(params.CommonCfg.SearchCacheBudgetGBRatio.Key, "0.1")
-		params.Save(params.CommonCfg.LoadNumThreadRatio.Key, "w1")
-		err = SetDiskIndexLoadParams(&params, indexParams, 100)
-		assert.Error(t, err)
-
-		params.Save(params.CommonCfg.LoadNumThreadRatio.Key, "8.0")
-		params.Save(params.CommonCfg.BeamWidthRatio.Key, "w1")
 		err = SetDiskIndexLoadParams(&params, indexParams, 100)
 		assert.Error(t, err)
 	})
@@ -233,14 +211,6 @@ func TestDiskIndexParams(t *testing.T) {
 		searchCacheBudget, ok := indexParams[SearchCacheBudgetKey]
 		assert.True(t, ok)
 		assert.Equal(t, fmt.Sprintf("%f", float32(getRowDataSizeOfFloatVector(100, 128))*float32(extraParams.SearchCacheBudgetGBRatio)/(1<<30)), searchCacheBudget)
-
-		numLoadThread, ok := indexParams[NumLoadThreadKey]
-		assert.True(t, ok)
-		expectedNumLoadThread := int(float32(hardware.GetCPUNum()) * float32(extraParams.LoadNumThreadRatio))
-		if expectedNumLoadThread > MaxLoadThread {
-			expectedNumLoadThread = MaxLoadThread
-		}
-		assert.Equal(t, strconv.Itoa(expectedNumLoadThread), numLoadThread)
 
 		beamWidth, ok := indexParams[BeamWidthKey]
 		assert.True(t, ok)

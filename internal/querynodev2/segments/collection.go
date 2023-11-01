@@ -114,7 +114,7 @@ func (m *collectionManager) Unref(collectionID int64, count uint32) bool {
 
 // Collection is a wrapper of the underlying C-structure C.CCollection
 type Collection struct {
-	mu            sync.RWMutex // protects colllectionPtr
+	sync.RWMutex  // protects colllectionPtr
 	collectionPtr C.CCollection
 	id            int64
 	partitions    *typeutil.ConcurrentSet[int64]
@@ -232,8 +232,8 @@ func DeleteCollection(collection *Collection) {
 		void
 		deleteCollection(CCollection collection);
 	*/
-	collection.mu.Lock()
-	defer collection.mu.Unlock()
+	collection.Lock()
+	defer collection.Unlock()
 
 	cPtr := collection.collectionPtr
 	if cPtr != nil {

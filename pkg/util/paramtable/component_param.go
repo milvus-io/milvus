@@ -1570,7 +1570,6 @@ type queryNodeConfig struct {
 	MaxReadConcurrency   ParamItem `refreshable:"true"`
 	MaxGroupNQ           ParamItem `refreshable:"true"`
 	TopKMergeRatio       ParamItem `refreshable:"true"`
-	CPURatio             ParamItem `refreshable:"true"`
 	MaxTimestampLag      ParamItem `refreshable:"true"`
 	GCEnabled            ParamItem `refreshable:"true"`
 
@@ -1784,16 +1783,16 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 			concurrency := int64(float64(cpuNum) * ratio)
 			if concurrency < 1 {
 				return "1" // MaxReadConcurrency must >= 1
-			} else if concurrency > cpuNum*100 {
-				return strconv.FormatInt(cpuNum*100, 10) // MaxReadConcurrency must <= 100*cpuNum
+			} else if concurrency > cpuNum*8 {
+				return strconv.FormatInt(cpuNum*8, 10) // MaxReadConcurrency must <= 8*cpuNum
 			}
 			return strconv.FormatInt(concurrency, 10)
 		},
 		Doc: `maxReadConcurrentRatio is the concurrency ratio of read task (search task and query task).
 Max read concurrency would be the value of ` + "runtime.NumCPU * maxReadConcurrentRatio" + `.
-It defaults to 2.0, which means max read concurrency would be the value of runtime.NumCPU * 2.
-Max read concurrency must greater than or equal to 1, and less than or equal to runtime.NumCPU * 100.
-(0, 100]`,
+It defaults to 1.0, which means max read concurrency would be the value of runtime.NumCPU.
+Max read concurrency must greater than or equal to 1, and less than or equal to runtime.NumCPU * 8.0.
+(0, 8.0]`,
 		Export: true,
 	}
 	p.MaxReadConcurrency.Init(base.mgr)
@@ -1809,7 +1808,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	p.MaxGroupNQ = ParamItem{
 		Key:          "queryNode.grouping.maxNQ",
 		Version:      "2.0.0",
-		DefaultValue: "1000",
+		DefaultValue: "100",
 		Export:       true,
 	}
 	p.MaxGroupNQ.Init(base.mgr)
@@ -1821,15 +1820,6 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Export:       true,
 	}
 	p.TopKMergeRatio.Init(base.mgr)
-
-	p.CPURatio = ParamItem{
-		Key:          "queryNode.scheduler.cpuRatio",
-		Version:      "2.0.0",
-		DefaultValue: "10",
-		Doc:          "ratio used to estimate read task cpu usage.",
-		Export:       true,
-	}
-	p.CPURatio.Init(base.mgr)
 
 	p.EnableDisk = ParamItem{
 		Key:          "queryNode.enableDisk",

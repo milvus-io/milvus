@@ -168,10 +168,11 @@ func (suite *ReduceSuite) TestReduceAllFunc() {
 	suite.NoError(err)
 	defer searchReq.Delete()
 
-	searchResult, err := suite.segment.Search(context.Background(), searchReq)
+	future := suite.segment.Search(context.Background(), searchReq)
+	err = future.Err()
 	suite.NoError(err)
 
-	err = checkSearchResult(nq, plan, searchResult)
+	err = checkSearchResult(nq, plan, future.Value().(*SearchResult))
 	suite.NoError(err)
 }
 

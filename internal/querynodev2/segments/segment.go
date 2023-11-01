@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
@@ -316,7 +317,7 @@ func (s *LocalSegment) Type() SegmentType {
 	return s.typ
 }
 
-func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*SearchResult, error) {
+func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) *conc.Future[any] {
 	/*
 		CStatus
 		Search(void* plan,
@@ -335,7 +336,7 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*S
 	defer s.ptrLock.RUnlock()
 
 	if s.ptr == nil {
-		return nil, merr.WrapErrSegmentNotLoaded(s.segmentID, "segment released")
+		return conc.NewErrFuture[any](merr.WrapErrSegmentNotLoaded(s.segmentID, "segment released"))
 	}
 
 	span := trace.SpanFromContext(ctx)
@@ -351,33 +352,31 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*S
 	hasIndex := s.ExistIndex(searchReq.searchFieldID)
 	log = log.With(zap.Bool("withIndex", hasIndex))
 	log.Debug("search segment...")
-
-	var searchResult SearchResult
-	var status C.CStatus
-	GetSQPool().Submit(func() (any, error) {
+	future := GetSQPool().Submit(func() (any, error) {
+		var searchResult SearchResult
 		tr := timerecord.NewTimeRecorder("cgoSearch")
-		status = C.Search(s.ptr,
+		status := C.Search(s.ptr,
 			searchReq.plan.cSearchPlan,
 			searchReq.cPlaceholderGroup,
 			traceCtx,
 			&searchResult.cSearchResult,
 		)
 		metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		return nil, nil
-	}).Await()
-	if err := HandleCStatus(&status, "Search failed"); err != nil {
-		return nil, err
-	}
-	log.Debug("search segment done")
-	return &searchResult, nil
+		if err := HandleCStatus(&status, "Search failed"); err != nil {
+			return nil, err
+		}
+		log.Debug("cgo search done", zap.Duration("timeTaken", tr.ElapseSpan()))
+		return &searchResult, nil
+	})
+	return future
 }
 
-func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segcorepb.RetrieveResults, error) {
+func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) *conc.Future[any] {
 	s.ptrLock.RLock()
 	defer s.ptrLock.RUnlock()
 
 	if s.ptr == nil {
-		return nil, merr.WrapErrSegmentNotLoaded(s.segmentID, "segment released")
+		return conc.NewErrFuture[any](merr.WrapErrSegmentNotLoaded(s.segmentID, "segment released"))
 	}
 
 	log := log.Ctx(ctx).With(
@@ -401,7 +400,7 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 	maxLimitSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	var retrieveResult RetrieveResult
 	var status C.CStatus
-	GetSQPool().Submit(func() (any, error) {
+	future := GetSQPool().Submit(func() (any, error) {
 		ts := C.uint64_t(plan.Timestamp)
 		tr := timerecord.NewTimeRecorder("cgoRetrieve")
 		status = C.Retrieve(s.ptr,
@@ -413,26 +412,20 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 
 		metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
 			metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		if err := HandleCStatus(&status, "Retrieve failed"); err != nil {
+			return nil, err
+		}
+
+		result := new(segcorepb.RetrieveResults)
+		if err := HandleCProto(&retrieveResult.cRetrieveResult, result); err != nil {
+			return nil, err
+		}
+
 		log.Debug("cgo retrieve done", zap.Duration("timeTaken", tr.ElapseSpan()))
-		return nil, nil
-	}).Await()
+		return result, nil
+	})
 
-	if err := HandleCStatus(&status, "Retrieve failed"); err != nil {
-		return nil, err
-	}
-
-	result := new(segcorepb.RetrieveResults)
-	if err := HandleCProto(&retrieveResult.cRetrieveResult, result); err != nil {
-		return nil, err
-	}
-
-	log.Debug("retrieve segment done",
-		zap.Int("resultNum", len(result.Offset)),
-	)
-
-	// Sort was done by the segcore.
-	// sort.Sort(&byPK{result})
-	return result, nil
+	return future
 }
 
 func (s *LocalSegment) GetFieldDataPath(index *IndexedFieldInfo, offset int64) (dataPath string, offsetInBinlog int64) {

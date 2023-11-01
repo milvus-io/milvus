@@ -32,20 +32,16 @@ const (
 	PQCodeBudgetRatioKey      = "pq_code_budget_gb_ratio"
 	NumBuildThreadRatioKey    = "num_build_thread_ratio"
 	SearchCacheBudgetRatioKey = "search_cache_budget_gb_ratio"
-	NumLoadThreadRatioKey     = "num_load_thread_ratio"
 	BeamWidthRatioKey         = "beamwidth_ratio"
 
 	MaxDegreeKey         = "max_degree"
 	SearchListSizeKey    = "search_list_size"
 	PQCodeBudgetKey      = "pq_code_budget_gb"
 	BuildDramBudgetKey   = "build_dram_budget_gb"
-	NumBuildThreadKey    = "num_build_thread"
 	SearchCacheBudgetKey = "search_cache_budget_gb"
-	NumLoadThreadKey     = "num_load_thread"
 	BeamWidthKey         = "beamwidth"
 
-	MaxLoadThread = 64
-	MaxBeamWidth  = 16
+	MaxBeamWidth = 16
 )
 
 func getRowDataSizeOfFloatVector(numRows int64, dim int64) int64 {
@@ -198,15 +194,6 @@ func SetDiskIndexBuildParams(indexParams map[string]string, fieldDataSize int64)
 	if err != nil {
 		return err
 	}
-	buildNumThreadsRatioStr, ok := indexParams[NumBuildThreadRatioKey]
-	if !ok {
-		return fmt.Errorf("index param buildNumThreadsRatio not exist")
-	}
-	buildNumThreadsRatio, err := strconv.ParseFloat(buildNumThreadsRatioStr, 64)
-	if err != nil {
-		return err
-	}
-
 	searchCacheBudgetGBRatioStr, ok := indexParams[SearchCacheBudgetRatioKey]
 	// set generate cache size when cache ratio param not set
 	if ok {
@@ -217,7 +204,6 @@ func SetDiskIndexBuildParams(indexParams map[string]string, fieldDataSize int64)
 		indexParams[SearchCacheBudgetKey] = fmt.Sprintf("%f", float32(fieldDataSize)*float32(SearchCacheBudgetGBRatio)/(1<<30))
 	}
 	indexParams[PQCodeBudgetKey] = fmt.Sprintf("%f", float32(fieldDataSize)*float32(pqCodeBudgetGBRatio)/(1<<30))
-	indexParams[NumBuildThreadKey] = strconv.Itoa(int(float32(hardware.GetCPUNum()) * float32(buildNumThreadsRatio)))
 	indexParams[BuildDramBudgetKey] = fmt.Sprintf("%f", float32(hardware.GetFreeMemoryCount())/(1<<30))
 	return nil
 }
@@ -236,7 +222,6 @@ func SetDiskIndexLoadParams(params *paramtable.ComponentParam, indexParams map[s
 	}
 
 	var searchCacheBudgetGBRatio float64
-	var loadNumThreadRatio float64
 	var beamWidthRatio float64
 
 	if params.AutoIndexConfig.Enable.GetAsBool() {
@@ -245,14 +230,9 @@ func SetDiskIndexLoadParams(params *paramtable.ComponentParam, indexParams map[s
 			return err
 		}
 		searchCacheBudgetGBRatio = extraParams.SearchCacheBudgetGBRatio
-		loadNumThreadRatio = extraParams.LoadNumThreadRatio
 		beamWidthRatio = extraParams.BeamWidthRatio
 	} else {
 		searchCacheBudgetGBRatio, err = strconv.ParseFloat(params.CommonCfg.SearchCacheBudgetGBRatio.GetValue(), 64)
-		if err != nil {
-			return err
-		}
-		loadNumThreadRatio, err = strconv.ParseFloat(params.CommonCfg.LoadNumThreadRatio.GetValue(), 64)
 		if err != nil {
 			return err
 		}
@@ -264,12 +244,6 @@ func SetDiskIndexLoadParams(params *paramtable.ComponentParam, indexParams map[s
 
 	indexParams[SearchCacheBudgetKey] = fmt.Sprintf("%f",
 		float32(getRowDataSizeOfFloatVector(numRows, dim))*float32(searchCacheBudgetGBRatio)/(1<<30))
-
-	numLoadThread := int(float32(hardware.GetCPUNum()) * float32(loadNumThreadRatio))
-	if numLoadThread > MaxLoadThread {
-		numLoadThread = MaxLoadThread
-	}
-	indexParams[NumLoadThreadKey] = strconv.Itoa(numLoadThread)
 
 	beamWidth := int(float32(hardware.GetCPUNum()) * float32(beamWidthRatio))
 	if beamWidth > MaxBeamWidth {

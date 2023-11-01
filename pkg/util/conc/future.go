@@ -102,3 +102,13 @@ func AwaitAll[T future](futures ...T) error {
 
 	return nil
 }
+
+// For error handling
+func NewErrFuture[T any](err error) *Future[T] {
+	future := &Future[T]{
+		ch: make(chan struct{}),
+	}
+	future.err = err
+	close(future.ch)
+	return future
+}

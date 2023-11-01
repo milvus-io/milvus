@@ -306,7 +306,6 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, true, Params.GroupEnabled.GetAsBool())
 		assert.Equal(t, int32(10240), Params.MaxReceiveChanSize.GetAsInt32())
 		assert.Equal(t, int32(10240), Params.MaxUnsolvedQueueSize.GetAsInt32())
-		assert.Equal(t, 10.0, Params.CPURatio.GetAsFloat())
 		assert.Equal(t, uint32(runtime.GOMAXPROCS(0)), Params.KnowhereThreadPoolSize.GetAsUint32())
 
 		// chunk cache

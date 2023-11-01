@@ -194,9 +194,22 @@ var (
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
-			Name:      "sq_segment_latency",
-			Help:      "latency of search or query per segment",
-			Buckets:   buckets,
+			// TODO, the name might be confusing, should rename to sq_task_latency
+			Name:    "sq_segment_latency",
+			Help:    "latency of search or query per task",
+			Buckets: buckets,
+		}, []string{
+			nodeIDLabelName,
+			queryTypeLabelName,
+			segmentStateLabelName,
+		})
+
+	QueryNodeSQFailCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "sq_task_fail",
+			Help:      "count of seaerch/query failed request",
 		}, []string{
 			nodeIDLabelName,
 			queryTypeLabelName,
