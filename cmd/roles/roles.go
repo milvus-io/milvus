@@ -350,8 +350,12 @@ func (mr *MilvusRoles) Run() {
 		rootCoord = mr.runRootCoord(ctx, local, &wg)
 	}
 
-	if mr.EnableProxy {
-		proxy = mr.runProxy(ctx, local, &wg)
+	if mr.EnableDataCoord {
+		dataCoord = mr.runDataCoord(ctx, local, &wg)
+	}
+
+	if mr.EnableIndexCoord {
+		indexCoord = mr.runIndexCoord(ctx, local, &wg)
 	}
 
 	if mr.EnableQueryCoord {
@@ -362,20 +366,15 @@ func (mr *MilvusRoles) Run() {
 		queryNode = mr.runQueryNode(ctx, local, &wg)
 	}
 
-	if mr.EnableDataCoord {
-		dataCoord = mr.runDataCoord(ctx, local, &wg)
-	}
-
 	if mr.EnableDataNode {
 		dataNode = mr.runDataNode(ctx, local, &wg)
 	}
-
-	if mr.EnableIndexCoord {
-		indexCoord = mr.runIndexCoord(ctx, local, &wg)
-	}
-
 	if mr.EnableIndexNode {
 		indexNode = mr.runIndexNode(ctx, local, &wg)
+	}
+
+	if mr.EnableProxy {
+		proxy = mr.runProxy(ctx, local, &wg)
 	}
 
 	wg.Wait()
@@ -389,40 +388,29 @@ func (mr *MilvusRoles) Run() {
 	<-mr.closed
 
 	// stop coordinators first
-	//	var component
-	coordinators := []component{rootCoord, queryCoord, dataCoord, indexCoord}
+	coordinators := []component{rootCoord, dataCoord, indexCoord, queryCoord}
 	for idx, coord := range coordinators {
 		log.Warn("stop processing")
 		if coord != nil {
-			log.Warn("stop coord", zap.Int("idx", idx), zap.Any("coord", coord))
-			wg.Add(1)
-			go func(coord component) {
-				defer wg.Done()
-				coord.Stop()
-			}(coord)
+			log.Info("stop coord", zap.Int("idx", idx), zap.Any("coord", coord))
+			coord.Stop()
 		}
 	}
-	wg.Wait()
 	log.Info("All coordinators have stopped")
 
 	// stop nodes
 	nodes := []component{queryNode, indexNode, dataNode}
-	for _, node := range nodes {
+	for idx, node := range nodes {
 		if node != nil {
-			wg.Add(1)
-			go func(node component) {
-				defer wg.Done()
-				node.Stop()
-			}(node)
+			log.Info("stop node", zap.Int("idx", idx), zap.Any("node", node))
+			node.Stop()
 		}
 	}
-	wg.Wait()
 	log.Info("All nodes have stopped")
 
-	// stop proxy
 	if proxy != nil {
 		proxy.Stop()
-		log.Info("proxy stopped")
+		log.Info("proxy stopped!")
 	}
 
 	log.Info("Milvus components graceful stop done")
