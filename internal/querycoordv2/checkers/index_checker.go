@@ -146,7 +146,7 @@ func (c *IndexChecker) getSealedSegmentsDist(replica *meta.Replica) []*meta.Segm
 
 func (c *IndexChecker) createSegmentUpdateTask(ctx context.Context, segment *meta.Segment, replica *meta.Replica) (task.Task, bool) {
 	action := task.NewSegmentActionWithScope(segment.Node, task.ActionTypeUpdate, segment.GetInsertChannel(), segment.GetID(), querypb.DataScope_Historical)
-	task, err := task.NewSegmentTask(
+	t, err := task.NewSegmentTask(
 		ctx,
 		params.Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
 		c.ID(),
@@ -163,6 +163,8 @@ func (c *IndexChecker) createSegmentUpdateTask(ctx context.Context, segment *met
 		)
 		return nil, false
 	}
-	task.SetReason("missing index")
-	return task, true
+	// index task shall have lower or equal priority than balance task
+	t.SetPriority(task.TaskPriorityLow)
+	t.SetReason("missing index")
+	return t, true
 }
