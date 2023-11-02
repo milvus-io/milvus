@@ -756,13 +756,7 @@ func TestDataNode(t *testing.T) {
 				CompactedTo:   101,
 				NumOfRows:     100,
 			}
-			cancelCtx, cancel := context.WithCancel(context.Background())
-			cancel()
-			status, err := node.SyncSegments(cancelCtx, req)
-			assert.NoError(t, err)
-			assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
-
-			status, err = node.SyncSegments(ctx, req)
+			status, err := node.SyncSegments(ctx, req)
 			assert.NoError(t, err)
 			assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
 

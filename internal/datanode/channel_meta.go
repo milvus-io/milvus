@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/concurrency"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 type (
@@ -68,7 +69,7 @@ type Channel interface {
 	listNewSegmentsStartPositions() []*datapb.SegmentStartPosition
 	transferNewSegments(segmentIDs []UniqueID)
 	updateSegmentPKRange(segID UniqueID, ids storage.FieldData)
-	mergeFlushedSegments(ctx context.Context, seg *Segment, planID UniqueID, compactedFrom []UniqueID) error
+	mergeFlushedSegments(ctx context.Context, seg *Segment, planID UniqueID, compactedFrom []UniqueID)
 	getSegment(segID UniqueID) *Segment
 	hasSegment(segID UniqueID, countFlushed bool) bool
 	removeSegments(segID ...UniqueID)
@@ -175,7 +176,7 @@ func (c *ChannelMeta) getCollectionAndPartitionID(segID UniqueID) (collID, parti
 	if seg, ok := c.segments[segID]; ok && seg.isValid() {
 		return seg.collectionID, seg.partitionID, nil
 	}
-	return 0, 0, fmt.Errorf("cannot find segment, id = %d", segID)
+	return 0, 0, merr.WrapErrSegmentNotFound(segID)
 }
 
 func (c *ChannelMeta) getChannelName() string {
@@ -590,7 +591,7 @@ func (c *ChannelMeta) getSegmentStatisticsUpdates(segID UniqueID) (*datapb.Segme
 		return &datapb.SegmentStats{SegmentID: segID, NumRows: seg.numRows}, nil
 	}
 
-	return nil, fmt.Errorf("error, there's no segment %d", segID)
+	return nil, merr.WrapErrSegmentNotFound(segID)
 }
 
 func (c *ChannelMeta) getCollectionID() UniqueID {
@@ -628,7 +629,7 @@ func (c *ChannelMeta) getCollectionSchema(collID UniqueID, ts Timestamp) (*schem
 	return c.collSchema, nil
 }
 
-func (c *ChannelMeta) mergeFlushedSegments(ctx context.Context, seg *Segment, planID UniqueID, compactedFrom []UniqueID) error {
+func (c *ChannelMeta) mergeFlushedSegments(ctx context.Context, seg *Segment, planID UniqueID, compactedFrom []UniqueID) {
 	log := log.Ctx(ctx).With(
 		zap.Int64("segment ID", seg.segmentID),
 		zap.Int64("collection ID", seg.collectionID),
@@ -636,13 +637,6 @@ func (c *ChannelMeta) mergeFlushedSegments(ctx context.Context, seg *Segment, pl
 		zap.Int64s("compacted from", compactedFrom),
 		zap.Int64("planID", planID),
 		zap.String("channel name", c.channelName))
-
-	if seg.collectionID != c.collectionID {
-		log.Warn("failed to mergeFlushedSegments, collection mismatch",
-			zap.Int64("current collection ID", seg.collectionID),
-			zap.Int64("expected collection ID", c.collectionID))
-		return fmt.Errorf("failed to mergeFlushedSegments, mismatch collection, ID=%d", seg.collectionID)
-	}
 
 	var inValidSegments []UniqueID
 	for _, ID := range compactedFrom {
@@ -661,12 +655,6 @@ func (c *ChannelMeta) mergeFlushedSegments(ctx context.Context, seg *Segment, pl
 	log.Info("merge flushed segments")
 	c.segMu.Lock()
 	defer c.segMu.Unlock()
-	select {
-	case <-ctx.Done():
-		log.Warn("the context has been closed", zap.Error(ctx.Err()))
-		return errors.New("invalid context")
-	default:
-	}
 
 	for _, ID := range compactedFrom {
 		// the existent of the segments are already checked
@@ -688,8 +676,6 @@ func (c *ChannelMeta) mergeFlushedSegments(ctx context.Context, seg *Segment, pl
 		seg.setType(datapb.SegmentType_Flushed)
 		c.segments[seg.segmentID] = seg
 	}
-
-	return nil
 }
 
 // for tests only

@@ -70,15 +70,8 @@ import (
 )
 
 const (
-	// RPCConnectionTimeout is used to set the timeout for rpc request
-	RPCConnectionTimeout = 30 * time.Second
-
 	// ConnectEtcdMaxRetryTime is used to limit the max retry time for connection etcd
 	ConnectEtcdMaxRetryTime = 100
-
-	// ImportCallTimeout is the timeout used in Import() method calls
-	// This value is equal to RootCoord's task expire time
-	ImportCallTimeout = 15 * 60 * time.Second
 )
 
 var getFlowGraphServiceAttempts = uint(50)
@@ -921,12 +914,19 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		oneSegment int64
 		channel    Channel
 		err        error
+		ds         *dataSyncService
+		ok         bool
 	)
 
 	for _, fromSegment := range req.GetCompactedFrom() {
 		channel, err = node.flowgraphManager.getChannel(fromSegment)
 		if err != nil {
 			log.Ctx(ctx).Warn("fail to get the channel", zap.Int64("segment", fromSegment), zap.Error(err))
+			continue
+		}
+		ds, ok = node.flowgraphManager.getFlowgraphService(channel.getChannelName())
+		if !ok {
+			log.Ctx(ctx).Warn("fail to find flow graph service", zap.Int64("segment", fromSegment))
 			continue
 		}
 		oneSegment = fromSegment
@@ -955,11 +955,9 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		return status, nil
 	}
 
-	if err = channel.mergeFlushedSegments(ctx, targetSeg, req.GetPlanID(), req.GetCompactedFrom()); err != nil {
-		log.Ctx(ctx).Warn("fail to merge flushed segments", zap.Error(err))
-		status.Reason = err.Error()
-		return status, nil
-	}
+	ds.fg.Blockall()
+	defer ds.fg.Unblock()
+	channel.mergeFlushedSegments(ctx, targetSeg, req.GetPlanID(), req.GetCompactedFrom())
 	log.Ctx(ctx).Info("DataNode SyncSegments success", zap.Int64("planID", req.GetPlanID()),
 		zap.Int64("target segmentID", req.GetCompactedTo()),
 		zap.Int64s("compacted from", req.GetCompactedFrom()),

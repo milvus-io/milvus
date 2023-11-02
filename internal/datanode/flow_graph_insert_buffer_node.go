@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 type insertBufferNode struct {
@@ -495,13 +496,18 @@ func (ibNode *insertBufferNode) Sync(fgMsg *flowGraphMsg, seg2Upload []UniqueID,
 		// use the flushed pk stats to take current stat
 		var pkStats []*storage.PrimaryKeyStats
 		// TODO, this has to be async flush, no need to block here.
-		err := retry.Do(ibNode.ctx, func() error {
-			statBlobs, err := ibNode.flushManager.flushBufferData(task.buffer,
+		var err error
+		_ = retry.Do(ibNode.ctx, func() error {
+			var statBlobs []*Blob
+			statBlobs, err = ibNode.flushManager.flushBufferData(task.buffer,
 				task.segmentID,
 				task.flushed,
 				task.dropped,
 				endPosition)
 			if err != nil {
+				if errors.Is(err, merr.ErrSegmentNotFound) {
+					return retry.Unrecoverable(err)
+				}
 				return err
 			}
 			pkStats, err = storage.DeserializeStats(statBlobs)
@@ -517,6 +523,14 @@ func (ibNode *insertBufferNode) Sync(fgMsg *flowGraphMsg, seg2Upload []UniqueID,
 			if task.auto {
 				metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.FailLabel).Inc()
 				metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.TotalLabel).Inc()
+			}
+			if errors.Is(err, merr.ErrSegmentNotFound) {
+				if !segment.isValid() {
+					log.Info("try to flush a compacted segment, ignore..",
+						zap.Int64("segmentID", task.segmentID),
+						zap.Error(err))
+				}
+				continue
 			}
 			err = fmt.Errorf("insertBufferNode flushBufferData failed, err = %s", err)
 			log.Error(err.Error())
