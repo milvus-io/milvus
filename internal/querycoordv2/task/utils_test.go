@@ -17,17 +17,25 @@
 package task
 
 import (
+	"context"
 	"testing"
+	"time"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/common"
 )
 
-func Test_getMetricType(t *testing.T) {
+type UtilsSuite struct {
+	suite.Suite
+}
+
+func (s *UtilsSuite) TestGetMetricType() {
 	collection := int64(1)
 	schema := &schemapb.CollectionSchema{
 		Name: "TestGetMetricType",
@@ -51,29 +59,139 @@ func Test_getMetricType(t *testing.T) {
 		FieldID:      100,
 	}
 
-	t.Run("test normal", func(t *testing.T) {
+	s.Run("test normal", func() {
 		metricType, err := getMetricType([]*indexpb.IndexInfo{indexInfo}, schema)
-		assert.NoError(t, err)
-		assert.Equal(t, "L2", metricType)
+		s.NoError(err)
+		s.Equal("L2", metricType)
 	})
 
-	t.Run("test get vec field failed", func(t *testing.T) {
+	s.Run("test get vec field failed", func() {
 		_, err := getMetricType([]*indexpb.IndexInfo{indexInfo}, &schemapb.CollectionSchema{
 			Name: "TestGetMetricType",
 		})
-		assert.Error(t, err)
+		s.Error(err)
 	})
-	t.Run("test field id mismatch", func(t *testing.T) {
+	s.Run("test field id mismatch", func() {
 		_, err := getMetricType([]*indexpb.IndexInfo{indexInfo}, &schemapb.CollectionSchema{
 			Name: "TestGetMetricType",
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: -1, Name: "vec", DataType: schemapb.DataType_FloatVector},
 			},
 		})
-		assert.Error(t, err)
+		s.Error(err)
 	})
-	t.Run("test no metric type", func(t *testing.T) {
+	s.Run("test no metric type", func() {
 		_, err := getMetricType([]*indexpb.IndexInfo{indexInfo2}, schema)
-		assert.Error(t, err)
+		s.Error(err)
 	})
+}
+
+func (s *UtilsSuite) TestPackLoadSegmentRequest() {
+	ctx := context.Background()
+
+	action := NewSegmentAction(1, ActionTypeGrow, "test-ch", 100)
+	task, err := NewSegmentTask(
+		ctx,
+		time.Second,
+		nil,
+		1,
+		10,
+		action,
+	)
+	s.NoError(err)
+
+	collectionInfoResp := &milvuspb.DescribeCollectionResponse{
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+			},
+		},
+		Properties: []*commonpb.KeyValuePair{
+			{
+				Key:   common.MmapEnabledKey,
+				Value: "false",
+			},
+		},
+	}
+
+	req := packLoadSegmentRequest(
+		task,
+		action,
+		collectionInfoResp.GetSchema(),
+		collectionInfoResp.GetProperties(),
+		&querypb.LoadMetaInfo{
+			LoadType: querypb.LoadType_LoadCollection,
+		},
+		&querypb.SegmentLoadInfo{},
+		nil,
+	)
+
+	s.True(req.GetNeedTransfer())
+	s.Equal(task.CollectionID(), req.CollectionID)
+	s.Equal(task.ReplicaID(), req.ReplicaID)
+	s.Equal(action.Node(), req.GetDstNodeID())
+	for _, field := range req.GetSchema().GetFields() {
+		s.False(common.IsMmapEnabled(field.GetTypeParams()...))
+	}
+}
+
+func (s *UtilsSuite) TestPackLoadSegmentRequestMmap() {
+	ctx := context.Background()
+
+	action := NewSegmentAction(1, ActionTypeGrow, "test-ch", 100)
+	task, err := NewSegmentTask(
+		ctx,
+		time.Second,
+		nil,
+		1,
+		10,
+		action,
+	)
+	s.NoError(err)
+
+	collectionInfoResp := &milvuspb.DescribeCollectionResponse{
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+			},
+		},
+		Properties: []*commonpb.KeyValuePair{
+			{
+				Key:   common.MmapEnabledKey,
+				Value: "true",
+			},
+		},
+	}
+
+	req := packLoadSegmentRequest(
+		task,
+		action,
+		collectionInfoResp.GetSchema(),
+		collectionInfoResp.GetProperties(),
+		&querypb.LoadMetaInfo{
+			LoadType: querypb.LoadType_LoadCollection,
+		},
+		&querypb.SegmentLoadInfo{},
+		nil,
+	)
+
+	s.True(req.GetNeedTransfer())
+	s.Equal(task.CollectionID(), req.CollectionID)
+	s.Equal(task.ReplicaID(), req.ReplicaID)
+	s.Equal(action.Node(), req.GetDstNodeID())
+	for _, field := range req.GetSchema().GetFields() {
+		s.True(common.IsMmapEnabled(field.GetTypeParams()...))
+	}
+}
+
+func TestUtils(t *testing.T) {
+	suite.Run(t, new(UtilsSuite))
 }

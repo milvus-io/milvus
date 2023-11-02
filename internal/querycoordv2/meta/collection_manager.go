@@ -130,7 +130,7 @@ func (m *CollectionManager) Recover(broker Broker) error {
 
 	for _, collection := range collections {
 		// Dropped collection should be deprecated
-		_, err = broker.GetCollectionSchema(ctx, collection.GetCollectionID())
+		_, err = broker.DescribeCollection(ctx, collection.GetCollectionID())
 		if errors.Is(err, merr.ErrCollectionNotFound) {
 			ctxLog.Info("skip dropped collection during recovery", zap.Int64("collection", collection.GetCollectionID()))
 			m.catalog.ReleaseCollection(collection.GetCollectionID())

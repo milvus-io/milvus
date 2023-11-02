@@ -205,7 +205,7 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
                              "to thread pool, "
                           << "segmentID:" << this->id_
                           << ", fieldID:" << info.field_id;
-        if (load_info.mmap_dir_path.empty() ||
+        if (!info.enable_mmap ||
             SystemProperty::Instance().IsSystem(field_id)) {
             LoadFieldData(field_id, field_data_info);
         } else {

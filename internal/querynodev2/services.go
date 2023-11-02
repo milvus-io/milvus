@@ -447,16 +447,16 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		return merr.Success(), nil
 	}
 
+	node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
+		node.composeIndexMeta(req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())
+	defer node.manager.Collection.Unref(req.GetCollectionID(), 1)
+
 	if req.GetLoadScope() == querypb.LoadScope_Delta {
 		return node.loadDeltaLogs(ctx, req), nil
 	}
 	if req.GetLoadScope() == querypb.LoadScope_Index {
 		return node.loadIndex(ctx, req), nil
 	}
-
-	node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
-		node.composeIndexMeta(req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())
-	defer node.manager.Collection.Unref(req.GetCollectionID(), 1)
 
 	// Actual load segment
 	log.Info("start to load segments...")

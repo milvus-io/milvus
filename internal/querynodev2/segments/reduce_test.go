@@ -93,7 +93,7 @@ func (suite *ReduceSuite) SetupTest() {
 	)
 	suite.Require().NoError(err)
 	for _, binlog := range binlogs {
-		err = suite.segment.LoadFieldData(binlog.FieldID, int64(msgLength), binlog)
+		err = suite.segment.LoadFieldData(binlog.FieldID, int64(msgLength), binlog, false)
 		suite.Require().NoError(err)
 	}
 }

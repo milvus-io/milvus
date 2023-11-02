@@ -655,7 +655,7 @@ func (s *LocalSegment) LoadMultiFieldData(rowCount int64, fields []*datapb.Field
 	return nil
 }
 
-func (s *LocalSegment) LoadFieldData(fieldID int64, rowCount int64, field *datapb.FieldBinlog) error {
+func (s *LocalSegment) LoadFieldData(fieldID int64, rowCount int64, field *datapb.FieldBinlog, mmapEnabled bool) error {
 	s.ptrLock.RLock()
 	defer s.ptrLock.RUnlock()
 
@@ -834,14 +834,14 @@ func (s *LocalSegment) LoadDeltaData(deltaData *storage.DeleteData) error {
 	return nil
 }
 
-func (s *LocalSegment) LoadIndex(indexInfo *querypb.FieldIndexInfo, fieldType schemapb.DataType) error {
+func (s *LocalSegment) LoadIndex(indexInfo *querypb.FieldIndexInfo, fieldType schemapb.DataType, enableMmap bool) error {
 	loadIndexInfo, err := newLoadIndexInfo()
 	defer deleteLoadIndexInfo(loadIndexInfo)
 	if err != nil {
 		return err
 	}
 
-	err = loadIndexInfo.appendLoadIndexInfo(indexInfo, s.collectionID, s.partitionID, s.segmentID, fieldType)
+	err = loadIndexInfo.appendLoadIndexInfo(indexInfo, s.collectionID, s.partitionID, s.segmentID, fieldType, enableMmap)
 	if err != nil {
 		if loadIndexInfo.cleanLocalData() != nil {
 			log.Warn("failed to clean cached data on disk after append index failed",

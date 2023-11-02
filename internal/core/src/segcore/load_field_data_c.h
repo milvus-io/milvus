@@ -46,6 +46,11 @@ void
 AppendMMapDirPath(CLoadFieldDataInfo c_load_field_data_info,
                   const char* dir_path);
 
+void
+EnableMmap(CLoadFieldDataInfo c_load_field_data_info,
+           int64_t field_id,
+           bool enabled);
+
 #ifdef __cplusplus
 }
 #endif

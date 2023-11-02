@@ -178,7 +178,7 @@ func (suite *CollectionManagerSuite) TestGet() {
 func (suite *CollectionManagerSuite) TestUpdate() {
 	mgr := suite.mgr
 
-	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything).Return(nil, nil)
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, nil)
 	for _, collection := range suite.collections {
 		if len(suite.partitions[collection]) > 0 {
 			suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil)
@@ -251,7 +251,7 @@ func (suite *CollectionManagerSuite) TestGetFieldIndex() {
 func (suite *CollectionManagerSuite) TestRemove() {
 	mgr := suite.mgr
 
-	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything).Return(nil, nil)
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, nil)
 	for _, collection := range suite.collections {
 		suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil).Maybe()
 	}
@@ -322,7 +322,7 @@ func (suite *CollectionManagerSuite) TestRecover_normal() {
 
 	// recover successfully
 	for _, collection := range suite.collections {
-		suite.broker.EXPECT().GetCollectionSchema(mock.Anything, collection).Return(nil, nil)
+		suite.broker.EXPECT().DescribeCollection(mock.Anything, collection).Return(nil, nil)
 		if len(suite.partitions[collection]) > 0 {
 			suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil)
 		}
@@ -342,7 +342,7 @@ func (suite *CollectionManagerSuite) TestRecover_normal() {
 func (suite *CollectionManagerSuite) TestRecoverLoadingCollection() {
 	mgr := suite.mgr
 	suite.releaseAll()
-	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything).Return(nil, nil)
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, nil)
 	// test put collection with partitions
 	for i, collection := range suite.collections {
 		suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil).Maybe()
@@ -432,9 +432,9 @@ func (suite *CollectionManagerSuite) TestRecover_with_dropped() {
 
 	for _, collection := range suite.collections {
 		if collection == droppedCollection {
-			suite.broker.EXPECT().GetCollectionSchema(mock.Anything, collection).Return(nil, merr.ErrCollectionNotFound)
+			suite.broker.EXPECT().DescribeCollection(mock.Anything, collection).Return(nil, merr.ErrCollectionNotFound)
 		} else {
-			suite.broker.EXPECT().GetCollectionSchema(mock.Anything, collection).Return(nil, nil)
+			suite.broker.EXPECT().DescribeCollection(mock.Anything, collection).Return(nil, nil)
 		}
 		if len(suite.partitions[collection]) != 0 {
 			if collection == droppedCollection {
@@ -465,8 +465,8 @@ func (suite *CollectionManagerSuite) TestRecover_with_dropped() {
 }
 
 func (suite *CollectionManagerSuite) TestRecover_Failed() {
-	mockErr1 := fmt.Errorf("mock GetCollectionSchema err")
-	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything).Return(nil, mockErr1)
+	mockErr1 := fmt.Errorf("mock.DescribeCollection err")
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, mockErr1)
 	suite.clearMemory()
 	err := suite.mgr.Recover(suite.broker)
 	suite.Error(err)
@@ -474,7 +474,7 @@ func (suite *CollectionManagerSuite) TestRecover_Failed() {
 
 	mockErr2 := fmt.Errorf("mock GetPartitions err")
 	suite.broker.ExpectedCalls = suite.broker.ExpectedCalls[:0]
-	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything).Return(nil, nil)
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, nil)
 	suite.broker.EXPECT().GetPartitions(mock.Anything, mock.Anything).Return(nil, mockErr2)
 	suite.clearMemory()
 	err = suite.mgr.Recover(suite.broker)
@@ -539,7 +539,7 @@ func (suite *CollectionManagerSuite) TestUpgradeRecover() {
 	suite.releaseAll()
 	mgr := suite.mgr
 
-	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything).Return(nil, nil)
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, nil)
 	for _, collection := range suite.collections {
 		if len(suite.partitions[collection]) > 0 {
 			suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil)
