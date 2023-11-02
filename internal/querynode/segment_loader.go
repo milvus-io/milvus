@@ -400,8 +400,13 @@ func (loader *segmentLoader) patchEntryNumber(ctx context.Context, segment *Segm
 func (loader *segmentLoader) filterPKStatsBinlogs(fieldBinlogs []*datapb.FieldBinlog, pkFieldID int64) []string {
 	result := make([]string, 0)
 	for _, fieldBinlog := range fieldBinlogs {
-		if fieldBinlog.FieldID == pkFieldID {
-			for _, binlog := range fieldBinlog.GetBinlogs() {
+		if fieldBinlog.FieldID != pkFieldID {
+			continue
+		}
+		for _, binlog := range fieldBinlog.GetBinlogs() {
+			_, logID := path.Split(binlog.GetLogPath())
+			// ignore CompoundStatsLog for upward compatibility
+			if logID != fmt.Sprint(storage.CompoundStatsType.GetLogID()) {
 				result = append(result, binlog.GetLogPath())
 			}
 		}
