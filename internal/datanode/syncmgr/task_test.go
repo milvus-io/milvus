@@ -214,6 +214,23 @@ func (s *SyncTaskSuite) TestRunNormal() {
 }
 
 func (s *SyncTaskSuite) TestRunError() {
+	s.Run("segment_not_found", func() {
+		s.metacache.EXPECT().GetSegmentsBy(mock.Anything).Return([]*metacache.SegmentInfo{})
+		flag := false
+		handler := func(_ error) { flag = true }
+		task := s.getSuiteSyncTask().WithFailureCallback(handler)
+		task.WithInsertData(s.getEmptyInsertBuffer())
+
+		err := task.Run()
+
+		s.Error(err)
+		s.True(flag)
+	})
+
+	s.metacache.ExpectedCalls = nil
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, metacache.NewBloomFilterSet())
+	metacache.UpdateNumOfRows(1000)(seg)
+	s.metacache.EXPECT().GetSegmentsBy(mock.Anything).Return([]*metacache.SegmentInfo{seg})
 	s.Run("serialize_insert_fail", func() {
 		flag := false
 		handler := func(_ error) { flag = true }

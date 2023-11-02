@@ -3,6 +3,7 @@ package syncmgr
 import (
 	"context"
 	"math/rand"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -169,6 +170,75 @@ func (s *SyncManagerSuite) TestSubmit() {
 	err = manager.SyncData(context.Background(), task)
 	s.NoError(err)
 
+	<-sig
+}
+
+func (s *SyncManagerSuite) TestCompacted() {
+	sig := make(chan struct{})
+	var segmentID atomic.Int64
+	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Run(func(_ context.Context, req *datapb.SaveBinlogPathsRequest) {
+		close(sig)
+		segmentID.Store(req.GetSegmentID())
+	}).Return(nil)
+	bfs := metacache.NewBloomFilterSet()
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs)
+	metacache.UpdateNumOfRows(1000)(seg)
+	metacache.CompactTo(1001)(seg)
+	s.metacache.EXPECT().GetSegmentsBy(mock.Anything).Return([]*metacache.SegmentInfo{seg})
+
+	manager, err := NewSyncManager(10, s.chunkManager, s.allocator)
+	s.NoError(err)
+	task := s.getSuiteSyncTask()
+	task.WithMetaWriter(BrokerMetaWriter(s.broker))
+	task.WithTimeRange(50, 100)
+	task.WithCheckpoint(&msgpb.MsgPosition{
+		ChannelName: s.channelName,
+		MsgID:       []byte{1, 2, 3, 4},
+		Timestamp:   100,
+	})
+
+	err = manager.SyncData(context.Background(), task)
+	s.NoError(err)
+
+	<-sig
+	s.EqualValues(1001, segmentID.Load())
+}
+
+func (s *SyncManagerSuite) TestBlock() {
+	sig := make(chan struct{})
+	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Run(func(_ context.Context, _ *datapb.SaveBinlogPathsRequest) {
+		close(sig)
+	}).Return(nil)
+	bfs := metacache.NewBloomFilterSet()
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs)
+	metacache.UpdateNumOfRows(1000)(seg)
+	s.metacache.EXPECT().GetSegmentsBy(mock.Anything).Return([]*metacache.SegmentInfo{seg})
+
+	manager, err := NewSyncManager(10, s.chunkManager, s.allocator)
+	s.NoError(err)
+
+	// block
+	manager.Block(s.segmentID)
+
+	go func() {
+		task := s.getSuiteSyncTask()
+		task.WithMetaWriter(BrokerMetaWriter(s.broker))
+		task.WithTimeRange(50, 100)
+		task.WithCheckpoint(&msgpb.MsgPosition{
+			ChannelName: s.channelName,
+			MsgID:       []byte{1, 2, 3, 4},
+			Timestamp:   100,
+		})
+		manager.SyncData(context.Background(), task)
+	}()
+
+	select {
+	case <-sig:
+		s.FailNow("sync task done during block")
+	default:
+	}
+
+	manager.Unblock(s.segmentID)
 	<-sig
 }
 
