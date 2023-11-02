@@ -19,15 +19,15 @@ const (
 	EnableAutoID  = true
 	DisableAutoID = false
 
-	HTTPCollectionName  = "collectionName"
-	HTTPDbName          = "dbName"
-	DefaultDbName       = "default"
-	DefaultIndexName    = "vector_idx"
-	DefaultOutputFields = "*"
-
-	HTTPReturnCode    = "code"
-	HTTPReturnMessage = "message"
-	HTTPReturnData    = "data"
+	HTTPCollectionName   = "collectionName"
+	HTTPDbName           = "dbName"
+	DefaultDbName        = "default"
+	DefaultIndexName     = "vector_idx"
+	DefaultOutputFields  = "*"
+	HTTPHeaderAllowInt64 = "Accept-Type-Allow-Int64"
+	HTTPReturnCode       = "code"
+	HTTPReturnMessage    = "message"
+	HTTPReturnData       = "data"
 
 	HTTPReturnFieldName       = "name"
 	HTTPReturnFieldType       = "type"
