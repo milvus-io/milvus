@@ -341,7 +341,7 @@ func (ob *TargetObserver) sync(ctx context.Context, replicaID int64, leaderView 
 		zap.String("channel", leaderView.Channel),
 	)
 
-	schema, err := ob.broker.GetCollectionSchema(ctx, leaderView.CollectionID)
+	resp, err := ob.broker.DescribeCollection(ctx, leaderView.CollectionID)
 	if err != nil {
 		log.Warn("failed to get collection info", zap.Error(err))
 		return false
@@ -360,7 +360,7 @@ func (ob *TargetObserver) sync(ctx context.Context, replicaID int64, leaderView 
 		ReplicaID:    replicaID,
 		Channel:      leaderView.Channel,
 		Actions:      diffs,
-		Schema:       schema,
+		Schema:       resp.GetSchema(),
 		LoadMeta: &querypb.LoadMetaInfo{
 			LoadType:     ob.meta.GetLoadType(leaderView.CollectionID),
 			CollectionID: leaderView.CollectionID,

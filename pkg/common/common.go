@@ -16,7 +16,12 @@
 
 package common
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+)
 
 // system field id:
 // 0: unique row id
@@ -119,6 +124,11 @@ const (
 	CollectionDiskQuotaKey       = "collection.diskProtection.diskQuota.mb"
 )
 
+// common properties
+const (
+	MmapEnabledKey = "mmap.enabled"
+)
+
 const (
 	PropertiesKey string = "properties"
 	TraceIDKey    string = "uber-trace-id"
@@ -126,6 +136,24 @@ const (
 
 func IsSystemField(fieldID int64) bool {
 	return fieldID < StartOfUserFieldID
+}
+
+func IsMmapEnabled(kvs ...*commonpb.KeyValuePair) bool {
+	for _, kv := range kvs {
+		if kv.Key == MmapEnabledKey && kv.Value == "true" {
+			return true
+		}
+	}
+	return false
+}
+
+func IsFieldMmapEnabled(schema *schemapb.CollectionSchema, fieldID int64) bool {
+	for _, field := range schema.GetFields() {
+		if field.GetFieldID() == fieldID {
+			return IsMmapEnabled(field.GetTypeParams()...)
+		}
+	}
+	return false
 }
 
 const (

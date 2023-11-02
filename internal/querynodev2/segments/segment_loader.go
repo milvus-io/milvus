@@ -644,12 +644,21 @@ func (loader *segmentLoader) filterPKStatsBinlogs(fieldBinlogs []*datapb.FieldBi
 }
 
 func (loader *segmentLoader) loadSealedSegmentFields(ctx context.Context, segment *LocalSegment, fields []*datapb.FieldBinlog, rowCount int64) error {
+	collection := loader.manager.Collection.Get(segment.Collection())
+	if collection == nil {
+		return merr.WrapErrCollectionNotLoaded(segment.Collection(), "failed to load segment fields")
+	}
+
 	runningGroup, _ := errgroup.WithContext(ctx)
 	for _, field := range fields {
 		fieldBinLog := field
 		fieldID := field.FieldID
 		runningGroup.Go(func() error {
-			return segment.LoadFieldData(fieldID, rowCount, fieldBinLog)
+			return segment.LoadFieldData(fieldID,
+				rowCount,
+				fieldBinLog,
+				common.IsFieldMmapEnabled(collection.Schema(), fieldID),
+			)
 		})
 	}
 	err := runningGroup.Wait()
@@ -716,14 +725,18 @@ func (loader *segmentLoader) loadFieldIndex(ctx context.Context, segment *LocalS
 		}
 	}
 
-	// 2. use index path to update segment
 	indexInfo.IndexFilePaths = filteredPaths
 	fieldType, err := loader.getFieldType(segment.Collection(), indexInfo.FieldID)
 	if err != nil {
 		return err
 	}
 
-	return segment.LoadIndex(indexInfo, fieldType)
+	collection := loader.manager.Collection.Get(segment.Collection())
+	if collection == nil {
+		return merr.WrapErrCollectionNotLoaded(segment.Collection(), "failed to load field index")
+	}
+
+	return segment.LoadIndex(indexInfo, fieldType, common.IsFieldMmapEnabled(collection.Schema(), indexInfo.GetFieldID()))
 }
 
 func (loader *segmentLoader) loadBloomFilter(ctx context.Context, segmentID int64, bfs *pkoracle.BloomFilterSet,
@@ -931,11 +944,13 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 	metrics.QueryNodeDiskUsedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(toMB(uint64(localDiskUsage)))
 	diskUsage := uint64(localDiskUsage) + loader.committedResource.DiskSize
 
-	mmapEnabled := len(paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue()) > 0
 	maxSegmentSize := uint64(0)
 	predictMemUsage := memUsage
 	predictDiskUsage := diskUsage
+	mmapFieldCount := 0
 	for _, loadInfo := range segmentLoadInfos {
+		collection := loader.manager.Collection.Get(loadInfo.GetCollectionID())
+
 		oldUsedMem := predictMemUsage
 		vecFieldID2IndexInfo := make(map[int64]*querypb.FieldIndexInfo)
 		for _, fieldIndexInfo := range loadInfo.IndexInfos {
@@ -947,6 +962,7 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 
 		for _, fieldBinlog := range loadInfo.BinlogPaths {
 			fieldID := fieldBinlog.FieldID
+			mmapEnabled := common.IsFieldMmapEnabled(collection.Schema(), fieldID)
 			if fieldIndexInfo, ok := vecFieldID2IndexInfo[fieldID]; ok {
 				neededMemSize, neededDiskSize, err := GetIndexResourceUsage(fieldIndexInfo)
 				if err != nil {
@@ -970,6 +986,10 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 				} else {
 					predictMemUsage += uint64(getBinlogDataSize(fieldBinlog))
 				}
+			}
+
+			if mmapEnabled {
+				mmapFieldCount++
 			}
 		}
 
@@ -997,20 +1017,10 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 		zap.Float64("diskUsage", toMB(diskUsage)),
 		zap.Float64("predictMemUsage", toMB(predictMemUsage)),
 		zap.Float64("predictDiskUsage", toMB(predictDiskUsage)),
-		zap.Bool("mmapEnabled", mmapEnabled),
+		zap.Int("mmapFieldCount", mmapFieldCount),
 	)
 
-	if !mmapEnabled && predictMemUsage > uint64(float64(totalMem)*paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()) {
-		return 0, 0, fmt.Errorf("load segment failed, OOM if load, maxSegmentSize = %v MB, concurrency = %d, memUsage = %v MB, predictMemUsage = %v MB, totalMem = %v MB thresholdFactor = %f",
-			toMB(maxSegmentSize),
-			concurrency,
-			toMB(memUsage),
-			toMB(predictMemUsage),
-			toMB(totalMem),
-			paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat())
-	}
-
-	if mmapEnabled && memUsage > uint64(float64(totalMem)*paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()) {
+	if predictMemUsage > uint64(float64(totalMem)*paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()) {
 		return 0, 0, fmt.Errorf("load segment failed, OOM if load, maxSegmentSize = %v MB, concurrency = %d, memUsage = %v MB, predictMemUsage = %v MB, totalMem = %v MB thresholdFactor = %f",
 			toMB(maxSegmentSize),
 			concurrency,

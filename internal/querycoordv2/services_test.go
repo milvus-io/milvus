@@ -1736,7 +1736,7 @@ func (suite *ServiceSuite) expectGetRecoverInfo(collection int64) {
 }
 
 func (suite *ServiceSuite) expectLoadPartitions() {
-	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything).
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
 		Return(nil, nil)
 	suite.broker.EXPECT().DescribeIndex(mock.Anything, mock.Anything).
 		Return(nil, nil)

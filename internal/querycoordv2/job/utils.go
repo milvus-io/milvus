@@ -73,10 +73,11 @@ func loadPartitions(ctx context.Context,
 	var err error
 	var schema *schemapb.CollectionSchema
 	if withSchema {
-		schema, err = broker.GetCollectionSchema(ctx, collection)
+		collectionInfo, err := broker.DescribeCollection(ctx, collection)
 		if err != nil {
 			return err
 		}
+		schema = collectionInfo.GetSchema()
 	}
 	indexes, err := broker.DescribeIndex(ctx, collection)
 	if err != nil {

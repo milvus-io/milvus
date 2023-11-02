@@ -72,6 +72,8 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 	defer m.mut.Unlock()
 
 	if collection, ok := m.collections[collectionID]; ok {
+		// the schema may be changed even the collection is loaded
+		collection.schema = schema
 		collection.Ref(1)
 		return
 	}

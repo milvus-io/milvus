@@ -29,6 +29,7 @@ struct FieldBinlogInfo {
     int64_t field_id;
     int64_t row_count = -1;
     std::vector<int64_t> entries_nums;
+    bool enable_mmap{false};
     std::vector<std::string> insert_files;
 };
 

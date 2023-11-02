@@ -56,12 +56,12 @@ func deleteLoadIndexInfo(info *LoadIndexInfo) {
 	C.DeleteLoadIndexInfo(info.cLoadIndexInfo)
 }
 
-func (li *LoadIndexInfo) appendLoadIndexInfo(indexInfo *querypb.FieldIndexInfo, collectionID int64, partitionID int64, segmentID int64, fieldType schemapb.DataType) error {
+func (li *LoadIndexInfo) appendLoadIndexInfo(indexInfo *querypb.FieldIndexInfo, collectionID int64, partitionID int64, segmentID int64, fieldType schemapb.DataType, enableMmap bool) error {
 	fieldID := indexInfo.FieldID
 	indexPaths := indexInfo.IndexFilePaths
 
 	mmapDirPath := paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue()
-	err := li.appendFieldInfo(collectionID, partitionID, segmentID, fieldID, fieldType, mmapDirPath)
+	err := li.appendFieldInfo(collectionID, partitionID, segmentID, fieldID, fieldType, enableMmap, mmapDirPath)
 	if err != nil {
 		return err
 	}
@@ -133,15 +133,16 @@ func (li *LoadIndexInfo) appendIndexFile(filePath string) error {
 }
 
 // appendFieldInfo appends fieldID & fieldType to index
-func (li *LoadIndexInfo) appendFieldInfo(collectionID int64, partitionID int64, segmentID int64, fieldID int64, fieldType schemapb.DataType, mmapDirPath string) error {
+func (li *LoadIndexInfo) appendFieldInfo(collectionID int64, partitionID int64, segmentID int64, fieldID int64, fieldType schemapb.DataType, enableMmap bool, mmapDirPath string) error {
 	cColID := C.int64_t(collectionID)
 	cParID := C.int64_t(partitionID)
 	cSegID := C.int64_t(segmentID)
 	cFieldID := C.int64_t(fieldID)
 	cintDType := uint32(fieldType)
+	cEnableMmap := C.bool(enableMmap)
 	cMmapDirPath := C.CString(mmapDirPath)
 	defer C.free(unsafe.Pointer(cMmapDirPath))
-	status := C.AppendFieldInfo(li.cLoadIndexInfo, cColID, cParID, cSegID, cFieldID, cintDType, cMmapDirPath)
+	status := C.AppendFieldInfo(li.cLoadIndexInfo, cColID, cParID, cSegID, cFieldID, cintDType, cEnableMmap, cMmapDirPath)
 	return HandleCStatus(&status, "AppendFieldInfo failed")
 }
 

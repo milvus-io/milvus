@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -128,6 +129,18 @@ func (m *CollectionManager) Recover(broker Broker) error {
 	ctxLog.Info("recover collections and partitions from kv store")
 
 	for _, collection := range collections {
+		// Dropped collection should be deprecated
+		_, err = broker.DescribeCollection(ctx, collection.GetCollectionID())
+		if errors.Is(err, merr.ErrCollectionNotFound) {
+			ctxLog.Info("skip dropped collection during recovery", zap.Int64("collection", collection.GetCollectionID()))
+			m.catalog.ReleaseCollection(collection.GetCollectionID())
+			continue
+		}
+		if err != nil {
+			ctxLog.Warn("failed to get collection schema", zap.Error(err))
+			return err
+		}
+
 		if collection.GetReplicaNumber() <= 0 {
 			ctxLog.Info("skip recovery and release collection due to invalid replica number",
 				zap.Int64("collectionID", collection.GetCollectionID()),

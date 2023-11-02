@@ -32,6 +32,7 @@
 #include <google/protobuf/generated_enum_reflection.h>
 #include <google/protobuf/unknown_field_set.h>
 #include "common.pb.h"
+#include <google/protobuf/descriptor.pb.h>
 // @@protoc_insertion_point(includes)
 #include <google/protobuf/port_def.inc>
 #define PROTOBUF_INTERNAL_EXPORT_schema_2eproto
@@ -683,10 +684,10 @@ class CollectionSchema final :
   std::string* _internal_mutable_description();
   public:
 
-  // bool autoID = 3;
-  void clear_autoid();
-  bool autoid() const;
-  void set_autoid(bool value);
+  // bool autoID = 3 [deprecated = true];
+  PROTOBUF_DEPRECATED void clear_autoid();
+  PROTOBUF_DEPRECATED bool autoid() const;
+  PROTOBUF_DEPRECATED void set_autoid(bool value);
   private:
   bool _internal_autoid() const;
   void _internal_set_autoid(bool value);
@@ -4297,7 +4298,7 @@ inline void CollectionSchema::set_allocated_description(std::string* description
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.schema.CollectionSchema.description)
 }
 
-// bool autoID = 3;
+// bool autoID = 3 [deprecated = true];
 inline void CollectionSchema::clear_autoid() {
   _impl_.autoid_ = false;
 }

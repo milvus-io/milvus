@@ -242,9 +242,9 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		}
 	}()
 
-	schema, err := ex.broker.GetCollectionSchema(ctx, task.CollectionID())
+	collectionInfo, err := ex.broker.DescribeCollection(ctx, task.CollectionID())
 	if err != nil {
-		log.Warn("failed to get schema of collection", zap.Error(err))
+		log.Warn("failed to get collection info", zap.Error(err))
 		return err
 	}
 	partitions, err := utils.GetPartitions(ex.meta.CollectionManager, task.CollectionID())
@@ -277,7 +277,13 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	loadInfo := utils.PackSegmentLoadInfo(resp, indexes)
 
 	// Get shard leader for the given replica and segment
-	leader, ok := getShardLeader(ex.meta.ReplicaManager, ex.dist, task.CollectionID(), action.Node(), segment.GetInsertChannel())
+	leader, ok := getShardLeader(
+		ex.meta.ReplicaManager,
+		ex.dist,
+		task.CollectionID(),
+		action.Node(),
+		segment.GetInsertChannel(),
+	)
 	if !ok {
 		msg := "no shard leader for the segment to execute loading"
 		err = merr.WrapErrChannelNotFound(segment.GetInsertChannel(), "shard delegator not found")
@@ -293,7 +299,15 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		return err
 	}
 
-	req := packLoadSegmentRequest(task, action, schema, loadMeta, loadInfo, indexInfo)
+	req := packLoadSegmentRequest(
+		task,
+		action,
+		collectionInfo.GetSchema(),
+		collectionInfo.GetProperties(),
+		loadMeta,
+		loadInfo,
+		indexInfo,
+	)
 	loadTask := NewLoadSegmentsTask(task, step, req)
 	ex.merger.Add(loadTask)
 	log.Info("load segment task committed")
@@ -396,9 +410,9 @@ func (ex *Executor) subDmChannel(task *ChannelTask, step int) error {
 
 	ctx := task.Context()
 
-	schema, err := ex.broker.GetCollectionSchema(ctx, task.CollectionID())
+	collectionInfo, err := ex.broker.DescribeCollection(ctx, task.CollectionID())
 	if err != nil {
-		log.Warn("failed to get schema of collection")
+		log.Warn("failed to get collection info")
 		return err
 	}
 	partitions, err := utils.GetPartitions(ex.meta.CollectionManager, task.CollectionID())
@@ -411,7 +425,7 @@ func (ex *Executor) subDmChannel(task *ChannelTask, step int) error {
 		log.Warn("fail to get index meta of collection")
 		return err
 	}
-	metricType, err := getMetricType(indexInfo, schema)
+	metricType, err := getMetricType(indexInfo, collectionInfo.GetSchema())
 	if err != nil {
 		log.Warn("failed to get metric type", zap.Error(err))
 		return err
@@ -429,7 +443,14 @@ func (ex *Executor) subDmChannel(task *ChannelTask, step int) error {
 		log.Warn(msg, zap.String("channelName", action.ChannelName()))
 		return merr.WrapErrChannelReduplicate(action.ChannelName())
 	}
-	req := packSubChannelRequest(task, action, schema, loadMeta, dmChannel, indexInfo)
+	req := packSubChannelRequest(
+		task,
+		action,
+		collectionInfo.GetSchema(),
+		loadMeta,
+		dmChannel,
+		indexInfo,
+	)
 	err = fillSubChannelRequest(ctx, req, ex.broker)
 	if err != nil {
 		log.Warn("failed to subscribe channel, failed to fill the request with segments",

@@ -216,14 +216,14 @@ func (o *LeaderObserver) sync(ctx context.Context, replicaID int64, leaderView *
 		zap.String("channel", leaderView.Channel),
 	)
 
-	schema, err := o.broker.GetCollectionSchema(ctx, leaderView.CollectionID)
+	collectionInfo, err := o.broker.DescribeCollection(ctx, leaderView.CollectionID)
 	if err != nil {
-		log.Warn("sync distribution failed, cannot get schema of collection", zap.Error(err))
+		log.Warn("failed to get collection info", zap.Error(err))
 		return false
 	}
 	partitions, err := utils.GetPartitions(o.meta.CollectionManager, leaderView.CollectionID)
 	if err != nil {
-		log.Warn("sync distribution failed, cannot get partitions of collection", zap.Error(err))
+		log.Warn("failed to get partitions", zap.Error(err))
 		return false
 	}
 
@@ -235,7 +235,7 @@ func (o *LeaderObserver) sync(ctx context.Context, replicaID int64, leaderView *
 		ReplicaID:    replicaID,
 		Channel:      leaderView.Channel,
 		Actions:      diffs,
-		Schema:       schema,
+		Schema:       collectionInfo.GetSchema(),
 		LoadMeta: &querypb.LoadMetaInfo{
 			LoadType:     o.meta.GetLoadType(leaderView.CollectionID),
 			CollectionID: leaderView.CollectionID,

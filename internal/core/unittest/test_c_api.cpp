@@ -16,6 +16,7 @@
 #include <boost/format.hpp>
 #include <chrono>
 #include <iostream>
+#include <memory>
 #include <random>
 #include <string>
 #include <unordered_set>
@@ -271,6 +272,15 @@ generate_index(void* raw_data,
 TEST(CApiTest, CollectionTest) {
     auto collection = NewCollection(get_default_schema_config());
     DeleteCollection(collection);
+}
+
+TEST(CApiTest, LoadInfoTest) {
+    auto load_info = std::make_shared<LoadFieldDataInfo>();
+    auto c_load_info = reinterpret_cast<CLoadFieldDataInfo*>(load_info.get());
+    AppendLoadFieldInfo(c_load_info, 100, 100);
+    EnableMmap(c_load_info, 100, true);
+
+    EXPECT_TRUE(load_info->field_infos.at(100).enable_mmap);
 }
 
 TEST(CApiTest, SetIndexMetaTest) {
@@ -1632,7 +1642,7 @@ TEST(CApiTest, LoadIndexInfo) {
     ASSERT_EQ(status.error_code, Success);
     std::string field_name = "field0";
     status = AppendFieldInfo(
-        c_load_index_info, 0, 0, 0, 0, CDataType::FloatVector, "");
+        c_load_index_info, 0, 0, 0, 0, CDataType::FloatVector, false, "");
     ASSERT_EQ(status.error_code, Success);
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -1794,7 +1804,7 @@ TEST(CApiTest, Indexing_Without_Predicate) {
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(
-        c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, "");
+        c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
         knowhere::Version::GetCurrentVersion().VersionNumber());
@@ -1936,7 +1946,7 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(
-        c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, "");
+        c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
         knowhere::Version::GetCurrentVersion().VersionNumber());
@@ -2108,7 +2118,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(
-        c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, "");
+        c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
         knowhere::Version::GetCurrentVersion().VersionNumber());
@@ -2282,7 +2292,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(
-        c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, "");
+        c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
         knowhere::Version::GetCurrentVersion().VersionNumber());
@@ -2448,7 +2458,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(
-        c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, "");
+        c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
         knowhere::Version::GetCurrentVersion().VersionNumber());
@@ -2615,7 +2625,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(
-        c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, "");
+        c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
         knowhere::Version::GetCurrentVersion().VersionNumber());
@@ -2788,7 +2798,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(
-        c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector, "");
+        c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
         knowhere::Version::GetCurrentVersion().VersionNumber());
@@ -2961,7 +2971,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(
-        c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector, "");
+        c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
         knowhere::Version::GetCurrentVersion().VersionNumber());
@@ -3128,7 +3138,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(
-        c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector, "");
+        c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
         knowhere::Version::GetCurrentVersion().VersionNumber());
@@ -3318,7 +3328,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(
-        c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector, "");
+        c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
         knowhere::Version::GetCurrentVersion().VersionNumber());
@@ -3491,7 +3501,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(
-        c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, "");
+        c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
         knowhere::Version::GetCurrentVersion().VersionNumber());
@@ -3718,7 +3728,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(
-        c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, "");
+        c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
         knowhere::Version::GetCurrentVersion().VersionNumber());

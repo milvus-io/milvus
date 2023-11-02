@@ -102,6 +102,7 @@ func packLoadSegmentRequest(
 	task *SegmentTask,
 	action Action,
 	schema *schemapb.CollectionSchema,
+	collectionProperties []*commonpb.KeyValuePair,
 	loadMeta *querypb.LoadMetaInfo,
 	loadInfo *querypb.SegmentLoadInfo,
 	indexInfo []*indexpb.IndexInfo,
@@ -110,6 +111,18 @@ func packLoadSegmentRequest(
 	if action.Type() == ActionTypeUpdate {
 		loadScope = querypb.LoadScope_Index
 	}
+
+	// field mmap enabled if collection-level mmap enabled or the field mmap enabled
+	collectionMmapEnabled := common.IsMmapEnabled(collectionProperties...)
+	for _, field := range schema.GetFields() {
+		if collectionMmapEnabled {
+			field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
+				Key:   common.MmapEnabledKey,
+				Value: "true",
+			})
+		}
+	}
+
 	return &querypb.LoadSegmentsRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_LoadSegments),

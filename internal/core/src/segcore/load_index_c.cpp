@@ -79,6 +79,7 @@ AppendFieldInfo(CLoadIndexInfo c_load_index_info,
                 int64_t segment_id,
                 int64_t field_id,
                 enum CDataType field_type,
+                bool enable_mmap,
                 const char* mmap_dir_path) {
     try {
         auto load_index_info =
@@ -88,6 +89,7 @@ AppendFieldInfo(CLoadIndexInfo c_load_index_info,
         load_index_info->segment_id = segment_id;
         load_index_info->field_id = field_id;
         load_index_info->field_type = milvus::DataType(field_type);
+        load_index_info->enable_mmap = enable_mmap;
         load_index_info->mmap_dir_path = std::string(mmap_dir_path);
 
         auto status = CStatus();
@@ -253,8 +255,10 @@ AppendIndexV2(CLoadIndexInfo c_load_index_info) {
             milvus::index::IndexFactory::GetInstance().CreateIndex(
                 index_info, fileManagerContext);
 
-        if (!load_index_info->mmap_dir_path.empty() &&
+        if (load_index_info->enable_mmap &&
             load_index_info->index->IsMmapSupported()) {
+            AssertInfo(!load_index_info->mmap_dir_path.empty(),
+                       "mmap directory path is empty");
             auto filepath =
                 std::filesystem::path(load_index_info->mmap_dir_path) /
                 std::to_string(load_index_info->segment_id) /

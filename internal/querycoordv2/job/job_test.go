@@ -126,7 +126,7 @@ func (suite *JobSuite) SetupSuite() {
 		suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collection).Return(vChannels, segmentBinlogs, nil).Maybe()
 	}
 
-	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything).
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
 		Return(nil, nil)
 	suite.broker.EXPECT().DescribeIndex(mock.Anything, mock.Anything).
 		Return(nil, nil)
@@ -1238,10 +1238,10 @@ func (suite *JobSuite) TestCallLoadPartitionFailed() {
 	// call LoadPartitions failed at get schema
 	getSchemaErr := fmt.Errorf("mock get schema error")
 	suite.broker.ExpectedCalls = lo.Filter(suite.broker.ExpectedCalls, func(call *mock.Call, _ int) bool {
-		return call.Method != "GetCollectionSchema"
+		return call.Method != "DescribeCollection"
 	})
 	for _, collection := range suite.collections {
-		suite.broker.EXPECT().GetCollectionSchema(mock.Anything, collection).Return(nil, getSchemaErr)
+		suite.broker.EXPECT().DescribeCollection(mock.Anything, collection).Return(nil, getSchemaErr)
 		loadCollectionReq := &querypb.LoadCollectionRequest{
 			CollectionID: collection,
 		}
@@ -1281,9 +1281,9 @@ func (suite *JobSuite) TestCallLoadPartitionFailed() {
 	}
 
 	suite.broker.ExpectedCalls = lo.Filter(suite.broker.ExpectedCalls, func(call *mock.Call, _ int) bool {
-		return call.Method != "DescribeIndex" && call.Method != "GetCollectionSchema"
+		return call.Method != "DescribeIndex" && call.Method != "DescribeCollection"
 	})
-	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything).Return(nil, nil)
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, nil)
 	suite.broker.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(nil, nil)
 }
 

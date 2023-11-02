@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
@@ -60,7 +61,6 @@ func (suite *SegmentLoaderSuite) SetupSuite() {
 	suite.partitionID = rand.Int63()
 	suite.segmentID = rand.Int63()
 	suite.segmentNum = 5
-	suite.schema = GenTestCollectionSchema("test", schemapb.DataType_Int64)
 }
 
 func (suite *SegmentLoaderSuite) SetupTest() {
@@ -76,14 +76,14 @@ func (suite *SegmentLoaderSuite) SetupTest() {
 	initcore.InitRemoteChunkManager(paramtable.Get())
 
 	// Data
-	schema := GenTestCollectionSchema("test", schemapb.DataType_Int64)
-	indexMeta := GenTestIndexMeta(suite.collectionID, schema)
+	suite.schema = GenTestCollectionSchema("test", schemapb.DataType_Int64)
+	indexMeta := GenTestIndexMeta(suite.collectionID, suite.schema)
 	loadMeta := &querypb.LoadMetaInfo{
 		LoadType:     querypb.LoadType_LoadCollection,
 		CollectionID: suite.collectionID,
 		PartitionIDs: []int64{suite.partitionID},
 	}
-	suite.manager.Collection.PutOrRef(suite.collectionID, schema, indexMeta, loadMeta)
+	suite.manager.Collection.PutOrRef(suite.collectionID, suite.schema, indexMeta, loadMeta)
 }
 
 func (suite *SegmentLoaderSuite) TearDownTest() {
@@ -438,6 +438,14 @@ func (suite *SegmentLoaderSuite) TestLoadWithMmap() {
 	paramtable.Get().Save(key, "/tmp/mmap-test")
 	defer paramtable.Get().Reset(key)
 	ctx := context.Background()
+
+	collection := suite.manager.Collection.Get(suite.collectionID)
+	for _, field := range collection.Schema().GetFields() {
+		field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
+			Key:   common.MmapEnabledKey,
+			Value: "true",
+		})
+	}
 
 	msgLength := 100
 	// Load sealed
