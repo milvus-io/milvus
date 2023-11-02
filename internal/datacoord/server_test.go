@@ -1334,6 +1334,21 @@ func TestSaveBinlogPaths(t *testing.T) {
 					},
 				},
 			},
+			Field2StatslogPaths: []*datapb.FieldBinlog{
+				{
+					FieldID: 1,
+					Binlogs: []*datapb.Binlog{
+						{
+							LogPath:    "/by-dev/test_stats/0/1/1/1/Allo1",
+							EntriesNum: 5,
+						},
+						{
+							LogPath:    "/by-dev/test_stats/0/1/1/1/Allo2",
+							EntriesNum: 5,
+						},
+					},
+				},
+			},
 			CheckPoints: []*datapb.CheckPoint{
 				{
 					SegmentID: 1,

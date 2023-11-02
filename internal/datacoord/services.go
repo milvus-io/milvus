@@ -183,7 +183,9 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 			zap.String("channelName", r.GetChannelName()),
 			zap.Uint32("count", r.GetCount()),
 			zap.Bool("isImport", r.GetIsImport()),
-			zap.Int64("import task ID", r.GetImportTaskID()))
+			zap.Int64("import task ID", r.GetImportTaskID()),
+			zap.String("segment level", r.GetLevel().String()),
+		)
 
 		// Load the collection info from Root Coordinator, if it is not found in server meta.
 		// Note: this request wouldn't be received if collection didn't exist.
@@ -449,37 +451,51 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	// validate
 	segmentID := req.GetSegmentID()
 	segment := s.meta.GetSegment(segmentID)
-
+	operators := []UpdateOperator{}
+	// if L1 segment not exist
+	// return error
+	// but if L0 segment not exist
+	// will create it
 	if segment == nil {
-		err := merr.WrapErrSegmentNotFound(segmentID)
-		log.Warn("failed to get segment", zap.Error(err))
-		return merr.Status(err), nil
-	}
+		if req.SegLevel != datapb.SegmentLevel_L0 {
+			err := merr.WrapErrSegmentNotFound(segmentID)
+			log.Warn("failed to get segment", zap.Error(err))
+			return merr.Status(err), nil
+		}
 
-	if segment.State == commonpb.SegmentState_Dropped {
-		log.Info("save to dropped segment, ignore this request")
-		return merr.Success(), nil
-	} else if !isSegmentHealthy(segment) {
-		err := merr.WrapErrSegmentNotFound(segmentID)
-		log.Warn("failed to get segment, the segment not healthy", zap.Error(err))
-		return merr.Status(err), nil
+		operators = append(operators, CreateL0Operator(req.GetCollectionID(), req.GetPartitionID(), req.GetSegmentID(), req.GetChannel()))
+	} else {
+		if segment.State == commonpb.SegmentState_Dropped {
+			log.Info("save to dropped segment, ignore this request")
+			return merr.Success(), nil
+		}
+
+		if !isSegmentHealthy(segment) {
+			err := merr.WrapErrSegmentNotFound(segmentID)
+			log.Warn("failed to get segment, the segment not healthy", zap.Error(err))
+			return merr.Status(err), nil
+		}
 	}
 
 	if req.GetDropped() {
 		s.segmentManager.DropSegment(ctx, segment.GetID())
+		operators = append(operators, UpdateStatusOperator(segmentID, commonpb.SegmentState_Dropped))
+	} else if req.GetFlushed() {
+		// set segment to SegmentState_Flushing
+		operators = append(operators, UpdateStatusOperator(segmentID, commonpb.SegmentState_Flushing))
 	}
 
-	// Set segment to SegmentState_Flushing. Also save binlogs and checkpoints.
-	err := s.meta.UpdateFlushSegmentsInfo(
-		req.GetSegmentID(),
-		req.GetFlushed(),
-		req.GetDropped(),
-		req.GetImporting(),
-		req.GetField2BinlogPaths(),
-		req.GetField2StatslogPaths(),
-		req.GetDeltalogs(),
-		req.GetCheckPoints(),
-		req.GetStartPositions())
+	// save binlogs
+	operators = append(operators, UpdateBinlogsOperator(segmentID, req.GetField2BinlogPaths(), req.GetField2StatslogPaths(), req.GetDeltalogs()))
+
+	// save startPositions of some other segments
+	operators = append(operators, UpdateStartPosition(req.GetStartPositions()))
+
+	// save checkpoints.
+	operators = append(operators, UpdateCheckPointOperator(segmentID, req.GetImporting(), req.GetCheckPoints()))
+
+	// run all operator and update new segment info
+	err := s.meta.UpdateSegmentsInfo(operators...)
 	if err != nil {
 		log.Error("save binlog and checkpoints failed", zap.Error(err))
 		return merr.Status(err), nil

@@ -152,6 +152,7 @@ message SegmentIDRequest {
   int64 partitionID = 4;
   bool isImport = 5;        // Indicate whether this request comes from a bulk insert task.
   int64 importTaskID = 6;   // Needed for segment lock.
+  SegmentLevel level = 7;
 }
 
 message AssignSegmentIDRequest {
@@ -329,6 +330,8 @@ message SaveBinlogPathsRequest {
   bool dropped = 10;
   bool importing = 11;
   string channel = 12; // report channel name for verification
+  SegmentLevel seg_level =13;
+  int64 partitionID =14; // report partitionID for create L0 segment
 }
 
 message CheckPoint {

@@ -163,7 +163,7 @@ func TestSealSegmentPolicy(t *testing.T) {
 		nosealTs := (now.Add(lifetime / 2)).UnixNano() / int64(time.Millisecond)
 		sealTs := (now.Add(lifetime)).UnixNano() / int64(time.Millisecond)
 
-		p := sealByLifetimePolicy(lifetime)
+		p := sealL1SegmentByLifetime(lifetime)
 
 		segment := &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
@@ -184,7 +184,7 @@ func Test_sealLongTimeIdlePolicy(t *testing.T) {
 	idleTimeTolerance := 2 * time.Second
 	minSizeToSealIdleSegment := 16.0
 	maxSizeOfSegment := 512.0
-	policy := sealLongTimeIdlePolicy(idleTimeTolerance, minSizeToSealIdleSegment, maxSizeOfSegment)
+	policy := sealL1SegmentByIdleTime(idleTimeTolerance, minSizeToSealIdleSegment, maxSizeOfSegment)
 	seg1 := &SegmentInfo{lastWrittenTime: time.Now().Add(idleTimeTolerance * 5)}
 	assert.False(t, policy(seg1, 100))
 	seg2 := &SegmentInfo{lastWrittenTime: getZeroTime(), currRows: 1, SegmentInfo: &datapb.SegmentInfo{MaxRowNum: 10000}}

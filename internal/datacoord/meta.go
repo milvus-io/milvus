@@ -439,183 +439,197 @@ func (m *meta) UnsetIsImporting(segmentID UniqueID) error {
 	return nil
 }
 
-// UpdateFlushSegmentsInfo update segment partial/completed flush info
-// `flushed` parameter indicating whether segment is flushed completely or partially
-// `binlogs`, `checkpoints` and `statPositions` are persistence data for segment
-func (m *meta) UpdateFlushSegmentsInfo(
-	segmentID UniqueID,
-	flushed bool,
-	dropped bool,
-	importing bool,
-	binlogs, statslogs, deltalogs []*datapb.FieldBinlog,
-	checkpoints []*datapb.CheckPoint,
-	startPositions []*datapb.SegmentStartPosition,
-) error {
-	log.Debug("meta update: update flush segments info",
-		zap.Int64("segmentId", segmentID),
-		zap.Int("binlog", len(binlogs)),
-		zap.Int("stats log", len(statslogs)),
-		zap.Int("delta logs", len(deltalogs)),
-		zap.Bool("flushed", flushed),
-		zap.Bool("dropped", dropped),
-		zap.Any("check points", checkpoints),
-		zap.Any("start position", startPositions),
-		zap.Bool("importing", importing))
-	m.Lock()
-	defer m.Unlock()
+type UpdateSegmentPack struct {
+	meta     *meta
+	segments map[int64]*SegmentInfo
+	// for update etcd binlog paths
+	increments map[int64]metastore.BinlogsIncrement
+	// for update segment metric after alter segments
+	metricMutation *segMetricMutation
+}
 
-	segment := m.segments.GetSegment(segmentID)
+func (p *UpdateSegmentPack) Get(segmentID int64) *SegmentInfo {
+	if segment, ok := p.segments[segmentID]; ok {
+		return segment
+	}
+
+	segment := p.meta.segments.GetSegment(segmentID)
 	if segment == nil || !isSegmentHealthy(segment) {
-		log.Warn("meta update: update flush segments info - segment not found",
+		log.Warn("meta update: get segment failed - segment not found",
 			zap.Int64("segmentID", segmentID),
 			zap.Bool("segment nil", segment == nil),
 			zap.Bool("segment unhealthy", !isSegmentHealthy(segment)))
 		return nil
 	}
 
-	metricMutation := &segMetricMutation{
-		stateChange: make(map[string]int),
+	p.segments[segmentID] = segment.Clone()
+	return p.segments[segmentID]
+}
+
+type UpdateOperator func(*UpdateSegmentPack) bool
+
+func CreateL0Operator(collectionID, partitionID, segmentID int64, channel string) UpdateOperator {
+	return func(modPack *UpdateSegmentPack) bool {
+		segment := modPack.meta.GetSegment(segmentID)
+		if segment == nil {
+			log.Info("meta update: add new l0 segment",
+				zap.Int64("collectionID", collectionID),
+				zap.Int64("partitionID", partitionID),
+				zap.Int64("segmentID", segmentID))
+		}
+		modPack.segments[segmentID] = &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            segmentID,
+				CollectionID:  collectionID,
+				PartitionID:   partitionID,
+				InsertChannel: channel,
+				NumOfRows:     0,
+				State:         commonpb.SegmentState_Growing,
+				Level:         datapb.SegmentLevel_L0,
+			},
+		}
+		return true
 	}
-	clonedSegment := segment.Clone()
-	modSegments := make(map[UniqueID]*SegmentInfo)
-	if flushed {
-		// Update segment state and prepare metrics.
-		updateSegStateAndPrepareMetrics(clonedSegment, commonpb.SegmentState_Flushing, metricMutation)
-		modSegments[segmentID] = clonedSegment
+}
+
+// Set status of segment
+// and record dropped time when change segment status to dropped
+func UpdateStatusOperator(segmentID int64, status commonpb.SegmentState) UpdateOperator {
+	return func(modPack *UpdateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Warn("meta update: update status failed - segment not found",
+				zap.Int64("segmentID", segmentID),
+				zap.String("status", status.String()))
+			return false
+		}
+
+		updateSegStateAndPrepareMetrics(segment, status, modPack.metricMutation)
+		if status == commonpb.SegmentState_Dropped {
+			segment.DroppedAt = uint64(time.Now().UnixNano())
+		}
+		return true
 	}
-	if dropped {
-		// Update segment state and prepare metrics.
-		updateSegStateAndPrepareMetrics(clonedSegment, commonpb.SegmentState_Dropped, metricMutation)
-		clonedSegment.DroppedAt = uint64(time.Now().UnixNano())
-		modSegments[segmentID] = clonedSegment
+}
+
+// update binlogs in segmentInfo
+func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs []*datapb.FieldBinlog) UpdateOperator {
+	return func(modPack *UpdateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Warn("meta update: update binlog failed - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+
+		segment.Binlogs = mergeFieldBinlogs(segment.GetBinlogs(), binlogs)
+		segment.Statslogs = mergeFieldBinlogs(segment.GetStatslogs(), statslogs)
+		segment.Deltalogs = mergeFieldBinlogs(segment.GetDeltalogs(), deltalogs)
+		modPack.increments[segmentID] = metastore.BinlogsIncrement{
+			Segment: segment.SegmentInfo,
+		}
+		return true
 	}
-	// TODO add diff encoding and compression
-	currBinlogs := clonedSegment.GetBinlogs()
-	getFieldBinlogs := func(id UniqueID, binlogs []*datapb.FieldBinlog) *datapb.FieldBinlog {
-		for _, binlog := range binlogs {
-			if id == binlog.GetFieldID() {
-				return binlog
+}
+
+// update startPosition
+func UpdateStartPosition(startPositions []*datapb.SegmentStartPosition) UpdateOperator {
+	return func(modPack *UpdateSegmentPack) bool {
+		for _, pos := range startPositions {
+			if len(pos.GetStartPosition().GetMsgID()) == 0 {
+				continue
+			}
+			s := modPack.Get(pos.GetSegmentID())
+			if s == nil {
+				continue
+			}
+
+			s.StartPosition = pos.GetStartPosition()
+		}
+		return true
+	}
+}
+
+// update segment checkpoint and num rows
+// if was importing segment
+// only update rows.
+func UpdateCheckPointOperator(segmentID int64, importing bool, checkpoints []*datapb.CheckPoint) UpdateOperator {
+	return func(modPack *UpdateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Warn("meta update: update checkpoint failed - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+
+		if importing {
+			segment.NumOfRows = segment.currRows
+		} else {
+			for _, cp := range checkpoints {
+				if cp.SegmentID != segmentID {
+					// Don't think this is gonna to happen, ignore for now.
+					log.Warn("checkpoint in segment is not same as flush segment to update, igreo", zap.Int64("current", segmentID), zap.Int64("checkpoint segment", cp.SegmentID))
+					continue
+				}
+
+				if segment.DmlPosition != nil && segment.DmlPosition.Timestamp >= cp.Position.Timestamp {
+					log.Warn("checkpoint in segment is larger than reported", zap.Any("current", segment.GetDmlPosition()), zap.Any("reported", cp.GetPosition()))
+					// segment position in etcd is larger than checkpoint, then dont change it
+					continue
+				}
+
+				segment.NumOfRows = cp.NumOfRows
+				segment.DmlPosition = cp.GetPosition()
 			}
 		}
-		return nil
-	}
-	// binlogs
-	for _, tBinlogs := range binlogs {
-		fieldBinlogs := getFieldBinlogs(tBinlogs.GetFieldID(), currBinlogs)
-		if fieldBinlogs == nil {
-			currBinlogs = append(currBinlogs, tBinlogs)
-		} else {
-			fieldBinlogs.Binlogs = append(fieldBinlogs.Binlogs, tBinlogs.Binlogs...)
-		}
-	}
-	clonedSegment.Binlogs = currBinlogs
-	// statlogs
-	currStatsLogs := clonedSegment.GetStatslogs()
-	for _, tStatsLogs := range statslogs {
-		fieldStatsLog := getFieldBinlogs(tStatsLogs.GetFieldID(), currStatsLogs)
-		if fieldStatsLog == nil {
-			currStatsLogs = append(currStatsLogs, tStatsLogs)
-		} else {
-			fieldStatsLog.Binlogs = append(fieldStatsLog.Binlogs, tStatsLogs.Binlogs...)
-		}
-	}
-	clonedSegment.Statslogs = currStatsLogs
-	// deltalogs
-	currDeltaLogs := clonedSegment.GetDeltalogs()
-	for _, tDeltaLogs := range deltalogs {
-		fieldDeltaLogs := getFieldBinlogs(tDeltaLogs.GetFieldID(), currDeltaLogs)
-		if fieldDeltaLogs == nil {
-			currDeltaLogs = append(currDeltaLogs, tDeltaLogs)
-		} else {
-			fieldDeltaLogs.Binlogs = append(fieldDeltaLogs.Binlogs, tDeltaLogs.Binlogs...)
-		}
-	}
-	clonedSegment.Deltalogs = currDeltaLogs
-	modSegments[segmentID] = clonedSegment
-	getClonedSegment := func(segmentID UniqueID) *SegmentInfo {
-		if s, ok := modSegments[segmentID]; ok {
-			return s
-		}
-		if s := m.segments.GetSegment(segmentID); s != nil && isSegmentHealthy(s) {
-			return s.Clone()
-		}
-		return nil
-	}
-	for _, pos := range startPositions {
-		if len(pos.GetStartPosition().GetMsgID()) == 0 {
-			continue
-		}
-		s := getClonedSegment(pos.GetSegmentID())
-		if s == nil {
-			continue
-		}
 
-		s.StartPosition = pos.GetStartPosition()
-		modSegments[pos.GetSegmentID()] = s
-	}
-
-	if importing {
-		s := clonedSegment
-		s.NumOfRows = s.currRows
-		count := segmentutil.CalcRowCountFromBinLog(s.SegmentInfo)
+		count := segmentutil.CalcRowCountFromBinLog(segment.SegmentInfo)
 		if count != segment.currRows && count > 0 {
 			log.Info("check point reported inconsistent with bin log row count",
-				zap.Int64("segmentID", segment.GetID()),
 				zap.Int64("current rows (wrong)", segment.currRows),
 				zap.Int64("segment bin log row count (correct)", count))
-			s.NumOfRows = count
+			segment.NumOfRows = count
 		}
-		modSegments[segmentID] = s
-	} else {
-		for _, cp := range checkpoints {
-			if cp.SegmentID != segmentID {
-				// Don't think this is gonna to happen, ignore for now.
-				log.Warn("checkpoint in segment is not same as flush segment to update, igreo", zap.Int64("current", segmentID), zap.Int64("checkpoint segment", cp.SegmentID))
-				continue
-			}
-			s := clonedSegment
+		return true
+	}
+}
 
-			if s.DmlPosition != nil && s.DmlPosition.Timestamp >= cp.Position.Timestamp {
-				log.Warn("checkpoint in segment is larger than reported", zap.Any("current", s.GetDmlPosition()), zap.Any("reported", cp.GetPosition()))
-				// segment position in etcd is larger than checkpoint, then dont change it
-				continue
-			}
+// updateSegmentsInfo update segment infos
+// will exec all operators, and update all changed segments
+func (m *meta) UpdateSegmentsInfo(operators ...UpdateOperator) error {
+	m.Lock()
+	defer m.Unlock()
+	updatePack := &UpdateSegmentPack{
+		meta:       m,
+		segments:   make(map[int64]*SegmentInfo),
+		increments: make(map[int64]metastore.BinlogsIncrement),
+		metricMutation: &segMetricMutation{
+			stateChange: make(map[string]int),
+		},
+	}
 
-			s.NumOfRows = cp.NumOfRows
-			count := segmentutil.CalcRowCountFromBinLog(s.SegmentInfo)
-			// count should smaller than or equal to cp reported
-			if count != cp.NumOfRows && count > 0 {
-				log.Info("check point reported inconsistent with bin log row count",
-					zap.Int64("segmentID", segment.GetID()),
-					zap.Int64("check point (wrong)", cp.NumOfRows),
-					zap.Int64("segment bin log row count (correct)", count))
-				s.NumOfRows = count
-			}
-
-			s.DmlPosition = cp.GetPosition()
-			modSegments[cp.GetSegmentID()] = s
+	for _, operator := range operators {
+		ok := operator(updatePack)
+		if !ok {
+			return nil
 		}
 	}
-	segments := make([]*datapb.SegmentInfo, 0, len(modSegments))
-	for _, seg := range modSegments {
-		segments = append(segments, seg.SegmentInfo)
-	}
-	if err := m.catalog.AlterSegments(m.ctx, segments,
-		metastore.BinlogsIncrement{
-			Segment: clonedSegment.SegmentInfo,
-		}); err != nil {
+
+	segments := lo.MapToSlice(updatePack.segments, func(_ int64, segment *SegmentInfo) *datapb.SegmentInfo { return segment.SegmentInfo })
+	increments := lo.Values(updatePack.increments)
+
+	if err := m.catalog.AlterSegments(m.ctx, segments, increments...); err != nil {
 		log.Error("meta update: update flush segments info - failed to store flush segment info into Etcd",
 			zap.Error(err))
 		return err
 	}
 	// Apply metric mutation after a successful meta update.
-	metricMutation.commit()
+	updatePack.metricMutation.commit()
 	// update memory status
-	for id, s := range modSegments {
+	for id, s := range updatePack.segments {
 		m.segments.SetSegment(id, s)
 	}
-	log.Info("meta update: update flush segments info - update flush segments info successfully",
-		zap.Int64("segmentID", segmentID))
+	log.Info("meta update: update flush segments info - update flush segments info successfully")
 	return nil
 }
 
