@@ -275,7 +275,12 @@ TEST(CApiTest, CollectionTest) {
 
 TEST(CApiTest, SetIndexMetaTest) {
     auto collection = NewCollection(get_default_schema_config());
-    SetIndexMeta(collection, get_default_index_meta());
+
+    milvus::proto::segcore::CollectionIndexMeta indexMeta;
+    indexMeta.ParseFromString(get_default_index_meta());
+    char buffer[indexMeta.ByteSizeLong()];
+    indexMeta.SerializeToArray(buffer, indexMeta.ByteSizeLong());
+    SetIndexMeta(collection, buffer, indexMeta.ByteSizeLong());
     DeleteCollection(collection);
 }
 

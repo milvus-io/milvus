@@ -18,17 +18,18 @@
 #include "segcore/Collection.h"
 
 CCollection
-NewCollection(const char* schema_proto_blob) {
-    auto proto = std::string(schema_proto_blob);
-    auto collection = std::make_unique<milvus::segcore::Collection>(proto);
+NewCollection(const void* schema_proto_blob, const int64_t length) {
+    auto collection = std::make_unique<milvus::segcore::Collection>(
+        schema_proto_blob, length);
     return (void*)collection.release();
 }
 
 void
-SetIndexMeta(CCollection collection, const char* index_meta_proto_blob) {
+SetIndexMeta(CCollection collection,
+             const void* proto_blob,
+             const int64_t length) {
     auto col = (milvus::segcore::Collection*)collection;
-    auto proto = std::string_view(index_meta_proto_blob);
-    col->parseIndexMeta(proto);
+    col->parseIndexMeta(proto_blob, length);
 }
 
 void

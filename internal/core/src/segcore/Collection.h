@@ -21,13 +21,12 @@ namespace milvus::segcore {
 
 class Collection {
  public:
-    explicit Collection(const std::string_view collection_proto);
+    explicit Collection(const milvus::proto::schema::CollectionSchema* schema);
+    explicit Collection(const std::string_view schema_proto);
+    explicit Collection(const void* collection_proto, const int64_t length);
 
     void
-    parse();
-
-    void
-    parseIndexMeta(const std::string_view index_meta_proto_blob);
+    parseIndexMeta(const void* index_meta_proto_blob, const int64_t length);
 
  public:
     SchemaPtr&
@@ -47,7 +46,6 @@ class Collection {
 
  private:
     std::string collection_name_;
-    std::string schema_proto_;
     SchemaPtr schema_;
     IndexMetaPtr index_meta_;
 };
