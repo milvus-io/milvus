@@ -2009,7 +2009,7 @@ class TestDeleteComplexExpr(TestcaseBase):
         collection_w = self.init_collection_general(prefix, False)[0]
 
         # delete
-        error = {ct.err_code: 1, ct.err_msg: "collection not loaded: unrecoverable error"}
+        error = {ct.err_code: 101, ct.err_msg: "collection not loaded"}
         collection_w.delete(expr="int64 >= 0", check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
