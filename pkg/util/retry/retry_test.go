@@ -63,6 +63,12 @@ func TestMaxSleepTime(t *testing.T) {
 	err := Do(ctx, testFn, Attempts(3), MaxSleepTime(200*time.Millisecond))
 	assert.Error(t, err)
 	t.Log(err)
+
+	ctx, cancel := context.WithTimeout(ctx, 1*time.Second)
+	defer cancel()
+	err = Do(ctx, testFn, Attempts(10), MaxSleepTime(200*time.Millisecond))
+	assert.Error(t, err)
+	assert.Nil(t, ctx.Err())
 }
 
 func TestSleep(t *testing.T) {
