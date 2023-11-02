@@ -279,6 +279,8 @@ CreateScalarDataArray(int64_t count, const FieldMeta& field_meta) {
         case DataType::ARRAY: {
             auto obj = scalar_array->mutable_array_data();
             obj->mutable_data()->Reserve(count);
+            obj->set_element_type(static_cast<milvus::proto::schema::DataType>(
+                field_meta.get_element_type()));
             for (int i = 0; i < count; i++) {
                 *(obj->mutable_data()->Add()) = proto::schema::ScalarField();
             }
@@ -406,6 +408,8 @@ CreateScalarDataArrayFrom(const void* data_raw,
         case DataType::ARRAY: {
             auto data = reinterpret_cast<const ScalarArray*>(data_raw);
             auto obj = scalar_array->mutable_array_data();
+            obj->set_element_type(static_cast<milvus::proto::schema::DataType>(
+                field_meta.get_element_type()));
             for (auto i = 0; i < count; i++) {
                 *(obj->mutable_data()->Add()) = data[i];
             }
