@@ -31,7 +31,7 @@
 #include "common/Consts.h"
 #include "common/FieldMeta.h"
 #include "common/Types.h"
-#include "log/Log.h"
+#include "common/Log.h"
 #include "query/ScalarIndex.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"

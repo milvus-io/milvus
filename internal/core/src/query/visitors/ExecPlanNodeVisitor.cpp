@@ -18,7 +18,7 @@
 #include "query/generated/ExecExprVisitor.h"
 #include "segcore/SegmentGrowing.h"
 #include "common/Json.h"
-#include "log/Log.h"
+#include "common/Log.h"
 
 namespace milvus::query {
 

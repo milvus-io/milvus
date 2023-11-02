@@ -15,7 +15,7 @@
 // limitations under the License.
 
 #include "common/Common.h"
-#include "log/Log.h"
+#include "common/Log.h"
 
 namespace milvus {
 

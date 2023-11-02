@@ -14,7 +14,8 @@ include_directories(${CMAKE_HOME_DIRECTORY}/src/thirdparty)
 
 add_definitions(-DMILVUS_TEST_SEGCORE_YAML_PATH="${CMAKE_SOURCE_DIR}/unittest/test_utils/test_segcore.yaml")
 
-# TODO: better to use ls/find pattern
+find_package(GTest REQUIRED)
+
 set(MILVUS_TEST_FILES
         init_gtest.cpp
         test_bf.cpp
@@ -68,13 +69,11 @@ if ( BUILD_DISK_ANN STREQUAL "ON" )
             )
 endif()
 
-if (LINUX OR APPLE)
-    set(MILVUS_TEST_FILES
-            ${MILVUS_TEST_FILES}
-            test_scalar_index_creator.cpp
-            test_string_index.cpp
-            test_array.cpp test_array_expr.cpp)
-endif()
+set(MILVUS_TEST_FILES
+        ${MILVUS_TEST_FILES}
+        test_scalar_index_creator.cpp
+        test_string_index.cpp
+        test_array.cpp test_array_expr.cpp)
 
 if (DEFINED AZURE_BUILD_DIR)
     set(MILVUS_TEST_FILES
@@ -107,8 +106,8 @@ if (LINUX)
             )
 
     target_link_libraries(index_builder_test
-            gtest
-            gtest_main
+            GTest::gtest
+            GTest::gtest_main
             milvus_segcore
             milvus_storage
             milvus_indexbuilder
@@ -121,7 +120,8 @@ add_executable(all_tests
         )
 
 target_link_libraries(all_tests
-        gtest
+        GTest::gtest
+        GTest::gtest_main
         milvus_segcore
         milvus_storage
         milvus_indexbuilder
@@ -135,15 +135,15 @@ if (LINUX)
 endif ()
 
 if (USE_DYNAMIC_SIMD)
-add_executable(dynamic_simd_test
-               test_simd.cpp)
+    add_executable(dynamic_simd_test
+                   test_simd.cpp)
 
-target_link_libraries(dynamic_simd_test
-                milvus_simd
-                milvus_log
-                gtest
-                ${CONAN_LIBS})
+    target_link_libraries(dynamic_simd_test
+                    GTest::gtest
+                    GTest::gtest_main
+                    milvus_simd
+                    )
 
-install(TARGETS dynamic_simd_test DESTINATION unittest)
+    install(TARGETS dynamic_simd_test DESTINATION unittest)
 endif()
 

@@ -33,7 +33,7 @@
 #include "storage/AliyunCredentialsProvider.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
-#include "log/Log.h"
+#include "common/Log.h"
 #include "signal.h"
 
 namespace milvus::storage {

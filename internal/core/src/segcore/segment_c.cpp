@@ -17,7 +17,7 @@
 #include "common/Tracer.h"
 #include "common/type_c.h"
 #include "google/protobuf/text_format.h"
-#include "log/Log.h"
+#include "common/Log.h"
 #include "segcore/Collection.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealedImpl.h"

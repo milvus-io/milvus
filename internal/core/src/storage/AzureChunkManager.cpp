@@ -18,7 +18,7 @@
 #include <sstream>
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
-#include "log/Log.h"
+#include "common/Log.h"
 #include "storage/AzureChunkManager.h"
 
 namespace milvus {

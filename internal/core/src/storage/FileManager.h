@@ -24,7 +24,7 @@
 #include "common/Consts.h"
 #include "storage/ChunkManager.h"
 #include "storage/Types.h"
-#include "log/Log.h"
+#include "common/Log.h"
 
 namespace milvus::storage {
 

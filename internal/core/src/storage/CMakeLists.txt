@@ -32,6 +32,10 @@ if (DEFINED AZURE_BUILD_DIR)
         )
 endif()
 
+find_package(Arrow REQUIRED)
+find_package(AWSSDK REQUIRED)
+find_package(google-cloud-cpp REQUIRED)
+
 set(STORAGE_FILES
     ${STORAGE_FILES}
     parquet_c.cpp
@@ -62,17 +66,17 @@ add_library(milvus_storage SHARED ${STORAGE_FILES})
 
 if (DEFINED AZURE_BUILD_DIR)
     target_link_libraries(milvus_storage PUBLIC
-            "-L${AZURE_BUILD_DIR} -lblob-chunk-manager"
-            milvus_common
-            pthread
-            ${CONAN_LIBS}
-            )
-else ()
-    target_link_libraries(milvus_storage PUBLIC
-            milvus_common
-            pthread
-            ${CONAN_LIBS}
-            )
+            "-L${AZURE_BUILD_DIR} -lblob-chunk-manager")
 endif()
+
+target_link_libraries(milvus_storage PUBLIC
+        milvus_common
+        pthread
+
+        arrow::libarrow
+        arrow::libparquet
+        aws-sdk-cpp::aws-sdk-cpp
+        google-cloud-cpp::storage
+)
 
 install(TARGETS milvus_storage DESTINATION "${CMAKE_INSTALL_LIBDIR}")

@@ -16,7 +16,7 @@
 
 #include "common/Slice.h"
 #include "common/Common.h"
-#include "log/Log.h"
+#include "common/Log.h"
 
 namespace milvus {
 

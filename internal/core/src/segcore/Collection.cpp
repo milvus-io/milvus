@@ -13,7 +13,7 @@
 
 #include "pb/schema.pb.h"
 #include "segcore/Collection.h"
-#include "log/Log.h"
+#include "common/Log.h"
 
 namespace milvus::segcore {
 

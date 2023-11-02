@@ -18,7 +18,7 @@
 #include <string>
 
 #include "ref.h"
-#include "log/Log.h"
+#include "common/Log.h"
 #if defined(__x86_64__)
 #include "avx2.h"
 #include "avx512.h"

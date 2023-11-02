@@ -17,7 +17,7 @@
 #include "index/VectorDiskIndex.h"
 
 #include "common/Utils.h"
-#include "config/ConfigKnowhere.h"
+#include "common/ConfigKnowhere.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
 #include "storage/LocalChunkManagerSingleton.h"

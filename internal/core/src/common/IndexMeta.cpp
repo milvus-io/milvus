@@ -18,7 +18,7 @@
 
 #include "IndexMeta.h"
 #include "protobuf_utils.h"
-#include "log/Log.h"
+#include "common/Log.h"
 
 namespace milvus {
 

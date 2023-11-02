@@ -18,7 +18,7 @@
 #include <fstream>
 #include <string>
 
-#include "log/Log.h"
+#include "common/Log.h"
 #include "opendal.h"
 #include "common/EasyAssert.h"
 #include "storage/Util.h"

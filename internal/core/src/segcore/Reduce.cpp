@@ -11,8 +11,6 @@
 
 #include "Reduce.h"
 
-#include <log/Log.h>
-
 #include <algorithm>
 #include <cstdint>
 #include <vector>

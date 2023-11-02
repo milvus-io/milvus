@@ -20,6 +20,7 @@ if ( APPLE )
     set( CMAKE_CROSSCOMPILING TRUE )
     set( RUN_HAVE_GNU_POSIX_REGEX 0 )
 endif ()
+# set(CMAKE_VERBOSE_MAKEFILE ON)
 
 add_definitions(-DELPP_THREAD_SAFE)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -56,7 +57,9 @@ if (CMAKE_COMPILER_IS_GNUCC)
     endif ()
 endif ()
 
-set( CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake" )
+list( APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake" )
+message(STATUS "CMAKE_PREFIX_PATH = ${CMAKE_PREFIX_PATH}")
+message(STATUS "CMAKE_MODULE_PATH = ${CMAKE_MODULE_PATH}")
 include( Utils )
 
 # **************************** Build time, type and code version ****************************
@@ -91,12 +94,6 @@ set( CMAKE_INSTALL_RPATH "/usr/lib" "${CMAKE_INSTALL_PREFIX}/lib" "${CMAKE_INSTA
 set( CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE )
 
 # **************************** Dependencies ****************************
-list( APPEND CMAKE_MODULE_PATH ${CMAKE_BINARY_DIR}/conan )
-include( ${CMAKE_BINARY_DIR}/conan/conanbuildinfo.cmake )
-set( CONAN_DISABLE_CHECK_COMPILER ON )
-conan_basic_setup( KEEP_RPATHS )
-
-set( CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} ${CONAN_PROTOBUF_ROOT})
 
 include( CTest )
 include( BuildUtils )

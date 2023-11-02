@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "log/Log.h"
+#include "common/Log.h"
 
 /*
  * INITIALIZE_EASYLOGGINGPP will create a global variable whose name is same to that already created in knowhere,

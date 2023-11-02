@@ -26,7 +26,7 @@
 #include "common/EasyAssert.h"
 #include "common/File.h"
 #include "fmt/format.h"
-#include "log/Log.h"
+#include "common/Log.h"
 #include "mmap/Utils.h"
 #include "storage/FieldData.h"
 #include "common/Array.h"

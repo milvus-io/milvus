@@ -23,7 +23,7 @@
 #include "common/Slice.h"
 #include "common/Common.h"
 #include "common/Tracer.h"
-#include "log/Log.h"
+#include "common/Log.h"
 
 std::once_flag flag1, flag2, flag3, flag4, flag5;
 std::once_flag traceFlag;

@@ -12,7 +12,7 @@
 #include <gtest/gtest.h>
 #include <exception>
 
-#include "config/ConfigKnowhere.h"
+#include "common/ConfigKnowhere.h"
 #include "gtest/gtest-death-test.h"
 #include "segcore/segcore_init_c.h"
 #include "test_utils/DataGen.h"

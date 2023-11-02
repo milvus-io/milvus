@@ -24,8 +24,6 @@ include_directories(${MILVUS_ENGINE_SRC})
 include_directories(${MILVUS_THIRDPARTY_SRC})
 
 add_subdirectory( pb )
-add_subdirectory( log )
-add_subdirectory( config )
 add_subdirectory( common )
 add_subdirectory( storage )
 add_subdirectory( index )

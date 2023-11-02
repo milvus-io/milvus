@@ -14,11 +14,11 @@
 #include <memory>
 #include <string>
 
+#include "common/Common.h"
+#include "common/Log.h"
 #include "index/ScalarIndex.h"
-#include "log/Log.h"
 #include "storage/FieldData.h"
 #include "storage/RemoteChunkManagerSingleton.h"
-#include "common/Common.h"
 #include "storage/ThreadPool.h"
 #include "storage/Util.h"
 #include "mmap/Utils.h"

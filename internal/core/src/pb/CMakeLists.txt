@@ -9,7 +9,7 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License
 
-find_package(Protobuf REQUIRED)
+find_package(protobuf REQUIRED)
 
 add_library(milvus_proto STATIC
     common.pb.cc
@@ -18,6 +18,5 @@ add_library(milvus_proto STATIC
     schema.pb.cc
     segcore.pb.cc
     )
-message(STATUS "milvus proto sources: " ${milvus_proto_srcs})
 
-target_link_libraries( milvus_proto PUBLIC ${CONAN_LIBS} )
+target_link_libraries(milvus_proto PUBLIC protobuf::libprotobuf)

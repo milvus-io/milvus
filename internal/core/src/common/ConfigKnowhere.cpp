@@ -19,7 +19,7 @@
 #include "ConfigKnowhere.h"
 #include "common/EasyAssert.h"
 #include "glog/logging.h"
-#include "log/Log.h"
+#include "common/Log.h"
 #include "knowhere/comp/knowhere_config.h"
 #include "knowhere/version.h"
 

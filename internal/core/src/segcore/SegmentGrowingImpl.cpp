@@ -21,9 +21,9 @@
 
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "common/Log.h"
 #include "common/Types.h"
 #include "fmt/format.h"
-#include "log/Log.h"
 #include "nlohmann/json.hpp"
 #include "query/PlanNode.h"
 #include "query/SearchOnSealed.h"

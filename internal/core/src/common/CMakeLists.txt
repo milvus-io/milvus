@@ -11,6 +11,13 @@
 
 milvus_add_pkg_config("milvus_common")
 
+find_package(glog REQUIRED)
+find_package(yaml-cpp REQUIRED)
+find_package(TBB REQUIRED)
+find_package(fmt REQUIRED)
+find_package(nlohmann_json REQUIRED)
+find_package(opentelemetry-cpp REQUIRED)
+
 set(COMMON_SRC
         Schema.cpp
         SystemProperty.cpp
@@ -22,19 +29,25 @@ set(COMMON_SRC
         Tracer.cpp
         IndexMeta.cpp
         EasyAssert.cpp
+        ConfigKnowhere.cpp
+        Log.cpp
 )
 
 add_library(milvus_common SHARED ${COMMON_SRC})
 
-target_link_libraries(milvus_common
-        milvus_config
-        milvus_log
+target_link_libraries(milvus_common PUBLIC
         milvus_proto
-        yaml-cpp
         boost_bitset_ext
         simdjson
         opendal
-        ${CONAN_LIBS}
-        )
+        knowhere
+
+        glog::glog
+        yaml-cpp
+        TBB::tbb
+        fmt::fmt-header-only
+        nlohmann_json::nlohmann_json
+        opentelemetry-cpp::opentelemetry-cpp
+)
 
 install(TARGETS milvus_common DESTINATION "${CMAKE_INSTALL_LIBDIR}")

@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "IndexConfigGenerator.h"
-#include "log/Log.h"
+#include "common/Log.h"
 
 namespace milvus::segcore {
 VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout,

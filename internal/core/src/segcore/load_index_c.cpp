@@ -17,7 +17,7 @@
 #include "index/IndexFactory.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
-#include "log/Log.h"
+#include "common/Log.h"
 #include "storage/FileManager.h"
 #include "segcore/Types.h"
 #include "storage/Util.h"
