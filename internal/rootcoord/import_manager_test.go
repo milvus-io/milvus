@@ -18,6 +18,7 @@ package rootcoord
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -1100,4 +1101,34 @@ func TestImportManager_isRowbased(t *testing.T) {
 	rb, err = mgr.isRowbased(files)
 	assert.NoError(t, err)
 	assert.False(t, rb)
+}
+
+func TestImportManager_mergeArray(t *testing.T) {
+	converter := func(arr []int64) []int {
+		res := make([]int, 0, len(arr))
+		for _, v := range arr {
+			res = append(res, int(v))
+		}
+		sort.Ints(res)
+		return res
+	}
+
+	arr1 := []int64{1, 2, 3}
+	arr2 := []int64{2, 4, 6}
+	res := converter(mergeArray(arr1, arr2))
+	assert.Equal(t, []int{1, 2, 3, 4, 6}, res)
+
+	res = converter(mergeArray(arr1, nil))
+	assert.Equal(t, []int{1, 2, 3}, res)
+
+	res = converter(mergeArray(nil, arr2))
+	assert.Equal(t, []int{2, 4, 6}, res)
+
+	res = converter(mergeArray(nil, nil))
+	assert.Equal(t, []int{}, res)
+
+	arr1 = []int64{1, 2, 3}
+	arr2 = []int64{6, 5, 4}
+	res = converter(mergeArray(arr1, arr2))
+	assert.Equal(t, []int{1, 2, 3, 4, 5, 6}, res)
 }
