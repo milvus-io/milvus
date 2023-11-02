@@ -1317,7 +1317,7 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 
 	// translate segment action
 	removeActions := make([]*querypb.SyncAction, 0)
-	addSegments := make(map[int64][]*querypb.SegmentLoadInfo)
+	group, ctx := errgroup.WithContext(ctx)
 	for _, action := range req.GetActions() {
 		log := log.With(zap.String("Action",
 			action.GetType().String()))
@@ -1331,7 +1331,26 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 				log.Warn("sync request from legacy querycoord without load info, skip")
 				continue
 			}
-			addSegments[action.GetNodeID()] = append(addSegments[action.GetNodeID()], action.GetInfo())
+
+			// to pass segment'version, we call load segment one by one
+			action := action
+			group.Go(func() error {
+				return shardDelegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+					Base: commonpbutil.NewMsgBase(
+						commonpbutil.WithMsgType(commonpb.MsgType_LoadSegments),
+						commonpbutil.WithMsgID(req.Base.GetMsgID()),
+					),
+					Infos:        []*querypb.SegmentLoadInfo{action.GetInfo()},
+					Schema:       req.GetSchema(),
+					LoadMeta:     req.GetLoadMeta(),
+					CollectionID: req.GetCollectionID(),
+					ReplicaID:    req.GetReplicaID(),
+					DstNodeID:    action.GetNodeID(),
+					Version:      action.GetVersion(),
+					NeedTransfer: false,
+					LoadScope:    querypb.LoadScope_Delta,
+				})
+			})
 		case querypb.SyncType_UpdateVersion:
 			log.Info("sync action", zap.Int64("TargetVersion", action.GetTargetVersion()))
 			pipeline := node.pipelineManager.Get(req.GetChannel())
@@ -1353,25 +1372,10 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 		}
 	}
 
-	for nodeID, infos := range addSegments {
-		err := shardDelegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(commonpb.MsgType_LoadSegments),
-				commonpbutil.WithMsgID(req.Base.GetMsgID()),
-			),
-			Infos:        infos,
-			Schema:       req.GetSchema(),
-			LoadMeta:     req.GetLoadMeta(),
-			CollectionID: req.GetCollectionID(),
-			ReplicaID:    req.GetReplicaID(),
-			DstNodeID:    nodeID,
-			Version:      req.GetVersion(),
-			NeedTransfer: false,
-			LoadScope:    querypb.LoadScope_Delta,
-		})
-		if err != nil {
-			return merr.Status(err), nil
-		}
+	err := group.Wait()
+	if err != nil {
+		log.Warn("failed to sync distribution", zap.Error(err))
+		return merr.Status(err), nil
 	}
 
 	for _, action := range removeActions {
