@@ -93,7 +93,7 @@ func NewCheckerController(
 		channelChecker: NewChannelChecker(meta, dist, targetMgr, balancer),
 		segmentChecker: NewSegmentChecker(meta, dist, targetMgr, balancer, nodeMgr),
 		balanceChecker: NewBalanceChecker(meta, balancer, nodeMgr, scheduler),
-		indexChecker:   NewIndexChecker(meta, dist, broker),
+		indexChecker:   NewIndexChecker(meta, dist, broker, nodeMgr),
 	}
 
 	manualCheckChs := map[checkerType]chan struct{}{
