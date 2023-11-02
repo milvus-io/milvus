@@ -18,7 +18,6 @@ package datanode
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"path"
 	"sync"
@@ -201,7 +200,7 @@ func (c *ChannelMeta) getCollectionAndPartitionID(segID UniqueID) (collID, parti
 	if seg, ok := c.segments[segID]; ok && seg.isValid() {
 		return seg.collectionID, seg.partitionID, nil
 	}
-	return 0, 0, fmt.Errorf("cannot find segment, id = %d", segID)
+	return 0, 0, merr.WrapErrSegmentNotFound(segID)
 }
 
 func (c *ChannelMeta) getChannelName(segID UniqueID) string {
@@ -640,7 +639,7 @@ func (c *ChannelMeta) getSegmentStatisticsUpdates(segID UniqueID) (*commonpb.Seg
 		return &commonpb.SegmentStats{SegmentID: segID, NumRows: seg.numRows}, nil
 	}
 
-	return nil, fmt.Errorf("error, there's no segment %d", segID)
+	return nil, merr.WrapErrSegmentNotFound(segID)
 }
 
 func (c *ChannelMeta) getCollectionID() UniqueID {
