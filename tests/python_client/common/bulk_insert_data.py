@@ -474,8 +474,8 @@ def prepare_bulk_insert_json_files(minio_endpoint="", bucket_name="milvus-bucket
         file names list
     """
     data_fields_c = copy.deepcopy(data_fields)
-    print(f"data_fields: {data_fields}")
-    print(f"data_fields_c: {data_fields_c}")
+    log.info(f"data_fields: {data_fields}")
+    log.info(f"data_fields_c: {data_fields_c}")
     files = gen_json_files(is_row_based=is_row_based, rows=rows, dim=dim,
                            auto_id=auto_id, str_pk=str_pk, float_vector=float_vector,
                            data_fields=data_fields_c, file_nums=file_nums, multi_folder=multi_folder,
@@ -520,5 +520,91 @@ def prepare_bulk_insert_numpy_files(minio_endpoint="", bucket_name="milvus-bucke
                           data_fields=data_fields,
                           file_nums=file_nums, force=force)
 
+    copy_files_to_minio(host=minio_endpoint, r_source=data_source, files=files, bucket_name=bucket_name, force=force)
+    return files
+
+def gen_csv_file(file, float_vector, data_fields, rows, dim, start_uid):
+    with open(file, "w") as f:
+        # field name
+        for i in range(len(data_fields)):
+            f.write(data_fields[i])
+            if i != len(data_fields) - 1:
+                f.write(",")
+        f.write("\n")
+
+        for i in range(rows):
+            # field value
+            for j in range(len(data_fields)):
+                data_field = data_fields[j]
+                if data_field == DataField.pk_field:
+                    f.write(str(i + start_uid))
+                if data_field == DataField.int_field:
+                    f.write(str(random.randint(-999999, 9999999)))
+                if data_field == DataField.float_field:
+                    f.write(str(random.random()))
+                if data_field == DataField.string_field:
+                    f.write(str(gen_unique_str()))
+                if data_field == DataField.bool_field:
+                    f.write(str(random.choice(["true", "false"])))
+                if data_field == DataField.vec_field:
+                    vectors = gen_float_vectors(1, dim) if float_vector else gen_binary_vectors(1, dim//8)
+                    f.write('"' + ','.join(str(x) for x in vectors) + '"')
+                if j != len(data_fields) - 1:
+                    f.write(",")
+            f.write("\n")
+
+
+def gen_csv_files(rows, dim, auto_id, float_vector, data_fields, file_nums, force):
+    files = []
+    start_uid = 0
+    if (not auto_id) and (DataField.pk_field not in data_fields):
+        data_fields.append(DataField.pk_field)
+    for i in range(file_nums):
+        file_name = gen_file_name(is_row_based=True, rows=rows, dim=dim, auto_id=auto_id, float_vector=float_vector, data_fields=data_fields, file_num=i, file_type=".csv", str_pk=False, err_type="")
+        file = f"{data_source}/{file_name}"
+        if not os.path.exists(file) or force:
+            gen_csv_file(file, float_vector, data_fields, rows, dim, start_uid)
+        start_uid += rows
+        files.append(file_name)
+    return files
+
+
+def prepare_bulk_insert_csv_files(minio_endpoint="", bucket_name="milvus-bucket", rows=100, dim=128, auto_id=True, float_vector=True, data_fields=[], file_nums=1, force=False):
+    """
+    Generate row based files based on params in csv format and copy them to minio
+
+    :param minio_endpoint: the minio_endpoint of minio
+    :type minio_endpoint: str
+
+    :param bucket_name: the bucket name of Milvus
+    :type bucket_name: str
+
+    :param rows: the number entities to be generated in the file
+    :type rows: int
+
+    :param dim: dim of vector data
+    :type dim: int
+
+    :param auto_id: generate primary key data or not
+    :type auto_id: bool
+
+    :param float_vector: generate float vectors or binary vectors
+    :type float_vector: boolean
+
+    :param: data_fields: data fields to be generated in the file(s):
+            It supports one or all of [pk, vectors, int, float, string, boolean]
+            Note: it automatically adds pk field if auto_id=False
+    :type data_fields: list
+
+    :param file_nums: file numbers to be generated
+    :type file_nums: int
+
+    :param force: re-generate the file(s) regardless existing or not
+    :type force: boolean
+    """
+    data_fields_c = copy.deepcopy(data_fields)
+    log.info(f"data_fields: {data_fields}")
+    log.info(f"data_fields_c: {data_fields_c}")
+    files = gen_csv_files(rows=rows, dim=dim, auto_id=auto_id, float_vector=float_vector, data_fields=data_fields_c, file_nums=file_nums, force=force)
     copy_files_to_minio(host=minio_endpoint, r_source=data_source, files=files, bucket_name=bucket_name, force=force)
     return files
