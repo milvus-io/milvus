@@ -63,7 +63,7 @@ func (r *refresher) refreshPeriodically(name string) {
 	defer r.wg.Done()
 	ticker := time.NewTicker(r.refreshInterval)
 	defer ticker.Stop()
-	log.Info("start refreshing configurations", zap.String("source", name))
+	log.Debug("start refreshing configurations", zap.String("source", name))
 	for {
 		select {
 		case <-ticker.C:

@@ -2550,7 +2550,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 			DefaultValue: "0.5",
 		}
 	} else {
-		log.Warn("DeployModeEnv is not set, use default", zap.Float64("default", 0.5))
+		log.Info("DeployModeEnv is not set, use default", zap.Float64("default", 0.5))
 		p.MemoryWatermark = ParamItem{
 			Key:          "datanode.memory.watermarkCluster",
 			Version:      "2.2.4",
