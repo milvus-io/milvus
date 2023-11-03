@@ -91,6 +91,7 @@ var _ flushManager = (*rendezvousFlushManager)(nil)
 type orderFlushQueue struct {
 	sync.Once
 	segmentID UniqueID
+	channel   string
 	injectCh  chan *taskInjection
 
 	// MsgID => flushTask
@@ -106,9 +107,10 @@ type orderFlushQueue struct {
 }
 
 // newOrderFlushQueue creates an orderFlushQueue
-func newOrderFlushQueue(segID UniqueID, f notifyMetaFunc) *orderFlushQueue {
+func newOrderFlushQueue(segID UniqueID, channel string, f notifyMetaFunc) *orderFlushQueue {
 	q := &orderFlushQueue{
 		segmentID:  segID,
+		channel:    channel,
 		notifyFunc: f,
 		injectCh:   make(chan *taskInjection, 100),
 	}
@@ -129,6 +131,7 @@ func (q *orderFlushQueue) getFlushTaskRunner(pos *internalpb.MsgPosition) *flush
 	t := actual.(*flushTaskRunner)
 	// not loaded means the task runner is new, do initializtion
 	if !loaded {
+		getOrCreateFlushTaskCounter().increase(q.channel)
 		// take over injection if task queue is handling it
 		q.injectMut.Lock()
 		q.runningTasks++
@@ -150,6 +153,7 @@ func (q *orderFlushQueue) getFlushTaskRunner(pos *internalpb.MsgPosition) *flush
 func (q *orderFlushQueue) postTask(pack *segmentFlushPack, postInjection postInjectionFunc) {
 	// delete task from working map
 	q.working.Delete(getSyncTaskID(pack.pos))
+	getOrCreateFlushTaskCounter().decrease(q.channel)
 	// after descreasing working count, check whether flush queue is empty
 	q.injectMut.Lock()
 	q.runningTasks--
@@ -277,7 +281,7 @@ type rendezvousFlushManager struct {
 
 // getFlushQueue gets or creates an orderFlushQueue for segment id if not found
 func (m *rendezvousFlushManager) getFlushQueue(segmentID UniqueID) *orderFlushQueue {
-	newQueue := newOrderFlushQueue(segmentID, m.notifyFunc)
+	newQueue := newOrderFlushQueue(segmentID, m.getChannelName(), m.notifyFunc)
 	actual, _ := m.dispatcher.LoadOrStore(segmentID, newQueue)
 	// all operation on dispatcher is private, assertion ok guaranteed
 	queue := actual.(*orderFlushQueue)
@@ -342,16 +346,8 @@ func (m *rendezvousFlushManager) handleDeleteTask(segmentID UniqueID, task flush
 
 // isFull return true if the task pool is full
 func (m *rendezvousFlushManager) isFull() bool {
-	var num int
-	m.dispatcher.Range(func(_, q any) bool {
-		queue := q.(*orderFlushQueue)
-		queue.working.Range(func(_, _ any) bool {
-			num++
-			return true
-		})
-		return true
-	})
-	return num >= Params.DataNodeCfg.MaxParallelSyncTaskNum
+	return getOrCreateFlushTaskCounter().getOrZero(m.getChannelName()) >=
+		int32(Params.DataNodeCfg.MaxParallelSyncTaskNum)
 }
 
 // flushBufferData notifies flush manager insert buffer data.
