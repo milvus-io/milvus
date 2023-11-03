@@ -531,6 +531,7 @@ func (s *Server) State() commonpb.StateCode {
 }
 
 func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
+	log.Debug("QueryCoord current state", zap.String("StateCode", s.State().String()))
 	nodeID := common.NotRegisteredID
 	if s.session != nil && s.session.Registered() {
 		nodeID = s.session.GetServerID()

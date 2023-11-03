@@ -759,6 +759,7 @@ func (c *Core) Stop() error {
 // GetComponentStates get states of components
 func (c *Core) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	code := c.GetStateCode()
+	log.Debug("RootCoord current state", zap.String("StateCode", code.String()))
 
 	nodeID := common.NotRegisteredID
 	if c.session != nil && c.session.Registered() {

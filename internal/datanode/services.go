@@ -67,8 +67,9 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 
 // GetComponentStates will return current state of DataNode
 func (node *DataNode) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
-	log.Debug("DataNode current state", zap.Any("State", node.stateCode.Load()))
 	nodeID := common.NotRegisteredID
+	state := node.stateCode.Load().(commonpb.StateCode)
+	log.Debug("DataNode current state", zap.String("State", state.String()))
 	if node.GetSession() != nil && node.session.Registered() {
 		nodeID = node.GetSession().ServerID
 	}
