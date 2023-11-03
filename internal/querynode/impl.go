@@ -485,6 +485,21 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *querypb.LoadSegment
 		return node.TransferLoad(ctx, in)
 	}
 
+	alreadyLoaded := true
+	for _, info := range in.Infos {
+		has, _ := node.metaReplica.hasSegment(info.SegmentID, segmentTypeSealed)
+		if !has {
+			alreadyLoaded = false
+		}
+	}
+
+	// if all segment has been loaded, just return success
+	if alreadyLoaded {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		}, nil
+	}
+
 	task := &loadSegmentsTask{
 		baseTask: baseTask{
 			ctx:  ctx,
