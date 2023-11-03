@@ -6,7 +6,9 @@ import (
 	"strings"
 
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -86,8 +88,8 @@ func AuthenticationInterceptor(ctx context.Context) (context.Context, error) {
 				// username+password authentication
 				username, password := parseMD(rawToken)
 				if !passwordVerify(ctx, username, password, globalMetaCache) {
-					msg := fmt.Sprintf("username: %s, password: %s", username, password)
-					return nil, merr.WrapErrParameterInvalid("vaild username and password", msg, "auth check failure, please check username and password are correct")
+					// NOTE: don't use the merr, because it will cause the wrong retry behavior in the sdk
+					return nil, status.Errorf(codes.Unauthenticated, "auth check failure, please check username [%s] and password [%s] are correct", username, password)
 				}
 				metrics.UserRPCCounter.WithLabelValues(username).Inc()
 			}
