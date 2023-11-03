@@ -17,7 +17,7 @@ var getEtcdAndPathFunction = getEtcdAndPath
 type etcdClientCreator struct {
 	mu       sync.Mutex
 	client   *clientv3.Client
-	rootpath *string
+	rootpath string
 }
 
 // Returns an Etcd client and the metaRootPath, if an error is hit, will panic.
@@ -39,7 +39,7 @@ func CloseEtcdClient() {
 		}
 	}
 	clientCreator.client = nil
-	clientCreator.rootpath = nil
+	clientCreator.rootpath = ""
 }
 
 // Returns an Etcd client and the metaRootPath, if an error is hit, will panic
@@ -54,9 +54,9 @@ func getEtcdAndPath() (*clientv3.Client, string) {
 			panic(fmt.Errorf("failed to create etcd client: %w", err))
 		}
 		path := paramtable.Get().ServiceParam.EtcdCfg.MetaRootPath.GetValue()
-		clientCreator.rootpath = &path
+		clientCreator.rootpath = path
 	}
-	return clientCreator.client, *clientCreator.rootpath
+	return clientCreator.client, clientCreator.rootpath
 }
 
 // Function that calls the Etcd constructor
