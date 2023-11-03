@@ -362,6 +362,7 @@ func (s *Server) initObserver() {
 		s.targetMgr,
 		s.broker,
 		s.cluster,
+		s.nodeMgr,
 	)
 	s.targetObserver = observers.NewTargetObserver(
 		s.meta,

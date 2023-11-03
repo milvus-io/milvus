@@ -72,7 +72,8 @@ func (suite *LeaderObserverTestSuite) SetupTest() {
 	// meta
 	store := querycoord.NewCatalog(suite.kv)
 	idAllocator := RandomIncrementIDAllocator()
-	suite.meta = meta.NewMeta(idAllocator, store, session.NewNodeManager())
+	nodeMgr := session.NewNodeManager()
+	suite.meta = meta.NewMeta(idAllocator, store, nodeMgr)
 	suite.broker = meta.NewMockBroker(suite.T())
 
 	suite.mockCluster = session.NewMockCluster(suite.T())
@@ -81,7 +82,7 @@ func (suite *LeaderObserverTestSuite) SetupTest() {
 	// }, nil).Maybe()
 	distManager := meta.NewDistributionManager()
 	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
-	suite.observer = NewLeaderObserver(distManager, suite.meta, targetManager, suite.broker, suite.mockCluster)
+	suite.observer = NewLeaderObserver(distManager, suite.meta, targetManager, suite.broker, suite.mockCluster, nodeMgr)
 }
 
 func (suite *LeaderObserverTestSuite) TearDownTest() {
