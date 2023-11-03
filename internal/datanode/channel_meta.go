@@ -59,7 +59,7 @@ type Channel interface {
 	getCollectionID() UniqueID
 	getCollectionSchema(collectionID UniqueID, ts Timestamp) (*schemapb.CollectionSchema, error)
 	getCollectionAndPartitionID(segID UniqueID) (collID, partitionID UniqueID, err error)
-	getChannelName(segID UniqueID) string
+	getChannelName() string
 
 	addSegment(ctx context.Context, req addSegmentReq) error
 	getSegment(segID UniqueID) *Segment
@@ -204,7 +204,7 @@ func (c *ChannelMeta) getCollectionAndPartitionID(segID UniqueID) (collID, parti
 	return 0, 0, fmt.Errorf("cannot find segment, id = %d", segID)
 }
 
-func (c *ChannelMeta) getChannelName(segID UniqueID) string {
+func (c *ChannelMeta) getChannelName() string {
 	return c.channelName
 }
 
