@@ -377,7 +377,11 @@ func (c *ClientBase[T]) checkErr(ctx context.Context, err error) (needRetry, nee
 		}
 		return true, true, err
 	case IsServerIDMismatchErr(err):
-		fallthrough
+		if ok, err := c.checkNodeSessionExist(ctx); !ok {
+			// if session doesn't exist, no need to retry for datanode/indexnode/querynode
+			return false, false, err
+		}
+		return true, true, err
 	case IsCrossClusterRoutingErr(err):
 		return true, true, err
 	default:
@@ -385,6 +389,19 @@ func (c *ClientBase[T]) checkErr(ctx context.Context, err error) (needRetry, nee
 		// Unknown err
 		return false, false, err
 	}
+}
+
+func (c *ClientBase[T]) checkNodeSessionExist(ctx context.Context) (bool, error) {
+	switch c.GetRole() {
+	case typeutil.DataNodeRole, typeutil.IndexNodeRole, typeutil.QueryNodeRole:
+		err := c.verifySession(ctx)
+		if err != nil && errors.Is(err, merr.ErrNodeNotFound) {
+			log.Warn("failed to verify node session", zap.Error(err))
+			// stop retry
+			return false, err
+		}
+	}
+	return true, nil
 }
 
 func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, error)) (any, error) {
@@ -412,15 +429,9 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 	defer cancel()
 	err := retry.Do(ctx, func() error {
 		if generic.IsZero(client) {
-			switch c.GetRole() {
-			case typeutil.DataNodeRole, typeutil.IndexNodeRole, typeutil.QueryNodeRole:
+			if ok, err := c.checkNodeSessionExist(ctx); !ok {
 				// if session doesn't exist, no need to reset connection for datanode/indexnode/querynode
-				err := c.verifySession(ctx)
-				if err != nil && errors.Is(err, merr.ErrNodeNotFound) {
-					log.Warn("failed to verify node session", zap.Error(err))
-					// stop retry
-					return retry.Unrecoverable(err)
-				}
+				return retry.Unrecoverable(err)
 			}
 
 			err := errors.Wrap(clientErr, "empty grpc client")
