@@ -238,6 +238,9 @@ void
 MinioChunkManager::BuildAliyunCloudClient(
     const StorageConfig& storage_config,
     const Aws::Client::ClientConfiguration& config) {
+    // For aliyun oss, support use virtual host mode
+    StorageConfig mutable_config = storage_config;
+    mutable_config.useVirtualHost = true;
     if (storage_config.useIAM) {
         auto aliyun_provider = Aws::MakeShared<
             Aws::Auth::AliyunSTSAssumeRoleWebIdentityCredentialsProvider>(
@@ -253,9 +256,9 @@ MinioChunkManager::BuildAliyunCloudClient(
             aliyun_provider,
             config,
             Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
-            storage_config.useVirtualHost);
+            mutable_config.useVirtualHost);
     } else {
-        BuildAccessKeyClient(storage_config, config);
+        BuildAccessKeyClient(mutable_config, config);
     }
 }
 
