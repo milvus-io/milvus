@@ -477,6 +477,12 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	})
 
 	t.Run("Auto with manual flush", func(t *testing.T) {
+		param := Params.DataNodeCfg.MaxParallelSyncTaskNum
+		Params.DataNodeCfg.MaxParallelSyncTaskNum = 100000
+		defer func() {
+			Params.DataNodeCfg.MaxParallelSyncTaskNum = param
+		}()
+
 		tmp := Params.DataNodeCfg.FlushInsertBufferSize
 		Params.DataNodeCfg.FlushInsertBufferSize = 200
 		defer func() {
