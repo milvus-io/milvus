@@ -115,6 +115,15 @@ func TestClientBase_NodeSessionNotExist(t *testing.T) {
 		return struct{}{}, nil
 	})
 	assert.True(t, errors.Is(err, merr.ErrNodeNotFound))
+
+	// test node already down, but new node start up with same ip and port
+	base.grpcClientMtx.Lock()
+	base.grpcClient = &mockClient{}
+	base.grpcClientMtx.Unlock()
+	_, err = base.Call(ctx, func(client *mockClient) (any, error) {
+		return struct{}{}, merr.ErrNodeNotMatch
+	})
+	assert.True(t, errors.Is(err, merr.ErrNodeNotFound))
 }
 
 func TestClientBase_Call(t *testing.T) {
