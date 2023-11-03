@@ -861,6 +861,7 @@ type AccessLogConfig struct {
 	LocalPath     ParamItem `refreshable:"false"`
 	Filename      ParamItem `refreshable:"false"`
 	MaxSize       ParamItem `refreshable:"false"`
+	CacheSize     ParamItem `refreshable:"false"`
 	RotatedTime   ParamItem `refreshable:"false"`
 	MaxBackups    ParamItem `refreshable:"false"`
 	RemotePath    ParamItem `refreshable:"false"`
@@ -1072,6 +1073,14 @@ please adjust in embedded Milvus: false`,
 		Doc:          "Max size for a single file, in MB.",
 	}
 	p.AccessLog.MaxSize.Init(base.mgr)
+
+	p.AccessLog.CacheSize = ParamItem{
+		Key:          "proxy.accessLog.maxSize",
+		Version:      "2.3.2",
+		DefaultValue: "10240",
+		Doc:          "Size of log of memory cache, in B",
+	}
+	p.AccessLog.CacheSize.Init(base.mgr)
 
 	p.AccessLog.MaxBackups = ParamItem{
 		Key:          "proxy.accessLog.maxBackups",
