@@ -48,6 +48,7 @@ type LeaderObserver struct {
 	target  *meta.TargetManager
 	broker  meta.Broker
 	cluster session.Cluster
+	nodeMgr *session.NodeManager
 
 	dispatcher *taskDispatcher[int64]
 
@@ -118,6 +119,11 @@ func (o *LeaderObserver) observeCollection(ctx context.Context, collection int64
 	for _, replica := range replicas {
 		leaders := o.dist.ChannelDistManager.GetShardLeadersByReplica(replica)
 		for ch, leaderID := range leaders {
+			if ok, _ := o.nodeMgr.IsStoppingNode(leaderID); ok {
+				// no need to correct leader's view which is loaded on stopping node
+				continue
+			}
+
 			leaderView := o.dist.LeaderViewManager.GetLeaderShardView(leaderID, ch)
 			if leaderView == nil {
 				continue
@@ -326,6 +332,7 @@ func NewLeaderObserver(
 	targetMgr *meta.TargetManager,
 	broker meta.Broker,
 	cluster session.Cluster,
+	nodeMgr *session.NodeManager,
 ) *LeaderObserver {
 	ob := &LeaderObserver{
 		dist:    dist,
@@ -333,6 +340,7 @@ func NewLeaderObserver(
 		target:  targetMgr,
 		broker:  broker,
 		cluster: cluster,
+		nodeMgr: nodeMgr,
 	}
 
 	dispatcher := newTaskDispatcher[int64](ob.observeCollection)
