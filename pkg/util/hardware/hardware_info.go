@@ -45,8 +45,10 @@ func InitMaxprocs(serverType string, flags *flag.FlagSet) {
 
 // GetCPUNum returns the count of cpu core.
 func GetCPUNum() int {
+	//nolint
 	cur := runtime.GOMAXPROCS(0)
 	if cur <= 0 {
+		//nolint
 		cur = runtime.NumCPU()
 	}
 	return cur

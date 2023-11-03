@@ -458,7 +458,7 @@ func setResult(result *datapb.CompactionResult) compactionTaskOpt {
 func calculateParallel() int {
 	// TODO after node memory management enabled, use this config as hard limit
 	return Params.DataCoordCfg.CompactionWorkerParalleTasks.GetAsInt()
-	//cores := runtime.NumCPU()
+	//cores := hardware.GetCPUNum()
 	//if cores < 16 {
 	//return 4
 	//}

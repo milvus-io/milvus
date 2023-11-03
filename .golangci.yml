@@ -118,6 +118,8 @@ linters-settings:
       - 'os\.Open\(.+\)'
       - 'os\.ReadFile\(.+\)'
       - 'os\.WriteFile\(.+\)'
+      - "runtime.NumCPU"
+      - "runtime.GOMAXPROCS(0)"
       #- 'fmt\.Print.*' WIP
 
 issues:
