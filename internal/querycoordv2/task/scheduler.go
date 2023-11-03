@@ -19,7 +19,6 @@ package task
 import (
 	"context"
 	"fmt"
-	"runtime"
 	"sync"
 	"time"
 
@@ -36,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -552,7 +552,7 @@ func (scheduler *taskScheduler) schedule(node int64) {
 	// The scheduler doesn't limit the number of tasks,
 	// to commit tasks to executors as soon as possible, to reach higher merge possibility
 	failCount := atomic.NewInt32(0)
-	funcutil.ProcessFuncParallel(len(toProcess), runtime.GOMAXPROCS(0), func(idx int) error {
+	funcutil.ProcessFuncParallel(len(toProcess), hardware.GetCPUNum(), func(idx int) error {
 		if !scheduler.process(toProcess[idx]) {
 			failCount.Inc()
 		}
