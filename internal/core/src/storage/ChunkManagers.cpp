@@ -145,6 +145,10 @@ AliyunChunkManager::AliyunChunkManager(const StorageConfig& storage_config) {
     InitSDKAPIDefault(storage_config.log_level);
 
     Aws::Client::ClientConfiguration config = generateConfig(storage_config);
+
+    // For aliyun oss, support use virtual host mode
+    StorageConfig mutable_config = storage_config;
+    mutable_config.useVirtualHost = true;
     if (storage_config.useIAM) {
         auto aliyun_provider = Aws::MakeShared<
             Aws::Auth::AliyunSTSAssumeRoleWebIdentityCredentialsProvider>(
@@ -160,9 +164,9 @@ AliyunChunkManager::AliyunChunkManager(const StorageConfig& storage_config) {
             aliyun_provider,
             config,
             Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
-            storage_config.useVirtualHost);
+            mutable_config.useVirtualHost);
     } else {
-        BuildAccessKeyClient(storage_config, config);
+        BuildAccessKeyClient(mutable_config, config);
     }
 
     LOG_SEGCORE_INFO_ << "init AliyunChunkManager with parameter[endpoint: '"
