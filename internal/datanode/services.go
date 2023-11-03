@@ -361,7 +361,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 			log.Ctx(ctx).Warn("fail to get the channel", zap.Int64("segment", fromSegment), zap.Error(err))
 			continue
 		}
-		ds, ok = node.flowgraphManager.getFlowgraphService(channel.getChannelName(fromSegment))
+		ds, ok = node.flowgraphManager.getFlowgraphService(channel.getChannelName())
 		if !ok {
 			log.Ctx(ctx).Warn("fail to find flow graph service", zap.Int64("segment", fromSegment))
 			continue

@@ -69,7 +69,7 @@ func TestOrderFlushQueue_Execute(t *testing.T) {
 
 	size := 1000
 	finish.Add(size)
-	q := newOrderFlushQueue(1, func(*segmentFlushPack) {
+	q := newOrderFlushQueue(1, "", func(*segmentFlushPack) {
 		counter.Inc()
 		finish.Done()
 	})
@@ -111,7 +111,7 @@ func TestOrderFlushQueue_Order(t *testing.T) {
 	size := 1000
 	finish.Add(size)
 	resultList := make([][]byte, 0, size)
-	q := newOrderFlushQueue(1, func(pack *segmentFlushPack) {
+	q := newOrderFlushQueue(1, "", func(pack *segmentFlushPack) {
 		counter.Inc()
 		resultList = append(resultList, pack.pos.MsgID)
 		finish.Done()

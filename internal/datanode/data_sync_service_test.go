@@ -775,7 +775,7 @@ func TestGetChannelWithTickler(t *testing.T) {
 	channel, err := getChannelWithTickler(context.TODO(), node, info, newTickler(), unflushed, flushed)
 	assert.NoError(t, err)
 	assert.NotNil(t, channel)
-	assert.Equal(t, channelName, channel.getChannelName(100))
+	assert.Equal(t, channelName, channel.getChannelName())
 	assert.Equal(t, int64(1), channel.getCollectionID())
 	assert.True(t, channel.hasSegment(100, true))
 	assert.True(t, channel.hasSegment(101, true))
