@@ -77,6 +77,9 @@ GetDatasetLims(const DatasetPtr& dataset) {
 
 inline bool
 PrefixMatch(const std::string_view str, const std::string_view prefix) {
+    if (prefix.length() > str.length()) {
+        return false;
+    }
     auto ret = strncmp(str.data(), prefix.data(), prefix.length());
     if (ret != 0) {
         return false;
