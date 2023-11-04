@@ -95,7 +95,7 @@ minio:
   # Cloud whether use virtual host bucket mode
   useVirtualHost: false
   # timeout for request time in milliseconds
-  requestTimeoutMs: 3000
+  requestTimeoutMs: 10000
 
 # Milvus supports four MQ: rocksmq(based on RockDB), natsmq(embedded nats-server), Pulsar and Kafka.
 # You can change your mq by setting mq.type field.
