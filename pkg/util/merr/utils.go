@@ -525,6 +525,14 @@ func WrapErrSegmentNotFound(id int64, msg ...string) error {
 	return err
 }
 
+func WrapErrSegmentsNotFound(ids []int64, msg ...string) error {
+	err := wrapWithField(ErrSegmentNotFound, "segments", ids)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
 func WrapErrSegmentNotLoaded(id int64, msg ...string) error {
 	err := wrapWithField(ErrSegmentNotLoaded, "segment", id)
 	if len(msg) > 0 {

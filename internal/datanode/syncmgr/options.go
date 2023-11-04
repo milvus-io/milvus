@@ -80,6 +80,11 @@ func (t *SyncTask) WithFlush() *SyncTask {
 	return t
 }
 
+func (t *SyncTask) WithDrop() *SyncTask {
+	t.isDrop = true
+	return t
+}
+
 func (t *SyncTask) WithMetaCache(metacache metacache.MetaCache) *SyncTask {
 	t.metacache = metacache
 	return t

@@ -19,6 +19,7 @@ package metacache
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type SegmentFilter func(info *SegmentInfo) bool
@@ -29,9 +30,10 @@ func WithPartitionID(partitionID int64) SegmentFilter {
 	}
 }
 
-func WithSegmentID(segmentID int64) SegmentFilter {
+func WithSegmentIDs(segmentIDs ...int64) SegmentFilter {
+	set := typeutil.NewSet[int64](segmentIDs...)
 	return func(info *SegmentInfo) bool {
-		return info.segmentID == segmentID
+		return set.Contain(info.segmentID)
 	}
 }
 

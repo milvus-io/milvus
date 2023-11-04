@@ -23,12 +23,13 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
 type MetaCache interface {
-	NewSegment(segmentID, partitionID int64)
+	NewSegment(segmentID, partitionID int64, startPos *msgpb.MsgPosition, actions ...SegmentAction)
 	UpdateSegments(action SegmentAction, filters ...SegmentFilter)
 	CompactSegments(newSegmentID, partitionID int64, oldSegmentIDs ...int64)
 	GetSegmentsBy(filters ...SegmentFilter) []*SegmentInfo
@@ -67,17 +68,21 @@ func (c *metaCacheImpl) init(vchannel *datapb.VchannelInfo, factory PkStatsFacto
 	}
 }
 
-func (c *metaCacheImpl) NewSegment(segmentID, partitionID int64) {
+func (c *metaCacheImpl) NewSegment(segmentID, partitionID int64, startPos *msgpb.MsgPosition, actions ...SegmentAction) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	if _, ok := c.segmentInfos[segmentID]; !ok {
-		c.segmentInfos[segmentID] = &SegmentInfo{
+		info := &SegmentInfo{
 			segmentID:        segmentID,
 			partitionID:      partitionID,
 			state:            commonpb.SegmentState_Growing,
 			startPosRecorded: false,
 		}
+		for _, action := range actions {
+			action(info)
+		}
+		c.segmentInfos[segmentID] = info
 	}
 }
 

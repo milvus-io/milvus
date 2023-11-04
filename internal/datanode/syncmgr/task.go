@@ -41,6 +41,7 @@ type SyncTask struct {
 	tsTo   typeutil.Timestamp
 
 	isFlush bool
+	isDrop  bool
 
 	metacache  metacache.MetaCache
 	metaWriter MetaWriter
@@ -75,7 +76,7 @@ func (t *SyncTask) Run() error {
 	log := t.getLogger()
 	var err error
 
-	infos := t.metacache.GetSegmentsBy(metacache.WithSegmentID(t.segmentID))
+	infos := t.metacache.GetSegmentsBy(metacache.WithSegmentIDs(t.segmentID))
 	if len(infos) == 0 {
 		log.Warn("failed to sync data, segment not found in metacache")
 		t.handleError(err)
@@ -245,7 +246,7 @@ func (t *SyncTask) serializeSinglePkStats(fieldID int64, stats *storage.PrimaryK
 }
 
 func (t *SyncTask) serializeMergedPkStats(fieldID int64, stats *storage.PrimaryKeyStats, rowNum int64) error {
-	segments := t.metacache.GetSegmentsBy(metacache.WithSegmentID(t.segmentID))
+	segments := t.metacache.GetSegmentsBy(metacache.WithSegmentIDs(t.segmentID))
 	var statsList []*storage.PrimaryKeyStats
 	var oldRowNum int64
 	for _, segment := range segments {

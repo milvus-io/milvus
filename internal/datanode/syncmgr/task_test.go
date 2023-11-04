@@ -201,6 +201,7 @@ func (s *SyncTaskSuite) TestRunNormal() {
 		task := s.getSuiteSyncTask()
 		task.WithInsertData(s.getInsertBuffer()).WithDeleteData(s.getDeleteBuffer())
 		task.WithFlush()
+		task.WithDrop()
 		task.WithMetaWriter(BrokerMetaWriter(s.broker))
 		task.WithCheckpoint(&msgpb.MsgPosition{
 			ChannelName: s.channelName,
