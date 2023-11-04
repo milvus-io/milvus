@@ -51,7 +51,7 @@ func (b *brokerMetaWriter) UpdateSync(pack *SyncTask) error {
 	deltaInfos[0] = &datapb.FieldBinlog{Binlogs: []*datapb.Binlog{pack.deltaBinlog}}
 
 	// only current segment checkpoint info,
-	segments := pack.metacache.GetSegmentsBy(metacache.WithSegmentID(pack.segmentID))
+	segments := pack.metacache.GetSegmentsBy(metacache.WithSegmentIDs(pack.segmentID))
 	if len(segments) == 0 {
 		return merr.WrapErrSegmentNotFound(pack.segmentID)
 	}
@@ -96,8 +96,8 @@ func (b *brokerMetaWriter) UpdateSync(pack *SyncTask) error {
 
 		StartPositions: startPos,
 		Flushed:        pack.isFlush,
-		//		Dropped:        pack.option.isDrop,
-		Channel: pack.channelName,
+		Dropped:        pack.isDrop,
+		Channel:        pack.channelName,
 	}
 	err := retry.Do(context.Background(), func() error {
 		err := b.broker.SaveBinlogPaths(context.Background(), req)

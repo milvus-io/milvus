@@ -81,7 +81,7 @@ func (s *MetaCacheSuite) SetupTest() {
 
 func (s *MetaCacheSuite) TestNewSegment() {
 	for i, seg := range s.newSegments {
-		s.cache.NewSegment(seg, s.partitionIDs[i])
+		s.cache.NewSegment(seg, s.partitionIDs[i], nil, UpdateNumOfRows(100))
 	}
 
 	for id, partitionID := range s.partitionIDs {
@@ -110,8 +110,8 @@ func (s *MetaCacheSuite) TestCompactSegments() {
 }
 
 func (s *MetaCacheSuite) TestUpdateSegments() {
-	s.cache.UpdateSegments(UpdateState(commonpb.SegmentState_Flushed), WithSegmentID(5))
-	segments := s.cache.GetSegmentsBy(WithSegmentID(5))
+	s.cache.UpdateSegments(UpdateState(commonpb.SegmentState_Flushed), WithSegmentIDs(5))
+	segments := s.cache.GetSegmentsBy(WithSegmentIDs(5))
 	s.Require().Equal(1, len(segments))
 	segment := segments[0]
 	s.Equal(commonpb.SegmentState_Flushed, segment.State())

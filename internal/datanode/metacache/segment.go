@@ -67,6 +67,10 @@ func (s *SegmentInfo) CompactTo() int64 {
 	return s.compactTo
 }
 
+func (s *SegmentInfo) GetBloomFilterSet() *BloomFilterSet {
+	return s.bfs
+}
+
 func (s *SegmentInfo) Clone() *SegmentInfo {
 	return &SegmentInfo{
 		segmentID:        s.segmentID,

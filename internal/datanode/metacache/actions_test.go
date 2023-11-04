@@ -40,7 +40,7 @@ func (s *SegmentFilterSuite) TestFilters() {
 	s.True(filter(info))
 
 	segmentID := int64(10001)
-	filter = WithSegmentID(segmentID)
+	filter = WithSegmentIDs(segmentID)
 	info.segmentID = segmentID + 1
 	s.False(filter(info))
 	info.segmentID = segmentID
