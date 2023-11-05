@@ -14,7 +14,6 @@ package server
 import (
 	"fmt"
 	"path"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -154,7 +153,7 @@ func parseCompressionType(params *paramtable.ComponentParam) ([]gorocksdb.Compre
 func NewRocksMQ(name string, idAllocator allocator.Interface) (*rocksmq, error) {
 	params := paramtable.Get()
 	// TODO we should use same rocksdb instance with different cfs
-	maxProcs := runtime.GOMAXPROCS(0)
+	maxProcs := hardware.GetCPUNum()
 	parallelism := 1
 	if maxProcs > 32 {
 		parallelism = 4

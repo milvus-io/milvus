@@ -1,10 +1,10 @@
 package datanode
 
 import (
-	"runtime"
 	"sync"
 
 	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/hardware"
 )
 
 var (
@@ -34,7 +34,7 @@ func getOrCreateIOPool() *conc.Pool[any] {
 func initStatsPool() {
 	poolSize := Params.DataNodeCfg.ChannelWorkPoolSize.GetAsInt()
 	if poolSize <= 0 {
-		poolSize = runtime.GOMAXPROCS(0)
+		poolSize = hardware.GetCPUNum()
 	}
 	statsPool = conc.NewPool[any](poolSize, conc.WithPreAlloc(false), conc.WithNonBlocking(false))
 }
@@ -46,8 +46,8 @@ func getOrCreateStatsPool() *conc.Pool[any] {
 
 func initMultiReadPool() {
 	capacity := Params.DataNodeCfg.FileReadConcurrency.GetAsInt()
-	if capacity > runtime.GOMAXPROCS(0) {
-		capacity = runtime.GOMAXPROCS(0)
+	if capacity > hardware.GetCPUNum() {
+		capacity = hardware.GetCPUNum()
 	}
 	// error only happens with negative expiry duration or with negative pre-alloc size.
 	ioPool = conc.NewPool[any](capacity)

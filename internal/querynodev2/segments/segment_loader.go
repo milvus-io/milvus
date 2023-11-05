@@ -31,7 +31,6 @@ import (
 	"context"
 	"fmt"
 	"path"
-	"runtime"
 	"runtime/debug"
 	"strconv"
 	"sync"
@@ -103,7 +102,7 @@ func NewLoader(
 	manager *Manager,
 	cm storage.ChunkManager,
 ) *segmentLoader {
-	cpuNum := runtime.GOMAXPROCS(0)
+	cpuNum := hardware.GetCPUNum()
 	ioPoolSize := cpuNum * 8
 	// make sure small machines could load faster
 	if ioPoolSize < 32 {
@@ -366,7 +365,7 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 	}
 	diskCap := paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsUint64()
 
-	poolCap := runtime.NumCPU() * paramtable.Get().CommonCfg.HighPriorityThreadCoreCoefficient.GetAsInt()
+	poolCap := hardware.GetCPUNum() * paramtable.Get().CommonCfg.HighPriorityThreadCoreCoefficient.GetAsInt()
 	if poolCap > 256 {
 		poolCap = 256
 	}
@@ -378,7 +377,7 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 		return resource, 0, merr.WrapErrServiceDiskLimitExceeded(float32(loader.committedResource.DiskSize+uint64(diskUsage)), float32(diskCap))
 	}
 
-	concurrencyLevel := funcutil.Min(runtime.GOMAXPROCS(0), len(infos))
+	concurrencyLevel := funcutil.Min(hardware.GetCPUNum(), len(infos))
 
 	for _, info := range infos {
 		for _, field := range info.GetBinlogPaths() {

@@ -24,6 +24,7 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -56,7 +57,7 @@ func initSQPool() {
 func initDynamicPool() {
 	dynOnce.Do(func() {
 		pool := conc.NewPool[any](
-			runtime.GOMAXPROCS(0),
+			hardware.GetCPUNum(),
 			conc.WithPreAlloc(false),
 			conc.WithDisablePurge(false),
 			conc.WithPreHandler(runtime.LockOSThread), // lock os thread for cgo thread disposal
