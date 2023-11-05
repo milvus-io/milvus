@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
@@ -85,8 +86,18 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 		growing := sd.segmentManager.GetGrowing(segmentID)
 		if growing == nil {
 			var err error
-			growing, err = segments.NewSegment(sd.collection, segmentID, insertData.PartitionID, sd.collectionID, sd.vchannelName,
-				segments.SegmentTypeGrowing, 0, insertData.StartPosition, insertData.StartPosition)
+			growing, err = segments.NewSegment(
+				sd.collection,
+				segmentID,
+				insertData.PartitionID,
+				sd.collectionID,
+				sd.vchannelName,
+				segments.SegmentTypeGrowing,
+				0,
+				insertData.StartPosition,
+				insertData.StartPosition,
+				datapb.SegmentLevel_Legacy,
+			)
 			if err != nil {
 				log.Error("failed to create new segment",
 					zap.Int64("segmentID", segmentID),
@@ -311,6 +322,23 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 		return err
 	}
 
+	deletedPks, deletedTss := sd.segmentManager.GetL0DeleteRecords()
+	for _, segment := range loaded {
+		err = segment.Delete(deletedPks, deletedTss)
+		if err != nil {
+			log.Warn("failed to forward L0 deletions to growing segment",
+				zap.Int64("segmentID", segment.ID()),
+				zap.Error(err),
+			)
+
+			// clear loaded growing segments
+			for _, segment := range loaded {
+				segment.Release()
+			}
+			return err
+		}
+	}
+
 	segmentIDs = lo.Map(loaded, func(segment segments.Segment, _ int) int64 { return segment.ID() })
 	log.Info("load growing segments done", zap.Int64s("segmentIDs", segmentIDs))
 
@@ -331,6 +359,10 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 
 // LoadSegments load segments local or remotely depends on the target node.
 func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
+	if len(req.GetInfos()) == 0 {
+		return nil
+	}
+
 	log := sd.getLogger(ctx)
 
 	targetNodeID := req.GetDstNodeID()
@@ -396,8 +428,9 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	}
 	log.Debug("work loads segments done")
 
-	// load index need no stream delete and distribution change
-	if req.GetLoadScope() == querypb.LoadScope_Index {
+	// load index and L0 segment need no stream delete and distribution change
+	if req.GetLoadScope() == querypb.LoadScope_Index ||
+		req.GetInfos()[0].GetLevel() == datapb.SegmentLevel_L0 {
 		return nil
 	}
 
@@ -433,11 +466,16 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 		return candidate.ID(), candidate
 	})
 
+	level0DeletePks, level0DeleteTss := sd.segmentManager.GetL0DeleteRecords()
+
 	sd.deleteMut.Lock()
 	defer sd.deleteMut.Unlock()
 	// apply buffered delete for new segments
 	// no goroutines here since qnv2 has no load merging logic
 	for _, info := range infos {
+		log := log.With(
+			zap.Int64("segmentID", info.GetSegmentID()),
+		)
 		candidate := idCandidates[info.GetSegmentID()]
 		position := info.GetDeltaPosition()
 		if position == nil { // for compatibility of rolling upgrade from 2.2.x to 2.3
@@ -450,16 +488,42 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 		}
 
 		deleteData := &storage.DeleteData{}
+		for i, pk := range level0DeletePks {
+			if candidate.MayPkExist(pk) {
+				deleteData.Append(pk, level0DeleteTss[i])
+			}
+		}
+
+		if deleteData.RowCount > 0 {
+			log.Info("forward L0 delete to worker...",
+				zap.Int64("deleteRowNum", deleteData.RowCount),
+			)
+			err := worker.Delete(ctx, &querypb.DeleteRequest{
+				Base:         commonpbutil.NewMsgBase(commonpbutil.WithTargetID(targetNodeID)),
+				CollectionId: info.GetCollectionID(),
+				PartitionId:  info.GetPartitionID(),
+				SegmentId:    info.GetSegmentID(),
+				PrimaryKeys:  storage.ParsePrimaryKeys2IDs(deleteData.Pks),
+				Timestamps:   deleteData.Tss,
+			})
+			if err != nil {
+				log.Warn("failed to apply delete when LoadSegment", zap.Error(err))
+				return err
+			}
+		}
+
+		deleteData = &storage.DeleteData{}
 		// start position is dml position for segment
 		// if this position is before deleteBuffer's safe ts, it means some delete shall be read from msgstream
 		if position.GetTimestamp() < sd.deleteBuffer.SafeTs() {
 			log.Info("load delete from stream...")
-			var err error
-			deleteData, err = sd.readDeleteFromMsgstream(ctx, position, sd.deleteBuffer.SafeTs(), candidate)
+			streamDeleteData, err := sd.readDeleteFromMsgstream(ctx, position, sd.deleteBuffer.SafeTs(), candidate)
 			if err != nil {
 				log.Warn("failed to read delete data from msgstream", zap.Error(err))
 				return err
 			}
+
+			deleteData.Merge(streamDeleteData)
 			log.Info("load delete from stream done")
 		}
 
@@ -472,9 +536,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 				}
 				for i, pk := range record.DeleteData.Pks {
 					if candidate.MayPkExist(pk) {
-						deleteData.Pks = append(deleteData.Pks, pk)
-						deleteData.Tss = append(deleteData.Tss, record.DeleteData.Tss[i])
-						deleteData.RowCount++
+						deleteData.Append(pk, record.DeleteData.Tss[i])
 					}
 				}
 			}

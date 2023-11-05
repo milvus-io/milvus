@@ -7,6 +7,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -20,7 +21,7 @@ type ManagerSuite struct {
 	partitionIDs  []int64
 	channels      []string
 	types         []SegmentType
-	segments      []*LocalSegment
+	segments      []Segment
 
 	mgr *segmentManager
 }
@@ -49,6 +50,7 @@ func (s *ManagerSuite) SetupTest() {
 			0,
 			nil,
 			nil,
+			datapb.SegmentLevel_Legacy,
 		)
 		s.Require().NoError(err)
 		s.segments = append(s.segments, segment)
@@ -115,8 +117,8 @@ func (s *ManagerSuite) TestRemoveBy() {
 func (s *ManagerSuite) TestUpdateBy() {
 	action := IncreaseVersion(1)
 
-	s.Equal(2, s.mgr.UpdateSegmentBy(action, WithType(SegmentTypeSealed)))
-	s.Equal(1, s.mgr.UpdateSegmentBy(action, WithType(SegmentTypeGrowing)))
+	s.Equal(2, s.mgr.UpdateBy(action, WithType(SegmentTypeSealed)))
+	s.Equal(1, s.mgr.UpdateBy(action, WithType(SegmentTypeGrowing)))
 
 	segments := s.mgr.GetBy()
 	for _, segment := range segments {

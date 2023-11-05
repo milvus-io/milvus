@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	storage "github.com/milvus-io/milvus/internal/storage"
@@ -45,7 +46,7 @@ type ReduceSuite struct {
 	partitionID  int64
 	segmentID    int64
 	collection   *Collection
-	segment      *LocalSegment
+	segment      Segment
 }
 
 func (suite *ReduceSuite) SetupSuite() {
@@ -80,6 +81,7 @@ func (suite *ReduceSuite) SetupTest() {
 		0,
 		nil,
 		nil,
+		datapb.SegmentLevel_Legacy,
 	)
 	suite.Require().NoError(err)
 
@@ -93,7 +95,7 @@ func (suite *ReduceSuite) SetupTest() {
 	)
 	suite.Require().NoError(err)
 	for _, binlog := range binlogs {
-		err = suite.segment.LoadFieldData(binlog.FieldID, int64(msgLength), binlog, false)
+		err = suite.segment.(*LocalSegment).LoadFieldData(binlog.FieldID, int64(msgLength), binlog, false)
 		suite.Require().NoError(err)
 	}
 }

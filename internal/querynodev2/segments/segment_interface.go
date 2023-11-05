@@ -20,6 +20,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -35,6 +36,7 @@ type Segment interface {
 	CASVersion(int64, int64) bool
 	StartPosition() *msgpb.MsgPosition
 	Type() SegmentType
+	Level() datapb.SegmentLevel
 	RLock() error
 	RUnlock()
 
@@ -46,15 +48,17 @@ type Segment interface {
 	MemSize() int64
 
 	// Index related
-	AddIndex(fieldID int64, index *IndexedFieldInfo)
 	GetIndex(fieldID int64) *IndexedFieldInfo
 	ExistIndex(fieldID int64) bool
 	Indexes() []*IndexedFieldInfo
+	HasRawData(fieldID int64) bool
 
 	// Modification related
 	Insert(rowIDs []int64, timestamps []typeutil.Timestamp, record *segcorepb.InsertRecord) error
 	Delete(primaryKeys []storage.PrimaryKey, timestamps []typeutil.Timestamp) error
+	LoadDeltaData(deltaData *storage.DeleteData) error
 	LastDeltaTimestamp() uint64
+	Release()
 
 	// Bloom filter related
 	UpdateBloomFilter(pks []storage.PrimaryKey)
@@ -63,6 +67,4 @@ type Segment interface {
 	// Read operations
 	Search(ctx context.Context, searchReq *SearchRequest) (*SearchResult, error)
 	Retrieve(ctx context.Context, plan *RetrievePlan) (*segcorepb.RetrieveResults, error)
-
-	Release()
 }

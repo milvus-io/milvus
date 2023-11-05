@@ -848,6 +848,16 @@ func (data *DeleteData) Append(pk PrimaryKey, ts Timestamp) {
 	data.RowCount++
 }
 
+func (data *DeleteData) Merge(other *DeleteData) {
+	data.Pks = append(other.Pks, other.Pks...)
+	data.Tss = append(other.Tss, other.Tss...)
+	data.RowCount += other.RowCount
+
+	other.Pks = nil
+	other.Tss = nil
+	other.RowCount = 0
+}
+
 // DeleteCodec serializes and deserializes the delete data
 type DeleteCodec struct{}
 

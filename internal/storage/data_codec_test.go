@@ -465,6 +465,25 @@ func TestDeleteCodec(t *testing.T) {
 		assert.Equal(t, sid, int64(1))
 		assert.Equal(t, data, deleteData)
 	})
+
+	t.Run("merge", func(t *testing.T) {
+		first := &DeleteData{
+			Pks:      []PrimaryKey{NewInt64PrimaryKey(1)},
+			Tss:      []uint64{100},
+			RowCount: 1,
+		}
+
+		second := &DeleteData{
+			Pks:      []PrimaryKey{NewInt64PrimaryKey(2)},
+			Tss:      []uint64{100},
+			RowCount: 1,
+		}
+
+		first.Merge(second)
+		assert.Equal(t, len(first.Pks), 2)
+		assert.Equal(t, len(first.Tss), 2)
+		assert.Equal(t, first.RowCount, int64(2))
+	})
 }
 
 func TestUpgradeDeleteLog(t *testing.T) {

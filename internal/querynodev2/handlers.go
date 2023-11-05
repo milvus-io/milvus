@@ -27,6 +27,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -42,6 +43,45 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
+
+func loadL0Segments(ctx context.Context, delegator delegator.ShardDelegator, req *querypb.WatchDmChannelsRequest) error {
+	l0Segments := make([]*querypb.SegmentLoadInfo, 0)
+	for _, channel := range req.GetInfos() {
+		for _, segmentID := range channel.GetFlushedSegmentIds() {
+			segmentInfo, ok := req.GetSegmentInfos()[segmentID]
+			if !ok ||
+				segmentInfo.GetLevel() != datapb.SegmentLevel_L0 {
+				continue
+			}
+
+			l0Segments = append(l0Segments, &querypb.SegmentLoadInfo{
+				SegmentID:     segmentID,
+				PartitionID:   segmentInfo.PartitionID,
+				CollectionID:  segmentInfo.CollectionID,
+				BinlogPaths:   segmentInfo.Binlogs,
+				NumOfRows:     segmentInfo.NumOfRows,
+				Statslogs:     segmentInfo.Statslogs,
+				Deltalogs:     segmentInfo.Deltalogs,
+				InsertChannel: segmentInfo.InsertChannel,
+				StartPosition: segmentInfo.GetStartPosition(),
+				Level:         segmentInfo.GetLevel(),
+			})
+		}
+	}
+
+	return delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		Base:          req.GetBase(),
+		DstNodeID:     req.GetNodeID(),
+		Infos:         l0Segments,
+		Schema:        req.GetSchema(),
+		CollectionID:  req.GetCollectionID(),
+		LoadMeta:      req.GetLoadMeta(),
+		ReplicaID:     req.GetReplicaID(),
+		Version:       req.GetVersion(),
+		NeedTransfer:  false,
+		IndexInfoList: req.GetIndexInfoList(),
+	})
+}
 
 func loadGrowingSegments(ctx context.Context, delegator delegator.ShardDelegator, req *querypb.WatchDmChannelsRequest) error {
 	// load growing segments

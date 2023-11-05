@@ -851,7 +851,7 @@ func SaveDeltaLog(collectionID int64,
 	binlogWriter := storage.NewDeleteBinlogWriter(schemapb.DataType_String, collectionID, partitionID, segmentID)
 	eventWriter, _ := binlogWriter.NextDeleteEventWriter()
 	dData := &storage.DeleteData{
-		Pks:      []storage.PrimaryKey{&storage.Int64PrimaryKey{Value: 1}, &storage.Int64PrimaryKey{Value: 2}},
+		Pks:      []storage.PrimaryKey{storage.NewInt64PrimaryKey(1), storage.NewInt64PrimaryKey(2)},
 		Tss:      []typeutil.Timestamp{100, 200},
 		RowCount: 2,
 	}

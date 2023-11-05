@@ -113,6 +113,10 @@ func (s *baseSegment) Type() SegmentType {
 	return s.typ
 }
 
+func (s *baseSegment) Level() datapb.SegmentLevel {
+	return datapb.SegmentLevel_Legacy
+}
+
 func (s *baseSegment) StartPosition() *msgpb.MsgPosition {
 	return s.startPosition
 }
@@ -162,11 +166,16 @@ func NewSegment(collection *Collection,
 	version int64,
 	startPosition *msgpb.MsgPosition,
 	deltaPosition *msgpb.MsgPosition,
-) (*LocalSegment, error) {
+	level datapb.SegmentLevel,
+) (Segment, error) {
 	/*
 		CSegmentInterface
 		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type);
 	*/
+	if level == datapb.SegmentLevel_L0 {
+		return NewL0Segment(collection, segmentID, partitionID, collectionID, shard, segmentType, version, startPosition, deltaPosition)
+	}
+
 	var segmentPtr C.CSegmentInterface
 	switch segmentType {
 	case SegmentTypeSealed:

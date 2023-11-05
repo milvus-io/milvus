@@ -31,7 +31,9 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/eventlog"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -116,6 +118,7 @@ type SegmentManager interface {
 	// and increases the ref count of the corresponding collection,
 	// dup segments will not increase the ref count
 	Put(segmentType SegmentType, segments ...Segment)
+	UpdateBy(action SegmentAction, filters ...SegmentFilter) int
 	Get(segmentID UniqueID) Segment
 	GetWithType(segmentID UniqueID, typ SegmentType) Segment
 	GetBy(filters ...SegmentFilter) []Segment
@@ -124,10 +127,9 @@ type SegmentManager interface {
 	GetAndPin(segments []int64, filters ...SegmentFilter) ([]Segment, error)
 	Unpin(segments []Segment)
 
-	UpdateSegmentBy(action SegmentAction, filters ...SegmentFilter) int
-
 	GetSealed(segmentID UniqueID) Segment
 	GetGrowing(segmentID UniqueID) Segment
+	GetL0DeleteRecords() ([]storage.PrimaryKey, []uint64)
 	Empty() bool
 
 	// Remove removes the given segment,
@@ -217,7 +219,7 @@ func (mgr *segmentManager) Put(segmentType SegmentType, segments ...Segment) {
 	}
 }
 
-func (mgr *segmentManager) UpdateSegmentBy(action SegmentAction, filters ...SegmentFilter) int {
+func (mgr *segmentManager) UpdateBy(action SegmentAction, filters ...SegmentFilter) int {
 	mgr.mu.RLock()
 	defer mgr.mu.RUnlock()
 
@@ -405,6 +407,25 @@ func (mgr *segmentManager) GetGrowing(segmentID UniqueID) Segment {
 	}
 
 	return nil
+}
+
+func (mgr *segmentManager) GetL0DeleteRecords() ([]storage.PrimaryKey, []uint64) {
+	mgr.mu.RLock()
+	defer mgr.mu.RUnlock()
+
+	pks := make([]storage.PrimaryKey, 0)
+	tss := make([]uint64, 0)
+	for _, segment := range mgr.sealedSegments {
+		if segment.Level() != datapb.SegmentLevel_L0 {
+			continue
+		}
+
+		deletePks, deleteTss := segment.(*L0Segment).DeleteRecords()
+		pks = append(pks, deletePks...)
+		tss = append(tss, deleteTss...)
+	}
+
+	return pks, tss
 }
 
 func (mgr *segmentManager) Empty() bool {

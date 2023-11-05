@@ -258,6 +258,7 @@ message SegmentLoadInfo {
   msg.MsgPosition start_position = 14;
   msg.MsgPosition delta_position = 15;
   int64 readableVersion = 16;
+  data.SegmentLevel level = 17;
 }
 
 message FieldIndexInfo {

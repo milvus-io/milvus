@@ -257,6 +257,13 @@ func (suite *ServiceSuite) TestWatchDmChannelsInt64() {
 	ctx := context.Background()
 
 	// data
+	deltaLogs, err := segments.SaveDeltaLog(suite.collectionID,
+		suite.partitionIDs[0],
+		suite.flushedSegmentIDs[0],
+		suite.node.cacheChunkManager,
+	)
+	suite.NoError(err)
+
 	req := &querypb.WatchDmChannelsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_WatchDmChannels,
@@ -273,6 +280,16 @@ func (suite *ServiceSuite) TestWatchDmChannelsInt64() {
 				SeekPosition:      suite.position,
 				FlushedSegmentIds: suite.flushedSegmentIDs,
 				DroppedSegmentIds: suite.droppedSegmentIDs,
+			},
+		},
+		SegmentInfos: map[int64]*datapb.SegmentInfo{
+			suite.flushedSegmentIDs[0]: {
+				ID:            suite.flushedSegmentIDs[0],
+				CollectionID:  suite.collectionID,
+				PartitionID:   suite.partitionIDs[0],
+				InsertChannel: suite.vchannel,
+				Deltalogs:     deltaLogs,
+				Level:         datapb.SegmentLevel_L0,
 			},
 		},
 		Schema: segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64),
