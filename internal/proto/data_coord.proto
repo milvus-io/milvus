@@ -484,6 +484,9 @@ message SyncSegmentsRequest {
   int64 num_of_rows = 3;
   repeated int64 compacted_from = 4;
   repeated FieldBinlog stats_logs = 5;
+  string channel_name = 6;
+  int64 partition_id = 7;
+  int64 collection_id = 8;
 }
 
 message CompactionSegmentBinlogs {
