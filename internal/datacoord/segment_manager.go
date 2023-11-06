@@ -66,6 +66,8 @@ func putAllocation(a *Allocation) {
 
 // Manager manages segment related operations.
 type Manager interface {
+	// CreateSegment create new segment when segment not exist
+
 	// AllocSegment allocates rows and record the allocation.
 	AllocSegment(ctx context.Context, collectionID, partitionID UniqueID, channelName string, requestRows int64) ([]*Allocation, error)
 	// allocSegmentForImport allocates one segment allocation for bulk insert.
@@ -99,7 +101,7 @@ func (alloc *Allocation) String() string {
 // make sure SegmentManager implements Manager
 var _ Manager = (*SegmentManager)(nil)
 
-// SegmentManager handles segment related logic
+// SegmentManager handles L1 segment related logic
 type SegmentManager struct {
 	meta                *meta
 	mu                  sync.RWMutex
@@ -178,20 +180,20 @@ func defaultCalUpperLimitPolicy() calUpperLimitPolicy {
 }
 
 func defaultAllocatePolicy() AllocatePolicy {
-	return AllocatePolicyV1
+	return AllocatePolicyL1
 }
 
 func defaultSegmentSealPolicy() []segmentSealPolicy {
 	return []segmentSealPolicy{
-		sealByMaxBinlogFileNumberPolicy(Params.DataCoordCfg.SegmentMaxBinlogFileNumber.GetAsInt()),
-		sealByLifetimePolicy(Params.DataCoordCfg.SegmentMaxLifetime.GetAsDuration(time.Second)),
-		getSegmentCapacityPolicy(Params.DataCoordCfg.SegmentSealProportion.GetAsFloat()),
-		sealLongTimeIdlePolicy(Params.DataCoordCfg.SegmentMaxIdleTime.GetAsDuration(time.Second), Params.DataCoordCfg.SegmentMinSizeFromIdleToSealed.GetAsFloat(), Params.DataCoordCfg.SegmentMaxSize.GetAsFloat()),
+		sealL1SegmentByBinlogFileNumber(Params.DataCoordCfg.SegmentMaxBinlogFileNumber.GetAsInt()),
+		sealL1SegmentByLifetime(Params.DataCoordCfg.SegmentMaxLifetime.GetAsDuration(time.Second)),
+		sealL1SegmentByCapacity(Params.DataCoordCfg.SegmentSealProportion.GetAsFloat()),
+		sealL1SegmentByIdleTime(Params.DataCoordCfg.SegmentMaxIdleTime.GetAsDuration(time.Second), Params.DataCoordCfg.SegmentMinSizeFromIdleToSealed.GetAsFloat(), Params.DataCoordCfg.SegmentMaxSize.GetAsFloat()),
 	}
 }
 
 func defaultFlushPolicy() flushPolicy {
-	return flushPolicyV1
+	return flushPolicyL1
 }
 
 // newSegmentManager should be the only way to retrieve SegmentManager.
@@ -222,7 +224,9 @@ func (s *SegmentManager) loadSegmentsFromMeta() {
 	segments := s.meta.GetUnFlushedSegments()
 	segmentsID := make([]UniqueID, 0, len(segments))
 	for _, segment := range segments {
-		segmentsID = append(segmentsID, segment.GetID())
+		if segment.Level != datapb.SegmentLevel_L0 {
+			segmentsID = append(segmentsID, segment.GetID())
+		}
 	}
 	s.segments = segmentsID
 }
@@ -275,7 +279,7 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 			log.Warn("Failed to get segment info from meta", zap.Int64("id", segmentID))
 			continue
 		}
-		if !satisfy(segment, collectionID, partitionID, channelName) || !isGrowing(segment) {
+		if !satisfy(segment, collectionID, partitionID, channelName) || !isGrowing(segment) || segment.GetLevel() == datapb.SegmentLevel_L0 {
 			continue
 		}
 		segments = append(segments, segment)
@@ -287,7 +291,7 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 		return nil, err
 	}
 	newSegmentAllocations, existedSegmentAllocations := s.allocPolicy(segments,
-		requestRows, int64(maxCountPerSegment))
+		requestRows, int64(maxCountPerSegment), datapb.SegmentLevel_L1)
 
 	// create new segments and add allocations
 	expireTs, err := s.genExpireTs(ctx, false)
@@ -295,7 +299,7 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 		return nil, err
 	}
 	for _, allocation := range newSegmentAllocations {
-		segment, err := s.openNewSegment(ctx, collectionID, partitionID, channelName, commonpb.SegmentState_Growing)
+		segment, err := s.openNewSegment(ctx, collectionID, partitionID, channelName, commonpb.SegmentState_Growing, datapb.SegmentLevel_L1)
 		if err != nil {
 			log.Error("Failed to open new segment for segment allocation")
 			return nil, err
@@ -337,7 +341,7 @@ func (s *SegmentManager) allocSegmentForImport(ctx context.Context, collectionID
 		return nil, err
 	}
 
-	segment, err := s.openNewSegment(ctx, collectionID, partitionID, channelName, commonpb.SegmentState_Importing)
+	segment, err := s.openNewSegment(ctx, collectionID, partitionID, channelName, commonpb.SegmentState_Importing, datapb.SegmentLevel_L1)
 	if err != nil {
 		return nil, err
 	}
@@ -375,7 +379,7 @@ func (s *SegmentManager) genExpireTs(ctx context.Context, isImported bool) (Time
 }
 
 func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID,
-	channelName string, segmentState commonpb.SegmentState,
+	channelName string, segmentState commonpb.SegmentState, level datapb.SegmentLevel,
 ) (*SegmentInfo, error) {
 	log := log.Ctx(ctx)
 	ctx, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "open-Segment")
@@ -399,6 +403,7 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 		NumOfRows:      0,
 		State:          segmentState,
 		MaxRowNum:      int64(maxNumOfRows),
+		Level:          level,
 		LastExpireTime: 0,
 	}
 	if segmentState == commonpb.SegmentState_Importing {

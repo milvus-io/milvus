@@ -189,3 +189,24 @@ func parseBuildIDFromFilePath(key string) (UniqueID, error) {
 	}
 	return strconv.ParseInt(ss[len(ss)-1], 10, 64)
 }
+
+func getFieldBinlogs(id UniqueID, binlogs []*datapb.FieldBinlog) *datapb.FieldBinlog {
+	for _, binlog := range binlogs {
+		if id == binlog.GetFieldID() {
+			return binlog
+		}
+	}
+	return nil
+}
+
+func mergeFieldBinlogs(currentBinlogs []*datapb.FieldBinlog, newBinlogs []*datapb.FieldBinlog) []*datapb.FieldBinlog {
+	for _, newBinlog := range newBinlogs {
+		fieldBinlogs := getFieldBinlogs(newBinlog.GetFieldID(), currentBinlogs)
+		if fieldBinlogs == nil {
+			currentBinlogs = append(currentBinlogs, newBinlog)
+		} else {
+			fieldBinlogs.Binlogs = append(fieldBinlogs.Binlogs, newBinlog.Binlogs...)
+		}
+	}
+	return currentBinlogs
+}
