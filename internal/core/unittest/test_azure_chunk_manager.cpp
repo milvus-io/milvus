@@ -210,7 +210,7 @@ TEST_F(AzureChunkManagerTest, ReadPositive) {
     try {
         chunk_manager_->Read(path, readdata, sizeof(dataWithNULL));
     } catch (SegcoreError& e) {
-        EXPECT_TRUE(string(e.what()).find("exists") != string::npos);
+        EXPECT_TRUE(string(e.what()).find("exist") != string::npos);
     }
 
     chunk_manager_->DeleteBucket(testBucketName);

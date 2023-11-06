@@ -16,6 +16,7 @@
 
 #include <iostream>
 #include <sstream>
+#include <azure/core/diagnostics/logger.hpp>
 #include <azure/identity/workload_identity_credential.hpp>
 #include "AzureBlobChunkManager.h"
 
@@ -48,11 +49,36 @@ GetConnectionString(const std::string& access_key_id,
            ";AccountKey=" + access_key_value + ";EndpointSuffix=" + address;
 }
 
+void
+AzureBlobChunkManager::InitLog(
+    std::string level_str,
+    std::function<void(std::string const& level, std::string const& message)>
+        listener) {
+    // SetListener accepts std::function<>, which can be either lambda or a function pointer.
+    Azure::Core::Diagnostics::Logger::SetListener(
+        [&](auto lvl, auto msg) { listener("info", msg); });
+    Azure::Core::Diagnostics::Logger::Level level =
+        Azure::Core::Diagnostics::Logger::Level::Verbose;
+    if (level_str == "fatal" || level_str == "error") {
+        level = Azure::Core::Diagnostics::Logger::Level::Error;
+    } else if (level_str == "warn") {
+        level = Azure::Core::Diagnostics::Logger::Level::Warning;
+    } else if (level_str == "info") {
+        level = Azure::Core::Diagnostics::Logger::Level::Informational;
+    } else if (level_str == "debug" || level_str == "trace") {
+        level = Azure::Core::Diagnostics::Logger::Level::Verbose;
+    }
+    // See above for the level descriptions.
+    Azure::Core::Diagnostics::Logger::SetLevel(level);
+}
+
 AzureBlobChunkManager::AzureBlobChunkManager(
     const std::string& access_key_id,
     const std::string& access_key_value,
     const std::string& address,
+    int64_t requestTimeoutMs,
     bool useIAM) {
+    requestTimeoutMs_ = requestTimeoutMs;
     if (useIAM) {
         auto workloadIdentityCredential =
             std::make_shared<Azure::Identity::WorkloadIdentityCredential>(
@@ -73,23 +99,38 @@ AzureBlobChunkManager::~AzureBlobChunkManager() {
 
 bool
 AzureBlobChunkManager::BucketExists(const std::string& bucket_name) {
-    std::vector<std::string> buckets;
-    for (auto containerPage = client_->ListBlobContainers();
-         containerPage.HasPage();
-         containerPage.MoveToNextPage()) {
-        for (auto& container : containerPage.BlobContainers) {
-            if (container.Name == bucket_name) {
-                return true;
-            }
+    try {
+        Azure::Core::Context context;
+        if (requestTimeoutMs_ > 0) {
+            context = context.WithDeadline(
+                std::chrono::system_clock::now() +
+                std::chrono::milliseconds(requestTimeoutMs_));
         }
+        client_->GetBlobContainerClient(bucket_name)
+            .GetProperties(
+                Azure::Storage::Blobs::GetBlobContainerPropertiesOptions(),
+                context);
+        return true;
+    } catch (const Azure::Storage::StorageException& e) {
+        if (e.StatusCode == Azure::Core::Http::HttpStatusCode::NotFound &&
+            e.ErrorCode == "ContainerNotFound") {
+            return false;
+        }
+        throw;
     }
-    return false;
 }
 
 std::vector<std::string>
 AzureBlobChunkManager::ListBuckets() {
+    Azure::Core::Context context;
+    if (requestTimeoutMs_ > 0) {
+        context =
+            context.WithDeadline(std::chrono::system_clock::now() +
+                                 std::chrono::milliseconds(requestTimeoutMs_));
+    }
     std::vector<std::string> buckets;
-    for (auto containerPage = client_->ListBlobContainers();
+    for (auto containerPage = client_->ListBlobContainers(
+             Azure::Storage::Blobs::ListBlobContainersOptions(), context);
          containerPage.HasPage();
          containerPage.MoveToNextPage()) {
         for (auto& container : containerPage.BlobContainers) {
@@ -99,57 +140,86 @@ AzureBlobChunkManager::ListBuckets() {
     return buckets;
 }
 
-void
+bool
 AzureBlobChunkManager::CreateBucket(const std::string& bucket_name) {
-    client_->GetBlobContainerClient(bucket_name).Create();
+    Azure::Core::Context context;
+    if (requestTimeoutMs_ > 0) {
+        context =
+            context.WithDeadline(std::chrono::system_clock::now() +
+                                 std::chrono::milliseconds(requestTimeoutMs_));
+    }
+    return client_->GetBlobContainerClient(bucket_name)
+        .CreateIfNotExists(Azure::Storage::Blobs::CreateBlobContainerOptions(),
+                           context)
+        .Value.Created;
 }
 
-void
+bool
 AzureBlobChunkManager::DeleteBucket(const std::string& bucket_name) {
-    client_->GetBlobContainerClient(bucket_name).Delete();
+    Azure::Core::Context context;
+    if (requestTimeoutMs_ > 0) {
+        context =
+            context.WithDeadline(std::chrono::system_clock::now() +
+                                 std::chrono::milliseconds(requestTimeoutMs_));
+    }
+    return client_->GetBlobContainerClient(bucket_name)
+        .DeleteIfExists(Azure::Storage::Blobs::DeleteBlobContainerOptions(),
+                        context)
+        .Value.Deleted;
 }
 
 bool
 AzureBlobChunkManager::ObjectExists(const std::string& bucket_name,
                                     const std::string& object_name) {
-    for (auto blobPage =
-             client_->GetBlobContainerClient(bucket_name).ListBlobs();
-         blobPage.HasPage();
-         blobPage.MoveToNextPage()) {
-        for (auto& blob : blobPage.Blobs) {
-            if (blob.Name == object_name) {
-                return true;
-            }
+    try {
+        Azure::Core::Context context;
+        if (requestTimeoutMs_ > 0) {
+            context = context.WithDeadline(
+                std::chrono::system_clock::now() +
+                std::chrono::milliseconds(requestTimeoutMs_));
         }
+        client_->GetBlobContainerClient(bucket_name)
+            .GetBlockBlobClient(object_name)
+            .GetProperties(Azure::Storage::Blobs::GetBlobPropertiesOptions(),
+                           context);
+        return true;
+    } catch (const Azure::Storage::StorageException& e) {
+        if (e.StatusCode == Azure::Core::Http::HttpStatusCode::NotFound) {
+            return false;
+        }
+        throw;
     }
-    return false;
 }
 
 int64_t
 AzureBlobChunkManager::GetObjectSize(const std::string& bucket_name,
                                      const std::string& object_name) {
-    for (auto blobPage =
-             client_->GetBlobContainerClient(bucket_name).ListBlobs();
-         blobPage.HasPage();
-         blobPage.MoveToNextPage()) {
-        for (auto& blob : blobPage.Blobs) {
-            if (blob.Name == object_name) {
-                return blob.BlobSize;
-            }
-        }
+    Azure::Core::Context context;
+    if (requestTimeoutMs_ > 0) {
+        context =
+            context.WithDeadline(std::chrono::system_clock::now() +
+                                 std::chrono::milliseconds(requestTimeoutMs_));
     }
-    std::stringstream err_msg;
-    err_msg << "object('" << bucket_name << "', '" << object_name
-            << "') not exists";
-    throw std::runtime_error(err_msg.str());
+    return client_->GetBlobContainerClient(bucket_name)
+        .GetBlockBlobClient(object_name)
+        .GetProperties(Azure::Storage::Blobs::GetBlobPropertiesOptions(),
+                       context)
+        .Value.BlobSize;
 }
 
-void
+bool
 AzureBlobChunkManager::DeleteObject(const std::string& bucket_name,
                                     const std::string& object_name) {
-    client_->GetBlobContainerClient(bucket_name)
+    Azure::Core::Context context;
+    if (requestTimeoutMs_ > 0) {
+        context =
+            context.WithDeadline(std::chrono::system_clock::now() +
+                                 std::chrono::milliseconds(requestTimeoutMs_));
+    }
+    return client_->GetBlobContainerClient(bucket_name)
         .GetBlockBlobClient(object_name)
-        .Delete();
+        .DeleteIfExists(Azure::Storage::Blobs::DeleteBlobOptions(), context)
+        .Value.Deleted;
 }
 
 bool
@@ -159,9 +229,18 @@ AzureBlobChunkManager::PutObjectBuffer(const std::string& bucket_name,
                                        uint64_t size) {
     std::vector<unsigned char> str(static_cast<char*>(buf),
                                    static_cast<char*>(buf) + size);
+    Azure::Core::Context context;
+    if (requestTimeoutMs_ > 0) {
+        context =
+            context.WithDeadline(std::chrono::system_clock::now() +
+                                 std::chrono::milliseconds(requestTimeoutMs_));
+    }
     client_->GetBlobContainerClient(bucket_name)
         .GetBlockBlobClient(object_name)
-        .UploadFrom(str.data(), str.size());
+        .UploadFrom(str.data(),
+                    str.size(),
+                    Azure::Storage::Blobs::UploadBlockBlobFromOptions(),
+                    context);
     return true;
 }
 
@@ -174,71 +253,47 @@ AzureBlobChunkManager::GetObjectBuffer(const std::string& bucket_name,
     downloadOptions.Range = Azure::Core::Http::HttpRange();
     downloadOptions.Range.Value().Offset = 0;
     downloadOptions.Range.Value().Length = size;
+    Azure::Core::Context context;
+    if (requestTimeoutMs_ > 0) {
+        context =
+            context.WithDeadline(std::chrono::system_clock::now() +
+                                 std::chrono::milliseconds(requestTimeoutMs_));
+    }
     auto downloadResponse = client_->GetBlobContainerClient(bucket_name)
                                 .GetBlockBlobClient(object_name)
-                                .Download(downloadOptions);
-    std::vector<unsigned char> str =
-        downloadResponse.Value.BodyStream->ReadToEnd();
-    memcpy(static_cast<char*>(buf), &str[0], str.size() * sizeof(str[0]));
-    return str.size();
+                                .Download(downloadOptions, context);
+    auto bodyStream = downloadResponse.Value.BodyStream.get();
+    uint64_t totalBytesRead = 0;
+    uint64_t bytesRead = 0;
+    do {
+        bytesRead = bodyStream->Read(
+            static_cast<uint8_t*>(buf) + totalBytesRead, size - totalBytesRead);
+        totalBytesRead += bytesRead;
+    } while (bytesRead != 0 && totalBytesRead < size);
+    return totalBytesRead;
 }
 
 std::vector<std::string>
-AzureBlobChunkManager::ListObjects(const char* bucket_name,
-                                   const char* prefix) {
+AzureBlobChunkManager::ListObjects(const std::string& bucket_name,
+                                   const std::string& prefix) {
     std::vector<std::string> objects_vec;
-    for (auto blobPage =
-             client_->GetBlobContainerClient(bucket_name).ListBlobs();
+    Azure::Storage::Blobs::ListBlobsOptions listOptions;
+    listOptions.Prefix = prefix;
+    Azure::Core::Context context;
+    if (requestTimeoutMs_ > 0) {
+        context =
+            context.WithDeadline(std::chrono::system_clock::now() +
+                                 std::chrono::milliseconds(requestTimeoutMs_));
+    }
+    for (auto blobPage = client_->GetBlobContainerClient(bucket_name)
+                             .ListBlobs(listOptions, context);
          blobPage.HasPage();
          blobPage.MoveToNextPage()) {
         for (auto& blob : blobPage.Blobs) {
-            if (blob.Name.rfind(prefix, 0) == 0) {
-                objects_vec.emplace_back(blob.Name);
-            }
+            objects_vec.emplace_back(blob.Name);
         }
     }
     return objects_vec;
 }
 
 }  // namespace azure
-
-int
-main() {
-    const char* containerName = "default";
-    const char* blobName = "sample-blob";
-    using namespace azure;
-    AzureBlobChunkManager chunkManager = AzureBlobChunkManager("", "", "");
-    std::vector<std::string> buckets = chunkManager.ListBuckets();
-    for (const auto& bucket : buckets) {
-        std::cout << bucket << std::endl;
-    }
-    std::vector<std::string> objects =
-        chunkManager.ListObjects(containerName, blobName);
-    for (const auto& object : objects) {
-        std::cout << object << std::endl;
-    }
-    std::cout << chunkManager.GetObjectSize(containerName, blobName)
-              << std::endl;
-    std::cout << chunkManager.ObjectExists(containerName, blobName)
-              << std::endl;
-    std::cout << chunkManager.ObjectExists(containerName, "blobName")
-              << std::endl;
-    std::cout << chunkManager.BucketExists(containerName) << std::endl;
-    char buffer[1024 * 1024];
-    chunkManager.GetObjectBuffer(containerName, blobName, buffer, 1024 * 1024);
-    std::cout << buffer << std::endl;
-
-    char msg[12];
-    memcpy(msg, "Azure hello!", 12);
-    if (!chunkManager.ObjectExists(containerName, "blobName")) {
-        chunkManager.PutObjectBuffer(containerName, "blobName", msg, 12);
-    }
-    char buffer0[1024 * 1024];
-    chunkManager.GetObjectBuffer(
-        containerName, "blobName", buffer0, 1024 * 1024);
-    std::cout << buffer0 << std::endl;
-    chunkManager.DeleteObject(containerName, "blobName");
-    chunkManager.CreateBucket("sample-container1");
-    chunkManager.DeleteBucket("sample-container1");
-    exit(EXIT_SUCCESS);
-}
