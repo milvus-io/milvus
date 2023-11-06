@@ -174,7 +174,7 @@ class MinioChunkManager : public ChunkManager {
     bool
     ObjectExists(const std::string& bucket_name,
                  const std::string& object_name);
-    int64_t
+    uint64_t
     GetObjectSize(const std::string& bucket_name,
                   const std::string& object_name);
     bool
