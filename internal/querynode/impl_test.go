@@ -27,8 +27,13 @@ import (
 	"testing"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -41,9 +46,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
 )
 
 func TestImpl_GetComponentStates(t *testing.T) {
@@ -845,6 +847,24 @@ func TestImpl_SearchFailed(t *testing.T) {
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, ret.GetStatus().GetErrorCode())
+
+	t.Run("QueryNode not healthy", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		node, err := genSimpleQueryNode(ctx)
+		defer node.Stop()
+		assert.NoError(t, err)
+
+		node.UpdateStateCode(commonpb.StateCode_Abnormal)
+
+		resp, err := node.Search(ctx, &queryPb.SearchRequest{
+			Req:             req,
+			FromShardLeader: false,
+			DmlChannels:     []string{defaultDMLChannel},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.Status.ErrorCode)
+	})
 }
 
 func TestImpl_searchWithDmlChannel(t *testing.T) {
@@ -1082,6 +1102,24 @@ func TestImpl_queryWithDmlChannel(t *testing.T) {
 		DmlChannels:     []string{defaultDMLChannel + "_suffix"},
 	}, defaultDMLChannel)
 	assert.NoError(t, err)
+
+	t.Run("QueryNode not healthy", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		node, err := genSimpleQueryNode(ctx)
+		defer node.Stop()
+		assert.NoError(t, err)
+
+		node.UpdateStateCode(commonpb.StateCode_Abnormal)
+
+		resp, err := node.Query(ctx, &queryPb.QueryRequest{
+			Req:             req,
+			FromShardLeader: false,
+			DmlChannels:     []string{defaultDMLChannel},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.Status.ErrorCode)
+	})
 }
 
 func TestImpl_SyncReplicaSegments(t *testing.T) {
