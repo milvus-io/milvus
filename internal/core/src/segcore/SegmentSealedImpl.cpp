@@ -1032,7 +1032,6 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id,
     // we have to clone the shared pointer,
     // to make sure it won't get released if segment released
     auto column = fields_.at(field_id);
-
     if (datatype_is_variable(field_meta.get_data_type())) {
         switch (field_meta.get_data_type()) {
             case DataType::VARCHAR:
@@ -1071,10 +1070,15 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id,
     auto src_vec = column->Data();
     switch (field_meta.get_data_type()) {
         case DataType::BOOL: {
-            FixedVector<bool> output(count);
-            bulk_subscript_impl<bool>(
-                src_vec, seg_offsets, count, output.data());
-            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
+            auto ret = fill_with_empty(field_id, count);
+            bulk_subscript_impl<bool>(src_vec,
+                                      seg_offsets,
+                                      count,
+                                      ret->mutable_scalars()
+                                          ->mutable_bool_data()
+                                          ->mutable_data()
+                                          ->mutable_data());
+            return ret;
         }
         case DataType::INT8: {
             FixedVector<int8_t> output(count);
@@ -1089,40 +1093,81 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id,
             return CreateScalarDataArrayFrom(output.data(), count, field_meta);
         }
         case DataType::INT32: {
-            FixedVector<int32_t> output(count);
-            bulk_subscript_impl<int32_t>(
-                src_vec, seg_offsets, count, output.data());
-            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
+            auto ret = fill_with_empty(field_id, count);
+            bulk_subscript_impl<int32_t>(src_vec,
+                                         seg_offsets,
+                                         count,
+                                         ret->mutable_scalars()
+                                             ->mutable_int_data()
+                                             ->mutable_data()
+                                             ->mutable_data());
+            return ret;
         }
         case DataType::INT64: {
-            FixedVector<int64_t> output(count);
-            bulk_subscript_impl<int64_t>(
-                src_vec, seg_offsets, count, output.data());
-            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
+            auto ret = fill_with_empty(field_id, count);
+            bulk_subscript_impl<int64_t>(src_vec,
+                                         seg_offsets,
+                                         count,
+                                         ret->mutable_scalars()
+                                             ->mutable_long_data()
+                                             ->mutable_data()
+                                             ->mutable_data());
+            return ret;
         }
         case DataType::FLOAT: {
-            FixedVector<float> output(count);
-            bulk_subscript_impl<float>(
-                src_vec, seg_offsets, count, output.data());
-            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
+            auto ret = fill_with_empty(field_id, count);
+            bulk_subscript_impl<float>(src_vec,
+                                       seg_offsets,
+                                       count,
+                                       ret->mutable_scalars()
+                                           ->mutable_float_data()
+                                           ->mutable_data()
+                                           ->mutable_data());
+            return ret;
         }
         case DataType::DOUBLE: {
-            FixedVector<double> output(count);
-            bulk_subscript_impl<double>(
-                src_vec, seg_offsets, count, output.data());
-            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
+            auto ret = fill_with_empty(field_id, count);
+            bulk_subscript_impl<double>(src_vec,
+                                        seg_offsets,
+                                        count,
+                                        ret->mutable_scalars()
+                                            ->mutable_double_data()
+                                            ->mutable_data()
+                                            ->mutable_data());
+            return ret;
         }
 
-        case DataType::VECTOR_FLOAT:
-        case DataType::VECTOR_FLOAT16:
-        case DataType::VECTOR_BINARY: {
-            aligned_vector<char> output(field_meta.get_sizeof() * count);
+        case DataType::VECTOR_FLOAT: {
+            auto ret = fill_with_empty(field_id, count);
             bulk_subscript_impl(field_meta.get_sizeof(),
                                 src_vec,
                                 seg_offsets,
                                 count,
-                                output.data());
-            return CreateVectorDataArrayFrom(output.data(), count, field_meta);
+                                ret->mutable_vectors()
+                                    ->mutable_float_vector()
+                                    ->mutable_data()
+                                    ->mutable_data());
+            return ret;
+        }
+        case DataType::VECTOR_FLOAT16: {
+            auto ret = fill_with_empty(field_id, count);
+            bulk_subscript_impl(
+                field_meta.get_sizeof(),
+                src_vec,
+                seg_offsets,
+                count,
+                ret->mutable_vectors()->mutable_float16_vector()->data());
+            return ret;
+        }
+        case DataType::VECTOR_BINARY: {
+            auto ret = fill_with_empty(field_id, count);
+            bulk_subscript_impl(
+                field_meta.get_sizeof(),
+                src_vec,
+                seg_offsets,
+                count,
+                ret->mutable_vectors()->mutable_binary_vector()->data());
+            return ret;
         }
 
         default: {
