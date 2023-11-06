@@ -361,21 +361,22 @@ func (c *ClientBase[T]) needResetCancel() (needReset bool) {
 	return false
 }
 
-func (c *ClientBase[T]) checkErr(ctx context.Context, err error) (needRetry, needReset bool, retErr error) {
+func (c *ClientBase[T]) checkGrpcErr(ctx context.Context, err error) (needRetry, needReset bool, retErr error) {
 	log := log.Ctx(ctx).With(zap.String("clientRole", c.GetRole()))
-	switch {
-	case funcutil.IsGrpcErr(err):
-		// grpc err
-		log.Warn("call received grpc error", zap.Error(err))
-		if funcutil.IsGrpcErr(err, codes.Canceled, codes.DeadlineExceeded) {
-			// canceled or deadline exceeded
-			return true, c.needResetCancel(), err
-		}
+	// Unknown err
+	if !funcutil.IsGrpcErr(err) {
+		log.Warn("fail to grpc call because of unknown error", zap.Error(err))
+		return false, false, err
+	}
 
-		if funcutil.IsGrpcErr(err, codes.Unimplemented) {
-			return false, false, merr.WrapErrServiceUnimplemented(err)
-		}
-		return true, true, err
+	// grpc err
+	log.Warn("call received grpc error", zap.Error(err))
+	switch {
+	case funcutil.IsGrpcErr(err, codes.Canceled, codes.DeadlineExceeded):
+		// canceled or deadline exceeded
+		return true, c.needResetCancel(), err
+	case funcutil.IsGrpcErr(err, codes.Unimplemented):
+		return false, false, merr.WrapErrServiceUnimplemented(err)
 	case IsServerIDMismatchErr(err):
 		if ok, err := c.checkNodeSessionExist(ctx); !ok {
 			// if session doesn't exist, no need to retry for datanode/indexnode/querynode
@@ -385,9 +386,7 @@ func (c *ClientBase[T]) checkErr(ctx context.Context, err error) (needRetry, nee
 	case IsCrossClusterRoutingErr(err):
 		return true, true, err
 	default:
-		log.Warn("fail to grpc call because of unknown error", zap.Error(err))
-		// Unknown err
-		return false, false, err
+		return true, true, err
 	}
 }
 
@@ -443,7 +442,7 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 		ret, err = caller(client)
 		if err != nil {
 			var needRetry, needReset bool
-			needRetry, needReset, err = c.checkErr(ctx, err)
+			needRetry, needReset, err = c.checkGrpcErr(ctx, err)
 			if !needRetry {
 				// stop retry
 				err = retry.Unrecoverable(err)

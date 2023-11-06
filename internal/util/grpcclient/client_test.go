@@ -121,7 +121,7 @@ func TestClientBase_NodeSessionNotExist(t *testing.T) {
 	base.grpcClient = &mockClient{}
 	base.grpcClientMtx.Unlock()
 	_, err = base.Call(ctx, func(client *mockClient) (any, error) {
-		return struct{}{}, merr.ErrNodeNotMatch
+		return struct{}{}, status.Errorf(codes.Unknown, merr.ErrNodeNotMatch.Error())
 	})
 	assert.True(t, errors.Is(err, merr.ErrNodeNotFound))
 }
@@ -343,19 +343,34 @@ func TestClientBase_Recall(t *testing.T) {
 	})
 }
 
-func TestClientBase_CheckError(t *testing.T) {
+func TestClientBase_CheckGrpcError(t *testing.T) {
 	base := ClientBase[*mockClient]{}
 	base.grpcClient = &mockClient{}
 	base.MaxAttempts = 1
 
 	ctx := context.Background()
-	retry, reset, _ := base.checkErr(ctx, status.Errorf(codes.Canceled, "fake context canceled"))
+	retry, reset, _ := base.checkGrpcErr(ctx, status.Errorf(codes.Canceled, "fake context canceled"))
 	assert.True(t, retry)
 	assert.True(t, reset)
 
-	retry, reset, _ = base.checkErr(ctx, status.Errorf(codes.Unimplemented, "fake context canceled"))
+	retry, reset, _ = base.checkGrpcErr(ctx, status.Errorf(codes.Unimplemented, "fake context canceled"))
 	assert.False(t, retry)
 	assert.False(t, reset)
+
+	// test serverId mismatch
+	retry, reset, _ = base.checkGrpcErr(ctx, status.Errorf(codes.Unknown, merr.ErrNodeNotMatch.Error()))
+	assert.True(t, retry)
+	assert.True(t, reset)
+
+	// test cross cluster
+	retry, reset, _ = base.checkGrpcErr(ctx, status.Errorf(codes.Unknown, merr.ErrServiceCrossClusterRouting.Error()))
+	assert.True(t, retry)
+	assert.True(t, reset)
+
+	// test default
+	retry, reset, _ = base.checkGrpcErr(ctx, status.Errorf(codes.Unknown, merr.ErrNodeNotFound.Error()))
+	assert.True(t, retry)
+	assert.True(t, reset)
 }
 
 type server struct {
