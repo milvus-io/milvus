@@ -173,11 +173,11 @@ func (_c *MockLoader_LoadBloomFilterSet_Call) RunAndReturn(run func(context.Cont
 }
 
 // LoadDeltaLogs provides a mock function with given fields: ctx, segment, deltaLogs
-func (_m *MockLoader) LoadDeltaLogs(ctx context.Context, segment *LocalSegment, deltaLogs []*datapb.FieldBinlog) error {
+func (_m *MockLoader) LoadDeltaLogs(ctx context.Context, segment Segment, deltaLogs []*datapb.FieldBinlog) error {
 	ret := _m.Called(ctx, segment, deltaLogs)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *LocalSegment, []*datapb.FieldBinlog) error); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, Segment, []*datapb.FieldBinlog) error); ok {
 		r0 = rf(ctx, segment, deltaLogs)
 	} else {
 		r0 = ret.Error(0)
@@ -193,15 +193,15 @@ type MockLoader_LoadDeltaLogs_Call struct {
 
 // LoadDeltaLogs is a helper method to define mock.On call
 //   - ctx context.Context
-//   - segment *LocalSegment
+//   - segment Segment
 //   - deltaLogs []*datapb.FieldBinlog
 func (_e *MockLoader_Expecter) LoadDeltaLogs(ctx interface{}, segment interface{}, deltaLogs interface{}) *MockLoader_LoadDeltaLogs_Call {
 	return &MockLoader_LoadDeltaLogs_Call{Call: _e.mock.On("LoadDeltaLogs", ctx, segment, deltaLogs)}
 }
 
-func (_c *MockLoader_LoadDeltaLogs_Call) Run(run func(ctx context.Context, segment *LocalSegment, deltaLogs []*datapb.FieldBinlog)) *MockLoader_LoadDeltaLogs_Call {
+func (_c *MockLoader_LoadDeltaLogs_Call) Run(run func(ctx context.Context, segment Segment, deltaLogs []*datapb.FieldBinlog)) *MockLoader_LoadDeltaLogs_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*LocalSegment), args[2].([]*datapb.FieldBinlog))
+		run(args[0].(context.Context), args[1].(Segment), args[2].([]*datapb.FieldBinlog))
 	})
 	return _c
 }
@@ -211,7 +211,7 @@ func (_c *MockLoader_LoadDeltaLogs_Call) Return(_a0 error) *MockLoader_LoadDelta
 	return _c
 }
 
-func (_c *MockLoader_LoadDeltaLogs_Call) RunAndReturn(run func(context.Context, *LocalSegment, []*datapb.FieldBinlog) error) *MockLoader_LoadDeltaLogs_Call {
+func (_c *MockLoader_LoadDeltaLogs_Call) RunAndReturn(run func(context.Context, Segment, []*datapb.FieldBinlog) error) *MockLoader_LoadDeltaLogs_Call {
 	_c.Call.Return(run)
 	return _c
 }

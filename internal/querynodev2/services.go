@@ -311,6 +311,11 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		pipeline.ExcludedSegments(droppedInfos...)
 	}
 
+	err = loadL0Segments(ctx, delegator, req)
+	if err != nil {
+		log.Warn("failed to load l0 segments", zap.Error(err))
+		return merr.Status(err), nil
+	}
 	err = loadGrowingSegments(ctx, delegator, req)
 	if err != nil {
 		msg := "failed to load growing segments"

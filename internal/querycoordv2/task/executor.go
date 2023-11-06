@@ -381,14 +381,14 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 func (ex *Executor) executeDmChannelAction(task *ChannelTask, step int) {
 	switch task.Actions()[step].Type() {
 	case ActionTypeGrow:
-		ex.subDmChannel(task, step)
+		ex.subscribeChannel(task, step)
 
 	case ActionTypeReduce:
-		ex.unsubDmChannel(task, step)
+		ex.unsubscribeChannel(task, step)
 	}
 }
 
-func (ex *Executor) subDmChannel(task *ChannelTask, step int) error {
+func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 	defer ex.removeTask(task, step)
 	startTs := time.Now()
 	action := task.Actions()[step].(*ChannelAction)
@@ -478,7 +478,7 @@ func (ex *Executor) subDmChannel(task *ChannelTask, step int) error {
 	return nil
 }
 
-func (ex *Executor) unsubDmChannel(task *ChannelTask, step int) error {
+func (ex *Executor) unsubscribeChannel(task *ChannelTask, step int) error {
 	defer ex.removeTask(task, step)
 	startTs := time.Now()
 	action := task.Actions()[step].(*ChannelAction)

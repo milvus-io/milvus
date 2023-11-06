@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
@@ -38,8 +39,8 @@ type SearchSuite struct {
 	partitionID  int64
 	segmentID    int64
 	collection   *Collection
-	sealed       *LocalSegment
-	growing      *LocalSegment
+	sealed       Segment
+	growing      Segment
 }
 
 func (suite *SearchSuite) SetupSuite() {
@@ -82,6 +83,7 @@ func (suite *SearchSuite) SetupTest() {
 		0,
 		nil,
 		nil,
+		datapb.SegmentLevel_Legacy,
 	)
 	suite.Require().NoError(err)
 
@@ -95,7 +97,7 @@ func (suite *SearchSuite) SetupTest() {
 	)
 	suite.Require().NoError(err)
 	for _, binlog := range binlogs {
-		err = suite.sealed.LoadFieldData(binlog.FieldID, int64(msgLength), binlog, false)
+		err = suite.sealed.(*LocalSegment).LoadFieldData(binlog.FieldID, int64(msgLength), binlog, false)
 		suite.Require().NoError(err)
 	}
 
@@ -108,10 +110,11 @@ func (suite *SearchSuite) SetupTest() {
 		0,
 		nil,
 		nil,
+		datapb.SegmentLevel_Legacy,
 	)
 	suite.Require().NoError(err)
 
-	insertMsg, err := genInsertMsg(suite.collection, suite.partitionID, suite.growing.segmentID, msgLength)
+	insertMsg, err := genInsertMsg(suite.collection, suite.partitionID, suite.growing.ID(), msgLength)
 	suite.Require().NoError(err)
 	insertRecord, err := storage.TransferInsertMsgToInsertRecord(suite.collection.Schema(), insertMsg)
 	suite.Require().NoError(err)

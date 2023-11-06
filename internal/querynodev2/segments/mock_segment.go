@@ -7,6 +7,8 @@ import (
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 
+	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
+
 	mock "github.com/stretchr/testify/mock"
 
 	msgpb "github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -27,40 +29,6 @@ type MockSegment_Expecter struct {
 
 func (_m *MockSegment) EXPECT() *MockSegment_Expecter {
 	return &MockSegment_Expecter{mock: &_m.Mock}
-}
-
-// AddIndex provides a mock function with given fields: fieldID, index
-func (_m *MockSegment) AddIndex(fieldID int64, index *IndexedFieldInfo) {
-	_m.Called(fieldID, index)
-}
-
-// MockSegment_AddIndex_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddIndex'
-type MockSegment_AddIndex_Call struct {
-	*mock.Call
-}
-
-// AddIndex is a helper method to define mock.On call
-//   - fieldID int64
-//   - index *IndexedFieldInfo
-func (_e *MockSegment_Expecter) AddIndex(fieldID interface{}, index interface{}) *MockSegment_AddIndex_Call {
-	return &MockSegment_AddIndex_Call{Call: _e.mock.On("AddIndex", fieldID, index)}
-}
-
-func (_c *MockSegment_AddIndex_Call) Run(run func(fieldID int64, index *IndexedFieldInfo)) *MockSegment_AddIndex_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(*IndexedFieldInfo))
-	})
-	return _c
-}
-
-func (_c *MockSegment_AddIndex_Call) Return() *MockSegment_AddIndex_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockSegment_AddIndex_Call) RunAndReturn(run func(int64, *IndexedFieldInfo)) *MockSegment_AddIndex_Call {
-	_c.Call.Return(run)
-	return _c
 }
 
 // CASVersion provides a mock function with given fields: _a0, _a1
@@ -276,6 +244,48 @@ func (_c *MockSegment_GetIndex_Call) RunAndReturn(run func(int64) *IndexedFieldI
 	return _c
 }
 
+// HasRawData provides a mock function with given fields: fieldID
+func (_m *MockSegment) HasRawData(fieldID int64) bool {
+	ret := _m.Called(fieldID)
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(int64) bool); ok {
+		r0 = rf(fieldID)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockSegment_HasRawData_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HasRawData'
+type MockSegment_HasRawData_Call struct {
+	*mock.Call
+}
+
+// HasRawData is a helper method to define mock.On call
+//   - fieldID int64
+func (_e *MockSegment_Expecter) HasRawData(fieldID interface{}) *MockSegment_HasRawData_Call {
+	return &MockSegment_HasRawData_Call{Call: _e.mock.On("HasRawData", fieldID)}
+}
+
+func (_c *MockSegment_HasRawData_Call) Run(run func(fieldID int64)) *MockSegment_HasRawData_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64))
+	})
+	return _c
+}
+
+func (_c *MockSegment_HasRawData_Call) Return(_a0 bool) *MockSegment_HasRawData_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_HasRawData_Call) RunAndReturn(run func(int64) bool) *MockSegment_HasRawData_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ID provides a mock function with given fields:
 func (_m *MockSegment) ID() int64 {
 	ret := _m.Called()
@@ -482,6 +492,89 @@ func (_c *MockSegment_LastDeltaTimestamp_Call) Return(_a0 uint64) *MockSegment_L
 }
 
 func (_c *MockSegment_LastDeltaTimestamp_Call) RunAndReturn(run func() uint64) *MockSegment_LastDeltaTimestamp_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Level provides a mock function with given fields:
+func (_m *MockSegment) Level() datapb.SegmentLevel {
+	ret := _m.Called()
+
+	var r0 datapb.SegmentLevel
+	if rf, ok := ret.Get(0).(func() datapb.SegmentLevel); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(datapb.SegmentLevel)
+	}
+
+	return r0
+}
+
+// MockSegment_Level_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Level'
+type MockSegment_Level_Call struct {
+	*mock.Call
+}
+
+// Level is a helper method to define mock.On call
+func (_e *MockSegment_Expecter) Level() *MockSegment_Level_Call {
+	return &MockSegment_Level_Call{Call: _e.mock.On("Level")}
+}
+
+func (_c *MockSegment_Level_Call) Run(run func()) *MockSegment_Level_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSegment_Level_Call) Return(_a0 datapb.SegmentLevel) *MockSegment_Level_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_Level_Call) RunAndReturn(run func() datapb.SegmentLevel) *MockSegment_Level_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// LoadDeltaData provides a mock function with given fields: deltaData
+func (_m *MockSegment) LoadDeltaData(deltaData *storage.DeleteData) error {
+	ret := _m.Called(deltaData)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*storage.DeleteData) error); ok {
+		r0 = rf(deltaData)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockSegment_LoadDeltaData_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoadDeltaData'
+type MockSegment_LoadDeltaData_Call struct {
+	*mock.Call
+}
+
+// LoadDeltaData is a helper method to define mock.On call
+//   - deltaData *storage.DeleteData
+func (_e *MockSegment_Expecter) LoadDeltaData(deltaData interface{}) *MockSegment_LoadDeltaData_Call {
+	return &MockSegment_LoadDeltaData_Call{Call: _e.mock.On("LoadDeltaData", deltaData)}
+}
+
+func (_c *MockSegment_LoadDeltaData_Call) Run(run func(deltaData *storage.DeleteData)) *MockSegment_LoadDeltaData_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*storage.DeleteData))
+	})
+	return _c
+}
+
+func (_c *MockSegment_LoadDeltaData_Call) Return(_a0 error) *MockSegment_LoadDeltaData_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_LoadDeltaData_Call) RunAndReturn(run func(*storage.DeleteData) error) *MockSegment_LoadDeltaData_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -16,17 +16,6 @@
 
 package segments
 
-/*
-#cgo pkg-config: milvus_segcore milvus_common
-
-#include "segcore/collection_c.h"
-#include "segcore/segment_c.h"
-#include "segcore/segcore_init_c.h"
-#include "common/init_c.h"
-
-*/
-import "C"
-
 import (
 	"context"
 	"fmt"
@@ -64,14 +53,12 @@ const (
 	UsedDiskMemoryRatio = 4
 )
 
-var ErrReadDeltaMsgFailed = errors.New("ReadDeltaMsgFailed")
-
 type Loader interface {
 	// Load loads binlogs, and spawn segments,
 	// NOTE: make sure the ref count of the corresponding collection will never go down to 0 during this
 	Load(ctx context.Context, collectionID int64, segmentType SegmentType, version int64, segments ...*querypb.SegmentLoadInfo) ([]Segment, error)
 
-	LoadDeltaLogs(ctx context.Context, segment *LocalSegment, deltaLogs []*datapb.FieldBinlog) error
+	LoadDeltaLogs(ctx context.Context, segment Segment, deltaLogs []*datapb.FieldBinlog) error
 
 	// LoadBloomFilterSet loads needed statslog for RemoteSegment.
 	LoadBloomFilterSet(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error)
@@ -201,10 +188,10 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	}
 	defer loader.freeRequest(resource)
 
-	newSegments := typeutil.NewConcurrentMap[int64, *LocalSegment]()
-	loaded := typeutil.NewConcurrentMap[int64, *LocalSegment]()
+	newSegments := typeutil.NewConcurrentMap[int64, Segment]()
+	loaded := typeutil.NewConcurrentMap[int64, Segment]()
 	defer func() {
-		newSegments.Range(func(_ int64, s *LocalSegment) bool {
+		newSegments.Range(func(_ int64, s Segment) bool {
 			s.Release()
 			return true
 		})
@@ -212,10 +199,10 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	}()
 
 	for _, info := range infos {
-		segmentID := info.SegmentID
-		partitionID := info.PartitionID
-		collectionID := info.CollectionID
-		shard := info.InsertChannel
+		segmentID := info.GetSegmentID()
+		partitionID := info.GetPartitionID()
+		collectionID := info.GetCollectionID()
+		shard := info.GetInsertChannel()
 
 		collection := loader.manager.Collection.Get(collectionID)
 		if collection == nil {
@@ -223,7 +210,19 @@ func (loader *segmentLoader) Load(ctx context.Context,
 			log.Warn("failed to get collection", zap.Error(err))
 			return nil, err
 		}
-		segment, err := NewSegment(collection, segmentID, partitionID, collectionID, shard, segmentType, version, info.GetStartPosition(), info.GetDeltaPosition())
+
+		segment, err := NewSegment(
+			collection,
+			segmentID,
+			partitionID,
+			collectionID,
+			shard,
+			segmentType,
+			version,
+			info.GetStartPosition(),
+			info.GetDeltaPosition(),
+			info.GetLevel(),
+		)
 		if err != nil {
 			log.Warn("load segment failed when create new segment",
 				zap.Int64("partitionID", partitionID),
@@ -243,7 +242,13 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		segment, _ := newSegments.Get(segmentID)
 
 		tr := timerecord.NewTimeRecorder("loadDurationPerSegment")
-		err := loader.loadSegment(ctx, segment, loadInfo)
+
+		var err error
+		if loadInfo.GetLevel() == datapb.SegmentLevel_L0 {
+			err = loader.LoadDeltaLogs(ctx, segment, loadInfo.GetDeltalogs())
+		} else {
+			err = loader.loadSegment(ctx, segment.(*LocalSegment), loadInfo)
+		}
 		if err != nil {
 			log.Warn("load segment failed when load data into memory",
 				zap.Int64("partitionID", partitionID),
@@ -282,7 +287,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 
 	log.Info("all segment load done")
 	var result []Segment
-	loaded.Range(func(_ int64, s *LocalSegment) bool {
+	loaded.Range(func(_ int64, s Segment) bool {
 		result = append(result, s)
 		return true
 	})
@@ -303,7 +308,7 @@ func (loader *segmentLoader) prepare(segmentType SegmentType, version int64, seg
 			loader.loadingSegments.Insert(segment.GetSegmentID(), newLoadResult())
 		} else {
 			// try to update segment version before skip load operation
-			loader.manager.Segment.UpdateSegmentBy(IncreaseVersion(version),
+			loader.manager.Segment.UpdateBy(IncreaseVersion(version),
 				WithType(segmentType), WithID(segment.SegmentID))
 			log.Info("skip loaded/loading segment", zap.Int64("segmentID", segment.GetSegmentID()),
 				zap.Bool("isLoaded", len(loader.manager.Segment.GetBy(WithType(segmentType), WithID(segment.GetSegmentID()))) > 0),
@@ -342,7 +347,8 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 	// we need to deal with empty infos case separately,
 	// because the following judgement for requested resources are based on current status and static config
 	// which may block empty-load operations by accident
-	if len(infos) == 0 {
+	if len(infos) == 0 ||
+		infos[0].GetLevel() == datapb.SegmentLevel_L0 {
 		return resource, 0, nil
 	}
 
@@ -789,7 +795,7 @@ func (loader *segmentLoader) loadBloomFilter(ctx context.Context, segmentID int6
 	return nil
 }
 
-func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment *LocalSegment, deltaLogs []*datapb.FieldBinlog) error {
+func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment, deltaLogs []*datapb.FieldBinlog) error {
 	dCodec := storage.DeleteCodec{}
 	var blobs []*storage.Blob
 	for _, deltaLog := range deltaLogs {
@@ -811,7 +817,7 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment *LocalSe
 		}
 	}
 	if len(blobs) == 0 {
-		log.Info("there are no delta logs saved with segment, skip loading delete record", zap.Any("segmentID", segment.segmentID))
+		log.Info("there are no delta logs saved with segment, skip loading delete record", zap.Any("segmentID", segment.ID()))
 		return nil
 	}
 	_, _, deltaData, err := dCodec.Deserialize(blobs)
@@ -1119,9 +1125,4 @@ func getBinlogDataSize(fieldBinlog *datapb.FieldBinlog) int64 {
 	}
 
 	return fieldSize
-}
-
-func getIndexEngineVersion() (minimal, current int32) {
-	cMinimal, cCurrent := C.GetMinimalIndexVersion(), C.GetCurrentIndexVersion()
-	return int32(cMinimal), int32(cCurrent)
 }
