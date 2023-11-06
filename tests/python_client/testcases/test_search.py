@@ -3127,6 +3127,53 @@ class TestCollectionSearch(TestcaseBase):
             assert set(ids) == set(filter_ids)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("exists", ["exists"])
+    @pytest.mark.parametrize("json_field_name", ["json_field", "json_field['number']", "json_field['name']",
+                                                 "float_array", "not_exist_field", "new_added_field"])
+    def test_search_with_expression_exists(self, exists, json_field_name, _async, enable_dynamic_field):
+        """
+        target: test search with different expressions
+        method: test search with different expressions
+        expected: searched successfully with correct limit(topK)
+        """
+        if not enable_dynamic_field:
+            pytest.skip("not allowed")
+        # 1. initialize with data
+        nb = 100
+        schema = cf.gen_array_collection_schema(with_json=True, enable_dynamic_field=enable_dynamic_field)
+        collection_w = self.init_collection_wrap(schema=schema, enable_dynamic_field=enable_dynamic_field)
+        log.info(schema.fields)
+        if enable_dynamic_field:
+            data = cf.get_row_data_by_schema(nb, schema=schema)
+            for i in range(nb):
+                data[i]["new_added_field"] = i
+            log.info(data[0])
+        else:
+            data = cf.gen_array_dataframe_data(nb, with_json=True)
+            log.info(data.head(1))
+        collection_w.insert(data)
+
+        # 2. create index
+        index_param = {"index_type": "FLAT", "metric_type": "COSINE", "params": {}}
+        collection_w.create_index("float_vector", index_param)
+        collection_w.load()
+
+        # 3. search with expression
+        expression = exists + " " + json_field_name
+        if enable_dynamic_field:
+            limit = nb if json_field_name in data[0].keys() else 0
+        else:
+            limit = nb if json_field_name in data.columns.to_list() else 0
+        log.info("test_search_with_expression: searching with expression: %s" % expression)
+        search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
+                                            default_search_params, nb, expression,
+                                            _async=_async,
+                                            check_task=CheckTasks.check_search_results,
+                                            check_items={"nq": default_nq,
+                                                         "limit": limit,
+                                                         "_async": _async})
+
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.xfail(reason="issue 24514")
     @pytest.mark.parametrize("expression", cf.gen_normal_expressions_field(default_float_field_name))
     def test_search_with_expression_auto_id(self, dim, expression, _async, enable_dynamic_field):
@@ -3404,6 +3451,39 @@ class TestCollectionSearch(TestcaseBase):
                                          "ids": insert_ids,
                                          "limit": default_limit,
                                          "_async": _async,
+                                         "output_fields": output_fields})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_output_array_field(self, auto_id, enable_dynamic_field):
+        """
+        target: test search output array field
+        method: create connection, collection, insert and search
+        expected: search successfully
+        """
+        # 1. create a collection
+        schema = cf.gen_array_collection_schema(auto_id=auto_id)
+        collection_w = self.init_collection_wrap(schema=schema)
+
+        # 2. insert data
+        if enable_dynamic_field:
+            data = cf.get_row_data_by_schema(schema=schema)
+        else:
+            data = cf.gen_array_dataframe_data(auto_id=auto_id)
+
+        collection_w.insert(data)
+
+        # 3. create index and load
+        collection_w.create_index(default_search_field)
+        collection_w.load()
+
+        # 4. search output array field, check
+        output_fields = [ct.default_int64_field_name, ct.default_int32_array_field_name,
+                         ct.default_float_array_field_name]
+        collection_w.search(vectors[:default_nq], default_search_field, {}, default_limit,
+                            output_fields=output_fields,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "limit": default_limit,
                                          "output_fields": output_fields})
 
     @pytest.mark.tags(CaseLabel.L1)

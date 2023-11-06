@@ -395,7 +395,7 @@ def gen_default_data_for_upsert(nb=ct.default_nb, dim=ct.default_dim, start=0, s
     return df, float_values
 
 
-def gen_array_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0,
+def gen_array_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0, auto_id=False,
                              array_length=ct.default_max_capacity, with_json=False, random_primary_key=False):
     if not random_primary_key:
         int_values = pd.Series(data=[i for i in range(start, start + nb)])
@@ -418,6 +418,8 @@ def gen_array_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0,
     })
     if with_json is False:
         df.drop(ct.default_json_field_name, axis=1, inplace=True)
+    if auto_id:
+        df.drop(ct.default_int64_field_name, axis=1, inplace=True)
 
     return df
 
