@@ -19,6 +19,20 @@ import (
 	"golang.org/x/exp/mmap"
 )
 
+type StatsLogType int64
+
+const (
+	DefaultStatsType StatsLogType = iota + 0
+
+	// CompundStatsType log save multiple stats
+	// and bloom filters to one file
+	CompoundStatsType
+)
+
+func (s StatsLogType) GetLogID() int64 {
+	return int64(s)
+}
+
 type FileReader interface {
 	io.Reader
 	io.Closer

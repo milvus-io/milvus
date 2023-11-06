@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -394,16 +395,7 @@ func (c *ChannelMeta) loadStats(ctx context.Context, segmentID int64, collection
 	}
 
 	// filter stats binlog files which is pk field stats log
-	var bloomFilterFiles []string
-	for _, binlog := range statsBinlogs {
-		if binlog.FieldID != pkField {
-			continue
-		}
-		for _, log := range binlog.GetBinlogs() {
-			bloomFilterFiles = append(bloomFilterFiles, log.GetLogPath())
-		}
-	}
-
+	bloomFilterFiles := filterPKStatsBinlogs(pkField, statsBinlogs)
 	// no stats log to parse, initialize a new BF
 	if len(bloomFilterFiles) == 0 {
 		log.Warn("no stats files to load")
@@ -919,4 +911,21 @@ func (c *ChannelMeta) getTotalMemorySize() int64 {
 
 func (c *ChannelMeta) close() {
 	c.closed.Store(true)
+}
+
+func filterPKStatsBinlogs(pkField int64, statsBinlogs []*datapb.FieldBinlog) []string {
+	bloomFilterFiles := []string{}
+	for _, binlog := range statsBinlogs {
+		if binlog.FieldID != pkField {
+			continue
+		}
+		for _, binlog := range binlog.GetBinlogs() {
+			_, logID := path.Split(binlog.GetLogPath())
+			// ignore CompoundStatsLog for upward compatibility
+			if logID != fmt.Sprint(storage.CompoundStatsType.GetLogID()) {
+				bloomFilterFiles = append(bloomFilterFiles, binlog.GetLogPath())
+			}
+		}
+	}
+	return bloomFilterFiles
 }
