@@ -57,6 +57,7 @@ class MilvusConan(ConanFile):
         "arrow:with_thrift": True,
         "arrow:with_jemalloc": True,
         "arrow:shared": False,
+        "folly:use_sse4_2": False,
         "aws-sdk-cpp:text-to-speech": False,
         "aws-sdk-cpp:transfer": False,
         "gtest:build_gmock": False,
