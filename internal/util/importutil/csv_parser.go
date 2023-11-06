@@ -66,7 +66,7 @@ func (p *CSVParser) SetBufSize() {
 
 	bufRowCount := p.bufRowCount
 	for {
-		if bufRowCount*sizePerRecord > SingleBlockSize {
+		if bufRowCount*sizePerRecord > ReadBufferSize {
 			bufRowCount--
 		} else {
 			break
