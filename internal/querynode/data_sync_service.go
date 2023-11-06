@@ -278,10 +278,10 @@ func (dsService *dataSyncService) removeEmptyFlowGraphByChannel(collectionID int
 	// start to release flow graph
 	log.Info("all segments released, start to remove deltaChannel flowgraph")
 	delete(dsService.deltaChannel2FlowGraph, dc)
-	dsService.metaReplica.removeCollectionVDeltaChannel(collectionID, dc)
 	// close flowgraph first, so no write will be dispatched to tSafeReplica
 	fg.close()
 	metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Dec()
+	dsService.metaReplica.removeCollectionVDeltaChannel(collectionID, dc)
 	dsService.tSafeReplica.removeTSafe(dc)
 	// try best to remove, it's ok if all info is gone before this call
 	rateCol.removeTSafeChannel(dc)
@@ -291,8 +291,8 @@ func (dsService *dataSyncService) removeEmptyFlowGraphByChannel(collectionID int
 func newDataSyncService(ctx context.Context,
 	metaReplica ReplicaInterface,
 	tSafeReplica TSafeReplicaInterface,
-	factory msgstream.Factory) *dataSyncService {
-
+	factory msgstream.Factory,
+) *dataSyncService {
 	return &dataSyncService{
 		ctx:                    ctx,
 		dmlChannel2FlowGraph:   make(map[Channel]*queryNodeFlowGraph),
