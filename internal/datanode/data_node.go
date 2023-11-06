@@ -1083,8 +1083,8 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 
 	// parse files and generate segments
 	segmentSize := int64(Params.DataCoordCfg.SegmentMaxSize) * 1024 * 1024
-	importWrapper := importutil.NewImportWrapper(newCtx, collectionInfo, segmentSize, node.rowIDAllocator,
-		node.chunkManager, importResult, reportFunc)
+	importWrapper := importutil.NewImportWrapper(newCtx, collectionInfo, segmentSize, Params.DataNodeCfg.BinLogMaxSize,
+		node.rowIDAllocator, node.chunkManager, importResult, reportFunc)
 	importWrapper.SetCallbackFunctions(assignSegmentFunc(node, req),
 		createBinLogsFunc(node, req, colInfo.GetSchema(), ts),
 		saveSegmentFunc(node, req, importResult, ts))
