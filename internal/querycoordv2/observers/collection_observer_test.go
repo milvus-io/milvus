@@ -185,7 +185,8 @@ func (suite *CollectionObserverSuite) SetupTest() {
 
 	// Dependencies
 	suite.dist = meta.NewDistributionManager()
-	suite.meta = meta.NewMeta(suite.idAllocator, suite.store, session.NewNodeManager())
+	nodeMgr := session.NewNodeManager()
+	suite.meta = meta.NewMeta(suite.idAllocator, suite.store, nodeMgr)
 	suite.broker = meta.NewMockBroker(suite.T())
 	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
 	suite.targetObserver = NewTargetObserver(suite.meta,
@@ -196,7 +197,7 @@ func (suite *CollectionObserverSuite) SetupTest() {
 	suite.checkerController = &checkers.CheckerController{}
 
 	mockCluster := session.NewMockCluster(suite.T())
-	suite.leaderObserver = NewLeaderObserver(suite.dist, suite.meta, suite.targetMgr, suite.broker, mockCluster)
+	suite.leaderObserver = NewLeaderObserver(suite.dist, suite.meta, suite.targetMgr, suite.broker, mockCluster, nodeMgr)
 	mockCluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
 
 	// Test object

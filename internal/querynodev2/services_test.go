@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -45,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
@@ -1765,6 +1767,7 @@ func (suite *ServiceSuite) TestSyncDistribution_Normal() {
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
 
+	// test sync targte version
 	syncVersionAction := &querypb.SyncAction{
 		Type:            querypb.SyncType_UpdateVersion,
 		SealedInTarget:  []int64{3},
@@ -1777,6 +1780,37 @@ func (suite *ServiceSuite) TestSyncDistribution_Normal() {
 	status, err = suite.node.SyncDistribution(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
+
+	// test sync segments
+	segmentVersion := int64(111)
+	syncSegmentVersion := &querypb.SyncAction{
+		Type:        querypb.SyncType_Set,
+		SegmentID:   suite.validSegmentIDs[0],
+		NodeID:      0,
+		PartitionID: suite.partitionIDs[0],
+		Info:        &querypb.SegmentLoadInfo{},
+		Version:     segmentVersion,
+	}
+	req.Actions = []*querypb.SyncAction{syncSegmentVersion}
+
+	testChannel := "test_sync_segment"
+	req.Channel = testChannel
+
+	// expected call load segment with right segment version
+	var versionMatch bool
+	mockDelegator := delegator.NewMockShardDelegator(suite.T())
+	mockDelegator.EXPECT().LoadSegments(mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
+			log.Info("version", zap.Int64("versionInload", req.GetVersion()))
+			versionMatch = req.GetVersion() == segmentVersion
+			return nil
+		})
+	suite.node.delegators.Insert(testChannel, mockDelegator)
+
+	status, err = suite.node.SyncDistribution(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
+	suite.True(versionMatch)
 }
 
 func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {
