@@ -44,6 +44,10 @@ jobs:
           path: /var/tmp/ccache
           key: macos-ccache-${{ env.corehash }}
           restore-keys: macos-ccache-
+      - name: Setup Python environment
+        uses: actions/setup-python@v4
+        with:
+          python-version: '<3.12'
       - name: Setup Go environment
         uses: actions/setup-go@v2.2.0
         with:
