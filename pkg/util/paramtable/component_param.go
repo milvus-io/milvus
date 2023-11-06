@@ -1204,16 +1204,17 @@ type queryCoordConfig struct {
 	// Deprecated: Since 2.2.2, use different interval for different checker
 	CheckInterval ParamItem `refreshable:"true"`
 
-	NextTargetSurviveTime       ParamItem `refreshable:"true"`
-	UpdateNextTargetInterval    ParamItem `refreshable:"false"`
-	CheckNodeInReplicaInterval  ParamItem `refreshable:"false"`
-	CheckResourceGroupInterval  ParamItem `refreshable:"false"`
-	EnableRGAutoRecover         ParamItem `refreshable:"true"`
-	CheckHealthInterval         ParamItem `refreshable:"false"`
-	CheckHealthRPCTimeout       ParamItem `refreshable:"true"`
-	BrokerTimeout               ParamItem `refreshable:"false"`
-	CollectionRecoverTimesLimit ParamItem `refreshable:"true"`
-	ObserverTaskParallel        ParamItem `refreshable:"false"`
+	NextTargetSurviveTime          ParamItem `refreshable:"true"`
+	UpdateNextTargetInterval       ParamItem `refreshable:"false"`
+	CheckNodeInReplicaInterval     ParamItem `refreshable:"false"`
+	CheckResourceGroupInterval     ParamItem `refreshable:"false"`
+	EnableRGAutoRecover            ParamItem `refreshable:"true"`
+	CheckHealthInterval            ParamItem `refreshable:"false"`
+	CheckHealthRPCTimeout          ParamItem `refreshable:"true"`
+	BrokerTimeout                  ParamItem `refreshable:"false"`
+	CollectionRecoverTimesLimit    ParamItem `refreshable:"true"`
+	ObserverTaskParallel           ParamItem `refreshable:"false"`
+	CheckAutoBalanceConfigInterval ParamItem `refreshable:"false"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -1261,7 +1262,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.AutoBalance = ParamItem{
 		Key:          "queryCoord.autoBalance",
 		Version:      "2.0.0",
-		DefaultValue: "true",
+		DefaultValue: "false",
 		PanicIfEmpty: true,
 		Doc:          "Enable auto balance",
 		Export:       true,
@@ -1535,6 +1536,16 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.ObserverTaskParallel.Init(base.mgr)
+
+	p.CheckAutoBalanceConfigInterval = ParamItem{
+		Key:          "queryCoord.checkAutoBalanceConfigInterval",
+		Version:      "2.3.3",
+		DefaultValue: "10",
+		PanicIfEmpty: true,
+		Doc:          "the interval of check auto balance config",
+		Export:       true,
+	}
+	p.CheckAutoBalanceConfigInterval.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -2040,6 +2051,10 @@ type dataCoordConfig struct {
 
 	MinSegmentNumRowsToEnableIndex ParamItem `refreshable:"true"`
 	BrokerTimeout                  ParamItem `refreshable:"false"`
+
+	// auto balance channel on datanode
+	AutoBalance                    ParamItem `refreshable:"true"`
+	CheckAutoBalanceConfigInterval ParamItem `refreshable:"false"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -2405,6 +2420,26 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.BrokerTimeout.Init(base.mgr)
+
+	p.AutoBalance = ParamItem{
+		Key:          "dataCoord.autoBalance",
+		Version:      "2.3.3",
+		DefaultValue: "false",
+		PanicIfEmpty: true,
+		Doc:          "Enable auto balance",
+		Export:       true,
+	}
+	p.AutoBalance.Init(base.mgr)
+
+	p.CheckAutoBalanceConfigInterval = ParamItem{
+		Key:          "dataCoord.checkAutoBalanceConfigInterval",
+		Version:      "2.3.3",
+		DefaultValue: "10",
+		PanicIfEmpty: true,
+		Doc:          "the interval of check auto balance config",
+		Export:       true,
+	}
+	p.CheckAutoBalanceConfigInterval.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

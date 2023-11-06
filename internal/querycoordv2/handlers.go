@@ -179,7 +179,7 @@ func (s *Server) getSystemInfoMetrics(
 			BaseComponentInfos: metricsinfo.BaseComponentInfos{
 				Name: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, paramtable.GetNodeID()),
 				HardwareInfos: metricsinfo.HardwareMetrics{
-					IP:           s.session.Address,
+					IP:           s.session.GetAddress(),
 					CPUCoreCount: hardware.GetCPUNum(),
 					CPUCoreUsage: hardware.GetCPUUsage(),
 					Memory:       hardware.GetMemoryCount(),

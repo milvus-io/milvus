@@ -276,6 +276,10 @@ func (c *ChannelManager) bgCheckChannelsWork(ctx context.Context) {
 			log.Info("background checking channels loop quit")
 			return
 		case <-ticker.C:
+			if !Params.DataCoordCfg.AutoBalance.GetAsBool() {
+				return
+			}
+
 			c.mu.Lock()
 			if !c.isSilent() {
 				log.Info("ChannelManager is not silent, skip channel balance this round")
@@ -342,6 +346,10 @@ func (c *ChannelManager) AddNode(nodeID int64) error {
 	defer c.mu.Unlock()
 
 	c.store.Add(nodeID)
+
+	if !Params.DataCoordCfg.AutoBalance.GetAsBool() {
+		return nil
+	}
 
 	updates := c.registerPolicy(c.store, nodeID)
 	if len(updates) <= 0 {

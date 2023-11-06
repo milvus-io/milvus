@@ -104,6 +104,18 @@ type SessionRaw struct {
 	EnableDisk bool   `json:"EnableDisk,omitempty"`
 }
 
+func (s *SessionRaw) GetAddress() string {
+	return s.Address
+}
+
+func (s *SessionRaw) GetServerID() int64 {
+	return s.ServerID
+}
+
+func (s *SessionRaw) IsTriggerKill() bool {
+	return s.TriggerKill
+}
+
 // Session is a struct to store service's session, including ServerID, ServerName,
 // Address.
 // Exclusive indicates that this server can only start one.

@@ -279,6 +279,8 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 10000, Params.BalanceCheckInterval.GetAsInt())
 		assert.Equal(t, 10000, Params.IndexCheckInterval.GetAsInt())
 		assert.Equal(t, 3, Params.CollectionRecoverTimesLimit.GetAsInt())
+		assert.Equal(t, false, Params.AutoBalance.GetAsBool())
+		assert.Equal(t, 10, Params.CheckAutoBalanceConfigInterval.GetAsInt())
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
@@ -351,6 +353,9 @@ func TestComponentParam(t *testing.T) {
 		assert.True(t, Params.EnableGarbageCollection.GetAsBool())
 		assert.Equal(t, Params.EnableActiveStandby.GetAsBool(), false)
 		t.Logf("dataCoord EnableActiveStandby = %t", Params.EnableActiveStandby.GetAsBool())
+
+		assert.Equal(t, false, Params.AutoBalance.GetAsBool())
+		assert.Equal(t, 10, Params.CheckAutoBalanceConfigInterval.GetAsInt())
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {
