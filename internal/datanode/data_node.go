@@ -709,9 +709,10 @@ func (node *DataNode) Stop() error {
 	// https://github.com/milvus-io/milvus/issues/12282
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 
-	node.cancel()
 	node.flowgraphManager.dropAll()
 	node.flowgraphManager.stop()
+	// Delay the cancellation of ctx to ensure that the session is automatically recycled after closed flow graph
+	node.cancel()
 
 	if node.rowIDAllocator != nil {
 		log.Info("close id allocator", zap.String("role", typeutil.DataNodeRole))

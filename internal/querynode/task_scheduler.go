@@ -348,14 +348,15 @@ func (s *taskScheduler) processReadTask(t readTask) {
 		return
 	}
 
-	err = t.Execute(s.ctx)
+	err = t.Execute(t.Ctx())
 	if err != nil {
 		log.Warn(err.Error())
 		return
 	}
-	err = t.PostExecute(s.ctx)
+	err = t.PostExecute(t.Ctx())
 }
 
+// no stop
 func (s *taskScheduler) Close() {
 	s.cancel()
 	s.wg.Wait()
