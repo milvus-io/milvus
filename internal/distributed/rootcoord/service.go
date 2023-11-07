@@ -52,6 +52,7 @@ import (
 	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	icc "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
 	qcc "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
+	"github.com/milvus-io/milvus/internal/distributed/utils"
 )
 
 var Params paramtable.GrpcServerConfig
@@ -323,8 +324,7 @@ func (s *Server) Stop() error {
 	log.Info("Rootcoord begin to stop grpc server")
 	s.cancel()
 	if s.grpcServer != nil {
-		log.Info("Graceful stop grpc server...")
-		s.grpcServer.GracefulStop()
+		utils.GracefulStopGRPCServer(s.grpcServer, time.Duration(Params.GracefulStopTimeout)*time.Second)
 	}
 	s.wg.Wait()
 
@@ -348,7 +348,6 @@ func (s *Server) Stop() error {
 			log.Error("Failed to close close rootCoord", zap.Error(err))
 		}
 	}
-
 	return nil
 }
 

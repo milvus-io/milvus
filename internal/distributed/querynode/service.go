@@ -35,6 +35,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/distributed/utils"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -102,7 +103,7 @@ func (s *Server) init() error {
 	qn.Params.InitOnce()
 	qn.Params.QueryNodeCfg.QueryNodeIP = Params.IP
 	qn.Params.QueryNodeCfg.QueryNodePort = int64(Params.Port)
-	//qn.Params.QueryNodeID = Params.QueryNodeID
+	// qn.Params.QueryNodeID = Params.QueryNodeID
 
 	closer := trace.InitTracing(fmt.Sprintf("query_node ip: %s, port: %d", Params.IP, Params.Port))
 	s.closer = closer
@@ -158,12 +159,12 @@ func (s *Server) start() error {
 // startGrpcLoop starts the grpc loop of QueryNode component.
 func (s *Server) startGrpcLoop(grpcPort int) {
 	defer s.wg.Done()
-	var kaep = keepalive.EnforcementPolicy{
+	kaep := keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
 		PermitWithoutStream: true,            // Allow pings even when there are no active streams
 	}
 
-	var kasp = keepalive.ServerParameters{
+	kasp := keepalive.ServerParameters{
 		Time:    60 * time.Second, // Ping the client if it is idle for 60 seconds to ensure the connection is still active
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
@@ -224,12 +225,10 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 		log.Warn("QueryNode Start Grpc Failed!!!!")
 		s.grpcErrChan <- err
 	}
-
 }
 
 // Run initializes and starts QueryNode's grpc service.
 func (s *Server) Run() error {
-
 	if err := s.init(); err != nil {
 		return err
 	}
@@ -260,8 +259,7 @@ func (s *Server) Stop() error {
 
 	s.cancel()
 	if s.grpcServer != nil {
-		log.Info("Graceful stop grpc server...")
-		s.grpcServer.GracefulStop()
+		utils.GracefulStopGRPCServer(s.grpcServer, time.Duration(Params.GracefulStopTimeout)*time.Second)
 	}
 	s.wg.Wait()
 	return nil
