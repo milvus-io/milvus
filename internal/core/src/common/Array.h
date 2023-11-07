@@ -120,13 +120,23 @@ class Array {
           size_t size,
           DataType element_type,
           std::vector<uint64_t>&& element_offsets)
-        : length_(element_offsets.size()),
-          size_(size),
+        : size_(size),
           offsets_(std::move(element_offsets)),
           element_type_(element_type) {
         delete[] data_;
         data_ = new char[size];
         std::copy(data, data + size, data_);
+        if (datatype_is_variable(element_type_)) {
+            length_ = offsets_.size();
+        } else {
+            // int8, int16, int32 are all promoted to int32
+            if (element_type_ == DataType::INT8 ||
+                element_type_ == DataType::INT16) {
+                length_ = size / sizeof(int32_t);
+            } else {
+                length_ = size / datatype_sizeof(element_type_);
+            }
+        }
     }
 
     Array(const Array& array) noexcept
@@ -433,9 +443,19 @@ class ArrayView {
               std::vector<uint64_t>&& element_offsets)
         : size_(size),
           element_type_(element_type),
-          offsets_(std::move(element_offsets)),
-          length_(element_offsets.size()) {
+          offsets_(std::move(element_offsets)) {
         data_ = data;
+        if (datatype_is_variable(element_type_)) {
+            length_ = offsets_.size();
+        } else {
+            // int8, int16, int32 are all promoted to int32
+            if (element_type_ == DataType::INT8 ||
+                element_type_ == DataType::INT16) {
+                length_ = size / sizeof(int32_t);
+            } else {
+                length_ = size / datatype_sizeof(element_type_);
+            }
+        }
     }
 
     template <typename T>
