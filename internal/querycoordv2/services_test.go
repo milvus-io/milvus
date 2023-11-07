@@ -149,6 +149,7 @@ func (suite *ServiceSuite) SetupTest() {
 		suite.targetMgr,
 		suite.dist,
 		suite.broker,
+		suite.cluster,
 	)
 	suite.targetObserver.Start()
 	for _, node := range suite.nodes {
@@ -157,6 +158,7 @@ func (suite *ServiceSuite) SetupTest() {
 		suite.NoError(err)
 	}
 	suite.cluster = session.NewMockCluster(suite.T())
+	suite.cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
 	suite.jobScheduler = job.NewScheduler()
 	suite.taskScheduler = task.NewMockScheduler(suite.T())
 	suite.jobScheduler.Start()
