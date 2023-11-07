@@ -46,4 +46,8 @@ type SessionInterface interface {
 	SetEnableActiveStandBy(enable bool)
 	ProcessActiveStandBy(activateFunc func() error) error
 	ForceActiveStandby(activateFunc func() error) error
+
+	GetAddress() string
+	GetServerID() int64
+	IsTriggerKill() bool
 }

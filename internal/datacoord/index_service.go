@@ -37,7 +37,7 @@ import (
 // serverID return the session serverID
 func (s *Server) serverID() int64 {
 	if s.session != nil {
-		return s.session.ServerID
+		return s.session.GetServerID()
 	}
 	// return 0 if no session exist, only for UT
 	return 0

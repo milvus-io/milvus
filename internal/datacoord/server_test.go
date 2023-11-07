@@ -4737,3 +4737,43 @@ func TestDataNodeTtChannel(t *testing.T) {
 		assert.EqualValues(t, 0, len(segment.allocations))
 	})
 }
+
+func TestUpdateAutoBalanceConfigLoop(t *testing.T) {
+	Params.Save(Params.DataCoordCfg.CheckAutoBalanceConfigInterval.Key, "1")
+	defer Params.Reset(Params.DataCoordCfg.CheckAutoBalanceConfigInterval.Key)
+	Params.Save(Params.DataCoordCfg.AutoBalance.Key, "false")
+	defer Params.Reset(Params.DataCoordCfg.AutoBalance.Key)
+
+	t.Run("test old node exist", func(t *testing.T) {
+		oldSessions := make(map[string]*sessionutil.Session)
+		oldSessions["s1"] = &sessionutil.Session{}
+
+		server := &Server{}
+		mockSession := sessionutil.NewMockSession(t)
+		mockSession.EXPECT().GetSessionsWithVersionRange(mock.Anything, mock.Anything).Return(oldSessions, 0, nil).Maybe()
+		server.session = mockSession
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go server.updateBalanceConfigLoop(ctx)
+		// old data node exist, disable auto balance
+		assert.Eventually(t, func() bool {
+			return !Params.DataCoordCfg.AutoBalance.GetAsBool()
+		}, 3*time.Second, 1*time.Second)
+	})
+
+	t.Run("test all old node down", func(t *testing.T) {
+		server := &Server{}
+		mockSession := sessionutil.NewMockSession(t)
+		mockSession.EXPECT().GetSessionsWithVersionRange(mock.Anything, mock.Anything).Return(nil, 0, nil).Maybe()
+		server.session = mockSession
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go server.updateBalanceConfigLoop(ctx)
+		// all old data node down, enable auto balance
+		assert.Eventually(t, func() bool {
+			return Params.DataCoordCfg.AutoBalance.GetAsBool()
+		}, 3*time.Second, 1*time.Second)
+	})
+}

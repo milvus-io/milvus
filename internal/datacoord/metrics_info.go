@@ -108,7 +108,7 @@ func (s *Server) getDataCoordMetrics() metricsinfo.DataCoordInfos {
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
 			Name: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, paramtable.GetNodeID()),
 			HardwareInfos: metricsinfo.HardwareMetrics{
-				IP:           s.session.Address,
+				IP:           s.session.GetAddress(),
 				CPUCoreCount: hardware.GetCPUNum(),
 				CPUCoreUsage: hardware.GetCPUUsage(),
 				Memory:       hardware.GetMemoryCount(),
