@@ -198,7 +198,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ReportTimeTick(mock.Anything, mock.Anything).Return(nil).Maybe()
 	broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil).Maybe()
-	broker.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).Return(nil).Maybe()
+	broker.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	broker.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	node.broker = broker
@@ -376,7 +376,7 @@ func TestDataSyncService_Close(t *testing.T) {
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ReportTimeTick(mock.Anything, mock.Anything).Return(nil).Maybe()
 	broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil).Maybe()
-	broker.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).Return(nil).Maybe()
+	broker.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	broker.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	node.broker = broker
