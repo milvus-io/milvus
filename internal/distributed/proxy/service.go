@@ -53,6 +53,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver"
 	qcc "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
+	"github.com/milvus-io/milvus/internal/distributed/utils"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/management"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -662,7 +663,6 @@ func (s *Server) start() error {
 // Stop stop the Proxy Server
 func (s *Server) Stop() error {
 	log.Info("Proxy stop", zap.String("internal address", Params.GetInternalAddress()), zap.String("external address", Params.GetInternalAddress()))
-	s.proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
 	var err error
 	if s.closer != nil {
 		if err = s.closer.Close(); err != nil {
@@ -680,15 +680,13 @@ func (s *Server) Stop() error {
 	go func() {
 		defer gracefulWg.Done()
 		if s.grpcInternalServer != nil {
-			log.Info("Graceful stop grpc internal server...")
-			s.grpcInternalServer.GracefulStop()
+			utils.GracefulStopGRPCServer(s.grpcInternalServer, Params.GracefulStopTimeout)
 		}
 		if s.tcpServer != nil {
 			log.Info("Graceful stop Proxy tcp server...")
 			s.tcpServer.Close()
 		} else if s.grpcExternalServer != nil {
-			log.Info("Graceful stop grpc external server...")
-			s.grpcExternalServer.GracefulStop()
+			utils.GracefulStopGRPCServer(s.grpcExternalServer, Params.GracefulStopTimeout)
 			if s.httpServer != nil {
 				log.Info("Graceful stop grpc http server...")
 				s.httpServer.Close()
@@ -698,7 +696,6 @@ func (s *Server) Stop() error {
 	gracefulWg.Wait()
 
 	s.wg.Wait()
-
 	err = s.proxy.Stop()
 	if err != nil {
 		return err

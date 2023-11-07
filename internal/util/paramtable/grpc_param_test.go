@@ -15,8 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 func TestGrpcServerParams(t *testing.T) {
@@ -64,6 +65,10 @@ func TestGrpcServerParams(t *testing.T) {
 	Params.Save("grpc.serverMaxSendSize", "a")
 	Params.InitServerMaxRecvSize()
 	assert.Equal(t, Params.ServerMaxSendSize, DefaultServerMaxSendSize)
+
+	Params.Save("common.gracefulStopTimeout", "10")
+	Params.initGracefulStopTimeout()
+	assert.Equal(t, Params.GracefulStopTimeout, 10)
 }
 
 func TestGrpcClientParams(t *testing.T) {

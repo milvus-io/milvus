@@ -18,8 +18,9 @@ import (
 	"time"
 
 	"github.com/go-basic/ipv4"
-	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
 )
 
 const (
@@ -113,8 +114,9 @@ func (p *grpcConfig) GetInternalAddress() string {
 type GrpcServerConfig struct {
 	grpcConfig
 
-	ServerMaxSendSize int
-	ServerMaxRecvSize int
+	ServerMaxSendSize   int
+	ServerMaxRecvSize   int
+	GracefulStopTimeout time.Duration
 }
 
 // InitOnce initialize grpc server config once
@@ -129,6 +131,7 @@ func (p *GrpcServerConfig) Init(domain string) {
 
 	p.InitServerMaxSendSize()
 	p.InitServerMaxRecvSize()
+	p.initGracefulStopTimeout()
 }
 
 func (p *GrpcServerConfig) InitServerMaxSendSize() {
@@ -173,6 +176,10 @@ func (p *GrpcServerConfig) InitServerMaxRecvSize() {
 
 	log.Debug("initServerMaxRecvSize",
 		zap.String("role", p.Domain), zap.Int("grpc.serverMaxRecvSize", p.ServerMaxRecvSize))
+}
+
+func (p *GrpcServerConfig) initGracefulStopTimeout() {
+	p.GracefulStopTimeout = time.Second * time.Duration(p.ParseInt64WithDefault("common.gracefulStopTimeout", 10))
 }
 
 // GrpcClientConfig is configuration for grpc client.
