@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -387,6 +388,8 @@ func TestChannelManager(t *testing.T) {
 		watchkv.RemoveWithPrefix("")
 		watchkv.Close()
 	}()
+
+	Params.Save(Params.DataCoordCfg.AutoBalance.Key, "true")
 
 	prefix := Params.CommonCfg.DataCoordWatchSubPath.GetValue()
 	t.Run("test AddNode with avalible node", func(t *testing.T) {
@@ -1063,6 +1066,7 @@ func TestChannelManager_BalanceBehaviour(t *testing.T) {
 
 	prefix := Params.CommonCfg.DataCoordWatchSubPath.GetValue()
 
+	Params.Save(Params.DataCoordCfg.AutoBalance.Key, "true")
 	t.Run("one node with three channels add a new node", func(t *testing.T) {
 		defer watchkv.RemoveWithPrefix("")
 
@@ -1092,26 +1096,6 @@ func TestChannelManager_BalanceBehaviour(t *testing.T) {
 		chManager.AddNode(2)
 		channelBalanced = "channel-1"
 
-		// waitAndStore := func(waitState, storeState datapb.ChannelWatchState, nodeID UniqueID, channelName string) {
-		//     for {
-		//         key := path.Join(prefix, strconv.FormatInt(nodeID, 10), channelName)
-		//         v, err := watchkv.Load(key)
-		//         if err == nil && len(v) > 0 {
-		//             watchInfo, err := parseWatchInfo(key, []byte(v))
-		//             require.NoError(t, err)
-		//             require.Equal(t, waitState, watchInfo.GetState())
-		//
-		//             watchInfo.State = storeState
-		//             data, err := proto.Marshal(watchInfo)
-		//             require.NoError(t, err)
-		//
-		//             watchkv.Save(key, string(data))
-		//             break
-		//         }
-		//         time.Sleep(100 * time.Millisecond)
-		//     }
-		// }
-
 		key := path.Join(prefix, "1", channelBalanced)
 		waitAndStore(t, watchkv, key, datapb.ChannelWatchState_ToRelease, datapb.ChannelWatchState_ReleaseSuccess)
 
@@ -1120,7 +1104,6 @@ func TestChannelManager_BalanceBehaviour(t *testing.T) {
 
 		assert.True(t, chManager.Match(1, "channel-2"))
 		assert.True(t, chManager.Match(1, "channel-3"))
-
 		assert.True(t, chManager.Match(2, "channel-1"))
 
 		chManager.AddNode(3)
@@ -1258,5 +1241,65 @@ func TestChannelManager_HelperFunc(t *testing.T) {
 				assert.ElementsMatch(t, test.expectedOut, nodes)
 			})
 		}
+	})
+}
+
+func TestChannelManager_BackgroundChannelChecker(t *testing.T) {
+	Params.Save(Params.DataCoordCfg.ChannelBalanceInterval.Key, "1")
+	Params.Save(Params.DataCoordCfg.ChannelBalanceSilentDuration.Key, "1")
+
+	watchkv := getWatchKV(t)
+	defer func() {
+		watchkv.RemoveWithPrefix("")
+		watchkv.Close()
+	}()
+
+	defer watchkv.RemoveWithPrefix("")
+
+	c, err := NewChannelManager(watchkv, newMockHandler(), withStateChecker())
+	require.NoError(t, err)
+	mockStore := NewMockRWChannelStore(t)
+	mockStore.EXPECT().GetNodesChannels().Return([]*NodeChannelInfo{
+		{
+			NodeID: 1,
+			Channels: []*channel{
+				{
+					Name: "channel-1",
+				},
+				{
+					Name: "channel-2",
+				},
+				{
+					Name: "channel-3",
+				},
+			},
+		},
+		{
+			NodeID: 2,
+		},
+	}).Maybe()
+	c.store = mockStore
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go c.bgCheckChannelsWork(ctx)
+
+	updateCounter := atomic.NewInt64(0)
+
+	mockStore.EXPECT().Update(mock.Anything).Run(func(op ChannelOpSet) {
+		updateCounter.Inc()
+	}).Return(nil).Maybe()
+
+	t.Run("test disable auto balance", func(t *testing.T) {
+		assert.Eventually(t, func() bool {
+			return updateCounter.Load() == 0
+		}, 5*time.Second, 1*time.Second)
+	})
+
+	t.Run("test enable auto balance", func(t *testing.T) {
+		Params.Save(Params.DataCoordCfg.AutoBalance.Key, "true")
+		assert.Eventually(t, func() bool {
+			return updateCounter.Load() > 0
+		}, 5*time.Second, 1*time.Second)
 	})
 }

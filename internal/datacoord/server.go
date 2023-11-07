@@ -28,6 +28,7 @@ import (
 
 	semver "github.com/blang/semver/v4"
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -130,7 +131,7 @@ type Server struct {
 	notifyIndexChan chan UniqueID
 	factory         dependency.Factory
 
-	session   *sessionutil.Session
+	session   sessionutil.SessionInterface
 	icSession *sessionutil.Session
 	dnEventCh <-chan *sessionutil.SessionEvent
 	inEventCh <-chan *sessionutil.SessionEvent
@@ -265,13 +266,13 @@ func (s *Server) Register() error {
 	log.Info("DataCoord Register Finished")
 
 	s.session.LivenessCheck(s.serverLoopCtx, func() {
-		logutil.Logger(s.ctx).Error("disconnected from etcd and exited", zap.Int64("serverID", s.session.ServerID))
+		logutil.Logger(s.ctx).Error("disconnected from etcd and exited", zap.Int64("serverID", s.session.GetServerID()))
 		if err := s.Stop(); err != nil {
 			logutil.Logger(s.ctx).Fatal("failed to stop server", zap.Error(err))
 		}
 		metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.DataCoordRole).Dec()
 		// manually send signal to starter goroutine
-		if s.session.TriggerKill {
+		if s.session.IsTriggerKill() {
 			if p, err := os.FindProcess(os.Getpid()); err == nil {
 				p.Signal(syscall.SIGINT)
 			}
@@ -394,8 +395,13 @@ func (s *Server) startDataCoord() {
 		s.compactionTrigger.start()
 	}
 	s.startServerLoop()
+	s.afterStart()
 	s.stateCode.Store(commonpb.StateCode_Healthy)
-	sessionutil.SaveServerInfo(typeutil.DataCoordRole, s.session.ServerID)
+	sessionutil.SaveServerInfo(typeutil.DataCoordRole, s.session.GetServerID())
+}
+
+func (s *Server) afterStart() {
+	go s.updateBalanceConfigLoop(s.ctx)
 }
 
 func (s *Server) initCluster() error {
@@ -785,7 +791,7 @@ func (s *Server) stopServiceWatch() {
 	// ErrCompacted is handled inside SessionWatcher, which means there is some other error occurred, closing server.
 	logutil.Logger(s.ctx).Error("watch service channel closed", zap.Int64("serverID", paramtable.GetNodeID()))
 	go s.Stop()
-	if s.session.TriggerKill {
+	if s.session.IsTriggerKill() {
 		if p, err := os.FindProcess(os.Getpid()); err == nil {
 			p.Signal(syscall.SIGINT)
 		}
@@ -1108,4 +1114,33 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 	}
 	s.meta.AddCollection(collInfo)
 	return nil
+}
+
+func (s *Server) updateBalanceConfigLoop(ctx context.Context) {
+	log := log.Ctx(s.ctx).WithRateGroup("dc.updateBalanceConfigLoop", 1, 60)
+	ticker := time.NewTicker(Params.DataCoordCfg.CheckAutoBalanceConfigInterval.GetAsDuration(time.Second))
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("update balance config loop exit!")
+			return
+
+		case <-ticker.C:
+			r := semver.MustParseRange("<2.3.0")
+			sessions, _, err := s.session.GetSessionsWithVersionRange(typeutil.DataNodeRole, r)
+			if err != nil {
+				log.Warn("check data node version occur error on etcd", zap.Error(err))
+				continue
+			}
+
+			if len(sessions) == 0 {
+				// only balance channel when all data node's version > 2.3.0
+				Params.Save(Params.DataCoordCfg.AutoBalance.Key, "true")
+				log.Info("all old data node down, enable auto balance!")
+				return
+			}
+
+			log.RatedDebug(10, "old data node exist", zap.Strings("sessions", lo.Keys(sessions)))
+		}
+	}
 }

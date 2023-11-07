@@ -107,6 +107,88 @@ func (_c *MockSession_ForceActiveStandby_Call) RunAndReturn(run func(func() erro
 	return _c
 }
 
+// GetAddress provides a mock function with given fields:
+func (_m *MockSession) GetAddress() string {
+	ret := _m.Called()
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func() string); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}
+
+// MockSession_GetAddress_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetAddress'
+type MockSession_GetAddress_Call struct {
+	*mock.Call
+}
+
+// GetAddress is a helper method to define mock.On call
+func (_e *MockSession_Expecter) GetAddress() *MockSession_GetAddress_Call {
+	return &MockSession_GetAddress_Call{Call: _e.mock.On("GetAddress")}
+}
+
+func (_c *MockSession_GetAddress_Call) Run(run func()) *MockSession_GetAddress_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSession_GetAddress_Call) Return(_a0 string) *MockSession_GetAddress_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSession_GetAddress_Call) RunAndReturn(run func() string) *MockSession_GetAddress_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetServerID provides a mock function with given fields:
+func (_m *MockSession) GetServerID() int64 {
+	ret := _m.Called()
+
+	var r0 int64
+	if rf, ok := ret.Get(0).(func() int64); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+
+	return r0
+}
+
+// MockSession_GetServerID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetServerID'
+type MockSession_GetServerID_Call struct {
+	*mock.Call
+}
+
+// GetServerID is a helper method to define mock.On call
+func (_e *MockSession_Expecter) GetServerID() *MockSession_GetServerID_Call {
+	return &MockSession_GetServerID_Call{Call: _e.mock.On("GetServerID")}
+}
+
+func (_c *MockSession_GetServerID_Call) Run(run func()) *MockSession_GetServerID_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSession_GetServerID_Call) Return(_a0 int64) *MockSession_GetServerID_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSession_GetServerID_Call) RunAndReturn(run func() int64) *MockSession_GetServerID_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetSessions provides a mock function with given fields: prefix
 func (_m *MockSession) GetSessions(prefix string) (map[string]*Session, int64, error) {
 	ret := _m.Called(prefix)
@@ -303,6 +385,47 @@ func (_c *MockSession_Init_Call) Return() *MockSession_Init_Call {
 }
 
 func (_c *MockSession_Init_Call) RunAndReturn(run func(string, string, bool, bool)) *MockSession_Init_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// IsTriggerKill provides a mock function with given fields:
+func (_m *MockSession) IsTriggerKill() bool {
+	ret := _m.Called()
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockSession_IsTriggerKill_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsTriggerKill'
+type MockSession_IsTriggerKill_Call struct {
+	*mock.Call
+}
+
+// IsTriggerKill is a helper method to define mock.On call
+func (_e *MockSession_Expecter) IsTriggerKill() *MockSession_IsTriggerKill_Call {
+	return &MockSession_IsTriggerKill_Call{Call: _e.mock.On("IsTriggerKill")}
+}
+
+func (_c *MockSession_IsTriggerKill_Call) Run(run func()) *MockSession_IsTriggerKill_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSession_IsTriggerKill_Call) Return(_a0 bool) *MockSession_IsTriggerKill_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSession_IsTriggerKill_Call) RunAndReturn(run func() bool) *MockSession_IsTriggerKill_Call {
 	_c.Call.Return(run)
 	return _c
 }

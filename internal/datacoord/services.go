@@ -620,7 +620,7 @@ func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetCompon
 	code := s.GetStateCode()
 	nodeID := common.NotRegisteredID
 	if s.session != nil && s.session.Registered() {
-		nodeID = s.session.ServerID // or Params.NodeID
+		nodeID = s.session.GetServerID() // or Params.NodeID
 	}
 	resp := &milvuspb.ComponentStates{
 		State: &milvuspb.ComponentInfo{
