@@ -452,12 +452,13 @@ func (node *QueryNode) Stop() error {
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		node.rpcLock.Lock()
 		defer node.rpcLock.Unlock()
-		node.queryNodeLoopCancel()
 
 		// close services
 		if node.dataSyncService != nil {
 			node.dataSyncService.close()
 		}
+		// Delay the cancellation of ctx to ensure that the session is automatically recycled after closed flow graph
+		node.queryNodeLoopCancel()
 
 		if node.metaReplica != nil {
 			node.metaReplica.freeAll()
