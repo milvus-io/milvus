@@ -857,6 +857,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("dim", [13])
     @pytest.mark.parametrize("entities", [150])
     @pytest.mark.parametrize("file_nums", [10])
+    @pytest.mark.xfail(reason="issue #28209")
     def test_partition_key_on_multi_numpy_files(
             self, auto_id, dim, entities, file_nums
     ):
