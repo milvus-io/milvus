@@ -743,6 +743,33 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 		s.Assert().False(fg.channel.hasSegment(req.CompactedFrom[0], true))
 		s.Assert().False(fg.channel.hasSegment(req.CompactedFrom[1], true))
 	})
+
+	s.Run("valid_request_with_meta", func() {
+		s1.setType(datapb.SegmentType_Flushed)
+		s2.setType(datapb.SegmentType_Flushed)
+		s3.setType(datapb.SegmentType_Flushed)
+
+		fg.channel.(*ChannelMeta).segments = map[UniqueID]*Segment{
+			s1.segmentID: &s1,
+			s2.segmentID: &s2,
+			s3.segmentID: &s3,
+		}
+
+		req := &datapb.SyncSegmentsRequest{
+			CompactedFrom: []int64{s1.segmentID, s2.segmentID},
+			CompactedTo:   101,
+			NumOfRows:     0,
+			ChannelName:   chanName,
+			CollectionId:  1,
+		}
+		status, err := s.node.SyncSegments(s.ctx, req)
+		s.Assert().NoError(err)
+		s.Assert().True(merr.Ok(status))
+
+		s.Assert().False(fg.channel.hasSegment(req.CompactedTo, true))
+		s.Assert().False(fg.channel.hasSegment(req.CompactedFrom[0], true))
+		s.Assert().False(fg.channel.hasSegment(req.CompactedFrom[1], true))
+	})
 }
 
 func (s *DataNodeServicesSuite) TestResendSegmentStats() {

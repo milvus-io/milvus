@@ -442,6 +442,9 @@ func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.Compact
 		CompactedFrom: newSegment.GetCompactionFrom(),
 		NumOfRows:     newSegment.GetNumOfRows(),
 		StatsLogs:     newSegment.GetStatslogs(),
+		ChannelName:   plan.GetChannel(),
+		PartitionId:   newSegment.GetPartitionID(),
+		CollectionId:  newSegment.GetCollectionID(),
 	}
 
 	log.Info("handleCompactionResult: syncing segments with node", zap.Int64("nodeID", nodeID))

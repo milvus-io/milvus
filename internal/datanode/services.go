@@ -336,6 +336,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		zap.Int64("target segmentID", req.GetCompactedTo()),
 		zap.Int64s("compacted from", req.GetCompactedFrom()),
 		zap.Int64("numOfRows", req.GetNumOfRows()),
+		zap.String("channelName", req.GetChannelName()),
 	)
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
@@ -348,34 +349,49 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 	}
 
 	var (
-		oneSegment int64
-		channel    Channel
-		err        error
-		ds         *dataSyncService
-		ok         bool
+		channel Channel
+		err     error
+		ds      *dataSyncService
+		ok      bool
+		collID  int64
+		partID  int64
 	)
 
-	for _, fromSegment := range req.GetCompactedFrom() {
-		channel, err = node.flowgraphManager.getChannel(fromSegment)
-		if err != nil {
-			log.Ctx(ctx).Warn("fail to get the channel", zap.Int64("segment", fromSegment), zap.Error(err))
-			continue
-		}
-		ds, ok = node.flowgraphManager.getFlowgraphService(channel.getChannelName())
+	if req.GetChannelName() != "" {
+		ds, ok = node.flowgraphManager.getFlowgraphService(req.GetChannelName())
 		if !ok {
-			log.Ctx(ctx).Warn("fail to find flow graph service", zap.Int64("segment", fromSegment))
-			continue
+			err := merr.WrapErrChannelNotFound(req.GetChannelName())
+			log.Warn("failed to sync segments", zap.Error(err))
+			return merr.Status(err), nil
 		}
-		oneSegment = fromSegment
-		break
-	}
-	if oneSegment == 0 {
-		log.Ctx(ctx).Warn("no valid segment, maybe the request is a retry")
-		return merr.Success(), nil
+		channel = ds.channel
+		collID = req.GetCollectionId()
+		partID = req.GetPartitionId()
+	} else {
+		var oneSegment int64
+		for _, fromSegment := range req.GetCompactedFrom() {
+			channel, err = node.flowgraphManager.getChannel(fromSegment)
+			if err != nil {
+				log.Ctx(ctx).Warn("fail to get the channel", zap.Int64("segment", fromSegment), zap.Error(err))
+				continue
+			}
+			ds, ok = node.flowgraphManager.getFlowgraphService(channel.getChannelName())
+			if !ok {
+				log.Ctx(ctx).Warn("fail to find flow graph service", zap.Int64("segment", fromSegment))
+				continue
+			}
+			oneSegment = fromSegment
+			break
+		}
+		if oneSegment == 0 {
+			log.Ctx(ctx).Warn("no valid segment, maybe the request is a retry")
+			return merr.Success(), nil
+		}
+
+		// oneSegment is definitely in the channel, guaranteed by the check before.
+		collID, partID, _ = channel.getCollectionAndPartitionID(oneSegment)
 	}
 
-	// oneSegment is definitely in the channel, guaranteed by the check before.
-	collID, partID, _ := channel.getCollectionAndPartitionID(oneSegment)
 	targetSeg := &Segment{
 		collectionID: collID,
 		partitionID:  partID,
