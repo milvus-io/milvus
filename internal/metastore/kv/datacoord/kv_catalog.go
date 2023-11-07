@@ -772,7 +772,7 @@ func buildBinlogKvsWithLogID(collectionID, partitionID, segmentID typeutil.Uniqu
 	checkBinlogs(storage.StatsBinlog, segmentID, statslogs)
 	// check stats log and bin log size match
 	if len(binlogs) != 0 && len(statslogs) != 0 {
-		if len(statslogs[0].GetBinlogs()) != len(binlogs[0].GetBinlogs()) {
+		if validStatslogNum(statslogs[0]) != len(binlogs[0].GetBinlogs()) {
 			log.Warn("find invalid segment while bin log size didn't match stat log size",
 				zap.Int64("collection", collectionID),
 				zap.Int64("partition", partitionID),
@@ -793,6 +793,17 @@ func buildBinlogKvsWithLogID(collectionID, partitionID, segmentID typeutil.Uniqu
 	}
 
 	return kvs, nil
+}
+
+func validStatslogNum(logs *datapb.FieldBinlog) int {
+	num := len(logs.Binlogs)
+	for _, statslog := range logs.Binlogs {
+		_, logidx := path.Split(statslog.LogPath)
+		if logidx == fmt.Sprint(storage.CompoundStatsType.GetLogID()) {
+			num--
+		}
+	}
+	return num
 }
 
 func buildSegmentAndBinlogsKvs(segment *datapb.SegmentInfo) (map[string]string, error) {
