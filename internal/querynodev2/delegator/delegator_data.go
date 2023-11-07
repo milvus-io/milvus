@@ -323,19 +323,22 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 	}
 
 	deletedPks, deletedTss := sd.segmentManager.GetL0DeleteRecords()
-	for _, segment := range loaded {
-		err = segment.Delete(deletedPks, deletedTss)
-		if err != nil {
-			log.Warn("failed to forward L0 deletions to growing segment",
-				zap.Int64("segmentID", segment.ID()),
-				zap.Error(err),
-			)
+	if len(deletedPks) > 0 {
+		log.Info("forwarding L0 delete records...", zap.Int("deleteNum", len(deletedPks)))
+		for _, segment := range loaded {
+			err = segment.Delete(deletedPks, deletedTss)
+			if err != nil {
+				log.Warn("failed to forward L0 deletions to growing segment",
+					zap.Int64("segmentID", segment.ID()),
+					zap.Error(err),
+				)
 
-			// clear loaded growing segments
-			for _, segment := range loaded {
-				segment.Release()
+				// clear loaded growing segments
+				for _, segment := range loaded {
+					segment.Release()
+				}
+				return err
 			}
-			return err
 		}
 	}
 
