@@ -640,8 +640,6 @@ func (s *Server) start() error {
 func (s *Server) Stop() error {
 	Params := &paramtable.Get().ProxyGrpcServerCfg
 	log.Debug("Proxy stop", zap.String("internal address", Params.GetInternalAddress()), zap.String("external address", Params.GetInternalAddress()))
-	s.proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
-	var err error
 
 	if s.etcdCli != nil {
 		defer s.etcdCli.Close()
@@ -670,7 +668,7 @@ func (s *Server) Stop() error {
 
 	s.wg.Wait()
 
-	err = s.proxy.Stop()
+	err := s.proxy.Stop()
 	if err != nil {
 		return err
 	}
