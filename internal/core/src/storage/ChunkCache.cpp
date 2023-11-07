@@ -28,12 +28,17 @@ ChunkCache::Read(const std::string& filepath) {
     }
     ca.release();
 
-    auto object_data =
-        GetObjectData(cm_.get(), std::vector<std::string>{filepath});
-    AssertInfo(object_data.size() == 1, "GetObjectData failed");
-    auto field_data = object_data[0];
+    auto field_data = DownloadAndDecodeRemoteFile(cm_.get(), filepath);
+    auto column = Mmap(path, field_data->GetFieldData());
+    auto ok =
+        madvise(reinterpret_cast<void*>(const_cast<char*>(column->Data())),
+                column->ByteSize(),
+                read_ahead_policy_);
+    AssertInfo(ok == 0,
+               fmt::format("failed to madvise to the data file {}, err: {}",
+                           path.c_str(),
+                           strerror(errno)));
 
-    auto column = Mmap(path, field_data);
     columns_.emplace(path, column);
     return column;
 }
@@ -66,6 +71,7 @@ std::shared_ptr<ColumnBase>
 ChunkCache::Mmap(const std::filesystem::path& path,
                  const FieldDataPtr& field_data) {
     std::unique_lock lck(mutex_);
+
     auto dir = path.parent_path();
     std::filesystem::create_directories(dir);
 
