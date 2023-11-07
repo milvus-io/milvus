@@ -27,6 +27,20 @@
 namespace milvus {
 namespace storage {
 
+template <typename... Args>
+
+static SegcoreError
+ThrowAzureError(const std::string& func,
+                const std::exception& err,
+                const std::string& fmtString,
+                Args&&... args) {
+    std::ostringstream oss;
+    const auto& message = fmt::format(fmtString, std::forward<Args>(args)...);
+    oss << "Error in " << func << "[exception:" << err.what()
+        << ", params:" << message << "]";
+    throw SegcoreError(S3Error, oss.str());
+}
+
 /**
  * @brief This AzureChunkManager is responsible for read and write file in blob.
    */
@@ -113,7 +127,7 @@ class AzureChunkManager : public ChunkManager {
     bool
     ObjectExists(const std::string& bucket_name,
                  const std::string& object_name);
-    int64_t
+    uint64_t
     GetObjectSize(const std::string& bucket_name,
                   const std::string& object_name);
     bool
@@ -130,9 +144,12 @@ class AzureChunkManager : public ChunkManager {
                     void* buf,
                     uint64_t size);
     std::vector<std::string>
-    ListObjects(const char* bucket_name, const char* prefix = nullptr);
+    ListObjects(const std::string& bucket_name,
+                const std::string& prefix = nullptr);
 
  private:
+    static std::atomic<size_t> init_count_;
+    static std::mutex client_mutex_;
     std::shared_ptr<azure::AzureBlobChunkManager> client_;
     std::string default_bucket_name_;
     std::string path_prefix_;

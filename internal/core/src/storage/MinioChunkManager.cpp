@@ -458,7 +458,7 @@ MinioChunkManager::ObjectExists(const std::string& bucket_name,
     return true;
 }
 
-int64_t
+uint64_t
 MinioChunkManager::GetObjectSize(const std::string& bucket_name,
                                  const std::string& object_name) {
     Aws::S3::Model::HeadObjectRequest request;

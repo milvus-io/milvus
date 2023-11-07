@@ -21,7 +21,7 @@
 #include <stdlib.h>
 #include <string>
 #include <vector>
-#include "azure/storage/common/storage_exception.hpp"
+#include <azure/storage/common/storage_exception.hpp>
 
 namespace azure {
 /**
@@ -29,9 +29,14 @@ namespace azure {
    */
 class AzureBlobChunkManager {
  public:
+    static void
+    InitLog(std::string level_string,
+            std::function<void(std::string const& level,
+                               std::string const& message)> listener);
     explicit AzureBlobChunkManager(const std::string& access_key_id,
                                    const std::string& access_key_value,
                                    const std::string& address,
+                                   int64_t requestTimeoutMs = 0,
                                    bool useIAM = false);
 
     AzureBlobChunkManager(const AzureBlobChunkManager&);
@@ -43,9 +48,9 @@ class AzureBlobChunkManager {
 
     bool
     BucketExists(const std::string& bucket_name);
-    void
+    bool
     CreateBucket(const std::string& bucket_name);
-    void
+    bool
     DeleteBucket(const std::string& bucket_name);
     std::vector<std::string>
     ListBuckets();
@@ -55,7 +60,7 @@ class AzureBlobChunkManager {
     int64_t
     GetObjectSize(const std::string& bucket_name,
                   const std::string& object_name);
-    void
+    bool
     DeleteObject(const std::string& bucket_name,
                  const std::string& object_name);
     bool
@@ -69,10 +74,12 @@ class AzureBlobChunkManager {
                     void* buf,
                     uint64_t size);
     std::vector<std::string>
-    ListObjects(const char* bucket_name, const char* prefix = nullptr);
+    ListObjects(const std::string& bucket_name,
+                const std::string& prefix = nullptr);
 
  private:
     std::shared_ptr<Azure::Storage::Blobs::BlobServiceClient> client_;
+    int64_t requestTimeoutMs_;
 };
 
 }  // namespace azure
