@@ -360,12 +360,12 @@ func (ib *indexBuilder) getTaskState(buildID, nodeID UniqueID) indexTaskState {
 		if err != nil {
 			log.Ctx(ib.ctx).Warn("IndexCoord get jobs info from IndexNode fail", zap.Int64("nodeID", nodeID),
 				zap.Error(err))
-			return indexTaskInProgress
+			return indexTaskRetry
 		}
 		if response.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 			log.Ctx(ib.ctx).Warn("IndexCoord get jobs info from IndexNode fail", zap.Int64("nodeID", nodeID),
 				zap.Int64("buildID", buildID), zap.String("fail reason", response.GetStatus().GetReason()))
-			return indexTaskInProgress
+			return indexTaskRetry
 		}
 
 		// indexInfos length is always one.
