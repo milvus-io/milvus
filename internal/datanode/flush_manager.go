@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"path"
 	"strconv"
+	"strings"
 	"sync"
 
 	"go.uber.org/atomic"
@@ -356,7 +357,7 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 	tr := timerecord.NewTimeRecorder("flushDuration")
 	// empty flush
 	if data == nil || data.buffer == nil {
-		//m.getFlushQueue(segmentID).enqueueInsertFlush(&flushBufferInsertTask{},
+		// m.getFlushQueue(segmentID).enqueueInsertFlush(&flushBufferInsertTask{},
 		//	map[UniqueID]string{}, map[UniqueID]string{}, flushed, dropped, pos)
 		m.handleInsertTask(segmentID, &flushBufferInsertTask{}, map[UniqueID]*datapb.Binlog{}, map[UniqueID]*datapb.Binlog{},
 			flushed, dropped, pos)
@@ -431,8 +432,8 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 		kvs[key] = blob.Value
 		field2Stats[fieldID] = &datapb.Binlog{
 			EntriesNum:    0,
-			TimestampFrom: 0, //TODO
-			TimestampTo:   0, //TODO,
+			TimestampFrom: 0, // TODO
+			TimestampTo:   0, // TODO,
 			LogPath:       key,
 			LogSize:       int64(len(blob.Value)),
 		}
@@ -449,8 +450,8 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 
 // notify flush manager del buffer data
 func (m *rendezvousFlushManager) flushDelData(data *DelDataBuf, segmentID UniqueID,
-	pos *internalpb.MsgPosition) error {
-
+	pos *internalpb.MsgPosition,
+) error {
 	// del signal with empty data
 	if data == nil || data.delData == nil {
 		m.handleDeleteTask(segmentID, &flushBufferDeleteTask{}, nil, pos)
@@ -570,7 +571,7 @@ func getSyncTaskID(pos *internalpb.MsgPosition) string {
 // close cleans up all the left members
 func (m *rendezvousFlushManager) close() {
 	m.dispatcher.Range(func(k, v interface{}) bool {
-		//assertion ok
+		// assertion ok
 		queue := v.(*orderFlushQueue)
 		queue.injectMut.Lock()
 		for i := 0; i < len(queue.injectCh); i++ {
@@ -657,9 +658,9 @@ func dropVirtualChannelFunc(dsService *dataSyncService, opts ...retry.Option) fl
 	return func(packs []*segmentFlushPack) {
 		req := &datapb.DropVirtualChannelRequest{
 			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(0),   //TODO msg type
-				commonpbutil.WithMsgID(0),     //TODO msg id
-				commonpbutil.WithTimeStamp(0), //TODO time stamp
+				commonpbutil.WithMsgType(0),   // TODO msg type
+				commonpbutil.WithMsgID(0),     // TODO msg id
+				commonpbutil.WithTimeStamp(0), // TODO time stamp
 				commonpbutil.WithSourceID(Params.DataNodeCfg.GetNodeID()),
 			),
 			ChannelName: dsService.vchannelName,
@@ -739,8 +740,13 @@ func dropVirtualChannelFunc(dsService *dataSyncService, opts ...retry.Option) fl
 				return fmt.Errorf(err.Error())
 			}
 
+			// to be compatible with datacoord 2.3's channel not found error
+			channelNotFound := func() bool {
+				return strings.Contains(rsp.GetStatus().GetReason(), "channel not found")
+			}
+
 			// meta error, datanode handles a virtual channel does not belong here
-			if rsp.GetStatus().GetErrorCode() == commonpb.ErrorCode_MetaFailed {
+			if rsp.GetStatus().GetErrorCode() == commonpb.ErrorCode_MetaFailed || channelNotFound() {
 				log.Warn("meta error found, skip sync and start to drop virtual channel", zap.String("channel", dsService.vchannelName))
 				return nil
 			}
@@ -847,8 +853,14 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 					zap.Error(errors.New(rsp.GetReason())))
 				return nil
 			}
+
+			// to be compatible with datacoord 2.3's channel not found error
+			channelNotFound := func() bool {
+				return strings.Contains(rsp.GetReason(), "channel not found")
+			}
+
 			// meta error, datanode handles a virtual channel does not belong here
-			if rsp.GetErrorCode() == commonpb.ErrorCode_MetaFailed {
+			if rsp.GetErrorCode() == commonpb.ErrorCode_MetaFailed || channelNotFound() {
 				log.Warn("meta error found, skip sync and start to drop virtual channel", zap.String("channel", dsService.vchannelName))
 				return nil
 			}
