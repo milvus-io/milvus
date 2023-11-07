@@ -930,7 +930,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 
 		state, ok := ib.tasks[buildID]
 		assert.True(t, ok)
-		assert.Equal(t, indexTaskInProgress, state)
+		assert.Equal(t, indexTaskRetry, state)
 	})
 
 	t.Run("get state fail", func(t *testing.T) {
@@ -955,7 +955,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 
 		state, ok := ib.tasks[buildID]
 		assert.True(t, ok)
-		assert.Equal(t, indexTaskInProgress, state)
+		assert.Equal(t, indexTaskRetry, state)
 	})
 
 	t.Run("finish task fail", func(t *testing.T) {
