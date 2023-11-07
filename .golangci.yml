@@ -115,6 +115,8 @@ linters-settings:
       - 'Reason:\s+\w+\.Error\(\)'
       - 'errors.New\((.+)\.GetReason\(\)\)'
       - 'commonpb\.Status\{[\s\n]*ErrorCode:[\s\n]*.+[\s\S\n]*?\}'
+      - "runtime.NumCPU"
+      - "runtime.GOMAXPROCS(0)"
       #- 'fmt\.Print.*' WIP
 
 issues:

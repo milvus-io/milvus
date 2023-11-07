@@ -18,12 +18,12 @@ package conc
 
 import (
 	"fmt"
-	"runtime"
 	"sync"
 
 	ants "github.com/panjf2000/ants/v2"
 
 	"github.com/milvus-io/milvus/pkg/util/generic"
+	"github.com/milvus-io/milvus/pkg/util/hardware"
 )
 
 // A goroutine pool
@@ -55,7 +55,7 @@ func NewPool[T any](cap int, opts ...PoolOption) *Pool[T] {
 // NewDefaultPool returns a pool with cap of the number of logical CPU,
 // and pre-alloced goroutines.
 func NewDefaultPool[T any]() *Pool[T] {
-	return NewPool[T](runtime.GOMAXPROCS(0), WithPreAlloc(true))
+	return NewPool[T](hardware.GetCPUNum(), WithPreAlloc(true))
 }
 
 // Submit a task into the pool,

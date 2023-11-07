@@ -3,8 +3,9 @@ package cgoconverter
 import (
 	"bytes"
 	"fmt"
-	"runtime"
 	"testing"
+
+	"github.com/milvus-io/milvus/pkg/util/hardware"
 )
 
 func TestBytesConverter(t *testing.T) {
@@ -29,7 +30,7 @@ func TestBytesConverter(t *testing.T) {
 }
 
 func TestConcurrentBytesConverter(t *testing.T) {
-	concurrency := runtime.GOMAXPROCS(0)
+	concurrency := hardware.GetCPUNum()
 	if concurrency <= 1 {
 		concurrency = 4
 	}
