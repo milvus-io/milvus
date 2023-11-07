@@ -35,7 +35,7 @@ import (
 // nodeD: count c = b + 2
 
 type nodeA struct {
-	BaseNode
+	InputNode
 	inputChan chan float64
 	a         float64
 }
@@ -47,7 +47,7 @@ type nodeB struct {
 
 type nodeC struct {
 	BaseNode
-	d          float64
+	c          float64
 	outputChan chan float64
 }
 
@@ -117,8 +117,10 @@ func createExampleFlowGraph() (*TimeTickedFlowGraph, chan float64, chan float64,
 	fg := NewTimeTickedFlowGraph(ctx)
 
 	var a Node = &nodeA{
-		BaseNode: BaseNode{
-			maxQueueLength: MaxQueueLength,
+		InputNode: InputNode{
+			BaseNode: BaseNode{
+				maxQueueLength: MaxQueueLength,
+			},
 		},
 		inputChan: inputChan,
 	}
@@ -175,8 +177,10 @@ func TestTimeTickedFlowGraph_AddNode(t *testing.T) {
 	fg := NewTimeTickedFlowGraph(context.TODO())
 
 	var a Node = &nodeA{
-		BaseNode: BaseNode{
-			maxQueueLength: MaxQueueLength,
+		InputNode: InputNode{
+			BaseNode: BaseNode{
+				maxQueueLength: MaxQueueLength,
+			},
 		},
 		inputChan: inputChan,
 	}
