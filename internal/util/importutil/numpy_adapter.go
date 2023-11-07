@@ -563,9 +563,9 @@ func (n *NumpyAdapter) ReadString(count int) ([]string, error) {
 	// read string one by one is not efficient, here we read strings batch by batch, each bach size is no more than 16MB
 	batchRead := 1 // rows of each batch, make sure this value is equal or greater than 1
 	if utf {
-		batchRead += SingleBlockSize / (utf8.UTFMax * maxLen)
+		batchRead += ReadBufferSize / (utf8.UTFMax * maxLen)
 	} else {
-		batchRead += SingleBlockSize / maxLen
+		batchRead += ReadBufferSize / maxLen
 	}
 
 	log.Info("Numpy adapter: prepare to read varchar batch by batch",
