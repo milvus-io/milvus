@@ -347,11 +347,19 @@ func (c *ChannelManager) AddNode(nodeID int64) error {
 
 	c.store.Add(nodeID)
 
-	if !Params.DataCoordCfg.AutoBalance.GetAsBool() {
-		return nil
+	bufferedUpdates, balanceUpdates := c.registerPolicy(c.store, nodeID)
+
+	updates := bufferedUpdates
+	// try bufferedUpdates first
+	if len(updates) <= 0 {
+		if !Params.DataCoordCfg.AutoBalance.GetAsBool() {
+			log.Info("auto balance disabled, skip reassignment for balance", zap.Int64("registered node", nodeID))
+			return nil
+		}
+		// if auto balance enabled, try balanceUpdates
+		updates = balanceUpdates
 	}
 
-	updates := c.registerPolicy(c.store, nodeID)
 	if len(updates) <= 0 {
 		log.Info("register node with no reassignment", zap.Int64("registered node", nodeID))
 		return nil
