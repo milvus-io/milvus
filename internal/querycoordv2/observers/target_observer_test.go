@@ -46,6 +46,7 @@ type TargetObserverSuite struct {
 	targetMgr *meta.TargetManager
 	distMgr   *meta.DistributionManager
 	broker    *meta.MockBroker
+	cluster   *session.MockCluster
 
 	observer *TargetObserver
 
@@ -82,7 +83,8 @@ func (suite *TargetObserverSuite) SetupTest() {
 	suite.broker = meta.NewMockBroker(suite.T())
 	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
 	suite.distMgr = meta.NewDistributionManager()
-	suite.observer = NewTargetObserver(suite.meta, suite.targetMgr, suite.distMgr, suite.broker)
+	suite.cluster = session.NewMockCluster(suite.T())
+	suite.observer = NewTargetObserver(suite.meta, suite.targetMgr, suite.distMgr, suite.broker, suite.cluster)
 	suite.collectionID = int64(1000)
 	suite.partitionID = int64(100)
 
@@ -225,6 +227,7 @@ type TargetObserverCheckSuite struct {
 	targetMgr *meta.TargetManager
 	distMgr   *meta.DistributionManager
 	broker    *meta.MockBroker
+	cluster   *session.MockCluster
 
 	observer *TargetObserver
 
@@ -258,7 +261,14 @@ func (suite *TargetObserverCheckSuite) SetupTest() {
 	suite.broker = meta.NewMockBroker(suite.T())
 	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
 	suite.distMgr = meta.NewDistributionManager()
-	suite.observer = NewTargetObserver(suite.meta, suite.targetMgr, suite.distMgr, suite.broker)
+	suite.cluster = session.NewMockCluster(suite.T())
+	suite.observer = NewTargetObserver(
+		suite.meta,
+		suite.targetMgr,
+		suite.distMgr,
+		suite.broker,
+		suite.cluster,
+	)
 	suite.collectionID = int64(1000)
 	suite.partitionID = int64(100)
 

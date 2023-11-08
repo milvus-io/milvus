@@ -541,58 +541,6 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncRemovedSegments() {
 	)
 }
 
-func (suite *LeaderObserverTestSuite) TestSyncTargetVersion() {
-	collectionID := int64(1001)
-
-	observer := suite.observer
-	observer.meta.CollectionManager.PutCollection(utils.CreateTestCollection(collectionID, 1))
-	observer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(collectionID, 1))
-	observer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, collectionID, []int64{1, 2}))
-
-	nextTargetChannels := []*datapb.VchannelInfo{
-		{
-			CollectionID:        collectionID,
-			ChannelName:         "channel-1",
-			UnflushedSegmentIds: []int64{22, 33},
-		},
-		{
-			CollectionID:        collectionID,
-			ChannelName:         "channel-2",
-			UnflushedSegmentIds: []int64{44},
-		},
-	}
-
-	nextTargetSegments := []*datapb.SegmentInfo{
-		{
-			ID:            11,
-			PartitionID:   1,
-			InsertChannel: "channel-1",
-		},
-		{
-			ID:            12,
-			PartitionID:   1,
-			InsertChannel: "channel-2",
-		},
-	}
-
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nextTargetChannels, nextTargetSegments, nil)
-	suite.observer.target.UpdateCollectionNextTarget(collectionID)
-	suite.observer.target.UpdateCollectionCurrentTarget(collectionID)
-	TargetVersion := suite.observer.target.GetCollectionTargetVersion(collectionID, meta.CurrentTarget)
-
-	view := utils.CreateTestLeaderView(1, collectionID, "channel-1", nil, nil)
-	view.TargetVersion = TargetVersion
-	action := observer.checkNeedUpdateTargetVersion(context.Background(), view)
-	suite.Nil(action)
-
-	view.TargetVersion = TargetVersion - 1
-	action = observer.checkNeedUpdateTargetVersion(context.Background(), view)
-	suite.NotNil(action)
-	suite.Equal(querypb.SyncType_UpdateVersion, action.Type)
-	suite.Len(action.GrowingInTarget, 2)
-	suite.Len(action.SealedInTarget, 1)
-}
-
 func TestLeaderObserverSuite(t *testing.T) {
 	suite.Run(t, new(LeaderObserverTestSuite))
 }
