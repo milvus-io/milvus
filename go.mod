@@ -24,7 +24,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/klauspost/compress v1.16.5
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.3.2
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.3.3
 	github.com/milvus-io/milvus/pkg v0.0.1
 	github.com/minio/minio-go/v7 v7.0.56
 	github.com/prometheus/client_golang v1.14.0
@@ -58,6 +58,8 @@ require (
 	google.golang.org/grpc/examples v0.0.0-20220617181431-3e7b97febc7f
 	stathat.com/c/consistent v1.0.0
 )
+
+require github.com/pingcap/log v1.1.1-0.20221015072633-39906604fb81
 
 require (
 	cloud.google.com/go/compute v1.19.0 // indirect
@@ -164,7 +166,6 @@ require (
 	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00 // indirect
 	github.com/pingcap/goleveldb v0.0.0-20191226122134-f82aafb29989 // indirect
 	github.com/pingcap/kvproto v0.0.0-20221129023506-621ec37aac7a // indirect
-	github.com/pingcap/log v1.1.1-0.20221015072633-39906604fb81 // indirect
 	github.com/pkg/browser v0.0.0-20210911075715-681adbf594b8 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
