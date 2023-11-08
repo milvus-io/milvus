@@ -225,7 +225,7 @@ func CleanSession(metaPath string, etcdEndpoints []string, sessionSuffix []strin
 	}
 
 	for _, key := range keys {
-		_, _ = etcdCli.Delete(ctx, key, clientv3.WithPrefix())
+		_, _ = etcdCli.Delete(ctx, key)
 	}
 	log.Info("clean sessions from etcd", zap.Any("keys", keys))
 	return nil
