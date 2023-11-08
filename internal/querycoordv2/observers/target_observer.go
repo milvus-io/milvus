@@ -421,7 +421,7 @@ func (ob *TargetObserver) checkNeedUpdateTargetVersion(ctx context.Context, lead
 
 	sealedSegments := ob.targetMgr.GetSealedSegmentsByChannel(leaderView.CollectionID, leaderView.Channel, meta.NextTarget)
 	growingSegments := ob.targetMgr.GetGrowingSegmentsByChannel(leaderView.CollectionID, leaderView.Channel, meta.NextTarget)
-	droppedSegments := ob.targetMgr.GetDroppedSegmentsByChannel(leaderView.CollectionID, leaderView.Channel, meta.CurrentTarget)
+	droppedSegments := ob.targetMgr.GetDroppedSegmentsByChannel(leaderView.CollectionID, leaderView.Channel, meta.NextTarget)
 
 	return &querypb.SyncAction{
 		Type:            querypb.SyncType_UpdateVersion,
