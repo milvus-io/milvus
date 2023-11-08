@@ -214,17 +214,29 @@ func (_c *MockBroker_DescribeCollection_Call) RunAndReturn(run func(context.Cont
 }
 
 // DropVirtualChannel provides a mock function with given fields: ctx, req
-func (_m *MockBroker) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) error {
+func (_m *MockBroker) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error) {
 	ret := _m.Called(ctx, req)
 
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.DropVirtualChannelRequest) error); ok {
+	var r0 *datapb.DropVirtualChannelResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.DropVirtualChannelRequest) *datapb.DropVirtualChannelResponse); ok {
 		r0 = rf(ctx, req)
 	} else {
-		r0 = ret.Error(0)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.DropVirtualChannelResponse)
+		}
 	}
 
-	return r0
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.DropVirtualChannelRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // MockBroker_DropVirtualChannel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropVirtualChannel'
@@ -246,12 +258,12 @@ func (_c *MockBroker_DropVirtualChannel_Call) Run(run func(ctx context.Context, 
 	return _c
 }
 
-func (_c *MockBroker_DropVirtualChannel_Call) Return(_a0 error) *MockBroker_DropVirtualChannel_Call {
-	_c.Call.Return(_a0)
+func (_c *MockBroker_DropVirtualChannel_Call) Return(_a0 *datapb.DropVirtualChannelResponse, _a1 error) *MockBroker_DropVirtualChannel_Call {
+	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockBroker_DropVirtualChannel_Call) RunAndReturn(run func(context.Context, *datapb.DropVirtualChannelRequest) error) *MockBroker_DropVirtualChannel_Call {
+func (_c *MockBroker_DropVirtualChannel_Call) RunAndReturn(run func(context.Context, *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error)) *MockBroker_DropVirtualChannel_Call {
 	_c.Call.Return(run)
 	return _c
 }

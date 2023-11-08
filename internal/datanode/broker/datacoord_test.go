@@ -260,7 +260,7 @@ func (s *dataCoordSuite) TestDropVirtualChannel() {
 				s.Equal("dml_0", req.GetChannelName())
 			}).
 			Return(&datapb.DropVirtualChannelResponse{Status: merr.Status(nil)}, nil)
-		err := s.broker.DropVirtualChannel(ctx, req)
+		_, err := s.broker.DropVirtualChannel(ctx, req)
 		s.NoError(err)
 		s.resetMock()
 	})
@@ -268,7 +268,7 @@ func (s *dataCoordSuite) TestDropVirtualChannel() {
 	s.Run("datacoord_return_error", func() {
 		s.dc.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).
 			Return(nil, errors.New("mock"))
-		err := s.broker.DropVirtualChannel(ctx, req)
+		_, err := s.broker.DropVirtualChannel(ctx, req)
 		s.Error(err)
 		s.resetMock()
 	})
@@ -276,7 +276,7 @@ func (s *dataCoordSuite) TestDropVirtualChannel() {
 	s.Run("datacoord_return_failure_status", func() {
 		s.dc.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).
 			Return(&datapb.DropVirtualChannelResponse{Status: merr.Status(errors.New("mock"))}, nil)
-		err := s.broker.DropVirtualChannel(ctx, req)
+		_, err := s.broker.DropVirtualChannel(ctx, req)
 		s.Error(err)
 		s.resetMock()
 	})
@@ -284,7 +284,7 @@ func (s *dataCoordSuite) TestDropVirtualChannel() {
 	s.Run("datacoord_return_legacy_MetaFailed", func() {
 		s.dc.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).
 			Return(&datapb.DropVirtualChannelResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_MetaFailed}}, nil)
-		err := s.broker.DropVirtualChannel(ctx, req)
+		_, err := s.broker.DropVirtualChannel(ctx, req)
 		s.Error(err)
 		s.ErrorIs(err, merr.ErrChannelNotFound)
 		s.resetMock()

@@ -48,7 +48,7 @@ type DataCoord interface {
 	GetSegmentInfo(ctx context.Context, segmentIDs []int64) ([]*datapb.SegmentInfo, error)
 	UpdateChannelCheckpoint(ctx context.Context, channelName string, cp *msgpb.MsgPosition) error
 	SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) error
-	DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) error
+	DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error)
 	UpdateSegmentStatistics(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest) error
 	SaveImportSegment(ctx context.Context, req *datapb.SaveImportSegmentRequest) error
 }

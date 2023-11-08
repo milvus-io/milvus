@@ -117,19 +117,16 @@ func (dc *dataCoordBroker) SaveBinlogPaths(ctx context.Context, req *datapb.Save
 	return nil
 }
 
-func (dc *dataCoordBroker) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) error {
+func (dc *dataCoordBroker) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error) {
 	log := log.Ctx(ctx)
 
 	resp, err := dc.client.DropVirtualChannel(ctx, req)
 	if err := merr.CheckRPCCall(resp, err); err != nil {
-		if resp.GetStatus().GetErrorCode() == commonpb.ErrorCode_MetaFailed {
-			err = merr.WrapErrChannelNotFound(req.GetChannelName())
-		}
 		log.Warn("failed to SaveBinlogPaths", zap.Error(err))
-		return err
+		return resp, err
 	}
 
-	return nil
+	return resp, nil
 }
 
 func (dc *dataCoordBroker) UpdateSegmentStatistics(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest) error {
