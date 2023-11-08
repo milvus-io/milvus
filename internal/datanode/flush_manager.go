@@ -29,6 +29,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -819,10 +820,12 @@ func dropVirtualChannelFunc(dsService *dataSyncService, opts ...retry.Option) fl
 		req.Segments = segments
 
 		err := retry.Do(context.Background(), func() error {
-			err := dsService.broker.DropVirtualChannel(context.Background(), req)
-			if err != nil {
+			resp, err := dsService.broker.DropVirtualChannel(context.Background(), req)
+			if err != nil ||
+				resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 				// meta error, datanode handles a virtual channel does not belong here
-				if errors.Is(err, merr.ErrChannelNotFound) {
+				if errors.Is(err, merr.ErrChannelNotFound) ||
+					resp.GetStatus().GetErrorCode() == commonpb.ErrorCode_MetaFailed {
 					log.Warn("meta error found, skip sync and start to drop virtual channel", zap.String("channel", dsService.vchannelName))
 					return nil
 				}

@@ -663,7 +663,7 @@ func TestFlushNotifyFunc(t *testing.T) {
 			Schema: meta.GetSchema(),
 		}, nil).Maybe()
 	broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil).Maybe()
-	broker.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).Return(nil).Maybe()
+	broker.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -748,7 +748,7 @@ func TestDropVirtualChannelFunc(t *testing.T) {
 			Schema: meta.GetSchema(),
 		}, nil)
 	broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil).Maybe()
-	broker.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).Return(nil).Maybe()
+	broker.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	vchanName := "vchan_01"
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -811,7 +811,7 @@ func TestDropVirtualChannelFunc(t *testing.T) {
 	t.Run("datacoord_return_error", func(t *testing.T) {
 		broker.ExpectedCalls = nil
 		broker.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).
-			Return(errors.New("mock"))
+			Return(nil, errors.New("mock"))
 		assert.Panics(t, func() {
 			dropFunc(nil)
 		})
@@ -822,7 +822,7 @@ func TestDropVirtualChannelFunc(t *testing.T) {
 	t.Run("datacoord_return_channel_not_found", func(t *testing.T) {
 		broker.ExpectedCalls = nil
 		broker.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).
-			Return(merr.WrapErrChannelNotFound("channel"))
+			Return(nil, merr.WrapErrChannelNotFound("channel"))
 		assert.NotPanics(t, func() {
 			dropFunc(nil)
 		})
