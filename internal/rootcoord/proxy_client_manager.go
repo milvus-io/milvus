@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
@@ -155,6 +156,10 @@ func (p *proxyClientManager) InvalidateCollectionMetaCache(ctx context.Context, 
 		group.Go(func() error {
 			sta, err := v.InvalidateCollectionMetaCache(ctx, request)
 			if err != nil {
+				if errors.Is(err, merr.ErrNodeNotFound) {
+					log.Warn("InvalidateCollectionMetaCache failed due to proxy service not found", zap.Error(err))
+					return nil
+				}
 				return fmt.Errorf("InvalidateCollectionMetaCache failed, proxyID = %d, err = %s", k, err)
 			}
 			if sta.ErrorCode != commonpb.ErrorCode_Success {
