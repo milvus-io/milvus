@@ -1455,7 +1455,8 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 }
 
 func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDistributionRequest) (*commonpb.Status, error) {
-	log := log.Ctx(ctx).With(zap.Int64("collectionID", req.GetCollectionID()), zap.String("channel", req.GetChannel()))
+	log := log.Ctx(ctx).WithRateGroup("querynode.SyncDistribution", 1, 60).
+		With(zap.Int64("collectionID", req.GetCollectionID()), zap.String("channel", req.GetChannel()))
 	// check node healthy
 	failStatus := &commonpb.Status{}
 	failStatus, isUnavailable := isUnavailableCode(node, failStatus, failStatus, nil)
@@ -1499,10 +1500,9 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 			}, segmentStateLoaded)
 
 		default:
-			return &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    "unexpected action type",
-			}, nil
+			// to be compatible with milvus 2.3, ignore unknown sync action, instead of return error
+			log.RatedInfo(30, "meet unknown sync action type, skip it",
+				zap.String("action", action.GetType().String()))
 		}
 	}
 
