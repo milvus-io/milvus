@@ -362,10 +362,10 @@ func (suite *ServerSuite) TestUpdateAutoBalanceConfigLoop() {
 
 	Params.Save(Params.QueryCoordCfg.CheckAutoBalanceConfigInterval.Key, "1")
 	defer Params.Reset(Params.QueryCoordCfg.CheckAutoBalanceConfigInterval.Key)
-	Params.Save(Params.QueryCoordCfg.AutoBalance.Key, "false")
-	defer Params.Reset(Params.QueryCoordCfg.AutoBalance.Key)
 
 	suite.Run("test old node exist", func() {
+		Params.Save(Params.QueryCoordCfg.AutoBalance.Key, "false")
+		defer Params.Reset(Params.QueryCoordCfg.AutoBalance.Key)
 		server := &Server{}
 		mockSession := sessionutil.NewMockSession(suite.T())
 		server.session = mockSession
@@ -384,6 +384,8 @@ func (suite *ServerSuite) TestUpdateAutoBalanceConfigLoop() {
 	})
 
 	suite.Run("all old node down", func() {
+		Params.Save(Params.QueryCoordCfg.AutoBalance.Key, "false")
+		defer Params.Reset(Params.QueryCoordCfg.AutoBalance.Key)
 		server := &Server{}
 		mockSession := sessionutil.NewMockSession(suite.T())
 		server.session = mockSession
