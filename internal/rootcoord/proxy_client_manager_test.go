@@ -196,6 +196,20 @@ func TestProxyClientManager_InvalidateCollectionMetaCache(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("mock proxy service down", func(t *testing.T) {
+		ctx := context.Background()
+		p1 := newMockProxy()
+		p1.InvalidateCollectionMetaCacheFunc = func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+			return nil, merr.ErrNodeNotFound
+		}
+		pcm := &proxyClientManager{proxyClient: map[int64]types.ProxyClient{
+			TestProxyID: p1,
+		}}
+
+		err := pcm.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{})
+		assert.NoError(t, err)
+	})
+
 	t.Run("normal case", func(t *testing.T) {
 		ctx := context.Background()
 		p1 := newMockProxy()

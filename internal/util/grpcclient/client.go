@@ -392,9 +392,9 @@ func (c *ClientBase[T]) checkGrpcErr(ctx context.Context, err error) (needRetry,
 
 func (c *ClientBase[T]) checkNodeSessionExist(ctx context.Context) (bool, error) {
 	switch c.GetRole() {
-	case typeutil.DataNodeRole, typeutil.IndexNodeRole, typeutil.QueryNodeRole:
+	case typeutil.DataNodeRole, typeutil.IndexNodeRole, typeutil.QueryNodeRole, typeutil.ProxyRole:
 		err := c.verifySession(ctx)
-		if err != nil && errors.Is(err, merr.ErrNodeNotFound) {
+		if errors.Is(err, merr.ErrNodeNotFound) {
 			log.Warn("failed to verify node session", zap.Error(err))
 			// stop retry
 			return false, err
