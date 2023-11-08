@@ -247,7 +247,7 @@ func (m *Manager) pullSourceConfigs(source string) error {
 
 	configs, err := configSource.GetConfigurations()
 	if err != nil {
-		log.Error("Get configuration by items failed", zap.Error(err))
+		log.Info("Get configuration by items failed", zap.Error(err))
 		return err
 	}
 
