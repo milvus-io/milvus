@@ -371,6 +371,7 @@ func (s *Server) initObserver() {
 		s.targetMgr,
 		s.dist,
 		s.broker,
+		s.cluster,
 	)
 	s.collectionObserver = observers.NewCollectionObserver(
 		s.dist,

@@ -21,7 +21,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -132,74 +131,8 @@ func (o *LeaderObserver) observeCollection(ctx context.Context, collection int64
 
 			actions := o.findNeedLoadedSegments(leaderView, dists)
 			actions = append(actions, o.findNeedRemovedSegments(leaderView, dists)...)
-			updateVersionAction := o.checkNeedUpdateTargetVersion(ctx, leaderView)
-			if updateVersionAction != nil {
-				actions = append(actions, updateVersionAction)
-			}
 			o.sync(ctx, replica.GetID(), leaderView, actions)
 		}
-	}
-}
-
-func (o *LeaderObserver) CheckTargetVersion(ctx context.Context, collectionID int64) bool {
-	// if not ready to observer, skip add task
-	if !o.readyToObserve(collectionID) {
-		return false
-	}
-
-	result := o.checkCollectionLeaderVersionIsCurrent(ctx, collectionID)
-	if !result {
-		o.dispatcher.AddTask(collectionID)
-	}
-
-	return result
-}
-
-func (o *LeaderObserver) checkCollectionLeaderVersionIsCurrent(ctx context.Context, collectionID int64) bool {
-	replicas := o.meta.ReplicaManager.GetByCollection(collectionID)
-	for _, replica := range replicas {
-		leaders := o.dist.ChannelDistManager.GetShardLeadersByReplica(replica)
-		for ch, leaderID := range leaders {
-			leaderView := o.dist.LeaderViewManager.GetLeaderShardView(leaderID, ch)
-			if leaderView == nil {
-				return false
-			}
-
-			action := o.checkNeedUpdateTargetVersion(ctx, leaderView)
-			if action != nil {
-				return false
-			}
-		}
-	}
-	return true
-}
-
-func (o *LeaderObserver) checkNeedUpdateTargetVersion(ctx context.Context, leaderView *meta.LeaderView) *querypb.SyncAction {
-	log.Ctx(ctx).WithRateGroup("qcv2.LeaderObserver", 1, 60)
-	targetVersion := o.target.GetCollectionTargetVersion(leaderView.CollectionID, meta.CurrentTarget)
-
-	if targetVersion <= leaderView.TargetVersion {
-		return nil
-	}
-
-	log.RatedInfo(10, "Update readable segment version",
-		zap.Int64("collectionID", leaderView.CollectionID),
-		zap.String("channelName", leaderView.Channel),
-		zap.Int64("nodeID", leaderView.ID),
-		zap.Int64("oldVersion", leaderView.TargetVersion),
-		zap.Int64("newVersion", targetVersion),
-	)
-
-	sealedSegments := o.target.GetSealedSegmentsByChannel(leaderView.CollectionID, leaderView.Channel, meta.CurrentTarget)
-	growingSegments := o.target.GetGrowingSegmentsByChannel(leaderView.CollectionID, leaderView.Channel, meta.CurrentTarget)
-	droppedSegments := o.target.GetDroppedSegmentsByChannel(leaderView.CollectionID, leaderView.Channel, meta.CurrentTarget)
-
-	return &querypb.SyncAction{
-		Type:            querypb.SyncType_UpdateVersion,
-		GrowingInTarget: growingSegments.Collect(),
-		SealedInTarget:  lo.Keys(sealedSegments),
-		DroppedInTarget: droppedSegments,
-		TargetVersion:   targetVersion,
 	}
 }
 

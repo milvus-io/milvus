@@ -558,6 +558,7 @@ func (suite *ServerSuite) hackServer() {
 		suite.server.targetMgr,
 		suite.server.dist,
 		suite.broker,
+		suite.server.cluster,
 	)
 	suite.server.collectionObserver = observers.NewCollectionObserver(
 		suite.server.dist,

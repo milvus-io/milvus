@@ -59,6 +59,7 @@ type CollectionObserverSuite struct {
 	kv          kv.MetaKv
 	store       metastore.QueryCoordCatalog
 	broker      *meta.MockBroker
+	cluster     *session.MockCluster
 
 	// Dependencies
 	dist              *meta.DistributionManager
@@ -189,10 +190,12 @@ func (suite *CollectionObserverSuite) SetupTest() {
 	suite.meta = meta.NewMeta(suite.idAllocator, suite.store, nodeMgr)
 	suite.broker = meta.NewMockBroker(suite.T())
 	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
+	suite.cluster = session.NewMockCluster(suite.T())
 	suite.targetObserver = NewTargetObserver(suite.meta,
 		suite.targetMgr,
 		suite.dist,
 		suite.broker,
+		suite.cluster,
 	)
 	suite.checkerController = &checkers.CheckerController{}
 
