@@ -545,6 +545,10 @@ func (s *LocalSegment) Delete(primaryKeys []storage.PrimaryKey, timestamps []typ
 		           const unsigned long* timestamps);
 	*/
 
+	if len(primaryKeys) == 0 {
+		return nil
+	}
+
 	s.ptrLock.RLock()
 	defer s.ptrLock.RUnlock()
 

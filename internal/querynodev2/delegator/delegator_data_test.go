@@ -501,6 +501,62 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 		}, sealed[0].Segments)
 	})
 
+	s.Run("load_segments_with_l0_delete_failed", func() {
+		defer func() {
+			s.workerManager.ExpectedCalls = nil
+			s.loader.ExpectedCalls = nil
+		}()
+
+		mockMgr := segments.NewMockSegmentManager(s.T())
+		delegator, err := NewShardDelegator(
+			context.Background(),
+			s.collectionID,
+			s.replicaID,
+			s.vchannelName,
+			s.version,
+			s.workerManager,
+			&segments.Manager{
+				Collection: s.manager.Collection,
+				Segment:    mockMgr,
+			},
+			s.tsafeManager,
+			s.loader,
+			&msgstream.MockMqFactory{
+				NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
+					return s.mq, nil
+				},
+			}, 10000)
+		s.NoError(err)
+
+		growing0 := segments.NewMockSegment(s.T())
+		growing1 := segments.NewMockSegment(s.T())
+		growing1.EXPECT().ID().Return(2)
+		growing0.EXPECT().Release()
+		growing1.EXPECT().Release()
+
+		mockErr := merr.WrapErrServiceInternal("mock")
+
+		growing0.EXPECT().Delete(mock.Anything, mock.Anything).Return(nil)
+		growing1.EXPECT().Delete(mock.Anything, mock.Anything).Return(mockErr)
+
+		s.loader.EXPECT().Load(
+			mock.Anything,
+			mock.Anything,
+			segments.SegmentTypeGrowing,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return([]segments.Segment{growing0, growing1}, nil)
+
+		mockMgr.EXPECT().GetL0DeleteRecords().Return(
+			[]storage.PrimaryKey{storage.NewInt64PrimaryKey(1)},
+			[]uint64{100},
+		)
+
+		err = delegator.LoadGrowing(context.Background(), []*querypb.SegmentLoadInfo{{}, {}}, 100)
+		s.ErrorIs(err, mockErr)
+	})
+
 	s.Run("load_segments_with_streaming_delete_failed", func() {
 		defer func() {
 			s.workerManager.ExpectedCalls = nil
