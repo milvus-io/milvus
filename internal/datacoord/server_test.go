@@ -4756,10 +4756,10 @@ func TestDataNodeTtChannel(t *testing.T) {
 func TestUpdateAutoBalanceConfigLoop(t *testing.T) {
 	Params.Save(Params.DataCoordCfg.CheckAutoBalanceConfigInterval.Key, "1")
 	defer Params.Reset(Params.DataCoordCfg.CheckAutoBalanceConfigInterval.Key)
-	Params.Save(Params.DataCoordCfg.AutoBalance.Key, "false")
-	defer Params.Reset(Params.DataCoordCfg.AutoBalance.Key)
 
 	t.Run("test old node exist", func(t *testing.T) {
+		Params.Save(Params.DataCoordCfg.AutoBalance.Key, "false")
+		defer Params.Reset(Params.DataCoordCfg.AutoBalance.Key)
 		oldSessions := make(map[string]*sessionutil.Session)
 		oldSessions["s1"] = sessionutil.NewSession(context.Background())
 
@@ -4778,6 +4778,8 @@ func TestUpdateAutoBalanceConfigLoop(t *testing.T) {
 	})
 
 	t.Run("test all old node down", func(t *testing.T) {
+		Params.Save(Params.DataCoordCfg.AutoBalance.Key, "false")
+		defer Params.Reset(Params.DataCoordCfg.AutoBalance.Key)
 		server := &Server{}
 		mockSession := sessionutil.NewMockSession(t)
 		mockSession.EXPECT().GetSessionsWithVersionRange(mock.Anything, mock.Anything).Return(nil, 0, nil).Maybe()
