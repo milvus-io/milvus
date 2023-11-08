@@ -39,8 +39,8 @@ const (
 	JSONFileExt  = ".json"
 	NumpyFileExt = ".npy"
 
-	// supposed size of a single block, to control a binlog file size, the max biglog file size is no more than 2*SingleBlockSize
-	SingleBlockSize = 16 * 1024 * 1024 // 16MB
+	// parsers read JSON/Numpy/CSV files buffer by buffer, this limitation is to define the buffer size.
+	ReadBufferSize = 16 * 1024 * 1024 // 16MB
 
 	// this limitation is to avoid this OOM risk:
 	// simetimes system segment max size is a large number, a single segment fields data might cause OOM.
@@ -92,6 +92,7 @@ type ImportWrapper struct {
 	cancel         context.CancelFunc     // for canceling parse process
 	collectionInfo *CollectionInfo        // collection details including schema
 	segmentSize    int64                  // maximum size of a segment(unit:byte) defined by dataCoord.segment.maxSize (milvus.yml)
+	binlogSize     int64                  // average binlog size(unit:byte), the max biglog file size is no more than 2*binlogSize
 	rowIDAllocator *allocator.IDAllocator // autoid allocator
 	chunkManager   storage.ChunkManager
 
@@ -107,7 +108,7 @@ type ImportWrapper struct {
 	progressPercent int64                             // working progress percent
 }
 
-func NewImportWrapper(ctx context.Context, collectionInfo *CollectionInfo, segmentSize int64,
+func NewImportWrapper(ctx context.Context, collectionInfo *CollectionInfo, segmentSize int64, maxBinlogSize int64,
 	idAlloc *allocator.IDAllocator, cm storage.ChunkManager, importResult *rootcoordpb.ImportResult,
 	reportFunc func(res *rootcoordpb.ImportResult) error,
 ) *ImportWrapper {
@@ -120,11 +121,19 @@ func NewImportWrapper(ctx context.Context, collectionInfo *CollectionInfo, segme
 
 	ctx, cancel := context.WithCancel(ctx)
 
+	// average binlogSize is expected to be half of the maxBinlogSize
+	// and avoid binlogSize to be a tiny value
+	binlogSize := int64(float32(maxBinlogSize) * 0.5)
+	if binlogSize < ReadBufferSize {
+		binlogSize = ReadBufferSize
+	}
+
 	wrapper := &ImportWrapper{
 		ctx:                  ctx,
 		cancel:               cancel,
 		collectionInfo:       collectionInfo,
 		segmentSize:          segmentSize,
+		binlogSize:           binlogSize,
 		rowIDAllocator:       idAlloc,
 		chunkManager:         cm,
 		importResult:         importResult,
@@ -282,7 +291,7 @@ func (p *ImportWrapper) Import(filePaths []string, options ImportOptions) error 
 			printFieldsDataInfo(fields, "import wrapper: prepare to flush binlog data", filePaths)
 			return p.flushFunc(fields, shardID, partitionID)
 		}
-		parser, err := NewNumpyParser(p.ctx, p.collectionInfo, p.rowIDAllocator, SingleBlockSize,
+		parser, err := NewNumpyParser(p.ctx, p.collectionInfo, p.rowIDAllocator, p.binlogSize,
 			p.chunkManager, flushFunc, p.updateProgressPercent)
 		if err != nil {
 			return err
@@ -384,7 +393,7 @@ func (p *ImportWrapper) doBinlogImport(filePaths []string, tsStartPoint uint64, 
 		printFieldsDataInfo(fields, "import wrapper: prepare to flush binlog data", filePaths)
 		return p.flushFunc(fields, shardID, partitionID)
 	}
-	parser, err := NewBinlogParser(p.ctx, p.collectionInfo, SingleBlockSize,
+	parser, err := NewBinlogParser(p.ctx, p.collectionInfo, p.binlogSize,
 		p.chunkManager, flushFunc, p.updateProgressPercent, tsStartPoint, tsEndPoint)
 	if err != nil {
 		return err
@@ -433,7 +442,7 @@ func (p *ImportWrapper) parseRowBasedJSON(filePath string, onlyValidate bool) er
 		}
 	}
 
-	consumer, err := NewJSONRowConsumer(p.ctx, p.collectionInfo, p.rowIDAllocator, SingleBlockSize, flushFunc)
+	consumer, err := NewJSONRowConsumer(p.ctx, p.collectionInfo, p.rowIDAllocator, p.binlogSize, flushFunc)
 	if err != nil {
 		return err
 	}
