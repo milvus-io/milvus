@@ -3,15 +3,17 @@
 using namespace azure;
 
 void
-print(std::string const& level, std::string const& message) {
-    std::cout << "level: " << level << ", message: " << message << std::endl;
+print(Azure::Core::Diagnostics::Logger::Level level,
+      std::string const& message) {
+    std::cout << "level: "
+              << ", message: " << message << std::endl;
 }
 
 int
 main() {
     const char* containerName = "default";
     const char* blobName = "sample-blob";
-    //    AzureBlobChunkManager::InitLog("info", print);
+    AzureBlobChunkManager::InitLog("info", print);
     AzureBlobChunkManager chunkManager = AzureBlobChunkManager("", "", "");
     std::vector<std::string> buckets = chunkManager.ListBuckets();
     std::cout << "list buckets." << std::endl;
