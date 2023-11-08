@@ -25,10 +25,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/commonpbutil"
-	"github.com/milvus-io/milvus/internal/util/contextutil"
-	"github.com/milvus-io/milvus/internal/util/errorutil"
-
 	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -43,6 +39,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
+	"github.com/milvus-io/milvus/internal/util/contextutil"
+	"github.com/milvus-io/milvus/internal/util/errorutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -752,6 +751,17 @@ func filterSegmentInfo(segmentInfos []*querypb.SegmentInfo, segmentIDs map[int64
 
 // Search performs replica search tasks.
 func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
+	failRet := &internalpb.SearchResults{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+	}
+
+	failRes, isUnavailable := isUnavailableCode(node, failRet, failRet.Status, nil)
+	if isUnavailable {
+		return failRes, nil
+	}
+
 	if !node.IsStandAlone && req.GetReq().GetBase().GetTargetID() != Params.QueryNodeCfg.GetNodeID() {
 		return &internalpb.SearchResults{
 			Status: &commonpb.Status{
@@ -761,12 +771,6 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 					common.WrapNodeIDNotMatchMsg(req.GetReq().GetBase().GetTargetID(), Params.QueryNodeCfg.GetNodeID())),
 			},
 		}, nil
-	}
-
-	failRet := &internalpb.SearchResults{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
 	}
 
 	tr := timerecord.NewTimeRecorder("Search")
@@ -1171,6 +1175,17 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *querypb.Que
 
 // Query performs replica query tasks.
 func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
+	failRet := &internalpb.RetrieveResults{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+	}
+
+	failRes, isUnavailable := isUnavailableCode(node, failRet, failRet.Status, nil)
+	if isUnavailable {
+		return failRes, nil
+	}
+
 	log.Ctx(ctx).Debug("Received QueryRequest", zap.Int64("msgID", req.GetReq().GetBase().GetMsgID()),
 		zap.Bool("fromShardleader", req.GetFromShardLeader()),
 		zap.Strings("vChannels", req.GetDmlChannels()),
@@ -1189,12 +1204,6 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 					common.WrapNodeIDNotMatchMsg(req.GetReq().GetBase().GetTargetID(), Params.QueryNodeCfg.GetNodeID())),
 			},
 		}, nil
-	}
-
-	failRet := &internalpb.RetrieveResults{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
 	}
 
 	coll, err := node.metaReplica.getCollectionByID(req.GetReq().GetCollectionID())
