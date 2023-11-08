@@ -16,6 +16,7 @@
 
 #include <iostream>
 #include <sstream>
+#include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "log/Log.h"
 #include "storage/AzureChunkManager.h"
@@ -26,9 +27,37 @@ namespace storage {
 std::atomic<size_t> AzureChunkManager::init_count_(0);
 std::mutex AzureChunkManager::client_mutex_;
 
+std::string const ErrorText = "ERROR";
+std::string const WarningText = "WARN ";
+std::string const InformationalText = "INFO ";
+std::string const VerboseText = "DEBUG";
+std::string const UnknownText = "?????";
+
+inline std::string const&
+LogLevelToConsoleString(Azure::Core::Diagnostics::Logger::Level logLevel) {
+    switch (logLevel) {
+        case Azure::Core::Diagnostics::Logger::Level::Error:
+            return ErrorText;
+
+        case Azure::Core::Diagnostics::Logger::Level::Warning:
+            return WarningText;
+
+        case Azure::Core::Diagnostics::Logger::Level::Informational:
+            return InformationalText;
+
+        case Azure::Core::Diagnostics::Logger::Level::Verbose:
+            return VerboseText;
+
+        default:
+            return UnknownText;
+    }
+}
+
 void
-AzureLogger(std::string const& level, std::string const& msg) {
-    LOG_SEGCORE_INFO_ << "[AZURE LOG] " << msg;
+AzureLogger(Azure::Core::Diagnostics::Logger::Level level,
+            std::string const& msg) {
+    LOG_SEGCORE_INFO_ << "[AZURE LOG] [" << LogLevelToConsoleString(level)
+                      << "] " << msg;
 }
 
 AzureChunkManager::AzureChunkManager(const StorageConfig& storage_config)
@@ -37,13 +66,16 @@ AzureChunkManager::AzureChunkManager(const StorageConfig& storage_config)
     std::scoped_lock lock{client_mutex_};
     const size_t initCount = init_count_++;
     if (initCount == 0) {
-        //        azure::AzureBlobChunkManager::InitLog(storage_config.log_level, AzureLogger);
+        azure::AzureBlobChunkManager::InitLog(storage_config.log_level,
+                                              AzureLogger);
     }
     client_ = std::make_shared<azure::AzureBlobChunkManager>(
         storage_config.access_key_id,
         storage_config.access_key_value,
         storage_config.address,
-        storage_config.requestTimeoutMs,
+        storage_config.requestTimeoutMs == 0
+            ? DEFAULT_CHUNK_MANAGER_REQUEST_TIMEOUT_MS
+            : storage_config.requestTimeoutMs,
         storage_config.useIAM);
 }
 
