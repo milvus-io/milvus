@@ -16,7 +16,6 @@
 
 #include <iostream>
 #include <sstream>
-#include <azure/core/diagnostics/logger.hpp>
 #include <azure/identity/workload_identity_credential.hpp>
 #include "AzureBlobChunkManager.h"
 
@@ -52,11 +51,10 @@ GetConnectionString(const std::string& access_key_id,
 void
 AzureBlobChunkManager::InitLog(
     std::string level_str,
-    std::function<void(std::string const& level, std::string const& message)>
-        listener) {
+    std::function<void(Azure::Core::Diagnostics::Logger::Level level,
+                       std::string const& message)> listener) {
     // SetListener accepts std::function<>, which can be either lambda or a function pointer.
-    Azure::Core::Diagnostics::Logger::SetListener(
-        [&](auto lvl, auto msg) { listener("info", msg); });
+    Azure::Core::Diagnostics::Logger::SetListener(listener);
     Azure::Core::Diagnostics::Logger::Level level =
         Azure::Core::Diagnostics::Logger::Level::Verbose;
     if (level_str == "fatal" || level_str == "error") {

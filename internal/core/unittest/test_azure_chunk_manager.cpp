@@ -25,7 +25,9 @@ StorageConfig
 get_default_storage_config() {
     auto endpoint = "core.windows.net";
     auto accessKey = "devstoreaccount1";
-    auto accessValue = "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==";
+    auto accessValue =
+        "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/"
+        "K1SZFPTOtr/KBHBeksoGMGw==";
     auto rootPath = "files";
     auto useSSL = false;
     auto useIam = false;
@@ -66,11 +68,17 @@ class AzureChunkManagerTest : public testing::Test {
     StorageConfig configs_;
 };
 
+TEST_F(AzureChunkManagerTest, AzureLogger) {
+    AzureLogger(Azure::Core::Diagnostics::Logger::Level::Error, "");
+    AzureLogger(Azure::Core::Diagnostics::Logger::Level::Warning, "");
+    AzureLogger(Azure::Core::Diagnostics::Logger::Level::Informational, "");
+    AzureLogger(Azure::Core::Diagnostics::Logger::Level::Verbose, "");
+}
+
 TEST_F(AzureChunkManagerTest, BasicFunctions) {
     EXPECT_TRUE(chunk_manager_->GetName() == "AzureChunkManager");
     EXPECT_TRUE(chunk_manager_ptr_->GetName() == "AzureChunkManager");
     EXPECT_TRUE(chunk_manager_->GetRootPath() == "files");
-
 
     string path = "test";
     uint8_t readdata[20] = {0};
@@ -132,9 +140,9 @@ TEST_F(AzureChunkManagerTest, WritePositive) {
     string testBucketName = configs_.bucket_name;
     EXPECT_EQ(chunk_manager_->GetBucketName(), testBucketName);
 
-     if (!chunk_manager_->BucketExists(testBucketName)) {
-         chunk_manager_->CreateBucket(testBucketName);
-     }
+    if (!chunk_manager_->BucketExists(testBucketName)) {
+        chunk_manager_->CreateBucket(testBucketName);
+    }
     auto has_bucket = chunk_manager_->BucketExists(testBucketName);
     uint8_t data[5] = {0x17, 0x32, 0x45, 0x34, 0x23};
     string path = "1";

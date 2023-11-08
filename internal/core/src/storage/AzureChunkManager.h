@@ -41,6 +41,10 @@ ThrowAzureError(const std::string& func,
     throw SegcoreError(S3Error, oss.str());
 }
 
+void
+AzureLogger(Azure::Core::Diagnostics::Logger::Level level,
+            std::string const& msg);
+
 /**
  * @brief This AzureChunkManager is responsible for read and write file in blob.
    */
