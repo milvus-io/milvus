@@ -1318,6 +1318,36 @@ func TestSyncDistribution(t *testing.T) {
 		_, ok = cs.getSegment(defaultSegmentID)
 		require.False(t, ok)
 	})
+
+	t.Run("test unknown sync action type", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		node, err := genSimpleQueryNode(ctx)
+		defer node.Stop()
+		assert.NoError(t, err)
+
+		node.ShardClusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel, defaultVersion)
+		cs, ok := node.ShardClusterService.getShardCluster(defaultDMLChannel)
+		require.True(t, ok)
+		cs.SetupFirstVersion()
+
+		resp, err := node.SyncDistribution(ctx, &querypb.SyncDistributionRequest{
+			Base:         &commonpb.MsgBase{TargetID: node.session.ServerID},
+			CollectionID: defaultCollectionID,
+			Channel:      defaultDMLChannel,
+			Actions: []*querypb.SyncAction{
+				{
+					Type:        30,
+					PartitionID: defaultPartitionID,
+					SegmentID:   defaultSegmentID,
+					NodeID:      99,
+				},
+			},
+		})
+
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
 }
 
 func TestGetDataDistribution(t *testing.T) {
