@@ -116,12 +116,21 @@ func TestClientBase_NodeSessionNotExist(t *testing.T) {
 	})
 	assert.True(t, errors.Is(err, merr.ErrNodeNotFound))
 
-	// test node already down, but new node start up with same ip and port
+	// test querynode/datanode/indexnode/proxy already down, but new node start up with same ip and port
 	base.grpcClientMtx.Lock()
 	base.grpcClient = &mockClient{}
 	base.grpcClientMtx.Unlock()
 	_, err = base.Call(ctx, func(client *mockClient) (any, error) {
 		return struct{}{}, status.Errorf(codes.Unknown, merr.ErrNodeNotMatch.Error())
+	})
+	assert.True(t, errors.Is(err, merr.ErrNodeNotFound))
+
+	// test querynode/datanode/indexnode/proxy down, return unavailable error
+	base.grpcClientMtx.Lock()
+	base.grpcClient = &mockClient{}
+	base.grpcClientMtx.Unlock()
+	_, err = base.Call(ctx, func(client *mockClient) (any, error) {
+		return struct{}{}, status.Errorf(codes.Unavailable, "fake error")
 	})
 	assert.True(t, errors.Is(err, merr.ErrNodeNotFound))
 }
