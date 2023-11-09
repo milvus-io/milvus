@@ -1,6 +1,7 @@
 #include <oneapi/tbb/concurrent_queue.h>
 
 #include <atomic>
+#include <exception>
 #include <optional>
 
 namespace milvus {
@@ -33,6 +34,9 @@ class Channel {
         std::optional<T> result;
         inner_.pop(result);
         if (!result.has_value()) {
+            if (ex_.has_value()) {
+                throw ex_.value();
+            }
             return false;
         }
         value = std::move(result.value());
@@ -40,11 +44,15 @@ class Channel {
     }
 
     void
-    close() {
+    close(std::optional<std::exception> ex = std::nullopt) {
+        if (ex.has_value()) {
+            ex_ = std::move(ex);
+        }
         inner_.push(std::nullopt);
     }
 
  private:
     oneapi::tbb::concurrent_bounded_queue<std::optional<T>> inner_{};
+    std::optional<std::exception> ex_{};
 };
 }  // namespace milvus
