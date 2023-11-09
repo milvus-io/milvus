@@ -576,7 +576,8 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			srcData := srcFields[field.FieldID].GetScalars().GetArrayData().GetData()
 
 			fieldData := &ArrayFieldData{
-				Data: make([]*schemapb.ScalarField, 0, len(srcData)),
+				ElementType: field.GetElementType(),
+				Data:        make([]*schemapb.ScalarField, 0, len(srcData)),
 			}
 
 			fieldData.Data = append(fieldData.Data, srcData...)
@@ -694,7 +695,8 @@ func mergeStringField(data *InsertData, fid FieldID, field *StringFieldData) {
 func mergeArrayField(data *InsertData, fid FieldID, field *ArrayFieldData) {
 	if _, ok := data.Data[fid]; !ok {
 		fieldData := &ArrayFieldData{
-			Data: nil,
+			ElementType: field.ElementType,
+			Data:        nil,
 		}
 		data.Data[fid] = fieldData
 	}
