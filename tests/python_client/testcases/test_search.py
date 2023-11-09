@@ -571,17 +571,15 @@ class TestCollectionSearchInvalid(TestcaseBase):
 
         # 2. search
         expression = "int32_array[101] > 0"
-        msg = ("failed to search: attempt #0: failed to search/query delegator 1 for channel "
-               "by-dev-rootcoord-dml_: fail to Search, QueryNode ID=1, reason=worker(1) query"
-               " failed: UnknownError: Assert \")index >= 0 && index < length_\" at /go/src/"
-               "github.com/milvus-io/milvus/internal/core/src/common/Array.h:454 => index out"
-               " of range, index=101, length=100: attempt #1: no available shard delegator "
-               "found: service unavailable")
-        collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, nb, expression,
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 65538,
-                                         ct.err_msg: msg})
+        # msg = ("failed to search: attempt #0: failed to search/query delegator 1 for channel "
+        #        "by-dev-rootcoord-dml_: fail to Search, QueryNode ID=1, reason=worker(1) query"
+        #        " failed: UnknownError: Assert \")index >= 0 && index < length_\" at /go/src/"
+        #        "github.com/milvus-io/milvus/internal/core/src/common/Array.h:454 => index out"
+        #        " of range, index=101, length=100: attempt #1: no available shard delegator "
+        #        "found: service unavailable")
+        res, _ = collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, nb, expression)
+        assert len(res[0]) == 0
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_expression_invalid_array_two(self):

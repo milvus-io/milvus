@@ -731,6 +731,9 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcherArray(UnaryRangeExpr& expr_raw)
                 if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                     return array.is_same_array(val);
                 } else {
+                    if (index >= array.length()) {
+                        return false;
+                    }
                     auto array_data = array.template get_data<GetType>(index);
                     return array_data == val;
                 }
@@ -743,6 +746,9 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcherArray(UnaryRangeExpr& expr_raw)
                 if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                     return !array.is_same_array(val);
                 } else {
+                    if (index >= array.length()) {
+                        return false;
+                    }
                     auto array_data = array.template get_data<GetType>(index);
                     return array_data != val;
                 }
@@ -755,6 +761,9 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcherArray(UnaryRangeExpr& expr_raw)
                 if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                     return false;
                 } else {
+                    if (index >= array.length()) {
+                        return false;
+                    }
                     auto array_data = array.template get_data<GetType>(index);
                     return array_data >= val;
                 }
@@ -767,6 +776,9 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcherArray(UnaryRangeExpr& expr_raw)
                 if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                     return false;
                 } else {
+                    if (index >= array.length()) {
+                        return false;
+                    }
                     auto array_data = array.template get_data<GetType>(index);
                     return array_data > val;
                 }
@@ -779,6 +791,9 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcherArray(UnaryRangeExpr& expr_raw)
                 if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                     return false;
                 } else {
+                    if (index >= array.length()) {
+                        return false;
+                    }
                     auto array_data = array.template get_data<GetType>(index);
                     return array_data <= val;
                 }
@@ -791,6 +806,9 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcherArray(UnaryRangeExpr& expr_raw)
                 if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                     return false;
                 } else {
+                    if (index >= array.length()) {
+                        return false;
+                    }
                     auto array_data = array.template get_data<GetType>(index);
                     return array_data < val;
                 }
@@ -803,6 +821,9 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcherArray(UnaryRangeExpr& expr_raw)
                 if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                     return false;
                 } else {
+                    if (index >= array.length()) {
+                        return false;
+                    }
                     auto array_data = array.template get_data<GetType>(index);
                     return Match(array_data, val, op);
                 }
@@ -1247,6 +1268,9 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcherArray(
                         return false;
                     };
                     auto elem_func = [&](const milvus::ArrayView& array) {
+                        if (index >= array.length()) {
+                            return false;
+                        }
                         auto value = array.get_data<GetType>(index);
                         return value + right_operand == val;
                     };
@@ -1259,6 +1283,9 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcherArray(
                         return false;
                     };
                     auto elem_func = [&](const milvus::ArrayView& array) {
+                        if (index >= array.length()) {
+                            return false;
+                        }
                         auto value = array.get_data<GetType>(index);
                         return value - right_operand == val;
                     };
@@ -1271,6 +1298,9 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcherArray(
                         return false;
                     };
                     auto elem_func = [&](const milvus::ArrayView& array) {
+                        if (index >= array.length()) {
+                            return false;
+                        }
                         auto value = array.get_data<GetType>(index);
                         return value * right_operand == val;
                     };
@@ -1283,6 +1313,9 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcherArray(
                         return false;
                     };
                     auto elem_func = [&](const milvus::ArrayView& array) {
+                        if (index >= array.length()) {
+                            return false;
+                        }
                         auto value = array.get_data<GetType>(index);
                         return value / right_operand == val;
                     };
@@ -1295,6 +1328,9 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcherArray(
                         return false;
                     };
                     auto elem_func = [&](const milvus::ArrayView& array) {
+                        if (index >= array.length()) {
+                            return false;
+                        }
                         auto value = array.get_data<GetType>(index);
                         return static_cast<ExprValueType>(
                                    fmod(value, right_operand)) == val;
@@ -1328,6 +1364,9 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcherArray(
                         return false;
                     };
                     auto elem_func = [&](const milvus::ArrayView& array) {
+                        if (index >= array.length()) {
+                            return false;
+                        }
                         auto value = array.get_data<GetType>(index);
                         return value + right_operand != val;
                     };
@@ -1340,6 +1379,9 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcherArray(
                         return false;
                     };
                     auto elem_func = [&](const milvus::ArrayView& array) {
+                        if (index >= array.length()) {
+                            return false;
+                        }
                         auto value = array.get_data<GetType>(index);
                         return value - right_operand != val;
                     };
@@ -1352,6 +1394,9 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcherArray(
                         return false;
                     };
                     auto elem_func = [&](const milvus::ArrayView& array) {
+                        if (index >= array.length()) {
+                            return false;
+                        }
                         auto value = array.get_data<GetType>(index);
                         return value * right_operand != val;
                     };
@@ -1364,6 +1409,9 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcherArray(
                         return false;
                     };
                     auto elem_func = [&](const milvus::ArrayView& array) {
+                        if (index >= array.length()) {
+                            return false;
+                        }
                         auto value = array.get_data<GetType>(index);
                         return value / right_operand != val;
                     };
@@ -1376,6 +1424,9 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcherArray(
                         return false;
                     };
                     auto elem_func = [&](const milvus::ArrayView& array) {
+                        if (index >= array.length()) {
+                            return false;
+                        }
                         auto value = array.get_data<GetType>(index);
                         return static_cast<ExprValueType>(
                                    fmod(value, right_operand)) != val;
@@ -1575,6 +1626,9 @@ ExecExprVisitor::ExecBinaryRangeVisitorDispatcherArray(
 
     if (lower_inclusive && upper_inclusive) {
         auto elem_func = [&](const milvus::ArrayView& array) {
+            if (index >= array.length()) {
+                return false;
+            }
             auto value = array.get_data<GetType>(index);
             return val1 <= value && value <= val2;
         };
@@ -1582,6 +1636,9 @@ ExecExprVisitor::ExecBinaryRangeVisitorDispatcherArray(
             expr.column_.field_id, index_func, elem_func);
     } else if (lower_inclusive && !upper_inclusive) {
         auto elem_func = [&](const milvus::ArrayView& array) {
+            if (index >= array.length()) {
+                return false;
+            }
             auto value = array.get_data<GetType>(index);
             return val1 <= value && value < val2;
         };
@@ -1589,6 +1646,9 @@ ExecExprVisitor::ExecBinaryRangeVisitorDispatcherArray(
             expr.column_.field_id, index_func, elem_func);
     } else if (!lower_inclusive && upper_inclusive) {
         auto elem_func = [&](const milvus::ArrayView& array) {
+            if (index >= array.length()) {
+                return false;
+            }
             auto value = array.get_data<GetType>(index);
             return val1 < value && value <= val2;
         };
@@ -1596,6 +1656,9 @@ ExecExprVisitor::ExecBinaryRangeVisitorDispatcherArray(
             expr.column_.field_id, index_func, elem_func);
     } else {
         auto elem_func = [&](const milvus::ArrayView& array) {
+            if (index >= array.length()) {
+                return false;
+            }
             auto value = array.get_data<GetType>(index);
             return val1 < value && value < val2;
         };
@@ -2533,6 +2596,9 @@ ExecExprVisitor::ExecTermArrayFieldInVariable(TermExpr& expr_raw)
     }
 
     auto elem_func = [&term_set, &index](const milvus::ArrayView& array) {
+        if (index >= array.length()) {
+            return false;
+        }
         auto value = array.get_data<GetType>(index);
         return term_set.find(ExprValueType(value)) != term_set.end();
     };
