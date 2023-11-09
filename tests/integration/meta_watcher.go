@@ -36,7 +36,7 @@ import (
 
 // MetaWatcher to observe meta data of milvus cluster
 type MetaWatcher interface {
-	ShowSessions() ([]*sessionutil.Session, error)
+	ShowSessions() ([]*sessionutil.SessionRaw, error)
 	ShowSegments() ([]*datapb.SegmentInfo, error)
 	ShowReplicas() ([]*querypb.Replica, error)
 }
@@ -47,7 +47,7 @@ type EtcdMetaWatcher struct {
 	etcdCli  *clientv3.Client
 }
 
-func (watcher *EtcdMetaWatcher) ShowSessions() ([]*sessionutil.Session, error) {
+func (watcher *EtcdMetaWatcher) ShowSessions() ([]*sessionutil.SessionRaw, error) {
 	metaPath := watcher.rootPath + "/meta/session"
 	return listSessionsByPrefix(watcher.etcdCli, metaPath)
 }
@@ -67,7 +67,7 @@ func (watcher *EtcdMetaWatcher) ShowReplicas() ([]*querypb.Replica, error) {
 //=================== Below largely copied from birdwatcher ========================
 
 // listSessions returns all session
-func listSessionsByPrefix(cli *clientv3.Client, prefix string) ([]*sessionutil.Session, error) {
+func listSessionsByPrefix(cli *clientv3.Client, prefix string) ([]*sessionutil.SessionRaw, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
 	defer cancel()
 	resp, err := cli.Get(ctx, prefix, clientv3.WithPrefix())
@@ -75,9 +75,9 @@ func listSessionsByPrefix(cli *clientv3.Client, prefix string) ([]*sessionutil.S
 		return nil, err
 	}
 
-	sessions := make([]*sessionutil.Session, 0, len(resp.Kvs))
+	sessions := make([]*sessionutil.SessionRaw, 0, len(resp.Kvs))
 	for _, kv := range resp.Kvs {
-		session := &sessionutil.Session{}
+		session := &sessionutil.SessionRaw{}
 		err := json.Unmarshal(kv.Value, session)
 		if err != nil {
 			continue
