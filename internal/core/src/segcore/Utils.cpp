@@ -15,6 +15,7 @@
 #include <string>
 
 #include "index/ScalarIndex.h"
+#include "log/Log.h"
 #include "storage/FieldData.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "common/Common.h"
@@ -698,41 +699,46 @@ ReverseDataFromIndex(const index::IndexBase* index,
 void
 LoadFieldDatasFromRemote(std::vector<std::string>& remote_files,
                          storage::FieldDataChannelPtr channel) {
-    auto parallel_degree =
-        static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+    try {
+        auto parallel_degree = static_cast<uint64_t>(
+            DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
 
-    auto rcm = storage::RemoteChunkManagerSingleton::GetInstance()
-                   .GetRemoteChunkManager();
-    std::sort(remote_files.begin(),
-              remote_files.end(),
-              [](const std::string& a, const std::string& b) {
-                  return std::stol(a.substr(a.find_last_of('/') + 1)) <
-                         std::stol(b.substr(b.find_last_of('/') + 1));
-              });
+        auto rcm = storage::RemoteChunkManagerSingleton::GetInstance()
+                       .GetRemoteChunkManager();
+        std::sort(remote_files.begin(),
+                  remote_files.end(),
+                  [](const std::string& a, const std::string& b) {
+                      return std::stol(a.substr(a.find_last_of('/') + 1)) <
+                             std::stol(b.substr(b.find_last_of('/') + 1));
+                  });
 
-    std::vector<std::string> batch_files;
+        std::vector<std::string> batch_files;
 
-    auto FetchRawData = [&]() {
-        auto result = storage::GetObjectData(rcm.get(), batch_files);
-        for (auto& data : result) {
-            channel->push(data);
+        auto FetchRawData = [&]() {
+            auto result = storage::GetObjectData(rcm.get(), batch_files);
+            for (auto& data : result) {
+                channel->push(data);
+            }
+        };
+
+        for (auto& file : remote_files) {
+            if (batch_files.size() >= parallel_degree) {
+                FetchRawData();
+                batch_files.clear();
+            }
+
+            batch_files.emplace_back(file);
         }
-    };
 
-    for (auto& file : remote_files) {
-        if (batch_files.size() >= parallel_degree) {
+        if (batch_files.size() > 0) {
             FetchRawData();
-            batch_files.clear();
         }
 
-        batch_files.emplace_back(file);
+        channel->close();
+    } catch (std::exception e) {
+        LOG_SEGCORE_INFO_ << "failed to load data from remote: " << e.what();
+        channel->close(std::move(e));
     }
-
-    if (batch_files.size() > 0) {
-        FetchRawData();
-    }
-
-    channel->close();
 }
 
 int64_t
