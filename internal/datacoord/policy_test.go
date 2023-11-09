@@ -69,7 +69,7 @@ func TestConsistentHashRegisterPolicy(t *testing.T) {
 		hashring := consistent.New()
 		policy := ConsistentHashRegisterPolicy(hashring)
 
-		updates := policy(store, 1)
+		updates, _ := policy(store, 1)
 		assert.NotNil(t, updates)
 		assert.Equal(t, 2, len(updates))
 		assert.EqualValues(t, &ChannelOp{Type: Delete, NodeID: bufferID, Channels: channels}, updates[0])
@@ -93,7 +93,7 @@ func TestConsistentHashRegisterPolicy(t *testing.T) {
 		hashring.Add(formatNodeID(1))
 		policy := ConsistentHashRegisterPolicy(hashring)
 
-		updates := policy(store, 2)
+		_, updates := policy(store, 2)
 
 		assert.NotNil(t, updates)
 		assert.Equal(t, 1, len(updates))
@@ -671,9 +671,10 @@ func TestAvgAssignRegisterPolicy(t *testing.T) {
 		nodeID int64
 	}
 	tests := []struct {
-		name string
-		args args
-		want ChannelOpSet
+		name            string
+		args            args
+		bufferedUpdates ChannelOpSet
+		balanceUpdates  ChannelOpSet
 	}{
 		{
 			"test empty",
@@ -686,6 +687,7 @@ func TestAvgAssignRegisterPolicy(t *testing.T) {
 				},
 				1,
 			},
+			nil,
 			nil,
 		},
 		{
@@ -712,6 +714,7 @@ func TestAvgAssignRegisterPolicy(t *testing.T) {
 					Channels: []*channel{{Name: "ch1", CollectionID: 1}},
 				},
 			},
+			nil,
 		},
 		{
 			"test with avg assign",
@@ -725,6 +728,7 @@ func TestAvgAssignRegisterPolicy(t *testing.T) {
 				},
 				3,
 			},
+			nil,
 			[]*ChannelOp{
 				{
 					Type:     Add,
@@ -747,6 +751,7 @@ func TestAvgAssignRegisterPolicy(t *testing.T) {
 				3,
 			},
 			nil,
+			nil,
 		},
 		{
 			"test node with empty channel",
@@ -761,6 +766,7 @@ func TestAvgAssignRegisterPolicy(t *testing.T) {
 				},
 				3,
 			},
+			nil,
 			[]*ChannelOp{
 				{
 					Type:     Add,
@@ -772,8 +778,9 @@ func TestAvgAssignRegisterPolicy(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := AvgAssignRegisterPolicy(tt.args.store, tt.args.nodeID)
-			assert.EqualValues(t, tt.want, got)
+			bufferedUpdates, balanceUpdates := AvgAssignRegisterPolicy(tt.args.store, tt.args.nodeID)
+			assert.EqualValues(t, tt.bufferedUpdates, bufferedUpdates)
+			assert.EqualValues(t, tt.balanceUpdates, balanceUpdates)
 		})
 	}
 }

@@ -31,11 +31,12 @@ import (
 )
 
 // RegisterPolicy decides the channels mapping after registering the nodeID
-type RegisterPolicy func(store ROChannelStore, nodeID int64) ChannelOpSet
+// return bufferedUpdates and balanceUpdates
+type RegisterPolicy func(store ROChannelStore, nodeID int64) (ChannelOpSet, ChannelOpSet)
 
 // EmptyRegister does nothing
-func EmptyRegister(store ROChannelStore, nodeID int64) ChannelOpSet {
-	return nil
+func EmptyRegister(store ROChannelStore, nodeID int64) (ChannelOpSet, ChannelOpSet) {
+	return nil, nil
 }
 
 // BufferChannelAssignPolicy assigns buffer channels to new registered node
@@ -53,10 +54,10 @@ func BufferChannelAssignPolicy(store ROChannelStore, nodeID int64) ChannelOpSet 
 
 // AvgAssignRegisterPolicy assigns channels with average to new registered node
 // Register will not directly delete the node-channel pair. Channel manager will handle channel release.
-func AvgAssignRegisterPolicy(store ROChannelStore, nodeID int64) ChannelOpSet {
+func AvgAssignRegisterPolicy(store ROChannelStore, nodeID int64) (ChannelOpSet, ChannelOpSet) {
 	opSet := BufferChannelAssignPolicy(store, nodeID)
 	if len(opSet) != 0 {
-		return opSet
+		return opSet, nil
 	}
 
 	// Get a list of available node-channel info.
@@ -69,7 +70,7 @@ func AvgAssignRegisterPolicy(store ROChannelStore, nodeID int64) ChannelOpSet {
 	// store already add the new node
 	chPerNode := channelNum / len(store.GetNodes())
 	if chPerNode == 0 {
-		return nil
+		return nil, nil
 	}
 
 	// sort in descending order and reallocate
@@ -96,7 +97,7 @@ func AvgAssignRegisterPolicy(store ROChannelStore, nodeID int64) ChannelOpSet {
 	for k, v := range releases {
 		opSet.Add(k, v)
 	}
-	return opSet
+	return nil, opSet
 }
 
 // filterNode filters out node-channel info where node ID == `nodeID`.
@@ -113,7 +114,7 @@ func filterNode(infos []*NodeChannelInfo, nodeID int64) []*NodeChannelInfo {
 
 // ConsistentHashRegisterPolicy use a consistent hash to maintain the mapping
 func ConsistentHashRegisterPolicy(hashRing *consistent.Consistent) RegisterPolicy {
-	return func(store ROChannelStore, nodeID int64) ChannelOpSet {
+	return func(store ROChannelStore, nodeID int64) (ChannelOpSet, ChannelOpSet) {
 		elems := formatNodeIDs(store.GetNodes())
 		hashRing.Set(elems)
 
@@ -122,7 +123,7 @@ func ConsistentHashRegisterPolicy(hashRing *consistent.Consistent) RegisterPolic
 		// If there are buffer channels, then nodeID is the first node.
 		opSet := BufferChannelAssignPolicy(store, nodeID)
 		if len(opSet) != 0 {
-			return opSet
+			return opSet, nil
 		}
 
 		opSet = ChannelOpSet{}
@@ -135,12 +136,12 @@ func ConsistentHashRegisterPolicy(hashRing *consistent.Consistent) RegisterPolic
 				if err != nil {
 					log.Warn("receive error when getting from hashRing",
 						zap.String("channel", ch.Name), zap.Error(err))
-					return nil
+					return nil, nil
 				}
 				did, err := deformatNodeID(idStr)
 				if err != nil {
 					log.Warn("failed to deformat node id", zap.Int64("nodeID", did))
-					return nil
+					return nil, nil
 				}
 				if did != c.NodeID {
 					releases[c.NodeID] = append(releases[c.NodeID], ch)
@@ -152,7 +153,7 @@ func ConsistentHashRegisterPolicy(hashRing *consistent.Consistent) RegisterPolic
 		for id, channels := range releases {
 			opSet.Add(id, channels)
 		}
-		return opSet
+		return nil, opSet
 	}
 }
 
