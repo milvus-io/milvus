@@ -661,7 +661,7 @@ func (s *Server) start() error {
 
 // Stop stop the Proxy Server
 func (s *Server) Stop() error {
-	log.Info("Proxy stop", zap.String("internal address", Params.GetInternalAddress()), zap.String("external address", Params.GetInternalAddress()))
+	log.Info("Proxy stop", zap.String("internal address", Params.GetInternalAddress()), zap.String("external address", Params.GetAddress()))
 	var err error
 	if s.closer != nil {
 		if err = s.closer.Close(); err != nil {
@@ -678,18 +678,25 @@ func (s *Server) Stop() error {
 	gracefulWg.Add(1)
 	go func() {
 		defer gracefulWg.Done()
-		if s.grpcInternalServer != nil {
-			utils.GracefulStopGRPCServer(s.grpcInternalServer, time.Duration(Params.GracefulStopTimeout)*time.Second)
-		}
+
 		if s.tcpServer != nil {
-			log.Info("Graceful stop Proxy tcp server...")
+			log.Info("Proxy stop tcp server...")
 			s.tcpServer.Close()
-		} else if s.grpcExternalServer != nil {
+		}
+
+		if s.grpcExternalServer != nil {
+			log.Info("Proxy stop external grpc server")
 			utils.GracefulStopGRPCServer(s.grpcExternalServer, time.Duration(Params.GracefulStopTimeout)*time.Second)
-			if s.httpServer != nil {
-				log.Info("Graceful stop grpc http server...")
-				s.httpServer.Close()
-			}
+		}
+
+		if s.httpServer != nil {
+			log.Info("Proxy stop http server...")
+			s.httpServer.Close()
+		}
+
+		if s.grpcInternalServer != nil {
+			log.Info("Proxy stop internal grpc server")
+			utils.GracefulStopGRPCServer(s.grpcInternalServer, time.Duration(Params.GracefulStopTimeout)*time.Second)
 		}
 	}()
 	gracefulWg.Wait()
