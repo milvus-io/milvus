@@ -36,6 +36,9 @@ InitChunkCacheSingleton(const char* c_dir_path, const char* read_ahead_policy);
 void
 CleanRemoteChunkManagerSingleton();
 
+char*
+GetStorageMetrics();
+
 #ifdef __cplusplus
 };
 #endif

@@ -46,6 +46,7 @@ set(STORAGE_FILES
     InsertData.cpp
     Event.cpp
     ThreadPool.cpp
+    prometheus_client.cpp
     storage_c.cpp
     ChunkManager.cpp
     MinioChunkManager.cpp
