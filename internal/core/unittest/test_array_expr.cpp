@@ -61,6 +61,30 @@ TEST(Expr, TestArrayRange) {
               column_info: <
                 field_id: 102
                 data_type: Array
+                nested_path:"1024"
+                element_type:Int64
+              >
+              lower_inclusive: false,
+              upper_inclusive: false,
+              lower_value: <
+                int64_val: 1
+              >
+              upper_value: <
+                int64_val: 10000
+              >
+        >)",
+             "long",
+             [](milvus::Array& array) {
+                 if (array.length() <= 1024) {
+                     return false;
+                 }
+                 auto val = array.get_data<int64_t>(1024);
+                 return 1 < val && val < 10000;
+             }},
+            {R"(binary_range_expr: <
+              column_info: <
+                field_id: 102
+                data_type: Array
                 nested_path:"0"
                 element_type:Int64
               >
@@ -76,6 +100,30 @@ TEST(Expr, TestArrayRange) {
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
+                 return 1 <= val && val < 10000;
+             }},
+            {R"(binary_range_expr: <
+              column_info: <
+                field_id: 102
+                data_type: Array
+                nested_path:"1024"
+                element_type:Int64
+              >
+              lower_inclusive: true,
+              upper_inclusive: false,
+              lower_value: <
+                int64_val: 1
+              >
+              upper_value: <
+                int64_val: 10000
+              >
+        >)",
+             "long",
+             [](milvus::Array& array) {
+                 if (array.length() <= 1024) {
+                     return false;
+                 }
+                 auto val = array.get_data<int64_t>(1024);
                  return 1 <= val && val < 10000;
              }},
             {R"(binary_range_expr: <
@@ -103,6 +151,30 @@ TEST(Expr, TestArrayRange) {
               column_info: <
                 field_id: 102
                 data_type: Array
+                nested_path:"1024"
+                element_type:Int64
+              >
+              lower_inclusive: false,
+              upper_inclusive: true,
+              lower_value: <
+                int64_val: 1
+              >
+              upper_value: <
+                int64_val: 10000
+              >
+        >)",
+             "long",
+             [](milvus::Array& array) {
+                 if (array.length() <= 1024) {
+                     return false;
+                 }
+                 auto val = array.get_data<int64_t>(1024);
+                 return 1 < val && val <= 10000;
+             }},
+            {R"(binary_range_expr: <
+              column_info: <
+                field_id: 102
+                data_type: Array
                 nested_path:"0"
                 element_type:Int64
               >
@@ -118,6 +190,30 @@ TEST(Expr, TestArrayRange) {
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
+                 return 1 <= val && val <= 10000;
+             }},
+            {R"(binary_range_expr: <
+              column_info: <
+                field_id: 102
+                data_type: Array
+                nested_path:"1024"
+                element_type:Int64
+              >
+              lower_inclusive: true,
+              upper_inclusive: true,
+              lower_value: <
+                int64_val: 1
+              >
+              upper_value: <
+                int64_val: 10000
+              >
+        >)",
+             "long",
+             [](milvus::Array& array) {
+                 if (array.length() <= 1024) {
+                     return false;
+                 }
+                 auto val = array.get_data<int64_t>(1024);
                  return 1 <= val && val <= 10000;
              }},
             {R"(binary_range_expr: <
@@ -314,6 +410,126 @@ TEST(Expr, TestArrayRange) {
              [](milvus::Array& array) {
                  auto val = array.get_data<double>(0);
                  return val == 2.2;
+             }},
+            {R"(unary_range_expr: <
+              column_info: <
+                field_id: 105
+                data_type: Array
+                nested_path:"1024"
+                element_type:Float
+              >
+              op: Equal,
+              value: <
+                float_val: 2.2
+              >
+        >)",
+             "float",
+             [](milvus::Array& array) {
+                 if (array.length() <= 1024) {
+                     return false;
+                 }
+                 auto val = array.get_data<double>(1024);
+                 return val == 2.2;
+             }},
+            {R"(unary_range_expr: <
+              column_info: <
+                field_id: 105
+                data_type: Array
+                nested_path:"1024"
+                element_type:Float
+              >
+              op: NotEqual,
+              value: <
+                float_val: 2.2
+              >
+        >)",
+             "float",
+             [](milvus::Array& array) {
+                 if (array.length() <= 1024) {
+                     return false;
+                 }
+                 auto val = array.get_data<double>(1024);
+                 return val != 2.2;
+             }},
+            {R"(unary_range_expr: <
+              column_info: <
+                field_id: 105
+                data_type: Array
+                nested_path:"1024"
+                element_type:Float
+              >
+              op: GreaterEqual,
+              value: <
+                float_val: 2.2
+              >
+        >)",
+             "float",
+             [](milvus::Array& array) {
+                 if (array.length() <= 1024) {
+                     return false;
+                 }
+                 auto val = array.get_data<double>(1024);
+                 return val >= 2.2;
+             }},
+            {R"(unary_range_expr: <
+              column_info: <
+                field_id: 105
+                data_type: Array
+                nested_path:"1024"
+                element_type:Float
+              >
+              op: GreaterThan,
+              value: <
+                float_val: 2.2
+              >
+        >)",
+             "float",
+             [](milvus::Array& array) {
+                 if (array.length() <= 1024) {
+                     return false;
+                 }
+                 auto val = array.get_data<double>(1024);
+                 return val > 2.2;
+             }},
+            {R"(unary_range_expr: <
+              column_info: <
+                field_id: 105
+                data_type: Array
+                nested_path:"1024"
+                element_type:Float
+              >
+              op: LessEqual,
+              value: <
+                float_val: 2.2
+              >
+        >)",
+             "float",
+             [](milvus::Array& array) {
+                 if (array.length() <= 1024) {
+                     return false;
+                 }
+                 auto val = array.get_data<double>(1024);
+                 return val <= 2.2;
+             }},
+            {R"(unary_range_expr: <
+              column_info: <
+                field_id: 105
+                data_type: Array
+                nested_path:"1024"
+                element_type:Float
+              >
+              op: LessThan,
+              value: <
+                float_val: 2.2
+              >
+        >)",
+             "float",
+             [](milvus::Array& array) {
+                 if (array.length() <= 1024) {
+                     return false;
+                 }
+                 auto val = array.get_data<double>(1024);
+                 return val < 2.2;
              }},
 
         };
@@ -1226,6 +1442,206 @@ TEST(Expr, TestArrayBinaryArith) {
              }},
             {R"(binary_arith_op_eval_range_expr: <
               column_info: <
+                field_id: 103
+                data_type: Array
+                nested_path:"1024"
+                element_type:Float
+              >
+              arith_op:Add
+              right_operand:<float_val:2.2 >
+              op:Equal
+              value:<float_val:133.2 >
+        >)",
+             "float",
+             [](milvus::Array& array) {
+                 if (array.length() <= 1024) {
+                     return false;
+                 }
+                 auto val = array.get_data<double>(1024);
+                 return val + 2.2 == 133.2;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+              column_info: <
+                field_id: 103
+                data_type: Array
+                nested_path:"1024"
+                element_type:Float
+              >
+              arith_op:Add
+              right_operand:<float_val:2.2 >
+              op:NotEqual
+              value:<float_val:133.2 >
+        >)",
+             "float",
+             [](milvus::Array& array) {
+                 if (array.length() <= 1024) {
+                     return false;
+                 }
+                 auto val = array.get_data<double>(1024);
+                 return val + 2.2 != 133.2;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+              column_info: <
+                field_id: 104
+                data_type: Array
+                nested_path:"1024"
+                element_type:Double
+              >
+              arith_op:Sub
+              right_operand:<float_val:11.1 >
+              op:Equal
+              value:<float_val:125.7 >
+        >)",
+             "double",
+             [](milvus::Array& array) {
+                 if (array.length() <= 1024) {
+                     return false;
+                 }
+                 auto val = array.get_data<double>(1024);
+                 return val - 11.1 == 125.7;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+              column_info: <
+                field_id: 104
+                data_type: Array
+                nested_path:"1024"
+                element_type:Double
+              >
+              arith_op:Sub
+              right_operand:<float_val:11.1 >
+              op:NotEqual
+              value:<float_val:125.7 >
+        >)",
+             "double",
+             [](milvus::Array& array) {
+                 if (array.length() <= 1024) {
+                     return false;
+                 }
+                 auto val = array.get_data<double>(1024);
+                 return val - 11.1 != 125.7;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+              column_info: <
+                field_id: 102
+                data_type: Array
+                nested_path:"1024"
+                element_type:Int64
+              >
+              arith_op:Mul
+              right_operand:<int64_val:2 >
+              op:Equal
+              value:<int64_val:8 >
+        >)",
+             "long",
+             [](milvus::Array& array) {
+                 if (array.length() <= 1024) {
+                     return false;
+                 }
+                 auto val = array.get_data<int64_t>(1024);
+                 return val * 2 == 8;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+              column_info: <
+                field_id: 102
+                data_type: Array
+                nested_path:"1024"
+                element_type:Int64
+              >
+              arith_op:Mul
+              right_operand:<int64_val:2 >
+              op:NotEqual
+              value:<int64_val:20 >
+        >)",
+             "long",
+             [](milvus::Array& array) {
+                 if (array.length() <= 1024) {
+                     return false;
+                 }
+                 auto val = array.get_data<int64_t>(1024);
+                 return val * 2 != 20;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+              column_info: <
+                field_id: 102
+                data_type: Array
+                nested_path:"1024"
+                element_type:Int64
+              >
+              arith_op:Div
+              right_operand:<int64_val:2 >
+              op:Equal
+              value:<int64_val:8 >
+        >)",
+             "long",
+             [](milvus::Array& array) {
+                 if (array.length() <= 1024) {
+                     return false;
+                 }
+                 auto val = array.get_data<int64_t>(1024);
+                 return val / 2 == 8;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+              column_info: <
+                field_id: 102
+                data_type: Array
+                nested_path:"1024"
+                element_type:Int64
+              >
+              arith_op:Div
+              right_operand:<int64_val:2 >
+              op:NotEqual
+              value:<int64_val:20 >
+        >)",
+             "long",
+             [](milvus::Array& array) {
+                 if (array.length() <= 1024) {
+                     return false;
+                 }
+                 auto val = array.get_data<int64_t>(1024);
+                 return val / 2 != 20;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+              column_info: <
+                field_id: 102
+                data_type: Array
+                nested_path:"1024"
+                element_type:Int64
+              >
+              arith_op:Mod
+              right_operand:<int64_val:3 >
+              op:Equal
+              value:<int64_val:0 >
+        >)",
+             "long",
+             [](milvus::Array& array) {
+                 if (array.length() <= 1024) {
+                     return false;
+                 }
+                 auto val = array.get_data<int64_t>(1024);
+                 return val % 3 == 0;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+              column_info: <
+                field_id: 102
+                data_type: Array
+                nested_path:"1024"
+                element_type:Int64
+              >
+              arith_op:Mod
+              right_operand:<int64_val:3 >
+              op:NotEqual
+              value:<int64_val:2 >
+        >)",
+             "long",
+             [](milvus::Array& array) {
+                 if (array.length() <= 1024) {
+                     return false;
+                 }
+                 auto val = array.get_data<int64_t>(1024);
+                 return val % 3 != 2;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+              column_info: <
                 field_id: 101
                 data_type: Array
                 nested_path:"0"
@@ -1342,6 +1758,15 @@ TEST(Expr, TestArrayStringMatch) {
          {"1"},
          [](milvus::Array& array) {
              return PrefixMatch(array.get_data<std::string_view>(1), "def");
+         }},
+        {OpType::PrefixMatch,
+         "def",
+         {"1024"},
+         [](milvus::Array& array) {
+             if (array.length() <= 1024) {
+                 return false;
+             }
+             return PrefixMatch(array.get_data<std::string_view>(1024), "def");
          }},
     };
     //vector_anns:<field_id:201 predicates:<unary_range_expr:<column_info:<field_id:131 data_type:Array nested_path:"0" element_type:VarChar > op:PrefixMatch value:<string_val:"abc" > > > query_info:<> placeholder_tag:"$0" >
@@ -1530,7 +1955,24 @@ TEST(Expr, TestArrayInTerm) {
              [](milvus::Array& array) {
                  return false;
              }},
-    };
+            {R"(term_expr: <
+              column_info: <
+                field_id: 104
+                data_type: Array
+                nested_path:"1024"
+                element_type:VarChar
+              >
+                values:<string_val:"abc" > values:<string_val:"idhgf1s" >
+        >)",
+             "string",
+             [](milvus::Array& array) {
+                 if (array.length() <= 1024) {
+                     return false;
+                 }
+                 auto val = array.get_data<std::string_view>(1024);
+                 return val == "abc" || val == "idhgf1s";
+             }},
+        };
 
     std::string raw_plan_tmp = R"(vector_anns: <
                                     field_id: 100
