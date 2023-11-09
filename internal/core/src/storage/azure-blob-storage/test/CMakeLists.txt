@@ -3,5 +3,5 @@
 
 project(azure-blob-test)
 
-add_executable(azure-blob-test test_azure_blob_chunk_manager.cpp)
-target_link_libraries(azure-blob-test PRIVATE blob-chunk-manager Azure::azure-identity Azure::azure-storage-blobs)
+add_executable(azure-blob-test test_azure_blob_chunk_manager.cpp ../AzureBlobChunkManager.cpp)
+target_link_libraries(azure-blob-test PRIVATE Azure::azure-identity Azure::azure-storage-blobs)

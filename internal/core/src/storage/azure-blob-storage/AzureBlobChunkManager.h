@@ -16,11 +16,12 @@
 
 #pragma once
 
-#include <azure/storage/blobs.hpp>
 #include <iostream>
 #include <stdlib.h>
 #include <string>
 #include <vector>
+#include <azure/core/diagnostics/logger.hpp>
+#include <azure/storage/blobs.hpp>
 #include <azure/storage/common/storage_exception.hpp>
 
 namespace azure {
@@ -31,7 +32,7 @@ class AzureBlobChunkManager {
  public:
     static void
     InitLog(std::string level_string,
-            std::function<void(std::string const& level,
+            std::function<void(Azure::Core::Diagnostics::Logger::Level level,
                                std::string const& message)> listener);
     explicit AzureBlobChunkManager(const std::string& access_key_id,
                                    const std::string& access_key_value,
