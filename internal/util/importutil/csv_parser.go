@@ -24,11 +24,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -43,7 +43,7 @@ type CSVParser struct {
 func NewCSVParser(ctx context.Context, collectionInfo *CollectionInfo, updateProgressFunc func(percent int64)) (*CSVParser, error) {
 	if collectionInfo == nil {
 		log.Warn("CSV parser: collection schema is nil")
-		return nil, errors.New("collection schema is nil")
+		return nil, merr.WrapErrImportFailed("collection schema is nil")
 	}
 
 	parser := &CSVParser{
@@ -108,7 +108,7 @@ func (p *CSVParser) combineDynamicRow(dynamicValues map[string]string, row map[s
 			desc.UseNumber()
 			if err := desc.Decode(&mp); err != nil {
 				log.Warn("CSV parser: illegal value for dynamic field, not a JSON object")
-				return errors.New("illegal value for dynamic field, not a JSON object")
+				return merr.WrapErrImportFailed("illegal value for dynamic field, not a JSON object")
 			}
 		}
 		// case 4
@@ -145,7 +145,7 @@ func (p *CSVParser) combineDynamicRow(dynamicValues map[string]string, row map[s
 		bs, err := json.Marshal(mp)
 		if err != nil {
 			log.Warn("CSV parser: illegal value for dynamic field, not a JSON object")
-			return errors.New("illegal value for dynamic field, not a JSON object")
+			return merr.WrapErrImportFailed("illegal value for dynamic field, not a JSON object")
 		}
 		row[dynamicFieldID] = string(bs)
 	} else if !ok && len(dynamicValues) == 0 {
@@ -168,7 +168,7 @@ func (p *CSVParser) verifyRow(raw []string) (map[storage.FieldID]string, error) 
 		if fieldID == p.collectionInfo.PrimaryKey.GetFieldID() && p.collectionInfo.PrimaryKey.GetAutoID() {
 			// primary key is auto-id, no need to provide
 			log.Warn("CSV parser: the primary key is auto-generated, no need to provide", zap.String("fieldName", fieldName))
-			return nil, fmt.Errorf("the primary key '%s' is auto-generated, no need to provide", fieldName)
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("the primary key '%s' is auto-generated, no need to provide", fieldName))
 		}
 
 		if ok {
@@ -179,7 +179,7 @@ func (p *CSVParser) verifyRow(raw []string) (map[storage.FieldID]string, error) 
 		} else {
 			// no dynamic field. if user provided redundant field, return error
 			log.Warn("CSV parser: the field is not defined in collection schema", zap.String("fieldName", fieldName))
-			return nil, fmt.Errorf("the field '%s' is not defined in collection schema", fieldName)
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("the field '%s' is not defined in collection schema", fieldName))
 		}
 	}
 	// some fields not provided?
@@ -198,7 +198,7 @@ func (p *CSVParser) verifyRow(raw []string) (map[storage.FieldID]string, error) 
 			if !ok {
 				// not auto-id primary key, no dynamic field,  must provide value
 				log.Warn("CSV parser: a field value is missed", zap.String("fieldName", k))
-				return nil, fmt.Errorf("value of field '%s' is missed", k)
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("value of field '%s' is missed", k))
 			}
 		}
 	}
@@ -215,7 +215,7 @@ func (p *CSVParser) verifyRow(raw []string) (map[storage.FieldID]string, error) 
 func (p *CSVParser) ParseRows(reader *IOReader, handle CSVRowHandler) error {
 	if reader == nil || handle == nil {
 		log.Warn("CSV Parser: CSV parse handle is nil")
-		return errors.New("CSV parse handle is nil")
+		return merr.WrapErrImportFailed("CSV parse handle is nil")
 	}
 	// discard bom in the file
 	RuneScanner := reader.r.(io.RuneScanner)
@@ -228,7 +228,9 @@ func (p *CSVParser) ParseRows(reader *IOReader, handle CSVRowHandler) error {
 		return err
 	}
 	if bom != '\ufeff' {
-		RuneScanner.UnreadRune()
+		if err = RuneScanner.UnreadRune(); err != nil {
+			return err
+		}
 	}
 	r := NewReader(reader.r)
 
@@ -252,7 +254,7 @@ func (p *CSVParser) ParseRows(reader *IOReader, handle CSVRowHandler) error {
 			break
 		} else if err != nil {
 			log.Warn("CSV Parser: failed to parse the field value", zap.Error(err))
-			return fmt.Errorf("failed to read the field value, error: %w", err)
+			return merr.WrapErrImportFailed(fmt.Sprintf("failed to read the field value, error: %v", err))
 		}
 		p.fieldsName = fieldsName
 		// read buffer
@@ -265,7 +267,7 @@ func (p *CSVParser) ParseRows(reader *IOReader, handle CSVRowHandler) error {
 				break
 			} else if err != nil {
 				log.Warn("CSV parser: failed to parse row value", zap.Error(err))
-				return fmt.Errorf("failed to parse row value, error: %w", err)
+				return merr.WrapErrImportFailed(fmt.Sprintf("failed to parse row value, error: %v", err))
 			}
 
 			row, err := p.verifyRow(values)
@@ -280,7 +282,7 @@ func (p *CSVParser) ParseRows(reader *IOReader, handle CSVRowHandler) error {
 				isEmpty = false
 				if err = handle.Handle(buf); err != nil {
 					log.Warn("CSV parser: failed to convert row value to entity", zap.Error(err))
-					return fmt.Errorf("failed to convert row value to entity, error: %w", err)
+					return merr.WrapErrImportFailed(fmt.Sprintf("failed to convert row value to entity, error: %v", err))
 				}
 				// clean the buffer
 				buf = make([]map[storage.FieldID]string, 0, p.bufRowCount)
@@ -290,14 +292,14 @@ func (p *CSVParser) ParseRows(reader *IOReader, handle CSVRowHandler) error {
 			isEmpty = false
 			if err = handle.Handle(buf); err != nil {
 				log.Warn("CSV parser: failed to convert row value to entity", zap.Error(err))
-				return fmt.Errorf("failed to convert row value to entity, error: %w", err)
+				return merr.WrapErrImportFailed(fmt.Sprintf("failed to convert row value to entity, error: %v", err))
 			}
 		}
 
 		// outside context might be canceled(service stop, or future enhancement for canceling import task)
 		if isCanceled(p.ctx) {
 			log.Warn("CSV parser: import task was canceled")
-			return errors.New("import task was canceled")
+			return merr.WrapErrImportFailed("import task was canceled")
 		}
 		// nolint
 		// this break means we require the first row must be fieldsName
