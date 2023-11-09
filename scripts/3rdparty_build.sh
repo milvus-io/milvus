@@ -63,10 +63,9 @@ popd
 
 pushd ${ROOT_DIR}/cmake_build/thirdparty
 
-# git clone https://github.com/jiaoew1991/opendal.git opendal
 git clone https://github.com/apache/incubator-opendal.git opendal
 cd opendal
-# git checkout blocking-layer
+git checkout 58f1202
 if command -v cargo >/dev/null 2>&1; then
     echo "cargo exists"
 else
@@ -74,11 +73,11 @@ else
     source $HOME/.cargo/env
 fi
 pushd bindings/c
-cargo build || { echo 'opendal_c build failed'; exit 1; }
+cargo build --release || { echo 'opendal_c build failed'; exit 1; }
 popd
 mkdir -p ${ROOT_DIR}/internal/core/output/lib
 mkdir -p ${ROOT_DIR}/internal/core/output/include
-cp target/debug/libopendal_c.a ${ROOT_DIR}/internal/core/output/lib/libopendal_c.a
+cp target/release/libopendal_c.a ${ROOT_DIR}/internal/core/output/lib/libopendal_c.a
 cp bindings/c/include/opendal.h ${ROOT_DIR}/internal/core/output/include/opendal.h
 
 popd
