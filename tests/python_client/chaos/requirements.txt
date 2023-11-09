@@ -1,5 +1,5 @@
 
 # for test result anaylszer
 prettytable==3.8.0
-pyarrow==11.0.0
+pyarrow==14.0.1
 fastparquet==2023.7.0
