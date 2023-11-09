@@ -14,6 +14,7 @@
 #include <map>
 #include <tuple>
 
+#include "common/Types.h"
 #include "indexbuilder/IndexFactory.h"
 #include "indexbuilder/VecIndexCreator.h"
 #include "common/QueryResult.h"
@@ -103,8 +104,8 @@ class IndexWrapperTest : public ::testing::TestWithParam<Param> {
     bool is_binary;
     DataType vec_field_data_type;
     knowhere::DataSetPtr xb_dataset;
-    std::vector<float> xb_data;
-    std::vector<uint8_t> xb_bin_data;
+    FixedVector<float> xb_data;
+    FixedVector<uint8_t> xb_bin_data;
     knowhere::DataSetPtr xq_dataset;
     int64_t query_offset = 100;
     int64_t NB = 10000;
@@ -141,8 +142,8 @@ TEST_P(IndexWrapperTest, BuildAndQuery) {
 
     auto dataset = GenDataset(NB, metric_type, is_binary);
     knowhere::DataSetPtr xb_dataset;
-    std::vector<uint8_t> bin_vecs;
-    std::vector<float> f_vecs;
+    FixedVector<uint8_t> bin_vecs;
+    FixedVector<float> f_vecs;
     if (is_binary) {
         bin_vecs = dataset.get_col<uint8_t>(milvus::FieldId(100));
         xb_dataset = knowhere::GenDataSet(NB, DIM, bin_vecs.data());
@@ -153,7 +154,7 @@ TEST_P(IndexWrapperTest, BuildAndQuery) {
 
     ASSERT_NO_THROW(index->Build(xb_dataset));
     auto binary_set = index->Serialize();
-    std::vector<std::string> index_files;
+    FixedVector<std::string> index_files;
     for (auto& binary : binary_set.binary_map_) {
         index_files.emplace_back(binary.first);
     }

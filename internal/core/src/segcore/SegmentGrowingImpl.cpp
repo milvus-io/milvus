@@ -23,6 +23,7 @@
 #include "common/EasyAssert.h"
 #include "common/Types.h"
 #include "fmt/format.h"
+#include "log/Log.h"
 #include "nlohmann/json.hpp"
 #include "query/PlanNode.h"
 #include "query/SearchOnSealed.h"
@@ -347,42 +348,52 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
     auto vec_ptr = insert_record_.get_field_data_base(field_id);
     auto& field_meta = schema_->operator[](field_id);
     if (field_meta.is_vector()) {
-        aligned_vector<char> output(field_meta.get_sizeof() * count);
+        auto result = CreateVectorDataArray(count, field_meta);
         if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
             bulk_subscript_impl<FloatVector>(field_id,
                                              field_meta.get_sizeof(),
                                              vec_ptr,
                                              seg_offsets,
                                              count,
-                                             output.data());
+                                             result->mutable_vectors()
+                                                 ->mutable_float_vector()
+                                                 ->mutable_data()
+                                                 ->mutable_data());
         } else if (field_meta.get_data_type() == DataType::VECTOR_BINARY) {
-            bulk_subscript_impl<BinaryVector>(field_id,
-                                              field_meta.get_sizeof(),
-                                              vec_ptr,
-                                              seg_offsets,
-                                              count,
-                                              output.data());
+            bulk_subscript_impl<BinaryVector>(
+                field_id,
+                field_meta.get_sizeof(),
+                vec_ptr,
+                seg_offsets,
+                count,
+                result->mutable_vectors()->mutable_binary_vector()->data());
         } else if (field_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
-            bulk_subscript_impl<Float16Vector>(field_id,
-                                               field_meta.get_sizeof(),
-                                               vec_ptr,
-                                               seg_offsets,
-                                               count,
-                                               output.data());
+            bulk_subscript_impl<Float16Vector>(
+                field_id,
+                field_meta.get_sizeof(),
+                vec_ptr,
+                seg_offsets,
+                count,
+                result->mutable_vectors()->mutable_float16_vector()->data());
         } else {
             PanicInfo(DataTypeInvalid, "logical error");
         }
-        return CreateVectorDataArrayFrom(output.data(), count, field_meta);
+        return result;
     }
 
     AssertInfo(!field_meta.is_vector(),
                "Scalar field meta type is vector type");
     switch (field_meta.get_data_type()) {
         case DataType::BOOL: {
-            FixedVector<bool> output(count);
-            bulk_subscript_impl<bool>(
-                vec_ptr, seg_offsets, count, output.data());
-            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
+            auto result = CreateScalarDataArray(count, field_meta);
+            bulk_subscript_impl<bool>(vec_ptr,
+                                      seg_offsets,
+                                      count,
+                                      result->mutable_scalars()
+                                          ->mutable_bool_data()
+                                          ->mutable_data()
+                                          ->mutable_data());
+            return result;
         }
         case DataType::INT8: {
             FixedVector<int8_t> output(count);
@@ -397,28 +408,48 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
             return CreateScalarDataArrayFrom(output.data(), count, field_meta);
         }
         case DataType::INT32: {
-            FixedVector<int32_t> output(count);
-            bulk_subscript_impl<int32_t>(
-                vec_ptr, seg_offsets, count, output.data());
-            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
+            auto result = CreateScalarDataArray(count, field_meta);
+            bulk_subscript_impl<int32_t>(vec_ptr,
+                                         seg_offsets,
+                                         count,
+                                         result->mutable_scalars()
+                                             ->mutable_int_data()
+                                             ->mutable_data()
+                                             ->mutable_data());
+            return result;
         }
         case DataType::INT64: {
-            FixedVector<int64_t> output(count);
-            bulk_subscript_impl<int64_t>(
-                vec_ptr, seg_offsets, count, output.data());
-            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
+            auto result = CreateScalarDataArray(count, field_meta);
+            bulk_subscript_impl<int64_t>(vec_ptr,
+                                         seg_offsets,
+                                         count,
+                                         result->mutable_scalars()
+                                             ->mutable_long_data()
+                                             ->mutable_data()
+                                             ->mutable_data());
+            return result;
         }
         case DataType::FLOAT: {
-            FixedVector<float> output(count);
-            bulk_subscript_impl<float>(
-                vec_ptr, seg_offsets, count, output.data());
-            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
+            auto result = CreateScalarDataArray(count, field_meta);
+            bulk_subscript_impl<float>(vec_ptr,
+                                       seg_offsets,
+                                       count,
+                                       result->mutable_scalars()
+                                           ->mutable_float_data()
+                                           ->mutable_data()
+                                           ->mutable_data());
+            return result;
         }
         case DataType::DOUBLE: {
-            FixedVector<double> output(count);
-            bulk_subscript_impl<double>(
-                vec_ptr, seg_offsets, count, output.data());
-            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
+            auto result = CreateScalarDataArray(count, field_meta);
+            bulk_subscript_impl<double>(vec_ptr,
+                                        seg_offsets,
+                                        count,
+                                        result->mutable_scalars()
+                                            ->mutable_double_data()
+                                            ->mutable_data()
+                                            ->mutable_data());
+            return result;
         }
         case DataType::VARCHAR: {
             FixedVector<std::string> output(count);
