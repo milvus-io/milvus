@@ -97,6 +97,8 @@ AwsChunkManager::AwsChunkManager(const StorageConfig& storage_config) {
         BuildAccessKeyClient(storage_config, config);
     }
 
+    PreCheck(storage_config);
+
     LOG_SEGCORE_INFO_ << "init AwsChunkManager with parameter[endpoint: '"
                       << storage_config.address << "', default_bucket_name:'"
                       << storage_config.bucket_name << "', root_path:'"
@@ -130,6 +132,8 @@ GcpChunkManager::GcpChunkManager(const StorageConfig& storage_config) {
     } else {
         BuildAccessKeyClient(storage_config, config);
     }
+
+    PreCheck(storage_config);
 
     LOG_SEGCORE_INFO_ << "init GcpChunkManager with parameter[endpoint: '"
                       << storage_config.address << "', default_bucket_name:'"
@@ -168,6 +172,8 @@ AliyunChunkManager::AliyunChunkManager(const StorageConfig& storage_config) {
     } else {
         BuildAccessKeyClient(mutable_config, config);
     }
+
+    PreCheck(storage_config);
 
     LOG_SEGCORE_INFO_ << "init AliyunChunkManager with parameter[endpoint: '"
                       << storage_config.address << "', default_bucket_name:'"
