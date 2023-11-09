@@ -86,8 +86,8 @@ func Test_CSVParserParseRows_IntPK(t *testing.T) {
 	}
 
 	reader := strings.NewReader(
-		`FieldBool,FieldInt8,FieldInt16,FieldInt32,FieldInt64,FieldFloat,FieldDouble,FieldString,FieldJSON,FieldBinaryVector,FieldFloatVector
-		true,10,101,1001,10001,3.14,1.56,No.0,"{""x"": 0}","[200,0]","[0.1,0.2,0.3,0.4]"`)
+		`FieldBool,FieldInt8,FieldInt16,FieldInt32,FieldInt64,FieldFloat,FieldDouble,FieldString,FieldJSON,FieldBinaryVector,FieldFloatVector,FieldArray
+		true,10,101,1001,10001,3.14,1.56,No.0,"{""x"": 0}","[200,0]","[0.1,0.2,0.3,0.4]","[1,2,3,4]"`)
 
 	t.Run("parse success", func(t *testing.T) {
 		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(100)}, consumer)
@@ -117,28 +117,28 @@ func Test_CSVParserParseRows_IntPK(t *testing.T) {
 
 		// csv parse error, fields len error
 		reader := strings.NewReader(
-			`FieldBool,FieldInt8,FieldInt16,FieldInt32,FieldInt64,FieldFloat,FieldDouble,FieldString,FieldJSON,FieldBinaryVector,FieldFloatVector
-		0,100,1000,99999999999999999,3,1,No.0,"{""x"": 0}","[200,0]","[0.1,0.2,0.3,0.4]"`)
+			`FieldBool,FieldInt8,FieldInt16,FieldInt32,FieldInt64,FieldFloat,FieldDouble,FieldString,FieldJSON,FieldBinaryVector,FieldFloatVector,FieldArray
+		0,100,1000,99999999999999999,3,1,No.0,"{""x"": 0}","[200,0]","[0.1,0.2,0.3,0.4]","[1,2,3,4]"`)
 		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(100)}, consumer)
 		assert.Error(t, err)
 
 		// redundant field
 		reader = strings.NewReader(
-			`dummy,FieldBool,FieldInt8,FieldInt16,FieldInt32,FieldInt64,FieldFloat,FieldDouble,FieldString,FieldJSON,FieldBinaryVector,FieldFloatVector
-		1,true,0,100,1000,99999999999999999,3,1,No.0,"{""x"": 0}","[200,0]","[0.1,0.2,0.3,0.4]"`)
+			`dummy,FieldBool,FieldInt8,FieldInt16,FieldInt32,FieldInt64,FieldFloat,FieldDouble,FieldString,FieldJSON,FieldBinaryVector,FieldFloatVector,FieldArray
+		1,true,0,100,1000,99999999999999999,3,1,No.0,"{""x"": 0}","[200,0]","[0.1,0.2,0.3,0.4]","[1,2,3,4]"`)
 		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(100)}, consumer)
 		assert.Error(t, err)
 
 		// field missed
 		reader = strings.NewReader(
-			`FieldInt8,FieldInt16,FieldInt32,FieldInt64,FieldFloat,FieldDouble,FieldString,FieldJSON,FieldBinaryVector,FieldFloatVector
-		0,100,1000,99999999999999999,3,1,No.0,"{""x"": 0}","[200,0]","[0.1,0.2,0.3,0.4]"`)
+			`FieldInt8,FieldInt16,FieldInt32,FieldInt64,FieldFloat,FieldDouble,FieldString,FieldJSON,FieldBinaryVector,FieldFloatVector,FieldArray
+		0,100,1000,99999999999999999,3,1,No.0,"{""x"": 0}","[200,0]","[0.1,0.2,0.3,0.4]","[1,2,3,4]"`)
 		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(100)}, consumer)
 		assert.Error(t, err)
 
 		// handle() error
-		content := `FieldBool,FieldInt8,FieldInt16,FieldInt32,FieldInt64,FieldFloat,FieldDouble,FieldString,FieldJSON,FieldBinaryVector,FieldFloatVector
-		true,0,100,1000,99999999999999999,3,1,No.0,"{""x"": 0}","[200,0]","[0.1,0.2,0.3,0.4]"`
+		content := `FieldBool,FieldInt8,FieldInt16,FieldInt32,FieldInt64,FieldFloat,FieldDouble,FieldString,FieldJSON,FieldBinaryVector,FieldFloatVector,FieldArray
+		true,0,100,1000,99999999999999999,3,1,No.0,"{""x"": 0}","[200,0]","[0.1,0.2,0.3,0.4]","[1,2,3,4]"`
 		consumer.handleErr = errors.New("error")
 		reader = strings.NewReader(content)
 		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(100)}, consumer)
