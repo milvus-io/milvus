@@ -76,6 +76,7 @@ type component interface {
 }
 
 func cleanLocalDir(path string) {
+	log.Info("start clean local dir", zap.String("root path", path))
 	_, statErr := os.Stat(path)
 	// path exist, but stat error
 	if statErr != nil && !os.IsNotExist(statErr) {
@@ -197,7 +198,7 @@ func (mr *MilvusRoles) runQueryCoord(ctx context.Context, localMsg bool) compone
 
 func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool, alias string) component {
 	querynode.Params.InitOnce()
-	rootPath := indexnode.Params.LocalStorageCfg.Path
+	rootPath := querynode.Params.LocalStorageCfg.Path
 	queryDataLocalPath := filepath.Join(rootPath, typeutil.QueryNodeRole)
 	cleanLocalDir(queryDataLocalPath)
 
