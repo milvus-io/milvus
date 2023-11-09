@@ -218,6 +218,27 @@ MinioChunkManager::BuildS3Client(
 }
 
 void
+MinioChunkManager::PreCheck(const StorageConfig& config) {
+    LOG_SEGCORE_INFO_ << "start to precheck chunk manager with configuration:"
+                      << config.ToString();
+    try {
+        // Just test connection not check real list, avoid cost resource.
+        ListWithPrefix("justforconnectioncheck");
+    } catch (SegcoreError& e) {
+        auto err_message = fmt::format(
+            "precheck chunk manager client failed, "
+            "error:{}, "
+            "configuration:{}",
+            e.what(),
+            config.ToString());
+        LOG_SEGCORE_ERROR_ << err_message;
+        throw SegcoreError(S3Error, err_message);
+    } catch (std::exception& e) {
+        throw e;
+    }
+};
+
+void
 MinioChunkManager::BuildAccessKeyClient(
     const StorageConfig& storage_config,
     const Aws::Client::ClientConfiguration& config) {
@@ -321,6 +342,8 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
     } else if (storageType == RemoteStorageType::GOOGLE_CLOUD) {
         BuildGoogleCloudClient(storage_config, config);
     }
+
+    PreCheck(storage_config);
 
     LOG_SEGCORE_INFO_ << "init MinioChunkManager with parameter[endpoint: '"
                       << storage_config.address << "', default_bucket_name:'"

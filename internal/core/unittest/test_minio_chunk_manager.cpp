@@ -83,6 +83,13 @@ class MinioChunkManagerTest : public testing::Test {
 //    MinioChunkManagerPtr chunk_manager_;
 //};
 
+TEST_F(MinioChunkManagerTest, InitFailed) {
+    auto configs = StorageConfig{};
+    // wrong address
+    configs.address = "1.2.3.4:9000";
+    EXPECT_THROW(std::make_unique<MinioChunkManager>(configs), SegcoreError);
+}
+
 TEST_F(MinioChunkManagerTest, BucketPositive) {
     string testBucketName = "test-bucket";
     chunk_manager_->SetBucketName(testBucketName);
