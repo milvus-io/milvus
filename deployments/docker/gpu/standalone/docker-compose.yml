@@ -33,7 +33,7 @@ services:
 
   standalone:
     container_name: milvus-standalone
-    image: milvusdb/milvus:v2.3.2-gpu
+    image: milvusdb/milvus:v2.3.3-gpu
     command: ["milvus", "run", "standalone"]
     security_opt:
     - seccomp:unconfined
