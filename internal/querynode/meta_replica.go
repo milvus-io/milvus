@@ -23,6 +23,7 @@ package querynode
 #include "segcore/segment_c.h"
 */
 import "C"
+
 import (
 	"errors"
 	"fmt"
@@ -135,6 +136,7 @@ type ReplicaInterface interface {
 	addSegmentsLoadingList(segmentIDs []UniqueID)
 	// removeSegmentsLoadingList add segment into black list, so get sealed segments will not return them.
 	removeSegmentsLoadingList(segmentIDs []UniqueID)
+	isSegmentStillLoading(segmentID UniqueID) bool
 
 	getGrowingSegments() []*Segment
 	getSealedSegments() []*Segment
@@ -205,7 +207,7 @@ func (replica *metaReplica) addCollection(collectionID UniqueID, schema *schemap
 		return col
 	}
 
-	var newC = newCollection(collectionID, schema)
+	newC := newCollection(collectionID, schema)
 	replica.collections[collectionID] = newC
 	metrics.QueryNodeNumCollections.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(len(replica.collections)))
 	return newC
@@ -413,7 +415,7 @@ func (replica *metaReplica) addPartition(collectionID UniqueID, partitionID Uniq
 func (replica *metaReplica) addPartitionPrivate(collection *Collection, partitionID UniqueID) error {
 	if !replica.hasPartitionPrivate(partitionID) {
 		collection.addPartitionID(partitionID)
-		var newPartition = newPartition(collection.ID(), partitionID)
+		newPartition := newPartition(collection.ID(), partitionID)
 		replica.partitions[partitionID] = newPartition
 		metrics.QueryNodeNumPartitions.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(len(replica.partitions)))
 	}
@@ -909,6 +911,13 @@ func (replica *metaReplica) removeSegmentsLoadingList(segmentIDs []UniqueID) {
 	defer replica.mu.Unlock()
 
 	replica.segmentsBlackList.Remove(segmentIDs...)
+}
+
+func (replica *metaReplica) isSegmentStillLoading(segmentID UniqueID) bool {
+	replica.mu.Lock()
+	defer replica.mu.Unlock()
+
+	return replica.segmentsBlackList.Contain(segmentID)
 }
 
 func (replica *metaReplica) getGrowingSegments() []*Segment {

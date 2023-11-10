@@ -486,8 +486,10 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *querypb.LoadSegment
 
 	alreadyLoaded := true
 	for _, info := range in.Infos {
+		// notice: segment is loaded when segment has been add to meta replica and removed from loading list
+		loading := node.metaReplica.isSegmentStillLoading(info.SegmentID)
 		has, _ := node.metaReplica.hasSegment(info.SegmentID, segmentTypeSealed)
-		if !has {
+		if loading || !has {
 			alreadyLoaded = false
 		}
 	}
