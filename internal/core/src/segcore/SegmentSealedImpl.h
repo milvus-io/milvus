@@ -29,6 +29,7 @@
 #include "SegmentSealed.h"
 #include "TimestampIndex.h"
 #include "common/EasyAssert.h"
+#include "google/protobuf/message_lite.h"
 #include "mmap/Column.h"
 #include "index/ScalarIndex.h"
 #include "sys/mman.h"
@@ -166,12 +167,12 @@ class SegmentSealedImpl : public SegmentSealed {
     }
 
  private:
-    template <typename T>
+    template <typename S, typename T = S>
     static void
     bulk_subscript_impl(const void* src_raw,
                         const int64_t* seg_offsets,
                         int64_t count,
-                        void* dst_raw);
+                        T* dst_raw);
 
     template <typename S, typename T = S>
     static void
@@ -180,11 +181,19 @@ class SegmentSealedImpl : public SegmentSealed {
                         int64_t count,
                         void* dst_raw);
 
+    template <typename S, typename T = S>
     static void
-    bulk_subscript_impl(const ColumnBase* column,
-                        const int64_t* seg_offsets,
-                        int64_t count,
-                        void* dst_raw);
+    bulk_subscript_ptr_impl(const ColumnBase* field,
+                            const int64_t* seg_offsets,
+                            int64_t count,
+                            google::protobuf::RepeatedPtrField<T>* dst_raw);
+
+    template <typename T>
+    static void
+    bulk_subscript_array_impl(const ColumnBase* column,
+                              const int64_t* seg_offsets,
+                              int64_t count,
+                              google::protobuf::RepeatedPtrField<T>* dst);
 
     static void
     bulk_subscript_impl(int64_t element_sizeof,
