@@ -1127,7 +1127,10 @@ func getCompactionMergeInfo(task *compactionTask) *milvuspb.CompactionMergeInfo 
 
 	var target int64 = -1
 	if task.result != nil {
-		target = task.result.GetSegmentID()
+		segments := task.result.GetSegments()
+		if len(segments) > 0 {
+			target = segments[0].GetSegmentID()
+		}
 	}
 
 	return &milvuspb.CompactionMergeInfo{

@@ -45,7 +45,7 @@ func (h *spyCompactionHandler) execCompactionPlan(signal *compactionSignal, plan
 }
 
 // completeCompaction record the result of a compaction
-func (h *spyCompactionHandler) completeCompaction(result *datapb.CompactionResult) error {
+func (h *spyCompactionHandler) completeCompaction(result *datapb.CompactionPlanResult) error {
 	return nil
 }
 

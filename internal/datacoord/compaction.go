@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -77,7 +76,7 @@ type compactionTask struct {
 	plan        *datapb.CompactionPlan
 	state       compactionTaskState
 	dataNodeID  int64
-	result      *datapb.CompactionResult
+	result      *datapb.CompactionPlanResult
 }
 
 func (t *compactionTask) shadowClone(opts ...compactionTaskOpt) *compactionTask {
@@ -104,7 +103,6 @@ type compactionPlanHandler struct {
 	allocator allocator
 	quit      chan struct{}
 	wg        sync.WaitGroup
-	flushCh   chan UniqueID
 	scheduler *scheduler
 }
 
@@ -259,8 +257,7 @@ func (s *scheduler) getExecutingTaskNum() int {
 	return int(s.taskNumber.Load())
 }
 
-func newCompactionPlanHandler(sessions *SessionManager, cm *ChannelManager, meta *meta,
-	allocator allocator, flush chan UniqueID,
+func newCompactionPlanHandler(sessions *SessionManager, cm *ChannelManager, meta *meta, allocator allocator,
 ) *compactionPlanHandler {
 	return &compactionPlanHandler{
 		plans:     make(map[int64]*compactionTask),
@@ -268,7 +265,6 @@ func newCompactionPlanHandler(sessions *SessionManager, cm *ChannelManager, meta
 		meta:      meta,
 		sessions:  sessions,
 		allocator: allocator,
-		flushCh:   flush,
 		scheduler: newScheduler(),
 	}
 }
@@ -390,7 +386,7 @@ func (c *compactionPlanHandler) setSegmentsCompacting(plan *datapb.CompactionPla
 
 // complete a compaction task
 // not threadsafe, only can be used internally
-func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionResult) error {
+func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionPlanResult) error {
 	planID := result.PlanID
 	if _, ok := c.plans[planID]; !ok {
 		return fmt.Errorf("plan %d is not found", planID)
@@ -412,17 +408,12 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionResu
 		return errors.New("unknown compaction type")
 	}
 	c.plans[planID] = c.plans[planID].shadowClone(setState(completed), setResult(result))
-	if c.plans[planID].plan.GetType() == datapb.CompactionType_MergeCompaction ||
-		c.plans[planID].plan.GetType() == datapb.CompactionType_MixCompaction {
-		c.flushCh <- result.GetSegmentID()
-	}
 	// TODO: when to clean task list
-
-	metrics.DataCoordCompactedSegmentSize.WithLabelValues().Observe(float64(getCompactedSegmentSize(result)))
+	UpdateCompactionSegmentSizeMetrics(result.GetSegments())
 	return nil
 }
 
-func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.CompactionPlan, result *datapb.CompactionResult) error {
+func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) error {
 	// Also prepare metric updates.
 	_, modSegments, newSegment, metricMutation, err := c.meta.PrepareCompleteCompactionMutation(plan, result)
 	if err != nil {
@@ -474,19 +465,19 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 	//  for DC might add new task while GetCompactionState.
 	executingTasks := c.getTasksByState(executing)
 	timeoutTasks := c.getTasksByState(timeout)
-	planStates := c.sessions.GetCompactionState()
+	planStates := c.sessions.GetCompactionPlansResults()
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, task := range executingTasks {
-		stateResult, ok := planStates[task.plan.PlanID]
-		state := stateResult.GetState()
+		planResult, ok := planStates[task.plan.PlanID]
+		state := planResult.GetState()
 		planID := task.plan.PlanID
 		// check whether the state of CompactionPlan is working
 		if ok {
 			if state == commonpb.CompactionState_Completed {
 				log.Info("complete compaction", zap.Int64("planID", planID), zap.Int64("nodeID", task.dataNodeID))
-				err := c.completeCompaction(stateResult.GetResult())
+				err := c.completeCompaction(planResult)
 				if err != nil {
 					log.Warn("fail to complete compaction", zap.Int64("planID", planID), zap.Int64("nodeID", task.dataNodeID), zap.Error(err))
 				}
@@ -594,7 +585,7 @@ func setStartTime(startTime uint64) compactionTaskOpt {
 	}
 }
 
-func setResult(result *datapb.CompactionResult) compactionTaskOpt {
+func setResult(result *datapb.CompactionPlanResult) compactionTaskOpt {
 	return func(task *compactionTask) {
 		task.result = result
 	}

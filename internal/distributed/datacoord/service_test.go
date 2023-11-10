@@ -188,7 +188,7 @@ func (m *MockDataCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetrics
 	return m.metricResp, m.err
 }
 
-func (m *MockDataCoord) CompleteCompaction(ctx context.Context, req *datapb.CompactionResult) (*commonpb.Status, error) {
+func (m *MockDataCoord) CompleteCompaction(ctx context.Context, req *datapb.CompactionPlanResult) (*commonpb.Status, error) {
 	return m.status, m.err
 }
 

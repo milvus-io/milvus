@@ -179,9 +179,12 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 	s.Run("success", func() {
 		s.node.compactionExecutor.executing.Insert(int64(3), newMockCompactor(true))
 		s.node.compactionExecutor.executing.Insert(int64(2), newMockCompactor(true))
-		s.node.compactionExecutor.completed.Insert(int64(1), &datapb.CompactionResult{
-			PlanID:    1,
-			SegmentID: 10,
+		s.node.compactionExecutor.completed.Insert(int64(1), &datapb.CompactionPlanResult{
+			PlanID: 1,
+			State:  commonpb.CompactionState_Completed,
+			Segments: []*datapb.CompactionSegment{
+				{SegmentID: 10},
+			},
 		})
 		stat, err := s.node.GetCompactionState(s.ctx, nil)
 		s.Assert().NoError(err)

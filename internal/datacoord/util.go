@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -129,9 +130,15 @@ func getCollectionTTL(properties map[string]string) (time.Duration, error) {
 	return Params.CommonCfg.EntityExpirationTTL.GetAsDuration(time.Second), nil
 }
 
-func getCompactedSegmentSize(s *datapb.CompactionResult) int64 {
-	var segmentSize int64
+func UpdateCompactionSegmentSizeMetrics(segments []*datapb.CompactionSegment) {
+	for _, seg := range segments {
+		size := getCompactedSegmentSize(seg)
+		metrics.DataCoordCompactedSegmentSize.WithLabelValues().Observe(float64(size))
+	}
+}
 
+func getCompactedSegmentSize(s *datapb.CompactionSegment) int64 {
+	var segmentSize int64
 	if s != nil {
 		for _, binlogs := range s.GetInsertLogs() {
 			for _, l := range binlogs.GetBinlogs() {

@@ -997,7 +997,7 @@ func (m *meta) SetSegmentCompacting(segmentID UniqueID, compacting bool) {
 // - the segment info of compactedTo segment after compaction to add
 // The compactedTo segment could contain 0 numRows
 func (m *meta) PrepareCompleteCompactionMutation(plan *datapb.CompactionPlan,
-	result *datapb.CompactionResult,
+	result *datapb.CompactionPlanResult,
 ) ([]*SegmentInfo, []*SegmentInfo, *SegmentInfo, *segMetricMutation, error) {
 	log.Info("meta update: prepare for complete compaction mutation")
 	compactionLogs := plan.GetSegmentBinlogs()
@@ -1048,12 +1048,15 @@ func (m *meta) PrepareCompleteCompactionMutation(plan *datapb.CompactionPlan,
 		deletedDeltalogs = append(deletedDeltalogs, l.GetDeltalogs()...)
 	}
 
+	// MixCompaction / MergeCompaction will generates one and only one segment
+	compactToSegment := result.GetSegments()[0]
+
 	newAddedDeltalogs := m.updateDeltalogs(originDeltalogs, deletedDeltalogs, nil)
-	copiedDeltalogs, err := m.copyDeltaFiles(newAddedDeltalogs, modSegments[0].CollectionID, modSegments[0].PartitionID, result.GetSegmentID())
+	copiedDeltalogs, err := m.copyDeltaFiles(newAddedDeltalogs, modSegments[0].CollectionID, modSegments[0].PartitionID, compactToSegment.GetSegmentID())
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	deltalogs := append(result.GetDeltalogs(), copiedDeltalogs...)
+	deltalogs := append(compactToSegment.GetDeltalogs(), copiedDeltalogs...)
 
 	compactionFrom := make([]UniqueID, 0, len(modSegments))
 	for _, s := range modSegments {
@@ -1061,15 +1064,15 @@ func (m *meta) PrepareCompleteCompactionMutation(plan *datapb.CompactionPlan,
 	}
 
 	segmentInfo := &datapb.SegmentInfo{
-		ID:                  result.GetSegmentID(),
+		ID:                  compactToSegment.GetSegmentID(),
 		CollectionID:        modSegments[0].CollectionID,
 		PartitionID:         modSegments[0].PartitionID,
 		InsertChannel:       modSegments[0].InsertChannel,
-		NumOfRows:           result.NumOfRows,
+		NumOfRows:           compactToSegment.NumOfRows,
 		State:               commonpb.SegmentState_Flushing,
 		MaxRowNum:           modSegments[0].MaxRowNum,
-		Binlogs:             result.GetInsertLogs(),
-		Statslogs:           result.GetField2StatslogPaths(),
+		Binlogs:             compactToSegment.GetInsertLogs(),
+		Statslogs:           compactToSegment.GetField2StatslogPaths(),
 		Deltalogs:           deltalogs,
 		StartPosition:       startPosition,
 		DmlPosition:         dmlPosition,
