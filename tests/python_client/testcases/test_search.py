@@ -108,7 +108,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
     def get_invalid_expr_value(self, request):
         if not isinstance(request.param, str):
             pytest.skip("expression value only support string")
-        if request.param == "":
+        if request.param in ["", " "]:
             pytest.skip("empty field is valid")
         yield request.param
 
@@ -483,6 +483,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         invalid_search_expr = get_invalid_expr_value
         log.info("test_search_param_invalid_expr_value: searching with "
                  "invalid expr: %s" % invalid_search_expr)
+        collection_w.load()
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit, invalid_search_expr,
                             check_task=CheckTasks.err_res,
