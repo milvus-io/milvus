@@ -670,7 +670,7 @@ func Test_NumpyParserPrepareAppendFunctions(t *testing.T) {
 	parser := createNumpyParser(t)
 
 	// succeed
-	appendFuncs, err := parser.prepareAppendFunctions()
+	appendFuncs, err := prepareAppendFunctions(parser.collectionInfo)
 	assert.NoError(t, err)
 	assert.Equal(t, len(createNumpySchema().Fields), len(appendFuncs))
 
@@ -694,7 +694,7 @@ func Test_NumpyParserPrepareAppendFunctions(t *testing.T) {
 		},
 	}
 	parser.collectionInfo.resetSchema(schema)
-	appendFuncs, err = parser.prepareAppendFunctions()
+	appendFuncs, err = prepareAppendFunctions(parser.collectionInfo)
 	assert.Error(t, err)
 	assert.Nil(t, appendFuncs)
 }
@@ -720,13 +720,13 @@ func Test_NumpyParserCheckRowCount(t *testing.T) {
 		segmentData[reader.fieldID] = fieldData
 	}
 
-	rowCount, err := parser.checkRowCount(segmentData)
+	rowCount, err := checkRowCount(parser.collectionInfo, segmentData)
 	assert.NoError(t, err)
 	assert.Equal(t, 5, rowCount)
 
 	// field data missed
 	delete(segmentData, 102)
-	rowCount, err = parser.checkRowCount(segmentData)
+	rowCount, err = checkRowCount(parser.collectionInfo, segmentData)
 	assert.Error(t, err)
 	assert.Zero(t, rowCount)
 
@@ -759,7 +759,7 @@ func Test_NumpyParserCheckRowCount(t *testing.T) {
 	}
 
 	parser.collectionInfo.resetSchema(schema)
-	rowCount, err = parser.checkRowCount(segmentData)
+	rowCount, err = checkRowCount(parser.collectionInfo, segmentData)
 	assert.Error(t, err)
 	assert.Zero(t, rowCount)
 
@@ -790,7 +790,7 @@ func Test_NumpyParserCheckRowCount(t *testing.T) {
 	}
 
 	parser.collectionInfo.resetSchema(schema)
-	rowCount, err = parser.checkRowCount(segmentData)
+	rowCount, err = checkRowCount(parser.collectionInfo, segmentData)
 	assert.NoError(t, err)
 	assert.Equal(t, 3, rowCount)
 }
@@ -804,7 +804,7 @@ func Test_NumpyParserSplitFieldsData(t *testing.T) {
 	parser := createNumpyParser(t)
 
 	t.Run("segemnt data is empty", func(t *testing.T) {
-		err = parser.splitFieldsData(make(BlockData), nil)
+		parser.autoIDRange, err = splitFieldsData(parser.collectionInfo, make(BlockData), nil, parser.rowIDAllocator)
 		assert.Error(t, err)
 	})
 
@@ -827,7 +827,7 @@ func Test_NumpyParserSplitFieldsData(t *testing.T) {
 		fieldsData := createFieldsData(sampleSchema(), 0)
 		shards := createShardsData(sampleSchema(), fieldsData, 1, []int64{1})
 		segmentData := genFieldsDataFunc()
-		err = parser.splitFieldsData(segmentData, shards)
+		parser.autoIDRange, err = splitFieldsData(parser.collectionInfo, segmentData, shards, parser.rowIDAllocator)
 		assert.Error(t, err)
 	})
 
@@ -863,7 +863,7 @@ func Test_NumpyParserSplitFieldsData(t *testing.T) {
 		parser.collectionInfo.ShardNum = 2
 		fieldsData := createFieldsData(schema, 0)
 		shards := createShardsData(schema, fieldsData, 2, []int64{1})
-		err = parser.splitFieldsData(segmentData, shards)
+		parser.autoIDRange, err = splitFieldsData(parser.collectionInfo, segmentData, shards, parser.rowIDAllocator)
 		assert.Error(t, err)
 	})
 
@@ -874,7 +874,7 @@ func Test_NumpyParserSplitFieldsData(t *testing.T) {
 		fieldsData := createFieldsData(sampleSchema(), 0)
 		shards := createShardsData(sampleSchema(), fieldsData, 2, []int64{1})
 		segmentData := genFieldsDataFunc()
-		err = parser.splitFieldsData(segmentData, shards)
+		parser.autoIDRange, err = splitFieldsData(parser.collectionInfo, segmentData, shards, parser.rowIDAllocator)
 		assert.Error(t, err)
 		parser.rowIDAllocator = newIDAllocator(ctx, t, nil)
 	})
@@ -888,7 +888,7 @@ func Test_NumpyParserSplitFieldsData(t *testing.T) {
 		fieldsData := createFieldsData(sampleSchema(), 0)
 		shards := createShardsData(sampleSchema(), fieldsData, 2, []int64{partitionID})
 		segmentData := genFieldsDataFunc()
-		err = parser.splitFieldsData(segmentData, shards)
+		parser.autoIDRange, err = splitFieldsData(parser.collectionInfo, segmentData, shards, parser.rowIDAllocator)
 		assert.NoError(t, err)
 		assert.NotEmpty(t, parser.autoIDRange)
 
@@ -900,7 +900,7 @@ func Test_NumpyParserSplitFieldsData(t *testing.T) {
 
 		// target field data is nil
 		shards[0][partitionID][105] = nil
-		err = parser.splitFieldsData(segmentData, shards)
+		parser.autoIDRange, err = splitFieldsData(parser.collectionInfo, segmentData, shards, parser.rowIDAllocator)
 		assert.Error(t, err)
 
 		schema.AutoID = false
@@ -935,7 +935,7 @@ func Test_NumpyParserSplitFieldsData(t *testing.T) {
 		segmentData[101] = &storage.Int64FieldData{
 			Data: []int64{1, 2, 4},
 		}
-		err = parser.splitFieldsData(segmentData, shards)
+		parser.autoIDRange, err = splitFieldsData(parser.collectionInfo, segmentData, shards, parser.rowIDAllocator)
 		assert.NoError(t, err)
 	})
 }
@@ -1203,14 +1203,14 @@ func Test_NumpyParserHashToPartition(t *testing.T) {
 
 	// no partition key, partition ID list greater than 1, return error
 	parser.collectionInfo.PartitionIDs = []int64{1, 2}
-	partID, err := parser.hashToPartition(blockData, 1)
+	partID, err := hashToPartition(parser.collectionInfo, blockData, 1)
 	assert.Error(t, err)
 	assert.Zero(t, partID)
 
 	// no partition key, return the only one partition ID
 	partitionID := int64(5)
 	parser.collectionInfo.PartitionIDs = []int64{partitionID}
-	partID, err = parser.hashToPartition(blockData, 1)
+	partID, err = hashToPartition(parser.collectionInfo, blockData, 1)
 	assert.NoError(t, err)
 	assert.Equal(t, partitionID, partID)
 
@@ -1219,7 +1219,7 @@ func Test_NumpyParserHashToPartition(t *testing.T) {
 	err = parser.collectionInfo.resetSchema(schema)
 	assert.NoError(t, err)
 	partitionIDs := []int64{3, 4, 5, 6}
-	partID, err = parser.hashToPartition(blockData, 1)
+	partID, err = hashToPartition(parser.collectionInfo, blockData, 1)
 	assert.NoError(t, err)
 	assert.Contains(t, partitionIDs, partID)
 
@@ -1227,7 +1227,7 @@ func Test_NumpyParserHashToPartition(t *testing.T) {
 	blockData[102] = &storage.FloatFieldData{
 		Data: []float32{1, 2, 3, 4, 5},
 	}
-	partID, err = parser.hashToPartition(blockData, 1)
+	partID, err = hashToPartition(parser.collectionInfo, blockData, 1)
 	assert.Error(t, err)
 	assert.Zero(t, partID)
 }
