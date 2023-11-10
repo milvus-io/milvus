@@ -123,7 +123,6 @@ func authenticate(c *gin.Context) {
 	if !proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
 		return
 	}
-	// TODO fubang
 	username, password, ok := httpserver.ParseUsernamePassword(c)
 	if ok {
 		if proxy.PasswordVerify(c, username, password) {
@@ -188,8 +187,8 @@ func (s *Server) startHTTPServer(errChan chan error) {
 			return
 		}
 		c.Next()
-	})
-	app := ginHandler.Group("/v1", authenticate)
+	}, authenticate, proxy.HTTPTraceLog)
+	app := ginHandler.Group("/v1")
 	httpserver.NewHandlers(s.proxy).RegisterRoutesToV1(app)
 	s.httpServer = &http.Server{Handler: ginHandler, ReadHeaderTimeout: time.Second}
 	errChan <- nil
@@ -247,6 +246,7 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 			logutil.UnaryTraceLoggerInterceptor,
 			proxy.RateLimitInterceptor(limiter),
 			accesslog.UnaryAccessLoggerInterceptor,
+			proxy.TraceLogInterceptor,
 			proxy.KeepActiveInterceptor,
 		)),
 	}

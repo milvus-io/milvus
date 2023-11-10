@@ -219,6 +219,7 @@ type commonConfig struct {
 	LockSlowLogWarnThreshold ParamItem `refreshable:"true"`
 
 	TTMsgEnabled ParamItem `refreshable:"true"`
+	TraceLogMode ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -633,6 +634,14 @@ like the old password verification when updating the credential`,
 		Doc:          "Whether the instance disable sending ts messages",
 	}
 	p.TTMsgEnabled.Init(base.mgr)
+
+	p.TraceLogMode = ParamItem{
+		Key:          "common.traceLogMode",
+		Version:      "2.3.4",
+		DefaultValue: "0",
+		Doc:          "trace request info",
+	}
+	p.TraceLogMode.Init(base.mgr)
 }
 
 type traceConfig struct {
