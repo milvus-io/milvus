@@ -1102,8 +1102,8 @@ class TestCollectionOperation(TestcaseBase):
         self._connect()
         fields = []
         for k, v in DataType.__members__.items():
-            if v and v != DataType.UNKNOWN and v != DataType.STRING\
-            and v != DataType.VARCHAR and v != DataType.FLOAT_VECTOR\
+            if v and v != DataType.UNKNOWN and v != DataType.STRING \
+            and v != DataType.VARCHAR and v != DataType.FLOAT_VECTOR and v != DataType.FLOAT16_VECTOR \
             and v != DataType.BINARY_VECTOR and v != DataType.ARRAY:
                 field, _ = self.field_schema_wrap.init_field_schema(name=k.lower(), dtype=v)
                 fields.append(field)
@@ -3071,7 +3071,7 @@ class TestDescribeCollection(TestcaseBase):
                          'element_type': 0},
                         {'field_id': 104, 'name': 'float_vector', 'description': '', 'type': 101,
                          'params': {'dim': 128}, 'element_type': 0}],
-             'aliases': [], 'consistency_level': 0, 'properties': [], 'num_partitions': 1}
+             'aliases': [], 'consistency_level': 0, 'properties': {}, 'num_partitions': 1}
         res = collection_w.describe()[0]
         del res['collection_id']
         log.info(res)
