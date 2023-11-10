@@ -416,7 +416,11 @@ func TestMetaReplica_BlackList(t *testing.T) {
 	segments = replica.getGrowingSegments()
 	assert.Equal(t, 1, len(segments))
 
+	assert.True(t, replica.isSegmentStillLoading(1))
+	assert.True(t, replica.isSegmentStillLoading(2))
 	replica.removeSegmentsLoadingList([]UniqueID{1, 2, 3})
+	assert.False(t, replica.isSegmentStillLoading(1))
+	assert.False(t, replica.isSegmentStillLoading(2))
 
 	segments = replica.getSealedSegments()
 	assert.Equal(t, 2, len(segments))
@@ -432,7 +436,6 @@ func TestMetaReplica_BlackList(t *testing.T) {
 
 	segments = replica.getGrowingSegments()
 	assert.Equal(t, 1, len(segments))
-
 }
 
 func TestMetaReplica_removeCollectionVDeltaChannel(t *testing.T) {
