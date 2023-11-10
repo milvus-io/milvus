@@ -33,16 +33,16 @@ import (
 )
 
 type (
-	Status   = int32
+	Status   = string
 	Priority int32
 )
 
 const (
-	TaskStatusCreated Status = iota + 1
-	TaskStatusStarted
-	TaskStatusSucceeded
-	TaskStatusCanceled
-	TaskStatusFailed
+	TaskStatusCreated   = "created"
+	TaskStatusStarted   = "started"
+	TaskStatusSucceeded = "succeeded"
+	TaskStatusCanceled  = "canceled"
+	TaskStatusFailed    = "failed"
 )
 
 const (
@@ -107,7 +107,7 @@ type baseTask struct {
 	loadType     querypb.LoadType
 
 	source   Source
-	status   *atomic.Int32
+	status   *atomic.String
 	priority Priority
 	err      error
 	actions  []Action
@@ -128,7 +128,7 @@ func newBaseTask(ctx context.Context, source Source, collectionID, replicaID Uni
 		replicaID:    replicaID,
 		shard:        shard,
 
-		status:   atomic.NewInt32(TaskStatusStarted),
+		status:   atomic.NewString(TaskStatusStarted),
 		priority: TaskPriorityNormal,
 		ctx:      ctx,
 		cancel:   cancel,
