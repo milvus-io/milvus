@@ -551,10 +551,10 @@ func (scheduler *taskScheduler) schedule(node int64) {
 
 	// The scheduler doesn't limit the number of tasks,
 	// to commit tasks to executors as soon as possible, to reach higher merge possibility
-	failCount := atomic.NewInt32(0)
+	commmittedNum := atomic.NewInt32(0)
 	funcutil.ProcessFuncParallel(len(toProcess), hardware.GetCPUNum(), func(idx int) error {
-		if !scheduler.process(toProcess[idx]) {
-			failCount.Inc()
+		if scheduler.process(toProcess[idx]) {
+			commmittedNum.Inc()
 		}
 		return nil
 	}, "process")
@@ -565,7 +565,7 @@ func (scheduler *taskScheduler) schedule(node int64) {
 
 	log.Info("processed tasks",
 		zap.Int("toProcessNum", len(toProcess)),
-		zap.Int32("failCount", failCount.Load()),
+		zap.Int32("committedNum", commmittedNum.Load()),
 		zap.Int("toRemoveNum", len(toRemove)),
 	)
 
@@ -689,7 +689,7 @@ func (scheduler *taskScheduler) recordSegmentTaskError(task *SegmentTask) {
 		zap.Int64("collectionID", task.CollectionID()),
 		zap.Int64("replicaID", task.ReplicaID()),
 		zap.Int64("segmentID", task.SegmentID()),
-		zap.Int32("taskStatus", task.Status()),
+		zap.String("status", task.Status()),
 		zap.Error(task.err),
 	)
 	meta.GlobalFailedLoadCache.Put(task.collectionID, task.Err())
@@ -700,7 +700,7 @@ func (scheduler *taskScheduler) remove(task Task) {
 		zap.Int64("taskID", task.ID()),
 		zap.Int64("collectionID", task.CollectionID()),
 		zap.Int64("replicaID", task.ReplicaID()),
-		zap.Int32("taskStatus", task.Status()),
+		zap.String("status", task.Status()),
 	)
 	task.Cancel(nil)
 	scheduler.tasks.Remove(task.ID())
@@ -725,7 +725,7 @@ func (scheduler *taskScheduler) remove(task Task) {
 	}
 
 	scheduler.updateTaskMetrics()
-	log.Debug("task removed", zap.Stack("stack"))
+	log.Info("task removed")
 }
 
 func (scheduler *taskScheduler) checkStale(task Task) error {
