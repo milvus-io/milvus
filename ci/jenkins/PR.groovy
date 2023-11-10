@@ -200,7 +200,7 @@ pipeline {
                                             MILVUS_HELM_NAMESPACE="milvus-ci" \
                                             MILVUS_CLUSTER_ENABLED="${clusterEnabled}" \
                                             TEST_TIMEOUT="${e2e_timeout_seconds}" \
-                                            ./ci_e2e_4am.sh  "-n 6 -x --tags L0 L1 --timeout ${case_timeout_seconds}"
+                                            ./ci_e2e_4am.sh  "-n 6 --tags L0 L1 --timeout ${case_timeout_seconds}"
                                             """
                             
                                         } else {
