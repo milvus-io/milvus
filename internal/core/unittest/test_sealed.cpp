@@ -1222,7 +1222,7 @@ TEST(Sealed, GetVectorFromChunkCache) {
     auto fakevec = dataset.get_col<float>(fakevec_id);
     auto conf = generate_build_conf(index_type, metric_type);
     auto ds = knowhere::GenDataSet(N, dim, fakevec.data());
-    auto indexing = std::make_unique<index::VectorMemIndex>(
+    auto indexing = std::make_unique<index::VectorMemIndex<float>>(
         index_type,
         metric_type,
         knowhere::Version::GetCurrentVersion().VersionNumber());

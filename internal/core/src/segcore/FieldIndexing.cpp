@@ -35,7 +35,7 @@ VectorFieldIndexing::VectorFieldIndexing(const FieldMeta& field_meta,
                                                field_index_meta,
                                                segcore_config,
                                                SegmentType::Growing)) {
-    index_ = std::make_unique<index::VectorMemIndex>(
+    index_ = std::make_unique<index::VectorMemIndex<float>>(
         config_->GetIndexType(),
         config_->GetMetricType(),
         knowhere::Version::GetCurrentVersion().VersionNumber());
@@ -57,7 +57,7 @@ VectorFieldIndexing::BuildIndexRange(int64_t ack_beg,
     data_.grow_to_at_least(ack_end);
     for (int chunk_id = ack_beg; chunk_id < ack_end; chunk_id++) {
         const auto& chunk = source->get_chunk(chunk_id);
-        auto indexing = std::make_unique<index::VectorMemIndex>(
+        auto indexing = std::make_unique<index::VectorMemIndex<float>>(
             knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
             knowhere::metric::L2,
             knowhere::Version::GetCurrentVersion().VersionNumber());
