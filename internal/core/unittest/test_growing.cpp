@@ -100,6 +100,7 @@ TEST(Growing, RealCount) {
 TEST(Growing, FillData) {
     auto schema = std::make_shared<Schema>();
     auto metric_type = knowhere::metric::L2;
+    auto bool_field = schema->AddDebugField("bool", DataType::BOOL);
     auto int8_field = schema->AddDebugField("int8", DataType::INT8);
     auto int16_field = schema->AddDebugField("int16", DataType::INT16);
     auto int32_field = schema->AddDebugField("int32", DataType::INT32);
@@ -145,6 +146,7 @@ TEST(Growing, FillData) {
     int64_t dim = 128;
     for (int64_t i = 0; i < n_batch; i++) {
         auto dataset = DataGen(schema, per_batch);
+        auto bool_values = dataset.get_col<bool>(bool_field);
         auto int8_values = dataset.get_col<int8_t>(int8_field);
         auto int16_values = dataset.get_col<int16_t>(int16_field);
         auto int32_values = dataset.get_col<int32_t>(int32_field);
@@ -172,6 +174,8 @@ TEST(Growing, FillData) {
                         dataset.raw_);
         auto num_inserted = (i + 1) * per_batch;
         auto ids_ds = GenRandomIds(num_inserted);
+        auto bool_result =
+            segment->bulk_subscript(bool_field, ids_ds->GetIds(), num_inserted);
         auto int8_result =
             segment->bulk_subscript(int8_field, ids_ds->GetIds(), num_inserted);
         auto int16_result = segment->bulk_subscript(
@@ -203,6 +207,7 @@ TEST(Growing, FillData) {
         auto vec_result =
             segment->bulk_subscript(vec, ids_ds->GetIds(), num_inserted);
 
+        EXPECT_EQ(bool_result->scalars().bool_data().data_size(), num_inserted);
         EXPECT_EQ(int8_result->scalars().int_data().data_size(), num_inserted);
         EXPECT_EQ(int16_result->scalars().int_data().data_size(), num_inserted);
         EXPECT_EQ(int32_result->scalars().int_data().data_size(), num_inserted);
