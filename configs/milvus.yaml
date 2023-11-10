@@ -412,6 +412,7 @@ dataNode:
     insertBufSize: 16777216 # Max buffer size to flush for a single segment.
     deleteBufBytes: 67108864 # Max buffer size to flush del for a single channel
     syncPeriod: 600 # The period to sync segments if buffer is not empty.
+    deltaPolicy: l0_delta # the delta policy current datanode using, one of bloom_filter_pkoracle and l0_delta
   # can specify ip for example
   # ip: 127.0.0.1
   ip: # if not specify address, will use the first unicastable address as local ip

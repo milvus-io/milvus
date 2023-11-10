@@ -2627,7 +2627,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		Key:          "dataNode.segment.deltaPolicy",
 		Version:      "2.3.4",
 		DefaultValue: "bloom_filter_pkoracle",
-		Doc:          "the delta policy current datanode using",
+		Doc:          "the delta policy current datanode using, one of bloom_filter_pkoracle and l0_delta",
 		Export:       true,
 	}
 	p.DeltaPolicy.Init(base.mgr)
