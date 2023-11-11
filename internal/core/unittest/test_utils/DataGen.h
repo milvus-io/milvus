@@ -919,7 +919,7 @@ GenVecIndexing(int64_t N, int64_t dim, const float* vec) {
     auto chunk_manager = milvus::storage::CreateChunkManager(storage_config);
     milvus::storage::FileManagerContext file_manager_context(
         field_data_meta, index_meta, chunk_manager);
-    auto indexing = std::make_unique<index::VectorMemIndex>(
+    auto indexing = std::make_unique<index::VectorMemIndex<float>>(
         knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
         knowhere::metric::L2,
         knowhere::Version::GetCurrentVersion().VersionNumber(),

@@ -1689,7 +1689,7 @@ TEST(CApiTest, LoadIndexSearch) {
     milvus::segcore::LoadIndexInfo load_index_info;
     auto& index_params = load_index_info.index_params;
     index_params["index_type"] = knowhere::IndexEnum::INDEX_FAISS_IVFSQ8;
-    load_index_info.index = std::make_unique<VectorMemIndex>(
+    load_index_info.index = std::make_unique<VectorMemIndex<float>>(
         index_params["index_type"],
         knowhere::metric::L2,
         knowhere::Version::GetCurrentVersion().VersionNumber());

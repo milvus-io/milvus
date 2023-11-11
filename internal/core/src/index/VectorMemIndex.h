@@ -27,6 +27,7 @@
 
 namespace milvus::index {
 
+template <typename T>
 class VectorMemIndex : public VectorIndex {
  public:
     explicit VectorMemIndex(
@@ -88,5 +89,6 @@ class VectorMemIndex : public VectorIndex {
     std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
 };
 
-using VectorMemIndexPtr = std::unique_ptr<VectorMemIndex>;
+template <typename T>
+using VectorMemIndexPtr = std::unique_ptr<VectorMemIndex<T>>;
 }  // namespace milvus::index

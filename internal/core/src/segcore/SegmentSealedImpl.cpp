@@ -1391,7 +1391,7 @@ SegmentSealedImpl::generate_binlog_index(const FieldId field_id) {
             auto index_metric = field_binlog_config->GetMetricType();
 
             index::IndexBasePtr vec_index =
-                std::make_unique<index::VectorMemIndex>(
+                std::make_unique<index::VectorMemIndex<float>>(
                     field_binlog_config->GetIndexType(),
                     index_metric,
                     knowhere::Version::GetCurrentVersion().VersionNumber());

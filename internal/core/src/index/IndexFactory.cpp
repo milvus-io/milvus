@@ -92,11 +92,25 @@ IndexFactory::CreateVectorIndex(
                     fmt::format("invalid data type to build disk index: {}",
                                 data_type));
         }
+    } else {  // create mem index
+        switch (data_type) {
+            case DataType::VECTOR_FLOAT: {
+                return std::make_unique<VectorMemIndex<float>>(
+                    index_type, metric_type, version, file_manager_context);
+            }
+            case DataType::VECTOR_BINARY: {
+                return std::make_unique<VectorMemIndex<uint8_t>>(
+                    index_type, metric_type, version, file_manager_context);
+            }
+            default:
+                throw SegcoreError(
+                    DataTypeInvalid,
+                    fmt::format("invalid data type to build mem index: {}",
+                                data_type));
+        }
     }
-
-    // create mem index
-    return std::make_unique<VectorMemIndex>(
-        index_type, metric_type, version, file_manager_context);
+    // return std::make_unique<VectorMemIndex>(
+    //     index_type, metric_type, version, file_manager_context);
 }
 
 }  // namespace milvus::index

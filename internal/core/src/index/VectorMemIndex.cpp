@@ -48,7 +48,8 @@
 
 namespace milvus::index {
 
-VectorMemIndex::VectorMemIndex(
+template <typename T>
+VectorMemIndex<T>::VectorMemIndex(
     const IndexType& index_type,
     const MetricType& metric_type,
     const IndexVersion& version,
@@ -65,8 +66,9 @@ VectorMemIndex::VectorMemIndex(
     index_ = knowhere::IndexFactory::Instance().Create(GetIndexType(), version);
 }
 
+template <typename T>
 BinarySet
-VectorMemIndex::Upload(const Config& config) {
+VectorMemIndex<T>::Upload(const Config& config) {
     auto binary_set = Serialize(config);
     file_manager_->AddFile(binary_set);
 
@@ -79,8 +81,9 @@ VectorMemIndex::Upload(const Config& config) {
     return ret;
 }
 
+template <typename T>
 BinarySet
-VectorMemIndex::Serialize(const Config& config) {
+VectorMemIndex<T>::Serialize(const Config& config) {
     knowhere::BinarySet ret;
     auto stat = index_.Serialize(ret);
     if (stat != knowhere::Status::success)
@@ -91,9 +94,10 @@ VectorMemIndex::Serialize(const Config& config) {
     return ret;
 }
 
+template <typename T>
 void
-VectorMemIndex::LoadWithoutAssemble(const BinarySet& binary_set,
-                                    const Config& config) {
+VectorMemIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
+                                       const Config& config) {
     auto stat = index_.Deserialize(binary_set, config);
     if (stat != knowhere::Status::success)
         PanicInfo(ErrorCode::UnexpectedError,
@@ -101,14 +105,16 @@ VectorMemIndex::LoadWithoutAssemble(const BinarySet& binary_set,
     SetDim(index_.Dim());
 }
 
+template <typename T>
 void
-VectorMemIndex::Load(const BinarySet& binary_set, const Config& config) {
+VectorMemIndex<T>::Load(const BinarySet& binary_set, const Config& config) {
     milvus::Assemble(const_cast<BinarySet&>(binary_set));
     LoadWithoutAssemble(binary_set, config);
 }
 
+template <typename T>
 void
-VectorMemIndex::Load(const Config& config) {
+VectorMemIndex<T>::Load(const Config& config) {
     if (config.contains(kMmapFilepath)) {
         return LoadFromFile(config);
     }
@@ -218,9 +224,10 @@ VectorMemIndex::Load(const Config& config) {
     LOG_SEGCORE_INFO_ << "load vector index done";
 }
 
+template <typename T>
 void
-VectorMemIndex::BuildWithDataset(const DatasetPtr& dataset,
-                                 const Config& config) {
+VectorMemIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
+                                    const Config& config) {
     knowhere::Json index_config;
     index_config.update(config);
 
@@ -235,8 +242,9 @@ VectorMemIndex::BuildWithDataset(const DatasetPtr& dataset,
     SetDim(index_.Dim());
 }
 
+template <typename T>
 void
-VectorMemIndex::Build(const Config& config) {
+VectorMemIndex<T>::Build(const Config& config) {
     auto insert_files =
         GetValueFromConfig<std::vector<std::string>>(config, "insert_files");
     AssertInfo(insert_files.has_value(),
@@ -272,9 +280,10 @@ VectorMemIndex::Build(const Config& config) {
     BuildWithDataset(dataset, build_config);
 }
 
+template <typename T>
 void
-VectorMemIndex::AddWithDataset(const DatasetPtr& dataset,
-                               const Config& config) {
+VectorMemIndex<T>::AddWithDataset(const DatasetPtr& dataset,
+                                  const Config& config) {
     knowhere::Json index_config;
     index_config.update(config);
 
@@ -286,10 +295,11 @@ VectorMemIndex::AddWithDataset(const DatasetPtr& dataset,
     rc.ElapseFromBegin("Done");
 }
 
+template <typename T>
 std::unique_ptr<SearchResult>
-VectorMemIndex::Query(const DatasetPtr dataset,
-                      const SearchInfo& search_info,
-                      const BitsetView& bitset) {
+VectorMemIndex<T>::Query(const DatasetPtr dataset,
+                         const SearchInfo& search_info,
+                         const BitsetView& bitset) {
     //    AssertInfo(GetMetricType() == search_info.metric_type_,
     //               "Metric type of field index isn't the same with search info");
 
@@ -358,13 +368,15 @@ VectorMemIndex::Query(const DatasetPtr dataset,
     return result;
 }
 
+template <typename T>
 const bool
-VectorMemIndex::HasRawData() const {
+VectorMemIndex<T>::HasRawData() const {
     return index_.HasRawData(GetMetricType());
 }
 
+template <typename T>
 std::vector<uint8_t>
-VectorMemIndex::GetVector(const DatasetPtr dataset) const {
+VectorMemIndex<T>::GetVector(const DatasetPtr dataset) const {
     auto res = index_.GetVectorByIds(*dataset);
     if (!res.has_value()) {
         PanicInfo(ErrorCode::UnexpectedError,
@@ -385,8 +397,10 @@ VectorMemIndex::GetVector(const DatasetPtr dataset) const {
     memcpy(raw_data.data(), tensor, data_size);
     return raw_data;
 }
+
+template <typename T>
 void
-VectorMemIndex::LoadFromFile(const Config& config) {
+VectorMemIndex<T>::LoadFromFile(const Config& config) {
     auto filepath = GetValueFromConfig<std::string>(config, kMmapFilepath);
     AssertInfo(filepath.has_value(), "mmap filepath is empty when load index");
 
@@ -501,5 +515,8 @@ VectorMemIndex::LoadFromFile(const Config& config) {
                            strerror(errno)));
     LOG_SEGCORE_INFO_ << "load vector index done";
 }
+
+template class VectorMemIndex<float>;
+template class VectorMemIndex<uint8_t>;
 
 }  // namespace milvus::index
