@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/samber/lo"
@@ -144,6 +145,7 @@ func FilterInIndexedSegments(handler Handler, indexCoord types.IndexCoord, segme
 	)
 
 	group := &errgroup.Group{}
+	mutex := &sync.Mutex{}
 	for collectionID, segmentIDs := range collectionSegments {
 		collectionID := collectionID
 		segmentIDs := segmentIDs
@@ -155,7 +157,9 @@ func FilterInIndexedSegments(handler Handler, indexCoord types.IndexCoord, segme
 					return err
 				}
 				indexed := extractSegmentsWithVectorIndex(vecFieldID, segmentInfos)
+				mutex.Lock()
 				collectionIndexedSegments[collectionID] = append(collectionIndexedSegments[collectionID], indexed...)
+				mutex.Unlock()
 			}
 			return nil
 		})
