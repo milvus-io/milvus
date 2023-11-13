@@ -380,6 +380,12 @@ dataCoord:
     maxParallelTaskNum: 10 # max parallel compaction task number
     indexBasedCompaction: true
 
+    levelzero:
+      enable: false
+      forceTrigger:
+        minSize: 8 # The minmum size in MB to force trigger a LevelZero Compaction
+        deltalogMinNum: 10 # the minimum number of deltalog files to force trigger a LevelZero Compaction
+
   enableGarbageCollection: true
   gc:
     interval: 3600 # gc interval in seconds
