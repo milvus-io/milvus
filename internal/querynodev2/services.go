@@ -266,6 +266,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		node.loader,
 		node.factory,
 		channel.GetSeekPosition().GetTimestamp(),
+		node.queryHook,
 	)
 	if err != nil {
 		log.Warn("failed to create shard delegator", zap.Error(err))
