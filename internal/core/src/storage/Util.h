@@ -95,6 +95,9 @@ CreateFileManager(IndexType index_type,
                   const IndexMeta& index_meta,
                   RemoteChunkManagerPtr rcm);
 
+int64_t
+GetByteSizeOfFieldDatas(const std::vector<FieldDataPtr>& field_datas);
+
 std::unique_ptr<DataCodec>
 DownloadAndDecodeRemoteFile(RemoteChunkManager* remote_chunk_manager, std::string file);
 

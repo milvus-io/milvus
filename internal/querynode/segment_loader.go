@@ -262,6 +262,12 @@ func (loader *segmentLoader) loadFiles(ctx context.Context, segment *Segment,
 		zap.Int64("segmentID", segmentID),
 		zap.String("segmentType", segment.getType().String()))
 
+	collection, err := loader.metaReplica.getCollectionByID(collectionID)
+	if err != nil {
+		log.Warn("failed to get collection while loading segment", zap.Error(err))
+		return err
+	}
+
 	pkFieldID, err := loader.metaReplica.getPKFieldIDByCollectionID(collectionID)
 	if err != nil {
 		return err
@@ -297,7 +303,7 @@ func (loader *segmentLoader) loadFiles(ctx context.Context, segment *Segment,
 			}
 		}
 
-		if err := loader.loadIndexedFieldData(ctx, segment, indexedFieldInfos); err != nil {
+		if err := loader.loadIndexedFieldData(ctx, collection.Schema(), segment, loadInfo.GetNumOfRows(), indexedFieldInfos); err != nil {
 			return err
 		}
 		if err := loader.loadSealedSegmentFields(ctx, segment, fieldBinlogs, loadInfo.GetNumOfRows()); err != nil {
@@ -461,7 +467,13 @@ func (loader *segmentLoader) loadFieldBinlogsAsync(ctx context.Context, field *d
 	return futures
 }
 
-func (loader *segmentLoader) loadIndexedFieldData(ctx context.Context, segment *Segment, vecFieldInfos map[int64]*IndexedFieldInfo) error {
+func (loader *segmentLoader) loadIndexedFieldData(ctx context.Context,
+	schema *schemapb.CollectionSchema,
+	segment *Segment,
+	numRows int64,
+	vecFieldInfos map[int64]*IndexedFieldInfo) error {
+	schemaHelper, _ := typeutil.CreateSchemaHelper(schema)
+
 	for fieldID, fieldInfo := range vecFieldInfos {
 		indexInfo := fieldInfo.indexInfo
 		err := loader.loadFieldIndexData(ctx, segment, indexInfo)
@@ -475,6 +487,18 @@ func (loader *segmentLoader) loadIndexedFieldData(ctx context.Context, segment *
 			zap.Int64("fieldID", fieldID))
 
 		segment.setIndexedFieldInfo(fieldID, fieldInfo)
+
+		// set average row data size of variable field
+		field, err := schemaHelper.GetFieldFromID(fieldID)
+		if err != nil {
+			return err
+		}
+		if typeutil.IsVariableDataType(field.GetDataType()) {
+			err = segment.UpdateFieldRawDataSize(numRows, fieldInfo.fieldBinlog)
+			if err != nil {
+				return err
+			}
+		}
 	}
 
 	return nil

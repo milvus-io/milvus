@@ -51,11 +51,11 @@ SegmentGrowingImpl::mask_with_delete(BitsetType& bitset, int64_t ins_barrier, Ti
 
 void
 SegmentGrowingImpl::Insert(int64_t reserved_offset,
-                           int64_t size,
+                           int64_t num_rows,
                            const int64_t* row_ids,
                            const Timestamp* timestamps_raw,
                            const InsertData* insert_data) {
-    AssertInfo(insert_data->num_rows() == size, "Entities_raw count not equal to insert size");
+    AssertInfo(insert_data->num_rows() == num_rows, "Entities_raw count not equal to insert size");
     //    AssertInfo(insert_data->fields_data_size() == schema_->size(),
     //               "num fields of insert data not equal to num of schema fields");
     // step 1: check insert data if valid
@@ -71,26 +71,33 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
     // query node already guarantees that the timestamp is ordered, avoid field data copy in c++
 
     // step 3: fill into Segment.ConcurrentVector
-    insert_record_.timestamps_.set_data_raw(reserved_offset, timestamps_raw, size);
-    insert_record_.row_ids_.set_data_raw(reserved_offset, row_ids, size);
+    insert_record_.timestamps_.set_data_raw(reserved_offset, timestamps_raw, num_rows);
+    insert_record_.row_ids_.set_data_raw(reserved_offset, row_ids, num_rows);
     for (auto [field_id, field_meta] : schema_->get_fields()) {
         AssertInfo(field_id_to_offset.count(field_id), "Cannot find field_id");
         auto data_offset = field_id_to_offset[field_id];
-        insert_record_.get_field_data_base(field_id)->set_data_raw(reserved_offset, size,
+        insert_record_.get_field_data_base(field_id)->set_data_raw(reserved_offset, num_rows,
                                                                    &insert_data->fields_data(data_offset), field_meta);
+
+        // update average row data size
+        if (datatype_is_variable(field_meta.get_data_type())) {
+            auto field_data_size =
+                GetRawDataSizeOfDataArray(&insert_data->fields_data(data_offset), field_meta, num_rows);
+            SegmentInternalInterface::set_field_avg_size(field_id, num_rows, field_data_size);
+        }
     }
 
     // step 4: set pks to offset
     auto field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
     AssertInfo(field_id.get() != INVALID_FIELD_ID, "Primary key is -1");
-    std::vector<PkType> pks(size);
+    std::vector<PkType> pks(num_rows);
     ParsePksFromFieldData(pks, insert_data->fields_data(field_id_to_offset[field_id]));
-    for (int i = 0; i < size; ++i) {
+    for (int i = 0; i < num_rows; ++i) {
         insert_record_.insert_pk(pks[i], reserved_offset + i);
     }
 
     // step 5: update small indexes
-    insert_record_.ack_responder_.AddSegment(reserved_offset, reserved_offset + size);
+    insert_record_.ack_responder_.AddSegment(reserved_offset, reserved_offset + num_rows);
     if (enable_small_index_) {
         int64_t chunk_rows = segcore_config_.get_chunk_rows();
         indexing_record_.UpdateResourceAck(insert_record_.ack_responder_.GetAck() / chunk_rows, insert_record_);
@@ -117,12 +124,13 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
     }
     auto reserved_offset = PreInsert(num_rows);
     for (auto& [id, info] : infos.field_infos) {
+        auto field_id = FieldId(id);
         auto insert_files = info.insert_files;
         auto field_datas = LoadFieldDatasFromRemote(insert_files);
         AssertInfo(num_rows == storage::GetTotalNumRowsForFieldDatas(field_datas),
                    "inconsistent num row between multi fields");
 
-        if (id == TimestampFieldID.get()) {
+        if (field_id == TimestampFieldID) {
             // step 2: sort timestamp
             // query node already guarantees that the timestamp is ordered, avoid field data copy in c++
 
@@ -131,14 +139,21 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
             continue;
         }
 
-        if (id == RowFieldID.get()) {
+        if (field_id == RowFieldID) {
             insert_record_.row_ids_.set_data_raw(reserved_offset, field_datas);
             continue;
         }
 
-        insert_record_.get_field_data_base(FieldId(id))->set_data_raw(reserved_offset, field_datas);
-        if (id == primary_field_id.get()) {
+        insert_record_.get_field_data_base(field_id)->set_data_raw(reserved_offset, field_datas);
+        if (field_id == primary_field_id) {
             insert_record_.insert_pks(field_datas);
+        }
+
+        // update average row data size
+        auto field_meta = (*schema_)[field_id];
+        if (datatype_is_variable(field_meta.get_data_type())) {
+            SegmentInternalInterface::set_field_avg_size(field_id, num_rows,
+                                                         storage::GetByteSizeOfFieldDatas(field_datas));
         }
     }
 

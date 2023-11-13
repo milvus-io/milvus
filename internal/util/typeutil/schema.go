@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"unsafe"
 
 	"go.uber.org/zap"
 
@@ -374,8 +375,16 @@ func IsStringType(dataType schemapb.DataType) bool {
 	}
 }
 
+func IsArrayType(dataType schemapb.DataType) bool {
+	return dataType == schemapb.DataType_Array
+}
+
+func IsVariableDataType(dataType schemapb.DataType) bool {
+	return IsStringType(dataType) || IsArrayType(dataType) || IsJSONType(dataType)
+}
+
 // AppendFieldData appends fields data of specified index from src to dst
-func AppendFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData, idx int64) {
+func AppendFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData, idx int64) (appendSize int64) {
 	for i, fieldData := range src {
 		switch fieldType := fieldData.Field.(type) {
 		case *schemapb.FieldData_Scalars:
@@ -401,6 +410,8 @@ func AppendFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData, idx i
 				} else {
 					dstScalar.GetBoolData().Data = append(dstScalar.GetBoolData().Data, srcScalar.BoolData.Data[idx])
 				}
+				/* #nosec G103 */
+				appendSize += int64(unsafe.Sizeof(srcScalar.BoolData.Data[idx]))
 			case *schemapb.ScalarField_IntData:
 				if dstScalar.GetIntData() == nil {
 					dstScalar.Data = &schemapb.ScalarField_IntData{
@@ -411,6 +422,8 @@ func AppendFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData, idx i
 				} else {
 					dstScalar.GetIntData().Data = append(dstScalar.GetIntData().Data, srcScalar.IntData.Data[idx])
 				}
+				/* #nosec G103 */
+				appendSize += int64(unsafe.Sizeof(srcScalar.IntData.Data[idx]))
 			case *schemapb.ScalarField_LongData:
 				if dstScalar.GetLongData() == nil {
 					dstScalar.Data = &schemapb.ScalarField_LongData{
@@ -421,6 +434,8 @@ func AppendFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData, idx i
 				} else {
 					dstScalar.GetLongData().Data = append(dstScalar.GetLongData().Data, srcScalar.LongData.Data[idx])
 				}
+				/* #nosec G103 */
+				appendSize += int64(unsafe.Sizeof(srcScalar.LongData.Data[idx]))
 			case *schemapb.ScalarField_FloatData:
 				if dstScalar.GetFloatData() == nil {
 					dstScalar.Data = &schemapb.ScalarField_FloatData{
@@ -431,6 +446,8 @@ func AppendFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData, idx i
 				} else {
 					dstScalar.GetFloatData().Data = append(dstScalar.GetFloatData().Data, srcScalar.FloatData.Data[idx])
 				}
+				/* #nosec G103 */
+				appendSize += int64(unsafe.Sizeof(srcScalar.FloatData.Data[idx]))
 			case *schemapb.ScalarField_DoubleData:
 				if dstScalar.GetDoubleData() == nil {
 					dstScalar.Data = &schemapb.ScalarField_DoubleData{
@@ -441,6 +458,8 @@ func AppendFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData, idx i
 				} else {
 					dstScalar.GetDoubleData().Data = append(dstScalar.GetDoubleData().Data, srcScalar.DoubleData.Data[idx])
 				}
+				/* #nosec G103 */
+				appendSize += int64(unsafe.Sizeof(srcScalar.DoubleData.Data[idx]))
 			case *schemapb.ScalarField_StringData:
 				if dstScalar.GetStringData() == nil {
 					dstScalar.Data = &schemapb.ScalarField_StringData{
@@ -451,6 +470,8 @@ func AppendFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData, idx i
 				} else {
 					dstScalar.GetStringData().Data = append(dstScalar.GetStringData().Data, srcScalar.StringData.Data[idx])
 				}
+				/* #nosec G103 */
+				appendSize += int64(unsafe.Sizeof(srcScalar.StringData.Data[idx]))
 			case *schemapb.ScalarField_ArrayData:
 				if dstScalar.GetArrayData() == nil {
 					dstScalar.Data = &schemapb.ScalarField_ArrayData{
@@ -461,6 +482,8 @@ func AppendFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData, idx i
 				} else {
 					dstScalar.GetArrayData().Data = append(dstScalar.GetArrayData().Data, srcScalar.ArrayData.Data[idx])
 				}
+				/* #nosec G103 */
+				appendSize += int64(unsafe.Sizeof(srcScalar.ArrayData.Data[idx]))
 			case *schemapb.ScalarField_JsonData:
 				if dstScalar.GetJsonData() == nil {
 					dstScalar.Data = &schemapb.ScalarField_JsonData{
@@ -471,6 +494,8 @@ func AppendFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData, idx i
 				} else {
 					dstScalar.GetJsonData().Data = append(dstScalar.GetJsonData().Data, srcScalar.JsonData.Data[idx])
 				}
+				/* #nosec G103 */
+				appendSize += int64(unsafe.Sizeof(srcScalar.JsonData.Data[idx]))
 			default:
 				log.Error("Not supported field type", zap.String("field type", fieldData.Type.String()))
 			}
@@ -501,6 +526,8 @@ func AppendFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData, idx i
 					dstBinaryVector := dstVector.Data.(*schemapb.VectorField_BinaryVector)
 					dstBinaryVector.BinaryVector = append(dstBinaryVector.BinaryVector, srcVector.BinaryVector[idx*(dim/8):(idx+1)*(dim/8)]...)
 				}
+				/* #nosec G103 */
+				appendSize += int64(unsafe.Sizeof(srcVector.BinaryVector[idx*(dim/8) : (idx+1)*(dim/8)]))
 			case *schemapb.VectorField_FloatVector:
 				if dstVector.GetFloatVector() == nil {
 					srcToCopy := srcVector.FloatVector.Data[idx*dim : (idx+1)*dim]
@@ -513,11 +540,15 @@ func AppendFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData, idx i
 				} else {
 					dstVector.GetFloatVector().Data = append(dstVector.GetFloatVector().Data, srcVector.FloatVector.Data[idx*dim:(idx+1)*dim]...)
 				}
+				/* #nosec G103 */
+				appendSize += int64(unsafe.Sizeof(srcVector.FloatVector.Data[idx*dim : (idx+1)*dim]))
 			default:
 				log.Error("Not supported field type", zap.String("field type", fieldData.Type.String()))
 			}
 		}
 	}
+
+	return
 }
 
 // DeleteFieldData delete fields data appended last time

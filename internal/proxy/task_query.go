@@ -581,6 +581,8 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 		}
 	}
 
+	var retSize int64
+	maxOutputSize := Params.QuotaConfig.MaxOutputSize
 	for j := 0; j < loopEnd; j++ {
 		sel := typeutil.SelectMinPK(validRetrieveResults, cursors)
 		if sel == -1 {
@@ -589,12 +591,18 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 
 		pk := typeutil.GetPK(validRetrieveResults[sel].GetIds(), cursors[sel])
 		if _, ok := idSet[pk]; !ok {
-			typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel])
+			retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel])
 			idSet[pk] = struct{}{}
 		} else {
 			// primary keys duplicate
 			skipDupCnt++
 		}
+
+		// limit retrieve result to avoid oom
+		if retSize > maxOutputSize {
+			return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", maxOutputSize)
+		}
+
 		cursors[sel]++
 	}
 

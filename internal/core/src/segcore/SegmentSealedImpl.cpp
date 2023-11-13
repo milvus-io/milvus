@@ -157,18 +157,18 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
 
 void
 SegmentSealedImpl::LoadFieldData(FieldId field_id, const std::vector<storage::FieldDataPtr>& field_data) {
-    int64_t size = storage::GetTotalNumRowsForFieldDatas(field_data);
+    int64_t num_rows = storage::GetTotalNumRowsForFieldDatas(field_data);
     if (row_count_opt_.has_value()) {
-        AssertInfo(row_count_opt_.value() == size, "field (" + std::to_string(field_id.get()) +
-                                                       ") data has different row count (" + std::to_string(size) +
-                                                       ") than other column's row count (" +
-                                                       std::to_string(row_count_opt_.value()) + ")");
+        AssertInfo(row_count_opt_.value() == num_rows,
+                   "field (" + std::to_string(field_id.get()) + ") data has different row count (" +
+                       std::to_string(num_rows) + ") than other column's row count (" +
+                       std::to_string(row_count_opt_.value()) + ")");
     }
 
     if (SystemProperty::Instance().IsSystem(field_id)) {
         auto system_field_type = SystemProperty::Instance().GetSystemFieldType(field_id);
         if (system_field_type == SystemFieldType::Timestamp) {
-            std::vector<Timestamp> timestamps(size);
+            std::vector<Timestamp> timestamps(num_rows);
             int64_t offset = 0;
             for (auto& data : field_data) {
                 int64_t row_count = data->get_num_rows();
@@ -177,10 +177,10 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, const std::vector<storage::Fi
             }
 
             TimestampIndex index;
-            auto min_slice_length = size < 4096 ? 1 : 4096;
-            auto meta = GenerateFakeSlices(timestamps.data(), size, min_slice_length);
+            auto min_slice_length = num_rows < 4096 ? 1 : 4096;
+            auto meta = GenerateFakeSlices(timestamps.data(), num_rows, min_slice_length);
             index.set_length_meta(std::move(meta));
-            index.build_with(timestamps.data(), size);  // todo ::opt to avoid copy timestamps from field data
+            index.build_with(timestamps.data(), num_rows);  // todo ::opt to avoid copy timestamps from field data
 
             // use special index
             std::unique_lock lck(mutex_);
@@ -198,16 +198,12 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, const std::vector<storage::Fi
         }
         ++system_ready_count_;
     } else {
-        // write data under lock
-        std::unique_lock lck(mutex_);
-
         auto& field_meta = (*schema_)[field_id];
         auto data_type = field_meta.get_data_type();
 
         // Don't allow raw data and index exist at the same time
         AssertInfo(!get_bit(index_ready_bitset_, field_id), "field data can't be loaded when indexing exists");
 
-        size_t size = 0;
         if (datatype_is_variable(data_type)) {
             std::unique_ptr<ColumnBase> column{};
             switch (data_type) {
@@ -222,11 +218,14 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, const std::vector<storage::Fi
                 default: {
                 }
             }
-            size = column->size();
+
+            // update average row data size
+            SegmentInternalInterface::set_field_avg_size(field_id, num_rows, column->size());
+            std::unique_lock lck(mutex_);
             variable_fields_.emplace(field_id, std::move(column));
         } else {
             auto column = Column(get_segment_id(), field_meta, field_data);
-            size = column.size();
+            std::unique_lock lck(mutex_);
             fixed_fields_.emplace(field_id, std::move(column));
         }
 
@@ -238,9 +237,10 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, const std::vector<storage::Fi
             insert_record_.seal_pks();
         }
 
+        std::unique_lock lck(mutex_);
         set_bit(field_data_ready_bitset_, field_id, true);
     }
-    update_row_count(size);
+    update_row_count(num_rows);
 }
 
 void

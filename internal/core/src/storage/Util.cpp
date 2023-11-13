@@ -494,4 +494,14 @@ ReleaseArrowUnused() {
     }
 }
 
+int64_t
+GetByteSizeOfFieldDatas(const std::vector<FieldDataPtr>& field_datas) {
+    int64_t result = 0;
+    for (auto& data : field_datas) {
+        result += data->Size();
+    }
+
+    return result;
+}
+
 }  // namespace milvus::storage
