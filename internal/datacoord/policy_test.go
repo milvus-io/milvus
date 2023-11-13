@@ -112,11 +112,18 @@ func TestConsistentHashRegisterPolicy(t *testing.T) {
 		assert.NotNil(t, updates)
 		assert.Equal(t, 1, len(updates))
 		// No Delete operation will be generated
-		assert.EqualValues(t, &ChannelOp{Type: Add, NodeID: 1, Channels: []RWChannel{channels[0]}}, updates[0])
-		assert.ElementsMatch(t,
-			NewChannelOpSet(NewAddOp(1, channels[0])).Collect(),
-			updates,
-		)
+
+		assert.Equal(t, 1, len(updates[0].GetChannelNames()))
+		channel := updates[0].GetChannelNames()[0]
+
+		// Not stable whether to balance chan-1 or chan-2
+		if channel == "chan-1" {
+			assert.EqualValues(t, &ChannelOp{Type: Add, NodeID: 1, Channels: []RWChannel{channels[0]}}, updates[0])
+		}
+
+		if channel == "chan-2" {
+			assert.EqualValues(t, &ChannelOp{Type: Add, NodeID: 1, Channels: []RWChannel{channels[1]}}, updates[0])
+		}
 	})
 }
 
