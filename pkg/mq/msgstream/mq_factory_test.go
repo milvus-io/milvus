@@ -46,12 +46,12 @@ func TestPmsFactory(t *testing.T) {
 			var cancel context.CancelFunc
 			ctx := context.Background()
 			if test.withTimeout {
-				ctx, cancel = context.WithTimeout(ctx, time.Millisecond)
+				if test.ctxTimeouted {
+					ctx, cancel = context.WithDeadline(ctx, time.Now().Add(-1*time.Minute))
+				} else {
+					ctx, cancel = context.WithTimeout(ctx, time.Second*10)
+				}
 				defer cancel()
-			}
-
-			if test.ctxTimeouted {
-				time.Sleep(time.Millisecond)
 			}
 			stream, err := pmsFactory.NewMsgStream(ctx)
 			if test.expectedError {
@@ -120,14 +120,13 @@ func TestKafkaFactory(t *testing.T) {
 		t.Run(test.description, func(t *testing.T) {
 			var cancel context.CancelFunc
 			ctx := context.Background()
-			timeoutDur := time.Millisecond * 30
 			if test.withTimeout {
-				ctx, cancel = context.WithTimeout(ctx, timeoutDur)
+				if test.ctxTimeouted {
+					ctx, cancel = context.WithDeadline(ctx, time.Now().Add(-1*time.Minute))
+				} else {
+					ctx, cancel = context.WithTimeout(ctx, time.Second*10)
+				}
 				defer cancel()
-			}
-
-			if test.ctxTimeouted {
-				time.Sleep(timeoutDur)
 			}
 			stream, err := kmsFactory.NewMsgStream(ctx)
 			if test.expectedError {
