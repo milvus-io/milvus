@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/retry"
 )
 
 func TestTimetickManagerNormal(t *testing.T) {
@@ -138,7 +139,7 @@ func TestTimetickManagerSendErr(t *testing.T) {
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ReportTimeTick(mock.Anything, mock.Anything).Return(errors.New("mock")).Maybe()
 
-	manager := newTimeTickSender(broker, 0)
+	manager := newTimeTickSender(broker, 0, retry.Attempts(1))
 
 	channelName1 := "channel1"
 	ts := uint64(time.Now().Unix())
@@ -156,8 +157,6 @@ func TestTimetickManagerSendErr(t *testing.T) {
 }
 
 func TestTimetickManagerSendReport(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	mockDataCoord := mocks.NewMockDataCoordClient(t)
 
 	called := atomic.NewBool(false)
@@ -170,9 +169,11 @@ func TestTimetickManagerSendReport(t *testing.T) {
 		Return(nil)
 	mockDataCoord.EXPECT().ReportDataNodeTtMsgs(mock.Anything, mock.Anything).Return(merr.Status(nil), nil).Maybe()
 	manager := newTimeTickSender(broker, 0)
-	go manager.start(ctx)
+	manager.start()
 
 	assert.Eventually(t, func() bool {
 		return called.Load()
 	}, 2*time.Second, 500*time.Millisecond)
+
+	manager.Stop()
 }

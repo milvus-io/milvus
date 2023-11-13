@@ -38,6 +38,11 @@ type timeTickSender struct {
 	nodeID int64
 	broker broker.Broker
 
+	wg         sync.WaitGroup
+	cancelFunc context.CancelFunc
+
+	options []retry.Option
+
 	mu                  sync.Mutex
 	channelStatesCaches map[string]*segmentStatesSequence // string -> *segmentStatesSequence
 }
@@ -47,15 +52,33 @@ type segmentStatesSequence struct {
 	data map[uint64][]*commonpb.SegmentStats // ts -> segmentStats
 }
 
-func newTimeTickSender(broker broker.Broker, nodeID int64) *timeTickSender {
+func newTimeTickSender(broker broker.Broker, nodeID int64, opts ...retry.Option) *timeTickSender {
 	return &timeTickSender{
 		nodeID:              nodeID,
 		broker:              broker,
 		channelStatesCaches: make(map[string]*segmentStatesSequence, 0),
+		options:             opts,
 	}
 }
 
-func (m *timeTickSender) start(ctx context.Context) {
+func (m *timeTickSender) start() {
+	m.wg.Add(1)
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancelFunc = cancel
+	go func() {
+		defer m.wg.Done()
+		m.work(ctx)
+	}()
+}
+
+func (m *timeTickSender) Stop() {
+	if m.cancelFunc != nil {
+		m.cancelFunc()
+		m.wg.Wait()
+	}
+}
+
+func (m *timeTickSender) work(ctx context.Context) {
 	ticker := time.NewTicker(Params.DataNodeCfg.DataNodeTimeTickInterval.GetAsDuration(time.Millisecond))
 	defer ticker.Stop()
 	for {
@@ -157,7 +180,7 @@ func (m *timeTickSender) sendReport(ctx context.Context) error {
 	log.RatedDebug(30, "timeTickSender send datanode timetick message", zap.Any("toSendMsgs", toSendMsgs), zap.Any("sendLastTss", sendLastTss))
 	err := retry.Do(ctx, func() error {
 		return m.broker.ReportTimeTick(ctx, toSendMsgs)
-	}, retry.Attempts(20), retry.Sleep(time.Millisecond*100))
+	}, m.options...)
 	if err != nil {
 		log.Error("ReportDataNodeTtMsgs fail after retry", zap.Error(err))
 		return err
