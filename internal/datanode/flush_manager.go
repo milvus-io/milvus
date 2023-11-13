@@ -25,6 +25,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
@@ -40,7 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metautil"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
-	"github.com/samber/lo"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 // flushManager defines a flush manager signature
@@ -500,7 +501,7 @@ func (m *rendezvousFlushManager) injectFlush(injection *taskInjection, segments 
 // fetch meta info for segment
 func (m *rendezvousFlushManager) getSegmentMeta(segmentID UniqueID, pos *internalpb.MsgPosition) (UniqueID, UniqueID, *etcdpb.CollectionMeta, error) {
 	if !m.hasSegment(segmentID, true) {
-		return -1, -1, nil, fmt.Errorf("no such segment %d in the channel", segmentID)
+		return -1, -1, nil, merr.WrapErrSegmentNotFound(segmentID)
 	}
 
 	// fetch meta information of segment
