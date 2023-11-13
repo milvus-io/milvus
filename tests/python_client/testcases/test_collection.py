@@ -3072,7 +3072,7 @@ class TestDescribeCollection(TestcaseBase):
                          'element_type': 0},
                         {'field_id': 104, 'name': 'float_vector', 'description': '', 'type': 101,
                          'params': {'dim': 128}, 'element_type': 0}],
-             'aliases': [], 'consistency_level': 0, 'properties': [], 'num_partitions': 1}
+             'aliases': [], 'consistency_level': 0, 'properties': {}, 'num_partitions': 1}
         res = collection_w.describe()[0]
         del res['collection_id']
         log.info(res)
