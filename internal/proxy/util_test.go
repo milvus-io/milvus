@@ -2085,6 +2085,8 @@ func TestSendReplicateMessagePack(t *testing.T) {
 		SendReplicateMessagePack(ctx, mockStream, &milvuspb.ReleaseCollectionRequest{})
 		SendReplicateMessagePack(ctx, mockStream, &milvuspb.CreateIndexRequest{})
 		SendReplicateMessagePack(ctx, mockStream, &milvuspb.DropIndexRequest{})
+		SendReplicateMessagePack(ctx, mockStream, &milvuspb.LoadPartitionsRequest{})
+		SendReplicateMessagePack(ctx, mockStream, &milvuspb.ReleasePartitionsRequest{})
 	})
 }
 
