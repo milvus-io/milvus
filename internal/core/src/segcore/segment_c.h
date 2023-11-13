@@ -49,7 +49,8 @@ void
 DeleteRetrieveResult(CRetrieveResult* retrieve_result);
 
 CStatus
-Retrieve(CSegmentInterface c_segment, CRetrievePlan c_plan, uint64_t timestamp, CRetrieveResult* result);
+Retrieve(
+    CSegmentInterface c_segment, CRetrievePlan c_plan, uint64_t timestamp, CRetrieveResult* result, int64_t limit_size);
 
 int64_t
 GetMemoryUsageInBytes(CSegmentInterface c_segment);
@@ -91,6 +92,9 @@ LoadDeletedRecord(CSegmentInterface c_segment, CLoadDeletedRecordInfo deleted_re
 
 CStatus
 UpdateSealedSegmentIndex(CSegmentInterface c_segment, CLoadIndexInfo c_load_index_info);
+
+CStatus
+UpdateFieldRawDataSize(CSegmentInterface c_segment, int64_t field_id, int64_t num_rows, int64_t field_data_size);
 
 CStatus
 DropFieldData(CSegmentInterface c_segment, int64_t field_id);

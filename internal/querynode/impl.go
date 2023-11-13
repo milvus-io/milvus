@@ -775,10 +775,15 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		}, nil
 	}
 
+	log := log.Ctx(ctx).With(
+		zap.Int64("msgID", req.GetReq().GetBase().GetMsgID()),
+		zap.Int64("collectionID", req.GetReq().GetCollectionID()),
+		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
+		zap.Strings("vChannels", req.GetDmlChannels()))
+
 	tr := timerecord.NewTimeRecorder("Search")
 	if !req.GetFromShardLeader() {
-		log.Ctx(ctx).Debug("Received SearchRequest",
-			zap.Strings("vChannels", req.GetDmlChannels()),
+		log.Debug("Received SearchRequest",
 			zap.Int64s("segmentIDs", req.GetSegmentIDs()),
 			zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
 			zap.Uint64("timeTravel", req.GetReq().GetTravelTimestamp()))
@@ -843,6 +848,7 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 
 	ret, err := reduceSearchResults(ctx, toReduceResults, req.Req.GetNq(), req.Req.GetTopk(), req.Req.GetMetricType())
 	if err != nil {
+		log.Warn("failed to reduce search results", zap.Error(err))
 		failRet.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		failRet.Status.Reason = err.Error()
 		return failRet, nil
@@ -856,12 +862,8 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 	}
 
 	if ret.SlicedBlob == nil {
-		log.Ctx(ctx).Debug("search result is empty",
-			zap.Strings("vChannels", req.GetDmlChannels()),
+		log.Debug("search result is empty",
 			zap.Int64s("segmentIDs", req.GetSegmentIDs()),
-			zap.Int64("collection", req.Req.CollectionID),
-			zap.Strings("shard", req.DmlChannels),
-			zap.Bool("from shard leader", req.FromShardLeader),
 			zap.String("dsl", req.Req.Dsl))
 	}
 	return ret, nil
@@ -891,10 +893,15 @@ func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *querypb.Se
 		return failRet, nil
 	}
 
+	log := log.Ctx(ctx).With(
+		zap.Int64("msgID", req.GetReq().GetBase().GetMsgID()),
+		zap.Int64("collectionID", req.GetReq().GetCollectionID()),
+		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
+		zap.String("vChannel", dmlChannel))
+
 	qs, err := node.queryShardService.getQueryShard(dmlChannel)
 	if err != nil {
-		log.Ctx(ctx).Warn("Search failed, failed to get query shard",
-			zap.String("vChannel", dmlChannel),
+		log.Warn("Search failed, failed to get query shard",
 			zap.Error(err))
 		failRet.Status.ErrorCode = commonpb.ErrorCode_NotShardLeader
 		failRet.Status.Reason = err.Error()
@@ -903,9 +910,7 @@ func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *querypb.Se
 
 	if req.FromShardLeader {
 		tr := timerecord.NewTimeRecorder("SubSearch")
-		log.Ctx(ctx).Debug("start do subsearch",
-			zap.Bool("fromShardLeader", req.GetFromShardLeader()),
-			zap.String("vChannel", dmlChannel),
+		log.Debug("start do subsearch",
 			zap.Int64s("segmentIDs", req.GetSegmentIDs()))
 
 		historicalTask, err2 := newSearchTask(ctx, req)
@@ -948,8 +953,7 @@ func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *querypb.Se
 
 	// from Proxy
 	tr := timerecord.NewTimeRecorder("SearchShard")
-	log.Ctx(ctx).Debug("start do search",
-		zap.String("vChannel", dmlChannel),
+	log.Debug("start do search",
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()))
 
 	cluster, ok := qs.clusterService.getShardCluster(dmlChannel)
@@ -1017,7 +1021,7 @@ func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *querypb.Se
 	}
 	results, errCluster = cluster.Search(searchCtx, req, withStreamingFunc)
 	if errCluster != nil {
-		log.Ctx(ctx).Warn("search shard cluster failed", zap.String("vChannel", dmlChannel), zap.Error(errCluster))
+		log.Warn("search shard cluster failed", zap.Error(errCluster))
 		failRet.Status.Reason = errCluster.Error()
 		return failRet, nil
 	}
@@ -1026,6 +1030,7 @@ func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *querypb.Se
 
 	ret, err2 := reduceSearchResults(ctx, results, req.Req.GetNq(), req.Req.GetTopk(), req.Req.GetMetricType())
 	if err2 != nil {
+		log.Warn("reduce shard cluster failed", zap.Error(err2))
 		failRet.Status.Reason = err2.Error()
 		return failRet, nil
 	}
@@ -1062,10 +1067,13 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *querypb.Que
 	}
 
 	msgID := req.GetReq().GetBase().GetMsgID()
-	log.Ctx(ctx).Debug("queryWithDmlChannel receives query request",
+	log := log.Ctx(ctx).With(
 		zap.Int64("msgID", msgID),
+		zap.Int64("collectionID", req.Req.GetCollectionID()),
 		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
-		zap.String("vChannel", dmlChannel),
+		zap.String("vChannel", dmlChannel))
+
+	log.Debug("queryWithDmlChannel receives query request",
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
 		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
 		zap.Uint64("timeTravel", req.GetReq().GetTravelTimestamp()))
@@ -1077,16 +1085,13 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *querypb.Que
 
 	qs, err := node.queryShardService.getQueryShard(dmlChannel)
 	if err != nil {
-		log.Ctx(ctx).Warn("Query failed, failed to get query shard", zap.Int64("msgID", msgID), zap.String("dml channel", dmlChannel), zap.Error(err))
+		log.Warn("Query failed, failed to get query shard", zap.Error(err))
 		failRet.Status.ErrorCode = commonpb.ErrorCode_NotShardLeader
 		failRet.Status.Reason = err.Error()
 		return failRet, nil
 	}
 
-	log.Ctx(ctx).Debug("queryWithDmlChannel starts do query",
-		zap.Int64("msgID", msgID),
-		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
-		zap.String("vChannel", dmlChannel),
+	log.Debug("queryWithDmlChannel starts do query",
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()))
 	tr := timerecord.NewTimeRecorder("")
 
@@ -1103,6 +1108,7 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *querypb.Que
 
 		err2 = queryTask.WaitToFinish()
 		if err2 != nil {
+			log.Warn("queryWithDmlChannel failed to query", zap.Error(err2))
 			failRet.Status.Reason = err2.Error()
 			return failRet, nil
 		}
@@ -1151,7 +1157,7 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *querypb.Que
 	// shard leader dispatches request to its shard cluster
 	results, errCluster = cluster.Query(queryCtx, req, withStreamingFunc)
 	if errCluster != nil {
-		log.Ctx(ctx).Warn("failed to query cluster", zap.Int64("msgID", msgID), zap.Int64("collectionID", req.Req.GetCollectionID()), zap.Error(errCluster))
+		log.Warn("queryWithDmlChannel failed to query cluster", zap.Error(errCluster))
 		failRet.Status.Reason = errCluster.Error()
 		return failRet, nil
 	}
@@ -1161,6 +1167,7 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *querypb.Que
 
 	ret, err2 := mergeInternalRetrieveResultsAndFillIfEmpty(ctx, results, req.Req.GetLimit(), req.GetReq().GetOutputFieldsId(), qs.collection.Schema())
 	if err2 != nil {
+		log.Warn("queryWithDmlChannel failed to merge query results", zap.Error(err2))
 		failRet.Status.Reason = err2.Error()
 		return failRet, nil
 	}
@@ -1188,9 +1195,13 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		return failRes, nil
 	}
 
-	log.Ctx(ctx).Debug("Received QueryRequest", zap.Int64("msgID", req.GetReq().GetBase().GetMsgID()),
-		zap.Bool("fromShardleader", req.GetFromShardLeader()),
-		zap.Strings("vChannels", req.GetDmlChannels()),
+	log := log.Ctx(ctx).With(
+		zap.Int64("msgID", req.GetReq().GetBase().GetMsgID()),
+		zap.Int64("collectionID", req.Req.GetCollectionID()),
+		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
+		zap.Strings("vChannels", req.GetDmlChannels()))
+
+	log.Debug("Received QueryRequest",
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
 		zap.Uint64("guaranteeTimestamp", req.Req.GetGuaranteeTimestamp()),
 		zap.Uint64("timeTravel", req.GetReq().GetTravelTimestamp()),
@@ -1250,6 +1261,7 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 	}
 	ret, err := mergeInternalRetrieveResultsAndFillIfEmpty(ctx, toMergeResults, req.GetReq().GetLimit(), req.GetReq().GetOutputFieldsId(), coll.Schema())
 	if err != nil {
+		log.Warn("failed to merge query results", zap.Error(err))
 		failRet.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		failRet.Status.Reason = err.Error()
 		return failRet, nil

@@ -161,6 +161,35 @@ func TestResult_mergeSegcoreRetrieveResults(t *testing.T) {
 			}
 		})
 
+		t.Run("test unLimited and maxOutputSize", func(t *testing.T) {
+			reqLimit := typeutil.Unlimited
+			Params.QuotaConfig.MaxOutputSize = 1
+
+			ids := make([]int64, 100)
+			offsets := make([]int64, 100)
+			for i := range ids {
+				ids[i] = int64(i)
+				offsets[i] = int64(i)
+			}
+			fieldData := genFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, ids, 1)
+
+			result := &segcorepb.RetrieveResults{
+				Ids: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{
+							Data: ids,
+						},
+					},
+				},
+				Offset:     offsets,
+				FieldsData: []*schemapb.FieldData{fieldData},
+			}
+
+			_, err := mergeSegcoreRetrieveResults(context.Background(), []*segcorepb.RetrieveResults{result}, reqLimit)
+			assert.Error(t, err)
+			Params.QuotaConfig.MaxOutputSize = 1104857600
+		})
+
 		t.Run("test int ID", func(t *testing.T) {
 			result, err := mergeSegcoreRetrieveResults(context.Background(), []*segcorepb.RetrieveResults{r1, r2}, typeutil.Unlimited)
 			assert.Equal(t, 2, len(result.GetFieldsData()))
@@ -338,6 +367,33 @@ func TestResult_mergeInternalRetrieveResults(t *testing.T) {
 					assert.NoError(t, err)
 				})
 			}
+		})
+
+		t.Run("test unLimited and maxOutputSize", func(t *testing.T) {
+			Params.QuotaConfig.MaxOutputSize = 1
+
+			ids := make([]int64, 100)
+			offsets := make([]int64, 100)
+			for i := range ids {
+				ids[i] = int64(i)
+				offsets[i] = int64(i)
+			}
+			fieldData := genFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, ids, 1)
+
+			result := &internalpb.RetrieveResults{
+				Ids: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{
+							Data: ids,
+						},
+					},
+				},
+				FieldsData: []*schemapb.FieldData{fieldData},
+			}
+
+			_, err := mergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{result}, typeutil.Unlimited)
+			assert.Error(t, err)
+			Params.QuotaConfig.MaxOutputSize = 1104857600
 		})
 
 		t.Run("test int ID", func(t *testing.T) {

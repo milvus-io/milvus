@@ -253,6 +253,22 @@ func genPKFieldSchema(param constFieldParam) *schemapb.FieldSchema {
 	return field
 }
 
+func genStringFieldSchema(param constFieldParam) *schemapb.FieldSchema {
+	field := &schemapb.FieldSchema{
+		FieldID:      param.id,
+		Name:         param.fieldName,
+		IsPrimaryKey: false,
+		DataType:     param.dataType,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "max_length",
+				Value: "100",
+			},
+		},
+	}
+	return field
+}
+
 func genVectorFieldSchema(param vecFieldParam) *schemapb.FieldSchema {
 	fieldVec := &schemapb.FieldSchema{
 		FieldID:      param.id,
@@ -490,6 +506,7 @@ func genTestCollectionSchema(pkTypes ...schemapb.DataType) *schemapb.CollectionS
 	fieldInt32 := genConstantFieldSchema(simpleInt32Field)
 	fieldFloat := genConstantFieldSchema(simpleFloatField)
 	fieldDouble := genConstantFieldSchema(simpleDoubleField)
+	fieldVarChar := genStringFieldSchema(simpleVarCharField)
 	floatVecFieldSchema := genVectorFieldSchema(simpleFloatVecField)
 	binVecFieldSchema := genVectorFieldSchema(simpleBinVecField)
 	var pkFieldSchema *schemapb.FieldSchema
@@ -516,6 +533,7 @@ func genTestCollectionSchema(pkTypes ...schemapb.DataType) *schemapb.CollectionS
 			fieldInt32,
 			fieldFloat,
 			fieldDouble,
+			fieldVarChar,
 			floatVecFieldSchema,
 			binVecFieldSchema,
 			pkFieldSchema,

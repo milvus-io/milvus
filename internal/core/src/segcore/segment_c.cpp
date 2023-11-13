@@ -90,11 +90,15 @@ DeleteRetrieveResult(CRetrieveResult* retrieve_result) {
 }
 
 CStatus
-Retrieve(CSegmentInterface c_segment, CRetrievePlan c_plan, uint64_t timestamp, CRetrieveResult* result) {
+Retrieve(CSegmentInterface c_segment,
+         CRetrievePlan c_plan,
+         uint64_t timestamp,
+         CRetrieveResult* result,
+         int64_t limit_size) {
     try {
         auto segment = (const milvus::segcore::SegmentInterface*)c_segment;
         auto plan = (const milvus::query::RetrievePlan*)c_plan;
-        auto retrieve_result = segment->Retrieve(plan, timestamp);
+        auto retrieve_result = segment->Retrieve(plan, timestamp, limit_size);
 
         auto size = retrieve_result->ByteSize();
         void* buffer = malloc(size);
@@ -263,6 +267,18 @@ UpdateSealedSegmentIndex(CSegmentInterface c_segment, CLoadIndexInfo c_load_inde
         AssertInfo(segment != nullptr, "segment conversion failed");
         auto load_index_info = (milvus::segcore::LoadIndexInfo*)c_load_index_info;
         segment->LoadIndex(*load_index_info);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
+}
+
+CStatus
+UpdateFieldRawDataSize(CSegmentInterface c_segment, int64_t field_id, int64_t num_rows, int64_t field_data_size) {
+    try {
+        auto segment_interface = reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        AssertInfo(segment_interface != nullptr, "segment conversion failed");
+        segment_interface->set_field_avg_size(milvus::FieldId(field_id), num_rows, field_data_size);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(UnexpectedError, e.what());
