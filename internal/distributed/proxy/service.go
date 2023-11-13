@@ -124,7 +124,6 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 }
 
 func authenticate(c *gin.Context) {
-	// TODO fubang
 	username, password, ok := httpserver.ParseUsernamePassword(c)
 	if ok {
 		if proxy.PasswordVerify(c, username, password) {
@@ -256,6 +255,7 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 			logutil.UnaryTraceLoggerInterceptor,
 			proxy.RateLimitInterceptor(limiter),
 			accesslog.UnaryUpdateAccessInfoInterceptor,
+			proxy.TraceLogInterceptor,
 			connection.KeepActiveInterceptor,
 		))
 	} else {
