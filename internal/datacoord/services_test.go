@@ -228,7 +228,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		ch := &channel{Name: "vchan1", CollectionID: 0}
+		ch := &channelMeta{Name: "vchan1", CollectionID: 0}
 		svr.channelManager.AddNode(0)
 		svr.channelManager.Watch(context.Background(), ch)
 
@@ -308,7 +308,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
 		assert.NoError(t, err)
 
-		ch := &channel{Name: "vchan1", CollectionID: 0}
+		ch := &channelMeta{Name: "vchan1", CollectionID: 0}
 		svr.channelManager.AddNode(0)
 		svr.channelManager.Watch(context.Background(), ch)
 
@@ -403,7 +403,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 
 		err = svr.channelManager.AddNode(0)
 		assert.NoError(t, err)
-		err = svr.channelManager.Watch(context.Background(), &channel{Name: "vchan1", CollectionID: 0})
+		err = svr.channelManager.Watch(context.Background(), &channelMeta{Name: "vchan1", CollectionID: 0})
 		assert.NoError(t, err)
 
 		sResp, err := svr.SaveBinlogPaths(context.TODO(), binlogReq)
@@ -449,7 +449,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
 		assert.NoError(t, err)
 
-		ch := &channel{Name: "vchan1", CollectionID: 0}
+		ch := &channelMeta{Name: "vchan1", CollectionID: 0}
 		svr.channelManager.AddNode(0)
 		svr.channelManager.Watch(context.Background(), ch)
 
@@ -495,7 +495,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
 		assert.NoError(t, err)
 
-		ch := &channel{Name: "vchan1", CollectionID: 0}
+		ch := &channelMeta{Name: "vchan1", CollectionID: 0}
 		svr.channelManager.AddNode(0)
 		svr.channelManager.Watch(context.Background(), ch)
 
@@ -579,7 +579,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			IndexSize:     0,
 		})
 
-		ch := &channel{Name: "vchan1", CollectionID: 0}
+		ch := &channelMeta{Name: "vchan1", CollectionID: 0}
 		svr.channelManager.AddNode(0)
 		svr.channelManager.Watch(context.Background(), ch)
 

@@ -35,10 +35,10 @@ import (
 )
 
 func genNodeChannelInfos(id int64, num int) *NodeChannelInfo {
-	channels := make([]*channel, 0, num)
+	channels := make([]RWChannel, 0, num)
 	for i := 0; i < num; i++ {
 		name := fmt.Sprintf("ch%d", i)
-		channels = append(channels, &channel{Name: name, CollectionID: 1})
+		channels = append(channels, &channelMeta{Name: name, CollectionID: 1, WatchInfo: &datapb.ChannelWatchInfo{}})
 	}
 	return &NodeChannelInfo{
 		NodeID:   id,
@@ -46,36 +46,24 @@ func genNodeChannelInfos(id int64, num int) *NodeChannelInfo {
 	}
 }
 
-func genChannelOperations(from, to int64, num int) ChannelOpSet {
-	ops := make([]*ChannelOp, 0, 2)
-	channels := make([]*channel, 0, num)
-	channelWatchInfos := make([]*datapb.ChannelWatchInfo, 0, num)
+func genChannelOperations(from, to int64, num int) *ChannelOpSet {
+	channels := make([]RWChannel, 0, num)
 	for i := 0; i < num; i++ {
 		name := fmt.Sprintf("ch%d", i)
-		channels = append(channels, &channel{Name: name, CollectionID: 1})
-		channelWatchInfos = append(channelWatchInfos, &datapb.ChannelWatchInfo{})
+		channels = append(channels, &channelMeta{Name: name, CollectionID: 1, WatchInfo: &datapb.ChannelWatchInfo{}})
 	}
 
-	ops = append(ops, &ChannelOp{
-		Type:     Delete,
-		NodeID:   from,
-		Channels: channels,
-	})
-
-	ops = append(ops, &ChannelOp{
-		Type:              Add,
-		NodeID:            to,
-		Channels:          channels,
-		ChannelWatchInfos: channelWatchInfos,
-	})
-
+	ops := NewChannelOpSet(
+		NewAddOp(to, channels...),
+		NewDeleteOp(from, channels...),
+	)
 	return ops
 }
 
 func TestChannelStore_Update(t *testing.T) {
 	txnKv := mocks.NewTxnKV(t)
 	txnKv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything).Run(func(saves map[string]string, removals []string, preds ...predicates.Predicate) {
-		assert.False(t, len(saves)+len(removals) > 128, "too many operations")
+		assert.False(t, len(saves)+len(removals) > 64, "too many operations")
 	}).Return(nil)
 
 	type fields struct {
@@ -83,7 +71,7 @@ func TestChannelStore_Update(t *testing.T) {
 		channelsInfo map[int64]*NodeChannelInfo
 	}
 	type args struct {
-		opSet ChannelOpSet
+		opSet *ChannelOpSet
 	}
 	tests := []struct {
 		name    string

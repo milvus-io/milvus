@@ -133,7 +133,21 @@ func (suite *ClusterSuite) TestCreate() {
 		suite.NoError(err)
 
 		channels := channelManager.GetAssignedChannels()
-		suite.EqualValues([]*NodeChannelInfo{{1, []*channel{{Name: "channel1", CollectionID: 1}}}}, channels)
+		suite.EqualValues([]*NodeChannelInfo{{1, []RWChannel{
+			&channelMeta{
+				Name:         "channel1",
+				CollectionID: 1,
+				WatchInfo: &datapb.ChannelWatchInfo{
+					Vchan: &datapb.VchannelInfo{
+						CollectionID:        1,
+						ChannelName:         "channel1",
+						UnflushedSegmentIds: []int64{},
+						FlushedSegmentIds:   []int64{},
+						DroppedSegmentIds:   []int64{},
+					},
+				},
+			},
+		}}}, channels)
 	})
 
 	suite.Run("remove_all_nodes_and_restart_with_other_nodes", func() {
@@ -235,7 +249,7 @@ func (suite *ClusterSuite) TestRegister() {
 		sessionManager := NewSessionManager()
 		channelManager, err := NewChannelManager(kv, newMockHandler())
 		suite.NoError(err)
-		err = channelManager.Watch(context.TODO(), &channel{
+		err = channelManager.Watch(context.TODO(), &channelMeta{
 			Name:         "ch1",
 			CollectionID: 0,
 		})
@@ -256,7 +270,7 @@ func (suite *ClusterSuite) TestRegister() {
 		nodeChannels := channelManager.GetAssignedChannels()
 		suite.EqualValues(1, len(nodeChannels))
 		suite.EqualValues(1, nodeChannels[0].NodeID)
-		suite.EqualValues("ch1", nodeChannels[0].Channels[0].Name)
+		suite.EqualValues("ch1", nodeChannels[0].Channels[0].GetName())
 
 		suite.MetricsEqual(metrics.DataCoordNumDataNodes, 1)
 	})
@@ -356,7 +370,7 @@ func (suite *ClusterSuite) TestUnregister() {
 		suite.EqualValues(1, len(channels))
 		suite.EqualValues(2, channels[0].NodeID)
 		suite.EqualValues(1, len(channels[0].Channels))
-		suite.EqualValues("ch1", channels[0].Channels[0].Name)
+		suite.EqualValues("ch1", channels[0].Channels[0].GetName())
 
 		suite.MetricsEqual(metrics.DataCoordNumDataNodes, 1)
 	})
@@ -391,7 +405,7 @@ func (suite *ClusterSuite) TestUnregister() {
 		channel := channelManager.GetBufferChannels()
 		suite.NotNil(channel)
 		suite.EqualValues(1, len(channel.Channels))
-		suite.EqualValues("ch_1", channel.Channels[0].Name)
+		suite.EqualValues("ch_1", channel.Channels[0].GetName())
 
 		suite.MetricsEqual(metrics.DataCoordNumDataNodes, 0)
 	})
@@ -435,7 +449,7 @@ func TestWatchIfNeeded(t *testing.T) {
 		assert.NoError(t, err)
 		channels := channelManager.GetAssignedChannels()
 		assert.EqualValues(t, 1, len(channels))
-		assert.EqualValues(t, "ch1", channels[0].Channels[0].Name)
+		assert.EqualValues(t, "ch1", channels[0].Channels[0].GetName())
 	})
 
 	t.Run("watch channel to empty cluster", func(t *testing.T) {
@@ -456,7 +470,7 @@ func TestWatchIfNeeded(t *testing.T) {
 		assert.Empty(t, channels)
 		channel := channelManager.GetBufferChannels()
 		assert.NotNil(t, channel)
-		assert.EqualValues(t, "ch1", channel.Channels[0].Name)
+		assert.EqualValues(t, "ch1", channel.Channels[0].GetName())
 	})
 }
 
