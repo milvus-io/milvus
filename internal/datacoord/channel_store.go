@@ -24,6 +24,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
@@ -32,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const (
@@ -52,31 +54,129 @@ const (
 
 // ChannelOp is an individual ADD or DELETE operation to the channel store.
 type ChannelOp struct {
-	Type              ChannelOpType
-	NodeID            int64
-	Channels          []*channel
-	ChannelWatchInfos []*datapb.ChannelWatchInfo
+	Type     ChannelOpType
+	NodeID   int64
+	Channels []RWChannel
 }
 
-// ChannelOpSet is a set of channel operations.
-type ChannelOpSet []*ChannelOp
-
-// Add appends a single operation to add the mapping between a node and channels.
-func (cos *ChannelOpSet) Add(id int64, channels []*channel) {
-	*cos = append(*cos, &ChannelOp{
+func NewAddOp(id int64, channels ...RWChannel) *ChannelOp {
+	return &ChannelOp{
 		NodeID:   id,
 		Type:     Add,
 		Channels: channels,
-	})
+	}
 }
 
-// Delete appends a single operation to remove the mapping between a node and channels.
-func (cos *ChannelOpSet) Delete(id int64, channels []*channel) {
-	*cos = append(*cos, &ChannelOp{
+func NewDeleteOp(id int64, channels ...RWChannel) *ChannelOp {
+	return &ChannelOp{
 		NodeID:   id,
 		Type:     Delete,
 		Channels: channels,
+	}
+}
+
+func (op *ChannelOp) Append(channels ...RWChannel) {
+	op.Channels = append(op.Channels, channels...)
+}
+
+func (op *ChannelOp) GetChannelNames() []string {
+	return lo.Map(op.Channels, func(c RWChannel, _ int) string {
+		return c.GetName()
 	})
+}
+
+func (op *ChannelOp) BuildKV() (map[string]string, []string, error) {
+	var (
+		saves    = make(map[string]string)
+		removals = []string{}
+	)
+	for _, ch := range op.Channels {
+		k := buildNodeChannelKey(op.NodeID, ch.GetName())
+		switch op.Type {
+		case Add:
+			info, err := proto.Marshal(ch.GetWatchInfo())
+			if err != nil {
+				return saves, removals, err
+			}
+			saves[k] = string(info)
+		case Delete:
+			removals = append(removals, k)
+		default:
+			return saves, removals, errUnknownOpType
+		}
+	}
+	return saves, removals, nil
+}
+
+// ChannelOpSet is a set of channel operations.
+type ChannelOpSet struct {
+	ops []*ChannelOp
+}
+
+func NewChannelOpSet(ops ...*ChannelOp) *ChannelOpSet {
+	if ops == nil {
+		ops = []*ChannelOp{}
+	}
+	return &ChannelOpSet{ops}
+}
+
+func (c *ChannelOpSet) Insert(ops ...*ChannelOp) {
+	c.ops = append(c.ops, ops...)
+}
+
+func (c *ChannelOpSet) Collect() []*ChannelOp {
+	if c == nil {
+		return []*ChannelOp{}
+	}
+	return c.ops
+}
+
+func (c *ChannelOpSet) Len() int {
+	if c == nil {
+		return 0
+	}
+
+	return len(c.ops)
+}
+
+// Add a new Add channel op, for ToWatch and ToRelease
+func (c *ChannelOpSet) Add(id int64, channels ...RWChannel) {
+	c.ops = append(c.ops, NewAddOp(id, channels...))
+}
+
+func (c *ChannelOpSet) Delete(id int64, channels ...RWChannel) {
+	c.ops = append(c.ops, NewDeleteOp(id, channels...))
+}
+
+func (c *ChannelOpSet) GetChannelNumber() int {
+	if c == nil {
+		return 0
+	}
+	number := 0
+	for _, op := range c.ops {
+		number += len(op.Channels)
+	}
+
+	return number
+}
+
+func (c *ChannelOpSet) SplitByChannel() map[string]*ChannelOpSet {
+	perChOps := make(map[string]*ChannelOpSet)
+
+	for _, op := range c.Collect() {
+		for _, ch := range op.Channels {
+			if _, ok := perChOps[ch.GetName()]; !ok {
+				perChOps[ch.GetName()] = NewChannelOpSet()
+			}
+
+			if op.Type == Add {
+				perChOps[ch.GetName()].Add(op.NodeID, ch)
+			} else {
+				perChOps[ch.GetName()].Delete(op.NodeID, ch)
+			}
+		}
+	}
+	return perChOps
 }
 
 // ROChannelStore is a read only channel store for channels and nodes.
@@ -103,9 +203,9 @@ type RWChannelStore interface {
 	// Add creates a new node-channels mapping, with no channels assigned to the node.
 	Add(nodeID int64)
 	// Delete removes nodeID and returns its channels.
-	Delete(nodeID int64) ([]*channel, error)
+	Delete(nodeID int64) ([]RWChannel, error)
 	// Update applies the operations in ChannelOpSet.
-	Update(op ChannelOpSet) error
+	Update(op *ChannelOpSet) error
 }
 
 // ChannelStore must satisfy RWChannelStore.
@@ -120,7 +220,7 @@ type ChannelStore struct {
 // NodeChannelInfo stores the nodeID and its channels.
 type NodeChannelInfo struct {
 	NodeID   int64
-	Channels []*channel
+	Channels []RWChannel
 }
 
 // NewChannelStore creates and returns a new ChannelStore.
@@ -131,7 +231,7 @@ func NewChannelStore(kv kv.TxnKV) *ChannelStore {
 	}
 	c.channelsInfo[bufferID] = &NodeChannelInfo{
 		NodeID:   bufferID,
-		Channels: make([]*channel, 0),
+		Channels: make([]RWChannel, 0),
 	}
 	return c
 }
@@ -158,10 +258,11 @@ func (c *ChannelStore) Reload() error {
 		reviseVChannelInfo(cw.GetVchan())
 
 		c.Add(nodeID)
-		channel := &channel{
+		channel := &channelMeta{
 			Name:         cw.GetVchan().GetChannelName(),
 			CollectionID: cw.GetVchan().GetCollectionID(),
 			Schema:       cw.GetSchema(),
+			WatchInfo:    cw,
 		}
 		c.channelsInfo[nodeID].Channels = append(c.channelsInfo[nodeID].Channels, channel)
 		log.Info("channel store reload channel",
@@ -181,59 +282,44 @@ func (c *ChannelStore) Add(nodeID int64) {
 
 	c.channelsInfo[nodeID] = &NodeChannelInfo{
 		NodeID:   nodeID,
-		Channels: make([]*channel, 0),
+		Channels: make([]RWChannel, 0),
 	}
 }
 
 // Update applies the channel operations in opSet.
-func (c *ChannelStore) Update(opSet ChannelOpSet) error {
-	totalChannelNum := 0
-	for _, op := range opSet {
-		totalChannelNum += len(op.Channels)
-	}
+func (c *ChannelStore) Update(opSet *ChannelOpSet) error {
+	totalChannelNum := opSet.GetChannelNumber()
 	if totalChannelNum <= maxOperationsPerTxn {
 		return c.update(opSet)
 	}
-	// Split opset into multiple txn. Operations on the same channel must be executed in one txn.
-	perChOps := make(map[string]ChannelOpSet)
-	for _, op := range opSet {
-		for i, ch := range op.Channels {
-			chOp := &ChannelOp{
-				Type:     op.Type,
-				NodeID:   op.NodeID,
-				Channels: []*channel{ch},
-			}
-			if op.Type == Add {
-				chOp.ChannelWatchInfos = []*datapb.ChannelWatchInfo{op.ChannelWatchInfos[i]}
-			}
-			perChOps[ch.Name] = append(perChOps[ch.Name], chOp)
-		}
-	}
 
-	// Execute a txn for every 128 operations.
+	// Split opset into multiple txn. Operations on the same channel must be executed in one txn.
+	perChOps := opSet.SplitByChannel()
+
+	// Execute a txn for every 64 operations.
 	count := 0
 	operations := make([]*ChannelOp, 0, maxOperationsPerTxn)
 	for _, opset := range perChOps {
-		if count+len(opset) > maxOperationsPerTxn {
-			if err := c.update(operations); err != nil {
+		if count+opset.Len() > maxOperationsPerTxn {
+			if err := c.update(NewChannelOpSet(operations...)); err != nil {
 				return err
 			}
 			count = 0
 			operations = make([]*ChannelOp, 0, maxOperationsPerTxn)
 		}
-		count += len(opset)
-		operations = append(operations, opset...)
+		count += opset.Len()
+		operations = append(operations, opset.Collect()...)
 	}
 	if count == 0 {
 		return nil
 	}
-	return c.update(operations)
+	return c.update(NewChannelOpSet(operations...))
 }
 
-func (c *ChannelStore) checkIfExist(nodeID int64, channel *channel) bool {
+func (c *ChannelStore) checkIfExist(nodeID int64, channel RWChannel) bool {
 	if _, ok := c.channelsInfo[nodeID]; ok {
 		for _, ch := range c.channelsInfo[nodeID].Channels {
-			if channel.Name == ch.Name && channel.CollectionID == ch.CollectionID {
+			if channel.GetName() == ch.GetName() && channel.GetCollectionID() == ch.GetCollectionID() {
 				return true
 			}
 		}
@@ -242,14 +328,14 @@ func (c *ChannelStore) checkIfExist(nodeID int64, channel *channel) bool {
 }
 
 // update applies the ADD/DELETE operations to the current channel store.
-func (c *ChannelStore) update(opSet ChannelOpSet) error {
+func (c *ChannelStore) update(opSet *ChannelOpSet) error {
 	// Update ChannelStore's kv store.
 	if err := c.txn(opSet); err != nil {
 		return err
 	}
 
 	// Update node id -> channel mapping.
-	for _, op := range opSet {
+	for _, op := range opSet.Collect() {
 		switch op.Type {
 		case Add:
 			for _, ch := range op.Channels {
@@ -260,15 +346,12 @@ func (c *ChannelStore) update(opSet ChannelOpSet) error {
 				c.channelsInfo[op.NodeID].Channels = append(c.channelsInfo[op.NodeID].Channels, ch)
 			}
 		case Delete:
-			// Remove target channels from channel store.
-			del := make(map[string]struct{})
-			for _, ch := range op.Channels {
-				del[ch.Name] = struct{}{}
-			}
+			del := typeutil.NewSet(op.GetChannelNames()...)
+
 			prev := c.channelsInfo[op.NodeID].Channels
-			curr := make([]*channel, 0, len(prev))
+			curr := make([]RWChannel, 0, len(prev))
 			for _, ch := range prev {
-				if _, ok := del[ch.Name]; !ok {
+				if !del.Contain(ch.GetName()) {
 					curr = append(curr, ch)
 				}
 			}
@@ -331,7 +414,7 @@ func (c *ChannelStore) GetNodeChannelCount(nodeID int64) int {
 }
 
 // Delete removes the given node from the channel store and returns its channels.
-func (c *ChannelStore) Delete(nodeID int64) ([]*channel, error) {
+func (c *ChannelStore) Delete(nodeID int64) ([]RWChannel, error) {
 	for id, info := range c.channelsInfo {
 		if id == nodeID {
 			if err := c.remove(nodeID); err != nil {
@@ -362,25 +445,19 @@ func (c *ChannelStore) remove(nodeID int64) error {
 }
 
 // txn updates the channelStore's kv store with the given channel ops.
-func (c *ChannelStore) txn(opSet ChannelOpSet) error {
-	saves := make(map[string]string)
-	var removals []string
-	for _, op := range opSet {
-		for i, ch := range op.Channels {
-			k := buildNodeChannelKey(op.NodeID, ch.Name)
-			switch op.Type {
-			case Add:
-				info, err := proto.Marshal(op.ChannelWatchInfos[i])
-				if err != nil {
-					return err
-				}
-				saves[k] = string(info)
-			case Delete:
-				removals = append(removals, k)
-			default:
-				return errUnknownOpType
-			}
+func (c *ChannelStore) txn(opSet *ChannelOpSet) error {
+	var (
+		saves    = make(map[string]string)
+		removals []string
+	)
+	for _, op := range opSet.Collect() {
+		opSaves, opRemovals, err := op.BuildKV()
+		if err != nil {
+			return err
 		}
+
+		saves = lo.Assign(opSaves, saves)
+		removals = append(removals, opRemovals...)
 	}
 	return c.store.MultiSaveAndRemove(saves, removals)
 }
@@ -409,13 +486,13 @@ var ChannelOpTypeNames = []string{"Add", "Delete"}
 
 // TODO: NIT: ObjectMarshaler -> ObjectMarshaller
 // MarshalLogObject implements the interface ObjectMarshaler.
-func (cu *ChannelOp) MarshalLogObject(enc zapcore.ObjectEncoder) error {
-	enc.AddString("type", ChannelOpTypeNames[cu.Type])
-	enc.AddInt64("nodeID", cu.NodeID)
+func (op *ChannelOp) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+	enc.AddString("type", ChannelOpTypeNames[op.Type])
+	enc.AddInt64("nodeID", op.NodeID)
 	cstr := "["
-	if len(cu.Channels) > 0 {
-		for _, s := range cu.Channels {
-			cstr += s.Name
+	if len(op.Channels) > 0 {
+		for _, s := range op.Channels {
+			cstr += s.GetName()
 			cstr += ", "
 		}
 		cstr = cstr[:len(cstr)-2]
@@ -427,8 +504,8 @@ func (cu *ChannelOp) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 
 // TODO: NIT: ArrayMarshaler -> ArrayMarshaller
 // MarshalLogArray implements the interface of ArrayMarshaler of zap.
-func (cos ChannelOpSet) MarshalLogArray(enc zapcore.ArrayEncoder) error {
-	for _, o := range cos {
+func (c *ChannelOpSet) MarshalLogArray(enc zapcore.ArrayEncoder) error {
+	for _, o := range c.Collect() {
 		enc.AppendObject(o)
 	}
 	return nil

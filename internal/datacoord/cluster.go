@@ -72,7 +72,7 @@ func (c *Cluster) UnRegister(node *NodeInfo) error {
 
 // Watch tries to add a channel in datanode cluster
 func (c *Cluster) Watch(ctx context.Context, ch string, collectionID UniqueID) error {
-	return c.channelManager.Watch(ctx, &channel{Name: ch, CollectionID: collectionID})
+	return c.channelManager.Watch(ctx, &channelMeta{Name: ch, CollectionID: collectionID})
 }
 
 // Flush sends flush requests to dataNodes specified
@@ -88,7 +88,7 @@ func (c *Cluster) Flush(ctx context.Context, nodeID int64, channel string,
 		return fmt.Errorf("channel %s is not watched on node %d", channel, nodeID)
 	}
 
-	ch := c.channelManager.getChannelByNodeAndName(nodeID, channel)
+	_, collID := c.channelManager.getCollectionIDByChannel(channel)
 
 	getSegmentID := func(segment *datapb.SegmentInfo, _ int) int64 {
 		return segment.GetID()
@@ -100,7 +100,7 @@ func (c *Cluster) Flush(ctx context.Context, nodeID int64, channel string,
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 			commonpbutil.WithTargetID(nodeID),
 		),
-		CollectionID: ch.CollectionID,
+		CollectionID: collID,
 		SegmentIDs:   lo.Map(segments, getSegmentID),
 		ChannelName:  channel,
 	}

@@ -76,7 +76,7 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 				chManager: &ChannelManager{
 					store: &ChannelStore{
 						channelsInfo: map[int64]*NodeChannelInfo{
-							1: {NodeID: 1, Channels: []*channel{{Name: "ch1"}}},
+							1: {NodeID: 1, Channels: []RWChannel{&channelMeta{Name: "ch1"}}},
 						},
 					},
 				},
@@ -106,7 +106,7 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 				chManager: &ChannelManager{
 					store: &ChannelStore{
 						channelsInfo: map[int64]*NodeChannelInfo{
-							1: {NodeID: 1, Channels: []*channel{{Name: "ch1"}}},
+							1: {NodeID: 1, Channels: []RWChannel{&channelMeta{Name: "ch1"}}},
 						},
 					},
 				},
@@ -136,7 +136,7 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 				chManager: &ChannelManager{
 					store: &ChannelStore{
 						channelsInfo: map[int64]*NodeChannelInfo{
-							1: {NodeID: 1, Channels: []*channel{{Name: "ch1"}}},
+							1: {NodeID: 1, Channels: []RWChannel{&channelMeta{Name: "ch1"}}},
 						},
 					},
 				},
@@ -215,7 +215,7 @@ func Test_compactionPlanHandler_execWithParallels(t *testing.T) {
 		chManager: &ChannelManager{
 			store: &ChannelStore{
 				channelsInfo: map[int64]*NodeChannelInfo{
-					1: {NodeID: 1, Channels: []*channel{{Name: "ch1"}}},
+					1: {NodeID: 1, Channels: []RWChannel{&channelMeta{Name: "ch1"}}},
 				},
 			},
 		},
