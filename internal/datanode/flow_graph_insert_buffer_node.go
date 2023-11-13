@@ -743,7 +743,7 @@ func newInsertBufferNode(
 	wTtMsgStream := wTt
 	wTtMsgStream.EnableProduce(true)
 
-	mt := newMergedTimeTickerSender(func(ts Timestamp, segmentIDs []int64) error {
+	mt := getOrCreateMergedTimeTickerSender(func(ts Timestamp, segmentIDs []int64) error {
 		stats := make([]*commonpb.SegmentStats, 0, len(segmentIDs))
 		for _, sid := range segmentIDs {
 			stat, err := config.channel.getSegmentStatisticsUpdates(sid)
