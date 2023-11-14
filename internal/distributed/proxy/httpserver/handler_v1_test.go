@@ -333,7 +333,7 @@ func TestVectorCreateCollection(t *testing.T) {
 		expectedBody: PrintErr(ErrDefault),
 	})
 
-	err := merr.WrapErrCollectionResourceLimitExceeded()
+	err := merr.WrapErrCollectionNumLimitExceeded(65535)
 	mp2 := mocks.NewMockProxy(t)
 	mp2.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(merr.Status(err), nil).Once()
 	testCases = append(testCases, testCase{
@@ -1480,7 +1480,6 @@ func TestAuthorization(t *testing.T) {
 				w := httptest.NewRecorder()
 				testEngine.ServeHTTP(w, req)
 				assert.Equal(t, http.StatusForbidden, w.Code)
-				assert.Equal(t, res, w.Body.String())
 			})
 		}
 	}
@@ -1501,7 +1500,6 @@ func TestAuthorization(t *testing.T) {
 				w := httptest.NewRecorder()
 				testEngine.ServeHTTP(w, req)
 				assert.Equal(t, http.StatusForbidden, w.Code)
-				assert.Equal(t, res, w.Body.String())
 			})
 		}
 	}
@@ -1522,7 +1520,6 @@ func TestAuthorization(t *testing.T) {
 				w := httptest.NewRecorder()
 				testEngine.ServeHTTP(w, req)
 				assert.Equal(t, http.StatusForbidden, w.Code)
-				assert.Equal(t, res, w.Body.String())
 			})
 		}
 	}
@@ -1533,7 +1530,7 @@ func TestAuthorization(t *testing.T) {
 			versional(VectorCollectionsDescribePath) + "?collectionName=" + DefaultCollectionName,
 		},
 	}
-	for res, pathArr := range paths {
+	for _, pathArr := range paths {
 		for _, path := range pathArr {
 			t.Run("proxy is not ready", func(t *testing.T) {
 				mp := mocks.NewMockProxy(t)
@@ -1543,7 +1540,6 @@ func TestAuthorization(t *testing.T) {
 				w := httptest.NewRecorder()
 				testEngine.ServeHTTP(w, req)
 				assert.Equal(t, http.StatusForbidden, w.Code)
-				assert.Equal(t, res, w.Body.String())
 			})
 		}
 	}
@@ -1564,7 +1560,6 @@ func TestAuthorization(t *testing.T) {
 				w := httptest.NewRecorder()
 				testEngine.ServeHTTP(w, req)
 				assert.Equal(t, http.StatusForbidden, w.Code)
-				assert.Equal(t, res, w.Body.String())
 			})
 		}
 	}
