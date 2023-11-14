@@ -108,8 +108,8 @@ class TestHighLevelApi(TestcaseBase):
         # 2. create collection with same params
         client_w.create_collection(client, collection_name, default_dim)
         # 3. create collection with same name and different params
-        error = {ct.err_code: 1, ct.err_msg: f"create duplicate collection with different parameters, "
-                                             f"collection: {collection_name}"}
+        error = {ct.err_code: 65535, ct.err_msg: f"create duplicate collection with different parameters, "
+                                                 f"collection: {collection_name}"}
         client_w.create_collection(client, collection_name, default_dim+1,
                                    check_task=CheckTasks.err_res, check_items=error)
         client_w.drop_collection(client, collection_name)
@@ -144,7 +144,7 @@ class TestHighLevelApi(TestcaseBase):
         rng = np.random.default_rng(seed=19530)
         vectors_to_search = rng.random((1, 8))
         search_params = {"metric_type": metric_type}
-        error = {ct.err_code: 1, ct.err_msg: f"metric type not match: expected=IP, actual={metric_type}"}
+        error = {ct.err_code: 65538, ct.err_msg: f"metric type not match: expected=IP, actual={metric_type}"}
         client_w.search(client, collection_name, vectors_to_search, limit=default_limit,
                         search_params=search_params,
                         check_task=CheckTasks.err_res, check_items=error)

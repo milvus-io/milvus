@@ -107,7 +107,7 @@ class TestQueryParams(TestcaseBase):
         log.info("test_query_no_collection: query without collection ")
         collection_w.query(default_term_expr,
                            check_task=CheckTasks.err_res,
-                           check_items={"err_code": 1,
+                           check_items={"err_code": 100,
                                         "err_msg": "collection not found"})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -204,7 +204,7 @@ class TestQueryParams(TestcaseBase):
         expected: raise exception
         """
         collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
-        error = {ct.err_code: 0, ct.err_msg: "The type of expr must be string"}
+        error = {ct.err_code: 1, ct.err_msg: "The type of expr must be string"}
         collection_w.query(None, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -216,7 +216,7 @@ class TestQueryParams(TestcaseBase):
         """
         collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
         exprs = [1, 2., [], {}, ()]
-        error = {ct.err_code: 0, ct.err_msg: "The type of expr must be string"}
+        error = {ct.err_code: 1, ct.err_msg: "The type of expr must be string"}
         for expr in exprs:
             collection_w.query(expr, check_task=CheckTasks.err_res, check_items=error)
 
@@ -1096,7 +1096,7 @@ class TestQueryParams(TestcaseBase):
         collection_w = self.init_collection_general(prefix, True)[0]
 
         # 2. query with no limit and no offset
-        error = {ct.err_code: 1, ct.err_msg: "empty expression should be used with limit"}
+        error = {ct.err_code: 65535, ct.err_msg: "empty expression should be used with limit"}
         collection_w.query("", check_task=CheckTasks.err_res, check_items=error)
 
         # 3. query with offset but no limit
@@ -1228,7 +1228,7 @@ class TestQueryParams(TestcaseBase):
         collection_w = self.init_collection_general(prefix, True)[0]
 
         # 2. query with limit > 16384
-        error = {ct.err_code: 1,
+        error = {ct.err_code: 65535,
                  ct.err_msg: "invalid max query result window, (offset+limit) should be in range [1, 16384]"}
         collection_w.query("", limit=16385, check_task=CheckTasks.err_res, check_items=error)
 
@@ -1237,7 +1237,7 @@ class TestQueryParams(TestcaseBase):
         collection_w.query("", limit=16384, offset=1, check_task=CheckTasks.err_res, check_items=error)
 
         # 4. query with limit < 0
-        error = {ct.err_code: 1,
+        error = {ct.err_code: 65535,
                  ct.err_msg: "invalid max query result window, offset [-1] is invalid, should be gte than 0"}
         collection_w.query("", limit=2, offset=-1,
                            check_task=CheckTasks.err_res, check_items=error)
@@ -1576,7 +1576,7 @@ class TestQueryParams(TestcaseBase):
         df = cf.gen_default_dataframe_data()
         partition_w.insert(df)
         assert partition_w.num_entities == ct.default_nb
-        error = {ct.err_code: 65535, ct.err_msg: "collection not loaded"}
+        error = {ct.err_code: 101, ct.err_msg: "collection not loaded"}
         collection_w.query(default_term_expr, partition_names=[partition_w.name],
                            check_task=CheckTasks.err_res, check_items=error)
 
@@ -1703,7 +1703,7 @@ class TestQueryParams(TestcaseBase):
         collection_w.insert(data)
 
         # 3. query with param ignore_growing invalid
-        error = {ct.err_code: 1, ct.err_msg: "parse search growing failed"}
+        error = {ct.err_code: 65535, ct.err_msg: "parse search growing failed"}
         collection_w.query('int64 >= 0', ignore_growing=ignore_growing,
                            check_task=CheckTasks.err_res, check_items=error)
 
@@ -1872,7 +1872,7 @@ class TestQueryParams(TestcaseBase):
         term_expr = f'{ct.default_int64_field_name} in {int_values[10: pos + 10]}'
         collection_w.query(term_expr, offset=10, limit=limit,
                            check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 1,
+                           check_items={ct.err_code: 65535,
                                         ct.err_msg: "limit [%s] is invalid" % limit})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1909,7 +1909,7 @@ class TestQueryParams(TestcaseBase):
         term_expr = f'{ct.default_int64_field_name} in {int_values[10: pos + 10]}'
         collection_w.query(term_expr, offset=offset, limit=10,
                            check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 1,
+                           check_items={ct.err_code: 65535,
                                         ct.err_msg: "offset [%s] is invalid" % offset})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1983,7 +1983,7 @@ class TestQueryOperation(TestcaseBase):
 
         # query after remove default connection
         collection_w.query(default_term_expr, check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 0, ct.err_msg: cem.ConnectFirst})
+                           check_items={ct.err_code: 1, ct.err_msg: cem.ConnectFirst})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_without_loading(self):
@@ -2005,7 +2005,7 @@ class TestQueryOperation(TestcaseBase):
 
         # query without load
         collection_w.query(default_term_expr, check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 65535,
+                           check_items={ct.err_code: 101,
                                         ct.err_msg: "collection not loaded"})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2729,7 +2729,7 @@ class TestQueryCount(TestcaseBase):
 
         collection_w.query(expr=default_term_expr, output_fields=[invalid_output_field],
                            check_task=CheckTasks.err_res,
-                           check_items={"err_code": 1,
+                           check_items={"err_code": 65535,
                                         "err_msg": f"field {invalid_output_field} not exist"})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2742,7 +2742,7 @@ class TestQueryCount(TestcaseBase):
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
         collection_w.query(expr=default_term_expr, output_fields=[ct.default_count_output],
                            check_task=CheckTasks.err_res,
-                           check_items={"err_code": 65535,
+                           check_items={"err_code": 101,
                                         "err_msg": "collection not loaded"})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -3109,12 +3109,12 @@ class TestQueryCount(TestcaseBase):
         # count with limit
         collection_w.query(expr=default_expr, output_fields=[ct.default_count_output], limit=10,
                            check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 1, ct.err_msg: "count entities with pagination is not allowed"}
+                           check_items={ct.err_code: 65535, ct.err_msg: "count entities with pagination is not allowed"}
                            )
         # count with pagination params
         collection_w.query(default_expr, output_fields=[ct.default_count_output], offset=10, limit=10,
                            check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 1, ct.err_msg: "count entities with pagination is not allowed"})
+                           check_items={ct.err_code: 65535, ct.err_msg: "count entities with pagination is not allowed"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_count_alias_insert_delete_drop(self):
@@ -3164,7 +3164,7 @@ class TestQueryCount(TestcaseBase):
                                  check_items={exp_res: [{count: 0}]})
 
         collection_w_alias.drop(check_task=CheckTasks.err_res,
-                                check_items={ct.err_code: 1,
+                                check_items={ct.err_code: 65535,
                                              ct.err_msg: "cannot drop the collection via alias"})
         collection_w.drop()
 

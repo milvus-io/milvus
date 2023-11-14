@@ -86,7 +86,7 @@ class TestConnectionParams(TestcaseBase):
 
         # check for alias
         self.connection_wrap.connect(alias=alias, check_task=ct.CheckTasks.err_res,
-                                     check_items={ct.err_code: 0, ct.err_msg: cem.AliasType % type(alias)})
+                                     check_items={ct.err_code: 1, ct.err_msg: cem.AliasType % type(alias)})
 
     @pytest.mark.skip("get_connection is replaced by has_connection")
     @pytest.mark.parametrize("alias", ct.get_not_string)
@@ -112,7 +112,7 @@ class TestConnectionParams(TestcaseBase):
 
         # check for alias
         self.connection_wrap.get_connection_addr(alias=alias, check_task=ct.CheckTasks.err_res,
-                                                 check_items={ct.err_code: 0, ct.err_msg: cem.AliasType % type(alias)})
+                                                 check_items={ct.err_code: 1, ct.err_msg: cem.AliasType % type(alias)})
 
     @pytest.mark.tags(ct.CaseLabel.L2)
     @pytest.mark.parametrize("alias", ct.get_not_string)
@@ -126,7 +126,7 @@ class TestConnectionParams(TestcaseBase):
         # check for alias
         self._connect()
         self.connection_wrap.remove_connection(alias=alias, check_task=ct.CheckTasks.err_res,
-                                               check_items={ct.err_code: 0, ct.err_msg: cem.AliasType % type(alias)})
+                                               check_items={ct.err_code: 1, ct.err_msg: cem.AliasType % type(alias)})
 
     @pytest.mark.tags(ct.CaseLabel.L2)
     @pytest.mark.parametrize("alias", ct.get_not_string)
@@ -140,7 +140,7 @@ class TestConnectionParams(TestcaseBase):
         # check for alias
         self._connect()
         self.connection_wrap.disconnect(alias=alias, check_task=ct.CheckTasks.err_res,
-                                        check_items={ct.err_code: 0, ct.err_msg: cem.AliasType % type(alias)})
+                                        check_items={ct.err_code: 1, ct.err_msg: cem.AliasType % type(alias)})
 
 
 class TestConnectionOperation(TestcaseBase):
@@ -164,7 +164,7 @@ class TestConnectionOperation(TestcaseBase):
                                             alias2={"port": "2", "host": "hostlocal"},
                                             testing=data,
                                             check_task=ct.CheckTasks.err_res,
-                                            check_items={ct.err_code: 0, ct.err_msg: err_msg})
+                                            check_items={ct.err_code: 1, ct.err_msg: err_msg})
 
         # list all connections and check the response
         self.connection_wrap.list_connections(check_task=ct.CheckTasks.ccr,
@@ -325,7 +325,7 @@ class TestConnectionOperation(TestcaseBase):
         err_msg = cem.ConnDiffConf % "test_alias_name"
         self.connection_wrap.add_connection(test_alias_name={"host": "localhost", "port": "1"},
                                             check_task=ct.CheckTasks.err_res,
-                                            check_items={ct.err_code: 0, ct.err_msg: err_msg})
+                                            check_items={ct.err_code: 1, ct.err_msg: err_msg})
 
         # add connection with the same params
         self.connection_wrap.add_connection(test_alias_name={"host": host, "port": port})
@@ -346,7 +346,7 @@ class TestConnectionOperation(TestcaseBase):
         err_msg = cem.ConnDiffConf % DefaultConfig.DEFAULT_USING
         self.connection_wrap.add_connection(default={"host": "localhost", "port": "1"},
                                             check_task=ct.CheckTasks.err_res,
-                                            check_items={ct.err_code: 0, ct.err_msg: err_msg})
+                                            check_items={ct.err_code: 1, ct.err_msg: err_msg})
 
         # add connection with the same params
         self.connection_wrap.add_connection(test_alias_name={"host": host, "port": port})
@@ -417,7 +417,7 @@ class TestConnectionOperation(TestcaseBase):
         # create connection that param of alias is not exist
         err_msg = cem.ConnLackConf % ct.Not_Exist
         self.connection_wrap.connect(alias=ct.Not_Exist, check_task=ct.CheckTasks.err_res,
-                                     check_items={ct.err_code: 0, ct.err_msg: err_msg})
+                                     check_items={ct.err_code: 1, ct.err_msg: err_msg})
 
         # list all connections and check the response
         self.connection_wrap.list_connections(check_task=ct.CheckTasks.ccr,
@@ -513,7 +513,7 @@ class TestConnectionOperation(TestcaseBase):
         err_msg = cem.ConnDiffConf % "default"
         self.connection_wrap.connect(alias=connect_name, host="host", port=port,
                                      check_task=ct.CheckTasks.err_res,
-                                     check_items={ct.err_code: 0, ct.err_msg: err_msg})
+                                     check_items={ct.err_code: 1, ct.err_msg: err_msg})
 
     @pytest.mark.tags(ct.CaseLabel.L2)
     @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING, "test_alias_nme"])
@@ -764,7 +764,7 @@ class TestConnectionOperation(TestcaseBase):
         collection_name = cf.gen_unique_str('connection_test_')
         schema = cf.gen_default_collection_schema()
         self.collection_wrap.init_collection(name=collection_name, schema=schema, check_task=ct.CheckTasks.err_res,
-                                             check_items={ct.err_code: 0,
+                                             check_items={ct.err_code: 1,
                                                           ct.err_msg: cem.ConnectFirst},
                                              _using=ct.Not_Exist)
 
@@ -790,7 +790,7 @@ class TestConnectionOperation(TestcaseBase):
 
         # drop collection failed
         self.collection_wrap.drop(check_task=ct.CheckTasks.err_res,
-                                  check_items={ct.err_code: 0, ct.err_msg: "should create connect first"})
+                                  check_items={ct.err_code: 1, ct.err_msg: "should create connect first"})
 
         # successfully created default connection
         self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=host, port=port,

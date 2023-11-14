@@ -429,10 +429,9 @@ class TestInsertParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data(nb=100)
         data[0][1] = 1.0
-        error = {ct.err_code: 0,
+        error = {ct.err_code: 1,
                  ct.err_msg: "The data in the same column must be of the same type"}
-        collection_w.insert(
-            data, check_task=CheckTasks.err_res, check_items=error)
+        collection_w.insert(data, check_task=CheckTasks.err_res, check_items=error)
 
 
 class TestInsertOperation(TestcaseBase):
@@ -467,9 +466,8 @@ class TestInsertOperation(TestcaseBase):
         res_list, _ = self.connection_wrap.list_connections()
         assert ct.default_alias not in res_list
         data = cf.gen_default_list_data(10)
-        error = {ct.err_code: 0, ct.err_msg: 'should create connect first'}
-        collection_w.insert(
-            data=data, check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 1, ct.err_msg: 'should create connect first'}
+        collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_insert_default_partition(self):
@@ -571,8 +569,7 @@ class TestInsertOperation(TestcaseBase):
                           "limit_2___________"], ['1', '2']]
         error = {ct.err_code: 1,
                  ct.err_msg: "invalid input, length of string exceeds max length"}
-        collection_w.insert(
-            data, check_task=CheckTasks.err_res, check_items=error)
+        collection_w.insert(data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_with_lack_vector_field(self):
@@ -1130,12 +1127,10 @@ class TestInsertAsync(TestcaseBase):
         method: insert async with invalid data
         expected: raise exception
         """
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix))
-        columns = [ct.default_int64_field_name,
-                   ct.default_float_vec_field_name]
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        columns = [ct.default_int64_field_name, ct.default_float_vec_field_name]
         df = pd.DataFrame(columns=columns)
-        error = {ct.err_code: 0,
+        error = {ct.err_code: 1,
                  ct.err_msg: "The fields don't match with schema fields"}
         collection_w.insert(data=df, _async=True,
                             check_task=CheckTasks.err_res, check_items=error)
@@ -1263,7 +1258,7 @@ class TestInsertInvalid(TestcaseBase):
         collection_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=collection_name)
         df = cf.gen_default_list_data(ct.default_nb)
-        error = {ct.err_code: 15, 'err_msg': "partition not found"}
+        error = {ct.err_code: 200, 'err_msg': "partition not found"}
         mutation_res, _ = collection_w.insert(data=df, partition_name="p", check_task=CheckTasks.err_res,
                                               check_items=error)
 
@@ -1309,14 +1304,13 @@ class TestInsertInvalid(TestcaseBase):
         method: insert int8 out of range
         expected: raise exception
         """
-        collection_w = self.init_collection_general(
-            prefix, is_all_data_type=True)[0]
+        collection_w = self.init_collection_general(prefix, is_all_data_type=True)[0]
         data = cf.gen_dataframe_all_data_type(nb=1)
         data[ct.default_int8_field_name] = [invalid_int8]
-        error = {ct.err_code: 1100, 'err_msg': "The data type of field int8 doesn't match, "
-                                            "expected: INT8, got INT64"}
-        collection_w.insert(
-            data, check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 1100, 'err_msg': f"the 0th element ({invalid_int8}) out of range: "
+                                               f"[-128, 127]: expected=integer doesn't overflow, "
+                                               f"actual=out of range: invalid parameter"}
+        collection_w.insert(data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("invalid_int16", [-32769, 32768])
@@ -1326,14 +1320,13 @@ class TestInsertInvalid(TestcaseBase):
         method: insert int16 out of range
         expected: raise exception
         """
-        collection_w = self.init_collection_general(
-            prefix, is_all_data_type=True)[0]
+        collection_w = self.init_collection_general(prefix, is_all_data_type=True)[0]
         data = cf.gen_dataframe_all_data_type(nb=1)
         data[ct.default_int16_field_name] = [invalid_int16]
-        error = {ct.err_code: 1100, 'err_msg': "The data type of field int16 doesn't match, "
-                                            "expected: INT16, got INT64"}
-        collection_w.insert(
-            data, check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 1100, 'err_msg': f"the 0th element ({invalid_int16}) out of range: "
+                                               f"[-32768, 32767]: expected=integer doesn't overflow, "
+                                               f"actual=out of range: invalid parameter"}
+        collection_w.insert(data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("invalid_int32", [-2147483649, 2147483648])
@@ -1343,14 +1336,11 @@ class TestInsertInvalid(TestcaseBase):
         method: insert int32 out of range
         expected: raise exception
         """
-        collection_w = self.init_collection_general(
-            prefix, is_all_data_type=True)[0]
+        collection_w = self.init_collection_general(prefix, is_all_data_type=True)[0]
         data = cf.gen_dataframe_all_data_type(nb=1)
         data[ct.default_int32_field_name] = [invalid_int32]
-        error = {ct.err_code: 1, 'err_msg': "The data type of field int16 doesn't match, "
-                                            "expected: INT32, got INT64"}
-        collection_w.insert(
-            data, check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 1, 'err_msg': "The data in the same column must be of the same type."}
+        collection_w.insert(data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip("no error code provided now")
@@ -2126,7 +2116,7 @@ class TestUpsertInvalid(TestcaseBase):
         collection_w.create_partition(p_name)
         cf.insert_data(collection_w)
         data = cf.gen_default_dataframe_data(nb=100)
-        error = {ct.err_code: 1, ct.err_msg: "Invalid partition name"}
+        error = {ct.err_code: 65535, ct.err_msg: "Invalid partition name"}
         collection_w.upsert(data=data, partition_name=partition_name,
                             check_task=CheckTasks.err_res, check_items=error)
 
@@ -2142,7 +2132,7 @@ class TestUpsertInvalid(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_dataframe_data(nb=2)
         partition_name = "partition1"
-        error = {ct.err_code: 15, ct.err_msg: f"partition={partition_name}: partition not found"}
+        error = {ct.err_code: 200, ct.err_msg: f"partition={partition_name}: partition not found"}
         collection_w.upsert(data=data, partition_name=partition_name,
                             check_task=CheckTasks.err_res, check_items=error)
 

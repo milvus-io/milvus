@@ -236,7 +236,7 @@ class TestPartitionKeyInvalidParams(TestcaseBase):
         collection_w, _ = self.collection_wrap.init_collection(name=c_name, schema=schema,
                                                                num_partitions=num_partitions,
                                                                check_task=CheckTasks.err_res,
-                                                               check_items={"err_code": 2, "err_msg": err_msg})
+                                                               check_items={"err_code": 65535, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_min_partitions(self):
@@ -282,11 +282,11 @@ class TestPartitionKeyInvalidParams(TestcaseBase):
         collection_w, _ = self.collection_wrap.init_collection(name=c_name, schema=schema,
                                                                num_partitions=min_partition - 1,
                                                                check_task=CheckTasks.err_res,
-                                                               check_items={"err_code": 2, "err_msg": err_msg})
+                                                               check_items={"err_code": 1, "err_msg": err_msg})
         collection_w, _ = self.collection_wrap.init_collection(name=c_name, schema=schema,
                                                                num_partitions=min_partition - 3,
                                                                check_task=CheckTasks.err_res,
-                                                               check_items={"err_code": 2, "err_msg": err_msg})
+                                                               check_items={"err_code": 1, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("is_par_key", [None, "", "invalid", 0.1, [], {}, ()])
@@ -300,7 +300,7 @@ class TestPartitionKeyInvalidParams(TestcaseBase):
         err_msg = "Param is_partition_key must be bool type"
         int64_field = cf.gen_int64_field(is_partition_key=is_par_key,
                                          check_task=CheckTasks.err_res,
-                                         check_items={"err_code": 2, "err_msg": err_msg})
+                                         check_items={"err_code": 1, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("num_partitions", [True, False, "", "invalid", 0.1, [], {}, ()])
@@ -322,7 +322,7 @@ class TestPartitionKeyInvalidParams(TestcaseBase):
         collection_w, _ = self.collection_wrap.init_collection(name=c_name, schema=schema,
                                                                num_partitions=num_partitions,
                                                                check_task=CheckTasks.err_res,
-                                                               check_items={"err_code": 2, "err_msg": err_msg})
+                                                               check_items={"err_code": 1, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_partition_key_on_multi_fields(self):
@@ -341,7 +341,7 @@ class TestPartitionKeyInvalidParams(TestcaseBase):
         schema = cf.gen_collection_schema(fields=[pk_field, int64_field, string_field, vector_field],
                                           auto_id=True,
                                           check_task=CheckTasks.err_res,
-                                          check_items={"err_code": 2, "err_msg": err_msg})
+                                          check_items={"err_code": 1, "err_msg": err_msg})
 
         # both defined in collection schema
         err_msg = "Param partition_key_field must be str type"
@@ -351,7 +351,7 @@ class TestPartitionKeyInvalidParams(TestcaseBase):
                                           partition_key_field=[int64_field.name, string_field.name],
                                           auto_id=True,
                                           check_task=CheckTasks.err_res,
-                                          check_items={"err_code": 2, "err_msg": err_msg})
+                                          check_items={"err_code": 1, "err_msg": err_msg})
 
         # one defined in field schema, one defined in collection schema
         err_msg = "Expected only one partition key field"
@@ -361,7 +361,7 @@ class TestPartitionKeyInvalidParams(TestcaseBase):
                                           partition_key_field=string_field.name,
                                           auto_id=True,
                                           check_task=CheckTasks.err_res,
-                                          check_items={"err_code": 2, "err_msg": err_msg})
+                                          check_items={"err_code": 1, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("is_int64_primary", [True, False])
@@ -386,7 +386,7 @@ class TestPartitionKeyInvalidParams(TestcaseBase):
         c_name = cf.gen_unique_str("par_key")
         collection_w, _ = self.collection_wrap.init_collection(name=c_name, schema=schema,
                                                                check_task=CheckTasks.err_res,
-                                                               check_items={"err_code": 2, "err_msg": err_msg})
+                                                               check_items={"err_code": 65535, "err_msg": err_msg})
 
         # if settings on collection schema
         if is_int64_primary:
@@ -401,7 +401,7 @@ class TestPartitionKeyInvalidParams(TestcaseBase):
         c_name = cf.gen_unique_str("par_key")
         collection_w, _ = self.collection_wrap.init_collection(name=c_name, schema=schema,
                                                                check_task=CheckTasks.err_res,
-                                                               check_items={"err_code": 2, "err_msg": err_msg})
+                                                               check_items={"err_code": 65535, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_partition_key_on_and_off(self):
@@ -420,7 +420,7 @@ class TestPartitionKeyInvalidParams(TestcaseBase):
                                           partition_key_field=vector_field.name,
                                           auto_id=True,
                                           check_task=CheckTasks.err_res,
-                                          check_items={"err_code": 2, "err_msg": err_msg})
+                                          check_items={"err_code": 1, "err_msg": err_msg})
 
         # if two fields with same type
         string_field = cf.gen_string_field(name="string1", is_partition_key=True)
@@ -430,7 +430,7 @@ class TestPartitionKeyInvalidParams(TestcaseBase):
                                           partition_key_field=string_field2.name,
                                           auto_id=True,
                                           check_task=CheckTasks.err_res,
-                                          check_items={"err_code": 2, "err_msg": err_msg})
+                                          check_items={"err_code": 1, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("field_type", [DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR, DataType.FLOAT,
@@ -463,7 +463,7 @@ class TestPartitionKeyInvalidParams(TestcaseBase):
                                                   int64_field, string_field, vector_field],
                                           auto_id=True,
                                           check_task=CheckTasks.err_res,
-                                          check_items={"err_code": 2, "err_msg": err_msg})
+                                          check_items={"err_code": 1, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_partition_key_on_not_existed_fields(self):
@@ -482,7 +482,7 @@ class TestPartitionKeyInvalidParams(TestcaseBase):
                                           partition_key_field="non_existing_field",
                                           auto_id=True,
                                           check_task=CheckTasks.err_res,
-                                          check_items={"err_code": 2, "err_msg": err_msg})
+                                          check_items={"err_code": 1, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_partition_key_on_empty_and_num_partitions_set(self):
@@ -500,7 +500,7 @@ class TestPartitionKeyInvalidParams(TestcaseBase):
         schema = cf.gen_collection_schema(fields=[pk_field, int64_field, string_field, vector_field],
                                           partition_key_field="", auto_id=True,
                                           check_task=CheckTasks.err_res,
-                                          check_items={"err_code": 2, "err_msg": err_msg})
+                                          check_items={"err_code": 1, "err_msg": err_msg})
 
         schema = cf.gen_default_collection_schema()
         err_msg = "num_partitions should only be specified with partition key field enabled"
@@ -508,7 +508,7 @@ class TestPartitionKeyInvalidParams(TestcaseBase):
         collection_w, _ = self.collection_wrap.init_collection(name=c_name, schema=schema,
                                                                num_partitions=200,
                                                                check_task=CheckTasks.err_res,
-                                                               check_items={"err_code": 2, "err_msg": err_msg})
+                                                               check_items={"err_code": 65535, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("invalid_data", [99, True, None, [], {}, ()])
@@ -541,7 +541,7 @@ class TestPartitionKeyInvalidParams(TestcaseBase):
         data = [pk_values, int64_values, string_values, float_vec_values]
 
         err_msg = "expect string input"
-        self.collection_wrap.insert(data, check_task=CheckTasks.err_res, check_items={"err_code": 2, "err_msg": err_msg})
+        self.collection_wrap.insert(data, check_task=CheckTasks.err_res, check_items={"err_code": 1, "err_msg": err_msg})
 
 
 class TestPartitionApiForbidden(TestcaseBase):
@@ -571,10 +571,10 @@ class TestPartitionApiForbidden(TestcaseBase):
         partition_name = cf.gen_unique_str("partition")
         self.collection_wrap.create_partition(partition_name,
                                               check_task=CheckTasks.err_res,
-                                              check_items={"err_code": 2, "err_msg": err_msg})
+                                              check_items={"err_code": 65535, "err_msg": err_msg})
         self.partition_wrap.init_partition(collection_w, partition_name,
                                            check_task=CheckTasks.err_res,
-                                           check_items={"err_code": 2, "err_msg": err_msg})
+                                           check_items={"err_code": 65535, "err_msg": err_msg})
 
         # get partition is allowed
         partitions = self.collection_wrap.partitions
@@ -598,17 +598,17 @@ class TestPartitionApiForbidden(TestcaseBase):
 
         err_msg = "not support manually specifying the partition names if partition key mode is used"
         self.partition_wrap.insert(data, check_task=CheckTasks.err_res,
-                                   check_items={"err_code": 2, "err_msg": err_msg})
+                                   check_items={"err_code": 65535, "err_msg": err_msg})
         self.collection_wrap.insert(data, partition_name=partitions[0].name,
                                     check_task=CheckTasks.err_res,
-                                    check_items={"err_code": 2, "err_msg": err_msg})
+                                    check_items={"err_code": 65535, "err_msg": err_msg})
 
         err_msg = "disable load partitions if partition key mode is used"
         self.partition_wrap.load(check_task=CheckTasks.err_res,
-                                 check_items={"err_code": 2, "err_msg": err_msg})
+                                 check_items={"err_code": 65535, "err_msg": err_msg})
         self.collection_wrap.load(partition_names=[partitions[0].name],
                                   check_task=CheckTasks.err_res,
-                                  check_items={"err_code": 2, "err_msg": err_msg})
+                                  check_items={"err_code": 65535, "err_msg": err_msg})
 
         # flush
         collection_w.flush()
@@ -634,13 +634,13 @@ class TestPartitionApiForbidden(TestcaseBase):
                                     expr=f'{int64_field.name} in [1,3,5]',
                                     output_fields=[int64_field.name, string_field.name],
                                     check_task=CheckTasks.err_res,
-                                    check_items={"err_code": nq, "err_msg": err_msg})
+                                    check_items={"err_code": 65535, "err_msg": err_msg})
         self.partition_wrap.search(data=search_vectors, anns_field=vector_field.name,
                                    params=ct.default_search_params, limit=entities_per_parkey,
                                    expr=f'{string_field.name} in ["{string_prefix}1","{string_prefix}3","{string_prefix}5"]',
                                    output_fields=[int64_field.name, string_field.name],
                                    check_task=CheckTasks.err_res,
-                                   check_items={"err_code": nq, "err_msg": err_msg})
+                                   check_items={"err_code": 65535, "err_msg": err_msg})
 
         # partition loading progress is allowed
         self.utility_wrap.loading_progress(collection_name=collection_w.name)
@@ -656,14 +656,14 @@ class TestPartitionApiForbidden(TestcaseBase):
 
         # partition delete is not allowed
         self.partition_wrap.delete(expr=f'{pk_field.name} in {pks}',
-                                   check_task=CheckTasks.err_res, check_items={"err_code": 2, "err_msg": err_msg})
+                                   check_task=CheckTasks.err_res, check_items={"err_code": 65535, "err_msg": err_msg})
         self.collection_wrap.delete(expr=f'{pk_field.name} in {pks}', partition_name=partitions[0].name,
-                                    check_task=CheckTasks.err_res, check_items={"err_code": 2, "err_msg": err_msg})
+                                    check_task=CheckTasks.err_res, check_items={"err_code": 65535, "err_msg": err_msg})
         # partition query is not allowed
         self.partition_wrap.query(expr=f'{pk_field.name} in {pks}',
-                                  check_task=CheckTasks.err_res, check_items={"err_code": 2, "err_msg": err_msg})
+                                  check_task=CheckTasks.err_res, check_items={"err_code": 65535, "err_msg": err_msg})
         self.collection_wrap.query(expr=f'{pk_field.name} in {pks}', partition_names=[partitions[0].name],
-                                   check_task=CheckTasks.err_res, check_items={"err_code": 2, "err_msg": err_msg})
+                                   check_task=CheckTasks.err_res, check_items={"err_code": 65535, "err_msg": err_msg})
         # partition upsert is not allowed
         # self.partition_wrap.upsert(data=data, check_task=CheckTasks.err_res,
         #                            check_items={"err_code": 2, "err_msg": err_msg})
@@ -671,10 +671,10 @@ class TestPartitionApiForbidden(TestcaseBase):
         #                             chek_task=CheckTasks.err_res, check_items={"err_code": 2, "err_msg": err_msg})
         # partition release
         err_msg = "disable release partitions if partition key mode is used"
-        self.partition_wrap.release(check_task=CheckTasks.err_res, check_items={"err_code": 2, "err_msg": err_msg})
+        self.partition_wrap.release(check_task=CheckTasks.err_res, check_items={"err_code": 65535, "err_msg": err_msg})
         # partition drop
         err_msg = "disable drop partition if partition key mode is used"
-        self.partition_wrap.drop(check_task=CheckTasks.err_res, check_items={"err_code": 2, "err_msg": err_msg})
+        self.partition_wrap.drop(check_task=CheckTasks.err_res, check_items={"err_code": 65535, "err_msg": err_msg})
 
         # # partition bulk insert
         # self.utility_wrap.do_bulk_insert(collection_w.name, files, partition_names=[partitions[0].name],

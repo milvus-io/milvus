@@ -196,7 +196,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.search(vectors, default_search_field,
                             default_search_params, default_limit, default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
+                            check_items={"err_code": 100,
                                          "err_msg": "collection not found"})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -268,7 +268,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         invalid_search_field = get_invalid_fields_type
         log.info("test_search_param_invalid_field_type: searching with invalid field: %s"
                  % invalid_search_field)
-        error1 = {"err_code": 65535, "err_msg": "collection not loaded"}
+        error1 = {"err_code": 202, "err_msg": "collection not loaded"}
         error2 = {"err_code": 1, "err_msg": f"`anns_field` value {get_invalid_fields_type} is illegal"}
         error = error2 if get_invalid_fields_type in [[], 1, [1, "2", 3], (1,), {1: 1}] else error1
         collection_w.search(vectors[:default_nq], invalid_search_field, default_search_params,
@@ -311,7 +311,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.search(vectors[:default_nq], default_search_field, search_params,
                             default_limit, default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 65535,
+                            check_items={"err_code": 101,
                                          "err_msg": "collection not loaded"})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -411,7 +411,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
                             limit, default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 65535,
+                            check_items={"err_code": 1,
                                          "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -466,7 +466,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, nb, expression,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
+                            check_items={"err_code": 65535,
                                          "err_msg": "failed to create query plan: "
                                                     "cannot parse expression: %s" % expression})
 
@@ -499,8 +499,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
         expected: raise exception and report the error
         """
         # 1. initialize with data
-        collection_w = self.init_collection_general(
-            prefix, is_all_data_type=True)[0]
+        collection_w = self.init_collection_general(prefix, is_all_data_type=True)[0]
+        collection_w.load()
         # 2 search with invalid bool expr
         invalid_search_expr_bool = f"{default_bool_field_name} == {get_invalid_expr_bool_value}"
         log.info("test_search_param_invalid_expr_bool: searching with "
@@ -508,7 +508,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit, invalid_search_expr_bool,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
+                            check_items={"err_code": 65535,
                                          "err_msg": "failed to create query plan"})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -548,7 +548,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
                                             default_search_params, default_limit, expression,
                                             check_task=CheckTasks.err_res,
-                                            check_items={"err_code": 1,
+                                            check_items={"err_code": 65535,
                                                          "err_msg": "failed to create query plan: cannot parse "
                                                                     "expression: %s" % expression})
 
@@ -665,7 +665,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.search(vectors, default_search_field,
                             default_search_params, default_limit, default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 65535,
+                            check_items={"err_code": 101,
                                          "err_msg": "collection not loaded"})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -693,7 +693,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             default_search_params, limit, default_search_exp,
                             [par_name],
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 65535,
+                            check_items={"err_code": 101,
                                          "err_msg": "collection not loaded"})
 
     @pytest.mark.skip("enable this later using session/strong consistency")
@@ -874,13 +874,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             search_params, reorder_k + 1,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 65538,
-                                         "err_msg": "failed to search: attempt #0: failed to search/query "
-                                                    "delegator 1 for channel by-dev-rootcoord-dml_12_44501"
-                                                    "8735380972010v0: fail to Search, QueryNode ID=1, reaso"
-                                                    "n=worker(1) query failed: UnknownError:  => failed to "
-                                                    "search: out of range in json: reorder_k(100) should be"
-                                                    " larger than k(101): attempt #1: no available shard de"
-                                                    "legator found: service unavailable"})
+                                         "err_msg": "reorder_k(100) should be larger than k(101)"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("nq", [16385])
@@ -899,7 +893,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             default_search_params, default_limit,
                             default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
+                            check_items={"err_code": 65535,
                                          "err_msg": "nq (number of search vector per search "
                                                     "request) should be in range [1, 16384]"})
 
@@ -1049,14 +1043,12 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.insert(data)
 
         # 3. search with param ignore_growing=True
-        search_params = {"metric_type": "L2", "params": {
-            "nprobe": 10}, "ignore_growing": ignore_growing}
-        vector = [[random.random() for _ in range(default_dim)]
-                  for _ in range(nq)]
+        search_params = {"metric_type": "L2", "params": {"nprobe": 10}, "ignore_growing": ignore_growing}
+        vector = [[random.random() for _ in range(default_dim)] for _ in range(nq)]
         collection_w.search(vector[:default_nq], default_search_field, search_params, default_limit,
                             default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
+                            check_items={"err_code": 65535,
                                          "err_msg": "parse search growing failed"})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1108,18 +1100,19 @@ class TestCollectionSearchInvalid(TestcaseBase):
         expected: raise exception and report the error
         """
         # 1. initialize with data
-        collection_w = self.init_collection_general(prefix)[0]
+        collection_w = self.init_collection_general(prefix, True)[0]
+        # collection_w.load()
         # 2. range search
         log.info("test_range_search_invalid_radius: Range searching collection %s" %
                  collection_w.name)
         radius = get_invalid_range_search_paras
-        range_search_params = {"metric_type": "L2",
+        range_search_params = {"metric_type": "COSINE",
                                "params": {"nprobe": 10, "radius": radius, "range_filter": 0}}
         collection_w.search(vectors[:default_nq], default_search_field,
                             range_search_params, default_limit,
                             default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 65535,
+                            check_items={"err_code": 65538,
                                          "err_msg": "collection not loaded"})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1141,7 +1134,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             range_search_params, default_limit,
                             default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 65535,
+                            check_items={"err_code": 101,
                                          "err_msg": "collection not loaded"})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1161,7 +1154,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             range_search_params, default_limit,
                             default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 65535,
+                            check_items={"err_code": 101,
                                          "err_msg": "collection not loaded"})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1182,7 +1175,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             range_search_params, default_limit,
                             default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 65535,
+                            check_items={"err_code": 101,
                                          "err_msg": "collection not loaded"})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -6573,8 +6566,7 @@ class TestCollectionRangeSearch(TestcaseBase):
         vectors = np.array(_vectors[0]).tolist()
         vectors = [vectors[i][-1] for i in range(default_nq)]
         # 3. range search with L2
-        range_search_params = {"metric_type": "COSINE",
-                               "params": {"range_filter": 1}}
+        range_search_params = {"metric_type": "COSINE", "params": {"range_filter": 1}}
         collection_w.search(vectors[:default_nq], default_search_field,
                             range_search_params, default_limit,
                             default_search_exp,
@@ -6583,13 +6575,12 @@ class TestCollectionRangeSearch(TestcaseBase):
                                          "ids": insert_ids,
                                          "limit": default_limit})
         # 4. range search with IP
-        range_search_params = {"metric_type": "IP",
-                               "params": {"range_filter": 1}}
+        range_search_params = {"metric_type": "IP", "params": {"range_filter": 1}}
         collection_w.search(vectors[:default_nq], default_search_field,
                             range_search_params, default_limit,
                             default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1,
+                            check_items={ct.err_code: 65538,
                                          ct.err_msg: "metric type not match: expected=COSINE, actual=IP"})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -6622,7 +6613,7 @@ class TestCollectionRangeSearch(TestcaseBase):
                             range_search_params, default_limit,
                             default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1,
+                            check_items={ct.err_code: 65538,
                                          ct.err_msg: "metric type not match: expected=L2, actual=IP"})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -6639,8 +6630,7 @@ class TestCollectionRangeSearch(TestcaseBase):
         vectors = np.array(_vectors[0]).tolist()
         vectors = [vectors[i][-1] for i in range(default_nq)]
         # 3. range search with L2
-        range_search_params = {"metric_type": "COSINE",
-                               "radius": 0, "range_filter": 1}
+        range_search_params = {"metric_type": "COSINE", "radius": 0, "range_filter": 1}
         collection_w.search(vectors[:default_nq], default_search_field,
                             range_search_params, default_limit,
                             default_search_exp,
@@ -6649,13 +6639,12 @@ class TestCollectionRangeSearch(TestcaseBase):
                                          "ids": insert_ids,
                                          "limit": default_limit})
         # 4. range search with IP
-        range_search_params = {"metric_type": "IP",
-                               "radius": 1, "range_filter": 0}
+        range_search_params = {"metric_type": "IP", "radius": 1, "range_filter": 0}
         collection_w.search(vectors[:default_nq], default_search_field,
                             range_search_params, default_limit,
                             default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1,
+                            check_items={ct.err_code: 65538,
                                          ct.err_msg: "metric type not match: expected=COSINE, actual=IP"})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -7845,7 +7834,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w1.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 65538, ct.err_msg: 'not loaded'})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w2.name],
                             check_task=CheckTasks.check_search_results,
@@ -7883,7 +7872,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w1.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 65538, ct.err_msg: 'partition not loaded'})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w2.name],
                             check_task=CheckTasks.check_search_results,
@@ -7915,15 +7904,15 @@ class TestCollectionLoadOperation(TestcaseBase):
         # search on collection, partition1, partition2
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 101, ct.err_msg: 'not loaded'})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w1.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 101, ct.err_msg: 'not loaded'})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w2.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 101, ct.err_msg: 'not loaded'})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_release_collection_load_partition(self):
@@ -7939,8 +7928,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         expected: No exception
         """
         # insert data
-        collection_w = self.init_collection_general(
-            prefix, True, 200, partition_num=1, is_index=False)[0]
+        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=False)[0]
         partition_w1, partition_w2 = collection_w.partitions
         collection_w.create_index(default_search_field, default_index_params)
         # delete data
@@ -7957,7 +7945,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w1.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 65538, ct.err_msg: 'not loaded'})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w2.name],
                             check_task=CheckTasks.check_search_results,
@@ -7990,15 +7978,15 @@ class TestCollectionLoadOperation(TestcaseBase):
         # search on collection, partition1, partition2
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 101, ct.err_msg: 'not loaded'})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w1.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 101, ct.err_msg: 'not loaded'})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w2.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not found'})
+                            check_items={ct.err_code: 65535, ct.err_msg: 'not found'})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_load_collection_delete_release_partition(self):
@@ -8029,11 +8017,11 @@ class TestCollectionLoadOperation(TestcaseBase):
                             partition_names=[
                                 partition_w1.name, partition_w2.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 65538, ct.err_msg: 'not loaded'})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w1.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 65538, ct.err_msg: 'not loaded'})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w2.name],
                             check_task=CheckTasks.check_search_results,
@@ -8075,7 +8063,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w2.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 65538, ct.err_msg: 'not loaded'})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_partition_delete_drop_partition(self):
@@ -8112,7 +8100,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w2.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not found'})
+                            check_items={ct.err_code: 65535, ct.err_msg: 'not found'})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_load_collection_release_partition_delete(self):
@@ -8144,7 +8132,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w1.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 65538, ct.err_msg: 'not loaded'})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w2.name],
                             check_task=CheckTasks.check_search_results,
@@ -8220,7 +8208,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w1.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 65535, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 101, ct.err_msg: 'not loaded'})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w2.name],
                             check_task=CheckTasks.err_res,
@@ -8258,7 +8246,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w.search(vectors[:1], field_name, default_search_params, 300,
                             partition_names=[partition_w1.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 65538, ct.err_msg: 'not loaded'})
         collection_w.search(vectors[:1], field_name, default_search_params, 300,
                             partition_names=[partition_w2.name],
                             check_task=CheckTasks.check_search_results,
@@ -8293,10 +8281,9 @@ class TestCollectionLoadOperation(TestcaseBase):
         partition_w1.load()
         # search on collection, partition1, partition2
         collection_w.search(vectors[:1], field_name, default_search_params, 300,
-                            partition_names=[
-                                partition_w1.name, partition_w2.name],
+                            partition_names=[partition_w1.name, partition_w2.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 65538, ct.err_msg: 'not loaded'})
         collection_w.search(vectors[:1], field_name, default_search_params, 300,
                             partition_names=[partition_w1.name],
                             check_task=CheckTasks.check_search_results,
@@ -8304,7 +8291,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w.search(vectors[:1], field_name, default_search_params, 300,
                             partition_names=[partition_w2.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 65538, ct.err_msg: 'not loaded'})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_load_partition_release_collection(self):
@@ -8384,7 +8371,8 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w.search(vectors[:1], field_name, default_search_params, 300,
                             partition_names=[partition_w2.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not found'})
+                            check_items={ct.err_code: 65535,
+                                         ct.err_msg: 'partition name search_partition_0 not found'})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_partition_compact_release_collection(self):
@@ -8416,15 +8404,15 @@ class TestCollectionLoadOperation(TestcaseBase):
         # search on collection, partition1, partition2
         collection_w.search(vectors[:1], field_name, default_search_params, 300,
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 101, ct.err_msg: 'collection not loaded'})
         collection_w.search(vectors[:1], field_name, default_search_params, 300,
                             partition_names=[partition_w1.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 101, ct.err_msg: 'collection not loaded'})
         collection_w.search(vectors[:1], field_name, default_search_params, 300,
                             partition_names=[partition_w2.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 101, ct.err_msg: 'collection not loaded'})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_load_collection_release_partition_compact(self):
@@ -8458,7 +8446,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w.search(vectors[:1], field_name, default_search_params, 300,
                             partition_names=[partition_w1.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 65538, ct.err_msg: 'not loaded'})
         collection_w.search(vectors[:1], field_name, default_search_params, 300,
                             partition_names=[partition_w2.name],
                             check_task=CheckTasks.check_search_results,
@@ -8493,7 +8481,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w1.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 65538, ct.err_msg: 'partition not loaded'})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w2.name],
                             check_task=CheckTasks.check_search_results,
@@ -8530,7 +8518,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w1.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 65538, ct.err_msg: 'not loaded'})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w2.name],
                             check_task=CheckTasks.check_search_results,
@@ -8561,15 +8549,15 @@ class TestCollectionLoadOperation(TestcaseBase):
         # search on collection, partition1, partition2
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 101, ct.err_msg: 'collection not loaded'})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w1.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 101, ct.err_msg: 'collection not loaded'})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w2.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 101, ct.err_msg: 'collection not loaded'})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_flush_load_partition_drop_partition(self):
@@ -8584,8 +8572,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         expected: No exception
         """
         # insert data
-        collection_w = self.init_collection_general(
-            prefix, True, 200, partition_num=1, is_index=False)[0]
+        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=False)[0]
         partition_w1, partition_w2 = collection_w.partitions
         collection_w.create_index(default_search_field, default_index_params)
         # flush
@@ -8596,18 +8583,18 @@ class TestCollectionLoadOperation(TestcaseBase):
         partition_w2.drop()
         # search on collection, partition1, partition2
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[
-                                partition_w1.name, partition_w2.name],
+                            partition_names=[partition_w1.name, partition_w2.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not found'})
+                            check_items={ct.err_code: 65535, ct.err_msg: 'partition not found'})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w1.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+
+                            check_items={ct.err_code: 101, ct.err_msg: 'collection not loaded'})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w2.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not found'})
+                            check_items={ct.err_code: 65535, ct.err_msg: 'partition not found'})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_flush_load_collection_drop_partition(self):
@@ -8643,7 +8630,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w2.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not found'})
+                            check_items={ct.err_code: 65535, ct.err_msg: 'not found'})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_flush_release_partition(self):
@@ -8710,18 +8697,17 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w.release()
         # search on collection, partition1, partition2
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[
-                                partition_w1.name, partition_w2.name],
+                            partition_names=[partition_w1.name, partition_w2.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 101, ct.err_msg: 'collection not loaded'})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w1.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 101, ct.err_msg: 'collection not loaded'})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w2.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 101, ct.err_msg: 'collection not loaded'})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_flush_release_partition(self):
@@ -8757,7 +8743,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w2.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not found'})
+                            check_items={ct.err_code: 65535, ct.err_msg: 'not found'})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_release_partition_flush(self):
@@ -8792,7 +8778,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w2.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 65538, ct.err_msg: 'not loaded'})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_release_collection_flush(self):
@@ -8858,15 +8844,15 @@ class TestCollectionLoadOperation(TestcaseBase):
         # search on collection, partition1, partition2
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 101, ct.err_msg: 'collection not loaded'})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w1.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 101, ct.err_msg: 'collection not loaded'})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w2.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 101, ct.err_msg: 'collection not loaded'})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_load_partition_drop_partition_flush(self):
@@ -8894,15 +8880,15 @@ class TestCollectionLoadOperation(TestcaseBase):
         # search on collection, partition1, partition2
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 101, ct.err_msg: 'collection not loaded'})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w1.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 101, ct.err_msg: 'collection not loaded'})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w2.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not found'})
+                            check_items={ct.err_code: 65535, ct.err_msg: 'collection not loaded'})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_release_collection_multi_times(self):
@@ -8929,7 +8915,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w1.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_items={ct.err_code: 65538, ct.err_msg: 'not loaded'})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w2.name],
                             check_task=CheckTasks.check_search_results,
@@ -8955,7 +8941,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         # search on collection
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 65535,
+                            check_items={ct.err_code: 101,
                                          ct.err_msg: "collection not loaded"})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -9067,7 +9053,7 @@ class TestCollectionSearchJSON(TestcaseBase):
                             default_search_params, default_limit,
                             json_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1,
+                            check_items={ct.err_code: 65535,
                                          ct.err_msg: "can not comparisons jsonField directly"})
 
     """

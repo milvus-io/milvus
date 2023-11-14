@@ -185,7 +185,7 @@ class TestAliasOperation(TestcaseBase):
         assert [p.name for p in collection_w.partitions] == [
             p.name for p in collection_alias.partitions]
         self.utility_wrap.drop_alias(alias_name)
-        error = {ct.err_code: 0,
+        error = {ct.err_code: 1,
                  ct.err_msg: f"Collection '{alias_name}' not exist, or you can pass in schema to create one"}
         collection_alias, _ = self.collection_wrap.init_collection(name=alias_name,
                                                                    check_task=CheckTasks.err_res,
@@ -361,7 +361,7 @@ class TestAliasOperation(TestcaseBase):
                                                                    check_items={exp_name: alias_name,
                                                                                 exp_schema: default_schema})
         assert self.utility_wrap.has_collection(c_name)[0]
-        error = {ct.err_code: 1,
+        error = {ct.err_code: 65535,
                  ct.err_msg: f"cannot drop the collection via alias = {alias_name}"}
         self.utility_wrap.drop_collection(alias_name,
                                           check_task=CheckTasks.err_res,
@@ -546,7 +546,7 @@ class TestAliasOperationInvalid(TestcaseBase):
         self.utility_wrap.create_alias(collection_w.name, alias_name)
         # collection_w.create_alias(alias_name)
 
-        error = {ct.err_code: 0,
+        error = {ct.err_code: 1,
                  ct.err_msg: "The collection already exist, but the schema is not the same as the schema passed in"}
         self.init_collection_wrap(alias_name, schema=default_binary_schema,
                                   check_task=CheckTasks.err_res,

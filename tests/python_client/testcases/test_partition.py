@@ -53,7 +53,7 @@ class TestPartitionParams(TestcaseBase):
         # create partition
         self.partition_wrap.init_partition(collection_w.collection, partition_name,
                                            check_task=CheckTasks.err_res,
-                                           check_items={ct.err_code: 1,
+                                           check_items={ct.err_code: 65535,
                                                         ct.err_msg: "Partition name should not be empty"})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -506,7 +506,7 @@ class TestPartitionParams(TestcaseBase):
                                       anns_field=ct.default_float_vec_field_name,
                                       params={"nprobe": 32}, limit=1,
                                       check_task=ct.CheckTasks.err_res,
-                                      check_items={ct.err_code: 65535,
+                                      check_items={ct.err_code: 101,
                                                    ct.err_msg: "collection not loaded"})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -603,7 +603,7 @@ class TestPartitionOperations(TestcaseBase):
         # create partition failed
         self.partition_wrap.init_partition(collection_w.collection, cf.gen_unique_str(prefix),
                                            check_task=CheckTasks.err_res,
-                                           check_items={ct.err_code: 4, ct.err_msg: "collection not found"})
+                                           check_items={ct.err_code: 100, ct.err_msg: "collection not found"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_partition_same_name_in_diff_collections(self):
@@ -696,7 +696,7 @@ class TestPartitionOperations(TestcaseBase):
 
         # verify that drop partition with error
         partition_w.drop(check_task=CheckTasks.err_res,
-                         check_items={ct.err_code: 1, ct.err_msg: "default partition cannot be deleted"})
+                         check_items={ct.err_code: 65535, ct.err_msg: "default partition cannot be deleted"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_partition_drop_partition_twice(self):
@@ -858,7 +858,7 @@ class TestPartitionOperations(TestcaseBase):
 
         # release the partition and check err response
         partition_w.release(check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 4, ct.err_msg: "collection not found"})
+                            check_items={ct.err_code: 100, ct.err_msg: "collection not found"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_partition_release_after_collection_released(self):
@@ -903,8 +903,8 @@ class TestPartitionOperations(TestcaseBase):
                                       anns_field=ct.default_float_vec_field_name,
                                       params={"nprobe": 32}, limit=1,
                                       check_task=ct.CheckTasks.err_res,
-                                      check_items={ct.err_code: 0,
-                                                   ct.err_msg: "not loaded"})
+                                      check_items={ct.err_code: 101,
+                                                   ct.err_msg: "collection not loaded"})
         # release partition
         partition_w.release()
 
@@ -972,7 +972,7 @@ class TestPartitionOperations(TestcaseBase):
         # insert data to partition
         partition_w.insert(cf.gen_default_dataframe_data(),
                            check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 4, ct.err_msg: "collection not found"})
+                           check_items={ct.err_code: 100, ct.err_msg: "collection not found"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_partition_insert_maximum_size_data(self):
@@ -1205,6 +1205,23 @@ class TestPartitionOperations(TestcaseBase):
         collection_w = self.init_collection_wrap()
         partition_name = None
         partition_w = self.init_partition_wrap(collection_w, partition_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_partition_not_exist(self):
+        """
+        target: test load partition not exist
+        method: call function: partition.load()
+        expected: return error
+        """
+
+        collection_w = self.init_collection_wrap()
+        partition_name = cf.gen_unique_str(prefix)
+        partition_w = self.init_partition_wrap(collection_w, partition_name)
+        partition_w.drop()
+        collection_w.create_index(ct.default_float_vec_field_name)
+        partition_w.load(check_task=CheckTasks.err_res,
+                         check_items={ct.err_code: 1,
+                                      ct.err_msg: "Partition not exist."})
 
 
 class TestShowBase(TestcaseBase):

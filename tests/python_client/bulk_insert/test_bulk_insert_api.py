@@ -1271,7 +1271,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             partition_name=self.collection_wrap.partitions[0].name,
             files=files,
             check_task=CheckTasks.err_res,
-            check_items={"err_code": 99, "err_msg": err_msg},
+            check_items={"err_code": 1100, "err_msg": err_msg},
         )
 
     @pytest.mark.tags(CaseLabel.L3)

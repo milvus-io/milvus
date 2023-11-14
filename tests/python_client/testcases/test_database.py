@@ -40,15 +40,6 @@ class TestDatabaseParams(TestcaseBase):
 
         super().teardown_method(method)
 
-    @pytest.fixture(scope="function", params=ct.get_invalid_strs)
-    def get_invalid_string(self, request):
-        """
-        get invalid string
-        :param request:
-        :type request:
-        """
-        yield request.param
-
     def test_db_default(self):
         """
         target: test normal db interface
@@ -99,7 +90,20 @@ class TestDatabaseParams(TestcaseBase):
         dbs_afrer_drop, _ = self.database_wrap.list_database()
         assert db_name not in dbs_afrer_drop
 
-    def test_create_db_invalid_name(self, get_invalid_string):
+    @pytest.mark.parametrize("get_invalid_string", ct.get_invalid_strs[6:])
+    def test_create_db_invalid_name_value(self, get_invalid_string):
+        """
+        target: test create db with invalid name
+        method: create db with invalid name
+        expected: error
+        """
+        self._connect()
+        error = {ct.err_code: 802, ct.err_msg: "Invalid database name"}
+        self.database_wrap.create_database(db_name=get_invalid_string, check_task=CheckTasks.err_res,
+                                           check_items=error)
+
+    @pytest.mark.parametrize("get_invalid_string", ct.get_invalid_strs[:6])
+    def test_create_db_invalid_name_type(self, get_invalid_string):
         """
         target: test create db with invalid name
         method: create db with invalid name
@@ -131,6 +135,7 @@ class TestDatabaseParams(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: "database already exist: default"}
         self.database_wrap.create_database(ct.default_db, check_task=CheckTasks.err_res, check_items=error)
 
+    @pytest.mark.parametrize("get_invalid_string", ct.get_invalid_strs[:6])
     def test_drop_db_invalid_name(self, get_invalid_string):
         """
         target: test drop db with invalid name
@@ -145,11 +150,11 @@ class TestDatabaseParams(TestcaseBase):
 
         # drop db
         self.database_wrap.drop_database(db_name=get_invalid_string, check_task=CheckTasks.err_res,
-                                         check_items={ct.err_code: 1, ct.err_msg: "is illegal"})
+                                         check_items={ct.err_code: 802, ct.err_msg: "is illegal"})
 
         # created db is exist
         self.database_wrap.create_database(db_name, check_task=CheckTasks.err_res,
-                                           check_items={ct.err_code: 1, ct.err_msg: "db existed"})
+                                           check_items={ct.err_code: 65535, ct.err_msg: "db existed"})
 
         self.database_wrap.drop_database(db_name)
         dbs, _ = self.database_wrap.list_database()
@@ -257,7 +262,7 @@ class TestDatabaseOperation(TestcaseBase):
         self.database_wrap.create_database(db_name)
 
         # create existed db again
-        error = {ct.err_code: 1, ct.err_msg: "database already exist"}
+        error = {ct.err_code: 65535, ct.err_msg: "database already exist"}
         self.database_wrap.create_database(db_name, check_task=CheckTasks.err_res, check_items=error)
 
     def test_create_db_exceeds_max_num(self):
@@ -274,8 +279,9 @@ class TestDatabaseOperation(TestcaseBase):
             self.database_wrap.create_database(cf.gen_unique_str(prefix))
 
         # there are ct.max_database_num-1 dbs (default is not included)
-        error = {ct.err_code: 1,
-                 ct.err_msg: f"database number ({ct.max_database_num + 1}) exceeds max configuration ({ct.max_database_num})"}
+        error = {ct.err_code: 801,
+                 ct.err_msg: f"Failed to create database, limit={ct.max_database_num}: "
+                             f"exceeded the limit number of database"}
         self.database_wrap.create_database(cf.gen_unique_str(prefix), check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/24182")
@@ -543,6 +549,7 @@ class TestDatabaseOperation(TestcaseBase):
         db_name = cf.gen_unique_str("db")
         self.database_wrap.create_database(db_name)
         self.database_wrap.using_database(db_name)
+        assert self.utility_wrap.list_collections()[0] == [c_name]
 
         # create a collection in new db using same name
         self.init_collection_wrap(c_name)
@@ -611,6 +618,33 @@ class TestDatabaseOperation(TestcaseBase):
         # check the collection not in default db
         self.database_wrap.using_database("default")
         assert self.utility_wrap.list_collections()[0] == []
+
+    def test_rename_collection_in_not_exist_db(self):
+        """
+        target: test rename collection in new created db
+        method: 1. create a db and create 1 collection in db
+                2. rename the collection
+        expected: exception
+        """
+        self._connect()
+        # check default db is empty
+        assert self.utility_wrap.list_collections()[0] == []
+
+        # create a new database
+        db_name = cf.gen_unique_str("db")
+        self.database_wrap.create_database(db_name)
+        self.database_wrap.using_database(db_name)
+
+        # create 1 collection in new db
+        old_name = "old_collection"
+        self.init_collection_wrap(old_name)
+        assert self.utility_wrap.list_collections()[0] == [old_name]
+
+        # rename the collection to a not exist db
+        new_name = "new_collection"
+        error = {ct.err_code: 65535, ct.err_msg: "target database:not_exist_db not found"}
+        self.utility_wrap.rename_collection(old_name, new_name, "not_exist_db",
+                                            check_task=CheckTasks.err_res, check_items=error)
 
 
 @pytest.mark.tags(CaseLabel.RBAC)

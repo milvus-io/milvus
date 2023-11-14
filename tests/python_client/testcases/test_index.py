@@ -61,7 +61,7 @@ class TestIndexParams(TestcaseBase):
         """
         self._connect()
         self.index_wrap.init_index(collection, default_field_name, default_index_params, check_task=CheckTasks.err_res,
-                                   check_items={ct.err_code: 0, ct.err_msg: clem.CollectionType})
+                                   check_items={ct.err_code: 1, ct.err_msg: clem.CollectionType})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("field_name", ct.get_invalid_strs)
@@ -128,7 +128,7 @@ class TestIndexParams(TestcaseBase):
         index_params["index_type"] = "IVFFFFFFF"
         self.index_wrap.init_index(collection_w.collection, default_field_name, index_params,
                                    check_task=CheckTasks.err_res,
-                                   check_items={ct.err_code: 1, ct.err_msg: ""})
+                                   check_items={ct.err_code: 65535, ct.err_msg: "invalid index type: IVFFFFFFF"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_params_invalid(self, get_invalid_index_params):
@@ -142,7 +142,7 @@ class TestIndexParams(TestcaseBase):
         index_params = get_invalid_index_params
         self.index_wrap.init_index(collection_w.collection, default_field_name, index_params,
                                    check_task=CheckTasks.err_res,
-                                   check_items={ct.err_code: 1, ct.err_msg: ""})
+                                   check_items={ct.err_code: 65535, ct.err_msg: "nlist out of range: [1, 65536]"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("index_name", ["_1ndeX", "In_t0"])
@@ -177,8 +177,9 @@ class TestIndexParams(TestcaseBase):
         self.index_wrap.init_index(collection_w.collection, ct.default_int64_field_name, default_index_params,
                                    index_name=index_name,
                                    check_task=CheckTasks.err_res,
-                                   check_items={ct.err_code: 1,
-                                                ct.err_msg: "invalid parameter"})
+                                   check_items={ct.err_code: 1100,
+                                                ct.err_msg: "index type not match: expected=STL_SORT, "
+                                                            "actual=IVF_SQ8: invalid parameter"})
 
     @pytest.mark.tags(CaseLabel.L1)
     # @pytest.mark.xfail(reason="issue 19181")
@@ -195,8 +196,8 @@ class TestIndexParams(TestcaseBase):
         self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params,
                                    index_name=get_invalid_index_name,
                                    check_task=CheckTasks.err_res,
-                                   check_items={ct.err_code: 1,
-                                                ct.err_msg: "Invalid index name"})
+                                   check_items={ct.err_code: 65535,
+                                                ct.err_msg: f"Invalid index name: {get_invalid_index_name}"})
 
 
 @pytest.mark.tags(CaseLabel.GPU)
@@ -702,8 +703,9 @@ class TestNewIndexBase(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, default_index_params, index_name="a")
         collection_w.create_index(ct.default_float_vec_field_name, default_index_params, index_name="b",
                                   check_task=CheckTasks.err_res,
-                                  check_items={ct.err_code: 1,
-                                               ct.err_msg: "CreateIndex failed: creating multiple indexes on same field is not supported"})
+                                  check_items={ct.err_code: 65535,
+                                               ct.err_msg: "CreateIndex failed: creating multiple indexes "
+                                                           "on same field is not supported"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_index_repeatedly_new(self):
@@ -871,8 +873,9 @@ class TestNewIndexBase(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, default_ip_index_params, index_name="a")
         collection_w.create_index(ct.default_float_vec_field_name, default_ip_index_params, index_name="b",
                                   check_task=CheckTasks.err_res,
-                                  check_items={ct.err_code: 1,
-                                               ct.err_msg: "CreateIndex failed: creating multiple indexes on same field is not supported"})
+                                  check_items={ct.err_code: 65535,
+                                               ct.err_msg: "CreateIndex failed: creating multiple indexes on same "
+                                                           "field is not supported"})
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_different_index_repeatedly_ip(self):
@@ -951,7 +954,7 @@ class TestNewIndexBase(TestcaseBase):
                                   index_name=ct.default_index_name)
         self.connection_wrap.remove_connection(ct.default_alias)
         collection_w.drop_index(index_name=ct.default_index_name, check_task=CheckTasks.err_res,
-                                check_items={ct.err_code: 0, ct.err_msg: "should create connect first."})
+                                check_items={ct.err_code: 1, ct.err_msg: "should create connect first."})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_drop_index_repeatedly(self, get_simple_index):
@@ -1020,7 +1023,7 @@ class TestNewIndexBase(TestcaseBase):
                                   index_name=ct.default_index_name)
         self.connection_wrap.remove_connection(ct.default_alias)
         collection_w.drop_index(index_name=ct.default_index_name, check_task=CheckTasks.err_res,
-                                check_items={ct.err_code: 0, ct.err_msg: "should create connect first."})
+                                check_items={ct.err_code: 1, ct.err_msg: "should create connect first."})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_drop_index_repeatedly_ip(self, get_simple_index):
@@ -1312,7 +1315,7 @@ class TestIndexInvalid(TestcaseBase):
         collection_w.create_index("float_vector", default_index)
         collection_w.load()
         collection_w.drop_index(check_task=CheckTasks.err_res,
-                                check_items={"err_code": 1,
+                                check_items={"err_code": 65535,
                                              "err_msg": "index cannot be dropped, collection is "
                                                         "loaded, please release it first"})
 
@@ -1343,8 +1346,10 @@ class TestIndexInvalid(TestcaseBase):
                                                                       dim=ct.default_dim, is_index=False)[0:4]
         collection_w.create_index(ct.default_json_field_name, index_params=ct.default_flat_index,
                                   check_task=CheckTasks.err_res,
-                                  check_items={ct.err_code: 1,
-                                               ct.err_msg: "create index on json field is not supported"})
+                                  check_items={ct.err_code: 1100,
+                                               ct.err_msg: "create index on json field is not supported: "
+                                                           "expected=supported field, actual=create index "
+                                                           "on JSON field: invalid parameter"})
 
 
 @pytest.mark.tags(CaseLabel.GPU)
@@ -1543,7 +1548,9 @@ class TestIndexString(TestcaseBase):
         collection_w.create_index(default_float_vec_field_name, default_index_params,
                                   index_name=index_name2,
                                   check_task=CheckTasks.err_res,
-                                  check_items={ct.err_code: 1, ct.err_msg: "CreateIndex failed"})
+                                  check_items={ct.err_code: 65535,
+                                               ct.err_msg: "CreateIndex failed: at most one distinct "
+                                                           "index is allowed per field"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_different_index_fields(self):
@@ -1962,7 +1969,7 @@ class TestAutoIndex(TestcaseBase):
         index_params = {"metric_type": "L2", "nlist": "1024", "M": "100"}
         collection_w.create_index(field_name, index_params,
                                   check_task=CheckTasks.err_res,
-                                  check_items={"err_code": 1,
+                                  check_items={"err_code": 65535,
                                                "err_msg": "only metric type can be "
                                                           "passed when use AutoIndex"})
 
