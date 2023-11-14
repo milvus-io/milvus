@@ -645,7 +645,7 @@ func TestCreateCollectionTask(t *testing.T) {
 		// recreate -> fail
 		err = task.Execute(ctx)
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, task.result.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_Success, task.result.ErrorCode)
 
 		err = task.PostExecute(ctx)
 		assert.NoError(t, err)

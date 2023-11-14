@@ -38,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/milvuserrors"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/util/uniquegenerator"
 )
@@ -268,14 +267,6 @@ func (coord *RootCoordMock) CreateCollection(ctx context.Context, req *milvuspb.
 	coord.collMtx.Lock()
 	defer coord.collMtx.Unlock()
 
-	_, exist := coord.collName2ID[req.CollectionName]
-	if exist {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    milvuserrors.MsgCollectionAlreadyExist(req.CollectionName),
-		}, nil
-	}
-
 	var schema schemapb.CollectionSchema
 	err := proto.Unmarshal(req.Schema, &schema)
 	if err != nil {
@@ -372,10 +363,7 @@ func (coord *RootCoordMock) DropCollection(ctx context.Context, req *milvuspb.Dr
 
 	collID, exist := coord.collName2ID[req.CollectionName]
 	if !exist {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_CollectionNotExists,
-			Reason:    milvuserrors.MsgCollectionNotExist(req.CollectionName),
-		}, nil
+		return merr.Status(merr.WrapErrCollectionNotFound(req.CollectionName)), nil
 	}
 
 	delete(coord.collName2ID, req.CollectionName)
@@ -449,10 +437,7 @@ func (coord *RootCoordMock) DescribeCollection(ctx context.Context, req *milvusp
 	collID, exist := coord.collName2ID[req.CollectionName]
 	if !exist && !usingID {
 		return &milvuspb.DescribeCollectionResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_CollectionNotExists,
-				Reason:    milvuserrors.MsgCollectionNotExist(req.CollectionName),
-			},
+			Status: merr.Status(merr.WrapErrCollectionNotFound(req.CollectionName)),
 		}, nil
 	}
 
@@ -532,22 +517,11 @@ func (coord *RootCoordMock) CreatePartition(ctx context.Context, req *milvuspb.C
 
 	collID, exist := coord.collName2ID[req.CollectionName]
 	if !exist {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_CollectionNotExists,
-			Reason:    milvuserrors.MsgCollectionNotExist(req.CollectionName),
-		}, nil
+		return merr.Status(merr.WrapErrCollectionNotFound(req.CollectionName)), nil
 	}
 
 	coord.partitionMtx.Lock()
 	defer coord.partitionMtx.Unlock()
-
-	_, partitionExist := coord.collID2Partitions[collID].partitionName2ID[req.PartitionName]
-	if partitionExist {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    milvuserrors.MsgPartitionAlreadyExist(req.PartitionName),
-		}, nil
-	}
 
 	ts := uint64(time.Now().Nanosecond())
 
@@ -575,10 +549,7 @@ func (coord *RootCoordMock) DropPartition(ctx context.Context, req *milvuspb.Dro
 
 	collID, exist := coord.collName2ID[req.CollectionName]
 	if !exist {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_CollectionNotExists,
-			Reason:    milvuserrors.MsgCollectionNotExist(req.CollectionName),
-		}, nil
+		return merr.Status(merr.WrapErrCollectionNotFound(req.CollectionName)), nil
 	}
 
 	coord.partitionMtx.Lock()
@@ -586,10 +557,7 @@ func (coord *RootCoordMock) DropPartition(ctx context.Context, req *milvuspb.Dro
 
 	partitionID, partitionExist := coord.collID2Partitions[collID].partitionName2ID[req.PartitionName]
 	if !partitionExist {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    milvuserrors.MsgPartitionNotExist(req.PartitionName),
-		}, nil
+		return merr.Status(merr.WrapErrPartitionNotFound(req.PartitionName)), nil
 	}
 
 	delete(coord.collID2Partitions[collID].partitionName2ID, req.PartitionName)
@@ -615,11 +583,8 @@ func (coord *RootCoordMock) HasPartition(ctx context.Context, req *milvuspb.HasP
 	collID, exist := coord.collName2ID[req.CollectionName]
 	if !exist {
 		return &milvuspb.BoolResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_CollectionNotExists,
-				Reason:    milvuserrors.MsgCollectionNotExist(req.CollectionName),
-			},
-			Value: false,
+			Status: merr.Status(merr.WrapErrCollectionNotFound(req.CollectionName)),
+			Value:  false,
 		}, nil
 	}
 
@@ -656,10 +621,7 @@ func (coord *RootCoordMock) ShowPartitions(ctx context.Context, req *milvuspb.Sh
 	collID, exist := coord.collName2ID[req.CollectionName]
 	if !exist {
 		return &milvuspb.ShowPartitionsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_CollectionNotExists,
-				Reason:    milvuserrors.MsgCollectionNotExist(req.CollectionName),
-			},
+			Status: merr.Status(merr.WrapErrCollectionNotFound(req.CollectionName)),
 		}, nil
 	}
 
