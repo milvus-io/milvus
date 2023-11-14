@@ -25,10 +25,11 @@ import (
 
 type BFWriteBufferSuite struct {
 	suite.Suite
-	collSchema *schemapb.CollectionSchema
-	syncMgr    *syncmgr.MockSyncManager
-	metacache  *metacache.MockMetaCache
-	broker     *broker.MockBroker
+	channelName string
+	collSchema  *schemapb.CollectionSchema
+	syncMgr     *syncmgr.MockSyncManager
+	metacache   *metacache.MockMetaCache
+	broker      *broker.MockBroker
 }
 
 func (s *BFWriteBufferSuite) SetupSuite() {
@@ -139,11 +140,14 @@ func (s *BFWriteBufferSuite) SetupTest() {
 }
 
 func (s *BFWriteBufferSuite) TestBufferData() {
-	wb, err := NewBFWriteBuffer(s.collSchema, s.metacache, s.syncMgr, &writeBufferOption{})
+	wb, err := NewBFWriteBuffer(s.channelName, s.collSchema, s.metacache, s.syncMgr, &writeBufferOption{})
 	s.NoError(err)
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1000}, metacache.NewBloomFilterSet())
-	s.metacache.EXPECT().GetSegmentsBy(mock.Anything).Return([]*metacache.SegmentInfo{seg})
+	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
+	s.metacache.EXPECT().GetSegmentByID(int64(1000)).Return(nil, false)
+	s.metacache.EXPECT().AddSegment(mock.Anything, mock.Anything).Return()
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
 	pks, msg := s.composeInsertMsg(1000, 10, 128)
 	delMsg := s.composeDeleteMsg(lo.Map(pks, func(id int64, _ int) storage.PrimaryKey { return storage.NewInt64PrimaryKey(id) }))
@@ -155,7 +159,7 @@ func (s *BFWriteBufferSuite) TestBufferData() {
 func (s *BFWriteBufferSuite) TestAutoSync() {
 	paramtable.Get().Save(paramtable.Get().DataNodeCfg.FlushInsertBufferSize.Key, "1")
 
-	wb, err := NewBFWriteBuffer(s.collSchema, s.metacache, s.syncMgr, &writeBufferOption{
+	wb, err := NewBFWriteBuffer(s.channelName, s.collSchema, s.metacache, s.syncMgr, &writeBufferOption{
 		syncPolicies: []SyncPolicy{
 			SyncFullBuffer,
 			GetSyncStaleBufferPolicy(paramtable.Get().DataNodeCfg.SyncPeriod.GetAsDuration(time.Second)),
@@ -165,10 +169,14 @@ func (s *BFWriteBufferSuite) TestAutoSync() {
 	s.NoError(err)
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1000}, metacache.NewBloomFilterSet())
-	s.metacache.EXPECT().GetSegmentsBy(mock.Anything).Return([]*metacache.SegmentInfo{seg})
-	s.metacache.EXPECT().GetSegmentIDsBy(mock.Anything).Return([]int64{1002}) // mock flushing
+	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
+	s.metacache.EXPECT().GetSegmentByID(int64(1000)).Return(nil, false)
+	s.metacache.EXPECT().GetSegmentByID(int64(1002)).Return(seg, true)
+	s.metacache.EXPECT().GetSegmentIDsBy(mock.Anything).Return([]int64{1002})
+	s.metacache.EXPECT().AddSegment(mock.Anything, mock.Anything).Return()
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything, mock.Anything).Return()
-	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).Return(nil).Twice()
+	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).Return(nil)
 
 	pks, msg := s.composeInsertMsg(1000, 10, 128)
 	delMsg := s.composeDeleteMsg(lo.Map(pks, func(id int64, _ int) storage.PrimaryKey { return storage.NewInt64PrimaryKey(id) }))

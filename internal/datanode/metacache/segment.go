@@ -30,9 +30,12 @@ type SegmentInfo struct {
 	startPosition    *msgpb.MsgPosition
 	checkpoint       *msgpb.MsgPosition
 	startPosRecorded bool
-	numOfRows        int64
+	flushedRows      int64
+	bufferRows       int64
+	syncingRows      int64
 	bfs              *BloomFilterSet
 	compactTo        int64
+	importing        bool
 }
 
 func (s *SegmentInfo) SegmentID() int64 {
@@ -47,8 +50,15 @@ func (s *SegmentInfo) State() commonpb.SegmentState {
 	return s.state
 }
 
+// NumOfRows returns sum of number of rows,
+// including flushed, syncing and buffered
 func (s *SegmentInfo) NumOfRows() int64 {
-	return s.numOfRows
+	return s.flushedRows + s.syncingRows + s.bufferRows
+}
+
+// FlushedRows return flushed rows number.
+func (s *SegmentInfo) FlushedRows() int64 {
+	return s.flushedRows
 }
 
 func (s *SegmentInfo) StartPosition() *msgpb.MsgPosition {
@@ -79,7 +89,9 @@ func (s *SegmentInfo) Clone() *SegmentInfo {
 		startPosition:    s.startPosition,
 		checkpoint:       s.checkpoint,
 		startPosRecorded: s.startPosRecorded,
-		numOfRows:        s.numOfRows,
+		flushedRows:      s.flushedRows,
+		bufferRows:       s.bufferRows,
+		syncingRows:      s.syncingRows,
 		bfs:              s.bfs,
 		compactTo:        s.compactTo,
 	}
@@ -90,7 +102,7 @@ func NewSegmentInfo(info *datapb.SegmentInfo, bfs *BloomFilterSet) *SegmentInfo 
 		segmentID:        info.GetID(),
 		partitionID:      info.GetPartitionID(),
 		state:            info.GetState(),
-		numOfRows:        info.GetNumOfRows(),
+		flushedRows:      info.GetNumOfRows(),
 		startPosition:    info.GetStartPosition(),
 		checkpoint:       info.GetDmlPosition(),
 		startPosRecorded: true,

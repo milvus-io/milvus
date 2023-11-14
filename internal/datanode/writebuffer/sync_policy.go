@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
@@ -34,5 +35,28 @@ func GetSyncStaleBufferPolicy(staleDuration time.Duration) SyncPolicy {
 func GetFlushingSegmentsPolicy(meta metacache.MetaCache) SyncPolicy {
 	return func(_ []*segmentBuffer, _ typeutil.Timestamp) []int64 {
 		return meta.GetSegmentIDsBy(metacache.WithSegmentState(commonpb.SegmentState_Flushing))
+	}
+}
+
+func GetFlushTsPolicy(flushTimestamp *atomic.Uint64, meta metacache.MetaCache) SyncPolicy {
+	return func(buffers []*segmentBuffer, ts typeutil.Timestamp) []int64 {
+		flushTs := flushTimestamp.Load()
+		if flushTs != nonFlushTS && ts >= flushTs {
+			// flush segment start pos < flushTs && checkpoint > flushTs
+			ids := lo.FilterMap(buffers, func(buf *segmentBuffer, _ int) (int64, bool) {
+				seg, ok := meta.GetSegmentByID(buf.segmentID)
+				if !ok {
+					return buf.segmentID, false
+				}
+				return buf.segmentID, seg.State() == commonpb.SegmentState_Flushed && buf.MinTimestamp() < flushTs
+			})
+			// set segment flushing
+			meta.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Flushing),
+				metacache.WithSegmentIDs(ids...), metacache.WithSegmentState(commonpb.SegmentState_Growing))
+
+			// flush all buffer
+			return ids
+		}
+		return nil
 	}
 }

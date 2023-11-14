@@ -38,6 +38,8 @@ import (
 var (
 	errUploadToBlobStorage     = errors.New("upload to blob storage wrong")
 	errDownloadFromBlobStorage = errors.New("download from blob storage wrong")
+	// errStart used for retry start
+	errStart = errors.New("start")
 )
 
 type downloader interface {

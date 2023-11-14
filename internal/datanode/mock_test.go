@@ -34,6 +34,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/broker"
+	"github.com/milvus-io/milvus/internal/datanode/metacache"
+	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
+	"github.com/milvus-io/milvus/internal/datanode/writebuffer"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -76,8 +79,6 @@ var segID2SegInfo = map[int64]*datapb.SegmentInfo{
 	},
 }
 
-var emptyFlushAndDropFunc flushAndDropFunc = func(_ []*segmentFlushPack) {}
-
 func newIDLEDataNodeMock(ctx context.Context, pkType schemapb.DataType) *DataNode {
 	factory := dependency.NewDefaultFactory(true)
 	node := NewDataNode(ctx, factory)
@@ -90,6 +91,11 @@ func newIDLEDataNodeMock(ctx context.Context, pkType schemapb.DataType) *DataNod
 
 	node.broker = broker
 	node.timeTickSender = newTimeTickSender(node.broker, 0)
+
+	syncMgr, _ := syncmgr.NewSyncManager(10, node.chunkManager, node.allocator)
+
+	node.syncMgr = syncMgr
+	node.writeBufferManager = writebuffer.NewManager(node.syncMgr)
 
 	return node
 }
@@ -821,7 +827,7 @@ func (df *DataFactory) GetMsgStreamInsertMsgs(n int) (msgs []*msgstream.InsertMs
 	return
 }
 
-func (df *DataFactory) GenMsgStreamDeleteMsg(pks []primaryKey, chanName string) *msgstream.DeleteMsg {
+func (df *DataFactory) GenMsgStreamDeleteMsg(pks []storage.PrimaryKey, chanName string) *msgstream.DeleteMsg {
 	idx := 100
 	timestamps := make([]Timestamp, len(pks))
 	for i := 0; i < len(pks); i++ {
@@ -850,7 +856,7 @@ func (df *DataFactory) GenMsgStreamDeleteMsg(pks []primaryKey, chanName string) 
 	return msg
 }
 
-func (df *DataFactory) GenMsgStreamDeleteMsgWithTs(idx int, pks []primaryKey, chanName string, ts Timestamp) *msgstream.DeleteMsg {
+func (df *DataFactory) GenMsgStreamDeleteMsgWithTs(idx int, pks []storage.PrimaryKey, chanName string, ts Timestamp) *msgstream.DeleteMsg {
 	msg := &msgstream.DeleteMsg{
 		BaseMsg: msgstream.BaseMsg{
 			HashValues:     []uint32{uint32(idx)},
@@ -907,7 +913,7 @@ func genFlowGraphInsertMsg(chanName string) flowGraphMsg {
 	return *fgMsg
 }
 
-func genFlowGraphDeleteMsg(pks []primaryKey, chanName string) flowGraphMsg {
+func genFlowGraphDeleteMsg(pks []storage.PrimaryKey, chanName string) flowGraphMsg {
 	timeRange := TimeRange{
 		timestampMin: 0,
 		timestampMax: math.MaxUint64,
@@ -1082,19 +1088,19 @@ func (f *FailMessageStreamFactory) NewTtMsgStream(ctx context.Context) (msgstrea
 	return nil, errors.New("mocked failure")
 }
 
-func genInsertDataWithPKs(PKs [2]primaryKey, dataType schemapb.DataType) *InsertData {
+func genInsertDataWithPKs(PKs [2]storage.PrimaryKey, dataType schemapb.DataType) *InsertData {
 	iD := genInsertData()
 	switch dataType {
 	case schemapb.DataType_Int64:
 		values := make([]int64, len(PKs))
 		for index, pk := range PKs {
-			values[index] = pk.(*int64PrimaryKey).Value
+			values[index] = pk.(*storage.Int64PrimaryKey).Value
 		}
 		iD.Data[106].(*storage.Int64FieldData).Data = values
 	case schemapb.DataType_VarChar:
 		values := make([]string, len(PKs))
 		for index, pk := range PKs {
-			values[index] = pk.(*varCharPrimaryKey).Value
+			values[index] = pk.(*storage.VarCharPrimaryKey).Value
 		}
 		iD.Data[109].(*storage.StringFieldData).Data = values
 	default:
@@ -1257,4 +1263,27 @@ func genTimestamp() typeutil.Timestamp {
 
 func genTestTickler() *etcdTickler {
 	return newEtcdTickler(0, "", nil, nil, 0)
+}
+
+// MockDataSuiteBase compose some mock dependency to generate test dataset
+type MockDataSuiteBase struct {
+	schema *schemapb.CollectionSchema
+}
+
+func (s *MockDataSuiteBase) prepareData() {
+	s.schema = &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64},
+			{FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64},
+			{FieldID: common.StartOfUserFieldID, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, Name: "pk"},
+			{FieldID: common.StartOfUserFieldID + 1, DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+			}},
+		},
+	}
+}
+
+func EmptyBfsFactory(info *datapb.SegmentInfo) *metacache.BloomFilterSet {
+	return metacache.NewBloomFilterSet()
 }

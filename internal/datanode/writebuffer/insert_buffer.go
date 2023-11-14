@@ -106,19 +106,12 @@ func NewInsertBuffer(sch *schemapb.CollectionSchema) (*InsertBuffer, error) {
 	}, nil
 }
 
-func (ib *InsertBuffer) Renew() *storage.InsertData {
+func (ib *InsertBuffer) Yield() *storage.InsertData {
 	if ib.IsEmpty() {
 		return nil
 	}
-	result := ib.buffer
 
-	// no error since validated in constructor
-	ib.buffer, _ = storage.NewInsertData(ib.collSchema)
-	ib.BufferBase.rows = 0
-	ib.BufferBase.TimestampFrom = math.MaxUint64
-	ib.BufferBase.TimestampTo = 0
-
-	return result
+	return ib.buffer
 }
 
 func (ib *InsertBuffer) Buffer(msgs []*msgstream.InsertMsg, startPos, endPos *msgpb.MsgPosition) ([]storage.FieldData, error) {

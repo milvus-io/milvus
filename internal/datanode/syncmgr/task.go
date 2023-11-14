@@ -8,6 +8,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -30,12 +31,16 @@ type SyncTask struct {
 	insertData *storage.InsertData
 	deleteData *storage.DeleteData
 
-	collectionID int64
-	partitionID  int64
-	segmentID    int64
-	channelName  string
-	schema       *schemapb.CollectionSchema
-	checkpoint   *msgpb.MsgPosition
+	collectionID  int64
+	partitionID   int64
+	segmentID     int64
+	channelName   string
+	schema        *schemapb.CollectionSchema
+	startPosition *msgpb.MsgPosition
+	checkpoint    *msgpb.MsgPosition
+	// batchSize is the row number of this sync task,
+	// not the total num of rows of segemnt
+	batchSize int64
 
 	tsFrom typeutil.Timestamp
 	tsTo   typeutil.Timestamp
@@ -120,6 +125,16 @@ func (t *SyncTask) Run() error {
 			return err
 		}
 	}
+
+	actions := []metacache.SegmentAction{metacache.FinishSyncing(t.batchSize)}
+	switch {
+	case t.isDrop:
+		actions = append(actions, metacache.UpdateState(commonpb.SegmentState_Dropped))
+	case t.isFlush:
+		actions = append(actions, metacache.UpdateState(commonpb.SegmentState_Flushed))
+	}
+
+	t.metacache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(t.segmentID))
 
 	log.Warn("task done")
 	return nil
@@ -245,7 +260,7 @@ func (t *SyncTask) serializeSinglePkStats(fieldID int64, stats *storage.PrimaryK
 	return nil
 }
 
-func (t *SyncTask) serializeMergedPkStats(fieldID int64, stats *storage.PrimaryKeyStats, rowNum int64) error {
+func (t *SyncTask) serializeMergedPkStats(fieldID int64, pkType schemapb.DataType, stats *storage.PrimaryKeyStats, rowNum int64) error {
 	segments := t.metacache.GetSegmentsBy(metacache.WithSegmentIDs(t.segmentID))
 	var statsList []*storage.PrimaryKeyStats
 	var oldRowNum int64
@@ -257,6 +272,7 @@ func (t *SyncTask) serializeMergedPkStats(fieldID int64, stats *storage.PrimaryK
 				MaxPk:   pks.MaxPK,
 				MinPk:   pks.MinPK,
 				BF:      pks.PkFilter,
+				PkType:  int64(pkType),
 			}
 		})...)
 	}
@@ -307,7 +323,7 @@ func (t *SyncTask) serializePkStatsLog() error {
 	}
 
 	if t.isFlush {
-		return t.serializeMergedPkStats(fieldID, stats, rowNum)
+		return t.serializeMergedPkStats(fieldID, pkField.GetDataType(), stats, rowNum)
 	}
 
 	return t.serializeSinglePkStats(fieldID, stats, rowNum)

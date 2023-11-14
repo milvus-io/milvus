@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -94,9 +95,10 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		fmt.Sprint(paramtable.GetNodeID()),
 		metrics.TotalLabel).Inc()
 
+	log := log.Ctx(ctx)
+
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		log.Warn("DataNode.FlushSegments failed", zap.Int64("nodeId", paramtable.GetNodeID()), zap.Error(err))
-
 		return merr.Status(err), nil
 	}
 
@@ -110,51 +112,27 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		return merr.Status(merr.WrapErrNodeNotMatch(req.GetBase().GetTargetID(), serverID)), nil
 	}
 
+	segmentIDs := req.GetSegmentIDs()
+	log = log.With(
+		zap.String("channelName", req.GetChannelName()),
+		zap.Int64s("segmentIDs", segmentIDs),
+	)
+
 	log.Info("receiving FlushSegments request",
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64s("sealedSegments", req.GetSegmentIDs()),
 	)
 
-	segmentIDs := req.GetSegmentIDs()
-	var flushedSeg []UniqueID
-	for _, segID := range segmentIDs {
-		// if the segment in already being flushed, skip it.
-		if node.segmentCache.checkIfCached(segID) {
-			logDupFlush(req.GetCollectionID(), segID)
-			continue
-		}
-		// Get the flush channel for the given segment ID.
-		// If no flush channel is found, report an error.
-		flushCh, err := node.flowgraphManager.getFlushCh(segID)
-		if err != nil {
-			log.Error("no flush channel found for the segment, unable to flush", zap.Int64("segmentID", segID), zap.Error(err))
-			return merr.Status(err), nil
-		}
-
-		// Double check that the segment is still not cached.
-		// Skip this flush if segment ID is cached, otherwise cache the segment ID and proceed.
-		exist := node.segmentCache.checkOrCache(segID)
-		if exist {
-			logDupFlush(req.GetCollectionID(), segID)
-			continue
-		}
-		// flushedSeg is only for logging purpose.
-		flushedSeg = append(flushedSeg, segID)
-		// Send the segment to its flush channel.
-		flushCh <- flushMsg{
-			msgID:        req.GetBase().GetMsgID(),
-			timestamp:    req.GetBase().GetTimestamp(),
-			segmentID:    segID,
-			collectionID: req.GetCollectionID(),
-		}
+	err := node.writeBufferManager.FlushSegments(ctx, req.GetChannelName(), segmentIDs)
+	if err != nil {
+		log.Warn("failed to flush segments", zap.Error(err))
+		return merr.Status(err), nil
 	}
 
 	// Log success flushed segments.
-	if len(flushedSeg) > 0 {
-		log.Info("sending segments to flush channel",
-			zap.Int64("collectionID", req.GetCollectionID()),
-			zap.Int64s("sealedSegments", flushedSeg))
-	}
+	log.Info("sending segments to WriteBuffer Manager",
+		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.Int64s("sealedSegments", req.GetSegmentIDs()))
 
 	metrics.DataNodeFlushReqCounter.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()),
@@ -279,8 +257,8 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 	task := newCompactionTask(
 		node.ctx,
 		binlogIO, binlogIO,
-		ds.channel,
-		ds.flushManager,
+		ds.metacache,
+		ds.syncMgr,
 		ds.idAllocator,
 		req,
 		node.chunkManager,
@@ -333,65 +311,22 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		return merr.Status(merr.WrapErrParameterInvalid(">0", "0", "compacted from segments shouldn't be empty")), nil
 	}
 
-	var (
-		channel Channel
-		err     error
-		ds      *dataSyncService
-		ok      bool
-		collID  int64
-		partID  int64
-	)
-
-	if req.GetChannelName() != "" {
-		ds, ok = node.flowgraphManager.getFlowgraphService(req.GetChannelName())
-		if !ok {
-			err := merr.WrapErrChannelNotFound(req.GetChannelName())
-			log.Warn("failed to sync segments", zap.Error(err))
-			return merr.Status(err), nil
-		}
-		channel = ds.channel
-		collID = req.GetCollectionId()
-		partID = req.GetPartitionId()
-	} else {
-		var oneSegment int64
-		for _, fromSegment := range req.GetCompactedFrom() {
-			channel, err = node.flowgraphManager.getChannel(fromSegment)
-			if err != nil {
-				log.Ctx(ctx).Warn("fail to get the channel", zap.Int64("segment", fromSegment), zap.Error(err))
-				continue
-			}
-			ds, ok = node.flowgraphManager.getFlowgraphService(channel.getChannelName())
-			if !ok {
-				log.Ctx(ctx).Warn("fail to find flow graph service", zap.Int64("segment", fromSegment))
-				continue
-			}
-			oneSegment = fromSegment
-			break
-		}
-		if oneSegment == 0 {
-			log.Ctx(ctx).Warn("no valid segment, maybe the request is a retry")
-			return merr.Success(), nil
-		}
-
-		// oneSegment is definitely in the channel, guaranteed by the check before.
-		collID, partID, _ = channel.getCollectionAndPartitionID(oneSegment)
-	}
-
-	targetSeg := &Segment{
-		collectionID: collID,
-		partitionID:  partID,
-		segmentID:    req.GetCompactedTo(),
-		numRows:      req.GetNumOfRows(),
-	}
-
-	err = channel.InitPKstats(ctx, targetSeg, req.GetStatsLogs(), tsoutil.GetCurrentTime())
-	if err != nil {
+	ds, ok := node.flowgraphManager.getFlowgraphService(req.GetChannelName())
+	if !ok {
+		err := merr.WrapErrChannelNotFound(req.GetChannelName())
+		log.Warn("failed to sync segments", zap.Error(err))
 		return merr.Status(err), nil
 	}
 
+	pks, err := loadStats(ctx, node.chunkManager, ds.metacache.Schema(), req.GetCompactedTo(), req.GetCollectionId(), req.GetStatsLogs(), 0)
+	if err != nil {
+		log.Warn("failed to load segment statslog", zap.Error(err))
+		return merr.Status(err), nil
+	}
+	bfs := metacache.NewBloomFilterSet(pks...)
 	ds.fg.Blockall()
 	defer ds.fg.Unblock()
-	channel.mergeFlushedSegments(ctx, targetSeg, req.GetPlanID(), req.GetCompactedFrom())
+	ds.metacache.CompactSegments(req.GetCompactedTo(), req.GetPartitionId(), req.GetNumOfRows(), bfs, req.GetCompactedFrom()...)
 	node.compactionExecutor.injectDone(req.GetPlanID(), true)
 	return merr.Success(), nil
 }
@@ -536,12 +471,11 @@ func (node *DataNode) FlushChannels(ctx context.Context, req *datapb.FlushChanne
 	}
 
 	for _, channel := range req.GetChannels() {
-		fg, ok := node.flowgraphManager.getFlowgraphService(channel)
-		if !ok {
-			msg := "may channel has not watched yet"
-			return merr.Status(merr.WrapErrChannelNotFound(channel, msg)), nil
+		err := node.writeBufferManager.FlushChannel(ctx, channel, req.GetFlushTs())
+		if err != nil {
+			log.Warn("failed to flush channel", zap.String("channel", channel), zap.Error(err))
+			return merr.Status(err), nil
 		}
-		fg.channel.setFlushTs(req.GetFlushTs())
 	}
 
 	return merr.Success(), nil
@@ -589,52 +523,47 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 
 	if err != nil {
 		return &datapb.AddImportSegmentResponse{
-			Status: &commonpb.Status{
-				// TODO: Add specific error code.
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    "failed to get channel position",
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 	// Add the new segment to the channel.
-	if !ds.channel.hasSegment(req.GetSegmentId(), true) {
+	if len(ds.metacache.GetSegmentIDsBy(metacache.WithSegmentIDs(req.GetSegmentId()), metacache.WithSegmentState(commonpb.SegmentState_Flushed))) == 0 {
 		log.Info("adding a new segment to channel", logFields...)
-		// Add segment as a flushed segment, but set `importing` to true to add extra information of the segment.
-		// By 'extra information' we mean segment info while adding a `SegmentType_Flushed` typed segment.
-		if err := ds.channel.addSegment(
-			context.TODO(),
-			addSegmentReq{
-				segType:      datapb.SegmentType_Flushed,
-				segID:        req.GetSegmentId(),
-				collID:       req.GetCollectionId(),
-				partitionID:  req.GetPartitionId(),
-				numOfRows:    req.GetRowNum(),
-				statsBinLogs: req.GetStatsLog(),
-				startPos: &msgpb.MsgPosition{
-					ChannelName: req.GetChannelName(),
-					MsgID:       posID,
-					Timestamp:   req.GetBase().GetTimestamp(),
-				},
-				endPos: &msgpb.MsgPosition{
-					ChannelName: req.GetChannelName(),
-					MsgID:       posID,
-					Timestamp:   req.GetBase().GetTimestamp(),
-				},
-				recoverTs: req.GetBase().GetTimestamp(),
-				importing: true,
-			}); err != nil {
-			logFields = append(logFields, zap.Error(err))
-			log.Error("failed to add segment to flow graph", logFields...)
+		pks, err := loadStats(ctx, node.chunkManager, ds.metacache.Schema(), req.GetSegmentId(), req.GetCollectionId(), req.GetStatsLog(), req.GetBase().GetTimestamp())
+		if err != nil {
+			log.Warn("failed to get segment pk stats", zap.Error(err))
 			return &datapb.AddImportSegmentResponse{
-				Status: &commonpb.Status{
-					// TODO: Add specific error code.
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    err.Error(),
-				},
+				Status: merr.Status(err),
 			}, nil
 		}
+
+		// Add segment as a flushed segment, but set `importing` to true to add extra information of the segment.
+		// By 'extra information' we mean segment info while adding a `SegmentType_Flushed` typed segment.
+		// ds.metacache.
+		ds.metacache.AddSegment(&datapb.SegmentInfo{
+			ID:            req.GetSegmentId(),
+			State:         commonpb.SegmentState_Flushed,
+			CollectionID:  req.GetCollectionId(),
+			PartitionID:   req.GetPartitionId(),
+			InsertChannel: req.GetChannelName(),
+			NumOfRows:     req.GetRowNum(),
+			Statslogs:     req.GetStatsLog(),
+			StartPosition: &msgpb.MsgPosition{
+				ChannelName: req.GetChannelName(),
+				MsgID:       posID,
+				Timestamp:   req.GetBase().GetTimestamp(),
+			},
+			DmlPosition: &msgpb.MsgPosition{
+				ChannelName: req.GetChannelName(),
+				MsgID:       posID,
+				Timestamp:   req.GetBase().GetTimestamp(),
+			},
+		}, func(info *datapb.SegmentInfo) *metacache.BloomFilterSet {
+			bfs := metacache.NewBloomFilterSet(pks...)
+			return bfs
+		}, metacache.UpdateImporting(true))
 	}
-	ds.flushingSegCache.Remove(req.GetSegmentId())
+
 	return &datapb.AddImportSegmentResponse{
 		Status:     merr.Success(),
 		ChannelPos: posID,
@@ -878,17 +807,17 @@ func createBinLogs(rowNum int, schema *schemapb.CollectionSchema, ts Timestamp,
 		return nil, nil, err
 	}
 
-	data := BufferData{buffer: &InsertData{
+	insertData := &InsertData{
 		Data: fields,
-	}}
-	data.updateSize(int64(rowNum))
+	}
+	// data.updateSize(int64(rowNum))
 	meta := &etcdpb.CollectionMeta{
 		ID:     colID,
 		Schema: schema,
 	}
 	iCodec := storage.NewInsertCodecWithSchema(meta)
 
-	binLogs, err := iCodec.Serialize(partID, segmentID, data.buffer)
+	binLogs, err := iCodec.Serialize(partID, segmentID, insertData)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -915,7 +844,7 @@ func createBinLogs(rowNum int, schema *schemapb.CollectionSchema, ts Timestamp,
 		key := path.Join(node.chunkManager.RootPath(), common.SegmentInsertLogPath, k)
 		kvs[key] = blob.Value[:]
 		field2Insert[fieldID] = &datapb.Binlog{
-			EntriesNum:    data.size,
+			EntriesNum:    int64(rowNum),
 			TimestampFrom: ts,
 			TimestampTo:   ts,
 			LogPath:       key,
@@ -926,7 +855,7 @@ func createBinLogs(rowNum int, schema *schemapb.CollectionSchema, ts Timestamp,
 
 	field2Stats := make(map[UniqueID]*datapb.Binlog)
 	// write stats binlog
-	statsBinLog, err := iCodec.SerializePkStatsByData(data.buffer)
+	statsBinLog, err := iCodec.SerializePkStatsByData(insertData)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -945,7 +874,7 @@ func createBinLogs(rowNum int, schema *schemapb.CollectionSchema, ts Timestamp,
 	key := path.Join(node.chunkManager.RootPath(), common.SegmentStatslogPath, k)
 	kvs[key] = statsBinLog.Value
 	field2Stats[fieldID] = &datapb.Binlog{
-		EntriesNum:    data.size,
+		EntriesNum:    int64(rowNum),
 		TimestampFrom: ts,
 		TimestampTo:   ts,
 		LogPath:       key,

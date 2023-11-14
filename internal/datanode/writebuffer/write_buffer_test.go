@@ -19,10 +19,11 @@ import (
 
 type WriteBufferSuite struct {
 	suite.Suite
-	collSchema *schemapb.CollectionSchema
-	wb         *writeBufferBase
-	syncMgr    *syncmgr.MockSyncManager
-	metacache  *metacache.MockMetaCache
+	channelName string
+	collSchema  *schemapb.CollectionSchema
+	wb          *writeBufferBase
+	syncMgr     *syncmgr.MockSyncManager
+	metacache   *metacache.MockMetaCache
 }
 
 func (s *WriteBufferSuite) SetupSuite() {
@@ -36,12 +37,13 @@ func (s *WriteBufferSuite) SetupSuite() {
 			}},
 		},
 	}
+	s.channelName = "by-dev-rootcoord-dml_0v0"
 }
 
 func (s *WriteBufferSuite) SetupTest() {
 	s.syncMgr = syncmgr.NewMockSyncManager(s.T())
 	s.metacache = metacache.NewMockMetaCache(s.T())
-	s.wb = newWriteBufferBase(s.collSchema, s.metacache, s.syncMgr, &writeBufferOption{
+	s.wb = newWriteBufferBase(s.channelName, s.collSchema, s.metacache, s.syncMgr, &writeBufferOption{
 		pkStatsFactory: func(vchannel *datapb.SegmentInfo) *metacache.BloomFilterSet {
 			return metacache.NewBloomFilterSet()
 		},
@@ -49,18 +51,18 @@ func (s *WriteBufferSuite) SetupTest() {
 }
 
 func (s *WriteBufferSuite) TestWriteBufferType() {
-	wb, err := NewWriteBuffer(s.collSchema, s.metacache, s.syncMgr, WithDeletePolicy(DeletePolicyBFPkOracle))
+	wb, err := NewWriteBuffer(s.channelName, s.collSchema, s.metacache, s.syncMgr, WithDeletePolicy(DeletePolicyBFPkOracle))
 	s.NoError(err)
 
 	_, ok := wb.(*bfWriteBuffer)
 	s.True(ok)
 
-	wb, err = NewWriteBuffer(s.collSchema, s.metacache, s.syncMgr, WithDeletePolicy(DeletePolicyL0Delta), WithIDAllocator(allocator.NewMockGIDAllocator()))
+	wb, err = NewWriteBuffer(s.channelName, s.collSchema, s.metacache, s.syncMgr, WithDeletePolicy(DeletePolicyL0Delta), WithIDAllocator(allocator.NewMockGIDAllocator()))
 	s.NoError(err)
 	_, ok = wb.(*l0WriteBuffer)
 	s.True(ok)
 
-	_, err = NewWriteBuffer(s.collSchema, s.metacache, s.syncMgr, WithDeletePolicy(""))
+	_, err = NewWriteBuffer(s.channelName, s.collSchema, s.metacache, s.syncMgr, WithDeletePolicy(""))
 	s.Error(err)
 }
 
@@ -79,7 +81,7 @@ func (s *WriteBufferSuite) TestFlushSegments() {
 
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything, mock.Anything)
 
-	wb, err := NewWriteBuffer(s.collSchema, s.metacache, s.syncMgr, WithDeletePolicy(DeletePolicyBFPkOracle))
+	wb, err := NewWriteBuffer(s.channelName, s.collSchema, s.metacache, s.syncMgr, WithDeletePolicy(DeletePolicyBFPkOracle))
 	s.NoError(err)
 
 	err = wb.FlushSegments(context.Background(), []int64{segmentID})

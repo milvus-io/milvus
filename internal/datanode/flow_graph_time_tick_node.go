@@ -19,7 +19,6 @@ package datanode
 import (
 	"context"
 	"fmt"
-	"math"
 	"reflect"
 	"sync"
 	"time"
@@ -29,6 +28,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/datanode/broker"
+	"github.com/milvus-io/milvus/internal/datanode/metacache"
+	"github.com/milvus-io/milvus/internal/datanode/writebuffer"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -44,10 +45,11 @@ var _ flowgraph.Node = (*ttNode)(nil)
 
 type ttNode struct {
 	BaseNode
-	vChannelName   string
-	channel        Channel
-	lastUpdateTime *atomic.Time
-	broker         broker.Broker
+	vChannelName       string
+	metacache          metacache.MetaCache
+	writeBufferManager writebuffer.Manager
+	lastUpdateTime     *atomic.Time
+	broker             broker.Broker
 
 	updateCPLock  sync.Mutex
 	notifyChannel chan checkPoint
@@ -91,7 +93,11 @@ func (ttn *ttNode) Operate(in []Msg) []Msg {
 	curTs, _ := tsoutil.ParseTS(fgMsg.timeRange.timestampMax)
 	if fgMsg.IsCloseMsg() {
 		if len(fgMsg.endPositions) > 0 {
-			channelPos := ttn.channel.getChannelCheckpoint(fgMsg.endPositions[0])
+			channelPos, _, err := ttn.writeBufferManager.GetCheckpoint(ttn.vChannelName)
+			if err != nil {
+				log.Warn("channel removed", zap.String("channel", ttn.vChannelName), zap.Error(err))
+				return []Msg{}
+			}
 			log.Info("flowgraph is closing, force update channel CP",
 				zap.Time("cpTs", tsoutil.PhysicalTime(channelPos.GetTimestamp())),
 				zap.String("channel", channelPos.GetChannelName()))
@@ -101,7 +107,11 @@ func (ttn *ttNode) Operate(in []Msg) []Msg {
 	}
 
 	// Do not block and async updateCheckPoint
-	channelPos := ttn.channel.getChannelCheckpoint(fgMsg.endPositions[0])
+	channelPos, needUpdate, err := ttn.writeBufferManager.GetCheckpoint(ttn.vChannelName)
+	if err != nil {
+		log.Warn("channel removed", zap.String("channel", ttn.vChannelName), zap.Error(err))
+		return []Msg{}
+	}
 	nonBlockingNotify := func() {
 		select {
 		case ttn.notifyChannel <- checkPoint{curTs, channelPos}:
@@ -109,14 +119,11 @@ func (ttn *ttNode) Operate(in []Msg) []Msg {
 		}
 	}
 
-	if curTs.Sub(ttn.lastUpdateTime.Load()) >= updateChanCPInterval {
+	if needUpdate || curTs.Sub(ttn.lastUpdateTime.Load()) >= updateChanCPInterval {
 		nonBlockingNotify()
 		return []Msg{}
 	}
 
-	if channelPos.GetTimestamp() >= ttn.channel.getFlushTs() {
-		nonBlockingNotify()
-	}
 	return []Msg{}
 }
 
@@ -135,10 +142,9 @@ func (ttn *ttNode) updateChannelCP(channelPos *msgpb.MsgPosition, curTs time.Tim
 	}
 
 	ttn.lastUpdateTime.Store(curTs)
-	// channelPos ts > flushTs means we could stop flush.
-	if channelPos.GetTimestamp() >= ttn.channel.getFlushTs() {
-		ttn.channel.setFlushTs(math.MaxUint64)
-	}
+
+	ttn.writeBufferManager.NotifyCheckpointUpdated(ttn.vChannelName, channelPos.GetTimestamp())
+
 	log.Info("UpdateChannelCheckpoint success",
 		zap.String("channel", ttn.vChannelName),
 		zap.Uint64("cpTs", channelPos.GetTimestamp()),
@@ -146,20 +152,21 @@ func (ttn *ttNode) updateChannelCP(channelPos *msgpb.MsgPosition, curTs time.Tim
 	return nil
 }
 
-func newTTNode(config *nodeConfig, broker broker.Broker) (*ttNode, error) {
+func newTTNode(config *nodeConfig, broker broker.Broker, wbManager writebuffer.Manager) (*ttNode, error) {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(Params.DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
 	baseNode.SetMaxParallelism(Params.DataNodeCfg.FlowGraphMaxParallelism.GetAsInt32())
 
 	tt := &ttNode{
-		BaseNode:       baseNode,
-		vChannelName:   config.vChannelName,
-		channel:        config.channel,
-		lastUpdateTime: atomic.NewTime(time.Time{}), // set to Zero to update channel checkpoint immediately after fg started
-		broker:         broker,
-		notifyChannel:  make(chan checkPoint, 1),
-		closeChannel:   make(chan struct{}),
-		closeWg:        sync.WaitGroup{},
+		BaseNode:           baseNode,
+		vChannelName:       config.vChannelName,
+		metacache:          config.metacache,
+		writeBufferManager: wbManager,
+		lastUpdateTime:     atomic.NewTime(time.Time{}), // set to Zero to update channel checkpoint immediately after fg started
+		broker:             broker,
+		notifyChannel:      make(chan checkPoint, 1),
+		closeChannel:       make(chan struct{}),
+		closeWg:            sync.WaitGroup{},
 	}
 
 	// check point updater

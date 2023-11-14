@@ -185,21 +185,22 @@ func (s *InsertBufferSuite) TestBuffer() {
 	})
 }
 
-func (s *InsertBufferSuite) TestRenew() {
+func (s *InsertBufferSuite) TestYield() {
 	insertBuffer, err := NewInsertBuffer(s.collSchema)
 	s.Require().NoError(err)
 
-	result := insertBuffer.Renew()
+	result := insertBuffer.Yield()
 	s.Nil(result)
-	s.True(insertBuffer.IsEmpty())
+
+	insertBuffer, err = NewInsertBuffer(s.collSchema)
+	s.Require().NoError(err)
 
 	pks, insertMsg := s.composeInsertMsg(10, 128)
 	_, err = insertBuffer.Buffer([]*msgstream.InsertMsg{insertMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
 	s.Require().NoError(err)
 
-	result = insertBuffer.Renew()
+	result = insertBuffer.Yield()
 	s.NotNil(result)
-	s.True(insertBuffer.IsEmpty())
 
 	pkField, ok := result.Data[common.StartOfUserFieldID]
 	s.Require().True(ok)

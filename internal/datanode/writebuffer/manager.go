@@ -21,10 +21,18 @@ type Manager interface {
 	Register(channel string, schema *schemapb.CollectionSchema, metacache metacache.MetaCache, opts ...WriteBufferOption) error
 	// FlushSegments notifies writeBuffer corresponding to provided channel to flush segments.
 	FlushSegments(ctx context.Context, channel string, segmentIDs []int64) error
+	// FlushChannel
+	FlushChannel(ctx context.Context, channel string, flushTs uint64) error
 	// RemoveChannel removes a write buffer from manager.
 	RemoveChannel(channel string)
+	// DropChannel remove write buffer and perform drop.
+	DropChannel(channel string)
 	// BufferData put data into channel write buffer.
 	BufferData(channel string, insertMsgs []*msgstream.InsertMsg, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) error
+	// GetCheckpoint returns checkpoint for provided channel.
+	GetCheckpoint(channel string) (*msgpb.MsgPosition, bool, error)
+	// NotifyCheckpointUpdated notify write buffer checkpoint updated to reset flushTs.
+	NotifyCheckpointUpdated(channel string, ts uint64)
 }
 
 // NewManager returns initialized manager as `Manager`
@@ -50,7 +58,7 @@ func (m *manager) Register(channel string, schema *schemapb.CollectionSchema, me
 	if ok {
 		return merr.WrapErrChannelReduplicate(channel)
 	}
-	buf, err := NewWriteBuffer(schema, metacache, m.syncMgr, opts...)
+	buf, err := NewWriteBuffer(channel, schema, metacache, m.syncMgr, opts...)
 	if err != nil {
 		return err
 	}
@@ -74,6 +82,21 @@ func (m *manager) FlushSegments(ctx context.Context, channel string, segmentIDs 
 	return buf.FlushSegments(ctx, segmentIDs)
 }
 
+func (m *manager) FlushChannel(ctx context.Context, channel string, flushTs uint64) error {
+	m.mut.RLock()
+	buf, ok := m.buffers[channel]
+	m.mut.RUnlock()
+
+	if !ok {
+		log.Ctx(ctx).Warn("write buffer not found when flush segments",
+			zap.String("channel", channel),
+			zap.Uint64("flushTs", flushTs))
+		return merr.WrapErrChannelNotFound(channel)
+	}
+	buf.SetFlushTimestamp(flushTs)
+	return nil
+}
+
 // BufferData put data into channel write buffer.
 func (m *manager) BufferData(channel string, insertMsgs []*msgstream.InsertMsg, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) error {
 	m.mut.RLock()
@@ -89,7 +112,37 @@ func (m *manager) BufferData(channel string, insertMsgs []*msgstream.InsertMsg, 
 	return buf.BufferData(insertMsgs, deleteMsgs, startPos, endPos)
 }
 
+// GetCheckpoint returns checkpoint for provided channel.
+func (m *manager) GetCheckpoint(channel string) (*msgpb.MsgPosition, bool, error) {
+	m.mut.RLock()
+	buf, ok := m.buffers[channel]
+	m.mut.RUnlock()
+
+	if !ok {
+		return nil, false, merr.WrapErrChannelNotFound(channel)
+	}
+	cp := buf.MinCheckpoint()
+	flushTs := buf.GetFlushTimestamp()
+
+	return cp, flushTs != nonFlushTS && cp.GetTimestamp() >= flushTs, nil
+}
+
+func (m *manager) NotifyCheckpointUpdated(channel string, ts uint64) {
+	m.mut.Lock()
+	defer m.mut.Unlock()
+	buf, ok := m.buffers[channel]
+	if !ok {
+		return
+	}
+	flushTs := buf.GetFlushTimestamp()
+	if flushTs != nonFlushTS && ts > flushTs {
+		log.Info("reset channel flushTs", zap.String("channel", channel))
+		buf.SetFlushTimestamp(nonFlushTS)
+	}
+}
+
 // RemoveChannel remove channel WriteBuffer from manager.
+// this method discards all buffered data since datanode no longer has the ownership
 func (m *manager) RemoveChannel(channel string) {
 	m.mut.Lock()
 	buf, ok := m.buffers[channel]
@@ -101,5 +154,21 @@ func (m *manager) RemoveChannel(channel string) {
 		return
 	}
 
-	buf.Close()
+	buf.Close(false)
+}
+
+// DropChannel removes channel WriteBuffer and process `DropChannel`
+// this method will save all buffered data
+func (m *manager) DropChannel(channel string) {
+	m.mut.Lock()
+	buf, ok := m.buffers[channel]
+	delete(m.buffers, channel)
+	m.mut.Unlock()
+
+	if !ok {
+		log.Warn("failed to drop channel, channel not maintained in manager", zap.String("channel", channel))
+		return
+	}
+
+	buf.Close(true)
 }

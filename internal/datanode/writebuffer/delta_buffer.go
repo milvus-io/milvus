@@ -45,16 +45,12 @@ func (ib *DeltaBuffer) getTimestampRange(tss []typeutil.Timestamp) TimeRange {
 	return tr
 }
 
-func (db *DeltaBuffer) Renew() *storage.DeleteData {
+func (db *DeltaBuffer) Yield() *storage.DeleteData {
 	if db.IsEmpty() {
 		return nil
 	}
-	result := db.buffer
-	db.BufferBase.rows = 0
-	db.BufferBase.TimestampFrom = math.MaxUint64
-	db.BufferBase.TimestampTo = 0
 
-	return result
+	return db.buffer
 }
 
 func (db *DeltaBuffer) Buffer(pks []storage.PrimaryKey, tss []typeutil.Timestamp, startPos, endPos *msgpb.MsgPosition) (bufSize int64) {

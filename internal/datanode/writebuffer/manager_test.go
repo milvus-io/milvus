@@ -3,17 +3,20 @@ package writebuffer
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
 type ManagerSuite struct {
@@ -97,7 +100,7 @@ func (s *ManagerSuite) TestBufferData() {
 	manager := s.manager
 	s.Run("channel_not_found", func() {
 		err := manager.BufferData(s.channelName, nil, nil, nil, nil)
-		s.Error(err, "FlushSegments shall return error when channel not found")
+		s.Error(err, "BufferData shall return error when channel not found")
 	})
 
 	s.Run("normal_buffer_data", func() {
@@ -111,6 +114,48 @@ func (s *ManagerSuite) TestBufferData() {
 
 		err := manager.BufferData(s.channelName, nil, nil, nil, nil)
 		s.NoError(err)
+	})
+}
+
+func (s *ManagerSuite) TestGetCheckpoint() {
+	manager := s.manager
+	s.Run("channel_not_found", func() {
+		_, _, err := manager.GetCheckpoint(s.channelName)
+		s.Error(err, "FlushSegments shall return error when channel not found")
+	})
+
+	s.Run("normal_checkpoint", func() {
+		wb := NewMockWriteBuffer(s.T())
+
+		manager.mut.Lock()
+		manager.buffers[s.channelName] = wb
+		manager.mut.Unlock()
+
+		pos := &msgpb.MsgPosition{ChannelName: s.channelName, Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0)}
+		wb.EXPECT().MinCheckpoint().Return(pos)
+		wb.EXPECT().GetFlushTimestamp().Return(nonFlushTS)
+		result, needUpdate, err := manager.GetCheckpoint(s.channelName)
+		s.NoError(err)
+		s.Equal(pos, result)
+		s.False(needUpdate)
+	})
+
+	s.Run("checkpoint_need_update", func() {
+		wb := NewMockWriteBuffer(s.T())
+
+		manager.mut.Lock()
+		manager.buffers[s.channelName] = wb
+		manager.mut.Unlock()
+
+		cpTimestamp := tsoutil.ComposeTSByTime(time.Now(), 0)
+
+		pos := &msgpb.MsgPosition{ChannelName: s.channelName, Timestamp: cpTimestamp}
+		wb.EXPECT().MinCheckpoint().Return(pos)
+		wb.EXPECT().GetFlushTimestamp().Return(cpTimestamp - 1)
+		result, needUpdate, err := manager.GetCheckpoint(s.channelName)
+		s.NoError(err)
+		s.Equal(pos, result)
+		s.True(needUpdate)
 	})
 }
 

@@ -41,21 +41,21 @@ func (s *DeltaBufferSuite) TestBuffer() {
 	})
 }
 
-func (s *DeltaBufferSuite) TestRenew() {
+func (s *DeltaBufferSuite) TestYield() {
 	deltaBuffer := NewDeltaBuffer()
 
-	result := deltaBuffer.Renew()
+	result := deltaBuffer.Yield()
 	s.Nil(result)
-	s.True(deltaBuffer.IsEmpty())
+
+	deltaBuffer = NewDeltaBuffer()
 
 	tss := lo.RepeatBy(100, func(idx int) uint64 { return tsoutil.ComposeTSByTime(time.Now(), int64(idx)) })
 	pks := lo.Map(tss, func(ts uint64, _ int) storage.PrimaryKey { return storage.NewInt64PrimaryKey(int64(ts)) })
 
 	deltaBuffer.Buffer(pks, tss, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
 
-	result = deltaBuffer.Renew()
+	result = deltaBuffer.Yield()
 	s.NotNil(result)
-	s.True(deltaBuffer.IsEmpty())
 
 	s.ElementsMatch(tss, result.Tss)
 	s.ElementsMatch(pks, result.Pks)
