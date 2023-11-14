@@ -20,6 +20,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"path"
 	"sync"
 	"time"
@@ -446,6 +447,8 @@ type UpdateSegmentPack struct {
 	increments map[int64]metastore.BinlogsIncrement
 	// for update segment metric after alter segments
 	metricMutation *segMetricMutation
+	// clustering info
+	clusteringInfo *internalpb.ClusteringInfo
 }
 
 func (p *UpdateSegmentPack) Get(segmentID int64) *SegmentInfo {

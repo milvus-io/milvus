@@ -259,6 +259,7 @@ message SegmentLoadInfo {
   msg.MsgPosition delta_position = 15;
   int64 readableVersion = 16;
   data.SegmentLevel level = 17;
+  repeated internal.ClusteringInfo clustering_infos = 18; // cluster info if have, support one segment containing more than one clustering
 }
 
 message FieldIndexInfo {

@@ -101,6 +101,8 @@ message SearchRequest {
   string metricType = 16;
   bool ignoreGrowing = 17; // Optional
   string username = 18;
+  int32 dim = 19;
+  SearchClusteringOptions clustering_options = 20;
 }
 
 message SearchResults {
@@ -246,4 +248,32 @@ enum RateType {
 message Rate {
   RateType rt = 1;
   double r = 2;
+}
+
+// clustering info of data distribution
+message ClusteringInfo {
+  // clustering.id, id of one cluster
+  int64 id = 1;
+  // clustering.operationID, id of one clustering operation, a clustering operation contains multiple clusters
+  int64 operationID = 2;
+  // clustering.centroid
+  repeated float centroid = 3;
+  // clustering.size
+  int64 size = 4;
+}
+
+// a clustering operation contains multiple clusters triggered in import or compaction
+message ClusteringOperation {
+  //  id of one clustering operation 
+  int64 id = 1;
+  // clustering parameters such as clustering method, cluster number, etc.
+  repeated common.KeyValuePair params = 2;
+  // clustering results
+  repeated ClusteringInfo clusters= 3;
+}
+
+// options to control clustering related behavior in SearchRequest 
+message SearchClusteringOptions {
+  bool enable = 1;
+  float filterRatio = 2;
 }

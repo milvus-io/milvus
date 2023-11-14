@@ -1,20 +1,4 @@
-// Licensed to the LF AI & Data foundation under one
-// or more contributor license agreements. See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership. The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License. You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-package bulkinsert
+package clustering
 
 import (
 	"context"
@@ -28,34 +12,31 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/clustering"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/tests/integration"
 	"github.com/milvus-io/milvus/tests/integration/util"
 )
 
-type BulkInsertSuite struct {
+type BulkInsertClusteringSuite struct {
 	integration.MiniClusterSuite
 }
 
-// test bulk insert E2E
+// test bulk insert with clustering info
 // 1, create collection with a vector column and a varchar column
 // 2, generate numpy files
 // 3, import
-// 4, create index
-// 5, load
-// 6, search
-func (s *BulkInsertSuite) TestBulkInsert() {
+// 4, check segment clustering info
+func (s *BulkInsertClusteringSuite) TestBulkInsertClustering() {
 	c := s.Cluster
 	ctx, cancel := context.WithCancel(c.GetContext())
 	defer cancel()
 
-	prefix := "TestBulkInsert"
+	prefix := "BulkInsertClusteringSuite"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
-
 	dim := util.DIM128
 
 	pkFieldSchema := &schemapb.FieldSchema{Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true}
@@ -99,11 +80,15 @@ func (s *BulkInsertSuite) TestBulkInsert() {
 		c.ChunkManager.RootPath() + "/" + "image_path.npy",
 	}
 
-	health1, err := c.DataCoord.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
+	allocTimestampResp, err := c.Proxy.AllocTimestamp(ctx, &milvuspb.AllocTimestampRequest{})
 	s.NoError(err)
-	log.Info("dataCoord health", zap.Any("health1", health1))
+	clusteringGroupId := allocTimestampResp.Timestamp
 
-	err = util.BulkInsertSync(ctx, c, collectionName, bulkInsertFiles, nil)
+	err = util.BulkInsertSync(ctx, c, collectionName, bulkInsertFiles, []*commonpb.KeyValuePair{
+		{Key: clustering.ClusteringCentroid, Value: "[0.0,0.0,0.0,0.0]"},
+		{Key: clustering.ClusteringSize, Value: "100"},
+		{Key: clustering.ClusteringOperationid, Value: fmt.Sprint(clusteringGroupId)},
+	})
 	s.NoError(err)
 
 	health2, err := c.DataCoord.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
@@ -115,61 +100,22 @@ func (s *BulkInsertSuite) TestBulkInsert() {
 	s.NotEmpty(segments)
 	for _, segment := range segments {
 		log.Info("ShowSegments result", zap.String("segment", segment.String()))
+		// check clustering info is inserted
+		s.True(len(segment.GetClusteringInfos()) > 0)
+		s.True(segment.GetClusteringInfos()[0].GetOperationID() == int64(clusteringGroupId))
+		s.True(segment.GetClusteringInfos()[0].GetSize() == int64(100))
+		s.True(segment.GetClusteringInfos()[0].GetId() != 0)
+		s.True(segment.GetClusteringInfos()[0].GetCentroid() != nil)
 	}
-
-	// create index
-	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
-		CollectionName: collectionName,
-		FieldName:      "embeddings",
-		IndexName:      "_default",
-		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexHNSW, metric.L2),
-	})
-	if createIndexStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("createIndexStatus fail reason", zap.String("reason", createIndexStatus.GetReason()))
-	}
-	s.NoError(err)
-	s.Equal(commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode())
-
-	s.WaitForIndexBuilt(ctx, collectionName, "embeddings")
-
-	// load
-	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
-		DbName:         dbName,
-		CollectionName: collectionName,
-	})
-	s.NoError(err)
-	if loadStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("loadStatus fail reason", zap.String("reason", loadStatus.GetReason()))
-	}
-	s.Equal(commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
-	s.WaitForLoad(ctx, collectionName)
-
-	// search
-	expr := "" // fmt.Sprintf("%s > 0", int64Field)
-	nq := 10
-	topk := 10
-	roundDecimal := -1
-
-	params := integration.GetSearchParams(integration.IndexHNSW, metric.L2)
-	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
-		"embeddings", schemapb.DataType_FloatVector, nil, metric.L2, params, nq, dim, topk, roundDecimal)
-
-	searchResult, err := c.Proxy.Search(ctx, searchReq)
-
-	if searchResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("searchResult fail reason", zap.String("reason", searchResult.GetStatus().GetReason()))
-	}
-	s.NoError(err)
-	s.Equal(commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
 
 	log.Info("======================")
 	log.Info("======================")
-	log.Info("TestBulkInsert succeed")
+	log.Info("BulkInsertClusteringSuite succeed")
 	log.Info("======================")
 	log.Info("======================")
 }
 
-func TestBulkInsert(t *testing.T) {
+func TestBulkInsertClustering(t *testing.T) {
 	t.Skip("Skip integration test, need to refactor integration test framework")
-	suite.Run(t, new(BulkInsertSuite))
+	suite.Run(t, new(BulkInsertClusteringSuite))
 }
