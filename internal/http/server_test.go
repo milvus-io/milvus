@@ -20,12 +20,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
@@ -35,29 +36,25 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
-func TestMain(t *testing.M) {
-	paramtable.Init()
-}
-
-func TestGetHTTPAddr(t *testing.T) {
-	assert.Equal(t, getHTTPAddr(), ":"+DefaultListenPort)
-	testPort := "9092"
-	t.Setenv(ListenPortEnvKey, testPort)
-	assert.Equal(t, getHTTPAddr(), ":"+testPort)
-}
-
 type HTTPServerTestSuite struct {
 	suite.Suite
-	server *httptest.Server
 }
 
 func (suite *HTTPServerTestSuite) SetupSuite() {
-	suite.server = httptest.NewServer(nil)
-	registerDefaults()
+	paramtable.Init()
+	ServeHTTP()
 }
 
 func (suite *HTTPServerTestSuite) TearDownSuite() {
-	defer suite.server.Close()
+	defer server.Close()
+	metricsServer = nil
+}
+
+func (suite *HTTPServerTestSuite) TestGetHTTPAddr() {
+	suite.Equal(getHTTPAddr(), ":"+DefaultListenPort)
+	testPort := "9092"
+	os.Setenv(ListenPortEnvKey, testPort)
+	suite.Equal(getHTTPAddr(), ":"+testPort)
 }
 
 func (suite *HTTPServerTestSuite) TestDefaultLogHandler() {
@@ -74,12 +71,12 @@ func (suite *HTTPServerTestSuite) TestDefaultLogHandler() {
 	payload, err := json.Marshal(map[string]any{"level": "error"})
 	suite.Require().NoError(err)
 
-	url := suite.server.URL + "/log/level"
+	url := "http://localhost:" + DefaultListenPort + "/log/level"
 	req, err := http.NewRequest(http.MethodPut, url, bytes.NewBuffer(payload))
 	req.Header.Set("Content-Type", "application/json")
 	suite.Require().NoError(err)
 
-	client := suite.server.Client()
+	client := http.Client{}
 	resp, err := client.Do(req)
 	suite.Require().NoError(err)
 	defer resp.Body.Close()
@@ -91,8 +88,8 @@ func (suite *HTTPServerTestSuite) TestDefaultLogHandler() {
 }
 
 func (suite *HTTPServerTestSuite) TestHealthzHandler() {
-	url := suite.server.URL + "/healthz"
-	client := suite.server.Client()
+	url := "http://localhost:" + DefaultListenPort + "/healthz"
+	client := http.Client{}
 
 	healthz.Register(&MockIndicator{"m1", commonpb.StateCode_Healthy})
 
@@ -119,6 +116,71 @@ func (suite *HTTPServerTestSuite) TestHealthzHandler() {
 	defer resp.Body.Close()
 	body, _ = io.ReadAll(resp.Body)
 	suite.Equal("{\"state\":\"component m2 state is Abnormal\",\"detail\":[{\"name\":\"m1\",\"code\":1},{\"name\":\"m2\",\"code\":2}]}", string(body))
+}
+
+func (suite *HTTPServerTestSuite) TestEventlogHandler() {
+	url := "http://localhost:" + DefaultListenPort + EventLogRouterPath
+	client := http.Client{}
+	req, _ := http.NewRequest(http.MethodGet, url, nil)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	suite.Nil(err)
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	suite.True(strings.HasPrefix(string(body), "{\"status\":200,\"port\":"))
+}
+
+func (suite *HTTPServerTestSuite) TestPprofHandler() {
+	client := http.Client{}
+	testCases := []struct {
+		enable     bool
+		path       string
+		statusCode int
+		resp       []byte
+	}{
+		{true, "/debug/pprof/<script>scripty<script>", http.StatusNotFound, []byte("Unknown profile\n")},
+		{true, "/debug/pprof/heap", http.StatusOK, nil},
+		{true, "/debug/pprof/heap?debug=1", http.StatusOK, nil},
+		{true, "/debug/pprof/cmdline", http.StatusOK, nil},
+		{true, "/debug/pprof/profile?seconds=1", http.StatusOK, nil},
+		{true, "/debug/pprof/symbol", http.StatusOK, nil},
+		{true, "/debug/pprof/trace", http.StatusOK, nil},
+		{true, "/debug/pprof/mutex", http.StatusOK, nil},
+		{true, "/debug/pprof/block?seconds=1", http.StatusOK, nil},
+		{true, "/debug/pprof/goroutine?seconds=1", http.StatusOK, nil},
+		{true, "/debug/pprof/", http.StatusOK, []byte("Types of profiles available:")},
+		{false, "/debug/pprof/<script>scripty<script>", http.StatusNotFound, []byte("404 page not found\n")},
+		{false, "/debug/pprof/heap", http.StatusNotFound, []byte("404 page not found\n")},
+		{false, "/debug/pprof/heap?debug=1", http.StatusNotFound, []byte("404 page not found\n")},
+		{false, "/debug/pprof/cmdline", http.StatusNotFound, []byte("404 page not found\n")},
+		{false, "/debug/pprof/profile?seconds=1", http.StatusNotFound, []byte("404 page not found\n")},
+		{false, "/debug/pprof/symbol", http.StatusNotFound, []byte("404 page not found\n")},
+		{false, "/debug/pprof/trace", http.StatusNotFound, []byte("404 page not found\n")},
+		{false, "/debug/pprof/mutex", http.StatusNotFound, []byte("404 page not found\n")},
+		{false, "/debug/pprof/block?seconds=1", http.StatusNotFound, []byte("404 page not found\n")},
+		{false, "/debug/pprof/goroutine?seconds=1", http.StatusNotFound, []byte("404 page not found\n")},
+		{false, "/debug/pprof/", http.StatusNotFound, []byte("404 page not found\n")},
+	}
+	for _, tc := range testCases {
+		if tc.enable != paramtable.Get().HTTPCfg.EnablePprof.GetAsBool() {
+			continue
+		}
+		req, _ := http.NewRequest(http.MethodGet, "http://localhost:"+DefaultListenPort+tc.path, nil)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := client.Do(req)
+		suite.Nil(err)
+		if err == nil {
+			defer resp.Body.Close()
+			suite.Equal(tc.statusCode, resp.StatusCode)
+			body, err := io.ReadAll(resp.Body)
+			suite.Nil(err)
+			if resp.StatusCode != http.StatusOK {
+				suite.True(bytes.Equal(tc.resp, body))
+			}
+		} else {
+			fmt.Println(err.Error())
+		}
+	}
 }
 
 func TestHTTPServerSuite(t *testing.T) {
