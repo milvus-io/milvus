@@ -6,7 +6,9 @@ import (
 	"strings"
 
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -60,7 +62,7 @@ func AuthenticationInterceptor(ctx context.Context) (context.Context, error) {
 
 			if len(authStrArr) < 1 {
 				log.Warn("key not found in header")
-				return nil, merr.WrapErrParameterInvalidMsg("missing authorization in header")
+				return nil, status.Error(codes.Unauthenticated, "missing authorization in header")
 			}
 
 			// token format: base64<username:password>
@@ -69,14 +71,14 @@ func AuthenticationInterceptor(ctx context.Context) (context.Context, error) {
 			rawToken, err := crypto.Base64Decode(token)
 			if err != nil {
 				log.Warn("fail to decode the token", zap.Error(err))
-				return nil, merr.WrapErrParameterInvalidMsg("invalid token format")
+				return nil, status.Error(codes.Unauthenticated, "invalid token format")
 			}
 
 			if !strings.Contains(rawToken, util.CredentialSeperator) {
 				user, err := VerifyAPIKey(rawToken)
 				if err != nil {
 					log.Warn("fail to verify apikey", zap.Error(err))
-					return nil, err
+					return nil, status.Error(codes.Unauthenticated, "auth check failure, please check api key is correct")
 				}
 				metrics.UserRPCCounter.WithLabelValues(user).Inc()
 				userToken := fmt.Sprintf("%s%s%s", user, util.CredentialSeperator, "___")
@@ -86,8 +88,9 @@ func AuthenticationInterceptor(ctx context.Context) (context.Context, error) {
 				// username+password authentication
 				username, password := parseMD(rawToken)
 				if !passwordVerify(ctx, username, password, globalMetaCache) {
-					msg := fmt.Sprintf("username: %s, password: %s", username, password)
-					return nil, merr.WrapErrParameterInvalid("vaild username and password", msg, "auth check failure, please check username and password are correct")
+					log.Warn("fail to verify password", zap.String("username", username))
+					// NOTE: don't use the merr, because it will cause the wrong retry behavior in the sdk
+					return nil, status.Error(codes.Unauthenticated, "auth check failure, please check username and password are correct")
 				}
 				metrics.UserRPCCounter.WithLabelValues(username).Inc()
 			}
