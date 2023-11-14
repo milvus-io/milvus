@@ -5,6 +5,8 @@ type httpConfig struct {
 	DebugMode            ParamItem `refreshable:"false"`
 	Port                 ParamItem `refreshable:"false"`
 	AcceptTypeAllowInt64 ParamItem `refreshable:"false"`
+	EnablePprof          ParamItem `refreshable:"false"`
+	RequestTimeoutMs     ParamItem `refreshable:"false"`
 }
 
 func (p *httpConfig) init(base *BaseTable) {
@@ -44,4 +46,13 @@ func (p *httpConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.AcceptTypeAllowInt64.Init(base.mgr)
+
+	p.EnablePprof = ParamItem{
+		Key:          "proxy.http.enablePprof",
+		DefaultValue: "true",
+		Version:      "2.3.3",
+		Doc:          "Whether to enable pprof middleware on the metrics port",
+		Export:       true,
+	}
+	p.EnablePprof.Init(base.mgr)
 }
