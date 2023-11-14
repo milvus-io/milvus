@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/clustering"
 	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -790,8 +791,28 @@ func saveSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest, res *rootcoo
 		log.Info("adding segment to the correct DataNode flow graph and saving binlog paths", logFields...)
 
 		err := retry.Do(context.Background(), func() error {
+			clusteringInfo, err := clustering.ClusteringInfoFromKV(req.GetImportTask().GetInfos())
+			if err != nil {
+				log.Warn("failed to parse clustering info from import request", zap.Error(err))
+				return fmt.Errorf(err.Error())
+			}
+			if clusteringInfo != nil && clusteringInfo.Id == 0 {
+				clusteringInfoId, err := node.rootCoord.AllocID(context.Background(), &rootcoordpb.AllocIDRequest{
+					Base: commonpbutil.NewMsgBase(
+						commonpbutil.WithMsgType(commonpb.MsgType_RequestID),
+						commonpbutil.WithMsgID(0),
+						commonpbutil.WithSourceID(node.session.ServerID),
+					),
+					Count: 1,
+				})
+				if err != nil {
+					log.Warn("failed to alloc id for cluster id", zap.Error(err))
+					return fmt.Errorf(err.Error())
+				}
+				clusteringInfo.Id = clusteringInfoId.ID
+			}
 			// Ask DataCoord to save binlog path and add segment to the corresponding DataNode flow graph.
-			err := node.broker.SaveImportSegment(context.Background(), &datapb.SaveImportSegmentRequest{
+			err = node.broker.SaveImportSegment(context.Background(), &datapb.SaveImportSegmentRequest{
 				Base: commonpbutil.NewMsgBase(
 					commonpbutil.WithTimeStamp(ts), // Pass current timestamp downstream.
 					commonpbutil.WithSourceID(paramtable.GetNodeID()),
@@ -822,7 +843,8 @@ func saveSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest, res *rootcoo
 							SegmentID: segmentID,
 						},
 					},
-					Importing: true,
+					Importing:      true,
+					ClusteringInfo: clusteringInfo,
 				},
 			})
 			// Only retrying when DataCoord is unhealthy or err != nil, otherwise return immediately.

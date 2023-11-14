@@ -20,6 +20,7 @@ package delegator
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -37,11 +38,13 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
+	"github.com/milvus-io/milvus/internal/util/clustering"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/distance"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -69,6 +72,7 @@ type ShardDelegator interface {
 	ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest, force bool) error
 	SyncTargetVersion(newVersion int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64)
 	GetTargetVersion() int64
+	OptimizeSearchBasedOnClustering(req *querypb.SearchRequest, sealeds []SnapshotItem) (*querypb.SearchRequest, []SnapshotItem)
 
 	// control
 	Serviceable() bool
@@ -175,6 +179,150 @@ func (sd *shardDelegator) modifyQueryRequest(req *querypb.QueryRequest, scope qu
 	return nodeReq
 }
 
+// OptimizeSearchBasedOnClustering optimize SearchRequest based on segments' clustering info.
+// Basic rule: calculate distance between search vector and clustering centroid of each segment,
+// only search on top x% nearest segment
+// Todo support call external hook
+func (sd *shardDelegator) OptimizeSearchBasedOnClustering(req *querypb.SearchRequest, sealeds []SnapshotItem) (*querypb.SearchRequest, []SnapshotItem) {
+	if !paramtable.Get().QueryNodeCfg.EnableSearchBasedOnClustering.GetAsBool() ||
+		!req.GetReq().GetClusteringOptions().GetEnable() {
+		log.Debug("skip optimize based on clustering info")
+		return req, sealeds
+	}
+
+	// basic optimize rule
+	topK := req.GetReq().GetTopk()
+	filterRatio := req.GetReq().GetClusteringOptions().GetFilterRatio()
+	dim := req.GetReq().GetDim()
+	metricType := req.GetReq().GetMetricType()
+	if metricType != distance.L2 && metricType != distance.IP {
+		log.Warn("Not supported metric type to do clustering optimize search", zap.String("metricType", metricType))
+		return req, sealeds
+	}
+	var phg commonpb.PlaceholderGroup
+	err := proto.Unmarshal(req.GetReq().GetPlaceholderGroup(), &phg)
+	if err != nil {
+		log.Warn("fail to parse SearchRequest PlaceholderGroup", zap.Error(err))
+		return req, sealeds
+	}
+	log.Debug("optimizeSearchBasedOnClustering",
+		zap.String("metricType", metricType),
+		zap.Int32("dim", dim),
+		zap.Int("length", len(phg.GetPlaceholders())),
+		zap.Any("phg", phg))
+
+	vectorsBytes := phg.GetPlaceholders()[0].GetValues()
+	searchVectors := make([][]float32, len(vectorsBytes))
+	for i, vectorBytes := range vectorsBytes {
+		searchVectors[i] = clustering.DeserializeFloatVector(vectorBytes)
+	}
+	segments := make([]SegmentEntry, 0)
+	for _, sealed := range sealeds {
+		segments = append(segments, sealed.Segments...)
+	}
+
+	type segmentDistanceStruct struct {
+		segment  SegmentEntry
+		distance float32
+	}
+	vectorSegmentDistances := make([][]segmentDistanceStruct, 0)
+	for _, searchVector := range searchVectors {
+		vectorSegmentDistance := make([]segmentDistanceStruct, 0)
+		for _, segment := range segments {
+			if segment.ClusteringInfos != nil {
+				for _, clusteringInfo := range segment.ClusteringInfos {
+					distance, err := distance.CalcFloatDistance(int64(dim), searchVector, clusteringInfo.Centroid, metricType)
+					if err != nil {
+						log.Error("Fail to calculate distance between clustering center and search vector", zap.Error(err))
+					}
+					log.Debug("distance between searchVector and cluster center",
+						zap.Int64("segmentID", segment.SegmentID),
+						zap.Float32s("distance", distance),
+						zap.Float32s("searchVector", searchVector),
+						zap.Float32s("clusterCentroid", clusteringInfo.Centroid))
+					if len(distance) > 0 {
+						vectorSegmentDistance = append(vectorSegmentDistance, segmentDistanceStruct{segment: segment, distance: distance[0]})
+					} else {
+						// if no legal distance is calculated, regard this segment as a normal one.
+						vectorSegmentDistance = append(vectorSegmentDistance, segmentDistanceStruct{segment: segment, distance: float32(0.0)})
+					}
+				}
+			} else {
+				vectorSegmentDistance = append(vectorSegmentDistance, segmentDistanceStruct{segment: segment, distance: float32(0.0)})
+			}
+		}
+		vectorSegmentDistances = append(vectorSegmentDistances, vectorSegmentDistance)
+	}
+	log.Debug("vector segment distances", zap.Any("vectorSegmentDistances", vectorSegmentDistances))
+
+	optimizedSegs := make(map[UniqueID]SegmentEntry, 0)
+	for _, vectorSegmentDistance := range vectorSegmentDistances {
+		// sort by distance
+		switch metricType {
+		case distance.L2:
+			sort.SliceStable(vectorSegmentDistance, func(i, j int) bool {
+				return vectorSegmentDistance[i].distance < vectorSegmentDistance[j].distance
+			})
+		case distance.IP:
+			// for IP or cosine metric, larger result means more similar, we should sort reverse
+			sort.SliceStable(vectorSegmentDistance, func(i, j int) bool {
+				return vectorSegmentDistance[i].distance > vectorSegmentDistance[j].distance
+			})
+		}
+
+		segmentNum := len(vectorSegmentDistance)
+		zeroSegmentNum := 0
+		var optimizedRowNums int64
+		for i, segmentDistance := range vectorSegmentDistance {
+			if segmentDistance.distance == 0.0 {
+				zeroSegmentNum++
+				if _, ok := optimizedSegs[segmentDistance.segment.SegmentID]; !ok {
+					optimizedSegs[segmentDistance.segment.SegmentID] = segmentDistance.segment
+					optimizedRowNums += segmentDistance.segment.NumOfRows
+				}
+			} else if i-zeroSegmentNum < int(float32(segmentNum-zeroSegmentNum)*filterRatio) {
+				if _, ok := optimizedSegs[segmentDistance.segment.SegmentID]; !ok {
+					optimizedSegs[segmentDistance.segment.SegmentID] = segmentDistance.segment
+					optimizedRowNums += segmentDistance.segment.NumOfRows
+				}
+			} else if topK > optimizedRowNums {
+				// if optimizedSegs row num is smaller than topK, keep append segments into optimizedSegs
+				if _, ok := optimizedSegs[segmentDistance.segment.SegmentID]; !ok {
+					optimizedSegs[segmentDistance.segment.SegmentID] = segmentDistance.segment
+					optimizedRowNums += segmentDistance.segment.NumOfRows
+				}
+			}
+		}
+	}
+	log.Debug("optimized segments", zap.Int("before", len(segments)), zap.Int("after", len(optimizedSegs)), zap.Any("segments", optimizedSegs))
+
+	// merge to SnapshotItem
+	nodeSegments := make(map[int64]SnapshotItem, 0)
+	for _, segment := range optimizedSegs {
+		if _, ok := nodeSegments[segment.NodeID]; ok {
+			snapshot := nodeSegments[segment.NodeID]
+			segments := append(snapshot.Segments, segment)
+			nodeSegments[segment.NodeID] = SnapshotItem{
+				NodeID:   segment.NodeID,
+				Segments: segments,
+			}
+		} else {
+			nodeSegments[segment.NodeID] = SnapshotItem{
+				NodeID:   segment.NodeID,
+				Segments: []SegmentEntry{segment},
+			}
+		}
+	}
+	nodeSegmentsArr := make([]SnapshotItem, 0)
+	for _, snapshot := range nodeSegments {
+		nodeSegmentsArr = append(nodeSegmentsArr, snapshot)
+	}
+
+	log.Debug("optimizeSearchBasedOnClustering done",
+		zap.Any("req", req), zap.Any("sealed", sealeds))
+	return req, nodeSegmentsArr
+}
+
 // Search preforms search operation on shard.
 func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest) ([]*internalpb.SearchResults, error) {
 	log := sd.getLogger(ctx)
@@ -221,6 +369,8 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		growing = []SegmentEntry{}
 	}
 
+	// filter segments based on cluster info
+	req, sealed = sd.OptimizeSearchBasedOnClustering(req, sealed)
 	sealedNum := lo.SumBy(sealed, func(item SnapshotItem) int { return len(item.Segments) })
 	log.Debug("search segments...",
 		zap.Int("sealedNum", sealedNum),

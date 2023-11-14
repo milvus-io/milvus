@@ -1624,6 +1624,8 @@ type queryNodeConfig struct {
 	CGOPoolSizeRatio ParamItem `refreshable:"false"`
 
 	EnableWorkerSQCostMetrics ParamItem `refreshable:"true"`
+
+	EnableSearchBasedOnClustering ParamItem `refreshable:"true"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -2002,6 +2004,14 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Doc:          "whether use worker's cost to measure delegator's workload",
 	}
 	p.EnableWorkerSQCostMetrics.Init(base.mgr)
+
+	p.EnableSearchBasedOnClustering = ParamItem{
+		Key:          "queryNode.enableSearchBasedOnClustering",
+		Version:      "2.4.0",
+		DefaultValue: "true",
+		Doc:          "whether enable use clustering info to optimize search",
+	}
+	p.EnableSearchBasedOnClustering.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

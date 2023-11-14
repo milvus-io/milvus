@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package bulkinsert
+package clustering
 
 import (
 	"context"
@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/clustering"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -36,27 +37,24 @@ import (
 	"github.com/milvus-io/milvus/tests/integration/util"
 )
 
-type BulkInsertSuite struct {
+type SearchClusteringSuite struct {
 	integration.MiniClusterSuite
 }
 
-// test bulk insert E2E
+// test bulk insert with clustering info
 // 1, create collection with a vector column and a varchar column
 // 2, generate numpy files
 // 3, import
-// 4, create index
-// 5, load
-// 6, search
-func (s *BulkInsertSuite) TestBulkInsert() {
+// 4, check segment clustering info
+func (s *BulkInsertClusteringSuite) TestSearchClustering() {
 	c := s.Cluster
 	ctx, cancel := context.WithCancel(c.GetContext())
 	defer cancel()
 
-	prefix := "TestBulkInsert"
+	prefix := "SearchClusteringSuite"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
-
-	dim := util.DIM128
+	dim := util.DIM8
 
 	pkFieldSchema := &schemapb.FieldSchema{Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true}
 	varcharFieldSchema := &schemapb.FieldSchema{Name: "image_path", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "65535"}}}
@@ -99,22 +97,35 @@ func (s *BulkInsertSuite) TestBulkInsert() {
 		c.ChunkManager.RootPath() + "/" + "image_path.npy",
 	}
 
-	health1, err := c.DataCoord.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
+	allocTimestampResp, err := c.Proxy.AllocTimestamp(ctx, &milvuspb.AllocTimestampRequest{})
 	s.NoError(err)
-	log.Info("dataCoord health", zap.Any("health1", health1))
+	operationID := allocTimestampResp.Timestamp
 
-	err = util.BulkInsertSync(ctx, c, collectionName, bulkInsertFiles, nil)
+	err = util.BulkInsertSync(ctx, c, collectionName, bulkInsertFiles, []*commonpb.KeyValuePair{
+		{Key: clustering.ClusteringCentroid, Value: "[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]"},
+		{Key: clustering.ClusteringSize, Value: "200"},
+		{Key: clustering.ClusteringOperationid, Value: fmt.Sprint(operationID)},
+	})
 	s.NoError(err)
 
-	health2, err := c.DataCoord.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
+	err = util.BulkInsertSync(ctx, c, collectionName, bulkInsertFiles, []*commonpb.KeyValuePair{
+		{Key: clustering.ClusteringCentroid, Value: "[1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0]"},
+		{Key: clustering.ClusteringSize, Value: "200"},
+		{Key: clustering.ClusteringOperationid, Value: fmt.Sprint(operationID)},
+	})
 	s.NoError(err)
-	log.Info("dataCoord health", zap.Any("health2", health2))
 
 	segments, err := c.MetaWatcher.ShowSegments()
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
 		log.Info("ShowSegments result", zap.String("segment", segment.String()))
+		// check clustering info is inserted
+		s.True(len(segment.GetClusteringInfos()) > 0)
+		s.True(segment.GetClusteringInfos()[0].GetOperationID() == int64(operationID))
+		s.True(segment.GetClusteringInfos()[0].GetSize() == int64(200))
+		s.True(segment.GetClusteringInfos()[0].GetId() != 0)
+		s.True(segment.GetClusteringInfos()[0].GetCentroid() != nil)
 	}
 
 	// create index
@@ -146,13 +157,15 @@ func (s *BulkInsertSuite) TestBulkInsert() {
 
 	// search
 	expr := "" // fmt.Sprintf("%s > 0", int64Field)
-	nq := 10
+	nq := 1
 	topk := 10
 	roundDecimal := -1
 
 	params := integration.GetSearchParams(integration.IndexHNSW, metric.L2)
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
 		"embeddings", schemapb.DataType_FloatVector, nil, metric.L2, params, nq, dim, topk, roundDecimal)
+	searchReq.SearchParams = append(searchReq.SearchParams, &commonpb.KeyValuePair{Key: clustering.SearchEnableClustering, Value: "true"})
+	searchReq.SearchParams = append(searchReq.SearchParams, &commonpb.KeyValuePair{Key: clustering.SearchClusteringFilterRatio, Value: "0.5"})
 
 	searchResult, err := c.Proxy.Search(ctx, searchReq)
 
@@ -164,12 +177,12 @@ func (s *BulkInsertSuite) TestBulkInsert() {
 
 	log.Info("======================")
 	log.Info("======================")
-	log.Info("TestBulkInsert succeed")
+	log.Info("SearchClusteringSuite succeed")
 	log.Info("======================")
 	log.Info("======================")
 }
 
-func TestBulkInsert(t *testing.T) {
+func TestSearchClustering(t *testing.T) {
 	t.Skip("Skip integration test, need to refactor integration test framework")
-	suite.Run(t, new(BulkInsertSuite))
+	suite.Run(t, new(SearchClusteringSuite))
 }

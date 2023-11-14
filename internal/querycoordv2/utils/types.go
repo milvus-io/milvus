@@ -104,17 +104,18 @@ func PackSegmentLoadInfo(resp *datapb.GetSegmentInfoResponse, indexes []*querypb
 			zap.Duration("tsLag", tsLag))
 	}
 	loadInfo := &querypb.SegmentLoadInfo{
-		SegmentID:     segment.ID,
-		PartitionID:   segment.PartitionID,
-		CollectionID:  segment.CollectionID,
-		BinlogPaths:   segment.Binlogs,
-		NumOfRows:     segment.NumOfRows,
-		Statslogs:     segment.Statslogs,
-		Deltalogs:     segment.Deltalogs,
-		InsertChannel: segment.InsertChannel,
-		IndexInfos:    indexes,
-		StartPosition: segment.GetStartPosition(),
-		DeltaPosition: deltaPosition,
+		SegmentID:       segment.ID,
+		PartitionID:     segment.PartitionID,
+		CollectionID:    segment.CollectionID,
+		BinlogPaths:     segment.Binlogs,
+		NumOfRows:       segment.NumOfRows,
+		Statslogs:       segment.Statslogs,
+		Deltalogs:       segment.Deltalogs,
+		InsertChannel:   segment.InsertChannel,
+		IndexInfos:      indexes,
+		StartPosition:   segment.GetStartPosition(),
+		DeltaPosition:   deltaPosition,
+		ClusteringInfos: segment.GetClusteringInfos(),
 	}
 	loadInfo.SegmentSize = calculateSegmentSize(loadInfo)
 	return loadInfo

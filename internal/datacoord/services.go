@@ -489,6 +489,8 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	// save checkpoints.
 	operators = append(operators, UpdateCheckPointOperator(segmentID, req.GetImporting(), req.GetCheckPoints()))
 
+	// clustering info
+
 	// run all operator and update new segment info
 	err := s.meta.UpdateSegmentsInfo(operators...)
 	if err != nil {
