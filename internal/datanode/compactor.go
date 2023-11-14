@@ -27,6 +27,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -56,7 +57,8 @@ type iterator = storage.Iterator
 
 type compactor interface {
 	complete()
-	compact() (*datapb.CompactionResult, error)
+	// compact() (*datapb.CompactionResult, error)
+	compact() (*datapb.CompactionPlanResult, error)
 	injectDone(success bool)
 	stop()
 	getPlanID() UniqueID
@@ -477,7 +479,7 @@ func (t *compactionTask) merge(
 	return insertPaths, statPaths, numRows, nil
 }
 
-func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
+func (t *compactionTask) compact() (*datapb.CompactionPlanResult, error) {
 	log := log.With(zap.Int64("planID", t.plan.GetPlanID()))
 	compactStart := time.Now()
 	if ok := funcutil.CheckCtxValid(t.ctx); !ok {
@@ -689,8 +691,7 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 		return nil, err
 	}
 
-	pack := &datapb.CompactionResult{
-		PlanID:              t.plan.GetPlanID(),
+	pack := &datapb.CompactionSegment{
 		SegmentID:           targetSegID,
 		InsertLogs:          inPaths,
 		Field2StatslogPaths: statsPaths,
@@ -712,7 +713,13 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 	metrics.DataNodeCompactionLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(t.tr.ElapseSpan().Milliseconds()))
 	metrics.DataNodeCompactionLatencyInQueue.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(durInQueue.Milliseconds()))
 
-	return pack, nil
+	planResult := &datapb.CompactionPlanResult{
+		State:    commonpb.CompactionState_Completed,
+		PlanID:   t.getPlanID(),
+		Segments: []*datapb.CompactionSegment{pack},
+	}
+
+	return planResult, nil
 }
 
 func (t *compactionTask) injectDone(success bool) {

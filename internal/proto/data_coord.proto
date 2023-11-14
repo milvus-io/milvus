@@ -509,8 +509,8 @@ message CompactionPlan {
   int64 total_rows = 9;
 }
 
-message CompactionResult {
-  int64 planID = 1;
+message CompactionSegment {
+  int64 planID = 1; // deprecated after 2.3.4
   int64 segmentID = 2;
   int64 num_of_rows = 3;
   repeated FieldBinlog insert_logs = 4;
@@ -519,15 +519,16 @@ message CompactionResult {
   string channel = 7;
 }
 
-message CompactionStateResult {
+message CompactionPlanResult {
   int64 planID = 1;
   common.CompactionState state = 2;
-  CompactionResult result = 3;
+  repeated CompactionSegment segments = 3;
+  string channel = 4;
 }
 
 message CompactionStateResponse {
   common.Status status = 1;
-  repeated CompactionStateResult results = 2;
+  repeated CompactionPlanResult results = 2;
 }
 
 // Deprecated

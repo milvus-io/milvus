@@ -126,7 +126,7 @@ func (m *GrpcDataCoordClient) GetMetrics(ctx context.Context, in *milvuspb.GetMe
 	return &milvuspb.GetMetricsResponse{}, m.Err
 }
 
-func (m *GrpcDataCoordClient) CompleteCompaction(ctx context.Context, req *datapb.CompactionResult, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (m *GrpcDataCoordClient) CompleteCompaction(ctx context.Context, req *datapb.CompactionPlanResult, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }
 

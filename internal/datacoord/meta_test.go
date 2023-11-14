@@ -716,12 +716,15 @@ func TestMeta_PrepareCompleteCompactionMutation(t *testing.T) {
 		StartTime: 15,
 	}
 
-	inCompactionResult := &datapb.CompactionResult{
+	inSegment := &datapb.CompactionSegment{
 		SegmentID:           3,
 		InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log5")},
 		Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog5")},
 		Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog5")},
 		NumOfRows:           2,
+	}
+	inCompactionResult := &datapb.CompactionPlanResult{
+		Segments: []*datapb.CompactionSegment{inSegment},
 	}
 	beforeCompact, afterCompact, newSegment, metricMutation, err := m.PrepareCompleteCompactionMutation(plan, inCompactionResult)
 	assert.NoError(t, err)
@@ -744,15 +747,15 @@ func TestMeta_PrepareCompleteCompactionMutation(t *testing.T) {
 	assert.NotZero(t, afterCompact[0].GetDroppedAt())
 	assert.NotZero(t, afterCompact[1].GetDroppedAt())
 
-	assert.Equal(t, inCompactionResult.SegmentID, newSegment.GetID())
+	assert.Equal(t, inSegment.SegmentID, newSegment.GetID())
 	assert.Equal(t, UniqueID(100), newSegment.GetCollectionID())
 	assert.Equal(t, UniqueID(10), newSegment.GetPartitionID())
-	assert.Equal(t, inCompactionResult.NumOfRows, newSegment.GetNumOfRows())
+	assert.Equal(t, inSegment.NumOfRows, newSegment.GetNumOfRows())
 	assert.Equal(t, commonpb.SegmentState_Flushing, newSegment.GetState())
 
-	assert.EqualValues(t, inCompactionResult.GetInsertLogs(), newSegment.GetBinlogs())
-	assert.EqualValues(t, inCompactionResult.GetField2StatslogPaths(), newSegment.GetStatslogs())
-	assert.EqualValues(t, inCompactionResult.GetDeltalogs(), newSegment.GetDeltalogs())
+	assert.EqualValues(t, inSegment.GetInsertLogs(), newSegment.GetBinlogs())
+	assert.EqualValues(t, inSegment.GetField2StatslogPaths(), newSegment.GetStatslogs())
+	assert.EqualValues(t, inSegment.GetDeltalogs(), newSegment.GetDeltalogs())
 	assert.NotZero(t, newSegment.lastFlushTime)
 	assert.Equal(t, uint64(15), newSegment.GetLastExpireTime())
 }

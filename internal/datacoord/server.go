@@ -446,7 +446,7 @@ func (s *Server) SetIndexNodeCreator(f func(context.Context, string, int64) (typ
 }
 
 func (s *Server) createCompactionHandler() {
-	s.compactionHandler = newCompactionPlanHandler(s.sessionManager, s.channelManager, s.meta, s.allocator, s.flushCh)
+	s.compactionHandler = newCompactionPlanHandler(s.sessionManager, s.channelManager, s.meta, s.allocator)
 }
 
 func (s *Server) stopCompactionHandler() {
