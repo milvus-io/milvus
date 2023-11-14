@@ -19,6 +19,7 @@ package storage
 import (
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -30,10 +31,19 @@ type PkStatistics struct {
 	PkFilter *bloom.BloomFilter //  bloom filter of pk inside a segment
 	MinPK    PrimaryKey         //	minimal pk value, shortcut for checking whether a pk is inside this segment
 	MaxPK    PrimaryKey         //  maximal pk value, same above
+	mu       sync.RWMutex
 }
 
-// update set pk min/max value if input value is beyond former range.
+// update set pk min/max value if input value is beyond former range. (lock protect)
 func (st *PkStatistics) UpdateMinMax(pk PrimaryKey) error {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+
+	return st.updateMinMaxNoLock(pk)
+}
+
+// update set pk min/max value if input value is beyond former range. (internal use, no lock protect)
+func (st *PkStatistics) updateMinMaxNoLock(pk PrimaryKey) error {
 	if st == nil {
 		return errors.New("nil pk statistics")
 	}
@@ -53,12 +63,15 @@ func (st *PkStatistics) UpdateMinMax(pk PrimaryKey) error {
 }
 
 func (st *PkStatistics) UpdatePKRange(ids FieldData) error {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+
 	switch pks := ids.(type) {
 	case *Int64FieldData:
 		buf := make([]byte, 8)
 		for _, pk := range pks.Data {
 			id := NewInt64PrimaryKey(pk)
-			err := st.UpdateMinMax(id)
+			err := st.updateMinMaxNoLock(id)
 			if err != nil {
 				return err
 			}
@@ -68,7 +81,7 @@ func (st *PkStatistics) UpdatePKRange(ids FieldData) error {
 	case *StringFieldData:
 		for _, pk := range pks.Data {
 			id := NewVarCharPrimaryKey(pk)
-			err := st.UpdateMinMax(id)
+			err := st.updateMinMaxNoLock(id)
 			if err != nil {
 				return err
 			}
@@ -81,6 +94,9 @@ func (st *PkStatistics) UpdatePKRange(ids FieldData) error {
 }
 
 func (st *PkStatistics) PkExist(pk PrimaryKey) bool {
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+
 	// empty pkStatics
 	if st.MinPK == nil || st.MaxPK == nil || st.PkFilter == nil {
 		return false
