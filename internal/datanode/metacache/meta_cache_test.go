@@ -23,13 +23,17 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/common"
 )
 
 type MetaCacheSuite struct {
 	suite.Suite
 
 	collectionID    int64
+	collSchema      *schemapb.CollectionSchema
 	vchannel        string
 	invaliedSeg     int64
 	partitionIDs    []int64
@@ -52,6 +56,15 @@ func (s *MetaCacheSuite) SetupSuite() {
 	s.bfsFactory = func(*datapb.SegmentInfo) *BloomFilterSet {
 		return NewBloomFilterSet()
 	}
+	s.collSchema = &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, Name: "pk"},
+			{FieldID: 101, DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+			}},
+		},
+	}
 }
 
 func (s *MetaCacheSuite) SetupTest() {
@@ -71,12 +84,20 @@ func (s *MetaCacheSuite) SetupTest() {
 		}
 	})
 
-	s.cache = NewMetaCache(&datapb.VchannelInfo{
-		CollectionID:      s.collectionID,
-		ChannelName:       s.vchannel,
-		FlushedSegments:   flushSegmentInfos,
-		UnflushedSegments: growingSegmentInfos,
+	s.cache = NewMetaCache(&datapb.ChannelWatchInfo{
+		Schema: s.collSchema,
+		Vchan: &datapb.VchannelInfo{
+			CollectionID:      s.collectionID,
+			ChannelName:       s.vchannel,
+			FlushedSegments:   flushSegmentInfos,
+			UnflushedSegments: growingSegmentInfos,
+		},
 	}, s.bfsFactory)
+}
+
+func (s *MetaCacheSuite) TestMetaInfo() {
+	s.Equal(s.collectionID, s.cache.Collection())
+	s.Equal(s.collSchema, s.cache.Schema())
 }
 
 func (s *MetaCacheSuite) TestNewSegment() {
@@ -97,7 +118,7 @@ func (s *MetaCacheSuite) TestNewSegment() {
 func (s *MetaCacheSuite) TestCompactSegments() {
 	for i, seg := range s.newSegments {
 		// compaction from flushed[i], unflushed[i] and invalidSeg to new[i]
-		s.cache.CompactSegments(seg, s.partitionIDs[i], s.flushedSegments[i], s.growingSegments[i], s.invaliedSeg)
+		s.cache.CompactSegments(seg, s.partitionIDs[i], 100, NewBloomFilterSet(), s.flushedSegments[i], s.growingSegments[i], s.invaliedSeg)
 	}
 
 	for i, partitionID := range s.partitionIDs {
@@ -109,12 +130,77 @@ func (s *MetaCacheSuite) TestCompactSegments() {
 	}
 }
 
+func (s *MetaCacheSuite) TestAddSegment() {
+	testSegs := []int64{100, 101, 102}
+	for _, segID := range testSegs {
+		info := &datapb.SegmentInfo{
+			ID:          segID,
+			PartitionID: 10,
+		}
+		s.cache.AddSegment(info, func(info *datapb.SegmentInfo) *BloomFilterSet {
+			return NewBloomFilterSet()
+		}, UpdateState(commonpb.SegmentState_Flushed))
+	}
+
+	segments := s.cache.GetSegmentsBy(WithSegmentIDs(testSegs...))
+	s.Require().Equal(3, len(segments))
+	for _, seg := range segments {
+		s.Equal(commonpb.SegmentState_Flushed, seg.State())
+		s.EqualValues(10, seg.partitionID)
+
+		seg, ok := s.cache.GetSegmentByID(seg.segmentID, WithSegmentState(commonpb.SegmentState_Flushed))
+		s.NotNil(seg)
+		s.True(ok)
+		seg, ok = s.cache.GetSegmentByID(seg.segmentID, WithSegmentState(commonpb.SegmentState_Growing))
+		s.Nil(seg)
+		s.False(ok)
+	}
+
+	gotSegIDs := lo.Map(segments, func(info *SegmentInfo, _ int) int64 {
+		return info.segmentID
+	})
+
+	s.ElementsMatch(testSegs, gotSegIDs)
+}
+
 func (s *MetaCacheSuite) TestUpdateSegments() {
 	s.cache.UpdateSegments(UpdateState(commonpb.SegmentState_Flushed), WithSegmentIDs(5))
 	segments := s.cache.GetSegmentsBy(WithSegmentIDs(5))
 	s.Require().Equal(1, len(segments))
 	segment := segments[0]
 	s.Equal(commonpb.SegmentState_Flushed, segment.State())
+}
+
+func (s *MetaCacheSuite) TestPredictSegments() {
+	pk := storage.NewInt64PrimaryKey(100)
+	predict, ok := s.cache.PredictSegments(pk)
+	s.False(ok)
+	s.Empty(predict)
+
+	pkFieldData := &storage.Int64FieldData{
+		Data: []int64{1, 2, 3, 4, 5, 6, 7},
+	}
+	info, got := s.cache.GetSegmentByID(1)
+	s.Require().True(got)
+	s.Require().NotNil(info)
+	err := info.GetBloomFilterSet().UpdatePKRange(pkFieldData)
+	s.Require().NoError(err)
+
+	predict, ok = s.cache.PredictSegments(pk, func(s *SegmentInfo) bool {
+		return s.segmentID == 1
+	})
+	s.False(ok)
+	s.Empty(predict)
+
+	predict, ok = s.cache.PredictSegments(
+		storage.NewInt64PrimaryKey(5),
+		func(s *SegmentInfo) bool {
+			return s.segmentID == 1
+		})
+	s.True(ok)
+	s.NotEmpty(predict)
+	s.Equal(1, len(predict))
+	s.EqualValues(1, predict[0])
 }
 
 func TestMetaCacheSuite(t *testing.T) {
