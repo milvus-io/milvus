@@ -121,6 +121,23 @@ func (suite *CatalogTestSuite) TestPartition() {
 	suite.Len(partitions, 1)
 }
 
+func (suite *CatalogTestSuite) TestReleaseManyPartitions() {
+	partitionIds := make([]int64, 0)
+	for i := 1; i <= 150; i++ {
+		suite.catalog.SavePartition(&querypb.PartitionLoadInfo{
+			CollectionID: 1,
+			PartitionID:  int64(i),
+		})
+		partitionIds = append(partitionIds, int64(i))
+	}
+
+	err := suite.catalog.ReleasePartition(1, partitionIds...)
+	suite.NoError(err)
+	partitions, err := suite.catalog.GetPartitions()
+	suite.NoError(err)
+	suite.Len(partitions, 0)
+}
+
 func (suite *CatalogTestSuite) TestReplica() {
 	suite.catalog.SaveReplica(&querypb.Replica{
 		CollectionID: 1,
