@@ -47,6 +47,9 @@ jobs:
     env:
       UBUNTU: ${{ matrix.ubuntu }}
     steps:
+      - name: Setup mold
+        uses: rui314/setup-mold@v1
+
       - name: Checkout
         uses: actions/checkout@v2
         with:
