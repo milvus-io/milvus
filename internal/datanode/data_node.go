@@ -89,7 +89,7 @@ type DataNode struct {
 	eventManagerMap  *typeutil.ConcurrentMap[string, *channelEventManager]
 
 	syncMgr            syncmgr.SyncManager
-	writeBufferManager writebuffer.Manager
+	writeBufferManager writebuffer.BufferManager
 
 	clearSignal        chan string // vchannel name
 	segmentCache       *Cache

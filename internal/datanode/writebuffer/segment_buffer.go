@@ -44,7 +44,7 @@ func (buf *segmentBuffer) MinTimestamp() typeutil.Timestamp {
 	return deltaTs
 }
 
-func (buf *segmentBuffer) MinCheckpoint() *msgpb.MsgPosition {
+func (buf *segmentBuffer) EarliestPosition() *msgpb.MsgPosition {
 	return getEarliestCheckpoint(buf.insertBuffer.startPos, buf.deltaBuffer.startPos)
 }
 

@@ -21,7 +21,7 @@ type writeNode struct {
 	BaseNode
 
 	channelName string
-	wbManager   writebuffer.Manager
+	wbManager   writebuffer.BufferManager
 	updater     statsUpdater
 	metacache   metacache.MetaCache
 }
@@ -110,7 +110,7 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 
 func newWriteNode(
 	ctx context.Context,
-	writeBufferManager writebuffer.Manager,
+	writeBufferManager writebuffer.BufferManager,
 	updater statsUpdater,
 	config *nodeConfig,
 ) *writeNode {

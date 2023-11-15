@@ -326,7 +326,7 @@ type DataSyncServiceSuite struct {
 	chunkManager *mocks.ChunkManager
 	broker       *broker.MockBroker
 	allocator    *allocator.MockAllocator
-	wbManager    *writebuffer.MockManager
+	wbManager    *writebuffer.MockBufferManager
 
 	factory *dependency.MockFactory
 	ms      *msgstream.MockMsgStream
@@ -344,7 +344,7 @@ func (s *DataSyncServiceSuite) SetupTest() {
 	s.chunkManager = mocks.NewChunkManager(s.T())
 	s.broker = broker.NewMockBroker(s.T())
 	s.allocator = allocator.NewMockAllocator(s.T())
-	s.wbManager = writebuffer.NewMockManager(s.T())
+	s.wbManager = writebuffer.NewMockBufferManager(s.T())
 
 	s.broker.EXPECT().UpdateSegmentStatistics(mock.Anything, mock.Anything).Return(nil).Maybe()
 

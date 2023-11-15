@@ -45,9 +45,8 @@ import (
 
 // dataSyncService controls a flowgraph for a specific collection
 type dataSyncService struct {
-	ctx      context.Context
-	cancelFn context.CancelFunc
-	// channel      Channel // channel stores meta of channel
+	ctx          context.Context
+	cancelFn     context.CancelFunc
 	metacache    metacache.MetaCache
 	opID         int64
 	collectionID UniqueID // collection id of vchan for which this data sync service serves
@@ -74,9 +73,6 @@ type dataSyncService struct {
 	dispClient   msgdispatcher.Client
 	chunkManager storage.ChunkManager
 
-	// test only
-	// flushListener chan *segmentFlushPack // chan to listen flush event
-
 	stopOnce sync.Once
 }
 
@@ -84,10 +80,9 @@ type nodeConfig struct {
 	msFactory    msgstream.Factory // msgStream factory
 	collectionID UniqueID
 	vChannelName string
-	// channel Channel
-	metacache metacache.MetaCache
-	allocator allocator.Allocator
-	serverID  UniqueID
+	metacache    metacache.MetaCache
+	allocator    allocator.Allocator
+	serverID     UniqueID
 }
 
 // start the flow graph in dataSyncService

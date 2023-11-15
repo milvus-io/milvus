@@ -145,6 +145,49 @@ func (_c *MockWriteBuffer_FlushSegments_Call) RunAndReturn(run func(context.Cont
 	return _c
 }
 
+// GetCheckpoint provides a mock function with given fields:
+func (_m *MockWriteBuffer) GetCheckpoint() *msgpb.MsgPosition {
+	ret := _m.Called()
+
+	var r0 *msgpb.MsgPosition
+	if rf, ok := ret.Get(0).(func() *msgpb.MsgPosition); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*msgpb.MsgPosition)
+		}
+	}
+
+	return r0
+}
+
+// MockWriteBuffer_GetCheckpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCheckpoint'
+type MockWriteBuffer_GetCheckpoint_Call struct {
+	*mock.Call
+}
+
+// GetCheckpoint is a helper method to define mock.On call
+func (_e *MockWriteBuffer_Expecter) GetCheckpoint() *MockWriteBuffer_GetCheckpoint_Call {
+	return &MockWriteBuffer_GetCheckpoint_Call{Call: _e.mock.On("GetCheckpoint")}
+}
+
+func (_c *MockWriteBuffer_GetCheckpoint_Call) Run(run func()) *MockWriteBuffer_GetCheckpoint_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockWriteBuffer_GetCheckpoint_Call) Return(_a0 *msgpb.MsgPosition) *MockWriteBuffer_GetCheckpoint_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockWriteBuffer_GetCheckpoint_Call) RunAndReturn(run func() *msgpb.MsgPosition) *MockWriteBuffer_GetCheckpoint_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetFlushTimestamp provides a mock function with given fields:
 func (_m *MockWriteBuffer) GetFlushTimestamp() uint64 {
 	ret := _m.Called()
@@ -224,49 +267,6 @@ func (_c *MockWriteBuffer_HasSegment_Call) Return(_a0 bool) *MockWriteBuffer_Has
 }
 
 func (_c *MockWriteBuffer_HasSegment_Call) RunAndReturn(run func(int64) bool) *MockWriteBuffer_HasSegment_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// MinCheckpoint provides a mock function with given fields:
-func (_m *MockWriteBuffer) MinCheckpoint() *msgpb.MsgPosition {
-	ret := _m.Called()
-
-	var r0 *msgpb.MsgPosition
-	if rf, ok := ret.Get(0).(func() *msgpb.MsgPosition); ok {
-		r0 = rf()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*msgpb.MsgPosition)
-		}
-	}
-
-	return r0
-}
-
-// MockWriteBuffer_MinCheckpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MinCheckpoint'
-type MockWriteBuffer_MinCheckpoint_Call struct {
-	*mock.Call
-}
-
-// MinCheckpoint is a helper method to define mock.On call
-func (_e *MockWriteBuffer_Expecter) MinCheckpoint() *MockWriteBuffer_MinCheckpoint_Call {
-	return &MockWriteBuffer_MinCheckpoint_Call{Call: _e.mock.On("MinCheckpoint")}
-}
-
-func (_c *MockWriteBuffer_MinCheckpoint_Call) Run(run func()) *MockWriteBuffer_MinCheckpoint_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockWriteBuffer_MinCheckpoint_Call) Return(_a0 *msgpb.MsgPosition) *MockWriteBuffer_MinCheckpoint_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockWriteBuffer_MinCheckpoint_Call) RunAndReturn(run func() *msgpb.MsgPosition) *MockWriteBuffer_MinCheckpoint_Call {
 	_c.Call.Return(run)
 	return _c
 }
