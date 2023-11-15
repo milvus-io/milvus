@@ -310,7 +310,7 @@ func TestGetChannelWithTickler(t *testing.T) {
 		},
 	}
 
-	metaCache, err := getMetaCacheWithTickler(context.TODO(), node, info, newTickler(), unflushed, flushed)
+	metaCache, err := getMetaCacheWithTickler(context.TODO(), node, info, newTickler(), unflushed, flushed, nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, metaCache)
 	assert.Equal(t, int64(1), metaCache.Collection())

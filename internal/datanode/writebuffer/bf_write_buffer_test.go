@@ -144,7 +144,7 @@ func (s *BFWriteBufferSuite) SetupTest() {
 }
 
 func (s *BFWriteBufferSuite) TestBufferData() {
-	wb, err := NewBFWriteBuffer(s.channelName, s.metacache, s.syncMgr, &writeBufferOption{})
+	wb, err := NewBFWriteBuffer(s.channelName, s.metacache, nil, s.syncMgr, &writeBufferOption{})
 	s.NoError(err)
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1000}, metacache.NewBloomFilterSet())
@@ -164,7 +164,7 @@ func (s *BFWriteBufferSuite) TestAutoSync() {
 	paramtable.Get().Save(paramtable.Get().DataNodeCfg.FlushInsertBufferSize.Key, "1")
 
 	s.Run("normal_auto_sync", func() {
-		wb, err := NewBFWriteBuffer(s.channelName, s.metacache, s.syncMgr, &writeBufferOption{
+		wb, err := NewBFWriteBuffer(s.channelName, s.metacache, nil, s.syncMgr, &writeBufferOption{
 			syncPolicies: []SyncPolicy{
 				SyncFullBuffer,
 				GetSyncStaleBufferPolicy(paramtable.Get().DataNodeCfg.SyncPeriod.GetAsDuration(time.Second)),

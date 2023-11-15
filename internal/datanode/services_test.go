@@ -243,7 +243,7 @@ func (s *DataNodeServicesSuite) TestFlushSegments() {
 	metaCache := metacache.NewMockMetaCache(s.T())
 	metaCache.EXPECT().Collection().Return(1).Maybe()
 	metaCache.EXPECT().Schema().Return(schema).Maybe()
-	s.node.writeBufferManager.Register(dmChannelName, metaCache)
+	s.node.writeBufferManager.Register(dmChannelName, metaCache, nil)
 
 	fgservice.metacache.AddSegment(&datapb.SegmentInfo{
 		ID:            segmentID,
