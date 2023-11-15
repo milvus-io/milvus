@@ -27,11 +27,13 @@
 #include "common/Json.h"
 #include "common/EasyAssert.h"
 #include "common/Array.h"
+#include "google/protobuf/message_lite.h"
 #include "mmap/Column.h"
 #include "common/Consts.h"
 #include "common/FieldMeta.h"
 #include "common/Types.h"
 #include "log/Log.h"
+#include "pb/schema.pb.h"
 #include "query/ScalarIndex.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"
@@ -921,7 +923,7 @@ SegmentSealedImpl::bulk_subscript(SystemFieldType system_type,
                 this->insert_record_.timestamps_.get_chunk_data(0),
                 seg_offsets,
                 count,
-                output);
+                static_cast<Timestamp*>(output));
             break;
         case SystemFieldType::RowId:
             AssertInfo(insert_record_.row_ids_.num_chunk() == 1,
@@ -930,7 +932,7 @@ SegmentSealedImpl::bulk_subscript(SystemFieldType system_type,
                 this->insert_record_.row_ids_.get_chunk_data(0),
                 seg_offsets,
                 count,
-                output);
+                static_cast<int64_t*>(output));
             break;
         default:
             PanicInfo(DataTypeInvalid,
@@ -938,16 +940,14 @@ SegmentSealedImpl::bulk_subscript(SystemFieldType system_type,
     }
 }
 
-template <typename T>
+template <typename S, typename T>
 void
 SegmentSealedImpl::bulk_subscript_impl(const void* src_raw,
                                        const int64_t* seg_offsets,
                                        int64_t count,
-                                       void* dst_raw) {
+                                       T* dst) {
     static_assert(IsScalar<T>);
-    auto src = reinterpret_cast<const T*>(src_raw);
-    auto dst = reinterpret_cast<T*>(dst_raw);
-
+    auto src = static_cast<const S*>(src_raw);
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
         dst[i] = src[offset];
@@ -968,18 +968,31 @@ SegmentSealedImpl::bulk_subscript_impl(const ColumnBase* column,
     }
 }
 
+template <typename S, typename T>
 void
-SegmentSealedImpl::bulk_subscript_impl(const ColumnBase* column,
-                                       const int64_t* seg_offsets,
-                                       int64_t count,
-                                       void* dst_raw) {
-    auto field = reinterpret_cast<const ArrayColumn*>(column);
-    auto dst = reinterpret_cast<ScalarArray*>(dst_raw);
+SegmentSealedImpl::bulk_subscript_ptr_impl(
+    const ColumnBase* column,
+    const int64_t* seg_offsets,
+    int64_t count,
+    google::protobuf::RepeatedPtrField<T>* dst) {
+    auto field = reinterpret_cast<const VariableColumn<S>*>(column);
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
-        if (offset != INVALID_SEG_OFFSET) {
-            dst[i] = std::move(field->RawAt(offset));
-        }
+        dst->at(i) = std::move(T(field->RawAt(offset)));
+    }
+}
+
+template <typename T>
+void
+SegmentSealedImpl::bulk_subscript_array_impl(
+    const ColumnBase* column,
+    const int64_t* seg_offsets,
+    int64_t count,
+    google::protobuf::RepeatedPtrField<T>* dst) {
+    auto field = reinterpret_cast<const ArrayColumn*>(column);
+    for (int64_t i = 0; i < count; ++i) {
+        auto offset = seg_offsets[i];
+        dst->at(i) = std::move(field->RawAt(offset));
     }
 }
 
@@ -990,11 +1003,11 @@ SegmentSealedImpl::bulk_subscript_impl(int64_t element_sizeof,
                                        const int64_t* seg_offsets,
                                        int64_t count,
                                        void* dst_raw) {
-    auto src_vec = reinterpret_cast<const char*>(src_raw);
+    auto column = reinterpret_cast<const char*>(src_raw);
     auto dst_vec = reinterpret_cast<char*>(dst_raw);
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
-        auto src = src_vec + element_sizeof * offset;
+        auto src = column + element_sizeof * offset;
         auto dst = dst_vec + i * element_sizeof;
         memcpy(dst, src, element_sizeof);
     }
@@ -1037,142 +1050,135 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id,
     // we have to clone the shared pointer,
     // to make sure it won't get released if segment released
     auto column = fields_.at(field_id);
-    if (datatype_is_variable(field_meta.get_data_type())) {
-        switch (field_meta.get_data_type()) {
-            case DataType::VARCHAR:
-            case DataType::STRING: {
-                FixedVector<std::string> output(count);
-                bulk_subscript_impl<std::string>(
-                    column.get(), seg_offsets, count, output.data());
-                return CreateScalarDataArrayFrom(
-                    output.data(), count, field_meta);
-            }
-
-            case DataType::JSON: {
-                FixedVector<std::string> output(count);
-                bulk_subscript_impl<Json, std::string>(
-                    column.get(), seg_offsets, count, output.data());
-                return CreateScalarDataArrayFrom(
-                    output.data(), count, field_meta);
-            }
-
-            case DataType::ARRAY: {
-                FixedVector<ScalarArray> output(count);
-                bulk_subscript_impl(
-                    column.get(), seg_offsets, count, output.data());
-                return CreateScalarDataArrayFrom(
-                    output.data(), count, field_meta);
-            }
-
-            default:
-                PanicInfo(
-                    DataTypeInvalid,
-                    fmt::format("unsupported data type: {}",
-                                datatype_name(field_meta.get_data_type())));
-        }
-    }
-
-    auto src_vec = column->Data();
+    auto ret = fill_with_empty(field_id, count);
     switch (field_meta.get_data_type()) {
+        case DataType::VARCHAR:
+        case DataType::STRING: {
+            bulk_subscript_ptr_impl<std::string>(
+                column.get(),
+                seg_offsets,
+                count,
+                ret->mutable_scalars()->mutable_string_data()->mutable_data());
+            break;
+        }
+
+        case DataType::JSON: {
+            bulk_subscript_ptr_impl<Json, std::string>(
+                column.get(),
+                seg_offsets,
+                count,
+                ret->mutable_scalars()->mutable_json_data()->mutable_data());
+            break;
+        }
+
+        case DataType::ARRAY: {
+            bulk_subscript_array_impl(
+                column.get(),
+                seg_offsets,
+                count,
+                ret->mutable_scalars()->mutable_array_data()->mutable_data());
+            break;
+        }
+
         case DataType::BOOL: {
-            auto ret = fill_with_empty(field_id, count);
-            bulk_subscript_impl<bool>(src_vec,
+            bulk_subscript_impl<bool>(column->Data(),
                                       seg_offsets,
                                       count,
                                       ret->mutable_scalars()
                                           ->mutable_bool_data()
                                           ->mutable_data()
                                           ->mutable_data());
-            return ret;
+            break;
         }
         case DataType::INT8: {
-            FixedVector<int8_t> output(count);
-            bulk_subscript_impl<int8_t>(
-                src_vec, seg_offsets, count, output.data());
-            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
+            bulk_subscript_impl<int8_t>(column->Data(),
+                                        seg_offsets,
+                                        count,
+                                        ret->mutable_scalars()
+                                            ->mutable_int_data()
+                                            ->mutable_data()
+                                            ->mutable_data());
+            break;
         }
         case DataType::INT16: {
-            FixedVector<int16_t> output(count);
-            bulk_subscript_impl<int16_t>(
-                src_vec, seg_offsets, count, output.data());
-            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
-        }
-        case DataType::INT32: {
-            auto ret = fill_with_empty(field_id, count);
-            bulk_subscript_impl<int32_t>(src_vec,
+            bulk_subscript_impl<int16_t>(column->Data(),
                                          seg_offsets,
                                          count,
                                          ret->mutable_scalars()
                                              ->mutable_int_data()
                                              ->mutable_data()
                                              ->mutable_data());
-            return ret;
+            break;
+        }
+        case DataType::INT32: {
+            bulk_subscript_impl<int32_t>(column->Data(),
+                                         seg_offsets,
+                                         count,
+                                         ret->mutable_scalars()
+                                             ->mutable_int_data()
+                                             ->mutable_data()
+                                             ->mutable_data());
+            break;
         }
         case DataType::INT64: {
-            auto ret = fill_with_empty(field_id, count);
-            bulk_subscript_impl<int64_t>(src_vec,
+            bulk_subscript_impl<int64_t>(column->Data(),
                                          seg_offsets,
                                          count,
                                          ret->mutable_scalars()
                                              ->mutable_long_data()
                                              ->mutable_data()
                                              ->mutable_data());
-            return ret;
+            break;
         }
         case DataType::FLOAT: {
-            auto ret = fill_with_empty(field_id, count);
-            bulk_subscript_impl<float>(src_vec,
+            bulk_subscript_impl<float>(column->Data(),
                                        seg_offsets,
                                        count,
                                        ret->mutable_scalars()
                                            ->mutable_float_data()
                                            ->mutable_data()
                                            ->mutable_data());
-            return ret;
+            break;
         }
         case DataType::DOUBLE: {
-            auto ret = fill_with_empty(field_id, count);
-            bulk_subscript_impl<double>(src_vec,
+            bulk_subscript_impl<double>(column->Data(),
                                         seg_offsets,
                                         count,
                                         ret->mutable_scalars()
                                             ->mutable_double_data()
                                             ->mutable_data()
                                             ->mutable_data());
-            return ret;
+            break;
         }
 
         case DataType::VECTOR_FLOAT: {
-            auto ret = fill_with_empty(field_id, count);
             bulk_subscript_impl(field_meta.get_sizeof(),
-                                src_vec,
+                                column->Data(),
                                 seg_offsets,
                                 count,
                                 ret->mutable_vectors()
                                     ->mutable_float_vector()
                                     ->mutable_data()
                                     ->mutable_data());
-            return ret;
+            break;
         }
         case DataType::VECTOR_FLOAT16: {
-            auto ret = fill_with_empty(field_id, count);
             bulk_subscript_impl(
                 field_meta.get_sizeof(),
-                src_vec,
+                column->Data(),
                 seg_offsets,
                 count,
                 ret->mutable_vectors()->mutable_float16_vector()->data());
-            return ret;
+            break;
         }
         case DataType::VECTOR_BINARY: {
-            auto ret = fill_with_empty(field_id, count);
             bulk_subscript_impl(
                 field_meta.get_sizeof(),
-                src_vec,
+                column->Data(),
                 seg_offsets,
                 count,
                 ret->mutable_vectors()->mutable_binary_vector()->data());
-            return ret;
+            break;
         }
 
         default: {
@@ -1181,6 +1187,8 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id,
                                   field_meta.get_data_type()));
         }
     }
+
+    return ret;
 }
 
 bool
