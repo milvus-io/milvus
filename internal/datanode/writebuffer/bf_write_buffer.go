@@ -1,6 +1,7 @@
 package writebuffer
 
 import (
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
@@ -17,9 +18,9 @@ type bfWriteBuffer struct {
 	metacache metacache.MetaCache
 }
 
-func NewBFWriteBuffer(sch *schemapb.CollectionSchema, metacache metacache.MetaCache, syncMgr syncmgr.SyncManager, option *writeBufferOption) (WriteBuffer, error) {
+func NewBFWriteBuffer(channel string, sch *schemapb.CollectionSchema, metacache metacache.MetaCache, syncMgr syncmgr.SyncManager, option *writeBufferOption) (WriteBuffer, error) {
 	return &bfWriteBuffer{
-		writeBufferBase: newWriteBufferBase(sch, metacache, syncMgr, option),
+		writeBufferBase: newWriteBufferBase(channel, sch, metacache, syncMgr, option),
 		syncMgr:         syncMgr,
 	}, nil
 }
@@ -50,7 +51,8 @@ func (wb *bfWriteBuffer) BufferData(insertMsgs []*msgstream.InsertMsg, deleteMsg
 	// distribute delete msg
 	for _, delMsg := range deleteMsgs {
 		pks := storage.ParseIDs2PrimaryKeys(delMsg.GetPrimaryKeys())
-		segments := wb.metaCache.GetSegmentsBy(metacache.WithPartitionID(delMsg.PartitionID))
+		segments := wb.metaCache.GetSegmentsBy(metacache.WithPartitionID(delMsg.PartitionID),
+			metacache.WithSegmentState(commonpb.SegmentState_Growing, commonpb.SegmentState_Flushing, commonpb.SegmentState_Flushed))
 		for _, segment := range segments {
 			var deletePks []storage.PrimaryKey
 			var deleteTss []typeutil.Timestamp

@@ -37,6 +37,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/broker"
+	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
+	"github.com/milvus-io/milvus/internal/datanode/writebuffer"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -85,6 +87,9 @@ type DataNode struct {
 	stateCode        atomic.Value // commonpb.StateCode_Initializing
 	flowgraphManager *flowgraphManager
 	eventManagerMap  *typeutil.ConcurrentMap[string, *channelEventManager]
+
+	syncMgr            syncmgr.SyncManager
+	writeBufferManager writebuffer.Manager
 
 	clearSignal        chan string // vchannel name
 	segmentCache       *Cache
@@ -259,6 +264,24 @@ func (node *DataNode) Init() error {
 		node.factory.Init(Params)
 		log.Info("DataNode server init succeeded",
 			zap.String("MsgChannelSubName", Params.CommonCfg.DataNodeSubName.GetValue()))
+
+		chunkManager, err := node.factory.NewPersistentStorageChunkManager(node.ctx)
+		if err != nil {
+			initError = err
+			return
+		}
+
+		node.chunkManager = chunkManager
+		syncMgr, err := syncmgr.NewSyncManager(paramtable.Get().DataNodeCfg.MaxParallelSyncTaskNum.GetAsInt(),
+			node.chunkManager, node.allocator)
+		if err != nil {
+			initError = err
+			log.Error("failed to create sync manager", zap.Error(err))
+			return
+		}
+		node.syncMgr = syncMgr
+
+		node.writeBufferManager = writebuffer.NewManager(syncMgr)
 	})
 	return initError
 }
@@ -340,14 +363,6 @@ func (node *DataNode) Start() error {
 			startErr = errors.New("DataNode fail to connect etcd")
 			return
 		}
-
-		chunkManager, err := node.factory.NewPersistentStorageChunkManager(node.ctx)
-		if err != nil {
-			startErr = err
-			return
-		}
-
-		node.chunkManager = chunkManager
 
 		node.stopWaiter.Add(1)
 		go node.BackGroundGC(node.clearSignal)

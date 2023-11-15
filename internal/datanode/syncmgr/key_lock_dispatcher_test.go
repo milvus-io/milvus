@@ -44,6 +44,7 @@ func (s *KeyLockDispatcherSuite) TestKeyLock() {
 	d.Submit(1, t1)
 
 	go func() {
+		defer t2.done()
 		d.Submit(1, t2)
 
 		sig.Store(true)
@@ -66,6 +67,7 @@ func (s *KeyLockDispatcherSuite) TestCap() {
 	d.Submit(1, t1)
 
 	go func() {
+		defer t2.done()
 		d.Submit(2, t2)
 
 		sig.Store(true)

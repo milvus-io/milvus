@@ -11,22 +11,26 @@ type Task interface {
 
 type keyLockDispatcher[K comparable] struct {
 	keyLock    *lock.KeyLock[K]
-	workerPool *conc.Pool[struct{}]
+	workerPool *conc.Pool[error]
 }
 
 func newKeyLockDispatcher[K comparable](maxParallel int) *keyLockDispatcher[K] {
 	return &keyLockDispatcher[K]{
-		workerPool: conc.NewPool[struct{}](maxParallel, conc.WithPreAlloc(true)),
+		workerPool: conc.NewPool[error](maxParallel, conc.WithPreAlloc(true)),
 		keyLock:    lock.NewKeyLock[K](),
 	}
 }
 
-func (d *keyLockDispatcher[K]) Submit(key K, t Task) *conc.Future[struct{}] {
+func (d *keyLockDispatcher[K]) Submit(key K, t Task, callbacks ...func(error)) *conc.Future[error] {
 	d.keyLock.Lock(key)
-	defer d.keyLock.Unlock(key)
 
-	return d.workerPool.Submit(func() (struct{}, error) {
+	return d.workerPool.Submit(func() (error, error) {
+		defer d.keyLock.Unlock(key)
 		err := t.Run()
-		return struct{}{}, err
+
+		for _, callback := range callbacks {
+			callback(err)
+		}
+		return err, nil
 	})
 }

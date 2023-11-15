@@ -2,6 +2,7 @@ package syncmgr
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -9,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -33,7 +35,8 @@ type SyncMeta struct {
 }
 
 type SyncManager interface {
-	SyncData(ctx context.Context, task *SyncTask) error
+	SyncData(ctx context.Context, task *SyncTask) *conc.Future[error]
+	GetMinCheckpoints(channel string) *msgpb.MsgPosition
 	Block(segmentID int64)
 	Unblock(segmentID int64)
 }
@@ -42,6 +45,8 @@ type syncManager struct {
 	*keyLockDispatcher[int64]
 	chunkManager storage.ChunkManager
 	allocator    allocator.Interface
+
+	tasks *typeutil.ConcurrentMap[string, *SyncTask]
 }
 
 func NewSyncManager(parallelTask int, chunkManager storage.ChunkManager, allocator allocator.Interface) (SyncManager, error) {
@@ -52,17 +57,38 @@ func NewSyncManager(parallelTask int, chunkManager storage.ChunkManager, allocat
 		keyLockDispatcher: newKeyLockDispatcher[int64](parallelTask),
 		chunkManager:      chunkManager,
 		allocator:         allocator,
+		tasks:             typeutil.NewConcurrentMap[string, *SyncTask](),
 	}, nil
 }
 
-func (mgr syncManager) SyncData(ctx context.Context, task *SyncTask) error {
+func (mgr syncManager) SyncData(ctx context.Context, task *SyncTask) *conc.Future[error] {
 	task.WithAllocator(mgr.allocator).WithChunkManager(mgr.chunkManager)
+
+	taskKey := fmt.Sprintf("%d-%d", task.segmentID, task.checkpoint.GetTimestamp())
+	mgr.tasks.Insert(taskKey, task)
 
 	// make sync for same segment execute in sequence
 	// if previous sync task is not finished, block here
-	mgr.Submit(task.segmentID, task)
+	return mgr.Submit(task.segmentID, task, func(err error) {
+		// remove task from records
+		mgr.tasks.Remove(taskKey)
+	})
+}
 
-	return nil
+func (mgr syncManager) GetMinCheckpoints(channel string) *msgpb.MsgPosition {
+	var cp *msgpb.MsgPosition
+	mgr.tasks.Range(func(_ string, task *SyncTask) bool {
+		if task.startPosition == nil {
+			return true
+		}
+		if task.channelName == channel {
+			if cp == nil || task.startPosition.GetTimestamp() < cp.GetTimestamp() {
+				cp = task.startPosition
+			}
+		}
+		return true
+	})
+	return cp
 }
 
 func (mgr syncManager) Block(segmentID int64) {

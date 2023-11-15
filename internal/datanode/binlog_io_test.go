@@ -190,19 +190,19 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 
 		tests := []struct {
 			isvalid  bool
-			deletepk primaryKey
+			deletepk storage.PrimaryKey
 			ts       uint64
 
 			description string
 		}{
-			{true, newInt64PrimaryKey(1), 1111111, "valid input"},
+			{true, storage.NewInt64PrimaryKey(1), 1111111, "valid input"},
 		}
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
 				if test.isvalid {
 					k, v, err := b.genDeltaBlobs(&DeleteData{
-						Pks: []primaryKey{test.deletepk},
+						Pks: []storage.PrimaryKey{test.deletepk},
 						Tss: []uint64{test.ts},
 					}, meta.GetID(), 10, 1)
 
@@ -217,12 +217,12 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 	})
 
 	t.Run("Test genDeltaBlobs error", func(t *testing.T) {
-		pk := newInt64PrimaryKey(1)
+		pk := storage.NewInt64PrimaryKey(1)
 
 		t.Run("Test serialize error", func(t *testing.T) {
 			alloc := allocator.NewMockAllocator(t)
 			b := &binlogIO{cm, alloc}
-			k, v, err := b.genDeltaBlobs(&DeleteData{Pks: []primaryKey{pk}, Tss: []uint64{}}, 1, 1, 1)
+			k, v, err := b.genDeltaBlobs(&DeleteData{Pks: []storage.PrimaryKey{pk}, Tss: []uint64{}}, 1, 1, 1)
 			assert.Error(t, err)
 			assert.Empty(t, k)
 			assert.Empty(t, v)
@@ -232,7 +232,7 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 			alloc := allocator.NewMockAllocator(t)
 			alloc.EXPECT().AllocOne().Call.Return(int64(0), fmt.Errorf("mock AllocOne error"))
 			bin := binlogIO{cm, alloc}
-			k, v, err := bin.genDeltaBlobs(&DeleteData{Pks: []primaryKey{pk}, Tss: []uint64{1}}, 1, 1, 1)
+			k, v, err := bin.genDeltaBlobs(&DeleteData{Pks: []storage.PrimaryKey{pk}, Tss: []uint64{1}}, 1, 1, 1)
 			assert.Error(t, err)
 			assert.Empty(t, k)
 			assert.Empty(t, v)

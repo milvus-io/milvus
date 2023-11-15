@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -23,10 +24,11 @@ import (
 
 type L0WriteBufferSuite struct {
 	suite.Suite
-	collSchema *schemapb.CollectionSchema
-	syncMgr    *syncmgr.MockSyncManager
-	metacache  *metacache.MockMetaCache
-	allocator  *allocator.MockGIDAllocator
+	channelName string
+	collSchema  *schemapb.CollectionSchema
+	syncMgr     *syncmgr.MockSyncManager
+	metacache   *metacache.MockMetaCache
+	allocator   *allocator.MockGIDAllocator
 }
 
 func (s *L0WriteBufferSuite) SetupSuite() {
@@ -51,6 +53,7 @@ func (s *L0WriteBufferSuite) SetupSuite() {
 			},
 		},
 	}
+	s.channelName = "by-dev-rootcoord-dml_0v0"
 }
 
 func (s *L0WriteBufferSuite) composeInsertMsg(segmentID int64, rowCount int, dim int) ([]int64, *msgstream.InsertMsg) {
@@ -138,16 +141,17 @@ func (s *L0WriteBufferSuite) SetupTest() {
 }
 
 func (s *L0WriteBufferSuite) TestBufferData() {
-	wb, err := NewL0WriteBuffer(s.collSchema, s.metacache, s.syncMgr, &writeBufferOption{
+	wb, err := NewL0WriteBuffer(s.channelName, s.collSchema, s.metacache, s.syncMgr, &writeBufferOption{
 		idAllocator: s.allocator,
 	})
 	s.NoError(err)
 
-	// seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1000}, metacache.NewBloomFilterSet())
-	// s.metacache.EXPECT().GetSegmentsBy(mock.Anything).Return([]*metacache.SegmentInfo{seg})
-
 	pks, msg := s.composeInsertMsg(1000, 10, 128)
 	delMsg := s.composeDeleteMsg(lo.Map(pks, func(id int64, _ int) storage.PrimaryKey { return storage.NewInt64PrimaryKey(id) }))
+
+	s.metacache.EXPECT().GetSegmentByID(int64(1000)).Return(nil, false)
+	s.metacache.EXPECT().AddSegment(mock.Anything, mock.Anything).Return()
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
 	err = wb.BufferData([]*msgstream.InsertMsg{msg}, []*msgstream.DeleteMsg{delMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
 	s.NoError(err)

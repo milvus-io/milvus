@@ -20,6 +20,7 @@ import (
 // MetaWriter is the interface for SyncManager to write segment sync meta.
 type MetaWriter interface {
 	UpdateSync(*SyncTask) error
+	DropChannel(string) error
 }
 
 type brokerMetaWriter struct {
@@ -38,7 +39,7 @@ func (b *brokerMetaWriter) UpdateSync(pack *SyncTask) error {
 	var (
 		fieldInsert = []*datapb.FieldBinlog{}
 		fieldStats  = []*datapb.FieldBinlog{}
-		deltaInfos  = make([]*datapb.FieldBinlog, 1)
+		deltaInfos  = make([]*datapb.FieldBinlog, 0)
 		checkPoints = []*datapb.CheckPoint{}
 	)
 
@@ -48,7 +49,9 @@ func (b *brokerMetaWriter) UpdateSync(pack *SyncTask) error {
 	for k, v := range pack.statsBinlogs {
 		fieldStats = append(fieldStats, &datapb.FieldBinlog{FieldID: k, Binlogs: []*datapb.Binlog{v}})
 	}
-	deltaInfos[0] = &datapb.FieldBinlog{Binlogs: []*datapb.Binlog{pack.deltaBinlog}}
+	if pack.deltaBinlog != nil {
+		deltaInfos = append(deltaInfos, &datapb.FieldBinlog{Binlogs: []*datapb.Binlog{pack.deltaBinlog}})
+	}
 
 	// only current segment checkpoint info,
 	segments := pack.metacache.GetSegmentsBy(metacache.WithSegmentIDs(pack.segmentID))
@@ -58,7 +61,7 @@ func (b *brokerMetaWriter) UpdateSync(pack *SyncTask) error {
 	segment := segments[0]
 	checkPoints = append(checkPoints, &datapb.CheckPoint{
 		SegmentID: pack.segmentID,
-		NumOfRows: segment.NumOfRows(), //+ pack.option.Row,
+		NumOfRows: segment.FlushedRows() + pack.batchSize,
 		Position:  pack.checkpoint,
 	})
 
@@ -68,7 +71,6 @@ func (b *brokerMetaWriter) UpdateSync(pack *SyncTask) error {
 			StartPosition: info.StartPosition(),
 		}
 	})
-
 	log.Info("SaveBinlogPath",
 		zap.Int64("SegmentID", pack.segmentID),
 		zap.Int64("CollectionID", pack.collectionID),
@@ -76,7 +78,7 @@ func (b *brokerMetaWriter) UpdateSync(pack *SyncTask) error {
 		zap.Any("checkPoints", checkPoints),
 		zap.Int("Length of Field2BinlogPaths", len(fieldInsert)),
 		zap.Int("Length of Field2Stats", len(fieldStats)),
-		zap.Int("Length of Field2Deltalogs", len(deltaInfos[0].GetBinlogs())),
+		// zap.Int("Length of Field2Deltalogs", len(deltaInfos[0].GetBinlogs())),
 		zap.String("vChannelName", pack.channelName),
 	)
 
@@ -126,6 +128,26 @@ func (b *brokerMetaWriter) UpdateSync(pack *SyncTask) error {
 	if err != nil {
 		log.Warn("failed to SaveBinlogPaths",
 			zap.Int64("segmentID", pack.segmentID),
+			zap.Error(err))
+	}
+	return err
+}
+
+func (b *brokerMetaWriter) DropChannel(channelName string) error {
+	err := retry.Do(context.Background(), func() error {
+		status, err := b.broker.DropVirtualChannel(context.Background(), &datapb.DropVirtualChannelRequest{
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(0), // TODO msg type
+				commonpbutil.WithMsgID(0),   // TODO msg id
+				commonpbutil.WithSourceID(paramtable.GetNodeID()),
+			),
+			ChannelName: channelName,
+		})
+		return merr.CheckRPCCall(status, err)
+	}, b.opts...)
+	if err != nil {
+		log.Warn("failed to DropChannel",
+			zap.String("channel", channelName),
 			zap.Error(err))
 	}
 	return err

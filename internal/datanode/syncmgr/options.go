@@ -40,6 +40,11 @@ func (t *SyncTask) WithDeleteData(deleteData *storage.DeleteData) *SyncTask {
 	return t
 }
 
+func (t *SyncTask) WithStartPosition(start *msgpb.MsgPosition) *SyncTask {
+	t.startPosition = start
+	return t
+}
+
 func (t *SyncTask) WithCheckpoint(cp *msgpb.MsgPosition) *SyncTask {
 	t.checkpoint = cp
 	return t
@@ -102,5 +107,10 @@ func (t *SyncTask) WithWriteRetryOptions(opts ...retry.Option) *SyncTask {
 
 func (t *SyncTask) WithFailureCallback(callback func(error)) *SyncTask {
 	t.failureCallback = callback
+	return t
+}
+
+func (t *SyncTask) WithBatchSize(batchSize int64) *SyncTask {
+	t.batchSize = batchSize
 	return t
 }

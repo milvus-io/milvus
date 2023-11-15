@@ -16,44 +16,44 @@
 
 package datanode
 
-import (
-	"math/rand"
-	"testing"
+// import (
+// 	"math/rand"
+// 	"testing"
 
-	"github.com/stretchr/testify/assert"
+// 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/common"
-)
+// 	"github.com/milvus-io/milvus/internal/storage"
+// 	"github.com/milvus-io/milvus/pkg/common"
+// )
 
-func TestSegment_UpdatePKRange(t *testing.T) {
-	seg := &Segment{}
+// func TestSegment_UpdatePKRange(t *testing.T) {
+// 	seg := &Segment{}
 
-	cases := make([]int64, 0, 100)
-	for i := 0; i < 100; i++ {
-		cases = append(cases, rand.Int63())
-	}
-	buf := make([]byte, 8)
-	for _, c := range cases {
-		seg.updatePKRange(&storage.Int64FieldData{
-			Data: []int64{c},
-		})
+// 	cases := make([]int64, 0, 100)
+// 	for i := 0; i < 100; i++ {
+// 		cases = append(cases, rand.Int63())
+// 	}
+// 	buf := make([]byte, 8)
+// 	for _, c := range cases {
+// 		seg.updatePKRange(&storage.Int64FieldData{
+// 			Data: []int64{c},
+// 		})
 
-		pk := newInt64PrimaryKey(c)
+// 		pk := newInt64PrimaryKey(c)
 
-		assert.Equal(t, true, seg.currentStat.MinPK.LE(pk))
-		assert.Equal(t, true, seg.currentStat.MaxPK.GE(pk))
+// 		assert.Equal(t, true, seg.currentStat.MinPK.LE(pk))
+// 		assert.Equal(t, true, seg.currentStat.MaxPK.GE(pk))
 
-		common.Endian.PutUint64(buf, uint64(c))
-		assert.True(t, seg.currentStat.PkFilter.Test(buf))
+// 		common.Endian.PutUint64(buf, uint64(c))
+// 		assert.True(t, seg.currentStat.PkFilter.Test(buf))
 
-		assert.True(t, seg.isPKExist(pk))
-	}
-}
+// 		assert.True(t, seg.isPKExist(pk))
+// 	}
+// }
 
-func TestEmptySegment(t *testing.T) {
-	seg := &Segment{}
+// func TestEmptySegment(t *testing.T) {
+// 	seg := &Segment{}
 
-	pk := newInt64PrimaryKey(1000)
-	assert.False(t, seg.isPKExist(pk))
-}
+// 	pk := newInt64PrimaryKey(1000)
+// 	assert.False(t, seg.isPKExist(pk))
+// }

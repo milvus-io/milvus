@@ -4,8 +4,8 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
+	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -25,7 +25,7 @@ type writeBufferOption struct {
 	syncPolicies []SyncPolicy
 
 	pkStatsFactory metacache.PkStatsFactory
-	broker         broker.Broker
+	metaWriter     syncmgr.MetaWriter
 }
 
 func defaultWBOption() *writeBufferOption {
@@ -57,9 +57,9 @@ func WithPKStatsFactory(factory metacache.PkStatsFactory) WriteBufferOption {
 	}
 }
 
-func WithBroker(broker broker.Broker) WriteBufferOption {
+func WithMetaWriter(writer syncmgr.MetaWriter) WriteBufferOption {
 	return func(opt *writeBufferOption) {
-		opt.broker = broker
+		opt.metaWriter = writer
 	}
 }
 

@@ -19,7 +19,6 @@ package datanode
 import (
 	"context"
 	"fmt"
-	"sort"
 	"sync"
 	"time"
 
@@ -30,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -74,46 +72,48 @@ func (fm *flowgraphManager) execute(totalMemory uint64) {
 	if !Params.DataNodeCfg.MemoryForceSyncEnable.GetAsBool() {
 		return
 	}
+	// TODO change to buffer manager
 
-	var total int64
-	channels := make([]struct {
-		channel    string
-		bufferSize int64
-	}, 0)
-	fm.flowgraphs.Range(func(key string, value *dataSyncService) bool {
-		size := value.channel.getTotalMemorySize()
-		channels = append(channels, struct {
+	/*
+		var total int64
+		channels := make([]struct {
 			channel    string
 			bufferSize int64
-		}{key, size})
-		total += size
-		return true
-	})
-	if len(channels) == 0 {
-		return
-	}
+		}, 0)
+		fm.flowgraphs.Range(func(key string, value *dataSyncService) bool {
+			size := value.channel.getTotalMemorySize()
+			channels = append(channels, struct {
+				channel    string
+				bufferSize int64
+			}{key, size})
+			total += size
+			return true
+		})
+		if len(channels) == 0 {
+			return
+		}
 
-	toMB := func(mem float64) float64 {
-		return mem / 1024 / 1024
-	}
+		toMB := func(mem float64) float64 {
+			return mem / 1024 / 1024
+		}
 
-	memoryWatermark := float64(totalMemory) * Params.DataNodeCfg.MemoryWatermark.GetAsFloat()
-	if float64(total) < memoryWatermark {
-		log.RatedDebug(5, "skip force sync because memory level is not high enough",
-			zap.Float64("current_total_memory_usage", toMB(float64(total))),
-			zap.Float64("current_memory_watermark", toMB(memoryWatermark)),
-			zap.Any("channel_memory_usages", channels))
-		return
-	}
+		memoryWatermark := float64(totalMemory) * Params.DataNodeCfg.MemoryWatermark.GetAsFloat()
+		if float64(total) < memoryWatermark {
+			log.RatedDebug(5, "skip force sync because memory level is not high enough",
+				zap.Float64("current_total_memory_usage", toMB(float64(total))),
+				zap.Float64("current_memory_watermark", toMB(memoryWatermark)),
+				zap.Any("channel_memory_usages", channels))
+			return
+		}
 
-	sort.Slice(channels, func(i, j int) bool {
-		return channels[i].bufferSize > channels[j].bufferSize
-	})
-	if fg, ok := fm.flowgraphs.Get(channels[0].channel); ok { // sync the first channel with the largest memory usage
-		fg.channel.setIsHighMemory(true)
-		log.Info("notify flowgraph to sync",
-			zap.String("channel", channels[0].channel), zap.Int64("bufferSize", channels[0].bufferSize))
-	}
+		sort.Slice(channels, func(i, j int) bool {
+			return channels[i].bufferSize > channels[j].bufferSize
+		})
+		if fg, ok := fm.flowgraphs.Get(channels[0].channel); ok { // sync the first channel with the largest memory usage
+			fg.channel.setIsHighMemory(true)
+			log.Info("notify flowgraph to sync",
+				zap.String("channel", channels[0].channel), zap.Int64("bufferSize", channels[0].bufferSize))
+		}*/
 }
 
 func (fm *flowgraphManager) Add(ds *dataSyncService) {
@@ -153,45 +153,6 @@ func (fm *flowgraphManager) release(vchanName string) {
 	}
 }
 
-func (fm *flowgraphManager) getFlushCh(segID UniqueID) (chan<- flushMsg, error) {
-	var flushCh chan flushMsg
-
-	fm.flowgraphs.Range(func(key string, fg *dataSyncService) bool {
-		if fg.channel.hasSegment(segID, true) {
-			flushCh = fg.flushCh
-			return false
-		}
-		return true
-	})
-
-	if flushCh != nil {
-		return flushCh, nil
-	}
-
-	return nil, merr.WrapErrSegmentNotFound(segID, "failed to get flush channel has this segment")
-}
-
-func (fm *flowgraphManager) getChannel(segID UniqueID) (Channel, error) {
-	var (
-		rep    Channel
-		exists = false
-	)
-	fm.flowgraphs.Range(func(key string, fg *dataSyncService) bool {
-		if fg.channel.hasSegment(segID, true) {
-			exists = true
-			rep = fg.channel
-			return false
-		}
-		return true
-	})
-
-	if exists {
-		return rep, nil
-	}
-
-	return nil, fmt.Errorf("cannot find segment %d in all flowgraphs", segID)
-}
-
 func (fm *flowgraphManager) getFlowgraphService(vchan string) (*dataSyncService, bool) {
 	return fm.flowgraphs.Get(vchan)
 }
@@ -225,7 +186,7 @@ func (fm *flowgraphManager) dropAll() {
 func (fm *flowgraphManager) collections() []int64 {
 	collectionSet := typeutil.UniqueSet{}
 	fm.flowgraphs.Range(func(key string, value *dataSyncService) bool {
-		collectionSet.Insert(value.channel.getCollectionID())
+		collectionSet.Insert(value.metacache.Collection())
 		return true
 	})
 

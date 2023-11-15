@@ -1,6 +1,7 @@
 package writebuffer
 
 import (
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -11,8 +12,6 @@ type segmentBuffer struct {
 
 	insertBuffer *InsertBuffer
 	deltaBuffer  *DeltaBuffer
-
-	flushing bool
 }
 
 func newSegmentBuffer(segmentID int64, collSchema *schemapb.CollectionSchema) (*segmentBuffer, error) {
@@ -31,12 +30,8 @@ func (buf *segmentBuffer) IsFull() bool {
 	return buf.insertBuffer.IsFull() || buf.deltaBuffer.IsFull()
 }
 
-func (buf *segmentBuffer) Renew() (insert *storage.InsertData, delete *storage.DeleteData) {
-	return buf.insertBuffer.Renew(), buf.deltaBuffer.Renew()
-}
-
-func (buf *segmentBuffer) SetFlush() {
-	buf.flushing = true
+func (buf *segmentBuffer) Yield() (insert *storage.InsertData, delete *storage.DeleteData) {
+	return buf.insertBuffer.Yield(), buf.deltaBuffer.Yield()
 }
 
 func (buf *segmentBuffer) MinTimestamp() typeutil.Timestamp {
@@ -49,8 +44,30 @@ func (buf *segmentBuffer) MinTimestamp() typeutil.Timestamp {
 	return deltaTs
 }
 
+func (buf *segmentBuffer) MinCheckpoint() *msgpb.MsgPosition {
+	return getEarliestCheckpoint(buf.insertBuffer.startPos, buf.deltaBuffer.startPos)
+}
+
 // TimeRange is a range of timestamp contains the min-timestamp and max-timestamp
 type TimeRange struct {
 	timestampMin typeutil.Timestamp
 	timestampMax typeutil.Timestamp
+}
+
+func getEarliestCheckpoint(cps ...*msgpb.MsgPosition) *msgpb.MsgPosition {
+	var result *msgpb.MsgPosition
+	for _, cp := range cps {
+		if cp == nil {
+			continue
+		}
+		if result == nil {
+			result = cp
+			continue
+		}
+
+		if cp.GetTimestamp() < result.GetTimestamp() {
+			result = cp
+		}
+	}
+	return result
 }

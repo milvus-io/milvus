@@ -30,8 +30,10 @@ type BloomFilterSet struct {
 	history []*storage.PkStatistics
 }
 
-func NewBloomFilterSet() *BloomFilterSet {
-	return &BloomFilterSet{}
+func NewBloomFilterSet(historyEntries ...*storage.PkStatistics) *BloomFilterSet {
+	return &BloomFilterSet{
+		history: historyEntries,
+	}
 }
 
 func (bfs *BloomFilterSet) PkExists(pk storage.PrimaryKey) bool {
