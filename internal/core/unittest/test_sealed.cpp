@@ -1382,3 +1382,192 @@ TEST(Sealed, LoadArrayFieldDataWithMMap) {
     SealedLoadFieldData(dataset, *segment, {}, true);
     segment->Search(plan.get(), ph_group.get());
 }
+
+TEST(Sealed, SkipIndexSkipUnaryRange) {
+    auto schema = std::make_shared<Schema>();
+    auto dim = 128;
+    auto metrics_type = "L2";
+    auto fake_vec_fid = schema->AddDebugField(
+        "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto i32_fid = schema->AddDebugField("int32_field", DataType::INT32);
+    auto i16_fid = schema->AddDebugField("int16_field", DataType::INT16);
+    auto i8_fid = schema->AddDebugField("int8_field", DataType::INT8);
+    auto float_fid = schema->AddDebugField("float_field", DataType::FLOAT);
+    auto double_fid = schema->AddDebugField("double_field", DataType::DOUBLE);
+    size_t N = 10;
+    auto dataset = DataGen(schema, N);
+    auto segment = CreateSealedSegment(schema);
+    std::cout << "pk_fid:" << pk_fid.get() << std::endl;
+
+    //test for int64
+    std::vector<int64_t> pks = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    auto pk_field_data = storage::CreateFieldData(DataType::INT64, 1, 10);
+    pk_field_data->FillFieldData(pks.data(), N);
+    segment->LoadPrimitiveSkipIndex(
+            pk_fid, 0, DataType::INT64, pk_field_data->Data(), N);
+    auto& skip_index = segment->GetSkipIndex();
+    bool equal_5_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        pk_fid, 0, OpType::Equal, 5);
+    bool equal_12_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        pk_fid, 0, OpType::Equal, 12);
+    bool equal_10_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        pk_fid, 0, OpType::Equal, 10);
+    ASSERT_FALSE(equal_5_skip);
+    ASSERT_TRUE(equal_12_skip);
+    ASSERT_FALSE(equal_10_skip);
+    bool less_than_1_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        pk_fid, 0, OpType::LessThan, 1);
+    bool less_than_5_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        pk_fid, 0, OpType::LessThan, 5);
+    ASSERT_TRUE(less_than_1_skip);
+    ASSERT_FALSE(less_than_5_skip);
+    bool less_equal_than_1_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        pk_fid, 0, OpType::LessEqual, 1);
+    bool less_equal_than_15_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        pk_fid, 0, OpType::LessThan, 15);
+    ASSERT_FALSE(less_equal_than_1_skip);
+    ASSERT_FALSE(less_equal_than_15_skip);
+    bool greater_than_10_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        pk_fid, 0, OpType::GreaterThan, 10);
+    bool greater_than_5_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        pk_fid, 0, OpType::GreaterThan, 5);
+    ASSERT_TRUE(greater_than_10_skip);
+    ASSERT_FALSE(greater_than_5_skip);
+    bool greater_equal_than_10_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        pk_fid, 0, OpType::GreaterEqual, 10);
+    bool greater_equal_than_5_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        pk_fid, 0, OpType::GreaterEqual, 5);
+    ASSERT_FALSE(greater_equal_than_10_skip);
+    ASSERT_FALSE(greater_equal_than_5_skip);
+
+    //test for int32
+    std::vector<int32_t> int32s = {2, 2, 3, 4, 5, 6, 7, 8, 9, 12};
+    auto int32_field_data = storage::CreateFieldData(DataType::INT32, 1, 10);
+    int32_field_data->FillFieldData(int32s.data(), N);
+    segment->LoadPrimitiveSkipIndex(
+            i32_fid, 0, DataType::INT32, int32_field_data->Data(), N);
+    less_than_1_skip = skip_index.CanSkipUnaryRange<int32_t>(
+        i32_fid, 0, OpType::LessThan, 1);
+    ASSERT_TRUE(less_than_1_skip);
+
+    //test for int16
+    std::vector<int16_t> int16s = {2, 2, 3, 4, 5, 6, 7, 8, 9, 12};
+    auto int16_field_data = storage::CreateFieldData(DataType::INT16, 1, 10);
+    int16_field_data->FillFieldData(int16s.data(), N);
+    segment->LoadPrimitiveSkipIndex(
+            i16_fid, 0, DataType::INT16, int16_field_data->Data(), N);
+    bool less_than_12_skip = skip_index.CanSkipUnaryRange<int16_t>(
+        i16_fid, 0, OpType::LessThan, 12);
+    ASSERT_FALSE(less_than_12_skip);
+
+    //test for int8
+    std::vector<int8_t> int8s = {2, 2, 3, 4, 5, 6, 7, 8, 9, 12};
+    auto int8_field_data = storage::CreateFieldData(DataType::INT8, 1, 10);
+    int8_field_data->FillFieldData(int8s.data(), N);
+    segment->LoadPrimitiveSkipIndex(
+            i8_fid, 0, DataType::INT8, int8_field_data->Data(), N);
+    bool greater_than_12_skip = skip_index.CanSkipUnaryRange<int8_t>(
+        i8_fid, 0, OpType::GreaterThan, 12);
+    ASSERT_TRUE(greater_than_12_skip);
+
+    // test for float
+    std::vector<float> floats = {
+        1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0};
+    auto float_field_data = storage::CreateFieldData(DataType::FLOAT, 1, 10);
+    float_field_data->FillFieldData(floats.data(), N);
+    segment->LoadPrimitiveSkipIndex(
+            float_fid, 0, DataType::FLOAT, float_field_data->Data(), N);
+    greater_than_10_skip = skip_index.CanSkipUnaryRange<float>(
+        float_fid, 0, OpType::GreaterThan, 10.0);
+    ASSERT_TRUE(greater_than_10_skip);
+
+    // test for double
+    std::vector<double> doubles = {
+        1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0};
+    auto double_field_data = storage::CreateFieldData(DataType::DOUBLE, 1, 10);
+    double_field_data->FillFieldData(doubles.data(), N);
+    segment->LoadPrimitiveSkipIndex(
+            double_fid, 0, DataType::DOUBLE, double_field_data->Data(), N);
+    greater_than_10_skip = skip_index.CanSkipUnaryRange<double>(
+        double_fid, 0, OpType::GreaterThan, 10.0);
+    ASSERT_TRUE(greater_than_10_skip);
+}
+
+TEST(Sealed, SkipIndexSkipBinaryRange) {
+    auto schema = std::make_shared<Schema>();
+    auto dim = 128;
+    auto metrics_type = "L2";
+    auto fake_vec_fid = schema->AddDebugField(
+        "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    size_t N = 10;
+    auto dataset = DataGen(schema, N);
+    auto segment = CreateSealedSegment(schema);
+    std::cout << "pk_fid:" << pk_fid.get() << std::endl;
+
+    //test for int64
+    std::vector<int64_t> pks = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    auto pk_field_data = storage::CreateFieldData(DataType::INT64, 1, 10);
+    pk_field_data->FillFieldData(pks.data(), N);
+    segment->LoadPrimitiveSkipIndex(
+            pk_fid, 0, DataType::INT64, pk_field_data->Data(), N);
+    auto& skip_index = segment->GetSkipIndex();
+    ASSERT_FALSE(skip_index.CanSkipBinaryRange<int64_t>(
+        pk_fid, 0, -3, 1, true, true));
+    ASSERT_TRUE(skip_index.CanSkipBinaryRange<int64_t>(
+        pk_fid, 0, -3, 1, true, false));
+
+    ASSERT_FALSE(skip_index.CanSkipBinaryRange<int64_t>(
+        pk_fid, 0, 7, 9, true, true));
+    ASSERT_FALSE(skip_index.CanSkipBinaryRange<int64_t>(
+        pk_fid, 0, 8, 12, true, false));
+
+    ASSERT_TRUE(skip_index.CanSkipBinaryRange<int64_t>(
+        pk_fid, 0, 10, 12, false, true));
+    ASSERT_FALSE(skip_index.CanSkipBinaryRange<int64_t>(
+        pk_fid, 0, 10, 12, true, true));
+}
+
+TEST(Sealed, SkipIndexSkipStringRange) {
+    auto schema = std::make_shared<Schema>();
+    auto dim = 128;
+    auto metrics_type = "L2";
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto string_fid = schema->AddDebugField("string_field", DataType::VARCHAR);
+    auto fake_vec_fid = schema->AddDebugField(
+            "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
+    size_t N = 5;
+    auto dataset = DataGen(schema, N);
+    auto segment = CreateSealedSegment(schema);
+
+    //test for string
+    std::vector<std::string> strings = {"e", "f", "g", "g", "j"};
+    auto string_field_data = storage::CreateFieldData(DataType::VARCHAR, 1, N);
+    string_field_data->FillFieldData(strings.data(), N);
+    auto string_field_data_info =
+            FieldDataInfo{string_fid.get(),
+                          N,
+                          std::vector<storage::FieldDataPtr>{string_field_data}};
+    segment->LoadFieldData(string_fid, string_field_data_info);
+    auto& skip_index = segment->GetSkipIndex();
+    ASSERT_TRUE(skip_index.CanSkipUnaryRange<std::string>(string_fid, 0, OpType::Equal, "w"));
+    ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(string_fid, 0, OpType::Equal, "e"));
+    ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(string_fid, 0, OpType::Equal, "j"));
+
+    ASSERT_TRUE(skip_index.CanSkipUnaryRange<std::string>(string_fid, 0, OpType::LessThan, "e"));
+    ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(string_fid, 0, OpType::LessEqual, "e"));
+
+    ASSERT_TRUE(skip_index.CanSkipUnaryRange<std::string>(string_fid, 0, OpType::GreaterThan, "j"));
+    ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(string_fid, 0, OpType::GreaterEqual, "j"));
+    ASSERT_FALSE(skip_index.CanSkipUnaryRange<int64_t>(string_fid, 0, OpType::GreaterEqual, 1));
+
+    ASSERT_TRUE(skip_index.CanSkipBinaryRange<std::string>(string_fid, 0, "a", "c", true, true));
+    ASSERT_TRUE(skip_index.CanSkipBinaryRange<std::string>(string_fid, 0, "c", "e", true, false));
+    ASSERT_FALSE(skip_index.CanSkipBinaryRange<std::string>(string_fid, 0, "c", "e", true, true));
+    ASSERT_FALSE(skip_index.CanSkipBinaryRange<std::string>(string_fid, 0, "e", "k", false, true));
+    ASSERT_FALSE(skip_index.CanSkipBinaryRange<std::string>(string_fid, 0, "j", "k", true, true));
+    ASSERT_TRUE(skip_index.CanSkipBinaryRange<std::string>(string_fid, 0, "j", "k", false, true));
+    ASSERT_FALSE(skip_index.CanSkipBinaryRange<int64_t>(string_fid, 0, 1, 2, false, true));
+
+}

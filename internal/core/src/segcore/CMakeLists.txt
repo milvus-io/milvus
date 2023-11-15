@@ -38,7 +38,8 @@ set(SEGCORE_FILES
         ScalarIndex.cpp
         TimestampIndex.cpp
         Utils.cpp
-        ConcurrentVector.cpp)
+        ConcurrentVector.cpp
+        SkipIndex.cpp)
 add_library(milvus_segcore SHARED ${SEGCORE_FILES})
 
 target_link_libraries(milvus_segcore milvus_query ${OpenMP_CXX_FLAGS})
