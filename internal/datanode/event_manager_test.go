@@ -71,6 +71,7 @@ func TestWatchChannel(t *testing.T) {
 
 	node.broker = broker
 
+	node.timeTickSender.Stop()
 	node.timeTickSender = newTimeTickSender(node.broker, 0)
 
 	t.Run("test watch channel", func(t *testing.T) {

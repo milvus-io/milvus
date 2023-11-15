@@ -355,8 +355,9 @@ func (node *DataNode) Start() error {
 		go node.compactionExecutor.start(node.ctx)
 
 		if Params.DataNodeCfg.DataNodeTimeTickByRPC.GetAsBool() {
-			node.timeTickSender = newTimeTickSender(node.broker, node.session.ServerID)
-			go node.timeTickSender.start(node.ctx)
+			node.timeTickSender = newTimeTickSender(node.broker, node.session.ServerID,
+				retry.Attempts(20), retry.Sleep(time.Millisecond*100))
+			node.timeTickSender.start()
 		}
 
 		node.stopWaiter.Add(1)
@@ -418,6 +419,10 @@ func (node *DataNode) Stop() error {
 
 		if node.session != nil {
 			node.session.Stop()
+		}
+
+		if node.timeTickSender != nil {
+			node.timeTickSender.Stop()
 		}
 
 		node.stopWaiter.Wait()
