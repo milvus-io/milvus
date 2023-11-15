@@ -110,7 +110,9 @@ func (p *JSONParser) combineDynamicRow(dynamicValues map[string]interface{}, row
 			if value, is := obj.(string); is {
 				// case 1
 				mp := make(map[string]interface{})
-				err := json.Unmarshal([]byte(value), &mp)
+				desc := json.NewDecoder(strings.NewReader(value))
+				desc.UseNumber()
+				err := desc.Decode(&mp)
 				if err != nil {
 					// invalid input
 					return errors.New("illegal value for dynamic field, not a JSON format string")
@@ -192,7 +194,7 @@ func (p *JSONParser) verifyRow(raw interface{}) (map[storage.FieldID]interface{}
 		}
 	}
 
-	// combine the redundant pairs into dunamic field(if has)
+	// combine the redundant pairs into dynamic field(if has)
 	err := p.combineDynamicRow(dynamicValues, row)
 	if err != nil {
 		log.Warn("JSON parser: failed to combine dynamic values", zap.Error(err))
