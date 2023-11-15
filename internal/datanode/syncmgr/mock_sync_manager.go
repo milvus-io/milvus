@@ -58,8 +58,8 @@ func (_c *MockSyncManager_Block_Call) RunAndReturn(run func(int64)) *MockSyncMan
 	return _c
 }
 
-// GetMinCheckpoints provides a mock function with given fields: channel
-func (_m *MockSyncManager) GetMinCheckpoints(channel string) *msgpb.MsgPosition {
+// GetEarliestPosition provides a mock function with given fields: channel
+func (_m *MockSyncManager) GetEarliestPosition(channel string) *msgpb.MsgPosition {
 	ret := _m.Called(channel)
 
 	var r0 *msgpb.MsgPosition
@@ -74,30 +74,30 @@ func (_m *MockSyncManager) GetMinCheckpoints(channel string) *msgpb.MsgPosition 
 	return r0
 }
 
-// MockSyncManager_GetMinCheckpoints_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetMinCheckpoints'
-type MockSyncManager_GetMinCheckpoints_Call struct {
+// MockSyncManager_GetEarliestPosition_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetEarliestPosition'
+type MockSyncManager_GetEarliestPosition_Call struct {
 	*mock.Call
 }
 
-// GetMinCheckpoints is a helper method to define mock.On call
+// GetEarliestPosition is a helper method to define mock.On call
 //   - channel string
-func (_e *MockSyncManager_Expecter) GetMinCheckpoints(channel interface{}) *MockSyncManager_GetMinCheckpoints_Call {
-	return &MockSyncManager_GetMinCheckpoints_Call{Call: _e.mock.On("GetMinCheckpoints", channel)}
+func (_e *MockSyncManager_Expecter) GetEarliestPosition(channel interface{}) *MockSyncManager_GetEarliestPosition_Call {
+	return &MockSyncManager_GetEarliestPosition_Call{Call: _e.mock.On("GetEarliestPosition", channel)}
 }
 
-func (_c *MockSyncManager_GetMinCheckpoints_Call) Run(run func(channel string)) *MockSyncManager_GetMinCheckpoints_Call {
+func (_c *MockSyncManager_GetEarliestPosition_Call) Run(run func(channel string)) *MockSyncManager_GetEarliestPosition_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(string))
 	})
 	return _c
 }
 
-func (_c *MockSyncManager_GetMinCheckpoints_Call) Return(_a0 *msgpb.MsgPosition) *MockSyncManager_GetMinCheckpoints_Call {
+func (_c *MockSyncManager_GetEarliestPosition_Call) Return(_a0 *msgpb.MsgPosition) *MockSyncManager_GetEarliestPosition_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockSyncManager_GetMinCheckpoints_Call) RunAndReturn(run func(string) *msgpb.MsgPosition) *MockSyncManager_GetMinCheckpoints_Call {
+func (_c *MockSyncManager_GetEarliestPosition_Call) RunAndReturn(run func(string) *msgpb.MsgPosition) *MockSyncManager_GetEarliestPosition_Call {
 	_c.Call.Return(run)
 	return _c
 }

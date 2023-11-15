@@ -47,7 +47,7 @@ type ttNode struct {
 	BaseNode
 	vChannelName       string
 	metacache          metacache.MetaCache
-	writeBufferManager writebuffer.Manager
+	writeBufferManager writebuffer.BufferManager
 	lastUpdateTime     *atomic.Time
 	broker             broker.Broker
 
@@ -152,7 +152,7 @@ func (ttn *ttNode) updateChannelCP(channelPos *msgpb.MsgPosition, curTs time.Tim
 	return nil
 }
 
-func newTTNode(config *nodeConfig, broker broker.Broker, wbManager writebuffer.Manager) (*ttNode, error) {
+func newTTNode(config *nodeConfig, broker broker.Broker, wbManager writebuffer.BufferManager) (*ttNode, error) {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(Params.DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
 	baseNode.SetMaxParallelism(Params.DataNodeCfg.FlowGraphMaxParallelism.GetAsInt32())

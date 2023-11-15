@@ -34,10 +34,18 @@ type SyncMeta struct {
 	metacache metacache.MetaCache
 }
 
+// SyncMangger is the interface for sync manager.
+// it processes the sync tasks inside and changes the meta.
 type SyncManager interface {
+	// SyncData is the method to submit sync task.
 	SyncData(ctx context.Context, task *SyncTask) *conc.Future[error]
-	GetMinCheckpoints(channel string) *msgpb.MsgPosition
+	// GetEarliestPosition returns the earliest position (normally start position) of the processing sync task of provided channel.
+	GetEarliestPosition(channel string) *msgpb.MsgPosition
+	// Block allows caller to block tasks of provided segment id.
+	// normally used by compaction task.
+	// if levelzero delta policy is enabled, this shall be an empty operation.
 	Block(segmentID int64)
+	// Unblock is the reverse method for `Block`.
 	Unblock(segmentID int64)
 }
 
@@ -75,7 +83,7 @@ func (mgr syncManager) SyncData(ctx context.Context, task *SyncTask) *conc.Futur
 	})
 }
 
-func (mgr syncManager) GetMinCheckpoints(channel string) *msgpb.MsgPosition {
+func (mgr syncManager) GetEarliestPosition(channel string) *msgpb.MsgPosition {
 	var cp *msgpb.MsgPosition
 	mgr.tasks.Range(func(_ string, task *SyncTask) bool {
 		if task.startPosition == nil {

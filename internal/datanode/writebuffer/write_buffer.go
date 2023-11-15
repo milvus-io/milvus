@@ -40,10 +40,10 @@ type WriteBuffer interface {
 	GetFlushTimestamp() uint64
 	// FlushSegments is the method to perform `Sync` operation with provided options.
 	FlushSegments(ctx context.Context, segmentIDs []int64) error
-	// MinCheckpoint returns current channel checkpoint.
+	// GetCheckpoint returns current channel checkpoint.
 	// If there are any non-empty segment buffer, returns the earliest buffer start position.
 	// Otherwise, returns latest buffered checkpoint.
-	MinCheckpoint() *msgpb.MsgPosition
+	GetCheckpoint() *msgpb.MsgPosition
 	// Close is the method to close and sink current buffer data.
 	Close(drop bool)
 }
@@ -124,14 +124,14 @@ func (wb *writeBufferBase) GetFlushTimestamp() uint64 {
 	return wb.flushTimestamp.Load()
 }
 
-func (wb *writeBufferBase) MinCheckpoint() *msgpb.MsgPosition {
+func (wb *writeBufferBase) GetCheckpoint() *msgpb.MsgPosition {
 	wb.mut.RLock()
 	defer wb.mut.RUnlock()
 
-	syncingPos := wb.syncMgr.GetMinCheckpoints(wb.channelName)
+	syncingPos := wb.syncMgr.GetEarliestPosition(wb.channelName)
 
 	positions := lo.MapToSlice(wb.buffers, func(_ int64, buf *segmentBuffer) *msgpb.MsgPosition {
-		return buf.MinCheckpoint()
+		return buf.EarliestPosition()
 	})
 	positions = append(positions, syncingPos)
 
@@ -143,7 +143,7 @@ func (wb *writeBufferBase) MinCheckpoint() *msgpb.MsgPosition {
 	return checkpoint
 }
 
-func (wb *writeBufferBase) triggerAutoSync() error {
+func (wb *writeBufferBase) triggerSync() error {
 	segmentsToSync := wb.getSegmentsToSync(wb.checkpoint.GetTimestamp())
 	if len(segmentsToSync) > 0 {
 		log.Info("write buffer get segments to sync", zap.Int64s("segmentIDs", segmentsToSync))
@@ -174,6 +174,7 @@ func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64)
 		syncTask := wb.getSyncTask(ctx, segmentID)
 		if syncTask == nil {
 			// segment info not found
+			log.Ctx(ctx).Warn("segment not found in meta", zap.Int64("segmentID", segmentID))
 			continue
 		}
 
@@ -218,7 +219,7 @@ func (wb *writeBufferBase) yieldBuffer(segmentID int64) (*storage.InsertData, *s
 
 	// remove buffer and move it to sync manager
 	delete(wb.buffers, segmentID)
-	start := buffer.MinCheckpoint()
+	start := buffer.EarliestPosition()
 	insert, delta := buffer.Yield()
 
 	return insert, delta, start

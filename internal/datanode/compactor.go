@@ -133,7 +133,7 @@ func (t *compactionTask) getChannelName() string {
 func (t *compactionTask) getNumRows() (int64, error) {
 	numRows := int64(0)
 	for _, binlog := range t.plan.SegmentBinlogs {
-		seg, ok := t.metaCache.GetSegmentByID(binlog.GetSegmentID()) // Channel.getSegment(binlog.GetSegmentID())
+		seg, ok := t.metaCache.GetSegmentByID(binlog.GetSegmentID())
 		if !ok {
 			return 0, merr.WrapErrSegmentNotFound(binlog.GetSegmentID(), "get compaction segments num rows failed")
 		}

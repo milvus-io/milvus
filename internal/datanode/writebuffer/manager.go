@@ -15,8 +15,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
-// Manager is the interface for WriteBuffer management.
-type Manager interface {
+// BufferManager is the interface for WriteBuffer management.
+type BufferManager interface {
 	// Register adds a WriteBuffer with provided schema & options.
 	Register(channel string, schema *schemapb.CollectionSchema, metacache metacache.MetaCache, opts ...WriteBufferOption) error
 	// FlushSegments notifies writeBuffer corresponding to provided channel to flush segments.
@@ -36,21 +36,21 @@ type Manager interface {
 }
 
 // NewManager returns initialized manager as `Manager`
-func NewManager(syncMgr syncmgr.SyncManager) Manager {
-	return &manager{
+func NewManager(syncMgr syncmgr.SyncManager) BufferManager {
+	return &bufferManager{
 		syncMgr: syncMgr,
 		buffers: make(map[string]WriteBuffer),
 	}
 }
 
-type manager struct {
+type bufferManager struct {
 	syncMgr syncmgr.SyncManager
 	buffers map[string]WriteBuffer
 	mut     sync.RWMutex
 }
 
 // Register a new WriteBuffer for channel.
-func (m *manager) Register(channel string, schema *schemapb.CollectionSchema, metacache metacache.MetaCache, opts ...WriteBufferOption) error {
+func (m *bufferManager) Register(channel string, schema *schemapb.CollectionSchema, metacache metacache.MetaCache, opts ...WriteBufferOption) error {
 	m.mut.Lock()
 	defer m.mut.Unlock()
 
@@ -67,7 +67,7 @@ func (m *manager) Register(channel string, schema *schemapb.CollectionSchema, me
 }
 
 // FlushSegments call sync segment and change segments state to Flushed.
-func (m *manager) FlushSegments(ctx context.Context, channel string, segmentIDs []int64) error {
+func (m *bufferManager) FlushSegments(ctx context.Context, channel string, segmentIDs []int64) error {
 	m.mut.RLock()
 	buf, ok := m.buffers[channel]
 	m.mut.RUnlock()
@@ -82,7 +82,7 @@ func (m *manager) FlushSegments(ctx context.Context, channel string, segmentIDs 
 	return buf.FlushSegments(ctx, segmentIDs)
 }
 
-func (m *manager) FlushChannel(ctx context.Context, channel string, flushTs uint64) error {
+func (m *bufferManager) FlushChannel(ctx context.Context, channel string, flushTs uint64) error {
 	m.mut.RLock()
 	buf, ok := m.buffers[channel]
 	m.mut.RUnlock()
@@ -98,7 +98,7 @@ func (m *manager) FlushChannel(ctx context.Context, channel string, flushTs uint
 }
 
 // BufferData put data into channel write buffer.
-func (m *manager) BufferData(channel string, insertMsgs []*msgstream.InsertMsg, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) error {
+func (m *bufferManager) BufferData(channel string, insertMsgs []*msgstream.InsertMsg, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) error {
 	m.mut.RLock()
 	buf, ok := m.buffers[channel]
 	m.mut.RUnlock()
@@ -113,7 +113,7 @@ func (m *manager) BufferData(channel string, insertMsgs []*msgstream.InsertMsg, 
 }
 
 // GetCheckpoint returns checkpoint for provided channel.
-func (m *manager) GetCheckpoint(channel string) (*msgpb.MsgPosition, bool, error) {
+func (m *bufferManager) GetCheckpoint(channel string) (*msgpb.MsgPosition, bool, error) {
 	m.mut.RLock()
 	buf, ok := m.buffers[channel]
 	m.mut.RUnlock()
@@ -121,13 +121,13 @@ func (m *manager) GetCheckpoint(channel string) (*msgpb.MsgPosition, bool, error
 	if !ok {
 		return nil, false, merr.WrapErrChannelNotFound(channel)
 	}
-	cp := buf.MinCheckpoint()
+	cp := buf.GetCheckpoint()
 	flushTs := buf.GetFlushTimestamp()
 
 	return cp, flushTs != nonFlushTS && cp.GetTimestamp() >= flushTs, nil
 }
 
-func (m *manager) NotifyCheckpointUpdated(channel string, ts uint64) {
+func (m *bufferManager) NotifyCheckpointUpdated(channel string, ts uint64) {
 	m.mut.Lock()
 	defer m.mut.Unlock()
 	buf, ok := m.buffers[channel]
@@ -143,7 +143,7 @@ func (m *manager) NotifyCheckpointUpdated(channel string, ts uint64) {
 
 // RemoveChannel remove channel WriteBuffer from manager.
 // this method discards all buffered data since datanode no longer has the ownership
-func (m *manager) RemoveChannel(channel string) {
+func (m *bufferManager) RemoveChannel(channel string) {
 	m.mut.Lock()
 	buf, ok := m.buffers[channel]
 	delete(m.buffers, channel)
@@ -159,7 +159,7 @@ func (m *manager) RemoveChannel(channel string) {
 
 // DropChannel removes channel WriteBuffer and process `DropChannel`
 // this method will save all buffered data
-func (m *manager) DropChannel(channel string) {
+func (m *bufferManager) DropChannel(channel string) {
 	m.mut.Lock()
 	buf, ok := m.buffers[channel]
 	delete(m.buffers, channel)

@@ -62,7 +62,7 @@ func (wb *l0WriteBuffer) BufferData(insertMsgs []*msgstream.InsertMsg, deleteMsg
 	// update buffer last checkpoint
 	wb.checkpoint = endPos
 
-	return wb.triggerAutoSync()
+	return wb.triggerSync()
 }
 
 func (wb *l0WriteBuffer) getL0SegmentID(partitionID int64) int64 {

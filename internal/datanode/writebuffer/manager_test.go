@@ -26,7 +26,7 @@ type ManagerSuite struct {
 	syncMgr     *syncmgr.MockSyncManager
 	metacache   *metacache.MockMetaCache
 
-	manager *manager
+	manager *bufferManager
 }
 
 func (s *ManagerSuite) SetupSuite() {
@@ -55,7 +55,7 @@ func (s *ManagerSuite) SetupTest() {
 
 	mgr := NewManager(s.syncMgr)
 	var ok bool
-	s.manager, ok = mgr.(*manager)
+	s.manager, ok = mgr.(*bufferManager)
 	s.Require().True(ok)
 }
 
@@ -132,7 +132,7 @@ func (s *ManagerSuite) TestGetCheckpoint() {
 		manager.mut.Unlock()
 
 		pos := &msgpb.MsgPosition{ChannelName: s.channelName, Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0)}
-		wb.EXPECT().MinCheckpoint().Return(pos)
+		wb.EXPECT().GetCheckpoint().Return(pos)
 		wb.EXPECT().GetFlushTimestamp().Return(nonFlushTS)
 		result, needUpdate, err := manager.GetCheckpoint(s.channelName)
 		s.NoError(err)
@@ -150,7 +150,7 @@ func (s *ManagerSuite) TestGetCheckpoint() {
 		cpTimestamp := tsoutil.ComposeTSByTime(time.Now(), 0)
 
 		pos := &msgpb.MsgPosition{ChannelName: s.channelName, Timestamp: cpTimestamp}
-		wb.EXPECT().MinCheckpoint().Return(pos)
+		wb.EXPECT().GetCheckpoint().Return(pos)
 		wb.EXPECT().GetFlushTimestamp().Return(cpTimestamp - 1)
 		result, needUpdate, err := manager.GetCheckpoint(s.channelName)
 		s.NoError(err)
