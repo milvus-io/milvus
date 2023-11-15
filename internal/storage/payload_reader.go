@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"fmt"
 
-	"github.com/apache/arrow/go/v8/arrow"
-	"github.com/apache/arrow/go/v8/parquet"
-	"github.com/apache/arrow/go/v8/parquet/file"
+	"github.com/apache/arrow/go/v12/arrow"
+	"github.com/apache/arrow/go/v12/parquet"
+	"github.com/apache/arrow/go/v12/parquet/file"
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
 
@@ -298,7 +298,11 @@ func (r *PayloadReader) GetBinaryVectorFromPayload() ([]byte, int, error) {
 		return nil, -1, fmt.Errorf("failed to get binary vector from datatype %v", r.colType.String())
 	}
 
-	dim := r.reader.RowGroup(0).Column(0).Descriptor().TypeLength()
+	col, err := r.reader.RowGroup(0).Column(0)
+	if err != nil {
+		return nil, -1, err
+	}
+	dim := col.Descriptor().TypeLength()
 	values := make([]parquet.FixedLenByteArray, r.numRows)
 	valuesRead, err := ReadDataFromAllRowGroups[parquet.FixedLenByteArray, *file.FixedLenByteArrayColumnChunkReader](r.reader, values, 0, r.numRows)
 	if err != nil {
@@ -321,7 +325,11 @@ func (r *PayloadReader) GetFloat16VectorFromPayload() ([]byte, int, error) {
 	if r.colType != schemapb.DataType_Float16Vector {
 		return nil, -1, fmt.Errorf("failed to get float vector from datatype %v", r.colType.String())
 	}
-	dim := r.reader.RowGroup(0).Column(0).Descriptor().TypeLength() / 2
+	col, err := r.reader.RowGroup(0).Column(0)
+	if err != nil {
+		return nil, -1, err
+	}
+	dim := col.Descriptor().TypeLength() / 2
 	values := make([]parquet.FixedLenByteArray, r.numRows)
 	valuesRead, err := ReadDataFromAllRowGroups[parquet.FixedLenByteArray, *file.FixedLenByteArrayColumnChunkReader](r.reader, values, 0, r.numRows)
 	if err != nil {
@@ -344,7 +352,12 @@ func (r *PayloadReader) GetFloatVectorFromPayload() ([]float32, int, error) {
 	if r.colType != schemapb.DataType_FloatVector {
 		return nil, -1, fmt.Errorf("failed to get float vector from datatype %v", r.colType.String())
 	}
-	dim := r.reader.RowGroup(0).Column(0).Descriptor().TypeLength() / 4
+	col, err := r.reader.RowGroup(0).Column(0)
+	if err != nil {
+		return nil, -1, err
+	}
+
+	dim := col.Descriptor().TypeLength() / 4
 
 	values := make([]parquet.FixedLenByteArray, r.numRows)
 	valuesRead, err := ReadDataFromAllRowGroups[parquet.FixedLenByteArray, *file.FixedLenByteArrayColumnChunkReader](r.reader, values, 0, r.numRows)
@@ -383,7 +396,10 @@ func ReadDataFromAllRowGroups[T any, E interface {
 		if columnIdx >= reader.RowGroup(i).NumColumns() {
 			return -1, fmt.Errorf("try to fetch %d-th column of reader but row group has only %d column(s)", columnIdx, reader.RowGroup(i).NumColumns())
 		}
-		column := reader.RowGroup(i).Column(columnIdx)
+		column, err := reader.RowGroup(i).Column(columnIdx)
+		if err != nil {
+			return -1, err
+		}
 
 		cReader, ok := column.(E)
 		if !ok {
