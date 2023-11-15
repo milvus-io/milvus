@@ -261,7 +261,8 @@ CreateScalarDataArray(int64_t count, const FieldMeta& field_meta) {
             obj->mutable_data()->Resize(count, 0);
             break;
         }
-        case DataType::VARCHAR: {
+        case DataType::VARCHAR:
+        case DataType::STRING: {
             auto obj = scalar_array->mutable_string_data();
             obj->mutable_data()->Reserve(count);
             for (auto i = 0; i < count; i++) {

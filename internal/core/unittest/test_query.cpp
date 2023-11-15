@@ -549,7 +549,6 @@ TEST(Query, FillSegment) {
     pb::schema::CollectionSchema proto;
     proto.set_name("col");
     proto.set_description("asdfhsalkgfhsadg");
-    proto.set_autoid(false);
     auto dim = 16;
 
     {

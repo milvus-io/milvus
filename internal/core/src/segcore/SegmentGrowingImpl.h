@@ -155,14 +155,22 @@ class SegmentGrowingImpl : public SegmentGrowing {
     bulk_subscript_impl(const VectorBase* vec_raw,
                         const int64_t* seg_offsets,
                         int64_t count,
-                        void* output_raw) const;
+                        T* output) const;
+
+    template <typename S, typename T = S>
+    void
+    bulk_subscript_ptr_impl(const VectorBase* vec_raw,
+                            const int64_t* seg_offsets,
+                            int64_t count,
+                            google::protobuf::RepeatedPtrField<T>* dst) const;
 
     // for scalar array vectors
+    template <typename T>
     void
-    bulk_subscript_impl(const VectorBase& vec_raw,
-                        const int64_t* seg_offsets,
-                        int64_t count,
-                        void* output_raw) const;
+    bulk_subscript_array_impl(const VectorBase& vec_raw,
+                              const int64_t* seg_offsets,
+                              int64_t count,
+                              google::protobuf::RepeatedPtrField<T>* dst) const;
 
     template <typename T>
     void
