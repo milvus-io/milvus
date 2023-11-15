@@ -151,14 +151,14 @@ pull_request_rules:
           - base=sql_beta
           - base~=^2(\.\d+){1,2}$
       - title~=\[skip e2e\]
-      - label=kind/improvement
+      - label=kind/enhancement
       - -files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt))).*$
     actions:
       label:
         add:
           - ci-passed
 
-  - name: Blocking PR if missing a related issue or doesn't have kind/improvement label
+  - name: Blocking PR if missing a related issue or doesn't have kind/enhancement label
     conditions:
       - or:
           - base=master
@@ -167,7 +167,7 @@ pull_request_rules:
       - and:
           - -body~=\#[0-9]{1,6}(\s+|$)
           - -body~=https://github.com/milvus-io/milvus/issues/[0-9]{1,6}(\s+|$)
-      - -label=kind/improvement
+      - -label=kind/enhancement
       - -title~=\[automated\]
     actions:
       label:
@@ -193,7 +193,7 @@ pull_request_rules:
                   - base=master
                   - base=sql_beta
                   - base~=^2(\.\d+){1,2}$
-              - label=kind/improvement
+              - label=kind/enhancement
     actions:
       label:
         remove:
@@ -356,29 +356,75 @@ pull_request_rules:
         message: |
           @{{author}} ut workflow job failed, comment `rerun ut` can trigger the job again.
 
-  - name: Add `needs-rebase` label when more than one commit in pr
+  - name: Add 'do-not-merge/invalid-pr-format' label for invalid PR titles
     conditions:
       - or:
-          - base=master
-          - base=sql_beta
-          - base~=^2(\.\d+){1,2}$
-      - '#commits>1'
+        - '-title~=^(feat:|enhance:|fix:)'
+        - body=^$
     actions:
-      comment:
-        message: |
-          @{{author}}, please be sure the pr should only have one commit, check https://github.com/milvus-io/milvus/blob/master/CODE_REVIEW.md for more details.
       label:
         add:
-          - needs-rebase
+          - do-not-merge/invalid-pr-format
+      comment:
+        message: |
+          @{{author}} 
 
-  - name: Remove `needs-rebase` label when only one commit in pr
+          **Invalid PR Title Format Detected**
+
+          Your PR submission does not adhere to our required standards. To ensure clarity and consistency, please meet the following criteria:
+
+          1. **Title Format:** The PR title must begin with one of these prefixes:
+            - `feat:` for introducing a new feature.
+            - `enhance:` for improvements to existing functionality.
+            - `fix:` for bug fixes.
+
+          2. **Description Requirement:** The PR must include a non-empty description, detailing the changes and their impact.
+
+          **Required Title Structure:**
+
+          ```
+          [Type]: [Description of the PR]
+          ```
+
+          Where `Type` is one of `feat`, `enhance`, or `fix`. 
+
+          **Example:**
+          ```
+          feat: Enhance search functionality within the user interface
+          ```
+
+          Please review and update your PR to comply with these guidelines.
+
+  - name: Remove 'do-not-merge/invalid-pr-format' label for valid PRs
     conditions:
-      - or:
-          - base=master
-          - base=sql_beta
-          - base~=^2(\.\d+){1,2}$
-      - '#commits=1'
+      - 'title~=^(feat:|enhance:|fix:)'
+      - '-body=^$'
+      - 'label=do-not-merge/invalid-pr-format'
     actions:
       label:
         remove:
-          - needs-rebase
+          - do-not-merge/invalid-pr-format
+
+  - name: Label bug fix PRs
+    conditions:
+      - 'title~=^fix:'
+    actions:
+      label:
+        add:
+          - kind/bug
+
+  - name: Label feature PRs
+    conditions:
+      - 'title~=^feat:'
+    actions:
+      label:
+        add:
+          - kind/feature
+
+  - name: Label enhancement PRs
+    conditions:
+      - 'title~=^enhance:'
+    actions:
+      label:
+        add:
+          - kind/enhancement
