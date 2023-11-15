@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -92,11 +93,13 @@ type shardDelegator struct {
 
 	lifetime lifetime.Lifetime[lifetime.State]
 
-	distribution   *distribution
-	segmentManager segments.SegmentManager
-	tsafeManager   tsafe.Manager
-	pkOracle       pkoracle.PkOracle
-	// L0 delete buffer
+	distribution    *distribution
+	segmentManager  segments.SegmentManager
+	tsafeManager    tsafe.Manager
+	pkOracle        pkoracle.PkOracle
+	level0Mut       sync.RWMutex
+	level0Deletions map[int64]*storage.DeleteData // partitionID -> deletions
+	// stream delete buffer
 	deleteMut    sync.Mutex
 	deleteBuffer deletebuffer.DeleteBuffer[*deletebuffer.Item]
 	// dispatcherClient msgdispatcher.Client

@@ -33,7 +33,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/eventlog"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -71,6 +70,12 @@ func WithType(typ SegmentType) SegmentFilter {
 func WithID(id int64) SegmentFilter {
 	return func(segment Segment) bool {
 		return segment.ID() == id
+	}
+}
+
+func WithLevel(level datapb.SegmentLevel) SegmentFilter {
+	return func(segment Segment) bool {
+		return segment.Level() == level
 	}
 }
 
@@ -129,7 +134,6 @@ type SegmentManager interface {
 
 	GetSealed(segmentID UniqueID) Segment
 	GetGrowing(segmentID UniqueID) Segment
-	GetL0DeleteRecords() ([]storage.PrimaryKey, []uint64)
 	Empty() bool
 
 	// Remove removes the given segment,
@@ -412,25 +416,6 @@ func (mgr *segmentManager) GetGrowing(segmentID UniqueID) Segment {
 	}
 
 	return nil
-}
-
-func (mgr *segmentManager) GetL0DeleteRecords() ([]storage.PrimaryKey, []uint64) {
-	mgr.mu.RLock()
-	defer mgr.mu.RUnlock()
-
-	pks := make([]storage.PrimaryKey, 0)
-	tss := make([]uint64, 0)
-	for _, segment := range mgr.sealedSegments {
-		if segment.Level() != datapb.SegmentLevel_L0 {
-			continue
-		}
-
-		deletePks, deleteTss := segment.(*L0Segment).DeleteRecords()
-		pks = append(pks, deletePks...)
-		tss = append(tss, deleteTss...)
-	}
-
-	return pks, tss
 }
 
 func (mgr *segmentManager) Empty() bool {
