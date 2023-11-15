@@ -47,6 +47,9 @@ jobs:
     env:
       UBUNTU: ${{ matrix.ubuntu }}
     steps:
+      - name: Setup mold
+        uses: rui314/setup-mold@v1
+        
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
         with:
