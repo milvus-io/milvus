@@ -41,6 +41,7 @@ type SyncTask struct {
 	// batchSize is the row number of this sync task,
 	// not the total num of rows of segemnt
 	batchSize int64
+	level     datapb.SegmentLevel
 
 	tsFrom typeutil.Timestamp
 	tsTo   typeutil.Timestamp

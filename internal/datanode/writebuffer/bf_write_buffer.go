@@ -71,5 +71,6 @@ func (wb *bfWriteBuffer) BufferData(insertMsgs []*msgstream.InsertMsg, deleteMsg
 	// update buffer last checkpoint
 	wb.checkpoint = endPos
 
-	return wb.triggerSync()
+	_, err = wb.triggerSync()
+	return err
 }

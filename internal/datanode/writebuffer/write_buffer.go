@@ -143,18 +143,18 @@ func (wb *writeBufferBase) GetCheckpoint() *msgpb.MsgPosition {
 	return checkpoint
 }
 
-func (wb *writeBufferBase) triggerSync() error {
+func (wb *writeBufferBase) triggerSync() (segmentIDs []int64, err error) {
 	segmentsToSync := wb.getSegmentsToSync(wb.checkpoint.GetTimestamp())
 	if len(segmentsToSync) > 0 {
 		log.Info("write buffer get segments to sync", zap.Int64s("segmentIDs", segmentsToSync))
 		err := wb.syncSegments(context.Background(), segmentsToSync)
 		if err != nil {
 			log.Warn("segment segments failed", zap.Int64s("segmentIDs", segmentsToSync), zap.Error(err))
-			return err
+			return segmentsToSync, err
 		}
 	}
 
-	return nil
+	return segmentsToSync, nil
 }
 
 func (wb *writeBufferBase) flushSegments(ctx context.Context, segmentIDs []int64) error {

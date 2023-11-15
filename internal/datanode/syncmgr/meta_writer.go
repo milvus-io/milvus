@@ -100,6 +100,7 @@ func (b *brokerMetaWriter) UpdateSync(pack *SyncTask) error {
 		Flushed:        pack.isFlush,
 		Dropped:        pack.isDrop,
 		Channel:        pack.channelName,
+		SegLevel:       pack.level,
 	}
 	err := retry.Do(context.Background(), func() error {
 		err := b.broker.SaveBinlogPaths(context.Background(), req)
