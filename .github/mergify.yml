@@ -359,7 +359,7 @@ pull_request_rules:
 
   - name: 'bot would add the kind/improvement label when it sees type: in PR title'
     conditions:
-      - title~=type\:
+      - 'title~=type:'
     actions:
       label:
         add:
