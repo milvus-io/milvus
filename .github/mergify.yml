@@ -356,3 +356,12 @@ pull_request_rules:
         message: |
           @{{author}} ut workflow job failed, comment `rerun ut` can trigger the job again.
 
+
+  - name: 'bot would add the kind/improvement label when it sees type: in PR title'
+    conditions:
+      - title~=(?i)type:
+    actions:
+      label:
+        add:
+          - 'kind/improvement'
+
