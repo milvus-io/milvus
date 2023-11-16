@@ -473,7 +473,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	}
 
 	if req.GetDropped() {
-		s.segmentManager.DropSegment(ctx, segment.GetID())
+		s.segmentManager.DropSegment(ctx, segmentID)
 		operators = append(operators, UpdateStatusOperator(segmentID, commonpb.SegmentState_Dropped))
 	} else if req.GetFlushed() {
 		// set segment to SegmentState_Flushing
@@ -503,8 +503,14 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		s.flushCh <- req.SegmentID
 
 		if !req.Importing && Params.DataCoordCfg.EnableCompaction.GetAsBool() {
-			err = s.compactionTrigger.triggerSingleCompaction(segment.GetCollectionID(), segment.GetPartitionID(),
-				segmentID, segment.GetInsertChannel())
+			if segment == nil && req.GetSegLevel() == datapb.SegmentLevel_L0 {
+				err = s.compactionTrigger.triggerSingleCompaction(req.GetCollectionID(), req.GetPartitionID(),
+					segmentID, req.GetChannel())
+			} else {
+				err = s.compactionTrigger.triggerSingleCompaction(segment.GetCollectionID(), segment.GetPartitionID(),
+					segmentID, segment.GetInsertChannel())
+			}
+
 			if err != nil {
 				log.Warn("failed to trigger single compaction")
 			} else {
