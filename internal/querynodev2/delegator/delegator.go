@@ -657,21 +657,22 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	log.Info("Init delta cache", zap.Int64("maxSegmentCacheBuffer", maxSegmentDeleteBuffer), zap.Time("startTime", tsoutil.PhysicalTime(startTs)))
 
 	sd := &shardDelegator{
-		collectionID:   collectionID,
-		replicaID:      replicaID,
-		vchannelName:   channel,
-		version:        version,
-		collection:     collection,
-		segmentManager: manager.Segment,
-		workerManager:  workerManager,
-		lifetime:       lifetime.NewLifetime(lifetime.Initializing),
-		distribution:   NewDistribution(),
-		deleteBuffer:   deletebuffer.NewDoubleCacheDeleteBuffer[*deletebuffer.Item](startTs, maxSegmentDeleteBuffer),
-		pkOracle:       pkoracle.NewPkOracle(),
-		tsafeManager:   tsafeManager,
-		latestTsafe:    atomic.NewUint64(startTs),
-		loader:         loader,
-		factory:        factory,
+		collectionID:    collectionID,
+		replicaID:       replicaID,
+		vchannelName:    channel,
+		version:         version,
+		collection:      collection,
+		segmentManager:  manager.Segment,
+		workerManager:   workerManager,
+		lifetime:        lifetime.NewLifetime(lifetime.Initializing),
+		distribution:    NewDistribution(),
+		level0Deletions: make(map[int64]*storage.DeleteData),
+		deleteBuffer:    deletebuffer.NewDoubleCacheDeleteBuffer[*deletebuffer.Item](startTs, maxSegmentDeleteBuffer),
+		pkOracle:        pkoracle.NewPkOracle(),
+		tsafeManager:    tsafeManager,
+		latestTsafe:     atomic.NewUint64(startTs),
+		loader:          loader,
+		factory:         factory,
 	}
 	m := sync.Mutex{}
 	sd.tsCond = sync.NewCond(&m)
