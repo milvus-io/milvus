@@ -167,7 +167,15 @@ pull_request_rules:
       - and:
           - -body~=\#[0-9]{1,6}(\s+|$)
           - -body~=https://github.com/milvus-io/milvus/issues/[0-9]{1,6}(\s+|$)
-      - -label=kind/enhancement
+      - and:
+        - label=kind/enhancement
+        - or:
+          - label=size/L
+          - label=size/XL
+          - label=size/XXL
+          
+      - -label=kind/doc
+      - -label=kind/test
       - -title~=\[automated\]
     actions:
       label:
@@ -375,8 +383,10 @@ pull_request_rules:
 
           1. **Title Format:** The PR title must begin with one of these prefixes:
             - `feat:` for introducing a new feature.
-            - `enhance:` for improvements to existing functionality.
             - `fix:` for bug fixes.
+            - `enhance:` for improvements to existing functionality.
+            - `test`: for add tests to existing functionality.
+            - `doc`: for modifying documentation.
 
           2. **Description Requirement:** The PR must include a non-empty description, detailing the changes and their impact.
 
@@ -386,18 +396,18 @@ pull_request_rules:
           [Type]: [Description of the PR]
           ```
 
-          Where `Type` is one of `feat`, `enhance`, or `fix`. 
+          Where `Type` is one of `feat`, `fix`, `enhance`, `test` or `doc`. 
 
           **Example:**
           ```
-          feat: Enhance search functionality within the user interface
+          enhance: improve search performance significantly 
           ```
 
           Please review and update your PR to comply with these guidelines.
 
   - name: Remove 'do-not-merge/invalid-pr-format' label for valid PRs
     conditions:
-      - 'title~=^(feat:|enhance:|fix:)'
+      - 'title~=^(feat:|enhance:|fix:|test:|doc:)'
       - '-body=^$'
       - 'label=do-not-merge/invalid-pr-format'
     actions:
@@ -428,3 +438,21 @@ pull_request_rules:
       label:
         add:
           - kind/enhancement
+
+  - name: Label test PRs
+    conditions:
+      - 'title~=^test:'
+    actions:
+      label:
+        add:
+          - kind/test
+
+  - name: Label doc PRs
+    conditions:
+      - 'title~=^doc:'
+    actions:
+      label:
+        add:
+          - kind/doc
+
+        
