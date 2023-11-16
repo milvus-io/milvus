@@ -61,7 +61,7 @@ import (
 
 const moduleName = "Proxy"
 
-const SlowReadSpan = time.Second * 5
+const SlowReadSpan = time.Microsecond * 5
 
 // GetComponentStates gets the state of Proxy.
 func (node *Proxy) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
@@ -2564,7 +2564,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	defer func() {
 		span := tr.ElapseSpan()
 		if span >= SlowReadSpan {
-			log.Info(rpcSlow(method), zap.Duration("duration", span))
+			log.Info(rpcSlow(method), zap.Int64("nq", qt.SearchRequest.GetNq()), zap.Duration("duration", span))
 		}
 	}()
 
@@ -2596,6 +2596,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	if err := qt.WaitToFinish(); err != nil {
 		log.Warn(
 			rpcFailedToWaitToFinish(method),
+			zap.Int64("nq", qt.SearchRequest.GetNq()),
 			zap.Error(err),
 		)
 
