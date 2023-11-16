@@ -371,7 +371,10 @@ pull_request_rules:
   - name: Add 'do-not-merge/invalid-pr-format' label for invalid PR titles
     conditions:
       - or:
-        - '-title~=^(feat:|enhance:|fix:)'
+        - base=master
+        - base~=^2\.3(\.\d+){0,1}$
+      - or:
+        - '-title~=^(feat:|enhance:|fix:|test:|doc:)'
         - body=^$
     actions:
       label:
@@ -411,6 +414,9 @@ pull_request_rules:
 
   - name: Remove 'do-not-merge/invalid-pr-format' label for valid PRs
     conditions:
+      - or:
+        - base=master
+        - base~=^2\.3(\.\d+){0,1}$
       - 'title~=^(feat:|enhance:|fix:|test:|doc:)'
       - '-body=^$'
       - 'label=do-not-merge/invalid-pr-format'
@@ -421,6 +427,9 @@ pull_request_rules:
 
   - name: Label bug fix PRs
     conditions:
+      - or:
+        - base=master
+        - base~=^2\.3(\.\d+){0,1}$
       - 'title~=^fix:'
     actions:
       label:
@@ -429,6 +438,9 @@ pull_request_rules:
 
   - name: Label feature PRs
     conditions:
+      - or:
+        - base=master
+        - base~=^2\.3(\.\d+){0,1}$
       - 'title~=^feat:'
     actions:
       label:
@@ -437,6 +449,9 @@ pull_request_rules:
 
   - name: Label enhancement PRs
     conditions:
+      - or:
+        - base=master
+        - base~=^2\.3(\.\d+){0,1}$
       - 'title~=^enhance:'
     actions:
       label:
@@ -445,6 +460,9 @@ pull_request_rules:
 
   - name: Label test PRs
     conditions:
+      - or:
+        - base=master
+        - base~=^2\.3(\.\d+){0,1}$
       - 'title~=^test:'
     actions:
       label:
@@ -453,6 +471,9 @@ pull_request_rules:
 
   - name: Label doc PRs
     conditions:
+      - or:
+        - base=master
+        - base~=^2\.3(\.\d+){0,1}$
       - 'title~=^doc:'
     actions:
       label:
