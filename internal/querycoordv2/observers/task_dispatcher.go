@@ -27,7 +27,10 @@ import (
 
 // taskDispatcher is the utility to provide task dedup and dispatch feature
 type taskDispatcher[K comparable] struct {
-	tasks      *typeutil.ConcurrentSet[K]
+	// tasks is the map for registered task
+	// key is the task identifier
+	// value is the flag stands for whether task is submitted to task pool
+	tasks      *typeutil.ConcurrentMap[K, bool]
 	pool       *conc.Pool[any]
 	notifyCh   chan struct{}
 	taskRunner task[K]
@@ -40,7 +43,7 @@ type task[K comparable] func(context.Context, K)
 
 func newTaskDispatcher[K comparable](runner task[K]) *taskDispatcher[K] {
 	return &taskDispatcher[K]{
-		tasks:      typeutil.NewConcurrentSet[K](),
+		tasks:      typeutil.NewConcurrentMap[K, bool](),
 		pool:       conc.NewPool[any](paramtable.Get().QueryCoordCfg.ObserverTaskParallel.GetAsInt()),
 		notifyCh:   make(chan struct{}, 1),
 		taskRunner: runner,
@@ -70,7 +73,8 @@ func (d *taskDispatcher[K]) Stop() {
 func (d *taskDispatcher[K]) AddTask(keys ...K) {
 	var added bool
 	for _, key := range keys {
-		added = d.tasks.Insert(key) || added
+		_, loaded := d.tasks.GetOrInsert(key, false)
+		added = added || !loaded
 	}
 	if added {
 		d.notify()
@@ -90,13 +94,15 @@ func (d *taskDispatcher[K]) schedule(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-d.notifyCh:
-			d.tasks.Range(func(k K) bool {
-				d.tasks.Insert(k)
-				d.pool.Submit(func() (any, error) {
-					d.taskRunner(ctx, k)
-					d.tasks.Remove(k)
-					return struct{}{}, nil
-				})
+			d.tasks.Range(func(k K, submitted bool) bool {
+				if !submitted {
+					d.pool.Submit(func() (any, error) {
+						d.taskRunner(ctx, k)
+						d.tasks.Remove(k)
+						return struct{}{}, nil
+					})
+					d.tasks.Insert(k, true)
+				}
 				return true
 			})
 		}
