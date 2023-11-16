@@ -48,7 +48,7 @@ type WriteBuffer interface {
 	Close(drop bool)
 }
 
-func NewWriteBuffer(channel string, schema *schemapb.CollectionSchema, metacache metacache.MetaCache, syncMgr syncmgr.SyncManager, opts ...WriteBufferOption) (WriteBuffer, error) {
+func NewWriteBuffer(channel string, metacache metacache.MetaCache, syncMgr syncmgr.SyncManager, opts ...WriteBufferOption) (WriteBuffer, error) {
 	option := defaultWBOption()
 	option.syncPolicies = append(option.syncPolicies, GetFlushingSegmentsPolicy(metacache))
 	for _, opt := range opts {
@@ -57,9 +57,9 @@ func NewWriteBuffer(channel string, schema *schemapb.CollectionSchema, metacache
 
 	switch option.deletePolicy {
 	case DeletePolicyBFPkOracle:
-		return NewBFWriteBuffer(channel, schema, metacache, syncMgr, option)
+		return NewBFWriteBuffer(channel, metacache, syncMgr, option)
 	case DeletePolicyL0Delta:
-		return NewL0WriteBuffer(channel, schema, metacache, syncMgr, option)
+		return NewL0WriteBuffer(channel, metacache, syncMgr, option)
 	default:
 		return nil, merr.WrapErrParameterInvalid("valid delete policy config", option.deletePolicy)
 	}
@@ -84,14 +84,15 @@ type writeBufferBase struct {
 	flushTimestamp *atomic.Uint64
 }
 
-func newWriteBufferBase(channel string, sch *schemapb.CollectionSchema, metacache metacache.MetaCache, syncMgr syncmgr.SyncManager, option *writeBufferOption) *writeBufferBase {
+func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr syncmgr.SyncManager, option *writeBufferOption) *writeBufferBase {
 	flushTs := atomic.NewUint64(nonFlushTS)
 	flushTsPolicy := GetFlushTsPolicy(flushTs, metacache)
 	option.syncPolicies = append(option.syncPolicies, flushTsPolicy)
 
 	return &writeBufferBase{
 		channelName:    channel,
-		collSchema:     sch,
+		collectionID:   metacache.Collection(),
+		collSchema:     metacache.Schema(),
 		syncMgr:        syncMgr,
 		metaWriter:     option.metaWriter,
 		buffers:        make(map[int64]*segmentBuffer),
@@ -143,18 +144,14 @@ func (wb *writeBufferBase) GetCheckpoint() *msgpb.MsgPosition {
 	return checkpoint
 }
 
-func (wb *writeBufferBase) triggerSync() error {
+func (wb *writeBufferBase) triggerSync() (segmentIDs []int64) {
 	segmentsToSync := wb.getSegmentsToSync(wb.checkpoint.GetTimestamp())
 	if len(segmentsToSync) > 0 {
 		log.Info("write buffer get segments to sync", zap.Int64s("segmentIDs", segmentsToSync))
-		err := wb.syncSegments(context.Background(), segmentsToSync)
-		if err != nil {
-			log.Warn("segment segments failed", zap.Int64s("segmentIDs", segmentsToSync), zap.Error(err))
-			return err
-		}
+		wb.syncSegments(context.Background(), segmentsToSync)
 	}
 
-	return nil
+	return segmentsToSync
 }
 
 func (wb *writeBufferBase) flushSegments(ctx context.Context, segmentIDs []int64) error {
@@ -169,7 +166,7 @@ func (wb *writeBufferBase) flushSegments(ctx context.Context, segmentIDs []int64
 	return nil
 }
 
-func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64) error {
+func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64) {
 	for _, segmentID := range segmentIDs {
 		syncTask := wb.getSyncTask(ctx, segmentID)
 		if syncTask == nil {
@@ -181,7 +178,6 @@ func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64)
 		// discard Future here, handle error in callback
 		_ = wb.syncMgr.SyncData(ctx, syncTask)
 	}
-	return nil
 }
 
 // getSegmentsToSync applies all policies to get segments list to sync.
@@ -242,7 +238,7 @@ func (wb *writeBufferBase) bufferInsert(insertMsgs []*msgstream.InsertMsg, start
 				InsertChannel: wb.channelName,
 				StartPosition: startPos,
 				State:         commonpb.SegmentState_Growing,
-			}, func(_ *datapb.SegmentInfo) *metacache.BloomFilterSet { return metacache.NewBloomFilterSet() })
+			}, func(_ *datapb.SegmentInfo) *metacache.BloomFilterSet { return metacache.NewBloomFilterSet() }, metacache.SetStartPosRecorded(false))
 		}
 
 		segBuf := wb.getOrCreateBuffer(segmentID)
@@ -292,6 +288,7 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) *sy
 		WithChannelName(wb.channelName).
 		WithSegmentID(segmentID).
 		WithStartPosition(startPos).
+		WithLevel(segmentInfo.Level()).
 		WithCheckpoint(wb.checkpoint).
 		WithSchema(wb.collSchema).
 		WithBatchSize(batchSize).

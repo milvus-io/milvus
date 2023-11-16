@@ -25,6 +25,7 @@ import (
 
 type BFWriteBufferSuite struct {
 	suite.Suite
+	collID      int64
 	channelName string
 	collSchema  *schemapb.CollectionSchema
 	syncMgr     *syncmgr.MockSyncManager
@@ -34,6 +35,7 @@ type BFWriteBufferSuite struct {
 
 func (s *BFWriteBufferSuite) SetupSuite() {
 	paramtable.Get().Init(paramtable.NewBaseTable())
+	s.collID = 100
 	s.collSchema = &schemapb.CollectionSchema{
 		Name: "test_collection",
 		Fields: []*schemapb.FieldSchema{
@@ -136,17 +138,19 @@ func (s *BFWriteBufferSuite) composeDeleteMsg(pks []storage.PrimaryKey) *msgstre
 func (s *BFWriteBufferSuite) SetupTest() {
 	s.syncMgr = syncmgr.NewMockSyncManager(s.T())
 	s.metacache = metacache.NewMockMetaCache(s.T())
+	s.metacache.EXPECT().Schema().Return(s.collSchema).Maybe()
+	s.metacache.EXPECT().Collection().Return(s.collID).Maybe()
 	s.broker = broker.NewMockBroker(s.T())
 }
 
 func (s *BFWriteBufferSuite) TestBufferData() {
-	wb, err := NewBFWriteBuffer(s.channelName, s.collSchema, s.metacache, s.syncMgr, &writeBufferOption{})
+	wb, err := NewBFWriteBuffer(s.channelName, s.metacache, s.syncMgr, &writeBufferOption{})
 	s.NoError(err)
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1000}, metacache.NewBloomFilterSet())
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 	s.metacache.EXPECT().GetSegmentByID(int64(1000)).Return(nil, false)
-	s.metacache.EXPECT().AddSegment(mock.Anything, mock.Anything).Return()
+	s.metacache.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything).Return()
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
 	pks, msg := s.composeInsertMsg(1000, 10, 128)
@@ -159,30 +163,32 @@ func (s *BFWriteBufferSuite) TestBufferData() {
 func (s *BFWriteBufferSuite) TestAutoSync() {
 	paramtable.Get().Save(paramtable.Get().DataNodeCfg.FlushInsertBufferSize.Key, "1")
 
-	wb, err := NewBFWriteBuffer(s.channelName, s.collSchema, s.metacache, s.syncMgr, &writeBufferOption{
-		syncPolicies: []SyncPolicy{
-			SyncFullBuffer,
-			GetSyncStaleBufferPolicy(paramtable.Get().DataNodeCfg.SyncPeriod.GetAsDuration(time.Second)),
-			GetFlushingSegmentsPolicy(s.metacache),
-		},
+	s.Run("normal_auto_sync", func() {
+		wb, err := NewBFWriteBuffer(s.channelName, s.metacache, s.syncMgr, &writeBufferOption{
+			syncPolicies: []SyncPolicy{
+				SyncFullBuffer,
+				GetSyncStaleBufferPolicy(paramtable.Get().DataNodeCfg.SyncPeriod.GetAsDuration(time.Second)),
+				GetFlushingSegmentsPolicy(s.metacache),
+			},
+		})
+		s.NoError(err)
+
+		seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1000}, metacache.NewBloomFilterSet())
+		s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
+		s.metacache.EXPECT().GetSegmentByID(int64(1000)).Return(nil, false)
+		s.metacache.EXPECT().GetSegmentByID(int64(1002)).Return(seg, true)
+		s.metacache.EXPECT().GetSegmentIDsBy(mock.Anything).Return([]int64{1002})
+		s.metacache.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything).Return()
+		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
+		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything, mock.Anything).Return()
+		s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).Return(nil)
+
+		pks, msg := s.composeInsertMsg(1000, 10, 128)
+		delMsg := s.composeDeleteMsg(lo.Map(pks, func(id int64, _ int) storage.PrimaryKey { return storage.NewInt64PrimaryKey(id) }))
+
+		err = wb.BufferData([]*msgstream.InsertMsg{msg}, []*msgstream.DeleteMsg{delMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
+		s.NoError(err)
 	})
-	s.NoError(err)
-
-	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1000}, metacache.NewBloomFilterSet())
-	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
-	s.metacache.EXPECT().GetSegmentByID(int64(1000)).Return(nil, false)
-	s.metacache.EXPECT().GetSegmentByID(int64(1002)).Return(seg, true)
-	s.metacache.EXPECT().GetSegmentIDsBy(mock.Anything).Return([]int64{1002})
-	s.metacache.EXPECT().AddSegment(mock.Anything, mock.Anything).Return()
-	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
-	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything, mock.Anything).Return()
-	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).Return(nil)
-
-	pks, msg := s.composeInsertMsg(1000, 10, 128)
-	delMsg := s.composeDeleteMsg(lo.Map(pks, func(id int64, _ int) storage.PrimaryKey { return storage.NewInt64PrimaryKey(id) }))
-
-	err = wb.BufferData([]*msgstream.InsertMsg{msg}, []*msgstream.DeleteMsg{delMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
-	s.NoError(err)
 }
 
 func TestBFWriteBuffer(t *testing.T) {

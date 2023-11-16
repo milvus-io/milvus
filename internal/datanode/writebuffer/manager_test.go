@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -21,16 +22,19 @@ import (
 
 type ManagerSuite struct {
 	suite.Suite
+	collID      int64
 	channelName string
 	collSchema  *schemapb.CollectionSchema
 	syncMgr     *syncmgr.MockSyncManager
 	metacache   *metacache.MockMetaCache
+	allocator   *allocator.MockAllocator
 
 	manager *bufferManager
 }
 
 func (s *ManagerSuite) SetupSuite() {
 	paramtable.Get().Init(paramtable.NewBaseTable())
+	s.collID = 100
 	s.collSchema = &schemapb.CollectionSchema{
 		Name: "test_collection",
 		Fields: []*schemapb.FieldSchema{
@@ -52,6 +56,9 @@ func (s *ManagerSuite) SetupSuite() {
 func (s *ManagerSuite) SetupTest() {
 	s.syncMgr = syncmgr.NewMockSyncManager(s.T())
 	s.metacache = metacache.NewMockMetaCache(s.T())
+	s.metacache.EXPECT().Collection().Return(s.collID).Maybe()
+	s.metacache.EXPECT().Schema().Return(s.collSchema).Maybe()
+	s.allocator = allocator.NewMockAllocator(s.T())
 
 	mgr := NewManager(s.syncMgr)
 	var ok bool
@@ -62,10 +69,10 @@ func (s *ManagerSuite) SetupTest() {
 func (s *ManagerSuite) TestRegister() {
 	manager := s.manager
 
-	err := manager.Register(s.channelName, s.collSchema, s.metacache)
+	err := manager.Register(s.channelName, s.metacache, WithIDAllocator(s.allocator))
 	s.NoError(err)
 
-	err = manager.Register(s.channelName, s.collSchema, s.metacache)
+	err = manager.Register(s.channelName, s.metacache, WithIDAllocator(s.allocator))
 	s.Error(err)
 	s.ErrorIs(err, merr.ErrChannelReduplicate)
 }
@@ -169,7 +176,7 @@ func (s *ManagerSuite) TestRemoveChannel() {
 	})
 
 	s.Run("remove_channel", func() {
-		err := manager.Register(s.channelName, s.collSchema, s.metacache)
+		err := manager.Register(s.channelName, s.metacache, WithIDAllocator(s.allocator))
 		s.Require().NoError(err)
 
 		s.NotPanics(func() {

@@ -3,7 +3,6 @@ package writebuffer
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -18,9 +17,9 @@ type bfWriteBuffer struct {
 	metacache metacache.MetaCache
 }
 
-func NewBFWriteBuffer(channel string, sch *schemapb.CollectionSchema, metacache metacache.MetaCache, syncMgr syncmgr.SyncManager, option *writeBufferOption) (WriteBuffer, error) {
+func NewBFWriteBuffer(channel string, metacache metacache.MetaCache, syncMgr syncmgr.SyncManager, option *writeBufferOption) (WriteBuffer, error) {
 	return &bfWriteBuffer{
-		writeBufferBase: newWriteBufferBase(channel, sch, metacache, syncMgr, option),
+		writeBufferBase: newWriteBufferBase(channel, metacache, syncMgr, option),
 		syncMgr:         syncMgr,
 	}, nil
 }
@@ -71,5 +70,6 @@ func (wb *bfWriteBuffer) BufferData(insertMsgs []*msgstream.InsertMsg, deleteMsg
 	// update buffer last checkpoint
 	wb.checkpoint = endPos
 
-	return wb.triggerSync()
+	_ = wb.triggerSync()
+	return nil
 }

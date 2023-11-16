@@ -6,8 +6,6 @@ import (
 	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
 	mock "github.com/stretchr/testify/mock"
 
-	msgpb "github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-
 	schemapb "github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 
 	storage "github.com/milvus-io/milvus/internal/storage"
@@ -346,56 +344,6 @@ func (_c *MockMetaCache_GetSegmentsBy_Call) Return(_a0 []*SegmentInfo) *MockMeta
 }
 
 func (_c *MockMetaCache_GetSegmentsBy_Call) RunAndReturn(run func(...SegmentFilter) []*SegmentInfo) *MockMetaCache_GetSegmentsBy_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// NewSegment provides a mock function with given fields: segmentID, partitionID, startPos, actions
-func (_m *MockMetaCache) NewSegment(segmentID int64, partitionID int64, startPos *msgpb.MsgPosition, actions ...SegmentAction) {
-	_va := make([]interface{}, len(actions))
-	for _i := range actions {
-		_va[_i] = actions[_i]
-	}
-	var _ca []interface{}
-	_ca = append(_ca, segmentID, partitionID, startPos)
-	_ca = append(_ca, _va...)
-	_m.Called(_ca...)
-}
-
-// MockMetaCache_NewSegment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'NewSegment'
-type MockMetaCache_NewSegment_Call struct {
-	*mock.Call
-}
-
-// NewSegment is a helper method to define mock.On call
-//   - segmentID int64
-//   - partitionID int64
-//   - startPos *msgpb.MsgPosition
-//   - actions ...SegmentAction
-func (_e *MockMetaCache_Expecter) NewSegment(segmentID interface{}, partitionID interface{}, startPos interface{}, actions ...interface{}) *MockMetaCache_NewSegment_Call {
-	return &MockMetaCache_NewSegment_Call{Call: _e.mock.On("NewSegment",
-		append([]interface{}{segmentID, partitionID, startPos}, actions...)...)}
-}
-
-func (_c *MockMetaCache_NewSegment_Call) Run(run func(segmentID int64, partitionID int64, startPos *msgpb.MsgPosition, actions ...SegmentAction)) *MockMetaCache_NewSegment_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		variadicArgs := make([]SegmentAction, len(args)-3)
-		for i, a := range args[3:] {
-			if a != nil {
-				variadicArgs[i] = a.(SegmentAction)
-			}
-		}
-		run(args[0].(int64), args[1].(int64), args[2].(*msgpb.MsgPosition), variadicArgs...)
-	})
-	return _c
-}
-
-func (_c *MockMetaCache_NewSegment_Call) Return() *MockMetaCache_NewSegment_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockMetaCache_NewSegment_Call) RunAndReturn(run func(int64, int64, *msgpb.MsgPosition, ...SegmentAction)) *MockMetaCache_NewSegment_Call {
 	_c.Call.Return(run)
 	return _c
 }

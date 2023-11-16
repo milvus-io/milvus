@@ -69,6 +69,7 @@ func (b *brokerMetaWriter) UpdateSync(pack *SyncTask) error {
 	log.Info("SaveBinlogPath",
 		zap.Int64("SegmentID", pack.segmentID),
 		zap.Int64("CollectionID", pack.collectionID),
+		zap.Int64("ParitionID", pack.partitionID),
 		zap.Any("startPos", startPos),
 		zap.Any("checkPoints", checkPoints),
 		zap.Int("binlogNum", lo.SumBy(insertFieldBinlogs, getBinlogNum)),
@@ -85,6 +86,7 @@ func (b *brokerMetaWriter) UpdateSync(pack *SyncTask) error {
 		),
 		SegmentID:           pack.segmentID,
 		CollectionID:        pack.collectionID,
+		PartitionID:         pack.partitionID,
 		Field2BinlogPaths:   insertFieldBinlogs,
 		Field2StatslogPaths: statsFieldBinlogs,
 		Deltalogs:           deltaFieldBinlogs,
@@ -95,6 +97,7 @@ func (b *brokerMetaWriter) UpdateSync(pack *SyncTask) error {
 		Flushed:        pack.isFlush,
 		Dropped:        pack.isDrop,
 		Channel:        pack.channelName,
+		SegLevel:       pack.level,
 	}
 	err := retry.Do(context.Background(), func() error {
 		err := b.broker.SaveBinlogPaths(context.Background(), req)
@@ -124,8 +127,12 @@ func (b *brokerMetaWriter) UpdateSync(pack *SyncTask) error {
 		log.Warn("failed to SaveBinlogPaths",
 			zap.Int64("segmentID", pack.segmentID),
 			zap.Error(err))
+		return err
 	}
-	return err
+
+	pack.metacache.UpdateSegments(metacache.SetStartPosRecorded(true), metacache.WithSegmentIDs(lo.Map(startPos, func(pos *datapb.SegmentStartPosition, _ int) int64 { return pos.GetSegmentID() })...))
+
+	return nil
 }
 
 func (b *brokerMetaWriter) DropChannel(channelName string) error {
