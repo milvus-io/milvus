@@ -201,7 +201,11 @@ pull_request_rules:
                   - base=master
                   - base=sql_beta
                   - base~=^2(\.\d+){1,2}$
-              - label=kind/enhancement
+              - and:
+                - label=kind/enhancement
+                - -label=size/L
+                - -label=size/XL
+                - -label=size/XXL
     actions:
       label:
         remove:
