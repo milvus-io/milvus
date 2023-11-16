@@ -76,7 +76,6 @@ func (b *CoordinatorBroker) ShowPartitionsInternal(ctx context.Context, collecti
 	resp, err := b.rootCoord.ShowPartitionsInternal(ctx, &milvuspb.ShowPartitionsRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
-			commonpbutil.WithMsgID(0),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		// please do not specify the collection name alone after database feature.

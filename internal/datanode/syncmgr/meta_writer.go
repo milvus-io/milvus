@@ -84,8 +84,6 @@ func (b *brokerMetaWriter) UpdateSync(pack *SyncTask) error {
 
 	req := &datapb.SaveBinlogPathsRequest{
 		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(0),
-			commonpbutil.WithMsgID(0),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		SegmentID:           pack.segmentID,
@@ -137,8 +135,6 @@ func (b *brokerMetaWriter) DropChannel(channelName string) error {
 	err := retry.Do(context.Background(), func() error {
 		status, err := b.broker.DropVirtualChannel(context.Background(), &datapb.DropVirtualChannelRequest{
 			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(0), // TODO msg type
-				commonpbutil.WithMsgID(0),   // TODO msg id
 				commonpbutil.WithSourceID(paramtable.GetNodeID()),
 			),
 			ChannelName: channelName,

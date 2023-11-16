@@ -2031,8 +2031,6 @@ func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (
 func (c *Core) ExpireCredCache(ctx context.Context, username string) error {
 	req := proxypb.InvalidateCredCacheRequest{
 		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(0), // TODO, msg type
-			commonpbutil.WithMsgID(0),   // TODO, msg id
 			commonpbutil.WithSourceID(c.session.ServerID),
 		),
 		Username: username,
@@ -2044,8 +2042,6 @@ func (c *Core) ExpireCredCache(ctx context.Context, username string) error {
 func (c *Core) UpdateCredCache(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
 	req := proxypb.UpdateCredCacheRequest{
 		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(0), // TODO, msg type
-			commonpbutil.WithMsgID(0),   // TODO, msg id
 			commonpbutil.WithSourceID(c.session.ServerID),
 		),
 		Username: credInfo.Username,
