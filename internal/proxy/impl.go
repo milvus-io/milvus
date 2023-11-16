@@ -61,7 +61,7 @@ import (
 
 const moduleName = "Proxy"
 
-const SlowReadSpan = time.Microsecond * 5
+const SlowReadSpan = time.Second * 5
 
 // GetComponentStates gets the state of Proxy.
 func (node *Proxy) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
