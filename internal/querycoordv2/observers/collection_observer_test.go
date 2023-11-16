@@ -189,7 +189,7 @@ func (suite *CollectionObserverSuite) SetupTest() {
 	nodeMgr := session.NewNodeManager()
 	suite.meta = meta.NewMeta(suite.idAllocator, suite.store, nodeMgr)
 	suite.broker = meta.NewMockBroker(suite.T())
-	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
+	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta, suite.store)
 	suite.cluster = session.NewMockCluster(suite.T())
 	suite.targetObserver = NewTargetObserver(suite.meta,
 		suite.targetMgr,

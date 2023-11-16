@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
+	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -112,7 +113,7 @@ func (suite *TargetManagerSuite) SetupTest() {
 	idAllocator := RandomIncrementIDAllocator()
 	suite.meta = NewMeta(idAllocator, store, session.NewNodeManager())
 	suite.broker = NewMockBroker(suite.T())
-	suite.mgr = NewTargetManager(suite.broker, suite.meta)
+	suite.mgr = NewTargetManager(suite.broker, suite.meta, store)
 
 	for _, collection := range suite.collections {
 		dmChannels := make([]*datapb.VchannelInfo, 0)
@@ -259,16 +260,18 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget() {
 
 func (suite *TargetManagerSuite) TestRemovePartition() {
 	collectionID := int64(1000)
+	suite.mgr.UpdateCollectionCurrentTarget(collectionID)
+	suite.mgr.UpdateCollectionNextTarget(collectionID)
 	suite.assertSegments(suite.getAllSegment(collectionID, suite.partitions[collectionID]), suite.mgr.GetSealedSegmentsByCollection(collectionID, NextTarget))
 	suite.assertChannels(suite.channels[collectionID], suite.mgr.GetDmChannelsByCollection(collectionID, NextTarget))
-	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(collectionID, CurrentTarget))
-	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(collectionID, CurrentTarget))
+	suite.assertSegments(suite.getAllSegment(collectionID, suite.partitions[collectionID]), suite.mgr.GetSealedSegmentsByCollection(collectionID, CurrentTarget))
+	suite.assertChannels(suite.channels[collectionID], suite.mgr.GetDmChannelsByCollection(collectionID, CurrentTarget))
 
 	suite.mgr.RemovePartition(collectionID, 100)
 	suite.assertSegments([]int64{3, 4}, suite.mgr.GetSealedSegmentsByCollection(collectionID, NextTarget))
 	suite.assertChannels(suite.channels[collectionID], suite.mgr.GetDmChannelsByCollection(collectionID, NextTarget))
-	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(collectionID, CurrentTarget))
-	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(collectionID, CurrentTarget))
+	suite.assertSegments([]int64{3, 4}, suite.mgr.GetSealedSegmentsByCollection(collectionID, CurrentTarget))
+	suite.assertChannels(suite.channels[collectionID], suite.mgr.GetDmChannelsByCollection(collectionID, CurrentTarget))
 }
 
 func (suite *TargetManagerSuite) TestRemoveCollection() {
@@ -413,6 +416,71 @@ func (suite *TargetManagerSuite) TestGetSegmentByChannel() {
 	suite.Len(suite.mgr.GetGrowingSegmentsByChannel(collectionID, "channel-1", NextTarget), 4)
 	suite.Len(suite.mgr.GetGrowingSegmentsByChannel(collectionID, "channel-2", NextTarget), 1)
 	suite.Len(suite.mgr.GetDroppedSegmentsByChannel(collectionID, "channel-1", NextTarget), 3)
+}
+
+func (suite *TargetManagerSuite) TestRecover() {
+	collectionID := int64(1003)
+	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(collectionID, NextTarget))
+	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(collectionID, NextTarget))
+	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(collectionID, CurrentTarget))
+	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(collectionID, CurrentTarget))
+
+	suite.meta.PutCollection(&Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{
+			CollectionID:  collectionID,
+			ReplicaNumber: 1,
+		},
+	})
+	suite.meta.PutPartition(&Partition{
+		PartitionLoadInfo: &querypb.PartitionLoadInfo{
+			CollectionID: collectionID,
+			PartitionID:  1,
+		},
+	})
+
+	nextTargetChannels := []*datapb.VchannelInfo{
+		{
+			CollectionID:        collectionID,
+			ChannelName:         "channel-1",
+			UnflushedSegmentIds: []int64{1, 2, 3, 4},
+			DroppedSegmentIds:   []int64{11, 22, 33},
+		},
+		{
+			CollectionID:        collectionID,
+			ChannelName:         "channel-2",
+			UnflushedSegmentIds: []int64{5},
+		},
+	}
+
+	nextTargetSegments := []*datapb.SegmentInfo{
+		{
+			ID:            11,
+			PartitionID:   1,
+			InsertChannel: "channel-1",
+		},
+		{
+			ID:            12,
+			PartitionID:   1,
+			InsertChannel: "channel-2",
+		},
+	}
+
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nextTargetChannels, nextTargetSegments, nil)
+	suite.mgr.UpdateCollectionNextTarget(collectionID)
+	suite.mgr.UpdateCollectionCurrentTarget(collectionID)
+
+	// clear target in memory
+	suite.mgr.current.removeCollectionTarget(collectionID)
+	suite.mgr.Recover()
+	suite.NotNil(suite.mgr.current.getCollectionTarget(collectionID))
+
+	// mock recover failed
+	mockCatalog := mocks.NewQueryCoordCatalog(suite.T())
+	mockErr := errors.New("failed to access etcd")
+	mockCatalog.EXPECT().GetCollectionTargets().Return(nil, mockErr)
+	suite.mgr.catalog = mockCatalog
+	err := suite.mgr.Recover()
+	suite.ErrorIs(err, mockErr)
 }
 
 func TestTargetManager(t *testing.T) {

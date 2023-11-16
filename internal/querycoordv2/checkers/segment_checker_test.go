@@ -73,7 +73,7 @@ func (suite *SegmentCheckerTestSuite) SetupTest() {
 	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeMgr)
 	distManager := meta.NewDistributionManager()
 	suite.broker = meta.NewMockBroker(suite.T())
-	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
+	targetManager := meta.NewTargetManager(suite.broker, suite.meta, store)
 
 	balancer := suite.createMockBalancer()
 	suite.checker = NewSegmentChecker(suite.meta, distManager, targetManager, balancer, suite.nodeMgr)

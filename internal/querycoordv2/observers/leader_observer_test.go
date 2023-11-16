@@ -81,7 +81,7 @@ func (suite *LeaderObserverTestSuite) SetupTest() {
 	// 	ErrorCode: commonpb.ErrorCode_Success,
 	// }, nil).Maybe()
 	distManager := meta.NewDistributionManager()
-	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
+	targetManager := meta.NewTargetManager(suite.broker, suite.meta, store)
 	suite.observer = NewLeaderObserver(distManager, suite.meta, targetManager, suite.broker, suite.mockCluster, nodeMgr)
 }
 

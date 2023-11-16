@@ -4,10 +4,13 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
@@ -197,6 +200,49 @@ func (suite *CatalogTestSuite) TestResourceGroup() {
 	suite.Equal("rg2", groups[1].GetName())
 	suite.Equal(int32(3), groups[1].GetCapacity())
 	suite.Equal([]int64{4, 5}, groups[1].GetNodes())
+}
+
+func (suite *CatalogTestSuite) TestCollectionTarget() {
+	suite.catalog.SaveCollectionTarget(&querypb.CollectionTarget{
+		CollectionID: 1,
+		Version:      1,
+	})
+	suite.catalog.SaveCollectionTarget(&querypb.CollectionTarget{
+		CollectionID: 2,
+		Version:      2,
+	})
+	suite.catalog.SaveCollectionTarget(&querypb.CollectionTarget{
+		CollectionID: 3,
+		Version:      3,
+	})
+	suite.catalog.SaveCollectionTarget(&querypb.CollectionTarget{
+		CollectionID: 1,
+		Version:      4,
+	})
+	suite.catalog.RemoveCollectionTarget(2)
+
+	targets, err := suite.catalog.GetCollectionTargets()
+	suite.NoError(err)
+	suite.Len(targets, 2)
+	suite.Equal(int64(4), targets[1].Version)
+	suite.Equal(int64(3), targets[3].Version)
+
+	// test access meta store failed
+	mockStore := mocks.NewMetaKv(suite.T())
+	mockErr := errors.New("failed to access etcd")
+	mockStore.EXPECT().Save(mock.Anything, mock.Anything).Return(mockErr)
+	mockStore.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, mockErr)
+
+	suite.catalog.cli = mockStore
+	err = suite.catalog.SaveCollectionTarget(&querypb.CollectionTarget{})
+	suite.ErrorIs(err, mockErr)
+
+	_, err = suite.catalog.GetCollectionTargets()
+	suite.ErrorIs(err, mockErr)
+
+	// test invalid message
+	err = suite.catalog.SaveCollectionTarget(nil)
+	suite.Error(err)
 }
 
 func (suite *CatalogTestSuite) TestLoadRelease() {

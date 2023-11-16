@@ -351,7 +351,13 @@ func (s *Server) initMeta() error {
 		ChannelDistManager: meta.NewChannelDistManager(),
 		LeaderViewManager:  meta.NewLeaderViewManager(),
 	}
-	s.targetMgr = meta.NewTargetManager(s.broker, s.meta)
+	s.targetMgr = meta.NewTargetManager(s.broker, s.meta, s.store)
+	err = s.targetMgr.Recover()
+	if err != nil {
+		log.Warn("failed to recover collection targets", zap.Error(err))
+		return err
+	}
+
 	log.Info("QueryCoord server initMeta done", zap.Duration("duration", record.ElapseSpan()))
 	return nil
 }
