@@ -373,6 +373,8 @@ dataCoord:
     # MUST BE GREATER THAN OR EQUAL TO <smallProportion>!!!
     # During compaction, the size of segment # of rows is able to exceed segment max # of rows by (expansionRate-1) * 100%.
     expansionRate: 1.25
+    # Whether to enable levelzero segment
+    enableLevelZero: false
   enableCompaction: true # Enable data segment compaction
   compaction:
     enableAutoCompaction: true
@@ -381,7 +383,6 @@ dataCoord:
     indexBasedCompaction: true
 
     levelzero:
-      enable: false
       forceTrigger:
         minSize: 8 # The minmum size in MB to force trigger a LevelZero Compaction
         deltalogMinNum: 10 # the minimum number of deltalog files to force trigger a LevelZero Compaction

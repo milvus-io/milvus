@@ -2045,8 +2045,8 @@ type dataCoordConfig struct {
 	SingleCompactionDeltalogMaxNum    ParamItem `refreshable:"true"`
 	GlobalCompactionInterval          ParamItem `refreshable:"false"`
 
-	// LevelZeroCompaction
-	LevelZeroCompactionEnabled               ParamItem `refreshable:"true"`
+	// LevelZero Segment
+	EnableLevelZeroSegment                   ParamItem `refreshable:"false"`
 	LevelZeroCompactionTriggerMinSize        ParamItem `refreshable:"true"`
 	LevelZeroCompactionTriggerDeltalogMinNum ParamItem `refreshable:"true"`
 
@@ -2334,13 +2334,13 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.GlobalCompactionInterval.Init(base.mgr)
 
 	// LevelZeroCompaction
-	p.LevelZeroCompactionEnabled = ParamItem{
-		Key:          "dataCoord.compaction.levelzero.enable",
+	p.EnableLevelZeroSegment = ParamItem{
+		Key:          "dataCoord.segment.enableLevelZero",
 		Version:      "2.3.4",
 		Doc:          "Whether to enable LevelZeroCompaction",
 		DefaultValue: "false",
 	}
-	p.LevelZeroCompactionEnabled.Init(base.mgr)
+	p.EnableLevelZeroSegment.Init(base.mgr)
 
 	p.LevelZeroCompactionTriggerMinSize = ParamItem{
 		Key:          "dataCoord.compaction.levelzero.forceTrigger.minSize",
