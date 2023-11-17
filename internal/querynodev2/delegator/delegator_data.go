@@ -745,6 +745,17 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 	log := sd.getLogger(ctx)
 
 	targetNodeID := req.GetNodeID()
+	level0Segments := typeutil.NewSet(lo.Map(sd.segmentManager.GetBy(segments.WithLevel(datapb.SegmentLevel_L0)), func(segment segments.Segment, _ int) int64 {
+		return segment.ID()
+	})...)
+	hasLevel0 := false
+	for _, segmentID := range req.GetSegmentIDs() {
+		hasLevel0 = level0Segments.Contain(segmentID)
+		if hasLevel0 {
+			break
+		}
+	}
+
 	// add common log fields
 	log = log.With(
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
@@ -809,6 +820,10 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 			)
 		}
 		return err
+	}
+
+	if hasLevel0 {
+		sd.GenerateLevel0DeletionCache()
 	}
 
 	return nil
