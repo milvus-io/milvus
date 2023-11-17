@@ -404,7 +404,7 @@ func (s *DataSyncServiceSuite) TestStartStop() {
 				return item, ok
 			})
 		}, nil)
-	s.wbManager.EXPECT().Register(insertChannelName, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	s.wbManager.EXPECT().Register(insertChannelName, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	ufs := []*datapb.SegmentInfo{{
 		CollectionID:  collMeta.ID,
