@@ -249,6 +249,7 @@ func (s *SyncTaskSuiteV2) TestRunNormal() {
 		s.NoError(err)
 	})
 }
+
 func (s *SyncTaskSuiteV2) TestBuildRecord() {
 	fieldSchemas := []*schemapb.FieldSchema{
 		{FieldID: 1, Name: "field0", DataType: schemapb.DataType_Bool},
