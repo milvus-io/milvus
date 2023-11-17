@@ -60,10 +60,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-var (
-	// Only for re-export
-	Params = &params.Params
-)
+// Only for re-export
+var Params = &params.Params
 
 type Server struct {
 	ctx                 context.Context
@@ -447,7 +445,7 @@ func (s *Server) Stop() error {
 		s.session.Stop()
 	}
 
-	if s.session != nil {
+	if s.cluster != nil {
 		log.Info("stop cluster...")
 		s.cluster.Stop()
 	}
@@ -515,7 +513,7 @@ func (s *Server) GetComponentStates(ctx context.Context) (*milvuspb.ComponentSta
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
 		State: serviceComponentInfo,
-		//SubcomponentStates: subComponentInfos,
+		// SubcomponentStates: subComponentInfos,
 	}, nil
 }
 
