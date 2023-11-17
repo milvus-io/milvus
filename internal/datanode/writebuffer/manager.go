@@ -7,7 +7,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -18,7 +17,7 @@ import (
 // BufferManager is the interface for WriteBuffer management.
 type BufferManager interface {
 	// Register adds a WriteBuffer with provided schema & options.
-	Register(channel string, schema *schemapb.CollectionSchema, metacache metacache.MetaCache, opts ...WriteBufferOption) error
+	Register(channel string, metacache metacache.MetaCache, opts ...WriteBufferOption) error
 	// FlushSegments notifies writeBuffer corresponding to provided channel to flush segments.
 	FlushSegments(ctx context.Context, channel string, segmentIDs []int64) error
 	// FlushChannel
@@ -50,7 +49,7 @@ type bufferManager struct {
 }
 
 // Register a new WriteBuffer for channel.
-func (m *bufferManager) Register(channel string, schema *schemapb.CollectionSchema, metacache metacache.MetaCache, opts ...WriteBufferOption) error {
+func (m *bufferManager) Register(channel string, metacache metacache.MetaCache, opts ...WriteBufferOption) error {
 	m.mut.Lock()
 	defer m.mut.Unlock()
 
@@ -58,7 +57,7 @@ func (m *bufferManager) Register(channel string, schema *schemapb.CollectionSche
 	if ok {
 		return merr.WrapErrChannelReduplicate(channel)
 	}
-	buf, err := NewWriteBuffer(channel, schema, metacache, m.syncMgr, opts...)
+	buf, err := NewWriteBuffer(channel, metacache, m.syncMgr, opts...)
 	if err != nil {
 		return err
 	}

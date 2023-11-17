@@ -210,6 +210,7 @@ func (s *SyncManagerSuite) TestCompacted() {
 
 func (s *SyncManagerSuite) TestBlock() {
 	sig := make(chan struct{})
+	counter := atomic.NewInt32(0)
 	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil)
 	bfs := metacache.NewBloomFilterSet()
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs)
@@ -219,7 +220,9 @@ func (s *SyncManagerSuite) TestBlock() {
 			return []*metacache.SegmentInfo{seg}
 		})
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(_ metacache.SegmentAction, filters ...metacache.SegmentFilter) {
-		close(sig)
+		if counter.Inc() == 2 {
+			close(sig)
+		}
 	})
 
 	manager, err := NewSyncManager(10, s.chunkManager, s.allocator)

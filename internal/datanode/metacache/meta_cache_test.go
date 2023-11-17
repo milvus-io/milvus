@@ -100,21 +100,6 @@ func (s *MetaCacheSuite) TestMetaInfo() {
 	s.Equal(s.collSchema, s.cache.Schema())
 }
 
-func (s *MetaCacheSuite) TestNewSegment() {
-	for i, seg := range s.newSegments {
-		s.cache.NewSegment(seg, s.partitionIDs[i], nil, UpdateNumOfRows(100))
-	}
-
-	for id, partitionID := range s.partitionIDs {
-		segs := s.cache.GetSegmentIDsBy(WithPartitionID(partitionID))
-		targets := []int64{s.flushedSegments[id], s.growingSegments[id], s.newSegments[id]}
-		s.Equal(len(targets), len(segs))
-		for _, seg := range segs {
-			s.True(lo.Contains(targets, seg))
-		}
-	}
-}
-
 func (s *MetaCacheSuite) TestCompactSegments() {
 	for i, seg := range s.newSegments {
 		// compaction from flushed[i], unflushed[i] and invalidSeg to new[i]

@@ -295,7 +295,7 @@ func getServiceWithChannel(initCtx context.Context, node *DataNode, info *datapb
 		resendTTCh = make(chan resendTTMsg, 100)
 	)
 
-	node.writeBufferManager.Register(channelName, metacache.Schema(), metacache, writebuffer.WithMetaWriter(syncmgr.BrokerMetaWriter(node.broker)), writebuffer.WithIDAllocator(node.allocator))
+	node.writeBufferManager.Register(channelName, metacache, writebuffer.WithMetaWriter(syncmgr.BrokerMetaWriter(node.broker)), writebuffer.WithIDAllocator(node.allocator))
 	ctx, cancel := context.WithCancel(node.ctx)
 	ds := &dataSyncService{
 		ctx:        ctx,

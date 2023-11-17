@@ -40,6 +40,7 @@ func (s *MetaWriterSuite) TestNormalSave() {
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs)
 	metacache.UpdateNumOfRows(1000)(seg)
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything).Return([]*metacache.SegmentInfo{seg})
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 	task := NewSyncTask()
 	task.WithMetaCache(s.metacache)
 	err := s.writer.UpdateSync(task)

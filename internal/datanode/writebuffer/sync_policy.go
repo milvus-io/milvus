@@ -8,6 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -48,7 +49,9 @@ func GetFlushTsPolicy(flushTimestamp *atomic.Uint64, meta metacache.MetaCache) S
 				if !ok {
 					return buf.segmentID, false
 				}
-				return buf.segmentID, seg.State() == commonpb.SegmentState_Flushed && buf.MinTimestamp() < flushTs
+				inRange := seg.State() == commonpb.SegmentState_Flushed ||
+					seg.Level() == datapb.SegmentLevel_L0
+				return buf.segmentID, inRange && buf.MinTimestamp() < flushTs
 			})
 			// set segment flushing
 			meta.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Flushing),

@@ -115,3 +115,8 @@ func (t *SyncTask) WithBatchSize(batchSize int64) *SyncTask {
 	t.batchSize = batchSize
 	return t
 }
+
+func (t *SyncTask) WithLevel(level datapb.SegmentLevel) *SyncTask {
+	t.level = level
+	return t
+}

@@ -240,9 +240,17 @@ func (s *DataNodeServicesSuite) TestFlushSegments() {
 	fgservice, ok := s.node.flowgraphManager.getFlowgraphService(dmChannelName)
 	s.Require().True(ok)
 
-	s.node.writeBufferManager.Register(dmChannelName, schema, metacache.NewMockMetaCache(s.T()))
+	metaCache := metacache.NewMockMetaCache(s.T())
+	metaCache.EXPECT().Collection().Return(1).Maybe()
+	metaCache.EXPECT().Schema().Return(schema).Maybe()
+	s.node.writeBufferManager.Register(dmChannelName, metaCache)
 
-	fgservice.metacache.NewSegment(segmentID, 1, &msgpb.MsgPosition{})
+	fgservice.metacache.AddSegment(&datapb.SegmentInfo{
+		ID:            segmentID,
+		CollectionID:  1,
+		PartitionID:   2,
+		StartPosition: &msgpb.MsgPosition{},
+	}, func(_ *datapb.SegmentInfo) *metacache.BloomFilterSet { return metacache.NewBloomFilterSet() })
 
 	s.Run("service_not_ready", func() {
 		ctx, cancel := context.WithCancel(context.Background())

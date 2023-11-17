@@ -23,7 +23,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -35,8 +34,6 @@ type MetaCache interface {
 	Collection() int64
 	// Schema returns collection schema.
 	Schema() *schemapb.CollectionSchema
-	// NewSegment creates a new segment from WAL stream data.
-	NewSegment(segmentID, partitionID int64, startPos *msgpb.MsgPosition, actions ...SegmentAction)
 	// AddSegment adds a segment from segment info.
 	AddSegment(segInfo *datapb.SegmentInfo, factory PkStatsFactory, actions ...SegmentAction)
 	// UpdateSegments applies action to segment(s) satisfy the provided filters.
@@ -95,25 +92,6 @@ func (c *metaCacheImpl) Collection() int64 {
 // Schema returns collection schema.
 func (c *metaCacheImpl) Schema() *schemapb.CollectionSchema {
 	return c.schema
-}
-
-// NewSegment creates a new segment from WAL stream data.
-func (c *metaCacheImpl) NewSegment(segmentID, partitionID int64, startPos *msgpb.MsgPosition, actions ...SegmentAction) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if _, ok := c.segmentInfos[segmentID]; !ok {
-		info := &SegmentInfo{
-			segmentID:        segmentID,
-			partitionID:      partitionID,
-			state:            commonpb.SegmentState_Growing,
-			startPosRecorded: false,
-		}
-		for _, action := range actions {
-			action(info)
-		}
-		c.segmentInfos[segmentID] = info
-	}
 }
 
 // AddSegment adds a segment from segment info.
