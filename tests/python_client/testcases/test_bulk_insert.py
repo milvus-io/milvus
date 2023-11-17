@@ -9,7 +9,10 @@ from common import common_type as ct
 from common.milvus_sys import MilvusSys
 from common.common_type import CaseLabel, CheckTasks
 from utils.util_log import test_log as log
+from common.minio_comm import copy_files_to_minio
+import random
 from common.bulk_insert_data import (
+    data_source,
     prepare_bulk_insert_json_files,
     prepare_bulk_insert_numpy_files,
     prepare_bulk_insert_csv_files,
@@ -1244,6 +1247,125 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         p_name = cf.gen_unique_str("bulk_insert_partition")
         m_partition, _ = self.collection_wrap.create_partition(partition_name=p_name)
         # build index
+    @pytest.mark.parametrize("auto_id", [True, False])
+    def test_dynamic_schema_with_json_file(self, auto_id):
+        """
+        """
+        import json
+        self._connect()
+        c_name = cf.gen_unique_str("dynamic_schema")
+        dim = 128
+        nb = 100
+        fields = [
+            cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
+            cf.gen_json_field(name=df.json_field),
+            cf.gen_float_vec_field(name=df.vec_field, dim=dim),
+        ]
+
+        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id, enable_dynamic_field=True)
+        self.collection_wrap.init_collection(c_name, schema=schema)
+        data = []
+        for i in range(nb):
+            d = {
+                    "name": f"test_{i}",
+                    "age": i,
+                    df.pk_field: i,
+                    df.json_field: {str(i): i},
+                    df.vec_field: [x for x in range(dim)],
+
+                }
+            if auto_id is True:
+                del d[df.pk_field]
+            for _ in range(random.randint(0, 3)):
+                random_key = cf.gen_unique_str("random_key")
+                random_value = cf.gen_unique_str("random_value")
+                d[random_key] = random_value
+            data.append(d)
+        # generate json file for bulk insert
+        file_name = "dynamic_schema.json"
+        json_data = {
+            "rows": data,
+        }
+        with open(f"{data_source}/{file_name}", "w") as f:
+            json.dump(json_data, f)
+        # upload data to minio
+        files = [file_name]
+        copy_files_to_minio(self.minio_endpoint, data_source, files, self.bucket_name, force=True)
+
+        index_params = ct.default_index
+        self.collection_wrap.create_index(
+            field_name=df.vec_field, index_params=index_params
+        )
+        # load collection
+        self.collection_wrap.load()
+        t0 = time.time()
+        task_id, _ = self.utility_wrap.do_bulk_insert(
+            collection_name=c_name, files=files
+        )
+        logging.info(f"bulk insert task ids:{task_id}")
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
+            task_ids=[task_id], timeout=90
+        )
+        tt = time.time() - t0
+        log.info(f"bulk insert state:{success} in {tt} with states: {states}")
+        assert success
+        time.sleep(2)
+        self.utility_wrap.wait_for_index_building_complete(c_name, timeout=120)
+        res, _ = self.utility_wrap.index_building_progress(c_name)
+        self.collection_wrap.load(_refresh=True)
+        log.info(f"wait for load finished and be ready for search")
+        res, _ = self.collection_wrap.query(expr=f"{df.pk_field} >= 0", output_fields=["name", "age"])
+        log.debug(f"query result: {res}")
+        assert len(res) == nb
+
+    @pytest.mark.parametrize("auto_id", [True])
+    @pytest.mark.parametrize("miss_meta_file", [True, False])
+    @pytest.mark.parametrize("dim", [1536])
+    def test_dynamic_schema_with_numpy_file(self, auto_id, miss_meta_file, dim):
+        """
+        """
+        import json
+        self._connect()
+        c_name = cf.gen_unique_str("dynamic_schema")
+        dim = dim
+        nb = 100
+        fields = [
+            cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
+            cf.gen_json_field(name=df.json_field),
+            cf.gen_float_vec_field(name=df.vec_field, dim=dim),
+        ]
+        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id, enable_dynamic_field=True)
+        self.collection_wrap.init_collection(c_name, schema=schema)
+        if auto_id is True:
+            files = [f"{df.vec_field}.npy", f"{df.json_field}.npy", "$meta.npy"]
+        else:
+            files = [f"{df.pk_field}.npy", f"{df.vec_field}.npy", f"{df.json_field}.npy", "$meta.npy"]
+        for f in files:
+            d = []
+            if f == "$meta.npy":
+                for i in range(nb):
+                    tmp = {"name": f"test_{i}", "age": i}
+                    for _ in range(random.randint(0, 3)):
+                        random_key = cf.gen_unique_str("random_key")
+                        random_value = cf.gen_unique_str("random_value")
+                        tmp[random_key] = random_value
+                    d.append(json.dumps(tmp))
+                np.save(f"{data_source}/{f}", d)
+            elif f == f"{df.pk_field}.npy":
+                d = np.array([i for i in range(nb)])
+                np.save(f"{data_source}/{f}", d)
+            elif f == f"{df.json_field}.npy":
+                d = np.array([json.dumps({str(i): i}) for i in range(nb)])
+                np.save(f"{data_source}/{f}", d)
+            elif f == f"{df.vec_field}.npy":
+                d = np.array([[np.float32(i) for i in range(dim)] for _ in range(nb)])
+                log.debug(f"vec data: {d}")
+                np.save(f"{data_source}/{f}", d)
+            else:
+                raise Exception(f"unknown file with {files}")
+
+        copy_files_to_minio(self.minio_endpoint, data_source, files, self.bucket_name, force=True)
+
         index_params = ct.default_index
         self.collection_wrap.create_index(
             field_name=df.vec_field, index_params=index_params
@@ -1294,3 +1416,161 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             ids = hits.ids
             results, _ = self.collection_wrap.query(expr=f"{df.pk_field} in {ids}")
             assert len(results) == len(ids)
+        # load collection
+        self.collection_wrap.load()
+        t0 = time.time()
+        if miss_meta_file is True:
+            # meta file is an optional file, so we can remove it
+            files = [f for f in files if f != "$meta.npy"]
+        task_id, _ = self.utility_wrap.do_bulk_insert(
+            collection_name=c_name, files=files
+        )
+        logging.info(f"bulk insert task ids:{task_id}")
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
+            task_ids=[task_id], timeout=90
+        )
+        tt = time.time() - t0
+        log.info(f"bulk insert state:{success} in {tt} with states: {states}")
+        assert success
+        time.sleep(2)
+        self.utility_wrap.wait_for_index_building_complete(c_name, timeout=120)
+        res, _ = self.utility_wrap.index_building_progress(c_name)
+        self.collection_wrap.load(_refresh=True)
+        log.info(f"wait for load finished and be ready for search")
+        res, _ = self.collection_wrap.query(expr=f"{df.pk_field} >= 0", output_fields=["name", "age"])
+        log.debug(f"query result: {res}")
+        assert len(res) == nb
+
+    def test_wrong_json_field_with_numpy_file(self):
+        """
+        """
+        auto_id = True
+        miss_meta_file = False
+        dim = 1536
+        import json
+        self._connect()
+        c_name = cf.gen_unique_str("dynamic_schema")
+        dim = dim
+        nb = 100
+        fields = [
+            cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
+            cf.gen_json_field(name=df.json_field),
+            cf.gen_float_vec_field(name=df.vec_field, dim=dim),
+        ]
+        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id, enable_dynamic_field=True)
+        self.collection_wrap.init_collection(c_name, schema=schema)
+        if auto_id is True:
+            files = [f"{df.vec_field}.npy", f"{df.json_field}.npy", "$meta.npy"]
+        else:
+            files = [f"{df.pk_field}.npy", f"{df.vec_field}.npy", f"{df.json_field}.npy", "$meta.npy"]
+        for f in files:
+            d = []
+            if f == "$meta.npy":
+                for i in range(nb):
+                    tmp = {"name": f"test_{i}", "age": i}
+                    for _ in range(random.randint(0, 3)):
+                        random_key = cf.gen_unique_str("random_key")
+                        random_value = cf.gen_unique_str("random_value")
+                        tmp[random_key] = random_value
+                    d.append(json.dumps(tmp))
+                np.save(f"{data_source}/{f}", d)
+            elif f == f"{df.pk_field}.npy":
+                d = np.array([i for i in range(nb)])
+                np.save(f"{data_source}/{f}", d)
+            elif f == f"{df.json_field}.npy":
+                tmp = [json.dumps({str(i): i}) for i in range(nb)]
+                tmp[-1] = "wrong json"
+                d = np.array(tmp)
+                np.save(f"{data_source}/{f}", d)
+            elif f == f"{df.vec_field}.npy":
+                d = np.array([[np.float32(i) for i in range(dim)] for _ in range(nb)])
+                log.debug(f"vec data: {d}")
+                np.save(f"{data_source}/{f}", d)
+            else:
+                raise Exception(f"unknown file with {files}")
+
+        copy_files_to_minio(self.minio_endpoint, data_source, files, self.bucket_name, force=True)
+
+        index_params = ct.default_index
+        self.collection_wrap.create_index(
+            field_name=df.vec_field, index_params=index_params
+        )
+        # load collection
+        self.collection_wrap.load()
+        t0 = time.time()
+        if miss_meta_file is True:
+            # meta file is an optional file, so we can remove it
+            files = [f for f in files if f != "$meta.npy"]
+        task_id, _ = self.utility_wrap.do_bulk_insert(
+            collection_name=c_name, files=files
+        )
+        logging.info(f"bulk insert task ids:{task_id}")
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
+            task_ids=[task_id], timeout=90
+        )
+        tt = time.time() - t0
+        log.info(f"bulk insert state:{success} in {tt} with states: {states}")
+        assert not success
+
+    def test_wrong_json_field_with_json_file(self):
+        """
+        """
+        auto_id = True
+        import json
+        self._connect()
+        c_name = cf.gen_unique_str("dynamic_schema")
+        dim = 128
+        nb = 100
+        fields = [
+            cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
+            cf.gen_json_field(name=df.json_field),
+            cf.gen_float_vec_field(name=df.vec_field, dim=dim),
+        ]
+
+        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id, enable_dynamic_field=True)
+        self.collection_wrap.init_collection(c_name, schema=schema)
+        data = []
+        for i in range(nb):
+            d = {
+                    "name": f"test_{i}",
+                    "age": i,
+                    df.pk_field: i,
+                    df.json_field: {str(i): i} if i != nb - 1 else "wrong json",
+                    df.vec_field: [x for x in range(dim)],
+
+                }
+            if auto_id is True:
+                del d[df.pk_field]
+            for _ in range(random.randint(0, 3)):
+                random_key = cf.gen_unique_str("random_key")
+                random_value = cf.gen_unique_str("random_value")
+                d[random_key] = random_value
+            data.append(d)
+        # generate json file for bulk insert
+        file_name = "dynamic_schema.json"
+        json_data = {
+            "rows": data,
+        }
+        with open(f"{data_source}/{file_name}", "w") as f:
+            json.dump(json_data, f)
+        # upload data to minio
+        files = [file_name]
+        copy_files_to_minio(self.minio_endpoint, data_source, files, self.bucket_name, force=True)
+
+        index_params = ct.default_index
+        self.collection_wrap.create_index(
+            field_name=df.vec_field, index_params=index_params
+        )
+        # load collection
+        self.collection_wrap.load()
+        t0 = time.time()
+        task_id, _ = self.utility_wrap.do_bulk_insert(
+            collection_name=c_name, files=files
+        )
+        logging.info(f"bulk insert task ids:{task_id}")
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
+            task_ids=[task_id], timeout=90
+        )
+        tt = time.time() - t0
+        log.info(f"bulk insert state:{success} in {tt} with states: {states}")
+        assert not success

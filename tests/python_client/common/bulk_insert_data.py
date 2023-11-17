@@ -21,6 +21,7 @@ class DataField:
     bool_field = "bool_scalar"
     float_field = "float_scalar"
     double_field = "double_scalar"
+    json_field = "json_scalar"
 
 
 class DataErrorType:
