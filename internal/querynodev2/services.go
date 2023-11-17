@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
@@ -432,6 +433,8 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		zap.Int64("version", req.GetVersion()),
 		zap.Bool("needTransfer", req.GetNeedTransfer()),
 	)
+
+	startTs := time.Now()
 	// check node healthy
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
 		return merr.Status(err), nil
@@ -488,7 +491,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 
 	node.manager.Collection.Ref(req.GetCollectionID(), uint32(len(loaded)))
 
-	log.Info("load segments done...",
+	log.Info("load segments done...", zap.Duration("time spent", time.Since(startTs)),
 		zap.Int64s("segments", lo.Map(loaded, func(s segments.Segment, _ int) int64 { return s.ID() })))
 
 	return merr.Success(), nil
@@ -1351,7 +1354,8 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 			// to pass segment'version, we call load segment one by one
 			action := action
 			group.Go(func() error {
-				return shardDelegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+				start := time.Now()
+				err := shardDelegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
 					Base: commonpbutil.NewMsgBase(
 						commonpbutil.WithMsgType(commonpb.MsgType_LoadSegments),
 						commonpbutil.WithMsgID(req.Base.GetMsgID()),
@@ -1366,6 +1370,11 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 					NeedTransfer: false,
 					LoadScope:    querypb.LoadScope_Delta,
 				})
+				if err != nil {
+					return err
+				}
+				log.Info("Successfully load delta from shard delegator", zap.Duration("time", time.Since(start)))
+				return nil
 			})
 		case querypb.SyncType_UpdateVersion:
 			log.Info("sync action", zap.Int64("TargetVersion", action.GetTargetVersion()))

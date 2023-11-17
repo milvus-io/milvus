@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -368,7 +367,7 @@ func (ob *TargetObserver) sync(ctx context.Context, replicaID int64, leaderView 
 		},
 		Version: time.Now().UnixNano(),
 	}
-	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond))
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	resp, err := ob.cluster.SyncDistribution(ctx, leaderView.ID, req)
 	if err != nil {

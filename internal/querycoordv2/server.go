@@ -19,6 +19,7 @@ package querycoordv2
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus/pkg/util/retry"
 	"os"
 	"sync"
 	"syscall"
@@ -721,49 +722,63 @@ func (s *Server) handleNodeUp(node int64) {
 	utils.AddNodesToCollectionsInRG(s.meta, meta.DefaultResourceGroupName, node)
 }
 
+// asynclly cleanup all the data related
 func (s *Server) handleNodeDown(node int64) {
-	log := log.With(zap.Int64("nodeID", node))
-	s.taskScheduler.RemoveExecutor(node)
-	s.distController.Remove(node)
+	go func() {
+		log := log.With(zap.Int64("nodeID", node))
+		s.taskScheduler.RemoveExecutor(node)
+		s.distController.Remove(node)
 
-	// Clear dist
-	s.dist.LeaderViewManager.Update(node)
-	s.dist.ChannelDistManager.Update(node)
-	s.dist.SegmentDistManager.Update(node)
+		// Clear dist
+		s.dist.LeaderViewManager.Update(node)
+		s.dist.ChannelDistManager.Update(node)
+		s.dist.SegmentDistManager.Update(node)
 
-	// Clear meta
-	for _, collection := range s.meta.CollectionManager.GetAll() {
-		log := log.With(zap.Int64("collectionID", collection))
-		replica := s.meta.ReplicaManager.GetByCollectionAndNode(collection, node)
-		if replica == nil {
-			continue
+		// Clear meta
+		for _, collection := range s.meta.CollectionManager.GetAll() {
+			log := log.With(zap.Int64("collectionID", collection))
+			replica := s.meta.ReplicaManager.GetByCollectionAndNode(collection, node)
+			if replica == nil {
+				continue
+			}
+
+			err := s.meta.ReplicaManager.RemoveNode(replica.GetID(), node)
+			if err != nil {
+				log.Warn("failed to remove node from collection's replicas",
+					zap.Int64("replicaID", replica.GetID()),
+					zap.Error(err),
+				)
+			}
+			log.Info("remove node from replica",
+				zap.Int64("replicaID", replica.GetID()))
 		}
-		err := s.meta.ReplicaManager.RemoveNode(replica.GetID(), node)
+
+		// Clear tasks
+		s.taskScheduler.RemoveByNode(node)
+		log.Info("cleaned up all task on node", zap.Int64("nodeID", node))
+
+		// block here until resource manager is able to handle node down
+		err := retry.Do(s.ctx, func() error {
+			rgName, err := s.meta.ResourceManager.HandleNodeDown(node)
+			if err != nil {
+				log.Warn("HandleNodeDown: failed to remove node from resource group",
+					zap.String("resourceGroup", rgName),
+					zap.Error(err),
+				)
+				return err
+			}
+			log.Info("HandleNodeDown: remove node from resource group",
+				zap.String("resourceGroup", rgName))
+			return nil
+		}, retry.Attempts(100))
 		if err != nil {
-			log.Warn("failed to remove node from collection's replicas",
-				zap.Int64("replicaID", replica.GetID()),
-				zap.Error(err),
-			)
+			log.Error("failed to handle resource manager node down", zap.Error(err))
+			if s.State() != commonpb.StateCode_Stopping && s.State() != commonpb.StateCode_Abnormal {
+				// only panic if server is not stopping or stopped
+				panic("failed to handle resource manager node down")
+			}
 		}
-		log.Info("remove node from replica",
-			zap.Int64("replicaID", replica.GetID()))
-	}
-
-	// Clear tasks
-	s.taskScheduler.RemoveByNode(node)
-
-	rgName, err := s.meta.ResourceManager.HandleNodeDown(node)
-	if err != nil {
-		log.Warn("HandleNodeDown: failed to remove node from resource group",
-			zap.String("resourceGroup", rgName),
-			zap.Error(err),
-		)
-		return
-	}
-
-	log.Info("HandleNodeDown: remove node from resource group",
-		zap.String("resourceGroup", rgName),
-	)
+	}()
 }
 
 // checkReplicas checks whether replica contains offline node, and remove those nodes

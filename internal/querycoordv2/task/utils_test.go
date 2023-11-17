@@ -19,9 +19,6 @@ package task
 import (
 	"context"
 	"testing"
-	"time"
-
-	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -29,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/stretchr/testify/suite"
 )
 
 type UtilsSuite struct {
@@ -92,7 +90,6 @@ func (s *UtilsSuite) TestPackLoadSegmentRequest() {
 	action := NewSegmentAction(1, ActionTypeGrow, "test-ch", 100)
 	task, err := NewSegmentTask(
 		ctx,
-		time.Second,
 		nil,
 		1,
 		10,
@@ -145,7 +142,6 @@ func (s *UtilsSuite) TestPackLoadSegmentRequestMmap() {
 	action := NewSegmentAction(1, ActionTypeGrow, "test-ch", 100)
 	task, err := NewSegmentTask(
 		ctx,
-		time.Second,
 		nil,
 		1,
 		10,

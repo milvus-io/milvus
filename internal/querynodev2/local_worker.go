@@ -19,6 +19,7 @@ package querynodev2
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -52,6 +53,7 @@ func (w *LocalWorker) LoadSegments(ctx context.Context, req *querypb.LoadSegment
 		})),
 		zap.String("loadScope", req.GetLoadScope().String()),
 	)
+	startTs := time.Now()
 	log.Info("start to load segments...")
 	loaded, err := w.node.loader.Load(ctx,
 		req.GetCollectionID(),
@@ -65,7 +67,7 @@ func (w *LocalWorker) LoadSegments(ctx context.Context, req *querypb.LoadSegment
 
 	w.node.manager.Collection.Ref(req.GetCollectionID(), uint32(len(loaded)))
 
-	log.Info("load segments done...",
+	log.Info("load segments done...", zap.Duration("time spent", time.Since(startTs)),
 		zap.Int64s("segments", lo.Map(loaded, func(s segments.Segment, _ int) int64 { return s.ID() })))
 	return err
 }

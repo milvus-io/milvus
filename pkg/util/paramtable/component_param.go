@@ -1200,8 +1200,6 @@ type queryCoordConfig struct {
 	ChannelCheckInterval       ParamItem `refreshable:"true"`
 	BalanceCheckInterval       ParamItem `refreshable:"true"`
 	IndexCheckInterval         ParamItem `refreshable:"true"`
-	ChannelTaskTimeout         ParamItem `refreshable:"true"`
-	SegmentTaskTimeout         ParamItem `refreshable:"true"`
 	DistPullInterval           ParamItem `refreshable:"false"`
 	HeartbeatAvailableInterval ParamItem `refreshable:"true"`
 	LoadTimeoutSeconds         ParamItem `refreshable:"true"`
@@ -1390,27 +1388,6 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.IndexCheckInterval.Init(base.mgr)
-
-	p.ChannelTaskTimeout = ParamItem{
-		Key:          "queryCoord.channelTaskTimeout",
-		Version:      "2.0.0",
-		DefaultValue: "60000",
-		PanicIfEmpty: true,
-		Doc:          "1 minute",
-		Export:       true,
-	}
-	p.ChannelTaskTimeout.Init(base.mgr)
-
-	p.SegmentTaskTimeout = ParamItem{
-		Key:          "queryCoord.segmentTaskTimeout",
-		Version:      "2.0.0",
-		DefaultValue: "120000",
-		PanicIfEmpty: true,
-		Doc:          "2 minute",
-		Export:       true,
-	}
-	p.SegmentTaskTimeout.Init(base.mgr)
-
 	p.DistPullInterval = ParamItem{
 		Key:          "queryCoord.distPullInterval",
 		Version:      "2.0.0",

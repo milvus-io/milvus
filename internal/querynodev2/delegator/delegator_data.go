@@ -429,7 +429,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		log.Warn("worker failed to load segments", zap.Error(err))
 		return err
 	}
-	log.Debug("work loads segments done")
+	log.Info("worker loads segments done")
 
 	// load index and L0 segment need no stream delete and distribution change
 	if req.GetLoadScope() == querypb.LoadScope_Index ||

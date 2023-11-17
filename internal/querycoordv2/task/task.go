@@ -19,13 +19,12 @@ package task
 import (
 	"context"
 	"fmt"
-	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/atomic"
 
+	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -285,7 +284,6 @@ type SegmentTask struct {
 // all actions must process the same segment,
 // empty actions is not allowed
 func NewSegmentTask(ctx context.Context,
-	timeout time.Duration,
 	source Source,
 	collectionID,
 	replicaID UniqueID,
@@ -342,7 +340,6 @@ type ChannelTask struct {
 // all actions must process the same channel, and the same type of channel
 // empty actions is not allowed
 func NewChannelTask(ctx context.Context,
-	timeout time.Duration,
 	source Source,
 	collectionID,
 	replicaID UniqueID,

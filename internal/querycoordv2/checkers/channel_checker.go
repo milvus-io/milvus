@@ -18,18 +18,16 @@ package checkers
 
 import (
 	"context"
-	"time"
 
-	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/samber/lo"
 )
 
 // TODO(sunby): have too much similar codes with SegmentChecker
@@ -195,14 +193,14 @@ func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*
 		plans[i].ReplicaID = replica.GetID()
 	}
 
-	return balance.CreateChannelTasksFromPlans(ctx, c.ID(), Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond), plans)
+	return balance.CreateChannelTasksFromPlans(ctx, c.ID(), plans)
 }
 
 func (c *ChannelChecker) createChannelReduceTasks(ctx context.Context, channels []*meta.DmChannel, replicaID int64) []task.Task {
 	ret := make([]task.Task, 0, len(channels))
 	for _, ch := range channels {
 		action := task.NewChannelAction(ch.Node, task.ActionTypeReduce, ch.GetChannelName())
-		task, err := task.NewChannelTask(ctx, Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond), c.ID(), ch.GetCollectionID(), replicaID, action)
+		task, err := task.NewChannelTask(ctx, c.ID(), ch.GetCollectionID(), replicaID, action)
 		if err != nil {
 			log.Warn("create channel reduce task failed",
 				zap.Int64("collection", ch.GetCollectionID()),

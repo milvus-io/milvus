@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/samber/lo"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -31,9 +31,11 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/samber/lo"
 )
 
 // idSource helper type for using id as task source
@@ -56,6 +58,28 @@ func Wait(ctx context.Context, timeout time.Duration, tasks ...Task) error {
 		for _, task := range tasks {
 			err = task.Wait()
 			if err != nil {
+				log.Warn("failed to to wait for task", zap.Any("task", task.String()), zap.Error(err))
+				cancel()
+				break
+			}
+		}
+		cancel()
+	}()
+	<-ctx.Done()
+
+	return err
+}
+
+func BlockWait(ctx context.Context, tasks ...Task) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var err error
+	go func() {
+		for _, task := range tasks {
+			err = task.Wait()
+			if err != nil {
+				log.Warn("failed to to wait for task", zap.Any("task", task.String()), zap.Error(err))
 				cancel()
 				break
 			}

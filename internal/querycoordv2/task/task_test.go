@@ -244,7 +244,6 @@ func (suite *TaskSuite) TestSubscribeChannelTask() {
 		})
 		task, err := NewChannelTask(
 			ctx,
-			timeout,
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
@@ -286,14 +285,12 @@ func (suite *TaskSuite) TestSubscribeChannelTask() {
 
 func (suite *TaskSuite) TestSubmitDuplicateSubscribeChannelTask() {
 	ctx := context.Background()
-	timeout := 10 * time.Second
 	targetNode := int64(3)
 
 	tasks := []Task{}
 	for _, channel := range suite.subChannels {
 		task, err := NewChannelTask(
 			ctx,
-			timeout,
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
@@ -322,7 +319,6 @@ func (suite *TaskSuite) TestSubmitDuplicateSubscribeChannelTask() {
 
 func (suite *TaskSuite) TestUnsubscribeChannelTask() {
 	ctx := context.Background()
-	timeout := 10 * time.Second
 	targetNode := int64(1)
 
 	// Expect
@@ -338,7 +334,6 @@ func (suite *TaskSuite) TestUnsubscribeChannelTask() {
 		})
 		task, err := NewChannelTask(
 			ctx,
-			timeout,
 			WrapIDSource(0),
 			suite.collection,
 			-1,
@@ -378,7 +373,6 @@ func (suite *TaskSuite) TestUnsubscribeChannelTask() {
 
 func (suite *TaskSuite) TestLoadSegmentTask() {
 	ctx := context.Background()
-	timeout := 10 * time.Second
 	targetNode := int64(3)
 	partition := int64(100)
 	channel := &datapb.VchannelInfo{
@@ -430,7 +424,6 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 		})
 		task, err := NewSegmentTask(
 			ctx,
-			timeout,
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
@@ -476,7 +469,6 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 
 func (suite *TaskSuite) TestLoadSegmentTaskNotIndex() {
 	ctx := context.Background()
-	timeout := 10 * time.Second
 	targetNode := int64(3)
 	partition := int64(100)
 	channel := &datapb.VchannelInfo{
@@ -528,7 +520,6 @@ func (suite *TaskSuite) TestLoadSegmentTaskNotIndex() {
 		})
 		task, err := NewSegmentTask(
 			ctx,
-			timeout,
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
@@ -572,88 +563,8 @@ func (suite *TaskSuite) TestLoadSegmentTaskNotIndex() {
 	}
 }
 
-func (suite *TaskSuite) TestLoadSegmentTaskFailed() {
-	ctx := context.Background()
-	timeout := 10 * time.Second
-	targetNode := int64(3)
-	partition := int64(100)
-	channel := &datapb.VchannelInfo{
-		CollectionID: suite.collection,
-		ChannelName:  Params.CommonCfg.RootCoordDml.GetValue() + "-test",
-	}
-
-	// Expect
-	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).Return(&milvuspb.DescribeCollectionResponse{
-		Schema: &schemapb.CollectionSchema{
-			Name: "TestLoadSegmentTask",
-			Fields: []*schemapb.FieldSchema{
-				{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
-			},
-		},
-	}, nil)
-	for _, segment := range suite.loadSegments {
-		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return(&datapb.GetSegmentInfoResponse{
-			Infos: []*datapb.SegmentInfo{
-				{
-					ID:            segment,
-					CollectionID:  suite.collection,
-					PartitionID:   partition,
-					InsertChannel: channel.ChannelName,
-				},
-			},
-		}, nil)
-		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, errors.New("index not ready"))
-	}
-
-	// Test load segment task
-	suite.dist.ChannelDistManager.Update(targetNode, meta.DmChannelFromVChannel(&datapb.VchannelInfo{
-		CollectionID: suite.collection,
-		ChannelName:  channel.ChannelName,
-	}))
-	tasks := []Task{}
-	segments := make([]*datapb.SegmentInfo, 0)
-	for _, segment := range suite.loadSegments {
-		segments = append(segments, &datapb.SegmentInfo{
-			ID:            segment,
-			PartitionID:   1,
-			InsertChannel: channel.ChannelName,
-		})
-		task, err := NewSegmentTask(
-			ctx,
-			timeout,
-			WrapIDSource(0),
-			suite.collection,
-			suite.replica,
-			NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segment),
-		)
-		suite.NoError(err)
-		tasks = append(tasks, task)
-		err = suite.scheduler.Add(task)
-		suite.NoError(err)
-	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return(nil, segments, nil)
-	suite.target.UpdateCollectionNextTarget(suite.collection)
-	segmentsNum := len(suite.loadSegments)
-	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
-
-	// Process tasks
-	suite.dispatchAndWait(targetNode)
-	suite.AssertTaskNum(segmentsNum, 0, 0, segmentsNum)
-
-	// Process tasks done
-	// Dist contains channels
-	time.Sleep(timeout)
-	suite.dispatchAndWait(targetNode)
-	suite.AssertTaskNum(0, 0, 0, 0)
-
-	for _, task := range tasks {
-		suite.Equal(TaskStatusFailed, task.Status())
-	}
-}
-
 func (suite *TaskSuite) TestReleaseSegmentTask() {
 	ctx := context.Background()
-	timeout := 10 * time.Second
 	targetNode := int64(3)
 	partition := int64(100)
 	channel := &datapb.VchannelInfo{
@@ -685,7 +596,6 @@ func (suite *TaskSuite) TestReleaseSegmentTask() {
 		view.Segments[segment] = &querypb.SegmentDist{NodeID: targetNode, Version: 0}
 		task, err := NewSegmentTask(
 			ctx,
-			timeout,
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
@@ -719,7 +629,6 @@ func (suite *TaskSuite) TestReleaseSegmentTask() {
 
 func (suite *TaskSuite) TestReleaseGrowingSegmentTask() {
 	ctx := context.Background()
-	timeout := 10 * time.Second
 	targetNode := int64(3)
 
 	// Expect
@@ -729,7 +638,6 @@ func (suite *TaskSuite) TestReleaseGrowingSegmentTask() {
 	for _, segment := range suite.releaseSegments {
 		task, err := NewSegmentTask(
 			ctx,
-			timeout,
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
@@ -772,7 +680,6 @@ func (suite *TaskSuite) TestReleaseGrowingSegmentTask() {
 
 func (suite *TaskSuite) TestMoveSegmentTask() {
 	ctx := context.Background()
-	timeout := 10 * time.Second
 	leader := int64(1)
 	sourceNode := int64(2)
 	targetNode := int64(3)
@@ -837,7 +744,6 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 
 		task, err := NewSegmentTask(
 			ctx,
-			timeout,
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
@@ -889,7 +795,6 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 
 func (suite *TaskSuite) TestMoveSegmentTaskStale() {
 	ctx := context.Background()
-	timeout := 10 * time.Second
 	leader := int64(1)
 	sourceNode := int64(2)
 	targetNode := int64(3)
@@ -921,7 +826,6 @@ func (suite *TaskSuite) TestMoveSegmentTaskStale() {
 
 		task, err := NewSegmentTask(
 			ctx,
-			timeout,
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
@@ -946,7 +850,6 @@ func (suite *TaskSuite) TestMoveSegmentTaskStale() {
 
 func (suite *TaskSuite) TestTaskCanceled() {
 	ctx := context.Background()
-	timeout := 10 * time.Second
 	targetNode := int64(3)
 	partition := int64(100)
 	channel := &datapb.VchannelInfo{
@@ -998,7 +901,6 @@ func (suite *TaskSuite) TestTaskCanceled() {
 		})
 		task, err := NewSegmentTask(
 			ctx,
-			timeout,
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
@@ -1035,7 +937,6 @@ func (suite *TaskSuite) TestTaskCanceled() {
 
 func (suite *TaskSuite) TestSegmentTaskStale() {
 	ctx := context.Background()
-	timeout := 10 * time.Second
 	targetNode := int64(3)
 	partition := int64(100)
 	channel := &datapb.VchannelInfo{
@@ -1088,7 +989,6 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 		})
 		task, err := NewSegmentTask(
 			ctx,
-			timeout,
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
@@ -1156,13 +1056,11 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 
 func (suite *TaskSuite) TestChannelTaskReplace() {
 	ctx := context.Background()
-	timeout := 10 * time.Second
 	targetNode := int64(3)
 
 	for _, channel := range suite.subChannels {
 		task, err := NewChannelTask(
 			ctx,
-			timeout,
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
@@ -1179,7 +1077,6 @@ func (suite *TaskSuite) TestChannelTaskReplace() {
 	for _, channel := range suite.subChannels {
 		task, err := NewChannelTask(
 			ctx,
-			timeout,
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
@@ -1198,7 +1095,6 @@ func (suite *TaskSuite) TestChannelTaskReplace() {
 	for _, channel := range suite.subChannels {
 		task, err := NewChannelTask(
 			ctx,
-			timeout,
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
@@ -1214,47 +1110,45 @@ func (suite *TaskSuite) TestChannelTaskReplace() {
 }
 
 func (suite *TaskSuite) TestCreateTaskBehavior() {
-	chanelTask, err := NewChannelTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, 0)
+	chanelTask, err := NewChannelTask(context.TODO(), WrapIDSource(0), 0, 0)
 	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.Nil(chanelTask)
 
 	action := NewSegmentAction(0, 0, "", 0)
-	chanelTask, err = NewChannelTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, 0, action)
+	chanelTask, err = NewChannelTask(context.TODO(), WrapIDSource(0), 0, 0, action)
 	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.Nil(chanelTask)
 
 	action1 := NewChannelAction(0, 0, "fake-channel1")
 	action2 := NewChannelAction(0, 0, "fake-channel2")
-	chanelTask, err = NewChannelTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, 0, action1, action2)
+	chanelTask, err = NewChannelTask(context.TODO(), WrapIDSource(0), 0, 0, action1, action2)
 	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.Nil(chanelTask)
 
-	segmentTask, err := NewSegmentTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, 0)
+	segmentTask, err := NewSegmentTask(context.TODO(), WrapIDSource(0), 0, 0)
 	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.Nil(segmentTask)
 
 	channelAction := NewChannelAction(0, 0, "fake-channel1")
-	segmentTask, err = NewSegmentTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, 0, channelAction)
+	segmentTask, err = NewSegmentTask(context.TODO(), WrapIDSource(0), 0, 0, channelAction)
 	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.Nil(segmentTask)
 
 	segmentAction1 := NewSegmentAction(0, 0, "", 0)
 	segmentAction2 := NewSegmentAction(0, 0, "", 1)
 
-	segmentTask, err = NewSegmentTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, 0, segmentAction1, segmentAction2)
+	segmentTask, err = NewSegmentTask(context.TODO(), WrapIDSource(0), 0, 0, segmentAction1, segmentAction2)
 	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.Nil(segmentTask)
 }
 
 func (suite *TaskSuite) TestSegmentTaskReplace() {
 	ctx := context.Background()
-	timeout := 10 * time.Second
 	targetNode := int64(3)
 
 	for _, segment := range suite.loadSegments {
 		task, err := NewSegmentTask(
 			ctx,
-			timeout,
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
@@ -1271,7 +1165,6 @@ func (suite *TaskSuite) TestSegmentTaskReplace() {
 	for _, segment := range suite.loadSegments {
 		task, err := NewSegmentTask(
 			ctx,
-			timeout,
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
@@ -1290,7 +1183,6 @@ func (suite *TaskSuite) TestSegmentTaskReplace() {
 	for _, segment := range suite.loadSegments {
 		task, err := NewSegmentTask(
 			ctx,
-			timeout,
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
@@ -1307,7 +1199,6 @@ func (suite *TaskSuite) TestSegmentTaskReplace() {
 
 func (suite *TaskSuite) TestNoExecutor() {
 	ctx := context.Background()
-	timeout := 10 * time.Second
 	targetNode := int64(-1)
 	channel := &datapb.VchannelInfo{
 		CollectionID: suite.collection,
@@ -1331,7 +1222,6 @@ func (suite *TaskSuite) TestNoExecutor() {
 		})
 		task, err := NewSegmentTask(
 			ctx,
-			timeout,
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,

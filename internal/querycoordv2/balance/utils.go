@@ -19,8 +19,6 @@ package balance
 import (
 	"context"
 	"fmt"
-	"time"
-
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -34,7 +32,7 @@ const (
 	DistInfoPrefix = "Balance-Dists:"
 )
 
-func CreateSegmentTasksFromPlans(ctx context.Context, source task.Source, timeout time.Duration, plans []SegmentAssignPlan) []task.Task {
+func CreateSegmentTasksFromPlans(ctx context.Context, source task.Source, plans []SegmentAssignPlan) []task.Task {
 	ret := make([]task.Task, 0)
 	for _, p := range plans {
 		actions := make([]task.Action, 0)
@@ -48,7 +46,6 @@ func CreateSegmentTasksFromPlans(ctx context.Context, source task.Source, timeou
 		}
 		t, err := task.NewSegmentTask(
 			ctx,
-			timeout,
 			source,
 			p.Segment.GetCollectionID(),
 			p.ReplicaID,
@@ -86,7 +83,7 @@ func CreateSegmentTasksFromPlans(ctx context.Context, source task.Source, timeou
 	return ret
 }
 
-func CreateChannelTasksFromPlans(ctx context.Context, source task.Source, timeout time.Duration, plans []ChannelAssignPlan) []task.Task {
+func CreateChannelTasksFromPlans(ctx context.Context, source task.Source, plans []ChannelAssignPlan) []task.Task {
 	ret := make([]task.Task, 0, len(plans))
 	for _, p := range plans {
 		actions := make([]task.Action, 0)
@@ -98,7 +95,7 @@ func CreateChannelTasksFromPlans(ctx context.Context, source task.Source, timeou
 			action := task.NewChannelAction(p.From, task.ActionTypeReduce, p.Channel.GetChannelName())
 			actions = append(actions, action)
 		}
-		t, err := task.NewChannelTask(ctx, timeout, source, p.Channel.GetCollectionID(), p.ReplicaID, actions...)
+		t, err := task.NewChannelTask(ctx, source, p.Channel.GetCollectionID(), p.ReplicaID, actions...)
 		if err != nil {
 			log.Warn("create channel task failed",
 				zap.Int64("collection", p.Channel.GetCollectionID()),

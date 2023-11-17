@@ -702,6 +702,7 @@ func (scheduler *taskScheduler) remove(task Task) {
 		zap.Int64("replicaID", task.ReplicaID()),
 		zap.String("status", task.Status()),
 	)
+	log.Info("start to remove task")
 	task.Cancel(nil)
 	scheduler.tasks.Remove(task.ID())
 	scheduler.waitQueue.Remove(task)
@@ -725,7 +726,7 @@ func (scheduler *taskScheduler) remove(task Task) {
 	}
 
 	scheduler.updateTaskMetrics()
-	log.Info("task removed")
+	log.Info("successfully remove task")
 }
 
 func (scheduler *taskScheduler) checkStale(task Task) error {
