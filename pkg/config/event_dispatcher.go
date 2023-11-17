@@ -17,9 +17,11 @@ package config
 
 import (
 	"strings"
+	"sync"
 )
 
 type EventDispatcher struct {
+	mut       sync.RWMutex
 	registry  map[string][]EventHandler
 	keyPrefix []string
 }
@@ -32,10 +34,14 @@ func NewEventDispatcher() *EventDispatcher {
 }
 
 func (ed *EventDispatcher) Get(key string) []EventHandler {
+	ed.mut.RLock()
+	defer ed.mut.RUnlock()
 	return ed.registry[formatKey(key)]
 }
 
 func (ed *EventDispatcher) Dispatch(event *Event) {
+	ed.mut.RLock()
+	defer ed.mut.RUnlock()
 	var hs []EventHandler
 	realKey := formatKey(event.Key)
 	hs, ok := ed.registry[realKey]
@@ -55,6 +61,8 @@ func (ed *EventDispatcher) Dispatch(event *Event) {
 
 // register a handler to watch specific config changed
 func (ed *EventDispatcher) Register(key string, handler EventHandler) {
+	ed.mut.Lock()
+	defer ed.mut.Unlock()
 	key = formatKey(key)
 	v, ok := ed.registry[key]
 	if ok {
@@ -66,6 +74,8 @@ func (ed *EventDispatcher) Register(key string, handler EventHandler) {
 
 // register a handler to watch specific config changed
 func (ed *EventDispatcher) RegisterForKeyPrefix(keyPrefix string, handler EventHandler) {
+	ed.mut.Lock()
+	defer ed.mut.Unlock()
 	keyPrefix = formatKey(keyPrefix)
 	v, ok := ed.registry[keyPrefix]
 	if ok {
@@ -77,6 +87,8 @@ func (ed *EventDispatcher) RegisterForKeyPrefix(keyPrefix string, handler EventH
 }
 
 func (ed *EventDispatcher) Unregister(key string, handler EventHandler) {
+	ed.mut.Lock()
+	defer ed.mut.Unlock()
 	key = formatKey(key)
 	v, ok := ed.registry[key]
 	if !ok {
