@@ -385,14 +385,17 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 
 	concurrencyLevel := funcutil.Min(hardware.GetCPUNum(), len(infos))
 
+	maxBinlogNum := 0
+	maxIndexFileNum := 0
 	for _, info := range infos {
 		for _, field := range info.GetBinlogPaths() {
-			resource.WorkNum += len(field.GetBinlogs())
+			maxBinlogNum += len(field.GetBinlogs())
 		}
 		for _, index := range info.GetIndexInfos() {
-			resource.WorkNum += len(index.IndexFilePaths)
+			maxIndexFileNum += len(index.IndexFilePaths)
 		}
 	}
+	resource.WorkNum = lo.Max([]int{maxBinlogNum, maxIndexFileNum})
 
 	for ; concurrencyLevel > 1; concurrencyLevel /= 2 {
 		_, _, err := loader.checkSegmentSize(ctx, infos, concurrencyLevel)
