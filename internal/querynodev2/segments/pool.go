@@ -33,10 +33,12 @@ var (
 	// and other operations (insert/delete/statistics/etc.)
 	// since in concurrent situation, there operation may block each other in high payload
 
-	sqp     atomic.Pointer[conc.Pool[any]]
-	sqOnce  sync.Once
-	dp      atomic.Pointer[conc.Pool[any]]
-	dynOnce sync.Once
+	sqp      atomic.Pointer[conc.Pool[any]]
+	sqOnce   sync.Once
+	dp       atomic.Pointer[conc.Pool[any]]
+	dynOnce  sync.Once
+	loadPool atomic.Pointer[conc.Pool[any]]
+	loadOnce sync.Once
 )
 
 // initSQPool initialize
@@ -57,13 +59,26 @@ func initSQPool() {
 func initDynamicPool() {
 	dynOnce.Do(func() {
 		pool := conc.NewPool[any](
-			hardware.GetCPUNum()*paramtable.Get().CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsInt(),
+			hardware.GetCPUNum(),
 			conc.WithPreAlloc(false),
 			conc.WithDisablePurge(false),
 			conc.WithPreHandler(runtime.LockOSThread), // lock os thread for cgo thread disposal
 		)
 
 		dp.Store(pool)
+	})
+}
+
+func initLoadPool() {
+	loadOnce.Do(func() {
+		pool := conc.NewPool[any](
+			hardware.GetCPUNum()*paramtable.Get().CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsInt(),
+			conc.WithPreAlloc(false),
+			conc.WithDisablePurge(false),
+			conc.WithPreHandler(runtime.LockOSThread), // lock os thread for cgo thread disposal
+		)
+
+		loadPool.Store(pool)
 	})
 }
 
@@ -77,4 +92,9 @@ func GetSQPool() *conc.Pool[any] {
 func GetDynamicPool() *conc.Pool[any] {
 	initDynamicPool()
 	return dp.Load()
+}
+
+func GetLoadPool() *conc.Pool[any] {
+	initLoadPool()
+	return loadPool.Load()
 }
