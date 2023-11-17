@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "common/EasyAssert.h"
+#include "common/Types.h"
 #include "knowhere/comp/index_param.h"
 #include "nlohmann/json.hpp"
 #include "query/SearchBruteForce.h"
@@ -356,8 +357,8 @@ class IndexTest : public ::testing::TestWithParam<Param> {
     milvus::Config range_search_conf;
     milvus::DataType vec_field_data_type;
     knowhere::DataSetPtr xb_dataset;
-    std::vector<float> xb_data;
-    std::vector<uint8_t> xb_bin_data;
+    FixedVector<float> xb_data;
+    FixedVector<uint8_t> xb_bin_data;
     knowhere::DataSetPtr xq_dataset;
     int64_t query_offset = 100;
     int64_t NB = 3000;
@@ -610,7 +611,7 @@ TEST(Indexing, SearchDiskAnnWithInvalidParam) {
 
     // build disk ann index
     auto dataset = GenDataset(NB, metric_type, false);
-    std::vector<float> xb_data =
+    FixedVector<float> xb_data =
         dataset.get_col<float>(milvus::FieldId(field_id));
     knowhere::DataSetPtr xb_dataset =
         knowhere::GenDataSet(NB, DIM, xb_data.data());
