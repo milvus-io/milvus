@@ -37,20 +37,14 @@ func BrokerMetaWriter(broker broker.Broker, opts ...retry.Option) MetaWriter {
 
 func (b *brokerMetaWriter) UpdateSync(pack *SyncTask) error {
 	var (
-		fieldInsert = []*datapb.FieldBinlog{}
-		fieldStats  = []*datapb.FieldBinlog{}
-		deltaInfos  = make([]*datapb.FieldBinlog, 0)
-		checkPoints = []*datapb.CheckPoint{}
+		checkPoints       = []*datapb.CheckPoint{}
+		deltaFieldBinlogs = []*datapb.FieldBinlog{}
 	)
 
-	for k, v := range pack.insertBinlogs {
-		fieldInsert = append(fieldInsert, &datapb.FieldBinlog{FieldID: k, Binlogs: []*datapb.Binlog{v}})
-	}
-	for k, v := range pack.statsBinlogs {
-		fieldStats = append(fieldStats, &datapb.FieldBinlog{FieldID: k, Binlogs: []*datapb.Binlog{v}})
-	}
-	if pack.deltaBinlog != nil {
-		deltaInfos = append(deltaInfos, &datapb.FieldBinlog{Binlogs: []*datapb.Binlog{pack.deltaBinlog}})
+	insertFieldBinlogs := lo.MapToSlice(pack.insertBinlogs, func(_ int64, fieldBinlog *datapb.FieldBinlog) *datapb.FieldBinlog { return fieldBinlog })
+	statsFieldBinlogs := lo.MapToSlice(pack.statsBinlogs, func(_ int64, fieldBinlog *datapb.FieldBinlog) *datapb.FieldBinlog { return fieldBinlog })
+	if len(pack.deltaBinlog.Binlogs) > 0 {
+		deltaFieldBinlogs = append(deltaFieldBinlogs, pack.deltaBinlog)
 	}
 
 	// only current segment checkpoint info,
@@ -71,14 +65,15 @@ func (b *brokerMetaWriter) UpdateSync(pack *SyncTask) error {
 			StartPosition: info.StartPosition(),
 		}
 	})
+	getBinlogNum := func(fBinlog *datapb.FieldBinlog) int { return len(fBinlog.GetBinlogs()) }
 	log.Info("SaveBinlogPath",
 		zap.Int64("SegmentID", pack.segmentID),
 		zap.Int64("CollectionID", pack.collectionID),
 		zap.Any("startPos", startPos),
 		zap.Any("checkPoints", checkPoints),
-		zap.Int("Length of Field2BinlogPaths", len(fieldInsert)),
-		zap.Int("Length of Field2Stats", len(fieldStats)),
-		// zap.Int("Length of Field2Deltalogs", len(deltaInfos[0].GetBinlogs())),
+		zap.Int("binlogNum", lo.SumBy(insertFieldBinlogs, getBinlogNum)),
+		zap.Int("statslogNum", lo.SumBy(statsFieldBinlogs, getBinlogNum)),
+		zap.Int("deltalogNum", lo.SumBy(deltaFieldBinlogs, getBinlogNum)),
 		zap.String("vChannelName", pack.channelName),
 	)
 
@@ -90,9 +85,9 @@ func (b *brokerMetaWriter) UpdateSync(pack *SyncTask) error {
 		),
 		SegmentID:           pack.segmentID,
 		CollectionID:        pack.collectionID,
-		Field2BinlogPaths:   fieldInsert,
-		Field2StatslogPaths: fieldStats,
-		Deltalogs:           deltaInfos,
+		Field2BinlogPaths:   insertFieldBinlogs,
+		Field2StatslogPaths: statsFieldBinlogs,
+		Deltalogs:           deltaFieldBinlogs,
 
 		CheckPoints: checkPoints,
 

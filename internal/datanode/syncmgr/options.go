@@ -14,8 +14,9 @@ import (
 func NewSyncTask() *SyncTask {
 	return &SyncTask{
 		isFlush:       false,
-		insertBinlogs: make(map[int64]*datapb.Binlog),
-		statsBinlogs:  make(map[int64]*datapb.Binlog),
+		insertBinlogs: make(map[int64]*datapb.FieldBinlog),
+		statsBinlogs:  make(map[int64]*datapb.FieldBinlog),
+		deltaBinlog:   &datapb.FieldBinlog{},
 		segmentData:   make(map[string][]byte),
 	}
 }
