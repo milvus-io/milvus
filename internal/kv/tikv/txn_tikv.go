@@ -773,7 +773,6 @@ func convertEmptyStringToByte(value string) ([]byte, error) {
 		return EmptyValueByte, nil
 	} else if value == EmptyValueString {
 		return nil, fmt.Errorf("Value for key is reserved by EmptyValue: %s", EmptyValueString)
-	} else {
-		return []byte(value), nil
 	}
+	return []byte(value), nil
 }
