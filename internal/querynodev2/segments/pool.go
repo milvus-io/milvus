@@ -57,7 +57,7 @@ func initSQPool() {
 func initDynamicPool() {
 	dynOnce.Do(func() {
 		pool := conc.NewPool[any](
-			hardware.GetCPUNum(),
+			hardware.GetCPUNum()*paramtable.Get().CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsInt(),
 			conc.WithPreAlloc(false),
 			conc.WithDisablePurge(false),
 			conc.WithPreHandler(runtime.LockOSThread), // lock os thread for cgo thread disposal
