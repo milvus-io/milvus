@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 
-	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -44,8 +43,6 @@ type queryShard struct {
 	vectorChunkManager *storage.VectorChunkManager
 	localCacheEnabled  bool
 	localCacheSize     int64
-
-	inUse atomic.Int64
 }
 
 func newQueryShard(
@@ -60,7 +57,6 @@ func newQueryShard(
 	remoteChunkManager storage.ChunkManager,
 	localCacheEnabled bool,
 ) (*queryShard, error) {
-
 	collection, err := metaReplica.getCollectionByID(collectionID)
 	if err != nil {
 		return nil, err
