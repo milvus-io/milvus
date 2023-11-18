@@ -73,7 +73,7 @@ else
     source $HOME/.cargo/env
 fi
 pushd bindings/c
-cargo build --release || { echo 'opendal_c build failed'; exit 1; }
+cargo build --release --verbose || { echo 'opendal_c build failed'; exit 1; }
 popd
 mkdir -p ${ROOT_DIR}/internal/core/output/lib
 mkdir -p ${ROOT_DIR}/internal/core/output/include
