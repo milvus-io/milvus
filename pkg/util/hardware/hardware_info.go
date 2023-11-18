@@ -14,13 +14,11 @@ package hardware
 import (
 	"flag"
 	syslog "log"
-	"os"
 	"runtime"
 	"sync"
 
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/mem"
-	"github.com/shirou/gopsutil/v3/process"
 	"go.uber.org/automaxprocs/maxprocs"
 	"go.uber.org/zap"
 
@@ -106,24 +104,6 @@ func GetMemoryCount() uint64 {
 		return limit
 	}
 	return stats.Total
-}
-
-// GetUsedMemoryCount returns the memory usage in bytes.
-func GetUsedMemoryCount() uint64 {
-	proc, err := process.NewProcess(int32(os.Getpid()))
-	if err != nil {
-		log.Warn("failed to get process info", zap.Error(err))
-		return 0
-	}
-
-	memInfo, err := proc.MemoryInfoEx()
-	if err != nil {
-		log.Warn("failed to get memory info", zap.Error(err))
-		return 0
-	}
-
-	// sub the shared memory to filter out the file-backed map memory usage
-	return memInfo.RSS - memInfo.Shared
 }
 
 // GetFreeMemoryCount returns the free memory in bytes.
