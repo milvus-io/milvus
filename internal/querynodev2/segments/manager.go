@@ -346,6 +346,11 @@ func (mgr *segmentManager) GetAndPin(segments []int64, filters ...SegmentFilter)
 		growing, growingExist := mgr.growingSegments[id]
 		sealed, sealedExist := mgr.sealedSegments[id]
 
+		// L0 Segment should not be queryable.
+		if sealedExist && sealed.Level() == datapb.SegmentLevel_L0 {
+			continue
+		}
+
 		growingExist = growingExist && filter(growing, filters...)
 		sealedExist = sealedExist && filter(sealed, filters...)
 
