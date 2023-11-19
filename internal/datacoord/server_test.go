@@ -4770,7 +4770,10 @@ func TestUpdateAutoBalanceConfigLoop(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		go server.updateBalanceConfigLoop(ctx)
+		go func() {
+			time.Sleep(1500 * time.Millisecond)
+			server.updateBalanceConfigLoop(ctx)
+		}()
 		// old data node exist, disable auto balance
 		assert.Eventually(t, func() bool {
 			return !Params.DataCoordCfg.AutoBalance.GetAsBool()
