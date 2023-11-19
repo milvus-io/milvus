@@ -24,14 +24,18 @@ import (
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+var proc *process.Process
+
+func init() {
+	var err error
+	proc, err = process.NewProcess(int32(os.Getpid()))
+	if err != nil {
+		panic(err)
+	}
+}
+
 // GetUsedMemoryCount returns the memory usage in bytes.
 func GetUsedMemoryCount() uint64 {
-	proc, err := process.NewProcess(int32(os.Getpid()))
-	if err != nil {
-		log.Warn("failed to get process info", zap.Error(err))
-		return 0
-	}
-
 	memInfo, err := proc.MemoryInfoEx()
 	if err != nil {
 		log.Warn("failed to get memory info", zap.Error(err))
