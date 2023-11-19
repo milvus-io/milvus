@@ -14,12 +14,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <chrono>
 #include <iostream>
 #include <sstream>
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "log/Log.h"
 #include "storage/AzureChunkManager.h"
+#include "storage/prometheus_client.h"
 
 namespace milvus {
 namespace storage {
@@ -170,8 +172,15 @@ AzureChunkManager::ObjectExists(const std::string& bucket_name,
                                 const std::string& object_name) {
     bool res;
     try {
+        auto start = std::chrono::system_clock::now();
         res = client_->ObjectExists(bucket_name, object_name);
+        internal_storage_request_latency_stat.Observe(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now() - start)
+                .count());
+        internal_storage_op_count_stat_suc.Increment();
     } catch (std::exception& err) {
+        internal_storage_op_count_stat_fail.Increment();
         ThrowAzureError("ObjectExists",
                         err,
                         "params, bucket={}, object={}",
@@ -186,8 +195,15 @@ AzureChunkManager::GetObjectSize(const std::string& bucket_name,
                                  const std::string& object_name) {
     uint64_t res;
     try {
+        auto start = std::chrono::system_clock::now();
         res = client_->GetObjectSize(bucket_name, object_name);
+        internal_storage_request_latency_stat.Observe(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now() - start)
+                .count());
+        internal_storage_op_count_stat_suc.Increment();
     } catch (std::exception& err) {
+        internal_storage_op_count_stat_fail.Increment();
         ThrowAzureError("GetObjectSize",
                         err,
                         "params, bucket={}, object={}",
@@ -202,8 +218,15 @@ AzureChunkManager::DeleteObject(const std::string& bucket_name,
                                 const std::string& object_name) {
     bool res;
     try {
+        auto start = std::chrono::system_clock::now();
         res = client_->DeleteObject(bucket_name, object_name);
+        internal_storage_request_latency_remove.Observe(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now() - start)
+                .count());
+        internal_storage_op_count_remove_suc.Increment();
     } catch (std::exception& err) {
+        internal_storage_op_count_remove_fail.Increment();
         ThrowAzureError("DeleteObject",
                         err,
                         "params, bucket={}, object={}",
@@ -220,8 +243,16 @@ AzureChunkManager::PutObjectBuffer(const std::string& bucket_name,
                                    uint64_t size) {
     bool res;
     try {
+        auto start = std::chrono::system_clock::now();
         res = client_->PutObjectBuffer(bucket_name, object_name, buf, size);
+        internal_storage_request_latency_put.Observe(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now() - start)
+                .count());
+        internal_storage_op_count_put_suc.Increment();
+        internal_storage_kv_size_put.Observe(size);
     } catch (std::exception& err) {
+        internal_storage_op_count_put_fail.Increment();
         ThrowAzureError("PutObjectBuffer",
                         err,
                         "params, bucket={}, object={}",
@@ -238,8 +269,16 @@ AzureChunkManager::GetObjectBuffer(const std::string& bucket_name,
                                    uint64_t size) {
     uint64_t res;
     try {
+        auto start = std::chrono::system_clock::now();
         res = client_->GetObjectBuffer(bucket_name, object_name, buf, size);
+        internal_storage_request_latency_get.Observe(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now() - start)
+                .count());
+        internal_storage_op_count_get_suc.Increment();
+        internal_storage_kv_size_get.Observe(size);
     } catch (std::exception& err) {
+        internal_storage_op_count_get_fail.Increment();
         ThrowAzureError("GetObjectBuffer",
                         err,
                         "params, bucket={}, object={}",
@@ -254,8 +293,15 @@ AzureChunkManager::ListObjects(const std::string& bucket_name,
                                const std::string& prefix) {
     std::vector<std::string> res;
     try {
+        auto start = std::chrono::system_clock::now();
         res = client_->ListObjects(bucket_name, prefix);
+        internal_storage_request_latency_list.Observe(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now() - start)
+                .count());
+        internal_storage_op_count_list_suc.Increment();
     } catch (std::exception& err) {
+        internal_storage_op_count_list_fail.Increment();
         ThrowAzureError("ListObjects",
                         err,
                         "params, bucket={}, prefix={}",
