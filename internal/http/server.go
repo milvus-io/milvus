@@ -36,6 +36,11 @@ const (
 	ListenPortEnvKey  = "METRICS_PORT"
 )
 
+var (
+	metricsServer *http.ServeMux
+	server        *http.Server
+)
+
 type Handler struct {
 	Path        string
 	HandlerFunc http.HandlerFunc
@@ -53,7 +58,6 @@ func registerDefaults() {
 		Path:    HealthzRouterPath,
 		Handler: healthz.Handler(),
 	})
-
 	Register(&Handler{
 		Path:    EventLogRouterPath,
 		Handler: eventlog.Handler(),
@@ -61,12 +65,19 @@ func registerDefaults() {
 }
 
 func Register(h *Handler) {
+	if metricsServer == nil {
+		if paramtable.Get().HTTPCfg.EnablePprof.GetAsBool() {
+			metricsServer = http.DefaultServeMux
+		} else {
+			metricsServer = http.NewServeMux()
+		}
+	}
 	if h.HandlerFunc != nil {
-		http.HandleFunc(h.Path, h.HandlerFunc)
+		metricsServer.HandleFunc(h.Path, h.HandlerFunc)
 		return
 	}
 	if h.Handler != nil {
-		http.Handle(h.Path, h.Handler)
+		metricsServer.Handle(h.Path, h.Handler)
 	}
 }
 
@@ -75,7 +86,7 @@ func ServeHTTP() {
 	go func() {
 		bindAddr := getHTTPAddr()
 		log.Info("management listen", zap.String("addr", bindAddr))
-		server := &http.Server{Addr: bindAddr, ReadTimeout: 10 * time.Second}
+		server = &http.Server{Handler: metricsServer, Addr: bindAddr, ReadTimeout: 10 * time.Second}
 		if err := server.ListenAndServe(); err != nil {
 			log.Error("handle metrics failed", zap.Error(err))
 		}
