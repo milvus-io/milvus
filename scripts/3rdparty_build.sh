@@ -63,7 +63,7 @@ popd
 
 pushd ${ROOT_DIR}/cmake_build/thirdparty
 
-git clone --depth=1 --branch v0.42.0 https://github.com/apache/incubator-opendal.git opendal ||  { echo 'clone opendal failed'; exit 1; }
+git clone --depth=1 --branch v0.42.0 https://github.com/apache/incubator-opendal.git opendal
 cd opendal
 if command -v cargo >/dev/null 2>&1; then
     echo "cargo exists"
