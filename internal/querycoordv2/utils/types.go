@@ -115,6 +115,7 @@ func PackSegmentLoadInfo(resp *datapb.GetSegmentInfoResponse, indexes []*querypb
 		IndexInfos:    indexes,
 		StartPosition: segment.GetStartPosition(),
 		DeltaPosition: deltaPosition,
+		Level:         segment.GetLevel(),
 	}
 	loadInfo.SegmentSize = calculateSegmentSize(loadInfo)
 	return loadInfo
