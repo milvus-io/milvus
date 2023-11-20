@@ -436,11 +436,8 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	}
 	log.Debug("work loads segments done")
 
-	// load index and L0 segment need no stream delete and distribution change
+	// load index segment need no stream delete and distribution change
 	if req.GetLoadScope() == querypb.LoadScope_Index {
-		return nil
-	} else if req.GetInfos()[0].GetLevel() == datapb.SegmentLevel_L0 {
-		sd.GenerateLevel0DeletionCache()
 		return nil
 	}
 
@@ -452,12 +449,19 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 			Version:     req.GetVersion(),
 		}
 	})
-	log.Debug("load delete...")
-	err = sd.loadStreamDelete(ctx, candidates, infos, req.GetDeltaPositions(), targetNodeID, worker, entries)
-	if err != nil {
-		log.Warn("load stream delete failed", zap.Error(err))
-		return err
+	if req.GetInfos()[0].GetLevel() == datapb.SegmentLevel_L0 {
+		sd.GenerateLevel0DeletionCache()
+	} else {
+		log.Debug("load delete...")
+		err = sd.loadStreamDelete(ctx, candidates, infos, req.GetDeltaPositions(), targetNodeID, worker, entries)
+		if err != nil {
+			log.Warn("load stream delete failed", zap.Error(err))
+			return err
+		}
 	}
+
+	// alter distribution
+	sd.distribution.AddDistributions(entries...)
 
 	return nil
 }
@@ -657,8 +661,6 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 		sd.pkOracle.Register(candidate, targetNodeID)
 	}
 	log.Info("load delete done")
-	// alter distribution
-	sd.distribution.AddDistributions(entries...)
 
 	return nil
 }

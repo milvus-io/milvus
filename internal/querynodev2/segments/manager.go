@@ -296,8 +296,6 @@ func (mgr *segmentManager) GetAndPinBy(filters ...SegmentFilter) ([]Segment, err
 	mgr.mu.RLock()
 	defer mgr.mu.RUnlock()
 
-	filters = append(filters, WithSkipEmpty())
-
 	ret := make([]Segment, 0)
 	var err error
 	defer func() {
@@ -319,7 +317,7 @@ func (mgr *segmentManager) GetAndPinBy(filters ...SegmentFilter) ([]Segment, err
 	}
 
 	for _, segment := range mgr.sealedSegments {
-		if filter(segment, filters...) {
+		if segment.Level() != datapb.SegmentLevel_L0 && filter(segment, filters...) {
 			err = segment.RLock()
 			if err != nil {
 				return nil, err
@@ -333,8 +331,6 @@ func (mgr *segmentManager) GetAndPinBy(filters ...SegmentFilter) ([]Segment, err
 func (mgr *segmentManager) GetAndPin(segments []int64, filters ...SegmentFilter) ([]Segment, error) {
 	mgr.mu.RLock()
 	defer mgr.mu.RUnlock()
-
-	filters = append(filters, WithSkipEmpty())
 
 	lockedSegments := make([]Segment, 0, len(segments))
 	var err error
