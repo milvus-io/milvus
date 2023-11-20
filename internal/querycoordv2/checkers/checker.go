@@ -48,6 +48,8 @@ func (c *checkerActivation) Deactivate() {
 	c.active.Store(false)
 }
 
-func newCheckerActivation() checkerActivation {
-	return checkerActivation{}
+func newCheckerActivation() *checkerActivation {
+	c := &checkerActivation{}
+	c.Activate()
+	return c
 }

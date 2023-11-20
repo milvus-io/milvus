@@ -36,7 +36,7 @@ import (
 )
 
 type SegmentChecker struct {
-	checkerActivation
+	*checkerActivation
 	meta      *meta.Meta
 	dist      *meta.DistributionManager
 	targetMgr *meta.TargetManager
@@ -77,7 +77,7 @@ func (c *SegmentChecker) readyToCheck(collectionID int64) bool {
 }
 
 func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
-	if !c.active {
+	if !c.IsActive() {
 		return nil
 	}
 	collectionIDs := c.meta.CollectionManager.GetAll()

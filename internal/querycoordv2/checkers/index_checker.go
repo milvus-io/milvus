@@ -36,7 +36,7 @@ var _ Checker = (*IndexChecker)(nil)
 
 // IndexChecker perform segment index check.
 type IndexChecker struct {
-	checkerActivation
+	*checkerActivation
 	meta    *meta.Meta
 	dist    *meta.DistributionManager
 	broker  meta.Broker
@@ -67,7 +67,7 @@ func (c *IndexChecker) Description() string {
 }
 
 func (c *IndexChecker) Check(ctx context.Context) []task.Task {
-	if !c.active {
+	if !c.IsActive() {
 		return nil
 	}
 	collectionIDs := c.meta.CollectionManager.GetAll()

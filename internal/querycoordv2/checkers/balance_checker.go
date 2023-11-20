@@ -36,7 +36,7 @@ import (
 
 // BalanceChecker checks the cluster distribution and generates balance tasks.
 type BalanceChecker struct {
-	checkerActivation
+	*checkerActivation
 	balance.Balance
 	meta                                 *meta.Meta
 	nodeManager                          *session.NodeManager
@@ -146,7 +146,7 @@ func (b *BalanceChecker) balanceReplicas(replicaIDs []int64) ([]balance.SegmentA
 }
 
 func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
-	if !b.active {
+	if !b.IsActive() {
 		return nil
 	}
 	ret := make([]task.Task, 0)
