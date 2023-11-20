@@ -34,6 +34,7 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -440,7 +441,7 @@ func (suite *CollectionManagerSuite) TestUpdateLoadPercentage() {
 	mgr.UpdateLoadPercent(1, 100)
 	partition = mgr.GetPartition(1)
 	suite.Equal(int32(100), partition.LoadPercentage)
-	suite.Equal(querypb.LoadStatus_Loaded, partition.Status)
+	suite.Equal(querypb.LoadStatus_Loading, partition.Status)
 	collection = mgr.GetCollection(1)
 	suite.Equal(int32(50), collection.LoadPercentage)
 	suite.Equal(querypb.LoadStatus_Loading, collection.Status)
@@ -448,10 +449,59 @@ func (suite *CollectionManagerSuite) TestUpdateLoadPercentage() {
 	mgr.UpdateLoadPercent(2, 100)
 	partition = mgr.GetPartition(1)
 	suite.Equal(int32(100), partition.LoadPercentage)
-	suite.Equal(querypb.LoadStatus_Loaded, partition.Status)
+	suite.Equal(querypb.LoadStatus_Loading, partition.Status)
 	collection = mgr.GetCollection(1)
 	suite.Equal(int32(100), collection.LoadPercentage)
+	suite.Equal(querypb.LoadStatus_Loading, collection.Status)
+	suite.Equal(querypb.LoadStatus_Loading, mgr.CalculateLoadStatus(collection.CollectionID))
+}
+
+func (suite *CollectionManagerSuite) TestUpdateLoadStatus() {
+	mgr := suite.mgr
+
+	// test non-exist collection
+	suite.Equal(querypb.LoadStatus_Invalid, mgr.CalculateLoadStatus(1))
+
+	err := mgr.UpdateLoadStatus(1, querypb.LoadStatus_Loading)
+	suite.Error(err)
+	suite.ErrorIs(err, merr.ErrPartitionNotFound)
+
+	mgr.PutCollection(&Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{
+			CollectionID:  1,
+			ReplicaNumber: 1,
+			Status:        querypb.LoadStatus_Loading,
+			LoadType:      querypb.LoadType_LoadCollection,
+		},
+		LoadPercentage: 0,
+		CreatedAt:      time.Now(),
+	})
+
+	partitions := []int64{1, 2}
+	for _, partition := range partitions {
+		mgr.PutPartition(&Partition{
+			PartitionLoadInfo: &querypb.PartitionLoadInfo{
+				CollectionID: 1,
+				PartitionID:  partition,
+				Status:       querypb.LoadStatus_Loading,
+			},
+			LoadPercentage: 0,
+			CreatedAt:      time.Now(),
+		})
+	}
+	// test update partition 1 to loaded
+	mgr.UpdateLoadStatus(1, querypb.LoadStatus_Loaded)
+	partition := mgr.GetPartition(1)
+	suite.Equal(querypb.LoadStatus_Loaded, partition.Status)
+	collection := mgr.GetCollection(1)
+	suite.Equal(querypb.LoadStatus_Loading, collection.Status)
+	// test update partition 2 load percentage to 100
+	mgr.UpdateLoadStatus(2, querypb.LoadStatus_Loaded)
+	partition = mgr.GetPartition(2)
+	suite.Equal(querypb.LoadStatus_Loaded, partition.Status)
+	collection = mgr.GetCollection(1)
 	suite.Equal(querypb.LoadStatus_Loaded, collection.Status)
+
 	suite.Equal(querypb.LoadStatus_Loaded, mgr.CalculateLoadStatus(collection.CollectionID))
 }
 

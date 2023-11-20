@@ -262,7 +262,7 @@ func (suite *CollectionObserverSuite) TestObserve() {
 	suite.True(ok)
 	view2 := &meta.LeaderView{
 		ID:           3,
-		CollectionID: 13,
+		CollectionID: 103,
 		Channel:      "103-dmc0",
 		Segments:     make(map[int64]*querypb.SegmentDist),
 	}

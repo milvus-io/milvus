@@ -308,7 +308,11 @@ func (m *CollectionManager) CalculateLoadStatus(collectionID typeutil.UniqueID) 
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
 
-	collection, ok := m.collections[collectionID]
+	return m.calculateLoadStatus(collectionID)
+}
+
+func (m *CollectionManager) calculateLoadStatus(collectionID typeutil.UniqueID) querypb.LoadStatus {
+	_, ok := m.collections[collectionID]
 	if !ok {
 		return querypb.LoadStatus_Invalid
 	}
@@ -318,13 +322,7 @@ func (m *CollectionManager) CalculateLoadStatus(collectionID typeutil.UniqueID) 
 			return querypb.LoadStatus_Loading
 		}
 	}
-	if len(partitions) > 0 {
-		return querypb.LoadStatus_Loaded
-	}
-	if collection.GetLoadType() == querypb.LoadType_LoadCollection {
-		return querypb.LoadStatus_Loaded
-	}
-	return querypb.LoadStatus_Invalid
+	return querypb.LoadStatus_Loaded
 }
 
 func (m *CollectionManager) GetFieldIndex(collectionID typeutil.UniqueID) map[int64]int64 {
@@ -466,17 +464,7 @@ func (m *CollectionManager) UpdateLoadPercent(partitionID int64, loadPercent int
 	// update partition load percentage
 	newPartition := oldPartition.Clone()
 	newPartition.LoadPercentage = loadPercent
-	savePartition := false
-	if loadPercent == 100 {
-		savePartition = true
-		newPartition.Status = querypb.LoadStatus_Loaded
-		// if partition becomes loaded, clear it's recoverTimes in load info
-		newPartition.RecoverTimes = 0
-		elapsed := time.Since(newPartition.CreatedAt)
-		metrics.QueryCoordLoadLatency.WithLabelValues().Observe(float64(elapsed.Milliseconds()))
-		eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("Partition %d loaded", partitionID)))
-	}
-	err := m.putPartition([]*Partition{newPartition}, savePartition)
+	err := m.putPartition([]*Partition{newPartition}, false)
 	if err != nil {
 		return 0, err
 	}
@@ -489,14 +477,47 @@ func (m *CollectionManager) UpdateLoadPercent(partitionID int64, loadPercent int
 	collectionPercent := m.calculateLoadPercentage(oldCollection.CollectionID)
 	newCollection := oldCollection.Clone()
 	newCollection.LoadPercentage = collectionPercent
-	saveCollection := false
-	if collectionPercent == 100 {
-		saveCollection = true
-		newCollection.Status = querypb.LoadStatus_Loaded
+	return collectionPercent, m.putCollection(false, newCollection)
+}
 
+func (m *CollectionManager) UpdateLoadStatus(partitionID int64, loadState querypb.LoadStatus) error {
+	m.rwmutex.Lock()
+	defer m.rwmutex.Unlock()
+
+	oldPartition, ok := m.partitions[partitionID]
+	if !ok {
+		return merr.WrapErrPartitionNotFound(partitionID)
+	}
+
+	// update partition load percentage
+	newPartition := oldPartition.Clone()
+	newPartition.Status = querypb.LoadStatus_Loaded
+	// if partition becomes loaded, clear it's recoverTimes in load info
+	newPartition.RecoverTimes = 0
+	elapsed := time.Since(newPartition.CreatedAt)
+	metrics.QueryCoordLoadLatency.WithLabelValues().Observe(float64(elapsed.Milliseconds()))
+	eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("Partition %d loaded", partitionID)))
+	err := m.putPartition([]*Partition{newPartition}, false)
+	if err != nil {
+		return err
+	}
+
+	// update collection load percentage
+	oldCollection, ok := m.collections[newPartition.CollectionID]
+	if !ok {
+		return merr.WrapErrCollectionNotFound(newPartition.CollectionID)
+	}
+	collectionLoadStatus := m.calculateLoadStatus(oldCollection.CollectionID)
+	if collectionLoadStatus == querypb.LoadStatus_Loaded {
+		newCollection := oldCollection.Clone()
+		newCollection.Status = querypb.LoadStatus_Loaded
 		// if collection becomes loaded, clear it's recoverTimes in load info
 		newCollection.RecoverTimes = 0
 
+		err = m.putCollection(true, newCollection)
+		if err != nil {
+			return err
+		}
 		// TODO: what if part of the collection has been unloaded? Now we decrease the metric only after
 		// 	`ReleaseCollection` is triggered. Maybe it's hard to make this metric really accurate.
 		metrics.QueryCoordNumCollections.WithLabelValues().Inc()
@@ -504,7 +525,7 @@ func (m *CollectionManager) UpdateLoadPercent(partitionID int64, loadPercent int
 		metrics.QueryCoordLoadLatency.WithLabelValues().Observe(float64(elapsed.Milliseconds()))
 		eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("Collection %d loaded", newCollection.CollectionID)))
 	}
-	return collectionPercent, m.putCollection(saveCollection, newCollection)
+	return nil
 }
 
 // RemoveCollection removes collection and its partitions.
