@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -31,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/eventlog"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/samber/lo"
 )
 
 type CollectionObserver struct {
