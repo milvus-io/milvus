@@ -24,6 +24,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+)
+
+var (
+	Params    = paramtable.Get()
+	localPath = "/tmp/milvus_test/chunkmanager/"
 )
 
 func TestLocalCM(t *testing.T) {
