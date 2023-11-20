@@ -436,7 +436,6 @@ func (s *SyncTaskSuiteV2) TestBuildRecord() {
 }
 
 func (s *SyncTaskSuiteV2) TestAppendLists() {
-
 }
 
 func TestSyncTaskV2(t *testing.T) {

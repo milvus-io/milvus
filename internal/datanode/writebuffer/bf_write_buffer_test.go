@@ -150,7 +150,6 @@ func (s *BFWriteBufferSuite) SetupTest() {
 	var err error
 	s.storageV2Cache, err = metacache.NewStorageV2Cache(s.collSchema)
 	s.Require().NoError(err)
-
 }
 
 func (s *BFWriteBufferSuite) TestBufferData() {
