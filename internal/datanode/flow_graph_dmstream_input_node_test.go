@@ -106,6 +106,9 @@ func (mtm *mockTtMsgStream) CheckTopicValid(channel string) error {
 func (mtm *mockTtMsgStream) EnableProduce(can bool) {
 }
 
+func (mtm *mockTtMsgStream) ResetProducer() {
+}
+
 func TestNewDmInputNode(t *testing.T) {
 	client := msgdispatcher.NewClient(&mockMsgStreamFactory{}, typeutil.DataNodeRole, paramtable.GetNodeID())
 	_, err := newDmInputNode(context.Background(), client, new(msgpb.MsgPosition), &nodeConfig{

@@ -488,6 +488,25 @@ func (ms *mqMsgStream) Seek(ctx context.Context, msgPositions []*msgpb.MsgPositi
 	return nil
 }
 
+func (ms *mqMsgStream) ResetProducer() {
+	log.Info("start to reset producer", zap.Int("producer num", len(ms.producers)))
+	ms.streamCancel()
+	ms.closeRWMutex.Lock()
+	defer ms.closeRWMutex.Unlock()
+	if !atomic.CompareAndSwapInt32(&ms.closed, 0, 1) {
+		return
+	}
+	channels := make([]string, 0)
+	for channel, producer := range ms.producers {
+		if producer != nil {
+			channels = append(channels, channel)
+			producer.Close()
+		}
+	}
+
+	ms.AsProducer(channels)
+}
+
 var _ MsgStream = (*MqTtMsgStream)(nil)
 
 // MqTtMsgStream is a msgstream that contains timeticks

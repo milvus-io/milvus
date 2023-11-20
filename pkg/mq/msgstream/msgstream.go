@@ -69,6 +69,8 @@ type MsgStream interface {
 	CheckTopicValid(channel string) error
 
 	EnableProduce(can bool)
+
+	ResetProducer()
 }
 
 type Factory interface {

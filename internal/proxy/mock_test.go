@@ -309,6 +309,9 @@ func (ms *simpleMockMsgStream) CheckTopicValid(topic string) error {
 func (ms *simpleMockMsgStream) EnableProduce(enabled bool) {
 }
 
+func (ms *simpleMockMsgStream) ResetProducer() {
+}
+
 func newSimpleMockMsgStream() *simpleMockMsgStream {
 	return &simpleMockMsgStream{
 		msgChan:  make(chan *msgstream.MsgPack, 1024),

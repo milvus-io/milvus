@@ -708,6 +708,35 @@ func TestStream_PulsarTtMsgStream_UnMarshalHeader(t *testing.T) {
 	outputStream.Close()
 }
 
+func TestStream_PulsarMsgStream_ResetProducer(t *testing.T) {
+	pulsarAddress := getPulsarAddress()
+	channelName := funcutil.RandomString(8)
+	producerChannels := []string{channelName}
+
+	msgPack := &MsgPack{}
+	ctx := context.Background()
+	inputStream := getPulsarInputStream(ctx, pulsarAddress, producerChannels)
+
+	// produce test data, at same time, try to reset
+	// runs ok
+
+	assert.NotPanics(t, func() {
+		go func() {
+			err := inputStream.Produce(msgPack)
+			assert.NoError(t, err)
+		}()
+		inputStream.ResetProducer()
+	})
+
+	assert.NotPanics(t, func() {
+		go func() {
+			inputStream.ResetProducer()
+		}()
+		err := inputStream.Produce(msgPack)
+		assert.NoError(t, err)
+	})
+}
+
 func createRandMsgPacks(msgsInPack int, numOfMsgPack int, deltaTs int) []*MsgPack {
 	msgPacks := make([]*MsgPack, numOfMsgPack)
 

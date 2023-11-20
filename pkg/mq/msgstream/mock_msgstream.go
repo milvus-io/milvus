@@ -445,6 +445,38 @@ func (_c *MockMsgStream_Produce_Call) RunAndReturn(run func(*MsgPack) error) *Mo
 	return _c
 }
 
+// ResetProducer provides a mock function with given fields:
+func (_m *MockMsgStream) ResetProducer() {
+	_m.Called()
+}
+
+// MockMsgStream_ResetProducer_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ResetProducer'
+type MockMsgStream_ResetProducer_Call struct {
+	*mock.Call
+}
+
+// ResetProducer is a helper method to define mock.On call
+func (_e *MockMsgStream_Expecter) ResetProducer() *MockMsgStream_ResetProducer_Call {
+	return &MockMsgStream_ResetProducer_Call{Call: _e.mock.On("ResetProducer")}
+}
+
+func (_c *MockMsgStream_ResetProducer_Call) Run(run func()) *MockMsgStream_ResetProducer_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockMsgStream_ResetProducer_Call) Return() *MockMsgStream_ResetProducer_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockMsgStream_ResetProducer_Call) RunAndReturn(run func()) *MockMsgStream_ResetProducer_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Seek provides a mock function with given fields: ctx, offset
 func (_m *MockMsgStream) Seek(ctx context.Context, offset []*msgpb.MsgPosition) error {
 	ret := _m.Called(ctx, offset)
@@ -526,8 +558,7 @@ func (_c *MockMsgStream_SetRepackFunc_Call) RunAndReturn(run func(RepackFunc)) *
 func NewMockMsgStream(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockMsgStream {
+}) *MockMsgStream {
 	mock := &MockMsgStream{}
 	mock.Mock.Test(t)
 

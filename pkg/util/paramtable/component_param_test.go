@@ -133,6 +133,8 @@ func TestComponentParam(t *testing.T) {
 
 		t.Logf("healthCheckTimeout: %v", &Params.HealthCheckTimeout)
 
+		t.Logf("replicateStreamResetInterval: %v", &Params.ReplicateStreamResetInterval)
+
 		t.Logf("MsgStreamTimeTickBufSize: %d", Params.MsgStreamTimeTickBufSize.GetAsInt64())
 
 		t.Logf("MaxNameLength: %d", Params.MaxNameLength.GetAsInt64())
@@ -164,6 +166,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, Params.CostMetricsExpireTime.GetAsInt(), 1000)
 		assert.Equal(t, Params.RetryTimesOnReplica.GetAsInt(), 2)
 		assert.EqualValues(t, Params.HealthCheckTimeout.GetAsInt64(), 3000)
+		assert.EqualValues(t, Params.ReplicateStreamResetInterval.GetAsInt64(), 600)
 	})
 
 	// t.Run("test proxyConfig panic", func(t *testing.T) {

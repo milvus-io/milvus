@@ -883,6 +883,7 @@ type proxyConfig struct {
 
 	TimeTickInterval             ParamItem `refreshable:"false"`
 	HealthCheckTimeout           ParamItem `refreshable:"true"`
+	ReplicateStreamResetInterval ParamItem `refreshable:"true"`
 	MsgStreamTimeTickBufSize     ParamItem `refreshable:"true"`
 	MaxNameLength                ParamItem `refreshable:"true"`
 	MaxUsernameLength            ParamItem `refreshable:"true"`
@@ -925,6 +926,17 @@ func (p *proxyConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.HealthCheckTimeout.Init(base.mgr)
+
+	p.ReplicateStreamResetInterval = ParamItem{
+		Key:          "proxy.replicateStreamResetInterval",
+		FallbackKeys: []string{"proxy.replicateStreamResetInterval"},
+		Version:      "2.3.4",
+		DefaultValue: "600",
+		PanicIfEmpty: true,
+		Doc:          "seconds, the interval that close inner producer to avoid memory rising, will create a new one atomically",
+		Export:       true,
+	}
+	p.ReplicateStreamResetInterval.Init(base.mgr)
 
 	p.MsgStreamTimeTickBufSize = ParamItem{
 		Key:          "proxy.msgStream.timeTick.bufSize",

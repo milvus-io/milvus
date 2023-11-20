@@ -380,6 +380,25 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 	}()
 }
 
+// resetStreamProducerLoop starts a goroutine that reset producer regularly
+func (node *Proxy) resetStreamProducerLoop() {
+	node.wg.Add(1)
+	go func() {
+		defer node.wg.Done()
+		ticker := time.NewTicker(Params.ProxyCfg.ReplicateStreamResetInterval.GetAsDuration(time.Second))
+		defer ticker.Stop()
+		for {
+			select {
+			case <-node.ctx.Done():
+				log.Info("reset replicate stream loop exit")
+				return
+			case <-ticker.C:
+				node.replicateMsgStream.ResetProducer()
+			}
+		}
+	}()
+}
+
 // Start starts a proxy node.
 func (node *Proxy) Start() error {
 	if err := node.sched.Start(); err != nil {
@@ -407,6 +426,11 @@ func (node *Proxy) Start() error {
 	log.Debug("start channels time ticker done", zap.String("role", typeutil.ProxyRole))
 
 	node.sendChannelsTimeTickLoop()
+
+	// a producer not close for a long time will consume lots of memory
+	// start to reset replicateStream producer regularly
+	// related with https://github.com/milvus-io/milvus/issues/28367
+	node.resetStreamProducerLoop()
 
 	// Start callbacks
 	for _, cb := range node.startCallbacks {
