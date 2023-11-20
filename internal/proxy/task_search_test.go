@@ -19,7 +19,6 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -1724,7 +1723,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 		},
 	}, nil)
 	err = task.Execute(ctx)
-	assert.True(t, strings.Contains(err.Error(), errInvalidShardLeaders.Error()))
+	assert.ErrorIs(t, err, merr.ErrChannelNotAvailable)
 
 	qn.ExpectedCalls = nil
 	qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
