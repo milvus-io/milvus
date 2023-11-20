@@ -241,6 +241,7 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 	var unaryServerOption grpc.ServerOption
 	if enableCustomInterceptor {
 		unaryServerOption = grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
+			accesslog.UnaryAccessLogInterceptor,
 			otelgrpc.UnaryServerInterceptor(opts...),
 			grpc_auth.UnaryServerInterceptor(proxy.AuthenticationInterceptor),
 			proxy.DatabaseInterceptor(),
@@ -248,7 +249,7 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 			proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptor),
 			logutil.UnaryTraceLoggerInterceptor,
 			proxy.RateLimitInterceptor(limiter),
-			accesslog.UnaryAccessLoggerInterceptor,
+			accesslog.UnaryUpdateAccessInfoInterceptor,
 			proxy.TraceLogInterceptor,
 			proxy.KeepActiveInterceptor,
 		))

@@ -177,6 +177,10 @@ func (pg *ParamGroup) GetValue() map[string]string {
 	return values
 }
 
+func ParseAsStings(v string) []string {
+	return getAsStrings(v)
+}
+
 func getAsStrings(v string) []string {
 	return getAndConvert(v, func(value string) ([]string, error) {
 		return strings.Split(value, ","), nil
