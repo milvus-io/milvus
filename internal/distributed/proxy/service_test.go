@@ -25,15 +25,15 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -41,16 +41,22 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+
+	grpcproxyclient "github.com/milvus-io/milvus/internal/distributed/proxy/client"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	milvusmock "github.com/milvus-io/milvus/internal/util/mock"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
 )
 
@@ -1164,7 +1170,9 @@ func waitForGrpcReady(opt *WaitOption) {
 
 // TODO: should tls-related configurations be hard code here?
 var waitDuration = time.Second * 1
+
 var clientPemPath = "../../../configs/cert/client.pem"
+
 var clientKeyPath = "../../../configs/cert/client.key"
 
 // waitForServerReady wait for internal grpc service and external service to be ready, according to the params.
@@ -1936,4 +1944,78 @@ func Test_NewServer_GetVersion(t *testing.T) {
 		assert.Equal(t, "v1", resp.GetVersion())
 		assert.Nil(t, err)
 	})
+}
+
+func Test_Service_GracefulStop(t *testing.T) {
+	mockedProxy := mocks.NewProxy(t)
+	var count int32
+
+	mockedProxy.EXPECT().GetComponentStates(mock.Anything).Run(func(ctx context.Context) {
+		fmt.Println("rpc start")
+		time.Sleep(10 * time.Second)
+		atomic.AddInt32(&count, 1)
+		fmt.Println("rpc done")
+	}).Return(&milvuspb.ComponentStates{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil)
+
+	mockedProxy.EXPECT().Init().Return(nil)
+	mockedProxy.EXPECT().Start().Return(nil)
+	mockedProxy.EXPECT().Stop().Return(nil)
+	mockedProxy.EXPECT().Register().Return(nil)
+	mockedProxy.EXPECT().SetEtcdClient(mock.Anything).Return()
+	mockedProxy.EXPECT().GetRateLimiter().Return(nil, nil)
+	mockedProxy.EXPECT().SetDataCoordClient(mock.Anything).Return()
+	mockedProxy.EXPECT().SetRootCoordClient(mock.Anything).Return()
+	mockedProxy.EXPECT().SetQueryCoordClient(mock.Anything).Return()
+	mockedProxy.EXPECT().SetIndexCoordClient(mock.Anything).Return()
+	mockedProxy.EXPECT().UpdateStateCode(mock.Anything).Return()
+
+	HTTPParams.InitOnce()
+	HTTPParams.Enabled = true
+	Params.TLSMode = 0
+	Params.ServerPemPath = "../../../configs/cert/server.pem"
+	Params.ServerKeyPath = "../../../configs/cert/server.key"
+	HTTPParams.Port = -1
+
+	Params.InitOnce(typeutil.ProxyRole)
+	Params.Port = funcutil.GetAvailablePort()
+	Params.InternalPort = funcutil.GetAvailablePort()
+
+	ctx := context.Background()
+	enableCustomInterceptor = false
+	defer func() {
+		enableCustomInterceptor = true
+	}()
+
+	server, err := NewServer(ctx, nil)
+	assert.NotNil(t, server)
+	assert.Nil(t, err)
+
+	server.proxy = mockedProxy
+	server.rootCoordClient = &MockRootCoord{}
+	server.indexCoordClient = &MockIndexCoord{}
+	server.queryCoordClient = &MockQueryCoord{}
+	server.dataCoordClient = &MockDataCoord{}
+
+	err = server.Run()
+	assert.Nil(t, err)
+
+	proxyClient, err := grpcproxyclient.NewClient(ctx, fmt.Sprintf("localhost:%d", Params.Port), 0)
+	assert.Nil(t, err)
+
+	group := &errgroup.Group{}
+	for i := 0; i < 3; i++ {
+		group.Go(func() error {
+			_, err := proxyClient.GetComponentStates(context.TODO())
+			return err
+		})
+	}
+
+	// waiting for all requests have been launched
+	time.Sleep(1 * time.Second)
+
+	server.Stop()
+
+	err = group.Wait()
+	assert.Nil(t, err)
+	assert.Equal(t, count, int32(3))
 }
