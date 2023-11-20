@@ -217,7 +217,7 @@ func (node *Proxy) Init() error {
 
 	node.factory.Init(Params)
 
-	accesslog.SetupAccseeLog(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)
+	accesslog.InitAccessLog(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)
 	log.Debug("init access log for Proxy done")
 
 	err := node.initRateCollector()
