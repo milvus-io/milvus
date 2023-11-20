@@ -277,7 +277,8 @@ func (c *ChannelManager) bgCheckChannelsWork(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if !Params.DataCoordCfg.AutoBalance.GetAsBool() {
-				return
+				log.Info("auto balance disabled, skip auto bg check balance")
+				continue
 			}
 
 			c.mu.Lock()
