@@ -522,6 +522,7 @@ common:
     ttl: 30 # ttl value when session granting a lease to register service
     retryTimes: 30 # retry times when session sending etcd requests
   storage:
+    scheme: "s3"
     enablev2: false
 
   # preCreatedTopic decides whether using existed topic

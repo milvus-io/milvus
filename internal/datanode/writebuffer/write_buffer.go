@@ -275,7 +275,8 @@ func (wb *writeBufferBase) bufferDelete(segmentID int64, pks []storage.PrimaryKe
 
 func SpaceCreatorFunc(segmentID int64, collSchema *schemapb.CollectionSchema, arrowSchema *arrow.Schema) func() (*milvus_storage.Space, error) {
 	return func() (*milvus_storage.Space, error) {
-		url := fmt.Sprintf("s3://%s:%s@%s/%d?endpoint_override=%s",
+		url := fmt.Sprintf("%s://%s:%s@%s/%d?endpoint_override=%s",
+			params.Params.CommonCfg.StorageScheme.GetValue(),
 			params.Params.MinioCfg.AccessKeyID.GetValue(),
 			params.Params.MinioCfg.SecretAccessKey.GetValue(),
 			params.Params.MinioCfg.BucketName.GetValue(),

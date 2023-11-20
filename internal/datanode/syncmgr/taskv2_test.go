@@ -75,8 +75,8 @@ func (s *SyncTaskSuiteV2) SetupSuite() {
 	s.schema = &schemapb.CollectionSchema{
 		Name: "sync_task_test_col",
 		Fields: []*schemapb.FieldSchema{
-			{FieldID: common.RowIDField, DataType: schemapb.DataType_Int64},
-			{FieldID: common.TimeStampField, DataType: schemapb.DataType_Int64},
+			{FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64},
+			{FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64},
 			{
 				FieldID:      100,
 				Name:         "pk",
@@ -114,7 +114,7 @@ func (s *SyncTaskSuiteV2) SetupTest() {
 	tmpDir := s.T().TempDir()
 	space, err := milvus_storage.Open(fmt.Sprintf("file:///%s", tmpDir), options.NewSpaceOptionBuilder().
 		SetSchema(schema.NewSchema(s.arrowSchema, &schema.SchemaOptions{
-			PrimaryColumn: "pk", VectorColumn: "vector",
+			PrimaryColumn: "pk", VectorColumn: "vector", VersionColumn: common.TimeStampFieldName,
 		})).Build())
 	s.Require().NoError(err)
 	s.space = space
@@ -263,9 +263,16 @@ func (s *SyncTaskSuiteV2) TestBuildRecord() {
 		{FieldID: 9, Name: "field8", DataType: schemapb.DataType_VarChar},
 		{FieldID: 10, Name: "field9", DataType: schemapb.DataType_BinaryVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}},
 		{FieldID: 11, Name: "field10", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}},
-		{FieldID: 12, Name: "field11", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32},
-		{FieldID: 13, Name: "field12", DataType: schemapb.DataType_JSON},
-		{FieldID: 14, Name: "field12", DataType: schemapb.DataType_Float16Vector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}},
+		{FieldID: 12, Name: "field11", DataType: schemapb.DataType_JSON},
+		{FieldID: 13, Name: "field12", DataType: schemapb.DataType_Float16Vector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}},
+		{FieldID: 14, Name: "field13", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32},
+		{FieldID: 15, Name: "field14", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Bool},
+		{FieldID: 16, Name: "field15", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int8},
+		{FieldID: 17, Name: "field16", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int16},
+		{FieldID: 18, Name: "field17", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+		{FieldID: 19, Name: "field18", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Float},
+		{FieldID: 20, Name: "field19", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Double},
+		{FieldID: 21, Name: "field20", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_String},
 	}
 
 	schema, err := metacache.ConvertToArrowSchema(fieldSchemas)
@@ -290,7 +297,17 @@ func (s *SyncTaskSuiteV2) TestBuildRecord() {
 				Data: []float32{4, 5, 6, 7, 4, 5, 6, 7},
 				Dim:  4,
 			},
-			12: &storage.ArrayFieldData{
+			12: &storage.JSONFieldData{
+				Data: [][]byte{
+					[]byte(`{"batch":2}`),
+					[]byte(`{"key":"world"}`),
+				},
+			},
+			13: &storage.Float16VectorFieldData{
+				Data: []byte{0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255},
+				Dim:  4,
+			},
+			14: &storage.ArrayFieldData{
 				ElementType: schemapb.DataType_Int32,
 				Data: []*schemapb.ScalarField{
 					{
@@ -305,15 +322,110 @@ func (s *SyncTaskSuiteV2) TestBuildRecord() {
 					},
 				},
 			},
-			13: &storage.JSONFieldData{
-				Data: [][]byte{
-					[]byte(`{"batch":2}`),
-					[]byte(`{"key":"world"}`),
+			15: &storage.ArrayFieldData{
+				ElementType: schemapb.DataType_Bool,
+				Data: []*schemapb.ScalarField{
+					{
+						Data: &schemapb.ScalarField_BoolData{
+							BoolData: &schemapb.BoolArray{Data: []bool{false, false, false}},
+						},
+					},
+					{
+						Data: &schemapb.ScalarField_BoolData{
+							BoolData: &schemapb.BoolArray{Data: []bool{false, false, false}},
+						},
+					},
 				},
 			},
-			14: &storage.Float16VectorFieldData{
-				Data: []byte{0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255},
-				Dim:  4,
+			16: &storage.ArrayFieldData{
+				ElementType: schemapb.DataType_Int8,
+				Data: []*schemapb.ScalarField{
+					{
+						Data: &schemapb.ScalarField_IntData{
+							IntData: &schemapb.IntArray{Data: []int32{3, 2, 1}},
+						},
+					},
+					{
+						Data: &schemapb.ScalarField_IntData{
+							IntData: &schemapb.IntArray{Data: []int32{6, 5, 4}},
+						},
+					},
+				},
+			},
+			17: &storage.ArrayFieldData{
+				ElementType: schemapb.DataType_Int16,
+				Data: []*schemapb.ScalarField{
+					{
+						Data: &schemapb.ScalarField_IntData{
+							IntData: &schemapb.IntArray{Data: []int32{3, 2, 1}},
+						},
+					},
+					{
+						Data: &schemapb.ScalarField_IntData{
+							IntData: &schemapb.IntArray{Data: []int32{6, 5, 4}},
+						},
+					},
+				},
+			},
+			18: &storage.ArrayFieldData{
+				ElementType: schemapb.DataType_Int64,
+				Data: []*schemapb.ScalarField{
+					{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{Data: []int64{3, 2, 1}},
+						},
+					},
+					{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{Data: []int64{3, 2, 1}},
+						},
+					},
+				},
+			},
+			19: &storage.ArrayFieldData{
+				ElementType: schemapb.DataType_Float,
+				Data: []*schemapb.ScalarField{
+					{
+						Data: &schemapb.ScalarField_FloatData{
+							FloatData: &schemapb.FloatArray{Data: []float32{3, 2, 1}},
+						},
+					},
+					{
+						Data: &schemapb.ScalarField_FloatData{
+							FloatData: &schemapb.FloatArray{Data: []float32{3, 2, 1}},
+						},
+					},
+				},
+			},
+			20: &storage.ArrayFieldData{
+				ElementType: schemapb.DataType_Double,
+				Data: []*schemapb.ScalarField{
+					{
+						Data: &schemapb.ScalarField_DoubleData{
+							DoubleData: &schemapb.DoubleArray{Data: []float64{3, 2, 1}},
+						},
+					},
+					{
+						Data: &schemapb.ScalarField_DoubleData{
+							DoubleData: &schemapb.DoubleArray{Data: []float64{3, 2, 1}},
+						},
+					},
+				},
+			},
+			21: &storage.ArrayFieldData{
+				ElementType: schemapb.DataType_String,
+				Data: []*schemapb.ScalarField{
+					{
+						Data: &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{Data: []string{"a", "b", "c"}},
+						},
+					},
+					{
+						Data: &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{Data: []string{"a", "b", "c"}},
+						},
+					},
+				},
 			},
 		},
 	}
@@ -321,6 +433,10 @@ func (s *SyncTaskSuiteV2) TestBuildRecord() {
 	err = buildRecord(b, data, fieldSchemas)
 	s.NoError(err)
 	s.EqualValues(2, b.NewRecord().NumRows())
+}
+
+func (s *SyncTaskSuiteV2) TestAppendLists() {
+
 }
 
 func TestSyncTaskV2(t *testing.T) {

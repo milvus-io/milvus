@@ -218,6 +218,7 @@ type commonConfig struct {
 	LockSlowLogInfoThreshold ParamItem `refreshable:"true"`
 	LockSlowLogWarnThreshold ParamItem `refreshable:"true"`
 
+	StorageScheme   ParamItem `refreshable:"false"`
 	EnableStorageV2 ParamItem `refreshable:"false"`
 	TTMsgEnabled    ParamItem `refreshable:"true"`
 	TraceLogMode    ParamItem `refreshable:"true"`
@@ -634,6 +635,13 @@ like the old password verification when updating the credential`,
 		DefaultValue: "false",
 	}
 	p.EnableStorageV2.Init(base.mgr)
+
+	p.StorageScheme = ParamItem{
+		Key:          "common.storage.scheme",
+		Version:      "2.3.4",
+		DefaultValue: "s3",
+	}
+	p.StorageScheme.Init(base.mgr)
 
 	p.TTMsgEnabled = ParamItem{
 		Key:          "common.ttMsgEnabled",

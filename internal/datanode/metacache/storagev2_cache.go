@@ -52,6 +52,13 @@ func (s *StorageV2Cache) GetOrCreateSpace(segmentID int64, creator func() (*milv
 	return space, nil
 }
 
+// only for unit test
+func (s *StorageV2Cache) SetSpace(segmentID int64, space *milvus_storage.Space) {
+	s.spaceMu.Lock()
+	defer s.spaceMu.Unlock()
+	s.spaces[segmentID] = space
+}
+
 func NewStorageV2Cache(schema *schemapb.CollectionSchema) (*StorageV2Cache, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema.Fields)
 	if err != nil {
