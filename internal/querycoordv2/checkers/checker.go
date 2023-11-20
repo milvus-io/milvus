@@ -18,6 +18,7 @@ package checkers
 
 import (
 	"context"
+	"sync/atomic"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 )
@@ -32,21 +33,21 @@ type Checker interface {
 }
 
 type checkerActivation struct {
-	active bool
+	active atomic.Bool
 }
 
 func (c *checkerActivation) IsActive() bool {
-	return c.active
+	return c.active.Load()
 }
 
 func (c *checkerActivation) Activate() {
-	c.active = true
+	c.active.Store(true)
 }
 
 func (c *checkerActivation) Deactivate() {
-	c.active = false
+	c.active.Store(false)
 }
 
 func newCheckerActivation() checkerActivation {
-	return checkerActivation{active: true}
+	return checkerActivation{}
 }
