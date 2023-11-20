@@ -19,7 +19,7 @@
 package metrics
 
 /*
-#cgo pkg-config: milvus_segcore milvus_common
+#cgo pkg-config: milvus_segcore milvus_storage milvus_common
 
 #include <stdlib.h>
 #include "segcore/metrics_c.h"
