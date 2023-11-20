@@ -210,7 +210,7 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 		nodes := lo.Map(nodes, func(node nodeInfo, _ int) int64 { return node.nodeID })
 		retryOnReplica := Params.ProxyCfg.RetryTimesOnReplica.GetAsInt()
 		wg.Go(func() error {
-			err := lb.ExecuteWithRetry(ctx, ChannelWorkload{
+			return lb.ExecuteWithRetry(ctx, ChannelWorkload{
 				db:             workload.db,
 				collectionName: workload.collectionName,
 				collectionID:   workload.collectionID,
@@ -220,12 +220,10 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 				exec:           workload.exec,
 				retryTimes:     uint(len(nodes) * retryOnReplica),
 			})
-			return err
 		})
 	}
 
-	err = wg.Wait()
-	return err
+	return wg.Wait()
 }
 
 func (lb *LBPolicyImpl) UpdateCostMetrics(node int64, cost *internalpb.CostAggregation) {
