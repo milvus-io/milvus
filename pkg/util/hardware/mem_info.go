@@ -1,16 +1,4 @@
-//go:build !darwin && !fressbsd && !openbsd
-// +build !darwin,!fressbsd,!openbsd
-
-package hardware
-
-import (
-	"os"
-
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/shirou/gopsutil/process"
-	"go.uber.org/zap"
-)
-
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,6 +11,20 @@ import (
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+//go:build !darwin && !openbsd && !freebsd
+// +build !darwin,!openbsd,!freebsd
+
+package hardware
+
+import (
+	"os"
+
+	"github.com/shirou/gopsutil/v3/process"
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/pkg/log"
+)
 
 var proc *process.Process
 
