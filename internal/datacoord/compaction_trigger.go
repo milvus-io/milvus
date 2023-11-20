@@ -907,9 +907,10 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, isDis
 		return true
 	}
 
-	// index version of segment lower than current version, trigger compaction
+	// index version of segment lower than current version and IndexFileKeys should have value, trigger compaction
 	for _, index := range segment.segmentIndexes {
-		if index.CurrentIndexVersion < t.indexEngineVersionManager.GetCurrentIndexEngineVersion() {
+		if index.CurrentIndexVersion < t.indexEngineVersionManager.GetCurrentIndexEngineVersion() &&
+			index.IndexFileKeys != nil {
 			log.Info("index version is too old, trigger compaction",
 				zap.Int64("segmentID", segment.ID),
 				zap.Int32("currentIndexVersion", index.CurrentIndexVersion),

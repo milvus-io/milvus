@@ -1842,6 +1842,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 		segmentIndexes: map[UniqueID]*model.SegmentIndex{
 			101: {
 				CurrentIndexVersion: 1,
+				IndexFileKeys:       []string{"index1"},
 			},
 		},
 	}
@@ -1860,6 +1861,26 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 		segmentIndexes: map[UniqueID]*model.SegmentIndex{
 			101: {
 				CurrentIndexVersion: 2,
+				IndexFileKeys:       []string{"index1"},
+			},
+		},
+	}
+	info6 := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             1,
+			CollectionID:   2,
+			PartitionID:    1,
+			LastExpireTime: 600,
+			NumOfRows:      10000,
+			MaxRowNum:      300,
+			InsertChannel:  "ch1",
+			State:          commonpb.SegmentState_Flushed,
+			Binlogs:        binlogs2,
+		},
+		segmentIndexes: map[UniqueID]*model.SegmentIndex{
+			101: {
+				CurrentIndexVersion: 1,
+				IndexFileKeys:       nil,
 			},
 		},
 	}
@@ -1869,6 +1890,9 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	assert.True(t, couldDo)
 	// expire time < Timestamp To, and index engine version is 2 which is equal CurrentIndexVersion in segmentIndex
 	couldDo = trigger.ShouldDoSingleCompaction(info5, false, &compactTime{expireTime: 300})
+	assert.False(t, couldDo)
+	// expire time < Timestamp To, and index engine version is 2 which is larger than CurrentIndexVersion in segmentIndex but indexFileKeys is nil
+	couldDo = trigger.ShouldDoSingleCompaction(info6, false, &compactTime{expireTime: 300})
 	assert.False(t, couldDo)
 }
 
