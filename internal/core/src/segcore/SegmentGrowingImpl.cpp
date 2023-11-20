@@ -107,7 +107,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
             continue;
         }
         AssertInfo(field_id_to_offset.count(field_id),
-                   fmt::format("can't find field {}", field_id));
+                   fmt::format("can't find field {}", field_id.get()));
         auto data_offset = field_id_to_offset[field_id];
         if (!indexing_record_.SyncDataWithIndex(field_id)) {
             insert_record_.get_field_data_base(field_id)->set_data_raw(
