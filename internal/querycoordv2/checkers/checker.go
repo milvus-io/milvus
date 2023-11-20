@@ -23,7 +23,30 @@ import (
 )
 
 type Checker interface {
-	ID() task.Source
+	ID() checkerType
 	Description() string
 	Check(ctx context.Context) []task.Task
+	IsActive() bool
+	Activate()
+	Deactivate()
+}
+
+type checkerActivation struct {
+	active bool
+}
+
+func (c *checkerActivation) IsActive() bool {
+	return c.active
+}
+
+func (c *checkerActivation) Activate() {
+	c.active = true
+}
+
+func (c *checkerActivation) Deactivate() {
+	c.active = false
+}
+
+func newCheckerActivation() checkerActivation {
+	return checkerActivation{active: true}
 }

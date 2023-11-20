@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
@@ -56,6 +57,7 @@ var (
 		balanceChecker: balanceCheckerName,
 		indexChecker:   indexCheckerName,
 	}
+	errTypeNotFound = errors.New("checker type not found")
 )
 
 func (s checkerType) String() string {
@@ -189,4 +191,33 @@ func (controller *CheckerController) check(ctx context.Context, checkType checke
 			continue
 		}
 	}
+}
+
+func (controller *CheckerController) Deactivate(typ checkerType) error {
+	for _, checker := range controller.checkers {
+		if checker.ID() == typ {
+			checker.Deactivate()
+			return nil
+		}
+	}
+	return errTypeNotFound
+}
+
+func (controller *CheckerController) Activate(typ checkerType) error {
+	for _, checker := range controller.checkers {
+		if checker.ID() == typ {
+			checker.Activate()
+			return nil
+		}
+	}
+	return errTypeNotFound
+}
+
+func (controller *CheckerController) IsActive(typ checkerType) (bool, error) {
+	for _, checker := range controller.checkers {
+		if checker.ID() == typ {
+			return checker.IsActive(), nil
+		}
+	}
+	return false, errTypeNotFound
 }
