@@ -1,14 +1,17 @@
 package proxy
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/util/parameterutil.go"
+	"go.uber.org/zap"
 )
 
 type validateUtil struct {
@@ -217,6 +220,18 @@ func (v *validateUtil) checkJSONFieldData(field *schemapb.FieldData, fieldSchema
 
 	if v.checkMaxLen {
 		return verifyBytesArrayLength(jsonArray, int64(Params.CommonCfg.JSONMaxLength))
+	}
+
+	var jsonMap map[string]interface{}
+	for _, data := range jsonArray {
+		err := json.Unmarshal(data, &jsonMap)
+		if err != nil {
+			log.Warn("insert invalid JSON data",
+				zap.ByteString("data", data),
+				zap.Error(err),
+			)
+			return err
+		}
 	}
 
 	return nil

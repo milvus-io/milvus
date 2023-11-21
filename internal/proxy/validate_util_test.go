@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"fmt"
 	"math"
 	"testing"
 
@@ -1179,5 +1180,106 @@ func Test_validateUtil_checkIntegerFieldData(t *testing.T) {
 		err := v.checkIntegerFieldData(data, f)
 		assert.NoError(t, err)
 	})
+}
 
+func Test_validateUtil_checkJSONData(t *testing.T) {
+	t.Run("no json data", func(t *testing.T) {
+		v := newValidateUtil(withOverflowCheck())
+
+		f := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_JSON,
+		}
+		data := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{
+							Data: []int32{int32(math.MinInt8 - 1)},
+						},
+					},
+				},
+			},
+		}
+
+		err := v.checkJSONFieldData(data, f)
+		assert.Error(t, err)
+	})
+
+	t.Run("json string exceed max length", func(t *testing.T) {
+		v := newValidateUtil(withOverflowCheck(), withMaxLenCheck())
+		jsonString := ""
+		for i := 0; i < Params.CommonCfg.JSONMaxLength; i++ {
+			jsonString += fmt.Sprintf("key: %d, value: %d", i, i)
+		}
+		jsonString = "{" + jsonString + "}"
+		f := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_JSON,
+		}
+		data := &schemapb.FieldData{
+			FieldName: "json",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_JsonData{
+						JsonData: &schemapb.JSONArray{
+							Data: [][]byte{[]byte(jsonString)},
+						},
+					},
+				},
+			},
+		}
+
+		err := v.checkJSONFieldData(data, f)
+		assert.Error(t, err)
+	})
+
+	t.Run("dynamic field exceed max length", func(t *testing.T) {
+		v := newValidateUtil(withOverflowCheck(), withMaxLenCheck())
+		jsonString := ""
+		for i := 0; i < Params.CommonCfg.JSONMaxLength; i++ {
+			jsonString += fmt.Sprintf("key: %d, value: %d", i, i)
+		}
+		jsonString = "{" + jsonString + "}"
+		f := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_JSON,
+		}
+		data := &schemapb.FieldData{
+			FieldName: "$meta",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_JsonData{
+						JsonData: &schemapb.JSONArray{
+							Data: [][]byte{[]byte(jsonString)},
+						},
+					},
+				},
+			},
+			IsDynamic: true,
+		}
+
+		err := v.checkJSONFieldData(data, f)
+		assert.Error(t, err)
+	})
+
+	t.Run("invalid_JSON_data", func(t *testing.T) {
+		v := newValidateUtil(withOverflowCheck(), withMaxLenCheck())
+		jsonData := "hello"
+		f := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_JSON,
+		}
+		data := &schemapb.FieldData{
+			FieldName: "json",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_JsonData{
+						JsonData: &schemapb.JSONArray{
+							Data: [][]byte{[]byte(jsonData)},
+						},
+					},
+				},
+			},
+		}
+
+		err := v.checkJSONFieldData(data, f)
+		assert.Error(t, err)
+	})
 }
