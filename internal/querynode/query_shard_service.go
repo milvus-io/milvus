@@ -73,18 +73,15 @@ func newQueryShardService(ctx context.Context, metaReplica ReplicaInterface, tSa
 	return qss, nil
 }
 
-func (q *queryShardService) addQueryShard(collectionID UniqueID, channel Channel, replicaID int64, delta int64) error {
+func (q *queryShardService) addQueryShard(collectionID UniqueID, channel Channel, replicaID int64) error {
 	log := log.With(
 		zap.Int64("collection", collectionID),
 		zap.Int64("replica", replicaID),
 		zap.String("channel", channel),
-		zap.Int64("delta", delta),
 	)
 	q.queryShardsMu.Lock()
 	defer q.queryShardsMu.Unlock()
-	if qs, ok := q.queryShards[channel]; ok {
-		qs.inUse.Add(delta)
-		log.Info("Successfully add query shard delta")
+	if _, ok := q.queryShards[channel]; ok {
 		return nil
 	}
 	qs, err := newQueryShard(
@@ -102,16 +99,14 @@ func (q *queryShardService) addQueryShard(collectionID UniqueID, channel Channel
 	if err != nil {
 		return err
 	}
-	qs.inUse.Add(delta)
 	q.queryShards[channel] = qs
 	log.Info("Successfully add new query shard")
 	return nil
 }
 
-func (q *queryShardService) removeQueryShard(channel Channel, delta int64) error {
+func (q *queryShardService) tryRemoveQueryShard(channel Channel) error {
 	log := log.With(
 		zap.String("channel", channel),
-		zap.Int64("delta", delta),
 	)
 	q.queryShardsMu.Lock()
 	defer q.queryShardsMu.Unlock()
@@ -119,14 +114,23 @@ func (q *queryShardService) removeQueryShard(channel Channel, delta int64) error
 	if !ok {
 		return errors.New(fmt.Sprintln("query shard(channel) ", channel, " does not exist"))
 	}
-	inUse := qs.inUse.Add(-delta)
-	if inUse == 0 {
+
+	segments, err := q.metaReplica.getSegmentIDsByVChannel(nil, channel, segmentTypeSealed)
+	if err != nil {
+		log.Warn("failed to check segments with VChannel", zap.Error(err))
+		return nil
+	}
+
+	_, channelExist := q.shardClusterService.getShardCluster(channel)
+	if !channelExist && len(segments) == 0 {
+		// only remove query shard service in worker when all sealed segment has been removed.
+		// `releaseSealed > 0` make sure that releaseSegment happens in worker.
+		// `len(segments) == 0` make sure that all sealed segment in worker has been removed.
 		delete(q.queryShards, channel)
 		qs.Close()
 		log.Info("Successfully remove query shard")
-		return nil
 	}
-	log.Info("Successfully remove query shard inUse")
+
 	return nil
 }
 

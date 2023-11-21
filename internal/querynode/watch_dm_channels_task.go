@@ -150,7 +150,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 	// add tsafe watch in query shard if exists
 	for _, dmlChannel := range vChannels {
 		// Here this error could be ignored
-		w.node.queryShardService.addQueryShard(collectionID, dmlChannel, w.req.GetReplicaID(), 1)
+		w.node.queryShardService.addQueryShard(collectionID, dmlChannel, w.req.GetReplicaID())
 	}
 
 	// start flow graphs

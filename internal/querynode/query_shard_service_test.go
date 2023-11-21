@@ -30,20 +30,20 @@ func TestQueryShardService(t *testing.T) {
 
 	qss, err := newQueryShardService(context.Background(), qn.metaReplica, qn.tSafeReplica, qn.ShardClusterService, qn.factory, qn.scheduler)
 	assert.NoError(t, err)
-	err = qss.addQueryShard(0, "vchan1", 0, 1)
+	err = qss.addQueryShard(0, "vchan1", 0)
 	assert.NoError(t, err)
 	found1 := qss.hasQueryShard("vchan1")
 	assert.Equal(t, true, found1)
 	_, err = qss.getQueryShard("vchan1")
 	assert.NoError(t, err)
-	err = qss.removeQueryShard("vchan1", 1)
+	err = qss.tryRemoveQueryShard("vchan1")
 	assert.NoError(t, err)
 
 	found2 := qss.hasQueryShard("vchan2")
 	assert.Equal(t, false, found2)
 	_, err = qss.getQueryShard("vchan2")
 	assert.Error(t, err)
-	err = qss.removeQueryShard("vchan2", 1)
+	err = qss.tryRemoveQueryShard("vchan2")
 	assert.Error(t, err)
 }
 
@@ -57,7 +57,7 @@ func TestQueryShardService_InvalidChunkManager(t *testing.T) {
 	lcm := qss.localChunkManager
 	qss.localChunkManager = nil
 
-	err = qss.addQueryShard(0, "vchan", 0, 1)
+	err = qss.addQueryShard(0, "vchan", 0)
 	assert.Error(t, err)
 
 	qss.localChunkManager = lcm
@@ -65,7 +65,7 @@ func TestQueryShardService_InvalidChunkManager(t *testing.T) {
 	rcm := qss.remoteChunkManager
 	qss.remoteChunkManager = nil
 
-	err = qss.addQueryShard(0, "vchan", 0, 1)
+	err = qss.addQueryShard(0, "vchan", 0)
 	assert.Error(t, err)
 
 	qss.remoteChunkManager = rcm

@@ -155,7 +155,6 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 		// skip error if collection not found, do clean up job below
 		log.Warn("failed to get collection for release partitions", zap.Int64("collectionID", r.req.GetCollectionID()),
 			zap.Int64s("partitionIDs", r.req.GetPartitionIDs()))
-
 	}
 	log.Info("start release partition", zap.Int64("collectionID", r.req.GetCollectionID()), zap.Int64s("partitionIDs", r.req.GetPartitionIDs()))
 
@@ -284,8 +283,8 @@ func (t *unsubDmChannelTask) releaseChannelResources(collection *Collection) err
 	collection.removeVChannel(t.channel)
 	// release flowgraph resources
 	t.node.dataSyncService.removeFlowGraphsByDMLChannels([]string{t.channel})
-	t.node.queryShardService.removeQueryShard(t.channel, 1)
 	t.node.ShardClusterService.releaseShardCluster(t.channel)
+	t.node.queryShardService.tryRemoveQueryShard(t.channel)
 
 	t.node.tSafeReplica.removeTSafe(t.channel)
 	log.Info("release channel related resources successfully")
