@@ -38,7 +38,7 @@ class TestRestfulSdkCompatibility(TestBase):
         rsp = client.collection_describe(name)
         assert rsp['code'] == 200
         assert rsp['data']['collectionName'] == name
-        assert rsp['data']['enableDynamic'] == enable_dynamic
+        assert rsp['data']['enableDynamicField'] == enable_dynamic
         assert rsp['data']['load'] == "LoadStateNotLoad"
         assert rsp['data']['shardsNum'] == shard_num
 
