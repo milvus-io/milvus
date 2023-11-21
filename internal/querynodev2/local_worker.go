@@ -80,9 +80,13 @@ func (w *LocalWorker) ReleaseSegments(ctx context.Context, req *querypb.ReleaseS
 		zap.String("scope", req.GetScope().String()),
 	)
 	log.Info("start to release segments")
+	sealedCount := 0
 	for _, id := range req.GetSegmentIDs() {
-		w.node.manager.Segment.Remove(id, req.GetScope())
+		_, count := w.node.manager.Segment.Remove(id, req.GetScope())
+		sealedCount += count
 	}
+	w.node.manager.Collection.Unref(req.GetCollectionID(), uint32(sealedCount))
+
 	return nil
 }
 
