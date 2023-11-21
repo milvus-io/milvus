@@ -64,10 +64,10 @@ func newUniqueMergedTimeTickerSender(send sendTimeTick) *mergedTimeTickerSender 
 func getOrCreateMergedTimeTickerSender(send sendTimeTick) *mergedTimeTickerSender {
 	getUniqueMergedTimeTickerSender.Do(func() {
 		uniqueMergedTimeTickerSender = newUniqueMergedTimeTickerSender(send)
+		uniqueMergedTimeTickerSender.wg.Add(2)
+		go uniqueMergedTimeTickerSender.tick()
+		go uniqueMergedTimeTickerSender.work()
 	})
-	uniqueMergedTimeTickerSender.wg.Add(2)
-	go uniqueMergedTimeTickerSender.tick()
-	go uniqueMergedTimeTickerSender.work()
 	return uniqueMergedTimeTickerSender
 }
 
