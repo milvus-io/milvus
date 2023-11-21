@@ -257,8 +257,8 @@ func (node *DataNode) Init() error {
 		node.allocator = alloc
 
 		node.factory.Init(Params)
-		log.Info("DataNode server init succeeded",
-			zap.String("MsgChannelSubName", Params.CommonCfg.DataNodeSubName.GetValue()))
+		log.Info("init datanode done", zap.String("MsgChannelSubName", Params.CommonCfg.DataNodeSubName.GetValue()),
+			zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", node.address))
 	})
 	return initError
 }
