@@ -52,6 +52,9 @@ func (w *LocalWorker) LoadSegments(ctx context.Context, req *querypb.LoadSegment
 		})),
 		zap.String("loadScope", req.GetLoadScope().String()),
 	)
+	w.node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
+		w.node.composeIndexMeta(req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())
+	defer w.node.manager.Collection.Unref(req.GetCollectionID(), 1)
 	log.Info("start to load segments...")
 	loaded, err := w.node.loader.Load(ctx,
 		req.GetCollectionID(),
