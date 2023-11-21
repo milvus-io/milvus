@@ -567,6 +567,9 @@ func (suite *ServiceSuite) TestLoadSegments_Int64() {
 			Schema:         schema,
 			DeltaPositions: []*msgpb.MsgPosition{{Timestamp: 20000}},
 			NeedTransfer:   true,
+			IndexInfoList: []*indexpb.IndexInfo{
+				{},
+			},
 		}
 
 		// LoadSegment
@@ -810,12 +813,21 @@ func (suite *ServiceSuite) TestLoadSegments_Failed() {
 		Infos:        suite.genSegmentLoadInfos(schema),
 		Schema:       schema,
 		NeedTransfer: true,
+		IndexInfoList: []*indexpb.IndexInfo{
+			{},
+		},
 	}
 
 	// Delegator not found
 	status, err := suite.node.LoadSegments(ctx, req)
 	suite.NoError(err)
 	suite.ErrorIs(merr.Error(status), merr.ErrChannelNotFound)
+
+	// IndexIndex not found
+	nonIndexReq := typeutil.Clone(req)
+	nonIndexReq.IndexInfoList = nil
+	suite.NoError(err)
+	suite.ErrorIs(merr.Error(status), merr.ErrIndexNotFound)
 
 	// target not match
 	req.Base.TargetID = -1
@@ -828,6 +840,7 @@ func (suite *ServiceSuite) TestLoadSegments_Failed() {
 	status, err = suite.node.LoadSegments(ctx, req)
 	suite.NoError(err)
 	suite.ErrorIs(merr.Error(status), merr.ErrServiceNotReady)
+
 }
 
 func (suite *ServiceSuite) TestLoadSegments_Transfer() {
