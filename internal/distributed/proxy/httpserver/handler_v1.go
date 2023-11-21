@@ -325,7 +325,7 @@ func (h *Handlers) getCollectionDetails(c *gin.Context) {
 		"indexes":             indexDesc,
 		"load":                collLoadState,
 		"shardsNum":           coll.ShardsNum,
-		"enableDynamic":       coll.Schema.EnableDynamicField,
+		"enableDynamicField":  coll.Schema.EnableDynamicField,
 	}})
 }
 
