@@ -4,11 +4,12 @@ import (
 	"path"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
 	"golang.org/x/net/context"
+
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 )
 
 const binlogIOTestDir = "/tmp/milvus_test/binlog_io"

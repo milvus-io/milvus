@@ -54,7 +54,6 @@ type iterator = storage.Iterator
 
 type compactor interface {
 	complete()
-	// compact() (*datapb.CompactionResult, error)
 	compact() (*datapb.CompactionPlanResult, error)
 	injectDone()
 	stop()
