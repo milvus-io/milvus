@@ -469,6 +469,8 @@ func (c *Core) initInternal() error {
 	c.factory.Init(Params)
 	chanMap := c.meta.ListCollectionPhysicalChannels()
 	c.chanTimeTick = newTimeTickSync(c.ctx, c.session.ServerID, c.factory, chanMap)
+	log.Info("create TimeTick sync done")
+
 	c.proxyClientManager = newProxyClientManager(c.proxyCreator)
 
 	c.broker = newServerBroker(c)
@@ -484,6 +486,7 @@ func (c *Core) initInternal() error {
 	)
 	c.proxyManager.AddSessionFunc(c.chanTimeTick.addSession, c.proxyClientManager.AddProxyClient)
 	c.proxyManager.DelSessionFunc(c.chanTimeTick.delSession, c.proxyClientManager.DelProxyClient)
+	log.Info("init proxy manager done")
 
 	c.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 
@@ -493,15 +496,18 @@ func (c *Core) initInternal() error {
 	if err := c.initImportManager(); err != nil {
 		return err
 	}
+	log.Info("init import manager done")
 
 	if err := c.initCredentials(); err != nil {
 		return err
 	}
+	log.Info("init credentials done")
 
 	if err := c.initRbac(); err != nil {
 		return err
 	}
 
+	log.Info("init rootcoord done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", c.address))
 	return nil
 }
 
@@ -671,7 +677,7 @@ func (c *Core) startInternal() error {
 			if err := c.proxyClientManager.RefreshPolicyInfoCache(c.ctx, &proxypb.RefreshPolicyInfoCacheRequest{
 				OpType: int32(typeutil.CacheRefresh),
 			}); err != nil {
-				log.Info("fail to refresh policy info cache", zap.Error(err))
+				log.RatedWarn(60, "fail to refresh policy info cache", zap.Error(err))
 				return err
 			}
 			return nil

@@ -330,6 +330,7 @@ func (s *Server) initDataCoord() error {
 	if err = s.initRootCoordClient(); err != nil {
 		return err
 	}
+	log.Info("init rootcoord client done")
 
 	s.broker = NewCoordinatorBroker(s.rootCoordClient)
 
@@ -337,6 +338,7 @@ func (s *Server) initDataCoord() error {
 	if err != nil {
 		return err
 	}
+	log.Info("init chunk manager factory done")
 
 	if err = s.initMeta(storageCli); err != nil {
 		return err
@@ -347,6 +349,7 @@ func (s *Server) initDataCoord() error {
 	if err = s.initCluster(); err != nil {
 		return err
 	}
+	log.Info("init datanode cluster done")
 
 	s.allocator = newRootCoordAllocator(s.rootCoordClient)
 
@@ -355,21 +358,25 @@ func (s *Server) initDataCoord() error {
 	if err = s.initServiceDiscovery(); err != nil {
 		return err
 	}
+	log.Info("init service discovery done")
 
 	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 		s.createCompactionHandler()
 		s.createCompactionTrigger()
+		log.Info("init compaction scheduler done")
 	}
 
 	if err = s.initSegmentManager(); err != nil {
 		return err
 	}
+	log.Info("init segment manager done")
 
 	s.initGarbageCollection(storageCli)
 	s.initIndexBuilder(storageCli)
 
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
 
+	log.Info("init datacoord done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", s.address))
 	return nil
 }
 

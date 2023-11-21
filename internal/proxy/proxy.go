@@ -293,6 +293,7 @@ func (node *Proxy) Init() error {
 	}
 	log.Debug("init meta cache done", zap.String("role", typeutil.ProxyRole))
 
+	log.Info("init proxy done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", node.address))
 	return nil
 }
 

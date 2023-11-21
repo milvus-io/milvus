@@ -282,6 +282,8 @@ func (node *DataNode) Init() error {
 		node.syncMgr = syncMgr
 
 		node.writeBufferManager = writebuffer.NewManager(syncMgr)
+
+		log.Info("init datanode done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", node.address))
 	})
 	return initError
 }
