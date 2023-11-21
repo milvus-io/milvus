@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -92,11 +93,13 @@ type shardDelegator struct {
 
 	lifetime lifetime.Lifetime[lifetime.State]
 
-	distribution   *distribution
-	segmentManager segments.SegmentManager
-	tsafeManager   tsafe.Manager
-	pkOracle       pkoracle.PkOracle
-	// L0 delete buffer
+	distribution    *distribution
+	segmentManager  segments.SegmentManager
+	tsafeManager    tsafe.Manager
+	pkOracle        pkoracle.PkOracle
+	level0Mut       sync.RWMutex
+	level0Deletions map[int64]*storage.DeleteData // partitionID -> deletions
+	// stream delete buffer
 	deleteMut    sync.Mutex
 	deleteBuffer deletebuffer.DeleteBuffer[*deletebuffer.Item]
 	// dispatcherClient msgdispatcher.Client
@@ -654,21 +657,22 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	log.Info("Init delta cache", zap.Int64("maxSegmentCacheBuffer", maxSegmentDeleteBuffer), zap.Time("startTime", tsoutil.PhysicalTime(startTs)))
 
 	sd := &shardDelegator{
-		collectionID:   collectionID,
-		replicaID:      replicaID,
-		vchannelName:   channel,
-		version:        version,
-		collection:     collection,
-		segmentManager: manager.Segment,
-		workerManager:  workerManager,
-		lifetime:       lifetime.NewLifetime(lifetime.Initializing),
-		distribution:   NewDistribution(),
-		deleteBuffer:   deletebuffer.NewDoubleCacheDeleteBuffer[*deletebuffer.Item](startTs, maxSegmentDeleteBuffer),
-		pkOracle:       pkoracle.NewPkOracle(),
-		tsafeManager:   tsafeManager,
-		latestTsafe:    atomic.NewUint64(startTs),
-		loader:         loader,
-		factory:        factory,
+		collectionID:    collectionID,
+		replicaID:       replicaID,
+		vchannelName:    channel,
+		version:         version,
+		collection:      collection,
+		segmentManager:  manager.Segment,
+		workerManager:   workerManager,
+		lifetime:        lifetime.NewLifetime(lifetime.Initializing),
+		distribution:    NewDistribution(),
+		level0Deletions: make(map[int64]*storage.DeleteData),
+		deleteBuffer:    deletebuffer.NewDoubleCacheDeleteBuffer[*deletebuffer.Item](startTs, maxSegmentDeleteBuffer),
+		pkOracle:        pkoracle.NewPkOracle(),
+		tsafeManager:    tsafeManager,
+		latestTsafe:     atomic.NewUint64(startTs),
+		loader:          loader,
+		factory:         factory,
 	}
 	m := sync.Mutex{}
 	sd.tsCond = sync.NewCond(&m)

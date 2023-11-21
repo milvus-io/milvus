@@ -768,6 +768,9 @@ func (loader *segmentLoader) loadBloomFilter(ctx context.Context, segmentID int6
 }
 
 func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment, deltaLogs []*datapb.FieldBinlog) error {
+	log := log.With(
+		zap.Int64("segmentID", segment.ID()),
+	)
 	dCodec := storage.DeleteCodec{}
 	var blobs []*storage.Blob
 	for _, deltaLog := range deltaLogs {
@@ -789,7 +792,7 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment,
 		}
 	}
 	if len(blobs) == 0 {
-		log.Info("there are no delta logs saved with segment, skip loading delete record", zap.Any("segmentID", segment.ID()))
+		log.Info("there are no delta logs saved with segment, skip loading delete record")
 		return nil
 	}
 	_, _, deltaData, err := dCodec.Deserialize(blobs)
@@ -801,6 +804,8 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment,
 	if err != nil {
 		return err
 	}
+
+	log.Info("load delta logs done", zap.Int64("deleteCount", deltaData.RowCount))
 	return nil
 }
 
