@@ -237,11 +237,11 @@ func (t *SyncTask) convertInsertData2PkStats(pkFieldID int64, dataType schemapb.
 	pkFieldData := t.insertData.Data[pkFieldID]
 
 	rowNum := int64(pkFieldData.RowNum())
-	if rowNum == 0 {
+
+	stats, err := storage.NewPrimaryKeyStats(pkFieldID, int64(dataType), rowNum)
+	if err != nil {
 		return nil, 0
 	}
-
-	stats := storage.NewPrimaryKeyStats(pkFieldID, int64(dataType), rowNum)
 	stats.UpdateByMsgs(pkFieldData)
 	return stats, rowNum
 }
@@ -310,9 +310,11 @@ func (t *SyncTask) serializePkStatsLog() error {
 	fieldID := pkField.GetFieldID()
 	if t.insertData != nil {
 		stats, rowNum := t.convertInsertData2PkStats(fieldID, pkField.GetDataType())
-		err := t.serializeSinglePkStats(fieldID, stats, rowNum)
-		if err != nil {
-			return err
+		if stats != nil && rowNum > 0 {
+			err := t.serializeSinglePkStats(fieldID, stats, rowNum)
+			if err != nil {
+				return err
+			}
 		}
 	}
 

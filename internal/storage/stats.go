@@ -190,12 +190,15 @@ func (stats *PrimaryKeyStats) UpdateMinMax(pk PrimaryKey) {
 	}
 }
 
-func NewPrimaryKeyStats(fieldID, pkType, rowNum int64) *PrimaryKeyStats {
+func NewPrimaryKeyStats(fieldID, pkType, rowNum int64) (*PrimaryKeyStats, error) {
+	if rowNum <= 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("non zero & non negative row num", rowNum)
+	}
 	return &PrimaryKeyStats{
 		FieldID: fieldID,
 		PkType:  pkType,
 		BF:      bloom.NewWithEstimates(uint(rowNum), MaxBloomFalsePositive),
-	}
+	}, nil
 }
 
 // StatsWriter writes stats to buffer
