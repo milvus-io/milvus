@@ -21,7 +21,7 @@ RUN yum install -y wget g++ gcc gdb libatomic libstdc++-static git make zip unzi
 RUN pip3 install conan==1.61.0
 
 RUN echo "target arch $TARGETARCH"
-RUN wget -qO- "https://cmake.org/files/v3.24/cmake-3.24.4-linux-`uname -m`.tar.gz" | tar --strip-components=1 -xz -C /usr/local
+RUN wget -qO- "https://cmake.org/files/v3.27/cmake-3.27.5-linux-`uname -m`.tar.gz" | tar --strip-components=1 -xz -C /usr/local
 
 RUN mkdir /tmp/ccache && cd /tmp/ccache &&\
     wget https://dl.fedoraproject.org/pub/epel/9/Everything/`uname -m`/Packages/h/hiredis-1.0.2-1.el9.`uname -m`.rpm &&\
