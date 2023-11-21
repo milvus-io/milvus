@@ -103,7 +103,11 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         reserved_offset, timestamps_raw, num_rows);
     insert_record_.row_ids_.set_data_raw(reserved_offset, row_ids, num_rows);
     for (auto [field_id, field_meta] : schema_->get_fields()) {
-        AssertInfo(field_id_to_offset.count(field_id), "Cannot find field_id");
+        if (field_id.get() < START_USER_FIELDID) {
+            continue;
+        }
+        AssertInfo(field_id_to_offset.count(field_id),
+                   fmt::format("can't find field {}", field_id.get()));
         auto data_offset = field_id_to_offset[field_id];
         if (!indexing_record_.SyncDataWithIndex(field_id)) {
             insert_record_.get_field_data_base(field_id)->set_data_raw(
