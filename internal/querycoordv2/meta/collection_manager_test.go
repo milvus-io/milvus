@@ -17,19 +17,15 @@
 package meta
 
 import (
-	"fmt"
 	"sort"
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/util/etcd"
-	"github.com/samber/lo"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -153,14 +149,6 @@ func (suite *CollectionManagerSuite) TestGet() {
 func (suite *CollectionManagerSuite) TestUpdate() {
 	mgr := suite.mgr
 
-	for i, collection := range suite.collections {
-		if suite.loadTypes[i] == querypb.LoadType_LoadCollection {
-			suite.broker.EXPECT().GetCollectionSchema(mock.Anything, collection).Return(nil, nil)
-		} else if len(suite.partitions[collection]) > 0 {
-			suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil)
-		}
-	}
-
 	collections := mgr.GetAllCollections()
 	partitions := mgr.GetAllPartitions()
 	for _, collection := range collections {
@@ -259,13 +247,6 @@ func (suite *CollectionManagerSuite) TestRecover_normal() {
 	mgr := suite.mgr
 
 	// recover successfully
-	for i, collection := range suite.collections {
-		if suite.loadTypes[i] == querypb.LoadType_LoadCollection {
-			suite.broker.EXPECT().GetCollectionSchema(mock.Anything, collection).Return(nil, nil)
-		} else if len(suite.partitions[collection]) > 0 {
-			suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil)
-		}
-	}
 	suite.clearMemory()
 	err := mgr.Recover(suite.broker)
 	suite.NoError(err)
@@ -280,64 +261,6 @@ func (suite *CollectionManagerSuite) TestRecover_normal() {
 			}
 		}
 	}
-}
-
-func (suite *CollectionManagerSuite) TestRecover_with_dropped() {
-	mgr := suite.mgr
-
-	droppedCollections := []int64{101, 102}
-	droppedPartition := int64(16)
-
-	for i, collection := range suite.collections {
-		if suite.loadTypes[i] == querypb.LoadType_LoadCollection && lo.Contains(droppedCollections, collection) {
-			suite.broker.EXPECT().GetCollectionSchema(mock.Anything, collection).Return(nil, common.NewCollectionNotExistError("not exist"))
-		} else if suite.loadTypes[i] == querypb.LoadType_LoadCollection {
-			suite.broker.EXPECT().GetCollectionSchema(mock.Anything, collection).Return(nil, nil)
-		}
-		if suite.loadTypes[i] == querypb.LoadType_LoadPartition && len(suite.partitions[collection]) != 0 {
-			if lo.Contains(droppedCollections, collection) {
-				suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(nil, common.NewCollectionNotExistError("not exist"))
-			} else {
-				suite.broker.EXPECT().GetPartitions(mock.Anything, collection).
-					Return(lo.Filter(suite.partitions[collection], func(partition int64, _ int) bool {
-						return partition != droppedPartition
-					}), nil)
-			}
-		}
-	}
-	suite.clearMemory()
-	err := mgr.Recover(suite.broker)
-	suite.NoError(err)
-	for i, collection := range suite.collections {
-		exist := suite.loadPercentage[i] == 100 && !lo.Contains(droppedCollections, collection)
-		if suite.loadTypes[i] == querypb.LoadType_LoadCollection {
-			suite.Equal(exist, mgr.Exist(collection))
-		} else {
-			for _, partitionID := range suite.partitions[collection] {
-				partition := mgr.GetPartition(partitionID)
-				partitionExist := exist && partitionID != droppedPartition
-				suite.Equal(partitionExist, partition != nil)
-			}
-		}
-	}
-}
-
-func (suite *CollectionManagerSuite) TestRecover_Failed() {
-	mockErr1 := fmt.Errorf("mock GetCollectionSchema err")
-	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything).Return(nil, mockErr1)
-	suite.clearMemory()
-	err := suite.mgr.Recover(suite.broker)
-	suite.Error(err)
-	suite.ErrorIs(err, mockErr1)
-
-	mockErr2 := fmt.Errorf("mock GetPartitions err")
-	suite.broker.ExpectedCalls = suite.broker.ExpectedCalls[:0]
-	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything).Return(nil, nil)
-	suite.broker.EXPECT().GetPartitions(mock.Anything, mock.Anything).Return(nil, mockErr2)
-	suite.clearMemory()
-	err = suite.mgr.Recover(suite.broker)
-	suite.Error(err)
-	suite.ErrorIs(err, mockErr2)
 }
 
 func (suite *CollectionManagerSuite) loadAll() {
