@@ -400,7 +400,7 @@ TEST(Sealed, LoadFieldData) {
 
     auto fakevec = dataset.get_col<float>(fakevec_id);
 
-    auto indexing = GenVecIndexing(N, dim, fakevec.data());
+    auto indexing = GenVecIndexing(N, dim, fakevec.data(), knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
 
     auto segment = CreateSealedSegment(schema);
     // std::string dsl = R"({
@@ -525,7 +525,7 @@ TEST(Sealed, LoadFieldDataMmap) {
 
     auto fakevec = dataset.get_col<float>(fakevec_id);
 
-    auto indexing = GenVecIndexing(N, dim, fakevec.data());
+    auto indexing = GenVecIndexing(N, dim, fakevec.data(), knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
 
     auto segment = CreateSealedSegment(schema);
     const char* raw_plan = R"(vector_anns: <
@@ -616,7 +616,7 @@ TEST(Sealed, LoadScalarIndex) {
 
     auto fakevec = dataset.get_col<float>(fakevec_id);
 
-    auto indexing = GenVecIndexing(N, dim, fakevec.data());
+    auto indexing = GenVecIndexing(N, dim, fakevec.data(), knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
 
     auto segment = CreateSealedSegment(schema);
     // std::string dsl = R"({
@@ -1135,7 +1135,7 @@ TEST(Sealed, GetVector) {
 
     auto fakevec = dataset.get_col<float>(fakevec_id);
 
-    auto indexing = GenVecIndexing(N, dim, fakevec.data());
+    auto indexing = GenVecIndexing(N, dim, fakevec.data(), knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
 
     auto segment_sealed = CreateSealedSegment(schema);
 

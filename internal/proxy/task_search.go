@@ -116,7 +116,8 @@ func getPartitionIDs(ctx context.Context, dbName string, collectionName string, 
 }
 
 // parseSearchInfo returns QueryInfo and offset
-func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair) (*planpb.QueryInfo, int64, error) {
+func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema) (*planpb.QueryInfo, int64, error) {
+	// 1. parse offset and real topk
 	topKStr, err := funcutil.GetAttrByKeyFromRepeatedKV(TopKKey, searchParamsPair)
 	if err != nil {
 		return nil, 0, errors.New(TopKKey + " not found in search_params")
@@ -149,11 +150,13 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair) (*planpb.QueryIn
 		return nil, 0, fmt.Errorf("%s+%s [%d] is invalid, %w", OffsetKey, TopKKey, queryTopK, err)
 	}
 
+	// 2. parse metrics type
 	metricType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.MetricTypeKey, searchParamsPair)
 	if err != nil {
 		metricType = ""
 	}
 
+	// 3. parse round decimal
 	roundDecimalStr, err := funcutil.GetAttrByKeyFromRepeatedKV(RoundDecimalKey, searchParamsPair)
 	if err != nil {
 		roundDecimalStr = "-1"
@@ -167,15 +170,39 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair) (*planpb.QueryIn
 	if roundDecimal != -1 && (roundDecimal > 6 || roundDecimal < 0) {
 		return nil, 0, fmt.Errorf("%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)
 	}
+
+	// 4. parse search param str
 	searchParamStr, err := funcutil.GetAttrByKeyFromRepeatedKV(SearchParamsKey, searchParamsPair)
 	if err != nil {
 		searchParamStr = ""
 	}
+
+	// 5. parse group by field
+	groupByFieldName, err := funcutil.GetAttrByKeyFromRepeatedKV(GroupByFieldKey, searchParamsPair)
+	if err != nil {
+		groupByFieldName = ""
+	}
+	var groupByFieldId int64
+	if groupByFieldName != "" {
+		groupByFieldId = -1
+		fields := schema.GetFields()
+		for _, field := range fields {
+			if field.Name == groupByFieldName {
+				groupByFieldId = field.FieldID
+				break
+			}
+		}
+		if groupByFieldId == -1 {
+			return nil, 0, merr.WrapErrFieldNotFound(groupByFieldName, "groupBy field not found in schema")
+		}
+	}
+
 	return &planpb.QueryInfo{
-		Topk:         queryTopK,
-		MetricType:   metricType,
-		SearchParams: searchParamStr,
-		RoundDecimal: roundDecimal,
+		Topk:           queryTopK,
+		MetricType:     metricType,
+		SearchParams:   searchParamStr,
+		RoundDecimal:   roundDecimal,
+		GroupByFieldId: groupByFieldId,
 	}, offset, nil
 }
 
@@ -299,9 +326,13 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 			annsField = vecFields[0].Name
 		}
-		queryInfo, offset, err := parseSearchInfo(t.request.GetSearchParams())
+		queryInfo, offset, err := parseSearchInfo(t.request.GetSearchParams(), t.schema.CollectionSchema)
 		if err != nil {
 			return err
+		}
+		if queryInfo.GroupByFieldId != 0 {
+			t.SearchRequest.IgnoreGrowing = true
+			// for group by operation, currently, we ignore growing segments
 		}
 		t.offset = offset
 
@@ -405,7 +436,6 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		zap.Bool("use_default_consistency", useDefaultConsistency),
 		zap.Any("consistency level", consistencyLevel),
 		zap.Uint64("timeout_ts", t.SearchRequest.GetTimeoutTimestamp()))
-
 	return nil
 }
 
@@ -817,7 +847,6 @@ func reduceSearchResultData(ctx context.Context, subSearchResultData []*schemapb
 	default:
 		return nil, errors.New("unsupported pk type")
 	}
-
 	for i, sData := range subSearchResultData {
 		pkLength := typeutil.GetSizeOfIDs(sData.GetIds())
 		log.Ctx(ctx).Debug("subSearchResultData",
@@ -852,6 +881,7 @@ func reduceSearchResultData(ctx context.Context, subSearchResultData []*schemapb
 
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
+
 	// reducing nq * topk results
 	for i := int64(0); i < nq; i++ {
 		var (
@@ -859,8 +889,9 @@ func reduceSearchResultData(ctx context.Context, subSearchResultData []*schemapb
 			// sum(cursors) == j
 			cursors = make([]int64, subSearchNum)
 
-			j     int64
-			idSet = make(map[interface{}]struct{})
+			j             int64
+			idSet         = make(map[interface{}]struct{})
+			groupByValSet = make(map[interface{}]struct{})
 		)
 
 		// skip offset results
@@ -882,17 +913,32 @@ func reduceSearchResultData(ctx context.Context, subSearchResultData []*schemapb
 			if subSearchIdx == -1 {
 				break
 			}
+			subSearchRes := subSearchResultData[subSearchIdx]
 
-			id := typeutil.GetPK(subSearchResultData[subSearchIdx].GetIds(), resultDataIdx)
-			score := subSearchResultData[subSearchIdx].Scores[resultDataIdx]
+			id := typeutil.GetPK(subSearchRes.GetIds(), resultDataIdx)
+			score := subSearchRes.Scores[resultDataIdx]
+			groupByVal := typeutil.GetData(subSearchRes.GetGroupByFieldValue(), int(resultDataIdx))
 
 			// remove duplicates
 			if _, ok := idSet[id]; !ok {
-				retSize += typeutil.AppendFieldData(ret.Results.FieldsData, subSearchResultData[subSearchIdx].FieldsData, resultDataIdx)
-				typeutil.AppendPKs(ret.Results.Ids, id)
-				ret.Results.Scores = append(ret.Results.Scores, score)
-				idSet[id] = struct{}{}
-				j++
+				groupByValExist := false
+				if groupByVal != nil {
+					_, groupByValExist = groupByValSet[groupByVal]
+				}
+				if !groupByValExist {
+					retSize += typeutil.AppendFieldData(ret.Results.FieldsData, subSearchResultData[subSearchIdx].FieldsData, resultDataIdx)
+					typeutil.AppendPKs(ret.Results.Ids, id)
+					ret.Results.Scores = append(ret.Results.Scores, score)
+					idSet[id] = struct{}{}
+					if groupByVal != nil {
+						groupByValSet[groupByVal] = struct{}{}
+						if err := typeutil.AppendGroupByValue(ret.Results, groupByVal, subSearchRes.GetGroupByFieldValue().GetType()); err != nil {
+							log.Ctx(ctx).Error("failed to append groupByValues", zap.Error(err))
+							return ret, err
+						}
+					}
+					j++
+				}
 			} else {
 				// skip entity with same id
 				skipDupCnt++

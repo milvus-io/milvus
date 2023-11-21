@@ -57,6 +57,7 @@ message QueryInfo {
   string metric_type = 3;
   string search_params = 4;
   int64 round_decimal = 5;
+  int64 group_by_field_id = 6;
 }
 
 message ColumnInfo {

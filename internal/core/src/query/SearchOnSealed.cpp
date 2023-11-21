@@ -49,18 +49,22 @@ SearchOnSealedIndex(const Schema& schema,
         auto index_type = vec_index->GetIndexType();
         return vec_index->Query(ds, search_info, bitset);
     }();
+    if (final->iterators.has_value()) {
+        result.iterators = std::move(final->iterators);
+    } else {
+        float* distances = final->distances_.data();
 
-    float* distances = final->distances_.data();
-
-    auto total_num = num_queries * topk;
-    if (round_decimal != -1) {
-        const float multiplier = pow(10.0, round_decimal);
-        for (int i = 0; i < total_num; i++) {
-            distances[i] = std::round(distances[i] * multiplier) / multiplier;
+        auto total_num = num_queries * topk;
+        if (round_decimal != -1) {
+            const float multiplier = pow(10.0, round_decimal);
+            for (int i = 0; i < total_num; i++) {
+                distances[i] =
+                    std::round(distances[i] * multiplier) / multiplier;
+            }
         }
+        result.seg_offsets_ = std::move(final->seg_offsets_);
+        result.distances_ = std::move(final->distances_);
     }
-    result.seg_offsets_ = std::move(final->seg_offsets_);
-    result.distances_ = std::move(final->distances_);
     result.total_nq_ = num_queries;
     result.unity_topK_ = topk;
 }
