@@ -1926,7 +1926,7 @@ func Test_compactionTrigger_new(t *testing.T) {
 }
 
 func Test_compactionTrigger_handleSignal(t *testing.T) {
-	got := newCompactionTrigger(&meta{segments: NewSegmentsInfo()}, &compactionPlanHandler{scheduler: newScheduler()}, newMockAllocator(), newMockHandler(), newMockVersionManager())
+	got := newCompactionTrigger(&meta{segments: NewSegmentsInfo()}, &compactionPlanHandler{scheduler: NewCompactionScheduler()}, newMockAllocator(), newMockHandler(), newMockVersionManager())
 	signal := &compactionSignal{
 		segmentID: 1,
 	}
@@ -1936,12 +1936,12 @@ func Test_compactionTrigger_handleSignal(t *testing.T) {
 }
 
 func Test_compactionTrigger_allocTs(t *testing.T) {
-	got := newCompactionTrigger(&meta{segments: NewSegmentsInfo()}, &compactionPlanHandler{scheduler: newScheduler()}, newMockAllocator(), newMockHandler(), newMockVersionManager())
+	got := newCompactionTrigger(&meta{segments: NewSegmentsInfo()}, &compactionPlanHandler{scheduler: NewCompactionScheduler()}, newMockAllocator(), newMockHandler(), newMockVersionManager())
 	ts, err := got.allocTs()
 	assert.NoError(t, err)
 	assert.True(t, ts > 0)
 
-	got = newCompactionTrigger(&meta{segments: NewSegmentsInfo()}, &compactionPlanHandler{scheduler: newScheduler()}, &FailsAllocator{}, newMockHandler(), newMockVersionManager())
+	got = newCompactionTrigger(&meta{segments: NewSegmentsInfo()}, &compactionPlanHandler{scheduler: NewCompactionScheduler()}, &FailsAllocator{}, newMockHandler(), newMockVersionManager())
 	ts, err = got.allocTs()
 	assert.Error(t, err)
 	assert.Equal(t, uint64(0), ts)
@@ -1968,7 +1968,7 @@ func Test_compactionTrigger_getCompactTime(t *testing.T) {
 	}
 
 	m := &meta{segments: NewSegmentsInfo(), collections: collections}
-	got := newCompactionTrigger(m, &compactionPlanHandler{scheduler: newScheduler()}, newMockAllocator(),
+	got := newCompactionTrigger(m, &compactionPlanHandler{scheduler: NewCompactionScheduler()}, newMockAllocator(),
 		&ServerHandler{
 			&Server{
 				meta: m,
