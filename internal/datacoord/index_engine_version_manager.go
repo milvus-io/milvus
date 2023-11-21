@@ -10,18 +10,28 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
-type IndexEngineVersionManager struct {
+type IndexEngineVersionManager interface {
+	Startup(sessions map[string]*sessionutil.Session)
+	AddNode(session *sessionutil.Session)
+	RemoveNode(session *sessionutil.Session)
+	Update(session *sessionutil.Session)
+
+	GetCurrentIndexEngineVersion() int32
+	GetMinimalIndexEngineVersion() int32
+}
+
+type versionManagerImpl struct {
 	mu       sync.Mutex
 	versions map[int64]sessionutil.IndexEngineVersion
 }
 
-func newIndexEngineVersionManager() *IndexEngineVersionManager {
-	return &IndexEngineVersionManager{
+func newIndexEngineVersionManager() IndexEngineVersionManager {
+	return &versionManagerImpl{
 		versions: map[int64]sessionutil.IndexEngineVersion{},
 	}
 }
 
-func (m *IndexEngineVersionManager) Startup(sessions map[string]*sessionutil.Session) {
+func (m *versionManagerImpl) Startup(sessions map[string]*sessionutil.Session) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -30,33 +40,33 @@ func (m *IndexEngineVersionManager) Startup(sessions map[string]*sessionutil.Ses
 	}
 }
 
-func (m *IndexEngineVersionManager) AddNode(session *sessionutil.Session) {
+func (m *versionManagerImpl) AddNode(session *sessionutil.Session) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	m.addOrUpdate(session)
 }
 
-func (m *IndexEngineVersionManager) RemoveNode(session *sessionutil.Session) {
+func (m *versionManagerImpl) RemoveNode(session *sessionutil.Session) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	delete(m.versions, session.ServerID)
 }
 
-func (m *IndexEngineVersionManager) Update(session *sessionutil.Session) {
+func (m *versionManagerImpl) Update(session *sessionutil.Session) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	m.addOrUpdate(session)
 }
 
-func (m *IndexEngineVersionManager) addOrUpdate(session *sessionutil.Session) {
+func (m *versionManagerImpl) addOrUpdate(session *sessionutil.Session) {
 	log.Info("addOrUpdate version", zap.Int64("nodeId", session.ServerID), zap.Int32("minimal", session.IndexEngineVersion.MinimalIndexVersion), zap.Int32("current", session.IndexEngineVersion.CurrentIndexVersion))
 	m.versions[session.ServerID] = session.IndexEngineVersion
 }
 
-func (m *IndexEngineVersionManager) GetCurrentIndexEngineVersion() int32 {
+func (m *versionManagerImpl) GetCurrentIndexEngineVersion() int32 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -75,7 +85,7 @@ func (m *IndexEngineVersionManager) GetCurrentIndexEngineVersion() int32 {
 	return current
 }
 
-func (m *IndexEngineVersionManager) GetMinimalIndexEngineVersion() int32 {
+func (m *versionManagerImpl) GetMinimalIndexEngineVersion() int32 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
