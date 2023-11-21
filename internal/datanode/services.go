@@ -325,8 +325,6 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		return merr.Status(err), nil
 	}
 	bfs := metacache.NewBloomFilterSet(pks...)
-	ds.fg.Blockall()
-	defer ds.fg.Unblock()
 	ds.metacache.CompactSegments(req.GetCompactedTo(), req.GetPartitionId(), req.GetNumOfRows(), bfs, req.GetCompactedFrom()...)
 	node.compactionExecutor.injectDone(req.GetPlanID(), true)
 	return merr.Success(), nil
