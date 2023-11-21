@@ -42,7 +42,7 @@ func (s *SyncPolicySuite) TestSyncFullBuffer() {
 	ids := SyncFullBuffer([]*segmentBuffer{buffer}, 0)
 	s.Equal(0, len(ids), "empty buffer shall not be synced")
 
-	buffer.insertBuffer.rows = buffer.insertBuffer.rowLimit + 1
+	buffer.insertBuffer.size = buffer.insertBuffer.sizeLimit + 1
 
 	ids = SyncFullBuffer([]*segmentBuffer{buffer}, 0)
 	s.ElementsMatch([]int64{100}, ids)
