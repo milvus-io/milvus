@@ -606,6 +606,7 @@ func (suite *ServiceSuite) TestLoadSegments_VarChar() {
 			DeltaPositions: []*msgpb.MsgPosition{{Timestamp: 20000}},
 			NeedTransfer:   true,
 			LoadMeta:       loadMeta,
+			IndexInfoList:  []*indexpb.IndexInfo{{}},
 		}
 
 		// LoadSegment
@@ -625,12 +626,13 @@ func (suite *ServiceSuite) TestLoadDeltaInt64() {
 			MsgID:    rand.Int63(),
 			TargetID: suite.node.session.ServerID,
 		},
-		CollectionID: suite.collectionID,
-		DstNodeID:    suite.node.session.ServerID,
-		Infos:        suite.genSegmentLoadInfos(schema),
-		Schema:       schema,
-		NeedTransfer: true,
-		LoadScope:    querypb.LoadScope_Delta,
+		CollectionID:  suite.collectionID,
+		DstNodeID:     suite.node.session.ServerID,
+		Infos:         suite.genSegmentLoadInfos(schema),
+		Schema:        schema,
+		NeedTransfer:  true,
+		LoadScope:     querypb.LoadScope_Delta,
+		IndexInfoList: []*indexpb.IndexInfo{{}},
 	}
 
 	// LoadSegment
@@ -649,12 +651,13 @@ func (suite *ServiceSuite) TestLoadDeltaVarchar() {
 			MsgID:    rand.Int63(),
 			TargetID: suite.node.session.ServerID,
 		},
-		CollectionID: suite.collectionID,
-		DstNodeID:    suite.node.session.ServerID,
-		Infos:        suite.genSegmentLoadInfos(schema),
-		Schema:       schema,
-		NeedTransfer: true,
-		LoadScope:    querypb.LoadScope_Delta,
+		CollectionID:  suite.collectionID,
+		DstNodeID:     suite.node.session.ServerID,
+		Infos:         suite.genSegmentLoadInfos(schema),
+		Schema:        schema,
+		NeedTransfer:  true,
+		LoadScope:     querypb.LoadScope_Delta,
+		IndexInfoList: []*indexpb.IndexInfo{{}},
 	}
 
 	// LoadSegment
