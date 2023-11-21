@@ -858,7 +858,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("dim", [13])
     @pytest.mark.parametrize("entities", [150])
     @pytest.mark.parametrize("file_nums", [10])
-    @pytest.mark.xfail(reason="issue #28209")
+    @pytest.mark.skip(reason="issue #28209")
     def test_partition_key_on_multi_numpy_files(
             self, auto_id, dim, entities, file_nums
     ):
@@ -945,7 +945,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     def test_partition_key_on_csv_file(self, auto_id, partition_key_field):
         """
         collection: auto_id, customized_id
-        collection scheam: [pk, float_vector, int64, varchar, bool, float]
+        collection schema: [pk, float_vector, int64, varchar, bool, float]
         Step:
         1. create collection with partition key enabled
         2. import data
@@ -1213,7 +1213,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         collection schema: [pk, int64, string, float_vector]
         Step:
         1. create collection and partition
-        2. bulid index and load partition
+        2. build index and load partition
         3. import data into the partition
         4. verify num entities
         5. verify index status
