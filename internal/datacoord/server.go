@@ -149,7 +149,7 @@ type Server struct {
 	// segReferManager  *SegmentReferenceManager
 	indexBuilder              *indexBuilder
 	indexNodeManager          *IndexNodeManager
-	indexEngineVersionManager *IndexEngineVersionManager
+	indexEngineVersionManager IndexEngineVersionManager
 
 	// manage ways that data coord access other coord
 	broker Broker
@@ -454,7 +454,7 @@ func (s *Server) stopCompactionHandler() {
 }
 
 func (s *Server) createCompactionTrigger() {
-	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionHandler, s.allocator, s.handler)
+	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionHandler, s.allocator, s.handler, s.indexEngineVersionManager)
 }
 
 func (s *Server) stopCompactionTrigger() {
