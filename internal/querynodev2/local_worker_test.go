@@ -25,6 +25,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
@@ -109,6 +110,7 @@ func (suite *LocalWorkerTestSuite) AfterTest(suiteName, testName string) {
 
 func (suite *LocalWorkerTestSuite) TestLoadSegment() {
 	// load empty
+	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
 	req := &querypb.LoadSegmentsRequest{
 		CollectionID: suite.collectionID,
 		Infos: lo.Map(suite.segmentIDs, func(segID int64, _ int) *querypb.SegmentLoadInfo {
@@ -118,6 +120,8 @@ func (suite *LocalWorkerTestSuite) TestLoadSegment() {
 				SegmentID:    segID,
 			}
 		}),
+		Schema:        schema,
+		IndexInfoList: []*indexpb.IndexInfo{{}},
 	}
 	err := suite.worker.LoadSegments(suite.ctx, req)
 	suite.NoError(err)
