@@ -22,9 +22,8 @@ import (
 )
 
 const (
-	retryableFlag       = 1 << 16
-	CanceledCode  int32 = 10000
-	TimeoutCode   int32 = 10001
+	CanceledCode int32 = 10000
+	TimeoutCode  int32 = 10001
 )
 
 // Define leaf errors here,
@@ -146,17 +145,27 @@ var (
 )
 
 type milvusError struct {
-	msg     string
-	errCode int32
+	msg       string
+	detail    string
+	retriable bool
+	errCode   int32
 }
 
 func newMilvusError(msg string, code int32, retriable bool) milvusError {
-	if retriable {
-		code |= retryableFlag
-	}
 	return milvusError{
-		msg:     msg,
-		errCode: code,
+		msg:       msg,
+		detail:    msg,
+		retriable: retriable,
+		errCode:   code,
+	}
+}
+
+func newMilvusErrorWithDetail(msg string, detail string, code int32, retriable bool) milvusError {
+	return milvusError{
+		msg:       msg,
+		detail:    detail,
+		retriable: retriable,
+		errCode:   code,
 	}
 }
 
@@ -166,6 +175,10 @@ func (e milvusError) code() int32 {
 
 func (e milvusError) Error() string {
 	return e.msg
+}
+
+func (e milvusError) Detail() string {
+	return e.detail
 }
 
 func (e milvusError) Is(err error) bool {

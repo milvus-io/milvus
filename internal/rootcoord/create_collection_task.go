@@ -89,7 +89,7 @@ func (t *createCollectionTask) validate() error {
 	maxColNumPerDB := Params.QuotaConfig.MaxCollectionNumPerDB.GetAsInt()
 	if len(collIDs) >= maxColNumPerDB {
 		log.Warn("unable to create collection because the number of collection has reached the limit in DB", zap.Int("maxCollectionNumPerDB", maxColNumPerDB))
-		return merr.WrapErrCollectionResourceLimitExceeded(fmt.Sprintf("Failed to create collection, maxCollectionNumPerDB={%d}", maxColNumPerDB))
+		return merr.WrapErrCollectionNumLimitExceeded(maxColNumPerDB, "max number of collection has reached the limit in DB")
 	}
 
 	totalCollections := 0
@@ -100,7 +100,7 @@ func (t *createCollectionTask) validate() error {
 	maxCollectionNum := Params.QuotaConfig.MaxCollectionNum.GetAsInt()
 	if totalCollections >= maxCollectionNum {
 		log.Warn("unable to create collection because the number of collection has reached the limit", zap.Int("max_collection_num", maxCollectionNum))
-		return merr.WrapErrCollectionResourceLimitExceeded(fmt.Sprintf("Failed to create collection, limit={%d}", maxCollectionNum))
+		return merr.WrapErrCollectionNumLimitExceeded(maxCollectionNum, "max number of collection has reached the limit")
 	}
 	return nil
 }
