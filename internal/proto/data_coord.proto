@@ -495,6 +495,7 @@ message CompactionSegmentBinlogs {
   repeated FieldBinlog field2StatslogPaths = 3;
   repeated FieldBinlog deltalogs = 4;
   string insert_channel = 5;
+  SegmentLevel level = 6;
 }
 
 message CompactionPlan {
