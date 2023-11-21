@@ -439,7 +439,7 @@ func (m *meta) UnsetIsImporting(segmentID UniqueID) error {
 	return nil
 }
 
-type UpdateSegmentPack struct {
+type updateSegmentPack struct {
 	meta     *meta
 	segments map[int64]*SegmentInfo
 	// for update etcd binlog paths
@@ -448,7 +448,7 @@ type UpdateSegmentPack struct {
 	metricMutation *segMetricMutation
 }
 
-func (p *UpdateSegmentPack) Get(segmentID int64) *SegmentInfo {
+func (p *updateSegmentPack) Get(segmentID int64) *SegmentInfo {
 	if segment, ok := p.segments[segmentID]; ok {
 		return segment
 	}
@@ -466,27 +466,28 @@ func (p *UpdateSegmentPack) Get(segmentID int64) *SegmentInfo {
 	return p.segments[segmentID]
 }
 
-type UpdateOperator func(*UpdateSegmentPack) bool
+type UpdateOperator func(*updateSegmentPack) bool
 
 func CreateL0Operator(collectionID, partitionID, segmentID int64, channel string) UpdateOperator {
-	return func(modPack *UpdateSegmentPack) bool {
-		segment := modPack.meta.GetSegment(segmentID)
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.meta.segments.GetSegment(segmentID)
 		if segment == nil {
 			log.Info("meta update: add new l0 segment",
 				zap.Int64("collectionID", collectionID),
 				zap.Int64("partitionID", partitionID),
 				zap.Int64("segmentID", segmentID))
-		}
-		modPack.segments[segmentID] = &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:            segmentID,
-				CollectionID:  collectionID,
-				PartitionID:   partitionID,
-				InsertChannel: channel,
-				NumOfRows:     0,
-				State:         commonpb.SegmentState_Growing,
-				Level:         datapb.SegmentLevel_L0,
-			},
+
+			modPack.segments[segmentID] = &SegmentInfo{
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:            segmentID,
+					CollectionID:  collectionID,
+					PartitionID:   partitionID,
+					InsertChannel: channel,
+					NumOfRows:     0,
+					State:         commonpb.SegmentState_Growing,
+					Level:         datapb.SegmentLevel_L0,
+				},
+			}
 		}
 		return true
 	}
@@ -495,7 +496,7 @@ func CreateL0Operator(collectionID, partitionID, segmentID int64, channel string
 // Set status of segment
 // and record dropped time when change segment status to dropped
 func UpdateStatusOperator(segmentID int64, status commonpb.SegmentState) UpdateOperator {
-	return func(modPack *UpdateSegmentPack) bool {
+	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
 			log.Warn("meta update: update status failed - segment not found",
@@ -514,7 +515,7 @@ func UpdateStatusOperator(segmentID int64, status commonpb.SegmentState) UpdateO
 
 // update binlogs in segmentInfo
 func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs []*datapb.FieldBinlog) UpdateOperator {
-	return func(modPack *UpdateSegmentPack) bool {
+	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
 			log.Warn("meta update: update binlog failed - segment not found",
@@ -534,7 +535,7 @@ func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs []*dat
 
 // update startPosition
 func UpdateStartPosition(startPositions []*datapb.SegmentStartPosition) UpdateOperator {
-	return func(modPack *UpdateSegmentPack) bool {
+	return func(modPack *updateSegmentPack) bool {
 		for _, pos := range startPositions {
 			if len(pos.GetStartPosition().GetMsgID()) == 0 {
 				continue
@@ -554,7 +555,7 @@ func UpdateStartPosition(startPositions []*datapb.SegmentStartPosition) UpdateOp
 // if was importing segment
 // only update rows.
 func UpdateCheckPointOperator(segmentID int64, importing bool, checkpoints []*datapb.CheckPoint) UpdateOperator {
-	return func(modPack *UpdateSegmentPack) bool {
+	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
 			log.Warn("meta update: update checkpoint failed - segment not found",
@@ -599,7 +600,7 @@ func UpdateCheckPointOperator(segmentID int64, importing bool, checkpoints []*da
 func (m *meta) UpdateSegmentsInfo(operators ...UpdateOperator) error {
 	m.Lock()
 	defer m.Unlock()
-	updatePack := &UpdateSegmentPack{
+	updatePack := &updateSegmentPack{
 		meta:       m,
 		segments:   make(map[int64]*SegmentInfo),
 		increments: make(map[int64]metastore.BinlogsIncrement),

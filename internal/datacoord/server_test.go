@@ -1319,6 +1319,7 @@ func TestSaveBinlogPaths(t *testing.T) {
 			},
 			SegmentID:    1,
 			CollectionID: 0,
+			Channel:      "ch1",
 			Field2BinlogPaths: []*datapb.FieldBinlog{
 				{
 					FieldID: 1,
@@ -1380,6 +1381,66 @@ func TestSaveBinlogPaths(t *testing.T) {
 		assert.EqualValues(t, segment.DmlPosition.ChannelName, "ch1")
 		assert.EqualValues(t, segment.DmlPosition.MsgID, []byte{1, 2, 3})
 		assert.EqualValues(t, segment.NumOfRows, 10)
+	})
+
+	t.Run("Normal L0 SaveRequest", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+
+		// vecFieldID := int64(201)
+		svr.meta.AddCollection(&collectionInfo{
+			ID: 0,
+		})
+
+		ctx := context.Background()
+
+		err := svr.channelManager.AddNode(0)
+		assert.NoError(t, err)
+		err = svr.channelManager.Watch(ctx, &channelMeta{Name: "ch1", CollectionID: 0})
+		assert.NoError(t, err)
+
+		resp, err := svr.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+			Base: &commonpb.MsgBase{
+				Timestamp: uint64(time.Now().Unix()),
+			},
+			SegmentID:    1,
+			PartitionID:  1,
+			CollectionID: 0,
+			SegLevel:     datapb.SegmentLevel_L0,
+			Deltalogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 1,
+					Binlogs: []*datapb.Binlog{
+						{
+							LogPath:    "/by-dev/test/0/1/1/1/Allo1",
+							EntriesNum: 5,
+						},
+						{
+							LogPath:    "/by-dev/test/0/1/1/1/Allo2",
+							EntriesNum: 5,
+						},
+					},
+				},
+			},
+			CheckPoints: []*datapb.CheckPoint{
+				{
+					SegmentID: 1,
+					Position: &msgpb.MsgPosition{
+						ChannelName: "ch1",
+						MsgID:       []byte{1, 2, 3},
+						MsgGroup:    "",
+						Timestamp:   0,
+					},
+					NumOfRows: 12,
+				},
+			},
+			Flushed: true,
+		})
+		assert.NoError(t, err)
+		assert.EqualValues(t, resp.ErrorCode, commonpb.ErrorCode_Success)
+
+		segment := svr.meta.GetHealthySegment(1)
+		assert.NotNil(t, segment)
 	})
 
 	t.Run("SaveDroppedSegment", func(t *testing.T) {
