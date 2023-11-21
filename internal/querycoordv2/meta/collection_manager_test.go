@@ -17,7 +17,6 @@
 package meta
 
 import (
-	"fmt"
 	"sort"
 	"testing"
 	"time"
@@ -35,7 +34,6 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -178,13 +176,6 @@ func (suite *CollectionManagerSuite) TestGet() {
 func (suite *CollectionManagerSuite) TestUpdate() {
 	mgr := suite.mgr
 
-	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything).Return(nil, nil)
-	for _, collection := range suite.collections {
-		if len(suite.partitions[collection]) > 0 {
-			suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil)
-		}
-	}
-
 	collections := mgr.GetAllCollections()
 	partitions := mgr.GetAllPartitions()
 	for _, collection := range collections {
@@ -251,11 +242,6 @@ func (suite *CollectionManagerSuite) TestGetFieldIndex() {
 func (suite *CollectionManagerSuite) TestRemove() {
 	mgr := suite.mgr
 
-	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything).Return(nil, nil)
-	for _, collection := range suite.collections {
-		suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil).Maybe()
-	}
-
 	// Remove collections/partitions
 	for i, collectionID := range suite.collections {
 		if suite.loadTypes[i] == querypb.LoadType_LoadCollection {
@@ -320,13 +306,6 @@ func (suite *CollectionManagerSuite) TestRemove() {
 func (suite *CollectionManagerSuite) TestRecover_normal() {
 	mgr := suite.mgr
 
-	// recover successfully
-	for _, collection := range suite.collections {
-		suite.broker.EXPECT().GetCollectionSchema(mock.Anything, collection).Return(nil, nil)
-		if len(suite.partitions[collection]) > 0 {
-			suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil)
-		}
-	}
 	suite.clearMemory()
 	err := mgr.Recover(suite.broker)
 	suite.NoError(err)
@@ -342,7 +321,6 @@ func (suite *CollectionManagerSuite) TestRecover_normal() {
 func (suite *CollectionManagerSuite) TestRecoverLoadingCollection() {
 	mgr := suite.mgr
 	suite.releaseAll()
-	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything).Return(nil, nil)
 	// test put collection with partitions
 	for i, collection := range suite.collections {
 		suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil).Maybe()
@@ -424,64 +402,6 @@ func (suite *CollectionManagerSuite) TestRecoverLoadingCollection() {
 	}
 }
 
-func (suite *CollectionManagerSuite) TestRecover_with_dropped() {
-	mgr := suite.mgr
-
-	droppedCollection := int64(101)
-	droppedPartition := int64(13)
-
-	for _, collection := range suite.collections {
-		if collection == droppedCollection {
-			suite.broker.EXPECT().GetCollectionSchema(mock.Anything, collection).Return(nil, merr.ErrCollectionNotFound)
-		} else {
-			suite.broker.EXPECT().GetCollectionSchema(mock.Anything, collection).Return(nil, nil)
-		}
-		if len(suite.partitions[collection]) != 0 {
-			if collection == droppedCollection {
-				suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(nil, merr.ErrCollectionNotFound)
-			} else {
-				suite.broker.EXPECT().GetPartitions(mock.Anything, collection).
-					Return(lo.Filter(suite.partitions[collection], func(partition int64, _ int) bool {
-						return partition != droppedPartition
-					}), nil)
-			}
-		}
-	}
-	suite.clearMemory()
-	err := mgr.Recover(suite.broker)
-	suite.NoError(err)
-	for _, collection := range suite.collections {
-		exist := collection != droppedCollection
-		suite.Equal(exist, mgr.Exist(collection))
-		if !exist {
-			continue
-		}
-		for _, partitionID := range suite.partitions[collection] {
-			partition := mgr.GetPartition(partitionID)
-			exist = partitionID != droppedPartition
-			suite.Equal(exist, partition != nil)
-		}
-	}
-}
-
-func (suite *CollectionManagerSuite) TestRecover_Failed() {
-	mockErr1 := fmt.Errorf("mock GetCollectionSchema err")
-	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything).Return(nil, mockErr1)
-	suite.clearMemory()
-	err := suite.mgr.Recover(suite.broker)
-	suite.Error(err)
-	suite.ErrorIs(err, mockErr1)
-
-	mockErr2 := fmt.Errorf("mock GetPartitions err")
-	suite.broker.ExpectedCalls = suite.broker.ExpectedCalls[:0]
-	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything).Return(nil, nil)
-	suite.broker.EXPECT().GetPartitions(mock.Anything, mock.Anything).Return(nil, mockErr2)
-	suite.clearMemory()
-	err = suite.mgr.Recover(suite.broker)
-	suite.Error(err)
-	suite.ErrorIs(err, mockErr2)
-}
-
 func (suite *CollectionManagerSuite) TestUpdateLoadPercentage() {
 	mgr := suite.mgr
 	mgr.PutCollection(&Collection{
@@ -538,13 +458,6 @@ func (suite *CollectionManagerSuite) TestUpdateLoadPercentage() {
 func (suite *CollectionManagerSuite) TestUpgradeRecover() {
 	suite.releaseAll()
 	mgr := suite.mgr
-
-	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything).Return(nil, nil)
-	for _, collection := range suite.collections {
-		if len(suite.partitions[collection]) > 0 {
-			suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil)
-		}
-	}
 
 	// put old version of collections and partitions
 	for i, collection := range suite.collections {
