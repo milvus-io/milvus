@@ -147,10 +147,7 @@ func (s *SyncManagerSuite) getSuiteSyncTask() *SyncTask {
 }
 
 func (s *SyncManagerSuite) TestSubmit() {
-	sig := make(chan struct{})
-	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Run(func(_ context.Context, _ *datapb.SaveBinlogPathsRequest) {
-		close(sig)
-	}).Return(nil)
+	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil)
 	bfs := metacache.NewBloomFilterSet()
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs)
 	metacache.UpdateNumOfRows(1000)(seg)
@@ -171,15 +168,14 @@ func (s *SyncManagerSuite) TestSubmit() {
 	f := manager.SyncData(context.Background(), task)
 	s.NotNil(f)
 
-	<-sig
-	s.NoError(f.Value())
+	r, err := f.Await()
+	s.NoError(err)
+	s.NoError(r)
 }
 
 func (s *SyncManagerSuite) TestCompacted() {
-	sig := make(chan struct{})
 	var segmentID atomic.Int64
 	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Run(func(_ context.Context, req *datapb.SaveBinlogPathsRequest) {
-		close(sig)
 		segmentID.Store(req.GetSegmentID())
 	}).Return(nil)
 	bfs := metacache.NewBloomFilterSet()
@@ -203,9 +199,10 @@ func (s *SyncManagerSuite) TestCompacted() {
 	f := manager.SyncData(context.Background(), task)
 	s.NotNil(f)
 
-	<-sig
+	r, err := f.Await()
+	s.NoError(err)
+	s.NoError(r)
 	s.EqualValues(1001, segmentID.Load())
-	s.NoError(f.Value())
 }
 
 func (s *SyncManagerSuite) TestBlock() {
