@@ -840,7 +840,6 @@ func (suite *ServiceSuite) TestLoadSegments_Failed() {
 	status, err = suite.node.LoadSegments(ctx, req)
 	suite.NoError(err)
 	suite.ErrorIs(merr.Error(status), merr.ErrServiceNotReady)
-
 }
 
 func (suite *ServiceSuite) TestLoadSegments_Transfer() {
