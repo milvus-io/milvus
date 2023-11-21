@@ -18,7 +18,6 @@ package proxy
 import (
 	"context"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -211,12 +210,10 @@ func TestQueryTask_all(t *testing.T) {
 	qn.ExpectedCalls = nil
 	qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	qn.EXPECT().Query(mock.Anything, mock.Anything).Return(&internalpb.RetrieveResults{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_NotShardLeader,
-		},
+		Status: merr.Status(merr.ErrChannelNotAvailable),
 	}, nil)
 	err = task.Execute(ctx)
-	assert.True(t, strings.Contains(err.Error(), errInvalidShardLeaders.Error()))
+	assert.ErrorIs(t, err, merr.ErrChannelNotAvailable)
 
 	qn.ExpectedCalls = nil
 	qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()

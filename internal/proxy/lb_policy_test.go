@@ -213,7 +213,7 @@ func (s *LBPolicySuite) TestSelectNode() {
 		shardLeaders:   s.nodes,
 		nq:             1,
 	}, typeutil.NewUniqueSet(s.nodes...))
-	s.ErrorIs(err, merr.ErrServiceUnavailable)
+	s.ErrorIs(err, merr.ErrChannelNotAvailable)
 	s.Equal(int64(-1), targetNode)
 
 	// test get shard leaders failed, retry to select node failed
