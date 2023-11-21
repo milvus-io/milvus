@@ -318,6 +318,12 @@ SegmentGrowingImpl::num_chunk() const {
     return upper_div(size, segcore_config_.get_chunk_rows());
 }
 
+DataType
+SegmentGrowingImpl::GetFieldDataType(milvus::FieldId field_id) const {
+    auto& field_meta = schema_->operator[](field_id);
+    return field_meta.get_data_type();
+}
+
 void
 SegmentGrowingImpl::vector_search(SearchInfo& search_info,
                                   const void* query_data,

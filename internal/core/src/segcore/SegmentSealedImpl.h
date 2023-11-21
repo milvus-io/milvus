@@ -84,6 +84,9 @@ class SegmentSealedImpl : public SegmentSealed {
     bool
     HasRawData(int64_t field_id) const override;
 
+    DataType
+    GetFieldDataType(FieldId fieldId) const override;
+
  public:
     int64_t
     GetMemoryUsageInBytes() const override;

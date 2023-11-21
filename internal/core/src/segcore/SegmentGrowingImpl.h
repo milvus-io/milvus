@@ -222,6 +222,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
                   const BitsetView& bitset,
                   SearchResult& output) const override;
 
+    DataType
+    GetFieldDataType(FieldId fieldId) const override;
+
  public:
     void
     mask_with_delete(BitsetType& bitset,

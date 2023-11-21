@@ -1068,3 +1068,68 @@ func SelectMinPK[T ResultWithID](results []T, cursors []int64, stopForBest bool,
 
 	return sel
 }
+
+func MaybeAppendGroupByValue(dstResData *schemapb.SearchResultData,
+	groupByVal interface{}, srcResData *schemapb.SearchResultData) {
+	if dstResData.GroupByFieldValue == nil {
+		dstResData.GroupByFieldValue = &schemapb.FieldData{
+			Type: srcResData.GetGroupByFieldValue().GetType(),
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{},
+			},
+		}
+	}
+	dstScalarField := dstResData.GroupByFieldValue.GetScalars()
+	srcValType := srcResData.GetGroupByFieldValue().GetType()
+	switch srcValType {
+	case schemapb.DataType_Bool:
+		if dstScalarField.GetBoolData() == nil {
+			dstScalarField.Data = &schemapb.ScalarField_BoolData{
+				BoolData: &schemapb.BoolArray{
+					Data: []bool{},
+				},
+			}
+		}
+		dstScalarField.GetBoolData().Data = append(dstScalarField.GetBoolData().Data, groupByVal.(bool))
+		break
+	case schemapb.DataType_Int8:
+	case schemapb.DataType_Int16:
+	case schemapb.DataType_Int32:
+		if dstScalarField.GetIntData() == nil {
+			dstScalarField.Data = &schemapb.ScalarField_IntData{
+				IntData: &schemapb.IntArray{
+					Data: []int32{},
+				},
+			}
+		}
+		dstScalarField.GetIntData().Data =
+			append(dstScalarField.GetIntData().Data, groupByVal.(int32))
+		break
+	case schemapb.DataType_Int64:
+		if dstScalarField.GetLongData() == nil {
+			dstScalarField.Data = &schemapb.ScalarField_LongData{
+				LongData: &schemapb.LongArray{
+					Data: []int64{},
+				},
+			}
+		}
+		dstScalarField.GetLongData().Data =
+			append(dstScalarField.GetLongData().Data, groupByVal.(int64))
+		break
+	case schemapb.DataType_VarChar:
+		if dstScalarField.GetStringData() == nil {
+			dstScalarField.Data = &schemapb.ScalarField_StringData{
+				StringData: &schemapb.StringArray{
+					Data: []string{},
+				},
+			}
+		}
+		dstScalarField.GetStringData().Data =
+			append(dstScalarField.GetStringData().Data, groupByVal.(string))
+		break
+	default:
+		log.Error("Not supported field type from groupby value field", zap.String("field type",
+			srcValType.String()))
+	}
+
+}

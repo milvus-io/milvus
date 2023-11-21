@@ -305,6 +305,22 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
 
     auto num_queries = dataset->GetRows();
     knowhere::Json search_conf = search_info.search_params_;
+    if(search_info.group_by_field_id_.has_value()) {
+        auto result = std::make_unique<SearchResult>();
+        try {
+            knowhere::expected<std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>>
+                    iterators_val = index_.AnnIterator(*dataset, search_conf, bitset);
+            if (iterators_val.has_value()) {
+                result->iterators = iterators_val.value();
+            }
+        } catch(const std::runtime_error& e) {
+            LOG_SEGCORE_ERROR_ << "Caught error when trying to initialize "
+                                  "ann iterators for group_by:" << e.what()
+                                  << ", group_by will not take effect";
+        }
+        return result;
+        //if the target index doesn't support iterators, directly return empty search result
+    }
     auto topk = search_info.topk_;
     // TODO :: check dim of search data
     auto final = [&] {

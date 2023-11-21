@@ -1225,6 +1225,12 @@ SegmentSealedImpl::HasRawData(int64_t field_id) const {
     return true;
 }
 
+DataType
+SegmentSealedImpl::GetFieldDataType(milvus::FieldId field_id) const {
+    auto& field_meta = schema_->operator[](field_id);
+    return field_meta.get_data_type();
+}
+
 std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
 SegmentSealedImpl::search_ids(const IdArray& id_array,
                               Timestamp timestamp) const {

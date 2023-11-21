@@ -21,12 +21,15 @@
 #include "common/Types.h"
 #include "knowhere/config.h"
 namespace milvus {
+
+
 struct SearchInfo {
     int64_t topk_;
     int64_t round_decimal_;
     FieldId field_id_;
     MetricType metric_type_;
     knowhere::Json search_params_;
+    std::optional<FieldId> group_by_field_id_;
 };
 
 using SearchInfoPtr = std::shared_ptr<SearchInfo>;

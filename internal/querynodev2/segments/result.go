@@ -59,10 +59,13 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 	log.Debug("shard leader get valid search results", zap.Int("numbers", len(searchResultData)))
 
 	for i, sData := range searchResultData {
+		groupByFieldValue := sData.GetGroupByFieldValue().GetScalars().GetLongData()
+		longData := groupByFieldValue.GetData()
 		log.Debug("reduceSearchResultData",
 			zap.Int("result No.", i),
 			zap.Int64("nq", sData.NumQueries),
-			zap.Int64("topk", sData.TopK))
+			zap.Int64("topk", sData.TopK),
+			zap.Int("hhccc==longData.size", len(longData)))
 	}
 
 	reducedResultData, err := ReduceSearchResultData(ctx, searchResultData, nq, topk)
@@ -129,6 +132,7 @@ func ReduceSearchResultData(ctx context.Context, searchResultData []*schemapb.Se
 		offsets := make([]int64, len(searchResultData))
 
 		idSet := make(map[interface{}]struct{})
+		groupByValueSet := make(map[interface{}]struct{})
 		var j int64
 		for j = 0; j < topk; {
 			sel := SelectSearchResultData(searchResultData, resultOffsets, offsets, i)
@@ -138,15 +142,26 @@ func ReduceSearchResultData(ctx context.Context, searchResultData []*schemapb.Se
 			idx := resultOffsets[sel][i] + offsets[sel]
 
 			id := typeutil.GetPK(searchResultData[sel].GetIds(), idx)
+			groupByVal := typeutil.GetData(searchResultData[sel].GetGroupByFieldValue(), int(idx))
 			score := searchResultData[sel].Scores[idx]
 
 			// remove duplicates
 			if _, ok := idSet[id]; !ok {
-				retSize += typeutil.AppendFieldData(ret.FieldsData, searchResultData[sel].FieldsData, idx)
-				typeutil.AppendPKs(ret.Ids, id)
-				ret.Scores = append(ret.Scores, score)
-				idSet[id] = struct{}{}
-				j++
+				groupByValExist := false
+				if groupByVal != nil {
+					_, groupByValExist = groupByValueSet[groupByVal]
+				}
+				if !groupByValExist {
+					retSize += typeutil.AppendFieldData(ret.FieldsData, searchResultData[sel].FieldsData, idx)
+					typeutil.AppendPKs(ret.Ids, id)
+					ret.Scores = append(ret.Scores, score)
+					if groupByVal != nil {
+						groupByValueSet[groupByVal] = struct{}{}
+						typeutil.MaybeAppendGroupByValue(ret, groupByVal, searchResultData[sel])
+					}
+					idSet[id] = struct{}{}
+					j++
+				}
 			} else {
 				// skip entity with same id
 				skipDupCnt++

@@ -197,6 +197,10 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
     search_info.search_params_ =
         nlohmann::json::parse(query_info_proto.search_params());
 
+    if(query_info_proto.group_by_field_id()!=0){
+        auto group_by_field_id = FieldId(query_info_proto.group_by_field_id());
+        search_info.group_by_field_id_ = group_by_field_id;
+    }
     auto plan_node = [&]() -> std::unique_ptr<VectorPlanNode> {
         if (anns_proto.vector_type() ==
             milvus::proto::plan::VectorType::BinaryVector) {
