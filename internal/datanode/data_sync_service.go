@@ -395,7 +395,7 @@ func getServiceWithChannel(initCtx context.Context, node *DataNode, info *datapb
 		return nil, err
 	}
 
-	ttNode, err := newTTNode(config, node.broker)
+	ttNode, err := newTTNode(config, node.broker, node.channelCheckpointUpdater)
 	if err != nil {
 		return nil, err
 	}

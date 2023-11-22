@@ -86,10 +86,11 @@ type DataNode struct {
 	flowgraphManager *flowgraphManager
 	eventManagerMap  *typeutil.ConcurrentMap[string, *channelEventManager]
 
-	clearSignal        chan string // vchannel name
-	segmentCache       *Cache
-	compactionExecutor *compactionExecutor
-	timeTickSender     *timeTickSender
+	clearSignal              chan string // vchannel name
+	segmentCache             *Cache
+	compactionExecutor       *compactionExecutor
+	timeTickSender           *timeTickSender
+	channelCheckpointUpdater *channelCheckpointUpdater
 
 	etcdCli   *clientv3.Client
 	address   string
@@ -257,6 +258,9 @@ func (node *DataNode) Init() error {
 		node.allocator = alloc
 
 		node.factory.Init(Params)
+
+		node.channelCheckpointUpdater = newChannelCheckpointUpdater(node)
+
 		log.Info("init datanode done", zap.String("MsgChannelSubName", Params.CommonCfg.DataNodeSubName.GetValue()),
 			zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", node.address))
 	})
@@ -424,6 +428,10 @@ func (node *DataNode) Stop() error {
 
 		if node.timeTickSender != nil {
 			node.timeTickSender.Stop()
+		}
+
+		if node.channelCheckpointUpdater != nil {
+			node.channelCheckpointUpdater.close()
 		}
 
 		node.stopWaiter.Wait()

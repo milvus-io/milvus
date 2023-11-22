@@ -2527,6 +2527,8 @@ type dataNodeConfig struct {
 
 	// channel
 	ChannelWorkPoolSize ParamItem `refreshable:"true"`
+
+	UpdateChannelCheckpointMaxParallel ParamItem `refreshable:"true"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -2561,7 +2563,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.FlowGraphSkipModeSkipNum = ParamItem{
 		Key:          "datanode.dataSync.skipMode.skipNum",
 		Version:      "2.3.4",
-		DefaultValue: "5",
+		DefaultValue: "4",
 		PanicIfEmpty: false,
 		Doc:          "Consume one for every n records skipped",
 		Export:       true,
@@ -2735,6 +2737,14 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		DefaultValue: "-1",
 	}
 	p.ChannelWorkPoolSize.Init(base.mgr)
+
+	p.UpdateChannelCheckpointMaxParallel = ParamItem{
+		Key:          "datanode.channel.updateChannelCheckpointMaxParallel",
+		Version:      "2.3.4",
+		PanicIfEmpty: false,
+		DefaultValue: "1000",
+	}
+	p.UpdateChannelCheckpointMaxParallel.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
