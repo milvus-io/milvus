@@ -619,6 +619,7 @@ func (s *Server) GetStateCode() commonpb.StateCode {
 // GetComponentStates returns DataCoord's current state
 func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	code := s.GetStateCode()
+	log.Debug("DataCoord current state", zap.String("StateCode", code.String()))
 	nodeID := common.NotRegisteredID
 	if s.session != nil && s.session.Registered() {
 		nodeID = s.session.GetServerID() // or Params.NodeID
