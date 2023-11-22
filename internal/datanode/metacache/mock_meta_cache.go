@@ -417,6 +417,63 @@ func (_c *MockMetaCache_PredictSegments_Call) RunAndReturn(run func(storage.Prim
 	return _c
 }
 
+// RemoveSegments provides a mock function with given fields: filters
+func (_m *MockMetaCache) RemoveSegments(filters ...SegmentFilter) []int64 {
+	_va := make([]interface{}, len(filters))
+	for _i := range filters {
+		_va[_i] = filters[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 []int64
+	if rf, ok := ret.Get(0).(func(...SegmentFilter) []int64); ok {
+		r0 = rf(filters...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]int64)
+		}
+	}
+
+	return r0
+}
+
+// MockMetaCache_RemoveSegments_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveSegments'
+type MockMetaCache_RemoveSegments_Call struct {
+	*mock.Call
+}
+
+// RemoveSegments is a helper method to define mock.On call
+//   - filters ...SegmentFilter
+func (_e *MockMetaCache_Expecter) RemoveSegments(filters ...interface{}) *MockMetaCache_RemoveSegments_Call {
+	return &MockMetaCache_RemoveSegments_Call{Call: _e.mock.On("RemoveSegments",
+		append([]interface{}{}, filters...)...)}
+}
+
+func (_c *MockMetaCache_RemoveSegments_Call) Run(run func(filters ...SegmentFilter)) *MockMetaCache_RemoveSegments_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]SegmentFilter, len(args)-0)
+		for i, a := range args[0:] {
+			if a != nil {
+				variadicArgs[i] = a.(SegmentFilter)
+			}
+		}
+		run(variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMetaCache_RemoveSegments_Call) Return(_a0 []int64) *MockMetaCache_RemoveSegments_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockMetaCache_RemoveSegments_Call) RunAndReturn(run func(...SegmentFilter) []int64) *MockMetaCache_RemoveSegments_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Schema provides a mock function with given fields:
 func (_m *MockMetaCache) Schema() *schemapb.CollectionSchema {
 	ret := _m.Called()

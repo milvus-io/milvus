@@ -71,5 +71,7 @@ func (wb *bfWriteBuffer) BufferData(insertMsgs []*msgstream.InsertMsg, deleteMsg
 	wb.checkpoint = endPos
 
 	_ = wb.triggerSync()
+
+	wb.cleanupCompactedSegments()
 	return nil
 }

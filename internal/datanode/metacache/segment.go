@@ -37,6 +37,7 @@ type SegmentInfo struct {
 	compactTo        int64
 	importing        bool
 	level            datapb.SegmentLevel
+	syncingTasks     int32
 }
 
 func (s *SegmentInfo) SegmentID() int64 {
@@ -101,6 +102,7 @@ func (s *SegmentInfo) Clone() *SegmentInfo {
 		compactTo:        s.compactTo,
 		level:            s.level,
 		importing:        s.importing,
+		syncingTasks:     s.syncingTasks,
 	}
 }
 

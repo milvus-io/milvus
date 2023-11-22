@@ -156,6 +156,19 @@ func (s *MetaCacheSuite) TestUpdateSegments() {
 	s.Equal(commonpb.SegmentState_Flushed, segment.State())
 }
 
+func (s *MetaCacheSuite) TestRemoveSegments() {
+	ids := s.cache.RemoveSegments()
+	s.Empty(ids, "remove without filter shall not succeed")
+
+	ids = s.cache.RemoveSegments(WithSegmentIDs(s.flushedSegments...))
+	s.ElementsMatch(s.flushedSegments, ids)
+
+	for _, segID := range s.flushedSegments {
+		_, ok := s.cache.GetSegmentByID(segID)
+		s.False(ok)
+	}
+}
+
 func (s *MetaCacheSuite) TestPredictSegments() {
 	pk := storage.NewInt64PrimaryKey(100)
 	predict, ok := s.cache.PredictSegments(pk)
