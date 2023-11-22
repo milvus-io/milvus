@@ -706,12 +706,11 @@ func WrapErrIoKeyNotFound(key string, msg ...string) error {
 	return err
 }
 
-func WrapErrIoFailed(key string, msg ...string) error {
-	err := wrapFieldsWithDesc(ErrIoFailed, err.Error(), value("key", key))
-	if len(msg) > 0 {
-		err = errors.Wrap(err, strings.Join(msg, "; "))
+func WrapErrIoFailed(key string, err error) error {
+	if err == nil {
+		return nil
 	}
-	return err
+	return wrapFieldsWithDesc(ErrIoFailed, err.Error(), value("key", key))
 }
 
 func WrapErrIoFailedReason(reason string, msg ...string) error {
