@@ -50,7 +50,7 @@ func (suite *SegmentSuite) SetupTest() {
 	suite.manager = NewManager()
 	schema := GenTestCollectionSchema("test-reduce", schemapb.DataType_Int64)
 	indexMeta := GenTestIndexMeta(suite.collectionID, schema)
-	suite.manager.Collection.PutOrRef(suite.collectionID,
+	suite.manager.Collection.Put(suite.collectionID,
 		schema,
 		indexMeta,
 		&querypb.LoadMetaInfo{
@@ -116,7 +116,6 @@ func (suite *SegmentSuite) TearDownTest() {
 	ctx := context.Background()
 	suite.sealed.Release()
 	suite.growing.Release()
-	DeleteCollection(suite.collection)
 	suite.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
 }
 

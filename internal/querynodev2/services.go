@@ -252,7 +252,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		return merr.Success(), nil
 	}
 
-	node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
+	node.manager.Collection.Put(req.GetCollectionID(), req.GetSchema(),
 		node.composeIndexMeta(req.GetIndexInfoList(), req.Schema), req.GetLoadMeta())
 	collection := node.manager.Collection.Get(req.GetCollectionID())
 	collection.SetMetricType(req.GetLoadMeta().GetMetricType())
@@ -389,10 +389,9 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 		node.pipelineManager.Remove(req.GetChannelName())
 		node.manager.Segment.RemoveBy(segments.WithChannel(req.GetChannelName()), segments.WithType(segments.SegmentTypeGrowing))
 		node.tSafeManager.Remove(ctx, req.GetChannelName())
-
-		node.manager.Collection.Unref(req.GetCollectionID(), 1)
 	}
 	log.Info("unsubscribed channel")
+	node.tryReleaseCollection(req.GetCollectionID())
 
 	return merr.Success(), nil
 }
@@ -466,9 +465,8 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		return merr.Success(), nil
 	}
 
-	node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
+	node.manager.Collection.Put(req.GetCollectionID(), req.GetSchema(),
 		node.composeIndexMeta(req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())
-	defer node.manager.Collection.Unref(req.GetCollectionID(), 1)
 
 	if req.GetLoadScope() == querypb.LoadScope_Delta {
 		return node.loadDeltaLogs(ctx, req), nil
@@ -488,8 +486,6 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 	if err != nil {
 		return merr.Status(err), nil
 	}
-
-	node.manager.Collection.Ref(req.GetCollectionID(), uint32(len(loaded)))
 
 	log.Info("load segments done...",
 		zap.Int64s("segments", lo.Map(loaded, func(s segments.Segment, _ int) int64 { return s.ID() })))
@@ -593,12 +589,10 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, req *querypb.Release
 	}
 
 	log.Info("start to release segments")
-	sealedCount := 0
 	for _, id := range req.GetSegmentIDs() {
-		_, count := node.manager.Segment.Remove(id, req.GetScope())
-		sealedCount += count
+		node.manager.Segment.Remove(id, req.GetScope())
 	}
-	node.manager.Collection.Unref(req.GetCollectionID(), uint32(sealedCount))
+	node.tryReleaseCollection(req.GetCollectionID())
 
 	return merr.Success(), nil
 }

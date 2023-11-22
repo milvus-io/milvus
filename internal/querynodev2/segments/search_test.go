@@ -63,7 +63,7 @@ func (suite *SearchSuite) SetupTest() {
 	suite.manager = NewManager()
 	schema := GenTestCollectionSchema("test-reduce", schemapb.DataType_Int64)
 	indexMeta := GenTestIndexMeta(suite.collectionID, schema)
-	suite.manager.Collection.PutOrRef(suite.collectionID,
+	suite.manager.Collection.Put(suite.collectionID,
 		schema,
 		indexMeta,
 		&querypb.LoadMetaInfo{
@@ -126,7 +126,6 @@ func (suite *SearchSuite) SetupTest() {
 
 func (suite *SearchSuite) TearDownTest() {
 	suite.sealed.Release()
-	DeleteCollection(suite.collection)
 	ctx := context.Background()
 	suite.chunkManager.RemoveWithPrefix(ctx, paramtable.Get().MinioCfg.RootPath.GetValue())
 }

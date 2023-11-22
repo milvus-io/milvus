@@ -457,6 +457,29 @@ func (node *QueryNode) getChannelStatistics(ctx context.Context, req *querypb.Ge
 	return resp, nil
 }
 
+func (node *QueryNode) tryReleaseCollection(collectionID int64) {
+	collection := node.manager.Collection.Get(collectionID)
+	if collection == nil {
+		return
+	}
+
+	delegatorFound := false
+	node.delegators.Range(func(shard string, delegator delegator.ShardDelegator) bool {
+		delegatorFound = delegator.Collection() == collectionID
+		return !delegatorFound
+	})
+	if delegatorFound {
+		return
+	}
+
+	segmentFound := len(node.manager.Segment.GetBy(segments.WithCollection(collectionID))) > 0
+	if segmentFound {
+		return
+	}
+
+	node.manager.Collection.Remove(collectionID)
+}
+
 func segmentStatsResponse(segStats []segments.SegmentStats) *internalpb.GetStatisticsResponse {
 	var totalRowNum int64
 	for _, stats := range segStats {

@@ -83,7 +83,7 @@ func (suite *SegmentLoaderSuite) SetupTest() {
 		CollectionID: suite.collectionID,
 		PartitionIDs: []int64{suite.partitionID},
 	}
-	suite.manager.Collection.PutOrRef(suite.collectionID, suite.schema, indexMeta, loadMeta)
+	suite.manager.Collection.Put(suite.collectionID, suite.schema, indexMeta, loadMeta)
 }
 
 func (suite *SegmentLoaderSuite) TearDownTest() {

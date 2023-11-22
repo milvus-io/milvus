@@ -173,15 +173,20 @@ func NewSegment(collection *Collection,
 		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type);
 	*/
 	if level == datapb.SegmentLevel_L0 {
-		return NewL0Segment(collection, segmentID, partitionID, collectionID, shard, segmentType, version, startPosition, deltaPosition)
+		return NewL0Segment(segmentID, partitionID, collectionID, shard, segmentType, version, startPosition, deltaPosition)
+	}
+
+	collectionPtr, ok := collection.Ptr()
+	if !ok {
+		defer DeleteCollection(collectionPtr)
 	}
 
 	var segmentPtr C.CSegmentInterface
 	switch segmentType {
 	case SegmentTypeSealed:
-		segmentPtr = C.NewSegment(collection.collectionPtr, C.Sealed, C.int64_t(segmentID))
+		segmentPtr = C.NewSegment(collectionPtr, C.Sealed, C.int64_t(segmentID))
 	case SegmentTypeGrowing:
-		segmentPtr = C.NewSegment(collection.collectionPtr, C.Growing, C.int64_t(segmentID))
+		segmentPtr = C.NewSegment(collectionPtr, C.Growing, C.int64_t(segmentID))
 	default:
 		return nil, fmt.Errorf("illegal segment type %d when create segment %d", segmentType, segmentID)
 	}

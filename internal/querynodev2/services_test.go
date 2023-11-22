@@ -587,7 +587,7 @@ func (suite *ServiceSuite) TestLoadSegments_VarChar() {
 		PartitionIDs: suite.partitionIDs,
 	}
 	suite.node.manager.Collection = segments.NewCollectionManager()
-	suite.node.manager.Collection.PutOrRef(suite.collectionID, schema, nil, loadMeta)
+	suite.node.manager.Collection.Put(suite.collectionID, schema, nil, loadMeta)
 
 	infos := suite.genSegmentLoadInfos(schema)
 	for _, info := range infos {
@@ -1212,7 +1212,7 @@ func (suite *ServiceSuite) TestSearch_Failed() {
 		PartitionIDs: suite.partitionIDs,
 		MetricType:   "L2",
 	}
-	suite.node.manager.Collection.PutOrRef(suite.collectionID, schema, nil, LoadMeta)
+	suite.node.manager.Collection.Put(suite.collectionID, schema, nil, LoadMeta)
 	req.GetReq().MetricType = "IP"
 	resp, err = suite.node.Search(ctx, req)
 	suite.NoError(err)

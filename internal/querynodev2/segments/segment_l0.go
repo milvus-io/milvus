@@ -40,7 +40,7 @@ type L0Segment struct {
 	tss       []uint64
 }
 
-func NewL0Segment(collection *Collection,
+func NewL0Segment(
 	segmentID int64,
 	partitionID int64,
 	collectionID int64,

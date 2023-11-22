@@ -46,10 +46,6 @@ func (suite *PlanSuite) SetupTest() {
 	suite.collection.AddPartition(suite.partitionID)
 }
 
-func (suite *PlanSuite) TearDownTest() {
-	DeleteCollection(suite.collection)
-}
-
 func (suite *PlanSuite) TestPlanCreateByExpr() {
 	planNode := &planpb.PlanNode{
 		OutputFieldIds: []int64{rowIDFieldID},

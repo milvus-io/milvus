@@ -49,6 +49,12 @@ func WithSkipEmpty() SegmentFilter {
 	}
 }
 
+func WithCollection(collectionID int64) SegmentFilter {
+	return func(segment Segment) bool {
+		return segment.Collection() == collectionID
+	}
+}
+
 func WithPartition(partitionID UniqueID) SegmentFilter {
 	return func(segment Segment) bool {
 		return segment.Partition() == partitionID

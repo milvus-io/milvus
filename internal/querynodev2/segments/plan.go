@@ -32,7 +32,6 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -42,11 +41,12 @@ type SearchPlan struct {
 }
 
 func createSearchPlanByExpr(col *Collection, expr []byte, metricType string) (*SearchPlan, error) {
-	if col.collectionPtr == nil {
-		return nil, errors.New("nil collection ptr, collectionID = " + fmt.Sprintln(col.id))
+	collectionPtr, ok := col.Ptr()
+	if !ok {
+		defer DeleteCollection(collectionPtr)
 	}
 	var cPlan C.CSearchPlan
-	status := C.CreateSearchPlanByExpr(col.collectionPtr, unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan)
+	status := C.CreateSearchPlanByExpr(collectionPtr, unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan)
 
 	err1 := HandleCStatus(&status, "Create Plan by expr failed")
 	if err1 != nil {
@@ -174,15 +174,13 @@ type RetrievePlan struct {
 }
 
 func NewRetrievePlan(col *Collection, expr []byte, timestamp Timestamp, msgID UniqueID) (*RetrievePlan, error) {
-	col.mu.RLock()
-	defer col.mu.RUnlock()
-
-	if col.collectionPtr == nil {
-		return nil, merr.WrapErrCollectionNotFound(col.id, "collection released")
+	collectionPtr, ok := col.Ptr()
+	if !ok {
+		defer DeleteCollection(collectionPtr)
 	}
 
 	var cPlan C.CRetrievePlan
-	status := C.CreateRetrievePlanByExpr(col.collectionPtr, unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan)
+	status := C.CreateRetrievePlanByExpr(collectionPtr, unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan)
 
 	err := HandleCStatus(&status, "Create retrieve plan by expr failed")
 	if err != nil {

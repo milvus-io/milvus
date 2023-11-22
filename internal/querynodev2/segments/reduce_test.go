@@ -102,7 +102,6 @@ func (suite *ReduceSuite) SetupTest() {
 
 func (suite *ReduceSuite) TearDownTest() {
 	suite.segment.Release()
-	DeleteCollection(suite.collection)
 	ctx := context.Background()
 	suite.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
 }
