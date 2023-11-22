@@ -297,8 +297,6 @@ func (node *QueryNode) Init() error {
 			return
 		}
 
-		log.Info("queryNode try to connect etcd success", zap.String("MetaRootPath", paramtable.Get().EtcdCfg.MetaRootPath.GetValue()))
-
 		schedulePolicy := paramtable.Get().QueryNodeCfg.SchedulePolicyName.GetValue()
 		node.scheduler = tasks.NewScheduler(
 			schedulePolicy,
