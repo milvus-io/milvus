@@ -52,6 +52,9 @@ func (w *LocalWorker) LoadSegments(ctx context.Context, req *querypb.LoadSegment
 		})),
 		zap.String("loadScope", req.GetLoadScope().String()),
 	)
+	w.node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
+		w.node.composeIndexMeta(req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())
+	defer w.node.manager.Collection.Unref(req.GetCollectionID(), 1)
 	log.Info("start to load segments...")
 	loaded, err := w.node.loader.Load(ctx,
 		req.GetCollectionID(),
@@ -77,9 +80,13 @@ func (w *LocalWorker) ReleaseSegments(ctx context.Context, req *querypb.ReleaseS
 		zap.String("scope", req.GetScope().String()),
 	)
 	log.Info("start to release segments")
+	sealedCount := 0
 	for _, id := range req.GetSegmentIDs() {
-		w.node.manager.Segment.Remove(id, req.GetScope())
+		_, count := w.node.manager.Segment.Remove(id, req.GetScope())
+		sealedCount += count
 	}
+	w.node.manager.Collection.Unref(req.GetCollectionID(), uint32(sealedCount))
+
 	return nil
 }
 
