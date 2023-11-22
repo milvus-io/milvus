@@ -214,6 +214,28 @@ func (s *SyncTaskSuite) TestRunNormal() {
 		err := task.Run()
 		s.NoError(err)
 	})
+
+	s.Run("with_zero_numrow_insertdata", func() {
+		task := s.getSuiteSyncTask()
+		task.WithInsertData(s.getEmptyInsertBuffer())
+		task.WithFlush()
+		task.WithDrop()
+		task.WithMetaWriter(BrokerMetaWriter(s.broker))
+		task.WithCheckpoint(&msgpb.MsgPosition{
+			ChannelName: s.channelName,
+			MsgID:       []byte{1, 2, 3, 4},
+			Timestamp:   100,
+		})
+
+		err := task.Run()
+		s.Error(err)
+
+		err = task.serializePkStatsLog()
+		s.NoError(err)
+		stats, rowNum := task.convertInsertData2PkStats(100, schemapb.DataType_Int64)
+		s.Nil(stats)
+		s.Zero(rowNum)
+	})
 }
 
 func (s *SyncTaskSuite) TestRunError() {

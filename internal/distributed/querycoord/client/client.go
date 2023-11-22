@@ -77,6 +77,11 @@ func (c *Client) getQueryCoordAddr() (string, error) {
 		log.Debug("QueryCoordClient msess key not existed", zap.Any("key", key))
 		return "", fmt.Errorf("find no available querycoord, check querycoord state")
 	}
+
+	log.Debug("QueryCoordClient GetSessions success",
+		zap.String("address", ms.Address),
+		zap.Int64("serverID", ms.ServerID),
+	)
 	c.grpcClient.SetNodeID(ms.ServerID)
 	return ms.Address, nil
 }

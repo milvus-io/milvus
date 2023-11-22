@@ -69,6 +69,7 @@ func (node *Proxy) GetComponentStates(ctx context.Context, req *milvuspb.GetComp
 		Status: merr.Success(),
 	}
 	code := node.GetStateCode()
+	log.Debug("Proxy current state", zap.String("StateCode", code.String()))
 	nodeID := common.NotRegisteredID
 	if node.session != nil && node.session.Registered() {
 		nodeID = node.session.ServerID
@@ -3954,7 +3955,9 @@ func (node *Proxy) ListImportTasks(ctx context.Context, req *milvuspb.ListImport
 
 	log.Debug("successfully received list import tasks response",
 		zap.String("collection", req.CollectionName),
-		zap.Any("tasks", resp.Tasks))
+		zap.Any("tasks", lo.SliceToMap(resp.GetTasks(), func(state *milvuspb.GetImportStateResponse) (int64, commonpb.ImportState) {
+			return state.GetId(), state.GetState()
+		})))
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.SuccessLabel).Inc()
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return resp, err

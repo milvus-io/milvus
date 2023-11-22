@@ -58,7 +58,7 @@ func (b *BufferBase) IsFull() bool {
 }
 
 func (b *BufferBase) IsEmpty() bool {
-	return b.rows == 0
+	return b.rows == 0 && b.size == 0
 }
 
 func (b *BufferBase) MinTimestamp() typeutil.Timestamp {
@@ -76,28 +76,25 @@ type InsertBuffer struct {
 }
 
 func NewInsertBuffer(sch *schemapb.CollectionSchema) (*InsertBuffer, error) {
-	size, err := typeutil.EstimateSizePerRecord(sch)
+	estSize, err := typeutil.EstimateSizePerRecord(sch)
 	if err != nil {
 		log.Warn("failed to estimate size per record", zap.Error(err))
 		return nil, err
 	}
 
-	if size == 0 {
+	if estSize == 0 {
 		return nil, errors.New("Invalid schema")
 	}
 	buffer, err := storage.NewInsertData(sch)
 	if err != nil {
 		return nil, err
 	}
-	limit := paramtable.Get().DataNodeCfg.FlushInsertBufferSize.GetAsInt64() / int64(size)
-	if paramtable.Get().DataNodeCfg.FlushInsertBufferSize.GetAsInt64()%int64(size) != 0 {
-		limit++
-	}
+	sizeLimit := paramtable.Get().DataNodeCfg.FlushInsertBufferSize.GetAsInt64()
 
 	return &InsertBuffer{
 		BufferBase: BufferBase{
-			rowLimit:      limit,
-			sizeLimit:     noLimit,
+			rowLimit:      noLimit,
+			sizeLimit:     sizeLimit,
 			TimestampFrom: math.MaxUint64,
 			TimestampTo:   0,
 		},
@@ -141,7 +138,7 @@ func (ib *InsertBuffer) Buffer(msgs []*msgstream.InsertMsg, startPos, endPos *ms
 		}
 
 		// update buffer size
-		ib.UpdateStatistics(int64(tmpBuffer.GetRowNum()), 0, ib.getTimestampRange(tsData), startPos, endPos)
+		ib.UpdateStatistics(int64(tmpBuffer.GetRowNum()), int64(tmpBuffer.GetMemorySize()), ib.getTimestampRange(tsData), startPos, endPos)
 	}
 	return pkData, nil
 }

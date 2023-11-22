@@ -3,6 +3,7 @@ package segments
 import (
 	"testing"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -22,17 +23,19 @@ type ManagerSuite struct {
 	channels      []string
 	types         []SegmentType
 	segments      []Segment
+	levels        []datapb.SegmentLevel
 
 	mgr *segmentManager
 }
 
 func (s *ManagerSuite) SetupSuite() {
 	paramtable.Init()
-	s.segmentIDs = []int64{1, 2, 3}
-	s.collectionIDs = []int64{100, 200, 300}
-	s.partitionIDs = []int64{10, 11, 12}
-	s.channels = []string{"dml1", "dml2", "dml3"}
-	s.types = []SegmentType{SegmentTypeSealed, SegmentTypeGrowing, SegmentTypeSealed}
+	s.segmentIDs = []int64{1, 2, 3, 4}
+	s.collectionIDs = []int64{100, 200, 300, 400}
+	s.partitionIDs = []int64{10, 11, 12, 13}
+	s.channels = []string{"dml1", "dml2", "dml3", "dml4"}
+	s.types = []SegmentType{SegmentTypeSealed, SegmentTypeGrowing, SegmentTypeSealed, SegmentTypeSealed}
+	s.levels = []datapb.SegmentLevel{datapb.SegmentLevel_Legacy, datapb.SegmentLevel_Legacy, datapb.SegmentLevel_L1, datapb.SegmentLevel_L0}
 }
 
 func (s *ManagerSuite) SetupTest() {
@@ -50,7 +53,7 @@ func (s *ManagerSuite) SetupTest() {
 			0,
 			nil,
 			nil,
-			datapb.SegmentLevel_Legacy,
+			s.levels[i],
 		)
 		s.Require().NoError(err)
 		s.segments = append(s.segments, segment)
@@ -62,17 +65,18 @@ func (s *ManagerSuite) SetupTest() {
 func (s *ManagerSuite) TestGetBy() {
 	for i, partitionID := range s.partitionIDs {
 		segments := s.mgr.GetBy(WithPartition(partitionID))
-		s.Contains(segments, s.segments[i])
+		s.Contains(
+			lo.Map(segments, func(segment Segment, _ int) int64 { return segment.ID() }), s.segmentIDs[i])
 	}
 
 	for i, channel := range s.channels {
 		segments := s.mgr.GetBy(WithChannel(channel))
-		s.Contains(segments, s.segments[i])
+		s.Contains(lo.Map(segments, func(segment Segment, _ int) int64 { return segment.ID() }), s.segmentIDs[i])
 	}
 
 	for i, typ := range s.types {
 		segments := s.mgr.GetBy(WithType(typ))
-		s.Contains(segments, s.segments[i])
+		s.Contains(lo.Map(segments, func(segment Segment, _ int) int64 { return segment.ID() }), s.segmentIDs[i])
 	}
 	s.mgr.Clear()
 
@@ -80,6 +84,13 @@ func (s *ManagerSuite) TestGetBy() {
 		segments := s.mgr.GetBy(WithType(typ))
 		s.Len(segments, 0)
 	}
+}
+
+func (s *ManagerSuite) TestGetAndPin() {
+	// get and pin will ignore L0 segment
+	segments, err := s.mgr.GetAndPin(lo.Filter(s.segmentIDs, func(_ int64, id int) bool { return s.levels[id] == datapb.SegmentLevel_L0 }))
+	s.NoError(err)
+	s.Equal(len(segments), 0)
 }
 
 func (s *ManagerSuite) TestRemoveGrowing() {
@@ -117,8 +128,8 @@ func (s *ManagerSuite) TestRemoveBy() {
 func (s *ManagerSuite) TestUpdateBy() {
 	action := IncreaseVersion(1)
 
-	s.Equal(2, s.mgr.UpdateBy(action, WithType(SegmentTypeSealed)))
-	s.Equal(1, s.mgr.UpdateBy(action, WithType(SegmentTypeGrowing)))
+	s.Equal(lo.Count(s.types, SegmentTypeSealed), s.mgr.UpdateBy(action, WithType(SegmentTypeSealed)))
+	s.Equal(lo.Count(s.types, SegmentTypeGrowing), s.mgr.UpdateBy(action, WithType(SegmentTypeGrowing)))
 
 	segments := s.mgr.GetBy()
 	for _, segment := range segments {

@@ -34,9 +34,11 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator/deletebuffer"
+	"github.com/milvus-io/milvus/internal/querynodev2/optimizers"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -92,11 +94,13 @@ type shardDelegator struct {
 
 	lifetime lifetime.Lifetime[lifetime.State]
 
-	distribution   *distribution
-	segmentManager segments.SegmentManager
-	tsafeManager   tsafe.Manager
-	pkOracle       pkoracle.PkOracle
-	// L0 delete buffer
+	distribution    *distribution
+	segmentManager  segments.SegmentManager
+	tsafeManager    tsafe.Manager
+	pkOracle        pkoracle.PkOracle
+	level0Mut       sync.RWMutex
+	level0Deletions map[int64]*storage.DeleteData // partitionID -> deletions
+	// stream delete buffer
 	deleteMut    sync.Mutex
 	deleteBuffer deletebuffer.DeleteBuffer[*deletebuffer.Item]
 	// dispatcherClient msgdispatcher.Client
@@ -106,6 +110,8 @@ type shardDelegator struct {
 	loader      segments.Loader
 	tsCond      *sync.Cond
 	latestTsafe *atomic.Uint64
+	// queryHook
+	queryHook optimizers.QueryHook
 }
 
 // getLogger returns the zap logger with pre-defined shard attributes.
@@ -226,6 +232,13 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		zap.Int("sealedNum", sealedNum),
 		zap.Int("growingNum", len(growing)),
 	)
+
+	req, err = optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, sealedNum)
+	if err != nil {
+		log.Warn("failed to optimize search params", zap.Error(err))
+		return nil, err
+	}
+
 	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, sd.modifySearchRequest)
 	if err != nil {
 		log.Warn("Search organizeSubTask failed", zap.Error(err))
@@ -636,7 +649,7 @@ func (sd *shardDelegator) Close() {
 // NewShardDelegator creates a new ShardDelegator instance with all fields initialized.
 func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID UniqueID, channel string, version int64,
 	workerManager cluster.Manager, manager *segments.Manager, tsafeManager tsafe.Manager, loader segments.Loader,
-	factory msgstream.Factory, startTs uint64,
+	factory msgstream.Factory, startTs uint64, queryHook optimizers.QueryHook,
 ) (ShardDelegator, error) {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID),
 		zap.Int64("replicaID", replicaID),
@@ -654,21 +667,23 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	log.Info("Init delta cache", zap.Int64("maxSegmentCacheBuffer", maxSegmentDeleteBuffer), zap.Time("startTime", tsoutil.PhysicalTime(startTs)))
 
 	sd := &shardDelegator{
-		collectionID:   collectionID,
-		replicaID:      replicaID,
-		vchannelName:   channel,
-		version:        version,
-		collection:     collection,
-		segmentManager: manager.Segment,
-		workerManager:  workerManager,
-		lifetime:       lifetime.NewLifetime(lifetime.Initializing),
-		distribution:   NewDistribution(),
-		deleteBuffer:   deletebuffer.NewDoubleCacheDeleteBuffer[*deletebuffer.Item](startTs, maxSegmentDeleteBuffer),
-		pkOracle:       pkoracle.NewPkOracle(),
-		tsafeManager:   tsafeManager,
-		latestTsafe:    atomic.NewUint64(startTs),
-		loader:         loader,
-		factory:        factory,
+		collectionID:    collectionID,
+		replicaID:       replicaID,
+		vchannelName:    channel,
+		version:         version,
+		collection:      collection,
+		segmentManager:  manager.Segment,
+		workerManager:   workerManager,
+		lifetime:        lifetime.NewLifetime(lifetime.Initializing),
+		distribution:    NewDistribution(),
+		level0Deletions: make(map[int64]*storage.DeleteData),
+		deleteBuffer:    deletebuffer.NewDoubleCacheDeleteBuffer[*deletebuffer.Item](startTs, maxSegmentDeleteBuffer),
+		pkOracle:        pkoracle.NewPkOracle(),
+		tsafeManager:    tsafeManager,
+		latestTsafe:     atomic.NewUint64(startTs),
+		loader:          loader,
+		factory:         factory,
+		queryHook:       queryHook,
 	}
 	m := sync.Mutex{}
 	sd.tsCond = sync.NewCond(&m)
