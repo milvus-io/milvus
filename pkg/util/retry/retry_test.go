@@ -127,8 +127,9 @@ func TestContextDeadline(t *testing.T) {
 func TestContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
+	mockErr := errors.New("mock error")
 	testFn := func() error {
-		return fmt.Errorf("some error")
+		return mockErr
 	}
 
 	go func() {
@@ -138,7 +139,7 @@ func TestContextCancel(t *testing.T) {
 
 	err := Do(ctx, testFn)
 	assert.Error(t, err)
-	assert.True(t, merr.IsCanceledOrTimeout(err))
+	assert.ErrorIs(t, err, mockErr)
 	t.Log(err)
 }
 

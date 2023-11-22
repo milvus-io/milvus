@@ -1718,9 +1718,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 	qn.ExpectedCalls = nil
 	qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	qn.EXPECT().Search(mock.Anything, mock.Anything).Return(&internalpb.SearchResults{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_NotShardLeader,
-		},
+		Status: merr.Status(merr.ErrChannelNotAvailable),
 	}, nil)
 	err = task.Execute(ctx)
 	assert.ErrorIs(t, err, merr.ErrChannelNotAvailable)
