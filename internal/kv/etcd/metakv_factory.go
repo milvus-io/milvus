@@ -17,6 +17,8 @@
 package etcdkv
 
 import (
+	"time"
+
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/zap"
 
@@ -45,7 +47,7 @@ func NewWatchKVFactory(rootPath string, etcdCfg *paramtable.EtcdConfig) (kv.Watc
 			cfg = embed.NewConfig()
 		}
 		cfg.Dir = etcdCfg.DataDir.GetValue()
-		watchKv, err := NewEmbededEtcdKV(cfg, rootPath)
+		watchKv, err := NewEmbededEtcdKV(cfg, rootPath, WithRequestTimeout(etcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 		if err != nil {
 			return nil, err
 		}
@@ -62,7 +64,8 @@ func NewWatchKVFactory(rootPath string, etcdCfg *paramtable.EtcdConfig) (kv.Watc
 	if err != nil {
 		return nil, err
 	}
-	watchKv := NewEtcdKV(client, rootPath)
+	watchKv := NewEtcdKV(client, rootPath,
+		WithRequestTimeout(etcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 	return watchKv, err
 }
 
