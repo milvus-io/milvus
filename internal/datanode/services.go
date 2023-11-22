@@ -115,14 +115,12 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 
 	segmentIDs := req.GetSegmentIDs()
 	log = log.With(
+		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.String("channelName", req.GetChannelName()),
 		zap.Int64s("segmentIDs", segmentIDs),
 	)
 
-	log.Info("receiving FlushSegments request",
-		zap.Int64("collectionID", req.GetCollectionID()),
-		zap.Int64s("sealedSegments", req.GetSegmentIDs()),
-	)
+	log.Info("receiving FlushSegments request")
 
 	err := node.writeBufferManager.FlushSegments(ctx, req.GetChannelName(), segmentIDs)
 	if err != nil {
@@ -131,9 +129,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 	}
 
 	// Log success flushed segments.
-	log.Info("sending segments to WriteBuffer Manager",
-		zap.Int64("collectionID", req.GetCollectionID()),
-		zap.Int64s("sealedSegments", req.GetSegmentIDs()))
+	log.Info("sending segments to WriteBuffer Manager")
 
 	metrics.DataNodeFlushReqCounter.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()),
