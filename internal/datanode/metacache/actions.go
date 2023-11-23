@@ -66,7 +66,7 @@ func WithLevel(level datapb.SegmentLevel) SegmentFilter {
 
 func WithCompacted() SegmentFilter {
 	return func(info *SegmentInfo) bool {
-		return info.compactTo > 0
+		return info.compactTo != 0
 	}
 }
 
