@@ -1525,7 +1525,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.CheckHealthRPCTimeout = ParamItem{
 		Key:          "queryCoord.checkHealthRPCTimeout",
 		Version:      "2.2.7",
-		DefaultValue: "100",
+		DefaultValue: "2000",
 		PanicIfEmpty: true,
 		Doc:          "100ms, the timeout of check health rpc to query node",
 		Export:       true,
