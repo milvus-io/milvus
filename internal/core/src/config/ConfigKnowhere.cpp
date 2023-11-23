@@ -45,6 +45,7 @@ KnowhereInitImpl(const char* conf_file) {
             gflags::SetCommandLineOption("flagfile", conf_file);
         }
 #endif
+        setbuf(stdout, NULL);
     };
 
     std::call_once(init_knowhere_once_, init);
