@@ -954,6 +954,7 @@ func (p *MinioConfig) Init(base *BaseTable) {
 		DefaultValue: "9000",
 		Version:      "2.0.0",
 		Doc:          "Port of MinIO/S3",
+		PanicIfEmpty: true,
 		Export:       true,
 	}
 	p.Port.Init(base.mgr)
