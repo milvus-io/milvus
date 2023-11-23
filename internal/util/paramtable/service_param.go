@@ -82,6 +82,7 @@ type EtcdConfig struct {
 	EtcdTLSKey        string
 	EtcdTLSCACert     string
 	EtcdTLSMinVersion string
+	RequestTimeout    time.Duration
 
 	// --- Embed ETCD ---
 	UseEmbedEtcd bool
@@ -111,6 +112,7 @@ func (p *EtcdConfig) LoadCfgToMemory() {
 	p.initEtcdTLSKey()
 	p.initEtcdTLSCACert()
 	p.initEtcdTLSMinVersion()
+	p.initEtcdRequestTimeout()
 }
 
 func (p *EtcdConfig) initUseEmbedEtcd() {
@@ -188,6 +190,15 @@ func (p *EtcdConfig) initEtcdTLSCACert() {
 
 func (p *EtcdConfig) initEtcdTLSMinVersion() {
 	p.EtcdTLSMinVersion = p.Base.LoadWithDefault("etcd.ssl.tlsMinVersion", "1.3")
+}
+
+func (p *EtcdConfig) initEtcdRequestTimeout() {
+	requestTimeout := p.Base.ParseInt64WithDefault("etcd.requestTimeout", 30000)
+	if requestTimeout < 0 {
+		requestTimeout = 30000
+	}
+
+	p.RequestTimeout = time.Duration(requestTimeout) * time.Millisecond
 }
 
 type LocalStorageConfig struct {

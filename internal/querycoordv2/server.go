@@ -60,10 +60,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-var (
-	// Only for re-export
-	Params = &params.Params
-)
+// Only for re-export
+var Params = &params.Params
 
 type Server struct {
 	ctx                 context.Context
@@ -210,7 +208,8 @@ func (s *Server) initQueryCoord() error {
 	s.UpdateStateCode(commonpb.StateCode_Initializing)
 	log.Info("QueryCoord", zap.Any("State", commonpb.StateCode_Initializing))
 	// Init KV
-	etcdKV := etcdkv.NewEtcdKV(s.etcdCli, Params.EtcdCfg.MetaRootPath)
+	etcdKV := etcdkv.NewEtcdKV(s.etcdCli, Params.EtcdCfg.MetaRootPath,
+		etcdkv.WithRequestTimeout(Params.EtcdCfg.RequestTimeout))
 	s.kv = etcdKV
 	log.Info("query coordinator try to connect etcd success")
 
@@ -515,7 +514,7 @@ func (s *Server) GetComponentStates(ctx context.Context) (*milvuspb.ComponentSta
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
 		State: serviceComponentInfo,
-		//SubcomponentStates: subComponentInfos,
+		// SubcomponentStates: subComponentInfos,
 	}, nil
 }
 
