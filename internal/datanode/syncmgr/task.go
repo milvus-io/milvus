@@ -371,3 +371,19 @@ func (t *SyncTask) getInCodec() *storage.InsertCodec {
 
 	return storage.NewInsertCodecWithSchema(meta)
 }
+
+func (t *SyncTask) SegmentID() int64 {
+	return t.segmentID
+}
+
+func (t *SyncTask) Checkpoint() *msgpb.MsgPosition {
+	return t.checkpoint
+}
+
+func (t *SyncTask) StartPosition() *msgpb.MsgPosition {
+	return t.startPosition
+}
+
+func (t *SyncTask) ChannelName() string {
+	return t.channelName
+}

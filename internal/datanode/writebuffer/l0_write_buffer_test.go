@@ -145,7 +145,7 @@ func (s *L0WriteBufferSuite) SetupTest() {
 }
 
 func (s *L0WriteBufferSuite) TestBufferData() {
-	wb, err := NewL0WriteBuffer(s.channelName, s.metacache, s.syncMgr, &writeBufferOption{
+	wb, err := NewL0WriteBuffer(s.channelName, s.metacache, nil, s.syncMgr, &writeBufferOption{
 		idAllocator: s.allocator,
 	})
 	s.NoError(err)

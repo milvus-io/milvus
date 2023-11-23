@@ -17,7 +17,7 @@ import (
 // BufferManager is the interface for WriteBuffer management.
 type BufferManager interface {
 	// Register adds a WriteBuffer with provided schema & options.
-	Register(channel string, metacache metacache.MetaCache, opts ...WriteBufferOption) error
+	Register(channel string, metacache metacache.MetaCache, storageV2Cache *metacache.StorageV2Cache, opts ...WriteBufferOption) error
 	// FlushSegments notifies writeBuffer corresponding to provided channel to flush segments.
 	FlushSegments(ctx context.Context, channel string, segmentIDs []int64) error
 	// FlushChannel
@@ -49,7 +49,7 @@ type bufferManager struct {
 }
 
 // Register a new WriteBuffer for channel.
-func (m *bufferManager) Register(channel string, metacache metacache.MetaCache, opts ...WriteBufferOption) error {
+func (m *bufferManager) Register(channel string, metacache metacache.MetaCache, storageV2Cache *metacache.StorageV2Cache, opts ...WriteBufferOption) error {
 	m.mut.Lock()
 	defer m.mut.Unlock()
 
@@ -57,7 +57,7 @@ func (m *bufferManager) Register(channel string, metacache metacache.MetaCache, 
 	if ok {
 		return merr.WrapErrChannelReduplicate(channel)
 	}
-	buf, err := NewWriteBuffer(channel, metacache, m.syncMgr, opts...)
+	buf, err := NewWriteBuffer(channel, metacache, storageV2Cache, m.syncMgr, opts...)
 	if err != nil {
 		return err
 	}

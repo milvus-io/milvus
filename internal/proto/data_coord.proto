@@ -310,6 +310,7 @@ message SegmentInfo {
   // For legacy level, it represent old segment before segment level introduced
   // so segments with Legacy level shall be treated as L1 segment
   SegmentLevel level = 20;
+  int64 storage_version = 21;
 }
 
 message SegmentStartPosition {
@@ -332,6 +333,7 @@ message SaveBinlogPathsRequest {
   string channel = 12; // report channel name for verification
   SegmentLevel seg_level =13;
   int64 partitionID =14; // report partitionID for create L0 segment
+  int64 storageVersion = 15;
 }
 
 message CheckPoint {

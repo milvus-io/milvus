@@ -493,6 +493,20 @@ func CreateL0Operator(collectionID, partitionID, segmentID int64, channel string
 	}
 }
 
+func UpdateStorageVersionOperator(segmentID int64, version int64) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.meta.GetSegment(segmentID)
+		if segment == nil {
+			log.Info("meta update: update storage version - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+
+		segment.StorageVersion = version
+		return true
+	}
+}
+
 // Set status of segment
 // and record dropped time when change segment status to dropped
 func UpdateStatusOperator(segmentID int64, status commonpb.SegmentState) UpdateOperator {
