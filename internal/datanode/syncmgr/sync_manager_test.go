@@ -151,6 +151,7 @@ func (s *SyncManagerSuite) TestSubmit() {
 	bfs := metacache.NewBloomFilterSet()
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs)
 	metacache.UpdateNumOfRows(1000)(seg)
+	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything).Return([]*metacache.SegmentInfo{seg})
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
@@ -182,6 +183,7 @@ func (s *SyncManagerSuite) TestCompacted() {
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs)
 	metacache.UpdateNumOfRows(1000)(seg)
 	metacache.CompactTo(1001)(seg)
+	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything).Return([]*metacache.SegmentInfo{seg})
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
@@ -212,6 +214,7 @@ func (s *SyncManagerSuite) TestBlock() {
 	bfs := metacache.NewBloomFilterSet()
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs)
 	metacache.UpdateNumOfRows(1000)(seg)
+	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything).
 		RunAndReturn(func(...metacache.SegmentFilter) []*metacache.SegmentInfo {
 			return []*metacache.SegmentInfo{seg}

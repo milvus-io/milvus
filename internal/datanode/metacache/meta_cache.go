@@ -110,22 +110,13 @@ func (c *metaCacheImpl) AddSegment(segInfo *datapb.SegmentInfo, factory PkStatsF
 	c.segmentInfos[segInfo.GetID()] = segment
 }
 
-func (c *metaCacheImpl) CompactSegments(newSegmentID, partitionID int64, numOfRows int64, bfs *BloomFilterSet, dropSegmentIDs ...int64) {
+func (c *metaCacheImpl) CompactSegments(newSegmentID, partitionID int64, numOfRows int64, bfs *BloomFilterSet, oldSegmentIDs ...int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	for _, dropSeg := range dropSegmentIDs {
-		if _, ok := c.segmentInfos[dropSeg]; ok {
-			delete(c.segmentInfos, dropSeg)
-		} else {
-			log.Warn("some dropped segment not exist in meta cache",
-				zap.String("channel", c.vChannelName),
-				zap.Int64("collectionID", c.collectionID),
-				zap.Int64("segmentID", dropSeg))
-		}
-	}
-
+	compactTo := NullSegment
 	if numOfRows > 0 {
+		compactTo = newSegmentID
 		if _, ok := c.segmentInfos[newSegmentID]; !ok {
 			c.segmentInfos[newSegmentID] = &SegmentInfo{
 				segmentID:        newSegmentID,
@@ -134,6 +125,19 @@ func (c *metaCacheImpl) CompactSegments(newSegmentID, partitionID int64, numOfRo
 				startPosRecorded: true,
 				bfs:              bfs,
 			}
+		}
+	}
+
+	for _, segID := range oldSegmentIDs {
+		if segmentInfo, ok := c.segmentInfos[segID]; ok {
+			updated := segmentInfo.Clone()
+			updated.compactTo = compactTo
+			c.segmentInfos[segID] = updated
+		} else {
+			log.Warn("some dropped segment not exist in meta cache",
+				zap.String("channel", c.vChannelName),
+				zap.Int64("collectionID", c.collectionID),
+				zap.Int64("segmentID", segID))
 		}
 	}
 }

@@ -107,10 +107,14 @@ func (s *MetaCacheSuite) TestCompactSegments() {
 	}
 
 	for i, partitionID := range s.partitionIDs {
-		segs := s.cache.GetSegmentIDsBy(WithPartitionID(partitionID))
-		s.Equal(1, len(segs))
+		segs := s.cache.GetSegmentsBy(WithPartitionID(partitionID))
 		for _, seg := range segs {
-			s.Equal(seg, s.newSegments[i])
+			if seg.SegmentID() == s.newSegments[i] {
+				s.Equal(commonpb.SegmentState_Flushed, seg.State())
+			}
+			if seg.SegmentID() == s.flushedSegments[i] {
+				s.Equal(s.newSegments[i], seg.CompactTo())
+			}
 		}
 	}
 }
