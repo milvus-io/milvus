@@ -31,6 +31,7 @@ func L2ImplPure(a []float32, b []float32) float32 {
 	for i := range a {
 		sum += (a[i] - b[i]) * (a[i] - b[i])
 	}
+
 	return sum
 }
 
@@ -40,6 +41,7 @@ func IPImplPure(a []float32, b []float32) float32 {
 	for i := range a {
 		sum += a[i] * b[i]
 	}
+
 	return sum
 }
 
@@ -51,6 +53,7 @@ func CosineImplPure(a []float32, b []float32) float32 {
 		normA += a[i] * a[i]
 		normB += b[i] * b[i]
 	}
+
 	return sum / float32(math.Sqrt(float64(normA)*float64(normB)))
 }
 
