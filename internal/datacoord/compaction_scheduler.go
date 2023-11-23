@@ -24,7 +24,7 @@ type Scheduler interface {
 type CompactionScheduler struct {
 	taskNumber    *atomic.Int32
 	queuingTasks  []*compactionTask
-	parallelTasks map[int64][]*compactionTask
+	parallelTasks map[int64][]*compactionTask // parallel by nodeID
 	mu            sync.RWMutex
 
 	planHandler *compactionPlanHandler

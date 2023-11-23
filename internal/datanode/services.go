@@ -245,7 +245,7 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 		return merr.Status(merr.WrapErrChannelNotFound(req.GetChannel(), "illegel compaction plan")), nil
 	}
 
-	if !node.compactionExecutor.channelValidateForCompaction(req.GetChannel()) {
+	if !node.compactionExecutor.isValidChannel(req.GetChannel()) {
 		log.Warn("channel of compaction is marked invalid in compaction executor", zap.String("channelName", req.GetChannel()))
 		return merr.Status(merr.WrapErrChannelNotFound(req.GetChannel(), "channel is dropping")), nil
 	}
@@ -275,7 +275,7 @@ func (node *DataNode) GetCompactionState(ctx context.Context, req *datapb.Compac
 			Status: merr.Status(err),
 		}, nil
 	}
-	results := node.compactionExecutor.getAllCompactionPlanResult()
+	results := node.compactionExecutor.getAllCompactionResults()
 
 	if len(results) > 0 {
 		planIDs := lo.Map(results, func(result *datapb.CompactionPlanResult, i int) UniqueID {
@@ -310,9 +310,11 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 
 	ds, ok := node.flowgraphManager.getFlowgraphService(req.GetChannelName())
 	if !ok {
-		err := merr.WrapErrChannelNotFound(req.GetChannelName())
-		log.Warn("failed to sync segments", zap.Error(err))
-		return merr.Status(err), nil
+		node.compactionExecutor.clearTasksByChannel(req.GetChannelName())
+		return merr.Status(nil), nil
+		// err := merr.WrapErrChannelNotFound(req.GetChannelName())
+		// log.Warn("failed to sync segments", zap.Error(err))
+		// return merr.Status(err), nil
 	}
 
 	pks, err := loadStats(ctx, node.chunkManager, ds.metacache.Schema(), req.GetCompactedTo(), req.GetCollectionId(), req.GetStatsLogs(), 0)
@@ -322,7 +324,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 	}
 	bfs := metacache.NewBloomFilterSet(pks...)
 	ds.metacache.CompactSegments(req.GetCompactedTo(), req.GetPartitionId(), req.GetNumOfRows(), bfs, req.GetCompactedFrom()...)
-	node.compactionExecutor.injectDone(req.GetPlanID(), true)
+	node.compactionExecutor.injectDone(req.GetPlanID())
 	return merr.Success(), nil
 }
 
