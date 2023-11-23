@@ -553,16 +553,19 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	if s.meta != nil {
 		return nil
 	}
-	s.watchClient = etcdkv.NewEtcdKV(s.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
+	s.watchClient = etcdkv.NewEtcdKV(s.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue(),
+		etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 	metaType := Params.MetaStoreCfg.MetaStoreType.GetValue()
 	log.Info("data coordinator connecting to metadata store", zap.String("metaType", metaType))
 	metaRootPath := ""
 	if metaType == util.MetaStoreTypeTiKV {
 		metaRootPath = Params.TiKVCfg.MetaRootPath.GetValue()
-		s.kv = tikv.NewTiKV(s.tikvCli, metaRootPath)
+		s.kv = tikv.NewTiKV(s.tikvCli, metaRootPath,
+			tikv.WithRequestTimeout(paramtable.Get().ServiceParam.TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 	} else if metaType == util.MetaStoreTypeEtcd {
 		metaRootPath = Params.EtcdCfg.MetaRootPath.GetValue()
-		s.kv = etcdkv.NewEtcdKV(s.etcdCli, metaRootPath)
+		s.kv = etcdkv.NewEtcdKV(s.etcdCli, metaRootPath,
+			etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 	} else {
 		return retry.Unrecoverable(fmt.Errorf("not supported meta store: %s", metaType))
 	}
