@@ -87,7 +87,7 @@ type metaKVCreator func(root string) (kv.MetaKv, error)
 
 func defaultMetaKVCreator(etcdCli *clientv3.Client) metaKVCreator {
 	return func(root string) (kv.MetaKv, error) {
-		return etcdkv.NewEtcdKV(etcdCli, root), nil
+		return etcdkv.NewEtcdKV(etcdCli, root, etcdkv.WithRequestTimeout(Params.EtcdCfg.RequestTimeout)), nil
 	}
 }
 
@@ -1994,7 +1994,6 @@ func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (
 			log.Info("a DataNode is no longer busy after processing task",
 				zap.Int64("dataNode ID", ir.GetDatanodeId()),
 				zap.Int64("task ID", ir.GetTaskId()))
-
 		}()
 		err := c.importManager.sendOutTasks(c.importManager.ctx)
 		if err != nil {
@@ -2050,8 +2049,8 @@ func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (
 func (c *Core) ExpireCredCache(ctx context.Context, username string) error {
 	req := proxypb.InvalidateCredCacheRequest{
 		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(0), //TODO, msg type
-			commonpbutil.WithMsgID(0),   //TODO, msg id
+			commonpbutil.WithMsgType(0), // TODO, msg type
+			commonpbutil.WithMsgID(0),   // TODO, msg id
 			commonpbutil.WithSourceID(c.session.ServerID),
 		),
 		Username: username,
@@ -2063,8 +2062,8 @@ func (c *Core) ExpireCredCache(ctx context.Context, username string) error {
 func (c *Core) UpdateCredCache(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
 	req := proxypb.UpdateCredCacheRequest{
 		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(0), //TODO, msg type
-			commonpbutil.WithMsgID(0),   //TODO, msg id
+			commonpbutil.WithMsgType(0), // TODO, msg type
+			commonpbutil.WithMsgID(0),   // TODO, msg id
 			commonpbutil.WithSourceID(c.session.ServerID),
 		),
 		Username: credInfo.Username,

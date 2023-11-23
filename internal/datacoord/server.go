@@ -123,7 +123,7 @@ type Server struct {
 
 	session   *sessionutil.Session
 	dnEventCh <-chan *sessionutil.SessionEvent
-	//icEventCh <-chan *sessionutil.SessionEvent
+	// icEventCh <-chan *sessionutil.SessionEvent
 	qcEventCh <-chan *sessionutil.SessionEvent
 
 	enableActiveStandBy bool
@@ -490,7 +490,8 @@ func (s *Server) initSegmentManager() error {
 }
 
 func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
-	etcdKV := etcdkv.NewEtcdKV(s.etcdCli, Params.EtcdCfg.MetaRootPath)
+	etcdKV := etcdkv.NewEtcdKV(s.etcdCli, Params.EtcdCfg.MetaRootPath,
+		etcdkv.WithRequestTimeout(Params.EtcdCfg.RequestTimeout))
 
 	s.kvClient = etcdKV
 	reloadEtcdFn := func() error {
@@ -748,7 +749,7 @@ func (s *Server) watchService(ctx context.Context) {
 				}()
 				return
 			}
-		//case event, ok := <-s.icEventCh:
+		// case event, ok := <-s.icEventCh:
 		//	if !ok {
 		//		s.stopServiceWatch()
 		//		return
@@ -820,7 +821,7 @@ func (s *Server) startFlushLoop(ctx context.Context) {
 				logutil.Logger(s.ctx).Info("flush loop shutdown")
 				return
 			case segmentID := <-s.flushCh:
-				//Ignore return error
+				// Ignore return error
 				log.Info("flush successfully", zap.Any("segmentID", segmentID))
 				err := s.postFlush(ctx, segmentID)
 				if err != nil {
