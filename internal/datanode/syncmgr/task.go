@@ -137,7 +137,7 @@ func (t *SyncTask) Run() error {
 
 	t.metacache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(t.segmentID))
 
-	log.Warn("task done")
+	log.Info("task done")
 	return nil
 }
 
