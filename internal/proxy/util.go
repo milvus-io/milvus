@@ -1561,6 +1561,16 @@ func SendReplicateMessagePack(ctx context.Context, replicateMsgStream msgstream.
 			BaseMsg:          getBaseMsg(ctx, ts),
 			DropIndexRequest: *r,
 		}
+	case *milvuspb.LoadPartitionsRequest:
+		tsMsg = &msgstream.LoadPartitionsMsg{
+			BaseMsg:               getBaseMsg(ctx, ts),
+			LoadPartitionsRequest: *r,
+		}
+	case *milvuspb.ReleasePartitionsRequest:
+		tsMsg = &msgstream.ReleasePartitionsMsg{
+			BaseMsg:                  getBaseMsg(ctx, ts),
+			ReleasePartitionsRequest: *r,
+		}
 	default:
 		log.Warn("unknown request", zap.Any("request", request))
 		return

@@ -1286,6 +1286,7 @@ func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPar
 		LoadPartitionsRequest: request,
 		queryCoord:            node.queryCoord,
 		datacoord:             node.dataCoord,
+		replicateMsgStream:    node.replicateMsgStream,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -1351,6 +1352,7 @@ func (node *Proxy) ReleasePartitions(ctx context.Context, request *milvuspb.Rele
 		Condition:                NewTaskCondition(ctx),
 		ReleasePartitionsRequest: request,
 		queryCoord:               node.queryCoord,
+		replicateMsgStream:       node.replicateMsgStream,
 	}
 
 	method := "ReleasePartitions"

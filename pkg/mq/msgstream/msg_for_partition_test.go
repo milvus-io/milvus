@@ -27,47 +27,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 )
 
-func TestCreateIndex(t *testing.T) {
-	var msg TsMsg = &CreateIndexMsg{
-		CreateIndexRequest: milvuspb.CreateIndexRequest{
+func TestLoadPartitions(t *testing.T) {
+	msg := &LoadPartitionsMsg{
+		LoadPartitionsRequest: milvuspb.LoadPartitionsRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:       commonpb.MsgType_CreateIndex,
-				MsgID:         100,
-				Timestamp:     1000,
-				SourceID:      10000,
-				TargetID:      100000,
-				ReplicateInfo: nil,
-			},
-			DbName: "unit_db",
-		},
-	}
-	assert.EqualValues(t, 100, msg.ID())
-	msg.SetID(200)
-	assert.EqualValues(t, 200, msg.ID())
-	assert.Equal(t, commonpb.MsgType_CreateIndex, msg.Type())
-	assert.EqualValues(t, 10000, msg.SourceID())
-
-	msgBytes, err := msg.Marshal(msg)
-	assert.NoError(t, err)
-
-	var newMsg TsMsg = &ReleaseCollectionMsg{}
-	_, err = newMsg.Unmarshal("1")
-	assert.Error(t, err)
-
-	newMsg, err = newMsg.Unmarshal(msgBytes)
-	assert.NoError(t, err)
-	assert.EqualValues(t, 200, newMsg.ID())
-	assert.EqualValues(t, 1000, newMsg.BeginTs())
-	assert.EqualValues(t, 1000, newMsg.EndTs())
-
-	assert.True(t, msg.Size() > 0)
-}
-
-func TestDropIndex(t *testing.T) {
-	var msg TsMsg = &DropIndexMsg{
-		DropIndexRequest: milvuspb.DropIndexRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:       commonpb.MsgType_DropIndex,
+				MsgType:       commonpb.MsgType_LoadPartitions,
 				MsgID:         100,
 				Timestamp:     1000,
 				SourceID:      10000,
@@ -76,19 +40,23 @@ func TestDropIndex(t *testing.T) {
 			},
 			DbName:         "unit_db",
 			CollectionName: "col1",
-			IndexName:      "unit_index",
+			PartitionNames: []string{
+				"p1",
+				"p2",
+			},
 		},
 	}
+
 	assert.EqualValues(t, 100, msg.ID())
 	msg.SetID(200)
 	assert.EqualValues(t, 200, msg.ID())
-	assert.Equal(t, commonpb.MsgType_DropIndex, msg.Type())
+	assert.Equal(t, commonpb.MsgType_LoadPartitions, msg.Type())
 	assert.EqualValues(t, 10000, msg.SourceID())
 
 	msgBytes, err := msg.Marshal(msg)
 	assert.NoError(t, err)
 
-	var newMsg TsMsg = &DropIndexMsg{}
+	var newMsg TsMsg = &LoadPartitionsMsg{}
 	_, err = newMsg.Unmarshal("1")
 	assert.Error(t, err)
 
@@ -97,8 +65,54 @@ func TestDropIndex(t *testing.T) {
 	assert.EqualValues(t, 200, newMsg.ID())
 	assert.EqualValues(t, 1000, newMsg.BeginTs())
 	assert.EqualValues(t, 1000, newMsg.EndTs())
-	assert.EqualValues(t, "col1", newMsg.(*DropIndexMsg).CollectionName)
-	assert.EqualValues(t, "unit_index", newMsg.(*DropIndexMsg).IndexName)
+	assert.EqualValues(t, 2, len(newMsg.(*LoadPartitionsMsg).PartitionNames))
+	assert.EqualValues(t, "unit_db", newMsg.(*LoadPartitionsMsg).DbName)
+	assert.EqualValues(t, "col1", newMsg.(*LoadPartitionsMsg).CollectionName)
+
+	assert.True(t, msg.Size() > 0)
+}
+
+func TestReleasePartitions(t *testing.T) {
+	msg := &ReleasePartitionsMsg{
+		ReleasePartitionsRequest: milvuspb.ReleasePartitionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:       commonpb.MsgType_ReleasePartitions,
+				MsgID:         100,
+				Timestamp:     1000,
+				SourceID:      10000,
+				TargetID:      100000,
+				ReplicateInfo: nil,
+			},
+			DbName:         "unit_db",
+			CollectionName: "col1",
+			PartitionNames: []string{
+				"p1",
+				"p2",
+			},
+		},
+	}
+
+	assert.EqualValues(t, 100, msg.ID())
+	msg.SetID(200)
+	assert.EqualValues(t, 200, msg.ID())
+	assert.Equal(t, commonpb.MsgType_ReleasePartitions, msg.Type())
+	assert.EqualValues(t, 10000, msg.SourceID())
+
+	msgBytes, err := msg.Marshal(msg)
+	assert.NoError(t, err)
+
+	var newMsg TsMsg = &ReleasePartitionsMsg{}
+	_, err = newMsg.Unmarshal("1")
+	assert.Error(t, err)
+
+	newMsg, err = newMsg.Unmarshal(msgBytes)
+	assert.NoError(t, err)
+	assert.EqualValues(t, 200, newMsg.ID())
+	assert.EqualValues(t, 1000, newMsg.BeginTs())
+	assert.EqualValues(t, 1000, newMsg.EndTs())
+	assert.EqualValues(t, 2, len(newMsg.(*ReleasePartitionsMsg).PartitionNames))
+	assert.EqualValues(t, "unit_db", newMsg.(*ReleasePartitionsMsg).DbName)
+	assert.EqualValues(t, "col1", newMsg.(*ReleasePartitionsMsg).CollectionName)
 
 	assert.True(t, msg.Size() > 0)
 }
