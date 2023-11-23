@@ -43,7 +43,7 @@ import (
 // WARN: DO NOT add method to get the collection
 type CollectionManager interface {
 	Get(collectionID int64) *Collection
-	Put(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo)
+	Put(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) *Collection
 	Remove(collectionID int64)
 }
 
@@ -65,7 +65,7 @@ func (m *collectionManager) Get(collectionID int64) *Collection {
 	return m.collections[collectionID]
 }
 
-func (m *collectionManager) Put(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) {
+func (m *collectionManager) Put(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) *Collection {
 	m.mut.Lock()
 	defer m.mut.Unlock()
 
@@ -74,14 +74,14 @@ func (m *collectionManager) Put(collectionID int64, schema *schemapb.CollectionS
 		collection.mu.Lock()
 		defer collection.mu.Unlock()
 		collection.schema = schema
-		collection.metricType.Store(loadMeta.GetMetricType())
-		return
+		return collection
 	}
 
 	collection := NewCollection(collectionID, schema, meta, loadMeta.GetLoadType())
 	collection.metricType.Store(loadMeta.GetMetricType())
 	collection.AddPartition(loadMeta.GetPartitionIDs()...)
 	m.collections[collectionID] = collection
+	return collection
 }
 
 func (m *collectionManager) Remove(collectionID int64) {

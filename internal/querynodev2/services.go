@@ -254,8 +254,6 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 
 	node.manager.Collection.Put(req.GetCollectionID(), req.GetSchema(),
 		node.composeIndexMeta(req.GetIndexInfoList(), req.Schema), req.GetLoadMeta())
-	collection := node.manager.Collection.Get(req.GetCollectionID())
-	collection.SetMetricType(req.GetLoadMeta().GetMetricType())
 	delegator, err := delegator.NewShardDelegator(
 		ctx,
 		req.GetCollectionID(),
@@ -445,6 +443,9 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		return merr.Status(err), nil
 	}
 
+	collection := node.manager.Collection.Put(req.GetCollectionID(), req.GetSchema(),
+		node.composeIndexMeta(req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())
+
 	// Delegates request to workers
 	if req.GetNeedTransfer() {
 		delegator, ok := node.delegators.Get(segment.GetInsertChannel())
@@ -456,6 +457,8 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		}
 
 		req.NeedTransfer = false
+		// the segment may be not with index, so no metric type in the load request, so fill it here
+		req.LoadMeta.MetricType = collection.GetMetricType()
 		err := delegator.LoadSegments(ctx, req)
 		if err != nil {
 			log.Warn("delegator failed to load segments", zap.Error(err))
@@ -464,9 +467,6 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 
 		return merr.Success(), nil
 	}
-
-	node.manager.Collection.Put(req.GetCollectionID(), req.GetSchema(),
-		node.composeIndexMeta(req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())
 
 	if req.GetLoadScope() == querypb.LoadScope_Delta {
 		return node.loadDeltaLogs(ctx, req), nil
