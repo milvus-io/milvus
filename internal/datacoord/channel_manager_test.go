@@ -1245,6 +1245,7 @@ func TestChannelManager_HelperFunc(t *testing.T) {
 }
 
 func TestChannelManager_BackgroundChannelChecker(t *testing.T) {
+	Params.Save(Params.DataCoordCfg.AutoBalance.Key, "false")
 	Params.Save(Params.DataCoordCfg.ChannelBalanceInterval.Key, "1")
 	Params.Save(Params.DataCoordCfg.ChannelBalanceSilentDuration.Key, "1")
 
