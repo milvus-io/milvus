@@ -68,8 +68,19 @@ func (_c *MockCollectionManager_Get_Call) RunAndReturn(run func(int64) *Collecti
 }
 
 // Put provides a mock function with given fields: collectionID, schema, meta, loadMeta
-func (_m *MockCollectionManager) Put(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) {
-	_m.Called(collectionID, schema, meta, loadMeta)
+func (_m *MockCollectionManager) Put(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) *Collection {
+	ret := _m.Called(collectionID, schema, meta, loadMeta)
+
+	var r0 *Collection
+	if rf, ok := ret.Get(0).(func(int64, *schemapb.CollectionSchema, *segcorepb.CollectionIndexMeta, *querypb.LoadMetaInfo) *Collection); ok {
+		r0 = rf(collectionID, schema, meta, loadMeta)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*Collection)
+		}
+	}
+
+	return r0
 }
 
 // MockCollectionManager_Put_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Put'
@@ -93,12 +104,12 @@ func (_c *MockCollectionManager_Put_Call) Run(run func(collectionID int64, schem
 	return _c
 }
 
-func (_c *MockCollectionManager_Put_Call) Return() *MockCollectionManager_Put_Call {
-	_c.Call.Return()
+func (_c *MockCollectionManager_Put_Call) Return(_a0 *Collection) *MockCollectionManager_Put_Call {
+	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockCollectionManager_Put_Call) RunAndReturn(run func(int64, *schemapb.CollectionSchema, *segcorepb.CollectionIndexMeta, *querypb.LoadMetaInfo)) *MockCollectionManager_Put_Call {
+func (_c *MockCollectionManager_Put_Call) RunAndReturn(run func(int64, *schemapb.CollectionSchema, *segcorepb.CollectionIndexMeta, *querypb.LoadMetaInfo) *Collection) *MockCollectionManager_Put_Call {
 	_c.Call.Return(run)
 	return _c
 }
