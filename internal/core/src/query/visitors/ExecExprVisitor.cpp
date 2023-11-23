@@ -38,6 +38,7 @@
 #include "query/PlanProto.h"
 #include "segcore/SkipIndex.h"
 #include "simd/hook.h"
+#include "index/Meta.h"
 
 namespace milvus::query {
 // THIS CONTAINS EXTRA BODY FOR VISITOR
