@@ -1119,35 +1119,35 @@ func isPartitionLoaded(ctx context.Context, qc types.QueryCoordClient, collID in
 }
 
 func fillFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
-	neededFieldsNum := 0
-	isPrimaryKeyNum := 0
+	requiredFieldsNum := 0
+	primaryKeyNum := 0
 
 	dataNameSet := typeutil.NewSet[string]()
 	for _, data := range insertMsg.FieldsData {
 		fieldName := data.GetFieldName()
 		if dataNameSet.Contain(fieldName) {
-			return merr.WrapErrParameterInvalidMsg("The FieldDatas parameter being passed contains duplicate data for field %s", fieldName)
+			return merr.WrapErrParameterInvalidMsg("duplicated field %s found", fieldName)
 		}
 		dataNameSet.Insert(fieldName)
 	}
 
 	for _, fieldSchema := range schema.Fields {
 		if fieldSchema.AutoID && !fieldSchema.IsPrimaryKey {
-			log.Error("not primary key field, but set autoID true", zap.String("fieldSchemaName", fieldSchema.GetName()))
-			return merr.WrapErrParameterInvalid("only primary key field can set autoID true", "")
+			log.Warn("not primary key field, but set autoID true", zap.String("field", fieldSchema.GetName()))
+			return merr.WrapErrParameterInvalidMsg("only primary key could be with AutoID enabled")
 		}
 		if fieldSchema.GetDefaultValue() != nil && fieldSchema.IsPrimaryKey {
-			return merr.WrapErrParameterInvalid("no default data", "", "pk field schema can not set default value")
+			return merr.WrapErrParameterInvalidMsg("primary key can't be with default value")
 		}
 		if !fieldSchema.AutoID {
-			neededFieldsNum++
+			requiredFieldsNum++
 		}
 		// if has no field pass in, consider use default value
 		// so complete it with field schema
 		if _, ok := dataNameSet[fieldSchema.GetName()]; !ok {
 			// primary key can not use default value
 			if fieldSchema.IsPrimaryKey {
-				isPrimaryKeyNum++
+				primaryKeyNum++
 				continue
 			}
 			dataToAppend := &schemapb.FieldData{
@@ -1158,19 +1158,19 @@ func fillFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstr
 		}
 	}
 
-	if isPrimaryKeyNum > 1 {
-		log.Error("the number of passed primary key fields is more than 1",
-			zap.Int64("primaryKeyNum", int64(isPrimaryKeyNum)),
-			zap.String("CollectionSchemaName", schema.GetName()))
-		return merr.WrapErrParameterInvalid("0 or 1", fmt.Sprint(isPrimaryKeyNum), "the number of passed primary key fields is more than 1")
+	if primaryKeyNum > 1 {
+		log.Warn("more than 1 primary keys not supported",
+			zap.Int64("primaryKeyNum", int64(primaryKeyNum)),
+			zap.String("collection", schema.GetName()))
+		return merr.WrapErrParameterInvalidMsg("more than 1 primary keys not supported, got %d", primaryKeyNum)
 	}
 
-	if len(insertMsg.FieldsData) != neededFieldsNum {
-		log.Error("the length of passed fields is not equal to needed",
-			zap.Int("expectFieldNumber", neededFieldsNum),
-			zap.Int("passFieldNumber", len(insertMsg.FieldsData)),
-			zap.String("CollectionSchemaName", schema.GetName()))
-		return merr.WrapErrParameterInvalid(neededFieldsNum, len(insertMsg.FieldsData), "the length of passed fields is equal to needed")
+	if len(insertMsg.FieldsData) != requiredFieldsNum {
+		log.Warn("the number of fields is less than needed",
+			zap.Int("fieldNum", len(insertMsg.FieldsData)),
+			zap.Int("requiredFieldNum", requiredFieldsNum),
+			zap.String("collection", schema.GetName()))
+		return merr.WrapErrParameterInvalid(requiredFieldsNum, len(insertMsg.FieldsData), "the number of fields is less than needed")
 	}
 
 	return nil
