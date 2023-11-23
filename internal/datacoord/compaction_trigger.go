@@ -27,6 +27,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
@@ -56,8 +57,9 @@ type compactionSignal struct {
 	isGlobal     bool
 	collectionID UniqueID
 	partitionID  UniqueID
-	segmentID    UniqueID
 	channel      string
+	segmentID    UniqueID
+	pos          *msgpb.MsgPosition
 }
 
 var _ trigger = (*compactionTrigger)(nil)
@@ -408,7 +410,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 				break
 			}
 			start := time.Now()
-			if err := t.fillOriginPlan(plan); err != nil {
+			if err := fillOriginPlan(t.allocator, plan); err != nil {
 				log.Warn("failed to fill plan",
 					zap.Int64("collectionID", signal.collectionID),
 					zap.Int64s("segmentIDs", segIDs),
@@ -512,7 +514,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 			break
 		}
 		start := time.Now()
-		if err := t.fillOriginPlan(plan); err != nil {
+		if err := fillOriginPlan(t.allocator, plan); err != nil {
 			log.Warn("failed to fill plan", zap.Error(err))
 			continue
 		}
@@ -807,34 +809,18 @@ func isExpandableSmallSegment(segment *SegmentInfo) bool {
 	return segment.GetNumOfRows() < int64(float64(segment.GetMaxRowNum())*(Params.DataCoordCfg.SegmentExpansionRate.GetAsFloat()-1))
 }
 
-func (t *compactionTrigger) fillOriginPlan(plan *datapb.CompactionPlan) error {
-	// TODO context
-	id, err := t.allocator.allocID(context.TODO())
-	if err != nil {
-		return err
-	}
-	plan.PlanID = id
-	plan.TimeoutInSeconds = int32(Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt())
-	return nil
-}
-
 func (t *compactionTrigger) isStaleSegment(segment *SegmentInfo) bool {
 	return time.Since(segment.lastFlushTime).Minutes() >= segmentTimedFlushDuration
 }
 
 func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, isDiskIndex bool, compactTime *compactTime) bool {
 	// no longer restricted binlog numbers because this is now related to field numbers
-	var binLog int
-	for _, binlogs := range segment.GetBinlogs() {
-		binLog += len(binlogs.GetBinlogs())
-	}
+
+	binlogCount := GetBinlogCount(segment.GetBinlogs())
 
 	// count all the statlog file count, only for flush generated segments
 	if len(segment.CompactionFrom) == 0 {
-		var statsLog int
-		for _, statsLogs := range segment.GetStatslogs() {
-			statsLog += len(statsLogs.GetBinlogs())
-		}
+		statsLogCount := GetBinlogCount(segment.GetStatslogs())
 
 		var maxSize int
 		if isDiskIndex {
@@ -846,19 +832,15 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, isDis
 		// if stats log is more than expected, trigger compaction to reduce stats log size.
 		// TODO maybe we want to compact to single statslog to reduce watch dml channel cost
 		// TODO avoid rebuild index twice.
-		if statsLog > maxSize*2.0 {
-			log.Info("stats number is too much, trigger compaction", zap.Int64("segmentID", segment.ID), zap.Int("Bin logs", binLog), zap.Int("Stat logs", statsLog))
+		if statsLogCount > maxSize*2.0 {
+			log.Info("stats number is too much, trigger compaction", zap.Int64("segmentID", segment.ID), zap.Int("Bin logs", binlogCount), zap.Int("Stat logs", statsLogCount))
 			return true
 		}
 	}
 
-	var deltaLog int
-	for _, deltaLogs := range segment.GetDeltalogs() {
-		deltaLog += len(deltaLogs.GetBinlogs())
-	}
-
-	if deltaLog > Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsInt() {
-		log.Info("total delta number is too much, trigger compaction", zap.Int64("segmentID", segment.ID), zap.Int("Bin logs", binLog), zap.Int("Delta logs", deltaLog))
+	deltaLogCount := GetBinlogCount(segment.GetDeltalogs())
+	if deltaLogCount > Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsInt() {
+		log.Info("total delta number is too much, trigger compaction", zap.Int64("segmentID", segment.ID), zap.Int("Bin logs", binlogCount), zap.Int("Delta logs", deltaLogCount))
 		return true
 	}
 
