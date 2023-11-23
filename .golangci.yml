@@ -160,4 +160,4 @@ issues:
   max-same-issues: 0
 
 service:
-  golangci-lint-version: 1.51.0 # use the fixed version to not introduce new linters unexpectedly
+  golangci-lint-version: 1.55.2 # use the fixed version to not introduce new linters unexpectedly
