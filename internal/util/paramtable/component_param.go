@@ -1083,7 +1083,7 @@ func (p *queryCoordConfig) initCheckHealthInterval() {
 }
 
 func (p *queryCoordConfig) initCheckHealthRPCTimeout() {
-	interval := p.Base.LoadWithDefault("queryCoord.checkHealthRPCTimeout", "100")
+	interval := p.Base.LoadWithDefault("queryCoord.checkHealthRPCTimeout", "2000")
 	checkHealthRPCTimeout, err := strconv.ParseInt(interval, 10, 64)
 	if err != nil {
 		panic(err)

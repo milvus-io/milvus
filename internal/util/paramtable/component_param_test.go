@@ -30,7 +30,6 @@ func TestComponentParam(t *testing.T) {
 	CParams.Init()
 
 	t.Run("test kafkaConfig", func(t *testing.T) {
-
 		params := CParams.ServiceParam.KafkaCfg
 		producerConfig := params.ProducerExtraConfig
 		assert.Equal(t, "dc", producerConfig["client.id"])
@@ -269,7 +268,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, float64(10), Params.CheckResourceGroupInterval.Seconds())
 		assert.Equal(t, true, Params.EnableRGAutoRecover)
 
-		//test balance factor legal range
+		// test balance factor legal range
 		Params.Base.Save("queryCoord.globalRowCountFactor", "50")
 		Params.initGlobalRowCountFactor()
 		assert.Equal(t, float64(1), Params.GlobalRowCountFactor)
@@ -282,7 +281,7 @@ func TestComponentParam(t *testing.T) {
 		Params.initGlobalRowCountFactor()
 		assert.Equal(t, 0.4, Params.GlobalRowCountFactor)
 
-		//test unbalance toleration factor legal range
+		// test unbalance toleration factor legal range
 		Params.Base.Save("queryCoord.scoreUnbalanceTolerationFactor", "-1")
 		Params.initScoreUnbalanceTolerationFactor()
 		assert.Equal(t, 0.05, Params.ScoreUnbalanceTolerationFactor)
@@ -291,7 +290,7 @@ func TestComponentParam(t *testing.T) {
 		Params.initScoreUnbalanceTolerationFactor()
 		assert.Equal(t, 0.3, Params.ScoreUnbalanceTolerationFactor)
 
-		//test reverse unbalance toleration factor legal range
+		// test reverse unbalance toleration factor legal range
 		Params.Base.Save("queryCoord.reverseUnBalanceTolerationFactor", "-1")
 		Params.initReverseUnbalanceTolerationFactor()
 		assert.Equal(t, 1.1, Params.ReverseUnbalanceTolerationFactor)
@@ -300,11 +299,12 @@ func TestComponentParam(t *testing.T) {
 		Params.initReverseUnbalanceTolerationFactor()
 		assert.Equal(t, 2.0, Params.ReverseUnbalanceTolerationFactor)
 
-		//test check health interval
+		// test check health interval
 		Params.Base.Save("queryCoord.CheckHealthInterval", "10")
 		Params.initCheckHealthInterval()
 		assert.Equal(t, time.Duration(10)*time.Millisecond, Params.CheckHealthInterval)
 
+		assert.Equal(t, time.Duration(2000)*time.Millisecond, Params.CheckHealthRPCTimeout)
 		Params.Base.Save("queryCoord.CheckHealthRPCTimeout", "10")
 		Params.initCheckHealthRPCTimeout()
 		assert.Equal(t, time.Duration(10)*time.Millisecond, Params.CheckHealthRPCTimeout)
