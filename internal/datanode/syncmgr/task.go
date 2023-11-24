@@ -82,14 +82,18 @@ func (t *SyncTask) Run() error {
 	log := t.getLogger()
 	var err error
 
-	infos := t.metacache.GetSegmentsBy(metacache.WithSegmentIDs(t.segmentID))
-	if len(infos) == 0 {
+	segment, has := t.metacache.GetSegmentByID(t.segmentID)
+	if !has {
 		log.Warn("failed to sync data, segment not found in metacache")
 		t.handleError(err)
 		return merr.WrapErrSegmentNotFound(t.segmentID)
 	}
 
-	segment := infos[0]
+	if segment.CompactTo() == metacache.NullSegment {
+		log.Info("segment compacted to zero-length segment, discard sync task")
+		return nil
+	}
+
 	if segment.CompactTo() > 0 {
 		log.Info("syncing segment compacted, update segment id", zap.Int64("compactTo", segment.CompactTo()))
 		// update sync task segment id

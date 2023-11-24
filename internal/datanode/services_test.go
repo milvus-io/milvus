@@ -684,8 +684,10 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 	s.Assert().True(ok)
 
 	fg.metacache.AddSegment(&datapb.SegmentInfo{ID: 100, CollectionID: 1, State: commonpb.SegmentState_Flushed}, EmptyBfsFactory)
+	fg.metacache.AddSegment(&datapb.SegmentInfo{ID: 101, CollectionID: 1, State: commonpb.SegmentState_Flushed}, EmptyBfsFactory)
 	fg.metacache.AddSegment(&datapb.SegmentInfo{ID: 200, CollectionID: 1, State: commonpb.SegmentState_Flushed}, EmptyBfsFactory)
-	fg.metacache.AddSegment(&datapb.SegmentInfo{ID: 200, CollectionID: 1, State: commonpb.SegmentState_Flushed}, EmptyBfsFactory)
+	fg.metacache.AddSegment(&datapb.SegmentInfo{ID: 201, CollectionID: 1, State: commonpb.SegmentState_Flushed}, EmptyBfsFactory)
+	fg.metacache.AddSegment(&datapb.SegmentInfo{ID: 300, CollectionID: 1, State: commonpb.SegmentState_Flushed}, EmptyBfsFactory)
 
 	s.Run("invalid compacted from", func() {
 		req := &datapb.SyncSegmentsRequest{
@@ -719,8 +721,9 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 		_, result := fg.metacache.GetSegmentByID(req.GetCompactedTo(), metacache.WithSegmentState(commonpb.SegmentState_Flushed))
 		s.True(result)
 		for _, compactFrom := range req.GetCompactedFrom() {
-			_, result := fg.metacache.GetSegmentByID(compactFrom, metacache.WithSegmentState(commonpb.SegmentState_Flushed))
-			s.False(result)
+			seg, result := fg.metacache.GetSegmentByID(compactFrom, metacache.WithSegmentState(commonpb.SegmentState_Flushed))
+			s.True(result)
+			s.Equal(req.CompactedTo, seg.CompactTo())
 		}
 
 		status, err = s.node.SyncSegments(s.ctx, req)
@@ -748,7 +751,7 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 
 		req := &datapb.SyncSegmentsRequest{
 			CompactedFrom: []int64{100, 200},
-			CompactedTo:   101,
+			CompactedTo:   301,
 			NumOfRows:     0,
 			ChannelName:   chanName,
 			CollectionId:  1,
@@ -757,11 +760,13 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 		s.Assert().NoError(err)
 		s.Assert().True(merr.Ok(status))
 
-		_, result := fg.metacache.GetSegmentByID(100, metacache.WithSegmentState(commonpb.SegmentState_Flushed))
-		s.False(result)
-		_, result = fg.metacache.GetSegmentByID(200, metacache.WithSegmentState(commonpb.SegmentState_Flushed))
-		s.False(result)
-		_, result = fg.metacache.GetSegmentByID(101, metacache.WithSegmentState(commonpb.SegmentState_Flushed))
+		seg, result := fg.metacache.GetSegmentByID(100, metacache.WithSegmentState(commonpb.SegmentState_Flushed))
+		s.True(result)
+		s.Equal(metacache.NullSegment, seg.CompactTo())
+		seg, result = fg.metacache.GetSegmentByID(200, metacache.WithSegmentState(commonpb.SegmentState_Flushed))
+		s.True(result)
+		s.Equal(metacache.NullSegment, seg.CompactTo())
+		_, result = fg.metacache.GetSegmentByID(301, metacache.WithSegmentState(commonpb.SegmentState_Flushed))
 		s.False(result)
 	})
 }

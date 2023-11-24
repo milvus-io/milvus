@@ -64,6 +64,18 @@ func WithLevel(level datapb.SegmentLevel) SegmentFilter {
 	}
 }
 
+func WithCompacted() SegmentFilter {
+	return func(info *SegmentInfo) bool {
+		return info.compactTo != 0
+	}
+}
+
+func WithNoSyncingTask() SegmentFilter {
+	return func(info *SegmentInfo) bool {
+		return info.syncingTasks == 0
+	}
+}
+
 type SegmentAction func(info *SegmentInfo)
 
 func UpdateState(state commonpb.SegmentState) SegmentAction {
@@ -112,6 +124,7 @@ func StartSyncing(batchSize int64) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.syncingRows += batchSize
 		info.bufferRows -= batchSize
+		info.syncingTasks++
 	}
 }
 
@@ -119,6 +132,7 @@ func FinishSyncing(batchSize int64) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.flushedRows += batchSize
 		info.syncingRows -= batchSize
+		info.syncingTasks--
 	}
 }
 
