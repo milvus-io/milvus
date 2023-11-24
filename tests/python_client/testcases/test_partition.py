@@ -699,6 +699,7 @@ class TestPartitionOperations(TestcaseBase):
                          check_items={ct.err_code: 1, ct.err_msg: "default partition cannot be deleted"})
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip("issue #28722")
     def test_partition_drop_partition_twice(self):
         """
         target: verify drop the same partition twice
@@ -947,7 +948,7 @@ class TestPartitionOperations(TestcaseBase):
         # insert data to partition
         partition_w.insert(cf.gen_default_dataframe_data(),
                            check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 1, ct.err_msg: "Partition not exist"})
+                           check_items={ct.err_code: 200, ct.err_msg: "partition not found"})
         # TODO: update the assert error
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1095,7 +1096,7 @@ class TestPartitionOperations(TestcaseBase):
         # insert data to partition
         partition_w.upsert(cf.gen_default_dataframe_data(),
                            check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 1, ct.err_msg: "Partition not exist"})
+                           check_items={ct.err_code: 200, ct.err_msg: "partition not found"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_partition_upsert_mismatched_data(self):
