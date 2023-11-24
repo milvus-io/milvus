@@ -113,8 +113,6 @@ using ScalarIndexSortPtr = std::unique_ptr<ScalarIndexSort<T>>;
 
 }  // namespace milvus::index
 
-#include "index/ScalarIndexSort-inl.h"
-
 namespace milvus::index {
 template <typename T>
 inline ScalarIndexSortPtr<T>

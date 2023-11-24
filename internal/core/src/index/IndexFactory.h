@@ -27,6 +27,10 @@
 #include "index/IndexInfo.h"
 #include "storage/Types.h"
 #include "storage/FileManager.h"
+#include "index/StringIndexMarisa.h"
+#include "index/ScalarIndexSort.h"
+#include "index/StringIndexMarisa.h"
+#include "index/BoolIndex.h"
 
 namespace milvus::index {
 
@@ -69,6 +73,9 @@ class IndexFactory {
                           storage::FileManagerContext());
 };
 
+template <>
+ScalarIndexPtr<std::string>
+IndexFactory::CreateScalarIndex<std::string>(
+    const IndexType& index_type,
+    const storage::FileManagerContext& file_manager_context);
 }  // namespace milvus::index
-
-#include "index/IndexFactory-inl.h"

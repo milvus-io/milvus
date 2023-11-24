@@ -212,7 +212,6 @@ func (s *BulkInsertSuite) TestBulkInsert() {
 }
 
 func TestBulkInsert(t *testing.T) {
-	t.Skip("Skip integration test, need to refactor integration test framework")
 	suite.Run(t, new(BulkInsertSuite))
 }
 
@@ -260,7 +259,6 @@ func GenerateNumpyFile(filePath string, rowCount int, dType schemapb.DataType, t
 }
 
 func TestGenerateNumpyFile(t *testing.T) {
-	t.Skip("Skip integration test, need to refactor integration test framework")
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
 	require.NoError(t, err)
 	err = GenerateNumpyFile(TempFilesPath+"embeddings.npy", 100, schemapb.DataType_FloatVector, []*commonpb.KeyValuePair{

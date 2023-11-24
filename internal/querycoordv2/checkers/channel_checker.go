@@ -34,6 +34,7 @@ import (
 
 // TODO(sunby): have too much similar codes with SegmentChecker
 type ChannelChecker struct {
+	*checkerActivation
 	meta      *meta.Meta
 	dist      *meta.DistributionManager
 	targetMgr *meta.TargetManager
@@ -47,14 +48,15 @@ func NewChannelChecker(
 	balancer balance.Balance,
 ) *ChannelChecker {
 	return &ChannelChecker{
-		meta:      meta,
-		dist:      dist,
-		targetMgr: targetMgr,
-		balancer:  balancer,
+		checkerActivation: newCheckerActivation(),
+		meta:              meta,
+		dist:              dist,
+		targetMgr:         targetMgr,
+		balancer:          balancer,
 	}
 }
 
-func (c *ChannelChecker) ID() task.Source {
+func (c *ChannelChecker) ID() checkerType {
 	return channelChecker
 }
 
@@ -70,6 +72,9 @@ func (c *ChannelChecker) readyToCheck(collectionID int64) bool {
 }
 
 func (c *ChannelChecker) Check(ctx context.Context) []task.Task {
+	if !c.IsActive() {
+		return nil
+	}
 	collectionIDs := c.meta.CollectionManager.GetAll()
 	tasks := make([]task.Task, 0)
 	for _, cid := range collectionIDs {

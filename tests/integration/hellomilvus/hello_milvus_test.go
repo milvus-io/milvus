@@ -40,7 +40,7 @@ type HelloMilvusSuite struct {
 }
 
 func (s *HelloMilvusSuite) TestHelloMilvus() {
-	ctx, cancel := context.WithCancel(s.Cluster.GetContext())
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c := s.Cluster
 
@@ -156,6 +156,5 @@ func (s *HelloMilvusSuite) TestHelloMilvus() {
 }
 
 func TestHelloMilvus(t *testing.T) {
-	t.Skip("Skip integration test, need to refactor integration test framework")
 	suite.Run(t, new(HelloMilvusSuite))
 }

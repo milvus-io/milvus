@@ -23,6 +23,12 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 )
 
+const (
+	// NullSegment means the segment id to discard
+	// happens when segment compacted to 0 lines and target segment is dropped directly
+	NullSegment = int64(-1)
+)
+
 type SegmentInfo struct {
 	segmentID        int64
 	partitionID      int64
@@ -37,6 +43,7 @@ type SegmentInfo struct {
 	compactTo        int64
 	importing        bool
 	level            datapb.SegmentLevel
+	syncingTasks     int32
 }
 
 func (s *SegmentInfo) SegmentID() int64 {
@@ -101,6 +108,7 @@ func (s *SegmentInfo) Clone() *SegmentInfo {
 		compactTo:        s.compactTo,
 		level:            s.level,
 		importing:        s.importing,
+		syncingTasks:     s.syncingTasks,
 	}
 }
 

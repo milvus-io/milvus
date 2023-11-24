@@ -217,3 +217,13 @@ func mergeFieldBinlogs(currentBinlogs []*datapb.FieldBinlog, newBinlogs []*datap
 	}
 	return currentBinlogs
 }
+
+func calculateL0SegmentSize(fields []*datapb.FieldBinlog) float64 {
+	size := int64(0)
+	for _, field := range fields {
+		for _, binlog := range field.GetBinlogs() {
+			size += binlog.GetLogSize()
+		}
+	}
+	return float64(size)
+}

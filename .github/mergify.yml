@@ -374,7 +374,7 @@ pull_request_rules:
         - base=master
         - base~=^2\.3(\.\d+){0,1}$
       - or:
-        - '-title~=^(feat:|enhance:|fix:|test:|doc:)'
+        - '-title~=^(feat:|enhance:|fix:|test:|doc:|auto:|\[automated\])'
         - body=^$
     actions:
       label:
@@ -394,6 +394,7 @@ pull_request_rules:
             - `enhance:` for improvements to existing functionality.
             - `test`: for add tests to existing functionality.
             - `doc`: for modifying documentation.
+            - `auto`: for the pull request from bot.
 
           2. **Description Requirement:** The PR must include a non-empty description, detailing the changes and their impact.
 
@@ -417,7 +418,7 @@ pull_request_rules:
       - or:
         - base=master
         - base~=^2\.3(\.\d+){0,1}$
-      - 'title~=^(feat:|enhance:|fix:|test:|doc:)'
+      - 'title~=^(feat:|enhance:|fix:|test:|doc:|auto:|\[automated\])'
       - '-body=^$'
       - 'label=do-not-merge/invalid-pr-format'
     actions:

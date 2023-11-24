@@ -218,8 +218,10 @@ type commonConfig struct {
 	LockSlowLogInfoThreshold ParamItem `refreshable:"true"`
 	LockSlowLogWarnThreshold ParamItem `refreshable:"true"`
 
-	TTMsgEnabled ParamItem `refreshable:"true"`
-	TraceLogMode ParamItem `refreshable:"true"`
+	StorageScheme   ParamItem `refreshable:"false"`
+	EnableStorageV2 ParamItem `refreshable:"false"`
+	TTMsgEnabled    ParamItem `refreshable:"true"`
+	TraceLogMode    ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -235,8 +237,14 @@ func (p *commonConfig) init(base *BaseTable) {
 	}
 	p.ClusterPrefix.Init(base.mgr)
 
+	pulsarPartitionKeyword := "-partition-"
 	chanNamePrefix := func(prefix string) string {
-		return strings.Join([]string{p.ClusterPrefix.GetValue(), prefix}, "-")
+		str := strings.Join([]string{p.ClusterPrefix.GetValue(), prefix}, "-")
+		if strings.Contains(str, pulsarPartitionKeyword) {
+			// there is a bug in pulsar client go, please refer to https://github.com/milvus-io/milvus/issues/28675
+			panic("channel name can not contains '-partition-'")
+		}
+		return str
 	}
 
 	// --- rootcoord ---
@@ -626,6 +634,20 @@ like the old password verification when updating the credential`,
 		Export:       true,
 	}
 	p.LockSlowLogWarnThreshold.Init(base.mgr)
+
+	p.EnableStorageV2 = ParamItem{
+		Key:          "common.storage.enablev2",
+		Version:      "2.3.1",
+		DefaultValue: "false",
+	}
+	p.EnableStorageV2.Init(base.mgr)
+
+	p.StorageScheme = ParamItem{
+		Key:          "common.storage.scheme",
+		Version:      "2.3.4",
+		DefaultValue: "s3",
+	}
+	p.StorageScheme.Init(base.mgr)
 
 	p.TTMsgEnabled = ParamItem{
 		Key:          "common.ttMsgEnabled",
@@ -1509,7 +1531,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.CheckHealthRPCTimeout = ParamItem{
 		Key:          "queryCoord.checkHealthRPCTimeout",
 		Version:      "2.2.7",
-		DefaultValue: "100",
+		DefaultValue: "2000",
 		PanicIfEmpty: true,
 		Doc:          "100ms, the timeout of check health rpc to query node",
 		Export:       true,

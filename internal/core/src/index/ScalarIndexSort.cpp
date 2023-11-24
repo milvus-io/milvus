@@ -26,11 +26,12 @@
 #include "common/Slice.h"
 #include "common/Types.h"
 #include "index/Utils.h"
+#include "index/ScalarIndexSort.h"
 
 namespace milvus::index {
 
 template <typename T>
-inline ScalarIndexSort<T>::ScalarIndexSort(
+ScalarIndexSort<T>::ScalarIndexSort(
     const storage::FileManagerContext& file_manager_context)
     : is_built_(false), data_() {
     if (file_manager_context.Valid()) {
@@ -41,7 +42,7 @@ inline ScalarIndexSort<T>::ScalarIndexSort(
 }
 
 template <typename T>
-inline void
+void
 ScalarIndexSort<T>::Build(const Config& config) {
     if (is_built_)
         return;
@@ -81,7 +82,7 @@ ScalarIndexSort<T>::Build(const Config& config) {
 }
 
 template <typename T>
-inline void
+void
 ScalarIndexSort<T>::Build(size_t n, const T* values) {
     if (is_built_)
         return;
@@ -103,7 +104,7 @@ ScalarIndexSort<T>::Build(size_t n, const T* values) {
 }
 
 template <typename T>
-inline BinarySet
+BinarySet
 ScalarIndexSort<T>::Serialize(const Config& config) {
     AssertInfo(is_built_, "index has not been built");
 
@@ -125,7 +126,7 @@ ScalarIndexSort<T>::Serialize(const Config& config) {
 }
 
 template <typename T>
-inline BinarySet
+BinarySet
 ScalarIndexSort<T>::Upload(const Config& config) {
     auto binary_set = Serialize(config);
     file_manager_->AddFile(binary_set);
@@ -140,7 +141,7 @@ ScalarIndexSort<T>::Upload(const Config& config) {
 }
 
 template <typename T>
-inline void
+void
 ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
                                         const Config& config) {
     size_t index_size;
@@ -158,14 +159,14 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
 }
 
 template <typename T>
-inline void
+void
 ScalarIndexSort<T>::Load(const BinarySet& index_binary, const Config& config) {
     milvus::Assemble(const_cast<BinarySet&>(index_binary));
     LoadWithoutAssemble(index_binary, config);
 }
 
 template <typename T>
-inline void
+void
 ScalarIndexSort<T>::Load(const Config& config) {
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
@@ -186,7 +187,7 @@ ScalarIndexSort<T>::Load(const Config& config) {
 }
 
 template <typename T>
-inline const TargetBitmap
+const TargetBitmap
 ScalarIndexSort<T>::In(const size_t n, const T* values) {
     AssertInfo(is_built_, "index has not been built");
     TargetBitmap bitset(data_.size());
@@ -208,7 +209,7 @@ ScalarIndexSort<T>::In(const size_t n, const T* values) {
 }
 
 template <typename T>
-inline const TargetBitmap
+const TargetBitmap
 ScalarIndexSort<T>::NotIn(const size_t n, const T* values) {
     AssertInfo(is_built_, "index has not been built");
     TargetBitmap bitset(data_.size(), true);
@@ -230,7 +231,7 @@ ScalarIndexSort<T>::NotIn(const size_t n, const T* values) {
 }
 
 template <typename T>
-inline const TargetBitmap
+const TargetBitmap
 ScalarIndexSort<T>::Range(const T value, const OpType op) {
     AssertInfo(is_built_, "index has not been built");
     TargetBitmap bitset(data_.size());
@@ -267,7 +268,7 @@ ScalarIndexSort<T>::Range(const T value, const OpType op) {
 }
 
 template <typename T>
-inline const TargetBitmap
+const TargetBitmap
 ScalarIndexSort<T>::Range(T lower_bound_value,
                           bool lb_inclusive,
                           T upper_bound_value,
@@ -305,7 +306,7 @@ ScalarIndexSort<T>::Range(T lower_bound_value,
 }
 
 template <typename T>
-inline T
+T
 ScalarIndexSort<T>::Reverse_Lookup(size_t idx) const {
     AssertInfo(idx < idx_to_offsets_.size(), "out of range of total count");
     AssertInfo(is_built_, "index has not been built");
@@ -315,7 +316,7 @@ ScalarIndexSort<T>::Reverse_Lookup(size_t idx) const {
 }
 
 template <typename T>
-inline bool
+bool
 ScalarIndexSort<T>::ShouldSkip(const T lower_value,
                                const T upper_value,
                                const milvus::OpType op) {
@@ -357,4 +358,12 @@ ScalarIndexSort<T>::ShouldSkip(const T lower_value,
     return true;
 }
 
+template class ScalarIndexSort<bool>;
+template class ScalarIndexSort<int8_t>;
+template class ScalarIndexSort<int16_t>;
+template class ScalarIndexSort<int32_t>;
+template class ScalarIndexSort<int64_t>;
+template class ScalarIndexSort<float>;
+template class ScalarIndexSort<double>;
+template class ScalarIndexSort<std::string>;
 }  // namespace milvus::index

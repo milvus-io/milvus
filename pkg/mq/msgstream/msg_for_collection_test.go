@@ -60,6 +60,8 @@ func TestFlushMsg(t *testing.T) {
 	assert.EqualValues(t, 200, newMsg.ID())
 	assert.EqualValues(t, 1000, newMsg.BeginTs())
 	assert.EqualValues(t, 1000, newMsg.EndTs())
+	assert.EqualValues(t, 2, len(newMsg.(*FlushMsg).CollectionNames))
+	assert.EqualValues(t, "unit_db", newMsg.(*FlushMsg).DbName)
 
 	assert.True(t, msg.Size() > 0)
 }
@@ -97,6 +99,8 @@ func TestLoadCollection(t *testing.T) {
 	assert.EqualValues(t, 200, newMsg.ID())
 	assert.EqualValues(t, 1000, newMsg.BeginTs())
 	assert.EqualValues(t, 1000, newMsg.EndTs())
+	assert.EqualValues(t, "unit_db", newMsg.(*LoadCollectionMsg).DbName)
+	assert.EqualValues(t, "col1", newMsg.(*LoadCollectionMsg).CollectionName)
 
 	assert.True(t, msg.Size() > 0)
 }
@@ -134,6 +138,8 @@ func TestReleaseCollection(t *testing.T) {
 	assert.EqualValues(t, 200, newMsg.ID())
 	assert.EqualValues(t, 1000, newMsg.BeginTs())
 	assert.EqualValues(t, 1000, newMsg.EndTs())
+	assert.EqualValues(t, "unit_db", newMsg.(*ReleaseCollectionMsg).DbName)
+	assert.EqualValues(t, "col1", newMsg.(*ReleaseCollectionMsg).CollectionName)
 
 	assert.True(t, msg.Size() > 0)
 }

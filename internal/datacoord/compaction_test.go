@@ -23,11 +23,9 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -40,172 +38,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
-
-func TestSchedulerSuite(t *testing.T) {
-	suite.Run(t, new(SchedulerSuite))
-}
-
-type SchedulerSuite struct {
-	suite.Suite
-	scheduler *scheduler
-}
-
-func (s *SchedulerSuite) SetupTest() {
-	s.scheduler = newScheduler()
-	s.scheduler.parallelTasks = map[int64][]*compactionTask{
-		100: {
-			{dataNodeID: 100, plan: &datapb.CompactionPlan{PlanID: 1, Channel: "ch-1", Type: datapb.CompactionType_MinorCompaction}},
-			{dataNodeID: 100, plan: &datapb.CompactionPlan{PlanID: 2, Channel: "ch-1", Type: datapb.CompactionType_MinorCompaction}},
-		},
-		101: {
-			{dataNodeID: 101, plan: &datapb.CompactionPlan{PlanID: 3, Channel: "ch-2", Type: datapb.CompactionType_MinorCompaction}},
-		},
-		102: {
-			{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 4, Channel: "ch-3", Type: datapb.CompactionType_Level0DeleteCompaction}},
-		},
-	}
-	s.scheduler.taskNumber.Add(4)
-}
-
-func (s *SchedulerSuite) TestScheduleEmpty() {
-	emptySch := newScheduler()
-
-	tasks := emptySch.schedule()
-	s.Empty(tasks)
-
-	s.Equal(0, emptySch.getExecutingTaskNum())
-	s.Empty(emptySch.queuingTasks)
-	s.Empty(emptySch.parallelTasks)
-}
-
-func (s *SchedulerSuite) TestScheduleParallelTaskFull() {
-	// dataNode 100's paralleTasks is full
-	tests := []struct {
-		description string
-		tasks       []*compactionTask
-		expectedOut []UniqueID // planID
-	}{
-		{"with L0 tasks", []*compactionTask{
-			{dataNodeID: 100, plan: &datapb.CompactionPlan{PlanID: 10, Channel: "ch-10", Type: datapb.CompactionType_Level0DeleteCompaction}},
-			{dataNodeID: 100, plan: &datapb.CompactionPlan{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MinorCompaction}},
-		}, []UniqueID{}},
-		{"without L0 tasks", []*compactionTask{
-			{dataNodeID: 100, plan: &datapb.CompactionPlan{PlanID: 10, Channel: "ch-10", Type: datapb.CompactionType_MinorCompaction}},
-			{dataNodeID: 100, plan: &datapb.CompactionPlan{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MinorCompaction}},
-		}, []UniqueID{}},
-		{"empty tasks", []*compactionTask{}, []UniqueID{}},
-	}
-
-	for _, test := range tests {
-		s.Run(test.description, func() {
-			s.SetupTest()
-			s.Require().Equal(4, s.scheduler.getExecutingTaskNum())
-
-			// submit the testing tasks
-			s.scheduler.submit(test.tasks...)
-			s.Equal(4+len(test.tasks), s.scheduler.getExecutingTaskNum())
-
-			gotTasks := s.scheduler.schedule()
-			s.Equal(test.expectedOut, lo.Map(gotTasks, func(t *compactionTask, _ int) int64 {
-				return t.plan.PlanID
-			}))
-		})
-	}
-}
-
-func (s *SchedulerSuite) TestScheduleNodeWith1ParallelTask() {
-	// dataNode 101's paralleTasks has 1 task running, not L0 task
-	tests := []struct {
-		description string
-		tasks       []*compactionTask
-		expectedOut []UniqueID // planID
-	}{
-		{"with L0 tasks diff channel", []*compactionTask{
-			{dataNodeID: 101, plan: &datapb.CompactionPlan{PlanID: 10, Channel: "ch-10", Type: datapb.CompactionType_Level0DeleteCompaction}},
-			{dataNodeID: 101, plan: &datapb.CompactionPlan{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MinorCompaction}},
-		}, []UniqueID{10}},
-		{"with L0 tasks same channel", []*compactionTask{
-			{dataNodeID: 101, plan: &datapb.CompactionPlan{PlanID: 10, Channel: "ch-2", Type: datapb.CompactionType_Level0DeleteCompaction}},
-			{dataNodeID: 101, plan: &datapb.CompactionPlan{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MinorCompaction}},
-		}, []UniqueID{11}},
-		{"without L0 tasks", []*compactionTask{
-			{dataNodeID: 101, plan: &datapb.CompactionPlan{PlanID: 14, Channel: "ch-2", Type: datapb.CompactionType_MinorCompaction}},
-			{dataNodeID: 101, plan: &datapb.CompactionPlan{PlanID: 13, Channel: "ch-11", Type: datapb.CompactionType_MinorCompaction}},
-		}, []UniqueID{14}},
-		{"empty tasks", []*compactionTask{}, []UniqueID{}},
-	}
-
-	for _, test := range tests {
-		s.Run(test.description, func() {
-			s.SetupTest()
-			s.Require().Equal(4, s.scheduler.getExecutingTaskNum())
-
-			// submit the testing tasks
-			s.scheduler.submit(test.tasks...)
-			s.Equal(4+len(test.tasks), s.scheduler.getExecutingTaskNum())
-
-			gotTasks := s.scheduler.schedule()
-			s.Equal(test.expectedOut, lo.Map(gotTasks, func(t *compactionTask, _ int) int64 {
-				return t.plan.PlanID
-			}))
-
-			// the second schedule returns empty for full paralleTasks
-			gotTasks = s.scheduler.schedule()
-			s.Empty(gotTasks)
-
-			s.Equal(4+len(test.tasks), s.scheduler.getExecutingTaskNum())
-		})
-	}
-}
-
-func (s *SchedulerSuite) TestScheduleNodeWithL0Executing() {
-	// dataNode 102's paralleTasks has running L0 tasks
-	// nothing of the same channel will be able to schedule
-	tests := []struct {
-		description string
-		tasks       []*compactionTask
-		expectedOut []UniqueID // planID
-	}{
-		{"with L0 tasks diff channel", []*compactionTask{
-			{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 10, Channel: "ch-10", Type: datapb.CompactionType_Level0DeleteCompaction}},
-			{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MinorCompaction}},
-		}, []UniqueID{10}},
-		{"with L0 tasks same channel", []*compactionTask{
-			{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 10, Channel: "ch-3", Type: datapb.CompactionType_Level0DeleteCompaction}},
-			{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MinorCompaction}},
-			{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 13, Channel: "ch-3", Type: datapb.CompactionType_MinorCompaction}},
-		}, []UniqueID{11}},
-		{"without L0 tasks", []*compactionTask{
-			{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 14, Channel: "ch-3", Type: datapb.CompactionType_MinorCompaction}},
-			{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 13, Channel: "ch-11", Type: datapb.CompactionType_MinorCompaction}},
-		}, []UniqueID{13}},
-		{"empty tasks", []*compactionTask{}, []UniqueID{}},
-	}
-
-	for _, test := range tests {
-		s.Run(test.description, func() {
-			s.SetupTest()
-			s.Require().Equal(4, s.scheduler.getExecutingTaskNum())
-
-			// submit the testing tasks
-			s.scheduler.submit(test.tasks...)
-			s.Equal(4+len(test.tasks), s.scheduler.getExecutingTaskNum())
-
-			gotTasks := s.scheduler.schedule()
-			s.Equal(test.expectedOut, lo.Map(gotTasks, func(t *compactionTask, _ int) int64 {
-				return t.plan.PlanID
-			}))
-
-			// the second schedule returns empty for full paralleTasks
-			if len(gotTasks) > 0 {
-				gotTasks = s.scheduler.schedule()
-				s.Empty(gotTasks)
-			}
-
-			s.Equal(4+len(test.tasks), s.scheduler.getExecutingTaskNum())
-		})
-	}
-}
 
 func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 	type fields struct {
@@ -284,7 +116,7 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 				sessions:  tt.fields.sessions,
 				chManager: tt.fields.chManager,
 				allocator: tt.fields.allocatorFactory(),
-				scheduler: newScheduler(),
+				scheduler: NewCompactionScheduler(),
 			}
 			Params.Save(Params.DataCoordCfg.CompactionCheckIntervalInSeconds.Key, "1")
 			c.start()
@@ -334,7 +166,7 @@ func Test_compactionPlanHandler_execWithParallels(t *testing.T) {
 			},
 		},
 		allocator: newMockAllocator(),
-		scheduler: newScheduler(),
+		scheduler: NewCompactionScheduler(),
 	}
 
 	signal := &compactionSignal{id: 100}
@@ -651,7 +483,7 @@ func TestCompactionPlanHandler_completeCompaction(t *testing.T) {
 			plans:     plans,
 			sessions:  sessions,
 			meta:      meta,
-			scheduler: newScheduler(),
+			scheduler: NewCompactionScheduler(),
 		}
 
 		err := c.completeCompaction(&compactionResult)
@@ -751,7 +583,7 @@ func TestCompactionPlanHandler_completeCompaction(t *testing.T) {
 			plans:     plans,
 			sessions:  sessions,
 			meta:      meta,
-			scheduler: newScheduler(),
+			scheduler: NewCompactionScheduler(),
 		}
 
 		err := c.completeCompaction(&compactionResult)
@@ -933,7 +765,7 @@ func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 				plans:     tt.fields.plans,
 				sessions:  tt.fields.sessions,
 				meta:      tt.fields.meta,
-				scheduler: newScheduler(),
+				scheduler: NewCompactionScheduler(),
 			}
 
 			err := c.updateCompaction(tt.args.ts)
@@ -987,7 +819,7 @@ func Test_newCompactionPlanHandler(t *testing.T) {
 				chManager: &ChannelManager{},
 				meta:      &meta{},
 				allocator: newMockAllocator(),
-				scheduler: newScheduler(),
+				scheduler: NewCompactionScheduler(),
 			},
 		},
 	}

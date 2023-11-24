@@ -82,14 +82,18 @@ func (t *SyncTask) Run() error {
 	log := t.getLogger()
 	var err error
 
-	infos := t.metacache.GetSegmentsBy(metacache.WithSegmentIDs(t.segmentID))
-	if len(infos) == 0 {
+	segment, has := t.metacache.GetSegmentByID(t.segmentID)
+	if !has {
 		log.Warn("failed to sync data, segment not found in metacache")
 		t.handleError(err)
 		return merr.WrapErrSegmentNotFound(t.segmentID)
 	}
 
-	segment := infos[0]
+	if segment.CompactTo() == metacache.NullSegment {
+		log.Info("segment compacted to zero-length segment, discard sync task")
+		return nil
+	}
+
 	if segment.CompactTo() > 0 {
 		log.Info("syncing segment compacted, update segment id", zap.Int64("compactTo", segment.CompactTo()))
 		// update sync task segment id
@@ -137,7 +141,7 @@ func (t *SyncTask) Run() error {
 
 	t.metacache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(t.segmentID))
 
-	log.Warn("task done")
+	log.Info("task done")
 	return nil
 }
 
@@ -370,4 +374,20 @@ func (t *SyncTask) getInCodec() *storage.InsertCodec {
 	}
 
 	return storage.NewInsertCodecWithSchema(meta)
+}
+
+func (t *SyncTask) SegmentID() int64 {
+	return t.segmentID
+}
+
+func (t *SyncTask) Checkpoint() *msgpb.MsgPosition {
+	return t.checkpoint
+}
+
+func (t *SyncTask) StartPosition() *msgpb.MsgPosition {
+	return t.startPosition
+}
+
+func (t *SyncTask) ChannelName() string {
+	return t.channelName
 }

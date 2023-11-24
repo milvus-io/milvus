@@ -115,14 +115,12 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 
 	segmentIDs := req.GetSegmentIDs()
 	log = log.With(
+		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.String("channelName", req.GetChannelName()),
 		zap.Int64s("segmentIDs", segmentIDs),
 	)
 
-	log.Info("receiving FlushSegments request",
-		zap.Int64("collectionID", req.GetCollectionID()),
-		zap.Int64s("sealedSegments", req.GetSegmentIDs()),
-	)
+	log.Info("receiving FlushSegments request")
 
 	err := node.writeBufferManager.FlushSegments(ctx, req.GetChannelName(), segmentIDs)
 	if err != nil {
@@ -131,9 +129,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 	}
 
 	// Log success flushed segments.
-	log.Info("sending segments to WriteBuffer Manager",
-		zap.Int64("collectionID", req.GetCollectionID()),
-		zap.Int64s("sealedSegments", req.GetSegmentIDs()))
+	log.Info("sending segments to WriteBuffer Manager")
 
 	metrics.DataNodeFlushReqCounter.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()),
@@ -325,8 +321,6 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		return merr.Status(err), nil
 	}
 	bfs := metacache.NewBloomFilterSet(pks...)
-	ds.fg.Blockall()
-	defer ds.fg.Unblock()
 	ds.metacache.CompactSegments(req.GetCompactedTo(), req.GetPartitionId(), req.GetNumOfRows(), bfs, req.GetCompactedFrom()...)
 	node.compactionExecutor.injectDone(req.GetPlanID(), true)
 	return merr.Success(), nil
@@ -718,8 +712,6 @@ func saveSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest, res *rootcoo
 				RowNum:       rowCount,
 				SaveBinlogPathReq: &datapb.SaveBinlogPathsRequest{
 					Base: commonpbutil.NewMsgBase(
-						commonpbutil.WithMsgType(0),
-						commonpbutil.WithMsgID(0),
 						commonpbutil.WithTimeStamp(ts),
 						commonpbutil.WithSourceID(paramtable.GetNodeID()),
 					),

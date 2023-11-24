@@ -446,6 +446,12 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		return merr.Status(err), nil
 	}
 
+	// check index
+	if len(req.GetIndexInfoList()) == 0 {
+		err := merr.WrapErrIndexNotFoundForCollection(req.GetSchema().GetName())
+		return merr.Status(err), nil
+	}
+
 	// Delegates request to workers
 	if req.GetNeedTransfer() {
 		delegator, ok := node.delegators.Get(segment.GetInsertChannel())

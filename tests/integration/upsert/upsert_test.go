@@ -159,6 +159,5 @@ func (s *UpsertSuite) TestUpsert() {
 }
 
 func TestUpsert(t *testing.T) {
-	t.Skip("Skip integration test, need to refactor integration test framework")
 	suite.Run(t, new(UpsertSuite))
 }

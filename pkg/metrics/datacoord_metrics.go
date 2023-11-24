@@ -59,6 +59,7 @@ var (
 			Help:      "number of segments",
 		}, []string{
 			segmentStateLabelName,
+			segmentLevelLabelName,
 		})
 
 	// DataCoordCollectionNum records the num of collections managed by DataCoord.
@@ -68,6 +69,22 @@ var (
 			Subsystem: typeutil.DataCoordRole,
 			Name:      "collection_num",
 			Help:      "number of collections",
+		}, []string{})
+
+	DataCoordSizeStoredL0Segment = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "store_l0_segment_size",
+			Help:      "stored l0 segment size",
+		}, []string{})
+
+	DataCoordRateStoredL0Segment = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "store_l0_segment_rate",
+			Help:      "stored l0 segment rate",
 		}, []string{})
 
 	DataCoordNumStoredRows = prometheus.NewGaugeVec(
@@ -254,6 +271,8 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DataCoordSegmentBinLogFileCount)
 	registry.MustRegister(DataCoordDmlChannelNum)
 	registry.MustRegister(DataCoordCompactedSegmentSize)
+	registry.MustRegister(DataCoordSizeStoredL0Segment)
+	registry.MustRegister(DataCoordRateStoredL0Segment)
 	registry.MustRegister(FlushedSegmentFileNum)
 	registry.MustRegister(IndexRequestCounter)
 	registry.MustRegister(IndexTaskNum)

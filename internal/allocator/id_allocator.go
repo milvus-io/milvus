@@ -93,7 +93,6 @@ func (ia *IDAllocator) syncID() (bool, error) {
 	req := &rootcoordpb.AllocIDRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_RequestID),
-			commonpbutil.WithMsgID(0),
 			commonpbutil.WithSourceID(ia.PeerID),
 		),
 		Count: need,

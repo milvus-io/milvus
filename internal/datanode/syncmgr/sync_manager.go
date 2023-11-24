@@ -38,7 +38,7 @@ type SyncMeta struct {
 // it processes the sync tasks inside and changes the meta.
 type SyncManager interface {
 	// SyncData is the method to submit sync task.
-	SyncData(ctx context.Context, task *SyncTask) *conc.Future[error]
+	SyncData(ctx context.Context, task Task) *conc.Future[error]
 	// GetEarliestPosition returns the earliest position (normally start position) of the processing sync task of provided channel.
 	GetEarliestPosition(channel string) *msgpb.MsgPosition
 	// Block allows caller to block tasks of provided segment id.
@@ -54,7 +54,7 @@ type syncManager struct {
 	chunkManager storage.ChunkManager
 	allocator    allocator.Interface
 
-	tasks *typeutil.ConcurrentMap[string, *SyncTask]
+	tasks *typeutil.ConcurrentMap[string, Task]
 }
 
 func NewSyncManager(parallelTask int, chunkManager storage.ChunkManager, allocator allocator.Interface) (SyncManager, error) {
@@ -65,19 +65,24 @@ func NewSyncManager(parallelTask int, chunkManager storage.ChunkManager, allocat
 		keyLockDispatcher: newKeyLockDispatcher[int64](parallelTask),
 		chunkManager:      chunkManager,
 		allocator:         allocator,
-		tasks:             typeutil.NewConcurrentMap[string, *SyncTask](),
+		tasks:             typeutil.NewConcurrentMap[string, Task](),
 	}, nil
 }
 
-func (mgr syncManager) SyncData(ctx context.Context, task *SyncTask) *conc.Future[error] {
-	task.WithAllocator(mgr.allocator).WithChunkManager(mgr.chunkManager)
+func (mgr syncManager) SyncData(ctx context.Context, task Task) *conc.Future[error] {
+	switch t := task.(type) {
+	case *SyncTask:
+		t.WithAllocator(mgr.allocator).WithChunkManager(mgr.chunkManager)
+	case *SyncTaskV2:
+		t.WithAllocator(mgr.allocator)
+	}
 
-	taskKey := fmt.Sprintf("%d-%d", task.segmentID, task.checkpoint.GetTimestamp())
+	taskKey := fmt.Sprintf("%d-%d", task.SegmentID(), task.Checkpoint().GetTimestamp())
 	mgr.tasks.Insert(taskKey, task)
 
 	// make sync for same segment execute in sequence
 	// if previous sync task is not finished, block here
-	return mgr.Submit(task.segmentID, task, func(err error) {
+	return mgr.Submit(task.SegmentID(), task, func(err error) {
 		// remove task from records
 		mgr.tasks.Remove(taskKey)
 	})
@@ -85,13 +90,13 @@ func (mgr syncManager) SyncData(ctx context.Context, task *SyncTask) *conc.Futur
 
 func (mgr syncManager) GetEarliestPosition(channel string) *msgpb.MsgPosition {
 	var cp *msgpb.MsgPosition
-	mgr.tasks.Range(func(_ string, task *SyncTask) bool {
-		if task.startPosition == nil {
+	mgr.tasks.Range(func(_ string, task Task) bool {
+		if task.StartPosition() == nil {
 			return true
 		}
-		if task.channelName == channel {
-			if cp == nil || task.startPosition.GetTimestamp() < cp.GetTimestamp() {
-				cp = task.startPosition
+		if task.ChannelName() == channel {
+			if cp == nil || task.StartPosition().GetTimestamp() < cp.GetTimestamp() {
+				cp = task.StartPosition()
 			}
 		}
 		return true
