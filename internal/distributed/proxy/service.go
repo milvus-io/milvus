@@ -338,14 +338,14 @@ func (s *Server) startInternalGrpc(grpcPort int, errChan chan error) {
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
 
-	log.Debug("Proxy internal server listen on tcp", zap.Int("port", grpcPort))
+	log.Info("Proxy internal server listen on tcp", zap.Int("port", grpcPort))
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
 		log.Warn("Proxy internal server failed to listen on", zap.Error(err), zap.Int("port", grpcPort))
 		errChan <- err
 		return
 	}
-	log.Debug("Proxy internal server already listen on tcp", zap.Int("port", grpcPort))
+	log.Info("Proxy internal server already listen on tcp", zap.Int("port", grpcPort))
 
 	opts := tracer.GetInterceptorOpts()
 	s.grpcInternalServer = grpc.NewServer(
@@ -377,7 +377,7 @@ func (s *Server) startInternalGrpc(grpcPort int, errChan chan error) {
 	grpc_health_v1.RegisterHealthServer(s.grpcInternalServer, s)
 	errChan <- nil
 
-	log.Debug("create Proxy internal grpc server",
+	log.Info("create Proxy internal grpc server",
 		zap.Any("enforcement policy", kaep),
 		zap.Any("server parameters", kasp))
 
