@@ -158,8 +158,10 @@ func (m *DeltaBufferManager) Delete(segID UniqueID) {
 }
 
 func (m *DeltaBufferManager) popHeapItem() *Item {
-	m.heapGuard.Lock()
-	defer m.heapGuard.Unlock()
+	if m.delBufHeap.Len() == 0 {
+		return nil
+	}
+
 	return heap.Pop(m.delBufHeap).(*Item)
 }
 
@@ -172,26 +174,32 @@ func (m *DeltaBufferManager) ShouldFlushSegments() []UniqueID {
 	var (
 		poppedSegmentIDs []UniqueID
 		poppedItems      []*Item
+		bufferSize       int64
 	)
-	for {
+	m.heapGuard.Lock()
+	for memUsage-bufferSize >= Params.DataNodeCfg.FlushDeleteBufferBytes {
 		segItem := m.popHeapItem()
-		poppedItems = append(poppedItems, segItem)
-		poppedSegmentIDs = append(poppedSegmentIDs, segItem.segmentID)
-		memUsage -= segItem.memorySize
-		if memUsage < Params.DataNodeCfg.FlushDeleteBufferBytes {
+		// all items popped
+		if segItem == nil {
 			break
 		}
+		poppedItems = append(poppedItems, segItem)
+		poppedSegmentIDs = append(poppedSegmentIDs, segItem.segmentID)
+		bufferSize += segItem.memorySize
 	}
 
 	//here we push all selected segment back into the heap
 	//in order to keep the heap semantically correct
-	m.heapGuard.Lock()
 	for _, segMem := range poppedItems {
 		heap.Push(m.delBufHeap, segMem)
 	}
 	m.heapGuard.Unlock()
 
-	log.Info("Add segments to sync delete buffer for stressfull memory", zap.Any("segments", poppedItems))
+	log.Info("Add segments to sync delete buffer for stressful memory",
+		zap.Int64s("segments", poppedSegmentIDs),
+		zap.Int64("deleteBufferSize", bufferSize),
+		zap.Int64("memUsage", memUsage),
+	)
 	return poppedSegmentIDs
 }
 
