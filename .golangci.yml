@@ -155,3 +155,6 @@ issues:
   max-issues-per-linter: 0
   # Maximum count of issues with the same text. Set to 0 to disable. Default is 3.
   max-same-issues: 0
+
+service:
+  golangci-lint-version: 1.55.2 # use the fixed version to not introduce new linters unexpectedly

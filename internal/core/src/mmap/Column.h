@@ -33,8 +33,6 @@
 
 namespace milvus {
 
-static int mmap_flags = MAP_SHARED;
-
 class ColumnBase {
  public:
     // memory mode ctor
@@ -56,7 +54,7 @@ class ColumnBase {
         data_ = static_cast<char*>(mmap(nullptr,
                                         cap_size_ + padding_,
                                         PROT_READ | PROT_WRITE,
-                                        mmap_flags | MAP_ANON,
+                                        MAP_PRIVATE | MAP_ANON,
                                         -1,
                                         0));
         AssertInfo(
@@ -77,7 +75,7 @@ class ColumnBase {
         data_ = static_cast<char*>(mmap(nullptr,
                                         cap_size_ + padding_,
                                         PROT_READ,
-                                        mmap_flags,
+                                        MAP_SHARED,
                                         file.Descriptor(),
                                         0));
         AssertInfo(data_ != MAP_FAILED,
@@ -100,7 +98,7 @@ class ColumnBase {
         data_ = static_cast<char*>(mmap(nullptr,
                                         cap_size_ + padding_,
                                         PROT_READ,
-                                        mmap_flags,
+                                        MAP_SHARED,
                                         file.Descriptor(),
                                         0));
         AssertInfo(data_ != MAP_FAILED,
@@ -191,7 +189,7 @@ class ColumnBase {
         auto data = static_cast<char*>(mmap(nullptr,
                                             new_size + padding_,
                                             PROT_READ | PROT_WRITE,
-                                            mmap_flags | MAP_ANON,
+                                            MAP_PRIVATE | MAP_ANON,
                                             -1,
                                             0));
 
