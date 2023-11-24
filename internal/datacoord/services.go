@@ -502,9 +502,15 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	log.Info("flush segment with meta", zap.Any("meta", req.GetField2BinlogPaths()))
 
 	if req.GetFlushed() {
-		s.segmentManager.DropSegment(ctx, req.SegmentID)
-		s.flushCh <- req.SegmentID
+		if req.GetSegLevel() == datapb.SegmentLevel_L0 {
+			metrics.DataCoordSizeStoredL0Segment.WithLabelValues().Observe(calculateL0SegmentSize(req.GetField2StatslogPaths()))
+			metrics.DataCoordRateStoredL0Segment.WithLabelValues().Inc()
+		} else {
+			// because segmentMananger only manage growing segment
+			s.segmentManager.DropSegment(ctx, req.SegmentID)
+		}
 
+		s.flushCh <- req.SegmentID
 		if !req.Importing && Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 			if segment == nil && req.GetSegLevel() == datapb.SegmentLevel_L0 {
 				err = s.compactionTrigger.triggerSingleCompaction(req.GetCollectionID(), req.GetPartitionID(),
