@@ -239,6 +239,31 @@ func (s *SyncTaskSuite) TestRunNormal() {
 	})
 }
 
+func (s *SyncTaskSuite) TestRunL0Segment() {
+	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil)
+	bfs := metacache.NewBloomFilterSet()
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{Level: datapb.SegmentLevel_L0}, bfs)
+	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
+	s.metacache.EXPECT().GetSegmentsBy(mock.Anything).Return([]*metacache.SegmentInfo{seg})
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
+
+	s.Run("pure_delete_l0_flush", func() {
+		task := s.getSuiteSyncTask()
+		task.WithDeleteData(s.getDeleteBuffer())
+		task.WithTimeRange(50, 100)
+		task.WithMetaWriter(BrokerMetaWriter(s.broker))
+		task.WithCheckpoint(&msgpb.MsgPosition{
+			ChannelName: s.channelName,
+			MsgID:       []byte{1, 2, 3, 4},
+			Timestamp:   100,
+		})
+		task.WithFlush()
+
+		err := task.Run()
+		s.NoError(err)
+	})
+}
+
 func (s *SyncTaskSuite) TestCompactToNull() {
 	bfs := metacache.NewBloomFilterSet()
 	fd, err := storage.NewFieldData(schemapb.DataType_Int64, &schemapb.FieldSchema{
