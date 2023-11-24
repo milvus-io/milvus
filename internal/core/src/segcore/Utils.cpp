@@ -699,6 +699,61 @@ ReverseDataFromIndex(const index::IndexBase* index,
 
     return data_array;
 }
+void
+LoadFieldDatasFromRemote2(std::shared_ptr<milvus_storage::Space> space,
+                          SchemaPtr schema,
+                          FieldDataInfo& field_data_info) {
+    LOG_SEGCORE_ERROR_ << "[remove me] start to load field data from space: "
+                       << schema->get_field_ids().size();
+
+    // log all schema ids
+    for (auto& field : schema->get_fields()) {
+        LOG_SEGCORE_ERROR_ << "[remove me] field id: "
+                           << field.second.get_id().get()
+                           << ", field name: " << field.second.get_name().get();
+    }
+    // log field data info id
+    LOG_SEGCORE_ERROR_ << "[remove me] field data info id: "
+                       << field_data_info.field_id;
+
+    auto res = space->ScanData();
+    if (!res.ok()) {
+        PanicInfo(S3Error, "failed to create scan iterator");
+    }
+    LOG_SEGCORE_ERROR_ << "[remove me] load field data from space: "
+                       << field_data_info.field_id;
+    auto reader = res.value();
+    for (auto rec = reader->Next(); rec != nullptr; rec = reader->Next()) {
+        LOG_SEGCORE_ERROR_ << "[remove me] got rec from reader: "
+                           << field_data_info.field_id << ", ok: " << res.ok();
+        if (!rec.ok()) {
+            LOG_SEGCORE_ERROR_ << "[remove me] failed to read data: "
+                               << rec.status().ToString();
+            PanicInfo(DataFormatBroken, "failed to read data");
+        }
+        auto data = rec.ValueUnsafe();
+        auto total_num_rows = data->num_rows();
+        for (auto& field : schema->get_fields()) {
+            if (field.second.get_id().get() != field_data_info.field_id) {
+                continue;
+            }
+            LOG_SEGCORE_ERROR_ << "[remove me] load field data from remote: "
+                               << field.second.get_name().get()
+                               << ", field_id:" << field.second.get_id().get()
+                               << ", nums:" << total_num_rows;
+
+            auto col_data =
+                data->GetColumnByName(field.second.get_name().get());
+            auto field_data = storage::CreateFieldData(
+                field.second.get_data_type(),
+                field.second.is_vector() ? field.second.get_dim() : 0,
+                total_num_rows);
+            field_data->FillFieldData(col_data);
+            field_data_info.channel->push(field_data);
+        }
+    }
+    field_data_info.channel->close();
+}
 // init segcore storage config first, and create default remote chunk manager
 // segcore use default remote chunk manager to load data from minio/s3
 void

@@ -25,6 +25,7 @@
 #include "storage/FieldData.h"
 #include "storage/Util.h"
 #include "mmap/Types.h"
+#include "storage/space.h"
 
 //////////////////////////////    common interfaces    //////////////////////////////
 CSegmentInterface
@@ -242,6 +243,22 @@ LoadFieldData(CSegmentInterface c_segment,
     }
 }
 
+CStatus
+LoadFieldDataV2(CSegmentInterface c_segment,
+                CLoadFieldDataInfo c_load_field_data_info) {
+    try {
+        auto segment =
+            reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        AssertInfo(segment != nullptr, "segment conversion failed");
+        LOG_SEGCORE_ERROR_ << "[remove me] load field data v2: "
+                           << segment->get_segment_id();
+        auto load_info = (LoadFieldDataInfo*)c_load_field_data_info;
+        segment->LoadFieldDataV2(*load_info);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
 // just for test
 CStatus
 LoadFieldRawData(CSegmentInterface c_segment,

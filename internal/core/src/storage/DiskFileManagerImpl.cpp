@@ -24,12 +24,22 @@
 #include "log/Log.h"
 
 #include "storage/DiskFileManagerImpl.h"
+#include "storage/FileManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/IndexData.h"
 #include "storage/Util.h"
 #include "storage/ThreadPools.h"
 
 namespace milvus::storage {
+
+DiskFileManagerImpl::DiskFileManagerImpl(
+    const FileManagerContext& fileManagerContext,
+    std::shared_ptr<milvus_storage::Space> space)
+    : FileManagerImpl(fileManagerContext.fieldDataMeta,
+                      fileManagerContext.indexMeta),
+      space_(space) {
+    rcm_ = fileManagerContext.chunkManagerPtr;
+}
 
 DiskFileManagerImpl::DiskFileManagerImpl(
     const FileManagerContext& fileManagerContext)
@@ -118,10 +128,10 @@ DiskFileManagerImpl::AddBatchIndexFiles(
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
 
-    auto LoadIndexFromDisk = [&](
-        const std::string& file,
-        const int64_t offset,
-        const int64_t data_size) -> std::shared_ptr<uint8_t[]> {
+    auto LoadIndexFromDisk =
+        [&](const std::string& file,
+            const int64_t offset,
+            const int64_t data_size) -> std::shared_ptr<uint8_t[]> {
         auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[data_size]);
         local_chunk_manager->Read(file, offset, buf.get(), data_size);
         return buf;
@@ -149,12 +159,22 @@ DiskFileManagerImpl::AddBatchIndexFiles(
         data_slices.emplace_back(res.get());
     }
 
-    auto res = PutIndexData(rcm_.get(),
-                            data_slices,
-                            remote_file_sizes,
-                            remote_files,
-                            field_meta_,
-                            index_meta_);
+    std::map<std::string, int64_t> res;
+    if (rcm_ != nullptr) {
+        res = PutIndexData(rcm_.get(),
+                           data_slices,
+                           remote_file_sizes,
+                           remote_files,
+                           field_meta_,
+                           index_meta_);
+    } else {
+        res = PutIndexData(space_,
+                           data_slices,
+                           remote_file_sizes,
+                           remote_files,
+                           field_meta_,
+                           index_meta_);
+    }
     for (auto iter = res.begin(); iter != res.end(); ++iter) {
         remote_paths_to_size_[iter->first] = iter->second;
     }
@@ -238,6 +258,85 @@ DiskFileManagerImpl::CacheBatchIndexFilesToDisk(
         offset += index_size;
     }
     return offset;
+}
+
+std::string
+DiskFileManagerImpl::CacheRawDataToDisk() {
+    auto blobs = space_->StatisticsBlobs();
+    std::vector<std::string> remote_files;
+    for (auto& blob : blobs) {
+        remote_files.push_back(blob.name);
+    }
+    std::sort(remote_files.begin(),
+              remote_files.end(),
+              [](const std::string& a, const std::string& b) {
+                  return std::stol(a.substr(a.find_last_of("/") + 1)) <
+                         std::stol(b.substr(b.find_last_of("/") + 1));
+              });
+
+    auto segment_id = GetFieldDataMeta().segment_id;
+    auto field_id = GetFieldDataMeta().field_id;
+
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto local_data_path = storage::GenFieldRawDataPathPrefix(
+                               local_chunk_manager, segment_id, field_id) +
+                           "raw_data";
+    local_chunk_manager->CreateFile(local_data_path);
+
+    // get batch raw data from s3 and write batch data to disk file
+    // TODO: load and write of different batches at the same time
+    std::vector<std::string> batch_files;
+
+    // file format
+    // num_rows(uint32) | dim(uint32) | index_data ([]uint8_t)
+    uint32_t num_rows = 0;
+    uint32_t dim = 0;
+    int64_t write_offset = sizeof(num_rows) + sizeof(dim);
+
+    auto FetchRawData = [&]() {
+        auto field_datas = GetObjectData(space_, batch_files, GetIndexMeta());
+        int batch_size = batch_files.size();
+        for (int i = 0; i < batch_size; ++i) {
+            auto field_data = field_datas[i];
+            num_rows += uint32_t(field_data->get_num_rows());
+            AssertInfo(dim == 0 || dim == field_data->get_dim(),
+                       "inconsistent dim value in multi binlogs!");
+            dim = field_data->get_dim();
+
+            auto data_size = field_data->get_num_rows() * dim * sizeof(float);
+            local_chunk_manager->Write(local_data_path,
+                                       write_offset,
+                                       const_cast<void*>(field_data->Data()),
+                                       data_size);
+            write_offset += data_size;
+        }
+    };
+
+    auto parallel_degree =
+        uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+    for (auto& file : remote_files) {
+        if (batch_files.size() >= parallel_degree) {
+            FetchRawData();
+            batch_files.clear();
+        }
+
+        batch_files.emplace_back(file);
+    }
+
+    if (batch_files.size() > 0) {
+        FetchRawData();
+    }
+
+    // write num_rows and dim value to file header
+    write_offset = 0;
+    local_chunk_manager->Write(
+        local_data_path, write_offset, &num_rows, sizeof(num_rows));
+    write_offset += sizeof(num_rows);
+    local_chunk_manager->Write(
+        local_data_path, write_offset, &dim, sizeof(dim));
+
+    return local_data_path;
 }
 
 std::string

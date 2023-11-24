@@ -113,6 +113,7 @@ if (LINUX)
             milvus_segcore
             milvus_storage
             milvus_indexbuilder
+            milvus_common
             )
     install(TARGETS index_builder_test DESTINATION unittest)
 endif()
@@ -127,6 +128,7 @@ target_link_libraries(all_tests
         milvus_storage
         milvus_indexbuilder
         pthread
+        milvus_common
         )
 
 install(TARGETS all_tests DESTINATION unittest)

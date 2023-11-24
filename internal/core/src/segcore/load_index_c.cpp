@@ -282,6 +282,68 @@ AppendIndexV2(CLoadIndexInfo c_load_index_info) {
 }
 
 CStatus
+AppendIndexV3(CLoadIndexInfo c_load_index_info) {
+    try {
+        auto load_index_info =
+            (milvus::segcore::LoadIndexInfo*)c_load_index_info;
+        auto& index_params = load_index_info->index_params;
+        auto field_type = load_index_info->field_type;
+
+        milvus::index::CreateIndexInfo index_info;
+        index_info.field_type = load_index_info->field_type;
+
+        // get index type
+        AssertInfo(index_params.find("index_type") != index_params.end(),
+                   "index type is empty");
+        index_info.index_type = index_params.at("index_type");
+
+        // get metric type
+        if (milvus::datatype_is_vector(field_type)) {
+            AssertInfo(index_params.find("metric_type") != index_params.end(),
+                       "metric type is empty for vector index");
+            index_info.metric_type = index_params.at("metric_type");
+        }
+
+        auto config = milvus::index::ParseConfigFromIndexParams(
+            load_index_info->index_params);
+
+        LOG_SEGCORE_ERROR_ << "[remove me] uri = " << load_index_info->uri
+                           << " index_store_version = "
+                           << load_index_info->index_store_version;
+        auto res = milvus_storage::Space::Open(
+            load_index_info->uri,
+            milvus_storage::Options{nullptr,
+                                    load_index_info->index_store_version});
+        AssertInfo(res.ok(), "init space failed");
+        std::shared_ptr<milvus_storage::Space> space = std::move(res.value());
+        load_index_info->index =
+            milvus::index::IndexFactory::GetInstance().CreateIndex(
+                index_info, milvus::storage::FileManagerContext(), space);
+
+        if (!load_index_info->mmap_dir_path.empty() &&
+            load_index_info->index->IsMmapSupported()) {
+            auto filepath =
+                std::filesystem::path(load_index_info->mmap_dir_path) /
+                std::to_string(load_index_info->segment_id) /
+                std::to_string(load_index_info->field_id) /
+                std::to_string(load_index_info->index_id);
+
+            config[kMmapFilepath] = filepath.string();
+        }
+
+        load_index_info->index->LoadV2(config);
+        auto status = CStatus();
+        status.error_code = milvus::Success;
+        status.error_msg = "";
+        return status;
+    } catch (std::exception& e) {
+        auto status = CStatus();
+        status.error_code = milvus::UnexpectedError;
+        status.error_msg = strdup(e.what());
+        return status;
+    }
+}
+CStatus
 AppendIndexFilePath(CLoadIndexInfo c_load_index_info, const char* c_file_path) {
     try {
         auto load_index_info =
@@ -368,4 +430,13 @@ CleanLoadedIndex(CLoadIndexInfo c_load_index_info) {
         status.error_msg = strdup(e.what());
         return status;
     }
+}
+
+void
+AppendStorageInfo(CLoadIndexInfo c_load_index_info,
+                  const char* uri,
+                  int64_t version) {
+    auto load_index_info = (milvus::segcore::LoadIndexInfo*)c_load_index_info;
+    load_index_info->uri = uri;
+    load_index_info->index_store_version = version;
 }

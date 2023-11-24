@@ -122,7 +122,7 @@ if (LINUX OR MSYS)
                   "-fPIC"
                   "-DELPP_THREAD_SAFE"
                   "-fopenmp"
-                  "-Werror"
+                  "-Wno-error"
                   )
     if (CMAKE_BUILD_TYPE STREQUAL "Release")
         append_flags( CMAKE_CXX_FLAGS

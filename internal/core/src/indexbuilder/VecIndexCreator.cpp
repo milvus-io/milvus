@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <map>
+#include <utility>
 
 #include "common/EasyAssert.h"
 #include "indexbuilder/VecIndexCreator.h"
@@ -23,16 +24,26 @@ VecIndexCreator::VecIndexCreator(
     DataType data_type,
     Config& config,
     const storage::FileManagerContext& file_manager_context)
-    : data_type_(data_type), config_(config) {
+    : VecIndexCreator(data_type, "", config, file_manager_context, nullptr) {
+}
+
+VecIndexCreator::VecIndexCreator(
+    DataType data_type,
+    const std::string& field_name,
+    Config& config,
+    const storage::FileManagerContext& file_manager_context,
+    std::shared_ptr<milvus_storage::Space> space)
+    : config_(config), data_type_(data_type), space_(std::move(space)) {
     index::CreateIndexInfo index_info;
     index_info.field_type = data_type_;
     index_info.index_type = index::GetIndexTypeFromConfig(config_);
     index_info.metric_type = index::GetMetricTypeFromConfig(config_);
+    index_info.field_name = field_name;
     index_info.index_engine_version =
         index::GetIndexEngineVersionFromConfig(config_);
 
     index_ = index::IndexFactory::GetInstance().CreateIndex(
-        index_info, file_manager_context);
+        index_info, file_manager_context, space_);
     AssertInfo(index_ != nullptr,
                "[VecIndexCreator]Index is null after create index");
 }
@@ -50,6 +61,11 @@ VecIndexCreator::Build(const milvus::DatasetPtr& dataset) {
 void
 VecIndexCreator::Build() {
     index_->Build(config_);
+}
+
+void
+VecIndexCreator::BuildV2() {
+    index_->BuildV2(config_);
 }
 
 milvus::BinarySet
@@ -73,6 +89,11 @@ VecIndexCreator::Query(const milvus::DatasetPtr& dataset,
 BinarySet
 VecIndexCreator::Upload() {
     return index_->Upload();
+}
+
+BinarySet
+VecIndexCreator::UploadV2() {
+    return index_->UploadV2();
 }
 
 void

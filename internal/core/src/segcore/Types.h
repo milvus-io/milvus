@@ -43,6 +43,8 @@ struct LoadIndexInfo {
     std::map<std::string, std::string> index_params;
     std::vector<std::string> index_files;
     index::IndexBasePtr index;
+    std::string uri;
+    int64_t index_store_version;
     IndexVersion index_engine_version;
 };
 

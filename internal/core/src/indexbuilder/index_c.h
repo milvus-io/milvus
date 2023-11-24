@@ -78,7 +78,19 @@ AppendFieldMetaInfo(CBuildIndexInfo c_build_index_info,
                     int64_t partition_id,
                     int64_t segment_id,
                     int64_t field_id,
-                    enum CDataType field_type);
+                    const char* field_name,
+                    enum CDataType field_type,
+                    int64_t dim);
+
+CStatus
+AppendFieldMetaInfoV2(CBuildIndexInfo c_build_index_info,
+                      int64_t collection_id,
+                      int64_t partition_id,
+                      int64_t segment_id,
+                      int64_t field_id,
+                      const char* field_name,
+                      enum CDataType field_type,
+                      int64_t dim);
 
 CStatus
 AppendIndexMetaInfo(CBuildIndexInfo c_build_index_info,
@@ -95,6 +107,18 @@ AppendIndexEngineVersionToBuildInfo(CBuildIndexInfo c_load_index_info,
 
 CStatus
 SerializeIndexAndUpLoad(CIndex index, CBinarySet* c_binary_set);
+
+CStatus
+SerializeIndexAndUpLoadV2(CIndex index, CBinarySet* c_binary_set);
+
+CStatus
+CreateIndexV3(CIndex* res_index, CBuildIndexInfo c_build_index_info);
+
+CStatus
+AppendIndexStorageInfo(CBuildIndexInfo c_build_index_info,
+                       const char* c_data_store_path,
+                       const char* c_index_store_path,
+                       int64_t data_store_version);
 
 #ifdef __cplusplus
 };

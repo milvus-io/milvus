@@ -22,6 +22,7 @@
 #include "common/EasyAssert.h"
 #include "common/Consts.h"
 #include "fmt/format.h"
+#include "log/Log.h"
 #include "storage/ChunkManager.h"
 #ifdef AZURE_BUILD_DIR
 #include "storage/AzureChunkManager.h"
@@ -35,6 +36,7 @@
 #include "storage/OpenDALChunkManager.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/DiskFileManagerImpl.h"
+#include "storage/Types.h"
 
 namespace milvus::storage {
 
@@ -433,6 +435,27 @@ EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
 }
 
 std::pair<std::string, size_t>
+EncodeAndUploadIndexSlice2(std::shared_ptr<milvus_storage::Space> space,
+                           uint8_t* buf,
+                           int64_t batch_size,
+                           IndexMeta index_meta,
+                           FieldDataMeta field_meta,
+                           std::string object_key) {
+    auto field_data = CreateFieldData(DataType::INT8);
+    field_data->FillFieldData(buf, batch_size);
+    auto indexData = std::make_shared<IndexData>(field_data);
+    indexData->set_index_meta(index_meta);
+    indexData->SetFieldDataMeta(field_meta);
+    auto serialized_index_data = indexData->serialize_to_remote_file();
+    auto serialized_index_size = serialized_index_data.size();
+    auto status = space->WriteBolb(
+        object_key, serialized_index_data.data(), serialized_index_size);
+    AssertInfo(status.ok(),
+               fmt::format("write to space error: %s", status.ToString()));
+    return std::make_pair(std::move(object_key), serialized_index_size);
+}
+
+std::pair<std::string, size_t>
 EncodeAndUploadFieldSlice(ChunkManager* chunk_manager,
                           uint8_t* buf,
                           int64_t element_count,
@@ -470,6 +493,46 @@ GetObjectData(ChunkManager* remote_chunk_manager,
     return datas;
 }
 
+std::vector<FieldDataPtr>
+GetObjectData(std::shared_ptr<milvus_storage::Space> space,
+              const std::vector<std::string>& remote_files,
+              const IndexMeta& index_meta) {
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
+    std::vector<std::future<std::vector<FieldDataPtr>>> futures;
+    auto downloadFile =
+        [&](const std::string& file) -> std::vector<FieldDataPtr> {
+        auto res = space->ScanData();
+        if (!res.ok()) {
+            PanicInfo(DataFormatBroken, "failed to create scan iterator");
+        }
+        auto reader = res.value();
+        std::vector<FieldDataPtr> datas;
+        for (auto rec = reader->Next(); rec != nullptr; rec = reader->Next()) {
+            if (!rec.ok()) {
+                PanicInfo(DataFormatBroken, "failed to read data");
+            }
+            auto data = rec.ValueUnsafe();
+            auto total_num_rows = data->num_rows();
+            auto col_data = data->GetColumnByName(index_meta.field_name);
+            auto field_data = storage::CreateFieldData(
+                index_meta.field_type, index_meta.dim, total_num_rows);
+            datas.push_back(field_data);
+        }
+        return datas;
+    };
+    for (auto& file : remote_files) {
+        futures.emplace_back(pool.Submit(downloadFile, file));
+    }
+
+    std::vector<FieldDataPtr> datas;
+    for (int i = 0; i < futures.size(); ++i) {
+        auto res = futures[i].get();
+        datas.insert(datas.end(), res.begin(), res.end());
+    }
+    ReleaseArrowUnused();
+    return datas;
+}
+
 std::map<std::string, int64_t>
 PutIndexData(ChunkManager* remote_chunk_manager,
              const std::vector<const uint8_t*>& data_slices,
@@ -487,6 +550,41 @@ PutIndexData(ChunkManager* remote_chunk_manager,
     for (int64_t i = 0; i < data_slices.size(); ++i) {
         futures.push_back(pool.Submit(EncodeAndUploadIndexSlice,
                                       remote_chunk_manager,
+                                      const_cast<uint8_t*>(data_slices[i]),
+                                      slice_sizes[i],
+                                      index_meta,
+                                      field_meta,
+                                      slice_names[i]));
+    }
+
+    std::map<std::string, int64_t> remote_paths_to_size;
+    for (auto& future : futures) {
+        auto res = future.get();
+        remote_paths_to_size[res.first] = res.second;
+    }
+
+    ReleaseArrowUnused();
+    return remote_paths_to_size;
+}
+
+std::map<std::string, int64_t>
+PutIndexData(std::shared_ptr<milvus_storage::Space> space,
+             const std::vector<const uint8_t*>& data_slices,
+             const std::vector<int64_t>& slice_sizes,
+             const std::vector<std::string>& slice_names,
+             FieldDataMeta& field_meta,
+             IndexMeta& index_meta) {
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+    std::vector<std::future<std::pair<std::string, size_t>>> futures;
+    AssertInfo(data_slices.size() == slice_sizes.size(),
+               "inconsistent size of data slices with slice sizes!");
+    AssertInfo(data_slices.size() == slice_names.size(),
+               "inconsistent size of data slices with slice names!");
+
+    LOG_SEGCORE_ERROR_ << "[remove me] ready to upload files to space";
+    for (int64_t i = 0; i < data_slices.size(); ++i) {
+        futures.push_back(pool.Submit(EncodeAndUploadIndexSlice2,
+                                      space,
                                       const_cast<uint8_t*>(data_slices[i]),
                                       slice_sizes[i],
                                       index_meta,

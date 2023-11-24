@@ -87,6 +87,11 @@ VectorDiskAnnIndex<T>::Load(const Config& config) {
 }
 
 template <typename T>
+void
+VectorDiskAnnIndex<T>::LoadV2(const Config& config) {
+}
+
+template <typename T>
 BinarySet
 VectorDiskAnnIndex<T>::Upload(const Config& config) {
     BinarySet ret;
@@ -97,6 +102,42 @@ VectorDiskAnnIndex<T>::Upload(const Config& config) {
     }
 
     return ret;
+}
+template <typename T>
+void
+VectorDiskAnnIndex<T>::BuildV2(const Config& config) {
+    knowhere::Json build_config;
+    build_config.update(config);
+
+    auto segment_id = file_manager_->GetFieldDataMeta().segment_id;
+    auto local_data_path = file_manager_->CacheRawDataToDisk();
+    build_config[DISK_ANN_RAW_DATA_PATH] = local_data_path;
+
+    auto local_index_path_prefix = file_manager_->GetLocalIndexObjectPrefix();
+    build_config[DISK_ANN_PREFIX_PATH] = local_index_path_prefix;
+
+    if (GetIndexType() == knowhere::IndexEnum::INDEX_DISKANN) {
+        auto num_threads = GetValueFromConfig<std::string>(
+            build_config, DISK_ANN_BUILD_THREAD_NUM);
+        AssertInfo(
+            num_threads.has_value(),
+            "param " + std::string(DISK_ANN_BUILD_THREAD_NUM) + "is empty");
+        build_config[DISK_ANN_THREADS_NUM] =
+            std::atoi(num_threads.value().c_str());
+    }
+    knowhere::DataSet* ds_ptr = nullptr;
+    build_config.erase("insert_files");
+    index_.Build(*ds_ptr, build_config);
+
+    auto local_chunk_manager =
+        storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    local_chunk_manager->RemoveDir(
+        storage::GetSegmentRawDataPathPrefix(local_chunk_manager, segment_id));
+}
+
+template <typename T>
+BinarySet
+VectorDiskAnnIndex<T>::UploadV2(const Config& config) {
 }
 
 template <typename T>

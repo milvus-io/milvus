@@ -20,11 +20,13 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "Utils.h"
 #include "Types.h"
 #include "common/Json.h"
+#include "common/LoadInfo.h"
 #include "common/EasyAssert.h"
 #include "common/Array.h"
 #include "google/protobuf/message_lite.h"
@@ -34,6 +36,7 @@
 #include "common/Types.h"
 #include "log/Log.h"
 #include "pb/schema.pb.h"
+#include "mmap/Types.h"
 #include "query/ScalarIndex.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"
@@ -220,6 +223,53 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
     }
 }
 
+void
+SegmentSealedImpl::LoadFieldDataV2(const LoadFieldDataInfo& load_info) {
+    // NOTE: lock only when data is ready to avoid starvation
+    // only one field for now, parallel load field data in golang
+    size_t num_rows = storage::GetNumRowsForLoadInfo(load_info);
+
+    for (auto& [id, info] : load_info.field_infos) {
+        AssertInfo(info.row_count > 0, "The row count of field data is 0");
+
+        auto field_id = FieldId(id);
+        auto insert_files = info.insert_files;
+        auto field_data_info =
+            FieldDataInfo(field_id.get(), num_rows, load_info.mmap_dir_path);
+
+        auto parallel_degree = static_cast<uint64_t>(
+            DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+        field_data_info.channel->set_capacity(parallel_degree * 2);
+        auto& pool =
+            ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+        // auto load_future = pool.Submit(
+        //     LoadFieldDatasFromRemote, insert_files, field_data_info.channel);
+
+        auto res = milvus_storage::Space::Open(
+            load_info.url,
+            milvus_storage::Options{nullptr, load_info.storage_version});
+        AssertInfo(res.ok(),
+                   fmt::format("init space failed: {}, error: {}",
+                               load_info.url,
+                               res.status().ToString()));
+        std::shared_ptr<milvus_storage::Space> space = std::move(res.value());
+        auto load_future = pool.Submit(
+            LoadFieldDatasFromRemote2, space, schema_, field_data_info);
+        LOG_SEGCORE_ERROR_ << "finish submitting LoadFieldDatasFromRemote task "
+                              "to thread pool, "
+                           << "segmentID:" << this->id_
+                           << ", fieldID:" << info.field_id;
+        if (load_info.mmap_dir_path.empty() ||
+            SystemProperty::Instance().IsSystem(field_id)) {
+            LoadFieldData(field_id, field_data_info);
+        } else {
+            MapFieldData(field_id, field_data_info);
+        }
+        LOG_SEGCORE_ERROR_ << "finish loading segment field, "
+                           << "segmentID:" << this->id_
+                           << ", fieldID:" << info.field_id;
+    }
+}
 void
 SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
     auto num_rows = data.row_count;
@@ -1341,7 +1391,9 @@ SegmentSealedImpl::mask_with_timestamps(BitsetType& bitset_chunk,
                "num chunk not equal to 1 for sealed segment");
     const auto& timestamps_data = insert_record_.timestamps_.get_chunk(0);
     AssertInfo(timestamps_data.size() == get_row_count(),
-               "Timestamp size not equal to row count");
+               fmt::format("Timestamp size not equal to row count: {}, {}",
+                           timestamps_data.size(),
+                           get_row_count()));
     auto range = insert_record_.timestamp_index_.get_active_range(timestamp);
 
     // range == (size_, size_) and size_ is this->timestamps_.size().
