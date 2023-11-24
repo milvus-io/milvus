@@ -934,6 +934,7 @@ func Test_EscapeString(t *testing.T) {
 		`str2 like 'abc"def-%'`,
 		`str4 like "abc\367-%"`,
 		`str4 like "中国"`,
+		`tag == '"blue"'`,
 	}
 	for _, expr = range exprs {
 		_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{

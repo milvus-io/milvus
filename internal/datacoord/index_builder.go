@@ -191,7 +191,7 @@ func (ib *indexBuilder) run() {
 	for _, buildID := range buildIDs {
 		ok := ib.process(buildID)
 		if !ok {
-			log.Ctx(ib.ctx).Info("there is no IndexNode available or etcd is not serviceable, wait a minute...")
+			log.Ctx(ib.ctx).Info("there is no idle indexing node, wait a minute...")
 			break
 		}
 	}
