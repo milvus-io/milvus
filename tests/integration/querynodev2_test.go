@@ -10,14 +10,14 @@ import (
 
 type QueryNodeV2Suite struct {
 	suite.Suite
-	c *MiniCluster
+	c *MiniClusterV2
 }
 
 func (s *QueryNodeV2Suite) SetupSuite() {
 	ctx := context.Background()
 	var err error
 
-	s.c, err = StartMiniCluster(ctx)
+	s.c, err = StartMiniClusterV2(ctx)
 	s.Require().NoError(err)
 
 	time.Sleep(time.Second)

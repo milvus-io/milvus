@@ -84,7 +84,7 @@ func (s *MiniClusterSuite) waitForIndexBuiltInternal(ctx context.Context, dbName
 	}
 }
 
-func waitingForIndexBuilt(ctx context.Context, cluster *MiniCluster, t *testing.T, collection, field string) {
+func waitingForIndexBuilt(ctx context.Context, cluster *MiniClusterV2, t *testing.T, collection, field string) {
 	getIndexBuilt := func() bool {
 		resp, err := cluster.Proxy.DescribeIndex(ctx, &milvuspb.DescribeIndexRequest{
 			CollectionName: collection,

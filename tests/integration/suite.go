@@ -61,7 +61,7 @@ type MiniClusterSuite struct {
 	suite.Suite
 	EmbedEtcdSuite
 
-	Cluster    *MiniCluster
+	Cluster    *MiniClusterV2
 	cancelFunc context.CancelFunc
 }
 
@@ -86,7 +86,7 @@ func (s *MiniClusterSuite) SetupTest() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*180)
 	s.cancelFunc = cancel
-	c, err := StartMiniCluster(ctx, func(c *MiniCluster) {
+	c, err := StartMiniClusterV2(ctx, func(c *MiniClusterV2) {
 		// change config etcd endpoints
 		c.params[params.EtcdCfg.Endpoints.Key] = val
 	})
