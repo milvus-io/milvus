@@ -56,7 +56,7 @@ func generateMsgPack() msgstream.MsgPack {
 	return msgPack
 }
 
-func TestNodeCtx_Start(t *testing.T) {
+func TestNodeManager_Start(t *testing.T) {
 	t.Setenv("ROCKSMQ_PATH", "/tmp/MilvusTest/FlowGraph/TestNodeStart")
 	factory := dependency.NewDefaultFactory(true)
 
@@ -76,19 +76,30 @@ func TestNodeCtx_Start(t *testing.T) {
 	nodeName := "input_node"
 	inputNode := NewInputNode(msgStream.Chan(), nodeName, 100, 100, "", 0, 0, "")
 
-	node := &nodeCtx{
-		node:    inputNode,
-		closeCh: make(chan struct{}),
-		closeWg: &sync.WaitGroup{},
+	ddNode := BaseNode{}
+
+	node0 := &nodeCtx{
+		node: inputNode,
 	}
 
-	node.inputChannel = make(chan []Msg)
+	node1 := &nodeCtx{
+		node: &ddNode,
+	}
+
+	node0.downstream = node1
+
+	node0.inputChannel = make(chan []Msg)
+
+	nodeCtxManager := &nodeCtxManager{
+		inputNodeCtx: node0,
+		closeWg:      &sync.WaitGroup{},
+	}
 
 	assert.NotPanics(t, func() {
-		node.Start()
+		nodeCtxManager.Start()
 	})
 
-	node.Close()
+	nodeCtxManager.Close()
 }
 
 func TestBaseNode(t *testing.T) {

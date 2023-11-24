@@ -30,20 +30,22 @@ import (
 // TimeTickedFlowGraph flowgraph with input from tt msg stream
 type TimeTickedFlowGraph struct {
 	nodeCtx         map[NodeName]*nodeCtx
+	nodeCtxManager  *nodeCtxManager
 	stopOnce        sync.Once
 	startOnce       sync.Once
 	closeWg         *sync.WaitGroup
 	closeGracefully *atomic.Bool
 }
 
-// AddNode add Node into flowgraph
+// AddNode add Node into flowgraph and fill nodeCtxManager
 func (fg *TimeTickedFlowGraph) AddNode(node Node) {
 	nodeCtx := nodeCtx{
-		node:    node,
-		closeCh: make(chan struct{}),
-		closeWg: fg.closeWg,
+		node: node,
 	}
 	fg.nodeCtx[node.Name()] = &nodeCtx
+	if node.IsInputNode() {
+		fg.nodeCtxManager = NewNodeCtxManager(&nodeCtx, fg.closeWg)
+	}
 }
 
 // SetEdges set directed edges from in nodes to out nodes
@@ -79,8 +81,9 @@ func (fg *TimeTickedFlowGraph) SetEdges(nodeName string, out []string) error {
 func (fg *TimeTickedFlowGraph) Start() {
 	fg.startOnce.Do(func() {
 		for _, v := range fg.nodeCtx {
-			v.Start()
+			v.node.Start()
 		}
+		fg.nodeCtxManager.Start()
 	})
 }
 
@@ -120,6 +123,7 @@ func (fg *TimeTickedFlowGraph) Close() {
 func NewTimeTickedFlowGraph(ctx context.Context) *TimeTickedFlowGraph {
 	flowGraph := TimeTickedFlowGraph{
 		nodeCtx:         make(map[string]*nodeCtx),
+		nodeCtxManager:  &nodeCtxManager{},
 		closeWg:         &sync.WaitGroup{},
 		closeGracefully: atomic.NewBool(CloseImmediately),
 	}
