@@ -910,3 +910,19 @@ func logDupFlush(cID, segID int64) {
 		zap.Int64("collectionID", cID),
 		zap.Int64("segmentID", segID))
 }
+
+func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportRequest) (*commonpb.Status, error) {
+	return nil, merr.ErrServiceUnimplemented
+}
+
+func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (*commonpb.Status, error) {
+	return nil, merr.ErrServiceUnimplemented
+}
+
+func (node *DataNode) GetImportState(ctx context.Context, req *datapb.GetImportStateRequest) (*datapb.GetImportStateResponse, error) {
+	return nil, merr.ErrServiceUnimplemented
+}
+
+func (node *DataNode) DropImport(ctx context.Context, req *datapb.DropImportRequest) (*commonpb.Status, error) {
+	return nil, merr.ErrServiceUnimplemented
+}

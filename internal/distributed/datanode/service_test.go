@@ -162,6 +162,22 @@ func (m *MockDataNode) CheckChannelOperationProgress(ctx context.Context, req *d
 	return &datapb.ChannelOperationProgressResponse{}, m.err
 }
 
+func (m *MockDataNode) PreImport(ctx context.Context, req *datapb.PreImportRequest) (*commonpb.Status, error) {
+	return m.status, m.err
+}
+
+func (m *MockDataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (*commonpb.Status, error) {
+	return m.status, m.err
+}
+
+func (m *MockDataNode) GetImportState(ctx context.Context, req *datapb.GetImportStateRequest) (*datapb.GetImportStateResponse, error) {
+	return &datapb.GetImportStateResponse{}, m.err
+}
+
+func (m *MockDataNode) DropImport(ctx context.Context, req *datapb.DropImportRequest) (*commonpb.Status, error) {
+	return m.status, m.err
+}
+
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type mockDataCoord struct {
 	types.DataCoordClient

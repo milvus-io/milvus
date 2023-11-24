@@ -119,6 +119,12 @@ service DataNode {
   rpc FlushChannels(FlushChannelsRequest) returns(common.Status) {}
   rpc NotifyChannelOperation(ChannelOperationsRequest) returns(common.Status) {}
   rpc CheckChannelOperationProgress(ChannelWatchInfo) returns(ChannelOperationProgressResponse) {}
+
+  // import v2
+  rpc PreImport(PreImportRequest) returns(common.Status) {}
+  rpc ImportV2(ImportRequest) returns(common.Status) {}
+  rpc GetImportState(GetImportStateRequest) returns(GetImportStateResponse) {}
+  rpc DropImport(DropImportRequest) returns(common.Status) {}
 }
 
 message FlushRequest {
@@ -736,4 +742,72 @@ message ChannelOperationProgressResponse {
   int64 opID = 2;
   ChannelWatchState state = 3;
   int32 progress = 4;
+}
+
+enum ImportState {
+  Pending = 0;
+  Preparing = 1;
+  InProgress = 2;
+  Failed = 3;
+  Completed = 4;
+}
+
+message PreImportRequest {
+  int64 requestID = 1;
+  int64 taskID = 2;
+  int64 collectionID = 3;
+  int64 partitionID = 4;
+  schema.CollectionSchema schema = 5;
+  repeated ImportFileInfo file_infos = 6;
+}
+
+message ImportRequest {
+  int64 requestID = 1;
+  int64 taskID = 2;
+  int64 collectionID = 3;
+  int64 partitionID = 4;
+  schema.CollectionSchema schema = 5;
+  repeated SegmentInfo segment_infos = 6;
+  repeated int64 autoIDs = 7;
+  repeated ImportFileInfo file_infos = 8;
+}
+
+message GetImportStateRequest {
+  int64 requestID = 1;
+  int64 taskID = 2;
+}
+
+message GetImportStateResponse {
+  common.Status status = 1;
+  int64 taskID = 2;
+  ImportState state = 3;
+  string reason = 4;
+  int64 slots = 5;
+  repeated ImportFileInfo file_infos = 6;
+  repeated SegmentInfo segment_infos = 7;
+}
+
+message DropImportRequest {
+  int64 requestID = 1;
+  int64 taskID = 2;
+}
+
+message ImportFileInfo {
+  repeated string file_name = 1;
+  repeated int64 file_size = 2;
+  int64 total_rows = 3;
+  map<string, int64> channel_rows = 4;
+  int64 imported_rows = 5;
+}
+
+message ImportTaskV2 {
+  int64 requestID = 1;
+  int64 taskID = 2;
+  int64 collectionID = 3;
+  int64 partitionID = 4;
+  repeated int64 segmentIDs =5;
+  int64 nodeID = 6;
+  ImportState state = 7;
+  string reason = 8;
+  repeated ImportFileInfo file_infos = 9;
 }

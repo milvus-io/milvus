@@ -232,3 +232,27 @@ func (c *Client) CheckChannelOperationProgress(ctx context.Context, req *datapb.
 		return client.CheckChannelOperationProgress(ctx, req)
 	})
 }
+
+func (c *Client) PreImport(ctx context.Context, req *datapb.PreImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataNodeClient) (*commonpb.Status, error) {
+		return client.PreImport(ctx, req)
+	})
+}
+
+func (c *Client) ImportV2(ctx context.Context, req *datapb.ImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataNodeClient) (*commonpb.Status, error) {
+		return client.ImportV2(ctx, req)
+	})
+}
+
+func (c *Client) GetImportState(ctx context.Context, req *datapb.GetImportStateRequest, opts ...grpc.CallOption) (*datapb.GetImportStateResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataNodeClient) (*datapb.GetImportStateResponse, error) {
+		return client.GetImportState(ctx, req)
+	})
+}
+
+func (c *Client) DropImport(ctx context.Context, req *datapb.DropImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataNodeClient) (*commonpb.Status, error) {
+		return client.DropImport(ctx, req)
+	})
+}

@@ -92,3 +92,19 @@ func (m *GrpcDataNodeClient) NotifyChannelOperation(ctx context.Context, in *dat
 func (m *GrpcDataNodeClient) CheckChannelOperationProgress(ctx context.Context, req *datapb.ChannelWatchInfo, opts ...grpc.CallOption) (*datapb.ChannelOperationProgressResponse, error) {
 	return &datapb.ChannelOperationProgressResponse{}, m.Err
 }
+
+func (m *GrpcDataNodeClient) PreImport(ctx context.Context, req *datapb.PreImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcDataNodeClient) ImportV2(ctx context.Context, req *datapb.ImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcDataNodeClient) GetImportState(ctx context.Context, req *datapb.GetImportStateRequest, opts ...grpc.CallOption) (*datapb.GetImportStateResponse, error) {
+	return &datapb.GetImportStateResponse{}, m.Err
+}
+
+func (m *GrpcDataNodeClient) DropImport(ctx context.Context, req *datapb.DropImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}

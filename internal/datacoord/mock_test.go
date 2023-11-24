@@ -295,6 +295,22 @@ func (c *mockDataNodeClient) CheckChannelOperationProgress(ctx context.Context, 
 	return &datapb.ChannelOperationProgressResponse{Status: merr.Success()}, nil
 }
 
+func (c *mockDataNodeClient) PreImport(ctx context.Context, req *datapb.PreImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
+}
+
+func (c *mockDataNodeClient) ImportV2(ctx context.Context, req *datapb.ImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
+}
+
+func (c *mockDataNodeClient) GetImportState(ctx context.Context, req *datapb.GetImportStateRequest, opts ...grpc.CallOption) (*datapb.GetImportStateResponse, error) {
+	return &datapb.GetImportStateResponse{Status: merr.Success()}, nil
+}
+
+func (c *mockDataNodeClient) DropImport(ctx context.Context, req *datapb.DropImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
+}
+
 func (c *mockDataNodeClient) Stop() error {
 	c.state = commonpb.StateCode_Abnormal
 	return nil
