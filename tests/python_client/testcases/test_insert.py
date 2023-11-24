@@ -1147,12 +1147,10 @@ class TestInsertAsync(TestcaseBase):
         method: insert async with invalid partition
         expected: raise exception
         """
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix))
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
         df = cf.gen_default_dataframe_data()
-        err_msg = "partition=p: partition not found"
-        future, _ = collection_w.insert(
-            data=df, partition_name="p", _async=True)
+        err_msg = "partition not found"
+        future, _ = collection_w.insert(data=df, partition_name="p", _async=True)
         future.done()
         with pytest.raises(MilvusException, match=err_msg):
             future.result()
@@ -2142,7 +2140,7 @@ class TestUpsertInvalid(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_dataframe_data(nb=2)
         partition_name = "partition1"
-        error = {ct.err_code: 15, ct.err_msg: f"partition={partition_name}: partition not found"}
+        error = {ct.err_code: 200, ct.err_msg: f"partition not found[partition={partition_name}]"}
         collection_w.upsert(data=data, partition_name=partition_name,
                             check_task=CheckTasks.err_res, check_items=error)
 
