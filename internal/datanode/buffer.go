@@ -158,6 +158,10 @@ func (m *DeltaBufferManager) Delete(segID UniqueID) {
 }
 
 func (m *DeltaBufferManager) popHeapItem() *Item {
+	if m.delBufHeap.Len() == 0 {
+		return nil
+	}
+
 	return heap.Pop(m.delBufHeap).(*Item)
 }
 
@@ -175,6 +179,10 @@ func (m *DeltaBufferManager) ShouldFlushSegments() []UniqueID {
 	m.heapGuard.Lock()
 	for memUsage-bufferSize >= Params.DataNodeCfg.FlushDeleteBufferBytes {
 		segItem := m.popHeapItem()
+		// all items popped
+		if segItem == nil {
+			break
+		}
 		poppedItems = append(poppedItems, segItem)
 		poppedSegmentIDs = append(poppedSegmentIDs, segItem.segmentID)
 		bufferSize += segItem.memorySize
