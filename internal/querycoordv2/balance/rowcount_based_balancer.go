@@ -37,6 +37,8 @@ type RowCountBasedBalancer struct {
 	targetMgr *meta.TargetManager
 }
 
+// AssignSegment, when row count based balancer assign segments, it will assign segment to node with least global row count.
+// try to make every query node has same row count.
 func (b *RowCountBasedBalancer) AssignSegment(collectionID int64, segments []*meta.Segment, nodes []int64) []SegmentAssignPlan {
 	nodeItems := b.convertToNodeItemsBySegment(nodes)
 	if len(nodeItems) == 0 {
@@ -69,6 +71,8 @@ func (b *RowCountBasedBalancer) AssignSegment(collectionID int64, segments []*me
 	return plans
 }
 
+// AssignSegment, when row count based balancer assign segments, it will assign channel to node with least global channel count.
+// try to make every query node has channel count
 func (b *RowCountBasedBalancer) AssignChannel(channels []*meta.DmChannel, nodes []int64) []ChannelAssignPlan {
 	nodeItems := b.convertToNodeItemsByChannel(nodes)
 	if len(nodeItems) == 0 {
@@ -280,7 +284,7 @@ func (b *RowCountBasedBalancer) genChannelPlan(replica *meta.Replica, onlineNode
 		}
 		average := int(math.Ceil(float64(len(channelDist)) / float64(len(onlineNodes))))
 
-		// find nodes with less row count than average
+		// find nodes with less channel count than average
 		nodeWithLessChannel := make([]int64, 0)
 		channelsToMove := make([]*meta.DmChannel, 0)
 		for _, node := range onlineNodes {
