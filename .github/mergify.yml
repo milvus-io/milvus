@@ -374,7 +374,7 @@ pull_request_rules:
         - base=master
         - base~=^2\.3(\.\d+){0,1}$
       - or:
-        - '-title~=^(feat:|enhance:|fix:|test:|doc:|auto:)'
+        - '-title~=^(feat:|enhance:|fix:|test:|doc:|auto:|\[automated\])'
         - body=^$
     actions:
       label:
@@ -418,7 +418,7 @@ pull_request_rules:
       - or:
         - base=master
         - base~=^2\.3(\.\d+){0,1}$
-      - 'title~=^(feat:|enhance:|fix:|test:|doc:|auto:)'
+      - 'title~=^(feat:|enhance:|fix:|test:|doc:|auto:|\[automated\])'
       - '-body=^$'
       - 'label=do-not-merge/invalid-pr-format'
     actions:
