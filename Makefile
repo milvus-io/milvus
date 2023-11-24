@@ -35,7 +35,7 @@ ifdef USE_DYNAMIC_SIMD
 	use_dynamic_simd = ${USE_DYNAMIC_SIMD}
 endif
 # golangci-lint
-GOLANGCI_LINT_VERSION := 1.53.1
+GOLANGCI_LINT_VERSION := 1.55.2
 GOLANGCI_LINT_OUTPUT := $(shell $(INSTALL_PATH)/golangci-lint --version 2>/dev/null)
 INSTALL_GOLANGCI_LINT := $(findstring $(GOLANGCI_LINT_VERSION), $(GOLANGCI_LINT_OUTPUT))
 # mockery
@@ -80,7 +80,7 @@ get-build-deps:
 getdeps:
 	@mkdir -p $(INSTALL_PATH)
 	@if [ -z "$(INSTALL_GOLANGCI_LINT)" ]; then \
-		echo "Installing golangci-lint into ./bin/" && curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(INSTALL_PATH) v1.53.1 ; \
+		echo "Installing golangci-lint into ./bin/" && curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(INSTALL_PATH) v1.55.2 ; \
 	else \
 		echo "golangci-lint v@$(GOLANGCI_LINT_VERSION) already installed"; \
 	fi
