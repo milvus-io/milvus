@@ -424,6 +424,12 @@ dataNode:
       maxQueueLength: 16 # Maximum length of task queue in flowgraph
       maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
     maxParallelSyncTaskNum: 6 # Maximum number of sync tasks executed in parallel in each flush manager
+    skipMode:
+      # when there are only timetick msg in flowgraph for a while (longer than coldTime),
+      # flowGraph will turn on skip mode to skip most timeticks to reduce cost, especially there are a lot of channels
+      enable: true
+      skipNum: 4
+      coldTime: 60
   segment:
     insertBufSize: 16777216 # Max buffer size to flush for a single segment.
     deleteBufBytes: 67108864 # Max buffer size to flush del for a single channel
