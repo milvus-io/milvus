@@ -237,8 +237,14 @@ func (p *commonConfig) init(base *BaseTable) {
 	}
 	p.ClusterPrefix.Init(base.mgr)
 
+	pulsarPartitionKeyword := "-partition-"
 	chanNamePrefix := func(prefix string) string {
-		return strings.Join([]string{p.ClusterPrefix.GetValue(), prefix}, "-")
+		str := strings.Join([]string{p.ClusterPrefix.GetValue(), prefix}, "-")
+		if strings.Contains(str, pulsarPartitionKeyword) {
+			// there is a bug in pulsar client go, please refer to https://github.com/milvus-io/milvus/issues/28675
+			panic("channel name can not contains '-partition-'")
+		}
+		return str
 	}
 
 	// --- rootcoord ---
