@@ -52,7 +52,6 @@ func (ta *timestampAllocator) alloc(ctx context.Context, count uint32) ([]Timest
 	req := &rootcoordpb.AllocTimestampRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_RequestTSO),
-			commonpbutil.WithMsgID(0),
 			commonpbutil.WithSourceID(ta.peerID),
 		),
 		Count: count,

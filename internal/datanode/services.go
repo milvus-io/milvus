@@ -712,8 +712,6 @@ func saveSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest, res *rootcoo
 				RowNum:       rowCount,
 				SaveBinlogPathReq: &datapb.SaveBinlogPathsRequest{
 					Base: commonpbutil.NewMsgBase(
-						commonpbutil.WithMsgType(0),
-						commonpbutil.WithMsgID(0),
 						commonpbutil.WithTimeStamp(ts),
 						commonpbutil.WithSourceID(paramtable.GetNodeID()),
 					),

@@ -53,7 +53,6 @@ func (alloc *rootCoordAllocator) allocTimestamp(ctx context.Context) (Timestamp,
 	resp, err := alloc.AllocTimestamp(ctx, &rootcoordpb.AllocTimestampRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_RequestTSO),
-			commonpbutil.WithMsgID(0),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		Count: 1,
@@ -69,7 +68,6 @@ func (alloc *rootCoordAllocator) allocID(ctx context.Context) (UniqueID, error) 
 	resp, err := alloc.AllocID(ctx, &rootcoordpb.AllocIDRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_RequestID),
-			commonpbutil.WithMsgID(0),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		Count: 1,

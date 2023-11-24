@@ -1608,7 +1608,6 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 
 	msgBase := commonpbutil.NewMsgBase(
 		commonpbutil.WithMsgType(commonpb.MsgType_SystemInfo),
-		commonpbutil.WithMsgID(0),
 		commonpbutil.WithSourceID(paramtable.GetNodeID()),
 	)
 	if request.Base == nil {
@@ -1695,7 +1694,6 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 
 	msgBase := commonpbutil.NewMsgBase(
 		commonpbutil.WithMsgType(commonpb.MsgType_SystemInfo),
-		commonpbutil.WithMsgID(0),
 		commonpbutil.WithSourceID(paramtable.GetNodeID()),
 	)
 	if request.Base == nil {
@@ -2223,7 +2221,6 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 			InsertRequest: msgpb.InsertRequest{
 				Base: commonpbutil.NewMsgBase(
 					commonpbutil.WithMsgType(commonpb.MsgType_Insert),
-					commonpbutil.WithMsgID(0),
 					commonpbutil.WithSourceID(paramtable.GetNodeID()),
 				),
 				DbName:         request.GetDbName(),
@@ -3283,7 +3280,6 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 	infoResp, err := node.dataCoord.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_SegmentInfo),
-			commonpbutil.WithMsgID(0),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		SegmentIDs: getSegmentsByStatesResponse.Segments,
@@ -3357,7 +3353,6 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 	infoResp, err := node.queryCoord.GetSegmentInfo(ctx, &querypb.GetSegmentInfoRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_SegmentInfo),
-			commonpbutil.WithMsgID(0),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		CollectionID: collID,
@@ -3508,7 +3503,6 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 
 	req.Base = commonpbutil.NewMsgBase(
 		commonpbutil.WithMsgType(commonpb.MsgType_SystemInfo),
-		commonpbutil.WithMsgID(0),
 		commonpbutil.WithSourceID(paramtable.GetNodeID()),
 	)
 	if metricType == metricsinfo.SystemInfoMetrics {
@@ -3570,7 +3564,6 @@ func (node *Proxy) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetrics
 
 	req.Base = commonpbutil.NewMsgBase(
 		commonpbutil.WithMsgType(commonpb.MsgType_SystemInfo),
-		commonpbutil.WithMsgID(0),
 		commonpbutil.WithSourceID(paramtable.GetNodeID()),
 	)
 
@@ -3627,7 +3620,6 @@ func (node *Proxy) LoadBalance(ctx context.Context, req *milvuspb.LoadBalanceReq
 	infoResp, err := node.queryCoord.LoadBalance(ctx, &querypb.LoadBalanceRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_LoadBalanceSegments),
-			commonpbutil.WithMsgID(0),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		SourceNodeIDs:    []int64{req.SrcNodeID},
@@ -4578,7 +4570,6 @@ func (node *Proxy) RenameCollection(ctx context.Context, req *milvuspb.RenameCol
 
 	req.Base = commonpbutil.NewMsgBase(
 		commonpbutil.WithMsgType(commonpb.MsgType_RenameCollection),
-		commonpbutil.WithMsgID(0),
 		commonpbutil.WithSourceID(paramtable.GetNodeID()),
 	)
 	resp, err := node.rootCoord.RenameCollection(ctx, req)
