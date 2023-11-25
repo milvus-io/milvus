@@ -417,6 +417,9 @@ func TestInsertCodec(t *testing.T) {
 	assert.NoError(t, err)
 	_, err = DeserializeStats([]*Blob{statsBlob2})
 	assert.NoError(t, err)
+
+	_, err = insertCodec.SerializePkStatsList([]*PrimaryKeyStats{}, 0)
+	assert.Error(t, err, "SerializePkStatsList zero length pkstats list shall return error")
 }
 
 func TestDeleteCodec(t *testing.T) {
