@@ -130,7 +130,10 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
     }
     knowhere::DataSet* ds_ptr = nullptr;
     build_config.erase("insert_files");
-    index_.Build(*ds_ptr, build_config);
+    auto stat = index_.Build(*ds_ptr, build_config);
+    if (stat != knowhere::Status::success)
+        PanicInfo(ErrorCode::IndexBuildError,
+                  "failed to build disk index, " + KnowhereStatusString(stat));
 
     local_chunk_manager->RemoveDir(
         storage::GetSegmentRawDataPathPrefix(local_chunk_manager, segment_id));
