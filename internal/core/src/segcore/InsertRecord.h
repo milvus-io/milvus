@@ -18,6 +18,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "common/FieldMeta.h"
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "segcore/AckResponder.h"
@@ -161,7 +162,7 @@ struct InsertRecord {
                         break;
                     }
                     default: {
-                        PanicInfo("unsupported pk type");
+                        PanicInfo("unsupported pk type " + datatype_name(field_meta.get_data_type()));
                     }
                 }
             }
@@ -173,7 +174,7 @@ struct InsertRecord {
                     this->append_field_data<BinaryVector>(field_id, field_meta.get_dim(), size_per_chunk);
                     continue;
                 } else {
-                    PanicInfo("unsupported");
+                    PanicInfo("unsupported vector type " + datatype_name(field_meta.get_data_type()));
                 }
             }
             switch (field_meta.get_data_type()) {
@@ -213,13 +214,8 @@ struct InsertRecord {
                     this->append_field_data<Json>(field_id, size_per_chunk);
                     break;
                 }
-                // case DataType::ARRAY: {
-                //     this->append_field_data<std::string>(field_id,
-                //                                          size_per_chunk);
-                //     break;
-                // }
                 default: {
-                    PanicInfo("unsupported");
+                    PanicInfo("unsupported data type " + datatype_name(field_meta.get_data_type()));
                 }
             }
         }
@@ -278,7 +274,7 @@ struct InsertRecord {
                     break;
                 }
                 default: {
-                    PanicInfo("unsupported primary key data type");
+                    PanicInfo("unsupported pk type " + datatype_name(data_type));
                 }
             }
         }

@@ -342,10 +342,28 @@ func validateDuplicatedFieldName(fields []*schemapb.FieldSchema) error {
 func validateFieldType(schema *schemapb.CollectionSchema) error {
 	for _, field := range schema.GetFields() {
 		switch field.GetDataType() {
+		case
+			// scalar types
+			schemapb.DataType_Bool,
+			schemapb.DataType_Int8,
+			schemapb.DataType_Int16,
+			schemapb.DataType_Int32,
+			schemapb.DataType_Int64,
+			schemapb.DataType_Float,
+			schemapb.DataType_Double,
+			schemapb.DataType_VarChar,
+			schemapb.DataType_JSON,
+			// vector types
+			schemapb.DataType_FloatVector,
+			schemapb.DataType_BinaryVector:
+			continue
+
+		// unsupported types
 		case schemapb.DataType_String:
 			return errors.New("string data type not supported yet, please use VarChar type instead")
-		case schemapb.DataType_None:
-			return errors.New("data type None is not valid")
+
+		default:
+			return fmt.Errorf("%s data type not supported", field.GetDataType().String())
 		}
 	}
 	return nil
