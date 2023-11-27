@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -153,6 +154,8 @@ func (s *L0WriteBufferSuite) TestBufferData() {
 	pks, msg := s.composeInsertMsg(1000, 10, 128)
 	delMsg := s.composeDeleteMsg(lo.Map(pks, func(id int64, _ int) storage.PrimaryKey { return storage.NewInt64PrimaryKey(id) }))
 
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1000}, metacache.NewBloomFilterSet())
+	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 	s.metacache.EXPECT().GetSegmentByID(int64(1000)).Return(nil, false)
 	s.metacache.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything).Return()
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
