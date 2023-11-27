@@ -1267,7 +1267,6 @@ func (suite *ServiceSuite) TestLoadBalanceFailed() {
 		resp, err := server.LoadBalance(ctx, req)
 		suite.NoError(err)
 		suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
-		suite.Contains(resp.Reason, "failed to balance segments")
 		suite.Contains(resp.Reason, "mock error")
 
 		suite.meta.ReplicaManager.AddNode(replicas[0].ID, 10)

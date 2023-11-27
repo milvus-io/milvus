@@ -96,6 +96,21 @@ struct StorageConfig {
     bool useIAM = false;
     bool useVirtualHost = false;
     int64_t requestTimeoutMs = 3000;
+
+    std::string
+    ToString() const {
+        std::stringstream ss;
+        ss << "[address=" << address << ", bucket_name=" << bucket_name
+           << ", root_path=" << root_path << ", storage_type=" << storage_type
+           << ", cloud_provider=" << cloud_provider
+           << ", iam_endpoint=" << iam_endpoint << ", log_level=" << log_level
+           << ", region=" << region << ", useSSL=" << std::boolalpha << useSSL
+           << ", useIAM=" << std::boolalpha << useIAM
+           << ", useVirtualHost=" << std::boolalpha << useVirtualHost
+           << ", requestTimeoutMs=" << requestTimeoutMs << "]";
+
+        return ss.str();
+    }
 };
 
 }  // namespace milvus::storage

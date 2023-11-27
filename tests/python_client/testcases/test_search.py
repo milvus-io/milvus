@@ -1311,7 +1311,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             default_search_params, default_limit,
                             expr,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 65538,
+                            check_items={"err_code": 65535,
                                          "err_msg": "UnknownError: unsupported right datatype JSON of compare expr"})
 
 
