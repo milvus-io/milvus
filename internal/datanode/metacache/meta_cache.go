@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type MetaCache interface {
@@ -126,18 +127,20 @@ func (c *metaCacheImpl) CompactSegments(newSegmentID, partitionID int64, numOfRo
 				bfs:              bfs,
 			}
 		}
+		log.Info("add compactTo segment info metacache", zap.Int64("segmentID", compactTo))
 	}
 
-	for _, segID := range oldSegmentIDs {
-		if segmentInfo, ok := c.segmentInfos[segID]; ok {
-			updated := segmentInfo.Clone()
+	oldSet := typeutil.NewSet(oldSegmentIDs...)
+	for _, segment := range c.segmentInfos {
+		if oldSet.Contain(segment.segmentID) ||
+			oldSet.Contain(segment.compactTo) {
+			updated := segment.Clone()
 			updated.compactTo = compactTo
-			c.segmentInfos[segID] = updated
-		} else {
-			log.Warn("some dropped segment not exist in meta cache",
-				zap.String("channel", c.vChannelName),
-				zap.Int64("collectionID", c.collectionID),
-				zap.Int64("segmentID", segID))
+			c.segmentInfos[segment.segmentID] = updated
+			log.Info("update segment compactTo",
+				zap.Int64("segmentID", segment.segmentID),
+				zap.Int64("originalCompactTo", segment.compactTo),
+				zap.Int64("compactTo", compactTo))
 		}
 	}
 }
