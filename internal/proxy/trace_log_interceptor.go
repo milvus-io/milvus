@@ -22,7 +22,6 @@ import (
 	"context"
 	"path"
 
-	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -44,6 +43,23 @@ func TraceLogInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryS
 		fields = append(fields, GetRequestFieldWithoutSensitiveInfo(req))
 		log.Ctx(ctx).Info("trace info: detail", fields...)
 		return handler(ctx, req)
+	case 3: // detail info with request and response
+		fields := GetRequestBaseInfo(ctx, req, info, true)
+		fields = append(fields, GetRequestFieldWithoutSensitiveInfo(req))
+		log.Ctx(ctx).Info("trace info: all request", fields...)
+		resp, err := handler(ctx, req)
+		if err != nil {
+			log.Ctx(ctx).Info("trace info: all, error", zap.Error(err))
+			return resp, err
+		}
+		if status, ok := requestutil.GetStatusFromResponse(resp); ok {
+			if status.Code != 0 {
+				log.Ctx(ctx).Info("trace info: all, fail", zap.Any("resp", resp))
+			}
+		} else {
+			log.Ctx(ctx).Info("trace info: all, unknown", zap.Any("resp", resp))
+		}
+		return resp, nil
 	default:
 		return handler(ctx, req)
 	}
@@ -93,9 +109,4 @@ func GetRequestFieldWithoutSensitiveInfo(req interface{}) zap.Field {
 		})
 	}
 	return zap.Any("request", req)
-}
-
-func HTTPTraceLog(ctx *gin.Context) {
-	// TODO trace http request info
-	ctx.Next()
 }

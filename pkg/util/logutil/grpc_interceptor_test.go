@@ -61,5 +61,5 @@ func withMetaData(ctx context.Context, level zapcore.Level) context.Context {
 	md := metadata.New(map[string]string{
 		logLevelRPCMetaKey: level.String(),
 	})
-	return metadata.NewIncomingContext(context.TODO(), md)
+	return metadata.NewIncomingContext(ctx, md)
 }
