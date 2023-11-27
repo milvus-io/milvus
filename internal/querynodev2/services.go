@@ -1288,6 +1288,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			}
 		}
 
+		numOfGrowingRows := int64(0)
 		growingSegments := make(map[int64]*msgpb.MsgPosition)
 		for _, entry := range growing {
 			segment := node.manager.Segment.GetWithType(entry.SegmentID, segments.SegmentTypeGrowing)
@@ -1297,14 +1298,16 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 				continue
 			}
 			growingSegments[entry.SegmentID] = segment.StartPosition()
+			numOfGrowingRows += segment.InsertCount()
 		}
 
 		leaderViews = append(leaderViews, &querypb.LeaderView{
-			Collection:      delegator.Collection(),
-			Channel:         key,
-			SegmentDist:     sealedSegments,
-			GrowingSegments: growingSegments,
-			TargetVersion:   delegator.GetTargetVersion(),
+			Collection:       delegator.Collection(),
+			Channel:          key,
+			SegmentDist:      sealedSegments,
+			GrowingSegments:  growingSegments,
+			TargetVersion:    delegator.GetTargetVersion(),
+			NumOfGrowingRows: numOfGrowingRows,
 		})
 		return true
 	})
