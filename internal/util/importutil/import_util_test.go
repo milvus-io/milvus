@@ -127,6 +127,14 @@ func sampleSchema() *schemapb.CollectionSchema {
 				Description:  "json",
 				DataType:     schemapb.DataType_JSON,
 			},
+			{
+				FieldID:      113,
+				Name:         "FieldArray",
+				IsPrimaryKey: false,
+				Description:  "array",
+				DataType:     schemapb.DataType_Array,
+				ElementType:  schemapb.DataType_Int32,
+			},
 		},
 	}
 	return schema
@@ -145,6 +153,7 @@ type sampleRow struct {
 	FieldJSON         string
 	FieldBinaryVector []int
 	FieldFloatVector  []float32
+	FieldArray        []int32
 }
 type sampleContent struct {
 	Rows []sampleRow
@@ -324,7 +333,18 @@ func createFieldsData(collectionSchema *schemapb.CollectionSchema, rowCount int)
 				jsonData = append(jsonData, []byte(fmt.Sprintf("{\"y\": %d}", i)))
 			}
 			fieldsData[schema.GetFieldID()] = jsonData
-
+		case schemapb.DataType_Array:
+			arrayData := make([]*schemapb.ScalarField, 0)
+			for i := 0; i < rowCount; i++ {
+				arrayData = append(arrayData, &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{
+							Data: []int32{int32(i), int32(i + 1), int32(i + 2)},
+						},
+					},
+				})
+			}
+			fieldsData[schema.GetFieldID()] = arrayData
 		default:
 			return nil
 		}
@@ -372,6 +392,8 @@ func createBlockData(collectionSchema *schemapb.CollectionSchema, fieldsData map
 				blockData[fieldID].(*storage.StringFieldData).Data = append(blockData[fieldID].(*storage.StringFieldData).Data, fieldsData[fieldID].([]string)...)
 			case schemapb.DataType_JSON:
 				blockData[fieldID].(*storage.JSONFieldData).Data = append(blockData[fieldID].(*storage.JSONFieldData).Data, fieldsData[fieldID].([][]byte)...)
+			case schemapb.DataType_Array:
+				blockData[fieldID].(*storage.ArrayFieldData).Data = append(blockData[fieldID].(*storage.ArrayFieldData).Data, fieldsData[fieldID].([]*schemapb.ScalarField)...)
 			default:
 				return nil
 			}
@@ -586,6 +608,7 @@ func Test_InitValidators(t *testing.T) {
 		checkConvertFunc("FieldFloatVector", validVal, invalidVal)
 		invalidVal = []interface{}{jsonNumber("1"), jsonNumber("2"), jsonNumber("3"), true}
 		checkConvertFunc("FieldFloatVector", validVal, invalidVal)
+		checkConvertFunc("FieldArray", validVal, invalidVal)
 	})
 
 	t.Run("init error cases", func(t *testing.T) {
@@ -672,6 +695,230 @@ func Test_InitValidators(t *testing.T) {
 		err = v.convertFunc("", fieldData)
 		assert.Error(t, err)
 		assert.Equal(t, 2, fieldData.RowNum())
+	})
+
+	t.Run("array field", func(t *testing.T) {
+		schema = &schemapb.CollectionSchema{
+			Name:        "schema",
+			Description: "schema",
+			AutoID:      true,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      113,
+					Name:         "FieldArray",
+					IsPrimaryKey: false,
+					DataType:     schemapb.DataType_Array,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: "max_capacity", Value: "100"},
+					},
+					ElementType: schemapb.DataType_Bool,
+				},
+			},
+		}
+		validators = make(map[storage.FieldID]*Validator)
+		err = initValidators(schema, validators)
+		assert.NoError(t, err)
+
+		v, ok := validators[113]
+		assert.True(t, ok)
+
+		fields := initBlockData(schema)
+		assert.NotNil(t, fields)
+		fieldData := fields[113]
+
+		err = v.convertFunc([]interface{}{true, false}, fieldData)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, fieldData.RowNum())
+
+		err = v.convertFunc([]interface{}{1, 2}, fieldData)
+		assert.Error(t, err)
+
+		schema = &schemapb.CollectionSchema{
+			Name:        "schema",
+			Description: "schema",
+			AutoID:      true,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      113,
+					Name:         "FieldArray",
+					IsPrimaryKey: false,
+					DataType:     schemapb.DataType_Array,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: "max_capacity", Value: "100"},
+					},
+					ElementType: schemapb.DataType_Int32,
+				},
+			},
+		}
+		validators = make(map[storage.FieldID]*Validator)
+		err = initValidators(schema, validators)
+		assert.NoError(t, err)
+
+		v, ok = validators[113]
+		assert.True(t, ok)
+
+		fields = initBlockData(schema)
+		assert.NotNil(t, fields)
+		fieldData = fields[113]
+
+		err = v.convertFunc([]interface{}{jsonNumber("1"), jsonNumber("2"), jsonNumber("3"), jsonNumber("4")}, fieldData)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, fieldData.RowNum())
+
+		err = v.convertFunc([]interface{}{true, false}, fieldData)
+		assert.Error(t, err)
+
+		err = v.convertFunc([]interface{}{jsonNumber("1.1"), jsonNumber("2.2")}, fieldData)
+		assert.Error(t, err)
+
+		schema = &schemapb.CollectionSchema{
+			Name:        "schema",
+			Description: "schema",
+			AutoID:      true,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      113,
+					Name:         "FieldArray",
+					IsPrimaryKey: false,
+					DataType:     schemapb.DataType_Array,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: "max_capacity", Value: "100"},
+					},
+					ElementType: schemapb.DataType_Int64,
+				},
+			},
+		}
+		validators = make(map[storage.FieldID]*Validator)
+		err = initValidators(schema, validators)
+		assert.NoError(t, err)
+
+		v, ok = validators[113]
+		assert.True(t, ok)
+
+		fields = initBlockData(schema)
+		assert.NotNil(t, fields)
+		fieldData = fields[113]
+
+		err = v.convertFunc([]interface{}{jsonNumber("1"), jsonNumber("2"), jsonNumber("3"), jsonNumber("4")}, fieldData)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, fieldData.RowNum())
+
+		err = v.convertFunc([]interface{}{true, false}, fieldData)
+		assert.Error(t, err)
+
+		err = v.convertFunc([]interface{}{jsonNumber("1.1"), jsonNumber("2.2")}, fieldData)
+		assert.Error(t, err)
+
+		schema = &schemapb.CollectionSchema{
+			Name:        "schema",
+			Description: "schema",
+			AutoID:      true,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      113,
+					Name:         "FieldArray",
+					IsPrimaryKey: false,
+					DataType:     schemapb.DataType_Array,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: "max_capacity", Value: "100"},
+					},
+					ElementType: schemapb.DataType_Float,
+				},
+			},
+		}
+		validators = make(map[storage.FieldID]*Validator)
+		err = initValidators(schema, validators)
+		assert.NoError(t, err)
+
+		v, ok = validators[113]
+		assert.True(t, ok)
+
+		fields = initBlockData(schema)
+		assert.NotNil(t, fields)
+		fieldData = fields[113]
+
+		err = v.convertFunc([]interface{}{jsonNumber("1.1"), jsonNumber("2.2"), jsonNumber("3.3"), jsonNumber("4.4")}, fieldData)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, fieldData.RowNum())
+
+		err = v.convertFunc([]interface{}{true, false}, fieldData)
+		assert.Error(t, err)
+
+		err = v.convertFunc([]interface{}{jsonNumber("1.1.1"), jsonNumber("2.2.2")}, fieldData)
+		assert.Error(t, err)
+
+		schema = &schemapb.CollectionSchema{
+			Name:        "schema",
+			Description: "schema",
+			AutoID:      true,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      113,
+					Name:         "FieldArray",
+					IsPrimaryKey: false,
+					DataType:     schemapb.DataType_Array,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: "max_capacity", Value: "100"},
+					},
+					ElementType: schemapb.DataType_Double,
+				},
+			},
+		}
+		validators = make(map[storage.FieldID]*Validator)
+		err = initValidators(schema, validators)
+		assert.NoError(t, err)
+
+		v, ok = validators[113]
+		assert.True(t, ok)
+
+		fields = initBlockData(schema)
+		assert.NotNil(t, fields)
+		fieldData = fields[113]
+
+		err = v.convertFunc([]interface{}{jsonNumber("1.2"), jsonNumber("2.3"), jsonNumber("3.4"), jsonNumber("4.5")}, fieldData)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, fieldData.RowNum())
+
+		err = v.convertFunc([]interface{}{true, false}, fieldData)
+		assert.Error(t, err)
+
+		err = v.convertFunc([]interface{}{jsonNumber("1.1.1"), jsonNumber("2.2.2")}, fieldData)
+		assert.Error(t, err)
+
+		schema = &schemapb.CollectionSchema{
+			Name:        "schema",
+			Description: "schema",
+			AutoID:      true,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      113,
+					Name:         "FieldArray",
+					IsPrimaryKey: false,
+					DataType:     schemapb.DataType_Array,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: "max_capacity", Value: "100"},
+					},
+					ElementType: schemapb.DataType_VarChar,
+				},
+			},
+		}
+		validators = make(map[storage.FieldID]*Validator)
+		err = initValidators(schema, validators)
+		assert.NoError(t, err)
+
+		v, ok = validators[113]
+		assert.True(t, ok)
+
+		fields = initBlockData(schema)
+		assert.NotNil(t, fields)
+		fieldData = fields[113]
+
+		err = v.convertFunc([]interface{}{"abc", "def"}, fieldData)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, fieldData.RowNum())
+
+		err = v.convertFunc([]interface{}{true, false}, fieldData)
+		assert.Error(t, err)
 	})
 }
 
@@ -829,7 +1076,7 @@ func Test_TryFlushBlocks(t *testing.T) {
 		return nil
 	}
 
-	blockSize := int64(1024)
+	blockSize := int64(2048)
 	maxTotalSize := int64(4096)
 	shardNum := int32(3)
 	schema := sampleSchema()

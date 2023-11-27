@@ -189,6 +189,10 @@ func Test_CSVRowConsumerInitValidators(t *testing.T) {
 		checkConvertFunc("FieldFloatVector", validVal, invalidVal)
 		invalidVal = `[1]`
 		checkConvertFunc("FieldFloatVector", validVal, invalidVal)
+
+		validVal = "[1,2,3,4]"
+		invalidVal = "[bool, false]"
+		checkConvertFunc("FieldArray", validVal, invalidVal)
 	})
 
 	t.Run("init error cases", func(t *testing.T) {
@@ -277,6 +281,168 @@ func Test_CSVRowConsumerInitValidators(t *testing.T) {
 		err = v.convertFunc("", fieldData)
 		assert.Error(t, err)
 		assert.Equal(t, 2, fieldData.RowNum())
+	})
+
+	t.Run("array field", func(t *testing.T) {
+		schema = &schemapb.CollectionSchema{
+			Name:        "schema",
+			Description: "schema",
+			AutoID:      true,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      113,
+					Name:         "FieldArray",
+					IsPrimaryKey: false,
+					DataType:     schemapb.DataType_Array,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: "max_capacity", Value: "100"},
+					},
+					ElementType: schemapb.DataType_Bool,
+				},
+			},
+		}
+		consumer.validators = make(map[int64]*CSVValidator)
+		err = consumer.initValidators(schema)
+		assert.NoError(t, err)
+
+		v, ok := consumer.validators[113]
+		assert.True(t, ok)
+
+		fields := initBlockData(schema)
+		assert.NotNil(t, fields)
+		fieldData := fields[113]
+
+		err = v.convertFunc("[true, false]", fieldData)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, fieldData.RowNum())
+
+		schema = &schemapb.CollectionSchema{
+			Name:        "schema",
+			Description: "schema",
+			AutoID:      true,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      113,
+					Name:         "FieldArray",
+					IsPrimaryKey: false,
+					DataType:     schemapb.DataType_Array,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: "max_capacity", Value: "100"},
+					},
+					ElementType: schemapb.DataType_Int64,
+				},
+			},
+		}
+		consumer.validators = make(map[int64]*CSVValidator)
+		err = consumer.initValidators(schema)
+		assert.NoError(t, err)
+
+		v, ok = consumer.validators[113]
+		assert.True(t, ok)
+
+		fields = initBlockData(schema)
+		assert.NotNil(t, fields)
+		fieldData = fields[113]
+
+		err = v.convertFunc("[1,2,3,4]", fieldData)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, fieldData.RowNum())
+
+		schema = &schemapb.CollectionSchema{
+			Name:        "schema",
+			Description: "schema",
+			AutoID:      true,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      113,
+					Name:         "FieldArray",
+					IsPrimaryKey: false,
+					DataType:     schemapb.DataType_Array,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: "max_capacity", Value: "100"},
+					},
+					ElementType: schemapb.DataType_Float,
+				},
+			},
+		}
+		consumer.validators = make(map[int64]*CSVValidator)
+		err = consumer.initValidators(schema)
+		assert.NoError(t, err)
+
+		v, ok = consumer.validators[113]
+		assert.True(t, ok)
+
+		fields = initBlockData(schema)
+		assert.NotNil(t, fields)
+		fieldData = fields[113]
+
+		err = v.convertFunc("[1.1,2.2,3.3,4.4]", fieldData)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, fieldData.RowNum())
+
+		schema = &schemapb.CollectionSchema{
+			Name:        "schema",
+			Description: "schema",
+			AutoID:      true,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      113,
+					Name:         "FieldArray",
+					IsPrimaryKey: false,
+					DataType:     schemapb.DataType_Array,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: "max_capacity", Value: "100"},
+					},
+					ElementType: schemapb.DataType_Double,
+				},
+			},
+		}
+		consumer.validators = make(map[int64]*CSVValidator)
+		err = consumer.initValidators(schema)
+		assert.NoError(t, err)
+
+		v, ok = consumer.validators[113]
+		assert.True(t, ok)
+
+		fields = initBlockData(schema)
+		assert.NotNil(t, fields)
+		fieldData = fields[113]
+
+		err = v.convertFunc("[1.2,2.3,3.4,4.5]", fieldData)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, fieldData.RowNum())
+
+		schema = &schemapb.CollectionSchema{
+			Name:        "schema",
+			Description: "schema",
+			AutoID:      true,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      113,
+					Name:         "FieldArray",
+					IsPrimaryKey: false,
+					DataType:     schemapb.DataType_Array,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: "max_capacity", Value: "100"},
+					},
+					ElementType: schemapb.DataType_VarChar,
+				},
+			},
+		}
+		consumer.validators = make(map[int64]*CSVValidator)
+		err = consumer.initValidators(schema)
+		assert.NoError(t, err)
+
+		v, ok = consumer.validators[113]
+		assert.True(t, ok)
+
+		fields = initBlockData(schema)
+		assert.NotNil(t, fields)
+		fieldData = fields[113]
+
+		err = v.convertFunc(`["abc", "vv"]`, fieldData)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, fieldData.RowNum())
 	})
 }
 
