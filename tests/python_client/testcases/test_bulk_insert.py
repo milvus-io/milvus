@@ -782,8 +782,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_float_field(name=df.float_field),
         ]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
-        self.collection_wrap.init_collection(c_name, schema=schema)
-        assert len(self.collection_wrap.partitions) == ct.default_partition_num
+        self.collection_wrap.init_collection(c_name, schema=schema, num_partitions=10)
+        assert len(self.collection_wrap.partitions) == 10
 
         # import data
         t0 = time.time()
@@ -879,7 +879,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_float_vec_field(name=df.vec_field, dim=dim),
         ]
         schema = cf.gen_collection_schema(fields=fields)
-        self.collection_wrap.init_collection(c_name, schema=schema)
+        self.collection_wrap.init_collection(c_name, schema=schema, num_partitions=10)
         # build index
         index_params = ct.default_index
         self.collection_wrap.create_index(
