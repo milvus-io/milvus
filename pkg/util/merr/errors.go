@@ -144,7 +144,7 @@ var (
 	errUnexpected = newMilvusError("unexpected error", (1<<16)-1, false)
 
 	// import
-	ErrImportFailed = newMilvusError("deserializing import data failed", 2100, false)
+	ErrImportFailed = newMilvusError("importing data failed", 2100, false)
 )
 
 type milvusError struct {
