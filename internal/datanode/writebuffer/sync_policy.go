@@ -13,16 +13,49 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-type SyncPolicy func(buffers []*segmentBuffer, ts typeutil.Timestamp) []int64
+type SyncPolicy interface {
+	SelectSegments(buffers []*segmentBuffer, ts typeutil.Timestamp) []int64
+	Reason() string
+}
 
-func SyncFullBuffer(buffers []*segmentBuffer, _ typeutil.Timestamp) []int64 {
-	return lo.FilterMap(buffers, func(buf *segmentBuffer, _ int) (int64, bool) {
-		return buf.segmentID, buf.IsFull()
-	})
+type SelectSegmentFunc func(buffer []*segmentBuffer, ts typeutil.Timestamp) []int64
+
+type SelectSegmentFnPolicy struct {
+	fn     SelectSegmentFunc
+	reason string
+}
+
+func (f SelectSegmentFnPolicy) SelectSegments(buffers []*segmentBuffer, ts typeutil.Timestamp) []int64 {
+	return f.fn(buffers, ts)
+}
+
+func (f SelectSegmentFnPolicy) Reason() string { return f.reason }
+
+func wrapSelectSegmentFuncPolicy(fn SelectSegmentFunc, reason string) SelectSegmentFnPolicy {
+	return SelectSegmentFnPolicy{
+		fn:     fn,
+		reason: reason,
+	}
+}
+
+func GetFullBufferPolicy() SyncPolicy {
+	return wrapSelectSegmentFuncPolicy(
+		func(buffers []*segmentBuffer, _ typeutil.Timestamp) []int64 {
+			return lo.FilterMap(buffers, func(buf *segmentBuffer, _ int) (int64, bool) {
+				return buf.segmentID, buf.IsFull()
+			})
+		}, "buffer full")
+}
+
+func GetCompactedSegmentsPolicy(meta metacache.MetaCache) SyncPolicy {
+	return wrapSelectSegmentFuncPolicy(func(buffers []*segmentBuffer, _ typeutil.Timestamp) []int64 {
+		segmentIDs := lo.Map(buffers, func(buffer *segmentBuffer, _ int) int64 { return buffer.segmentID })
+		return meta.GetSegmentIDsBy(metacache.WithSegmentIDs(segmentIDs...), metacache.WithCompacted())
+	}, "segment compacted")
 }
 
 func GetSyncStaleBufferPolicy(staleDuration time.Duration) SyncPolicy {
-	return func(buffers []*segmentBuffer, ts typeutil.Timestamp) []int64 {
+	return wrapSelectSegmentFuncPolicy(func(buffers []*segmentBuffer, ts typeutil.Timestamp) []int64 {
 		current := tsoutil.PhysicalTime(ts)
 		return lo.FilterMap(buffers, func(buf *segmentBuffer, _ int) (int64, bool) {
 			minTs := buf.MinTimestamp()
@@ -30,17 +63,17 @@ func GetSyncStaleBufferPolicy(staleDuration time.Duration) SyncPolicy {
 
 			return buf.segmentID, current.Sub(start) > staleDuration
 		})
-	}
+	}, "buffer stale")
 }
 
 func GetFlushingSegmentsPolicy(meta metacache.MetaCache) SyncPolicy {
-	return func(_ []*segmentBuffer, _ typeutil.Timestamp) []int64 {
+	return wrapSelectSegmentFuncPolicy(func(_ []*segmentBuffer, _ typeutil.Timestamp) []int64 {
 		return meta.GetSegmentIDsBy(metacache.WithSegmentState(commonpb.SegmentState_Flushing))
-	}
+	}, "segment flushing")
 }
 
 func GetFlushTsPolicy(flushTimestamp *atomic.Uint64, meta metacache.MetaCache) SyncPolicy {
-	return func(buffers []*segmentBuffer, ts typeutil.Timestamp) []int64 {
+	return wrapSelectSegmentFuncPolicy(func(buffers []*segmentBuffer, ts typeutil.Timestamp) []int64 {
 		flushTs := flushTimestamp.Load()
 		if flushTs != nonFlushTS && ts >= flushTs {
 			// flush segment start pos < flushTs && checkpoint > flushTs
@@ -61,5 +94,5 @@ func GetFlushTsPolicy(flushTimestamp *atomic.Uint64, meta metacache.MetaCache) S
 			return ids
 		}
 		return nil
-	}
+	}, "flush ts")
 }
