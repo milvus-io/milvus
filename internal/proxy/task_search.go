@@ -210,7 +210,6 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	t.Base.MsgType = commonpb.MsgType_Search
 	t.Base.SourceID = paramtable.GetNodeID()
-	log := log.Ctx(ctx)
 
 	collectionName := t.request.CollectionName
 	t.collectionName = collectionName
@@ -218,6 +217,8 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	if err != nil { // err is not nil if collection not exists
 		return err
 	}
+
+	log := log.Ctx(ctx).With(zap.Int64("collID", collID), zap.String("collName", collectionName))
 
 	t.SearchRequest.DbID = 0 // todo
 	t.SearchRequest.CollectionID = collID
@@ -270,6 +271,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		return fmt.Errorf("%s [%d] is invalid, %w", NQKey, nq, err)
 	}
 	t.SearchRequest.Nq = nq
+	log = log.With(zap.Int64("nq", nq))
 
 	outputFieldIDs, err := getOutputFieldIDs(t.schema, t.request.GetOutputFields())
 	if err != nil {
@@ -404,7 +406,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 func (t *searchTask) Execute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-Execute")
 	defer sp.End()
-	log := log.Ctx(ctx)
+	log := log.Ctx(ctx).With(zap.Int64("nq", t.SearchRequest.GetNq()))
 
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute search %d", t.ID()))
 	defer tr.CtxElapse(ctx, "done")
@@ -437,7 +439,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	defer func() {
 		tr.CtxElapse(ctx, "done")
 	}()
-	log := log.Ctx(ctx)
+	log := log.Ctx(ctx).With(zap.Int64("nq", t.SearchRequest.GetNq()))
 
 	var (
 		Nq         = t.SearchRequest.GetNq()
