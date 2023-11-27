@@ -71,11 +71,20 @@ func (b *RowCountBasedBalancer) convertToNodeItems(nodeIDs []int64) []*nodeItem 
 	ret := make([]*nodeItem, 0, len(nodeIDs))
 	for _, nodeInfo := range b.getNodes(nodeIDs) {
 		node := nodeInfo.ID()
+
+		// calculate sealed segment row count on node
 		segments := b.dist.SegmentDistManager.GetByNode(node)
 		rowcnt := 0
 		for _, s := range segments {
 			rowcnt += int(s.GetNumOfRows())
 		}
+
+		// calculate growing segment row count on node
+		views := b.dist.GetLeaderView(node)
+		for _, view := range views {
+			rowcnt += int(view.NumOfGrowingRows)
+		}
+
 		// more row count, less priority
 		nodeItem := newNodeItem(rowcnt, node)
 		ret = append(ret, &nodeItem)
