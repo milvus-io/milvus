@@ -46,7 +46,7 @@ func CloseEtcdClient() {
 func getEtcdAndPath() (*clientv3.Client, string) {
 	clientCreator.mu.Lock()
 	defer clientCreator.mu.Unlock()
-	// If client/path doesnt exist, create a new one
+	// If client/path doesn’t exist, create a new one
 	if clientCreator.client == nil {
 		var err error
 		clientCreator.client, err = createEtcdClient()

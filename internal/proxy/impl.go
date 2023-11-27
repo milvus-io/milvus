@@ -69,6 +69,7 @@ func (node *Proxy) GetComponentStates(ctx context.Context, req *milvuspb.GetComp
 		Status: merr.Success(),
 	}
 	code := node.GetStateCode()
+	log.Debug("Proxy current state", zap.String("StateCode", code.String()))
 	nodeID := common.NotRegisteredID
 	if node.session != nil && node.session.Registered() {
 		nodeID = node.session.ServerID
@@ -1285,6 +1286,7 @@ func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPar
 		LoadPartitionsRequest: request,
 		queryCoord:            node.queryCoord,
 		datacoord:             node.dataCoord,
+		replicateMsgStream:    node.replicateMsgStream,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -1350,6 +1352,7 @@ func (node *Proxy) ReleasePartitions(ctx context.Context, request *milvuspb.Rele
 		Condition:                NewTaskCondition(ctx),
 		ReleasePartitionsRequest: request,
 		queryCoord:               node.queryCoord,
+		replicateMsgStream:       node.replicateMsgStream,
 	}
 
 	method := "ReleasePartitions"
@@ -1605,7 +1608,6 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 
 	msgBase := commonpbutil.NewMsgBase(
 		commonpbutil.WithMsgType(commonpb.MsgType_SystemInfo),
-		commonpbutil.WithMsgID(0),
 		commonpbutil.WithSourceID(paramtable.GetNodeID()),
 	)
 	if request.Base == nil {
@@ -1692,7 +1694,6 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 
 	msgBase := commonpbutil.NewMsgBase(
 		commonpbutil.WithMsgType(commonpb.MsgType_SystemInfo),
-		commonpbutil.WithMsgID(0),
 		commonpbutil.WithSourceID(paramtable.GetNodeID()),
 	)
 	if request.Base == nil {
@@ -2220,7 +2221,6 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 			InsertRequest: msgpb.InsertRequest{
 				Base: commonpbutil.NewMsgBase(
 					commonpbutil.WithMsgType(commonpb.MsgType_Insert),
-					commonpbutil.WithMsgID(0),
 					commonpbutil.WithSourceID(paramtable.GetNodeID()),
 				),
 				DbName:         request.GetDbName(),
@@ -3281,7 +3281,6 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 	infoResp, err := node.dataCoord.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_SegmentInfo),
-			commonpbutil.WithMsgID(0),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		SegmentIDs: getSegmentsByStatesResponse.Segments,
@@ -3355,7 +3354,6 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 	infoResp, err := node.queryCoord.GetSegmentInfo(ctx, &querypb.GetSegmentInfoRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_SegmentInfo),
-			commonpbutil.WithMsgID(0),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		CollectionID: collID,
@@ -3506,7 +3504,6 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 
 	req.Base = commonpbutil.NewMsgBase(
 		commonpbutil.WithMsgType(commonpb.MsgType_SystemInfo),
-		commonpbutil.WithMsgID(0),
 		commonpbutil.WithSourceID(paramtable.GetNodeID()),
 	)
 	if metricType == metricsinfo.SystemInfoMetrics {
@@ -3568,7 +3565,6 @@ func (node *Proxy) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetrics
 
 	req.Base = commonpbutil.NewMsgBase(
 		commonpbutil.WithMsgType(commonpb.MsgType_SystemInfo),
-		commonpbutil.WithMsgID(0),
 		commonpbutil.WithSourceID(paramtable.GetNodeID()),
 	)
 
@@ -3625,7 +3621,6 @@ func (node *Proxy) LoadBalance(ctx context.Context, req *milvuspb.LoadBalanceReq
 	infoResp, err := node.queryCoord.LoadBalance(ctx, &querypb.LoadBalanceRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_LoadBalanceSegments),
-			commonpbutil.WithMsgID(0),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		SourceNodeIDs:    []int64{req.SrcNodeID},
@@ -3955,7 +3950,9 @@ func (node *Proxy) ListImportTasks(ctx context.Context, req *milvuspb.ListImport
 
 	log.Debug("successfully received list import tasks response",
 		zap.String("collection", req.CollectionName),
-		zap.Any("tasks", resp.Tasks))
+		zap.Any("tasks", lo.SliceToMap(resp.GetTasks(), func(state *milvuspb.GetImportStateResponse) (int64, commonpb.ImportState) {
+			return state.GetId(), state.GetState()
+		})))
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.SuccessLabel).Inc()
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return resp, err
@@ -4574,7 +4571,6 @@ func (node *Proxy) RenameCollection(ctx context.Context, req *milvuspb.RenameCol
 
 	req.Base = commonpbutil.NewMsgBase(
 		commonpbutil.WithMsgType(commonpb.MsgType_RenameCollection),
-		commonpbutil.WithMsgID(0),
 		commonpbutil.WithSourceID(paramtable.GetNodeID()),
 	)
 	resp, err := node.rootCoord.RenameCollection(ctx, req)

@@ -321,11 +321,13 @@ func (c *Core) initKVCreator() {
 	if c.metaKVCreator == nil {
 		if Params.MetaStoreCfg.MetaStoreType.GetValue() == util.MetaStoreTypeTiKV {
 			c.metaKVCreator = func() (kv.MetaKv, error) {
-				return tikv.NewTiKV(c.tikvCli, Params.TiKVCfg.MetaRootPath.GetValue()), nil
+				return tikv.NewTiKV(c.tikvCli, Params.TiKVCfg.MetaRootPath.GetValue(),
+					tikv.WithRequestTimeout(paramtable.Get().ServiceParam.TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond))), nil
 			}
 		} else {
 			c.metaKVCreator = func() (kv.MetaKv, error) {
-				return etcdkv.NewEtcdKV(c.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue()), nil
+				return etcdkv.NewEtcdKV(c.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue(),
+					etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))), nil
 			}
 		}
 	}
@@ -759,6 +761,7 @@ func (c *Core) Stop() error {
 // GetComponentStates get states of components
 func (c *Core) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	code := c.GetStateCode()
+	log.Debug("RootCoord current state", zap.String("StateCode", code.String()))
 
 	nodeID := common.NotRegisteredID
 	if c.session != nil && c.session.Registered() {
@@ -975,7 +978,6 @@ func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollecti
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("CreateCollection", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("CreateCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordNumOfCollections.Inc()
 	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("CreateCollection").Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Ctx(ctx).Info("done to create collection",
@@ -1025,7 +1027,6 @@ func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRe
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("DropCollection", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("DropCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordNumOfCollections.Dec()
 	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("DropCollection").Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Ctx(ctx).Info("done to drop collection", zap.String("role", typeutil.RootCoordRole),
@@ -1276,7 +1277,6 @@ func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollection
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollection", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("AlterCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordNumOfCollections.Dec()
 	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("AlterCollection").Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Info("done to alter collection",
@@ -2031,8 +2031,6 @@ func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (
 func (c *Core) ExpireCredCache(ctx context.Context, username string) error {
 	req := proxypb.InvalidateCredCacheRequest{
 		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(0), // TODO, msg type
-			commonpbutil.WithMsgID(0),   // TODO, msg id
 			commonpbutil.WithSourceID(c.session.ServerID),
 		),
 		Username: username,
@@ -2044,8 +2042,6 @@ func (c *Core) ExpireCredCache(ctx context.Context, username string) error {
 func (c *Core) UpdateCredCache(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
 	req := proxypb.UpdateCredCacheRequest{
 		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(0), // TODO, msg type
-			commonpbutil.WithMsgID(0),   // TODO, msg id
 			commonpbutil.WithSourceID(c.session.ServerID),
 		),
 		Username: credInfo.Username,

@@ -80,14 +80,14 @@ type indexBuilder struct {
 	policy                    buildIndexPolicy
 	nodeManager               *IndexNodeManager
 	chunkManager              storage.ChunkManager
-	indexEngineVersionManager *IndexEngineVersionManager
+	indexEngineVersionManager IndexEngineVersionManager
 }
 
 func newIndexBuilder(
 	ctx context.Context,
 	metaTable *meta, nodeManager *IndexNodeManager,
 	chunkManager storage.ChunkManager,
-	indexEngineVersionManager *IndexEngineVersionManager,
+	indexEngineVersionManager IndexEngineVersionManager,
 ) *indexBuilder {
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -191,7 +191,7 @@ func (ib *indexBuilder) run() {
 	for _, buildID := range buildIDs {
 		ok := ib.process(buildID)
 		if !ok {
-			log.Ctx(ib.ctx).Info("there is no IndexNode available or etcd is not serviceable, wait a minute...")
+			log.Ctx(ib.ctx).Info("there is no idle indexing node, wait a minute...")
 			break
 		}
 	}

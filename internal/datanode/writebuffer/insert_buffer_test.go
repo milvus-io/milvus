@@ -121,7 +121,7 @@ func (s *InsertBufferSuite) TestBasic() {
 		s.True(insertBuffer.IsEmpty())
 		s.False(insertBuffer.IsFull())
 
-		insertBuffer.rows = insertBuffer.rowLimit + 1
+		insertBuffer.size = insertBuffer.sizeLimit + 1
 		s.True(insertBuffer.IsFull())
 		s.False(insertBuffer.IsEmpty())
 	})

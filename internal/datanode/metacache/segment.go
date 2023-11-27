@@ -23,6 +23,12 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 )
 
+const (
+	// NullSegment means the segment id to discard
+	// happens when segment compacted to 0 lines and target segment is dropped directly
+	NullSegment = int64(-1)
+)
+
 type SegmentInfo struct {
 	segmentID        int64
 	partitionID      int64
@@ -36,6 +42,8 @@ type SegmentInfo struct {
 	bfs              *BloomFilterSet
 	compactTo        int64
 	importing        bool
+	level            datapb.SegmentLevel
+	syncingTasks     int32
 }
 
 func (s *SegmentInfo) SegmentID() int64 {
@@ -81,6 +89,10 @@ func (s *SegmentInfo) GetBloomFilterSet() *BloomFilterSet {
 	return s.bfs
 }
 
+func (s *SegmentInfo) Level() datapb.SegmentLevel {
+	return s.level
+}
+
 func (s *SegmentInfo) Clone() *SegmentInfo {
 	return &SegmentInfo{
 		segmentID:        s.segmentID,
@@ -94,10 +106,17 @@ func (s *SegmentInfo) Clone() *SegmentInfo {
 		syncingRows:      s.syncingRows,
 		bfs:              s.bfs,
 		compactTo:        s.compactTo,
+		level:            s.level,
+		importing:        s.importing,
+		syncingTasks:     s.syncingTasks,
 	}
 }
 
 func NewSegmentInfo(info *datapb.SegmentInfo, bfs *BloomFilterSet) *SegmentInfo {
+	level := info.GetLevel()
+	if level == datapb.SegmentLevel_Legacy {
+		level = datapb.SegmentLevel_L1
+	}
 	return &SegmentInfo{
 		segmentID:        info.GetID(),
 		partitionID:      info.GetPartitionID(),
@@ -106,6 +125,7 @@ func NewSegmentInfo(info *datapb.SegmentInfo, bfs *BloomFilterSet) *SegmentInfo 
 		startPosition:    info.GetStartPosition(),
 		checkpoint:       info.GetDmlPosition(),
 		startPosRecorded: true,
+		level:            level,
 		bfs:              bfs,
 	}
 }

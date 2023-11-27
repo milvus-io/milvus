@@ -432,9 +432,8 @@ func HandleCompare(op int, left, right *ExprWithType) (*planpb.Expr, error) {
 		return handleCompareRightValue(op, right, valueExpr)
 	} else if valueExpr := right.expr.GetValueExpr(); valueExpr != nil {
 		return handleCompareRightValue(cmpOp, left, valueExpr)
-	} else {
-		return handleCompare(cmpOp, left, right)
 	}
+	return handleCompare(cmpOp, left, right)
 }
 
 func isEmptyExpression(s string) bool {
@@ -504,7 +503,7 @@ func convertEscapeSingle(literal string) (string, error) {
 			b.WriteString(literal[start : end-1])
 			b.WriteString(`'`)
 		}
-		start = end
+		start = end + 1
 	}
 	b.WriteString(literal[end+1 : len(literal)-1])
 	b.WriteString(`"`)

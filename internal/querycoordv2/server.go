@@ -214,10 +214,12 @@ func (s *Server) initQueryCoord() error {
 	var idAllocatorKV kv.TxnKV
 	log.Info(fmt.Sprintf("query coordinator connecting to %s.", metaType))
 	if metaType == util.MetaStoreTypeTiKV {
-		s.kv = tikv.NewTiKV(s.tikvCli, Params.TiKVCfg.MetaRootPath.GetValue())
+		s.kv = tikv.NewTiKV(s.tikvCli, Params.TiKVCfg.MetaRootPath.GetValue(),
+			tikv.WithRequestTimeout(paramtable.Get().ServiceParam.TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 		idAllocatorKV = tsoutil.NewTSOTiKVBase(s.tikvCli, Params.TiKVCfg.KvRootPath.GetValue(), "querycoord-id-allocator")
 	} else if metaType == util.MetaStoreTypeEtcd {
-		s.kv = etcdkv.NewEtcdKV(s.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
+		s.kv = etcdkv.NewEtcdKV(s.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue(),
+			etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 		idAllocatorKV = tsoutil.NewTSOKVBase(s.etcdCli, Params.EtcdCfg.KvRootPath.GetValue(), "querycoord-id-allocator")
 	} else {
 		return fmt.Errorf("not supported meta store: %s", metaType)
@@ -531,6 +533,7 @@ func (s *Server) State() commonpb.StateCode {
 }
 
 func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
+	log.Debug("QueryCoord current state", zap.String("StateCode", s.State().String()))
 	nodeID := common.NotRegisteredID
 	if s.session != nil && s.session.Registered() {
 		nodeID = s.session.GetServerID()

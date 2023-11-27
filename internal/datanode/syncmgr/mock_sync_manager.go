@@ -103,11 +103,11 @@ func (_c *MockSyncManager_GetEarliestPosition_Call) RunAndReturn(run func(string
 }
 
 // SyncData provides a mock function with given fields: ctx, task
-func (_m *MockSyncManager) SyncData(ctx context.Context, task *SyncTask) *conc.Future[error] {
+func (_m *MockSyncManager) SyncData(ctx context.Context, task Task) *conc.Future[error] {
 	ret := _m.Called(ctx, task)
 
 	var r0 *conc.Future[error]
-	if rf, ok := ret.Get(0).(func(context.Context, *SyncTask) *conc.Future[error]); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, Task) *conc.Future[error]); ok {
 		r0 = rf(ctx, task)
 	} else {
 		if ret.Get(0) != nil {
@@ -125,14 +125,14 @@ type MockSyncManager_SyncData_Call struct {
 
 // SyncData is a helper method to define mock.On call
 //   - ctx context.Context
-//   - task *SyncTask
+//   - task Task
 func (_e *MockSyncManager_Expecter) SyncData(ctx interface{}, task interface{}) *MockSyncManager_SyncData_Call {
 	return &MockSyncManager_SyncData_Call{Call: _e.mock.On("SyncData", ctx, task)}
 }
 
-func (_c *MockSyncManager_SyncData_Call) Run(run func(ctx context.Context, task *SyncTask)) *MockSyncManager_SyncData_Call {
+func (_c *MockSyncManager_SyncData_Call) Run(run func(ctx context.Context, task Task)) *MockSyncManager_SyncData_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*SyncTask))
+		run(args[0].(context.Context), args[1].(Task))
 	})
 	return _c
 }
@@ -142,7 +142,7 @@ func (_c *MockSyncManager_SyncData_Call) Return(_a0 *conc.Future[error]) *MockSy
 	return _c
 }
 
-func (_c *MockSyncManager_SyncData_Call) RunAndReturn(run func(context.Context, *SyncTask) *conc.Future[error]) *MockSyncManager_SyncData_Call {
+func (_c *MockSyncManager_SyncData_Call) RunAndReturn(run func(context.Context, Task) *conc.Future[error]) *MockSyncManager_SyncData_Call {
 	_c.Call.Return(run)
 	return _c
 }

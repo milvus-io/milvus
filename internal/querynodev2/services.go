@@ -64,6 +64,8 @@ func (node *QueryNode) GetComponentStates(ctx context.Context, req *milvuspb.Get
 	code := node.lifetime.GetState()
 	nodeID := common.NotRegisteredID
 
+	log.Debug("QueryNode current state", zap.Int64("NodeID", nodeID), zap.String("StateCode", code.String()))
+
 	if node.session != nil && node.session.Registered() {
 		nodeID = paramtable.GetNodeID()
 	}
@@ -266,6 +268,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		node.loader,
 		node.factory,
 		channel.GetSeekPosition().GetTimestamp(),
+		node.queryHook,
 	)
 	if err != nil {
 		log.Warn("failed to create shard delegator", zap.Error(err))
@@ -440,6 +443,12 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 
 	// check target matches
 	if err := merr.CheckTargetID(req.GetBase()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	// check index
+	if len(req.GetIndexInfoList()) == 0 {
+		err := merr.WrapErrIndexNotFoundForCollection(req.GetSchema().GetName())
 		return merr.Status(err), nil
 	}
 

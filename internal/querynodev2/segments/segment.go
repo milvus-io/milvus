@@ -652,7 +652,7 @@ func (s *LocalSegment) LoadMultiFieldData(rowCount int64, fields []*datapb.Field
 	}
 
 	var status C.CStatus
-	GetDynamicPool().Submit(func() (any, error) {
+	GetLoadPool().Submit(func() (any, error) {
 		status = C.LoadFieldData(s.ptr, loadFieldDataInfo.cLoadFieldDataInfo)
 		return nil, nil
 	}).Await()
@@ -705,7 +705,7 @@ func (s *LocalSegment) LoadFieldData(fieldID int64, rowCount int64, field *datap
 	loadFieldDataInfo.appendMMapDirPath(paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue())
 
 	var status C.CStatus
-	GetDynamicPool().Submit(func() (any, error) {
+	GetLoadPool().Submit(func() (any, error) {
 		log.Info("submitted loadFieldData task to dy pool")
 		status = C.LoadFieldData(s.ptr, loadFieldDataInfo.cLoadFieldDataInfo)
 		return nil, nil
@@ -757,7 +757,7 @@ func (s *LocalSegment) AddFieldDataInfo(rowCount int64, fields []*datapb.FieldBi
 	}
 
 	var status C.CStatus
-	GetDynamicPool().Submit(func() (any, error) {
+	GetLoadPool().Submit(func() (any, error) {
 		status = C.AddFieldDataInfoForSealed(s.ptr, loadFieldDataInfo.cLoadFieldDataInfo)
 		return nil, nil
 	}).Await()
@@ -886,7 +886,7 @@ func (s *LocalSegment) LoadIndexInfo(indexInfo *querypb.FieldIndexInfo, info *Lo
 	}
 
 	var status C.CStatus
-	GetDynamicPool().Submit(func() (any, error) {
+	GetLoadPool().Submit(func() (any, error) {
 		status = C.UpdateSealedSegmentIndex(s.ptr, info.cLoadIndexInfo)
 		return nil, nil
 	}).Await()

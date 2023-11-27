@@ -14,4 +14,5 @@ func TestHTTPConfig_Init(t *testing.T) {
 	assert.Equal(t, cfg.DebugMode.GetAsBool(), false)
 	assert.Equal(t, cfg.Port.GetValue(), "")
 	assert.Equal(t, cfg.AcceptTypeAllowInt64.GetValue(), "false")
+	assert.Equal(t, cfg.EnablePprof.GetAsBool(), true)
 }

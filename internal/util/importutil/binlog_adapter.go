@@ -316,10 +316,9 @@ func (p *BinlogAdapter) readDeltalogs(segmentHolder *SegmentFilesHolder) (map[in
 		}
 		log.Info("Binlog adapter: count of deleted entities", zap.Int("deletedCount", len(deletedIDDict)))
 		return nil, deletedIDDict, nil
-	} else {
-		log.Warn("Binlog adapter: unsupported primary key type", zap.Int("type", int(primaryKey.GetDataType())))
-		return nil, nil, fmt.Errorf("unsupported primary key type %d, primary key should be int64 or varchar", primaryKey.GetDataType())
 	}
+	log.Warn("Binlog adapter: unsupported primary key type", zap.Int("type", int(primaryKey.GetDataType())))
+	return nil, nil, fmt.Errorf("unsupported primary key type %d, primary key should be int64 or varchar", primaryKey.GetDataType())
 }
 
 // decodeDeleteLogs decodes string array(read from delta log) to storage.DeleteLog array
@@ -495,10 +494,9 @@ func (p *BinlogAdapter) readPrimaryKeys(logPath string) ([]int64, []string, erro
 		}
 		log.Info("Binlog adapter: succeed to read varchar primary key binlog", zap.Int("len", len(idList)))
 		return nil, idList, nil
-	} else {
-		log.Warn("Binlog adapter: unsupported primary key type", zap.Int("type", int(primaryKey.GetDataType())))
-		return nil, nil, fmt.Errorf("unsupported primary key type %d, primary key should be int64 or varchar", primaryKey.GetDataType())
 	}
+	log.Warn("Binlog adapter: unsupported primary key type", zap.Int("type", int(primaryKey.GetDataType())))
+	return nil, nil, fmt.Errorf("unsupported primary key type %d, primary key should be int64 or varchar", primaryKey.GetDataType())
 }
 
 // getShardingListByPrimaryInt64 method generates a shard id list by primary key(int64) list and deleted list.

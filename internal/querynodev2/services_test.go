@@ -567,6 +567,9 @@ func (suite *ServiceSuite) TestLoadSegments_Int64() {
 			Schema:         schema,
 			DeltaPositions: []*msgpb.MsgPosition{{Timestamp: 20000}},
 			NeedTransfer:   true,
+			IndexInfoList: []*indexpb.IndexInfo{
+				{},
+			},
 		}
 
 		// LoadSegment
@@ -603,6 +606,7 @@ func (suite *ServiceSuite) TestLoadSegments_VarChar() {
 			DeltaPositions: []*msgpb.MsgPosition{{Timestamp: 20000}},
 			NeedTransfer:   true,
 			LoadMeta:       loadMeta,
+			IndexInfoList:  []*indexpb.IndexInfo{{}},
 		}
 
 		// LoadSegment
@@ -622,12 +626,13 @@ func (suite *ServiceSuite) TestLoadDeltaInt64() {
 			MsgID:    rand.Int63(),
 			TargetID: suite.node.session.ServerID,
 		},
-		CollectionID: suite.collectionID,
-		DstNodeID:    suite.node.session.ServerID,
-		Infos:        suite.genSegmentLoadInfos(schema),
-		Schema:       schema,
-		NeedTransfer: true,
-		LoadScope:    querypb.LoadScope_Delta,
+		CollectionID:  suite.collectionID,
+		DstNodeID:     suite.node.session.ServerID,
+		Infos:         suite.genSegmentLoadInfos(schema),
+		Schema:        schema,
+		NeedTransfer:  true,
+		LoadScope:     querypb.LoadScope_Delta,
+		IndexInfoList: []*indexpb.IndexInfo{{}},
 	}
 
 	// LoadSegment
@@ -646,12 +651,13 @@ func (suite *ServiceSuite) TestLoadDeltaVarchar() {
 			MsgID:    rand.Int63(),
 			TargetID: suite.node.session.ServerID,
 		},
-		CollectionID: suite.collectionID,
-		DstNodeID:    suite.node.session.ServerID,
-		Infos:        suite.genSegmentLoadInfos(schema),
-		Schema:       schema,
-		NeedTransfer: true,
-		LoadScope:    querypb.LoadScope_Delta,
+		CollectionID:  suite.collectionID,
+		DstNodeID:     suite.node.session.ServerID,
+		Infos:         suite.genSegmentLoadInfos(schema),
+		Schema:        schema,
+		NeedTransfer:  true,
+		LoadScope:     querypb.LoadScope_Delta,
+		IndexInfoList: []*indexpb.IndexInfo{{}},
 	}
 
 	// LoadSegment
@@ -681,12 +687,13 @@ func (suite *ServiceSuite) TestLoadIndex_Success() {
 			MsgID:    rand.Int63(),
 			TargetID: suite.node.session.ServerID,
 		},
-		CollectionID: suite.collectionID,
-		DstNodeID:    suite.node.session.ServerID,
-		Infos:        rawInfo,
-		Schema:       schema,
-		NeedTransfer: false,
-		LoadScope:    querypb.LoadScope_Full,
+		CollectionID:  suite.collectionID,
+		DstNodeID:     suite.node.session.ServerID,
+		Infos:         rawInfo,
+		Schema:        schema,
+		NeedTransfer:  false,
+		LoadScope:     querypb.LoadScope_Full,
+		IndexInfoList: []*indexpb.IndexInfo{{}},
 	}
 
 	// Load segment
@@ -705,12 +712,13 @@ func (suite *ServiceSuite) TestLoadIndex_Success() {
 			MsgID:    rand.Int63(),
 			TargetID: suite.node.session.ServerID,
 		},
-		CollectionID: suite.collectionID,
-		DstNodeID:    suite.node.session.ServerID,
-		Infos:        infos,
-		Schema:       schema,
-		NeedTransfer: false,
-		LoadScope:    querypb.LoadScope_Index,
+		CollectionID:  suite.collectionID,
+		DstNodeID:     suite.node.session.ServerID,
+		Infos:         infos,
+		Schema:        schema,
+		NeedTransfer:  false,
+		LoadScope:     querypb.LoadScope_Index,
+		IndexInfoList: []*indexpb.IndexInfo{{}},
 	}
 
 	// Load segment
@@ -749,12 +757,13 @@ func (suite *ServiceSuite) TestLoadIndex_Failed() {
 				MsgID:    rand.Int63(),
 				TargetID: suite.node.session.ServerID,
 			},
-			CollectionID: suite.collectionID,
-			DstNodeID:    suite.node.session.ServerID,
-			Infos:        rawInfo,
-			Schema:       schema,
-			NeedTransfer: false,
-			LoadScope:    querypb.LoadScope_Index,
+			CollectionID:  suite.collectionID,
+			DstNodeID:     suite.node.session.ServerID,
+			Infos:         rawInfo,
+			Schema:        schema,
+			NeedTransfer:  false,
+			LoadScope:     querypb.LoadScope_Index,
+			IndexInfoList: []*indexpb.IndexInfo{{}},
 		}
 
 		// Load segment
@@ -781,12 +790,13 @@ func (suite *ServiceSuite) TestLoadIndex_Failed() {
 				MsgID:    rand.Int63(),
 				TargetID: suite.node.session.ServerID,
 			},
-			CollectionID: suite.collectionID,
-			DstNodeID:    suite.node.session.ServerID,
-			Infos:        infos,
-			Schema:       schema,
-			NeedTransfer: false,
-			LoadScope:    querypb.LoadScope_Index,
+			CollectionID:  suite.collectionID,
+			DstNodeID:     suite.node.session.ServerID,
+			Infos:         infos,
+			Schema:        schema,
+			NeedTransfer:  false,
+			LoadScope:     querypb.LoadScope_Index,
+			IndexInfoList: []*indexpb.IndexInfo{{}},
 		}
 
 		// Load segment
@@ -810,6 +820,9 @@ func (suite *ServiceSuite) TestLoadSegments_Failed() {
 		Infos:        suite.genSegmentLoadInfos(schema),
 		Schema:       schema,
 		NeedTransfer: true,
+		IndexInfoList: []*indexpb.IndexInfo{
+			{},
+		},
 	}
 
 	// Delegator not found
@@ -817,10 +830,18 @@ func (suite *ServiceSuite) TestLoadSegments_Failed() {
 	suite.NoError(err)
 	suite.ErrorIs(merr.Error(status), merr.ErrChannelNotFound)
 
+	// IndexIndex not found
+	nonIndexReq := typeutil.Clone(req)
+	nonIndexReq.IndexInfoList = nil
+	status, err = suite.node.LoadSegments(ctx, nonIndexReq)
+	suite.NoError(err)
+	suite.ErrorIs(merr.Error(status), merr.ErrIndexNotFound)
+
 	// target not match
 	req.Base.TargetID = -1
 	status, err = suite.node.LoadSegments(ctx, req)
 	suite.NoError(err)
+	suite.T().Log(merr.Error(status))
 	suite.ErrorIs(merr.Error(status), merr.ErrNodeNotMatch)
 
 	// node not healthy
@@ -846,11 +867,12 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 				MsgID:    rand.Int63(),
 				TargetID: suite.node.session.ServerID,
 			},
-			CollectionID: suite.collectionID,
-			DstNodeID:    suite.node.session.ServerID,
-			Infos:        suite.genSegmentLoadInfos(schema),
-			Schema:       schema,
-			NeedTransfer: true,
+			CollectionID:  suite.collectionID,
+			DstNodeID:     suite.node.session.ServerID,
+			Infos:         suite.genSegmentLoadInfos(schema),
+			Schema:        schema,
+			NeedTransfer:  true,
+			IndexInfoList: []*indexpb.IndexInfo{{}},
 		}
 
 		// LoadSegment
@@ -867,11 +889,12 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 				MsgID:    rand.Int63(),
 				TargetID: suite.node.session.ServerID,
 			},
-			CollectionID: suite.collectionID,
-			DstNodeID:    suite.node.session.ServerID,
-			Infos:        suite.genSegmentLoadInfos(schema),
-			Schema:       schema,
-			NeedTransfer: true,
+			CollectionID:  suite.collectionID,
+			DstNodeID:     suite.node.session.ServerID,
+			Infos:         suite.genSegmentLoadInfos(schema),
+			Schema:        schema,
+			NeedTransfer:  true,
+			IndexInfoList: []*indexpb.IndexInfo{{}},
 		}
 
 		// LoadSegment
@@ -893,14 +916,14 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 				MsgID:    rand.Int63(),
 				TargetID: suite.node.session.ServerID,
 			},
-			CollectionID: suite.collectionID,
-			DstNodeID:    suite.node.session.ServerID,
-			Infos:        suite.genSegmentLoadInfos(schema),
-			Schema:       schema,
-			NeedTransfer: true,
+			CollectionID:  suite.collectionID,
+			DstNodeID:     suite.node.session.ServerID,
+			Infos:         suite.genSegmentLoadInfos(schema),
+			Schema:        schema,
+			NeedTransfer:  true,
+			IndexInfoList: []*indexpb.IndexInfo{{}},
 		}
 
-		// LoadSegment
 		// LoadSegment
 		status, err := suite.node.LoadSegments(ctx, req)
 		suite.NoError(err)
@@ -1840,7 +1863,8 @@ func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {
 	delegator, ok := suite.node.delegators.Get(suite.vchannel)
 	suite.True(ok)
 	sealedSegments, _ := delegator.GetSegmentInfo(false)
-	suite.Len(sealedSegments[0].Segments, 3)
+	// 1 level 0 + 3 sealed segments
+	suite.Len(sealedSegments[0].Segments, 4)
 
 	// data
 	req := &querypb.SyncDistributionRequest{
@@ -1864,7 +1888,7 @@ func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
 	sealedSegments, _ = delegator.GetSegmentInfo(false)
-	suite.Len(sealedSegments[0].Segments, 3)
+	suite.Len(sealedSegments[0].Segments, 4)
 
 	releaseAction = &querypb.SyncAction{
 		Type:      querypb.SyncType_Remove,
@@ -1878,7 +1902,7 @@ func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
 	sealedSegments, _ = delegator.GetSegmentInfo(false)
-	suite.Len(sealedSegments[0].Segments, 2)
+	suite.Len(sealedSegments[0].Segments, 3)
 }
 
 func (suite *ServiceSuite) TestSyncDistribution_Failed() {

@@ -23,7 +23,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -35,12 +34,12 @@ type MetaCache interface {
 	Collection() int64
 	// Schema returns collection schema.
 	Schema() *schemapb.CollectionSchema
-	// NewSegment creates a new segment from WAL stream data.
-	NewSegment(segmentID, partitionID int64, startPos *msgpb.MsgPosition, actions ...SegmentAction)
 	// AddSegment adds a segment from segment info.
 	AddSegment(segInfo *datapb.SegmentInfo, factory PkStatsFactory, actions ...SegmentAction)
 	// UpdateSegments applies action to segment(s) satisfy the provided filters.
 	UpdateSegments(action SegmentAction, filters ...SegmentFilter)
+	// RemoveSegments removes segments matches the provided filter.
+	RemoveSegments(filters ...SegmentFilter) []int64
 	// CompactSegments transfers compaction segment results inside the metacache.
 	CompactSegments(newSegmentID, partitionID int64, numRows int64, bfs *BloomFilterSet, oldSegmentIDs ...int64)
 	// GetSegmentsBy returns segments statify the provided filters.
@@ -49,6 +48,7 @@ type MetaCache interface {
 	GetSegmentByID(id int64, filters ...SegmentFilter) (*SegmentInfo, bool)
 	// GetSegmentIDs returns ids of segments which satifiy the provided filters.
 	GetSegmentIDsBy(filters ...SegmentFilter) []int64
+	// PredictSegments returns the segment ids which may contain the provided primary key.
 	PredictSegments(pk storage.PrimaryKey, filters ...SegmentFilter) ([]int64, bool)
 }
 
@@ -97,25 +97,6 @@ func (c *metaCacheImpl) Schema() *schemapb.CollectionSchema {
 	return c.schema
 }
 
-// NewSegment creates a new segment from WAL stream data.
-func (c *metaCacheImpl) NewSegment(segmentID, partitionID int64, startPos *msgpb.MsgPosition, actions ...SegmentAction) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if _, ok := c.segmentInfos[segmentID]; !ok {
-		info := &SegmentInfo{
-			segmentID:        segmentID,
-			partitionID:      partitionID,
-			state:            commonpb.SegmentState_Growing,
-			startPosRecorded: false,
-		}
-		for _, action := range actions {
-			action(info)
-		}
-		c.segmentInfos[segmentID] = info
-	}
-}
-
 // AddSegment adds a segment from segment info.
 func (c *metaCacheImpl) AddSegment(segInfo *datapb.SegmentInfo, factory PkStatsFactory, actions ...SegmentAction) {
 	segment := NewSegmentInfo(segInfo, factory(segInfo))
@@ -129,22 +110,13 @@ func (c *metaCacheImpl) AddSegment(segInfo *datapb.SegmentInfo, factory PkStatsF
 	c.segmentInfos[segInfo.GetID()] = segment
 }
 
-func (c *metaCacheImpl) CompactSegments(newSegmentID, partitionID int64, numOfRows int64, bfs *BloomFilterSet, dropSegmentIDs ...int64) {
+func (c *metaCacheImpl) CompactSegments(newSegmentID, partitionID int64, numOfRows int64, bfs *BloomFilterSet, oldSegmentIDs ...int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	for _, dropSeg := range dropSegmentIDs {
-		if _, ok := c.segmentInfos[dropSeg]; ok {
-			delete(c.segmentInfos, dropSeg)
-		} else {
-			log.Warn("some dropped segment not exist in meta cache",
-				zap.String("channel", c.vChannelName),
-				zap.Int64("collectionID", c.collectionID),
-				zap.Int64("segmentID", dropSeg))
-		}
-	}
-
+	compactTo := NullSegment
 	if numOfRows > 0 {
+		compactTo = newSegmentID
 		if _, ok := c.segmentInfos[newSegmentID]; !ok {
 			c.segmentInfos[newSegmentID] = &SegmentInfo{
 				segmentID:        newSegmentID,
@@ -155,6 +127,39 @@ func (c *metaCacheImpl) CompactSegments(newSegmentID, partitionID int64, numOfRo
 			}
 		}
 	}
+
+	for _, segID := range oldSegmentIDs {
+		if segmentInfo, ok := c.segmentInfos[segID]; ok {
+			updated := segmentInfo.Clone()
+			updated.compactTo = compactTo
+			c.segmentInfos[segID] = updated
+		} else {
+			log.Warn("some dropped segment not exist in meta cache",
+				zap.String("channel", c.vChannelName),
+				zap.Int64("collectionID", c.collectionID),
+				zap.Int64("segmentID", segID))
+		}
+	}
+}
+
+func (c *metaCacheImpl) RemoveSegments(filters ...SegmentFilter) []int64 {
+	if len(filters) == 0 {
+		log.Warn("remove segment without filters is not allowed", zap.Stack("callstack"))
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	filter := c.mergeFilters(filters...)
+
+	var ids []int64
+	for segID, info := range c.segmentInfos {
+		if filter(info) {
+			ids = append(ids, segID)
+			delete(c.segmentInfos, segID)
+		}
+	}
+	return ids
 }
 
 func (c *metaCacheImpl) GetSegmentsBy(filters ...SegmentFilter) []*SegmentInfo {

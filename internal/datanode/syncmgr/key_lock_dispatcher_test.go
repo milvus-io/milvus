@@ -6,6 +6,8 @@ import (
 
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 )
 
 type mockTask struct {
@@ -16,6 +18,11 @@ type mockTask struct {
 func (t *mockTask) done() {
 	close(t.ch)
 }
+
+func (t *mockTask) SegmentID() int64                  { panic("no implementation") }
+func (t *mockTask) Checkpoint() *msgpb.MsgPosition    { panic("no implementation") }
+func (t *mockTask) StartPosition() *msgpb.MsgPosition { panic("no implementation") }
+func (t *mockTask) ChannelName() string               { panic("no implementation") }
 
 func (t *mockTask) Run() error {
 	<-t.ch

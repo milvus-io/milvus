@@ -20,6 +20,7 @@ import (
 // MetaWriter is the interface for SyncManager to write segment sync meta.
 type MetaWriter interface {
 	UpdateSync(*SyncTask) error
+	UpdateSyncV2(*SyncTaskV2) error
 	DropChannel(string) error
 }
 
@@ -37,21 +38,106 @@ func BrokerMetaWriter(broker broker.Broker, opts ...retry.Option) MetaWriter {
 
 func (b *brokerMetaWriter) UpdateSync(pack *SyncTask) error {
 	var (
-		fieldInsert = []*datapb.FieldBinlog{}
-		fieldStats  = []*datapb.FieldBinlog{}
-		deltaInfos  = make([]*datapb.FieldBinlog, 0)
-		checkPoints = []*datapb.CheckPoint{}
+		checkPoints       = []*datapb.CheckPoint{}
+		deltaFieldBinlogs = []*datapb.FieldBinlog{}
 	)
 
-	for k, v := range pack.insertBinlogs {
-		fieldInsert = append(fieldInsert, &datapb.FieldBinlog{FieldID: k, Binlogs: []*datapb.Binlog{v}})
+	insertFieldBinlogs := lo.MapToSlice(pack.insertBinlogs, func(_ int64, fieldBinlog *datapb.FieldBinlog) *datapb.FieldBinlog { return fieldBinlog })
+	statsFieldBinlogs := lo.MapToSlice(pack.statsBinlogs, func(_ int64, fieldBinlog *datapb.FieldBinlog) *datapb.FieldBinlog { return fieldBinlog })
+	if len(pack.deltaBinlog.Binlogs) > 0 {
+		deltaFieldBinlogs = append(deltaFieldBinlogs, pack.deltaBinlog)
 	}
-	for k, v := range pack.statsBinlogs {
-		fieldStats = append(fieldStats, &datapb.FieldBinlog{FieldID: k, Binlogs: []*datapb.Binlog{v}})
+
+	// only current segment checkpoint info,
+	segments := pack.metacache.GetSegmentsBy(metacache.WithSegmentIDs(pack.segmentID))
+	if len(segments) == 0 {
+		return merr.WrapErrSegmentNotFound(pack.segmentID)
 	}
-	if pack.deltaBinlog != nil {
-		deltaInfos = append(deltaInfos, &datapb.FieldBinlog{Binlogs: []*datapb.Binlog{pack.deltaBinlog}})
+	segment := segments[0]
+	checkPoints = append(checkPoints, &datapb.CheckPoint{
+		SegmentID: pack.segmentID,
+		NumOfRows: segment.FlushedRows() + pack.batchSize,
+		Position:  pack.checkpoint,
+	})
+
+	startPos := lo.Map(pack.metacache.GetSegmentsBy(metacache.WithStartPosNotRecorded()), func(info *metacache.SegmentInfo, _ int) *datapb.SegmentStartPosition {
+		return &datapb.SegmentStartPosition{
+			SegmentID:     info.SegmentID(),
+			StartPosition: info.StartPosition(),
+		}
+	})
+	getBinlogNum := func(fBinlog *datapb.FieldBinlog) int { return len(fBinlog.GetBinlogs()) }
+	log.Info("SaveBinlogPath",
+		zap.Int64("SegmentID", pack.segmentID),
+		zap.Int64("CollectionID", pack.collectionID),
+		zap.Int64("ParitionID", pack.partitionID),
+		zap.Any("startPos", startPos),
+		zap.Any("checkPoints", checkPoints),
+		zap.Int("binlogNum", lo.SumBy(insertFieldBinlogs, getBinlogNum)),
+		zap.Int("statslogNum", lo.SumBy(statsFieldBinlogs, getBinlogNum)),
+		zap.Int("deltalogNum", lo.SumBy(deltaFieldBinlogs, getBinlogNum)),
+		zap.String("vChannelName", pack.channelName),
+	)
+
+	req := &datapb.SaveBinlogPathsRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(0),
+			commonpbutil.WithMsgID(0),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+		),
+		SegmentID:           pack.segmentID,
+		CollectionID:        pack.collectionID,
+		PartitionID:         pack.partitionID,
+		Field2BinlogPaths:   insertFieldBinlogs,
+		Field2StatslogPaths: statsFieldBinlogs,
+		Deltalogs:           deltaFieldBinlogs,
+
+		CheckPoints: checkPoints,
+
+		StartPositions: startPos,
+		Flushed:        pack.isFlush,
+		Dropped:        pack.isDrop,
+		Channel:        pack.channelName,
+		SegLevel:       pack.level,
 	}
+	err := retry.Do(context.Background(), func() error {
+		err := b.broker.SaveBinlogPaths(context.Background(), req)
+		// Segment not found during stale segment flush. Segment might get compacted already.
+		// Stop retry and still proceed to the end, ignoring this error.
+		if !pack.isFlush && errors.Is(err, merr.ErrSegmentNotFound) {
+			log.Warn("stale segment not found, could be compacted",
+				zap.Int64("segmentID", pack.segmentID))
+			log.Warn("failed to SaveBinlogPaths",
+				zap.Int64("segmentID", pack.segmentID),
+				zap.Error(err))
+			return nil
+		}
+		// meta error, datanode handles a virtual channel does not belong here
+		if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrChannelNotFound) {
+			log.Warn("meta error found, skip sync and start to drop virtual channel", zap.String("channel", pack.channelName))
+			return nil
+		}
+
+		if err != nil {
+			return err
+		}
+
+		return nil
+	}, b.opts...)
+	if err != nil {
+		log.Warn("failed to SaveBinlogPaths",
+			zap.Int64("segmentID", pack.segmentID),
+			zap.Error(err))
+		return err
+	}
+
+	pack.metacache.UpdateSegments(metacache.SetStartPosRecorded(true), metacache.WithSegmentIDs(lo.Map(startPos, func(pos *datapb.SegmentStartPosition, _ int) int64 { return pos.GetSegmentID() })...))
+
+	return nil
+}
+
+func (b *brokerMetaWriter) UpdateSyncV2(pack *SyncTaskV2) error {
+	checkPoints := []*datapb.CheckPoint{}
 
 	// only current segment checkpoint info,
 	segments := pack.metacache.GetSegmentsBy(metacache.WithSegmentIDs(pack.segmentID))
@@ -76,25 +162,18 @@ func (b *brokerMetaWriter) UpdateSync(pack *SyncTask) error {
 		zap.Int64("CollectionID", pack.collectionID),
 		zap.Any("startPos", startPos),
 		zap.Any("checkPoints", checkPoints),
-		zap.Int("Length of Field2BinlogPaths", len(fieldInsert)),
-		zap.Int("Length of Field2Stats", len(fieldStats)),
-		// zap.Int("Length of Field2Deltalogs", len(deltaInfos[0].GetBinlogs())),
 		zap.String("vChannelName", pack.channelName),
 	)
 
 	req := &datapb.SaveBinlogPathsRequest{
 		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(0),
-			commonpbutil.WithMsgID(0),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
-		SegmentID:           pack.segmentID,
-		CollectionID:        pack.collectionID,
-		Field2BinlogPaths:   fieldInsert,
-		Field2StatslogPaths: fieldStats,
-		Deltalogs:           deltaInfos,
+		SegmentID:    pack.segmentID,
+		CollectionID: pack.collectionID,
 
-		CheckPoints: checkPoints,
+		CheckPoints:    checkPoints,
+		StorageVersion: pack.storageVersion,
 
 		StartPositions: startPos,
 		Flushed:        pack.isFlush,
@@ -137,8 +216,6 @@ func (b *brokerMetaWriter) DropChannel(channelName string) error {
 	err := retry.Do(context.Background(), func() error {
 		status, err := b.broker.DropVirtualChannel(context.Background(), &datapb.DropVirtualChannelRequest{
 			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(0), // TODO msg type
-				commonpbutil.WithMsgID(0),   // TODO msg id
 				commonpbutil.WithSourceID(paramtable.GetNodeID()),
 			),
 			ChannelName: channelName,

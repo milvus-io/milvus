@@ -14,8 +14,9 @@ import (
 func NewSyncTask() *SyncTask {
 	return &SyncTask{
 		isFlush:       false,
-		insertBinlogs: make(map[int64]*datapb.Binlog),
-		statsBinlogs:  make(map[int64]*datapb.Binlog),
+		insertBinlogs: make(map[int64]*datapb.FieldBinlog),
+		statsBinlogs:  make(map[int64]*datapb.FieldBinlog),
+		deltaBinlog:   &datapb.FieldBinlog{},
 		segmentData:   make(map[string][]byte),
 	}
 }
@@ -112,5 +113,10 @@ func (t *SyncTask) WithFailureCallback(callback func(error)) *SyncTask {
 
 func (t *SyncTask) WithBatchSize(batchSize int64) *SyncTask {
 	t.batchSize = batchSize
+	return t
+}
+
+func (t *SyncTask) WithLevel(level datapb.SegmentLevel) *SyncTask {
+	t.level = level
 	return t
 }

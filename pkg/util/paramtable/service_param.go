@@ -101,6 +101,7 @@ type EtcdConfig struct {
 	EtcdTLSKey        ParamItem          `refreshable:"false"`
 	EtcdTLSCACert     ParamItem          `refreshable:"false"`
 	EtcdTLSMinVersion ParamItem          `refreshable:"false"`
+	RequestTimeout    ParamItem          `refreshable:"false"`
 
 	// --- Embed ETCD ---
 	UseEmbedEtcd ParamItem `refreshable:"false"`
@@ -257,6 +258,15 @@ We recommend using version 1.2 and above.`,
 		Export: true,
 	}
 	p.EtcdTLSMinVersion.Init(base.mgr)
+
+	p.RequestTimeout = ParamItem{
+		Key:          "etcd.requestTimeout",
+		DefaultValue: "10000",
+		Version:      "2.3.4",
+		Doc:          `Etcd operation timeout in milliseconds`,
+		Export:       true,
+	}
+	p.RequestTimeout.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -268,7 +278,7 @@ type TiKVConfig struct {
 	KvSubPath        ParamItem          `refreshable:"false"`
 	MetaRootPath     CompositeParamItem `refreshable:"false"`
 	KvRootPath       CompositeParamItem `refreshable:"false"`
-	RequestTimeout   ParamItem          `refreshable:"true"`
+	RequestTimeout   ParamItem          `refreshable:"false"`
 	SnapshotScanSize ParamItem          `refreshable:"true"`
 	TiKVUseSSL       ParamItem          `refreshable:"false"`
 	TiKVTLSCert      ParamItem          `refreshable:"false"`
@@ -954,6 +964,7 @@ func (p *MinioConfig) Init(base *BaseTable) {
 		DefaultValue: "9000",
 		Version:      "2.0.0",
 		Doc:          "Port of MinIO/S3",
+		PanicIfEmpty: true,
 		Export:       true,
 	}
 	p.Port.Init(base.mgr)

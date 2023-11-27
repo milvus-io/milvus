@@ -19,10 +19,11 @@
 package metrics
 
 /*
-#cgo pkg-config: milvus_segcore milvus_common
+#cgo pkg-config: milvus_segcore milvus_storage milvus_common
 
 #include <stdlib.h>
 #include "segcore/metrics_c.h"
+#include "storage/storage_c.h"
 
 */
 import "C"
@@ -37,6 +38,7 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 	"go.uber.org/zap"
+	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus/pkg/log"
 )
@@ -129,9 +131,21 @@ func (r *CRegistry) Gather() (res []*dto.MetricFamily, err error) {
 
 	out, err := parser.TextToMetricFamilies(strings.NewReader(metricsStr))
 	if err != nil {
-		log.Error("fail to parse prometheus metrics", zap.Error(err))
+		log.Error("fail to parse knowhere prometheus metrics", zap.Error(err))
 		return
 	}
+
+	cMetricsStr = C.GetStorageMetrics()
+	metricsStr = C.GoString(cMetricsStr)
+	C.free(unsafe.Pointer(cMetricsStr))
+
+	out1, err := parser.TextToMetricFamilies(strings.NewReader(metricsStr))
+	if err != nil {
+		log.Error("fail to parse storage prometheus metrics", zap.Error(err))
+		return
+	}
+
+	maps.Copy(out, out1)
 	res = NormalizeMetricFamilies(out)
 	return
 }

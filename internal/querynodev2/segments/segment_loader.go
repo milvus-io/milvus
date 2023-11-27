@@ -70,19 +70,16 @@ type Loader interface {
 type LoadResource struct {
 	MemorySize uint64
 	DiskSize   uint64
-	WorkNum    int
 }
 
 func (r *LoadResource) Add(resource LoadResource) {
 	r.MemorySize += resource.MemorySize
 	r.DiskSize += resource.DiskSize
-	r.WorkNum += resource.WorkNum
 }
 
 func (r *LoadResource) Sub(resource LoadResource) {
 	r.MemorySize -= resource.MemorySize
 	r.DiskSize -= resource.DiskSize
-	r.WorkNum -= resource.WorkNum
 }
 
 func NewLoader(
@@ -371,37 +368,14 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 	}
 	diskCap := paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsUint64()
 
-	poolCap := hardware.GetCPUNum() * paramtable.Get().CommonCfg.HighPriorityThreadCoreCoefficient.GetAsInt()
-	if poolCap > 256 {
-		poolCap = 256
-	}
-	if loader.committedResource.WorkNum >= poolCap {
-		return resource, 0, merr.WrapErrServiceRequestLimitExceeded(int32(poolCap))
-	} else if loader.committedResource.MemorySize+memoryUsage >= totalMemory {
+	if loader.committedResource.MemorySize+memoryUsage >= totalMemory {
 		return resource, 0, merr.WrapErrServiceMemoryLimitExceeded(float32(loader.committedResource.MemorySize+memoryUsage), float32(totalMemory))
 	} else if loader.committedResource.DiskSize+uint64(diskUsage) >= diskCap {
 		return resource, 0, merr.WrapErrServiceDiskLimitExceeded(float32(loader.committedResource.DiskSize+uint64(diskUsage)), float32(diskCap))
 	}
 
 	concurrencyLevel := funcutil.Min(hardware.GetCPUNum(), len(infos))
-
-	for _, info := range infos {
-		for _, field := range info.GetBinlogPaths() {
-			resource.WorkNum += len(field.GetBinlogs())
-		}
-		for _, index := range info.GetIndexInfos() {
-			resource.WorkNum += len(index.IndexFilePaths)
-		}
-	}
-
-	for ; concurrencyLevel > 1; concurrencyLevel /= 2 {
-		_, _, err := loader.checkSegmentSize(ctx, infos, concurrencyLevel)
-		if err == nil {
-			break
-		}
-	}
-
-	mu, du, err := loader.checkSegmentSize(ctx, infos, concurrencyLevel)
+	mu, du, err := loader.checkSegmentSize(ctx, infos)
 	if err != nil {
 		log.Warn("no sufficient resource to load segments", zap.Error(err))
 		return resource, 0, err
@@ -415,8 +389,6 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 	}
 	loader.committedResource.Add(resource)
 	log.Info("request resource for loading segments (unit in MiB)",
-		zap.Int("workerNum", resource.WorkNum),
-		zap.Int("committedWorkerNum", loader.committedResource.WorkNum),
 		zap.Float64("memory", toMB(resource.MemorySize)),
 		zap.Float64("committedMemory", toMB(loader.committedResource.MemorySize)),
 		zap.Float64("disk", toMB(resource.DiskSize)),
@@ -796,6 +768,9 @@ func (loader *segmentLoader) loadBloomFilter(ctx context.Context, segmentID int6
 }
 
 func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment, deltaLogs []*datapb.FieldBinlog) error {
+	log := log.With(
+		zap.Int64("segmentID", segment.ID()),
+	)
 	dCodec := storage.DeleteCodec{}
 	var blobs []*storage.Blob
 	for _, deltaLog := range deltaLogs {
@@ -817,7 +792,7 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment,
 		}
 	}
 	if len(blobs) == 0 {
-		log.Info("there are no delta logs saved with segment, skip loading delete record", zap.Any("segmentID", segment.ID()))
+		log.Info("there are no delta logs saved with segment, skip loading delete record")
 		return nil
 	}
 	_, _, deltaData, err := dCodec.Deserialize(blobs)
@@ -829,6 +804,8 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment,
 	if err != nil {
 		return err
 	}
+
+	log.Info("load delta logs done", zap.Int64("deleteCount", deltaData.RowCount))
 	return nil
 }
 
@@ -920,11 +897,11 @@ func GetIndexResourceUsage(indexInfo *querypb.FieldIndexInfo) (uint64, uint64, e
 	return uint64(indexInfo.IndexSize), 0, nil
 }
 
-// checkSegmentSize checks whether the memory & disk is sufficient to load the segments with given concurrency,
+// checkSegmentSize checks whether the memory & disk is sufficient to load the segments
 // returns the memory & disk usage while loading if possible to load,
 // otherwise, returns error
-func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadInfos []*querypb.SegmentLoadInfo, concurrency int) (uint64, uint64, error) {
-	if len(segmentLoadInfos) == 0 || concurrency == 0 {
+func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadInfos []*querypb.SegmentLoadInfo) (uint64, uint64, error) {
+	if len(segmentLoadInfos) == 0 {
 		return 0, 0, nil
 	}
 
@@ -1016,7 +993,6 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 
 	log.Info("predict memory and disk usage while loading (in MiB)",
 		zap.Float64("maxSegmentSize", toMB(maxSegmentSize)),
-		zap.Int("concurrency", concurrency),
 		zap.Float64("committedMemSize", toMB(loader.committedResource.MemorySize)),
 		zap.Float64("memUsage", toMB(memUsage)),
 		zap.Float64("committedDiskSize", toMB(loader.committedResource.DiskSize)),
@@ -1027,9 +1003,8 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 	)
 
 	if predictMemUsage > uint64(float64(totalMem)*paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()) {
-		return 0, 0, fmt.Errorf("load segment failed, OOM if load, maxSegmentSize = %v MB, concurrency = %d, memUsage = %v MB, predictMemUsage = %v MB, totalMem = %v MB thresholdFactor = %f",
+		return 0, 0, fmt.Errorf("load segment failed, OOM if load, maxSegmentSize = %v MB,  memUsage = %v MB, predictMemUsage = %v MB, totalMem = %v MB thresholdFactor = %f",
 			toMB(maxSegmentSize),
-			concurrency,
 			toMB(memUsage),
 			toMB(predictMemUsage),
 			toMB(totalMem),

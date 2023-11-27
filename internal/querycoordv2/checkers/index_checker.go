@@ -36,6 +36,7 @@ var _ Checker = (*IndexChecker)(nil)
 
 // IndexChecker perform segment index check.
 type IndexChecker struct {
+	*checkerActivation
 	meta    *meta.Meta
 	dist    *meta.DistributionManager
 	broker  meta.Broker
@@ -49,14 +50,15 @@ func NewIndexChecker(
 	nodeMgr *session.NodeManager,
 ) *IndexChecker {
 	return &IndexChecker{
-		meta:    meta,
-		dist:    dist,
-		broker:  broker,
-		nodeMgr: nodeMgr,
+		checkerActivation: newCheckerActivation(),
+		meta:              meta,
+		dist:              dist,
+		broker:            broker,
+		nodeMgr:           nodeMgr,
 	}
 }
 
-func (c *IndexChecker) ID() task.Source {
+func (c *IndexChecker) ID() checkerType {
 	return indexChecker
 }
 
@@ -65,6 +67,9 @@ func (c *IndexChecker) Description() string {
 }
 
 func (c *IndexChecker) Check(ctx context.Context) []task.Task {
+	if !c.IsActive() {
+		return nil
+	}
 	collectionIDs := c.meta.CollectionManager.GetAll()
 	var tasks []task.Task
 

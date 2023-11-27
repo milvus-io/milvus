@@ -2,8 +2,10 @@ package writebuffer
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
+	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -11,11 +13,16 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	milvus_storage "github.com/milvus-io/milvus-storage/go/storage"
+	"github.com/milvus-io/milvus-storage/go/storage/options"
+	"github.com/milvus-io/milvus-storage/go/storage/schema"
 	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/conc"
@@ -48,7 +55,7 @@ type WriteBuffer interface {
 	Close(drop bool)
 }
 
-func NewWriteBuffer(channel string, schema *schemapb.CollectionSchema, metacache metacache.MetaCache, syncMgr syncmgr.SyncManager, opts ...WriteBufferOption) (WriteBuffer, error) {
+func NewWriteBuffer(channel string, metacache metacache.MetaCache, storageV2Cache *metacache.StorageV2Cache, syncMgr syncmgr.SyncManager, opts ...WriteBufferOption) (WriteBuffer, error) {
 	option := defaultWBOption()
 	option.syncPolicies = append(option.syncPolicies, GetFlushingSegmentsPolicy(metacache))
 	for _, opt := range opts {
@@ -57,9 +64,9 @@ func NewWriteBuffer(channel string, schema *schemapb.CollectionSchema, metacache
 
 	switch option.deletePolicy {
 	case DeletePolicyBFPkOracle:
-		return NewBFWriteBuffer(channel, schema, metacache, syncMgr, option)
+		return NewBFWriteBuffer(channel, metacache, nil, syncMgr, option)
 	case DeletePolicyL0Delta:
-		return NewL0WriteBuffer(channel, schema, metacache, syncMgr, option)
+		return NewL0WriteBuffer(channel, metacache, nil, syncMgr, option)
 	default:
 		return nil, merr.WrapErrParameterInvalid("valid delete policy config", option.deletePolicy)
 	}
@@ -82,22 +89,26 @@ type writeBufferBase struct {
 	syncPolicies   []SyncPolicy
 	checkpoint     *msgpb.MsgPosition
 	flushTimestamp *atomic.Uint64
+
+	storagev2Cache *metacache.StorageV2Cache
 }
 
-func newWriteBufferBase(channel string, sch *schemapb.CollectionSchema, metacache metacache.MetaCache, syncMgr syncmgr.SyncManager, option *writeBufferOption) *writeBufferBase {
+func newWriteBufferBase(channel string, metacache metacache.MetaCache, storageV2Cache *metacache.StorageV2Cache, syncMgr syncmgr.SyncManager, option *writeBufferOption) *writeBufferBase {
 	flushTs := atomic.NewUint64(nonFlushTS)
 	flushTsPolicy := GetFlushTsPolicy(flushTs, metacache)
 	option.syncPolicies = append(option.syncPolicies, flushTsPolicy)
 
 	return &writeBufferBase{
 		channelName:    channel,
-		collSchema:     sch,
+		collectionID:   metacache.Collection(),
+		collSchema:     metacache.Schema(),
 		syncMgr:        syncMgr,
 		metaWriter:     option.metaWriter,
 		buffers:        make(map[int64]*segmentBuffer),
 		metaCache:      metacache,
 		syncPolicies:   option.syncPolicies,
 		flushTimestamp: flushTs,
+		storagev2Cache: storageV2Cache,
 	}
 }
 
@@ -143,18 +154,30 @@ func (wb *writeBufferBase) GetCheckpoint() *msgpb.MsgPosition {
 	return checkpoint
 }
 
-func (wb *writeBufferBase) triggerSync() error {
+func (wb *writeBufferBase) triggerSync() (segmentIDs []int64) {
 	segmentsToSync := wb.getSegmentsToSync(wb.checkpoint.GetTimestamp())
 	if len(segmentsToSync) > 0 {
 		log.Info("write buffer get segments to sync", zap.Int64s("segmentIDs", segmentsToSync))
-		err := wb.syncSegments(context.Background(), segmentsToSync)
-		if err != nil {
-			log.Warn("segment segments failed", zap.Int64s("segmentIDs", segmentsToSync), zap.Error(err))
-			return err
-		}
+		wb.syncSegments(context.Background(), segmentsToSync)
 	}
 
-	return nil
+	return segmentsToSync
+}
+
+func (wb *writeBufferBase) cleanupCompactedSegments() {
+	segmentIDs := wb.metaCache.GetSegmentIDsBy(metacache.WithCompacted(), metacache.WithNoSyncingTask())
+	// remove compacted only when there is no writebuffer
+	targetIDs := lo.Filter(segmentIDs, func(segmentID int64, _ int) bool {
+		_, ok := wb.buffers[segmentID]
+		return !ok
+	})
+	if len(targetIDs) == 0 {
+		return
+	}
+	removed := wb.metaCache.RemoveSegments(metacache.WithSegmentIDs(targetIDs...))
+	if len(removed) > 0 {
+		log.Info("remove compacted segments", zap.Int64s("removed", removed))
+	}
 }
 
 func (wb *writeBufferBase) flushSegments(ctx context.Context, segmentIDs []int64) error {
@@ -169,7 +192,7 @@ func (wb *writeBufferBase) flushSegments(ctx context.Context, segmentIDs []int64
 	return nil
 }
 
-func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64) error {
+func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64) {
 	for _, segmentID := range segmentIDs {
 		syncTask := wb.getSyncTask(ctx, segmentID)
 		if syncTask == nil {
@@ -181,7 +204,6 @@ func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64)
 		// discard Future here, handle error in callback
 		_ = wb.syncMgr.SyncData(ctx, syncTask)
 	}
-	return nil
 }
 
 // getSegmentsToSync applies all policies to get segments list to sync.
@@ -242,7 +264,7 @@ func (wb *writeBufferBase) bufferInsert(insertMsgs []*msgstream.InsertMsg, start
 				InsertChannel: wb.channelName,
 				StartPosition: startPos,
 				State:         commonpb.SegmentState_Growing,
-			}, func(_ *datapb.SegmentInfo) *metacache.BloomFilterSet { return metacache.NewBloomFilterSet() })
+			}, func(_ *datapb.SegmentInfo) *metacache.BloomFilterSet { return metacache.NewBloomFilterSet() }, metacache.SetStartPosRecorded(false))
 		}
 
 		segBuf := wb.getOrCreateBuffer(segmentID)
@@ -267,7 +289,42 @@ func (wb *writeBufferBase) bufferDelete(segmentID int64, pks []storage.PrimaryKe
 	return nil
 }
 
-func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) *syncmgr.SyncTask {
+func SpaceCreatorFunc(segmentID int64, collSchema *schemapb.CollectionSchema, arrowSchema *arrow.Schema) func() (*milvus_storage.Space, error) {
+	return func() (*milvus_storage.Space, error) {
+		url := fmt.Sprintf("%s://%s:%s@%s/%d?endpoint_override=%s",
+			params.Params.CommonCfg.StorageScheme.GetValue(),
+			params.Params.MinioCfg.AccessKeyID.GetValue(),
+			params.Params.MinioCfg.SecretAccessKey.GetValue(),
+			params.Params.MinioCfg.BucketName.GetValue(),
+			segmentID,
+			params.Params.MinioCfg.Address.GetValue())
+
+		pkSchema, err := typeutil.GetPrimaryFieldSchema(collSchema)
+		if err != nil {
+			return nil, err
+		}
+		vecSchema, err := typeutil.GetVectorFieldSchema(collSchema)
+		if err != nil {
+			return nil, err
+		}
+		space, err := milvus_storage.Open(
+			url,
+			options.NewSpaceOptionBuilder().
+				SetSchema(schema.NewSchema(
+					arrowSchema,
+					&schema.SchemaOptions{
+						PrimaryColumn: pkSchema.Name,
+						VectorColumn:  vecSchema.Name,
+						VersionColumn: common.TimeStampFieldName,
+					},
+				)).
+				Build(),
+		)
+		return space, err
+	}
+}
+
+func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) syncmgr.Task {
 	segmentInfo, ok := wb.metaCache.GetSegmentByID(segmentID) // wb.metaCache.GetSegmentsBy(metacache.WithSegmentIDs(segmentID))
 	if !ok {
 		log.Ctx(ctx).Warn("segment info not found in meta cache", zap.Int64("segmentID", segmentID))
@@ -279,30 +336,67 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) *sy
 
 	actions := []metacache.SegmentAction{metacache.RollStats()}
 	if insert != nil {
-		actions = append(actions, metacache.StartSyncing(int64(insert.GetRowNum())))
 		batchSize = int64(insert.GetRowNum())
 	}
+	actions = append(actions, metacache.StartSyncing(batchSize))
 	wb.metaCache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(segmentID))
 
-	syncTask := syncmgr.NewSyncTask().
-		WithInsertData(insert).
-		WithDeleteData(delta).
-		WithCollectionID(wb.collectionID).
-		WithPartitionID(segmentInfo.PartitionID()).
-		WithChannelName(wb.channelName).
-		WithSegmentID(segmentID).
-		WithStartPosition(startPos).
-		WithCheckpoint(wb.checkpoint).
-		WithSchema(wb.collSchema).
-		WithBatchSize(batchSize).
-		WithMetaCache(wb.metaCache).
-		WithMetaWriter(wb.metaWriter).
-		WithFailureCallback(func(err error) {
-			// TODO could change to unsub channel in the future
-			panic(err)
-		})
-	if segmentInfo.State() == commonpb.SegmentState_Flushing {
-		syncTask.WithFlush()
+	var syncTask syncmgr.Task
+	if params.Params.CommonCfg.EnableStorageV2.GetAsBool() {
+		arrowSchema := wb.storagev2Cache.ArrowSchema()
+		space, err := wb.storagev2Cache.GetOrCreateSpace(segmentID, SpaceCreatorFunc(segmentID, wb.collSchema, arrowSchema))
+		if err != nil {
+			log.Warn("failed to get or create space", zap.Error(err))
+			return nil
+		}
+
+		task := syncmgr.NewSyncTaskV2().
+			WithInsertData(insert).
+			WithDeleteData(delta).
+			WithCollectionID(wb.collectionID).
+			WithPartitionID(segmentInfo.PartitionID()).
+			WithChannelName(wb.channelName).
+			WithSegmentID(segmentID).
+			WithStartPosition(startPos).
+			WithLevel(segmentInfo.Level()).
+			WithCheckpoint(wb.checkpoint).
+			WithSchema(wb.collSchema).
+			WithBatchSize(batchSize).
+			WithMetaCache(wb.metaCache).
+			WithMetaWriter(wb.metaWriter).
+			WithArrowSchema(arrowSchema).
+			WithSpace(space).
+			WithFailureCallback(func(err error) {
+				// TODO could change to unsub channel in the future
+				panic(err)
+			})
+		if segmentInfo.State() == commonpb.SegmentState_Flushing {
+			task.WithFlush()
+		}
+		syncTask = task
+	} else {
+		task := syncmgr.NewSyncTask().
+			WithInsertData(insert).
+			WithDeleteData(delta).
+			WithCollectionID(wb.collectionID).
+			WithPartitionID(segmentInfo.PartitionID()).
+			WithChannelName(wb.channelName).
+			WithSegmentID(segmentID).
+			WithStartPosition(startPos).
+			WithLevel(segmentInfo.Level()).
+			WithCheckpoint(wb.checkpoint).
+			WithSchema(wb.collSchema).
+			WithBatchSize(batchSize).
+			WithMetaCache(wb.metaCache).
+			WithMetaWriter(wb.metaWriter).
+			WithFailureCallback(func(err error) {
+				// TODO could change to unsub channel in the future
+				panic(err)
+			})
+		if segmentInfo.State() == commonpb.SegmentState_Flushing {
+			task.WithFlush()
+		}
+		syncTask = task
 	}
 
 	return syncTask
@@ -322,7 +416,13 @@ func (wb *writeBufferBase) Close(drop bool) {
 		if syncTask == nil {
 			continue
 		}
-		syncTask.WithDrop()
+		switch t := syncTask.(type) {
+		case *syncmgr.SyncTask:
+			t.WithDrop()
+		case *syncmgr.SyncTaskV2:
+			t.WithDrop()
+		}
+
 		f := wb.syncMgr.SyncData(context.Background(), syncTask)
 		futures = append(futures, f)
 	}

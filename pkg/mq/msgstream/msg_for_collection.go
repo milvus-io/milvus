@@ -51,8 +51,8 @@ func (l *LoadCollectionMsg) SourceID() int64 {
 
 func (l *LoadCollectionMsg) Marshal(input TsMsg) (MarshalType, error) {
 	loadCollectionMsg := input.(*LoadCollectionMsg)
-	createIndexRequest := &loadCollectionMsg.LoadCollectionRequest
-	mb, err := proto.Marshal(createIndexRequest)
+	loadCollectionRequest := &loadCollectionMsg.LoadCollectionRequest
+	mb, err := proto.Marshal(loadCollectionRequest)
 	if err != nil {
 		return nil, err
 	}

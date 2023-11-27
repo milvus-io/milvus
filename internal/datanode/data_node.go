@@ -354,7 +354,8 @@ func (node *DataNode) Start() error {
 			}*/
 
 		connectEtcdFn := func() error {
-			etcdKV := etcdkv.NewEtcdKV(node.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
+			etcdKV := etcdkv.NewEtcdKV(node.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue(),
+				etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 			node.watchKv = etcdKV
 			return nil
 		}

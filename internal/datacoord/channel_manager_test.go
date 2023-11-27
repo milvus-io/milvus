@@ -1239,6 +1239,7 @@ func TestChannelManager_HelperFunc(t *testing.T) {
 }
 
 func TestChannelManager_BackgroundChannelChecker(t *testing.T) {
+	Params.Save(Params.DataCoordCfg.AutoBalance.Key, "false")
 	Params.Save(Params.DataCoordCfg.ChannelBalanceInterval.Key, "1")
 	Params.Save(Params.DataCoordCfg.ChannelBalanceSilentDuration.Key, "1")
 
@@ -1279,7 +1280,6 @@ func TestChannelManager_BackgroundChannelChecker(t *testing.T) {
 	go c.bgCheckChannelsWork(ctx)
 
 	updateCounter := atomic.NewInt64(0)
-
 	mockStore.EXPECT().Update(mock.Anything).Run(func(op *ChannelOpSet) {
 		updateCounter.Inc()
 	}).Return(nil).Maybe()

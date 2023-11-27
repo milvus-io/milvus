@@ -6,8 +6,6 @@ import (
 	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
 	mock "github.com/stretchr/testify/mock"
 
-	msgpb "github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-
 	schemapb "github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 
 	storage "github.com/milvus-io/milvus/internal/storage"
@@ -350,56 +348,6 @@ func (_c *MockMetaCache_GetSegmentsBy_Call) RunAndReturn(run func(...SegmentFilt
 	return _c
 }
 
-// NewSegment provides a mock function with given fields: segmentID, partitionID, startPos, actions
-func (_m *MockMetaCache) NewSegment(segmentID int64, partitionID int64, startPos *msgpb.MsgPosition, actions ...SegmentAction) {
-	_va := make([]interface{}, len(actions))
-	for _i := range actions {
-		_va[_i] = actions[_i]
-	}
-	var _ca []interface{}
-	_ca = append(_ca, segmentID, partitionID, startPos)
-	_ca = append(_ca, _va...)
-	_m.Called(_ca...)
-}
-
-// MockMetaCache_NewSegment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'NewSegment'
-type MockMetaCache_NewSegment_Call struct {
-	*mock.Call
-}
-
-// NewSegment is a helper method to define mock.On call
-//   - segmentID int64
-//   - partitionID int64
-//   - startPos *msgpb.MsgPosition
-//   - actions ...SegmentAction
-func (_e *MockMetaCache_Expecter) NewSegment(segmentID interface{}, partitionID interface{}, startPos interface{}, actions ...interface{}) *MockMetaCache_NewSegment_Call {
-	return &MockMetaCache_NewSegment_Call{Call: _e.mock.On("NewSegment",
-		append([]interface{}{segmentID, partitionID, startPos}, actions...)...)}
-}
-
-func (_c *MockMetaCache_NewSegment_Call) Run(run func(segmentID int64, partitionID int64, startPos *msgpb.MsgPosition, actions ...SegmentAction)) *MockMetaCache_NewSegment_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		variadicArgs := make([]SegmentAction, len(args)-3)
-		for i, a := range args[3:] {
-			if a != nil {
-				variadicArgs[i] = a.(SegmentAction)
-			}
-		}
-		run(args[0].(int64), args[1].(int64), args[2].(*msgpb.MsgPosition), variadicArgs...)
-	})
-	return _c
-}
-
-func (_c *MockMetaCache_NewSegment_Call) Return() *MockMetaCache_NewSegment_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockMetaCache_NewSegment_Call) RunAndReturn(run func(int64, int64, *msgpb.MsgPosition, ...SegmentAction)) *MockMetaCache_NewSegment_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // PredictSegments provides a mock function with given fields: pk, filters
 func (_m *MockMetaCache) PredictSegments(pk storage.PrimaryKey, filters ...SegmentFilter) ([]int64, bool) {
 	_va := make([]interface{}, len(filters))
@@ -465,6 +413,63 @@ func (_c *MockMetaCache_PredictSegments_Call) Return(_a0 []int64, _a1 bool) *Moc
 }
 
 func (_c *MockMetaCache_PredictSegments_Call) RunAndReturn(run func(storage.PrimaryKey, ...SegmentFilter) ([]int64, bool)) *MockMetaCache_PredictSegments_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RemoveSegments provides a mock function with given fields: filters
+func (_m *MockMetaCache) RemoveSegments(filters ...SegmentFilter) []int64 {
+	_va := make([]interface{}, len(filters))
+	for _i := range filters {
+		_va[_i] = filters[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 []int64
+	if rf, ok := ret.Get(0).(func(...SegmentFilter) []int64); ok {
+		r0 = rf(filters...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]int64)
+		}
+	}
+
+	return r0
+}
+
+// MockMetaCache_RemoveSegments_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveSegments'
+type MockMetaCache_RemoveSegments_Call struct {
+	*mock.Call
+}
+
+// RemoveSegments is a helper method to define mock.On call
+//   - filters ...SegmentFilter
+func (_e *MockMetaCache_Expecter) RemoveSegments(filters ...interface{}) *MockMetaCache_RemoveSegments_Call {
+	return &MockMetaCache_RemoveSegments_Call{Call: _e.mock.On("RemoveSegments",
+		append([]interface{}{}, filters...)...)}
+}
+
+func (_c *MockMetaCache_RemoveSegments_Call) Run(run func(filters ...SegmentFilter)) *MockMetaCache_RemoveSegments_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]SegmentFilter, len(args)-0)
+		for i, a := range args[0:] {
+			if a != nil {
+				variadicArgs[i] = a.(SegmentFilter)
+			}
+		}
+		run(variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMetaCache_RemoveSegments_Call) Return(_a0 []int64) *MockMetaCache_RemoveSegments_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockMetaCache_RemoveSegments_Call) RunAndReturn(run func(...SegmentFilter) []int64) *MockMetaCache_RemoveSegments_Call {
 	_c.Call.Return(run)
 	return _c
 }

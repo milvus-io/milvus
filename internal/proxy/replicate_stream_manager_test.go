@@ -52,7 +52,10 @@ func TestReplicateManager(t *testing.T) {
 		assert.Equal(t, 3, i)
 		res := resourceManager.Delete(ReplicateMsgStreamTyp, "test")
 		assert.NotNil(t, res)
-		time.Sleep(2 * time.Second)
+
+		assert.Eventually(t, func() bool {
+			return resourceManager.Delete(ReplicateMsgStreamTyp, "test") == nil
+		}, time.Second*4, time.Millisecond*500)
 
 		_, err = manager.GetReplicateMsgStream(context.Background(), "test")
 		assert.NoError(t, err)
@@ -61,7 +64,10 @@ func TestReplicateManager(t *testing.T) {
 	{
 		res := resourceManager.Delete(ReplicateMsgStreamTyp, "test")
 		assert.NotNil(t, res)
-		time.Sleep(2 * time.Second)
+
+		assert.Eventually(t, func() bool {
+			return resourceManager.Delete(ReplicateMsgStreamTyp, "test") == nil
+		}, time.Second*4, time.Millisecond*500)
 
 		res, err := resourceManager.Get(ReplicateMsgStreamTyp, "test", func() (resource.Resource, error) {
 			return resource.NewResource(resource.WithObj("str")), nil

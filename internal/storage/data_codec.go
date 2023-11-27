@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -144,7 +145,7 @@ func (insertCodec *InsertCodec) SerializePkStats(stats *PrimaryKeyStats, rowNum 
 // Serialize Pk stats list to one blob
 func (insertCodec *InsertCodec) SerializePkStatsList(stats []*PrimaryKeyStats, rowNum int64) (*Blob, error) {
 	if len(stats) == 0 {
-		return nil, nil
+		return nil, merr.WrapErrServiceInternal("shall not serialize zero length statslog list")
 	}
 
 	blobKey := fmt.Sprintf("%d", stats[0].FieldID)
@@ -841,11 +842,26 @@ type DeleteData struct {
 	RowCount int64
 }
 
+func NewDeleteData(pks []PrimaryKey, tss []Timestamp) *DeleteData {
+	return &DeleteData{
+		Pks:      pks,
+		Tss:      tss,
+		RowCount: int64(len(pks)),
+	}
+}
+
 // Append append 1 pk&ts pair to DeleteData
 func (data *DeleteData) Append(pk PrimaryKey, ts Timestamp) {
 	data.Pks = append(data.Pks, pk)
 	data.Tss = append(data.Tss, ts)
 	data.RowCount++
+}
+
+// Append append 1 pk&ts pair to DeleteData
+func (data *DeleteData) AppendBatch(pks []PrimaryKey, tss []Timestamp) {
+	data.Pks = append(data.Pks, pks...)
+	data.Tss = append(data.Tss, tss...)
+	data.RowCount += int64(len(pks))
 }
 
 func (data *DeleteData) Merge(other *DeleteData) {

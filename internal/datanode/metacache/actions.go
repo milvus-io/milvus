@@ -19,6 +19,7 @@ package metacache
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -54,6 +55,24 @@ func WithStartPosNotRecorded() SegmentFilter {
 func WithImporting() SegmentFilter {
 	return func(info *SegmentInfo) bool {
 		return info.importing
+	}
+}
+
+func WithLevel(level datapb.SegmentLevel) SegmentFilter {
+	return func(info *SegmentInfo) bool {
+		return info.level == level
+	}
+}
+
+func WithCompacted() SegmentFilter {
+	return func(info *SegmentInfo) bool {
+		return info.compactTo != 0
+	}
+}
+
+func WithNoSyncingTask() SegmentFilter {
+	return func(info *SegmentInfo) bool {
+		return info.syncingTasks == 0
 	}
 }
 
@@ -105,6 +124,7 @@ func StartSyncing(batchSize int64) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.syncingRows += batchSize
 		info.bufferRows -= batchSize
+		info.syncingTasks++
 	}
 }
 
@@ -112,6 +132,13 @@ func FinishSyncing(batchSize int64) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.flushedRows += batchSize
 		info.syncingRows -= batchSize
+		info.syncingTasks--
+	}
+}
+
+func SetStartPosRecorded(flag bool) SegmentAction {
+	return func(info *SegmentInfo) {
+		info.startPosRecorded = flag
 	}
 }
 

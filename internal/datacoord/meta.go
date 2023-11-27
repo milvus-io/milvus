@@ -66,9 +66,9 @@ type meta struct {
 
 // A local cache of segment metric update. Must call commit() to take effect.
 type segMetricMutation struct {
-	stateChange       map[string]int // segment state -> state change count (to increase or decrease).
-	rowCountChange    int64          // Change in # of rows.
-	rowCountAccChange int64          // Total # of historical added rows, accumulated.
+	stateChange       map[string]map[string]int // segment state, seg level -> state change count (to increase or decrease).
+	rowCountChange    int64                     // Change in # of rows.
+	rowCountAccChange int64                     // Total # of historical added rows, accumulated.
 }
 
 type collectionInfo struct {
@@ -107,15 +107,11 @@ func (m *meta) reloadFromKV() error {
 		return err
 	}
 	metrics.DataCoordNumCollections.WithLabelValues().Set(0)
-	metrics.DataCoordNumSegments.WithLabelValues(metrics.SealedSegmentLabel).Set(0)
-	metrics.DataCoordNumSegments.WithLabelValues(metrics.GrowingSegmentLabel).Set(0)
-	metrics.DataCoordNumSegments.WithLabelValues(metrics.FlushedSegmentLabel).Set(0)
-	metrics.DataCoordNumSegments.WithLabelValues(metrics.FlushingSegmentLabel).Set(0)
-	metrics.DataCoordNumSegments.WithLabelValues(metrics.DroppedSegmentLabel).Set(0)
+	metrics.DataCoordNumSegments.Reset()
 	numStoredRows := int64(0)
 	for _, segment := range segments {
 		m.segments.SetSegment(segment.ID, NewSegmentInfo(segment))
-		metrics.DataCoordNumSegments.WithLabelValues(segment.State.String()).Inc()
+		metrics.DataCoordNumSegments.WithLabelValues(segment.State.String(), segment.GetLevel().String()).Inc()
 		if segment.State == commonpb.SegmentState_Flushed {
 			numStoredRows += segment.NumOfRows
 
@@ -216,14 +212,6 @@ func (m *meta) GetClonedCollectionInfo(collectionID UniqueID) *collectionInfo {
 	return cloneColl
 }
 
-// chanPartSegments is an internal result struct, which is aggregates of SegmentInfos with same collectionID, partitionID and channelName
-type chanPartSegments struct {
-	collectionID UniqueID
-	partitionID  UniqueID
-	channelName  string
-	segments     []*SegmentInfo
-}
-
 // GetSegmentsChanPart returns segments organized in Channel-Partition dimension with selector applied
 func (m *meta) GetSegmentsChanPart(selector SegmentInfoSelector) []*chanPartSegments {
 	m.RLock()
@@ -310,7 +298,7 @@ func (m *meta) AddSegment(ctx context.Context, segment *SegmentInfo) error {
 		return err
 	}
 	m.segments.SetSegment(segment.GetID(), segment)
-	metrics.DataCoordNumSegments.WithLabelValues(segment.GetState().String()).Inc()
+	metrics.DataCoordNumSegments.WithLabelValues(segment.GetState().String(), segment.GetLevel().String()).Inc()
 	log.Info("meta update: adding segment - complete", zap.Int64("segmentID", segment.GetID()))
 	return nil
 }
@@ -332,7 +320,7 @@ func (m *meta) DropSegment(segmentID UniqueID) error {
 			zap.Error(err))
 		return err
 	}
-	metrics.DataCoordNumSegments.WithLabelValues(segment.GetState().String()).Dec()
+	metrics.DataCoordNumSegments.WithLabelValues(segment.GetState().String(), segment.GetLevel().String()).Dec()
 	m.segments.DropSegment(segmentID)
 	log.Info("meta update: dropping segment - complete",
 		zap.Int64("segmentID", segmentID))
@@ -388,7 +376,7 @@ func (m *meta) SetState(segmentID UniqueID, targetState commonpb.SegmentState) e
 	// Persist segment updates first.
 	clonedSegment := curSegInfo.Clone()
 	metricMutation := &segMetricMutation{
-		stateChange: make(map[string]int),
+		stateChange: make(map[string]map[string]int),
 	}
 	if clonedSegment != nil && isSegmentHealthy(clonedSegment) {
 		// Update segment state and prepare segment metric update.
@@ -439,7 +427,7 @@ func (m *meta) UnsetIsImporting(segmentID UniqueID) error {
 	return nil
 }
 
-type UpdateSegmentPack struct {
+type updateSegmentPack struct {
 	meta     *meta
 	segments map[int64]*SegmentInfo
 	// for update etcd binlog paths
@@ -448,7 +436,7 @@ type UpdateSegmentPack struct {
 	metricMutation *segMetricMutation
 }
 
-func (p *UpdateSegmentPack) Get(segmentID int64) *SegmentInfo {
+func (p *updateSegmentPack) Get(segmentID int64) *SegmentInfo {
 	if segment, ok := p.segments[segmentID]; ok {
 		return segment
 	}
@@ -466,28 +454,43 @@ func (p *UpdateSegmentPack) Get(segmentID int64) *SegmentInfo {
 	return p.segments[segmentID]
 }
 
-type UpdateOperator func(*UpdateSegmentPack) bool
+type UpdateOperator func(*updateSegmentPack) bool
 
 func CreateL0Operator(collectionID, partitionID, segmentID int64, channel string) UpdateOperator {
-	return func(modPack *UpdateSegmentPack) bool {
-		segment := modPack.meta.GetSegment(segmentID)
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.meta.segments.GetSegment(segmentID)
 		if segment == nil {
 			log.Info("meta update: add new l0 segment",
 				zap.Int64("collectionID", collectionID),
 				zap.Int64("partitionID", partitionID),
 				zap.Int64("segmentID", segmentID))
+
+			modPack.segments[segmentID] = &SegmentInfo{
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:            segmentID,
+					CollectionID:  collectionID,
+					PartitionID:   partitionID,
+					InsertChannel: channel,
+					NumOfRows:     0,
+					State:         commonpb.SegmentState_Growing,
+					Level:         datapb.SegmentLevel_L0,
+				},
+			}
 		}
-		modPack.segments[segmentID] = &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:            segmentID,
-				CollectionID:  collectionID,
-				PartitionID:   partitionID,
-				InsertChannel: channel,
-				NumOfRows:     0,
-				State:         commonpb.SegmentState_Growing,
-				Level:         datapb.SegmentLevel_L0,
-			},
+		return true
+	}
+}
+
+func UpdateStorageVersionOperator(segmentID int64, version int64) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.meta.GetSegment(segmentID)
+		if segment == nil {
+			log.Info("meta update: update storage version - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
 		}
+
+		segment.StorageVersion = version
 		return true
 	}
 }
@@ -495,7 +498,7 @@ func CreateL0Operator(collectionID, partitionID, segmentID int64, channel string
 // Set status of segment
 // and record dropped time when change segment status to dropped
 func UpdateStatusOperator(segmentID int64, status commonpb.SegmentState) UpdateOperator {
-	return func(modPack *UpdateSegmentPack) bool {
+	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
 			log.Warn("meta update: update status failed - segment not found",
@@ -514,7 +517,7 @@ func UpdateStatusOperator(segmentID int64, status commonpb.SegmentState) UpdateO
 
 // update binlogs in segmentInfo
 func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs []*datapb.FieldBinlog) UpdateOperator {
-	return func(modPack *UpdateSegmentPack) bool {
+	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
 			log.Warn("meta update: update binlog failed - segment not found",
@@ -534,7 +537,7 @@ func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs []*dat
 
 // update startPosition
 func UpdateStartPosition(startPositions []*datapb.SegmentStartPosition) UpdateOperator {
-	return func(modPack *UpdateSegmentPack) bool {
+	return func(modPack *updateSegmentPack) bool {
 		for _, pos := range startPositions {
 			if len(pos.GetStartPosition().GetMsgID()) == 0 {
 				continue
@@ -554,7 +557,7 @@ func UpdateStartPosition(startPositions []*datapb.SegmentStartPosition) UpdateOp
 // if was importing segment
 // only update rows.
 func UpdateCheckPointOperator(segmentID int64, importing bool, checkpoints []*datapb.CheckPoint) UpdateOperator {
-	return func(modPack *UpdateSegmentPack) bool {
+	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
 			log.Warn("meta update: update checkpoint failed - segment not found",
@@ -599,12 +602,12 @@ func UpdateCheckPointOperator(segmentID int64, importing bool, checkpoints []*da
 func (m *meta) UpdateSegmentsInfo(operators ...UpdateOperator) error {
 	m.Lock()
 	defer m.Unlock()
-	updatePack := &UpdateSegmentPack{
+	updatePack := &updateSegmentPack{
 		meta:       m,
 		segments:   make(map[int64]*SegmentInfo),
 		increments: make(map[int64]metastore.BinlogsIncrement),
 		metricMutation: &segMetricMutation{
-			stateChange: make(map[string]int),
+			stateChange: make(map[string]map[string]int),
 		},
 	}
 
@@ -643,7 +646,7 @@ func (m *meta) UpdateDropChannelSegmentInfo(channel string, segments []*SegmentI
 
 	// Prepare segment metric mutation.
 	metricMutation := &segMetricMutation{
-		stateChange: make(map[string]int),
+		stateChange: make(map[string]map[string]int),
 	}
 	modSegments := make(map[UniqueID]*SegmentInfo)
 	// save new segments flushed from buffer data
@@ -684,7 +687,7 @@ func (m *meta) UpdateDropChannelSegmentInfo(channel string, segments []*SegmentI
 // mergeDropSegment merges drop segment information with meta segments
 func (m *meta) mergeDropSegment(seg2Drop *SegmentInfo) (*SegmentInfo, *segMetricMutation) {
 	metricMutation := &segMetricMutation{
-		stateChange: make(map[string]int),
+		stateChange: make(map[string]map[string]int),
 	}
 
 	segment := m.segments.GetSegment(seg2Drop.ID)
@@ -781,96 +784,69 @@ func (m *meta) batchSaveDropSegments(channel string, modSegments map[int64]*Segm
 }
 
 // GetSegmentsByChannel returns all segment info which insert channel equals provided `dmlCh`
-func (m *meta) GetSegmentsByChannel(dmlCh string) []*SegmentInfo {
-	m.RLock()
-	defer m.RUnlock()
-	infos := make([]*SegmentInfo, 0)
-	segments := m.segments.GetSegments()
-	for _, segment := range segments {
-		if !isSegmentHealthy(segment) || segment.InsertChannel != dmlCh {
-			continue
-		}
-		infos = append(infos, segment)
-	}
-	return infos
+func (m *meta) GetSegmentsByChannel(channel string) []*SegmentInfo {
+	return m.SelectSegments(func(segment *SegmentInfo) bool {
+		return isSegmentHealthy(segment) && segment.InsertChannel == channel
+	})
 }
 
 // GetSegmentsOfCollection get all segments of collection
 func (m *meta) GetSegmentsOfCollection(collectionID UniqueID) []*SegmentInfo {
-	m.RLock()
-	defer m.RUnlock()
-
-	ret := make([]*SegmentInfo, 0)
-	segments := m.segments.GetSegments()
-	for _, segment := range segments {
-		if isSegmentHealthy(segment) && segment.GetCollectionID() == collectionID {
-			ret = append(ret, segment)
-		}
-	}
-	return ret
+	return m.SelectSegments(func(segment *SegmentInfo) bool {
+		return isSegmentHealthy(segment) && segment.GetCollectionID() == collectionID
+	})
 }
 
 // GetSegmentsIDOfCollection returns all segment ids which collection equals to provided `collectionID`
 func (m *meta) GetSegmentsIDOfCollection(collectionID UniqueID) []UniqueID {
-	m.RLock()
-	defer m.RUnlock()
-	ret := make([]UniqueID, 0)
-	segments := m.segments.GetSegments()
-	for _, segment := range segments {
-		if isSegmentHealthy(segment) && segment.CollectionID == collectionID {
-			ret = append(ret, segment.ID)
-		}
-	}
-	return ret
+	segments := m.SelectSegments(func(segment *SegmentInfo) bool {
+		return isSegmentHealthy(segment) && segment.CollectionID == collectionID
+	})
+
+	return lo.Map(segments, func(segment *SegmentInfo, _ int) int64 {
+		return segment.ID
+	})
 }
 
 // GetSegmentsIDOfCollection returns all segment ids which collection equals to provided `collectionID`
 func (m *meta) GetSegmentsIDOfCollectionWithDropped(collectionID UniqueID) []UniqueID {
-	m.RLock()
-	defer m.RUnlock()
-	ret := make([]UniqueID, 0)
-	segments := m.segments.GetSegments()
-	for _, segment := range segments {
-		if segment != nil &&
+	segments := m.SelectSegments(func(segment *SegmentInfo) bool {
+		return segment != nil &&
 			segment.GetState() != commonpb.SegmentState_SegmentStateNone &&
 			segment.GetState() != commonpb.SegmentState_NotExist &&
-			segment.CollectionID == collectionID {
-			ret = append(ret, segment.ID)
-		}
-	}
-	return ret
+			segment.CollectionID == collectionID
+	})
+
+	return lo.Map(segments, func(segment *SegmentInfo, _ int) int64 {
+		return segment.ID
+	})
 }
 
 // GetSegmentsIDOfPartition returns all segments ids which collection & partition equals to provided `collectionID`, `partitionID`
 func (m *meta) GetSegmentsIDOfPartition(collectionID, partitionID UniqueID) []UniqueID {
-	m.RLock()
-	defer m.RUnlock()
-	ret := make([]UniqueID, 0)
-	segments := m.segments.GetSegments()
-	for _, segment := range segments {
-		if isSegmentHealthy(segment) && segment.CollectionID == collectionID && segment.PartitionID == partitionID {
-			ret = append(ret, segment.ID)
-		}
-	}
-	return ret
+	segments := m.SelectSegments(func(segment *SegmentInfo) bool {
+		return isSegmentHealthy(segment) &&
+			segment.CollectionID == collectionID &&
+			segment.PartitionID == partitionID
+	})
+
+	return lo.Map(segments, func(segment *SegmentInfo, _ int) int64 {
+		return segment.ID
+	})
 }
 
 // GetSegmentsIDOfPartition returns all segments ids which collection & partition equals to provided `collectionID`, `partitionID`
 func (m *meta) GetSegmentsIDOfPartitionWithDropped(collectionID, partitionID UniqueID) []UniqueID {
-	m.RLock()
-	defer m.RUnlock()
-	ret := make([]UniqueID, 0)
-	segments := m.segments.GetSegments()
-	for _, segment := range segments {
-		if segment != nil &&
-			segment.GetState() != commonpb.SegmentState_SegmentStateNone &&
+	segments := m.SelectSegments(func(segment *SegmentInfo) bool {
+		return segment.GetState() != commonpb.SegmentState_SegmentStateNone &&
 			segment.GetState() != commonpb.SegmentState_NotExist &&
 			segment.CollectionID == collectionID &&
-			segment.PartitionID == partitionID {
-			ret = append(ret, segment.ID)
-		}
-	}
-	return ret
+			segment.PartitionID == partitionID
+	})
+
+	return lo.Map(segments, func(segment *SegmentInfo, _ int) int64 {
+		return segment.ID
+	})
 }
 
 // GetNumRowsOfPartition returns row count of segments belongs to provided collection & partition
@@ -889,30 +865,16 @@ func (m *meta) GetNumRowsOfPartition(collectionID UniqueID, partitionID UniqueID
 
 // GetUnFlushedSegments get all segments which state is not `Flushing` nor `Flushed`
 func (m *meta) GetUnFlushedSegments() []*SegmentInfo {
-	m.RLock()
-	defer m.RUnlock()
-	ret := make([]*SegmentInfo, 0)
-	segments := m.segments.GetSegments()
-	for _, segment := range segments {
-		if segment.State == commonpb.SegmentState_Growing || segment.State == commonpb.SegmentState_Sealed {
-			ret = append(ret, segment)
-		}
-	}
-	return ret
+	return m.SelectSegments(func(segment *SegmentInfo) bool {
+		return segment.GetState() == commonpb.SegmentState_Growing || segment.GetState() == commonpb.SegmentState_Sealed
+	})
 }
 
 // GetFlushingSegments get all segments which state is `Flushing`
 func (m *meta) GetFlushingSegments() []*SegmentInfo {
-	m.RLock()
-	defer m.RUnlock()
-	ret := make([]*SegmentInfo, 0)
-	segments := m.segments.GetSegments()
-	for _, info := range segments {
-		if info.State == commonpb.SegmentState_Flushing {
-			ret = append(ret, info)
-		}
-	}
-	return ret
+	return m.SelectSegments(func(segment *SegmentInfo) bool {
+		return segment.GetState() == commonpb.SegmentState_Flushing
+	})
 }
 
 // SelectSegments select segments with selector
@@ -1010,7 +972,7 @@ func (m *meta) PrepareCompleteCompactionMutation(plan *datapb.CompactionPlan,
 	)
 
 	metricMutation := &segMetricMutation{
-		stateChange: make(map[string]int),
+		stateChange: make(map[string]map[string]int),
 	}
 	for _, cl := range compactionLogs {
 		if segment := m.segments.GetSegment(cl.GetSegmentID()); segment != nil {
@@ -1081,7 +1043,7 @@ func (m *meta) PrepareCompleteCompactionMutation(plan *datapb.CompactionPlan,
 		LastExpireTime:      plan.GetStartTime(),
 	}
 	segment := NewSegmentInfo(segmentInfo)
-	metricMutation.addNewSeg(segment.GetState(), segment.GetNumOfRows())
+	metricMutation.addNewSeg(segment.GetState(), segment.GetLevel(), segment.GetNumOfRows())
 	log.Info("meta update: prepare for complete compaction mutation - complete",
 		zap.Int64("collectionID", segment.GetCollectionID()),
 		zap.Int64("partitionID", segment.GetPartitionID()),
@@ -1335,9 +1297,50 @@ func (m *meta) GcConfirm(ctx context.Context, collectionID, partitionID UniqueID
 	return m.catalog.GcConfirm(ctx, collectionID, partitionID)
 }
 
+func (m *meta) GetCompactableSegmentGroupByCollection() map[int64][]*SegmentInfo {
+	allSegs := m.SelectSegments(func(segment *SegmentInfo) bool {
+		return isSegmentHealthy(segment) &&
+			isFlush(segment) && // sealed segment
+			!segment.isCompacting && // not compacting now
+			!segment.GetIsImporting() // not importing now
+	})
+
+	ret := make(map[int64][]*SegmentInfo)
+	for _, seg := range allSegs {
+		if _, ok := ret[seg.CollectionID]; !ok {
+			ret[seg.CollectionID] = make([]*SegmentInfo, 0)
+		}
+
+		ret[seg.CollectionID] = append(ret[seg.CollectionID], seg)
+	}
+
+	return ret
+}
+
+func (m *meta) GetEarliestStartPositionOfGrowingSegments(label *CompactionGroupLabel) *msgpb.MsgPosition {
+	segments := m.SelectSegments(func(segment *SegmentInfo) bool {
+		return segment.GetState() == commonpb.SegmentState_Growing &&
+			segment.GetCollectionID() == label.CollectionID &&
+			segment.GetPartitionID() == label.PartitionID &&
+			segment.GetInsertChannel() == label.Channel
+	})
+
+	var earliest *msgpb.MsgPosition
+	for _, seg := range segments {
+		if earliest == nil || earliest.GetTimestamp() > seg.GetStartPosition().GetTimestamp() {
+			earliest = seg.GetStartPosition()
+		}
+	}
+	return earliest
+}
+
 // addNewSeg update metrics update for a new segment.
-func (s *segMetricMutation) addNewSeg(state commonpb.SegmentState, rowCount int64) {
-	s.stateChange[state.String()]++
+func (s *segMetricMutation) addNewSeg(state commonpb.SegmentState, level datapb.SegmentLevel, rowCount int64) {
+	if _, ok := s.stateChange[level.String()]; !ok {
+		s.stateChange[level.String()] = make(map[string]int)
+	}
+	s.stateChange[level.String()][state.String()] += 1
+
 	s.rowCountChange += rowCount
 	s.rowCountAccChange += rowCount
 }
@@ -1345,17 +1348,22 @@ func (s *segMetricMutation) addNewSeg(state commonpb.SegmentState, rowCount int6
 // commit persists all updates in current segMetricMutation, should and must be called AFTER segment state change
 // has persisted in Etcd.
 func (s *segMetricMutation) commit() {
-	for state, change := range s.stateChange {
-		metrics.DataCoordNumSegments.WithLabelValues(state).Add(float64(change))
+	for level, submap := range s.stateChange {
+		for state, change := range submap {
+			metrics.DataCoordNumSegments.WithLabelValues(state, level).Add(float64(change))
+		}
 	}
 	metrics.DataCoordNumStoredRowsCounter.WithLabelValues().Add(float64(s.rowCountAccChange))
 }
 
 // append updates current segMetricMutation when segment state change happens.
-func (s *segMetricMutation) append(oldState, newState commonpb.SegmentState, rowCountUpdate int64) {
+func (s *segMetricMutation) append(oldState, newState commonpb.SegmentState, level datapb.SegmentLevel, rowCountUpdate int64) {
 	if oldState != newState {
-		s.stateChange[oldState.String()]--
-		s.stateChange[newState.String()]++
+		if _, ok := s.stateChange[level.String()]; !ok {
+			s.stateChange[level.String()] = make(map[string]int)
+		}
+		s.stateChange[level.String()][oldState.String()] -= 1
+		s.stateChange[level.String()][newState.String()] += 1
 	}
 	// Update # of rows on new flush operations and drop operations.
 	if isFlushState(newState) && !isFlushState(oldState) {
@@ -1379,6 +1387,6 @@ func updateSegStateAndPrepareMetrics(segToUpdate *SegmentInfo, targetState commo
 		zap.String("old state", segToUpdate.GetState().String()),
 		zap.String("new state", targetState.String()),
 		zap.Int64("# of rows", segToUpdate.GetNumOfRows()))
-	metricMutation.append(segToUpdate.GetState(), targetState, segToUpdate.GetNumOfRows())
+	metricMutation.append(segToUpdate.GetState(), targetState, segToUpdate.GetLevel(), segToUpdate.GetNumOfRows())
 	segToUpdate.State = targetState
 }

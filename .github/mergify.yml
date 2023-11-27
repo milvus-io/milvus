@@ -167,7 +167,15 @@ pull_request_rules:
       - and:
           - -body~=\#[0-9]{1,6}(\s+|$)
           - -body~=https://github.com/milvus-io/milvus/issues/[0-9]{1,6}(\s+|$)
-      - -label=kind/enhancement
+      - and:
+        - label=kind/enhancement
+        - or:
+          - label=size/L
+          - label=size/XL
+          - label=size/XXL
+          
+      - -label=kind/doc
+      - -label=kind/test
       - -title~=\[automated\]
     actions:
       label:
@@ -193,7 +201,11 @@ pull_request_rules:
                   - base=master
                   - base=sql_beta
                   - base~=^2(\.\d+){1,2}$
-              - label=kind/enhancement
+              - and:
+                - label=kind/enhancement
+                - -label=size/L
+                - -label=size/XL
+                - -label=size/XXL
     actions:
       label:
         remove:
@@ -359,7 +371,10 @@ pull_request_rules:
   - name: Add 'do-not-merge/invalid-pr-format' label for invalid PR titles
     conditions:
       - or:
-        - '-title~=^(feat:|enhance:|fix:)'
+        - base=master
+        - base~=^2\.3(\.\d+){0,1}$
+      - or:
+        - '-title~=^(feat:|enhance:|fix:|test:|doc:|auto:|\[automated\])'
         - body=^$
     actions:
       label:
@@ -375,8 +390,11 @@ pull_request_rules:
 
           1. **Title Format:** The PR title must begin with one of these prefixes:
             - `feat:` for introducing a new feature.
-            - `enhance:` for improvements to existing functionality.
             - `fix:` for bug fixes.
+            - `enhance:` for improvements to existing functionality.
+            - `test`: for add tests to existing functionality.
+            - `doc`: for modifying documentation.
+            - `auto`: for the pull request from bot.
 
           2. **Description Requirement:** The PR must include a non-empty description, detailing the changes and their impact.
 
@@ -386,18 +404,21 @@ pull_request_rules:
           [Type]: [Description of the PR]
           ```
 
-          Where `Type` is one of `feat`, `enhance`, or `fix`. 
+          Where `Type` is one of `feat`, `fix`, `enhance`, `test` or `doc`. 
 
           **Example:**
           ```
-          feat: Enhance search functionality within the user interface
+          enhance: improve search performance significantly 
           ```
 
           Please review and update your PR to comply with these guidelines.
 
   - name: Remove 'do-not-merge/invalid-pr-format' label for valid PRs
     conditions:
-      - 'title~=^(feat:|enhance:|fix:)'
+      - or:
+        - base=master
+        - base~=^2\.3(\.\d+){0,1}$
+      - 'title~=^(feat:|enhance:|fix:|test:|doc:|auto:|\[automated\])'
       - '-body=^$'
       - 'label=do-not-merge/invalid-pr-format'
     actions:
@@ -407,6 +428,9 @@ pull_request_rules:
 
   - name: Label bug fix PRs
     conditions:
+      - or:
+        - base=master
+        - base~=^2\.3(\.\d+){0,1}$
       - 'title~=^fix:'
     actions:
       label:
@@ -415,6 +439,9 @@ pull_request_rules:
 
   - name: Label feature PRs
     conditions:
+      - or:
+        - base=master
+        - base~=^2\.3(\.\d+){0,1}$
       - 'title~=^feat:'
     actions:
       label:
@@ -423,8 +450,35 @@ pull_request_rules:
 
   - name: Label enhancement PRs
     conditions:
+      - or:
+        - base=master
+        - base~=^2\.3(\.\d+){0,1}$
       - 'title~=^enhance:'
     actions:
       label:
         add:
           - kind/enhancement
+
+  - name: Label test PRs
+    conditions:
+      - or:
+        - base=master
+        - base~=^2\.3(\.\d+){0,1}$
+      - 'title~=^test:'
+    actions:
+      label:
+        add:
+          - kind/test
+
+  - name: Label doc PRs
+    conditions:
+      - or:
+        - base=master
+        - base~=^2\.3(\.\d+){0,1}$
+      - 'title~=^doc:'
+    actions:
+      label:
+        add:
+          - kind/doc
+
+        

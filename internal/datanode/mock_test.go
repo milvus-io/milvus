@@ -1117,7 +1117,8 @@ func genTestStat(meta *etcdpb.CollectionMeta) *storage.PrimaryKeyStats {
 			pkFieldType = int64(field.DataType)
 		}
 	}
-	return storage.NewPrimaryKeyStats(pkFieldID, pkFieldType, 0)
+	stats, _ := storage.NewPrimaryKeyStats(pkFieldID, pkFieldType, 100)
+	return stats
 }
 
 func genInsertData() *InsertData {

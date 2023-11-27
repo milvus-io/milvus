@@ -473,7 +473,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	}
 
 	if req.GetDropped() {
-		s.segmentManager.DropSegment(ctx, segment.GetID())
+		s.segmentManager.DropSegment(ctx, segmentID)
 		operators = append(operators, UpdateStatusOperator(segmentID, commonpb.SegmentState_Dropped))
 	} else if req.GetFlushed() {
 		// set segment to SegmentState_Flushing
@@ -489,6 +489,9 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	// save checkpoints.
 	operators = append(operators, UpdateCheckPointOperator(segmentID, req.GetImporting(), req.GetCheckPoints()))
 
+	if Params.CommonCfg.EnableStorageV2.GetAsBool() {
+		operators = append(operators, UpdateStorageVersionOperator(segmentID, req.GetStorageVersion()))
+	}
 	// run all operator and update new segment info
 	err := s.meta.UpdateSegmentsInfo(operators...)
 	if err != nil {
@@ -499,12 +502,24 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	log.Info("flush segment with meta", zap.Any("meta", req.GetField2BinlogPaths()))
 
 	if req.GetFlushed() {
-		s.segmentManager.DropSegment(ctx, req.SegmentID)
-		s.flushCh <- req.SegmentID
+		if req.GetSegLevel() == datapb.SegmentLevel_L0 {
+			metrics.DataCoordSizeStoredL0Segment.WithLabelValues().Observe(calculateL0SegmentSize(req.GetField2StatslogPaths()))
+			metrics.DataCoordRateStoredL0Segment.WithLabelValues().Inc()
+		} else {
+			// because segmentMananger only manage growing segment
+			s.segmentManager.DropSegment(ctx, req.SegmentID)
+		}
 
+		s.flushCh <- req.SegmentID
 		if !req.Importing && Params.DataCoordCfg.EnableCompaction.GetAsBool() {
-			err = s.compactionTrigger.triggerSingleCompaction(segment.GetCollectionID(), segment.GetPartitionID(),
-				segmentID, segment.GetInsertChannel())
+			if segment == nil && req.GetSegLevel() == datapb.SegmentLevel_L0 {
+				err = s.compactionTrigger.triggerSingleCompaction(req.GetCollectionID(), req.GetPartitionID(),
+					segmentID, req.GetChannel())
+			} else {
+				err = s.compactionTrigger.triggerSingleCompaction(segment.GetCollectionID(), segment.GetPartitionID(),
+					segmentID, segment.GetInsertChannel())
+			}
+
 			if err != nil {
 				log.Warn("failed to trigger single compaction")
 			} else {
@@ -613,6 +628,7 @@ func (s *Server) GetStateCode() commonpb.StateCode {
 // GetComponentStates returns DataCoord's current state
 func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	code := s.GetStateCode()
+	log.Debug("DataCoord current state", zap.String("StateCode", code.String()))
 	nodeID := common.NotRegisteredID
 	if s.session != nil && s.session.Registered() {
 		nodeID = s.session.GetServerID() // or Params.NodeID
@@ -815,7 +831,7 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 		}
 
 		binlogs := segment.GetBinlogs()
-		if len(binlogs) == 0 {
+		if len(binlogs) == 0 && segment.GetLevel() != datapb.SegmentLevel_L0 {
 			continue
 		}
 		rowCount := segmentutil.CalcRowCountFromBinLog(segment.SegmentInfo)
@@ -834,6 +850,7 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 			CollectionID:  segment.CollectionID,
 			InsertChannel: segment.InsertChannel,
 			NumOfRows:     rowCount,
+			Level:         segment.GetLevel(),
 		})
 	}
 

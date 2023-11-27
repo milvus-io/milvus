@@ -1141,6 +1141,5 @@ func (s *JSONExprSuite) TestJsonContains() {
 }
 
 func TestJsonExpr(t *testing.T) {
-	t.Skip("Skip integration test, need to refactor integration test framework")
 	suite.Run(t, new(JSONExprSuite))
 }

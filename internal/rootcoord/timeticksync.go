@@ -330,7 +330,6 @@ func (t *timetickSync) sendTimeTickToChannel(chanNames []string, ts typeutil.Tim
 	timeTickResult := msgpb.TimeTickMsg{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_TimeTick),
-			commonpbutil.WithMsgID(0),
 			commonpbutil.WithTimeStamp(ts),
 			commonpbutil.WithSourceID(t.sourceID),
 		),

@@ -40,6 +40,7 @@ func (s *MetaWriterSuite) TestNormalSave() {
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs)
 	metacache.UpdateNumOfRows(1000)(seg)
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything).Return([]*metacache.SegmentInfo{seg})
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 	task := NewSyncTask()
 	task.WithMetaCache(s.metacache)
 	err := s.writer.UpdateSync(task)
@@ -56,6 +57,32 @@ func (s *MetaWriterSuite) TestReturnError() {
 	task := NewSyncTask()
 	task.WithMetaCache(s.metacache)
 	err := s.writer.UpdateSync(task)
+	s.Error(err)
+}
+
+func (s *MetaWriterSuite) TestNormalSaveV2() {
+	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil)
+
+	bfs := metacache.NewBloomFilterSet()
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs)
+	metacache.UpdateNumOfRows(1000)(seg)
+	s.metacache.EXPECT().GetSegmentsBy(mock.Anything).Return([]*metacache.SegmentInfo{seg})
+	task := NewSyncTaskV2()
+	task.WithMetaCache(s.metacache)
+	err := s.writer.UpdateSyncV2(task)
+	s.NoError(err)
+}
+
+func (s *MetaWriterSuite) TestReturnErrorV2() {
+	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(errors.New("mocked"))
+
+	bfs := metacache.NewBloomFilterSet()
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs)
+	metacache.UpdateNumOfRows(1000)(seg)
+	s.metacache.EXPECT().GetSegmentsBy(mock.Anything).Return([]*metacache.SegmentInfo{seg})
+	task := NewSyncTaskV2()
+	task.WithMetaCache(s.metacache)
+	err := s.writer.UpdateSyncV2(task)
 	s.Error(err)
 }
 

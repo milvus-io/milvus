@@ -356,7 +356,10 @@ func (t *compactionTask) merge(
 		return nil, nil, 0, err
 	}
 
-	stats := storage.NewPrimaryKeyStats(pkID, int64(pkType), oldRowNums)
+	stats, err := storage.NewPrimaryKeyStats(pkID, int64(pkType), oldRowNums)
+	if err != nil {
+		return nil, nil, 0, err
+	}
 	// initial timestampFrom, timestampTo = -1, -1 is an illegal value, only to mark initial state
 	var (
 		timestampTo   int64 = -1

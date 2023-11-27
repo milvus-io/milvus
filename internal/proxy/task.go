@@ -1590,7 +1590,7 @@ func (t *releaseCollectionTask) Execute(ctx context.Context) (err error) {
 		return err
 	}
 	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.ReleaseCollectionRequest)
-	return err
+	return nil
 }
 
 func (t *releaseCollectionTask) PostExecute(ctx context.Context) error {
@@ -1606,7 +1606,8 @@ type loadPartitionsTask struct {
 	datacoord  types.DataCoordClient
 	result     *commonpb.Status
 
-	collectionID UniqueID
+	collectionID       UniqueID
+	replicateMsgStream msgstream.MsgStream
 }
 
 func (t *loadPartitionsTask) TraceCtx() context.Context {
@@ -1735,7 +1736,12 @@ func (t *loadPartitionsTask) Execute(ctx context.Context) error {
 		ResourceGroups: t.ResourceGroups,
 	}
 	t.result, err = t.queryCoord.LoadPartitions(ctx, request)
-	return err
+	if err != nil {
+		return err
+	}
+	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.LoadPartitionsRequest)
+
+	return nil
 }
 
 func (t *loadPartitionsTask) PostExecute(ctx context.Context) error {
@@ -1749,7 +1755,8 @@ type releasePartitionsTask struct {
 	queryCoord types.QueryCoordClient
 	result     *commonpb.Status
 
-	collectionID UniqueID
+	collectionID       UniqueID
+	replicateMsgStream msgstream.MsgStream
 }
 
 func (t *releasePartitionsTask) TraceCtx() context.Context {
@@ -1836,7 +1843,11 @@ func (t *releasePartitionsTask) Execute(ctx context.Context) (err error) {
 		PartitionIDs: partitionIDs,
 	}
 	t.result, err = t.queryCoord.ReleasePartitions(ctx, request)
-	return err
+	if err != nil {
+		return err
+	}
+	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.ReleasePartitionsRequest)
+	return nil
 }
 
 func (t *releasePartitionsTask) PostExecute(ctx context.Context) error {

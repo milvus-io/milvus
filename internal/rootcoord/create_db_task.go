@@ -18,7 +18,6 @@ package rootcoord
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -40,7 +39,7 @@ func (t *createDatabaseTask) Prepare(ctx context.Context) error {
 
 	cfgMaxDatabaseNum := Params.RootCoordCfg.MaxDatabaseNum.GetAsInt()
 	if len(dbs) > cfgMaxDatabaseNum {
-		return merr.WrapErrDatabaseResourceLimitExceeded(fmt.Sprintf("Failed to create database, limit={%d}", cfgMaxDatabaseNum))
+		return merr.WrapErrDatabaseNumLimitExceeded(cfgMaxDatabaseNum)
 	}
 
 	t.dbID, err = t.core.idAllocator.AllocOne()
