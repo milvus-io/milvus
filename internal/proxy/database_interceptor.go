@@ -10,7 +10,7 @@ import (
 
 // DatabaseInterceptor fill dbname into request based on kv pair <"dbname": "xx"> in header
 func DatabaseInterceptor() grpc.UnaryServerInterceptor {
-	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
 		filledCtx, filledReq := fillDatabase(ctx, req)
 		return handler(filledCtx, filledReq)
 	}

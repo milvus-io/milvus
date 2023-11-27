@@ -32,7 +32,7 @@ import (
 
 type AccessKey struct{}
 
-func UnaryAccessLogInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+func UnaryAccessLogInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	accessInfo := NewGrpcAccessInfo(ctx, info, req)
 	newCtx := context.WithValue(ctx, AccessKey{}, accessInfo)
 	resp, err := handler(newCtx, req)
@@ -41,7 +41,7 @@ func UnaryAccessLogInterceptor(ctx context.Context, req interface{}, info *grpc.
 	return resp, err
 }
 
-func UnaryUpdateAccessInfoInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+func UnaryUpdateAccessInfoInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	accessInfo := ctx.Value(AccessKey{}).(*GrpcAccessInfo)
 	accessInfo.UpdateCtx(ctx)
 	return handler(ctx, req)
