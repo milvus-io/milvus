@@ -150,7 +150,7 @@ func (c *compactionPlanHandler) start() {
 		}
 	}()
 
-	// seperate check results and schedule goroutine so that check results doesn't
+	// saperate check results and schedule goroutine so that check results doesn't
 	// influence the schedule
 	go func() {
 		defer c.stopWg.Done()
@@ -341,7 +341,6 @@ func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.Compact
 	if newSegmentInfo != nil {
 		log.Info("meta has already been changed, skip meta change and retry sync segments")
 	} else {
-
 		// Also prepare metric updates.
 		_, modSegments, newSegment, metricMutation, err := c.meta.PrepareCompleteCompactionMutation(plan, result)
 		if err != nil {
