@@ -847,31 +847,45 @@ func (s *LocalSegment) LoadDeltaData(deltaData *storage.DeleteData) error {
 	return nil
 }
 
-func (s *LocalSegment) LoadIndex(indexInfo *querypb.FieldIndexInfo, fieldType schemapb.DataType, enableMmap bool) error {
-	loadIndexInfo, err := newLoadIndexInfo()
-	defer deleteLoadIndexInfo(loadIndexInfo)
-	if err != nil {
-		return err
-	}
+func (s *LocalSegment) LoadIndex(indexInfo *querypb.FieldIndexInfo, fieldType schemapb.DataType) error {
+	var loadIndexInfo *LoadIndexInfo
+	_, err := GetLoadPool().Submit(func() (any, error) {
+		var err error
+		loadIndexInfo, err = newLoadIndexInfo()
+		if err != nil {
+			return nil, err
+		}
 
-	err = loadIndexInfo.appendLoadIndexInfo(indexInfo, s.collectionID, s.partitionID, s.segmentID, fieldType, enableMmap)
+		err = loadIndexInfo.appendLoadIndexInfo(indexInfo, s.collectionID, s.partitionID, s.segmentID, fieldType)
+		if err != nil {
+			if loadIndexInfo.cleanLocalData() != nil {
+				log.Warn("failed to clean cached data on disk after append index failed",
+					zap.Int64("buildID", indexInfo.BuildID),
+					zap.Int64("index version", indexInfo.IndexVersion))
+			}
+			return nil, err
+		}
+		if s.Type() != SegmentTypeSealed {
+			errMsg := fmt.Sprintln("updateSegmentIndex failed, illegal segment type ", s.typ, "segmentID = ", s.ID())
+			return nil, errors.New(errMsg)
+		}
+		return nil, nil
+	}).Await()
 	if err != nil {
-		if loadIndexInfo.cleanLocalData() != nil {
-			log.Warn("failed to clean cached data on disk after append index failed",
-				zap.Int64("buildID", indexInfo.BuildID),
-				zap.Int64("index version", indexInfo.IndexVersion))
+		log.Warn("failed to load index", zap.Error(err))
+		if loadIndexInfo != nil {
+			GetDynamicPool().Submit(func() (any, error) {
+				deleteLoadIndexInfo(loadIndexInfo)
+				return nil, nil
+			})
 		}
 		return err
 	}
-	if s.Type() != SegmentTypeSealed {
-		errMsg := fmt.Sprintln("updateSegmentIndex failed, illegal segment type ", s.typ, "segmentID = ", s.ID())
-		return errors.New(errMsg)
-	}
 
-	return s.LoadIndexInfo(indexInfo, loadIndexInfo)
+	return s.setIndex(indexInfo, loadIndexInfo)
 }
 
-func (s *LocalSegment) LoadIndexInfo(indexInfo *querypb.FieldIndexInfo, info *LoadIndexInfo) error {
+func (s *LocalSegment) setIndex(indexInfo *querypb.FieldIndexInfo, info *LoadIndexInfo) error {
 	log := log.With(
 		zap.Int64("collectionID", s.Collection()),
 		zap.Int64("partitionID", s.Partition()),
@@ -886,7 +900,7 @@ func (s *LocalSegment) LoadIndexInfo(indexInfo *querypb.FieldIndexInfo, info *Lo
 	}
 
 	var status C.CStatus
-	GetLoadPool().Submit(func() (any, error) {
+	GetDynamicPool().Submit(func() (any, error) {
 		status = C.UpdateSealedSegmentIndex(s.ptr, info.cLoadIndexInfo)
 		return nil, nil
 	}).Await()
