@@ -19,10 +19,9 @@ package importutil
 import (
 	"fmt"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 type CollectionInfo struct {
@@ -43,11 +42,11 @@ func NewCollectionInfo(collectionSchema *schemapb.CollectionSchema,
 	partitionIDs []int64,
 ) (*CollectionInfo, error) {
 	if shardNum <= 0 {
-		return nil, fmt.Errorf("illegal shard number %d", shardNum)
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("illegal shard number %d", shardNum))
 	}
 
 	if len(partitionIDs) == 0 {
-		return nil, errors.New("partition list is empty")
+		return nil, merr.WrapErrImportFailed("partition list is empty")
 	}
 
 	info := &CollectionInfo{
@@ -65,7 +64,7 @@ func NewCollectionInfo(collectionSchema *schemapb.CollectionSchema,
 
 func (c *CollectionInfo) resetSchema(collectionSchema *schemapb.CollectionSchema) error {
 	if collectionSchema == nil {
-		return errors.New("collection schema is null")
+		return merr.WrapErrImportFailed("collection schema is null")
 	}
 
 	fields := make([]*schemapb.FieldSchema, 0)
@@ -92,11 +91,11 @@ func (c *CollectionInfo) resetSchema(collectionSchema *schemapb.CollectionSchema
 	}
 
 	if primaryKey == nil {
-		return errors.New("collection schema has no primary key")
+		return merr.WrapErrImportFailed("collection schema has no primary key")
 	}
 
 	if partitionKey == nil && len(c.PartitionIDs) != 1 {
-		return errors.New("only allow one partition when there is no partition key")
+		return merr.WrapErrImportFailed("only allow one partition when there is no partition key")
 	}
 
 	c.Schema = &schemapb.CollectionSchema{
