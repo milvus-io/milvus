@@ -46,10 +46,23 @@ func (wb *l0WriteBuffer) BufferData(insertMsgs []*msgstream.InsertMsg, deleteMsg
 	defer wb.mut.Unlock()
 
 	// process insert msgs
-	_, err := wb.bufferInsert(insertMsgs, startPos, endPos)
+	pkData, err := wb.bufferInsert(insertMsgs, startPos, endPos)
 	if err != nil {
 		log.Warn("failed to buffer insert data", zap.Error(err))
 		return err
+	}
+
+	// update pk oracle
+	for segmentID, dataList := range pkData {
+		segments := wb.metaCache.GetSegmentsBy(metacache.WithSegmentIDs(segmentID))
+		for _, segment := range segments {
+			for _, fieldData := range dataList {
+				err := segment.GetBloomFilterSet().UpdatePKRange(fieldData)
+				if err != nil {
+					return err
+				}
+			}
+		}
 	}
 
 	for _, msg := range deleteMsgs {
