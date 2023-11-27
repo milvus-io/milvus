@@ -250,8 +250,6 @@ LoadFieldDataV2(CSegmentInterface c_segment,
         auto segment =
             reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
         AssertInfo(segment != nullptr, "segment conversion failed");
-        LOG_SEGCORE_ERROR_ << "[remove me] load field data v2: "
-                           << segment->get_segment_id();
         auto load_info = (LoadFieldDataInfo*)c_load_field_data_info;
         segment->LoadFieldDataV2(*load_info);
         return milvus::SuccessCStatus();

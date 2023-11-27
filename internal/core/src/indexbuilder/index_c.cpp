@@ -146,7 +146,7 @@ CreateIndex(CIndex* res_index, CBuildIndexInfo c_build_index_info) {
 }
 
 CStatus
-CreateIndexV3(CIndex* res_index, CBuildIndexInfo c_build_index_info) {
+CreateIndexV2(CIndex* res_index, CBuildIndexInfo c_build_index_info) {
     try {
         auto build_index_info = (BuildIndexInfo*)c_build_index_info;
         auto field_type = build_index_info->field_type;
@@ -645,17 +645,14 @@ SerializeIndexAndUpLoad(CIndex index, CBinarySet* c_binary_set) {
 
 CStatus
 SerializeIndexAndUpLoadV2(CIndex index, CBinarySet* c_binary_set) {
-    LOG_SEGCORE_ERROR_ << "[remove me] call serialize index and upload";
     auto status = CStatus();
     try {
         AssertInfo(
             index,
             "failed to serialize index to binary set, passed index was null");
-        LOG_SEGCORE_ERROR_ << "[remove me] reintercept";
 
         auto real_index =
             reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
-        LOG_SEGCORE_ERROR_ << "[remove me] ready to call uploadv2";
 
         auto binary =
             std::make_unique<knowhere::BinarySet>(real_index->UploadV2());

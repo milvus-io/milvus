@@ -307,9 +307,6 @@ AppendIndexV3(CLoadIndexInfo c_load_index_info) {
         auto config = milvus::index::ParseConfigFromIndexParams(
             load_index_info->index_params);
 
-        LOG_SEGCORE_ERROR_ << "[remove me] uri = " << load_index_info->uri
-                           << " index_store_version = "
-                           << load_index_info->index_store_version;
         auto res = milvus_storage::Space::Open(
             load_index_info->uri,
             milvus_storage::Options{nullptr,

@@ -46,8 +46,6 @@ Collection::Collection(const void* schema_proto, const int64_t length) {
 
     collection_name_ = collection_schema.name();
     schema_ = Schema::ParseFrom(collection_schema);
-    LOG_SEGCORE_ERROR_ << "[remove me] collection schema fields num: "
-                       << schema_->get_field_ids().size();
 }
 
 void

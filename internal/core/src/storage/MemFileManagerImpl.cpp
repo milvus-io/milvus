@@ -98,7 +98,6 @@ MemFileManagerImpl::AddFileV2(const BinarySet& binary_set) {
     std::vector<std::string> slice_names;
 
     auto AddBatchIndexFiles = [&]() {
-        LOG_SEGCORE_ERROR_ << "[remove me] ready to add batch index files";
         auto res = PutIndexData(space_,
                                 data_slices,
                                 slice_sizes,

@@ -255,19 +255,19 @@ SegmentSealedImpl::LoadFieldDataV2(const LoadFieldDataInfo& load_info) {
         std::shared_ptr<milvus_storage::Space> space = std::move(res.value());
         auto load_future = pool.Submit(
             LoadFieldDatasFromRemote2, space, schema_, field_data_info);
-        LOG_SEGCORE_ERROR_ << "finish submitting LoadFieldDatasFromRemote task "
-                              "to thread pool, "
-                           << "segmentID:" << this->id_
-                           << ", fieldID:" << info.field_id;
+        LOG_SEGCORE_INFO_ << "finish submitting LoadFieldDatasFromRemote task "
+                             "to thread pool, "
+                          << "segmentID:" << this->id_
+                          << ", fieldID:" << info.field_id;
         if (load_info.mmap_dir_path.empty() ||
             SystemProperty::Instance().IsSystem(field_id)) {
             LoadFieldData(field_id, field_data_info);
         } else {
             MapFieldData(field_id, field_data_info);
         }
-        LOG_SEGCORE_ERROR_ << "finish loading segment field, "
-                           << "segmentID:" << this->id_
-                           << ", fieldID:" << info.field_id;
+        LOG_SEGCORE_INFO_ << "finish loading segment field, "
+                          << "segmentID:" << this->id_
+                          << ", fieldID:" << info.field_id;
     }
 }
 void

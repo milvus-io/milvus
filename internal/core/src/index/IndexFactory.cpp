@@ -206,9 +206,10 @@ IndexFactory::CreateScalarIndex(const CreateIndexInfo& create_index_info,
             return CreateScalarIndex<std::string>(
                 index_type, file_manager, space);
         default:
-            throw std::invalid_argument(
-                std::string("invalid data type to build index: ") +
-                std::to_string(int(data_type)));
+            throw SegcoreError(
+                DataTypeInvalid,
+                fmt::format("invalid data type to build mem index: {}",
+                            data_type));
     }
 }
 

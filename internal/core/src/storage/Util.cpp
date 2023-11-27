@@ -581,7 +581,6 @@ PutIndexData(std::shared_ptr<milvus_storage::Space> space,
     AssertInfo(data_slices.size() == slice_names.size(),
                "inconsistent size of data slices with slice names!");
 
-    LOG_SEGCORE_ERROR_ << "[remove me] ready to upload files to space";
     for (int64_t i = 0; i < data_slices.size(); ++i) {
         futures.push_back(pool.Submit(EncodeAndUploadIndexSlice2,
                                       space,

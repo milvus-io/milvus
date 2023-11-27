@@ -703,32 +703,16 @@ void
 LoadFieldDatasFromRemote2(std::shared_ptr<milvus_storage::Space> space,
                           SchemaPtr schema,
                           FieldDataInfo& field_data_info) {
-    LOG_SEGCORE_ERROR_ << "[remove me] start to load field data from space: "
-                       << schema->get_field_ids().size();
-
     // log all schema ids
     for (auto& field : schema->get_fields()) {
-        LOG_SEGCORE_ERROR_ << "[remove me] field id: "
-                           << field.second.get_id().get()
-                           << ", field name: " << field.second.get_name().get();
     }
-    // log field data info id
-    LOG_SEGCORE_ERROR_ << "[remove me] field data info id: "
-                       << field_data_info.field_id;
-
     auto res = space->ScanData();
     if (!res.ok()) {
         PanicInfo(S3Error, "failed to create scan iterator");
     }
-    LOG_SEGCORE_ERROR_ << "[remove me] load field data from space: "
-                       << field_data_info.field_id;
     auto reader = res.value();
     for (auto rec = reader->Next(); rec != nullptr; rec = reader->Next()) {
-        LOG_SEGCORE_ERROR_ << "[remove me] got rec from reader: "
-                           << field_data_info.field_id << ", ok: " << res.ok();
         if (!rec.ok()) {
-            LOG_SEGCORE_ERROR_ << "[remove me] failed to read data: "
-                               << rec.status().ToString();
             PanicInfo(DataFormatBroken, "failed to read data");
         }
         auto data = rec.ValueUnsafe();
@@ -737,11 +721,6 @@ LoadFieldDatasFromRemote2(std::shared_ptr<milvus_storage::Space> space,
             if (field.second.get_id().get() != field_data_info.field_id) {
                 continue;
             }
-            LOG_SEGCORE_ERROR_ << "[remove me] load field data from remote: "
-                               << field.second.get_name().get()
-                               << ", field_id:" << field.second.get_id().get()
-                               << ", nums:" << total_num_rows;
-
             auto col_data =
                 data->GetColumnByName(field.second.get_name().get());
             auto field_data = storage::CreateFieldData(
