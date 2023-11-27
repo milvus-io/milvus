@@ -192,7 +192,7 @@ func (s *Server) startHTTPServer(errChan chan error) {
 			return
 		}
 		c.Next()
-	}, authenticate, proxy.HTTPTraceLog)
+	}, authenticate)
 	app := ginHandler.Group("/v1")
 	httpserver.NewHandlers(s.proxy).RegisterRoutesToV1(app)
 	s.httpServer = &http.Server{Handler: ginHandler, ReadHeaderTimeout: time.Second}
