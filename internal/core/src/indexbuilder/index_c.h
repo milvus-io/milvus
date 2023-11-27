@@ -78,9 +78,7 @@ AppendFieldMetaInfo(CBuildIndexInfo c_build_index_info,
                     int64_t partition_id,
                     int64_t segment_id,
                     int64_t field_id,
-                    const char* field_name,
-                    enum CDataType field_type,
-                    int64_t dim);
+                    enum CDataType field_type);
 
 CStatus
 AppendFieldMetaInfoV2(CBuildIndexInfo c_build_index_info,

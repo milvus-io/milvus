@@ -519,38 +519,6 @@ AppendFieldMetaInfo(CBuildIndexInfo c_build_index_info,
                     int64_t partition_id,
                     int64_t segment_id,
                     int64_t field_id,
-                    const char* field_name,
-                    enum CDataType field_type,
-                    int64_t dim) {
-    try {
-        auto build_index_info = (BuildIndexInfo*)c_build_index_info;
-        build_index_info->collection_id = collection_id;
-        build_index_info->partition_id = partition_id;
-        build_index_info->segment_id = segment_id;
-        build_index_info->field_id = field_id;
-        build_index_info->field_type = milvus::DataType(field_type);
-        build_index_info->field_name = field_name;
-        build_index_info->dim = dim;
-
-        auto status = CStatus();
-        status.error_code = Success;
-        status.error_msg = "";
-        return status;
-    } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
-    }
-}
-
-CStatus
-AppendFieldMetaInfo(CBuildIndexInfo c_build_index_info,
-                    int64_t collection_id,
-                    int64_t partition_id,
-                    int64_t segment_id,
-                    int64_t field_id,
-                    std::string field_name,
                     enum CDataType field_type) {
     try {
         auto build_index_info = (BuildIndexInfo*)c_build_index_info;
@@ -558,7 +526,6 @@ AppendFieldMetaInfo(CBuildIndexInfo c_build_index_info,
         build_index_info->partition_id = partition_id;
         build_index_info->segment_id = segment_id;
         build_index_info->field_id = field_id;
-        build_index_info->field_name = field_name;
 
         build_index_info->field_type = milvus::DataType(field_type);
 
