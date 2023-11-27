@@ -334,6 +334,26 @@ func (c *SessionManager) CheckChannelOperationProgress(ctx context.Context, node
 	return resp, nil
 }
 
+func (c *SessionManager) PreImport(nodeID int64, req *datapb.PreImportRequest) (*commonpb.Status, error) {
+	return nil, merr.ErrServiceUnimplemented
+}
+
+func (c *SessionManager) ImportV2(nodeID int64, req *datapb.ImportRequest) (*commonpb.Status, error) {
+	return nil, merr.ErrServiceUnimplemented
+}
+
+func (c *SessionManager) GetImportState(nodeID int64, req *datapb.GetImportStateRequest) (*datapb.GetImportStateResponse, error) {
+	return nil, merr.ErrServiceUnimplemented
+}
+
+func (c *SessionManager) DropImport(nodeID int64, req *datapb.DropImportRequest) (*commonpb.Status, error) {
+	return nil, merr.ErrServiceUnimplemented
+}
+
+func (c *SessionManager) AddImportSegment(nodeID int64, req *datapb.AddImportSegmentRequest) (*datapb.AddImportSegmentResponse, error) {
+	return nil, merr.ErrServiceUnimplemented
+}
+
 func (c *SessionManager) getClient(ctx context.Context, nodeID int64) (types.DataNodeClient, error) {
 	c.sessions.RLock()
 	session, ok := c.sessions.data[nodeID]

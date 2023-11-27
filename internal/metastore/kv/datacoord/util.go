@@ -410,3 +410,7 @@ func buildCollectionPrefix(collectionID typeutil.UniqueID) string {
 func buildPartitionPrefix(collectionID, partitionID typeutil.UniqueID) string {
 	return fmt.Sprintf("%s/%d/%d", SegmentPrefix, collectionID, partitionID)
 }
+
+func buildImportTaskKey(taskID int64) string {
+	return fmt.Sprintf("%s/%d", ImportTaskPrefix, taskID)
+}

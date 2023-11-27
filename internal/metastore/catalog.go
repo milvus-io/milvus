@@ -135,6 +135,10 @@ type DataCoordCatalog interface {
 	AlterSegmentIndexes(ctx context.Context, newSegIdxes []*model.SegmentIndex) error
 	DropSegmentIndex(ctx context.Context, collID, partID, segID, buildID typeutil.UniqueID) error
 
+	SaveImportTask(task *datapb.ImportTaskV2) error
+	ListImportTasks() ([]*datapb.ImportTaskV2, error)
+	DropImportTask(taskID int64) error
+
 	GcConfirm(ctx context.Context, collectionID, partitionID typeutil.UniqueID) bool
 }
 

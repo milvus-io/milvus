@@ -19,7 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
-
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -135,6 +135,54 @@ func (c *Cluster) FlushChannels(ctx context.Context, nodeID int64, flushTs Times
 // Import sends import requests to DataNodes whose ID==nodeID.
 func (c *Cluster) Import(ctx context.Context, nodeID int64, it *datapb.ImportTaskRequest) {
 	c.sessionManager.Import(ctx, nodeID, it)
+}
+
+func (c *Cluster) PreImport(nodeID int64, req *datapb.PreImportRequest) error {
+	status, err := c.sessionManager.PreImport(nodeID, req)
+	if err != nil {
+		return err
+	}
+	return merr.Error(status)
+}
+
+func (c *Cluster) ImportV2(nodeID int64, req *datapb.ImportRequest) error {
+	status, err := c.sessionManager.ImportV2(nodeID, req)
+	if err != nil {
+		return err
+	}
+	return merr.Error(status)
+}
+
+func (c *Cluster) GetImportState(nodeID int64, req *datapb.GetImportStateRequest) (*datapb.GetImportStateResponse, error) {
+	resp, err := c.sessionManager.GetImportState(nodeID, req)
+	if err != nil {
+		return nil, err
+	}
+	err = merr.Error(resp.GetStatus())
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+func (c *Cluster) DropImport(nodeID int64, req *datapb.DropImportRequest) error {
+	status, err := c.sessionManager.DropImport(nodeID, req)
+	if err != nil {
+		return err
+	}
+	return merr.Error(status)
+}
+
+func (c *Cluster) AddImportSegment(nodeID int64, req *datapb.AddImportSegmentRequest) (*datapb.AddImportSegmentResponse, error) {
+	resp, err := c.sessionManager.AddImportSegment(nodeID, req)
+	if err != nil {
+		return nil, err
+	}
+	err = merr.Error(resp.GetStatus())
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 // GetSessions returns all sessions

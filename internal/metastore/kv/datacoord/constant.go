@@ -24,6 +24,7 @@ const (
 	SegmentStatslogPathPrefix = MetaPrefix + "/statslog"
 	ChannelRemovePrefix       = MetaPrefix + "/channel-removal"
 	ChannelCheckpointPrefix   = MetaPrefix + "/channel-cp"
+	ImportTaskPrefix          = MetaPrefix + "/import-task"
 
 	NonRemoveFlagTomestone = "non-removed"
 	RemoveFlagTomestone    = "removed"

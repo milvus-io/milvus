@@ -700,6 +700,37 @@ func (kc *Catalog) DropSegmentIndex(ctx context.Context, collID, partID, segID, 
 	return nil
 }
 
+func (kc *Catalog) SaveImportTask(task *datapb.ImportTaskV2) error {
+	key := buildImportTaskKey(task.GetTaskID())
+	value, err := proto.Marshal(task)
+	if err != nil {
+		return err
+	}
+	return kc.MetaKv.Save(key, string(value))
+}
+
+func (kc *Catalog) ListImportTasks() ([]*datapb.ImportTaskV2, error) {
+	_, values, err := kc.MetaKv.LoadWithPrefix(ImportTaskPrefix)
+	if err != nil {
+		return nil, err
+	}
+	tasks := make([]*datapb.ImportTaskV2, 0)
+	for _, value := range values {
+		task := &datapb.ImportTaskV2{}
+		err = proto.Unmarshal([]byte(value), task)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, task)
+	}
+	return tasks, nil
+}
+
+func (kc *Catalog) DropImportTask(taskID int64) error {
+	key := buildImportTaskKey(taskID)
+	return kc.MetaKv.Remove(key)
+}
+
 const allPartitionID = -1
 
 // GcConfirm returns true if related collection/partition is not found.
