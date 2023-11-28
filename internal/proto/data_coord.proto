@@ -745,11 +745,22 @@ message ChannelOperationProgressResponse {
 }
 
 enum ImportState {
-  Pending = 0;
-  Preparing = 1;
+  None = 0;
+  Pending = 1;
   InProgress = 2;
   Failed = 3;
   Completed = 4;
+}
+
+message ColumnBasedFile {
+  repeated string files = 1;
+}
+
+message ImportFile {
+  oneof file {
+    string row_based_file = 1;
+    ColumnBasedFile column_based_file = 2;
+  }
 }
 
 message PreImportRequest {
@@ -758,7 +769,7 @@ message PreImportRequest {
   int64 collectionID = 3;
   int64 partitionID = 4;
   schema.CollectionSchema schema = 5;
-  repeated ImportFileInfo file_infos = 6;
+  repeated ImportFile import_files = 6;
 }
 
 message ImportRequest {
@@ -767,9 +778,9 @@ message ImportRequest {
   int64 collectionID = 3;
   int64 partitionID = 4;
   schema.CollectionSchema schema = 5;
-  repeated SegmentInfo segment_infos = 6;
-  repeated int64 autoIDs = 7;
-  repeated ImportFileInfo file_infos = 8;
+  repeated ImportFile import_files = 6;
+  repeated SegmentInfo segment_infos = 7;
+  repeated int64 autoIDs = 8;
 }
 
 message GetImportStateRequest {
@@ -793,11 +804,22 @@ message DropImportRequest {
 }
 
 message ImportFileInfo {
-  repeated string file_name = 1;
-  repeated int64 file_size = 2;
+  ImportFile import_file = 1;
+  int64 file_size = 2;
   int64 total_rows = 3;
   map<string, int64> channel_rows = 4;
   int64 imported_rows = 5;
+}
+
+message PreImportTask {
+  int64 requestID = 1;
+  int64 taskID = 2;
+  int64 collectionID = 3;
+  int64 partitionID = 4;
+  int64 nodeID = 5;
+  ImportState state = 6;
+  string reason = 7;
+  repeated ImportFileInfo file_infos = 8;
 }
 
 message ImportTaskV2 {
