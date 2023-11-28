@@ -18,6 +18,7 @@ package observers
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -32,6 +33,7 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -121,6 +123,11 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegments() {
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).Return(&milvuspb.DescribeCollectionResponse{Schema: schema}, nil)
 	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, int64(1)).Return(
 		&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{info}}, nil)
+	// will cause sync failed once
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error")).Once()
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return([]*indexpb.IndexInfo{
+		{IndexName: "test"},
+	}, nil)
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
 	observer.target.UpdateCollectionNextTarget(int64(1))
@@ -155,7 +162,8 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegments() {
 				CollectionID: 1,
 				PartitionIDs: []int64{1},
 			},
-			Version: version,
+			Version:       version,
+			IndexInfoList: []*indexpb.IndexInfo{{IndexName: "test"}},
 		}
 	}
 
@@ -213,6 +221,9 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncLoadedSegments() {
 		&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{info}}, nil)
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return([]*indexpb.IndexInfo{
+		{IndexName: "test"},
+	}, nil)
 	observer.target.UpdateCollectionNextTarget(int64(1))
 	observer.target.UpdateCollectionCurrentTarget(1)
 	observer.target.UpdateCollectionNextTarget(int64(1))
@@ -247,7 +258,8 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncLoadedSegments() {
 				CollectionID: 1,
 				PartitionIDs: []int64{1},
 			},
-			Version: version,
+			Version:       version,
+			IndexInfoList: []*indexpb.IndexInfo{{IndexName: "test"}},
 		}
 	}
 	called := atomic.NewBool(false)
@@ -344,6 +356,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 		&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{info}}, nil)
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return([]*indexpb.IndexInfo{{IndexName: "test"}}, nil)
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).Return(&milvuspb.DescribeCollectionResponse{Schema: schema}, nil)
 	observer.target.UpdateCollectionNextTarget(int64(1))
 	observer.target.UpdateCollectionCurrentTarget(1)
@@ -381,7 +394,8 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 				CollectionID: 1,
 				PartitionIDs: []int64{1},
 			},
-			Version: version,
+			Version:       version,
+			IndexInfoList: []*indexpb.IndexInfo{{IndexName: "test"}},
 		}
 	}
 	called := atomic.NewBool(false)
@@ -413,7 +427,9 @@ func (suite *LeaderObserverTestSuite) TestSyncRemovedSegments() {
 
 	schema := utils.CreateTestSchema()
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).Return(&milvuspb.DescribeCollectionResponse{Schema: schema}, nil)
-
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return([]*indexpb.IndexInfo{
+		{IndexName: "test"},
+	}, nil)
 	channels := []*datapb.VchannelInfo{
 		{
 			CollectionID: 1,
@@ -451,7 +467,8 @@ func (suite *LeaderObserverTestSuite) TestSyncRemovedSegments() {
 				CollectionID: 1,
 				PartitionIDs: []int64{1},
 			},
-			Version: version,
+			Version:       version,
+			IndexInfoList: []*indexpb.IndexInfo{{IndexName: "test"}},
 		}
 	}
 	ch := make(chan struct{})
@@ -495,6 +512,9 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncRemovedSegments() {
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).Return(&milvuspb.DescribeCollectionResponse{Schema: schema}, nil)
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return([]*indexpb.IndexInfo{
+		{IndexName: "test"},
+	}, nil)
 	observer.target.UpdateCollectionNextTarget(int64(1))
 
 	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
@@ -520,7 +540,8 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncRemovedSegments() {
 				CollectionID: 1,
 				PartitionIDs: []int64{1},
 			},
-			Version: version,
+			Version:       version,
+			IndexInfoList: []*indexpb.IndexInfo{{IndexName: "test"}},
 		}
 	}
 	called := atomic.NewBool(false)
