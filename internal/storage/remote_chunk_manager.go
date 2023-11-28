@@ -315,13 +315,9 @@ func (mcm *RemoteChunkManager) ListWithPrefix(ctx context.Context, prefix string
 func (mcm *RemoteChunkManager) getObject(ctx context.Context, bucketName, objectName string,
 	offset int64, size int64,
 ) (FileReader, error) {
-	start := timerecord.NewTimeRecorder("getObject")
-
 	reader, err := mcm.client.GetObject(ctx, bucketName, objectName, offset, size)
 	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataGetLabel, metrics.TotalLabel).Inc()
 	if err == nil && reader != nil {
-		metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataGetLabel).
-			Observe(float64(start.ElapseSpan().Milliseconds()))
 		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataGetLabel, metrics.SuccessLabel).Inc()
 	} else {
 		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataGetLabel, metrics.FailLabel).Inc()
