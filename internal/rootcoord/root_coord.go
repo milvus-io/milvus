@@ -2809,6 +2809,7 @@ func (c *Core) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest)
 	group, ctx := errgroup.WithContext(ctx)
 	errReasons := make([]string, 0, len(c.proxyClientManager.proxyClient))
 
+	c.proxyClientManager.lock.RLock()
 	for nodeID, proxyClient := range c.proxyClientManager.proxyClient {
 		nodeID := nodeID
 		proxyClient := proxyClient
@@ -2827,6 +2828,7 @@ func (c *Core) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest)
 			return nil
 		})
 	}
+	c.proxyClientManager.lock.RUnlock()
 
 	err := group.Wait()
 	if err != nil || len(errReasons) != 0 {
