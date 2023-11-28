@@ -343,7 +343,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                     search_params, default_limit,
                                     default_search_exp,
                                     check_task=CheckTasks.err_res,
-                                    check_items={"err_code": 65538,
+                                    check_items={"err_code": 65535,
                                                  "err_msg": "failed to search"})
 
     @pytest.mark.skip("not fixed yet")
@@ -873,14 +873,9 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.search(vectors[:default_nq], default_search_field,
                             search_params, reorder_k + 1,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 65538,
-                                         "err_msg": "failed to search: attempt #0: failed to search/query "
-                                                    "delegator 1 for channel by-dev-rootcoord-dml_12_44501"
-                                                    "8735380972010v0: fail to Search, QueryNode ID=1, reaso"
-                                                    "n=worker(1) query failed: UnknownError:  => failed to "
-                                                    "search: out of range in json: reorder_k(100) should be"
-                                                    " larger than k(101): attempt #1: no available shard de"
-                                                    "legator found: service unavailable"})
+                            check_items={"err_code": 65535,
+                                         "err_msg": f"reorder_k({reorder_k}) should be larger than "
+                                                    f"k({reorder_k + 1})"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("nq", [16385])
@@ -942,8 +937,9 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.search(binary_vectors[:default_nq], "binary_vector",
                             search_params, default_limit, "int64 >= 0",
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 65538, "err_msg": "metric type not match: "
-                                                                       "expected=JACCARD, actual=L2"})
+                            check_items={"err_code": 65535,
+                                         "err_msg": "metric type not match: invalid parameter"
+                                                    "[expected=JACCARD][actual=L2]"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_with_output_fields_not_exist(self):
@@ -6053,7 +6049,7 @@ class TestSearchDiskann(TestcaseBase):
                             default_search_exp,
                             output_fields=output_fields,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 65538,
+                            check_items={"err_code": 65535,
                                          "err_msg": "fail to search on all shard leaders"})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -6511,8 +6507,9 @@ class TestCollectionRangeSearch(TestcaseBase):
                             range_search_params, default_limit,
                             default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1,
-                                         ct.err_msg: "metric type not match: expected=COSINE, actual=IP"})
+                            check_items={ct.err_code: 65535,
+                                         ct.err_msg: "metric type not match: invalid parameter"
+                                                     "[expected=COSINE][actual=IP]"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_only_radius(self):
@@ -6544,8 +6541,9 @@ class TestCollectionRangeSearch(TestcaseBase):
                             range_search_params, default_limit,
                             default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1,
-                                         ct.err_msg: "metric type not match: expected=L2, actual=IP"})
+                            check_items={ct.err_code: 65535,
+                                         ct.err_msg: "metric type not match: invalid parameter"
+                                                     "[expected=L2][actual=IP]"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_radius_range_filter_not_in_params(self):
@@ -6577,8 +6575,9 @@ class TestCollectionRangeSearch(TestcaseBase):
                             range_search_params, default_limit,
                             default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1,
-                                         ct.err_msg: "metric type not match: expected=COSINE, actual=IP"})
+                            check_items={ct.err_code: 65535,
+                                         ct.err_msg: "metric type not match: invalid parameter"
+                                                     "[expected=COSINE][actual=IP]"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("dup_times", [1, 2])
