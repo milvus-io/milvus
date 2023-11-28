@@ -28,13 +28,15 @@ type writeBufferOption struct {
 	metaWriter     syncmgr.MetaWriter
 }
 
-func defaultWBOption() *writeBufferOption {
+func defaultWBOption(metacache metacache.MetaCache) *writeBufferOption {
 	return &writeBufferOption{
 		// TODO use l0 delta as default after implementation.
 		deletePolicy: paramtable.Get().DataNodeCfg.DeltaPolicy.GetValue(),
 		syncPolicies: []SyncPolicy{
-			SyncFullBuffer,
+			GetFullBufferPolicy(),
 			GetSyncStaleBufferPolicy(paramtable.Get().DataNodeCfg.SyncPeriod.GetAsDuration(time.Second)),
+			GetCompactedSegmentsPolicy(metacache),
+			GetFlushingSegmentsPolicy(metacache),
 		},
 	}
 }

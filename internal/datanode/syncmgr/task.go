@@ -31,6 +31,7 @@ type SyncTask struct {
 	insertData *storage.InsertData
 	deleteData *storage.DeleteData
 
+	segment       *metacache.SegmentInfo
 	collectionID  int64
 	partitionID   int64
 	segmentID     int64
@@ -81,20 +82,25 @@ func (t *SyncTask) handleError(err error) {
 func (t *SyncTask) Run() error {
 	log := t.getLogger()
 	var err error
+	var has bool
 
-	infos := t.metacache.GetSegmentsBy(metacache.WithSegmentIDs(t.segmentID))
-	if len(infos) == 0 {
+	t.segment, has = t.metacache.GetSegmentByID(t.segmentID)
+	if !has {
 		log.Warn("failed to sync data, segment not found in metacache")
 		t.handleError(err)
 		return merr.WrapErrSegmentNotFound(t.segmentID)
 	}
 
-	segment := infos[0]
-	if segment.CompactTo() > 0 {
-		log.Info("syncing segment compacted, update segment id", zap.Int64("compactTo", segment.CompactTo()))
+	if t.segment.CompactTo() == metacache.NullSegment {
+		log.Info("segment compacted to zero-length segment, discard sync task")
+		return nil
+	}
+
+	if t.segment.CompactTo() > 0 {
+		log.Info("syncing segment compacted, update segment id", zap.Int64("compactTo", t.segment.CompactTo()))
 		// update sync task segment id
 		// it's ok to use compactTo segmentID here, since there shall be no insert for compacted segment
-		t.segmentID = segment.CompactTo()
+		t.segmentID = t.segment.CompactTo()
 	}
 
 	err = t.serializeInsertData()
@@ -137,7 +143,7 @@ func (t *SyncTask) Run() error {
 
 	t.metacache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(t.segmentID))
 
-	log.Warn("task done")
+	log.Info("task done")
 	return nil
 }
 
@@ -318,7 +324,9 @@ func (t *SyncTask) serializePkStatsLog() error {
 		}
 	}
 
-	if t.isFlush {
+	// skip statslog for empty segment
+	// DO NOT use level check here since Level zero segment may contain insert data in the future
+	if t.isFlush && t.segment.NumOfRows() > 0 {
 		return t.serializeMergedPkStats(fieldID, pkField.GetDataType())
 	}
 	return nil
@@ -370,4 +378,20 @@ func (t *SyncTask) getInCodec() *storage.InsertCodec {
 	}
 
 	return storage.NewInsertCodecWithSchema(meta)
+}
+
+func (t *SyncTask) SegmentID() int64 {
+	return t.segmentID
+}
+
+func (t *SyncTask) Checkpoint() *msgpb.MsgPosition {
+	return t.checkpoint
+}
+
+func (t *SyncTask) StartPosition() *msgpb.MsgPosition {
+	return t.startPosition
+}
+
+func (t *SyncTask) ChannelName() string {
+	return t.channelName
 }

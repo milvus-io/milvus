@@ -63,6 +63,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/cockroachdb/errors"
+
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 // A ParseError is returned for parsing errors.
@@ -75,7 +77,7 @@ type ParseError struct {
 }
 
 func (e *ParseError) Error() string {
-	if e.Err == ErrFieldCount {
+	if errors.Is(e.Err, ErrFieldCount) {
 		return fmt.Sprintf("record on line %d: %v", e.Line, e.Err)
 	}
 	if e.StartLine != e.Line {
@@ -88,15 +90,15 @@ func (e *ParseError) Unwrap() error { return e.Err }
 
 // These are the errors that can be returned in ParseError.Err.
 var (
-	ErrBareQuote  = errors.New("bare \" in non-quoted-field")
-	ErrQuote      = errors.New("extraneous or missing \" in quoted-field")
-	ErrFieldCount = errors.New("wrong number of fields")
+	ErrBareQuote  = merr.WrapErrImportFailed("bare \" in non-quoted-field")
+	ErrQuote      = merr.WrapErrImportFailed("extraneous or missing \" in quoted-field")
+	ErrFieldCount = merr.WrapErrImportFailed("wrong number of fields")
 
 	// Deprecated: ErrTrailingComma is no longer used.
-	ErrTrailingComma = errors.New("extra delimiter at end of line")
+	ErrTrailingComma = merr.WrapErrImportFailed("extra delimiter at end of line")
 )
 
-var errInvalidDelim = errors.New("csv: invalid field or comment delimiter")
+var errInvalidDelim = merr.WrapErrImportFailed("csv: invalid field or comment delimiter")
 
 func validDelim(r rune) bool {
 	return r != 0 && r != '"' && r != '\r' && r != '\n' && utf8.ValidRune(r) && r != utf8.RuneError
@@ -257,9 +259,9 @@ func (r *Reader) ReadAll() (records [][]string, err error) {
 // The result is only valid until the next call to readLine.
 func (r *Reader) readLine() ([]byte, error) {
 	line, err := r.r.ReadSlice('\n')
-	if err == bufio.ErrBufferFull {
+	if errors.Is(err, bufio.ErrBufferFull) {
 		r.rawBuffer = append(r.rawBuffer[:0], line...)
-		for err == bufio.ErrBufferFull {
+		for errors.Is(err, bufio.ErrBufferFull) {
 			line, err = r.r.ReadSlice('\n')
 			r.rawBuffer = append(r.rawBuffer, line...)
 		}

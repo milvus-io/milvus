@@ -39,12 +39,13 @@ func (s *SyncPolicySuite) TestSyncFullBuffer() {
 	buffer, err := newSegmentBuffer(100, s.collSchema)
 	s.Require().NoError(err)
 
-	ids := SyncFullBuffer([]*segmentBuffer{buffer}, 0)
+	policy := GetFullBufferPolicy()
+	ids := policy.SelectSegments([]*segmentBuffer{buffer}, 0)
 	s.Equal(0, len(ids), "empty buffer shall not be synced")
 
 	buffer.insertBuffer.size = buffer.insertBuffer.sizeLimit + 1
 
-	ids = SyncFullBuffer([]*segmentBuffer{buffer}, 0)
+	ids = policy.SelectSegments([]*segmentBuffer{buffer}, 0)
 	s.ElementsMatch([]int64{100}, ids)
 }
 
@@ -54,14 +55,14 @@ func (s *SyncPolicySuite) TestSyncStalePolicy() {
 	buffer, err := newSegmentBuffer(100, s.collSchema)
 	s.Require().NoError(err)
 
-	ids := policy([]*segmentBuffer{buffer}, tsoutil.ComposeTSByTime(time.Now(), 0))
+	ids := policy.SelectSegments([]*segmentBuffer{buffer}, tsoutil.ComposeTSByTime(time.Now(), 0))
 	s.Equal(0, len(ids), "empty buffer shall not be synced")
 
 	buffer.insertBuffer.startPos = &msgpb.MsgPosition{
 		Timestamp: tsoutil.ComposeTSByTime(time.Now().Add(-time.Minute*2), 0),
 	}
 
-	ids = policy([]*segmentBuffer{buffer}, tsoutil.ComposeTSByTime(time.Now(), 0))
+	ids = policy.SelectSegments([]*segmentBuffer{buffer}, tsoutil.ComposeTSByTime(time.Now(), 0))
 	s.ElementsMatch([]int64{100}, ids)
 }
 
@@ -71,7 +72,17 @@ func (s *SyncPolicySuite) TestFlushingSegmentsPolicy() {
 	ids := []int64{1, 2, 3}
 	metacache.EXPECT().GetSegmentIDsBy(mock.Anything).Return(ids)
 
-	result := policy([]*segmentBuffer{}, tsoutil.ComposeTSByTime(time.Now(), 0))
+	result := policy.SelectSegments([]*segmentBuffer{}, tsoutil.ComposeTSByTime(time.Now(), 0))
+	s.ElementsMatch(ids, result)
+}
+
+func (s *SyncPolicySuite) TestCompactedSegmentsPolicy() {
+	metacache := metacache.NewMockMetaCache(s.T())
+	policy := GetCompactedSegmentsPolicy(metacache)
+	ids := []int64{1, 2}
+	metacache.EXPECT().GetSegmentIDsBy(mock.Anything, mock.Anything).Return(ids)
+
+	result := policy.SelectSegments([]*segmentBuffer{{segmentID: 1}, {segmentID: 2}}, tsoutil.ComposeTSByTime(time.Now(), 0))
 	s.ElementsMatch(ids, result)
 }
 

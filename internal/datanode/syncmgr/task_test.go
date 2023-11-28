@@ -167,6 +167,7 @@ func (s *SyncTaskSuite) TestRunNormal() {
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs)
 	metacache.UpdateNumOfRows(1000)(seg)
 	seg.GetBloomFilterSet().Roll()
+	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything).Return([]*metacache.SegmentInfo{seg})
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
@@ -238,9 +239,70 @@ func (s *SyncTaskSuite) TestRunNormal() {
 	})
 }
 
+func (s *SyncTaskSuite) TestRunL0Segment() {
+	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil)
+	bfs := metacache.NewBloomFilterSet()
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{Level: datapb.SegmentLevel_L0}, bfs)
+	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
+	s.metacache.EXPECT().GetSegmentsBy(mock.Anything).Return([]*metacache.SegmentInfo{seg})
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
+
+	s.Run("pure_delete_l0_flush", func() {
+		task := s.getSuiteSyncTask()
+		task.WithDeleteData(s.getDeleteBuffer())
+		task.WithTimeRange(50, 100)
+		task.WithMetaWriter(BrokerMetaWriter(s.broker))
+		task.WithCheckpoint(&msgpb.MsgPosition{
+			ChannelName: s.channelName,
+			MsgID:       []byte{1, 2, 3, 4},
+			Timestamp:   100,
+		})
+		task.WithFlush()
+
+		err := task.Run()
+		s.NoError(err)
+	})
+}
+
+func (s *SyncTaskSuite) TestCompactToNull() {
+	bfs := metacache.NewBloomFilterSet()
+	fd, err := storage.NewFieldData(schemapb.DataType_Int64, &schemapb.FieldSchema{
+		FieldID:      101,
+		Name:         "ID",
+		IsPrimaryKey: true,
+		DataType:     schemapb.DataType_Int64,
+	})
+	s.Require().NoError(err)
+
+	ids := []int64{1, 2, 3, 4, 5, 6, 7}
+	for _, id := range ids {
+		err = fd.AppendRow(id)
+		s.Require().NoError(err)
+	}
+
+	bfs.UpdatePKRange(fd)
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs)
+	metacache.UpdateNumOfRows(1000)(seg)
+	metacache.CompactTo(metacache.NullSegment)(seg)
+	seg.GetBloomFilterSet().Roll()
+	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
+
+	task := s.getSuiteSyncTask()
+	task.WithMetaWriter(BrokerMetaWriter(s.broker))
+	task.WithTimeRange(50, 100)
+	task.WithCheckpoint(&msgpb.MsgPosition{
+		ChannelName: s.channelName,
+		MsgID:       []byte{1, 2, 3, 4},
+		Timestamp:   100,
+	})
+
+	err = task.Run()
+	s.NoError(err)
+}
+
 func (s *SyncTaskSuite) TestRunError() {
 	s.Run("segment_not_found", func() {
-		s.metacache.EXPECT().GetSegmentsBy(mock.Anything).Return([]*metacache.SegmentInfo{})
+		s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(nil, false)
 		flag := false
 		handler := func(_ error) { flag = true }
 		task := s.getSuiteSyncTask().WithFailureCallback(handler)
@@ -255,7 +317,7 @@ func (s *SyncTaskSuite) TestRunError() {
 	s.metacache.ExpectedCalls = nil
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, metacache.NewBloomFilterSet())
 	metacache.UpdateNumOfRows(1000)(seg)
-	s.metacache.EXPECT().GetSegmentsBy(mock.Anything).Return([]*metacache.SegmentInfo{seg})
+	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
 	s.Run("serialize_insert_fail", func() {
 		flag := false
 		handler := func(_ error) { flag = true }

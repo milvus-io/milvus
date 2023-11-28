@@ -1241,7 +1241,6 @@ func TestProxy_ReplicateMessage(t *testing.T) {
 			timeTickResult := msgpb.TimeTickMsg{
 				Base: commonpbutil.NewMsgBase(
 					commonpbutil.WithMsgType(commonpb.MsgType(-1)),
-					commonpbutil.WithMsgID(0),
 					commonpbutil.WithTimeStamp(10),
 					commonpbutil.WithSourceID(-1),
 				),

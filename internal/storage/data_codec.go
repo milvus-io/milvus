@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -144,7 +145,7 @@ func (insertCodec *InsertCodec) SerializePkStats(stats *PrimaryKeyStats, rowNum 
 // Serialize Pk stats list to one blob
 func (insertCodec *InsertCodec) SerializePkStatsList(stats []*PrimaryKeyStats, rowNum int64) (*Blob, error) {
 	if len(stats) == 0 {
-		return nil, nil
+		return nil, merr.WrapErrServiceInternal("shall not serialize zero length statslog list")
 	}
 
 	blobKey := fmt.Sprintf("%d", stats[0].FieldID)

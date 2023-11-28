@@ -310,7 +310,7 @@ func TestGetChannelWithTickler(t *testing.T) {
 		},
 	}
 
-	metaCache, err := getMetaCacheWithTickler(context.TODO(), node, info, newTickler(), unflushed, flushed)
+	metaCache, err := getMetaCacheWithTickler(context.TODO(), node, info, newTickler(), unflushed, flushed, nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, metaCache)
 	assert.Equal(t, int64(1), metaCache.Collection())
@@ -404,7 +404,7 @@ func (s *DataSyncServiceSuite) TestStartStop() {
 				return item, ok
 			})
 		}, nil)
-	s.wbManager.EXPECT().Register(insertChannelName, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	s.wbManager.EXPECT().Register(insertChannelName, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	ufs := []*datapb.SegmentInfo{{
 		CollectionID:  collMeta.ID,

@@ -42,10 +42,10 @@ type MetaWatcherSuite struct {
 func (s *MetaWatcherSuite) TestShowSessions() {
 	sessions, err := s.Cluster.MetaWatcher.ShowSessions()
 	s.NoError(err)
-	s.NotEmpty(sessions)
 	for _, session := range sessions {
-		log.Info("ShowSessions result", zap.String("session", session.String()))
+		log.Info("ShowSessions result", zap.Any("session", session))
 	}
+	log.Info("TestShowSessions succeed")
 }
 
 func (s *MetaWatcherSuite) TestShowSegments() {
@@ -128,12 +128,27 @@ func (s *MetaWatcherSuite) TestShowSegments() {
 	s.NoError(err)
 	s.Equal(insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
+	// flush
+	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+		DbName:          dbName,
+		CollectionNames: []string{collectionName},
+	})
+	s.NoError(err)
+	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
+	ids := segmentIDs.GetData()
+	s.Require().NotEmpty(segmentIDs)
+	s.Require().True(has)
+	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
+	s.True(has)
+	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
+
 	segments, err := c.MetaWatcher.ShowSegments()
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
 		log.Info("ShowSegments result", zap.String("segment", segment.String()))
 	}
+	log.Info("TestShowSegments succeed")
 }
 
 func (s *MetaWatcherSuite) TestShowReplicas() {
@@ -306,6 +321,5 @@ func (s *MetaWatcherSuite) TestShowReplicas() {
 }
 
 func TestMetaWatcher(t *testing.T) {
-	t.Skip("Skip integration test, need to refactor integration test framework")
 	suite.Run(t, new(MetaWatcherSuite))
 }

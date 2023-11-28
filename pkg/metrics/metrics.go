@@ -76,6 +76,7 @@ const (
 	collectionName           = "collection_name"
 	segmentStateLabelName    = "segment_state"
 	segmentIDLabelName       = "segment_id"
+	segmentLevelLabelName    = "segment_level"
 	usernameLabelName        = "username"
 	roleNameLabelName        = "role_name"
 	cacheNameLabelName       = "cache_name"

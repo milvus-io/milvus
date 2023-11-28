@@ -68,7 +68,6 @@ func (dc *dataCoordBroker) GetSegmentInfo(ctx context.Context, segmentIDs []int6
 	infoResp, err := dc.client.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_SegmentInfo),
-			commonpbutil.WithMsgID(0),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		SegmentIDs:       segmentIDs,

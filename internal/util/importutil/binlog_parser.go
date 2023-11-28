@@ -24,11 +24,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 type BinlogParser struct {
@@ -64,23 +64,23 @@ func NewBinlogParser(ctx context.Context,
 ) (*BinlogParser, error) {
 	if collectionInfo == nil {
 		log.Warn("Binlog parser: collection schema is nil")
-		return nil, errors.New("collection schema is nil")
+		return nil, merr.WrapErrImportFailed("collection schema is nil")
 	}
 
 	if chunkManager == nil {
 		log.Warn("Binlog parser: chunk manager pointer is nil")
-		return nil, errors.New("chunk manager pointer is nil")
+		return nil, merr.WrapErrImportFailed("chunk manager pointer is nil")
 	}
 
 	if flushFunc == nil {
 		log.Warn("Binlog parser: flush function is nil")
-		return nil, errors.New("flush function is nil")
+		return nil, merr.WrapErrImportFailed("flush function is nil")
 	}
 
 	if tsStartPoint > tsEndPoint {
 		log.Warn("Binlog parser: the tsStartPoint should be less than tsEndPoint",
 			zap.Uint64("tsStartPoint", tsStartPoint), zap.Uint64("tsEndPoint", tsEndPoint))
-		return nil, fmt.Errorf("Binlog parser: the tsStartPoint %d should be less than tsEndPoint %d", tsStartPoint, tsEndPoint)
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("Binlog parser: the tsStartPoint %d should be less than tsEndPoint %d", tsStartPoint, tsEndPoint))
 	}
 
 	v := &BinlogParser{
@@ -121,7 +121,7 @@ func (p *BinlogParser) constructSegmentHolders(insertlogRoot string, deltalogRoo
 	insertlogs, _, err := p.chunkManager.ListWithPrefix(context.TODO(), insertlogRoot, true)
 	if err != nil {
 		log.Warn("Binlog parser: list insert logs error", zap.Error(err))
-		return nil, fmt.Errorf("failed to list insert logs with root path %s, error: %w", insertlogRoot, err)
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to list insert logs with root path %s, error: %v", insertlogRoot, err))
 	}
 
 	// collect insert log paths
@@ -139,7 +139,7 @@ func (p *BinlogParser) constructSegmentHolders(insertlogRoot string, deltalogRoo
 		fieldID, err := strconv.ParseInt(fieldStrID, 10, 64)
 		if err != nil {
 			log.Warn("Binlog parser: failed to parse field id", zap.String("fieldPath", fieldPath), zap.Error(err))
-			return nil, fmt.Errorf("failed to parse field id from insert log path %s, error: %w", insertlog, err)
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to parse field id from insert log path %s, error: %v", insertlog, err))
 		}
 
 		segmentPath := path.Dir(fieldPath)
@@ -147,7 +147,7 @@ func (p *BinlogParser) constructSegmentHolders(insertlogRoot string, deltalogRoo
 		segmentID, err := strconv.ParseInt(segmentStrID, 10, 64)
 		if err != nil {
 			log.Warn("Binlog parser: failed to parse segment id", zap.String("segmentPath", segmentPath), zap.Error(err))
-			return nil, fmt.Errorf("failed to parse segment id from insert log path %s, error: %w", insertlog, err)
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to parse segment id from insert log path %s, error: %v", insertlog, err))
 		}
 
 		holder, ok := holders[segmentID]
@@ -186,7 +186,7 @@ func (p *BinlogParser) constructSegmentHolders(insertlogRoot string, deltalogRoo
 		deltalogs, _, err := p.chunkManager.ListWithPrefix(context.TODO(), deltalogRoot, true)
 		if err != nil {
 			log.Warn("Binlog parser: failed to list delta logs", zap.Error(err))
-			return nil, fmt.Errorf("failed to list delta logs, error: %w", err)
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to list delta logs, error: %v", err))
 		}
 
 		log.Info("Binlog parser: list delta logs", zap.Int("logsCount", len(deltalogs)))
@@ -197,7 +197,7 @@ func (p *BinlogParser) constructSegmentHolders(insertlogRoot string, deltalogRoo
 			segmentID, err := strconv.ParseInt(segmentStrID, 10, 64)
 			if err != nil {
 				log.Warn("Binlog parser: failed to parse segment id", zap.String("segmentPath", segmentPath), zap.Error(err))
-				return nil, fmt.Errorf("failed to parse segment id from delta log path %s, error: %w", deltalog, err)
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to parse segment id from delta log path %s, error: %v", deltalog, err))
 			}
 
 			// if the segment id doesn't exist, no need to process this deltalog
@@ -221,14 +221,14 @@ func (p *BinlogParser) constructSegmentHolders(insertlogRoot string, deltalogRoo
 func (p *BinlogParser) parseSegmentFiles(segmentHolder *SegmentFilesHolder) error {
 	if segmentHolder == nil {
 		log.Warn("Binlog parser: segment files holder is nil")
-		return errors.New("segment files holder is nil")
+		return merr.WrapErrImportFailed("segment files holder is nil")
 	}
 
 	adapter, err := NewBinlogAdapter(p.ctx, p.collectionInfo, p.blockSize,
 		MaxTotalSizeInMemory, p.chunkManager, p.callFlushFunc, p.tsStartPoint, p.tsEndPoint)
 	if err != nil {
 		log.Warn("Binlog parser: failed to create binlog adapter", zap.Error(err))
-		return fmt.Errorf("failed to create binlog adapter, error: %w", err)
+		return merr.WrapErrImportFailed(fmt.Sprintf("failed to create binlog adapter, error: %v", err))
 	}
 
 	return adapter.Read(segmentHolder)
@@ -240,7 +240,7 @@ func (p *BinlogParser) parseSegmentFiles(segmentHolder *SegmentFilesHolder) erro
 func (p *BinlogParser) Parse(filePaths []string) error {
 	if len(filePaths) != 1 && len(filePaths) != 2 {
 		log.Warn("Binlog parser: illegal paths for binlog import, partition binlog path and delta path are required")
-		return errors.New("illegal paths for binlog import, partition binlog path and delta path are required")
+		return merr.WrapErrImportFailed("illegal paths for binlog import, partition binlog path and delta path are required")
 	}
 
 	insertlogPath := filePaths[0]

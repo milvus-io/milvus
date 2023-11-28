@@ -56,7 +56,7 @@ function install_linux_deps() {
 
 function install_mac_deps() {
   sudo xcode-select --install > /dev/null 2>&1
-  brew install libomp ninja cmake llvm@15 ccache grep pkg-config zip unzip
+  brew install boost libomp ninja cmake llvm@15 ccache grep pkg-config zip unzip tbb
   export PATH="/usr/local/opt/grep/libexec/gnubin:$PATH"
   brew update && brew upgrade && brew cleanup
 
@@ -66,6 +66,8 @@ function install_mac_deps() {
     brew install openssl
     brew install librdkafka
   fi
+
+  sudo ln -s "$(brew --prefix llvm@15)" "/usr/local/opt/llvm"
 }
 
 if ! command -v go &> /dev/null

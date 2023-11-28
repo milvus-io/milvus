@@ -503,7 +503,7 @@ func convertEscapeSingle(literal string) (string, error) {
 			b.WriteString(literal[start : end-1])
 			b.WriteString(`'`)
 		}
-		start = end
+		start = end + 1
 	}
 	b.WriteString(literal[end+1 : len(literal)-1])
 	b.WriteString(`"`)

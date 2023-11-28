@@ -107,10 +107,14 @@ func (s *MetaCacheSuite) TestCompactSegments() {
 	}
 
 	for i, partitionID := range s.partitionIDs {
-		segs := s.cache.GetSegmentIDsBy(WithPartitionID(partitionID))
-		s.Equal(1, len(segs))
+		segs := s.cache.GetSegmentsBy(WithPartitionID(partitionID))
 		for _, seg := range segs {
-			s.Equal(seg, s.newSegments[i])
+			if seg.SegmentID() == s.newSegments[i] {
+				s.Equal(commonpb.SegmentState_Flushed, seg.State())
+			}
+			if seg.SegmentID() == s.flushedSegments[i] {
+				s.Equal(s.newSegments[i], seg.CompactTo())
+			}
 		}
 	}
 }
@@ -154,6 +158,19 @@ func (s *MetaCacheSuite) TestUpdateSegments() {
 	s.Require().Equal(1, len(segments))
 	segment := segments[0]
 	s.Equal(commonpb.SegmentState_Flushed, segment.State())
+}
+
+func (s *MetaCacheSuite) TestRemoveSegments() {
+	ids := s.cache.RemoveSegments()
+	s.Empty(ids, "remove without filter shall not succeed")
+
+	ids = s.cache.RemoveSegments(WithSegmentIDs(s.flushedSegments...))
+	s.ElementsMatch(s.flushedSegments, ids)
+
+	for _, segID := range s.flushedSegments {
+		_, ok := s.cache.GetSegmentByID(segID)
+		s.False(ok)
+	}
 }
 
 func (s *MetaCacheSuite) TestPredictSegments() {

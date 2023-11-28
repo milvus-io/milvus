@@ -321,11 +321,13 @@ func (c *Core) initKVCreator() {
 	if c.metaKVCreator == nil {
 		if Params.MetaStoreCfg.MetaStoreType.GetValue() == util.MetaStoreTypeTiKV {
 			c.metaKVCreator = func() (kv.MetaKv, error) {
-				return tikv.NewTiKV(c.tikvCli, Params.TiKVCfg.MetaRootPath.GetValue()), nil
+				return tikv.NewTiKV(c.tikvCli, Params.TiKVCfg.MetaRootPath.GetValue(),
+					tikv.WithRequestTimeout(paramtable.Get().ServiceParam.TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond))), nil
 			}
 		} else {
 			c.metaKVCreator = func() (kv.MetaKv, error) {
-				return etcdkv.NewEtcdKV(c.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue()), nil
+				return etcdkv.NewEtcdKV(c.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue(),
+					etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))), nil
 			}
 		}
 	}
@@ -469,6 +471,8 @@ func (c *Core) initInternal() error {
 	c.factory.Init(Params)
 	chanMap := c.meta.ListCollectionPhysicalChannels()
 	c.chanTimeTick = newTimeTickSync(c.ctx, c.session.ServerID, c.factory, chanMap)
+	log.Info("create TimeTick sync done")
+
 	c.proxyClientManager = newProxyClientManager(c.proxyCreator)
 
 	c.broker = newServerBroker(c)
@@ -484,6 +488,7 @@ func (c *Core) initInternal() error {
 	)
 	c.proxyManager.AddSessionFunc(c.chanTimeTick.addSession, c.proxyClientManager.AddProxyClient)
 	c.proxyManager.DelSessionFunc(c.chanTimeTick.delSession, c.proxyClientManager.DelProxyClient)
+	log.Info("init proxy manager done")
 
 	c.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 
@@ -493,15 +498,18 @@ func (c *Core) initInternal() error {
 	if err := c.initImportManager(); err != nil {
 		return err
 	}
+	log.Info("init import manager done")
 
 	if err := c.initCredentials(); err != nil {
 		return err
 	}
+	log.Info("init credentials done")
 
 	if err := c.initRbac(); err != nil {
 		return err
 	}
 
+	log.Info("init rootcoord done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", c.address))
 	return nil
 }
 
@@ -671,7 +679,7 @@ func (c *Core) startInternal() error {
 			if err := c.proxyClientManager.RefreshPolicyInfoCache(c.ctx, &proxypb.RefreshPolicyInfoCacheRequest{
 				OpType: int32(typeutil.CacheRefresh),
 			}); err != nil {
-				log.Info("fail to refresh policy info cache", zap.Error(err))
+				log.RatedWarn(60, "fail to refresh policy info cache", zap.Error(err))
 				return err
 			}
 			return nil
@@ -976,7 +984,6 @@ func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollecti
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("CreateCollection", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("CreateCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordNumOfCollections.Inc()
 	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("CreateCollection").Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Ctx(ctx).Info("done to create collection",
@@ -1026,7 +1033,6 @@ func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRe
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("DropCollection", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("DropCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordNumOfCollections.Dec()
 	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("DropCollection").Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Ctx(ctx).Info("done to drop collection", zap.String("role", typeutil.RootCoordRole),
@@ -1277,7 +1283,6 @@ func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollection
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollection", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("AlterCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordNumOfCollections.Dec()
 	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("AlterCollection").Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Info("done to alter collection",
@@ -2032,8 +2037,6 @@ func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (
 func (c *Core) ExpireCredCache(ctx context.Context, username string) error {
 	req := proxypb.InvalidateCredCacheRequest{
 		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(0), // TODO, msg type
-			commonpbutil.WithMsgID(0),   // TODO, msg id
 			commonpbutil.WithSourceID(c.session.ServerID),
 		),
 		Username: username,
@@ -2045,8 +2048,6 @@ func (c *Core) ExpireCredCache(ctx context.Context, username string) error {
 func (c *Core) UpdateCredCache(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
 	req := proxypb.UpdateCredCacheRequest{
 		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(0), // TODO, msg type
-			commonpbutil.WithMsgID(0),   // TODO, msg id
 			commonpbutil.WithSourceID(c.session.ServerID),
 		),
 		Username: credInfo.Username,

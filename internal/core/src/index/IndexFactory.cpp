@@ -21,8 +21,38 @@
 #include "knowhere/utils.h"
 
 #include "index/VectorDiskIndex.h"
+#include "index/ScalarIndexSort.h"
+#include "index/StringIndexMarisa.h"
+#include "index/BoolIndex.h"
 
 namespace milvus::index {
+
+template <typename T>
+ScalarIndexPtr<T>
+IndexFactory::CreateScalarIndex(
+    const IndexType& index_type,
+    const storage::FileManagerContext& file_manager_context) {
+    return CreateScalarIndexSort<T>(file_manager_context);
+}
+
+// template <>
+// inline ScalarIndexPtr<bool>
+// IndexFactory::CreateScalarIndex(const IndexType& index_type) {
+//    return CreateBoolIndex();
+//}
+//
+
+template <>
+ScalarIndexPtr<std::string>
+IndexFactory::CreateScalarIndex<std::string>(
+    const IndexType& index_type,
+    const storage::FileManagerContext& file_manager_context) {
+#if defined(__linux__) || defined(__APPLE__)
+    return CreateStringIndexMarisa(file_manager_context);
+#else
+    throw std::runtime_error("unsupported platform");
+#endif
+}
 
 IndexBasePtr
 IndexFactory::CreateIndex(

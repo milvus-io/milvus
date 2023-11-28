@@ -74,7 +74,9 @@ func TestDropIndex(t *testing.T) {
 				TargetID:      100000,
 				ReplicateInfo: nil,
 			},
-			DbName: "unit_db",
+			DbName:         "unit_db",
+			CollectionName: "col1",
+			IndexName:      "unit_index",
 		},
 	}
 	assert.EqualValues(t, 100, msg.ID())
@@ -86,7 +88,7 @@ func TestDropIndex(t *testing.T) {
 	msgBytes, err := msg.Marshal(msg)
 	assert.NoError(t, err)
 
-	var newMsg TsMsg = &ReleaseCollectionMsg{}
+	var newMsg TsMsg = &DropIndexMsg{}
 	_, err = newMsg.Unmarshal("1")
 	assert.Error(t, err)
 
@@ -95,6 +97,8 @@ func TestDropIndex(t *testing.T) {
 	assert.EqualValues(t, 200, newMsg.ID())
 	assert.EqualValues(t, 1000, newMsg.BeginTs())
 	assert.EqualValues(t, 1000, newMsg.EndTs())
+	assert.EqualValues(t, "col1", newMsg.(*DropIndexMsg).CollectionName)
+	assert.EqualValues(t, "unit_index", newMsg.(*DropIndexMsg).IndexName)
 
 	assert.True(t, msg.Size() > 0)
 }

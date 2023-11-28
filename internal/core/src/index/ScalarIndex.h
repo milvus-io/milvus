@@ -76,5 +76,3 @@ template <typename T>
 using ScalarIndexPtr = std::unique_ptr<ScalarIndex<T>>;
 
 }  // namespace milvus::index
-
-#include "index/ScalarIndex-inl.h"

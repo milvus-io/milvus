@@ -141,7 +141,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.NoError(err)
 		suite.NotNil(meta)
 
-		suite.MetricsEqual(metrics.DataCoordNumSegments.WithLabelValues(metrics.FlushedSegmentLabel), 1)
+		suite.MetricsEqual(metrics.DataCoordNumSegments.WithLabelValues(metrics.FlushedSegmentLabel, datapb.SegmentLevel_Legacy.String()), 1)
 	})
 }
 
@@ -731,7 +731,7 @@ func TestMeta_PrepareCompleteCompactionMutation(t *testing.T) {
 	assert.NotNil(t, beforeCompact)
 	assert.NotNil(t, afterCompact)
 	assert.NotNil(t, newSegment)
-	assert.Equal(t, 3, len(metricMutation.stateChange))
+	assert.Equal(t, 3, len(metricMutation.stateChange[datapb.SegmentLevel_Legacy.String()]))
 	assert.Equal(t, int64(0), metricMutation.rowCountChange)
 	assert.Equal(t, int64(2), metricMutation.rowCountAccChange)
 

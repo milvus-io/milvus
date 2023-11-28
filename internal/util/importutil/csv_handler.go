@@ -23,7 +23,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -31,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -60,14 +60,14 @@ func NewCSVRowConsumer(ctx context.Context,
 ) (*CSVRowConsumer, error) {
 	if collectionInfo == nil {
 		log.Warn("CSV row consumer: collection schema is nil")
-		return nil, errors.New("collection schema is nil")
+		return nil, merr.WrapErrImportFailed("collection schema is nil")
 	}
 
 	v := &CSVRowConsumer{
 		ctx:            ctx,
 		collectionInfo: collectionInfo,
 		rowIDAllocator: idAlloc,
-		validators:     make(map[storage.FieldID]*CSVValidator, 0),
+		validators:     make(map[storage.FieldID]*CSVValidator),
 		rowCounter:     0,
 		shardsData:     make([]ShardData, 0, collectionInfo.ShardNum),
 		blockSize:      blockSize,
@@ -77,14 +77,14 @@ func NewCSVRowConsumer(ctx context.Context,
 
 	if err := v.initValidators(collectionInfo.Schema); err != nil {
 		log.Warn("CSV row consumer: fail to initialize csv row-based consumer", zap.Error(err))
-		return nil, fmt.Errorf("fail to initialize csv row-based consumer, error: %w", err)
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("fail to initialize csv row-based consumer, error: %v", err))
 	}
 
 	for i := 0; i < int(collectionInfo.ShardNum); i++ {
 		shardData := initShardData(collectionInfo.Schema, collectionInfo.PartitionIDs)
 		if shardData == nil {
 			log.Warn("CSV row consumer: fail to initialize in-memory segment data", zap.Int("shardID", i))
-			return nil, fmt.Errorf("fail to initialize in-memory segment data for shard id %d", i)
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("fail to initialize in-memory segment data for shard id %d", i))
 		}
 		v.shardsData = append(v.shardsData, shardData)
 	}
@@ -92,7 +92,7 @@ func NewCSVRowConsumer(ctx context.Context,
 	// primary key is autoid, id generator is required
 	if v.collectionInfo.PrimaryKey.GetAutoID() && idAlloc == nil {
 		log.Warn("CSV row consumer: ID allocator is nil")
-		return nil, errors.New("ID allocator is nil")
+		return nil, merr.WrapErrImportFailed("ID allocator is nil")
 	}
 
 	return v, nil
@@ -106,7 +106,7 @@ type CSVValidator struct {
 
 func (v *CSVRowConsumer) initValidators(collectionSchema *schemapb.CollectionSchema) error {
 	if collectionSchema == nil {
-		return errors.New("collection schema is nil")
+		return merr.WrapErrImportFailed("collection schema is nil")
 	}
 
 	validators := v.validators
@@ -124,7 +124,7 @@ func (v *CSVRowConsumer) initValidators(collectionSchema *schemapb.CollectionSch
 			validators[schema.GetFieldID()].convertFunc = func(str string, field storage.FieldData) error {
 				var value bool
 				if err := json.Unmarshal([]byte(str), &value); err != nil {
-					return fmt.Errorf("illegal value '%v' for bool type field '%s'", str, schema.GetName())
+					return merr.WrapErrImportFailed(fmt.Sprintf("illegal value '%v' for bool type field '%s'", str, schema.GetName()))
 				}
 				field.(*storage.BoolFieldData).Data = append(field.(*storage.BoolFieldData).Data, value)
 				return nil
@@ -151,7 +151,7 @@ func (v *CSVRowConsumer) initValidators(collectionSchema *schemapb.CollectionSch
 			validators[schema.GetFieldID()].convertFunc = func(str string, field storage.FieldData) error {
 				value, err := strconv.ParseInt(str, 0, 8)
 				if err != nil {
-					return fmt.Errorf("failed to parse value '%v' for int8 field '%s', error: %w", str, schema.GetName(), err)
+					return merr.WrapErrImportFailed(fmt.Sprintf("failed to parse value '%v' for int8 field '%s', error: %v", str, schema.GetName(), err))
 				}
 				field.(*storage.Int8FieldData).Data = append(field.(*storage.Int8FieldData).Data, int8(value))
 				return nil
@@ -160,7 +160,7 @@ func (v *CSVRowConsumer) initValidators(collectionSchema *schemapb.CollectionSch
 			validators[schema.GetFieldID()].convertFunc = func(str string, field storage.FieldData) error {
 				value, err := strconv.ParseInt(str, 0, 16)
 				if err != nil {
-					return fmt.Errorf("failed to parse value '%v' for int16 field '%s', error: %w", str, schema.GetName(), err)
+					return merr.WrapErrImportFailed(fmt.Sprintf("failed to parse value '%v' for int16 field '%s', error: %v", str, schema.GetName(), err))
 				}
 				field.(*storage.Int16FieldData).Data = append(field.(*storage.Int16FieldData).Data, int16(value))
 				return nil
@@ -169,7 +169,7 @@ func (v *CSVRowConsumer) initValidators(collectionSchema *schemapb.CollectionSch
 			validators[schema.GetFieldID()].convertFunc = func(str string, field storage.FieldData) error {
 				value, err := strconv.ParseInt(str, 0, 32)
 				if err != nil {
-					return fmt.Errorf("failed to parse value '%v' for int32 field '%s', error: %w", str, schema.GetName(), err)
+					return merr.WrapErrImportFailed(fmt.Sprintf("failed to parse value '%v' for int32 field '%s', error: %v", str, schema.GetName(), err))
 				}
 				field.(*storage.Int32FieldData).Data = append(field.(*storage.Int32FieldData).Data, int32(value))
 				return nil
@@ -178,7 +178,7 @@ func (v *CSVRowConsumer) initValidators(collectionSchema *schemapb.CollectionSch
 			validators[schema.GetFieldID()].convertFunc = func(str string, field storage.FieldData) error {
 				value, err := strconv.ParseInt(str, 0, 64)
 				if err != nil {
-					return fmt.Errorf("failed to parse value '%v' for int64 field '%s', error: %w", str, schema.GetName(), err)
+					return merr.WrapErrImportFailed(fmt.Sprintf("failed to parse value '%v' for int64 field '%s', error: %v", str, schema.GetName(), err))
 				}
 				field.(*storage.Int64FieldData).Data = append(field.(*storage.Int64FieldData).Data, value)
 				return nil
@@ -194,23 +194,23 @@ func (v *CSVRowConsumer) initValidators(collectionSchema *schemapb.CollectionSch
 				desc := json.NewDecoder(strings.NewReader(str))
 				desc.UseNumber()
 				if err := desc.Decode(&arr); err != nil {
-					return fmt.Errorf("'%v' is not an array for binary vector field '%s'", str, schema.GetName())
+					return merr.WrapErrImportFailed(fmt.Sprintf("'%v' is not an array for binary vector field '%s'", str, schema.GetName()))
 				}
 
 				// we use uint8 to represent binary vector in csv file, each uint8 value represents 8 dimensions.
 				if len(arr)*8 != dim {
-					return fmt.Errorf("bit size %d doesn't equal to vector dimension %d of field '%s'", len(arr)*8, dim, schema.GetName())
+					return merr.WrapErrImportFailed(fmt.Sprintf("bit size %d doesn't equal to vector dimension %d of field '%s'", len(arr)*8, dim, schema.GetName()))
 				}
 
 				for i := 0; i < len(arr); i++ {
 					if num, ok := arr[i].(json.Number); ok {
 						value, err := strconv.ParseUint(string(num), 0, 8)
 						if err != nil {
-							return fmt.Errorf("failed to parse value '%v' for binary vector field '%s', error: %w", num, schema.GetName(), err)
+							return merr.WrapErrImportFailed(fmt.Sprintf("failed to parse value '%v' for binary vector field '%s', error: %v", num, schema.GetName(), err))
 						}
 						field.(*storage.BinaryVectorFieldData).Data = append(field.(*storage.BinaryVectorFieldData).Data, byte(value))
 					} else {
-						return fmt.Errorf("illegal value '%v' for binary vector field '%s'", str, schema.GetName())
+						return merr.WrapErrImportFailed(fmt.Sprintf("illegal value '%v' for binary vector field '%s'", str, schema.GetName()))
 					}
 				}
 
@@ -227,11 +227,11 @@ func (v *CSVRowConsumer) initValidators(collectionSchema *schemapb.CollectionSch
 				desc := json.NewDecoder(strings.NewReader(str))
 				desc.UseNumber()
 				if err := desc.Decode(&arr); err != nil {
-					return fmt.Errorf("'%v' is not an array for float vector field '%s'", str, schema.GetName())
+					return merr.WrapErrImportFailed(fmt.Sprintf("'%v' is not an array for float vector field '%s'", str, schema.GetName()))
 				}
 
 				if len(arr) != dim {
-					return fmt.Errorf("array size %d doesn't equal to vector dimension %d of field '%s'", len(arr), dim, schema.GetName())
+					return merr.WrapErrImportFailed(fmt.Sprintf("array size %d doesn't equal to vector dimension %d of field '%s'", len(arr), dim, schema.GetName()))
 				}
 
 				for i := 0; i < len(arr); i++ {
@@ -242,7 +242,7 @@ func (v *CSVRowConsumer) initValidators(collectionSchema *schemapb.CollectionSch
 						}
 						field.(*storage.FloatVectorFieldData).Data = append(field.(*storage.FloatVectorFieldData).Data, float32(value))
 					} else {
-						return fmt.Errorf("illegal value '%v' for float vector field '%s'", str, schema.GetName())
+						return merr.WrapErrImportFailed(fmt.Sprintf("illegal value '%v' for float vector field '%s'", str, schema.GetName()))
 					}
 				}
 
@@ -259,13 +259,25 @@ func (v *CSVRowConsumer) initValidators(collectionSchema *schemapb.CollectionSch
 			validators[schema.GetFieldID()].convertFunc = func(str string, field storage.FieldData) error {
 				var dummy interface{}
 				if err := json.Unmarshal([]byte(str), &dummy); err != nil {
-					return fmt.Errorf("failed to parse value '%v' for JSON field '%s', error: %w", str, schema.GetName(), err)
+					return merr.WrapErrImportFailed(fmt.Sprintf("failed to parse value '%v' for JSON field '%s', error: %v", str, schema.GetName(), err))
 				}
 				field.(*storage.JSONFieldData).Data = append(field.(*storage.JSONFieldData).Data, []byte(str))
 				return nil
 			}
+		case schemapb.DataType_Array:
+			validators[schema.GetFieldID()].convertFunc = func(str string, field storage.FieldData) error {
+				var arr []interface{}
+				desc := json.NewDecoder(strings.NewReader(str))
+				desc.UseNumber()
+				if err := desc.Decode(&arr); err != nil {
+					return merr.WrapErrImportFailed(fmt.Sprintf("'%v' is not an array for array field '%s'", str, schema.GetName()))
+				}
+
+				return getArrayElementData(schema, arr, field)
+			}
+
 		default:
-			return fmt.Errorf("unsupport data type: %s", getTypeName(collectionSchema.Fields[i].DataType))
+			return merr.WrapErrImportFailed(fmt.Sprintf("unsupport data type: %s", getTypeName(collectionSchema.Fields[i].DataType)))
 		}
 	}
 	return nil
@@ -282,7 +294,7 @@ func (v *CSVRowConsumer) RowCount() int64 {
 func (v *CSVRowConsumer) Handle(rows []map[storage.FieldID]string) error {
 	if v == nil || v.validators == nil || len(v.validators) == 0 {
 		log.Warn("CSV row consumer is not initialized")
-		return errors.New("CSV row consumer is not initialized")
+		return merr.WrapErrImportFailed("CSV row consumer is not initialized")
 	}
 	// if rows is nil, that means read to end of file, force flush all data
 	if rows == nil {
@@ -297,7 +309,7 @@ func (v *CSVRowConsumer) Handle(rows []map[storage.FieldID]string) error {
 	err := tryFlushBlocks(v.ctx, v.shardsData, v.collectionInfo.Schema, v.callFlushFunc, v.blockSize, MaxTotalSizeInMemory, false)
 	if err != nil {
 		log.Warn("CSV row consumer: try flush data but failed", zap.Error(err))
-		return fmt.Errorf("try flush data but failed, error: %w", err)
+		return merr.WrapErrImportFailed(fmt.Sprintf("try flush data but failed, error: %v", err))
 	}
 
 	// prepare autoid, no matter int64 or varchar pk, we always generate autoid since the hidden field RowIDField requires them
@@ -308,24 +320,24 @@ func (v *CSVRowConsumer) Handle(rows []map[storage.FieldID]string) error {
 	if v.collectionInfo.PrimaryKey.AutoID {
 		if v.rowIDAllocator == nil {
 			log.Warn("CSV row consumer: primary keys is auto-generated but IDAllocator is nil")
-			return fmt.Errorf("primary keys is auto-generated but IDAllocator is nil")
+			return merr.WrapErrImportFailed("primary keys is auto-generated but IDAllocator is nil")
 		}
 		var err error
 		rowIDBegin, rowIDEnd, err = v.rowIDAllocator.Alloc(uint32(len(rows)))
 		if err != nil {
 			log.Warn("CSV row consumer: failed to generate primary keys", zap.Int("count", len(rows)), zap.Error(err))
-			return fmt.Errorf("failed to generate %d primary keys, error: %w", len(rows), err)
+			return merr.WrapErrImportFailed(fmt.Sprintf("failed to generate %d primary keys, error: %v", len(rows), err))
 		}
 		if rowIDEnd-rowIDBegin != int64(len(rows)) {
 			log.Warn("CSV row consumer: try to generate primary keys but allocated ids are not enough",
 				zap.Int("count", len(rows)), zap.Int64("generated", rowIDEnd-rowIDBegin))
-			return fmt.Errorf("try to generate %d primary keys but only %d keys were allocated", len(rows), rowIDEnd-rowIDBegin)
+			return merr.WrapErrImportFailed(fmt.Sprintf("try to generate %d primary keys but only %d keys were allocated", len(rows), rowIDEnd-rowIDBegin))
 		}
 		log.Info("CSV row consumer: auto-generate primary keys", zap.Int64("begin", rowIDBegin), zap.Int64("end", rowIDEnd))
 		if primaryValidator.isString {
 			// if pk is varchar, no need to record auto-generated row ids
 			log.Warn("CSV row consumer: string type primary key connot be auto-generated")
-			return errors.New("string type primary key connot be auto-generated")
+			return merr.WrapErrImportFailed("string type primary key connot be auto-generated")
 		}
 		v.autoIDRange = append(v.autoIDRange, rowIDBegin, rowIDEnd)
 	}
@@ -361,8 +373,8 @@ func (v *CSVRowConsumer) Handle(rows []map[storage.FieldID]string) error {
 				if err != nil {
 					log.Warn("CSV row consumer: failed to parse primary key at the row",
 						zap.String("value", pkStr), zap.Int64("rowNumber", rowNumber), zap.Error(err))
-					return fmt.Errorf("failed to parse primary key '%s' at the row %d, error: %w",
-						pkStr, rowNumber, err)
+					return merr.WrapErrImportFailed(fmt.Sprintf("failed to parse primary key '%s' at the row %d, error: %v",
+						pkStr, rowNumber, err))
 				}
 			}
 
@@ -370,7 +382,7 @@ func (v *CSVRowConsumer) Handle(rows []map[storage.FieldID]string) error {
 			if err != nil {
 				log.Warn("CSV row consumer: failed to hash primary key at the row",
 					zap.Int64("key", pk), zap.Int64("rowNumber", rowNumber), zap.Error(err))
-				return fmt.Errorf("failed to hash primary key %d at the row %d, error: %w", pk, rowNumber, err)
+				return merr.WrapErrImportFailed(fmt.Sprintf("failed to hash primary key %d at the row %d, error: %v", pk, rowNumber, err))
 			}
 
 			// hash to shard based on pk, hash to partition if partition key exist
@@ -395,8 +407,8 @@ func (v *CSVRowConsumer) Handle(rows []map[storage.FieldID]string) error {
 			if err := validator.convertFunc(value, v.shardsData[shardID][partitionID][fieldID]); err != nil {
 				log.Warn("CSV row consumer: failed to convert value for field at the row",
 					zap.String("fieldName", validator.fieldName), zap.Int64("rowNumber", rowNumber), zap.Error(err))
-				return fmt.Errorf("failed to convert value for field '%s' at the row %d,  error: %w",
-					validator.fieldName, rowNumber, err)
+				return merr.WrapErrImportFailed(fmt.Sprintf("failed to convert value for field '%s' at the row %d,  error: %v",
+					validator.fieldName, rowNumber, err))
 			}
 		}
 	}
@@ -405,12 +417,12 @@ func (v *CSVRowConsumer) Handle(rows []map[storage.FieldID]string) error {
 	return nil
 }
 
-// hashToPartition hash partition key to get an partition ID, return the first partition ID if no partition key exist
+// hashToPartition hash partition key to get a partition ID, return the first partition ID if no partition key exist
 // CollectionInfo ensures only one partition ID in the PartitionIDs if no partition key exist
 func (v *CSVRowConsumer) hashToPartition(row map[storage.FieldID]string, rowNumber int64) (int64, error) {
 	if v.collectionInfo.PartitionKey == nil {
 		if len(v.collectionInfo.PartitionIDs) != 1 {
-			return 0, fmt.Errorf("collection '%s' partition list is empty", v.collectionInfo.Schema.Name)
+			return 0, merr.WrapErrImportFailed(fmt.Sprintf("collection '%s' partition list is empty", v.collectionInfo.Schema.Name))
 		}
 		// no partition key, directly return the target partition id
 		return v.collectionInfo.PartitionIDs[0], nil
@@ -429,15 +441,15 @@ func (v *CSVRowConsumer) hashToPartition(row map[storage.FieldID]string, rowNumb
 		if err != nil {
 			log.Warn("CSV row consumer: failed to parse partition key at the row",
 				zap.String("value", value), zap.Int64("rowNumber", rowNumber), zap.Error(err))
-			return 0, fmt.Errorf("failed to parse partition key '%s' at the row %d, error: %w",
-				value, rowNumber, err)
+			return 0, merr.WrapErrImportFailed(fmt.Sprintf("failed to parse partition key '%s' at the row %d, error: %v",
+				value, rowNumber, err))
 		}
 
 		hashValue, err = typeutil.Hash32Int64(pk)
 		if err != nil {
 			log.Warn("CSV row consumer: failed to hash partition key at the row",
 				zap.Int64("key", pk), zap.Int64("rowNumber", rowNumber), zap.Error(err))
-			return 0, fmt.Errorf("failed to hash partition key %d at the row %d, error: %w", pk, rowNumber, err)
+			return 0, merr.WrapErrImportFailed(fmt.Sprintf("failed to hash partition key %d at the row %d, error: %v", pk, rowNumber, err))
 		}
 	}
 

@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -183,4 +184,14 @@ func (suite *UtilSuite) TestGetCollectionAutoCompactionEnabled() {
 	enabled, err = getCollectionAutoCompactionEnabled(map[string]string{})
 	suite.NoError(err)
 	suite.Equal(Params.DataCoordCfg.EnableAutoCompaction.GetAsBool(), enabled)
+}
+
+func (suite *UtilSuite) TestCalculateL0SegmentSize() {
+	logsize := int64(100)
+	fields := []*datapb.FieldBinlog{{
+		FieldID: 102,
+		Binlogs: []*datapb.Binlog{{LogSize: logsize}},
+	}}
+
+	suite.Equal(calculateL0SegmentSize(fields), float64(logsize))
 }
