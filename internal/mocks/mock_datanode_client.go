@@ -772,6 +772,76 @@ func (_c *MockDataNodeClient_GetMetrics_Call) RunAndReturn(run func(context.Cont
 	return _c
 }
 
+// GetPreImportState provides a mock function with given fields: ctx, in, opts
+func (_m *MockDataNodeClient) GetPreImportState(ctx context.Context, in *datapb.GetPreImportStateRequest, opts ...grpc.CallOption) (*datapb.GetPreImportStateResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *datapb.GetPreImportStateResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetPreImportStateRequest, ...grpc.CallOption) (*datapb.GetPreImportStateResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetPreImportStateRequest, ...grpc.CallOption) *datapb.GetPreImportStateResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.GetPreImportStateResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.GetPreImportStateRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataNodeClient_GetPreImportState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPreImportState'
+type MockDataNodeClient_GetPreImportState_Call struct {
+	*mock.Call
+}
+
+// GetPreImportState is a helper method to define mock.On call
+//  - ctx context.Context
+//  - in *datapb.GetPreImportStateRequest
+//  - opts ...grpc.CallOption
+func (_e *MockDataNodeClient_Expecter) GetPreImportState(ctx interface{}, in interface{}, opts ...interface{}) *MockDataNodeClient_GetPreImportState_Call {
+	return &MockDataNodeClient_GetPreImportState_Call{Call: _e.mock.On("GetPreImportState",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockDataNodeClient_GetPreImportState_Call) Run(run func(ctx context.Context, in *datapb.GetPreImportStateRequest, opts ...grpc.CallOption)) *MockDataNodeClient_GetPreImportState_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*datapb.GetPreImportStateRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockDataNodeClient_GetPreImportState_Call) Return(_a0 *datapb.GetPreImportStateResponse, _a1 error) *MockDataNodeClient_GetPreImportState_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataNodeClient_GetPreImportState_Call) RunAndReturn(run func(context.Context, *datapb.GetPreImportStateRequest, ...grpc.CallOption) (*datapb.GetPreImportStateResponse, error)) *MockDataNodeClient_GetPreImportState_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetStatisticsChannel provides a mock function with given fields: ctx, in, opts
 func (_m *MockDataNodeClient) GetStatisticsChannel(ctx context.Context, in *internalpb.GetStatisticsChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
 	_va := make([]interface{}, len(opts))

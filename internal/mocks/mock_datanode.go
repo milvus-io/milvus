@@ -623,6 +623,61 @@ func (_c *MockDataNode_GetMetrics_Call) RunAndReturn(run func(context.Context, *
 	return _c
 }
 
+// GetPreImportState provides a mock function with given fields: _a0, _a1
+func (_m *MockDataNode) GetPreImportState(_a0 context.Context, _a1 *datapb.GetPreImportStateRequest) (*datapb.GetPreImportStateResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *datapb.GetPreImportStateResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetPreImportStateRequest) (*datapb.GetPreImportStateResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetPreImportStateRequest) *datapb.GetPreImportStateResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.GetPreImportStateResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.GetPreImportStateRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataNode_GetPreImportState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPreImportState'
+type MockDataNode_GetPreImportState_Call struct {
+	*mock.Call
+}
+
+// GetPreImportState is a helper method to define mock.On call
+//  - _a0 context.Context
+//  - _a1 *datapb.GetPreImportStateRequest
+func (_e *MockDataNode_Expecter) GetPreImportState(_a0 interface{}, _a1 interface{}) *MockDataNode_GetPreImportState_Call {
+	return &MockDataNode_GetPreImportState_Call{Call: _e.mock.On("GetPreImportState", _a0, _a1)}
+}
+
+func (_c *MockDataNode_GetPreImportState_Call) Run(run func(_a0 context.Context, _a1 *datapb.GetPreImportStateRequest)) *MockDataNode_GetPreImportState_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.GetPreImportStateRequest))
+	})
+	return _c
+}
+
+func (_c *MockDataNode_GetPreImportState_Call) Return(_a0 *datapb.GetPreImportStateResponse, _a1 error) *MockDataNode_GetPreImportState_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataNode_GetPreImportState_Call) RunAndReturn(run func(context.Context, *datapb.GetPreImportStateRequest) (*datapb.GetPreImportStateResponse, error)) *MockDataNode_GetPreImportState_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetStateCode provides a mock function with given fields:
 func (_m *MockDataNode) GetStateCode() commonpb.StateCode {
 	ret := _m.Called()

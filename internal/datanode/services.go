@@ -919,6 +919,10 @@ func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (
 	return nil, merr.ErrServiceUnimplemented
 }
 
+func (node *DataNode) GetPreImportState(ctx context.Context, req *datapb.GetPreImportStateRequest) (*datapb.GetPreImportStateResponse, error) {
+	return nil, merr.ErrServiceUnimplemented
+}
+
 func (node *DataNode) GetImportState(ctx context.Context, req *datapb.GetImportStateRequest) (*datapb.GetImportStateResponse, error) {
 	return nil, merr.ErrServiceUnimplemented
 }

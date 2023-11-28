@@ -101,6 +101,10 @@ func (m *GrpcDataNodeClient) ImportV2(ctx context.Context, req *datapb.ImportReq
 	return &commonpb.Status{}, m.Err
 }
 
+func (m *GrpcDataNodeClient) GetPreImportState(ctx context.Context, req *datapb.GetPreImportStateRequest, opts ...grpc.CallOption) (*datapb.GetPreImportStateResponse, error) {
+	return &datapb.GetPreImportStateResponse{}, m.Err
+}
+
 func (m *GrpcDataNodeClient) GetImportState(ctx context.Context, req *datapb.GetImportStateRequest, opts ...grpc.CallOption) (*datapb.GetImportStateResponse, error) {
 	return &datapb.GetImportStateResponse{}, m.Err
 }

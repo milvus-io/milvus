@@ -170,6 +170,10 @@ func (m *MockDataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) 
 	return m.status, m.err
 }
 
+func (m *MockDataNode) GetPreImportState(ctx context.Context, req *datapb.GetPreImportStateRequest) (*datapb.GetPreImportStateResponse, error) {
+	return &datapb.GetPreImportStateResponse{}, m.err
+}
+
 func (m *MockDataNode) GetImportState(ctx context.Context, req *datapb.GetImportStateRequest) (*datapb.GetImportStateResponse, error) {
 	return &datapb.GetImportStateResponse{}, m.err
 }
