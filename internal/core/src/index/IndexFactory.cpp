@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "index/IndexFactory.h"
+#include "common/EasyAssert.h"
 #include "index/VectorMemIndex.h"
 #include "index/Utils.h"
 #include "index/Meta.h"
@@ -50,7 +51,7 @@ IndexFactory::CreateScalarIndex<std::string>(
 #if defined(__linux__) || defined(__APPLE__)
     return CreateStringIndexMarisa(file_manager_context);
 #else
-    throw std::runtime_error("unsupported platform");
+    throw SegcoreError(Unsupported, "unsupported platform");
 #endif
 }
 
@@ -72,7 +73,7 @@ IndexFactory::CreateScalarIndex(
 #if defined(__linux__) || defined(__APPLE__)
     return CreateStringIndexMarisa(file_manager_context, space);
 #else
-    throw std::runtime_error("unsupported platform");
+    throw SegcoreError(Unsupported, "unsupported platform");
 #endif
 }
 

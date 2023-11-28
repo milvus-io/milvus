@@ -501,15 +501,9 @@ AppendFieldMetaInfoV2(CBuildIndexInfo c_build_index_info,
         build_index_info->field_name = field_name;
         build_index_info->dim = dim;
 
-        auto status = CStatus();
-        status.error_code = Success;
-        status.error_msg = "";
-        return status;
+        return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
+        return milvus::FailureCStatus(&e);
     }
 }
 
