@@ -570,17 +570,17 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.create_index("float_vector", ct.default_index)
         collection_w.load()
 
-        # 2. search
+        # 2. search (subscript > max_capacity)
         expression = "int32_array[101] > 0"
-        # msg = ("failed to search: attempt #0: failed to search/query delegator 1 for channel "
-        #        "by-dev-rootcoord-dml_: fail to Search, QueryNode ID=1, reason=worker(1) query"
-        #        " failed: UnknownError: Assert \")index >= 0 && index < length_\" at /go/src/"
-        #        "github.com/milvus-io/milvus/internal/core/src/common/Array.h:454 => index out"
-        #        " of range, index=101, length=100: attempt #1: no available shard delegator "
-        #        "found: service unavailable")
         res, _ = collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, nb, expression)
+                                     default_search_params, nb, expression)
         assert len(res[0]) == 0
+
+        # 3. search (max_capacity > subscript > actual length of array)
+        expression = "int32_array[51] > 0"
+        res, _ = collection_w.search(vectors[:default_nq], default_search_field,
+                                     default_search_params, default_limit, expression)
+        assert len(res[0]) == default_limit
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_expression_invalid_array_two(self):
@@ -6356,10 +6356,8 @@ class TestSearchDiskann(TestcaseBase):
         collection_w.load()
         default_expr = "int64 in [1, 2, 3, 4]"
         limit = 4
-        default_search_params = {
-            "metric_type": "COSINE", "params": {"nprobe": 64}}
-        vectors = [[random.random() for _ in range(dim)]
-                   for _ in range(default_nq)]
+        default_search_params = {"metric_type": "COSINE", "params": {"nprobe": 64}}
+        vectors = [[random.random() for _ in range(dim)]for _ in range(default_nq)]
         output_fields = [default_int64_field_name,
                          default_float_field_name,  default_string_field_name]
         search_res = collection_w.search(vectors[:default_nq], default_search_field,
