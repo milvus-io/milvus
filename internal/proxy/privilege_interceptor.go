@@ -53,7 +53,7 @@ func getPolicyModel(modelString string) model.Model {
 
 // UnaryServerInterceptor returns a new unary server interceptors that performs per-request privilege access.
 func UnaryServerInterceptor(privilegeFunc PrivilegeFunc) grpc.UnaryServerInterceptor {
-	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		newCtx, err := privilegeFunc(ctx, req)
 		if err != nil {
 			return nil, err
