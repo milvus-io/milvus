@@ -887,16 +887,17 @@ func (p *rootCoordConfig) init(base *BaseTable) {
 // /////////////////////////////////////////////////////////////////////////////
 // --- proxy ---
 type AccessLogConfig struct {
-	Enable        ParamItem `refreshable:"false"`
-	MinioEnable   ParamItem `refreshable:"false"`
-	LocalPath     ParamItem `refreshable:"false"`
-	Filename      ParamItem `refreshable:"false"`
-	MaxSize       ParamItem `refreshable:"false"`
-	CacheSize     ParamItem `refreshable:"false"`
-	RotatedTime   ParamItem `refreshable:"false"`
-	MaxBackups    ParamItem `refreshable:"false"`
-	RemotePath    ParamItem `refreshable:"false"`
-	RemoteMaxTime ParamItem `refreshable:"false"`
+	Enable        ParamItem  `refreshable:"false"`
+	MinioEnable   ParamItem  `refreshable:"false"`
+	LocalPath     ParamItem  `refreshable:"false"`
+	Filename      ParamItem  `refreshable:"false"`
+	MaxSize       ParamItem  `refreshable:"false"`
+	CacheSize     ParamItem  `refreshable:"false"`
+	RotatedTime   ParamItem  `refreshable:"false"`
+	MaxBackups    ParamItem  `refreshable:"false"`
+	RemotePath    ParamItem  `refreshable:"false"`
+	RemoteMaxTime ParamItem  `refreshable:"false"`
+	Formatter     ParamGroup `refreshable:"false"`
 }
 
 type proxyConfig struct {
@@ -917,13 +918,14 @@ type proxyConfig struct {
 	MaxUserNum                   ParamItem `refreshable:"true"`
 	MaxRoleNum                   ParamItem `refreshable:"true"`
 	MaxTaskNum                   ParamItem `refreshable:"false"`
-	AccessLog                    AccessLogConfig
 	ShardLeaderCacheInterval     ParamItem `refreshable:"false"`
 	ReplicaSelectionPolicy       ParamItem `refreshable:"false"`
 	CheckQueryNodeHealthInterval ParamItem `refreshable:"false"`
 	CostMetricsExpireTime        ParamItem `refreshable:"true"`
 	RetryTimesOnReplica          ParamItem `refreshable:"true"`
 	RetryTimesOnHealthCheck      ParamItem `refreshable:"true"`
+
+	AccessLog AccessLogConfig
 }
 
 func (p *proxyConfig) init(base *BaseTable) {
@@ -1106,7 +1108,7 @@ please adjust in embedded Milvus: false`,
 	p.AccessLog.MaxSize.Init(base.mgr)
 
 	p.AccessLog.CacheSize = ParamItem{
-		Key:          "proxy.accessLog.maxSize",
+		Key:          "proxy.accessLog.cacheSize",
 		Version:      "2.3.2",
 		DefaultValue: "10240",
 		Doc:          "Size of log of memory cache, in B",
@@ -1140,10 +1142,16 @@ please adjust in embedded Milvus: false`,
 	p.AccessLog.RemoteMaxTime = ParamItem{
 		Key:          "proxy.accessLog.remoteMaxTime",
 		Version:      "2.2.0",
-		DefaultValue: "168",
+		DefaultValue: "0",
 		Doc:          "Max time for log file in minIO, in hours",
 	}
 	p.AccessLog.RemoteMaxTime.Init(base.mgr)
+
+	p.AccessLog.Formatter = ParamGroup{
+		KeyPrefix: "proxy.accessLog.formatters.",
+		Version:   "2.3.4",
+	}
+	p.AccessLog.Formatter.Init(base.mgr)
 
 	p.ShardLeaderCacheInterval = ParamItem{
 		Key:          "proxy.shardLeaderCacheInterval",
@@ -2801,6 +2809,10 @@ func (p *integrationTestConfig) init(base *BaseTable) {
 
 func (params *ComponentParam) Save(key string, value string) error {
 	return params.baseTable.Save(key, value)
+}
+
+func (params *ComponentParam) SaveGroup(group map[string]string) error {
+	return params.baseTable.SaveGroup(group)
 }
 
 func (params *ComponentParam) Remove(key string) error {
