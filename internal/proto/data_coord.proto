@@ -124,6 +124,7 @@ service DataNode {
   rpc PreImport(PreImportRequest) returns(common.Status) {}
   rpc ImportV2(ImportRequest) returns(common.Status) {}
   rpc GetImportState(GetImportStateRequest) returns(GetImportStateResponse) {}
+  rpc GetPreImportState(GetPreImportStateRequest) returns(GetPreImportStateResponse) {}
   rpc DropImport(DropImportRequest) returns(common.Status) {}
 }
 
@@ -779,13 +780,44 @@ message ImportRequest {
   int64 partitionID = 4;
   schema.CollectionSchema schema = 5;
   repeated ImportFile import_files = 6;
-  repeated SegmentInfo segment_infos = 7;
+  repeated int64 segmentIDs = 7;
   repeated int64 autoIDs = 8;
+  repeated string segment_channels = 9;
+}
+
+message GetPreImportStateRequest {
+  int64 requestID = 1;
+  int64 taskID = 2;
+}
+
+message ImportFileStats {
+  ImportFile import_file = 1;
+  int64 file_size = 2;
+  int64 total_rows = 3;
+  map<string, int64> channel_rows = 4;
+}
+
+message GetPreImportStateResponse {
+  common.Status status = 1;
+  int64 taskID = 2;
+  ImportState state = 3;
+  string reason = 4;
+  int64 slots = 5;
+  repeated ImportFileStats file_stats = 6;
 }
 
 message GetImportStateRequest {
   int64 requestID = 1;
   int64 taskID = 2;
+}
+
+message ImportFileInfo {
+  int64 segmentID = 1;
+  int64 total_rows = 2;
+  int64 imported_rows = 3;
+  repeated FieldBinlog binlogs = 4;
+  repeated FieldBinlog statslogs = 5;
+  repeated index.IndexFilePathInfo index_infos = 6;
 }
 
 message GetImportStateResponse {
@@ -795,20 +827,11 @@ message GetImportStateResponse {
   string reason = 4;
   int64 slots = 5;
   repeated ImportFileInfo file_infos = 6;
-  repeated SegmentInfo segment_infos = 7;
 }
 
 message DropImportRequest {
   int64 requestID = 1;
   int64 taskID = 2;
-}
-
-message ImportFileInfo {
-  ImportFile import_file = 1;
-  int64 file_size = 2;
-  int64 total_rows = 3;
-  map<string, int64> channel_rows = 4;
-  int64 imported_rows = 5;
 }
 
 message PreImportTask {
@@ -819,7 +842,7 @@ message PreImportTask {
   int64 nodeID = 5;
   ImportState state = 6;
   string reason = 7;
-  repeated ImportFileInfo file_infos = 8;
+  repeated ImportFileStats file_stats = 8;
 }
 
 message ImportTaskV2 {
@@ -827,9 +850,9 @@ message ImportTaskV2 {
   int64 taskID = 2;
   int64 collectionID = 3;
   int64 partitionID = 4;
-  repeated int64 segmentIDs =5;
+  repeated int64 segmentIDs = 5;
   int64 nodeID = 6;
   ImportState state = 7;
   string reason = 8;
-  repeated ImportFileInfo file_infos = 9;
+  repeated ImportFile files = 9;
 }
