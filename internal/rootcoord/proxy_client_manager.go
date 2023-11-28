@@ -48,10 +48,10 @@ func DefaultProxyCreator(ctx context.Context, addr string, nodeID int64) (types.
 }
 
 type proxyClientManager struct {
-	creator     proxyCreator
-	lock        sync.RWMutex
-	proxyClient map[int64]types.ProxyClient
-	helper      proxyClientManagerHelper
+	creator      proxyCreator
+	lock         sync.RWMutex
+	proxyClients sync.Map
+	helper       proxyClientManagerHelper
 }
 
 type proxyClientManagerHelper struct {
@@ -64,13 +64,12 @@ var defaultClientManagerHelper = proxyClientManagerHelper{
 
 func newProxyClientManager(creator proxyCreator) *proxyClientManager {
 	return &proxyClientManager{
-		creator:     creator,
-		proxyClient: make(map[int64]types.ProxyClient),
-		helper:      defaultClientManagerHelper,
+		creator: creator,
+		helper:  defaultClientManagerHelper,
 	}
 }
 
-func (p *proxyClientManager) GetProxyClients(sessions []*sessionutil.Session) {
+func (p *proxyClientManager) AddProxyClients(sessions []*sessionutil.Session) {
 	for _, session := range sessions {
 		p.AddProxyClient(session)
 	}
@@ -78,7 +77,7 @@ func (p *proxyClientManager) GetProxyClients(sessions []*sessionutil.Session) {
 
 func (p *proxyClientManager) AddProxyClient(session *sessionutil.Session) {
 	p.lock.RLock()
-	_, ok := p.proxyClient[session.ServerID]
+	_, ok := p.proxyClients.Load(session.ServerID)
 	p.lock.RUnlock()
 	if ok {
 		return
@@ -90,15 +89,24 @@ func (p *proxyClientManager) AddProxyClient(session *sessionutil.Session) {
 
 // GetProxyCount returns number of proxy clients.
 func (p *proxyClientManager) GetProxyCount() int {
-	p.lock.Lock()
-	defer p.lock.Unlock()
+	p.lock.RLock()
+	defer p.lock.RUnlock()
 
-	return len(p.proxyClient)
+	return p.getProxyCount()
+}
+
+func (p *proxyClientManager) getProxyCount() int {
+	var i int
+	p.proxyClients.Range(func(k, v interface{}) bool {
+		i++
+		return true
+	})
+	return i
 }
 
 // mutex.Lock is required before calling this method.
 func (p *proxyClientManager) updateProxyNumMetric() {
-	metrics.RootCoordProxyCounter.WithLabelValues().Set(float64(len(p.proxyClient)))
+	metrics.RootCoordProxyCounter.WithLabelValues().Set(float64(p.getProxyCount()))
 }
 
 func (p *proxyClientManager) connect(session *sessionutil.Session) {
@@ -111,12 +119,12 @@ func (p *proxyClientManager) connect(session *sessionutil.Session) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	_, ok := p.proxyClient[session.ServerID]
+	_, ok := p.proxyClients.Load(session.ServerID)
 	if ok {
 		pc.Close()
 		return
 	}
-	p.proxyClient[session.ServerID] = pc
+	p.proxyClients.Store(session.ServerID, pc)
 	log.Info("succeed to create proxy client", zap.String("address", session.Address), zap.Int64("serverID", session.ServerID))
 	p.helper.afterConnect()
 }
@@ -125,12 +133,12 @@ func (p *proxyClientManager) DelProxyClient(s *sessionutil.Session) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	cli, ok := p.proxyClient[s.ServerID]
+	cli, ok := p.proxyClients.Load(s.ServerID)
 	if ok {
-		cli.Close()
+		cli.(types.ProxyClient).Close()
 	}
 
-	delete(p.proxyClient, s.ServerID)
+	p.proxyClients.Delete(s.ServerID)
 	p.updateProxyNumMetric()
 	log.Info("remove proxy client", zap.String("proxy address", s.Address), zap.Int64("proxy id", s.ServerID))
 }
@@ -145,14 +153,14 @@ func (p *proxyClientManager) InvalidateCollectionMetaCache(ctx context.Context, 
 	}
 	c.apply(request)
 
-	if len(p.proxyClient) == 0 {
+	if p.getProxyCount() == 0 {
 		log.Warn("proxy client is empty, InvalidateCollectionMetaCache will not send to any client")
 		return nil
 	}
 
 	group := &errgroup.Group{}
-	for k, v := range p.proxyClient {
-		k, v := k, v
+	p.proxyClients.Range(func(k1, v1 interface{}) bool {
+		k, v := k1, v1.(types.ProxyClient)
 		group.Go(func() error {
 			sta, err := v.InvalidateCollectionMetaCache(ctx, request)
 			if err != nil {
@@ -167,7 +175,28 @@ func (p *proxyClientManager) InvalidateCollectionMetaCache(ctx context.Context, 
 			}
 			return nil
 		})
-	}
+		return true
+	})
+
+	p.proxyClients.Range(func(k1, v1 interface{}) bool {
+		k, v := k1, v1.(types.ProxyClient)
+		group.Go(func() error {
+			sta, err := v.InvalidateCollectionMetaCache(ctx, request)
+			if err != nil {
+				if errors.Is(err, merr.ErrNodeNotFound) {
+					log.Warn("InvalidateCollectionMetaCache failed due to proxy service not found", zap.Error(err))
+					return nil
+				}
+				return fmt.Errorf("InvalidateCollectionMetaCache failed, proxyID = %d, err = %s", k, err)
+			}
+			if sta.ErrorCode != commonpb.ErrorCode_Success {
+				return fmt.Errorf("InvalidateCollectionMetaCache failed, proxyID = %d, err = %s", k, sta.Reason)
+			}
+			return nil
+		})
+		return true
+	})
+
 	return group.Wait()
 }
 
@@ -176,14 +205,14 @@ func (p *proxyClientManager) InvalidateCredentialCache(ctx context.Context, requ
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	if len(p.proxyClient) == 0 {
+	if p.getProxyCount() == 0 {
 		log.Warn("proxy client is empty, InvalidateCredentialCache will not send to any client")
 		return nil
 	}
 
 	group := &errgroup.Group{}
-	for k, v := range p.proxyClient {
-		k, v := k, v
+	p.proxyClients.Range(func(k1, v1 interface{}) bool {
+		k, v := k1, v1.(types.ProxyClient)
 		group.Go(func() error {
 			sta, err := v.InvalidateCredentialCache(ctx, request)
 			if err != nil {
@@ -194,7 +223,8 @@ func (p *proxyClientManager) InvalidateCredentialCache(ctx context.Context, requ
 			}
 			return nil
 		})
-	}
+		return true
+	})
 	return group.Wait()
 }
 
@@ -203,14 +233,14 @@ func (p *proxyClientManager) UpdateCredentialCache(ctx context.Context, request 
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	if len(p.proxyClient) == 0 {
+	if p.getProxyCount() == 0 {
 		log.Warn("proxy client is empty, UpdateCredentialCache will not send to any client")
 		return nil
 	}
 
 	group := &errgroup.Group{}
-	for k, v := range p.proxyClient {
-		k, v := k, v
+	p.proxyClients.Range(func(k1, v1 interface{}) bool {
+		k, v := k1, v1.(types.ProxyClient)
 		group.Go(func() error {
 			sta, err := v.UpdateCredentialCache(ctx, request)
 			if err != nil {
@@ -221,7 +251,8 @@ func (p *proxyClientManager) UpdateCredentialCache(ctx context.Context, request 
 			}
 			return nil
 		})
-	}
+		return true
+	})
 	return group.Wait()
 }
 
@@ -230,14 +261,14 @@ func (p *proxyClientManager) RefreshPolicyInfoCache(ctx context.Context, req *pr
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	if len(p.proxyClient) == 0 {
+	if p.getProxyCount() == 0 {
 		log.Warn("proxy client is empty, RefreshPrivilegeInfoCache will not send to any client")
 		return nil
 	}
 
 	group := &errgroup.Group{}
-	for k, v := range p.proxyClient {
-		k, v := k, v
+	p.proxyClients.Range(func(k1, v1 interface{}) bool {
+		k, v := k1, v1.(types.ProxyClient)
 		group.Go(func() error {
 			status, err := v.RefreshPolicyInfoCache(ctx, req)
 			if err != nil {
@@ -248,7 +279,8 @@ func (p *proxyClientManager) RefreshPolicyInfoCache(ctx context.Context, req *pr
 			}
 			return nil
 		})
-	}
+		return true
+	})
 	return group.Wait()
 }
 
@@ -257,7 +289,7 @@ func (p *proxyClientManager) GetProxyMetrics(ctx context.Context) ([]*milvuspb.G
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	if len(p.proxyClient) == 0 {
+	if p.getProxyCount() == 0 {
 		log.Warn("proxy client is empty, GetMetrics will not send to any client")
 		return nil, nil
 	}
@@ -270,8 +302,8 @@ func (p *proxyClientManager) GetProxyMetrics(ctx context.Context) ([]*milvuspb.G
 	group := &errgroup.Group{}
 	var metricRspsMu sync.Mutex
 	metricRsps := make([]*milvuspb.GetMetricsResponse, 0)
-	for k, v := range p.proxyClient {
-		k, v := k, v
+	p.proxyClients.Range(func(k1, v1 interface{}) bool {
+		k, v := k1, v1.(types.ProxyClient)
 		group.Go(func() error {
 			rsp, err := v.GetProxyMetrics(ctx, req)
 			if err != nil {
@@ -285,7 +317,8 @@ func (p *proxyClientManager) GetProxyMetrics(ctx context.Context) ([]*milvuspb.G
 			metricRspsMu.Unlock()
 			return nil
 		})
-	}
+		return true
+	})
 	err = group.Wait()
 	if err != nil {
 		return nil, err
@@ -298,14 +331,14 @@ func (p *proxyClientManager) SetRates(ctx context.Context, request *proxypb.SetR
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	if len(p.proxyClient) == 0 {
+	if p.getProxyCount() == 0 {
 		log.Warn("proxy client is empty, SetRates will not send to any client")
 		return nil
 	}
 
 	group := &errgroup.Group{}
-	for k, v := range p.proxyClient {
-		k, v := k, v
+	p.proxyClients.Range(func(k1, v1 interface{}) bool {
+		k, v := k1, v1.(types.ProxyClient)
 		group.Go(func() error {
 			sta, err := v.SetRates(ctx, request)
 			if err != nil {
@@ -316,6 +349,7 @@ func (p *proxyClientManager) SetRates(ctx context.Context, request *proxypb.SetR
 			}
 			return nil
 		})
-	}
+		return true
+	})
 	return group.Wait()
 }

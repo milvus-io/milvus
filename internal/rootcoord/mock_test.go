@@ -385,9 +385,7 @@ func newTestCore(opts ...Opt) *Core {
 
 func withValidProxyManager() Opt {
 	return func(c *Core) {
-		c.proxyClientManager = &proxyClientManager{
-			proxyClient: make(map[UniqueID]types.ProxyClient),
-		}
+		c.proxyClientManager = &proxyClientManager{}
 		p := newMockProxy()
 		p.InvalidateCollectionMetaCacheFunc = func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 			return merr.Success(), nil
@@ -398,15 +396,13 @@ func withValidProxyManager() Opt {
 				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 			}, nil
 		}
-		c.proxyClientManager.proxyClient[TestProxyID] = p
+		c.proxyClientManager.proxyClients.Store(TestProxyID, p)
 	}
 }
 
 func withInvalidProxyManager() Opt {
 	return func(c *Core) {
-		c.proxyClientManager = &proxyClientManager{
-			proxyClient: make(map[UniqueID]types.ProxyClient),
-		}
+		c.proxyClientManager = &proxyClientManager{}
 		p := newMockProxy()
 		p.InvalidateCollectionMetaCacheFunc = func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 			return merr.Success(), errors.New("error mock InvalidateCollectionMetaCache")
@@ -417,7 +413,7 @@ func withInvalidProxyManager() Opt {
 				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 			}, nil
 		}
-		c.proxyClientManager.proxyClient[TestProxyID] = p
+		c.proxyClientManager.proxyClients.Store(TestProxyID, p)
 	}
 }
 
