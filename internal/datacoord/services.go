@@ -421,6 +421,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		zap.Int64("nodeID", req.GetBase().GetSourceID()),
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64("segmentID", req.GetSegmentID()),
+		zap.String("level", req.GetSegLevel().String()),
 	)
 
 	log.Info("receive SaveBinlogPaths request",

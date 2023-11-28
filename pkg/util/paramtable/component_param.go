@@ -2523,7 +2523,6 @@ type dataNodeConfig struct {
 	FlushDeleteBufferBytes ParamItem `refreshable:"true"`
 	BinLogMaxSize          ParamItem `refreshable:"true"`
 	SyncPeriod             ParamItem `refreshable:"true"`
-	DeltaPolicy            ParamItem `refreshable:"false"`
 
 	// watchEvent
 	WatchEventTicklerInterval ParamItem `refreshable:"false"`
@@ -2652,15 +2651,6 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.SyncPeriod.Init(base.mgr)
-
-	p.DeltaPolicy = ParamItem{
-		Key:          "dataNode.segment.deltaPolicy",
-		Version:      "2.3.4",
-		DefaultValue: "bloom_filter_pkoracle",
-		Doc:          "the delta policy current datanode using",
-		Export:       true,
-	}
-	p.DeltaPolicy.Init(base.mgr)
 
 	p.WatchEventTicklerInterval = ParamItem{
 		Key:          "datanode.segment.watchEventTicklerInterval",
