@@ -103,14 +103,20 @@ VectorDiskAnnIndex<T>::Upload(const Config& config) {
 
     return ret;
 }
+
+template <typename T>
+BinarySet
+VectorDiskAnnIndex<T>::UploadV2(const Config& config) {
+    return Upload(config);
+}
+
 template <typename T>
 void
 VectorDiskAnnIndex<T>::BuildV2(const Config& config) {
     knowhere::Json build_config;
     build_config.update(config);
 
-    auto segment_id = file_manager_->GetFieldDataMeta().segment_id;
-    auto local_data_path = file_manager_->CacheRawDataToDisk();
+    auto local_data_path = file_manager_->CacheRawDataToDisk(space_);
     build_config[DISK_ANN_RAW_DATA_PATH] = local_data_path;
 
     auto local_index_path_prefix = file_manager_->GetLocalIndexObjectPrefix();
@@ -131,13 +137,9 @@ VectorDiskAnnIndex<T>::BuildV2(const Config& config) {
 
     auto local_chunk_manager =
         storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto segment_id = file_manager_->GetFieldDataMeta().segment_id;
     local_chunk_manager->RemoveDir(
         storage::GetSegmentRawDataPathPrefix(local_chunk_manager, segment_id));
-}
-
-template <typename T>
-BinarySet
-VectorDiskAnnIndex<T>::UploadV2(const Config& config) {
 }
 
 template <typename T>

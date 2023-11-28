@@ -77,10 +77,18 @@ class DiskFileManagerImpl : public FileManagerImpl {
     void
     CacheIndexToDisk(const std::vector<std::string>& remote_files);
 
+    void
+    CacheIndexToDiskV2();
+
     uint64_t
     CacheBatchIndexFilesToDisk(const std::vector<std::string>& remote_files,
                                const std::string& local_file_name,
                                uint64_t local_file_init_offfset);
+
+    uint64_t
+    CacheBatchIndexFilesToDiskV2(const std::vector<std::string>& remote_files,
+                                 const std::string& local_file_name,
+                                 uint64_t local_file_init_offfset);
 
     void
     AddBatchIndexFiles(const std::string& local_file_name,
@@ -92,7 +100,13 @@ class DiskFileManagerImpl : public FileManagerImpl {
     CacheRawDataToDisk(std::vector<std::string> remote_files);
 
     std::string
-    CacheRawDataToDisk();
+    CacheRawDataToDisk(std::shared_ptr<milvus_storage::Space> space);
+
+    virtual bool
+    AddFileUsingSpace(const std::string& local_file_name,
+                      const std::vector<int64_t>& local_file_offsets,
+                      const std::vector<std::string>& remote_files,
+                      const std::vector<int64_t>& remote_file_sizes);
 
  private:
     int64_t
