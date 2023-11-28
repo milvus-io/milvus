@@ -51,6 +51,7 @@ static inline void
 set_bit(BitsetType& bitset, FieldId field_id, bool flag = true) {
     auto pos = field_id.get() - START_USER_FIELDID;
     AssertInfo(pos >= 0, "invalid field id");
+    LOG_SEGCORE_INFO_ << "set bit , field id " << std::to_string(field_id.get());
     bitset[pos] = flag;
 }
 
@@ -638,6 +639,10 @@ SegmentSealedImpl::vector_search(SearchInfo& search_info,
     AssertInfo(field_meta.is_vector(),
                "The meta type of vector field is not vector type");
     if (get_bit(binlog_index_bitset_, field_id)) {
+        LOG_SEGCORE_INFO_ << "using binlog index search : "<<std::to_string(field_id.get());
+        for (auto& it : vec_binlog_config_) {
+            LOG_SEGCORE_INFO_ << "vec_binlog_config_ has "<<std::to_string(it.first.get());
+        }
         AssertInfo(
             vec_binlog_config_.find(field_id) != vec_binlog_config_.end(),
             "The binlog params is not generate.");
@@ -1372,6 +1377,7 @@ SegmentSealedImpl::generate_binlog_index(const FieldId field_id) {
         field_meta.get_data_type() == DataType::VECTOR_FLOAT &&
         segcore_config_.get_enable_interim_segment_index()) {
         try {
+            LOG_SEGCORE_INFO_ << "begin to generate binlog index for "<<std::to_string(field_id.get());
             auto& field_index_meta =
                 col_index_meta_->GetFieldIndexMeta(field_id);
             auto& index_params = field_index_meta.GetIndexParams();
@@ -1410,7 +1416,7 @@ SegmentSealedImpl::generate_binlog_index(const FieldId field_id) {
 
             vec_binlog_config_[field_id] = std::move(field_binlog_config);
             set_bit(binlog_index_bitset_, field_id, true);
-
+            LOG_SEGCORE_INFO_ << "end of generate binlog index for "<<std::to_string(field_id.get());
             return true;
         } catch (std::exception& e) {
             return false;
