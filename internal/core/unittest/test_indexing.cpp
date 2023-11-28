@@ -766,8 +766,9 @@ class IndexTestV2 : public ::testing::TestWithParam<Param> {
         };
 
         is_binary = is_binary_map[index_type];
-        int vec_size = DIM;
+        int vec_size;
         if (is_binary) {
+            vec_size = DIM / 8;
             vec_field_data_type = milvus::DataType::VECTOR_BINARY;
         } else {
             vec_size = DIM * 4;

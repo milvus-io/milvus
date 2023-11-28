@@ -46,10 +46,13 @@ void
 AppendMMapDirPath(CLoadFieldDataInfo c_load_field_data_info,
                   const char* dir_path);
 
-void 
+void
 SetUri(CLoadFieldDataInfo c_load_field_data_info, const char* uri);
 
-void SetStorageVersion(CLoadFieldDataInfo c_load_field_data_info, int64_t storage_version);
+void
+SetStorageVersion(CLoadFieldDataInfo c_load_field_data_info,
+                  int64_t storage_version);
+
 void
 EnableMmap(CLoadFieldDataInfo c_load_field_data_info,
            int64_t field_id,
