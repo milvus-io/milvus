@@ -302,7 +302,7 @@ func (g *getStatisticsTask) getStatisticsShard(ctx context.Context, nodeID int64
 			zap.Int64("nodeID", nodeID),
 			zap.String("reason", result.GetStatus().GetReason()))
 		globalMetaCache.DeprecateShardCache(g.request.GetDbName(), g.collectionName)
-		return fmt.Errorf("fail to get statistic, QueryNode ID=%d, reason=%s", nodeID, result.GetStatus().GetReason())
+		return errors.Wrapf(merr.Error(result.GetStatus()), "fail to get statistic on QueryNode ID=%d", nodeID)
 	}
 	g.resultBuf.Insert(result)
 
