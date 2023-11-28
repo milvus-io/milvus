@@ -1302,7 +1302,7 @@ func genSimpleRowIDField(numRows int) []int64 {
 
 func genSimpleRetrievePlan(collection *Collection) (*RetrievePlan, error) {
 	timestamp := storage.Timestamp(1000)
-	planBytes, err := genSimpleRetrievePlanExpr(collection.schema)
+	planBytes, err := genSimpleRetrievePlanExpr(collection.schema.Load())
 	if err != nil {
 		return nil, err
 	}

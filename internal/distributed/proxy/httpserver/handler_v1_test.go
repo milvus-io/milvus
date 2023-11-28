@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -21,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -1788,4 +1791,44 @@ func getFieldSchema() []*schemapb.FieldSchema {
 	}
 
 	return fields
+}
+
+func TestInterceptor(t *testing.T) {
+	h := Handlers{}
+	v := atomic.NewInt32(0)
+	h.interceptors = []RestRequestInterceptor{
+		func(ctx context.Context, ginCtx *gin.Context, req any, handler func(reqCtx context.Context, req any) (any, error)) (any, error) {
+			log.Info("pre1")
+			v.Add(1)
+			assert.EqualValues(t, 1, v.Load())
+			res, err := handler(ctx, req)
+			log.Info("post1")
+			v.Add(1)
+			assert.EqualValues(t, 6, v.Load())
+			return res, err
+		},
+		func(ctx context.Context, ginCtx *gin.Context, req any, handler func(reqCtx context.Context, req any) (any, error)) (any, error) {
+			log.Info("pre2")
+			v.Add(1)
+			assert.EqualValues(t, 2, v.Load())
+			res, err := handler(ctx, req)
+			log.Info("post2")
+			v.Add(1)
+			assert.EqualValues(t, 5, v.Load())
+			return res, err
+		},
+		func(ctx context.Context, ginCtx *gin.Context, req any, handler func(reqCtx context.Context, req any) (any, error)) (any, error) {
+			log.Info("pre3")
+			v.Add(1)
+			assert.EqualValues(t, 3, v.Load())
+			res, err := handler(ctx, req)
+			log.Info("post3")
+			v.Add(1)
+			assert.EqualValues(t, 4, v.Load())
+			return res, err
+		},
+	}
+	_, _ = h.executeRestRequestInterceptor(context.Background(), nil, &milvuspb.CreateCollectionRequest{}, func(reqCtx context.Context, req any) (any, error) {
+		return &commonpb.Status{}, nil
+	})
 }

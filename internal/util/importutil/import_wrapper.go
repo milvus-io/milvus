@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
@@ -149,17 +150,17 @@ func NewImportWrapper(ctx context.Context, collectionInfo *CollectionInfo, segme
 func (p *ImportWrapper) SetCallbackFunctions(assignSegmentFunc AssignSegmentFunc, createBinlogsFunc CreateBinlogsFunc, saveSegmentFunc SaveSegmentFunc) error {
 	if assignSegmentFunc == nil {
 		log.Warn("import wrapper: callback function AssignSegmentFunc is nil")
-		return fmt.Errorf("callback function AssignSegmentFunc is nil")
+		return merr.WrapErrImportFailed("callback function AssignSegmentFunc is nil")
 	}
 
 	if createBinlogsFunc == nil {
 		log.Warn("import wrapper: callback function CreateBinlogsFunc is nil")
-		return fmt.Errorf("callback function CreateBinlogsFunc is nil")
+		return merr.WrapErrImportFailed("callback function CreateBinlogsFunc is nil")
 	}
 
 	if saveSegmentFunc == nil {
 		log.Warn("import wrapper: callback function SaveSegmentFunc is nil")
-		return fmt.Errorf("callback function SaveSegmentFunc is nil")
+		return merr.WrapErrImportFailed("callback function SaveSegmentFunc is nil")
 	}
 
 	p.assignSegmentFunc = assignSegmentFunc
@@ -190,7 +191,7 @@ func (p *ImportWrapper) fileValidation(filePaths []string) (bool, error) {
 		// only allow json file, numpy file and csv file
 		if fileType != JSONFileExt && fileType != NumpyFileExt && fileType != CSVFileExt {
 			log.Warn("import wrapper: unsupported file type", zap.String("filePath", filePath))
-			return false, fmt.Errorf("unsupported file type: '%s'", filePath)
+			return false, merr.WrapErrImportFailed(fmt.Sprintf("unsupported file type: '%s'", filePath))
 		}
 
 		// we use the first file to determine row-based or column-based
@@ -203,12 +204,12 @@ func (p *ImportWrapper) fileValidation(filePaths []string) (bool, error) {
 		if rowBased {
 			if fileType != JSONFileExt && fileType != CSVFileExt {
 				log.Warn("import wrapper: unsupported file type for row-based mode", zap.String("filePath", filePath))
-				return rowBased, fmt.Errorf("unsupported file type for row-based mode: '%s'", filePath)
+				return rowBased, merr.WrapErrImportFailed(fmt.Sprintf("unsupported file type for row-based mode: '%s'", filePath))
 			}
 		} else {
 			if fileType != NumpyFileExt {
 				log.Warn("import wrapper: unsupported file type for column-based mode", zap.String("filePath", filePath))
-				return rowBased, fmt.Errorf("unsupported file type for column-based mode: '%s'", filePath)
+				return rowBased, merr.WrapErrImportFailed(fmt.Sprintf("unsupported file type for column-based mode: '%s'", filePath))
 			}
 		}
 
@@ -216,7 +217,7 @@ func (p *ImportWrapper) fileValidation(filePaths []string) (bool, error) {
 		_, ok := fileNames[name]
 		if ok {
 			log.Warn("import wrapper: duplicate file name", zap.String("filePath", filePath))
-			return rowBased, fmt.Errorf("duplicate file: '%s'", filePath)
+			return rowBased, merr.WrapErrImportFailed(fmt.Sprintf("duplicate file: '%s'", filePath))
 		}
 		fileNames[name] = struct{}{}
 
@@ -224,20 +225,20 @@ func (p *ImportWrapper) fileValidation(filePaths []string) (bool, error) {
 		size, err := p.chunkManager.Size(p.ctx, filePath)
 		if err != nil {
 			log.Warn("import wrapper: failed to get file size", zap.String("filePath", filePath), zap.Error(err))
-			return rowBased, fmt.Errorf("failed to get file size of '%s', error:%w", filePath, err)
+			return rowBased, merr.WrapErrImportFailed(fmt.Sprintf("failed to get file size of '%s', error:%v", filePath, err))
 		}
 
 		// empty file
 		if size == 0 {
 			log.Warn("import wrapper: file size is zero", zap.String("filePath", filePath))
-			return rowBased, fmt.Errorf("the file '%s' size is zero", filePath)
+			return rowBased, merr.WrapErrImportFailed(fmt.Sprintf("the file '%s' size is zero", filePath))
 		}
 
 		if size > params.Params.CommonCfg.ImportMaxFileSize.GetAsInt64() {
 			log.Warn("import wrapper: file size exceeds the maximum size", zap.String("filePath", filePath),
 				zap.Int64("fileSize", size), zap.String("MaxFileSize", params.Params.CommonCfg.ImportMaxFileSize.GetValue()))
-			return rowBased, fmt.Errorf("the file '%s' size exceeds the maximum size: %s bytes",
-				filePath, params.Params.CommonCfg.ImportMaxFileSize.GetValue())
+			return rowBased, merr.WrapErrImportFailed(fmt.Sprintf("the file '%s' size exceeds the maximum size: %s bytes",
+				filePath, params.Params.CommonCfg.ImportMaxFileSize.GetValue()))
 		}
 		totalSize += size
 	}
@@ -567,7 +568,7 @@ func (p *ImportWrapper) flushFunc(fields BlockData, shardID int, partitionID int
 		if err != nil {
 			logFields = append(logFields, zap.Error(err))
 			log.Warn("import wrapper: failed to assign a new segment", logFields...)
-			return fmt.Errorf("failed to assign a new segment for shard id %d, error: %w", shardID, err)
+			return merr.WrapErrImportFailed(fmt.Sprintf("failed to assign a new segment for shard id %d, error: %v", shardID, err))
 		}
 
 		segment = &WorkingSegment{
@@ -589,8 +590,8 @@ func (p *ImportWrapper) flushFunc(fields BlockData, shardID int, partitionID int
 		logFields = append(logFields, zap.Error(err), zap.Int64("segmentID", segment.segmentID),
 			zap.String("targetChannel", segment.targetChName))
 		log.Warn("import wrapper: failed to save binlogs", logFields...)
-		return fmt.Errorf("failed to save binlogs, shard id %d, segment id %d, channel '%s', error: %w",
-			shardID, segment.segmentID, segment.targetChName, err)
+		return merr.WrapErrImportFailed(fmt.Sprintf("failed to save binlogs, shard id %d, segment id %d, channel '%s', error: %v",
+			shardID, segment.segmentID, segment.targetChName, err))
 	}
 
 	segment.fieldsInsert = append(segment.fieldsInsert, fieldsInsert...)
@@ -630,8 +631,8 @@ func (p *ImportWrapper) closeWorkingSegment(segment *WorkingSegment) error {
 	if err != nil {
 		logFields = append(logFields, zap.Error(err))
 		log.Warn("import wrapper: failed to seal segment", logFields...)
-		return fmt.Errorf("failed to seal segment, shard id %d, segment id %d, channel '%s', error: %w",
-			segment.shardID, segment.segmentID, segment.targetChName, err)
+		return merr.WrapErrImportFailed(fmt.Sprintf("failed to seal segment, shard id %d, segment id %d, channel '%s', error: %v",
+			segment.shardID, segment.segmentID, segment.targetChName, err))
 	}
 
 	return nil
