@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <boost/filesystem.hpp>
+#include <memory>
 #include <mutex>
 #include <utility>
 
@@ -117,48 +118,30 @@ DiskFileManagerImpl::AddFile(const std::string& file) noexcept {
     std::vector<int64_t> local_file_offsets;
 
     int slice_num = 0;
-    if (space_ != nullptr) {
-        for (int64_t offset = 0; offset < fileSize; slice_num++) {
-            auto batch_size =
-                std::min(FILE_SLICE_SIZE, int64_t(fileSize) - offset);
-            batch_remote_files.emplace_back(
-                GetRemoteIndexPath(fileName, slice_num));
-            remote_file_sizes.emplace_back(batch_size);
-            local_file_offsets.emplace_back(offset);
-            offset += batch_size;
-        }
-        return AddFileUsingSpace(fileName,
-                                 local_file_offsets,
-                                 batch_remote_files,
-                                 remote_file_sizes);
-    } else {
-        auto parallel_degree =
-            uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
-        for (int64_t offset = 0; offset < fileSize; slice_num++) {
-            if (batch_remote_files.size() >= parallel_degree) {
-                AddBatchIndexFiles(file,
-                                   local_file_offsets,
-                                   batch_remote_files,
-                                   remote_file_sizes);
-                batch_remote_files.clear();
-                remote_file_sizes.clear();
-                local_file_offsets.clear();
-            }
-
-            auto batch_size =
-                std::min(FILE_SLICE_SIZE, int64_t(fileSize) - offset);
-            batch_remote_files.emplace_back(
-                GetRemoteIndexPath(fileName, slice_num));
-            remote_file_sizes.emplace_back(batch_size);
-            local_file_offsets.emplace_back(offset);
-            offset += batch_size;
-        }
-        if (batch_remote_files.size() > 0) {
+    auto parallel_degree =
+        uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+    for (int64_t offset = 0; offset < fileSize; slice_num++) {
+        if (batch_remote_files.size() >= parallel_degree) {
             AddBatchIndexFiles(file,
                                local_file_offsets,
                                batch_remote_files,
+
                                remote_file_sizes);
+            batch_remote_files.clear();
+            remote_file_sizes.clear();
+            local_file_offsets.clear();
         }
+
+        auto batch_size = std::min(FILE_SLICE_SIZE, int64_t(fileSize) - offset);
+        batch_remote_files.emplace_back(
+            GetRemoteIndexPath(fileName, slice_num));
+        remote_file_sizes.emplace_back(batch_size);
+        local_file_offsets.emplace_back(offset);
+        offset += batch_size;
+    }
+    if (batch_remote_files.size() > 0) {
+        AddBatchIndexFiles(
+            file, local_file_offsets, batch_remote_files, remote_file_sizes);
     }
     FILEMANAGER_CATCH
     FILEMANAGER_END
@@ -208,15 +191,15 @@ DiskFileManagerImpl::AddBatchIndexFiles(
     }
 
     std::map<std::string, int64_t> res;
-    if (rcm_ != nullptr) {
-        res = PutIndexData(rcm_.get(),
+    if (space_ != nullptr) {
+        res = PutIndexData(space_,
                            data_slices,
                            remote_file_sizes,
                            remote_files,
                            field_meta_,
                            index_meta_);
     } else {
-        res = PutIndexData(space_,
+        res = PutIndexData(rcm_.get(),
                            data_slices,
                            remote_file_sizes,
                            remote_files,
@@ -229,23 +212,31 @@ DiskFileManagerImpl::AddBatchIndexFiles(
 }
 
 void
-DiskFileManagerImpl::CacheIndexToDiskV2() {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+DiskFileManagerImpl::CacheIndexToDisk() {
     auto blobs = space_->StatisticsBlobs();
     std::vector<std::string> remote_files;
     for (auto& blob : blobs) {
-        remote_files.emplace_back(blob.name);
+        remote_files.push_back(blob.name);
     }
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+
     std::map<std::string, std::vector<int>> index_slices;
     for (auto& file_path : remote_files) {
         auto pos = file_path.find_last_of("_");
         index_slices[file_path.substr(0, pos)].emplace_back(
             std::stoi(file_path.substr(pos + 1)));
     }
+
     for (auto& slices : index_slices) {
         std::sort(slices.second.begin(), slices.second.end());
     }
+
+    auto EstimateParallelDegree = [&](const std::string& file) -> uint64_t {
+        auto fileSize = space_->GetBlobByteSize(file);
+        return uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / fileSize.value());
+    };
+
     for (auto& slices : index_slices) {
         auto prefix = slices.first;
         auto local_index_file_name =
@@ -253,8 +244,27 @@ DiskFileManagerImpl::CacheIndexToDiskV2() {
             prefix.substr(prefix.find_last_of('/') + 1);
         local_chunk_manager->CreateFile(local_index_file_name);
         int64_t offset = 0;
+        std::vector<std::string> batch_remote_files;
+        uint64_t max_parallel_degree = INT_MAX;
         for (int& iter : slices.second) {
-            space_->ReadBlob(blob.name, void* target)
+            if (batch_remote_files.size() == max_parallel_degree) {
+                auto next_offset = CacheBatchIndexFilesToDiskV2(
+                    batch_remote_files, local_index_file_name, offset);
+                offset = next_offset;
+                batch_remote_files.clear();
+            }
+            auto origin_file = prefix + "_" + std::to_string(iter);
+            if (batch_remote_files.size() == 0) {
+                // Use first file size as average size to estimate
+                max_parallel_degree = EstimateParallelDegree(origin_file);
+            }
+            batch_remote_files.push_back(origin_file);
+        }
+        if (batch_remote_files.size() > 0) {
+            auto next_offset = CacheBatchIndexFilesToDiskV2(
+                batch_remote_files, local_index_file_name, offset);
+            offset = next_offset;
+            batch_remote_files.clear();
         }
         local_paths_.emplace_back(local_index_file_name);
     }
@@ -340,6 +350,30 @@ DiskFileManagerImpl::CacheBatchIndexFilesToDisk(
     return offset;
 }
 
+uint64_t
+DiskFileManagerImpl::CacheBatchIndexFilesToDiskV2(
+    const std::vector<std::string>& remote_files,
+    const std::string& local_file_name,
+    uint64_t local_file_init_offfset) {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto index_datas = GetObjectData(space_, remote_files);
+    int batch_size = remote_files.size();
+    AssertInfo(index_datas.size() == batch_size,
+               "inconsistent file num and index data num!");
+
+    uint64_t offset = local_file_init_offfset;
+    for (int i = 0; i < batch_size; ++i) {
+        auto index_data = index_datas[i];
+        auto index_size = index_data->Size();
+        auto uint8_data =
+            reinterpret_cast<uint8_t*>(const_cast<void*>(index_data->Data()));
+        local_chunk_manager->Write(
+            local_file_name, offset, uint8_data, index_size);
+        offset += index_size;
+    }
+    return offset;
+}
 std::string
 DiskFileManagerImpl::CacheRawDataToDisk(
     std::shared_ptr<milvus_storage::Space> space) {
@@ -358,7 +392,7 @@ DiskFileManagerImpl::CacheRawDataToDisk(
     uint32_t dim = 0;
     int64_t write_offset = sizeof(num_rows) + sizeof(dim);
     auto res = space->ScanData();
-    if (res.ok()) {
+    if (!res.ok()) {
         PanicInfo(IndexBuildError,
                   fmt::format("failed to create scan iterator: {}",
                               res.status().ToString()));
@@ -375,9 +409,11 @@ DiskFileManagerImpl::CacheRawDataToDisk(
             break;
         }
         auto total_num_rows = data->num_rows();
+        num_rows += total_num_rows;
         auto col_data = data->GetColumnByName(index_meta_.field_name);
         auto field_data = storage::CreateFieldData(
             index_meta_.field_type, index_meta_.dim, total_num_rows);
+        field_data->FillFieldData(col_data);
         dim = field_data->get_dim();
         auto data_size =
             field_data->get_num_rows() * index_meta_.dim * sizeof(float);

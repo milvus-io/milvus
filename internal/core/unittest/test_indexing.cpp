@@ -845,7 +845,13 @@ TEST_P(IndexTestV2, BuildAndQuery) {
     index::IndexBasePtr index;
 
     milvus::storage::FieldDataMeta field_data_meta{1, 2, 3, 100};
-    milvus::storage::IndexMeta index_meta{3, 100, 1000, 1};
+    milvus::storage::IndexMeta index_meta{.segment_id = 3,
+                                          .field_id = 100,
+                                          .build_id = 1000,
+                                          .index_version = 1,
+                                          .field_name = "vec",
+                                          .field_type = vec_field_data_type,
+                                          .dim = DIM};
     auto chunk_manager = milvus::storage::CreateChunkManager(storage_config_);
     milvus::storage::FileManagerContext file_manager_context(
         field_data_meta, index_meta, chunk_manager, space);

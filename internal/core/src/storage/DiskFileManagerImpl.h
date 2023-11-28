@@ -78,7 +78,7 @@ class DiskFileManagerImpl : public FileManagerImpl {
     CacheIndexToDisk(const std::vector<std::string>& remote_files);
 
     void
-    CacheIndexToDiskV2();
+    CacheIndexToDisk();
 
     uint64_t
     CacheBatchIndexFilesToDisk(const std::vector<std::string>& remote_files,

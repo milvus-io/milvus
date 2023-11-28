@@ -228,7 +228,11 @@ IndexFactory::CreateVectorIndex(
         switch (data_type) {
             case DataType::VECTOR_FLOAT: {
                 return std::make_unique<VectorDiskAnnIndex<float>>(
-                    index_type, metric_type, version, file_manager_context);
+                    index_type,
+                    metric_type,
+                    version,
+                    space,
+                    file_manager_context);
             }
             default:
                 throw SegcoreError(

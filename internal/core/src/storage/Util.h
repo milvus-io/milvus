@@ -88,6 +88,10 @@ std::unique_ptr<DataCodec>
 DownloadAndDecodeRemoteFile(ChunkManager* chunk_manager,
                             const std::string& file);
 
+std::unique_ptr<DataCodec>
+DownloadAndDecodeRemoteFileV2(std::shared_ptr<milvus_storage::Space> space,
+                              const std::string& file);
+
 std::pair<std::string, size_t>
 EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
                           uint8_t* buf,
@@ -117,8 +121,7 @@ GetObjectData(ChunkManager* remote_chunk_manager,
 
 std::vector<FieldDataPtr>
 GetObjectData(std::shared_ptr<milvus_storage::Space> space,
-              const std::vector<std::string>& remote_files,
-              const IndexMeta& index_meta);
+              const std::vector<std::string>& remote_files);
 
 std::map<std::string, int64_t>
 PutIndexData(ChunkManager* remote_chunk_manager,

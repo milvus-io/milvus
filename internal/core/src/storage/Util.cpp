@@ -415,6 +415,22 @@ DownloadAndDecodeRemoteFile(ChunkManager* chunk_manager,
     return DeserializeFileData(buf, fileSize);
 }
 
+std::unique_ptr<DataCodec>
+DownloadAndDecodeRemoteFileV2(std::shared_ptr<milvus_storage::Space> space,
+                              const std::string& file) {
+    auto fileSize = space->GetBlobByteSize(file);
+    if (!fileSize.ok()) {
+        PanicInfo(FileReadFailed, fileSize.status().ToString());
+    }
+    auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize.value()]);
+    auto status = space->ReadBlob(file, buf.get());
+    if (!status.ok()) {
+        PanicInfo(FileReadFailed, status.ToString());
+    }
+
+    return DeserializeFileData(buf, fileSize.value());
+}
+
 std::pair<std::string, size_t>
 EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
                           uint8_t* buf,
@@ -495,39 +511,18 @@ GetObjectData(ChunkManager* remote_chunk_manager,
 
 std::vector<FieldDataPtr>
 GetObjectData(std::shared_ptr<milvus_storage::Space> space,
-              const std::vector<std::string>& remote_files,
-              const IndexMeta& index_meta) {
+              const std::vector<std::string>& remote_files) {
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
-    std::vector<std::future<std::vector<FieldDataPtr>>> futures;
-    auto downloadFile =
-        [&](const std::string& file) -> std::vector<FieldDataPtr> {
-        auto res = space->ScanData();
-        if (!res.ok()) {
-            PanicInfo(DataFormatBroken, "failed to create scan iterator");
-        }
-        auto reader = res.value();
-        std::vector<FieldDataPtr> datas;
-        for (auto rec = reader->Next(); rec != nullptr; rec = reader->Next()) {
-            if (!rec.ok()) {
-                PanicInfo(DataFormatBroken, "failed to read data");
-            }
-            auto data = rec.ValueUnsafe();
-            auto total_num_rows = data->num_rows();
-            auto col_data = data->GetColumnByName(index_meta.field_name);
-            auto field_data = storage::CreateFieldData(
-                index_meta.field_type, index_meta.dim, total_num_rows);
-            datas.push_back(field_data);
-        }
-        return datas;
-    };
+    std::vector<std::future<std::unique_ptr<DataCodec>>> futures;
     for (auto& file : remote_files) {
-        futures.emplace_back(pool.Submit(downloadFile, file));
+        futures.emplace_back(
+            pool.Submit(DownloadAndDecodeRemoteFileV2, space, file));
     }
 
     std::vector<FieldDataPtr> datas;
     for (int i = 0; i < futures.size(); ++i) {
         auto res = futures[i].get();
-        datas.insert(datas.end(), res.begin(), res.end());
+        datas.emplace_back(res->GetFieldData());
     }
     ReleaseArrowUnused();
     return datas;

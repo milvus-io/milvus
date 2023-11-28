@@ -35,6 +35,14 @@ class VectorDiskAnnIndex : public VectorIndex {
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());
 
+    explicit VectorDiskAnnIndex(
+        const IndexType& index_type,
+        const MetricType& metric_type,
+        const IndexVersion& version,
+        std::shared_ptr<milvus_storage::Space> space,
+        const storage::FileManagerContext& file_manager_context =
+            storage::FileManagerContext());
+
     BinarySet
     Serialize(const Config& config) override {  // deprecated
         BinarySet binary_set;

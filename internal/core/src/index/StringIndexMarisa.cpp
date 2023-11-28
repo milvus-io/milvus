@@ -84,6 +84,7 @@ StringIndexMarisa::BuildV2(const Config& config) {
         auto col_data = data->GetColumnByName(field_name.value());
         auto field_data =
             storage::CreateFieldData(DataType::STRING, 0, total_num_rows);
+        field_data->FillFieldData(col_data);
         field_datas.push_back(field_data);
     }
     int64_t total_num_rows = 0;
