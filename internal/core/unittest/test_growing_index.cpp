@@ -125,6 +125,20 @@ TEST(GrowingIndex, Correctness) {
     }
 }
 
+TEST(GrowingIndex, MissIndexMeta) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto random = schema->AddDebugField("random", DataType::DOUBLE);
+    auto vec = schema->AddDebugField(
+        "embeddings", DataType::VECTOR_FLOAT, 128, knowhere::metric::L2);
+    schema->set_primary_field_id(pk);
+
+    auto& config = SegcoreConfig::default_config();
+    config.set_chunk_rows(1024);
+    config.set_enable_interim_segment_index(true);
+    auto segment = CreateGrowingSegment(schema, nullptr);
+}
+
 using Param = const char*;
 
 class GrowingIndexGetVectorTest : public ::testing::TestWithParam<Param> {

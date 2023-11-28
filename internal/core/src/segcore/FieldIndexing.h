@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <optional>
 #include <map>
 #include <memory>
@@ -24,6 +25,7 @@
 #include "common/Schema.h"
 #include "common/IndexMeta.h"
 #include "IndexConfigGenerator.h"
+#include "log/Log.h"
 #include "segcore/SegcoreConfig.h"
 #include "index/VectorIndex.h"
 
@@ -246,6 +248,12 @@ class IndexingRecord {
                 segcore_config_.get_enable_interim_segment_index()) {
                 // TODO: skip binary small index now, reenable after config.yaml is ready
                 if (field_meta.get_data_type() == DataType::VECTOR_BINARY) {
+                    continue;
+                }
+
+                if (index_meta_ == nullptr) {
+                    LOG_SEGCORE_INFO_
+                        << "miss index meta for growing interim index";
                     continue;
                 }
                 //Small-Index enabled, create index for vector field only
