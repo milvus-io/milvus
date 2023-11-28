@@ -68,7 +68,7 @@ TYPED_TEST_P(TypedScalarIndexTest, Count) {
                 create_index_info);
         auto scalar_index =
             dynamic_cast<milvus::index::ScalarIndex<T>*>(index.get());
-        auto arr = GenArr<T>(nb);
+        auto arr = GenSortedArr<T>(nb);
         scalar_index->Build(nb, arr.data());
         ASSERT_EQ(nb, scalar_index->Count());
     }
@@ -87,7 +87,7 @@ TYPED_TEST_P(TypedScalarIndexTest, In) {
                 create_index_info);
         auto scalar_index =
             dynamic_cast<milvus::index::ScalarIndex<T>*>(index.get());
-        auto arr = GenArr<T>(nb);
+        auto arr = GenSortedArr<T>(nb);
         scalar_index->Build(nb, arr.data());
         assert_in<T>(scalar_index, arr);
     }
@@ -106,7 +106,7 @@ TYPED_TEST_P(TypedScalarIndexTest, NotIn) {
                 create_index_info);
         auto scalar_index =
             dynamic_cast<milvus::index::ScalarIndex<T>*>(index.get());
-        auto arr = GenArr<T>(nb);
+        auto arr = GenSortedArr<T>(nb);
         scalar_index->Build(nb, arr.data());
         assert_not_in<T>(scalar_index, arr);
     }
@@ -125,7 +125,7 @@ TYPED_TEST_P(TypedScalarIndexTest, Reverse) {
                 create_index_info);
         auto scalar_index =
             dynamic_cast<milvus::index::ScalarIndex<T>*>(index.get());
-        auto arr = GenArr<T>(nb);
+        auto arr = GenSortedArr<T>(nb);
         scalar_index->Build(nb, arr.data());
         assert_reverse<T>(scalar_index, arr);
     }
@@ -144,7 +144,7 @@ TYPED_TEST_P(TypedScalarIndexTest, Range) {
                 create_index_info);
         auto scalar_index =
             dynamic_cast<milvus::index::ScalarIndex<T>*>(index.get());
-        auto arr = GenArr<T>(nb);
+        auto arr = GenSortedArr<T>(nb);
         scalar_index->Build(nb, arr.data());
         assert_range<T>(scalar_index, arr);
     }
@@ -163,7 +163,7 @@ TYPED_TEST_P(TypedScalarIndexTest, Codec) {
                 create_index_info);
         auto scalar_index =
             dynamic_cast<milvus::index::ScalarIndex<T>*>(index.get());
-        auto arr = GenArr<T>(nb);
+        auto arr = GenSortedArr<T>(nb);
         scalar_index->Build(nb, arr.data());
 
         auto binary_set = index->Serialize(nullptr);

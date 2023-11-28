@@ -70,12 +70,14 @@ class IndexFactory {
     ScalarIndexPtr<T>
     CreateScalarIndex(const IndexType& index_type,
                       const storage::FileManagerContext& file_manager_context =
-                          storage::FileManagerContext());
+                          storage::FileManagerContext(),
+                      DataType d_type = DataType::NONE);
 };
 
 template <>
 ScalarIndexPtr<std::string>
 IndexFactory::CreateScalarIndex<std::string>(
     const IndexType& index_type,
-    const storage::FileManagerContext& file_manager_context);
+    const storage::FileManagerContext& file_manager_context,
+    DataType d_type);
 }  // namespace milvus::index

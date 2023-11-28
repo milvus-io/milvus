@@ -26,6 +26,9 @@ ScalarIndexCreator::ScalarIndexCreator(
     const storage::FileManagerContext& file_manager_context)
     : dtype_(dtype), config_(config) {
     milvus::index::CreateIndexInfo index_info;
+    if (config.contains("index_type")) {
+        index_type_ = config.at("index_type").get<std::string>();
+    }
     index_info.field_type = dtype_;
     index_info.index_type = index_type();
     index_ = index::IndexFactory::GetInstance().CreateIndex(
@@ -56,8 +59,7 @@ ScalarIndexCreator::Load(const milvus::BinarySet& binary_set) {
 
 std::string
 ScalarIndexCreator::index_type() {
-    // TODO
-    return "sort";
+    return index_type_;
 }
 
 BinarySet

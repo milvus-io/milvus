@@ -49,6 +49,7 @@ class ScalarIndexCreator : public IndexCreatorBase {
     index::IndexBasePtr index_ = nullptr;
     Config config_;
     DataType dtype_;
+    IndexType index_type_;
 };
 
 using ScalarIndexCreatorPtr = std::unique_ptr<ScalarIndexCreator>;

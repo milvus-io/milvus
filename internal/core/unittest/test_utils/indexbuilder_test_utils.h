@@ -348,7 +348,7 @@ template <typename T,
           typename = typename std::enable_if_t<std::is_arithmetic_v<T> ||
                                                std::is_same_v<T, std::string>>>
 inline std::vector<T>
-GenArr(int64_t n) {
+GenSortedArr(int64_t n) {
     auto max_i8 = std::numeric_limits<int8_t>::max() - 1;
     std::vector<T> arr;
     arr.resize(n);
@@ -374,7 +374,7 @@ GenStrArr(int64_t n) {
 
 template <>
 inline std::vector<std::string>
-GenArr<std::string>(int64_t n) {
+GenSortedArr<std::string>(int64_t n) {
     return GenStrArr(n);
 }
 

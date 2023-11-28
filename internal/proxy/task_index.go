@@ -160,6 +160,8 @@ func (cit *createIndexTask) parseIndexParams() error {
 			if exist && !validateArithmeticIndexType(specifyIndexType) {
 				return merr.WrapErrParameterInvalid(DefaultArithmeticIndexType, specifyIndexType, "index type not match")
 			}
+		} else if typeutil.IsBoolType(cit.fieldSchema.DataType) {
+			// TODO: should we check something?
 		} else {
 			return merr.WrapErrParameterInvalid("supported field",
 				fmt.Sprintf("create index on %s field", cit.fieldSchema.DataType.String()),

@@ -248,12 +248,12 @@ func validatePartitionTag(partitionTag string, strictCheck bool) error {
 
 func validateStringIndexType(indexType string) bool {
 	// compatible with the index type marisa-trie of attu versions prior to 2.3.0
-	return indexType == DefaultStringIndexType || indexType == "marisa-trie"
+	return indexType == DefaultStringIndexType || indexType == "marisa-trie" || indexType == "inverted_index"
 }
 
 func validateArithmeticIndexType(indexType string) bool {
 	// compatible with the index type Asceneding of attu versions prior to 2.3.0
-	return indexType == DefaultArithmeticIndexType || indexType == "Asceneding"
+	return indexType == DefaultArithmeticIndexType || indexType == "Asceneding" || indexType == "inverted_index"
 }
 
 func validateFieldName(fieldName string) error {
