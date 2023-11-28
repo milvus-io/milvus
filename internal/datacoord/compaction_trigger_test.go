@@ -73,6 +73,10 @@ func (h *spyCompactionHandler) start() {}
 
 func (h *spyCompactionHandler) stop() {}
 
+func newMockVersionManager() IndexEngineVersionManager {
+	return &versionManagerImpl{}
+}
+
 var _ compactionPlanContext = (*spyCompactionHandler)(nil)
 
 func Test_compactionTrigger_force(t *testing.T) {
@@ -1294,6 +1298,7 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 				signals:                      tt.fields.signals,
 				compactionHandler:            tt.fields.compactionHandler,
 				globalTrigger:                tt.fields.globalTrigger,
+				indexEngineVersionManager:    newMockVersionManager(),
 				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
 				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
 				testingOnly:                  true,
@@ -1471,6 +1476,7 @@ func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
 				signals:                      tt.fields.signals,
 				compactionHandler:            tt.fields.compactionHandler,
 				globalTrigger:                tt.fields.globalTrigger,
+				indexEngineVersionManager:    newMockVersionManager(),
 				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
 				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
 				testingOnly:                  true,
@@ -1629,13 +1635,14 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tr := &compactionTrigger{
-				meta:              tt.fields.meta,
-				handler:           newMockHandlerWithMeta(tt.fields.meta),
-				allocator:         tt.fields.allocator,
-				signals:           tt.fields.signals,
-				compactionHandler: tt.fields.compactionHandler,
-				globalTrigger:     tt.fields.globalTrigger,
-				testingOnly:       true,
+				meta:                      tt.fields.meta,
+				handler:                   newMockHandlerWithMeta(tt.fields.meta),
+				allocator:                 tt.fields.allocator,
+				signals:                   tt.fields.signals,
+				compactionHandler:         tt.fields.compactionHandler,
+				globalTrigger:             tt.fields.globalTrigger,
+				indexEngineVersionManager: newMockVersionManager(),
+				testingOnly:               true,
 			}
 			tr.start()
 			defer tr.stop()
@@ -1678,7 +1685,7 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 
 // Test shouldDoSingleCompaction
 func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
-	trigger := newCompactionTrigger(&meta{}, &compactionPlanHandler{}, newMockAllocator(), newMockHandler())
+	trigger := newCompactionTrigger(&meta{}, &compactionPlanHandler{}, newMockAllocator(), newMockHandler(), newIndexEngineVersionManager())
 
 	// Test too many deltalogs.
 	var binlogs []*datapb.FieldBinlog
@@ -1816,6 +1823,77 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	// deltalog is large enough, should do compaction
 	couldDo = trigger.ShouldDoSingleCompaction(info3, false, &compactTime{})
 	assert.True(t, couldDo)
+
+	mockVersionManager := NewMockVersionManager(t)
+	mockVersionManager.On("GetCurrentIndexEngineVersion", mock.Anything).Return(int32(2), nil)
+	trigger.indexEngineVersionManager = mockVersionManager
+	info4 := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             1,
+			CollectionID:   2,
+			PartitionID:    1,
+			LastExpireTime: 600,
+			NumOfRows:      10000,
+			MaxRowNum:      300,
+			InsertChannel:  "ch1",
+			State:          commonpb.SegmentState_Flushed,
+			Binlogs:        binlogs2,
+		},
+		segmentIndexes: map[UniqueID]*model.SegmentIndex{
+			101: {
+				CurrentIndexVersion: 1,
+				IndexFileKeys:       []string{"index1"},
+			},
+		},
+	}
+	info5 := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             1,
+			CollectionID:   2,
+			PartitionID:    1,
+			LastExpireTime: 600,
+			NumOfRows:      10000,
+			MaxRowNum:      300,
+			InsertChannel:  "ch1",
+			State:          commonpb.SegmentState_Flushed,
+			Binlogs:        binlogs2,
+		},
+		segmentIndexes: map[UniqueID]*model.SegmentIndex{
+			101: {
+				CurrentIndexVersion: 2,
+				IndexFileKeys:       []string{"index1"},
+			},
+		},
+	}
+	info6 := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             1,
+			CollectionID:   2,
+			PartitionID:    1,
+			LastExpireTime: 600,
+			NumOfRows:      10000,
+			MaxRowNum:      300,
+			InsertChannel:  "ch1",
+			State:          commonpb.SegmentState_Flushed,
+			Binlogs:        binlogs2,
+		},
+		segmentIndexes: map[UniqueID]*model.SegmentIndex{
+			101: {
+				CurrentIndexVersion: 1,
+				IndexFileKeys:       nil,
+			},
+		},
+	}
+
+	// expire time < Timestamp To, but index engine version is 2 which is larger than CurrentIndexVersion in segmentIndex
+	couldDo = trigger.ShouldDoSingleCompaction(info4, false, &compactTime{expireTime: 300})
+	assert.True(t, couldDo)
+	// expire time < Timestamp To, and index engine version is 2 which is equal CurrentIndexVersion in segmentIndex
+	couldDo = trigger.ShouldDoSingleCompaction(info5, false, &compactTime{expireTime: 300})
+	assert.False(t, couldDo)
+	// expire time < Timestamp To, and index engine version is 2 which is larger than CurrentIndexVersion in segmentIndex but indexFileKeys is nil
+	couldDo = trigger.ShouldDoSingleCompaction(info6, false, &compactTime{expireTime: 300})
+	assert.False(t, couldDo)
 }
 
 func Test_compactionTrigger_new(t *testing.T) {
@@ -1839,7 +1917,7 @@ func Test_compactionTrigger_new(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := newCompactionTrigger(tt.args.meta, tt.args.compactionHandler, tt.args.allocator, newMockHandler())
+			got := newCompactionTrigger(tt.args.meta, tt.args.compactionHandler, tt.args.allocator, newMockHandler(), newMockVersionManager())
 			assert.Equal(t, tt.args.meta, got.meta)
 			assert.Equal(t, tt.args.compactionHandler, got.compactionHandler)
 			assert.Equal(t, tt.args.allocator, got.allocator)
@@ -1848,7 +1926,7 @@ func Test_compactionTrigger_new(t *testing.T) {
 }
 
 func Test_compactionTrigger_handleSignal(t *testing.T) {
-	got := newCompactionTrigger(&meta{segments: NewSegmentsInfo()}, &compactionPlanHandler{}, newMockAllocator(), newMockHandler())
+	got := newCompactionTrigger(&meta{segments: NewSegmentsInfo()}, &compactionPlanHandler{}, newMockAllocator(), newMockHandler(), newMockVersionManager())
 	signal := &compactionSignal{
 		segmentID: 1,
 	}
@@ -1858,12 +1936,12 @@ func Test_compactionTrigger_handleSignal(t *testing.T) {
 }
 
 func Test_compactionTrigger_allocTs(t *testing.T) {
-	got := newCompactionTrigger(&meta{segments: NewSegmentsInfo()}, &compactionPlanHandler{}, newMockAllocator(), newMockHandler())
+	got := newCompactionTrigger(&meta{segments: NewSegmentsInfo()}, &compactionPlanHandler{}, newMockAllocator(), newMockHandler(), newMockVersionManager())
 	ts, err := got.allocTs()
 	assert.NoError(t, err)
 	assert.True(t, ts > 0)
 
-	got = newCompactionTrigger(&meta{segments: NewSegmentsInfo()}, &compactionPlanHandler{}, &FailsAllocator{}, newMockHandler())
+	got = newCompactionTrigger(&meta{segments: NewSegmentsInfo()}, &compactionPlanHandler{}, &FailsAllocator{}, newMockHandler(), newMockVersionManager())
 	ts, err = got.allocTs()
 	assert.Error(t, err)
 	assert.Equal(t, uint64(0), ts)
@@ -1895,7 +1973,7 @@ func Test_compactionTrigger_getCompactTime(t *testing.T) {
 			&Server{
 				meta: m,
 			},
-		})
+		}, newMockVersionManager())
 	coll := &collectionInfo{
 		ID:         1,
 		Schema:     newTestSchema(),
@@ -1925,6 +2003,7 @@ type CompactionTriggerSuite struct {
 	allocator         *NMockAllocator
 	handler           *NMockHandler
 	compactionHandler *MockCompactionPlanContext
+	versionManager    *MockVersionManager
 }
 
 func (s *CompactionTriggerSuite) SetupSuite() {
@@ -2046,11 +2125,13 @@ func (s *CompactionTriggerSuite) SetupTest() {
 	s.allocator = NewNMockAllocator(s.T())
 	s.compactionHandler = NewMockCompactionPlanContext(s.T())
 	s.handler = NewNMockHandler(s.T())
+	s.versionManager = NewMockVersionManager(s.T())
 	s.tr = newCompactionTrigger(
 		s.meta,
 		s.compactionHandler,
 		s.allocator,
 		s.handler,
+		s.versionManager,
 	)
 	s.tr.testingOnly = true
 }
