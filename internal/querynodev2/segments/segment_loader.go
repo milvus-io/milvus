@@ -968,6 +968,11 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 					predictDiskUsage += uint64(getBinlogDataSize(fieldBinlog))
 				} else {
 					predictMemUsage += uint64(getBinlogDataSize(fieldBinlog))
+					enableBinlogIndex := paramtable.Get().QueryNodeCfg.EnableTempSegmentIndex.GetAsBool()
+					if enableBinlogIndex {
+						buildBinlogIndexRate := paramtable.Get().QueryNodeCfg.InterimIndexMemExpandRate.GetAsFloat()
+						predictMemUsage += uint64(float32(getBinlogDataSize(fieldBinlog)) * float32(buildBinlogIndexRate))
+					}
 				}
 			}
 

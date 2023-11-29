@@ -176,7 +176,7 @@ func (s *BFWriteBufferSuite) TestAutoSync() {
 	s.Run("normal_auto_sync", func() {
 		wb, err := NewBFWriteBuffer(s.channelName, s.metacache, nil, s.syncMgr, &writeBufferOption{
 			syncPolicies: []SyncPolicy{
-				SyncFullBuffer,
+				GetFullBufferPolicy(),
 				GetSyncStaleBufferPolicy(paramtable.Get().DataNodeCfg.SyncPeriod.GetAsDuration(time.Second)),
 				GetFlushingSegmentsPolicy(s.metacache),
 			},
@@ -248,7 +248,7 @@ func (s *BFWriteBufferSuite) TestAutoSyncWithStorageV2() {
 	s.Run("normal_auto_sync", func() {
 		wb, err := NewBFWriteBuffer(s.channelName, s.metacache, s.storageV2Cache, s.syncMgr, &writeBufferOption{
 			syncPolicies: []SyncPolicy{
-				SyncFullBuffer,
+				GetFullBufferPolicy(),
 				GetSyncStaleBufferPolicy(paramtable.Get().DataNodeCfg.SyncPeriod.GetAsDuration(time.Second)),
 				GetFlushingSegmentsPolicy(s.metacache),
 			},

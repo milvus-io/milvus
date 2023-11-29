@@ -379,7 +379,7 @@ func (c *ClientBase[T]) checkGrpcErr(ctx context.Context, err error) (needRetry,
 		return false, false, merr.WrapErrServiceUnimplemented(err)
 	case IsServerIDMismatchErr(err):
 		if ok, err := c.checkNodeSessionExist(ctx); !ok {
-			// if session doesn't exist, no need to retry for datanode/indexnode/querynode
+			// if session doesn't exist, no need to retry for datanode/indexnode/querynode/proxy
 			return false, false, err
 		}
 		return true, true, err

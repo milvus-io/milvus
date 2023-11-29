@@ -92,16 +92,30 @@ func (b *ScoreBasedBalancer) convertToNodeItems(collectionID int64, nodeIDs []in
 }
 
 func (b *ScoreBasedBalancer) calculatePriority(collectionID, nodeID int64) int {
-	globalSegments := b.dist.SegmentDistManager.GetByNode(nodeID)
 	rowCount := 0
+	// calculate global sealed segment row count
+	globalSegments := b.dist.SegmentDistManager.GetByNode(nodeID)
 	for _, s := range globalSegments {
 		rowCount += int(s.GetNumOfRows())
 	}
 
-	collectionSegments := b.dist.SegmentDistManager.GetByCollectionAndNode(collectionID, nodeID)
+	// calculate global growing segment row count
+	views := b.dist.GetLeaderView(nodeID)
+	for _, view := range views {
+		rowCount += int(view.NumOfGrowingRows)
+	}
+
 	collectionRowCount := 0
+	// calculate collection sealed segment row count
+	collectionSegments := b.dist.SegmentDistManager.GetByCollectionAndNode(collectionID, nodeID)
 	for _, s := range collectionSegments {
 		collectionRowCount += int(s.GetNumOfRows())
+	}
+
+	// calculate collection growing segment row count
+	collectionViews := b.dist.LeaderViewManager.GetByCollectionAndNode(collectionID, nodeID)
+	for _, view := range collectionViews {
+		collectionRowCount += int(view.NumOfGrowingRows)
 	}
 	return collectionRowCount + int(float64(rowCount)*
 		params.Params.QueryCoordCfg.GlobalRowCountFactor.GetAsFloat())
