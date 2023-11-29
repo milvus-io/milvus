@@ -39,7 +39,6 @@ import (
 const (
 	JSONFileExt  = ".json"
 	NumpyFileExt = ".npy"
-	CSVFileExt   = ".csv"
 
 	// parsers read JSON/Numpy/CSV files buffer by buffer, this limitation is to define the buffer size.
 	ReadBufferSize = 16 * 1024 * 1024 // 16MB
@@ -189,20 +188,20 @@ func (p *ImportWrapper) fileValidation(filePaths []string) (bool, error) {
 		name, fileType := GetFileNameAndExt(filePath)
 
 		// only allow json file, numpy file and csv file
-		if fileType != JSONFileExt && fileType != NumpyFileExt && fileType != CSVFileExt {
+		if fileType != JSONFileExt && fileType != NumpyFileExt {
 			log.Warn("import wrapper: unsupported file type", zap.String("filePath", filePath))
 			return false, merr.WrapErrImportFailed(fmt.Sprintf("unsupported file type: '%s'", filePath))
 		}
 
 		// we use the first file to determine row-based or column-based
-		if i == 0 && (fileType == JSONFileExt || fileType == CSVFileExt) {
+		if i == 0 && fileType == JSONFileExt {
 			rowBased = true
 		}
 
 		// check file type
 		// row-based only support json and csv type, column-based only support numpy type
 		if rowBased {
-			if fileType != JSONFileExt && fileType != CSVFileExt {
+			if fileType != JSONFileExt {
 				log.Warn("import wrapper: unsupported file type for row-based mode", zap.String("filePath", filePath))
 				return rowBased, merr.WrapErrImportFailed(fmt.Sprintf("unsupported file type for row-based mode: '%s'", filePath))
 			}
@@ -278,12 +277,6 @@ func (p *ImportWrapper) Import(filePaths []string, options ImportOptions) error 
 				err = p.parseRowBasedJSON(filePath, options.OnlyValidate)
 				if err != nil {
 					log.Warn("import wrapper: failed to parse row-based json file", zap.Error(err), zap.String("filePath", filePath))
-					return err
-				}
-			} else if fileType == CSVFileExt {
-				err = p.parseRowBasedCSV(filePath, options.OnlyValidate)
-				if err != nil {
-					log.Warn("import wrapper: failed to parse row-based csv file", zap.Error(err), zap.String("filePath", filePath))
 					return err
 				}
 			} // no need to check else, since the fileValidation() already do this
@@ -461,54 +454,6 @@ func (p *ImportWrapper) parseRowBasedJSON(filePath string, onlyValidate bool) er
 	}
 
 	// for row-based files, auto-id is generated within JSONRowConsumer
-	p.importResult.AutoIds = append(p.importResult.AutoIds, consumer.IDRange()...)
-
-	tr.Elapse("parsed")
-	return nil
-}
-
-func (p *ImportWrapper) parseRowBasedCSV(filePath string, onlyValidate bool) error {
-	tr := timerecord.NewTimeRecorder("csv row-based parser: " + filePath)
-
-	file, err := p.chunkManager.Reader(p.ctx, filePath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	size, err := p.chunkManager.Size(p.ctx, filePath)
-	if err != nil {
-		return err
-	}
-	// csv parser
-	reader := bufio.NewReader(file)
-	parser, err := NewCSVParser(p.ctx, p.collectionInfo, p.updateProgressPercent)
-	if err != nil {
-		return err
-	}
-
-	// if only validate, we input a empty flushFunc so that the consumer do nothing but only validation.
-	var flushFunc ImportFlushFunc
-	if onlyValidate {
-		flushFunc = func(fields BlockData, shardID int, partitionID int64) error {
-			return nil
-		}
-	} else {
-		flushFunc = func(fields BlockData, shardID int, partitionID int64) error {
-			filePaths := []string{filePath}
-			printFieldsDataInfo(fields, "import wrapper: prepare to flush binlogs", filePaths)
-			return p.flushFunc(fields, shardID, partitionID)
-		}
-	}
-
-	consumer, err := NewCSVRowConsumer(p.ctx, p.collectionInfo, p.rowIDAllocator, p.binlogSize, flushFunc)
-	if err != nil {
-		return err
-	}
-
-	err = parser.ParseRows(&IOReader{r: reader, fileSize: size}, consumer)
-	if err != nil {
-		return err
-	}
 	p.importResult.AutoIds = append(p.importResult.AutoIds, consumer.IDRange()...)
 
 	tr.Elapse("parsed")

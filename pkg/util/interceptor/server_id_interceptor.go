@@ -34,7 +34,7 @@ type GetServerIDFunc func() int64
 // ServerIDValidationUnaryServerInterceptor returns a new unary server interceptor that
 // verifies whether the target server ID of request matches with the server's ID and rejects it accordingly.
 func ServerIDValidationUnaryServerInterceptor(fn GetServerIDFunc) grpc.UnaryServerInterceptor {
-	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		md, ok := metadata.FromIncomingContext(ctx)
 		if !ok {
 			return handler(ctx, req)

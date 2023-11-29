@@ -192,6 +192,39 @@ func (_c *MockCompactionPlanContext_isFull_Call) RunAndReturn(run func() bool) *
 	return _c
 }
 
+// removeTasksByChannel provides a mock function with given fields: channel
+func (_m *MockCompactionPlanContext) removeTasksByChannel(channel string) {
+	_m.Called(channel)
+}
+
+// MockCompactionPlanContext_removeTasksByChannel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'removeTasksByChannel'
+type MockCompactionPlanContext_removeTasksByChannel_Call struct {
+	*mock.Call
+}
+
+// removeTasksByChannel is a helper method to define mock.On call
+//   - channel string
+func (_e *MockCompactionPlanContext_Expecter) removeTasksByChannel(channel interface{}) *MockCompactionPlanContext_removeTasksByChannel_Call {
+	return &MockCompactionPlanContext_removeTasksByChannel_Call{Call: _e.mock.On("removeTasksByChannel", channel)}
+}
+
+func (_c *MockCompactionPlanContext_removeTasksByChannel_Call) Run(run func(channel string)) *MockCompactionPlanContext_removeTasksByChannel_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockCompactionPlanContext_removeTasksByChannel_Call) Return() *MockCompactionPlanContext_removeTasksByChannel_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockCompactionPlanContext_removeTasksByChannel_Call) RunAndReturn(run func(string)) *MockCompactionPlanContext_removeTasksByChannel_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // start provides a mock function with given fields:
 func (_m *MockCompactionPlanContext) start() {
 	_m.Called()
