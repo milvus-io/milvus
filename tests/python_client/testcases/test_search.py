@@ -9428,19 +9428,19 @@ class TestSearchIterator(TestcaseBase):
         """
         # 1. initialize with data
         batch_size = 100
-        collection_w = self.init_collection_general(
-            prefix, True, is_index=False)[0]
+        collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
         collection_w.create_index(field_name, {"metric_type": "L2"})
         collection_w.load()
         # 2. search iterator
-        search_params = {"metric_type": "L2"}
+        search_params = {"metric_type": "L2", "params": {"radius": 35.0, "range_filter": 34.0}}
         collection_w.search_iterator(vectors[:1], field_name, search_params, batch_size,
                                      check_task=CheckTasks.check_search_iterator,
-                                     check_items={"metric_type": "L2"})
+                                     check_items={"metric_type": "L2",
+                                                  "radius": 35.0,
+                                                  "range_filter": 34.0})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("metrics", ct.float_metrics[1:])
-    def test_range_search_iterator_IP_COSINE(self, metrics):
+    def test_range_search_iterator_IP(self):
         """
         target: test iterator range search
         method: 1. search iterator
@@ -9449,15 +9449,37 @@ class TestSearchIterator(TestcaseBase):
         """
         # 1. initialize with data
         batch_size = 100
-        collection_w = self.init_collection_general(
-            prefix, True, is_index=False)[0]
-        collection_w.create_index(field_name, {"metric_type": metrics})
+        collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
+        collection_w.create_index(field_name, {"metric_type": "IP"})
         collection_w.load()
         # 2. search iterator
-        search_params = {"metric_type": metrics, "params": {}}
+        search_params = {"metric_type": "IP", "params": {"radius": 0, "range_filter": 45}}
         collection_w.search_iterator(vectors[:1], field_name, search_params, batch_size,
                                      check_task=CheckTasks.check_search_iterator,
-                                     check_items={"metric_type": metrics})
+                                     check_items={"metric_type": "IP",
+                                                  "radius": 0,
+                                                  "range_filter": 45})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_range_search_iterator_COSINE(self):
+        """
+        target: test iterator range search
+        method: 1. search iterator
+                2. check the result, expect pk not repeat and meet the expr requirements
+        expected: search successfully
+        """
+        # 1. initialize with data
+        batch_size = 100
+        collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
+        collection_w.create_index(field_name, {"metric_type": "COSINE"})
+        collection_w.load()
+        # 2. search iterator
+        search_params = {"metric_type": "COSINE", "params": {"radius": 0.8, "range_filter": 1}}
+        collection_w.search_iterator(vectors[:1], field_name, search_params, batch_size,
+                                     check_task=CheckTasks.check_search_iterator,
+                                     check_items={"metric_type": "COSINE",
+                                                  "radius": 0.8,
+                                                  "range_filter": 1})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_iterator_only_radius(self):
@@ -9469,15 +9491,15 @@ class TestSearchIterator(TestcaseBase):
         """
         # 1. initialize with data
         batch_size = 100
-        collection_w = self.init_collection_general(
-            prefix, True, is_index=False)[0]
+        collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
         collection_w.create_index(field_name, {"metric_type": "L2"})
         collection_w.load()
         # 2. search iterator
-        search_params = {"metric_type": "L2", "params": {}}
+        search_params = {"metric_type": "L2", "params": {"radius": 35.0}}
         collection_w.search_iterator(vectors[:1], field_name, search_params, batch_size,
                                      check_task=CheckTasks.check_search_iterator,
-                                     check_items={"metric_type": "L2"})
+                                     check_items={"metric_type": "L2",
+                                                  "radius": 35.0})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip("issue #25145")
