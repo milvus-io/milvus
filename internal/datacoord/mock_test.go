@@ -303,12 +303,12 @@ func (c *mockDataNodeClient) ImportV2(ctx context.Context, req *datapb.ImportReq
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
 
-func (c *mockDataNodeClient) GetPreImportState(ctx context.Context, req *datapb.GetPreImportStateRequest, opts ...grpc.CallOption) (*datapb.GetPreImportStateResponse, error) {
-	return &datapb.GetPreImportStateResponse{Status: merr.Success()}, nil
+func (c *mockDataNodeClient) QueryPreImport(ctx context.Context, req *datapb.QueryPreImportRequest, opts ...grpc.CallOption) (*datapb.QueryPreImportResponse, error) {
+	return &datapb.QueryPreImportResponse{Status: merr.Success()}, nil
 }
 
-func (c *mockDataNodeClient) GetImportState(ctx context.Context, req *datapb.GetImportStateRequest, opts ...grpc.CallOption) (*datapb.GetImportStateResponse, error) {
-	return &datapb.GetImportStateResponse{Status: merr.Success()}, nil
+func (c *mockDataNodeClient) QueryImport(ctx context.Context, req *datapb.QueryImportRequest, opts ...grpc.CallOption) (*datapb.QueryImportResponse, error) {
+	return &datapb.QueryImportResponse{Status: merr.Success()}, nil
 }
 
 func (c *mockDataNodeClient) DropImport(ctx context.Context, req *datapb.DropImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {

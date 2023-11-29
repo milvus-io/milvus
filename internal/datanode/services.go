@@ -920,11 +920,11 @@ func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (
 	return nil, merr.ErrServiceUnimplemented
 }
 
-func (node *DataNode) GetPreImportState(ctx context.Context, req *datapb.GetPreImportStateRequest) (*datapb.GetPreImportStateResponse, error) {
+func (node *DataNode) QueryPreImport(ctx context.Context, req *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error) {
 	return nil, merr.ErrServiceUnimplemented
 }
 
-func (node *DataNode) GetImportState(ctx context.Context, req *datapb.GetImportStateRequest) (*datapb.GetImportStateResponse, error) {
+func (node *DataNode) QueryImport(ctx context.Context, req *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error) {
 	return nil, merr.ErrServiceUnimplemented
 }
 

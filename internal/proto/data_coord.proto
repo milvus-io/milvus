@@ -123,8 +123,8 @@ service DataNode {
   // import v2
   rpc PreImport(PreImportRequest) returns(common.Status) {}
   rpc ImportV2(ImportRequest) returns(common.Status) {}
-  rpc GetImportState(GetImportStateRequest) returns(GetImportStateResponse) {}
-  rpc GetPreImportState(GetPreImportStateRequest) returns(GetPreImportStateResponse) {}
+  rpc QueryPreImport(QueryPreImportRequest) returns(QueryPreImportResponse) {}
+  rpc QueryImport(QueryImportRequest) returns(QueryImportResponse) {}
   rpc DropImport(DropImportRequest) returns(common.Status) {}
 }
 
@@ -765,29 +765,32 @@ message ImportFile {
 }
 
 message PreImportRequest {
-  int64 requestID = 1;
-  int64 taskID = 2;
-  int64 collectionID = 3;
-  int64 partitionID = 4;
-  schema.CollectionSchema schema = 5;
-  repeated ImportFile import_files = 6;
+  string clusterID = 1;
+  int64 requestID = 2;
+  int64 taskID = 3;
+  int64 collectionID = 4;
+  int64 partitionID = 5;
+  schema.CollectionSchema schema = 6;
+  repeated ImportFile import_files = 7;
 }
 
 message ImportRequest {
-  int64 requestID = 1;
-  int64 taskID = 2;
-  int64 collectionID = 3;
-  int64 partitionID = 4;
-  schema.CollectionSchema schema = 5;
-  repeated ImportFile import_files = 6;
-  repeated int64 segmentIDs = 7;
-  repeated int64 autoIDs = 8;
-  repeated string segment_channels = 9;
+  string clusterID = 1;
+  int64 requestID = 2;
+  int64 taskID = 3;
+  int64 collectionID = 4;
+  int64 partitionID = 5;
+  schema.CollectionSchema schema = 6;
+  repeated ImportFile import_files = 7;
+  repeated int64 segmentIDs = 8;
+  repeated int64 autoIDs = 9;
+  repeated string segment_channels = 10;
 }
 
-message GetPreImportStateRequest {
-  int64 requestID = 1;
-  int64 taskID = 2;
+message QueryPreImportRequest {
+  string clusterID = 1;
+  int64 requestID = 2;
+  int64 taskID = 3;
 }
 
 message ImportFileStats {
@@ -797,7 +800,7 @@ message ImportFileStats {
   map<string, int64> channel_rows = 4;
 }
 
-message GetPreImportStateResponse {
+message QueryPreImportResponse {
   common.Status status = 1;
   int64 taskID = 2;
   ImportState state = 3;
@@ -806,9 +809,10 @@ message GetPreImportStateResponse {
   repeated ImportFileStats file_stats = 6;
 }
 
-message GetImportStateRequest {
-  int64 requestID = 1;
-  int64 taskID = 2;
+message QueryImportRequest {
+  string clusterID = 1;
+  int64 requestID = 2;
+  int64 taskID = 3;
 }
 
 message ImportFileInfo {
@@ -820,7 +824,7 @@ message ImportFileInfo {
   repeated index.IndexFilePathInfo index_infos = 6;
 }
 
-message GetImportStateResponse {
+message QueryImportResponse {
   common.Status status = 1;
   int64 taskID = 2;
   ImportState state = 3;
@@ -830,8 +834,9 @@ message GetImportStateResponse {
 }
 
 message DropImportRequest {
-  int64 requestID = 1;
-  int64 taskID = 2;
+  string clusterID = 1;
+  int64 requestID = 2;
+  int64 taskID = 3;
 }
 
 message PreImportTask {
