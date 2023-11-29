@@ -1,4 +1,4 @@
-package proxy
+package connection
 
 import (
 	"context"
@@ -61,7 +61,7 @@ func (s *connectionManager) init() {
 	})
 }
 
-func (s *connectionManager) stop() {
+func (s *connectionManager) Stop() {
 	s.stopOnce.Do(func() {
 		close(s.closeSignal)
 		s.wg.Wait()
@@ -80,14 +80,14 @@ func (s *connectionManager) checkLoop() {
 			log.Info("connection manager closed")
 			return
 		case identifier := <-s.buffer:
-			s.update(identifier)
+			s.Update(identifier)
 		case <-t.C:
 			s.removeLongInactiveClients()
 		}
 	}
 }
 
-func (s *connectionManager) register(ctx context.Context, identifier int64, info *commonpb.ClientInfo) {
+func (s *connectionManager) Register(ctx context.Context, identifier int64, info *commonpb.ClientInfo) {
 	cli := clientInfo{
 		ClientInfo:     info,
 		identifier:     identifier,
@@ -98,38 +98,15 @@ func (s *connectionManager) register(ctx context.Context, identifier int64, info
 	defer s.mu.Unlock()
 
 	s.clientInfos[identifier] = cli
-	cli.ctxLogRegister(ctx)
+	log.Ctx(ctx).Info("client register", cli.GetLogger()...)
 }
 
-func (s *connectionManager) keepActive(identifier int64) {
+func (s *connectionManager) KeepActive(identifier int64) {
 	// make this asynchronous and then the rpc won't be blocked too long.
 	s.buffer <- identifier
 }
 
-func (s *connectionManager) update(identifier int64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	cli, ok := s.clientInfos[identifier]
-	if ok {
-		cli.lastActiveTime = time.Now()
-		s.clientInfos[identifier] = cli
-	}
-}
-
-func (s *connectionManager) removeLongInactiveClients() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	for candidate, cli := range s.clientInfos {
-		if time.Since(cli.lastActiveTime) > s.ttl {
-			cli.logDeregister()
-			delete(s.clientInfos, candidate)
-		}
-	}
-}
-
-func (s *connectionManager) list() []*commonpb.ClientInfo {
+func (s *connectionManager) List() []*commonpb.ClientInfo {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -151,6 +128,44 @@ func (s *connectionManager) list() []*commonpb.ClientInfo {
 	return clients
 }
 
+func (s *connectionManager) Get(ctx context.Context) *commonpb.ClientInfo {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	identifier, err := GetIdentifierFromContext(ctx)
+	if err != nil {
+		return nil
+	}
+
+	cli, ok := s.clientInfos[identifier]
+	if !ok {
+		return nil
+	}
+	return cli.ClientInfo
+}
+
+func (s *connectionManager) Update(identifier int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	cli, ok := s.clientInfos[identifier]
+	if ok {
+		cli.lastActiveTime = time.Now()
+		s.clientInfos[identifier] = cli
+	}
+}
+
+func (s *connectionManager) removeLongInactiveClients() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for candidate, cli := range s.clientInfos {
+		if time.Since(cli.lastActiveTime) > s.ttl {
+			log.Info("client deregister", cli.GetLogger()...)
+			delete(s.clientInfos, candidate)
+		}
+	}
+}
+
 func newConnectionManager(opts ...connectionManagerOption) *connectionManager {
 	s := &connectionManager{
 		closeSignal: make(chan struct{}, 1),
@@ -163,17 +178,4 @@ func newConnectionManager(opts ...connectionManagerOption) *connectionManager {
 	s.init()
 
 	return s
-}
-
-var connectionManagerInstance *connectionManager
-
-var getConnectionManagerInstanceOnce sync.Once
-
-func GetConnectionManager() *connectionManager {
-	getConnectionManagerInstanceOnce.Do(func() {
-		connectionManagerInstance = newConnectionManager(
-			withDuration(defaultConnCheckDuration),
-			withTTL(defaultTTLForInactiveConn))
-	})
-	return connectionManagerInstance
 }
