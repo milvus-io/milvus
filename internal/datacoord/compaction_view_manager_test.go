@@ -122,16 +122,20 @@ func (s *CompactionViewManagerSuite) TestCheck() {
 			log.Info("All views", zap.String("l0 view", v.String()))
 		}).Once()
 
-	// nothing in the view
+	// nothing in the view before the test
 	s.Empty(s.m.view.collections)
 	s.m.Check()
-	for _, views := range s.m.view.collections {
-		for _, view := range views {
-			s.Equal(datapb.SegmentLevel_L0, view.Level)
-			s.Equal(commonpb.SegmentState_Flushed, view.State)
-			log.Info("String", zap.String("segment", view.String()))
-			log.Info("LevelZeroString", zap.String("segment", view.LevelZeroString()))
-		}
+
+	s.m.viewGuard.Lock()
+	views := s.m.view.GetSegmentViewBy(s.testLabel.CollectionID, nil)
+	s.m.viewGuard.Unlock()
+	s.Equal(4, len(views))
+	for _, view := range views {
+		s.EqualValues(s.testLabel, view.label)
+		s.Equal(datapb.SegmentLevel_L0, view.Level)
+		s.Equal(commonpb.SegmentState_Flushed, view.State)
+		log.Info("String", zap.String("segment", view.String()))
+		log.Info("LevelZeroString", zap.String("segment", view.LevelZeroString()))
 	}
 
 	// clear meta

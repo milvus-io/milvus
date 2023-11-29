@@ -70,6 +70,18 @@ var (
 	errChannelInBuffer   = errors.New("channel is in buffer")
 )
 
+type CompactionMeta interface {
+	SelectSegments(selector SegmentInfoSelector) []*SegmentInfo
+	GetHealthySegment(segID UniqueID) *SegmentInfo
+	UpdateSegmentsInfo(operators ...UpdateOperator) error
+	SetSegmentCompacting(segmentID int64, compacting bool)
+
+	PrepareCompleteCompactionMutation(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *SegmentInfo, *segMetricMutation, error)
+	alterMetaStoreAfterCompaction(segmentCompactTo *SegmentInfo, segmentsCompactFrom []*SegmentInfo) error
+}
+
+var _ CompactionMeta = (*meta)(nil)
+
 type compactionTask struct {
 	triggerInfo *compactionSignal
 	plan        *datapb.CompactionPlan
@@ -97,7 +109,7 @@ type compactionPlanHandler struct {
 	mu    sync.RWMutex
 	plans map[int64]*compactionTask // planID -> task
 
-	meta      *meta
+	meta      CompactionMeta
 	allocator allocator
 	chManager *ChannelManager
 	sessions  *SessionManager
@@ -108,7 +120,7 @@ type compactionPlanHandler struct {
 	stopWg   sync.WaitGroup
 }
 
-func newCompactionPlanHandler(sessions *SessionManager, cm *ChannelManager, meta *meta, allocator allocator,
+func newCompactionPlanHandler(sessions *SessionManager, cm *ChannelManager, meta CompactionMeta, allocator allocator,
 ) *compactionPlanHandler {
 	return &compactionPlanHandler{
 		plans:     make(map[int64]*compactionTask),
@@ -258,7 +270,7 @@ func (c *compactionPlanHandler) RefreshPlan(task *compactionTask) {
 
 	if plan.GetType() == datapb.CompactionType_MixCompaction {
 		for _, seg := range plan.GetSegmentBinlogs() {
-			info := c.meta.GetSegment(seg.GetSegmentID())
+			info := c.meta.GetHealthySegment(seg.GetSegmentID())
 			seg.Deltalogs = info.GetDeltalogs()
 		}
 		return
@@ -352,6 +364,9 @@ func (c *compactionPlanHandler) handleL0CompactionResult(plan *datapb.Compaction
 		operators = append(operators, UpdateStatusOperator(seg.SegmentID, commonpb.SegmentState_Dropped))
 	}
 
+	log.Info("meta update: update segments info for level zero compaction",
+		zap.Int64("planID", plan.GetPlanID()),
+	)
 	return c.meta.UpdateSegmentsInfo(operators...)
 }
 
@@ -369,7 +384,7 @@ func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.Compact
 		log.Info("meta has already been changed, skip meta change and retry sync segments")
 	} else {
 		// Also prepare metric updates.
-		_, modSegments, newSegment, metricMutation, err := c.meta.PrepareCompleteCompactionMutation(plan, result)
+		modSegments, newSegment, metricMutation, err := c.meta.PrepareCompleteCompactionMutation(plan, result)
 		if err != nil {
 			return err
 		}

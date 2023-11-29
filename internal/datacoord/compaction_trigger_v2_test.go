@@ -53,7 +53,7 @@ func (s *CompactionTriggerManagerSuite) TestNotify() {
 		return info.GetLevel() == datapb.SegmentLevel_L0
 	})
 
-	latestL0Segments := GetSegmentViews(levelZeroSegments...)
+	latestL0Segments := GetViewsByInfo(levelZeroSegments...)
 	s.Require().NotEmpty(latestL0Segments)
 	levelZeroView := viewManager.getChangedLevelZeroViews(1, latestL0Segments)
 	s.Require().Equal(1, len(levelZeroView))

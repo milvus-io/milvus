@@ -23,9 +23,11 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -38,6 +40,154 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
+
+func TestCompactionPlanHandlerSuite(t *testing.T) {
+	suite.Run(t, new(CompactionPlanHandlerSuite))
+}
+
+type CompactionPlanHandlerSuite struct {
+	suite.Suite
+
+	mockMeta  *MockCompactionMeta
+	mockAlloc *NMockAllocator
+}
+
+func (s *CompactionPlanHandlerSuite) SetupTest() {
+	s.mockMeta = NewMockCompactionMeta(s.T())
+	s.mockAlloc = NewNMockAllocator(s.T())
+}
+
+func (s *CompactionPlanHandlerSuite) TesthandleL0CompactionResults() {
+	channel := "Ch-1"
+	s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Run(func(operators ...UpdateOperator) {
+			s.Equal(5, len(operators))
+		}).Return(nil).Once()
+
+	deltalogs := []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log3", 1))}
+	// 2 l0 segments, 3 sealed segments
+	plan := &datapb.CompactionPlan{
+		PlanID: 1,
+		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+			{
+				SegmentID:     100,
+				Deltalogs:     deltalogs,
+				Level:         datapb.SegmentLevel_L0,
+				InsertChannel: channel,
+			},
+			{
+				SegmentID:     101,
+				Deltalogs:     deltalogs,
+				Level:         datapb.SegmentLevel_L0,
+				InsertChannel: channel,
+			},
+			{
+				SegmentID:     200,
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: channel,
+			},
+			{
+				SegmentID:     201,
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: channel,
+			},
+			{
+				SegmentID:     202,
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: channel,
+			},
+		},
+		Type: datapb.CompactionType_Level0DeleteCompaction,
+	}
+
+	result := &datapb.CompactionPlanResult{
+		PlanID:  plan.GetPlanID(),
+		State:   commonpb.CompactionState_Completed,
+		Channel: channel,
+		Segments: []*datapb.CompactionSegment{
+			{
+				SegmentID: 200,
+				Deltalogs: deltalogs,
+				Channel:   channel,
+			},
+			{
+				SegmentID: 201,
+				Deltalogs: deltalogs,
+				Channel:   channel,
+			},
+			{
+				SegmentID: 202,
+				Deltalogs: deltalogs,
+				Channel:   channel,
+			},
+		},
+	}
+
+	handler := newCompactionPlanHandler(nil, nil, s.mockMeta, s.mockAlloc)
+	err := handler.handleL0CompactionResult(plan, result)
+	s.NoError(err)
+}
+
+func (s *CompactionPlanHandlerSuite) TestRefreshL0Plan() {
+	channel := "Ch-1"
+	s.mockMeta.EXPECT().SelectSegments(mock.Anything).Return(
+		[]*SegmentInfo{
+			{SegmentInfo: &datapb.SegmentInfo{
+				ID:            200,
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: channel,
+			}},
+			{SegmentInfo: &datapb.SegmentInfo{
+				ID:            201,
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: channel,
+			}},
+			{SegmentInfo: &datapb.SegmentInfo{
+				ID:            202,
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: channel,
+			}},
+		},
+	)
+
+	deltalogs := []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log3", 1))}
+	// 2 l0 segments
+	plan := &datapb.CompactionPlan{
+		PlanID: 1,
+		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+			{
+				SegmentID:     100,
+				Deltalogs:     deltalogs,
+				Level:         datapb.SegmentLevel_L0,
+				InsertChannel: channel,
+			},
+			{
+				SegmentID:     101,
+				Deltalogs:     deltalogs,
+				Level:         datapb.SegmentLevel_L0,
+				InsertChannel: channel,
+			},
+		},
+		Type: datapb.CompactionType_Level0DeleteCompaction,
+	}
+
+	task := &compactionTask{
+		triggerInfo: &compactionSignal{id: 19530, collectionID: 1, partitionID: 10},
+		state:       executing,
+		plan:        plan,
+		dataNodeID:  1,
+	}
+
+	handler := newCompactionPlanHandler(nil, nil, s.mockMeta, s.mockAlloc)
+	handler.RefreshPlan(task)
+
+	s.Equal(5, len(task.plan.GetSegmentBinlogs()))
+	segIDs := lo.Map(task.plan.GetSegmentBinlogs(), func(b *datapb.CompactionSegmentBinlogs, _ int) int64 {
+		return b.GetSegmentID()
+	})
+
+	s.ElementsMatch([]int64{200, 201, 202, 100, 101}, segIDs)
+}
 
 func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 	type fields struct {
@@ -352,11 +502,11 @@ func TestCompactionPlanHandler_handleMergeCompactionResult(t *testing.T) {
 		},
 	}
 
-	has, err := c.meta.HasSegments([]UniqueID{1, 2})
+	has, err := meta.HasSegments([]UniqueID{1, 2})
 	require.NoError(t, err)
 	require.True(t, has)
 
-	has, err = c.meta.HasSegments([]UniqueID{3})
+	has, err = meta.HasSegments([]UniqueID{3})
 	require.Error(t, err)
 	require.False(t, has)
 
@@ -369,7 +519,7 @@ func TestCompactionPlanHandler_handleMergeCompactionResult(t *testing.T) {
 	err = c2.handleMergeCompactionResult(plan, compactionResult2)
 	assert.Error(t, err)
 
-	has, err = c.meta.HasSegments([]UniqueID{1, 2, 3})
+	has, err = meta.HasSegments([]UniqueID{1, 2, 3})
 	require.NoError(t, err)
 	require.True(t, has)
 

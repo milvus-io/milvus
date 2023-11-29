@@ -108,7 +108,7 @@ func (m *CompactionViewManager) Check() {
 			return info.GetLevel() == datapb.SegmentLevel_L0
 		})
 
-		latestL0Segments := GetSegmentViews(levelZeroSegments...)
+		latestL0Segments := GetViewsByInfo(levelZeroSegments...)
 		changedL0Views := m.getChangedLevelZeroViews(collID, latestL0Segments)
 		if len(changedL0Views) == 0 {
 			continue

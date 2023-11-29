@@ -35,7 +35,7 @@ func (v *FullViews) GetSegmentViewBy(collectionID UniqueID, selector SegmentView
 	var ret []*SegmentView
 
 	for _, view := range views {
-		if selector(view) {
+		if selector == nil || selector(view) {
 			ret = append(ret, view.Clone())
 		}
 	}
@@ -108,7 +108,7 @@ func (s *SegmentView) Clone() *SegmentView {
 	}
 }
 
-func GetSegmentViews(segments ...*SegmentInfo) []*SegmentView {
+func GetViewsByInfo(segments ...*SegmentInfo) []*SegmentView {
 	return lo.Map(segments, func(segment *SegmentInfo, _ int) *SegmentView {
 		return &SegmentView{
 			ID: segment.ID,
