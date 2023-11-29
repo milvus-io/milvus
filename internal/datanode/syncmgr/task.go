@@ -87,8 +87,9 @@ func (t *SyncTask) Run() error {
 	t.segment, has = t.metacache.GetSegmentByID(t.segmentID)
 	if !has {
 		log.Warn("failed to sync data, segment not found in metacache")
+		err := merr.WrapErrSegmentNotFound(t.segmentID)
 		t.handleError(err)
-		return merr.WrapErrSegmentNotFound(t.segmentID)
+		return err
 	}
 
 	if t.segment.CompactTo() == metacache.NullSegment {
