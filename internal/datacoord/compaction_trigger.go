@@ -342,7 +342,8 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 			isSegmentHealthy(segment) &&
 			isFlush(segment) &&
 			!segment.isCompacting && // not compacting now
-			!segment.GetIsImporting() // not importing now
+			!segment.GetIsImporting() && // not importing now
+			segment.GetLevel() != datapb.SegmentLevel_L0 // ignore level zero segments
 	}) // m is list of chanPartSegments, which is channel-partition organized segments
 
 	if len(m) == 0 {
@@ -780,7 +781,8 @@ func (t *compactionTrigger) getCandidateSegments(channel string, partitionID Uni
 			s.GetInsertChannel() != channel ||
 			s.GetPartitionID() != partitionID ||
 			s.isCompacting ||
-			s.GetIsImporting() {
+			s.GetIsImporting() ||
+			s.GetLevel() == datapb.SegmentLevel_L0 {
 			continue
 		}
 		res = append(res, s)

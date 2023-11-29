@@ -104,26 +104,7 @@ func (s *CompactionViewManagerSuite) TestCheck() {
 	paramtable.Get().Save(Params.DataCoordCfg.EnableLevelZeroSegment.Key, "true")
 	defer paramtable.Get().Reset(Params.DataCoordCfg.EnableLevelZeroSegment.Key)
 
-	s.mockAlloc.EXPECT().allocID(mock.Anything).Return(1, nil).Times(3)
-	// nothing int the view, just store in the first check
-	s.Empty(s.m.view.collections)
-	s.m.Check()
-	for _, views := range s.m.view.collections {
-		for _, view := range views {
-			s.Equal(datapb.SegmentLevel_L0, view.Level)
-			s.Equal(commonpb.SegmentState_Flushed, view.State)
-			log.Info("String", zap.String("segment", view.String()))
-			log.Info("LevelZeroString", zap.String("segment", view.LevelZeroString()))
-		}
-	}
-
-	// change of meta
-	addInfo := genTestSegmentInfo(s.testLabel, 19530, datapb.SegmentLevel_L0, commonpb.SegmentState_Flushed)
-	addInfo.Deltalogs = genTestDeltalogs(1, 10)
-	s.m.meta.Lock()
-	s.m.meta.segments.segments[addInfo.GetID()] = addInfo
-	s.m.meta.Unlock()
-
+	s.mockAlloc.EXPECT().allocID(mock.Anything).Return(1, nil).Times(2)
 	s.mockTriggerManager.EXPECT().Notify(mock.Anything, mock.Anything, mock.Anything).
 		Run(func(taskID UniqueID, tType CompactionTriggerType, views []CompactionView) {
 			s.EqualValues(1, taskID)
@@ -133,7 +114,7 @@ func (s *CompactionViewManagerSuite) TestCheck() {
 			s.True(ok)
 			s.NotNil(v)
 
-			expectedSegs := []int64{100, 101, 102, 103, 19530}
+			expectedSegs := []int64{100, 101, 102, 103}
 			gotSegs := lo.Map(v.segments, func(s *SegmentView, _ int) int64 { return s.ID })
 			s.ElementsMatch(expectedSegs, gotSegs)
 
@@ -141,7 +122,21 @@ func (s *CompactionViewManagerSuite) TestCheck() {
 			log.Info("All views", zap.String("l0 view", v.String()))
 		}).Once()
 
+	// nothing in the view before the test
+	s.Empty(s.m.view.collections)
 	s.m.Check()
+
+	s.m.viewGuard.Lock()
+	views := s.m.view.GetSegmentViewBy(s.testLabel.CollectionID, nil)
+	s.m.viewGuard.Unlock()
+	s.Equal(4, len(views))
+	for _, view := range views {
+		s.EqualValues(s.testLabel, view.label)
+		s.Equal(datapb.SegmentLevel_L0, view.Level)
+		s.Equal(commonpb.SegmentState_Flushed, view.State)
+		log.Info("String", zap.String("segment", view.String()))
+		log.Info("LevelZeroString", zap.String("segment", view.LevelZeroString()))
+	}
 
 	// clear meta
 	s.m.meta.Lock()

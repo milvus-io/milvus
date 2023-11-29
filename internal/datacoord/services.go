@@ -513,18 +513,14 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 
 		s.flushCh <- req.SegmentID
 		if !req.Importing && Params.DataCoordCfg.EnableCompaction.GetAsBool() {
-			if segment == nil && req.GetSegLevel() == datapb.SegmentLevel_L0 {
-				err = s.compactionTrigger.triggerSingleCompaction(req.GetCollectionID(), req.GetPartitionID(),
-					segmentID, req.GetChannel())
-			} else {
+			if req.GetSegLevel() != datapb.SegmentLevel_L0 {
 				err = s.compactionTrigger.triggerSingleCompaction(segment.GetCollectionID(), segment.GetPartitionID(),
 					segmentID, segment.GetInsertChannel())
-			}
-
-			if err != nil {
-				log.Warn("failed to trigger single compaction")
-			} else {
-				log.Info("compaction triggered for segment")
+				if err != nil {
+					log.Warn("failed to trigger single compaction")
+				} else {
+					log.Info("compaction triggered for segment")
+				}
 			}
 		}
 	}
