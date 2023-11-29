@@ -37,6 +37,8 @@ func (s StatsLogType) LogIdx() string {
 type FileReader interface {
 	io.Reader
 	io.Closer
+	io.ReaderAt
+	io.Seeker
 }
 
 // ChunkManager is to manager chunks.
