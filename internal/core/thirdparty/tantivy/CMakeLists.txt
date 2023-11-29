@@ -16,6 +16,13 @@ set(LIB_HEADER_FOLDER "${CMAKE_CURRENT_SOURCE_DIR}/tantivy-binding/include")
 set(HOME_VAR $ENV{HOME})
 set(PATH_VAR $ENV{PATH})
 set(ENV{PATH} ${HOME_VAR}/.cargo/bin:${PATH_VAR})
+message($ENV{PATH})
+
+add_custom_command(OUTPUT ls_cargo
+        COMMENT "ls cargo"
+        COMMAND ls ${HOME_VAR}/.cargo/bin/
+        )
+add_custom_target(ls_cargo_target DEPENDS ls_cargo)
 
 add_custom_command(OUTPUT compile_tantivy
         COMMENT "Compiling tantivy binding"
