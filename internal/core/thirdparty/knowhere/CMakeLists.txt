@@ -12,7 +12,7 @@
 #-------------------------------------------------------------------------------
 
 set(KNOWHERE_VERSION v1.3.21)
-set(KNOWHERE_SOURCE_MD5 "b11d102325eaf83468f000747888e2db")
+set(KNOWHERE_SOURCE_MD5 "46704b6e5164c6b3761733b250ce6416")
 
 if (DEFINED ENV{MILVUS_KNOWHERE_URL})
     set(KNOWHERE_SOURCE_URL "$ENV{MILVUS_KNOWHERE_URL}")
