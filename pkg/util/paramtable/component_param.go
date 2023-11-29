@@ -1600,11 +1600,12 @@ type queryNodeConfig struct {
 	StatsPublishInterval ParamItem `refreshable:"true"`
 
 	// segcore
-	KnowhereThreadPoolSize ParamItem `refreshable:"false"`
-	ChunkRows              ParamItem `refreshable:"false"`
-	EnableTempSegmentIndex ParamItem `refreshable:"false"`
-	InterimIndexNlist      ParamItem `refreshable:"false"`
-	InterimIndexNProbe     ParamItem `refreshable:"false"`
+	KnowhereThreadPoolSize    ParamItem `refreshable:"false"`
+	ChunkRows                 ParamItem `refreshable:"false"`
+	EnableTempSegmentIndex    ParamItem `refreshable:"false"`
+	InterimIndexNlist         ParamItem `refreshable:"false"`
+	InterimIndexNProbe        ParamItem `refreshable:"false"`
+	InterimIndexMemExpandRate ParamItem `refreshable:"false"`
 
 	// memory limit
 	LoadMemoryUsageFactor               ParamItem `refreshable:"true"`
@@ -1742,6 +1743,15 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.InterimIndexNlist.Init(base.mgr)
+
+	p.InterimIndexMemExpandRate = ParamItem{
+		Key:          "queryNode.segcore.interimIndex.memExpansionRate",
+		Version:      "2.0.0",
+		DefaultValue: "1.15",
+		Doc:          "extra memory needed by building interim index",
+		Export:       true,
+	}
+	p.InterimIndexMemExpandRate.Init(base.mgr)
 
 	p.InterimIndexNProbe = ParamItem{
 		Key:     "queryNode.segcore.interimIndex.nprobe",
