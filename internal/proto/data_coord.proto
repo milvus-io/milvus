@@ -774,6 +774,11 @@ message PreImportRequest {
   repeated ImportFile import_files = 7;
 }
 
+message autoIDRange {
+  int64 begin = 1;
+  int64 end = 2;
+}
+
 message ImportRequest {
   string clusterID = 1;
   int64 requestID = 2;
@@ -782,9 +787,8 @@ message ImportRequest {
   int64 partitionID = 5;
   schema.CollectionSchema schema = 6;
   repeated ImportFile import_files = 7;
-  repeated int64 segmentIDs = 8;
-  repeated int64 autoIDs = 9;
-  repeated string segment_channels = 10;
+  map<int64, autoIDRange> autoID_ranges = 8;
+  map<int64, string> segment_channels = 9;
 }
 
 message QueryPreImportRequest {
